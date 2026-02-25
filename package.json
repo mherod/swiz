@@ -1,0 +1,17 @@
+{
+  "name": "swiz",
+  "module": "index.ts",
+  "type": "module",
+  "bin": {
+    "swiz": "index.ts"
+  },
+  "scripts": {
+    "start": "bun run index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
