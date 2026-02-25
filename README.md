@@ -65,6 +65,22 @@ Skills are discovered from:
 
 Skills can contain `` !`command` `` directives that inject dynamic context (e.g. `git status`, `pwd`). By default, `swiz skill` executes these and inlines the output — just like Claude Code does at runtime. Use `--raw` to see the unexpanded source.
 
+### `swiz tasks [subcommand]`
+
+View and manage session-scoped agent tasks. Tasks are stored per-session in `~/.claude/tasks/` with full audit logging.
+
+```bash
+swiz tasks                                  # list tasks for current project's latest session
+swiz tasks --all-projects                   # list tasks across all projects
+swiz tasks --session <id>                   # target a specific session
+swiz tasks create "subject" "description"   # create a new task
+swiz tasks complete <id> --evidence "text"  # mark task done (evidence required)
+swiz tasks status <id> in_progress          # update task status
+swiz tasks complete-all                     # bulk-complete remaining tasks
+```
+
+Statuses: `pending`, `in_progress`, `completed`, `cancelled`. All transitions are recorded in an audit log.
+
 ### `swiz help [command]`
 
 Show available commands or details for a specific one.
