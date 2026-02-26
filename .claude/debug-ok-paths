@@ -1,0 +1,3 @@
+# Paths excluded from the debug-statements stop hook.
+# swiz is a CLI tool — console.log in src/commands/ is intentional terminal output.
+src/commands/
