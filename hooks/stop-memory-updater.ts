@@ -134,8 +134,10 @@ async function main(): Promise<void> {
   try {
     const input = (await Bun.stdin.json()) as StopHookInput;
 
-    // Respect stop_hook_active — avoid loops if an agent hook triggers stop
-    if (input.stop_hook_active) { ok(); return; }
+    // Note: we intentionally ignore stop_hook_active here. This hook is async
+    // and never blocks, so it cannot cause the retry loops that flag guards against.
+    // Skipping on stop_hook_active would prevent the hook from ever running in
+    // sessions where other stop hooks block first (which is nearly every session).
 
     const projectDir = await findProjectDir(input.cwd);
     if (!projectDir) { ok(); return; }

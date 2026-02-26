@@ -170,15 +170,21 @@ async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<v
 }
 
 /** Stop / PostToolUse: short-circuit and forward the first block.
- *  Hooks marked async are fire-and-forget (e.g. posttooluse-prettier-ts). */
+ *  Async hooks are launched first so they run even if a blocker short-circuits. */
 async function runBlocking(groups: HookGroup[], payloadStr: string): Promise<void> {
+  // Pre-launch async hooks (fire-and-forget) before blocking hooks can short-circuit
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) {
         log(`   → ${hook.file} [async, fire-and-forget]`);
         runHook(hook.file, payloadStr).catch(() => {});
-        continue;
       }
+    }
+  }
+  // Process blocking hooks sequentially
+  for (const group of groups) {
+    for (const hook of group.hooks) {
+      if (hook.async) continue;
       log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`);
       const resp = await runHook(hook.file, payloadStr);
       if (resp && isBlock(resp)) {
