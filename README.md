@@ -17,9 +17,10 @@ Then use `swiz` from anywhere.
 
 | Agent | Config Path | Hooks | Status |
 |-------|------------|-------|--------|
-| Claude Code | `~/.claude/settings.json` | nested matcher groups | install / uninstall / status |
-| Cursor | `~/.cursor/hooks.json` | flat list (`version: 1`) | install / uninstall / status |
-| Gemini CLI | `~/.gemini/settings.json` | nested matcher groups | install / uninstall / status |
+| Claude Code | `~/.claude/settings.json` | nested matcher groups | full support |
+| Cursor IDE | `~/.cursor/hooks.json` | flat list (`version: 1`) | full support |
+| Cursor CLI | `~/.cursor/hooks.json` | flat list (`version: 1`) | **limited** — only `beforeShellExecution` / `afterShellExecution` fire ([tracking](https://forum.cursor.com/t/cursor-cli-doesnt-send-all-events-defined-in-hooks/148316)) |
+| Gemini CLI | `~/.gemini/settings.json` | nested matcher groups | full support |
 | Codex CLI | `~/.codex/config.toml` | Rust-only (no user config) | tool mappings tracked, ready when hooks ship |
 
 ### Cross-Agent Translation
@@ -116,6 +117,29 @@ swiz skill --raw commit # raw SKILL.md without expansion
 
 Skills are discovered from `.skills/` (project-local) and `~/.claude/skills/` (global). The `!`command`` inline syntax is expanded by default — shell commands inside skill content are executed and their output is inlined.
 
+### `swiz shim`
+
+Shell-level command interception that works with **any** agent — no hook event support required. Installs wrapper functions into your shell profile that intercept commands like `grep`, `npm`, `sed`, `node`, and `rm` before they execute.
+
+```bash
+swiz shim                 # show installation status
+swiz shim install         # add to ~/.zshenv (default for zsh)
+swiz shim install .zshrc  # add to ~/.zshrc instead
+swiz shim install --dry-run
+swiz shim uninstall       # remove from all profiles
+```
+
+**How it works:**
+
+- In **non-interactive shells** (agent context): commands are **blocked** with a clear error message explaining the correct alternative. The agent sees exit code 1 and adapts.
+- In **interactive shells** (human typing): a yellow **warning** is printed but the command proceeds normally.
+- **Bypass**: `SWIZ_BYPASS=1 grep ...` or `command grep ...` to skip the shim.
+- **Force strict mode**: `SWIZ_SHIM=strict` to block even in interactive shells.
+
+Shimmed commands: `grep`, `egrep`, `fgrep`, `find`, `sed`, `awk`, `npm`, `npx`, `yarn`, `pnpm`, `node`, `ts-node`, `python`, `python3`, `rm`.
+
+This is the primary workaround for **Cursor CLI**, where only `beforeShellExecution`/`afterShellExecution` events fire — the shim catches everything else at the shell layer.
+
 ### `swiz tasks [subcommand]`
 
 Session-scoped task management with audit logging.
@@ -211,13 +235,23 @@ swiz/
 │       ├── hooks.ts          # Inspect hook configs across agents
 │       ├── skill.ts          # Read and expand skill definitions
 │       ├── tasks.ts          # Session-scoped task management
+│       ├── shim.ts           # Shell shim install/uninstall/status
 │       └── help.ts           # Usage information
 └── hooks/
     ├── hook-utils.ts         # Shared cross-agent tool equivalence sets + polyglot output helpers
+    ├── shim.sh               # Shell wrapper functions (sourced from profile)
     ├── task-subject-validation.ts  # Shared validation logic
-    └── *.sh / *.ts           # 35 hook scripts
+    └── *.sh / *.ts           # 37 hook scripts
 ```
 
 The canonical hook manifest lives in `install.ts`. Each hook group specifies an event, an optional tool matcher, and a list of scripts. At install time, `agents.ts` translates matchers (`Bash` → `Shell` for Cursor, `Bash` → `run_shell_command` for Gemini) and events (`Stop` → `stop` for Cursor, `Stop` → `AfterAgent` for Gemini), then generates the correct config structure per agent.
 
 Hook scripts themselves use the equivalence sets from `hook-utils.ts` (e.g. `isShellTool("run_shell_command")` returns `true`) so they work regardless of which agent's tool name is in the payload.
+
+## Known Limitations
+
+**Cursor CLI** — only `beforeShellExecution` and `afterShellExecution` events fire. All other hook events (`preToolUse`, `postToolUse`, `stop`, `sessionStart`, `beforeSubmitPrompt`, etc.) are silently ignored. This means swiz event hooks only work in the **Cursor IDE**, not when running `cursor` in the terminal. **Workaround**: `swiz shim install` adds shell-level interception that catches banned commands regardless of which agent runs them. Full CLI hook parity is on Cursor's roadmap with no ETA. [Forum thread](https://forum.cursor.com/t/cursor-cli-doesnt-send-all-events-defined-in-hooks/148316).
+
+**Codex CLI** — has `AfterAgent` and `AfterToolUse` hook events in its Rust crate, but no user-facing config file for hooks yet. Tool name mappings are tracked and ready for when user-configurable hooks ship.
+
+**Claude Code settings revert** — a running Claude Code process watches `~/.claude/settings.json` and may revert writes within ~1.5 seconds. Close all Claude Code sessions before running `swiz install`, or the changes won't persist.

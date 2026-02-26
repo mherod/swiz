@@ -51,6 +51,11 @@ export const AGENTS: AgentDef[] = [
       subagentStop: "SubagentStop",
     },
   },
+  // ⚠ Cursor CLI (cursor-agent) only supports beforeShellExecution and
+  // afterShellExecution hooks. All other events (preToolUse, postToolUse,
+  // stop, sessionStart, etc.) only fire in the Cursor IDE.
+  // Full CLI hook parity is on Cursor's roadmap with no ETA.
+  // See: https://forum.cursor.com/t/cursor-cli-doesnt-send-all-events-defined-in-hooks/148316
   {
     id: "cursor",
     name: "Cursor",
