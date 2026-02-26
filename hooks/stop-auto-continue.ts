@@ -23,6 +23,10 @@ async function main(): Promise<void> {
 
   if (!input.transcript_path) return;
 
+  // Escape hatch: if a stop hook already fired once this cycle, let the
+  // session terminate instead of blocking forever.
+  if (input.stop_hook_active) return;
+
   let raw: string;
   try {
     raw = await Bun.file(input.transcript_path).text();
@@ -42,15 +46,16 @@ async function main(): Promise<void> {
     const context = formatTurnsAsContext(turns);
     const prompt =
       `You are analyzing a conversation between a user and an AI assistant. ` +
-      `The assistant is about to stop. Identify the single most important action ` +
+      `The assistant is about to stop. Identify the boldest, highest-impact action ` +
       `it should execute next — autonomously, without asking the user any questions ` +
       `or waiting for confirmation. ` +
-      `Be specific and actionable. Start with an imperative verb (Run, Fix, Add, ` +
-      `Check, Verify, Commit, etc.). ` +
-      `CRITICAL: The step must be something the assistant can do right now on its own. ` +
-      `Do NOT suggest asking the user, confirming scope, or presenting options — ` +
-      `those are failure states. ` +
-      `Write ONLY the action itself — no prefix, no explanation, no questions.\n\n` +
+      `Be ambitious. There is always more to do: more to test, more to improve, more to ship. ` +
+      `NEVER conclude that work is complete or that nothing remains — if the obvious tasks are ` +
+      `done, find the next valuable improvement (tests, edge cases, related issues, quality). ` +
+      `Start with an imperative verb (Run, Fix, Add, Check, Verify, Commit, Improve, etc.). ` +
+      `CRITICAL: Reply with ONE sentence only — no preamble, no explanation, no questions. ` +
+      `The step must be something the assistant can do right now on its own. ` +
+      `Do NOT suggest asking the user, confirming scope, or presenting options.\n\n` +
       `<conversation>\n${context}\n</conversation>`;
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {

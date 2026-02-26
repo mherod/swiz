@@ -145,7 +145,7 @@ describe("stop-auto-continue", () => {
     expect(result.reason).toContain("Commit the changes to main");
   });
 
-  test("fires even when stop_hook_active is true", async () => {
+  test("allows stop when stop_hook_active is true (escape hatch)", async () => {
     const binDir = await createTempDir();
     await createFakeClaude(binDir, "Run the test suite");
 
@@ -155,8 +155,7 @@ describe("stop-auto-continue", () => {
       stopHookActive: true,
     });
 
-    expect(result.decision).toBe("block");
-    expect(result.reason).toContain("Run the test suite");
+    expect(result.decision).toBeUndefined();
   });
 
   test("allows stop for trivial sessions (< 5 tool calls)", async () => {
