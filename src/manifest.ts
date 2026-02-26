@@ -33,7 +33,7 @@ export const manifest: HookGroup[] = [
       { file: "stop-changelog-staleness.ts", timeout: 10 },
       { file: "stop-completion-auditor.ts", timeout: 10 },
       { file: "stop-personal-repo-issues.ts", timeout: 10 },
-      { file: "stop-auto-continue.ts", timeout: 60 },
+      { file: "stop-auto-continue.ts", timeout: 120 },
       { file: "stop-memory-updater.ts", timeout: 15, async: true },
     ],
   },
@@ -118,7 +118,7 @@ export const manifest: HookGroup[] = [
 // Per-event timeout budget for the dispatcher (seconds).
 // Covers worst-case sequential execution of all hooks in that event.
 export const DISPATCH_TIMEOUTS: Record<string, number> = {
-  stop: 180,          // 15 hooks × ~12s avg
+  stop: 300,          // 14 hooks × ~10s avg + 120s AI call (stop-auto-continue)
   preToolUse: 60,     // 11 hooks × ~5s avg
   postToolUse: 90,    // 8 hooks × ~10s avg
   sessionStart: 20,
