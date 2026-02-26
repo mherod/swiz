@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Stop hook: Suggest a next step by prompting an AI agent with the transcript context.
-// Blocks stop ONCE with the suggestion; allows stop on the next attempt (stop_hook_active).
+// Blocks stop with the suggestion; allows stop on the next attempt (stop_hook_active).
 // Silently allows stop if no AI backend is available or the transcript is too short.
 
 import { promptAgent, detectAgentCli } from "../src/agent.ts";
@@ -17,13 +17,8 @@ const CONTEXT_TURNS = 15;  // Recent turns to send as context
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as StopHookInput;
 
-  // Prevent infinite loop — use a per-session sentinel so this hook specifically
-  // tracks whether it has already fired, rather than relying on stop_hook_active
-  // (which is set by ANY blocking stop hook, not just this one).
-  const sentinel = input.session_id
-    ? `/tmp/swiz-auto-continue-fired-${input.session_id}.flag`
-    : null;
-  if (sentinel && (await Bun.file(sentinel).exists())) return;
+  // Allow stop on retry — prevents blocking forever after the suggestion is shown
+  if (input.stop_hook_active) return;
 
   // Need a transcript and an AI backend to work
   if (!input.transcript_path) return;
@@ -60,9 +55,6 @@ async function main(): Promise<void> {
   }
 
   if (!suggestion) return;
-
-  // Mark this hook as fired for this session before blocking
-  if (sentinel) await Bun.write(sentinel, "1");
 
   blockStopRaw(`Suggested next step: ${suggestion}`);
 }
