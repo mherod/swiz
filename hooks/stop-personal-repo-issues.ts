@@ -26,7 +26,7 @@ async function getCurrentGitHubUser(): Promise<string | null> {
 }
 
 /** Labels that indicate an issue is not actionable right now. */
-const SKIP_LABELS = new Set(["blocked", "upstream", "wontfix", "duplicate", "on-hold", "waiting"]);
+const SKIP_LABELS = new Set(["blocked", "upstream", "wontfix", "duplicate", "on-hold", "waiting", "backlog"]);
 
 async function getActionableIssueCount(cwd: string): Promise<number> {
   const output = await gh(
