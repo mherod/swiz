@@ -573,6 +573,15 @@ async function installAgent(agent: AgentDef, dryRun: boolean) {
 
 // ─── Command ────────────────────────────────────────────────────────────────
 
+function checkBunAvailable(): boolean {
+  try {
+    const proc = Bun.spawnSync(["bun", "--version"]);
+    return proc.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
 export const installCommand: Command = {
   name: "install",
   description: "Install swiz hooks into agent settings",
@@ -580,6 +589,13 @@ export const installCommand: Command = {
   async run(args) {
     const dryRun = args.includes("--dry-run");
     const targets = getAgentByFlag(args);
+
+    if (!checkBunAvailable()) {
+      console.error(`\n  ${RED}✗ bun is not installed or not on PATH.${RESET}`);
+      console.error(`  swiz hooks require bun to run. Install it first:\n`);
+      console.error(`    curl -fsSL https://bun.sh/install | bash\n`);
+      process.exit(1);
+    }
 
     console.log(`\n  swiz install${dryRun ? " (dry run)" : ""}\n`);
     console.log(`  Hooks: ${HOOKS_DIR}`);

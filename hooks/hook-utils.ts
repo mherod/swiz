@@ -1,6 +1,19 @@
 // Shared utilities for swiz hook scripts.
 // Import with: import { denyPreToolUse, isShellTool, isEditTool, ... } from "./hook-utils.ts";
 
+// ─── Runtime dependency check ───────────────────────────────────────────────
+// Verify bun is reachable on PATH. This file executes inside bun, but the
+// check catches mangled PATH in non-interactive agent shells where the user's
+// profile wasn't sourced. Uses Bun.which() for a fast lookup (no spawn).
+
+if (!Bun.which("bun")) {
+  console.error(
+    "swiz: bun is not reachable on PATH in this shell environment. " +
+    "Hooks that invoke bun scripts will fail. " +
+    "Ensure bun is installed: curl -fsSL https://bun.sh/install | bash"
+  );
+}
+
 // ─── Cross-agent tool equivalence ──────────────────────────────────────────
 // Each set contains all names an agent might use for the same concept.
 // Claude Code | Cursor       | Gemini CLI        | Codex CLI

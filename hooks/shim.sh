@@ -12,6 +12,17 @@
 # Real cmd:  command grep ...
 # Uninstall: swiz shim uninstall
 
+# ── Dependency check ──────────────────────────────────────────────────────────
+# swiz hooks and the shim redirect commands to bun. Warn once if it's missing.
+
+if ! command -v bun >/dev/null 2>&1; then
+  printf '\033[31mswiz: bun is not installed or not on PATH.\033[0m\n' >&2
+  printf 'swiz hooks require bun to run. Install it:\n' >&2
+  printf '  curl -fsSL https://bun.sh/install | bash\n\n' >&2
+fi
+
+# ── Agent detection ──────────────────────────────────────────────────────────
+
 _swiz_is_agent() {
   # Non-interactive shell is almost certainly an agent
   [[ $- != *i* ]] && return 0
