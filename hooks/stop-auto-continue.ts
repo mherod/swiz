@@ -12,7 +12,7 @@ import {
 } from "../src/transcript-utils.ts";
 
 const MIN_TOOL_CALLS = 5;       // Don't engage for trivial sessions
-const CONTEXT_TURNS = 15;       // Recent turns to send as context
+const CONTEXT_TURNS = 10;       // Recent turns to send as context
 const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 90_000;
 
 const FALLBACK_SUGGESTION =
