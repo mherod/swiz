@@ -11,8 +11,7 @@ export function createHelpCommand(commands: Map<string, Command>): Command {
       if (target) {
         const cmd = commands.get(target);
         if (!cmd) {
-          console.error(`Unknown command: ${target}`);
-          process.exit(1);
+          throw new Error(`Unknown command: ${target}`);
         }
         console.log(`\n  ${cmd.name} - ${cmd.description}`);
         if (cmd.usage) console.log(`  Usage: ${cmd.usage}`);
