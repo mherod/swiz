@@ -16,10 +16,12 @@ export type AgentBackend = "agent" | "claude" | "gemini";
 
 /**
  * Return the first available agent CLI backend, or null if none is installed.
+ * Claude Code is skipped when CLAUDECODE is set — nested claude invocations
+ * are blocked by the CLI and would fail immediately.
  */
 export function detectAgentCli(): AgentBackend | null {
   if (Bun.which("agent")) return "agent";
-  if (Bun.which("claude")) return "claude";
+  if (Bun.which("claude") && !process.env.CLAUDECODE) return "claude";
   if (Bun.which("gemini")) return "gemini";
   return null;
 }
@@ -68,9 +70,7 @@ export async function promptAgent(prompt: string, options?: PromptAgentOptions):
           "--prompt", prompt,
         ];
 
-  // Strip CLAUDECODE so the spawned CLI accepts nested invocations from inside a session.
-  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
-  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe", env: cleanEnv });
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
 
   if (options?.signal) {
     const onAbort = () => {
