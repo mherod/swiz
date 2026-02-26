@@ -6,7 +6,7 @@ import { git, isGitRepo, blockStop, type StopHookInput } from "./hook-utils.ts";
 export {};
 
 const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|py|rb|go|java|kt|swift|php|cs|cpp|c|rs|vue|svelte)$/;
-const EXCLUDE_PATH_RE = /node_modules|\.claude\/hooks\/|__tests__|\.test\.|\.spec\./;
+const EXCLUDE_PATH_RE = /node_modules|\.claude\/hooks\/|^hooks\/|__tests__|\.test\.|\.spec\./;
 const TODO_RE = /\b(TODO|FIXME|HACK|XXX|WORKAROUND)\b/i;
 const COMMENT_RE = /(\/[/*]|#\s)/;
 const REGEX_LITERAL_RE = /^\s*\/[^/]/; // line content starts with regex literal
