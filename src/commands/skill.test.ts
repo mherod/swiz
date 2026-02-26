@@ -2,7 +2,53 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { stripFrontmatter } from "./skill.ts";
+import { stripFrontmatter, parseFrontmatterField } from "./skill.ts";
+
+// ─── parseFrontmatterField unit tests ────────────────────────────────────────
+
+describe("parseFrontmatterField", () => {
+  test("extracts a simple string field", () => {
+    const content = "---\ndescription: A test skill\n---\n# Body\n";
+    expect(parseFrontmatterField(content, "description")).toBe("A test skill");
+  });
+
+  test("trims trailing whitespace from extracted value", () => {
+    const content = "---\ndescription: Padded value   \n---\n";
+    expect(parseFrontmatterField(content, "description")).toBe("Padded value");
+  });
+
+  test("returns null when field is absent", () => {
+    const content = "---\nauthor: Alice\n---\n# Body\n";
+    expect(parseFrontmatterField(content, "description")).toBeNull();
+  });
+
+  test("returns null when content has no frontmatter", () => {
+    const content = "# Just a heading\n\nNo frontmatter here.\n";
+    expect(parseFrontmatterField(content, "description")).toBeNull();
+  });
+
+  test("handles field with no space after colon (key:value)", () => {
+    const content = "---\ndescription:Compact value\n---\n";
+    expect(parseFrontmatterField(content, "description")).toBe("Compact value");
+  });
+
+  test("extracts field with quoted value", () => {
+    const content = "---\nglobs: \"*.ts, *.tsx\"\n---\n";
+    expect(parseFrontmatterField(content, "globs")).toBe("\"*.ts, *.tsx\"");
+  });
+
+  test("extracts first matching field when multiple fields exist", () => {
+    const content = "---\ndescription: First\nglobs: \"*.ts\"\ntags: testing\n---\n";
+    expect(parseFrontmatterField(content, "description")).toBe("First");
+    expect(parseFrontmatterField(content, "globs")).toBe("\"*.ts\"");
+    expect(parseFrontmatterField(content, "tags")).toBe("testing");
+  });
+
+  test("returns null when frontmatter has no closing ---", () => {
+    const content = "---\ndescription: No close\n# Body\n";
+    expect(parseFrontmatterField(content, "description")).toBeNull();
+  });
+});
 
 // ─── stripFrontmatter unit tests ─────────────────────────────────────────────
 

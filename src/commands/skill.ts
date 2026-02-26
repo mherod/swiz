@@ -49,7 +49,7 @@ async function findSkills(): Promise<SkillInfo[]> {
   return skills;
 }
 
-function parseFrontmatterField(content: string, field: string): string | null {
+export function parseFrontmatterField(content: string, field: string): string | null {
   const match = content.match(
     new RegExp(`^---[\\s\\S]*?^${field}:\\s*(.+)$[\\s\\S]*?^---`, "m")
   );
