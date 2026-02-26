@@ -205,7 +205,7 @@ swiz tasks complete-all                     # bulk-complete remaining
 | `pretooluse-eslint-config-strength.ts` | Prevents weakening eslint rule severity |
 | `pretooluse-json-validation.ts` | Validates JSON syntax before write |
 | `pretooluse-no-direct-deps.ts` | Blocks direct edits to dependency blocks in package.json — use the package manager |
-| `pretooluse-require-tasks.ts` | Blocks Edit/Write/Shell tools until tasks exist for the session |
+| `pretooluse-require-tasks.ts` | Blocks Edit/Write/Shell tools unless at least one task is pending or in progress |
 | `pretooluse-no-task-delegation.ts` | Prevents agents from delegating work to sub-tasks instead of doing it |
 | `pretooluse-task-subject-validation.ts` | Validates task subjects meet quality standards |
 
