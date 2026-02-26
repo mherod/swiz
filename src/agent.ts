@@ -3,14 +3,38 @@
 // Supported backends, checked in priority order:
 //   agent  — Cursor Agent  (agent --print --mode ask --trust --workspace <dir> <prompt>)
 //   claude — Claude Code   (claude --print --tools "" <prompt>)
-//   gemini — Gemini CLI    (gemini --prompt --approval-mode plan <prompt>)
+//   gemini — Gemini CLI    (gemini --prompt <prompt>)
 //
 // promptOnly mode (used by stop-auto-continue):
-//   agent:  --workspace tmpdir()  — no project files to read
+//   agent:  --workspace <tmpdir>  — no project files to read
 //   claude: --tools ""            — all tools disabled
-//   gemini: --approval-mode plan  — read-only mode
+//   gemini: (no extra flags)      — key-based API, no tool access by default
 
 import { tmpdir } from "node:os";
+
+/**
+ * Attempt to read the Gemini API key from the system keychain where gemini CLI
+ * stores it (service: gemini-cli-api-key, account: default-api-key).
+ * gemini CLI stores credentials as a JSON blob via keytar — we parse it to
+ * extract the raw accessToken string.
+ * Returns the key string, or null if unavailable.
+ */
+async function readGeminiKeyFromKeychain(): Promise<string | null> {
+  try {
+    const raw = await Bun.secrets.get({ service: "gemini-cli-api-key", name: "default-api-key" });
+    if (!raw) return null;
+    // Try to parse keytar's wrapped credential format: { token: { accessToken } }
+    try {
+      const parsed = JSON.parse(raw) as { token?: { accessToken?: string } };
+      return parsed?.token?.accessToken ?? null;
+    } catch {
+      // Stored as a plain key string (fallback)
+      return raw;
+    }
+  } catch {
+    return null;
+  }
+}
 
 export type AgentBackend = "agent" | "claude" | "gemini";
 
@@ -32,7 +56,7 @@ export interface PromptAgentOptions {
    * content — no codebase or tool access. Per-backend implementation:
    *   agent:  --workspace <tmpdir>  (no project files available)
    *   claude: --tools ""            (all tools disabled)
-   *   gemini: --approval-mode plan  (read-only mode)
+   *   gemini: (no extra flags)      (API key auth; no tool access by default)
    */
   promptOnly?: boolean;
   /** When provided, kills the spawned process if the signal aborts. */
@@ -71,11 +95,21 @@ export async function promptAgent(prompt: string, options?: PromptAgentOptions):
         ]
       : [
           "gemini",
-          ...(options?.promptOnly ? ["--approval-mode", "plan"] : []),
           "--prompt", prompt,
         ];
 
-  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+  // For gemini, inject GEMINI_API_KEY from keychain if not already in env.
+  // gemini CLI in non-interactive contexts often skips its keychain lookup;
+  // reading it via `security` CLI and injecting as env var is more reliable.
+  let spawnEnv: Record<string, string> | undefined;
+  if (backend === "gemini" && !process.env.GEMINI_API_KEY) {
+    const keychainKey = await readGeminiKeyFromKeychain();
+    if (keychainKey) {
+      spawnEnv = { ...process.env as Record<string, string>, GEMINI_API_KEY: keychainKey };
+    }
+  }
+
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe", env: spawnEnv });
 
   // Resolve the abort signal — caller-supplied takes precedence; otherwise
   // create an internal one from timeout if provided.
