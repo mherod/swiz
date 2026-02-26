@@ -227,13 +227,11 @@ async function updateStatus(
   const task = tasks.find((t) => t.id === taskId);
 
   if (!task) {
-    console.error(`Task #${taskId} not found.`);
-    process.exit(1);
+    throw new Error(`Task #${taskId} not found.`);
   }
 
   if (newStatus === "completed" && !evidence) {
-    console.error("Evidence required when completing a task. Use --evidence.");
-    process.exit(1);
+    throw new Error("Evidence required when completing a task. Use --evidence.");
   }
 
   const oldStatus = task.status;
@@ -294,19 +292,16 @@ async function resolveSession(args: string[]): Promise<string> {
 
   if (sessions.length === 0) {
     if (filterCwd) {
-      console.error(`No task sessions found for ${filterCwd}.`);
-      console.error("Use --all-projects to see all.");
+      throw new Error(`No task sessions found for ${filterCwd}.\nUse --all-projects to see all.`);
     } else {
-      console.error("No task sessions found.");
+      throw new Error("No task sessions found.");
     }
-    process.exit(1);
   }
 
   if (explicit) {
     const match = sessions.find((s) => s.startsWith(explicit));
     if (!match) {
-      console.error(`Session "${explicit}" not found.`);
-      process.exit(1);
+      throw new Error(`Session "${explicit}" not found.`);
     }
     return match;
   }
@@ -363,8 +358,7 @@ export const tasksCommand: Command = {
         const subject = rest[0];
         const description = rest[1];
         if (!subject || !description) {
-          console.error('Usage: swiz tasks create "<subject>" "<description>"');
-          process.exit(1);
+          throw new Error('Usage: swiz tasks create "<subject>" "<description>"');
         }
         const sessionId = await resolveSession(rest.slice(2));
         await createTask(sessionId, subject, description);
@@ -374,8 +368,7 @@ export const tasksCommand: Command = {
       case "complete": {
         const taskId = rest[0];
         if (!taskId) {
-          console.error("Usage: swiz tasks complete <task-id> [--evidence TEXT]");
-          process.exit(1);
+          throw new Error("Usage: swiz tasks complete <task-id> [--evidence TEXT]");
         }
         const evidence = extractFlag(rest, "--evidence");
         const sessionId = await resolveSession(rest.slice(1));
@@ -393,10 +386,9 @@ export const tasksCommand: Command = {
           "cancelled",
         ];
         if (!taskId || !newStatus || !valid.includes(newStatus)) {
-          console.error(
+          throw new Error(
             `Usage: swiz tasks status <task-id> <${valid.join("|")}> [--evidence TEXT]`
           );
-          process.exit(1);
         }
         const evidence = extractFlag(rest, "--evidence");
         const sessionId = await resolveSession(rest.slice(2));
@@ -411,9 +403,7 @@ export const tasksCommand: Command = {
       }
 
       default:
-        console.error(`Unknown subcommand: ${subcommand}`);
-        console.error('Run "swiz help tasks" for usage.');
-        process.exit(1);
+        throw new Error(`Unknown subcommand: ${subcommand}\nRun "swiz help tasks" for usage.`);
     }
   },
 };

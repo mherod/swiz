@@ -268,8 +268,7 @@ function collectTurns(lines: string[]): Turn[] {
 async function loadTurns(sessionPath: string): Promise<Turn[]> {
   const file = Bun.file(sessionPath);
   if (!(await file.exists())) {
-    console.error(`Transcript not found: ${sessionPath}`);
-    process.exit(1);
+    throw new Error(`Transcript not found: ${sessionPath}`);
   }
   const text = await file.text();
   return collectTurns(text.split("\n").filter(Boolean));
@@ -327,13 +326,8 @@ async function generateAutoReply(turns: Turn[]): Promise<void> {
     `Write ONLY the message itself — no prefix, no explanation, no metadata.\n\n` +
     `<conversation>\n${context}\n</conversation>`;
 
-  try {
-    const output = await promptAgent(prompt);
-    console.log(output);
-  } catch (err) {
-    console.error(String(err));
-    process.exit(1);
-  }
+  const output = await promptAgent(prompt);
+  console.log(output);
 }
 
 // ─── Command ─────────────────────────────────────────────────────────────────
@@ -376,9 +370,7 @@ export const transcriptCommand: Command = {
     const sessions = await findSessions(projectDir);
 
     if (sessions.length === 0) {
-      console.error(`No transcripts found for: ${targetDir}`);
-      console.error(`(looked in: ${projectDir})`);
-      process.exit(1);
+      throw new Error(`No transcripts found for: ${targetDir}\n(looked in: ${projectDir})`);
     }
 
     if (listOnly) {
@@ -400,10 +392,8 @@ export const transcriptCommand: Command = {
     if (sessionQuery) {
       const match = sessions.find((s) => s.id.startsWith(sessionQuery!));
       if (!match) {
-        console.error(`No session matching: ${sessionQuery}`);
-        console.error(`Available sessions:`);
-        for (const s of sessions) console.error(`  ${s.id}`);
-        process.exit(1);
+        const available = sessions.map((s) => `  ${s.id}`).join("\n");
+        throw new Error(`No session matching: ${sessionQuery}\nAvailable sessions:\n${available}`);
       }
       session = match;
     } else {

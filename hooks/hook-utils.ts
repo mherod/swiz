@@ -148,7 +148,7 @@ export function denyPostToolUse(reason: string): never {
 }
 
 /** Emit additional context for a hook event. Works across all agents. */
-export function emitContext(eventName: string, context: string): void {
+export function emitContext(eventName: string, context: string): never {
   console.log(
     JSON.stringify({
       systemMessage: context,
@@ -158,6 +158,7 @@ export function emitContext(eventName: string, context: string): void {
       },
     })
   );
+  process.exit(0);
 }
 
 // ─── Stop hook helpers ────────────────────────────────────────────────────

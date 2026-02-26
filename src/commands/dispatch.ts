@@ -255,8 +255,7 @@ export const dispatchCommand: Command = {
   async run(args) {
     const canonicalEvent = args[0];
     if (!canonicalEvent) {
-      console.error("Usage: swiz dispatch <event> [agentEventName]");
-      process.exit(1);
+      throw new Error("Usage: swiz dispatch <event> [agentEventName]");
     }
     // args[1] is the agent-translated event name (e.g. "UserPromptSubmit" for Claude Code).
     // Falls back to canonicalEvent so hookEventName always matches the registering config.

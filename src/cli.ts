@@ -23,14 +23,15 @@ async function run() {
   if (!command) {
     console.error(`Unknown command: ${commandName}`);
     console.error(`Run "swiz help" to see available commands.`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   try {
     await command.run(rest);
   } catch (err) {
     console.error(String(err));
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 

@@ -52,8 +52,7 @@ export const continueCommand: Command = {
     }
 
     if (!detectAgentCli()) {
-      console.error("No AI backend found. Install one of: Cursor Agent (agent), Claude Code (claude), or Gemini CLI (gemini).");
-      process.exit(1);
+      throw new Error("No AI backend found. Install one of: Cursor Agent (agent), Claude Code (claude), or Gemini CLI (gemini).");
     }
 
     const projectKey = projectKeyFromCwd(targetDir);
@@ -61,16 +60,14 @@ export const continueCommand: Command = {
     const sessions = await findSessions(projectDir);
 
     if (sessions.length === 0) {
-      console.error(`No transcripts found for: ${targetDir}`);
-      process.exit(1);
+      throw new Error(`No transcripts found for: ${targetDir}`);
     }
 
     let session: Session;
     if (sessionQuery) {
       const match = sessions.find((s) => s.id.startsWith(sessionQuery!));
       if (!match) {
-        console.error(`No session matching: ${sessionQuery}`);
-        process.exit(1);
+        throw new Error(`No session matching: ${sessionQuery}`);
       }
       session = match;
     } else {
@@ -81,21 +78,18 @@ export const continueCommand: Command = {
     try {
       raw = await Bun.file(session.path).text();
     } catch {
-      console.error(`Could not read transcript: ${session.path}`);
-      process.exit(1);
+      throw new Error(`Could not read transcript: ${session.path}`);
     }
 
     let suggestion: string;
     try {
       suggestion = await generateNextStep(raw);
     } catch (err) {
-      console.error(`Failed to generate suggestion: ${String(err)}`);
-      process.exit(1);
+      throw new Error(`Failed to generate suggestion: ${String(err)}`);
     }
 
     if (!suggestion) {
-      console.error("Empty suggestion returned from AI backend.");
-      process.exit(1);
+      throw new Error("Empty suggestion returned from AI backend.");
     }
 
     if (printOnly) {
@@ -115,6 +109,6 @@ export const continueCommand: Command = {
       stdin: "inherit",
     });
     await proc.exited;
-    process.exit(proc.exitCode ?? 0);
+    process.exitCode = proc.exitCode ?? 0;
   },
 };

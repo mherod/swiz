@@ -121,8 +121,7 @@ export const cleanupCommand: Command = {
       } else if (arg === "--older-than" && args[i + 1]) {
         const days = parseInt(args[++i]!, 10);
         if (isNaN(days) || days < 1) {
-          console.error("--older-than requires a positive integer (days)");
-          process.exit(1);
+          throw new Error("--older-than requires a positive integer (days)");
         }
         olderThanDays = days;
       } else if (arg === "--project" && args[i + 1]) {
@@ -147,8 +146,7 @@ export const cleanupCommand: Command = {
     }
 
     if (projectFilter && projectNames.length === 0) {
-      console.error(`Project "${projectFilter}" not found in ${PROJECTS_DIR}`);
-      process.exit(1);
+      throw new Error(`Project "${projectFilter}" not found in ${PROJECTS_DIR}`);
     }
 
     // Scan each project
