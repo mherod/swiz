@@ -100,7 +100,11 @@ async function expandInlineCommands(content: string): Promise<string> {
   return content.replace(INLINE_CMD_RE, () => results[i++]!);
 }
 
-async function readSkill(name: string, raw: boolean) {
+function stripFrontmatter(content: string): string {
+  return content.replace(/^---[\s\S]*?^---\s*\n?/m, "");
+}
+
+async function readSkill(name: string, raw: boolean, noFrontMatter: boolean) {
   const skills = await findSkills();
   const skill = skills.find((s) => s.name === name);
 
@@ -112,20 +116,25 @@ async function readSkill(name: string, raw: boolean) {
   if (!raw) {
     content = await expandInlineCommands(content);
   }
+  if (noFrontMatter) {
+    content = stripFrontmatter(content);
+  }
   console.log(content);
 }
 
 export const skillCommand: Command = {
   name: "skill",
   description: "Read and list skills",
-  usage: "swiz skill [--raw] [skill-name]",
+  usage: "swiz skill [--raw] [--no-front-matter] [skill-name]",
   async run(args) {
     const raw = args.includes("--raw");
-    const name = args.find((a) => a !== "--raw");
+    const noFrontMatter = args.includes("--no-front-matter");
+    const flags = new Set(["--raw", "--no-front-matter"]);
+    const name = args.find((a) => !flags.has(a));
     if (!name) {
       await listSkills();
     } else {
-      await readSkill(name, raw);
+      await readSkill(name, raw, noFrontMatter);
     }
   },
 };
