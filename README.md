@@ -155,27 +155,27 @@ swiz tasks complete-all                     # bulk-complete remaining
 
 ## Bundled Hooks
 
-37 hook scripts across 5 event types, all using shared cross-agent tool equivalence from `hooks/hook-utils.ts`:
+37 hook scripts across 5 event types, all TypeScript, using shared utilities from `hooks/hook-utils.ts` (cross-agent tool equivalence, polyglot output, git/gh helpers, portable skill checking):
 
 ### Stop (15)
 
 | Hook | What it does |
 |------|-------------|
-| `stop-secret-scanner.sh` | Blocks stop if secrets/API keys detected in staged changes |
-| `stop-debug-statements.sh` | Blocks stop if `console.log`, `debugger`, etc. left in code |
-| `stop-large-files.sh` | Blocks stop if uncommitted files exceed size threshold |
-| `stop-git-status.sh` | Blocks stop if working tree has uncommitted changes |
-| `stop-lockfile-drift.sh` | Blocks stop if lockfile is out of sync with manifest |
-| `stop-lint-staged.sh` | Runs lint-staged on staged files before allowing stop |
-| `stop-git-push.sh` | Warns if commits exist that haven't been pushed |
-| `stop-branch-conflicts.sh` | Checks for merge conflicts with the base branch |
-| `stop-pr-description.sh` | Validates PR description exists and isn't empty |
-| `stop-pr-changes-requested.sh` | Blocks stop if PR has unresolved change requests |
-| `stop-github-ci.sh` | Blocks stop if GitHub Actions CI is failing |
-| `stop-todo-tracker.sh` | Blocks stop if new TODO/FIXME/HACK comments were introduced |
-| `stop-changelog-staleness.sh` | Warns if changelog hasn't been updated alongside code changes |
-| `stop-completion-auditor.sh` | Verifies tasks have completion evidence before allowing stop |
-| `stop-personal-repo-issues.ts` | Checks for open issues assigned to the user |
+| `stop-secret-scanner.ts` | Blocks stop if secrets/API keys detected in staged changes |
+| `stop-debug-statements.ts` | Blocks stop if `console.log`, `debugger`, etc. left in code |
+| `stop-large-files.ts` | Blocks stop if uncommitted files exceed size threshold |
+| `stop-git-status.ts` | Blocks stop if working tree has uncommitted changes |
+| `stop-lockfile-drift.ts` | Blocks stop if lockfile is out of sync with manifest |
+| `stop-lint-staged.ts` | Runs lint-staged on staged files before allowing stop |
+| `stop-git-push.ts` | Warns if commits exist that haven't been pushed |
+| `stop-branch-conflicts.ts` | Checks for merge conflicts with the base branch |
+| `stop-pr-description.ts` | Validates PR description exists and isn't empty |
+| `stop-pr-changes-requested.ts` | Blocks stop if PR has unresolved change requests |
+| `stop-github-ci.ts` | Blocks stop if GitHub Actions CI is failing |
+| `stop-todo-tracker.ts` | Blocks stop if new TODO/FIXME/HACK comments were introduced |
+| `stop-changelog-staleness.ts` | Warns if changelog hasn't been updated alongside code changes |
+| `stop-completion-auditor.ts` | Verifies tasks have completion evidence before allowing stop |
+| `stop-personal-repo-issues.ts` | Checks for actionable open issues (skips blocked/upstream) |
 
 ### PreToolUse (11)
 
@@ -197,10 +197,10 @@ swiz tasks complete-all                     # bulk-complete remaining
 
 | Hook | What it does |
 |------|-------------|
-| `posttooluse-git-status.sh` | Injects git status context after any tool use |
-| `posttooluse-json-validation.sh` | Validates JSON files are still valid after edits |
-| `posttooluse-test-pairing.sh` | Reminds agent to write/update tests after code edits |
-| `posttooluse-task-advisor.sh` | Countdown warning — task enforcement is coming |
+| `posttooluse-git-status.ts` | Injects git status context after any tool use |
+| `posttooluse-json-validation.ts` | Validates JSON files are still valid after edits |
+| `posttooluse-test-pairing.ts` | Reminds agent to write/update tests after code edits |
+| `posttooluse-task-advisor.ts` | Countdown warning — task enforcement is coming |
 | `posttooluse-pr-context.ts` | Injects PR context when checking out branches |
 | `posttooluse-prettier-ts.ts` | Auto-formats TypeScript files after edits (async) |
 | `posttooluse-task-subject-validation.ts` | Validates task subjects after creation |
@@ -209,15 +209,15 @@ swiz tasks complete-all                     # bulk-complete remaining
 
 | Hook | What it does |
 |------|-------------|
-| `sessionstart-health-snapshot.sh` | Captures project health baseline at session start |
-| `sessionstart-compact-context.sh` | Re-injects core conventions after context compaction |
+| `sessionstart-health-snapshot.ts` | Captures project health baseline at session start |
+| `sessionstart-compact-context.ts` | Re-injects core conventions after context compaction |
 
 ### UserPromptSubmit (2)
 
 | Hook | What it does |
 |------|-------------|
-| `userpromptsubmit-git-context.sh` | Injects current git branch/status into every prompt |
-| `userpromptsubmit-task-advisor.sh` | Reminds agent about active tasks before each prompt |
+| `userpromptsubmit-git-context.ts` | Injects current git branch/status into every prompt |
+| `userpromptsubmit-task-advisor.ts` | Reminds agent about active tasks before each prompt |
 
 ## Architecture
 
@@ -227,6 +227,7 @@ swiz/
 ├── src/
 │   ├── cli.ts                # Command registration and dispatch
 │   ├── types.ts              # Command interface
+│   ├── manifest.ts           # Canonical hook manifest (events, matchers, scripts)
 │   ├── agents.ts             # Agent definitions, tool/event translation
 │   └── commands/
 │       ├── install.ts        # Deploy hooks with per-agent config generation
@@ -238,13 +239,13 @@ swiz/
 │       ├── shim.ts           # Shell shim install/uninstall/status
 │       └── help.ts           # Usage information
 └── hooks/
-    ├── hook-utils.ts         # Shared cross-agent tool equivalence sets + polyglot output helpers
+    ├── hook-utils.ts         # Shared utilities: tool equivalence, polyglot output, git/gh, skill checking
     ├── shim.sh               # Shell wrapper functions (sourced from profile)
     ├── task-subject-validation.ts  # Shared validation logic
-    └── *.sh / *.ts           # 37 hook scripts
+    └── *.ts                  # 37 hook scripts (all TypeScript)
 ```
 
-The canonical hook manifest lives in `install.ts`. Each hook group specifies an event, an optional tool matcher, and a list of scripts. At install time, `agents.ts` translates matchers (`Bash` → `Shell` for Cursor, `Bash` → `run_shell_command` for Gemini) and events (`Stop` → `stop` for Cursor, `Stop` → `AfterAgent` for Gemini), then generates the correct config structure per agent.
+The canonical hook manifest lives in `src/manifest.ts`. Each hook group specifies an event, an optional tool matcher, and a list of scripts. At install time, `agents.ts` translates matchers (`Bash` → `Shell` for Cursor, `Bash` → `run_shell_command` for Gemini) and events (`Stop` → `stop` for Cursor, `Stop` → `AfterAgent` for Gemini), then generates the correct config structure per agent.
 
 Hook scripts themselves use the equivalence sets from `hook-utils.ts` (e.g. `isShellTool("run_shell_command")` returns `true`) so they work regardless of which agent's tool name is in the payload.
 

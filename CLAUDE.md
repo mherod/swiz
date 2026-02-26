@@ -46,7 +46,7 @@ Use `dirname(Bun.main)` to resolve the swiz project root at runtime. DO NOT use 
 
 ## Hook System
 
-Hooks live in `hooks/` at the project root. The authoritative manifest is the `manifest` array in `src/commands/install.ts` — it is agent-agnostic and uses camelCase event names (`stop`, `preToolUse`, `postToolUse`, `sessionStart`, `userPromptSubmit`).
+Hooks live in `hooks/` at the project root. The authoritative manifest is the `manifest` array in `src/manifest.ts` — it is agent-agnostic and uses camelCase event names (`stop`, `preToolUse`, `postToolUse`, `sessionStart`, `userPromptSubmit`).
 
 Translation to agent-specific formats happens at config generation time:
 - **Event names**: `EVENT_MAP` maps canonical names to Claude Code (PascalCase) and Cursor (camelCase/custom) equivalents. `UserPromptSubmit` becomes `beforeSubmitPrompt` in Cursor.
@@ -54,25 +54,34 @@ Translation to agent-specific formats happens at config generation time:
 - **Config structure**: Claude Code uses nested matcher groups in `~/.claude/settings.json`. Cursor uses a flat hook list with `version: 1` in `~/.cursor/hooks.json`.
 
 When adding a hook:
-1. Add the script to `hooks/`
-2. Make shell scripts executable (`chmod +x`)
-3. Add the entry to `manifest` in `src/commands/install.ts`
-4. Run `swiz install --dry-run` to verify
+1. Add a `.ts` script to `hooks/`
+2. Add the entry to `manifest` in `src/manifest.ts`
+3. Run `swiz install --dry-run` to verify
 
 DO NOT hard-code agent-specific event names or tool names in hook scripts. The translation layer handles this.
 
 ## Writing Hooks
 
-All hooks should import from `hooks/hook-utils.ts` for shared utilities:
-
-```ts
-import { denyPreToolUse, denyPostToolUse, emitContext, isShellTool, isEditTool } from "./hook-utils.ts";
-```
+All hooks are TypeScript and import from `hooks/hook-utils.ts` for shared utilities. Hook scripts receive a JSON payload on stdin from the agent and exit `0` in all cases — the JSON output determines the decision, not the exit code.
 
 **Output helpers** — emit polyglot JSON understood by all agents (Claude, Cursor, Gemini, Codex):
 - `denyPreToolUse(reason)` — blocks the tool call (PreToolUse)
 - `denyPostToolUse(reason)` — feeds an error back after tool execution (PostToolUse)
 - `emitContext(eventName, context)` — injects non-blocking context (SessionStart, UserPromptSubmit)
+
+**Stop hook helpers:**
+- `blockStop(reason)` — emits block decision with ACTION REQUIRED footer and exits
+- `blockStopRaw(reason)` — emits block decision without footer (caller controls full reason)
+- `actionRequired()` — returns the standard ACTION REQUIRED footer string
+
+**Git / CLI helpers:**
+- `git(args, cwd)` — run git command, returns trimmed stdout or `""` on failure
+- `gh(args, cwd)` — run gh CLI command, returns trimmed stdout or `""` on failure
+- `isGitRepo(cwd)` / `isGitHubRemote(cwd)` / `hasGhCli()` — environment checks
+
+**Skill existence checking** — hooks reference skills portably by checking if they're installed:
+- `skillExists(name)` — checks `.skills/` and `~/.claude/skills/` for `SKILL.md` (cached per process)
+- `skillAdvice(skill, withSkill, withoutSkill)` — returns skill-aware message if the skill exists, or a fallback with manual CLI commands if it doesn't
 
 **Cross-agent tool checks** — use these instead of hardcoding `"Bash"` or `"Edit"`:
 - `isShellTool(name)` — matches `Bash`, `Shell`, `run_shell_command`, etc.
@@ -83,7 +92,7 @@ import { denyPreToolUse, denyPostToolUse, emitContext, isShellTool, isEditTool }
 
 **Package manager detection** — `detectPackageManager()` walks up from CWD to find the lockfile; `detectPkgRunner()` returns the appropriate `bunx`/`npx`/`pnpm dlx` command.
 
-Hook scripts receive a JSON payload on stdin from the agent. TypeScript hooks exit `0` in all cases — the JSON output determines the decision, not the exit code.
+**Input types** — `StopHookInput`, `ToolHookInput`, `SessionHookInput` for typed stdin parsing.
 
 ## Task Data
 
@@ -97,5 +106,5 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 - ANSI escape codes for terminal output — no chalk or color libraries
 - Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks
-- `.ts` hooks are invoked with `bun hooks/<file>.ts`, `.sh` hooks are invoked directly
+- All hooks are `.ts` and invoked with `bun hooks/<file>.ts`
 - All settings file writes create a `.bak` backup first
