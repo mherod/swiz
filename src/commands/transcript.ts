@@ -262,29 +262,21 @@ function collectTurns(lines: string[]): Turn[] {
   return turns;
 }
 
-// ─── Main rendering ──────────────────────────────────────────────────────────
+// ─── Turn loading ─────────────────────────────────────────────────────────────
 
-async function renderTranscript(
-  sessionPath: string,
-  sessionId: string,
-  opts: { head?: number; tail?: number } = {}
-): Promise<void> {
+async function loadTurns(sessionPath: string): Promise<Turn[]> {
   const file = Bun.file(sessionPath);
   if (!(await file.exists())) {
     console.error(`Transcript not found: ${sessionPath}`);
     process.exit(1);
   }
-
   const text = await file.text();
-  const lines = text.split("\n").filter(Boolean);
-  let turns = collectTurns(lines);
+  return collectTurns(text.split("\n").filter(Boolean));
+}
 
-  if (opts.tail !== undefined) {
-    turns = turns.slice(-opts.tail);
-  } else if (opts.head !== undefined) {
-    turns = turns.slice(0, opts.head);
-  }
+// ─── Main rendering ──────────────────────────────────────────────────────────
 
+function renderTurns(turns: Turn[], sessionId: string): void {
   console.log(
     `\n${DIM}Session: ${sessionId}${RESET}\n${DIM}${"─".repeat(60)}${RESET}`
   );
@@ -304,12 +296,62 @@ async function renderTranscript(
   }
 }
 
+// ─── Auto-reply generation ────────────────────────────────────────────────────
+
+async function generateAutoReply(turns: Turn[]): Promise<void> {
+  // Build a plain-text representation of the conversation for LLM context
+  const lines: string[] = [];
+  for (const { entry, role } of turns) {
+    if (role === "user") {
+      const text = extractText(entry.message?.content).trim();
+      if (text) lines.push(`User: ${text}\n`);
+    } else {
+      const content = entry.message?.content;
+      const blocks: ContentBlock[] = typeof content === "string"
+        ? [{ type: "text", text: content }]
+        : (content ?? []);
+      const textParts = blocks
+        .filter((b): b is TextBlock => b.type === "text" && !!(b as TextBlock).text?.trim())
+        .map((b) => b.text!.trim());
+      if (textParts.length > 0) {
+        lines.push(`Assistant: ${textParts.join("\n")}\n`);
+      }
+    }
+  }
+
+  const context = lines.join("\n").trim();
+  const prompt =
+    `Based on the conversation below, write a single natural follow-up message ` +
+    `that the user might send to continue the conversation. ` +
+    `Write ONLY the message itself — no prefix, no explanation, no metadata.\n\n` +
+    `<conversation>\n${context}\n</conversation>`;
+
+  // Detect available CLI backend
+  const hasAgent = !!Bun.which("agent");
+  const hasClaude = !!Bun.which("claude");
+
+  if (!hasAgent && !hasClaude) {
+    console.error("No AI backend found. Install Cursor Agent (agent) or Claude Code (claude).");
+    process.exit(1);
+  }
+
+  const args: string[] = hasAgent
+    ? ["agent", "--print", "--mode", "ask", "--trust", prompt]
+    : ["claude", "--print", prompt];
+
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+  const output = await new Response(proc.stdout).text();
+  await proc.exited;
+
+  console.log(output.trim());
+}
+
 // ─── Command ─────────────────────────────────────────────────────────────────
 
 export const transcriptCommand: Command = {
   name: "transcript",
   description: "Display Agent-User chat history for the current project",
-  usage: "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N]",
+  usage: "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--auto-reply]",
   async run(args) {
     const HOME = process.env.HOME ?? "~";
     const PROJECTS_DIR = join(HOME, ".claude", "projects");
@@ -320,6 +362,7 @@ export const transcriptCommand: Command = {
     let listOnly = false;
     let headCount: number | undefined;
     let tailCount: number | undefined;
+    let autoReply = false;
 
     for (let i = 0; i < args.length; i++) {
       if ((args[i] === "--session" || args[i] === "-s") && args[i + 1]) {
@@ -332,6 +375,8 @@ export const transcriptCommand: Command = {
         headCount = parseInt(args[++i]!, 10);
       } else if ((args[i] === "--tail" || args[i] === "-T") && args[i + 1]) {
         tailCount = parseInt(args[++i]!, 10);
+      } else if (args[i] === "--auto-reply") {
+        autoReply = true;
       }
     }
 
@@ -375,6 +420,17 @@ export const transcriptCommand: Command = {
       session = sessions[0]!; // newest session
     }
 
-    await renderTranscript(session.path, session.id, { head: headCount, tail: tailCount });
+    let turns = await loadTurns(session.path);
+    if (tailCount !== undefined) {
+      turns = turns.slice(-tailCount);
+    } else if (headCount !== undefined) {
+      turns = turns.slice(0, headCount);
+    }
+
+    if (autoReply) {
+      await generateAutoReply(turns);
+    } else {
+      renderTurns(turns, session.id);
+    }
   },
 };
