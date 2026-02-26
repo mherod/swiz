@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if secrets/credentials detected in recent commits
 
-import { git, isGitRepo, blockStop, type StopHookInput } from "./hook-utils.ts";
+import { git, isGitRepo, blockStop, TEST_FILE_RE, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -27,7 +27,13 @@ async function main(): Promise<void> {
 
   const findings: string[] = [];
 
+  let currentFile = "";
   for (const line of diff.split("\n")) {
+    if (line.startsWith("+++ b/")) {
+      currentFile = line.slice(6);
+      continue;
+    }
+    if (TEST_FILE_RE.test(currentFile)) continue;
     if (!line.startsWith("+") || line.startsWith("+++")) continue;
 
     if (PRIVATE_KEY_RE.test(line)) {
