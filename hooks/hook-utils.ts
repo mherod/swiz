@@ -14,6 +14,61 @@ if (!Bun.which("bun")) {
   );
 }
 
+// ─── Project convention detection ───────────────────────────────────────────
+// Walk up from CWD looking for lockfiles to determine the project's package
+// manager and runtime. Cached per process so hooks don't stat the filesystem
+// on every import.
+
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+export type PackageManager = "bun" | "pnpm" | "yarn" | "npm";
+export type Runtime = "bun" | "node";
+
+let _pmCache: PackageManager | null | undefined;
+
+export function detectPackageManager(): PackageManager | null {
+  if (_pmCache !== undefined) return _pmCache;
+
+  let dir = process.cwd();
+  while (true) {
+    if (existsSync(join(dir, "bun.lockb")) || existsSync(join(dir, "bun.lock"))) {
+      _pmCache = "bun"; return _pmCache;
+    }
+    if (existsSync(join(dir, "pnpm-lock.yaml"))) {
+      _pmCache = "pnpm"; return _pmCache;
+    }
+    if (existsSync(join(dir, "yarn.lock"))) {
+      _pmCache = "yarn"; return _pmCache;
+    }
+    if (existsSync(join(dir, "package-lock.json"))) {
+      _pmCache = "npm"; return _pmCache;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  _pmCache = null;
+  return null;
+}
+
+export function detectRuntime(): Runtime {
+  const pm = detectPackageManager();
+  return pm === "bun" ? "bun" : "node";
+}
+
+/** The "run package" command for the detected PM (e.g. bunx, pnpm dlx, npx) */
+export function detectPkgRunner(): string {
+  const pm = detectPackageManager();
+  switch (pm) {
+    case "bun": return "bunx";
+    case "pnpm": return "pnpm dlx";
+    case "yarn": return "yarn dlx";
+    default: return "npx";
+  }
+}
+
 // ─── Cross-agent tool equivalence ──────────────────────────────────────────
 // Each set contains all names an agent might use for the same concept.
 // Claude Code | Cursor       | Gemini CLI        | Codex CLI

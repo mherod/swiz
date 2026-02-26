@@ -21,6 +21,42 @@ if ! command -v bun >/dev/null 2>&1; then
   printf '  curl -fsSL https://bun.sh/install | bash\n\n' >&2
 fi
 
+# ── Project convention detection ──────────────────────────────────────────────
+# Walk up from CWD to find the lockfile that identifies the project's PM.
+# Called per-command (fast — just stat checks).
+
+_swiz_detect_pm() {
+  local dir="$PWD"
+  while true; do
+    [[ -f "$dir/bun.lockb" || -f "$dir/bun.lock" ]] && { echo "bun"; return; }
+    [[ -f "$dir/pnpm-lock.yaml" ]] && { echo "pnpm"; return; }
+    [[ -f "$dir/yarn.lock" ]] && { echo "yarn"; return; }
+    [[ -f "$dir/package-lock.json" ]] && { echo "npm"; return; }
+    local parent
+    parent="$(command dirname "$dir")"
+    [[ "$parent" == "$dir" ]] && break
+    dir="$parent"
+  done
+  echo ""
+}
+
+_swiz_detect_runtime() {
+  local pm
+  pm="$(_swiz_detect_pm)"
+  [[ "$pm" == "bun" ]] && echo "bun" || echo "node"
+}
+
+_swiz_detect_runner() {
+  local pm
+  pm="$(_swiz_detect_pm)"
+  case "$pm" in
+    bun)  echo "bunx" ;;
+    pnpm) echo "pnpm dlx" ;;
+    yarn) echo "yarn dlx" ;;
+    *)    echo "npx" ;;
+  esac
+}
+
 # ── Agent detection ──────────────────────────────────────────────────────────
 
 _swiz_is_agent() {
@@ -90,67 +126,88 @@ awk() {
   command awk "$@"
 }
 
-# ── Package managers (project uses bun) ──────────────────────────────────────
+# ── Package managers (project-aware) ─────────────────────────────────────────
+# Detect the project's PM from lockfiles. If you're already using the right
+# one, it passes through. If not, you're told what this project uses.
+
+_swiz_pm_guard() {
+  local invoked="$1"; shift
+  local pm
+  pm="$(_swiz_detect_pm)"
+
+  # No lockfile found — can't enforce, allow
+  [[ -z "$pm" ]] && return 1
+  # Already using the project's PM — allow
+  [[ "$invoked" == "$pm" ]] && return 1
+
+  _swiz_guard "$invoked" "$pm" \
+    "This project uses \`$pm\` (detected from lockfile). Use \`$pm\` instead." "$@"
+}
 
 npm() {
-  local subcmd="${1:-}"
-  case "$subcmd" in
-    install|i|add|ci|uninstall|remove|rm|un|r|update|up|upgrade|dedupe|rebuild|link)
-      _swiz_guard npm "bun ${subcmd}" \
-        "Use \`bun\` instead of npm. bun is the project-standard runtime." "$@" && return 1 ;;
-    run|start|test|t)
-      _swiz_guard npm "bun run" \
-        "Use \`bun run <script>\` instead." "$@" && return 1 ;;
-    exec)
-      _swiz_guard npm bunx \
-        "Use \`bunx <pkg>\` instead of \`npm exec\`." "$@" && return 1 ;;
-    *)
-      ;; # allow npm info, npm view, etc.
-  esac
+  _swiz_pm_guard npm "$@" && return 1
   command npm "$@"
 }
 
 npx() {
-  _swiz_guard npx bunx \
-    "Use \`bunx\` instead of npx." "$@" && return 1
+  local runner
+  runner="$(_swiz_detect_runner)"
+  [[ "$runner" == "npx" ]] && { command npx "$@"; return $?; }
+  _swiz_guard npx "$runner" \
+    "This project uses \`$runner\` instead of npx." "$@" && return 1
   command npx "$@"
 }
 
 yarn() {
-  _swiz_guard yarn bun \
-    "Use \`bun\` instead of yarn. bun is the project-standard runtime." "$@" && return 1
+  _swiz_pm_guard yarn "$@" && return 1
   command yarn "$@"
 }
 
 pnpm() {
-  _swiz_guard pnpm bun \
-    "Use \`bun\` instead of pnpm. bun is the project-standard runtime." "$@" && return 1
+  _swiz_pm_guard pnpm "$@" && return 1
   command pnpm "$@"
 }
 
-# ── Runtimes (project uses bun) ──────────────────────────────────────────────
+bun() {
+  _swiz_pm_guard bun "$@" && return 1
+  command bun "$@"
+}
+
+# ── Runtimes (project-aware) ─────────────────────────────────────────────────
+# Only block node/ts-node if the project uses bun. Python is always redirected
+# to the project's runtime.
 
 node() {
-  _swiz_guard node bun \
-    "Use \`bun\` instead of node — native TypeScript, faster startup." "$@" && return 1
+  local rt
+  rt="$(_swiz_detect_runtime)"
+  [[ "$rt" == "node" ]] && { command node "$@"; return $?; }
+  _swiz_guard node "$rt" \
+    "This project uses \`$rt\`. Use \`$rt\` instead of node." "$@" && return 1
   command node "$@"
 }
 
 ts-node() {
-  _swiz_guard ts-node bun \
-    "Use \`bun\` instead of ts-node — native TypeScript, no compilation step." "$@" && return 1
+  local rt
+  rt="$(_swiz_detect_runtime)"
+  [[ "$rt" == "node" ]] && { command ts-node "$@"; return $?; }
+  _swiz_guard ts-node "$rt" \
+    "This project uses \`$rt\` with native TypeScript. Use \`$rt\` instead." "$@" && return 1
   command ts-node "$@"
 }
 
 python() {
-  _swiz_guard python bun \
-    "Use \`bun\` instead of python — consistent runtime across environments." "$@" && return 1
+  local rt
+  rt="$(_swiz_detect_runtime)"
+  _swiz_guard python "$rt" \
+    "Use \`$rt\` instead of python — consistent runtime across environments." "$@" && return 1
   command python "$@"
 }
 
 python3() {
-  _swiz_guard python3 bun \
-    "Use \`bun\` instead of python3 — consistent runtime across environments." "$@" && return 1
+  local rt
+  rt="$(_swiz_detect_runtime)"
+  _swiz_guard python3 "$rt" \
+    "Use \`$rt\` instead of python3 — consistent runtime across environments." "$@" && return 1
   command python3 "$@"
 }
 

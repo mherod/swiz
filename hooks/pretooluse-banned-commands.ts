@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
 // PreToolUse hook: Block banned Bash commands and guide to safe alternatives.
 
-import { denyPreToolUse, isShellTool } from "./hook-utils.ts";
+import { denyPreToolUse, isShellTool, detectRuntime, detectPackageManager } from "./hook-utils.ts";
+
+const RUNTIME = detectRuntime();
+const PM = detectPackageManager();
 
 interface Rule {
   /** Returns true if this rule matches the command. */
@@ -159,28 +162,37 @@ const RULES: Rule[] = [
   {
     match: (c) => /(?:^|[|;&])\s*python3?(\s|$)/.test(c),
     message: [
-      "Do not use `python` or `python3`. Python is banned due to system compatibility",
-      "concerns — the system Python version is unreliable across environments.",
+      "Do not use `python` or `python3`. The system Python version is unreliable",
+      "across environments.",
       "",
-      "Use `bun` instead — it is faster, ships a consistent runtime, and supports",
-      "TypeScript natively without any setup:",
-      "  • bun script.ts       — run a TypeScript or JavaScript file",
-      "  • bun -e 'code here'  — evaluate an inline expression",
-      "  • bun run <script>    — run a package.json script",
+      `Use \`${RUNTIME}\` instead — it ships a consistent runtime:`,
+      ...(RUNTIME === "bun"
+        ? [
+            "  • bun script.ts       — run a TypeScript or JavaScript file",
+            "  • bun -e 'code here'  — evaluate an inline expression",
+          ]
+        : [
+            "  • node script.js      — run a JavaScript file",
+            "  • npx ts-node file.ts — run TypeScript (with ts-node)",
+          ]),
     ].join("\n"),
   },
-  {
-    match: (c) => /(?:^|[|;&])\s*(node|ts-node)\s/.test(c),
-    message: [
-      "Do not use `node` or `ts-node`. Use `bun` instead.",
-      "",
-      "bun is the project-standard runtime — native TypeScript, faster startup:",
-      "  • bun script.ts       — run a TypeScript or JavaScript file",
-      "  • bun -e 'code here'  — evaluate an inline expression",
-      "  • bun run <script>    — run a package.json script",
-      "  • bun test            — run tests",
-    ].join("\n"),
-  },
+  ...(PM === "bun"
+    ? [
+        {
+          match: (c: string) => /(?:^|[|;&])\s*(node|ts-node)\s/.test(c),
+          message: [
+            "Do not use `node` or `ts-node`. This project uses bun.",
+            "",
+            "bun is the project-standard runtime — native TypeScript, faster startup:",
+            "  • bun script.ts       — run a TypeScript or JavaScript file",
+            "  • bun -e 'code here'  — evaluate an inline expression",
+            "  • bun run <script>    — run a package.json script",
+            "  • bun test            — run tests",
+          ].join("\n"),
+        },
+      ]
+    : []) as Rule[],
   {
     match: (c) => /git\s+commit\b.*--no-verify/.test(c) || /git\s+push\b.*--no-verify/.test(c),
     message: [
