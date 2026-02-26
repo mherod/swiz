@@ -8,7 +8,7 @@ export {};
 const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|py|rb|go|java|kt|swift|php|cs|cpp|c|rs)$/;
 const TEST_FILE_RE = /\.test\.|\.spec\.|__tests__|\/test\//;
 // CLI and hook infrastructure uses console.log as its output channel — not debugging
-const INFRA_FILE_RE = /hooks\/|\/cli\.|index\.ts$|dispatch\.ts$/;
+const INFRA_FILE_RE = /hooks\/|\/commands\/|\/cli\.|index\.ts$|dispatch\.ts$/;
 
 // Debug patterns per language
 const JS_DEBUG_RE = /\bconsole\.(log|debug|trace|dir|table)\b/;
