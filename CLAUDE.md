@@ -96,6 +96,10 @@ All output helpers return `never` and call `process.exit(0)` after writing JSON.
 
 **Input types** — `StopHookInput`, `ToolHookInput`, `SessionHookInput` for typed stdin parsing.
 
+**Test file detection** — `TEST_FILE_RE` from `hook-utils.ts` identifies test files (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`). Use this constant in hooks that scan source code to exclude test files from checks, allowing test fixtures to contain literal patterns without triggering the hook.
+
+**Diff file tracking** — When scanning git diffs line-by-line, track the current file by reading `+++ b/<path>` headers, then apply file-level exclusions (e.g., `if (TEST_FILE_RE.test(currentFile)) continue`). This pattern is lighter than splitting the diff into file chunks and allows consistent file-based filtering across all checked lines.
+
 ## Task Data
 
 Tasks are stored per-session in `~/.claude/tasks/<session-id>/`. Each task is a JSON file named `<id>.json`. Audit logs go in `.audit-log.jsonl` within the session directory.
@@ -127,3 +131,5 @@ Hook scripts (`hooks/*.ts`) are the exception — their `process.exit(0)` calls 
 - Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks
 - All hooks are `.ts` and invoked with `bun hooks/<file>.ts`
 - All settings file writes create a `.bak` backup first
+- **Multiline regex with `\s*`**: DO NOT use `\s*` after a closing delimiter like `---` if you need to preserve blank lines. Use `[ \t]*` instead to match only horizontal whitespace. The pattern `/^---[\s\S]*?^---\s*\n?/m` greedily consumes newlines after the closing `---`, eating blank lines that should remain. Change to `[ \t]*\n?` to avoid this.
+- **Stop hook session context**: Hooks like `stop-auto-continue.ts` can load session task context from `~/.claude/tasks/<session_id>/` and inject it into agent prompts. This gives the agent a longer-term view of session accomplishments beyond just the transcript. Load task files, format by status (IN PROGRESS before COMPLETED), and inject as a dedicated section before the transcript.
