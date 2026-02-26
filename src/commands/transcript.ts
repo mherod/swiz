@@ -326,18 +326,23 @@ async function generateAutoReply(turns: Turn[]): Promise<void> {
     `Write ONLY the message itself — no prefix, no explanation, no metadata.\n\n` +
     `<conversation>\n${context}\n</conversation>`;
 
-  // Detect available CLI backend
+  // Detect available CLI backend (first match wins)
   const hasAgent = !!Bun.which("agent");
   const hasClaude = !!Bun.which("claude");
+  const hasGemini = !!Bun.which("gemini");
 
-  if (!hasAgent && !hasClaude) {
-    console.error("No AI backend found. Install Cursor Agent (agent) or Claude Code (claude).");
+  if (!hasAgent && !hasClaude && !hasGemini) {
+    console.error(
+      "No AI backend found. Install one of: Cursor Agent (agent), Claude Code (claude), or Gemini CLI (gemini)."
+    );
     process.exit(1);
   }
 
   const args: string[] = hasAgent
     ? ["agent", "--print", "--mode", "ask", "--trust", prompt]
-    : ["claude", "--print", prompt];
+    : hasClaude
+    ? ["claude", "--print", prompt]
+    : ["gemini", "--prompt", prompt];
 
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
   const output = await new Response(proc.stdout).text();
