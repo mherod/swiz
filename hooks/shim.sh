@@ -143,6 +143,14 @@ python3() {
   command python3 "$@"
 }
 
+# ── File creation (agents should use Write tool) ─────────────────────────────
+
+touch() {
+  _swiz_guard touch "Write tool" \
+    "Use the Write tool to create files. It is tracked, reviewable, and works for empty files." "$@" && return 1
+  command touch "$@"
+}
+
 # ── Destructive commands ─────────────────────────────────────────────────────
 
 rm() {
@@ -151,21 +159,47 @@ rm() {
   command rm "$@"
 }
 
-# ── Git security ─────────────────────────────────────────────────────────────
-# Blocks unsafe git patterns that agents abuse: --no-verify, --trailer
-# injection, Co-authored-by signatures, AI generation markers.
-#
-# Adopted from ~/.shell_common. Only defined if no existing git() wrapper is
-# present (e.g. .shell_common already sourced in interactive shells). This
-# ensures the shim provides coverage in non-interactive agent shells without
-# clobbering the user's own wrapper.
+# ── Chaining helper ──────────────────────────────────────────────────────────
+# If a function already exists (e.g. from .shell_common), rename it so the
+# swiz wrapper can chain through it. Swiz is the authority — its guards
+# always run first, then the previous wrapper (if any) handles the rest.
 
 _swiz_has_function() {
-  # Portable check for bash and zsh
   type "$1" 2>/dev/null | command grep -q 'function'
 }
 
-if ! _swiz_has_function git; then
+_swiz_chain_existing() {
+  local name="$1" chain="_swiz_chain_${1}"
+  if _swiz_has_function "$name"; then
+    eval "$(declare -f "$name" | command sed "1s/^${name} /${chain} /")"
+  fi
+}
+
+# Passthrough: call the chained wrapper if it exists, otherwise command directly
+_swiz_run_git() {
+  if _swiz_has_function _swiz_chain_git; then
+    _swiz_chain_git "$@"
+  else
+    command git "$@"
+  fi
+}
+
+_swiz_run_gh() {
+  if _swiz_has_function _swiz_chain_gh; then
+    _swiz_chain_gh "$@"
+  else
+    command gh "$@"
+  fi
+}
+
+# Save existing wrappers before we override them
+_swiz_chain_existing git
+_swiz_chain_existing gh
+
+# ── Git security ─────────────────────────────────────────────────────────────
+# Swiz is the authority. These guards always run first, then delegate to any
+# existing wrapper (e.g. .shell_common) or directly to `command git`.
+
 git() {
   [[ -n "${SWIZ_BYPASS:-}" ]] && { command git "$@"; return $?; }
 
@@ -192,6 +226,47 @@ git() {
         printf 'swiz: git %s --no-verify is blocked.\n' "$1" >&2
         printf 'This flag bypasses pre-commit hooks and other safety mechanisms.\n' >&2
         printf 'Address the underlying issue flagged by the hooks instead.\n' >&2
+        return 1
+        ;;
+    esac
+  fi
+
+  # Block dangerous git subcommands
+  case "$1" in
+    stash)
+      printf 'swiz: Do not use `git stash`. Stashed changes are easy to lose.\n' >&2
+      printf 'Commit work-in-progress instead: git commit -m "wip: ..."\n' >&2
+      return 1
+      ;;
+    restore)
+      printf 'swiz: Do not use `git restore`. It silently discards uncommitted changes.\n' >&2
+      printf 'Use the Edit tool to undo specific changes, or `git revert <hash>`.\n' >&2
+      return 1
+      ;;
+    clean)
+      printf 'swiz: Do not use `git clean`. It permanently deletes untracked files.\n' >&2
+      printf 'Use `trash <path>` for recoverable deletion.\n' >&2
+      return 1
+      ;;
+  esac
+
+  # Block git reset --hard
+  if [[ "$1" == "reset" ]]; then
+    case "$*" in
+      *--hard*)
+        printf 'swiz: Do not use `git reset --hard`. It destroys uncommitted changes.\n' >&2
+        printf 'Use `git revert <hash>` or `git reset HEAD~1` (soft, keeps changes staged).\n' >&2
+        return 1
+        ;;
+    esac
+  fi
+
+  # Block git checkout -- <file> (discards changes)
+  if [[ "$1" == "checkout" ]]; then
+    case "$*" in
+      *" -- "*)
+        printf 'swiz: Do not use `git checkout -- <file>`. It discards file changes.\n' >&2
+        printf 'Use the Edit tool to undo specific changes, or `git revert <hash>`.\n' >&2
         return 1
         ;;
     esac
@@ -227,7 +302,8 @@ git() {
     fi
   fi
 
-  command git "$@"
+  # Delegate to chained wrapper or raw git
+  _swiz_run_git "$@"
   local git_exit=$?
 
   # Clean stale lock files when no other git processes are running
@@ -243,13 +319,9 @@ git() {
 
   return $git_exit
 }
-fi
 
 # ── GitHub CLI security ──────────────────────────────────────────────────────
-# Blocks --admin flag which bypasses repository protection rules.
-# Only defined if no existing gh() wrapper is present.
 
-if ! _swiz_has_function gh; then
 gh() {
   [[ -n "${SWIZ_BYPASS:-}" ]] && { command gh "$@"; return $?; }
 
@@ -262,6 +334,5 @@ gh() {
       ;;
   esac
 
-  command gh "$@"
+  _swiz_run_gh "$@"
 }
-fi

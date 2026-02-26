@@ -37,6 +37,27 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
+    match: (c) => /(?:^|[|;&])\s*find\s/.test(c),
+    message: [
+      "Do not use `find`. It is slow and does not respect .gitignore.",
+      "",
+      "Instead, use one of these faster alternatives:",
+      "  • fd 'pattern'              — fast, respects .gitignore",
+      "  • fd -e ts                  — find files by extension",
+      "  • Glob tool                 — preferred for codebase file discovery",
+    ].join("\n"),
+  },
+  {
+    match: (c) => /(?:^|[|;&])\s*awk\s/.test(c),
+    message: [
+      "Do not use `awk` for file processing. It produces unreviewed changes.",
+      "",
+      "Instead, use the Edit tool for file modifications:",
+      "  • Edit tool: precise old_string → new_string replacements (preferred)",
+      "  • For data extraction, consider `bun -e` with a TypeScript one-liner",
+    ].join("\n"),
+  },
+  {
     match: (c) => /(?:^|[|;&])\s*sed\s/.test(c),
     message: [
       "Do not use `sed` to edit files. It is unreliable and produces unreviewed changes.",
@@ -146,6 +167,54 @@ const RULES: Rule[] = [
       "  • bun script.ts       — run a TypeScript or JavaScript file",
       "  • bun -e 'code here'  — evaluate an inline expression",
       "  • bun run <script>    — run a package.json script",
+    ].join("\n"),
+  },
+  {
+    match: (c) => /(?:^|[|;&])\s*(node|ts-node)\s/.test(c),
+    message: [
+      "Do not use `node` or `ts-node`. Use `bun` instead.",
+      "",
+      "bun is the project-standard runtime — native TypeScript, faster startup:",
+      "  • bun script.ts       — run a TypeScript or JavaScript file",
+      "  • bun -e 'code here'  — evaluate an inline expression",
+      "  • bun run <script>    — run a package.json script",
+      "  • bun test            — run tests",
+    ].join("\n"),
+  },
+  {
+    match: (c) => /git\s+commit\b.*--no-verify/.test(c) || /git\s+push\b.*--no-verify/.test(c),
+    message: [
+      "Do not use `--no-verify`. It bypasses pre-commit hooks and safety mechanisms.",
+      "",
+      "Address the underlying issue flagged by the hooks instead of circumventing them.",
+    ].join("\n"),
+  },
+  {
+    match: (c) => /git\s+.*--trailer/.test(c),
+    message: [
+      "Do not use `--trailer` with git. AI tools use this to inject co-authorship signatures.",
+      "",
+      "Create commits without trailer attribution.",
+    ].join("\n"),
+  },
+  {
+    match: (c) => {
+      const mMatch = c.match(/git\s+commit\s.*-m\s+["']([^"']*)/);
+      if (!mMatch) return false;
+      return /Co-authored-by:/i.test(mMatch[1]);
+    },
+    message: [
+      "Do not include `Co-authored-by:` in commit messages.",
+      "",
+      "Create commits without co-author attribution.",
+    ].join("\n"),
+  },
+  {
+    match: (c) => /gh\s+.*--admin/.test(c),
+    message: [
+      "Do not use `gh --admin`. It bypasses repository protection rules and required checks.",
+      "",
+      "Ensure PRs pass all required checks and obtain proper approvals.",
     ].join("\n"),
   },
 ];
