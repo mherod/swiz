@@ -28,7 +28,8 @@ function sanitizeResponse(raw: string): string {
     if (!trimmed) continue;
     // NFKC folds fullwidth ＜→<; strip zero-width format chars to prevent ZWJ injection
     const normalized = trimmed.normalize("NFKC").replace(/[\u200B-\u200D\u2060\uFEFF]/g, "");
-    if (/<\w/.test(normalized)) return ""; // tool-call or XML markup — reject
+    // Also match angle-bracket homoglyphs (〈 U+3008, ‹ U+2039, ⟨ U+27E8) that don't NFKC-normalize to <
+    if (/[<〈‹⟨]\w/.test(normalized)) return ""; // tool-call or XML markup — reject
     return trimmed;
   }
   return "";
