@@ -17,8 +17,13 @@ const CONTEXT_TURNS = 15;  // Recent turns to send as context
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as StopHookInput;
 
-  // Prevent infinite loop — agent has already seen the suggestion and is stopping again
-  if (input.stop_hook_active) return;
+  // Prevent infinite loop — use a per-session sentinel so this hook specifically
+  // tracks whether it has already fired, rather than relying on stop_hook_active
+  // (which is set by ANY blocking stop hook, not just this one).
+  const sentinel = input.session_id
+    ? `/tmp/swiz-auto-continue-fired-${input.session_id}.flag`
+    : null;
+  if (sentinel && (await Bun.file(sentinel).exists())) return;
 
   // Need a transcript and an AI backend to work
   if (!input.transcript_path) return;
@@ -55,6 +60,9 @@ async function main(): Promise<void> {
   }
 
   if (!suggestion) return;
+
+  // Mark this hook as fired for this session before blocking
+  if (sentinel) await Bun.write(sentinel, "1");
 
   blockStopRaw(`Suggested next step: ${suggestion}`);
 }
