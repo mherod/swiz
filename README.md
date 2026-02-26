@@ -58,7 +58,7 @@ Hook scripts emit polyglot JSON that all agents understand — `decision`/`reaso
 
 ### `swiz install`
 
-Deploy all 37 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 38 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks
@@ -155,9 +155,9 @@ swiz tasks complete-all                     # bulk-complete remaining
 
 ## Bundled Hooks
 
-37 hook scripts across 5 event types, all TypeScript, using shared utilities from `hooks/hook-utils.ts` (cross-agent tool equivalence, polyglot output, git/gh helpers, portable skill checking):
+38 hook scripts across 5 event types, all TypeScript, using shared utilities from `hooks/hook-utils.ts` (cross-agent tool equivalence, polyglot output, git/gh helpers, portable skill checking):
 
-### Stop (15)
+### Stop (16)
 
 | Hook | What it does |
 |------|-------------|
@@ -176,6 +176,7 @@ swiz tasks complete-all                     # bulk-complete remaining
 | `stop-changelog-staleness.ts` | Warns if changelog hasn't been updated alongside code changes |
 | `stop-completion-auditor.ts` | Verifies tasks have completion evidence before allowing stop |
 | `stop-personal-repo-issues.ts` | Checks for actionable open issues (skips blocked/upstream) |
+| `stop-memory-updater.ts` | Extracts confirmed patterns from transcript to project memory (async, never blocks) |
 
 ### PreToolUse (11)
 
