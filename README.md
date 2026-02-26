@@ -1,8 +1,8 @@
 # swiz
 
-A swiss-army-knife CLI for AI-assisted development — part toolkit, part swizzle.
+A cross-agent hooks framework that enforces autonomous discipline. Swiz installs hook scripts across AI coding agents — Claude Code, Cursor, and Gemini CLI — ensuring consistent, accountable behaviour regardless of which agent is running.
 
-Works across agents: Claude Code, Cursor, and more.
+Hooks block bad patterns, enforce task tracking, gate completions on evidence, and redirect agents to safe alternatives. One manifest, every agent.
 
 ## Install
 
@@ -13,36 +13,69 @@ bun link
 
 Then use `swiz` from anywhere.
 
+## Supported Agents
+
+| Agent | Config Path | Status |
+|-------|------------|--------|
+| Claude Code | `~/.claude/settings.json` | ✓ |
+| Cursor | `~/.cursor/hooks.json` | ✓ |
+| Gemini CLI | `~/.gemini/settings.json` | ✓ |
+
+Tool names, event names, and config structures are automatically translated between agents. A hook written once works everywhere:
+
+| Concept | Claude Code | Cursor | Gemini CLI |
+|---------|------------|--------|------------|
+| Shell | `Bash` | `Shell` | `run_shell_command` |
+| Edit | `Edit` | `StrReplace` | `replace` |
+| Write | `Write` | `Write` | `write_file` |
+| Before tool | `PreToolUse` | `preToolUse` | `BeforeTool` |
+| After tool | `PostToolUse` | `postToolUse` | `AfterTool` |
+| Stop | `Stop` | `stop` | `AfterAgent` |
+| Tasks | `TaskCreate` | `TodoWrite` | `write_todos` |
+
 ## Commands
 
 ### `swiz install`
 
-Install swiz-managed hooks into your agent settings. Generates consistent configs for both Claude Code and Cursor from a single hook manifest.
+Deploy hooks to all detected agents from a single manifest.
 
 ```bash
-swiz install              # install hooks for all detected agents
-swiz install --claude     # Claude Code only (~/.claude/settings.json)
-swiz install --cursor     # Cursor only (~/.cursor/hooks.json)
-swiz install --dry-run    # preview what would be written
+swiz install              # all agents
+swiz install --claude     # Claude Code only
+swiz install --cursor     # Cursor only
+swiz install --gemini     # Gemini CLI only
+swiz install --dry-run    # full diff preview, no writes
 ```
 
-Includes 35 hooks across 5 event types:
+Dry run shows a line-by-line unified diff of exactly what would change, plus a summary of hooks added/removed/kept.
 
-- **Stop** (15) — secret scanning, debug statements, large files, uncommitted changes, lockfile drift, lint-staged, unpushed commits, branch conflicts, PR description, changes requested, CI status, TODO tracking, changelog staleness, completion auditing, open issues
-- **PreToolUse** (10) — banned commands, npm/yarn redirects, long sleep, `as any` casts, eslint-disable, eslint config strength, JSON validation, task enforcement, task delegation, task subject validation
-- **PostToolUse** (7) — git status context, JSON validation, test pairing, task advisor, PR context on checkout, prettier formatting, task subject validation
-- **SessionStart** (1) — project health snapshot
-- **UserPromptSubmit** (2) — git context, task advisor
+If a running agent process (e.g. Claude Code) reverts the write, swiz detects this and tells you to close sessions first.
 
-Event names and tool matchers are automatically translated between agents (e.g. `Bash`/`Shell`, `Stop`/`stop`, `UserPromptSubmit`/`beforeSubmitPrompt`).
+### `swiz uninstall`
+
+Cleanly remove all swiz-managed hooks from agent settings, preserving any non-swiz hooks.
+
+```bash
+swiz uninstall              # all agents
+swiz uninstall --cursor     # Cursor only
+swiz uninstall --dry-run    # preview what would be removed
+```
+
+### `swiz status`
+
+Show installation state across all agents — binary location, settings path, and hook counts.
+
+```bash
+swiz status
+```
 
 ### `swiz hooks [event] [script]`
 
 Inspect hook configurations across all agents.
 
 ```bash
-swiz hooks                    # list all events from Claude Code + Cursor
-swiz hooks Stop               # show hooks for an event (matches both agents)
+swiz hooks                    # list all events from all agents
+swiz hooks Stop               # show hooks for an event
 swiz hooks Stop secret-scanner # print full source of a hook script
 ```
 
@@ -56,31 +89,33 @@ swiz skill commit       # print a skill with inline commands expanded
 swiz skill --raw commit # print the raw SKILL.md without expansion
 ```
 
-Skills are discovered from:
-
-- `.skills/` — project-local skills (relative to cwd)
-- `~/.claude/skills/` — global skills
-
-#### Inline command expansion
-
-Skills can contain `` !`command` `` directives that inject dynamic context (e.g. `git status`, `pwd`). By default, `swiz skill` executes these and inlines the output — just like Claude Code does at runtime. Use `--raw` to see the unexpanded source.
+Skills are discovered from `.skills/` (project-local) and `~/.claude/skills/` (global). Inline `!`command`` directives are expanded by default.
 
 ### `swiz tasks [subcommand]`
 
-View and manage session-scoped agent tasks. Tasks are stored per-session in `~/.claude/tasks/` with full audit logging.
+Session-scoped task management with audit logging.
 
 ```bash
-swiz tasks                                  # list tasks for current project's latest session
-swiz tasks --all-projects                   # list tasks across all projects
-swiz tasks --session <id>                   # target a specific session
+swiz tasks                                  # list tasks for current project
+swiz tasks --all-projects                   # list across all projects
 swiz tasks create "subject" "description"   # create a new task
-swiz tasks complete <id> --evidence "text"  # mark task done (evidence required)
-swiz tasks status <id> in_progress          # update task status
-swiz tasks complete-all                     # bulk-complete remaining tasks
+swiz tasks complete <id> --evidence "text"  # complete with evidence (required)
+swiz tasks status <id> in_progress          # update status
+swiz tasks complete-all                     # bulk-complete remaining
 ```
 
-Statuses: `pending`, `in_progress`, `completed`, `cancelled`. All transitions are recorded in an audit log.
+## Bundled Hooks
 
-### `swiz help [command]`
+35 hooks across 5 event types:
 
-Show available commands or details for a specific one.
+**Stop** (15) — Secret scanning, debug statements, large files, uncommitted changes, lockfile drift, lint-staged, unpushed commits, branch conflicts, PR description, changes requested, CI status, TODO tracking, changelog staleness, completion auditing, open issues.
+
+**PreToolUse** (10) — Banned commands (grep→rg, sed→Edit, rm→trash, cd, touch, python), npm/yarn→pnpm redirects, long sleep detection, `as any` blocking, eslint-disable blocking, eslint config strength enforcement, JSON validation, task enforcement (blocks tools until tasks exist), task delegation prevention, task subject validation.
+
+**PostToolUse** (7) — Git status context, JSON validation, test pairing reminders, task advisor (countdown to enforcement), PR context on checkout, prettier formatting, task subject validation.
+
+**SessionStart** (1) — Project health snapshot.
+
+**UserPromptSubmit** (2) — Git context injection, task advisor.
+
+All hook scripts use shared cross-agent tool equivalence sets from `hooks/hook-utils.ts`, so they respond correctly regardless of whether the tool is called `Bash`, `Shell`, or `run_shell_command`.

@@ -1,19 +1,8 @@
 import { join } from "node:path";
 import type { Command } from "../types.ts";
+import { AGENTS, type AgentDef } from "../agents.ts";
 
-const HOME = process.env.HOME ?? "~";
-
-const CLAUDE_PATHS = [
-  join(HOME, ".claude", "settings.json"),
-  join(HOME, ".claude", "settings.local.json"),
-  ".claude/settings.json",
-  ".claude/settings.local.json",
-];
-
-const CURSOR_PATHS = [
-  join(HOME, ".cursor", "hooks.json"),
-  ".cursor/hooks.json",
-];
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 interface HookEntry {
   type?: "command" | "agent" | "prompt";
@@ -35,11 +24,13 @@ type HooksConfig = Record<string, HookMatcher[]>;
 
 interface LoadedSettings {
   source: string;
-  agent: "claude" | "cursor";
+  agent: AgentDef;
   hooks: HooksConfig;
 }
 
-function normalizeCursorHooks(
+// ─── Normalization ──────────────────────────────────────────────────────────
+
+function normalizeFlatHooks(
   raw: Record<string, HookEntry[]>
 ): HooksConfig {
   const result: HooksConfig = {};
@@ -58,43 +49,52 @@ function normalizeCursorHooks(
   return result;
 }
 
+// ─── Settings loading ───────────────────────────────────────────────────────
+
+function settingsPaths(agent: AgentDef): string[] {
+  const paths = [agent.settingsPath];
+  if (agent.id === "claude") {
+    const HOME = process.env.HOME ?? "~";
+    paths.push(join(HOME, ".claude", "settings.local.json"));
+    paths.push(".claude/settings.json");
+    paths.push(".claude/settings.local.json");
+  } else if (agent.id === "cursor") {
+    paths.push(".cursor/hooks.json");
+  } else if (agent.id === "gemini") {
+    paths.push(".gemini/settings.json");
+  }
+  return paths;
+}
+
 async function loadAllSettings(): Promise<LoadedSettings[]> {
   const results: LoadedSettings[] = [];
 
-  for (const path of CLAUDE_PATHS) {
-    const resolved = path.startsWith("/") ? path : join(process.cwd(), path);
-    const file = Bun.file(resolved);
-    if (!(await file.exists())) continue;
-    try {
-      const json = await file.json();
-      if (json.hooks) {
-        results.push({ source: resolved, agent: "claude", hooks: json.hooks });
-      }
-    } catch {
-      continue;
-    }
-  }
+  for (const agent of AGENTS) {
+    for (const path of settingsPaths(agent)) {
+      const resolved = path.startsWith("/") ? path : join(process.cwd(), path);
+      const file = Bun.file(resolved);
+      if (!(await file.exists())) continue;
+      try {
+        const json = await file.json();
+        const raw = json.hooks ?? json[agent.hooksKey];
+        if (!raw) continue;
 
-  for (const path of CURSOR_PATHS) {
-    const resolved = path.startsWith("/") ? path : join(process.cwd(), path);
-    const file = Bun.file(resolved);
-    if (!(await file.exists())) continue;
-    try {
-      const json = await file.json();
-      if (json.hooks) {
-        results.push({
-          source: resolved,
-          agent: "cursor",
-          hooks: normalizeCursorHooks(json.hooks),
-        });
+        const hooks =
+          agent.configStyle === "flat"
+            ? normalizeFlatHooks(raw)
+            : (raw as HooksConfig);
+
+        results.push({ source: resolved, agent, hooks });
+      } catch {
+        continue;
       }
-    } catch {
-      continue;
     }
   }
 
   return results;
 }
+
+// ─── Display helpers ────────────────────────────────────────────────────────
 
 function resolveScriptPath(command: string): string | null {
   const expanded = command.replace(/\$HOME/g, process.env.HOME ?? "~");
@@ -117,8 +117,7 @@ async function listEvents(allSettings: LoadedSettings[]) {
   }
 
   for (const { source, agent, hooks } of allSettings) {
-    const label = agent === "cursor" ? "Cursor" : "Claude Code";
-    console.log(`\n  ${label} (${source})\n`);
+    console.log(`\n  ${agent.name} (${source})\n`);
     for (const [event, matchers] of Object.entries(hooks)) {
       const hookCount = matchers.reduce((n, m) => n + m.hooks.length, 0);
       console.log(`    ${event.padEnd(22)} ${hookCount} hook(s)`);
@@ -130,7 +129,7 @@ async function listEvents(allSettings: LoadedSettings[]) {
 async function showEvent(allSettings: LoadedSettings[], eventName: string) {
   let found = false;
 
-  for (const { source, hooks } of allSettings) {
+  for (const { source, agent, hooks } of allSettings) {
     const key = Object.keys(hooks).find(
       (k) => k.toLowerCase() === eventName.toLowerCase()
     );
@@ -138,7 +137,7 @@ async function showEvent(allSettings: LoadedSettings[], eventName: string) {
     found = true;
 
     const matchers = hooks[key]!;
-    console.log(`\n  ${key} hooks (${source})\n`);
+    console.log(`\n  ${key} hooks — ${agent.name} (${source})\n`);
 
     for (const group of matchers) {
       const matchLabel = group.matcher ? `[${group.matcher}]` : "[*]";
@@ -185,7 +184,8 @@ async function showScript(allSettings: LoadedSettings[], scriptQuery: string) {
     for (const matchers of Object.values(hooks)) {
       for (const group of matchers) {
         for (const hook of group.hooks) {
-          if (hook.type !== "command" || !hook.command) continue;
+          if (hook.type !== "command" && hook.type !== undefined) continue;
+          if (!hook.command) continue;
           const name = shortName(hook.command);
           if (!name.includes(scriptQuery)) continue;
 
@@ -212,9 +212,11 @@ async function showScript(allSettings: LoadedSettings[], scriptQuery: string) {
   process.exit(1);
 }
 
+// ─── Command ────────────────────────────────────────────────────────────────
+
 export const hooksCommand: Command = {
   name: "hooks",
-  description: "Inspect agent hooks (Claude Code, Cursor)",
+  description: "Inspect agent hooks (Claude Code, Cursor, Gemini CLI)",
   usage: "swiz hooks [event] [script-name]",
   async run(args) {
     const allSettings = await loadAllSettings();

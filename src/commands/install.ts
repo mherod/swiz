@@ -1,12 +1,25 @@
 import { join, dirname } from "node:path";
 import type { Command } from "../types.ts";
+import {
+  AGENTS,
+  getAgentByFlag,
+  translateMatcher,
+  translateEvent,
+  detectInstalledAgents,
+  type AgentDef,
+} from "../agents.ts";
 
 const SWIZ_ROOT = dirname(Bun.main);
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks");
-const HOME = process.env.HOME ?? "~";
 
-const CLAUDE_SETTINGS = join(HOME, ".claude", "settings.json");
-const CURSOR_HOOKS = join(HOME, ".cursor", "hooks.json");
+// ─── ANSI ────────────────────────────────────────────────────────────────────
+
+const RED = "\x1b[31m";
+const GREEN = "\x1b[32m";
+const DIM = "\x1b[2m";
+const CYAN = "\x1b[36m";
+const RESET = "\x1b[0m";
+const BOLD = "\x1b[1m";
 
 // ─── Agent-agnostic hook manifest ───────────────────────────────────────────
 
@@ -23,7 +36,6 @@ interface HookGroup {
 }
 
 const manifest: HookGroup[] = [
-  // Stop hooks
   {
     event: "stop",
     hooks: [
@@ -44,8 +56,6 @@ const manifest: HookGroup[] = [
       { file: "stop-personal-repo-issues.ts", timeout: 10 },
     ],
   },
-
-  // PreToolUse hooks
   {
     event: "preToolUse",
     matcher: "Task",
@@ -80,8 +90,6 @@ const manifest: HookGroup[] = [
       { file: "pretooluse-long-sleep.ts", timeout: 5 },
     ],
   },
-
-  // PostToolUse hooks
   {
     event: "postToolUse",
     hooks: [{ file: "posttooluse-git-status.sh", timeout: 5 }],
@@ -106,15 +114,11 @@ const manifest: HookGroup[] = [
       { file: "posttooluse-prettier-ts.ts", timeout: 5, async: true },
     ],
   },
-
-  // SessionStart
   {
     event: "sessionStart",
     matcher: "startup",
     hooks: [{ file: "sessionstart-health-snapshot.sh", timeout: 10 }],
   },
-
-  // UserPromptSubmit / beforeSubmitPrompt
   {
     event: "userPromptSubmit",
     hooks: [
@@ -124,47 +128,6 @@ const manifest: HookGroup[] = [
   },
 ];
 
-// ─── Tool name mapping ──────────────────────────────────────────────────────
-
-// Manifest uses Claude-style names as canonical; translate per-agent.
-const TOOL_ALIASES: Record<string, Record<string, string>> = {
-  claude: {},
-  cursor: {
-    Bash: "Shell",
-    Edit: "StrReplace",
-    NotebookEdit: "EditNotebook",
-    Task: "TodoWrite",
-    TaskCreate: "TodoWrite",
-    TaskUpdate: "TodoWrite",
-  },
-};
-
-function translateMatcher(
-  matcher: string | undefined,
-  agent: string
-): string | undefined {
-  if (!matcher) return undefined;
-  const aliases = TOOL_ALIASES[agent] ?? {};
-  return matcher.replace(/\b\w+\b/g, (tok) => aliases[tok] ?? tok);
-}
-
-// ─── Event name mapping ─────────────────────────────────────────────────────
-
-const EVENT_MAP: Record<string, { claude: string; cursor: string }> = {
-  stop: { claude: "Stop", cursor: "stop" },
-  preToolUse: { claude: "PreToolUse", cursor: "preToolUse" },
-  postToolUse: { claude: "PostToolUse", cursor: "postToolUse" },
-  sessionStart: { claude: "SessionStart", cursor: "sessionStart" },
-  sessionEnd: { claude: "SessionEnd", cursor: "sessionEnd" },
-  userPromptSubmit: {
-    claude: "UserPromptSubmit",
-    cursor: "beforeSubmitPrompt",
-  },
-  preCompact: { claude: "PreCompact", cursor: "preCompact" },
-  subagentStart: { claude: "SubagentStart", cursor: "subagentStart" },
-  subagentStop: { claude: "SubagentStop", cursor: "subagentStop" },
-};
-
 // ─── Config generators ──────────────────────────────────────────────────────
 
 function hookCommand(file: string): string {
@@ -172,14 +135,14 @@ function hookCommand(file: string): string {
   return `${prefix}${HOOKS_DIR}/${file}`;
 }
 
-function buildClaudeConfig() {
+function buildNestedConfig(agent: AgentDef) {
   const config: Record<string, unknown[]> = {};
 
   for (const group of manifest) {
-    const eventName = EVENT_MAP[group.event]?.claude ?? group.event;
+    const eventName = translateEvent(group.event, agent);
     if (!config[eventName]) config[eventName] = [];
 
-    const matcher = translateMatcher(group.matcher, "claude");
+    const matcher = translateMatcher(group.matcher, agent);
     const hooks = group.hooks.map((h) => {
       const entry: Record<string, unknown> = {
         type: "command",
@@ -198,14 +161,14 @@ function buildClaudeConfig() {
   return config;
 }
 
-function buildCursorConfig() {
+function buildFlatConfig(agent: AgentDef) {
   const config: Record<string, unknown[]> = {};
 
   for (const group of manifest) {
-    const eventName = EVENT_MAP[group.event]?.cursor ?? group.event;
+    const eventName = translateEvent(group.event, agent);
     if (!config[eventName]) config[eventName] = [];
 
-    const matcher = translateMatcher(group.matcher, "cursor");
+    const matcher = translateMatcher(group.matcher, agent);
 
     for (const h of group.hooks) {
       const entry: Record<string, unknown> = {
@@ -220,14 +183,13 @@ function buildCursorConfig() {
   return config;
 }
 
-// ─── Diff ────────────────────────────────────────────────────────────────────
+function buildConfig(agent: AgentDef) {
+  return agent.configStyle === "nested"
+    ? buildNestedConfig(agent)
+    : buildFlatConfig(agent);
+}
 
-const RED = "\x1b[31m";
-const GREEN = "\x1b[32m";
-const DIM = "\x1b[2m";
-const CYAN = "\x1b[36m";
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
+// ─── Diff ────────────────────────────────────────────────────────────────────
 
 interface DiffHunk {
   oldStart: number;
@@ -399,7 +361,12 @@ async function readFileText(path: string): Promise<string> {
   return (await f.exists()) ? await f.text() : "";
 }
 
-async function backup(path: string) {
+async function readJsonFile(path: string): Promise<Record<string, unknown>> {
+  const f = Bun.file(path);
+  return (await f.exists()) ? await f.json() : {};
+}
+
+async function backup(path: string): Promise<boolean> {
   const file = Bun.file(path);
   if (await file.exists()) {
     await Bun.write(path + ".bak", await file.text());
@@ -408,56 +375,7 @@ async function backup(path: string) {
   return false;
 }
 
-async function installClaude(dryRun: boolean) {
-  const config = buildClaudeConfig();
-
-  console.log(`  ${BOLD}Claude Code${RESET} → ${CLAUDE_SETTINGS}\n`);
-
-  const file = Bun.file(CLAUDE_SETTINGS);
-  const settings = (await file.exists()) ? await file.json() : {};
-  const oldText = (await readFileText(CLAUDE_SETTINGS)).trimEnd();
-
-  const proposed = { ...settings, hooks: config };
-  const newText = JSON.stringify(proposed, null, 2);
-
-  if (dryRun) {
-    printDiffReport(CLAUDE_SETTINGS, oldText, newText, settings.hooks, config);
-    return;
-  }
-
-  await backup(CLAUDE_SETTINGS);
-  await Bun.write(CLAUDE_SETTINGS, newText + "\n");
-  console.log(`    ✓ written (backup at ${CLAUDE_SETTINGS}.bak)\n`);
-}
-
-async function installCursor(dryRun: boolean) {
-  const config = buildCursorConfig();
-
-  console.log(`  ${BOLD}Cursor${RESET} → ${CURSOR_HOOKS}\n`);
-
-  const oldText = (await readFileText(CURSOR_HOOKS)).trimEnd();
-  const oldParsed = oldText ? JSON.parse(oldText) : {};
-
-  const proposed = { version: 1, hooks: config };
-  const newText = JSON.stringify(proposed, null, 2);
-
-  if (dryRun) {
-    printDiffReport(
-      CURSOR_HOOKS,
-      oldText,
-      newText,
-      oldParsed.hooks ?? {},
-      config
-    );
-    return;
-  }
-
-  await backup(CURSOR_HOOKS);
-  await Bun.write(CURSOR_HOOKS, newText + "\n");
-  console.log(`    ✓ written (backup at ${CURSOR_HOOKS}.bak)\n`);
-}
-
-// ─── Dry-run report ─────────────────────────────────────────────────────────
+// ─── Hook command collection ─────────────────────────────────────────────────
 
 function collectCommands(hooks: Record<string, unknown>): Set<string> {
   const cmds = new Set<string>();
@@ -477,38 +395,72 @@ function collectCommands(hooks: Record<string, unknown>): Set<string> {
   return cmds;
 }
 
-function printDiffReport(
-  path: string,
-  oldText: string,
-  newText: string,
-  oldHooks: Record<string, unknown> | undefined,
-  newHooks: Record<string, unknown>
-) {
-  const oldCmds = oldHooks ? collectCommands(oldHooks) : new Set<string>();
-  const newCmds = collectCommands(newHooks);
+// ─── Per-agent install ───────────────────────────────────────────────────────
 
-  const added = [...newCmds].filter((c) => !oldCmds.has(c));
-  const removed = [...oldCmds].filter((c) => !newCmds.has(c));
-  const kept = [...newCmds].filter((c) => oldCmds.has(c));
+async function installAgent(agent: AgentDef, dryRun: boolean) {
+  const config = buildConfig(agent);
 
-  if (added.length) {
-    console.log(`    ${GREEN}+ ${added.length} hook(s) added:${RESET}`);
-    for (const c of added) console.log(`      ${GREEN}+ ${c}${RESET}`);
-    console.log();
-  }
-  if (removed.length) {
-    console.log(`    ${RED}- ${removed.length} hook(s) removed:${RESET}`);
-    for (const c of removed) console.log(`      ${RED}- ${c}${RESET}`);
-    console.log();
-  }
-  if (kept.length) {
-    console.log(`    ${DIM}  ${kept.length} hook(s) unchanged${RESET}\n`);
-  }
-  if (!oldText && newText) {
-    console.log(`    ${GREEN}+ new file (${newText.split("\n").length} lines)${RESET}\n`);
+  console.log(`  ${BOLD}${agent.name}${RESET} → ${agent.settingsPath}\n`);
+
+  const existing = await readJsonFile(agent.settingsPath);
+  const oldText = (await readFileText(agent.settingsPath)).trimEnd();
+  const oldHooks = (existing[agent.hooksKey] as Record<string, unknown>) ?? {};
+
+  let proposed: Record<string, unknown>;
+  let newText: string;
+
+  if (agent.wrapsHooks) {
+    proposed = { ...agent.wrapsHooks, hooks: config };
+    newText = JSON.stringify(proposed, null, 2);
+  } else {
+    proposed = { ...existing, [agent.hooksKey]: config };
+    newText = JSON.stringify(proposed, null, 2);
   }
 
-  console.log(formatUnifiedDiff(path, oldText, newText));
+  if (dryRun) {
+    const oldCmds = collectCommands(oldHooks);
+    const newCmds = collectCommands(config);
+
+    const added = [...newCmds].filter((c) => !oldCmds.has(c));
+    const removed = [...oldCmds].filter((c) => !newCmds.has(c));
+    const kept = [...newCmds].filter((c) => oldCmds.has(c));
+
+    if (added.length) {
+      console.log(`    ${GREEN}+ ${added.length} hook(s) added:${RESET}`);
+      for (const c of added) console.log(`      ${GREEN}+ ${c}${RESET}`);
+      console.log();
+    }
+    if (removed.length) {
+      console.log(`    ${RED}- ${removed.length} hook(s) removed:${RESET}`);
+      for (const c of removed) console.log(`      ${RED}- ${c}${RESET}`);
+      console.log();
+    }
+    if (kept.length) {
+      console.log(`    ${DIM}  ${kept.length} hook(s) unchanged${RESET}\n`);
+    }
+    if (!oldText && newText) {
+      console.log(`    ${GREEN}+ new file (${newText.split("\n").length} lines)${RESET}\n`);
+    }
+
+    console.log(formatUnifiedDiff(agent.settingsPath, oldText, newText));
+    return;
+  }
+
+  await backup(agent.settingsPath);
+  await Bun.write(agent.settingsPath, newText + "\n");
+
+  // Verify the write persisted (some agents watch and revert their settings)
+  await new Promise((r) => setTimeout(r, 1500));
+  const verify = await readFileText(agent.settingsPath);
+  const persisted = verify.trimEnd() === newText;
+
+  if (persisted) {
+    console.log(`    ✓ written (backup at ${agent.settingsPath}.bak)\n`);
+  } else {
+    const YELLOW = "\x1b[33m";
+    console.log(`    ✓ written, but ${YELLOW}reverted by running ${agent.name} process${RESET}`);
+    console.log(`    ${DIM}Close all ${agent.name} sessions first, then re-run swiz install.${RESET}\n`);
+  }
 }
 
 // ─── Command ────────────────────────────────────────────────────────────────
@@ -516,18 +468,18 @@ function printDiffReport(
 export const installCommand: Command = {
   name: "install",
   description: "Install swiz hooks into agent settings",
-  usage: "swiz install [--claude] [--cursor] [--dry-run]",
+  usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run]`,
   async run(args) {
     const dryRun = args.includes("--dry-run");
-    const claudeOnly = args.includes("--claude");
-    const cursorOnly = args.includes("--cursor");
-    const both = !claudeOnly && !cursorOnly;
+    const targets = getAgentByFlag(args);
 
     console.log(`\n  swiz install${dryRun ? " (dry run)" : ""}\n`);
-    console.log(`  Hooks: ${HOOKS_DIR}\n`);
+    console.log(`  Hooks: ${HOOKS_DIR}`);
+    console.log(`  Agents: ${targets.map((a) => a.name).join(", ")}\n`);
 
-    if (both || claudeOnly) await installClaude(dryRun);
-    if (both || cursorOnly) await installCursor(dryRun);
+    for (const agent of targets) {
+      await installAgent(agent, dryRun);
+    }
 
     if (dryRun) {
       console.log("  No changes written.\n");
