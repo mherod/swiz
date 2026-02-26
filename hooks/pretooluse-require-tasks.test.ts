@@ -13,11 +13,13 @@ async function runHook(
     homeDir,
     toolName = "Bash",
     sessionId = "session-123",
-  }: { homeDir: string; toolName?: string; sessionId?: string }
+    transcriptPath,
+  }: { homeDir: string; toolName?: string; sessionId?: string; transcriptPath?: string }
 ): Promise<HookResult> {
   const payload = JSON.stringify({
     tool_name: toolName,
     session_id: sessionId,
+    transcript_path: transcriptPath ?? "",
   });
   const proc = Bun.spawn(["bun", "hooks/pretooluse-require-tasks.ts"], {
     stdin: "pipe",
@@ -138,6 +140,91 @@ describe("pretooluse-require-tasks", () => {
     });
 
     const result = await runHook({ homeDir, toolName: "Edit", sessionId });
+    expect(result.decision).toBeUndefined();
+  });
+
+  test("denies when tasks exist but are stale (20+ calls since last task tool)", async () => {
+    const homeDir = await createTempHome();
+    const sessionId = "session-stale";
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Active task",
+      status: "in_progress",
+    });
+
+    // Build a transcript: one TaskCreate call, then 21 non-task calls
+    const lines: string[] = [];
+    const makeEntry = (toolName: string) =>
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", name: toolName, id: "x", input: {} }],
+        },
+      });
+    lines.push(makeEntry("TaskCreate")); // index 0 — last task tool
+    for (let i = 0; i < 21; i++) lines.push(makeEntry("Read")); // indices 1–21
+
+    const transcriptPath = join(homeDir, "transcript.jsonl");
+    await writeFile(transcriptPath, lines.join("\n") + "\n");
+
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId, transcriptPath });
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toContain("stale");
+  });
+
+  test("allows when tasks exist and transcript is fresh (< 20 calls since last task tool)", async () => {
+    const homeDir = await createTempHome();
+    const sessionId = "session-fresh";
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Active task",
+      status: "in_progress",
+    });
+
+    const lines: string[] = [];
+    const makeEntry = (toolName: string) =>
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", name: toolName, id: "x", input: {} }],
+        },
+      });
+    lines.push(makeEntry("TaskCreate")); // index 0
+    for (let i = 0; i < 5; i++) lines.push(makeEntry("Read")); // indices 1–5
+
+    const transcriptPath = join(homeDir, "transcript.jsonl");
+    await writeFile(transcriptPath, lines.join("\n") + "\n");
+
+    const result = await runHook({ homeDir, toolName: "Edit", sessionId, transcriptPath });
+    expect(result.decision).toBeUndefined();
+  });
+
+  test("skips staleness check when no task tool has been used yet", async () => {
+    const homeDir = await createTempHome();
+    const sessionId = "session-notask-tool";
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Bootstrap task",
+      status: "pending",
+    });
+
+    // Transcript with many non-task tool calls but no task tool call
+    const lines: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      lines.push(
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "Read", id: "x", input: {} }],
+          },
+        })
+      );
+    }
+    const transcriptPath = join(homeDir, "transcript.jsonl");
+    await writeFile(transcriptPath, lines.join("\n") + "\n");
+
+    // Should allow — staleness only triggers after task tools have been used
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId, transcriptPath });
     expect(result.decision).toBeUndefined();
   });
 });
