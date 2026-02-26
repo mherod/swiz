@@ -29,48 +29,29 @@ async function createTempDir(): Promise<string> {
   return dir;
 }
 
-/** Creates a fake `claude` binary that prints `output` and exits with `exitCode`. */
-async function createFakeClaude(
+/** Creates a fake `agent` binary that prints `output` and exits with `exitCode`. */
+async function createFakeAgent(
   binDir: string,
   output: string,
   exitCode = 0
 ): Promise<void> {
   const script = `#!/bin/sh\nprintf '%s' '${output.replace(/'/g, "'\\''")}'\nexit ${exitCode}\n`;
-  const path = join(binDir, "claude");
+  const path = join(binDir, "agent");
   await writeFile(path, script);
   await chmod(path, 0o755);
 }
 
-/** Creates a fake `claude` binary that sleeps for `delaySecs` then prints output. */
-async function createSlowFakeClaude(
+/** Creates a fake `agent` binary that sleeps for `delaySecs` then prints output.
+ * Uses `exec` so that sleep becomes the main process — SIGTERM/SIGKILL hit it
+ * directly and close the pipe immediately instead of waiting for sleep to finish. */
+async function createSlowFakeAgent(
   binDir: string,
-  output: string,
+  _output: string,
   delaySecs: number
 ): Promise<void> {
-  const script =
-    `#!/bin/sh\nsleep ${delaySecs}\n` +
-    `printf '%s' '${output.replace(/'/g, "'\\''")}'\nexit 0\n`;
-  const path = join(binDir, "claude");
-  await writeFile(path, script);
-  await chmod(path, 0o755);
-}
-
-/** Creates a fake `claude` binary that fails the first `failCount` times, then succeeds. */
-async function createFlakyFakeClaude(
-  binDir: string,
-  successOutput: string,
-  failCount: number
-): Promise<void> {
-  const counterFile = join(binDir, ".call-count");
-  const script =
-    `#!/bin/sh\n` +
-    `COUNT=0\n` +
-    `if [ -f '${counterFile}' ]; then read COUNT < '${counterFile}'; fi\n` +
-    `COUNT=$((COUNT + 1))\n` +
-    `printf '%d' $COUNT > '${counterFile}'\n` +
-    `if [ "$COUNT" -le ${failCount} ]; then exit 1; fi\n` +
-    `printf '%s' '${successOutput.replace(/'/g, "'\\''")}'\nexit 0\n`;
-  const path = join(binDir, "claude");
+  // exec replaces the shell with sleep, so kill signals hit sleep directly
+  const script = `#!/bin/sh\nexec sleep ${delaySecs}\n`;
+  const path = join(binDir, "agent");
   await writeFile(path, script);
   await chmod(path, 0o755);
 }
@@ -116,13 +97,14 @@ async function runHook({
     cwd: workDir,
   });
 
+  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
   const proc = Bun.spawn([BUN_EXE, "hooks/stop-auto-continue.ts"], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
     env: {
-      ...process.env,
-      PATH: binDir,
+      ...cleanEnv,
+      PATH: `${binDir}:/bin:/usr/bin`,
       ...extraEnv,
     },
   });
@@ -151,7 +133,7 @@ async function runHook({
 describe("stop-auto-continue", () => {
   test("blocks with AI suggestion for a substantive session", async () => {
     const binDir = await createTempDir();
-    await createFakeClaude(binDir, "Commit the changes to main");
+    await createFakeAgent(binDir, "Commit the changes to main");
 
     const result = await runHook({
       transcriptContent: buildTranscript(10),
@@ -164,7 +146,7 @@ describe("stop-auto-continue", () => {
 
   test("blocks even when stop_hook_active is true (unconditional)", async () => {
     const binDir = await createTempDir();
-    await createFakeClaude(binDir, "Run the test suite");
+    await createFakeAgent(binDir, "Run the test suite");
 
     const result = await runHook({
       transcriptContent: buildTranscript(10),
@@ -178,7 +160,7 @@ describe("stop-auto-continue", () => {
 
   test("allows stop for trivial sessions (< 5 tool calls)", async () => {
     const binDir = await createTempDir();
-    await createFakeClaude(binDir, "Should not appear");
+    await createFakeAgent(binDir, "Should not appear");
 
     const result = await runHook({
       transcriptContent: buildTranscript(3),
@@ -188,24 +170,10 @@ describe("stop-auto-continue", () => {
     expect(result.decision).toBeUndefined();
   });
 
-  test("retries on backend failure and succeeds on later attempt", async () => {
+  test("falls back to generic message when agent fails", async () => {
     const binDir = await createTempDir();
-    // Fails first 2 times, succeeds on 3rd
-    await createFlakyFakeClaude(binDir, "Push to origin main", 2);
-
-    const result = await runHook({
-      transcriptContent: buildTranscript(10),
-      binDir,
-    });
-
-    expect(result.decision).toBe("block");
-    expect(result.reason).toContain("Push to origin main");
-  });
-
-  test("falls back to generic message when all retries exhausted", async () => {
-    const binDir = await createTempDir();
-    // Always fails
-    await createFakeClaude(binDir, "", 1);
+    // Agent always fails
+    await createFakeAgent(binDir, "", 1);
 
     const result = await runHook({
       transcriptContent: buildTranscript(10),
@@ -217,7 +185,7 @@ describe("stop-auto-continue", () => {
   });
 
   test("blocks with fallback guidance when no AI backend is available", async () => {
-    // binDir has no claude/agent/gemini
+    // binDir has no agent binary
     const binDir = await createTempDir();
 
     const result = await runHook({
@@ -264,7 +232,7 @@ describe("stop-auto-continue", () => {
 
   test("times out slow backend and falls back to generic message", async () => {
     const binDir = await createTempDir();
-    await createSlowFakeClaude(binDir, "This should never appear", 30);
+    await createSlowFakeAgent(binDir, "This should never appear", 30);
 
     const result = await runHook({
       transcriptContent: buildTranscript(10),
@@ -277,5 +245,5 @@ describe("stop-auto-continue", () => {
     expect(result.decision).toBe("block");
     expect(result.reason).toContain("identify the most critical incomplete task");
     expect(result.reason).not.toContain("This should never appear");
-  }, 30_000);
+  }, 10_000);
 });

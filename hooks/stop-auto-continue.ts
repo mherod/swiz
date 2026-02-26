@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop with an AI-generated next-step suggestion.
-// Retries ferociously (MAX_RETRIES attempts) before falling back to a generic nudge.
-// Only skips for trivial sessions (< MIN_TOOL_CALLS) or when no backend is available.
+// Uses the Cursor Agent CLI (agent --print --mode ask --trust).
+// Only skips for trivial sessions (< MIN_TOOL_CALLS) or when agent is not installed.
 
 import { promptAgent, detectAgentCli } from "../src/agent.ts";
 import { blockStopRaw, type StopHookInput } from "./hook-utils.ts";
@@ -13,8 +13,7 @@ import {
 
 const MIN_TOOL_CALLS = 5;       // Don't engage for trivial sessions
 const CONTEXT_TURNS = 15;       // Recent turns to send as context
-const MAX_RETRIES = 5;
-const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 20_000;
+const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 90_000;
 
 const FALLBACK_SUGGESTION =
   "Review the session transcript, identify the most critical incomplete task, and complete it autonomously without asking for confirmation.";
@@ -57,21 +56,16 @@ async function main(): Promise<void> {
       `CRITICAL: Reply with ONE sentence only — no preamble, no explanation, no questions. ` +
       `The step must be something the assistant can do right now on its own. ` +
       `Do NOT suggest asking the user, confirming scope, or presenting options.\n\n` +
-      `<conversation>\n${context}\n</conversation>`;
+      `=== CONVERSATION ===\n${context}\n=== END ===`;
 
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      try {
-        const result = await promptAgent(prompt, {
-          promptOnly: true,
-          timeout: ATTEMPT_TIMEOUT_MS,
-        });
-        if (result) {
-          suggestion = result;
-          break;
-        }
-      } catch {
-        // retry (includes timeout / abort)
-      }
+    try {
+      const result = await promptAgent(prompt, {
+        promptOnly: true,
+        timeout: ATTEMPT_TIMEOUT_MS,
+      });
+      if (result) suggestion = result;
+    } catch {
+      // Fall through to fallback
     }
   }
 

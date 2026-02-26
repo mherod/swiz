@@ -1,62 +1,25 @@
-// Utilities for invoking an AI agent CLI in non-interactive (headless) mode.
+// Utility for invoking the Cursor Agent CLI in non-interactive (headless) mode.
 //
-// Supported backends, checked in priority order:
-//   agent  — Cursor Agent  (agent --print --mode ask --trust --workspace <dir> <prompt>)
-//   claude — Claude Code   (claude --print --tools "" <prompt>)
-//   gemini — Gemini CLI    (gemini --prompt <prompt>)
+//   agent — Cursor Agent  (agent --print --mode ask --trust --workspace <dir> <prompt>)
 //
 // promptOnly mode (used by stop-auto-continue):
-//   agent:  --workspace <tmpdir>  — no project files to read
-//   claude: --tools ""            — all tools disabled
-//   gemini: (no extra flags)      — key-based API, no tool access by default
+//   agent: --workspace <tmpdir>  — no project files to read
 
 import { tmpdir } from "node:os";
 
-/**
- * Attempt to read the Gemini API key from the system keychain where gemini CLI
- * stores it (service: gemini-cli-api-key, account: default-api-key).
- * gemini CLI stores credentials as a JSON blob via keytar — we parse it to
- * extract the raw accessToken string.
- * Returns the key string, or null if unavailable.
- */
-async function readGeminiKeyFromKeychain(): Promise<string | null> {
-  try {
-    const raw = await Bun.secrets.get({ service: "gemini-cli-api-key", name: "default-api-key" });
-    if (!raw) return null;
-    // Try to parse keytar's wrapped credential format: { token: { accessToken } }
-    try {
-      const parsed = JSON.parse(raw) as { token?: { accessToken?: string } };
-      return parsed?.token?.accessToken ?? null;
-    } catch {
-      // Stored as a plain key string (fallback)
-      return raw;
-    }
-  } catch {
-    return null;
-  }
-}
-
-export type AgentBackend = "agent" | "claude" | "gemini";
+export type AgentBackend = "agent";
 
 /**
- * Return the first available agent CLI backend, or null if none is installed.
- * Claude Code is skipped when CLAUDECODE is set — nested claude invocations
- * are blocked by the CLI and would fail immediately.
+ * Return "agent" if the Cursor Agent CLI is installed, null otherwise.
  */
 export function detectAgentCli(): AgentBackend | null {
-  if (Bun.which("agent")) return "agent";
-  if (Bun.which("claude") && !process.env.CLAUDECODE) return "claude";
-  if (Bun.which("gemini")) return "gemini";
-  return null;
+  return Bun.which("agent") ? "agent" : null;
 }
 
 export interface PromptAgentOptions {
   /**
-   * When true, restricts the agent to respond based solely on the prompt
-   * content — no codebase or tool access. Per-backend implementation:
-   *   agent:  --workspace <tmpdir>  (no project files available)
-   *   claude: --tools ""            (all tools disabled)
-   *   gemini: (no extra flags)      (API key auth; no tool access by default)
+   * When true, runs agent with --workspace <tmpdir> so it has no access
+   * to the current project's files — prompt-only Q&A mode.
    */
   promptOnly?: boolean;
   /** When provided, kills the spawned process if the signal aborts. */
@@ -69,47 +32,21 @@ export interface PromptAgentOptions {
 }
 
 /**
- * Send a prompt to the first available agent CLI and return the trimmed output.
- * Throws if no backend is found or the process exits non-zero.
+ * Send a prompt to the Cursor Agent CLI and return the trimmed output.
+ * Throws if agent is not installed or the process exits non-zero.
  */
 export async function promptAgent(prompt: string, options?: PromptAgentOptions): Promise<string> {
-  const backend = detectAgentCli();
-  if (!backend) {
-    throw new Error(
-      "No AI backend found. Install one of: Cursor Agent (agent), Claude Code (claude), or Gemini CLI (gemini)."
-    );
+  if (!detectAgentCli()) {
+    throw new Error("Cursor Agent not found. Install it via the Cursor IDE.");
   }
 
-  const args: string[] =
-    backend === "agent"
-      ? [
-          "agent", "--print", "--mode", "ask", "--trust",
-          ...(options?.promptOnly ? ["--workspace", tmpdir()] : []),
-          prompt,
-        ]
-      : backend === "claude"
-      ? [
-          "claude", "--print",
-          ...(options?.promptOnly ? ["--tools", ""] : []),
-          prompt,
-        ]
-      : [
-          "gemini",
-          "--prompt", prompt,
-        ];
+  const args = [
+    "agent", "--print", "--mode", "ask", "--trust",
+    ...(options?.promptOnly ? ["--workspace", tmpdir()] : []),
+    prompt,
+  ];
 
-  // For gemini, inject GEMINI_API_KEY from keychain if not already in env.
-  // gemini CLI in non-interactive contexts often skips its keychain lookup;
-  // reading it via `security` CLI and injecting as env var is more reliable.
-  let spawnEnv: Record<string, string> | undefined;
-  if (backend === "gemini" && !process.env.GEMINI_API_KEY) {
-    const keychainKey = await readGeminiKeyFromKeychain();
-    if (keychainKey) {
-      spawnEnv = { ...process.env as Record<string, string>, GEMINI_API_KEY: keychainKey };
-    }
-  }
-
-  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe", env: spawnEnv });
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
 
   // Resolve the abort signal — caller-supplied takes precedence; otherwise
   // create an internal one from timeout if provided.
@@ -142,7 +79,7 @@ export async function promptAgent(prompt: string, options?: PromptAgentOptions):
 
   if (proc.exitCode !== 0) {
     const err = await new Response(proc.stderr).text();
-    throw new Error(`${backend} exited ${proc.exitCode}: ${err.trim()}`);
+    throw new Error(`agent exited ${proc.exitCode}: ${err.trim()}`);
   }
 
   return output.trim();
