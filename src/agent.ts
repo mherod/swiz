@@ -1,9 +1,16 @@
 // Utilities for invoking an AI agent CLI in non-interactive (headless) mode.
 //
 // Supported backends, checked in priority order:
-//   agent  — Cursor Agent  (agent --print --mode ask --trust <prompt>)
-//   claude — Claude Code   (claude --print <prompt>)
-//   gemini — Gemini CLI    (gemini --prompt <prompt>)
+//   agent  — Cursor Agent  (agent --print --mode ask --trust --workspace <dir> <prompt>)
+//   claude — Claude Code   (claude --print --tools "" <prompt>)
+//   gemini — Gemini CLI    (gemini --prompt --approval-mode plan <prompt>)
+//
+// promptOnly mode (used by stop-auto-continue):
+//   agent:  --workspace tmpdir()  — no project files to read
+//   claude: --tools ""            — all tools disabled
+//   gemini: --approval-mode plan  — read-only mode
+
+import { tmpdir } from "node:os";
 
 export type AgentBackend = "agent" | "claude" | "gemini";
 
@@ -19,11 +26,13 @@ export function detectAgentCli(): AgentBackend | null {
 
 export interface PromptAgentOptions {
   /**
-   * Override the workspace directory passed to the Cursor agent backend.
-   * Use this to restrict the agent to a neutral directory (e.g. os.tmpdir())
-   * when the response should be based solely on the prompt content.
+   * When true, restricts the agent to respond based solely on the prompt
+   * content — no codebase or tool access. Per-backend implementation:
+   *   agent:  --workspace <tmpdir>  (no project files available)
+   *   claude: --tools ""            (all tools disabled)
+   *   gemini: --approval-mode plan  (read-only mode)
    */
-  workspace?: string;
+  promptOnly?: boolean;
 }
 
 /**
@@ -42,12 +51,20 @@ export async function promptAgent(prompt: string, options?: PromptAgentOptions):
     backend === "agent"
       ? [
           "agent", "--print", "--mode", "ask", "--trust",
-          ...(options?.workspace ? ["--workspace", options.workspace] : []),
+          ...(options?.promptOnly ? ["--workspace", tmpdir()] : []),
           prompt,
         ]
       : backend === "claude"
-      ? ["claude", "--print", prompt]
-      : ["gemini", "--prompt", prompt];
+      ? [
+          "claude", "--print",
+          ...(options?.promptOnly ? ["--tools", ""] : []),
+          prompt,
+        ]
+      : [
+          "gemini",
+          ...(options?.promptOnly ? ["--approval-mode", "plan"] : []),
+          "--prompt", prompt,
+        ];
 
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
   const output = await new Response(proc.stdout).text();
