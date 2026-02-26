@@ -25,10 +25,21 @@ async function getCurrentGitHubUser(): Promise<string | null> {
   return login || null;
 }
 
-async function getOpenIssueCount(cwd: string): Promise<number> {
-  const output = await gh(["issue", "list", "--state", "open", "--json", "number", "--jq", "length"], cwd);
-  const count = parseInt(output, 10);
-  return isNaN(count) ? 0 : count;
+/** Labels that indicate an issue is not actionable right now. */
+const SKIP_LABELS = new Set(["blocked", "upstream", "wontfix", "duplicate", "on-hold", "waiting"]);
+
+async function getActionableIssueCount(cwd: string): Promise<number> {
+  const output = await gh(
+    ["issue", "list", "--state", "open", "--json", "number,labels"],
+    cwd,
+  );
+  if (!output) return 0;
+  let issues: Array<{ number: number; labels: Array<{ name: string }> }>;
+  try { issues = JSON.parse(output); } catch { return 0; }
+  const actionable = issues.filter(
+    (i) => !i.labels.some((l) => SKIP_LABELS.has(l.name.toLowerCase()))
+  );
+  return actionable.length;
 }
 
 async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise<number> {
@@ -61,7 +72,7 @@ async function main(): Promise<void> {
     // Only applies to personal repos
     if (owner !== currentUser) return;
 
-    const issueCount = await getOpenIssueCount(cwd);
+    const issueCount = await getActionableIssueCount(cwd);
     const prCount = await getOpenPRsWithFeedback(cwd, currentUser);
 
     if (issueCount === 0 && prCount === 0) return;
