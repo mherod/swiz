@@ -19,6 +19,21 @@ async function createTempDir(): Promise<string> {
   return dir;
 }
 
+/** Creates a fake binary that sleeps before responding. */
+async function createSlowFakeBinary(
+  binDir: string,
+  name: string,
+  output: string,
+  delaySecs: number
+): Promise<void> {
+  const script =
+    `#!/bin/sh\nsleep ${delaySecs}\n` +
+    `printf '%s' '${output.replace(/'/g, "'\\''")}'\nexit 0\n`;
+  const path = join(binDir, name);
+  await writeFile(path, script);
+  await chmod(path, 0o755);
+}
+
 /** Creates a fake binary that dumps its arguments to a file, then prints output. */
 async function createFakeBinary(
   binDir: string,
@@ -38,6 +53,21 @@ async function createFakeBinary(
   return argsFile;
 }
 
+/** Creates a fake binary that sleeps then prints output. */
+async function createSlowFakeBinary(
+  binDir: string,
+  name: string,
+  output: string,
+  delaySecs: number,
+): Promise<void> {
+  const script =
+    `#!/bin/sh\nsleep ${delaySecs}\n` +
+    `printf '%s' '${output.replace(/'/g, "'\\''")}'\nexit 0\n`;
+  const path = join(binDir, name);
+  await writeFile(path, script);
+  await chmod(path, 0o755);
+}
+
 async function readCapturedArgs(argsFile: string): Promise<string[]> {
   const text = await Bun.file(argsFile).text();
   return text.trim().split("\n");
@@ -50,12 +80,16 @@ async function readCapturedArgs(argsFile: string): Promise<string[]> {
 async function runAgentCall(
   binDir: string,
   prompt: string,
-  promptOnly: boolean
-): Promise<{ stdout: string; exitCode: number | null }> {
+  promptOnly: boolean,
+  timeout?: number
+): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+  const opts = timeout
+    ? `{ promptOnly: ${promptOnly}, timeout: ${timeout} }`
+    : `{ promptOnly: ${promptOnly} }`;
   const script = `
     import { promptAgent } from "./src/agent.ts";
     try {
-      const result = await promptAgent(${JSON.stringify(prompt)}, { promptOnly: ${promptOnly} });
+      const result = await promptAgent(${JSON.stringify(prompt)}, ${opts});
       console.log(result);
     } catch (e) {
       console.error(e.message);
@@ -65,18 +99,20 @@ async function runAgentCall(
   const scriptPath = join(binDir, "test-runner.ts");
   await writeFile(scriptPath, script);
 
+  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
   const proc = Bun.spawn(["bun", scriptPath], {
     cwd: join(import.meta.dir, ".."),
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, PATH: binDir },
+    env: { ...cleanEnv, PATH: binDir },
   });
   const stdout = await new Response(proc.stdout).text();
+  const stderr = await new Response(proc.stderr).text();
   await proc.exited;
-  return { stdout: stdout.trim(), exitCode: proc.exitCode };
+  return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode: proc.exitCode };
 }
 
-async function runDetect(binDir: string): Promise<string> {
+async function runDetect(binDir: string, extraEnv: Record<string, string> = {}): Promise<string> {
   const script = `
     import { detectAgentCli } from "./src/agent.ts";
     console.log(detectAgentCli() ?? "null");
@@ -84,11 +120,12 @@ async function runDetect(binDir: string): Promise<string> {
   const scriptPath = join(binDir, "test-detect.ts");
   await writeFile(scriptPath, script);
 
+  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
   const proc = Bun.spawn(["bun", scriptPath], {
     cwd: join(import.meta.dir, ".."),
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, PATH: binDir },
+    env: { ...cleanEnv, PATH: binDir, ...extraEnv },
   });
   const stdout = await new Response(proc.stdout).text();
   await proc.exited;
@@ -127,6 +164,21 @@ describe("detectAgentCli", () => {
   test("returns null when no backend is available", async () => {
     const binDir = await createTempDir();
     expect(await runDetect(binDir)).toBe("null");
+  });
+
+  test("skips claude when CLAUDECODE is set", async () => {
+    const binDir = await createTempDir();
+    await createFakeBinary(binDir, "claude", "");
+    await createFakeBinary(binDir, "gemini", "");
+
+    expect(await runDetect(binDir, { CLAUDECODE: "1" })).toBe("gemini");
+  });
+
+  test("returns null when only claude is available and CLAUDECODE is set", async () => {
+    const binDir = await createTempDir();
+    await createFakeBinary(binDir, "claude", "");
+
+    expect(await runDetect(binDir, { CLAUDECODE: "1" })).toBe("null");
   });
 });
 
@@ -246,5 +298,30 @@ describe("promptAgent error handling", () => {
 
     const result = await runAgentCall(binDir, "test prompt", false);
     expect(result.exitCode).toBe(1);
+  });
+});
+
+// ─── promptAgent: timeout option ─────────────────────────────────────────────
+
+describe("promptAgent timeout option", () => {
+  test("kills slow backend and throws on timeout", async () => {
+    const binDir = await createTempDir();
+    await createSlowFakeBinary(binDir, "claude", "should not appear", 30);
+
+    const start = Date.now();
+    const result = await runAgentCall(binDir, "test prompt", false, 500);
+    const elapsed = Date.now() - start;
+
+    expect(result.exitCode).toBe(1);
+    expect(elapsed).toBeLessThan(10_000);
+  }, 15_000);
+
+  test("returns normally when backend responds within timeout", async () => {
+    const binDir = await createTempDir();
+    await createFakeBinary(binDir, "claude", "fast response");
+
+    const result = await runAgentCall(binDir, "test prompt", false, 5_000);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("fast response");
   });
 });
