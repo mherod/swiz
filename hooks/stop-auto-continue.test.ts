@@ -290,6 +290,21 @@ describe("stop-auto-continue", () => {
     expect(result.reason).not.toContain("<tool_call>");
   });
 
+  test("rejects response with unicode fullwidth < lookalike", async () => {
+    const binDir = await createTempDir();
+    // U+FF1C FULLWIDTH LESS-THAN SIGN — NFKC-normalises to ASCII <
+    await createFakeAgent(binDir, "\uFF1Ctool_call\uFF1E");
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+    expect(result.reason).not.toContain("\uFF1Ctool_call");
+  });
+
   test("rejects response with leading-whitespace XML tag", async () => {
     const binDir = await createTempDir();
     await createFakeAgent(binDir, "  <tool_call>read_file</tool_call>");

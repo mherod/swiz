@@ -26,7 +26,7 @@ function sanitizeResponse(raw: string): string {
   for (const line of raw.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    if (/<\w/.test(trimmed)) return ""; // tool-call or XML markup — reject
+    if (/<\w/.test(trimmed.normalize("NFKC"))) return ""; // tool-call or XML markup — reject
     return trimmed;
   }
   return "";
