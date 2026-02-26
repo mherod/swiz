@@ -24,11 +24,16 @@ async function runGit(dir: string, args: string[]): Promise<string> {
 }
 
 /**
- * Initialise a git repo and create 10 empty commits so that
- * `git diff HEAD~10..HEAD` (the hook's primary range) resolves correctly.
- * The test commit will then be the 11th commit, fully captured by the range.
+ * Initialise a git repo and optionally pre-seed with empty commits.
+ *
+ * Pass `seedCommits: 10` (the default) to place the test commit as the 11th,
+ * fully captured by `HEAD~10..HEAD` — used by the deep-history tests.
+ *
+ * Pass `seedCommits: 0` to create a fresh repo (1 commit total after
+ * `commitFile`) — used by the shallow-repo edge-case tests to verify the
+ * empty-tree fallback path.
  */
-async function makeTempGitRepo(suffix = ""): Promise<string> {
+async function makeTempGitRepo(suffix = "", { seedCommits = 10 } = {}): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), `swiz-stop-debug${suffix}-`));
   tempDirs.push(dir);
 
@@ -36,8 +41,7 @@ async function makeTempGitRepo(suffix = ""): Promise<string> {
   await runGit(dir, ["config", "user.email", "test@example.com"]);
   await runGit(dir, ["config", "user.name", "Test"]);
 
-  // Pre-seed with 10 empty commits so HEAD~10 resolves to before our test commit
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < seedCommits; i++) {
     await runGit(dir, ["commit", "--allow-empty", "-m", `seed ${i}`]);
   }
 
@@ -265,5 +269,56 @@ describe("stop-debug-statements: mixed commits", () => {
     await commitFile(dir, "dist/app.bundle.js", "console.log('bundle init');\n");
     const result = await runHook(dir);
     expect(result.blocked).toBe(false);
+  });
+});
+
+// ─── Shallow repo (< 11 commits) — empty-tree fallback path ──────────────────
+//
+// These tests use repos with 0 seed commits so HEAD~10 doesn't exist.
+// The hook falls back to `git diff <empty-tree>..HEAD`, which covers all
+// committed content regardless of history depth.
+
+describe("stop-debug-statements: shallow repo (< 11 commits)", () => {
+  test("console.log in first-ever commit is blocked", async () => {
+    const dir = await makeTempGitRepo("-shallow-detect", { seedCommits: 0 });
+    await commitFile(dir, "src/app.ts", "export function run() { console.log('debug'); }\n");
+    const result = await runHook(dir);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("console.log");
+  });
+
+  test("debugger in first-ever commit is blocked", async () => {
+    const dir = await makeTempGitRepo("-shallow-debugger", { seedCommits: 0 });
+    await commitFile(dir, "src/utils.ts", "function check() { debugger; }\n");
+    const result = await runHook(dir);
+    expect(result.blocked).toBe(true);
+  });
+
+  test("console.log in generated file in first commit is NOT blocked", async () => {
+    const dir = await makeTempGitRepo("-shallow-generated", { seedCommits: 0 });
+    await commitFile(dir, "build/main.dart.js", "console.log('flutter bootstrap');\n");
+    const result = await runHook(dir);
+    expect(result.blocked).toBe(false);
+  });
+
+  test("console.log in hooks/ in first commit is NOT blocked", async () => {
+    const dir = await makeTempGitRepo("-shallow-infra", { seedCommits: 0 });
+    await commitFile(dir, "hooks/my-hook.ts", "console.log(JSON.stringify({ ok: true }));\n");
+    const result = await runHook(dir);
+    expect(result.blocked).toBe(false);
+  });
+
+  test("console.log in test file in first commit is NOT blocked", async () => {
+    const dir = await makeTempGitRepo("-shallow-test", { seedCommits: 0 });
+    await commitFile(dir, "src/app.test.ts", "test('x', () => { console.log('test'); });\n");
+    const result = await runHook(dir);
+    expect(result.blocked).toBe(false);
+  });
+
+  test("repo with 5 commits containing console.log is blocked", async () => {
+    const dir = await makeTempGitRepo("-five-commits", { seedCommits: 4 });
+    await commitFile(dir, "src/lib.ts", "export const x = () => { console.log('five'); };\n");
+    const result = await runHook(dir);
+    expect(result.blocked).toBe(true);
   });
 });
