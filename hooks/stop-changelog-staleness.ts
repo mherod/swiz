@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if CHANGELOG.md hasn't been updated within 1 day of the last commit
 
-import { git, isGitRepo, blockStop, createSessionTask, type StopHookInput } from "./hook-utils.ts";
+import { git, isGitRepo, blockStop, createSessionTask, skillAdvice, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -45,14 +45,20 @@ async function main(): Promise<void> {
   await createSessionTask(
     input.session_id,
     "stop-changelog-staleness-task-created",
-    "Update CHANGELOG.md via /changelog skill",
+    "Update CHANGELOG.md",
     `CHANGELOG.md is ${days}d ${hours}h behind the latest commit. Run /changelog to regenerate and commit the updated changelog.`
+  );
+
+  const advice = skillAdvice(
+    "changelog",
+    "Run the /changelog skill to generate and update CHANGELOG.md, then commit the result.",
+    "Update CHANGELOG.md with recent changes, then commit the result."
   );
 
   blockStop(
     `CHANGELOG.md is stale — last updated ${days}d ${hours}h before the most recent commit.\n\n` +
       "The changelog must be kept current with every commit session.\n\n" +
-      "Run the /changelog skill to generate and update CHANGELOG.md, then commit the result."
+      advice
   );
 }
 

@@ -2,7 +2,7 @@
 // Stop hook: Block stop if current branch has conflicts with origin/main
 // Checks both GitHub PR merge state (authoritative) and local merge-tree (fallback)
 
-import { git, gh, isGitRepo, hasGhCli, blockStop, type StopHookInput } from "./hook-utils.ts";
+import { git, gh, isGitRepo, hasGhCli, blockStop, skillAdvice, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -37,7 +37,11 @@ async function main(): Promise<void> {
         if (pr.state === "OPEN" && pr.mergeable === "CONFLICTING") {
           let reason = `PR #${pr.number} for branch '${branch}' has merge conflicts (GitHub: mergeable=CONFLICTING, mergeStateStatus=${pr.mergeStateStatus}).\n\n`;
           reason += `${pr.url}\n\n`;
-          reason += "Use the /rebase-onto-main skill to rebase and resolve conflicts before stopping.";
+          reason += skillAdvice(
+            "rebase-onto-main",
+            "Use the /rebase-onto-main skill to rebase and resolve conflicts before stopping.",
+            "Rebase and resolve conflicts before stopping:\n  git fetch origin main\n  git rebase origin/main"
+          );
           blockStop(reason);
         }
 
@@ -64,7 +68,11 @@ async function main(): Promise<void> {
   if (conflictCount > 0) {
     let reason = `Branch '${branch}' has conflicts with origin/main.\n\n`;
     reason += `${conflictCount} conflict(s) detected — ${behind} commit(s) on origin/main not yet in this branch.\n\n`;
-    reason += "Use the /rebase-onto-main skill to rebase and resolve conflicts before stopping.";
+    reason += skillAdvice(
+      "rebase-onto-main",
+      "Use the /rebase-onto-main skill to rebase and resolve conflicts before stopping.",
+      "Rebase and resolve conflicts before stopping:\n  git fetch origin main\n  git rebase origin/main"
+    );
     blockStop(reason);
   }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if current branch has unpushed commits
 
-import { git, isGitRepo, blockStop, createSessionTask, type StopHookInput } from "./hook-utils.ts";
+import { git, isGitRepo, blockStop, createSessionTask, skillAdvice, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -39,13 +39,17 @@ async function main(): Promise<void> {
       reason = `Branch '${branch}' is ${behind} commit(s) behind '${upstream}'.\n\n`;
     }
     reason += "Run: git pull --rebase --autostash\n\n";
-    reason += "If conflicts arise during the rebase, use the /resolve-conflicts skill to resolve them, then push with /push.";
+    reason += skillAdvice(
+      "resolve-conflicts",
+      "If conflicts arise during the rebase, use the /resolve-conflicts skill to resolve them, then push with /push.",
+      "If conflicts arise during the rebase, resolve them manually, then run: git push origin " + branch
+    );
 
     await createSessionTask(
       input.session_id,
       "stop-git-push-behind-task-created",
       "Pull remote changes before pushing",
-      `Branch '${branch}' is ${behind} commit(s) behind '${upstream}'. Run: git pull --rebase --autostash. If conflicts arise, use /resolve-conflicts. Then push with /push.`
+      `Branch '${branch}' is ${behind} commit(s) behind '${upstream}'. Run: git pull --rebase --autostash. Resolve conflicts if any, then push.`
     );
 
     blockStop(reason);
@@ -55,13 +59,17 @@ async function main(): Promise<void> {
   if (ahead > 0) {
     let reason = `Unpushed commits detected on branch '${branch}'.\n\n`;
     reason += `${ahead} commit(s) ahead of '${upstream}'.\n\n`;
-    reason += "Use the /push skill to push your changes before stopping.";
+    reason += skillAdvice(
+      "push",
+      "Use the /push skill to push your changes before stopping.",
+      `Push your changes before stopping:\n  git push origin ${branch}`
+    );
 
     await createSessionTask(
       input.session_id,
       "stop-git-push-task-created",
       "Push branch to remote",
-      `Branch '${branch}' has ${ahead} unpushed commit(s) ahead of '${upstream}'. Use the /push skill to push your changes to the remote before stopping.`
+      `Branch '${branch}' has ${ahead} unpushed commit(s) ahead of '${upstream}'. Push changes to remote before stopping.`
     );
 
     blockStop(reason);

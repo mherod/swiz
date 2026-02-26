@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if GitHub CI checks are pending or failing
 
-import { git, gh, isGitRepo, isGitHubRemote, hasGhCli, blockStop, type StopHookInput } from "./hook-utils.ts";
+import { git, gh, isGitRepo, isGitHubRemote, hasGhCli, blockStop, skillAdvice, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -66,7 +66,11 @@ async function main(): Promise<void> {
     reason += `Failing checks (${failing.length}): ${names}\n\n`;
     reason += "To view failure logs:\n";
     for (const r of failing) reason += `  gh run view ${r.databaseId} --log-failed\n`;
-    reason += "\nUse the /ci-status skill to analyze failures and fix them before stopping.";
+    reason += "\n" + skillAdvice(
+      "ci-status",
+      "Use the /ci-status skill to analyze failures and fix them before stopping.",
+      "Analyze CI failures and fix them before stopping. View logs with:\n  gh run view <run-id> --log-failed"
+    );
     blockStop(reason);
   }
 
@@ -74,7 +78,11 @@ async function main(): Promise<void> {
     const names = active.map((r) => `${r.workflowName} (${r.status})`).join(", ");
     let reason = `GitHub CI is still running on branch '${branch}'.\n\n`;
     reason += `Active checks (${active.length}): ${names}\n\n`;
-    reason += "Wait for CI to complete, then check results with the /ci-status skill.";
+    reason += skillAdvice(
+      "ci-status",
+      "Wait for CI to complete, then check results with the /ci-status skill.",
+      "Wait for CI to complete, then check results:\n  gh run list --branch " + branch
+    );
     blockStop(reason);
   }
 }

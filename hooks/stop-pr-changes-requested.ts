@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if current branch has CHANGES_REQUESTED reviews
 
-import { git, gh, isGitRepo, isGitHubRemote, hasGhCli, blockStop, type StopHookInput } from "./hook-utils.ts";
+import { git, gh, isGitRepo, isGitHubRemote, hasGhCli, blockStop, skillAdvice, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -57,7 +57,11 @@ async function main(): Promise<void> {
   let reason = `PR #${pr.number} has changes requested from reviewers.\n\n`;
   reason += `Reviewers: ${reviewers}\n\n`;
   reason += `Requested changes:\n${details}\n\n`;
-  reason += "Use the /pr-comments-address skill to address all feedback before stopping.";
+  reason += skillAdvice(
+    "pr-comments-address",
+    "Use the /pr-comments-address skill to address all feedback before stopping.",
+    `Address all review feedback before stopping:\n  gh pr view ${pr.number} --comments`
+  );
 
   blockStop(reason);
 }

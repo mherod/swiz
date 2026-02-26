@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if new TODO/FIXME/HACK lines were introduced in commits
 
-import { git, isGitRepo, blockStop, type StopHookInput } from "./hook-utils.ts";
+import { git, isGitRepo, blockStop, skillAdvice, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -53,7 +53,11 @@ async function main(): Promise<void> {
   let reason = `${todos.length} new TODO/FIXME/HACK comment(s) introduced in recent commits.\n\n`;
   reason += "Items:\n";
   for (const t of todos) reason += `  ${t}\n`;
-  reason += "\nEither resolve these now, or use the /farm-out-issues skill to file them as GitHub issues before stopping.";
+  reason += "\n" + skillAdvice(
+    "farm-out-issues",
+    "Either resolve these now, or use the /farm-out-issues skill to file them as GitHub issues before stopping.",
+    "Either resolve these now, or file them as GitHub issues before stopping:\n  gh issue create --title \"<title>\" --body \"<description>\""
+  );
 
   blockStop(reason);
 }

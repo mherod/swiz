@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if git repository has uncommitted changes
 
-import { git, isGitRepo, blockStop, createSessionTask, type StopHookInput } from "./hook-utils.ts";
+import { git, isGitRepo, blockStop, createSessionTask, skillAdvice, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -38,13 +38,17 @@ async function main(): Promise<void> {
   reason += "Files with changes:\n";
   reason += lines.slice(0, 20).map((l) => `  ${l}`).join("\n");
   if (total > 20) reason += `\n  ... and ${total - 20} more file(s)`;
-  reason += "\n\nUse the /commit skill to review and commit your changes before stopping.";
+  reason += "\n\n" + skillAdvice(
+    "commit",
+    "Use the /commit skill to review and commit your changes before stopping.",
+    "Stage and commit your changes before stopping:\n  git add .\n  git commit -m \"<type>(<scope>): <summary>\""
+  );
 
   await createSessionTask(
     input.session_id,
     "stop-git-status-task-created",
     "Commit uncommitted changes",
-    `Git repository at ${cwd} has uncommitted changes (${summary}). Use the /commit skill to stage and commit your changes before stopping.`
+    `Git repository at ${cwd} has uncommitted changes (${summary}). Stage and commit your changes before stopping.`
   );
 
   blockStop(reason);

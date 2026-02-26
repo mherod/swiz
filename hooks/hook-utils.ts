@@ -165,12 +165,18 @@ export function emitContext(eventName: string, context: string): void {
 // ─── Stop hook helpers ────────────────────────────────────────────────────
 
 /** Standard ACTION REQUIRED footer appended to all stop hook block reasons. */
-export const ACTION_REQUIRED =
-  "\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action. If you believe this is a false positive, use the /re-assess skill to re-evaluate your assumptions — the hook's findings take authority over your own assessment.";
+export function actionRequired(): string {
+  const reassess = skillAdvice(
+    "re-assess",
+    "If you believe this is a false positive, use the /re-assess skill to re-evaluate your assumptions — the hook's findings take authority over your own assessment.",
+    "If you believe this is a false positive, re-evaluate your assumptions carefully before retrying — the hook's findings take authority over your own assessment."
+  );
+  return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action. ${reassess}`;
+}
 
 /** Emit a stop block decision and exit. Appends ACTION_REQUIRED footer. */
 export function blockStop(reason: string): never {
-  console.log(JSON.stringify({ decision: "block", reason: reason + ACTION_REQUIRED }));
+  console.log(JSON.stringify({ decision: "block", reason: reason + actionRequired() }));
   process.exit(0);
 }
 
@@ -237,6 +243,41 @@ export async function createSessionTask(
     await proc.exited;
     await Bun.write(sentinel, "");
   } catch {}
+}
+
+// ─── Skill existence checking ───────────────────────────────────────────
+// Skills live in .skills/ (project-local) or ~/.claude/skills/ (global).
+// Each skill is a directory containing SKILL.md.
+
+const SKILL_DIRS = [
+  join(process.cwd(), ".skills"),
+  join(process.env.HOME ?? "~", ".claude", "skills"),
+];
+
+const _skillCache = new Map<string, boolean>();
+
+/** Check if a skill exists in any of the skill directories. Cached per process. */
+export function skillExists(name: string): boolean {
+  const cached = _skillCache.get(name);
+  if (cached !== undefined) return cached;
+
+  const found = SKILL_DIRS.some((dir) =>
+    existsSync(join(dir, name, "SKILL.md"))
+  );
+  _skillCache.set(name, found);
+  return found;
+}
+
+/**
+ * Return actionable advice that references a skill if it exists,
+ * or falls back to concrete manual steps.
+ *
+ * @param skill - The skill name without leading slash (e.g. "commit")
+ * @param withSkill - Message to use when the skill exists (may include `/<skill>`)
+ * @param withoutSkill - Fallback message with concrete manual steps
+ */
+export function skillAdvice(skill: string, withSkill: string, withoutSkill: string): string {
+  return skillExists(skill) ? withSkill : withoutSkill;
 }
 
 // ─── Common input types ─────────────────────────────────────────────────

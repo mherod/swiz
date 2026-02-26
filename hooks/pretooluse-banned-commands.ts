@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // PreToolUse hook: Block banned Bash commands and guide to safe alternatives.
 
-import { denyPreToolUse, isShellTool, detectRuntime, detectPackageManager } from "./hook-utils.ts";
+import { denyPreToolUse, isShellTool, detectRuntime, detectPackageManager, skillExists } from "./hook-utils.ts";
 
 const RUNTIME = detectRuntime();
 const PM = detectPackageManager();
@@ -90,8 +90,7 @@ const RULES: Rule[] = [
       "Use safe deletion instead:",
       "  • trash <path>         — moves to macOS Trash (recoverable)",
       "  • mv <path> ~/.Trash/  — manual fallback if trash unavailable",
-      "",
-      "See: /delete-safely skill for details.",
+      ...(skillExists("delete-safely") ? ["", "See the /delete-safely skill for details."] : []),
     ].join("\n"),
   },
   {
@@ -101,7 +100,7 @@ const RULES: Rule[] = [
       "",
       "Instead:",
       "  • Commit work-in-progress: `git commit -m \"wip: ...\"`",
-      "  • Use the /commit skill to preserve your current state",
+      ...(skillExists("commit") ? ["  • Use the /commit skill to preserve your current state"] : []),
       "  • If you need a clean slate, commit first, then revert in a new commit",
     ].join("\n"),
   },
@@ -213,7 +212,7 @@ const RULES: Rule[] = [
     match: (c) => {
       const mMatch = c.match(/git\s+commit\s.*-m\s+["']([^"']*)/);
       if (!mMatch) return false;
-      return /Co-authored-by:/i.test(mMatch[1]);
+      return /Co-authored-by:/i.test(mMatch[1]!);
     },
     message: [
       "Do not include `Co-authored-by:` in commit messages.",

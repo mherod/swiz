@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if open PR has empty or placeholder description
 
-import { git, gh, isGitRepo, isGitHubRemote, hasGhCli, blockStop, type StopHookInput } from "./hook-utils.ts";
+import { git, gh, isGitRepo, isGitHubRemote, hasGhCli, blockStop, skillAdvice, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -42,11 +42,17 @@ async function main(): Promise<void> {
   const body = pr.body ?? "";
   const bodyStripped = body.replace(/\s/g, "");
 
+  const prAdvice = skillAdvice(
+    "refine-pr",
+    "Use the /refine-pr skill to populate the PR description before stopping.",
+    `Update the PR description before stopping:\n  gh pr edit ${pr.number} --body "<description>"`
+  );
+
   // Empty body
   if (!bodyStripped) {
     blockStop(
       `PR #${pr.number} ('${pr.title}') has an empty description.\n\n` +
-        "Use the /refine-pr skill to populate the PR description before stopping."
+        prAdvice
     );
   }
 
@@ -75,7 +81,7 @@ async function main(): Promise<void> {
     if (bodyLower.includes(pattern.toLowerCase())) {
       blockStop(
         `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n` +
-          "Use the /refine-pr skill to populate the PR description before stopping."
+          prAdvice
       );
     }
   }
@@ -84,7 +90,7 @@ async function main(): Promise<void> {
   if (bodyStripped.length < 20) {
     blockStop(
       `PR #${pr.number} ('${pr.title}') description is too short (${bodyStripped.length} chars).\n\n` +
-        "Use the /refine-pr skill to populate the PR description before stopping."
+        prAdvice
     );
   }
 }
