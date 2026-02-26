@@ -40,7 +40,7 @@ fi
 # These are pattern strings used in rule implementations, not actual developer notes.
 # After grep -n on a diff, lines look like "403:+  /pattern/flags," so we exclude
 # lines where the diff content (after the leading +) is a regex literal starting with /
-TODOS=$(echo "$DIFF" | grep -n "^+" | grep -v "^+++" | grep -iE "\b(TODO|FIXME|HACK|XXX|WORKAROUND)\b" | grep -vE ":[+][[:space:]]*/[^/]" | head -15)
+TODOS=$(echo "$DIFF" | grep -n "^+" | grep -v "^+++" | grep -iE "\b(TODO|FIXME|HACK|XXX|WORKAROUND)\b" | grep -vE ":[+][[:space:]]*/[^/]" | grep -iE ":[+].*(/[/*]|#[[:space:]]).*\b(TODO|FIXME|HACK|XXX|WORKAROUND)\b" | head -15)
 
 {
   echo "New TODOs found:"
