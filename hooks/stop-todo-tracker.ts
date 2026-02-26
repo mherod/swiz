@@ -6,6 +6,7 @@ import { git, isGitRepo, blockStop, SOURCE_EXT_RE, skillAdvice, type StopHookInp
 export {};
 
 const EXCLUDE_PATH_RE = /node_modules|\.claude\/hooks\/|^hooks\/|__tests__|\.test\.|\.spec\./;
+const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/;
 const TODO_RE = /\b(TODO|FIXME|HACK|XXX|WORKAROUND)\b/i;
 const COMMENT_RE = /(\/[/*]|#\s)/;
 const REGEX_LITERAL_RE = /^\s*\/[^/]/; // line content starts with regex literal
@@ -22,7 +23,7 @@ async function main(): Promise<void> {
 
   const sourceFiles = changedRaw
     .split("\n")
-    .filter((f) => SOURCE_EXT_RE.test(f) && !EXCLUDE_PATH_RE.test(f));
+    .filter((f) => SOURCE_EXT_RE.test(f) && !EXCLUDE_PATH_RE.test(f) && !GENERATED_FILE_RE.test(f));
 
   if (sourceFiles.length === 0) return;
 
