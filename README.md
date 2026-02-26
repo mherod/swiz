@@ -57,7 +57,7 @@ Hook scripts emit polyglot JSON that all agents understand — `decision`/`reaso
 
 ### `swiz install`
 
-Deploy all 35 hooks to agent settings from the canonical manifest.
+Deploy all 37 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks
@@ -68,7 +68,10 @@ swiz install --codex      # shows Codex status (not yet configurable)
 swiz install --dry-run    # line-by-line unified diff, no writes
 ```
 
-- Dry run shows an LCS-based unified diff of exactly what would change, plus counts of hooks added/removed/kept.
+- **Merge, not replace** — user-defined hooks (sound effects, agent hooks, inline scripts, etc.) are preserved. Only swiz-managed hooks are touched.
+- **Legacy replacement** — if you previously had hooks at `~/.claude/hooks/`, swiz detects and replaces them with the portable versions from the swiz project.
+- **Idempotent** — running install twice produces the same result. Old swiz hooks are stripped before new ones are added.
+- Dry run shows an LCS-based unified diff of exactly what would change, plus counts of hooks added/replaced/preserved.
 - Creates a `.bak` backup before writing.
 - If a running agent process (e.g. Claude Code) reverts the write within 1.5s, swiz detects and warns you to close sessions first.
 - Non-configurable agents (Codex) are skipped gracefully with an explanation.
@@ -128,7 +131,7 @@ swiz tasks complete-all                     # bulk-complete remaining
 
 ## Bundled Hooks
 
-35 hook scripts across 5 event types, all using shared cross-agent tool equivalence from `hooks/hook-utils.ts`:
+37 hook scripts across 5 event types, all using shared cross-agent tool equivalence from `hooks/hook-utils.ts`:
 
 ### Stop (15)
 
@@ -150,7 +153,7 @@ swiz tasks complete-all                     # bulk-complete remaining
 | `stop-completion-auditor.sh` | Verifies tasks have completion evidence before allowing stop |
 | `stop-personal-repo-issues.ts` | Checks for open issues assigned to the user |
 
-### PreToolUse (10)
+### PreToolUse (11)
 
 | Hook | What it does |
 |------|-------------|
@@ -161,6 +164,7 @@ swiz tasks complete-all                     # bulk-complete remaining
 | `pretooluse-no-eslint-disable.ts` | Blocks edits adding `eslint-disable` comments |
 | `pretooluse-eslint-config-strength.ts` | Prevents weakening eslint rule severity |
 | `pretooluse-json-validation.ts` | Validates JSON syntax before write |
+| `pretooluse-no-direct-deps.ts` | Blocks direct edits to dependency blocks in package.json — use the package manager |
 | `pretooluse-require-tasks.ts` | Blocks Edit/Write/Shell tools until tasks exist for the session |
 | `pretooluse-no-task-delegation.ts` | Prevents agents from delegating work to sub-tasks instead of doing it |
 | `pretooluse-task-subject-validation.ts` | Validates task subjects meet quality standards |
@@ -177,11 +181,12 @@ swiz tasks complete-all                     # bulk-complete remaining
 | `posttooluse-prettier-ts.ts` | Auto-formats TypeScript files after edits (async) |
 | `posttooluse-task-subject-validation.ts` | Validates task subjects after creation |
 
-### SessionStart (1)
+### SessionStart (2)
 
 | Hook | What it does |
 |------|-------------|
 | `sessionstart-health-snapshot.sh` | Captures project health baseline at session start |
+| `sessionstart-compact-context.sh` | Re-injects core conventions after context compaction |
 
 ### UserPromptSubmit (2)
 

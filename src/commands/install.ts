@@ -76,6 +76,7 @@ const manifest: HookGroup[] = [
     matcher: "Edit|Write|NotebookEdit",
     hooks: [
       { file: "pretooluse-json-validation.ts" },
+      { file: "pretooluse-no-direct-deps.ts", timeout: 5 },
       { file: "pretooluse-no-eslint-disable.ts", timeout: 5 },
       { file: "pretooluse-eslint-config-strength.ts", timeout: 5 },
       { file: "pretooluse-no-as-any.ts", timeout: 5 },
@@ -120,6 +121,11 @@ const manifest: HookGroup[] = [
     hooks: [{ file: "sessionstart-health-snapshot.sh", timeout: 10 }],
   },
   {
+    event: "sessionStart",
+    matcher: "compact",
+    hooks: [{ file: "sessionstart-compact-context.sh", timeout: 5 }],
+  },
+  {
     event: "userPromptSubmit",
     hooks: [
       { file: "userpromptsubmit-git-context.sh", timeout: 5 },
@@ -135,12 +141,69 @@ function hookCommand(file: string): string {
   return `${prefix}${HOOKS_DIR}/${file}`;
 }
 
-function buildNestedConfig(agent: AgentDef) {
-  const config: Record<string, unknown[]> = {};
+// Paths that swiz supersedes — hooks at these locations are replaced by swiz equivalents.
+const LEGACY_HOOK_DIRS = [
+  "$HOME/.claude/hooks/",
+  `${process.env.HOME}/.claude/hooks/`,
+];
 
+function isSwizCommand(cmd: unknown): boolean {
+  return typeof cmd === "string" && cmd.includes(HOOKS_DIR);
+}
+
+function isLegacySwizCommand(cmd: unknown): boolean {
+  if (typeof cmd !== "string") return false;
+  return LEGACY_HOOK_DIRS.some((dir) => cmd.includes(dir));
+}
+
+function isManagedCommand(cmd: unknown): boolean {
+  return isSwizCommand(cmd) || isLegacySwizCommand(cmd);
+}
+
+// Strip swiz-managed and legacy hooks from a nested matcher group array,
+// returning only user-defined entries.
+function stripManagedFromNestedGroups(groups: unknown[]): unknown[] {
+  const kept: unknown[] = [];
+  for (const group of groups) {
+    const g = group as Record<string, unknown>;
+    if (Array.isArray(g.hooks)) {
+      const userHooks = g.hooks.filter(
+        (h) => !isManagedCommand((h as Record<string, unknown>).command)
+      );
+      if (userHooks.length > 0) {
+        kept.push({ ...g, hooks: userHooks });
+      }
+    } else if (!isManagedCommand(g.command)) {
+      kept.push(group);
+    }
+  }
+  return kept;
+}
+
+// Strip swiz-managed and legacy hooks from a flat hook array.
+function stripManagedFromFlatList(entries: unknown[]): unknown[] {
+  return entries.filter(
+    (e) => !isManagedCommand((e as Record<string, unknown>).command)
+  );
+}
+
+function mergeNestedConfig(
+  agent: AgentDef,
+  existingHooks: Record<string, unknown>
+): Record<string, unknown[]> {
+  const merged: Record<string, unknown[]> = {};
+
+  // Preserve all existing events (including ones swiz doesn't touch)
+  for (const [event, groups] of Object.entries(existingHooks)) {
+    if (!Array.isArray(groups)) continue;
+    const userGroups = stripManagedFromNestedGroups(groups);
+    if (userGroups.length > 0) merged[event] = userGroups;
+  }
+
+  // Add swiz hooks
   for (const group of manifest) {
     const eventName = translateEvent(group.event, agent);
-    if (!config[eventName]) config[eventName] = [];
+    if (!merged[eventName]) merged[eventName] = [];
 
     const matcher = translateMatcher(group.matcher, agent);
     const hooks = group.hooks.map((h) => {
@@ -155,18 +218,29 @@ function buildNestedConfig(agent: AgentDef) {
 
     const entry: Record<string, unknown> = { hooks };
     if (matcher) entry.matcher = matcher;
-    config[eventName].push(entry);
+    merged[eventName].push(entry);
   }
 
-  return config;
+  return merged;
 }
 
-function buildFlatConfig(agent: AgentDef) {
-  const config: Record<string, unknown[]> = {};
+function mergeFlatConfig(
+  agent: AgentDef,
+  existingHooks: Record<string, unknown>
+): Record<string, unknown[]> {
+  const merged: Record<string, unknown[]> = {};
 
+  // Preserve user hooks
+  for (const [event, entries] of Object.entries(existingHooks)) {
+    if (!Array.isArray(entries)) continue;
+    const userEntries = stripManagedFromFlatList(entries);
+    if (userEntries.length > 0) merged[event] = userEntries;
+  }
+
+  // Add swiz hooks
   for (const group of manifest) {
     const eventName = translateEvent(group.event, agent);
-    if (!config[eventName]) config[eventName] = [];
+    if (!merged[eventName]) merged[eventName] = [];
 
     const matcher = translateMatcher(group.matcher, agent);
 
@@ -176,17 +250,20 @@ function buildFlatConfig(agent: AgentDef) {
       };
       if (h.timeout) entry.timeout = h.timeout;
       if (matcher) entry.matcher = matcher;
-      config[eventName].push(entry);
+      merged[eventName].push(entry);
     }
   }
 
-  return config;
+  return merged;
 }
 
-function buildConfig(agent: AgentDef) {
+function mergeConfig(
+  agent: AgentDef,
+  existingHooks: Record<string, unknown>
+): Record<string, unknown[]> {
   return agent.configStyle === "nested"
-    ? buildNestedConfig(agent)
-    : buildFlatConfig(agent);
+    ? mergeNestedConfig(agent, existingHooks)
+    : mergeFlatConfig(agent, existingHooks);
 }
 
 // ─── Diff ────────────────────────────────────────────────────────────────────
@@ -406,13 +483,20 @@ async function installAgent(agent: AgentDef, dryRun: boolean) {
     return;
   }
 
-  const config = buildConfig(agent);
-
   console.log(`  ${BOLD}${agent.name}${RESET} → ${agent.settingsPath}\n`);
 
   const existing = await readJsonFile(agent.settingsPath);
   const oldText = (await readFileText(agent.settingsPath)).trimEnd();
-  const oldHooks = (existing[agent.hooksKey] as Record<string, unknown>) ?? {};
+
+  // For wrapped configs (Cursor), hooks live inside the wrapper
+  const oldHooksRaw = agent.wrapsHooks
+    ? ((existing as Record<string, unknown>).hooks as Record<string, unknown>) ?? {}
+    : (existing[agent.hooksKey] as Record<string, unknown>) ?? {};
+  const oldHooks = typeof oldHooksRaw === "object" && !Array.isArray(oldHooksRaw)
+    ? oldHooksRaw
+    : {};
+
+  const config = mergeConfig(agent, oldHooks);
 
   let proposed: Record<string, unknown>;
   let newText: string;
@@ -427,11 +511,18 @@ async function installAgent(agent: AgentDef, dryRun: boolean) {
 
   if (dryRun) {
     const oldCmds = collectCommands(oldHooks);
-    const newCmds = collectCommands(config);
+    const allNewCmds = collectCommands(config);
+    const swizCmds = new Set([...allNewCmds].filter((c) => c.includes(HOOKS_DIR)));
+    const isManaged = (c: string) =>
+      c.includes(HOOKS_DIR) || LEGACY_HOOK_DIRS.some((d) => c.includes(d));
+    const userCmds = new Set([...oldCmds].filter((c) => !isManaged(c)));
+    const legacyCmds = [...oldCmds].filter((c) =>
+      LEGACY_HOOK_DIRS.some((d) => c.includes(d))
+    );
 
-    const added = [...newCmds].filter((c) => !oldCmds.has(c));
-    const removed = [...oldCmds].filter((c) => !newCmds.has(c));
-    const kept = [...newCmds].filter((c) => oldCmds.has(c));
+    const added = [...swizCmds].filter((c) => !oldCmds.has(c));
+    const removed = [...oldCmds].filter((c) => c.includes(HOOKS_DIR) && !swizCmds.has(c));
+    const kept = [...swizCmds].filter((c) => oldCmds.has(c));
 
     if (added.length) {
       console.log(`    ${GREEN}+ ${added.length} hook(s) added:${RESET}`);
@@ -443,8 +534,17 @@ async function installAgent(agent: AgentDef, dryRun: boolean) {
       for (const c of removed) console.log(`      ${RED}- ${c}${RESET}`);
       console.log();
     }
+    if (legacyCmds.length) {
+      const YELLOW = "\x1b[33m";
+      console.log(`    ${YELLOW}↻ ${legacyCmds.length} legacy hook(s) replaced by swiz:${RESET}`);
+      for (const c of legacyCmds) console.log(`      ${YELLOW}↻ ${c}${RESET}`);
+      console.log();
+    }
     if (kept.length) {
-      console.log(`    ${DIM}  ${kept.length} hook(s) unchanged${RESET}\n`);
+      console.log(`    ${DIM}  ${kept.length} swiz hook(s) unchanged${RESET}\n`);
+    }
+    if (userCmds.size) {
+      console.log(`    ${CYAN}  ${userCmds.size} user hook(s) preserved${RESET}\n`);
     }
     if (!oldText && newText) {
       console.log(`    ${GREEN}+ new file (${newText.split("\n").length} lines)${RESET}\n`);
