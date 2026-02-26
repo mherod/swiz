@@ -170,11 +170,7 @@ async function showEvent(allSettings: LoadedSettings[], eventName: string) {
   }
 
   if (!found) {
-    console.error(`No hooks found for event: ${eventName}`);
-    console.error(
-      `Run "swiz hooks" to see available events.`
-    );
-    process.exit(1);
+    throw new Error(`No hooks found for event: ${eventName}\nRun "swiz hooks" to see available events.`);
   }
   console.log();
 }
@@ -197,8 +193,7 @@ async function showScript(allSettings: LoadedSettings[], scriptQuery: string) {
 
           const file = Bun.file(scriptPath);
           if (!(await file.exists())) {
-            console.error(`Script not found: ${scriptPath}`);
-            process.exit(1);
+            throw new Error(`Script not found: ${scriptPath}`);
           }
 
           console.log(await file.text());
