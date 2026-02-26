@@ -143,9 +143,7 @@ async function install(args: string[]) {
   if (targetName) {
     target = profiles.find((p) => p.name === targetName);
     if (!target) {
-      console.error(`  ${RED}Unknown profile: ${targetName}${RESET}`);
-      console.error(`  Available: ${profiles.map((p) => p.name).join(", ")}`);
-      process.exit(1);
+      throw new Error(`Unknown profile: ${targetName}\nAvailable: ${profiles.map((p) => p.name).join(", ")}`);
     }
   } else {
     // Default: .zshenv for zsh (broadest coverage), .bashrc for bash
@@ -153,8 +151,7 @@ async function install(args: string[]) {
   }
 
   if (!target) {
-    console.error(`  ${RED}Could not determine shell profile.${RESET}`);
-    process.exit(1);
+    throw new Error("Could not determine shell profile.");
   }
 
   console.log(`\n  ${BOLD}swiz shim install${dryRun ? " (dry run)" : ""}${RESET}\n`);
@@ -247,9 +244,7 @@ export const shimCommand: Command = {
       case undefined:
         return showStatus();
       default:
-        console.error(`  Unknown subcommand: ${subcommand}`);
-        console.error(`  Usage: ${this.usage}`);
-        process.exit(1);
+        throw new Error(`Unknown subcommand: ${subcommand}\nUsage: swiz shim [install | uninstall | status] [--dry-run]`);
     }
   },
 };
