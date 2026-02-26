@@ -161,3 +161,105 @@ export function emitContext(eventName: string, context: string): void {
     })
   );
 }
+
+// ─── Stop hook helpers ────────────────────────────────────────────────────
+
+/** Standard ACTION REQUIRED footer appended to all stop hook block reasons. */
+export const ACTION_REQUIRED =
+  "\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action. If you believe this is a false positive, use the /re-assess skill to re-evaluate your assumptions — the hook's findings take authority over your own assessment.";
+
+/** Emit a stop block decision and exit. Appends ACTION_REQUIRED footer. */
+export function blockStop(reason: string): never {
+  console.log(JSON.stringify({ decision: "block", reason: reason + ACTION_REQUIRED }));
+  process.exit(0);
+}
+
+/** Emit a raw stop block (no footer appended — caller controls the full reason). */
+export function blockStopRaw(reason: string): never {
+  console.log(JSON.stringify({ decision: "block", reason }));
+  process.exit(0);
+}
+
+// ─── Git / CLI helpers ──────────────────────────────────────────────────
+
+/** Run a git command and return trimmed stdout. Returns "" on non-zero exit or error. */
+export async function git(args: string[], cwd: string): Promise<string> {
+  try {
+    const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+    const output = await new Response(proc.stdout).text();
+    await proc.exited;
+    return proc.exitCode === 0 ? output.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Run a gh CLI command and return trimmed stdout. Returns "" on failure. */
+export async function gh(args: string[], cwd: string): Promise<string> {
+  try {
+    const proc = Bun.spawn(["gh", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+    const output = await new Response(proc.stdout).text();
+    await proc.exited;
+    return proc.exitCode === 0 ? output.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+export async function isGitRepo(cwd: string): Promise<boolean> {
+  return (await git(["rev-parse", "--git-dir"], cwd)) !== "";
+}
+
+export async function isGitHubRemote(cwd: string): Promise<boolean> {
+  const url = await git(["remote", "get-url", "origin"], cwd);
+  return url.includes("github.com");
+}
+
+export function hasGhCli(): boolean {
+  return !!Bun.which("gh");
+}
+
+/** Create a session task via tasks-list.ts. Uses a sentinel file to fire only once per session. */
+export async function createSessionTask(
+  sessionId: string | undefined,
+  sentinelKey: string,
+  subject: string,
+  description: string
+): Promise<void> {
+  if (!sessionId || sessionId === "null") return;
+  const sentinel = `/tmp/${sentinelKey}-${sessionId}.flag`;
+  if (await Bun.file(sentinel).exists()) return;
+  try {
+    const proc = Bun.spawn(
+      ["bun", `${process.env.HOME}/.claude/hooks/tasks-list.ts`, "--session", sessionId, "--create", subject, description],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+    await proc.exited;
+    await Bun.write(sentinel, "");
+  } catch {}
+}
+
+// ─── Common input types ─────────────────────────────────────────────────
+
+export interface StopHookInput {
+  cwd: string;
+  session_id?: string;
+  stop_hook_active?: boolean;
+  transcript_path?: string;
+}
+
+export interface ToolHookInput {
+  cwd: string;
+  session_id?: string;
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
+  transcript_path?: string;
+}
+
+export interface SessionHookInput {
+  cwd: string;
+  session_id?: string;
+  trigger?: string;
+  matcher?: string;
+  hook_event_name?: string;
+}

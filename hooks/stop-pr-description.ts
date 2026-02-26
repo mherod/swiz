@@ -1,0 +1,92 @@
+#!/usr/bin/env bun
+// Stop hook: Block stop if open PR has empty or placeholder description
+
+import { git, gh, isGitRepo, isGitHubRemote, hasGhCli, blockStop, type StopHookInput } from "./hook-utils.ts";
+
+export {};
+
+const PLACEHOLDER_PATTERNS = [
+  "Describe your changes",
+  "What does this PR do",
+  "<!-- ",
+  "Add a description",
+  "[Add description]",
+  "Your description here",
+];
+
+async function main(): Promise<void> {
+  const input = (await Bun.stdin.json()) as StopHookInput;
+  const cwd = input.cwd;
+
+  if (!(await isGitRepo(cwd))) return;
+  if (!hasGhCli()) return;
+  if (!(await isGitHubRemote(cwd))) return;
+
+  const branch = await git(["branch", "--show-current"], cwd);
+  if (!branch || branch === "main" || branch === "master") return;
+
+  // Find open PR for this branch
+  const prRaw = await gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number,title,body"], cwd);
+  if (!prRaw) return;
+
+  let prs: Array<{ number: number; title: string; body: string }>;
+  try {
+    prs = JSON.parse(prRaw);
+  } catch {
+    return;
+  }
+
+  const pr = prs[0];
+  if (!pr) return;
+
+  const body = pr.body ?? "";
+  const bodyStripped = body.replace(/\s/g, "");
+
+  // Empty body
+  if (!bodyStripped) {
+    blockStop(
+      `PR #${pr.number} ('${pr.title}') has an empty description.\n\n` +
+        "Use the /refine-pr skill to populate the PR description before stopping."
+    );
+  }
+
+  // Check for ## Summary immediately followed by a placeholder
+  const lines = body.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (/^## Summary/.test(lines[i]!)) {
+      // Check next non-blank line
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j]!.trim() === "") continue;
+        if (lines[j]!.trim().startsWith("<")) {
+          blockStop(
+            `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n` +
+              "Replace the '<...>' placeholder under '## Summary' with actual content before stopping."
+          );
+        }
+        break;
+      }
+      break;
+    }
+  }
+
+  // Check for placeholder patterns
+  const bodyLower = body.toLowerCase();
+  for (const pattern of PLACEHOLDER_PATTERNS) {
+    if (bodyLower.includes(pattern.toLowerCase())) {
+      blockStop(
+        `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n` +
+          "Use the /refine-pr skill to populate the PR description before stopping."
+      );
+    }
+  }
+
+  // Minimum length
+  if (bodyStripped.length < 20) {
+    blockStop(
+      `PR #${pr.number} ('${pr.title}') description is too short (${bodyStripped.length} chars).\n\n` +
+        "Use the /refine-pr skill to populate the PR description before stopping."
+    );
+  }
+}
+
+main();
