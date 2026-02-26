@@ -1,114 +1,19 @@
 import { join, resolve } from "node:path";
-import { readdir, stat } from "node:fs/promises";
 import type { Command } from "../types.ts";
 import { promptAgent, detectAgentCli } from "../agent.ts";
-
-// ─── Session discovery (mirrors transcript.ts) ────────────────────────────────
-
-interface Session {
-  id: string;
-  path: string;
-  mtime: number;
-}
-
-function projectKeyFromCwd(cwd: string): string {
-  return cwd.replace(/[/.]/g, "-");
-}
-
-async function findSessions(projectDir: string): Promise<Session[]> {
-  let entries: string[];
-  try {
-    entries = await readdir(projectDir);
-  } catch {
-    return [];
-  }
-
-  const sessions: Session[] = [];
-  for (const entry of entries) {
-    if (!entry.endsWith(".jsonl")) continue;
-    const id = entry.slice(0, -6);
-    const filePath = join(projectDir, entry);
-    try {
-      const s = await stat(filePath);
-      sessions.push({ id, path: filePath, mtime: s.mtimeMs });
-    } catch {
-      continue;
-    }
-  }
-
-  return sessions.sort((a, b) => b.mtime - a.mtime);
-}
-
-// ─── Turn extraction ──────────────────────────────────────────────────────────
-
-interface TextBlock { type: "text"; text?: string }
-interface ToolUseBlock { type: "tool_use"; name?: string }
-type ContentBlock = TextBlock | ToolUseBlock | { type: string };
-
-interface Turn {
-  role: "user" | "assistant";
-  text: string;
-}
-
-function extractText(content: string | ContentBlock[] | undefined): string {
-  if (!content) return "";
-  if (typeof content === "string") return content;
-  return (content as ContentBlock[])
-    .filter((b): b is TextBlock => b.type === "text" && !!(b as TextBlock).text)
-    .map((b) => b.text!)
-    .join("\n")
-    .trim();
-}
-
-async function loadTurns(sessionPath: string, limit = 20): Promise<Turn[]> {
-  const file = Bun.file(sessionPath);
-  if (!(await file.exists())) return [];
-
-  const text = await file.text();
-  const turns: Turn[] = [];
-
-  for (const line of text.split("\n").filter(Boolean)) {
-    try {
-      const entry = JSON.parse(line);
-      if (entry?.type !== "user" && entry?.type !== "assistant") continue;
-
-      const msg = entry.message;
-      if (!msg) continue;
-
-      // Skip hook feedback injected as user messages
-      if (
-        entry.type === "user" &&
-        typeof msg.content === "string" &&
-        (msg.content.startsWith("Stop hook feedback:") ||
-          msg.content.startsWith("<command-message>"))
-      ) continue;
-
-      if (entry.type === "assistant") {
-        const blocks: ContentBlock[] = typeof msg.content === "string"
-          ? [{ type: "text", text: msg.content }]
-          : (msg.content ?? []);
-        const textParts = (blocks as ContentBlock[])
-          .filter((b): b is TextBlock => b.type === "text" && !!(b as TextBlock).text?.trim())
-          .map((b) => b.text!.trim());
-        if (textParts.length === 0) continue;
-        turns.push({ role: "assistant", text: textParts.join("\n") });
-      } else {
-        const text = extractText(msg.content).trim();
-        if (!text) continue;
-        turns.push({ role: "user", text });
-      }
-    } catch {}
-  }
-
-  return turns.slice(-limit);
-}
+import {
+  projectKeyFromCwd,
+  findSessions,
+  extractPlainTurns,
+  formatTurnsAsContext,
+  type Session,
+} from "../transcript-utils.ts";
 
 // ─── Next-step suggestion ─────────────────────────────────────────────────────
 
-async function generateNextStep(turns: Turn[]): Promise<string> {
-  const context = turns
-    .map(({ role, text }) => `${role === "user" ? "User" : "Assistant"}: ${text}`)
-    .join("\n\n");
+async function generateNextStep(jsonlText: string): Promise<string> {
+  const turns = extractPlainTurns(jsonlText).slice(-20);
+  const context = formatTurnsAsContext(turns);
 
   const prompt =
     `You are analyzing a conversation between a user and an AI assistant. ` +
@@ -172,15 +77,17 @@ export const continueCommand: Command = {
       session = sessions[0]!;
     }
 
-    const turns = await loadTurns(session.path);
-    if (turns.length === 0) {
-      console.error("No conversation turns found in session.");
+    let raw: string;
+    try {
+      raw = await Bun.file(session.path).text();
+    } catch {
+      console.error(`Could not read transcript: ${session.path}`);
       process.exit(1);
     }
 
     let suggestion: string;
     try {
-      suggestion = await generateNextStep(turns);
+      suggestion = await generateNextStep(raw);
     } catch (err) {
       console.error(`Failed to generate suggestion: ${String(err)}`);
       process.exit(1);

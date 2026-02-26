@@ -5,80 +5,14 @@
 
 import { promptAgent, detectAgentCli } from "../src/agent.ts";
 import { blockStopRaw, type StopHookInput } from "./hook-utils.ts";
+import {
+  extractPlainTurns,
+  countToolCalls,
+  formatTurnsAsContext,
+} from "../src/transcript-utils.ts";
 
-const MIN_TOOL_CALLS = 5;   // Don't engage for trivial sessions
-const CONTEXT_TURNS = 15;   // Recent turns to send as context
-
-// ─── Plain-text context builder ───────────────────────────────────────────────
-// Produces "User: ...\nAssistant: ...\n" suitable for an LLM context window.
-
-interface TextTurn {
-  role: "user" | "assistant";
-  text: string;
-}
-
-async function extractTextTurns(transcriptPath: string): Promise<TextTurn[]> {
-  try {
-    const raw = await Bun.file(transcriptPath).text();
-    const turns: TextTurn[] = [];
-
-    for (const line of raw.split("\n").filter(Boolean)) {
-      try {
-        const entry = JSON.parse(line);
-        if (entry?.type !== "user" && entry?.type !== "assistant") continue;
-
-        const content = entry?.message?.content;
-        if (!content) continue;
-
-        // Skip injected hook feedback
-        if (
-          entry.type === "user" &&
-          typeof content === "string" &&
-          (content.startsWith("Stop hook feedback:") ||
-            content.startsWith("<command-message>"))
-        ) continue;
-
-        let text: string;
-        if (typeof content === "string") {
-          text = content;
-        } else if (Array.isArray(content)) {
-          text = content
-            .filter((b: { type?: string; text?: string }) => b?.type === "text" && b?.text)
-            .map((b: { text?: string }) => b.text!)
-            .join("\n");
-        } else {
-          continue;
-        }
-
-        text = text.trim();
-        if (text) turns.push({ role: entry.type, text });
-      } catch {}
-    }
-
-    return turns.slice(-CONTEXT_TURNS);
-  } catch {
-    return [];
-  }
-}
-
-async function countToolCalls(transcriptPath: string): Promise<number> {
-  try {
-    const raw = await Bun.file(transcriptPath).text();
-    let count = 0;
-    for (const line of raw.split("\n").filter(Boolean)) {
-      try {
-        const entry = JSON.parse(line);
-        if (entry?.type !== "assistant") continue;
-        const content = entry?.message?.content;
-        if (!Array.isArray(content)) continue;
-        count += content.filter((b: { type?: string }) => b?.type === "tool_use").length;
-      } catch {}
-    }
-    return count;
-  } catch {
-    return 0;
-  }
-}
+const MIN_TOOL_CALLS = 5;  // Don't engage for trivial sessions
+const CONTEXT_TURNS = 15;  // Recent turns to send as context
 
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as StopHookInput;
@@ -90,16 +24,20 @@ async function main(): Promise<void> {
   if (!input.transcript_path) return;
   if (!detectAgentCli()) return;
 
-  // Only engage for substantive sessions
-  const toolCallCount = await countToolCalls(input.transcript_path);
-  if (toolCallCount < MIN_TOOL_CALLS) return;
+  let raw: string;
+  try {
+    raw = await Bun.file(input.transcript_path).text();
+  } catch {
+    return;
+  }
 
-  const turns = await extractTextTurns(input.transcript_path);
+  // Only engage for substantive sessions
+  if (countToolCalls(raw) < MIN_TOOL_CALLS) return;
+
+  const turns = extractPlainTurns(raw).slice(-CONTEXT_TURNS);
   if (turns.length === 0) return;
 
-  const context = turns
-    .map(({ role, text }) => `${role === "user" ? "User" : "Assistant"}: ${text}`)
-    .join("\n\n");
+  const context = formatTurnsAsContext(turns);
 
   const prompt =
     `You are analyzing a conversation between a user and an AI assistant. ` +
