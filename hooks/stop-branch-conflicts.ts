@@ -2,7 +2,7 @@
 // Stop hook: Block stop if current branch has conflicts with origin/main
 // Checks both GitHub PR merge state (authoritative) and local merge-tree (fallback)
 
-import { git, gh, isGitRepo, hasGhCli, blockStop, skillAdvice, type StopHookInput } from "./hook-utils.ts";
+import { git, gh, isGitRepo, hasGhCli, blockStop, isDefaultBranch, skillAdvice, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -16,7 +16,7 @@ async function main(): Promise<void> {
   if (!branch) return; // detached HEAD
 
   // Skip if on main or master
-  if (branch === "main" || branch === "master") return;
+  if (isDefaultBranch(branch)) return;
 
   // --- GitHub PR merge state check (authoritative) ---
   if (hasGhCli()) {

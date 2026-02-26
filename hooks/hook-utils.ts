@@ -280,6 +280,93 @@ export function skillAdvice(skill: string, withSkill: string, withoutSkill: stri
   return skillExists(skill) ? withSkill : withoutSkill;
 }
 
+// ─── Branch utilities ───────────────────────────────────────────────────
+
+/** True if branch is the default integration branch (main or master). */
+export function isDefaultBranch(branch: string): boolean {
+  return branch === "main" || branch === "master";
+}
+
+// ─── Git status parsing ─────────────────────────────────────────────────
+
+export interface GitStatusCounts {
+  total: number;
+  modified: number;
+  added: number;
+  deleted: number;
+  untracked: number;
+  lines: string[];
+}
+
+/** Parse `git status --porcelain` output into a breakdown of file counts. */
+export function parseGitStatus(porcelain: string): GitStatusCounts {
+  const lines = porcelain.split("\n").filter(Boolean);
+  let modified = 0, added = 0, deleted = 0, untracked = 0;
+  for (const line of lines) {
+    if (line.startsWith(" M")) modified++;
+    else if (line.startsWith("A ")) added++;
+    else if (line.startsWith("D ")) deleted++;
+    else if (line.startsWith("??")) untracked++;
+  }
+  return { total: lines.length, modified, added, deleted, untracked, lines };
+}
+
+// ─── Git ahead/behind ───────────────────────────────────────────────────
+
+/**
+ * Return how many commits the current branch is ahead/behind its upstream,
+ * plus the upstream ref name. Returns null if no upstream is set or counts
+ * cannot be parsed.
+ */
+export async function getGitAheadBehind(
+  cwd: string
+): Promise<{ ahead: number; behind: number; upstream: string } | null> {
+  const upstream = await git(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
+  if (!upstream) return null;
+  const ahead = parseInt(await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd));
+  const behind = parseInt(await git(["rev-list", "--count", "HEAD..@{upstream}"], cwd));
+  if (isNaN(ahead) || isNaN(behind)) return null;
+  return { ahead, behind, upstream };
+}
+
+// ─── Source file classification ─────────────────────────────────────────
+
+/** Source file extensions worth scanning for code issues. */
+export const SOURCE_EXT_RE =
+  /\.(ts|tsx|js|jsx|mjs|cjs|py|rb|go|java|kt|swift|php|cs|cpp|c|rs|vue|svelte)$/;
+
+/** Files that are tests — skip for debug/TODO checks. */
+export const TEST_FILE_RE = /\.test\.|\.spec\.|__tests__|\/test\//;
+
+// ─── Transcript parsing ─────────────────────────────────────────────────
+
+/**
+ * Parse a Claude Code JSONL transcript and return every tool name called by
+ * the assistant, in order. Returns [] if the file is missing or unreadable.
+ */
+export async function extractToolNamesFromTranscript(transcriptPath: string): Promise<string[]> {
+  try {
+    const text = await Bun.file(transcriptPath).text();
+    const toolNames: string[] = [];
+    for (const line of text.split("\n").filter(Boolean)) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry?.type !== "assistant") continue;
+        const content = entry?.message?.content;
+        if (!Array.isArray(content)) continue;
+        for (const block of content) {
+          if (block?.type === "tool_use" && block?.name) {
+            toolNames.push(block.name);
+          }
+        }
+      } catch {}
+    }
+    return toolNames;
+  } catch {
+    return [];
+  }
+}
+
 // ─── Common input types ─────────────────────────────────────────────────
 
 export interface StopHookInput {

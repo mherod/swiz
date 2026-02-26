@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if current branch has unpushed commits
 
-import { git, isGitRepo, blockStop, createSessionTask, skillAdvice, type StopHookInput } from "./hook-utils.ts";
+import { git, isGitRepo, blockStop, createSessionTask, getGitAheadBehind, skillAdvice, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -18,15 +18,10 @@ async function main(): Promise<void> {
   const remoteUrl = await git(["remote", "get-url", "origin"], cwd);
   if (!remoteUrl) return;
 
-  // Must have an upstream tracking branch
-  const upstream = await git(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
-  if (!upstream) return;
+  const aheadBehind = await getGitAheadBehind(cwd);
+  if (!aheadBehind) return;
 
-  const ahead = parseInt(await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd));
-  const behind = parseInt(await git(["rev-list", "--count", "HEAD..@{upstream}"], cwd));
-
-  // If parsing failed, allow stop
-  if (isNaN(ahead) || isNaN(behind)) return;
+  const { ahead, behind, upstream } = aheadBehind;
 
   // Block if behind remote — must pull first
   if (behind > 0) {

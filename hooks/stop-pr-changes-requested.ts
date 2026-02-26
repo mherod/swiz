@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if current branch has CHANGES_REQUESTED reviews
 
-import { git, gh, isGitRepo, isGitHubRemote, hasGhCli, blockStop, skillAdvice, type StopHookInput } from "./hook-utils.ts";
+import { git, gh, isGitRepo, isGitHubRemote, hasGhCli, blockStop, isDefaultBranch, skillAdvice, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -14,7 +14,7 @@ async function main(): Promise<void> {
   if (!(await isGitHubRemote(cwd))) return;
 
   const branch = await git(["branch", "--show-current"], cwd);
-  if (!branch || branch === "main" || branch === "master") return;
+  if (!branch || isDefaultBranch(branch)) return;
 
   // Find PR for current branch
   const prRaw = await gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number,title"], cwd);

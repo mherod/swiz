@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if open PR has empty or placeholder description
 
-import { git, gh, isGitRepo, isGitHubRemote, hasGhCli, blockStop, skillAdvice, type StopHookInput } from "./hook-utils.ts";
+import { git, gh, isGitRepo, isGitHubRemote, hasGhCli, blockStop, isDefaultBranch, skillAdvice, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   if (!(await isGitHubRemote(cwd))) return;
 
   const branch = await git(["branch", "--show-current"], cwd);
-  if (!branch || branch === "main" || branch === "master") return;
+  if (!branch || isDefaultBranch(branch)) return;
 
   // Find open PR for this branch
   const prRaw = await gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number,title,body"], cwd);
