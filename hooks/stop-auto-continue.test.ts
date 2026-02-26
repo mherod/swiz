@@ -290,6 +290,47 @@ describe("stop-auto-continue", () => {
     expect(result.reason).not.toContain("<tool_call>");
   });
 
+  test("rejects response with leading-whitespace XML tag", async () => {
+    const binDir = await createTempDir();
+    await createFakeAgent(binDir, "  <tool_call>read_file</tool_call>");
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+    expect(result.reason).not.toContain("<tool_call>");
+  });
+
+  test("rejects response with XML markup embedded after normal text", async () => {
+    const binDir = await createTempDir();
+    await createFakeAgent(binDir, "Run the tests <tool_call>bash</tool_call>");
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+    expect(result.reason).not.toContain("<tool_call>");
+  });
+
+  test("skips empty lines and returns first non-empty clean line", async () => {
+    const binDir = await createTempDir();
+    await createFakeAgent(binDir, "\n\nRun the full test suite.");
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("Run the full test suite.");
+  });
+
   test("times out slow backend and falls back to generic message", async () => {
     const binDir = await createTempDir();
     await createSlowFakeAgent(binDir, "This should never appear", 30);
