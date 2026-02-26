@@ -1,6 +1,7 @@
 import { join, resolve } from "node:path";
 import { readdir, stat } from "node:fs/promises";
 import type { Command } from "../types.ts";
+import { promptAgent } from "../agent.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -326,29 +327,13 @@ async function generateAutoReply(turns: Turn[]): Promise<void> {
     `Write ONLY the message itself — no prefix, no explanation, no metadata.\n\n` +
     `<conversation>\n${context}\n</conversation>`;
 
-  // Detect available CLI backend (first match wins)
-  const hasAgent = !!Bun.which("agent");
-  const hasClaude = !!Bun.which("claude");
-  const hasGemini = !!Bun.which("gemini");
-
-  if (!hasAgent && !hasClaude && !hasGemini) {
-    console.error(
-      "No AI backend found. Install one of: Cursor Agent (agent), Claude Code (claude), or Gemini CLI (gemini)."
-    );
+  try {
+    const output = await promptAgent(prompt);
+    console.log(output);
+  } catch (err) {
+    console.error(String(err));
     process.exit(1);
   }
-
-  const args: string[] = hasAgent
-    ? ["agent", "--print", "--mode", "ask", "--trust", prompt]
-    : hasClaude
-    ? ["claude", "--print", prompt]
-    : ["gemini", "--prompt", prompt];
-
-  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
-  const output = await new Response(proc.stdout).text();
-  await proc.exited;
-
-  console.log(output.trim());
 }
 
 // ─── Command ─────────────────────────────────────────────────────────────────
