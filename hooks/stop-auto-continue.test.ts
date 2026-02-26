@@ -305,6 +305,35 @@ describe("stop-auto-continue", () => {
     expect(result.reason).not.toContain("\uFF1Ctool_call");
   });
 
+  test("rejects response with zero-width joiner injected between < and tag name", async () => {
+    const binDir = await createTempDir();
+    // U+200D ZWJ between < and tag name would break /<\w/ without stripping
+    await createFakeAgent(binDir, "<\u200Dtool_call>");
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+    expect(result.reason).not.toContain("<\u200Dtool_call>");
+  });
+
+  test("rejects response with RTL override character before markup", async () => {
+    const binDir = await createTempDir();
+    // U+202E RIGHT-TO-LEFT OVERRIDE — ASCII < is still present, already caught
+    await createFakeAgent(binDir, "\u202E<tool_call>");
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+  });
+
   test("rejects response with leading-whitespace XML tag", async () => {
     const binDir = await createTempDir();
     await createFakeAgent(binDir, "  <tool_call>read_file</tool_call>");

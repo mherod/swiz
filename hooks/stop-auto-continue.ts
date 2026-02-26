@@ -26,7 +26,9 @@ function sanitizeResponse(raw: string): string {
   for (const line of raw.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    if (/<\w/.test(trimmed.normalize("NFKC"))) return ""; // tool-call or XML markup — reject
+    // NFKC folds fullwidth ＜→<; strip zero-width format chars to prevent ZWJ injection
+    const normalized = trimmed.normalize("NFKC").replace(/[\u200B-\u200D\u2060\uFEFF]/g, "");
+    if (/<\w/.test(normalized)) return ""; // tool-call or XML markup — reject
     return trimmed;
   }
   return "";
