@@ -93,7 +93,7 @@ function mergeNestedConfig(
     if (!merged[eventName]) merged[eventName] = [];
 
     const timeout = DISPATCH_TIMEOUTS[group.event] ?? 30;
-    const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${group.event}`;
+    const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${group.event} ${eventName}`;
     merged[eventName].push({ hooks: [{ type: "command", command: cmd, timeout }] });
   }
 
@@ -123,7 +123,7 @@ function mergeFlatConfig(
     if (!merged[eventName]) merged[eventName] = [];
 
     const timeout = DISPATCH_TIMEOUTS[group.event] ?? 30;
-    const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${group.event}`;
+    const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${group.event} ${eventName}`;
     merged[eventName].push({ command: cmd, timeout });
   }
 

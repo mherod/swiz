@@ -153,13 +153,16 @@ async function runContext(
 export const dispatchCommand: Command = {
   name: "dispatch",
   description: "Fan out a hook event to all matching scripts (used by agent configs)",
-  usage: "swiz dispatch <event>",
+  usage: "swiz dispatch <event> [agentEventName]",
   async run(args) {
     const canonicalEvent = args[0];
     if (!canonicalEvent) {
-      console.error("Usage: swiz dispatch <event>");
+      console.error("Usage: swiz dispatch <event> [agentEventName]");
       process.exit(1);
     }
+    // args[1] is the agent-translated event name (e.g. "UserPromptSubmit" for Claude Code).
+    // Falls back to canonicalEvent so hookEventName always matches the registering config.
+    const hookEventName = args[1] ?? canonicalEvent;
 
     const payloadStr = await new Response(Bun.stdin).text();
     let payload: Record<string, unknown> = {};
@@ -191,7 +194,7 @@ export const dispatchCommand: Command = {
         break;
       case "sessionStart":
       case "userPromptSubmit":
-        await runContext(matchingGroups, payloadStr, canonicalEvent);
+        await runContext(matchingGroups, payloadStr, hookEventName);
         break;
       default:
         await runBlocking(matchingGroups, payloadStr);
