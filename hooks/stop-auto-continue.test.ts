@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile, chmod } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -498,6 +498,216 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBe("block");
     expect(result.reason).toContain("Run the full test suite.");
+  });
+
+  // ─── Session task context tests ─────────────────────────────────────────────
+
+  /** Creates a fake HOME tree with a tasks dir for "test-session" and returns the home path. */
+  async function setupTasksDir(sessionId = "test-session"): Promise<string> {
+    const fakeHome = await createTempDir();
+    await mkdir(join(fakeHome, ".claude", "tasks", sessionId), { recursive: true });
+    return fakeHome;
+  }
+
+  /** Writes a single task JSON file into the session tasks dir. */
+  async function writeTask(
+    fakeHome: string,
+    id: string,
+    status: string,
+    subject: string,
+    sessionId = "test-session"
+  ): Promise<void> {
+    const tasksDir = join(fakeHome, ".claude", "tasks", sessionId);
+    await writeFile(join(tasksDir, `${id}.json`), JSON.stringify({ id, status, subject }));
+  }
+
+  /** Returns a fake agent binDir that dumps args to a file and outputs a safe suggestion. */
+  async function createArgCapturingAgent(binDir: string): Promise<string> {
+    const argsFile = join(binDir, "captured-args.txt");
+    const script =
+      `#!/bin/sh\n` +
+      `printf '%s\\n' "$@" > '${argsFile}'\n` +
+      `printf '%s' 'Run the tests'\n` +
+      `exit 0\n`;
+    const agentPath = join(binDir, "agent");
+    await writeFile(agentPath, script);
+    await chmod(agentPath, 0o755);
+    return argsFile;
+  }
+
+  test("omits SESSION TASKS section when tasks directory does not exist", async () => {
+    const fakeHome = await createTempDir(); // no .claude/tasks created
+    const binDir = await createTempDir();
+    const argsFile = await createArgCapturingAgent(binDir);
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    });
+
+    const capturedArgs = await Bun.file(argsFile).text();
+    expect(capturedArgs).not.toContain("SESSION TASKS");
+  });
+
+  test("omits SESSION TASKS section when tasks directory is empty", async () => {
+    const fakeHome = await setupTasksDir();
+    const binDir = await createTempDir();
+    const argsFile = await createArgCapturingAgent(binDir);
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    });
+
+    const capturedArgs = await Bun.file(argsFile).text();
+    expect(capturedArgs).not.toContain("SESSION TASKS");
+  });
+
+  test("includes COMPLETED tasks in SESSION TASKS section", async () => {
+    const fakeHome = await setupTasksDir();
+    await writeTask(fakeHome, "1", "completed", "Fix the auth bug");
+    await writeTask(fakeHome, "2", "completed", "Add unit tests");
+    const binDir = await createTempDir();
+    const argsFile = await createArgCapturingAgent(binDir);
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    });
+
+    const capturedArgs = await Bun.file(argsFile).text();
+    expect(capturedArgs).toContain("SESSION TASKS");
+    expect(capturedArgs).toContain("COMPLETED:");
+    expect(capturedArgs).toContain("Fix the auth bug (#1)");
+    expect(capturedArgs).toContain("Add unit tests (#2)");
+  });
+
+  test("includes IN PROGRESS tasks in SESSION TASKS section", async () => {
+    const fakeHome = await setupTasksDir();
+    await writeTask(fakeHome, "3", "in_progress", "Refactor CLI entry");
+    const binDir = await createTempDir();
+    const argsFile = await createArgCapturingAgent(binDir);
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    });
+
+    const capturedArgs = await Bun.file(argsFile).text();
+    expect(capturedArgs).toContain("SESSION TASKS");
+    expect(capturedArgs).toContain("IN PROGRESS:");
+    expect(capturedArgs).toContain("Refactor CLI entry (#3)");
+  });
+
+  test("excludes pending tasks from SESSION TASKS section", async () => {
+    const fakeHome = await setupTasksDir();
+    await writeTask(fakeHome, "1", "completed", "Done task");
+    await writeTask(fakeHome, "2", "pending", "Not started yet");
+    const binDir = await createTempDir();
+    const argsFile = await createArgCapturingAgent(binDir);
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    });
+
+    const capturedArgs = await Bun.file(argsFile).text();
+    expect(capturedArgs).toContain("Done task (#1)");
+    expect(capturedArgs).not.toContain("Not started yet");
+  });
+
+  test("shows both IN PROGRESS and COMPLETED in mixed-status session", async () => {
+    const fakeHome = await setupTasksDir();
+    await writeTask(fakeHome, "1", "completed", "Write tests");
+    await writeTask(fakeHome, "2", "in_progress", "Fix type errors");
+    await writeTask(fakeHome, "3", "pending", "Deploy to prod");
+    const binDir = await createTempDir();
+    const argsFile = await createArgCapturingAgent(binDir);
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    });
+
+    const capturedArgs = await Bun.file(argsFile).text();
+    expect(capturedArgs).toContain("IN PROGRESS:");
+    expect(capturedArgs).toContain("Fix type errors (#2)");
+    expect(capturedArgs).toContain("COMPLETED:");
+    expect(capturedArgs).toContain("Write tests (#1)");
+    expect(capturedArgs).not.toContain("Deploy to prod");
+  });
+
+  test("silently skips malformed JSON task files and shows valid tasks", async () => {
+    const fakeHome = await setupTasksDir();
+    await writeTask(fakeHome, "1", "completed", "Valid task");
+    // Write a malformed JSON file alongside the valid one
+    await writeFile(
+      join(fakeHome, ".claude", "tasks", "test-session", "bad.json"),
+      "{ this is not valid json }"
+    );
+    const binDir = await createTempDir();
+    const argsFile = await createArgCapturingAgent(binDir);
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    });
+
+    const capturedArgs = await Bun.file(argsFile).text();
+    expect(capturedArgs).toContain("Valid task (#1)");
+    // Malformed file should not cause an error message or crash
+    expect(capturedArgs).not.toContain("not valid json");
+  });
+
+  test("silently skips task file with null id", async () => {
+    const fakeHome = await setupTasksDir();
+    await writeTask(fakeHome, "1", "completed", "Real task");
+    // Task with literal null id (as produced by some serialization paths)
+    await writeFile(
+      join(fakeHome, ".claude", "tasks", "test-session", "nullid.json"),
+      JSON.stringify({ id: "null", status: "completed", subject: "Ghost task" })
+    );
+    const binDir = await createTempDir();
+    const argsFile = await createArgCapturingAgent(binDir);
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    });
+
+    const capturedArgs = await Bun.file(argsFile).text();
+    expect(capturedArgs).toContain("Real task (#1)");
+    expect(capturedArgs).not.toContain("Ghost task");
+  });
+
+  test("ignores non-.json files in tasks directory", async () => {
+    const fakeHome = await setupTasksDir();
+    await writeTask(fakeHome, "1", "completed", "Real task");
+    // Audit log and other non-json files should not be read as tasks
+    await writeFile(
+      join(fakeHome, ".claude", "tasks", "test-session", ".audit-log.jsonl"),
+      JSON.stringify({ action: "create", taskId: "99", subject: "Should be ignored" })
+    );
+    const binDir = await createTempDir();
+    const argsFile = await createArgCapturingAgent(binDir);
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    });
+
+    const capturedArgs = await Bun.file(argsFile).text();
+    expect(capturedArgs).toContain("Real task (#1)");
+    expect(capturedArgs).not.toContain("Should be ignored");
   });
 
   test("times out slow backend and falls back to generic message", async () => {
