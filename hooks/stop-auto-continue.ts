@@ -60,26 +60,17 @@ async function main(): Promise<void> {
       `<conversation>\n${context}\n</conversation>`;
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), ATTEMPT_TIMEOUT_MS);
       try {
-        const agentP = promptAgent(prompt, { promptOnly: true, signal: ac.signal });
-        agentP.catch(() => {});
-        const result = await Promise.race([
-          agentP,
-          new Promise<never>((_, reject) => {
-            if (ac.signal.aborted) return reject(new Error("timeout"));
-            ac.signal.addEventListener("abort", () => reject(new Error("timeout")), { once: true });
-          }),
-        ]);
+        const result = await promptAgent(prompt, {
+          promptOnly: true,
+          timeout: ATTEMPT_TIMEOUT_MS,
+        });
         if (result) {
           suggestion = result;
           break;
         }
       } catch {
         // retry (includes timeout / abort)
-      } finally {
-        clearTimeout(timer);
       }
     }
   }

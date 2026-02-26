@@ -37,6 +37,11 @@ export interface PromptAgentOptions {
   promptOnly?: boolean;
   /** When provided, kills the spawned process if the signal aborts. */
   signal?: AbortSignal;
+  /**
+   * Per-call timeout in milliseconds. Creates an internal AbortController
+   * that fires after this many ms. Ignored if `signal` is also provided.
+   */
+  timeout?: number;
 }
 
 /**
@@ -72,16 +77,29 @@ export async function promptAgent(prompt: string, options?: PromptAgentOptions):
 
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
 
-  if (options?.signal) {
+  // Resolve the abort signal — caller-supplied takes precedence; otherwise
+  // create an internal one from timeout if provided.
+  let signal = options?.signal;
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  if (!signal && options?.timeout) {
+    const controller = new AbortController();
+    timeoutHandle = setTimeout(() => controller.abort(), options.timeout).unref();
+    signal = controller.signal;
+  }
+
+  if (signal) {
     const onAbort = () => {
       proc.kill();
       setTimeout(() => proc.kill(9), 2_000).unref();
     };
-    if (options.signal.aborted) {
+    if (signal.aborted) {
       onAbort();
     } else {
-      options.signal.addEventListener("abort", onAbort, { once: true });
-      proc.exited.then(() => options.signal!.removeEventListener("abort", onAbort));
+      signal.addEventListener("abort", onAbort, { once: true });
+      proc.exited.then(() => {
+        signal!.removeEventListener("abort", onAbort);
+        clearTimeout(timeoutHandle);
+      });
     }
   }
 
