@@ -11,6 +11,7 @@ import { dispatchCommand } from "./src/commands/dispatch.ts";
 import { transcriptCommand } from "./src/commands/transcript.ts";
 import { continueCommand } from "./src/commands/continue.ts";
 import { cleanupCommand } from "./src/commands/cleanup.ts";
+import { sessionCommand } from "./src/commands/session.ts";
 
 registerCommand(skillCommand);
 registerCommand(hooksCommand);
@@ -23,5 +24,6 @@ registerCommand(dispatchCommand);
 registerCommand(transcriptCommand);
 registerCommand(continueCommand);
 registerCommand(cleanupCommand);
+registerCommand(sessionCommand);
 
 await run();
