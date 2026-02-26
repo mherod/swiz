@@ -1,4 +1,5 @@
 import { join, dirname } from "node:path";
+import { appendFileSync } from "node:fs";
 import type { Command } from "../types.ts";
 import { manifest, type HookGroup } from "../manifest.ts";
 import {
@@ -12,6 +13,24 @@ import {
 
 const SWIZ_ROOT = dirname(Bun.main);
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks");
+const LOG_PATH = "/tmp/swiz-dispatch.log";
+
+// ─── Debug logger ────────────────────────────────────────────────────────────
+
+function log(msg: string): void {
+  try {
+    appendFileSync(LOG_PATH, msg + "\n");
+  } catch {
+    // Never let logging break dispatch
+  }
+}
+
+function logHeader(event: string, hookEventName: string, toolName?: string, trigger?: string): void {
+  const ts = new Date().toISOString();
+  log(`\n── ${ts} ── ${event} (hookEventName=${hookEventName}) ──`);
+  if (toolName) log(`   tool: ${toolName}`);
+  if (trigger) log(`   trigger: ${trigger}`);
+}
 
 // ─── Cross-agent matcher ─────────────────────────────────────────────────────
 // Agents use different tool names (Bash/Shell/run_shell_command). Match using
@@ -53,20 +72,28 @@ async function runHook(
   const proc = Bun.spawn(cmd, {
     stdin: "pipe",
     stdout: "pipe",
-    stderr: "inherit",
+    stderr: "pipe",
   });
 
   proc.stdin.write(payloadStr);
   proc.stdin.end();
 
   const output = await new Response(proc.stdout).text();
+  const stderr = await new Response(proc.stderr).text();
   await proc.exited;
 
+  const exitCode = proc.exitCode;
   const trimmed = output.trim();
+
+  if (stderr.trim()) log(`   stderr: ${stderr.trim().slice(0, 500)}`);
+  if (exitCode !== 0) log(`   exit=${exitCode}`);
+  if (trimmed) log(`   stdout: ${trimmed.slice(0, 500)}`);
+
   if (!trimmed) return null;
   try {
     return JSON.parse(trimmed) as Record<string, unknown>;
   } catch {
+    log(`   ⚠ invalid JSON: ${trimmed.slice(0, 200)}`);
     return null;
   }
 }
@@ -95,13 +122,17 @@ function extractContext(resp: Record<string, unknown>): string | null {
 async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<void> {
   for (const group of groups) {
     for (const hook of group.hooks) {
+      log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`);
       const resp = await runHook(hook.file, payloadStr);
       if (resp && isDeny(resp)) {
+        log(`   ✗ DENY from ${hook.file}`);
         console.log(JSON.stringify(resp));
         return;
       }
+      log(`   ✓ ${hook.file} (${resp ? "allow" : "no output"})`);
     }
   }
+  log(`   result: all passed`);
 }
 
 /** Stop / PostToolUse: short-circuit and forward the first block.
@@ -110,16 +141,21 @@ async function runBlocking(groups: HookGroup[], payloadStr: string): Promise<voi
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) {
+        log(`   → ${hook.file} [async, fire-and-forget]`);
         runHook(hook.file, payloadStr).catch(() => {});
         continue;
       }
+      log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`);
       const resp = await runHook(hook.file, payloadStr);
       if (resp && isBlock(resp)) {
+        log(`   ✗ BLOCK from ${hook.file}`);
         console.log(JSON.stringify(resp));
         return;
       }
+      log(`   ✓ ${hook.file} (${resp ? "ok" : "no output"})`);
     }
   }
+  log(`   result: all passed`);
 }
 
 /** SessionStart / UserPromptSubmit: run all hooks, merge additionalContext. */
@@ -131,21 +167,33 @@ async function runContext(
   const contexts: string[] = [];
   for (const group of groups) {
     for (const hook of group.hooks) {
+      log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`);
       const resp = await runHook(hook.file, payloadStr);
-      if (!resp) continue;
+      if (!resp) {
+        log(`   ✓ ${hook.file} (no output)`);
+        continue;
+      }
       const ctx = extractContext(resp);
-      if (ctx) contexts.push(ctx);
+      if (ctx) {
+        contexts.push(ctx);
+        log(`   ✓ ${hook.file} (context: ${ctx.slice(0, 100)})`);
+      } else {
+        log(`   ✓ ${hook.file} (no context extracted)`);
+      }
     }
   }
-  if (contexts.length === 0) return;
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: eventName,
-        additionalContext: contexts.join("\n\n"),
-      },
-    })
-  );
+  if (contexts.length === 0) {
+    log(`   result: no contexts to merge`);
+    return;
+  }
+  const output = JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: eventName,
+      additionalContext: contexts.join("\n\n"),
+    },
+  });
+  log(`   result: merged ${contexts.length} context(s), hookEventName=${eventName}`);
+  console.log(output);
 }
 
 // ─── Command ────────────────────────────────────────────────────────────────
@@ -178,9 +226,13 @@ export const dispatchCommand: Command = {
       ? (payload.trigger ?? payload.hook_event_name) as string | undefined
       : undefined;
 
+    logHeader(canonicalEvent, hookEventName, toolName, trigger);
+
     const matchingGroups = manifest.filter(
       (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
     );
+
+    log(`   matched ${matchingGroups.length} group(s) from ${manifest.filter((g) => g.event === canonicalEvent).length} total`);
 
     if (matchingGroups.length === 0) return;
 
