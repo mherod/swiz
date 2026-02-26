@@ -232,6 +232,29 @@ describe("stop-secret-scanner: test file exclusion", () => {
   });
 });
 
+// ─── Findings limit ───────────────────────────────────────────────────────────
+
+describe("stop-secret-scanner: findings collection limit", () => {
+  test("stops scanning after finding 10 secrets (performance limit)", async () => {
+    const dir = await makeTempGitRepo();
+    // Commit 15 secret patterns — hook should stop at 10 and report only those
+    const secrets = [];
+    for (let i = 0; i < 15; i++) {
+      // API_KEY with unique numeric secret values (8+ chars minimum)
+      secrets.push(`const API_KEY = "secret${i.toString().padStart(8, '0')}";`);
+    }
+    await commitFile(dir, "config.ts", secrets.join("\n") + "\n");
+    const result = await runHook(dir);
+    expect(result.blocked).toBe(true);
+    // Should contain reason with "Suspicious lines:" header and multiple findings
+    expect(result.reason).toContain("Suspicious lines:");
+    // Count lines that start with "  " (indented findings) in the reason
+    const lines = result.reason?.split("\n") ?? [];
+    const findingLines = lines.filter(l => l.startsWith("  "));
+    expect(findingLines.length).toBe(10); // Exactly 10 findings reported (limit)
+  });
+});
+
 // ─── Non-git directory ────────────────────────────────────────────────────────
 
 describe("stop-secret-scanner: non-git directory", () => {
