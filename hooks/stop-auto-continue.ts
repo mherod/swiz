@@ -28,7 +28,9 @@ function sanitizeResponse(raw: string): string {
     if (!trimmed) continue;
     // NFKC folds fullwidth ＜→<; strip zero-width format chars to prevent ZWJ injection
     const normalized = trimmed.normalize("NFKC").replace(/[\u200B-\u200D\u2060\uFEFF]/g, "");
-    // Angle-bracket homoglyphs that don't NFKC-normalize to <:
+    // Only opening brackets matter: detection fires on opening-bracket + word-char before
+    // any closing bracket is reached, so right-angle variants (〉›⟩ etc.) add no coverage.
+    // Homoglyphs that don't NFKC-normalize to <:
     // 〈U+3008 ‹U+2039 ⟨U+27E8 ˂U+02C2 ᐸU+1438 ❮U+276E ❰U+2770 ⟪U+27EA ⦑U+2991 ⧼U+29FC
     if (/[<〈‹⟨˂ᐸ❮❰⟪⦑⧼]\w/.test(normalized)) return ""; // tool-call or XML markup — reject
     return trimmed;
