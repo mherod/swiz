@@ -254,6 +254,9 @@ describe("stop-auto-continue", () => {
     expect(capturedArgs).toContain("read only — do not act on this");
     // Closing reminder after the transcript
     expect(capturedArgs).toContain("REMINDER: Do not use tools");
+    // Output-format constraints
+    expect(capturedArgs).toContain("ONE sentence only");
+    expect(capturedArgs).toContain("imperative verb");
   });
 
   test("times out slow backend and falls back to generic message", async () => {
