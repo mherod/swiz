@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-// Stop hook: Suggest a next step by prompting an AI agent with the transcript context.
-// Blocks stop with the suggestion; allows stop on the next attempt (stop_hook_active).
-// Silently allows stop if no AI backend is available or the transcript is too short.
+// Stop hook: Always block stop with an AI-generated next-step suggestion.
+// Falls back to a generic nudge if no AI backend is available or it fails.
+// Only skips for trivial sessions (< MIN_TOOL_CALLS).
 
 import { promptAgent, detectAgentCli } from "../src/agent.ts";
 import { blockStopRaw, type StopHookInput } from "./hook-utils.ts";
@@ -14,15 +14,13 @@ import {
 const MIN_TOOL_CALLS = 5;  // Don't engage for trivial sessions
 const CONTEXT_TURNS = 15;  // Recent turns to send as context
 
+const FALLBACK_SUGGESTION =
+  "Review the session transcript and identify the most important incomplete task or loose end before stopping.";
+
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as StopHookInput;
 
-  // Allow stop on retry — prevents blocking forever after the suggestion is shown
-  if (input.stop_hook_active) return;
-
-  // Need a transcript and an AI backend to work
   if (!input.transcript_path) return;
-  if (!detectAgentCli()) return;
 
   let raw: string;
   try {
@@ -37,24 +35,25 @@ async function main(): Promise<void> {
   const turns = extractPlainTurns(raw).slice(-CONTEXT_TURNS);
   if (turns.length === 0) return;
 
-  const context = formatTurnsAsContext(turns);
+  let suggestion = FALLBACK_SUGGESTION;
 
-  const prompt =
-    `You are analyzing a conversation between a user and an AI assistant. ` +
-    `Based on the conversation below, suggest a single concrete next step the ` +
-    `assistant should take. Be specific and actionable. Start with an imperative ` +
-    `verb (Run, Fix, Add, Check, Verify, Commit, etc.). ` +
-    `Write ONLY the suggestion itself — no prefix, no explanation.\n\n` +
-    `<conversation>\n${context}\n</conversation>`;
+  if (detectAgentCli()) {
+    const context = formatTurnsAsContext(turns);
+    const prompt =
+      `You are analyzing a conversation between a user and an AI assistant. ` +
+      `Based on the conversation below, suggest a single concrete next step the ` +
+      `assistant should take. Be specific and actionable. Start with an imperative ` +
+      `verb (Run, Fix, Add, Check, Verify, Commit, etc.). ` +
+      `Write ONLY the suggestion itself — no prefix, no explanation.\n\n` +
+      `<conversation>\n${context}\n</conversation>`;
 
-  let suggestion: string;
-  try {
-    suggestion = await promptAgent(prompt);
-  } catch {
-    return; // No backend or backend failed — allow stop silently
+    try {
+      const aiSuggestion = await promptAgent(prompt);
+      if (aiSuggestion) suggestion = aiSuggestion;
+    } catch {
+      // AI backend failed — fall through to FALLBACK_SUGGESTION
+    }
   }
-
-  if (!suggestion) return;
 
   blockStopRaw(`Suggested next step: ${suggestion}`);
 }
