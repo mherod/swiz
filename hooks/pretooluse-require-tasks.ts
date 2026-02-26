@@ -5,7 +5,7 @@
 //
 // Pure transcript scan — no sentinel files, no external state, no race conditions.
 
-import { denyPreToolUse as deny, READ_TOOLS, TASK_TOOLS } from "./hook-utils.ts";
+import { denyPreToolUse as deny, extractToolNamesFromTranscript, READ_TOOLS, TASK_TOOLS } from "./hook-utils.ts";
 
 const TOOL_CALL_THRESHOLD = 10;
 const STALENESS_THRESHOLD = 20;
@@ -19,28 +19,10 @@ if (!transcriptPath || !sessionId) process.exit(0);
 
 if (READ_TOOLS.has(toolName)) process.exit(0);
 
-const transcriptFile = Bun.file(transcriptPath);
-if (!(await transcriptFile.exists())) process.exit(0);
+if (!(await Bun.file(transcriptPath).exists())) process.exit(0);
 
 // Parse transcript: extract all assistant tool_use names in order
-const lines = (await transcriptFile.text()).split("\n").filter(Boolean);
-const toolNames: string[] = [];
-
-for (const line of lines) {
-  try {
-    const entry = JSON.parse(line);
-    if (entry?.type !== "assistant") continue;
-    const content = entry?.message?.content;
-    if (!Array.isArray(content)) continue;
-    for (const block of content) {
-      if (block?.type === "tool_use" && block?.name) {
-        toolNames.push(block.name);
-      }
-    }
-  } catch {
-    // skip malformed lines
-  }
-}
+const toolNames = await extractToolNamesFromTranscript(transcriptPath);
 
 const total = toolNames.length;
 if (total < TOOL_CALL_THRESHOLD) process.exit(0);
@@ -48,7 +30,7 @@ if (total < TOOL_CALL_THRESHOLD) process.exit(0);
 // Find index of last task tool call
 let lastTaskIndex = -1;
 for (let i = toolNames.length - 1; i >= 0; i--) {
-  if (TASK_TOOLS.has(toolNames[i])) {
+  if (TASK_TOOLS.has(toolNames[i]!)) {
     lastTaskIndex = i;
     break;
   }

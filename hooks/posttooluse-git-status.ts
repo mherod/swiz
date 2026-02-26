@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // PostToolUse hook: Inject git status context after every tool call
 
-import { git, type ToolHookInput } from "./hook-utils.ts";
+import { git, getGitAheadBehind, parseGitStatus, type ToolHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -17,17 +17,13 @@ async function main(): Promise<void> {
   const branch = (await git(["branch", "--show-current"], cwd)) || "(detached)";
 
   const porcelain = await git(["status", "--porcelain"], cwd);
-  const uncommitted = porcelain ? porcelain.split("\n").length : 0;
-
-  // Remote status
-  const upstream = await git(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
+  const uncommitted = porcelain ? parseGitStatus(porcelain).total : 0;
 
   let status = `[git] branch: ${branch} | uncommitted files: ${uncommitted}`;
 
-  if (upstream) {
-    const ahead = parseInt(await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd)) || 0;
-    const behind = parseInt(await git(["rev-list", "--count", "HEAD..@{upstream}"], cwd)) || 0;
-
+  const aheadBehind = await getGitAheadBehind(cwd);
+  if (aheadBehind) {
+    const { ahead, behind } = aheadBehind;
     if (ahead > 0 && behind > 0) {
       status += ` | diverged: ${ahead} ahead, ${behind} behind`;
     } else if (ahead > 0) {

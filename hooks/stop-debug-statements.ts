@@ -1,12 +1,10 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if debug statements found in recently committed files
 
-import { git, isGitRepo, blockStop, type StopHookInput } from "./hook-utils.ts";
+import { git, isGitRepo, blockStop, SOURCE_EXT_RE, TEST_FILE_RE, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
-const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|py|rb|go|java|kt|swift|php|cs|cpp|c|rs)$/;
-const TEST_FILE_RE = /\.test\.|\.spec\.|__tests__|\/test\//;
 // CLI and hook infrastructure uses console.log as its output channel — not debugging
 const INFRA_FILE_RE = /hooks\/|\/commands\/|\/cli\.|index\.ts$|dispatch\.ts$/;
 

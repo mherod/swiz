@@ -3,42 +3,16 @@
 // Provides countdown hints showing remaining calls until mandatory enforcement
 // Uses transcript scan (no external state) to determine position
 
-import type { ToolHookInput } from "./hook-utils.ts";
+import { extractToolNamesFromTranscript, type ToolHookInput } from "./hook-utils.ts";
 
 export {};
-
-interface TranscriptEntry {
-  type: string;
-  message?: {
-    content?: Array<{ type: string; name?: string }>;
-  };
-}
 
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as ToolHookInput;
   const transcript = input.transcript_path;
   if (!transcript) return;
 
-  const file = Bun.file(transcript);
-  if (!(await file.exists())) return;
-
-  // Parse JSONL transcript
-  const text = await file.text();
-  const lines = text.trim().split("\n");
-
-  const toolNames: string[] = [];
-  for (const line of lines) {
-    try {
-      const entry = JSON.parse(line) as TranscriptEntry;
-      if (entry.type !== "assistant") continue;
-      for (const block of entry.message?.content ?? []) {
-        if (block.type === "tool_use" && block.name) {
-          toolNames.push(block.name);
-        }
-      }
-    } catch {}
-  }
-
+  const toolNames = await extractToolNamesFromTranscript(transcript);
   const total = toolNames.length;
   const TASK_TOOLS = new Set(["TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TodoWrite"]);
   const lastTaskIdx = toolNames.reduce((acc, name, i) => (TASK_TOOLS.has(name) ? i : acc), -1);

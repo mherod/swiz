@@ -4,18 +4,11 @@
 
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { blockStop, type StopHookInput } from "./hook-utils.ts";
+import { blockStop, extractToolNamesFromTranscript, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
 const TOOL_CALL_THRESHOLD = 10;
-
-interface TranscriptEntry {
-  type: string;
-  message?: {
-    content?: Array<{ type: string; name?: string; id?: string }>;
-  };
-}
 
 interface TaskFile {
   id: string;
@@ -31,29 +24,12 @@ interface AuditEntry {
 }
 
 async function countToolCalls(transcriptPath: string): Promise<{ total: number; taskToolUsed: boolean }> {
-  try {
-    const text = await Bun.file(transcriptPath).text();
-    let total = 0;
-    let taskToolUsed = false;
-    const TASK_TOOLS = new Set(["TaskCreate", "TaskUpdate", "TodoWrite"]);
-
-    for (const line of text.trim().split("\n")) {
-      try {
-        const entry = JSON.parse(line) as TranscriptEntry;
-        if (entry.type !== "assistant") continue;
-        for (const block of entry.message?.content ?? []) {
-          if (block.type === "tool_use") {
-            total++;
-            if (block.name && TASK_TOOLS.has(block.name)) taskToolUsed = true;
-          }
-        }
-      } catch {}
-    }
-
-    return { total, taskToolUsed };
-  } catch {
-    return { total: 0, taskToolUsed: false };
-  }
+  const TASK_TOOLS = new Set(["TaskCreate", "TaskUpdate", "TodoWrite"]);
+  const toolNames = await extractToolNamesFromTranscript(transcriptPath);
+  return {
+    total: toolNames.length,
+    taskToolUsed: toolNames.some((n) => TASK_TOOLS.has(n)),
+  };
 }
 
 async function main(): Promise<void> {

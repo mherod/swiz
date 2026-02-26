@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if git repository has uncommitted changes
 
-import { git, isGitRepo, blockStop, createSessionTask, skillAdvice, type StopHookInput } from "./hook-utils.ts";
+import { git, isGitRepo, blockStop, createSessionTask, parseGitStatus, skillAdvice, type StopHookInput } from "./hook-utils.ts";
 
 export {};
 
@@ -14,17 +14,7 @@ async function main(): Promise<void> {
   const porcelain = await git(["status", "--porcelain"], cwd);
   if (!porcelain) return;
 
-  const lines = porcelain.split("\n").filter(Boolean);
-  const total = lines.length;
-
-  // Count files by status
-  let modified = 0, added = 0, deleted = 0, untracked = 0;
-  for (const line of lines) {
-    if (line.startsWith(" M")) modified++;
-    else if (line.startsWith("A ")) added++;
-    else if (line.startsWith("D ")) deleted++;
-    else if (line.startsWith("??")) untracked++;
-  }
+  const { total, modified, added, deleted, untracked, lines } = parseGitStatus(porcelain);
 
   const parts: string[] = [];
   if (modified > 0) parts.push(`${modified} modified`);
