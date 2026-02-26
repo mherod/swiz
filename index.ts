@@ -10,6 +10,7 @@ import { shimCommand } from "./src/commands/shim.ts";
 import { dispatchCommand } from "./src/commands/dispatch.ts";
 import { transcriptCommand } from "./src/commands/transcript.ts";
 import { continueCommand } from "./src/commands/continue.ts";
+import { cleanupCommand } from "./src/commands/cleanup.ts";
 
 registerCommand(skillCommand);
 registerCommand(hooksCommand);
@@ -21,5 +22,6 @@ registerCommand(shimCommand);
 registerCommand(dispatchCommand);
 registerCommand(transcriptCommand);
 registerCommand(continueCommand);
+registerCommand(cleanupCommand);
 
 await run();
