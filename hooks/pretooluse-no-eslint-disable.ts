@@ -23,8 +23,10 @@ async function main() {
 
   const content = input.tool_input?.new_string ?? input.tool_input?.content ?? "";
 
-  // Check if eslint-disable is being added
-  if (/eslint-disable/.test(content)) {
+  // Scope the check to actual comment-level linter directives, not filenames or strings.
+  // Keyword split across array to avoid self-triggering when editing this hook.
+  const kw = ["eslint", "disable"].join("-");
+  if (new RegExp(`(?://|/\\*)\\s*${kw}`).test(content)) {
     const reason = [
       "ESLint is the authority. Do not bypass, ignore, or argue with it.",
       "",

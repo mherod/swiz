@@ -7,6 +7,7 @@ import { uninstallCommand } from "./src/commands/uninstall.ts";
 import { statusCommand } from "./src/commands/status.ts";
 import { tasksCommand } from "./src/commands/tasks.ts";
 import { shimCommand } from "./src/commands/shim.ts";
+import { dispatchCommand } from "./src/commands/dispatch.ts";
 
 registerCommand(skillCommand);
 registerCommand(hooksCommand);
@@ -15,5 +16,6 @@ registerCommand(uninstallCommand);
 registerCommand(statusCommand);
 registerCommand(tasksCommand);
 registerCommand(shimCommand);
+registerCommand(dispatchCommand);
 
 run();

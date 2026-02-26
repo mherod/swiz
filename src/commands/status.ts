@@ -1,7 +1,7 @@
 import { dirname } from "node:path";
 import { join } from "node:path";
 import type { Command } from "../types.ts";
-import { AGENTS, detectInstalledAgents, type AgentDef } from "../agents.ts";
+import { AGENTS, type AgentDef } from "../agents.ts";
 
 const SWIZ_ROOT = dirname(Bun.main);
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks");
@@ -14,19 +14,23 @@ const YELLOW = "\x1b[33m";
 const CYAN = "\x1b[36m";
 const RESET = "\x1b[0m";
 
+function isSwizManaged(cmd: string): boolean {
+  return cmd.includes(HOOKS_DIR) || cmd.includes(join(SWIZ_ROOT, "index.ts"));
+}
+
 function collectSwizCommands(hooks: Record<string, unknown>): Set<string> {
   const cmds = new Set<string>();
   for (const entries of Object.values(hooks)) {
     if (!Array.isArray(entries)) continue;
     for (const entry of entries) {
       const e = entry as Record<string, unknown>;
-      if (typeof e.command === "string" && e.command.includes(HOOKS_DIR)) {
+      if (typeof e.command === "string" && isSwizManaged(e.command)) {
         cmds.add(e.command);
       }
       if (Array.isArray(e.hooks)) {
         for (const h of e.hooks) {
           const hh = h as Record<string, unknown>;
-          if (typeof hh.command === "string" && hh.command.includes(HOOKS_DIR)) {
+          if (typeof hh.command === "string" && isSwizManaged(hh.command)) {
             cmds.add(hh.command);
           }
         }
@@ -98,7 +102,7 @@ async function checkAgent(agent: AgentDef) {
     const hooksObj = hooks as Record<string, unknown>;
     const totalHooks = countAllHooks(hooksObj);
     const swizCmds = collectSwizCommands(hooksObj);
-    const swizCount = swizCmds.length;
+    const swizCount = swizCmds.size;
     const otherCount = totalHooks - swizCount;
 
     if (swizCount > 0) {
@@ -118,10 +122,10 @@ async function checkAgent(agent: AgentDef) {
             list.some(
               (h) =>
                 typeof (h as Record<string, unknown>).command === "string" &&
-                ((h as Record<string, unknown>).command as string).includes(HOOKS_DIR)
+                isSwizManaged((h as Record<string, unknown>).command as string)
             );
           if (Array.isArray(e.hooks) && hasSwiz(e.hooks)) events.add(event);
-          else if (typeof e.command === "string" && (e.command as string).includes(HOOKS_DIR))
+          else if (typeof e.command === "string" && isSwizManaged(e.command))
             events.add(event);
         }
       }

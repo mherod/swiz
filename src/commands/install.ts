@@ -3,11 +3,10 @@ import type { Command } from "../types.ts";
 import {
   AGENTS,
   getAgentByFlag,
-  translateMatcher,
   translateEvent,
-  detectInstalledAgents,
   type AgentDef,
 } from "../agents.ts";
+import { manifest, DISPATCH_TIMEOUTS } from "../manifest.ts";
 
 const SWIZ_ROOT = dirname(Bun.main);
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks");
@@ -21,125 +20,8 @@ const CYAN = "\x1b[36m";
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
 
-// ─── Agent-agnostic hook manifest ───────────────────────────────────────────
-
-interface HookDef {
-  file: string;
-  timeout?: number;
-  async?: boolean;
-}
-
-interface HookGroup {
-  event: string;
-  matcher?: string;
-  hooks: HookDef[];
-}
-
-const manifest: HookGroup[] = [
-  {
-    event: "stop",
-    hooks: [
-      { file: "stop-secret-scanner.sh", timeout: 10 },
-      { file: "stop-debug-statements.sh", timeout: 10 },
-      { file: "stop-large-files.sh", timeout: 10 },
-      { file: "stop-git-status.sh", timeout: 10 },
-      { file: "stop-lockfile-drift.sh", timeout: 10 },
-      { file: "stop-lint-staged.sh", timeout: 30 },
-      { file: "stop-git-push.sh", timeout: 10 },
-      { file: "stop-branch-conflicts.sh", timeout: 10 },
-      { file: "stop-pr-description.sh", timeout: 10 },
-      { file: "stop-pr-changes-requested.sh", timeout: 10 },
-      { file: "stop-github-ci.sh", timeout: 15 },
-      { file: "stop-todo-tracker.sh", timeout: 10 },
-      { file: "stop-changelog-staleness.sh", timeout: 10 },
-      { file: "stop-completion-auditor.sh", timeout: 10 },
-      { file: "stop-personal-repo-issues.ts", timeout: 10 },
-    ],
-  },
-  {
-    event: "preToolUse",
-    matcher: "Task",
-    hooks: [{ file: "pretooluse-no-task-delegation.ts", timeout: 5 }],
-  },
-  {
-    event: "preToolUse",
-    matcher: "TaskCreate",
-    hooks: [{ file: "pretooluse-task-subject-validation.ts", timeout: 5 }],
-  },
-  {
-    event: "preToolUse",
-    matcher: "Edit|Write|Bash",
-    hooks: [{ file: "pretooluse-require-tasks.ts", timeout: 5 }],
-  },
-  {
-    event: "preToolUse",
-    matcher: "Edit|Write|NotebookEdit",
-    hooks: [
-      { file: "pretooluse-json-validation.ts" },
-      { file: "pretooluse-no-direct-deps.ts", timeout: 5 },
-      { file: "pretooluse-no-eslint-disable.ts", timeout: 5 },
-      { file: "pretooluse-eslint-config-strength.ts", timeout: 5 },
-      { file: "pretooluse-no-as-any.ts", timeout: 5 },
-    ],
-  },
-  {
-    event: "preToolUse",
-    matcher: "Bash",
-    hooks: [
-      { file: "pretooluse-banned-commands.ts" },
-      { file: "pretooluse-no-npm.ts" },
-      { file: "pretooluse-long-sleep.ts", timeout: 5 },
-    ],
-  },
-  {
-    event: "postToolUse",
-    hooks: [{ file: "posttooluse-git-status.sh", timeout: 5 }],
-  },
-  {
-    event: "postToolUse",
-    matcher: "TaskCreate",
-    hooks: [{ file: "posttooluse-task-subject-validation.ts", timeout: 5 }],
-  },
-  {
-    event: "postToolUse",
-    matcher: "Bash",
-    hooks: [{ file: "posttooluse-pr-context.ts", timeout: 10 }],
-  },
-  {
-    event: "postToolUse",
-    matcher: "Edit|Write",
-    hooks: [
-      { file: "posttooluse-json-validation.sh" },
-      { file: "posttooluse-test-pairing.sh", timeout: 5 },
-      { file: "posttooluse-task-advisor.sh", timeout: 5 },
-      { file: "posttooluse-prettier-ts.ts", timeout: 5, async: true },
-    ],
-  },
-  {
-    event: "sessionStart",
-    matcher: "startup",
-    hooks: [{ file: "sessionstart-health-snapshot.sh", timeout: 10 }],
-  },
-  {
-    event: "sessionStart",
-    matcher: "compact",
-    hooks: [{ file: "sessionstart-compact-context.sh", timeout: 5 }],
-  },
-  {
-    event: "userPromptSubmit",
-    hooks: [
-      { file: "userpromptsubmit-git-context.sh", timeout: 5 },
-      { file: "userpromptsubmit-task-advisor.sh", timeout: 5 },
-    ],
-  },
-];
-
 // ─── Config generators ──────────────────────────────────────────────────────
-
-function hookCommand(file: string): string {
-  const prefix = file.endsWith(".ts") ? "bun " : "";
-  return `${prefix}${HOOKS_DIR}/${file}`;
-}
+// manifest and DISPATCH_TIMEOUTS imported from ../manifest.ts
 
 // Paths that swiz supersedes — hooks at these locations are replaced by swiz equivalents.
 const LEGACY_HOOK_DIRS = [
@@ -148,7 +30,8 @@ const LEGACY_HOOK_DIRS = [
 ];
 
 function isSwizCommand(cmd: unknown): boolean {
-  return typeof cmd === "string" && cmd.includes(HOOKS_DIR);
+  if (typeof cmd !== "string") return false;
+  return cmd.includes(HOOKS_DIR) || cmd.includes(join(SWIZ_ROOT, "index.ts"));
 }
 
 function isLegacySwizCommand(cmd: unknown): boolean {
@@ -200,25 +83,18 @@ function mergeNestedConfig(
     if (userGroups.length > 0) merged[event] = userGroups;
   }
 
-  // Add swiz hooks
+  // Add one dispatch entry per unique canonical event
+  const seenEvents = new Set<string>();
   for (const group of manifest) {
+    if (seenEvents.has(group.event)) continue;
+    seenEvents.add(group.event);
+
     const eventName = translateEvent(group.event, agent);
     if (!merged[eventName]) merged[eventName] = [];
 
-    const matcher = translateMatcher(group.matcher, agent);
-    const hooks = group.hooks.map((h) => {
-      const entry: Record<string, unknown> = {
-        type: "command",
-        command: hookCommand(h.file),
-      };
-      if (h.timeout) entry.timeout = h.timeout;
-      if (h.async) entry.async = true;
-      return entry;
-    });
-
-    const entry: Record<string, unknown> = { hooks };
-    if (matcher) entry.matcher = matcher;
-    merged[eventName].push(entry);
+    const timeout = DISPATCH_TIMEOUTS[group.event] ?? 30;
+    const cmd = `bun ${join(SWIZ_ROOT, "index.ts")} dispatch ${group.event}`;
+    merged[eventName].push({ hooks: [{ type: "command", command: cmd, timeout }] });
   }
 
   return merged;
@@ -237,21 +113,18 @@ function mergeFlatConfig(
     if (userEntries.length > 0) merged[event] = userEntries;
   }
 
-  // Add swiz hooks
+  // Add one dispatch entry per unique canonical event
+  const seenEvents = new Set<string>();
   for (const group of manifest) {
+    if (seenEvents.has(group.event)) continue;
+    seenEvents.add(group.event);
+
     const eventName = translateEvent(group.event, agent);
     if (!merged[eventName]) merged[eventName] = [];
 
-    const matcher = translateMatcher(group.matcher, agent);
-
-    for (const h of group.hooks) {
-      const entry: Record<string, unknown> = {
-        command: hookCommand(h.file),
-      };
-      if (h.timeout) entry.timeout = h.timeout;
-      if (matcher) entry.matcher = matcher;
-      merged[eventName].push(entry);
-    }
+    const timeout = DISPATCH_TIMEOUTS[group.event] ?? 30;
+    const cmd = `bun ${join(SWIZ_ROOT, "index.ts")} dispatch ${group.event}`;
+    merged[eventName].push({ command: cmd, timeout });
   }
 
   return merged;
@@ -512,16 +385,14 @@ async function installAgent(agent: AgentDef, dryRun: boolean) {
   if (dryRun) {
     const oldCmds = collectCommands(oldHooks);
     const allNewCmds = collectCommands(config);
-    const swizCmds = new Set([...allNewCmds].filter((c) => c.includes(HOOKS_DIR)));
-    const isManaged = (c: string) =>
-      c.includes(HOOKS_DIR) || LEGACY_HOOK_DIRS.some((d) => c.includes(d));
-    const userCmds = new Set([...oldCmds].filter((c) => !isManaged(c)));
+    const swizCmds = new Set([...allNewCmds].filter((c) => isSwizCommand(c)));
+    const userCmds = new Set([...oldCmds].filter((c) => !isManagedCommand(c)));
     const legacyCmds = [...oldCmds].filter((c) =>
       LEGACY_HOOK_DIRS.some((d) => c.includes(d))
     );
 
     const added = [...swizCmds].filter((c) => !oldCmds.has(c));
-    const removed = [...oldCmds].filter((c) => c.includes(HOOKS_DIR) && !swizCmds.has(c));
+    const removed = [...oldCmds].filter((c) => isSwizCommand(c) && !swizCmds.has(c));
     const kept = [...swizCmds].filter((c) => oldCmds.has(c));
 
     if (added.length) {
