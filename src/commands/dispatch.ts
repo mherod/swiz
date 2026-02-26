@@ -214,10 +214,11 @@ export const dispatchCommand: Command = {
 
     const payloadStr = await new Response(Bun.stdin).text();
     let payload: Record<string, unknown> = {};
+    let parseError = false;
     try {
       payload = JSON.parse(payloadStr) as Record<string, unknown>;
     } catch {
-      // Proceed with empty payload — individual hooks handle missing fields
+      parseError = true;
     }
 
     const toolName = (payload.tool_name ?? payload.toolName) as string | undefined;
@@ -227,6 +228,16 @@ export const dispatchCommand: Command = {
       : undefined;
 
     logHeader(canonicalEvent, hookEventName, toolName, trigger);
+    log(`   payload: ${payloadStr.length} bytes${parseError ? " ⚠ INVALID JSON" : ""}`);
+    if (payloadStr.length === 0) {
+      log(`   ⚠ EMPTY STDIN — no payload received from agent`);
+    } else {
+      const keys = Object.keys(payload);
+      log(`   keys: ${keys.join(", ")}`);
+      if (!payload.session_id) log(`   ⚠ missing session_id`);
+      if (!payload.tool_name && !payload.toolName && canonicalEvent !== "sessionStart" && canonicalEvent !== "userPromptSubmit" && canonicalEvent !== "stop")
+        log(`   ⚠ missing tool_name`);
+    }
 
     const matchingGroups = manifest.filter(
       (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
