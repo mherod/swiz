@@ -20,4 +20,4 @@ registerCommand(shimCommand);
 registerCommand(dispatchCommand);
 registerCommand(transcriptCommand);
 
-run();
+await run();

@@ -7,7 +7,7 @@ export function registerCommand(command: Command) {
   commands.set(command.name, command);
 }
 
-function run() {
+async function run() {
   const help = createHelpCommand(commands);
   commands.set("help", help);
 
@@ -26,7 +26,12 @@ function run() {
     process.exit(1);
   }
 
-  return command.run(rest);
+  try {
+    await command.run(rest);
+  } catch (err) {
+    console.error(String(err));
+    process.exit(1);
+  }
 }
 
 export { commands, run };
