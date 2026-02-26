@@ -56,6 +56,11 @@ function cleanEmptyEvents(
 }
 
 async function uninstallAgent(agent: AgentDef, dryRun: boolean) {
+  if (!agent.hooksConfigurable) {
+    console.log(`  ${BOLD}${agent.name}${RESET}: ${DIM}hooks not user-configurable — skipped${RESET}\n`);
+    return;
+  }
+
   const file = Bun.file(agent.settingsPath);
   if (!(await file.exists())) {
     console.log(`  ${BOLD}${agent.name}${RESET}: ${DIM}no settings file${RESET}\n`);

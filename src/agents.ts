@@ -20,7 +20,14 @@ export interface AgentDef {
   toolAliases: Record<string, string>;
   /** Event name map: canonical → agent-specific */
   eventMap: Record<string, string>;
+  /** Whether this agent supports user-configurable hooks via a settings file */
+  hooksConfigurable: boolean;
 }
+
+// ─── Codex hooks status ─────────────────────────────────────────────────────
+// Codex has AfterAgent and AfterToolUse events in its Rust hooks crate, but
+// no user-facing config file for hooks yet (only programmatic Rust hooks).
+// We include it here for tool name mapping and forward compatibility.
 
 export const AGENTS: AgentDef[] = [
   {
@@ -30,6 +37,7 @@ export const AGENTS: AgentDef[] = [
     hooksKey: "hooks",
     configStyle: "nested",
     binary: "claude",
+    hooksConfigurable: true,
     toolAliases: {},
     eventMap: {
       stop: "Stop",
@@ -51,6 +59,7 @@ export const AGENTS: AgentDef[] = [
     wrapsHooks: { version: 1 },
     configStyle: "flat",
     binary: "cursor",
+    hooksConfigurable: true,
     toolAliases: {
       Bash: "Shell",
       Edit: "StrReplace",
@@ -78,6 +87,7 @@ export const AGENTS: AgentDef[] = [
     hooksKey: "hooks",
     configStyle: "nested",
     binary: "gemini",
+    hooksConfigurable: true,
     toolAliases: {
       Bash: "run_shell_command",
       Edit: "replace",
@@ -102,6 +112,36 @@ export const AGENTS: AgentDef[] = [
       subagentStop: "SubagentStop",
     },
   },
+  {
+    id: "codex",
+    name: "Codex CLI",
+    settingsPath: join(HOME, ".codex", "config.toml"),
+    hooksKey: "hooks",
+    configStyle: "nested",
+    binary: "codex",
+    hooksConfigurable: false,
+    toolAliases: {
+      Bash: "shell_command",
+      Edit: "apply_patch",
+      Write: "apply_patch",
+      Read: "read_file",
+      Grep: "grep_files",
+      Glob: "list_dir",
+      Task: "spawn_agent",
+      TaskCreate: "spawn_agent",
+      NotebookEdit: "apply_patch",
+    },
+    eventMap: {
+      stop: "AfterAgent",
+      postToolUse: "AfterToolUse",
+      // Codex does not yet support pre-tool or session hooks
+      preToolUse: "BeforeToolUse",
+      sessionStart: "SessionStart",
+      sessionEnd: "SessionEnd",
+      userPromptSubmit: "BeforeAgent",
+      preCompact: "PreCompress",
+    },
+  },
 ];
 
 export function getAgent(id: string): AgentDef | undefined {
@@ -112,6 +152,9 @@ export function getAgentByFlag(args: string[]): AgentDef[] {
   const explicit = AGENTS.filter((a) => args.includes(`--${a.id}`));
   return explicit.length > 0 ? explicit : AGENTS;
 }
+
+/** Agents that support user-configurable hooks files */
+export const CONFIGURABLE_AGENTS = AGENTS.filter((a) => a.hooksConfigurable);
 
 // ─── Translation helpers ────────────────────────────────────────────────────
 

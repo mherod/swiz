@@ -79,6 +79,12 @@ async function checkAgent(agent: AgentDef) {
 
   console.log(`    Settings: ${GREEN}✓${RESET} ${agent.settingsPath}`);
 
+  if (!agent.hooksConfigurable) {
+    console.log(`    Hooks:    ${YELLOW}not yet user-configurable${RESET} (tool mappings tracked)`);
+    console.log();
+    return;
+  }
+
   try {
     const json = await file.json();
     const hooks = json[agent.hooksKey] ?? json.hooks;
