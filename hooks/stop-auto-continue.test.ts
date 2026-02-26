@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile, chmod } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -10,6 +10,8 @@ interface HookResult {
   reason?: string;
   rawOutput: string;
 }
+
+const BUN_EXE = Bun.which("bun") ?? "bun";
 
 const tempDirs: string[] = [];
 
@@ -48,7 +50,8 @@ async function createFlakyFakeClaude(
   const counterFile = join(binDir, ".call-count");
   const script =
     `#!/bin/sh\n` +
-    `COUNT=$(cat '${counterFile}' 2>/dev/null || echo 0)\n` +
+    `COUNT=0\n` +
+    `if [ -f '${counterFile}' ]; then read COUNT < '${counterFile}'; fi\n` +
     `COUNT=$((COUNT + 1))\n` +
     `printf '%d' $COUNT > '${counterFile}'\n` +
     `if [ "$COUNT" -le ${failCount} ]; then exit 1; fi\n` +
@@ -97,11 +100,14 @@ async function runHook({
     cwd: workDir,
   });
 
-  const proc = Bun.spawn(["bun", "hooks/stop-auto-continue.ts"], {
+  const proc = Bun.spawn([BUN_EXE, "hooks/stop-auto-continue.ts"], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
+    env: {
+      ...process.env,
+      PATH: binDir,
+    },
   });
   proc.stdin.write(payload);
   proc.stdin.end();
@@ -190,10 +196,10 @@ describe("stop-auto-continue", () => {
     });
 
     expect(result.decision).toBe("block");
-    expect(result.reason).toContain("incomplete task or loose end");
+    expect(result.reason).toContain("identify the most critical incomplete task");
   });
 
-  test("allows stop when no AI backend is available", async () => {
+  test("blocks with fallback guidance when no AI backend is available", async () => {
     // binDir has no claude/agent/gemini
     const binDir = await createTempDir();
 
@@ -202,6 +208,7 @@ describe("stop-auto-continue", () => {
       binDir,
     });
 
-    expect(result.decision).toBeUndefined();
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
   });
 });
