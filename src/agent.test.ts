@@ -53,21 +53,6 @@ async function createFakeBinary(
   return argsFile;
 }
 
-/** Creates a fake binary that sleeps then prints output. */
-async function createSlowFakeBinary(
-  binDir: string,
-  name: string,
-  output: string,
-  delaySecs: number,
-): Promise<void> {
-  const script =
-    `#!/bin/sh\nsleep ${delaySecs}\n` +
-    `printf '%s' '${output.replace(/'/g, "'\\''")}'\nexit 0\n`;
-  const path = join(binDir, name);
-  await writeFile(path, script);
-  await chmod(path, 0o755);
-}
-
 async function readCapturedArgs(argsFile: string): Promise<string[]> {
   const text = await Bun.file(argsFile).text();
   return text.trim().split("\n");
