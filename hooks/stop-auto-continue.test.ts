@@ -409,6 +409,56 @@ describe("stop-auto-continue", () => {
     expect(result.reason).not.toContain("\u276Etool_call");
   });
 
+  test("rejects response with small less-than sign ﹤ (U+FE64, NFKC→<)", async () => {
+    const binDir = await createTempDir();
+    await createFakeAgent(binDir, "\uFE64tool_call\uFE65");
+
+    const result = await runHook({ transcriptContent: buildTranscript(10), binDir });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+  });
+
+  test("rejects response with heavy left-pointing angle bracket ❰ (U+2770)", async () => {
+    const binDir = await createTempDir();
+    await createFakeAgent(binDir, "\u2770tool_call\u2771");
+
+    const result = await runHook({ transcriptContent: buildTranscript(10), binDir });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+  });
+
+  test("rejects response with mathematical left double angle bracket ⟪ (U+27EA)", async () => {
+    const binDir = await createTempDir();
+    await createFakeAgent(binDir, "\u27EAtool_call\u27EB");
+
+    const result = await runHook({ transcriptContent: buildTranscript(10), binDir });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+  });
+
+  test("rejects response with left angle bracket with dot ⦑ (U+2991)", async () => {
+    const binDir = await createTempDir();
+    await createFakeAgent(binDir, "\u2991tool_call\u2992");
+
+    const result = await runHook({ transcriptContent: buildTranscript(10), binDir });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+  });
+
+  test("rejects response with left-pointing curved angle bracket ⧼ (U+29FC)", async () => {
+    const binDir = await createTempDir();
+    await createFakeAgent(binDir, "\u29FCtool_call\u29FD");
+
+    const result = await runHook({ transcriptContent: buildTranscript(10), binDir });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+  });
+
   test("rejects response with leading-whitespace XML tag", async () => {
     const binDir = await createTempDir();
     await createFakeAgent(binDir, "  <tool_call>read_file</tool_call>");
