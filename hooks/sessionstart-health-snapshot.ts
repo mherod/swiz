@@ -2,18 +2,77 @@
 // SessionStart hook: Inject project health snapshot as additionalContext
 
 import { git, gh, isGitRepo, isGitHubRemote, hasGhCli, type SessionHookInput } from "./hook-utils.ts";
+import { join } from "node:path";
+import { readFileSync } from "node:fs";
 
 export {};
+
+interface PluginEnvRequirement {
+  plugin: string;
+  envVar: string;
+  fix: string;
+}
+
+const KNOWN_PLUGIN_ENV: PluginEnvRequirement[] = [
+  {
+    plugin: "github@claude-plugins-official",
+    envVar: "GITHUB_PERSONAL_ACCESS_TOKEN",
+    fix: "Run: gh auth token | pbcopy, then add GITHUB_PERSONAL_ACCESS_TOKEN to ~/.claude/settings.json env block",
+  },
+  {
+    plugin: "greptile@claude-plugins-official",
+    envVar: "GREPTILE_API_KEY",
+    fix: "Get a key at https://app.greptile.com and add GREPTILE_API_KEY to ~/.claude/settings.json env block",
+  },
+];
+
+function checkPluginEnv(): string[] {
+  const warnings: string[] = [];
+  const settingsPath = join(process.env.HOME ?? "~", ".claude", "settings.json");
+
+  let enabledPlugins: Record<string, boolean> = {};
+  try {
+    const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    enabledPlugins = settings.enabledPlugins ?? {};
+  } catch {
+    return warnings;
+  }
+
+  for (const req of KNOWN_PLUGIN_ENV) {
+    if (!enabledPlugins[req.plugin]) continue;
+    if (process.env[req.envVar]) continue;
+    warnings.push(`Plugin "${req.plugin}" is enabled but ${req.envVar} is not set. ${req.fix}`);
+  }
+
+  return warnings;
+}
 
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as SessionHookInput;
   const cwd = input.cwd;
   if (!cwd) return;
 
-  if (!(await isGitRepo(cwd))) return;
-  if (!(await isGitHubRemote(cwd))) return;
-
   const parts: string[] = [];
+
+  // Plugin environment health — runs regardless of git context
+  const pluginWarnings = checkPluginEnv();
+  if (pluginWarnings.length > 0) {
+    parts.push(`[ENV] ${pluginWarnings.join(" | ")}`);
+  }
+
+  if (!(await isGitRepo(cwd)) || !(await isGitHubRemote(cwd))) {
+    if (parts.length > 0) {
+      console.log(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: "SessionStart",
+            additionalContext: parts.join(" "),
+          },
+        })
+      );
+    }
+    return;
+  }
 
   // Git status summary
   const branch = await git(["branch", "--show-current"], cwd);
