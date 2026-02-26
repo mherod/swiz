@@ -31,7 +31,7 @@ const LEGACY_HOOK_DIRS = [
 
 function isSwizCommand(cmd: unknown): boolean {
   if (typeof cmd !== "string") return false;
-  return cmd.includes(HOOKS_DIR) || cmd.includes(join(SWIZ_ROOT, "index.ts"));
+  return cmd.includes(HOOKS_DIR) || cmd.includes(join(SWIZ_ROOT, "index.ts")) || /\bswiz\s+dispatch\b/.test(cmd);
 }
 
 function isLegacySwizCommand(cmd: unknown): boolean {
@@ -93,7 +93,7 @@ function mergeNestedConfig(
     if (!merged[eventName]) merged[eventName] = [];
 
     const timeout = DISPATCH_TIMEOUTS[group.event] ?? 30;
-    const cmd = `bun ${join(SWIZ_ROOT, "index.ts")} dispatch ${group.event}`;
+    const cmd = `swiz dispatch ${group.event}`;
     merged[eventName].push({ hooks: [{ type: "command", command: cmd, timeout }] });
   }
 
@@ -123,7 +123,7 @@ function mergeFlatConfig(
     if (!merged[eventName]) merged[eventName] = [];
 
     const timeout = DISPATCH_TIMEOUTS[group.event] ?? 30;
-    const cmd = `bun ${join(SWIZ_ROOT, "index.ts")} dispatch ${group.event}`;
+    const cmd = `swiz dispatch ${group.event}`;
     merged[eventName].push({ command: cmd, timeout });
   }
 
