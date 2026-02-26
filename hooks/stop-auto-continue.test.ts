@@ -211,4 +211,37 @@ describe("stop-auto-continue", () => {
     expect(result.decision).toBe("block");
     expect(result.reason).toContain("identify the most critical incomplete task");
   });
+
+  test("passes --workspace with a temp dir when using agent backend", async () => {
+    const binDir = await createTempDir();
+    const argsFile = join(binDir, "captured-args.txt");
+
+    // Fake `agent` binary that dumps its arguments to a file, then outputs a suggestion
+    const script =
+      `#!/bin/sh\n` +
+      `printf '%s\\n' "$@" > '${argsFile}'\n` +
+      `printf '%s' 'Run the linter'\n` +
+      `exit 0\n`;
+    const agentPath = join(binDir, "agent");
+    await writeFile(agentPath, script);
+    await chmod(agentPath, 0o755);
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("Run the linter");
+
+    // Verify --workspace was passed with a temp directory path
+    const capturedArgs = await Bun.file(argsFile).text();
+    const argLines = capturedArgs.trim().split("\n");
+    const wsIdx = argLines.indexOf("--workspace");
+    expect(wsIdx).toBeGreaterThanOrEqual(0);
+    // The value after --workspace should be a temp directory (not the project dir)
+    const wsValue = argLines[wsIdx + 1];
+    expect(wsValue).toBeDefined();
+    expect(wsValue).not.toContain("Development/swiz");
+  });
 });
