@@ -462,10 +462,11 @@ export const installCommand: Command = {
     const targets = getAgentByFlag(args);
 
     if (!checkBunAvailable()) {
-      console.error(`\n  ${RED}✗ bun is not installed or not on PATH.${RESET}`);
-      console.error(`  swiz hooks require bun to run. Install it first:\n`);
-      console.error(`    curl -fsSL https://bun.sh/install | bash\n`);
-      process.exit(1);
+      throw new Error(
+        `\n  ${RED}✗ bun is not installed or not on PATH.${RESET}\n` +
+        `  swiz hooks require bun to run. Install it first:\n\n` +
+        `    curl -fsSL https://bun.sh/install | bash`
+      );
     }
 
     console.log(`\n  swiz install${dryRun ? " (dry run)" : ""}\n`);
