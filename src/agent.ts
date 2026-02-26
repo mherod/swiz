@@ -17,11 +17,20 @@ export function detectAgentCli(): AgentBackend | null {
   return null;
 }
 
+export interface PromptAgentOptions {
+  /**
+   * Override the workspace directory passed to the Cursor agent backend.
+   * Use this to restrict the agent to a neutral directory (e.g. os.tmpdir())
+   * when the response should be based solely on the prompt content.
+   */
+  workspace?: string;
+}
+
 /**
  * Send a prompt to the first available agent CLI and return the trimmed output.
  * Throws if no backend is found or the process exits non-zero.
  */
-export async function promptAgent(prompt: string): Promise<string> {
+export async function promptAgent(prompt: string, options?: PromptAgentOptions): Promise<string> {
   const backend = detectAgentCli();
   if (!backend) {
     throw new Error(
@@ -31,7 +40,11 @@ export async function promptAgent(prompt: string): Promise<string> {
 
   const args: string[] =
     backend === "agent"
-      ? ["agent", "--print", "--mode", "ask", "--trust", prompt]
+      ? [
+          "agent", "--print", "--mode", "ask", "--trust",
+          ...(options?.workspace ? ["--workspace", options.workspace] : []),
+          prompt,
+        ]
       : backend === "claude"
       ? ["claude", "--print", prompt]
       : ["gemini", "--prompt", prompt];

@@ -3,6 +3,7 @@
 // Retries ferociously (MAX_RETRIES attempts) before falling back to a generic nudge.
 // Only skips for trivial sessions (< MIN_TOOL_CALLS) or when no backend is available.
 
+import { tmpdir } from "node:os";
 import { promptAgent, detectAgentCli } from "../src/agent.ts";
 import { blockStopRaw, type StopHookInput } from "./hook-utils.ts";
 import {
@@ -56,7 +57,7 @@ async function main(): Promise<void> {
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
-        const result = await promptAgent(prompt);
+        const result = await promptAgent(prompt, { workspace: tmpdir() });
         if (result) {
           suggestion = result;
           break;
