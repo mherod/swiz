@@ -11,9 +11,10 @@ import {
   formatTurnsAsContext,
 } from "../src/transcript-utils.ts";
 
-const MIN_TOOL_CALLS = 5;  // Don't engage for trivial sessions
-const CONTEXT_TURNS = 15;  // Recent turns to send as context
+const MIN_TOOL_CALLS = 5;       // Don't engage for trivial sessions
+const CONTEXT_TURNS = 15;       // Recent turns to send as context
 const MAX_RETRIES = 5;
+const ATTEMPT_TIMEOUT_MS = 20_000;  // Per-attempt AI call budget (20s × 5 retries = 100s max)
 
 const FALLBACK_SUGGESTION =
   "Review the session transcript, identify the most critical incomplete task, and complete it autonomously without asking for confirmation.";
@@ -60,13 +61,18 @@ async function main(): Promise<void> {
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
-        const result = await promptAgent(prompt, { promptOnly: true });
+        const result = await Promise.race([
+          promptAgent(prompt, { promptOnly: true }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("timeout")), ATTEMPT_TIMEOUT_MS)
+          ),
+        ]);
         if (result) {
           suggestion = result;
           break;
         }
       } catch {
-        // retry
+        // retry (includes timeout)
       }
     }
   }
