@@ -4,10 +4,19 @@ import type { Command } from "../types.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-interface ContentBlock {
-  type: string;
+interface TextBlock {
+  type: "text";
   text?: string;
 }
+
+interface ToolUseBlock {
+  type: "tool_use";
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
+
+type ContentBlock = TextBlock | ToolUseBlock | { type: string; [key: string]: unknown };
 
 interface TranscriptEntry {
   type: string;
@@ -64,10 +73,41 @@ function extractText(content: string | ContentBlock[] | undefined): string {
   if (!content) return "";
   if (typeof content === "string") return content;
   return content
-    .filter((b) => b.type === "text" && b.text)
+    .filter((b): b is TextBlock => b.type === "text" && !!(b as TextBlock).text)
     .map((b) => b.text!)
     .join("\n")
     .trim();
+}
+
+// ─── Tool-use label formatting ────────────────────────────────────────────────
+
+const TOOL_KEY_PARAM: Record<string, string> = {
+  Read: "file_path",
+  Write: "file_path",
+  Edit: "file_path",
+  Bash: "command",
+  Glob: "pattern",
+  Grep: "pattern",
+  WebFetch: "url",
+  WebSearch: "query",
+};
+
+function formatToolUse(name: string, input: Record<string, unknown>): string {
+  // Task tool: use subagent_type as name, description as param
+  if (name === "Task" && input.subagent_type) {
+    const desc = typeof input.description === "string"
+      ? input.description.slice(0, 70)
+      : "";
+    return `${input.subagent_type}(${desc})`;
+  }
+  const param = TOOL_KEY_PARAM[name];
+  if (param && input[param] !== undefined) {
+    return `${name}(${String(input[param]).slice(0, 70)})`;
+  }
+  // Fallback: first string value in input
+  const firstStr = Object.values(input).find((v) => typeof v === "string");
+  if (firstStr) return `${name}(${String(firstStr).slice(0, 70)})`;
+  return name;
 }
 
 // ─── ANSI helpers ────────────────────────────────────────────────────────────
@@ -76,6 +116,7 @@ const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
 const CYAN = "\x1b[36m";
 const YELLOW = "\x1b[33m";
+const GREEN = "\x1b[32m";
 const RESET = "\x1b[0m";
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
@@ -132,6 +173,43 @@ function renderTurn(
   console.log(wrapped);
 }
 
+function renderAssistantBlocks(entry: TranscriptEntry): boolean {
+  const content = entry.message?.content;
+  if (!content) return false;
+
+  const blocks: ContentBlock[] = typeof content === "string"
+    ? [{ type: "text", text: content }]
+    : content;
+
+  const visible = blocks.filter(
+    (b) =>
+      (b.type === "text" && !!(b as TextBlock).text?.trim()) ||
+      (b.type === "tool_use" && !!(b as ToolUseBlock).name)
+  );
+  if (visible.length === 0) return false;
+
+  const ts = entry.timestamp ? ` ${DIM}${formatTimestamp(entry.timestamp)}${RESET}` : "";
+  console.log(`\n${CYAN}${BOLD}ASSISTANT${RESET}${ts}`);
+
+  const cols = process.stdout.columns ?? 80;
+  const wrapWidth = Math.min(cols - 4, 100);
+
+  for (const block of blocks) {
+    if (block.type === "text") {
+      const text = (block as TextBlock).text?.trim();
+      if (text) console.log(wordWrap(text, wrapWidth, "  "));
+    } else if (block.type === "tool_use") {
+      const b = block as ToolUseBlock;
+      if (b.name) {
+        const label = formatToolUse(b.name, b.input ?? {});
+        console.log(`  ${GREEN}⏺${RESET} ${DIM}${label}${RESET}`);
+      }
+    }
+  }
+
+  return true;
+}
+
 // ─── Main rendering ──────────────────────────────────────────────────────────
 
 async function renderTranscript(sessionPath: string, sessionId: string): Promise<void> {
@@ -161,10 +239,7 @@ async function renderTranscript(sessionPath: string, sessionId: string): Promise
     const msg = entry.message;
     if (!msg) continue;
 
-    const text = extractText(msg.content);
-    if (!text.trim()) continue;
-
-    // Skip hook feedback injected as user messages (they look like stop hook output)
+    // Skip hook feedback injected as user messages
     if (
       entry.type === "user" &&
       typeof msg.content === "string" &&
@@ -174,8 +249,16 @@ async function renderTranscript(sessionPath: string, sessionId: string): Promise
       continue;
     }
 
-    renderTurn(entry.type as "user" | "assistant", text, entry.timestamp);
-    turnCount++;
+    let rendered: boolean;
+    if (entry.type === "assistant") {
+      rendered = renderAssistantBlocks(entry);
+    } else {
+      const text = extractText(msg.content);
+      rendered = !!text.trim();
+      if (rendered) renderTurn("user", text, entry.timestamp);
+    }
+
+    if (rendered) turnCount++;
   }
 
   if (turnCount === 0) {
