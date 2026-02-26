@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 ---
 description: Swiz CLI project guidance — architecture, patterns, and conventions.
 globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
@@ -57,11 +61,37 @@ When adding a hook:
 
 DO NOT hard-code agent-specific event names or tool names in hook scripts. The translation layer handles this.
 
+## Writing Hooks
+
+All hooks should import from `hooks/hook-utils.ts` for shared utilities:
+
+```ts
+import { denyPreToolUse, denyPostToolUse, emitContext, isShellTool, isEditTool } from "./hook-utils.ts";
+```
+
+**Output helpers** — emit polyglot JSON understood by all agents (Claude, Cursor, Gemini, Codex):
+- `denyPreToolUse(reason)` — blocks the tool call (PreToolUse)
+- `denyPostToolUse(reason)` — feeds an error back after tool execution (PostToolUse)
+- `emitContext(eventName, context)` — injects non-blocking context (SessionStart, UserPromptSubmit)
+
+**Cross-agent tool checks** — use these instead of hardcoding `"Bash"` or `"Edit"`:
+- `isShellTool(name)` — matches `Bash`, `Shell`, `run_shell_command`, etc.
+- `isEditTool(name)` — matches `Edit`, `StrReplace`, `replace`, `apply_patch`
+- `isFileEditTool(name)` — edit or write tools
+- `isCodeChangeTool(name)` — edit, write, or notebook tools
+- `isTaskTool(name)` / `isTaskCreateTool(name)` — task management tools
+
+**Package manager detection** — `detectPackageManager()` walks up from CWD to find the lockfile; `detectPkgRunner()` returns the appropriate `bunx`/`npx`/`pnpm dlx` command.
+
+Hook scripts receive a JSON payload on stdin from the agent. TypeScript hooks exit `0` in all cases — the JSON output determines the decision, not the exit code.
+
 ## Task Data
 
 Tasks are stored per-session in `~/.claude/tasks/<session-id>/`. Each task is a JSON file named `<id>.json`. Audit logs go in `.audit-log.jsonl` within the session directory.
 
 Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcript files for `cwd` fields.
+
+`swiz tasks complete <id>` requires `--evidence "text"` — the completion evidence is stored on the task and checked by the stop-completion-auditor hook.
 
 ## Conventions
 
