@@ -58,7 +58,7 @@ Hook scripts emit polyglot JSON that all agents understand — `decision`/`reaso
 
 ### `swiz install`
 
-Deploy all 38 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 39 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks
@@ -140,6 +140,20 @@ Shimmed commands: `grep`, `egrep`, `fgrep`, `find`, `sed`, `awk`, `npm`, `npx`, 
 
 This is the primary workaround for **Cursor CLI**, where only `beforeShellExecution`/`afterShellExecution` events fire — the shim catches everything else at the shell layer.
 
+### `swiz continue`
+
+Resume the most recent Claude Code session with an AI-generated next step. Reads the session transcript, asks an AI backend "what should the assistant do next?", then launches `claude --continue "<suggestion>"` so the agent picks up immediately.
+
+```bash
+swiz continue             # generate suggestion and resume most recent session
+swiz continue --print     # dry run — print the suggestion without resuming
+swiz continue --session <id>  # resume a specific session (by ID prefix)
+```
+
+Uses the same AI backend detection as `stop-auto-continue` (`agent` → `claude` → `gemini`). Exits gracefully if no backend is available.
+
+**The loop**: `stop-auto-continue` blocks stop with a suggestion → user runs `swiz continue` → session resumes with that suggestion as the first user prompt.
+
 ### `swiz tasks [subcommand]`
 
 Session-scoped task management with audit logging.
@@ -155,9 +169,9 @@ swiz tasks complete-all                     # bulk-complete remaining
 
 ## Bundled Hooks
 
-38 hook scripts across 5 event types, all TypeScript, using shared utilities from `hooks/hook-utils.ts` (cross-agent tool equivalence, polyglot output, git/gh helpers, portable skill checking):
+39 hook scripts across 5 event types, all TypeScript, using shared utilities from `hooks/hook-utils.ts` (cross-agent tool equivalence, polyglot output, git/gh helpers, portable skill checking):
 
-### Stop (16)
+### Stop (17)
 
 | Hook | What it does |
 |------|-------------|
@@ -176,6 +190,7 @@ swiz tasks complete-all                     # bulk-complete remaining
 | `stop-changelog-staleness.ts` | Warns if changelog hasn't been updated alongside code changes |
 | `stop-completion-auditor.ts` | Verifies tasks have completion evidence before allowing stop |
 | `stop-personal-repo-issues.ts` | Checks for actionable open issues (skips blocked/upstream) |
+| `stop-auto-continue.ts` | Blocks stop once with an AI-generated "next step" suggestion; respects `stop_hook_active` to allow stop on second attempt |
 | `stop-memory-updater.ts` | Extracts confirmed patterns from transcript to project memory (async, never blocks) |
 
 ### PreToolUse (11)
@@ -230,6 +245,7 @@ swiz/
 │   ├── types.ts              # Command interface
 │   ├── manifest.ts           # Canonical hook manifest (events, matchers, scripts)
 │   ├── agents.ts             # Agent definitions, tool/event translation
+│   ├── agent.ts              # AI backend detection and prompting (agent/claude/gemini)
 │   └── commands/
 │       ├── install.ts        # Deploy hooks with per-agent config generation
 │       ├── uninstall.ts      # Remove swiz hooks, preserve others
@@ -238,12 +254,14 @@ swiz/
 │       ├── skill.ts          # Read and expand skill definitions
 │       ├── tasks.ts          # Session-scoped task management
 │       ├── shim.ts           # Shell shim install/uninstall/status
+│       ├── transcript.ts     # Display session chat history with head/tail/auto-reply
+│       ├── continue.ts       # Resume session with AI-generated next step
 │       └── help.ts           # Usage information
 └── hooks/
     ├── hook-utils.ts         # Shared utilities: tool equivalence, polyglot output, git/gh, skill checking
     ├── shim.sh               # Shell wrapper functions (sourced from profile)
     ├── task-subject-validation.ts  # Shared validation logic
-    └── *.ts                  # 37 hook scripts (all TypeScript)
+    └── *.ts                  # 39 hook scripts (all TypeScript)
 ```
 
 The canonical hook manifest lives in `src/manifest.ts`. Each hook group specifies an event, an optional tool matcher, and a list of scripts. At install time, `agents.ts` translates matchers (`Bash` → `Shell` for Cursor, `Bash` → `run_shell_command` for Gemini) and events (`Stop` → `stop` for Cursor, `Stop` → `AfterAgent` for Gemini), then generates the correct config structure per agent.
