@@ -1,80 +1,72 @@
 #!/usr/bin/env bun
 
-import { spawn } from "bun";
+import { existsSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { isFileEditTool } from "./hook-utils.ts";
 
 interface HookInput {
+  cwd: string;
   tool_name: string;
-  tool_output?: {
-    status?: string;
-    file_path?: string;
-  };
   tool_input?: {
     file_path?: string;
   };
+}
+
+/** Walk up from filePath to find node_modules/.bin/prettier */
+function findPrettier(filePath: string, cwd: string): string | null {
+  // Check project cwd first
+  const cwdBin = join(cwd, "node_modules", ".bin", "prettier");
+  if (existsSync(cwdBin)) return cwdBin;
+
+  // Walk up from file location
+  let dir = dirname(filePath);
+  for (let i = 0; i < 10; i++) {
+    const candidate = join(dir, "node_modules", ".bin", "prettier");
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
 }
 
 async function main() {
   const input: HookInput = await Bun.stdin.json();
 
   const toolName = input.tool_name ?? "";
-  if (!isFileEditTool(toolName)) {
-    process.exit(0);
-  }
+  if (!isFileEditTool(toolName)) process.exit(0);
 
   const filePath = input.tool_input?.file_path ?? "";
-  if (!filePath) {
-    process.exit(0);
-  }
+  if (!filePath) process.exit(0);
 
-  // Only format TypeScript files
-  if (!/\.(ts|tsx)$/.test(filePath)) {
-    process.exit(0);
-  }
+  if (!/\.(ts|tsx)$/.test(filePath)) process.exit(0);
 
-  // Run prettier asynchronously in the background
-  // This is non-blocking and provides feedback via additionalContext
+  const cwd = input.cwd ?? process.cwd();
+  const prettierBin = findPrettier(filePath, cwd);
+
+  // No prettier available — exit silently, no stderr noise
+  if (!prettierBin) process.exit(0);
+
   try {
-    const proc = spawn(["bun", "prettier", "--write", filePath]);
+    const proc = Bun.spawn([prettierBin, "--write", filePath], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    await new Response(proc.stderr).text();
+    await proc.exited;
 
-    // Wait for exit code to determine success
-    const exitCode = await proc.exited;
-
-    const feedback =
-      exitCode === 0
-        ? `Prettier formatted: ${filePath}`
-        : `Prettier skipped: ${filePath}`;
-
-    console.log(
-      JSON.stringify({
+    if (proc.exitCode === 0) {
+      console.log(JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "PostToolUse",
-          additionalContext: feedback,
+          additionalContext: `Prettier formatted: ${filePath}`,
         },
-      })
-    );
-  } catch (error) {
-    // Silently fail if prettier is not available or errors occur
-    // This is a quality-of-life enhancement, not a blocker
-    console.log(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PostToolUse",
-          additionalContext: `Prettier unavailable for ${filePath}`,
-        },
-      })
-    );
+      }));
+    }
+    // Non-zero exit: skip silently (config issue, parse error, etc.)
+  } catch {
+    // Prettier crashed — skip silently
   }
 }
 
-main().catch((e) => {
-  console.error("Hook error:", e);
-  // Don't exit non-zero; this is non-blocking
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-      },
-    })
-  );
-});
+main().catch(() => {});

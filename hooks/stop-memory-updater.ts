@@ -20,6 +20,7 @@ const PROJECTS_DIR = join(HOME, ".claude", "projects");
 // a pattern than to write something wrong to memory.
 
 const DIRECTIVE_RES: Array<{ re: RegExp; prefix: string }> = [
+  // Explicit directives (high confidence)
   { re: /\balways\s+use\b/i, prefix: "DO" },
   { re: /\bnever\s+use\b/i, prefix: "DON'T" },
   { re: /\bdon'?t\s+use\b/i, prefix: "DON'T" },
@@ -32,6 +33,15 @@ const DIRECTIVE_RES: Array<{ re: RegExp; prefix: string }> = [
   { re: /\buse\s+\w+\s+instead\s+of\b/i, prefix: "DO" },
   { re: /\bmake\s+sure\s+(?:to|that)\b/i, prefix: "DO" },
   { re: /\bthe\s+(?:rule|convention)\s+is\b/i, prefix: "" },
+  // Conversational directives (medium confidence)
+  { re: /\bwe\s+should\s+(?:always|never|use|write|keep)\b/i, prefix: "DO" },
+  { re: /\bshouldn'?t\s+(?:use|assume|have|add|include)\b/i, prefix: "DON'T" },
+  { re: /\blet'?s\s+(?:use|switch\s+to|convert|move\s+to)\b/i, prefix: "DO" },
+  { re: /\bthis\s+project\s+uses\b/i, prefix: "DO" },
+  { re: /\bwe\s+use\s+\w+\s+(?:for|in|across)\b/i, prefix: "DO" },
+  { re: /\brather\s+than\b/i, prefix: "DO" },
+  { re: /\binstead\s+(?:of|just)\b/i, prefix: "DO" },
+  { re: /\bgive\s+a\s+gentle\b/i, prefix: "DO" },
 ];
 
 interface Directive {

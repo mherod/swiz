@@ -55,7 +55,7 @@ export const manifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Edit|Write|NotebookEdit",
     hooks: [
-      { file: "pretooluse-json-validation.ts" },
+      { file: "pretooluse-json-validation.ts", timeout: 5 },
       { file: "pretooluse-no-direct-deps.ts", timeout: 5 },
       { file: "pretooluse-no-eslint-disable.ts", timeout: 5 },
       { file: "pretooluse-eslint-config-strength.ts", timeout: 5 },
@@ -66,8 +66,8 @@ export const manifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Bash",
     hooks: [
-      { file: "pretooluse-banned-commands.ts" },
-      { file: "pretooluse-no-npm.ts" },
+      { file: "pretooluse-banned-commands.ts", timeout: 5 },
+      { file: "pretooluse-no-npm.ts", timeout: 5 },
       { file: "pretooluse-long-sleep.ts", timeout: 5 },
     ],
   },
@@ -89,7 +89,7 @@ export const manifest: HookGroup[] = [
     event: "postToolUse",
     matcher: "Edit|Write",
     hooks: [
-      { file: "posttooluse-json-validation.ts" },
+      { file: "posttooluse-json-validation.ts", timeout: 5 },
       { file: "posttooluse-test-pairing.ts", timeout: 5 },
       { file: "posttooluse-task-advisor.ts", timeout: 5 },
       { file: "posttooluse-prettier-ts.ts", timeout: 5, async: true },

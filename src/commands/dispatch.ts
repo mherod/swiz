@@ -61,9 +61,12 @@ function groupMatches(
 
 // ─── Hook execution ──────────────────────────────────────────────────────────
 
+const DEFAULT_TIMEOUT = 10; // seconds
+
 async function runHook(
   file: string,
-  payloadStr: string
+  payloadStr: string,
+  timeoutSec?: number
 ): Promise<Record<string, unknown> | null> {
   const cmd = file.endsWith(".ts")
     ? ["bun", join(HOOKS_DIR, file)]
@@ -78,9 +81,16 @@ async function runHook(
   proc.stdin.write(payloadStr);
   proc.stdin.end();
 
+  const deadline = (timeoutSec ?? DEFAULT_TIMEOUT) * 1000;
+  const timer = setTimeout(() => {
+    log(`   ⏱ TIMEOUT (${timeoutSec ?? DEFAULT_TIMEOUT}s) — killing ${file}`);
+    proc.kill();
+  }, deadline);
+
   const output = await new Response(proc.stdout).text();
   const stderr = await new Response(proc.stderr).text();
   await proc.exited;
+  clearTimeout(timer);
 
   const exitCode = proc.exitCode;
   const trimmed = output.trim();
@@ -137,7 +147,7 @@ async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<v
   for (const group of groups) {
     for (const hook of group.hooks) {
       log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`);
-      const resp = await runHook(hook.file, payloadStr);
+      const resp = await runHook(hook.file, payloadStr, hook.timeout);
       if (resp && isDeny(resp)) {
         log(`   ✗ DENY from ${hook.file}`);
         console.log(JSON.stringify(resp));
@@ -177,7 +187,7 @@ async function runBlocking(groups: HookGroup[], payloadStr: string): Promise<voi
     for (const hook of group.hooks) {
       if (hook.async) {
         log(`   → ${hook.file} [async, fire-and-forget]`);
-        runHook(hook.file, payloadStr).catch(() => {});
+        runHook(hook.file, payloadStr, hook.timeout).catch(() => {});
       }
     }
   }
@@ -186,7 +196,7 @@ async function runBlocking(groups: HookGroup[], payloadStr: string): Promise<voi
     for (const hook of group.hooks) {
       if (hook.async) continue;
       log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`);
-      const resp = await runHook(hook.file, payloadStr);
+      const resp = await runHook(hook.file, payloadStr, hook.timeout);
       if (resp && isBlock(resp)) {
         log(`   ✗ BLOCK from ${hook.file}`);
         console.log(JSON.stringify(resp));
@@ -208,7 +218,7 @@ async function runContext(
   for (const group of groups) {
     for (const hook of group.hooks) {
       log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`);
-      const resp = await runHook(hook.file, payloadStr);
+      const resp = await runHook(hook.file, payloadStr, hook.timeout);
       if (!resp) {
         log(`   ✓ ${hook.file} (no output)`);
         continue;
