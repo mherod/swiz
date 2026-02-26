@@ -23,10 +23,6 @@ async function main(): Promise<void> {
 
   if (!input.transcript_path) return;
 
-  // Escape hatch: if a stop hook already fired once this cycle, let the
-  // session terminate instead of blocking forever.
-  if (input.stop_hook_active) return;
-
   let raw: string;
   try {
     raw = await Bun.file(input.transcript_path).text();
