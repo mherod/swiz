@@ -8,6 +8,9 @@ export {};
 // CLI and hook infrastructure uses console.log as its output channel — not debugging
 const INFRA_FILE_RE = /hooks\/|\/commands\/|\/cli\.|index\.ts$|dispatch\.ts$/;
 
+// Compiled/generated artifacts contain machine-written console calls — not authored debug statements
+const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/;
+
 // Debug patterns per language
 const JS_DEBUG_RE = /\bconsole\.(log|debug|trace|dir|table)\b/;
 const JS_COMMENT_RE = /\/\/.*console\./;
@@ -28,7 +31,7 @@ async function main(): Promise<void> {
   // Filter to source files, excluding tests and infrastructure
   const sourceFiles = changedRaw
     .split("\n")
-    .filter((f) => SOURCE_EXT_RE.test(f) && !TEST_FILE_RE.test(f) && !INFRA_FILE_RE.test(f));
+    .filter((f) => SOURCE_EXT_RE.test(f) && !TEST_FILE_RE.test(f) && !INFRA_FILE_RE.test(f) && !GENERATED_FILE_RE.test(f));
 
   if (sourceFiles.length === 0) return;
 
