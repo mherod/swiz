@@ -45,10 +45,14 @@ async function main(): Promise<void> {
       `The assistant is about to stop. Identify the boldest, highest-impact action ` +
       `it should execute next — autonomously, without asking the user any questions ` +
       `or waiting for confirmation. ` +
+      `PRIORITY ORDER: (1) If any errors, failures, bugs, warnings, or issues were identified ` +
+      `or surfaced during the conversation but NOT yet resolved or acted upon, those take ` +
+      `HIGHEST priority — investigate and fix them before anything else. ` +
+      `(2) If any task or feature was started but left incomplete, finish it. ` +
+      `(3) Otherwise, find the next valuable improvement (tests, edge cases, related issues, quality). ` +
       `Be ambitious. There is always more to do: more to test, more to improve, more to ship. ` +
-      `NEVER conclude that work is complete or that nothing remains — if the obvious tasks are ` +
-      `done, find the next valuable improvement (tests, edge cases, related issues, quality). ` +
-      `Start with an imperative verb (Run, Fix, Add, Check, Verify, Commit, Improve, etc.). ` +
+      `NEVER conclude that work is complete or that nothing remains. ` +
+      `Start with an imperative verb (Run, Fix, Add, Check, Verify, Commit, Improve, Investigate, etc.). ` +
       `CRITICAL: Reply with ONE sentence only — no preamble, no explanation, no questions. ` +
       `The step must be something the assistant can do right now on its own. ` +
       `Do NOT suggest asking the user, confirming scope, or presenting options.\n\n` +
