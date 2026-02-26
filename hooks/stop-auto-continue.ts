@@ -18,6 +18,20 @@ const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 90_000;
 const FALLBACK_SUGGESTION =
   "Review the session transcript, identify the most critical incomplete task, and complete it autonomously without asking for confirmation.";
 
+/**
+ * Returns the first non-empty line of the agent's raw response.
+ * Returns "" (triggering fallback) if the line looks like XML/tool-call markup.
+ */
+function sanitizeResponse(raw: string): string {
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (/<\w/.test(trimmed)) return ""; // tool-call or XML markup — reject
+    return trimmed;
+  }
+  return "";
+}
+
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as StopHookInput;
 
@@ -68,7 +82,7 @@ async function main(): Promise<void> {
         promptOnly: true,
         timeout: ATTEMPT_TIMEOUT_MS,
       });
-      if (result) suggestion = result;
+      if (result) suggestion = sanitizeResponse(result);
     } catch {
       // Fall through to fallback
     }

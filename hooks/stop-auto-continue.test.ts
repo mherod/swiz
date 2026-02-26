@@ -259,6 +259,37 @@ describe("stop-auto-continue", () => {
     expect(capturedArgs).toContain("imperative verb");
   });
 
+  test("truncates multi-line response to first non-empty line", async () => {
+    const binDir = await createTempDir();
+    // Agent returns a preamble line then the real suggestion
+    await createFakeAgent(binDir, "I will now analyze the transcript.\nRun the full test suite.");
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    });
+
+    expect(result.decision).toBe("block");
+    // Only the first line should appear
+    expect(result.reason).toContain("I will now analyze the transcript.");
+    expect(result.reason).not.toContain("Run the full test suite.");
+  });
+
+  test("falls back to generic message when agent response contains tool-call markup", async () => {
+    const binDir = await createTempDir();
+    // Agent returns what looks like XML/tool-call markup on the first line
+    await createFakeAgent(binDir, "<tool_call>read_file</tool_call>");
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+    expect(result.reason).not.toContain("<tool_call>");
+  });
+
   test("times out slow backend and falls back to generic message", async () => {
     const binDir = await createTempDir();
     await createSlowFakeAgent(binDir, "This should never appear", 30);
