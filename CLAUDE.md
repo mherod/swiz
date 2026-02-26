@@ -69,6 +69,8 @@ All hooks are TypeScript and import from `hooks/hook-utils.ts` for shared utilit
 - `denyPostToolUse(reason)` — feeds an error back after tool execution (PostToolUse)
 - `emitContext(eventName, context)` — injects non-blocking context (SessionStart, UserPromptSubmit)
 
+All output helpers return `never` and call `process.exit(0)` after writing JSON. This is load-bearing: `dispatch.ts` reads a hook's entire stdout and calls `JSON.parse()` once on it. Any output after the JSON corrupts the parse silently. DO NOT write anything to stdout after calling any output helper.
+
 **Stop hook helpers:**
 - `blockStop(reason)` — emits block decision with ACTION REQUIRED footer and exits
 - `blockStopRaw(reason)` — emits block decision without footer (caller controls full reason)
@@ -101,6 +103,23 @@ Tasks are stored per-session in `~/.claude/tasks/<session-id>/`. Each task is a 
 Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcript files for `cwd` fields.
 
 `swiz tasks complete <id>` requires `--evidence "text"` — the completion evidence is stored on the task and checked by the stop-completion-auditor hook.
+
+## CLI Error Handling
+
+Commands in `src/commands/` must throw errors instead of calling `process.exit(1)`. `process.exit` terminates the process immediately, bypassing `finally` blocks and dropping any pending async work.
+
+```ts
+// DO
+throw new Error("No session found. Use --all-projects to see all.");
+
+// DON'T
+console.error("No session found.");
+process.exit(1);
+```
+
+The top-level handler in `src/cli.ts` catches thrown errors and sets `process.exitCode = 1`, letting the event loop drain naturally. The pass-through in `src/commands/continue.ts` uses `process.exitCode = proc.exitCode ?? 0; return` for the same reason.
+
+Hook scripts (`hooks/*.ts`) are the exception — their `process.exit(0)` calls are intentional and must stay.
 
 ## Conventions
 
