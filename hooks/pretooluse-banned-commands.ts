@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 // PreToolUse hook: Block banned Bash commands and guide to safe alternatives.
+// Rules with severity "warn" allow the command through with a gentle nudge.
+// Rules with severity "deny" (default) block the command entirely.
 
 import { denyPreToolUse, isShellTool, detectRuntime, detectPackageManager, skillExists } from "./hook-utils.ts";
 
@@ -10,21 +12,18 @@ interface Rule {
   /** Returns true if this rule matches the command. */
   match: (command: string) => boolean;
   message: string;
+  /** "deny" blocks the command. "warn" allows it with a hint. Default: "deny". */
+  severity?: "deny" | "warn";
 }
 
 const RULES: Rule[] = [
   {
     // grep as a command: at start of line or directly after a pipe (not inside quoted strings)
     match: (c) => /(?:^|\|\s*)grep\s/.test(c),
+    severity: "warn",
     message: [
-      "Use `rg` (ripgrep) instead of `grep`. This is a project convention.",
-      "",
-      "rg is faster, respects .gitignore, and has better defaults:",
-      "  • rg 'pattern'              — search recursively in current directory",
-      "  • rg 'pattern' path/        — search in specific path",
-      "  • rg -l 'pattern'           — list matching files only",
-      "  • rg --type ts 'pattern'    — filter by file type",
-      "  • Use the Grep tool         — preferred for codebase searches in Claude",
+      "Tip: prefer `rg` (ripgrep) over `grep` — it's faster and respects .gitignore.",
+      "  rg 'pattern'  |  rg -l 'pattern'  |  rg --type ts 'pattern'",
     ].join("\n"),
   },
   {
@@ -41,13 +40,10 @@ const RULES: Rule[] = [
   },
   {
     match: (c) => /(?:^|[|;&])\s*find\s/.test(c),
+    severity: "warn",
     message: [
-      "Do not use `find`. It is slow and does not respect .gitignore.",
-      "",
-      "Instead, use one of these faster alternatives:",
-      "  • fd 'pattern'              — fast, respects .gitignore",
-      "  • fd -e ts                  — find files by extension",
-      "  • Glob tool                 — preferred for codebase file discovery",
+      "Tip: prefer `fd` or the Glob tool over `find` — faster and respects .gitignore.",
+      "  fd 'pattern'  |  fd -e ts  |  Glob tool for codebase file discovery",
     ].join("\n"),
   },
   {
@@ -235,8 +231,25 @@ if (!isShellTool(input?.tool_name ?? "")) process.exit(0);
 
 const command: string = input?.tool_input?.command ?? "";
 
+const warnings: string[] = [];
+
 for (const rule of RULES) {
-  if (rule.match(command)) {
+  if (!rule.match(command)) continue;
+
+  if (rule.severity === "warn") {
+    warnings.push(rule.message);
+  } else {
     denyPreToolUse(rule.message);
   }
+}
+
+// Emit collected warnings as allow-with-hint (doesn't block the command)
+if (warnings.length > 0) {
+  console.log(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      permissionDecisionReason: warnings.join("\n\n"),
+    },
+  }));
 }

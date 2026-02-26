@@ -106,6 +106,19 @@ function isDeny(resp: Record<string, unknown>): boolean {
   return hso?.permissionDecision === "deny";
 }
 
+function isAllowWithReason(resp: Record<string, unknown>): boolean {
+  const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined;
+  return hso?.permissionDecision === "allow" && typeof hso?.permissionDecisionReason === "string";
+}
+
+function extractAllowReason(resp: Record<string, unknown>): string | null {
+  const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined;
+  if (hso?.permissionDecision === "allow" && typeof hso?.permissionDecisionReason === "string") {
+    return hso.permissionDecisionReason as string;
+  }
+  return null;
+}
+
 function isBlock(resp: Record<string, unknown>): boolean {
   return resp.decision === "block";
 }
@@ -118,8 +131,9 @@ function extractContext(resp: Record<string, unknown>): string | null {
 
 // ─── Dispatch strategies ─────────────────────────────────────────────────────
 
-/** PreToolUse: short-circuit and forward the first deny. */
+/** PreToolUse: short-circuit on first deny; collect and merge allow-with-reason hints. */
 async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<void> {
+  const hints: string[] = [];
   for (const group of groups) {
     for (const hook of group.hooks) {
       log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`);
@@ -129,8 +143,28 @@ async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<v
         console.log(JSON.stringify(resp));
         return;
       }
+      if (resp && isAllowWithReason(resp)) {
+        const reason = extractAllowReason(resp);
+        if (reason) {
+          hints.push(reason);
+          log(`   ~ ${hook.file} (hint: ${reason.slice(0, 100)})`);
+          continue;
+        }
+      }
       log(`   ✓ ${hook.file} (${resp ? "allow" : "no output"})`);
     }
+  }
+  // Forward collected hints as a single allow-with-reason response
+  if (hints.length > 0) {
+    log(`   result: passed with ${hints.length} hint(s)`);
+    console.log(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+        permissionDecisionReason: hints.join("\n\n"),
+      },
+    }));
+    return;
   }
   log(`   result: all passed`);
 }
