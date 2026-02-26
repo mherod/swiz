@@ -100,6 +100,41 @@ export interface PlainTurn {
   text: string;
 }
 
+function toolCallLabel(block: { name?: string; input?: Record<string, unknown> }): string {
+  const name = block.name ?? "unknown";
+  const input = block.input;
+  if (!input) return name;
+
+  const pathVal = input.path ?? input.file_path;
+  if (typeof pathVal === "string") return `${name}(${pathVal})`;
+
+  if (typeof input.command === "string") {
+    const cmd = input.command.length > 80
+      ? input.command.slice(0, 77) + "..."
+      : input.command;
+    return `${name}(${cmd})`;
+  }
+
+  if (typeof input.pattern === "string") return `${name}(${input.pattern})`;
+  if (typeof input.glob_pattern === "string") return `${name}(${input.glob_pattern})`;
+  if (typeof input.query === "string") {
+    const q = input.query.length > 60
+      ? input.query.slice(0, 57) + "..."
+      : input.query;
+    return `${name}(${q})`;
+  }
+
+  return name;
+}
+
+function summarizeToolCalls(content: unknown[]): string {
+  const calls = content
+    .filter((b: any) => b?.type === "tool_use" && b?.name)
+    .map((b: any) => toolCallLabel(b));
+  if (calls.length === 0) return "";
+  return `[Tools: ${calls.join(", ")}]`;
+}
+
 export function extractPlainTurns(jsonlText: string): PlainTurn[] {
   const turns: PlainTurn[] = [];
 
@@ -124,6 +159,9 @@ export function extractPlainTurns(jsonlText: string): PlainTurn[] {
           )
           .map((b: { text?: string }) => b.text!)
           .join("\n");
+
+        const toolSummary = summarizeToolCalls(content);
+        if (toolSummary) text = text ? `${text}\n${toolSummary}` : toolSummary;
       } else {
         continue;
       }
