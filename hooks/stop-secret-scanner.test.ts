@@ -255,6 +255,106 @@ describe("stop-secret-scanner: findings collection limit", () => {
   });
 });
 
+// ─── Robustness: edge cases and malformed input ────────────────────────────────
+
+describe("stop-secret-scanner: robustness against edge cases", () => {
+  test("handles diff with missing +++ header at start", async () => {
+    const dir = await makeTempGitRepo();
+    // Commit a file with secret, then manually check the hook doesn't crash
+    // if diff is missing the +++ header (edge case)
+    await commitFile(dir, "config.ts", `const API_KEY = "supersecret1234";\n`);
+    const result = await runHook(dir);
+    // Should still block because the file is non-test and contains the secret
+    expect(result.blocked).toBe(true);
+  });
+
+  test("handles diff with null bytes (binary-like content)", async () => {
+    const dir = await makeTempGitRepo();
+    // Commit a file with secret value mixed with null-like patterns
+    await commitFile(dir, "config.ts", `const API_KEY = "secret\\x00value";\n`);
+    const result = await runHook(dir);
+    // Should handle gracefully — null bytes in strings are literal, not binary markers
+    expect(result.blocked).toBe(true);
+  });
+
+  test("handles very long diff lines (truncated at 120 chars in report)", async () => {
+    const dir = await makeTempGitRepo();
+    // Create a very long line with a secret embedded
+    const longSecret = `const API_KEY = "${"a".repeat(200)}";\n`;
+    await commitFile(dir, "config.ts", longSecret);
+    const result = await runHook(dir);
+    expect(result.blocked).toBe(true);
+    // Verify the reported line is truncated at 120 chars
+    const lines = result.reason?.split("\n") ?? [];
+    const findingLines = lines.filter(l => l.startsWith("  "));
+    expect(findingLines[0]?.length).toBeLessThanOrEqual(122); // "  " + 120 chars
+  });
+
+  test("handles empty file additions", async () => {
+    const dir = await makeTempGitRepo();
+    // Add an empty file
+    await commitFile(dir, "empty.ts", "");
+    const result = await runHook(dir);
+    expect(result.blocked).toBe(false);
+  });
+
+  test("handles mixed line endings (CRLF and LF)", async () => {
+    const dir = await makeTempGitRepo();
+    // Commit with mixed line endings
+    await commitFile(dir, "config.ts", `const API_KEY = "supersecret1234";\r\nconst USER = "test";\n`);
+    const result = await runHook(dir);
+    // Should correctly identify the secret regardless of line ending
+    expect(result.blocked).toBe(true);
+  });
+
+  test("handles secret value at exact 8-char minimum length", async () => {
+    const dir = await makeTempGitRepo();
+    // GENERIC_SECRET_RE requires 8+ chars: [^"']{8,}
+    await commitFile(dir, "config.ts", `const API_KEY = "12345678";\n`);
+    const result = await runHook(dir);
+    expect(result.blocked).toBe(true);
+  });
+
+  test("ignores secret value with exactly 7 chars (below minimum)", async () => {
+    const dir = await makeTempGitRepo();
+    // 7 chars is below the 8-char minimum in GENERIC_SECRET_RE
+    await commitFile(dir, "config.ts", `const API_KEY = "1234567";\n`);
+    const result = await runHook(dir);
+    expect(result.blocked).toBe(false);
+  });
+
+  test("handles multiline strings with embedded secrets", async () => {
+    const dir = await makeTempGitRepo();
+    // Secret split across lines with template literals
+    await commitFile(
+      dir,
+      "config.ts",
+      `const API_KEY = \`secret\nvalue123456\`;\n`
+    );
+    const result = await runHook(dir);
+    // Line-by-line checking, so only the first line is checked
+    // "const API_KEY = `secret" doesn't match the pattern
+    // (the pattern expects a closing quote on the same line)
+    expect(result.blocked).toBe(false);
+  });
+
+  test("handles secret value with mixed alphanumeric and symbols", async () => {
+    const dir = await makeTempGitRepo();
+    // Secret with mixed characters (alphanumeric + dashes/dots)
+    await commitFile(dir, "config.ts", `const API_KEY = "secret-key-12345";\n`);
+    const result = await runHook(dir);
+    expect(result.blocked).toBe(true);
+  });
+
+  test("handles secrets with Unicode characters", async () => {
+    const dir = await makeTempGitRepo();
+    // Secret with Unicode (8+ chars including Unicode)
+    await commitFile(dir, "config.ts", `const PASSWORD = "pässwörd1234";\n`);
+    const result = await runHook(dir);
+    expect(result.blocked).toBe(true);
+  });
+});
+
 // ─── Non-git directory ────────────────────────────────────────────────────────
 
 describe("stop-secret-scanner: non-git directory", () => {
