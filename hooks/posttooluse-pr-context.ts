@@ -86,7 +86,7 @@ if (pr.body) {
 }
 
 if (pr.comments?.length) {
-  const last = pr.comments[pr.comments.length - 1];
+  const last = pr.comments[pr.comments.length - 1]!;
   const who = last.author?.login ?? "unknown";
   const when = last.createdAt ?? "";
   const text = last.body ?? "";

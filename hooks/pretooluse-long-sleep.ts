@@ -17,7 +17,7 @@ async function main() {
   // Detect sleep commands with durations >= 30 seconds
   const sleepMatch = command.match(/sleep\s+(\d+)/);
   if (sleepMatch) {
-    const duration = parseInt(sleepMatch[1], 10);
+    const duration = parseInt(sleepMatch[1] ?? "0", 10);
 
     if (duration >= 30) {
       const reason = [

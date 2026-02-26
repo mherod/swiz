@@ -15,7 +15,7 @@ export type DetectionResult = CompoundResult | CompoundMatch;
 /** Extract the leading verb from a subject, e.g. "Fix" from "Fix A and B". */
 function extractVerb(s: string): string | null {
   const m = s.match(/^([A-Z][a-z]*)(?:\s|$)/);
-  return m ? m[1] : null;
+  return m ? (m[1] ?? null) : null;
 }
 
 // Primary imperative verbs that signal independent deliverable tasks.
@@ -75,7 +75,7 @@ export function detect(s: string): DetectionResult {
       // (bare already has the verb stripped). Find the longest trailing suffix of the
       // first part whose length is ≤ the max trailing-item length, then use everything
       // before it as the shared stem.
-      const firstPart = parts[0].trim();
+      const firstPart = (parts[0] ?? "").trim();
       const firstTokens = firstPart.split(/\s+/);
       const maxSuffixLen = Math.max(...parts.slice(1).map((p) => p.trim().length));
 
@@ -117,7 +117,7 @@ export function detect(s: string): DetectionResult {
     // Detect shared trailing object: leading parts are bare action verbs (1-2 words),
     // and only the last part carries the object. E.g. "Review, approve, and merge the PR"
     // → append the object from the last item to each bare-verb part.
-    const lastPart = parts[parts.length - 1].trim();
+    const lastPart = (parts[parts.length - 1] ?? "").trim();
     const lastVerbMatch = lastPart.match(ACTION_VERBS);
     if (lastVerbMatch) {
       const lastVerb = lastVerbMatch[0];

@@ -119,7 +119,7 @@ const target = CMD[PM];
 const m = command.match(/(?:^|[|;&])\s*(npm|npx|yarn|pnpm|pnpx|bunx?)\s*(\S*)(.*?)(?=[|;&]|$)/);
 if (!m) process.exit(0);
 
-const invoked = m[1].toLowerCase();
+const invoked = (m[1] ?? "").toLowerCase();
 const subcmd = m[2]?.toLowerCase() ?? "";
 const rest = m[3]?.trim() ?? "";
 
