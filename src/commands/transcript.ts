@@ -210,23 +210,15 @@ function renderAssistantBlocks(entry: TranscriptEntry): boolean {
   return true;
 }
 
-// ─── Main rendering ──────────────────────────────────────────────────────────
+// ─── Turn collection ─────────────────────────────────────────────────────────
 
-async function renderTranscript(sessionPath: string, sessionId: string): Promise<void> {
-  const file = Bun.file(sessionPath);
-  if (!(await file.exists())) {
-    console.error(`Transcript not found: ${sessionPath}`);
-    process.exit(1);
-  }
+interface Turn {
+  entry: TranscriptEntry;
+  role: "user" | "assistant";
+}
 
-  const text = await file.text();
-  const lines = text.split("\n").filter(Boolean);
-
-  console.log(
-    `\n${DIM}Session: ${sessionId}${RESET}\n${DIM}${"─".repeat(60)}${RESET}`
-  );
-
-  let turnCount = 0;
+function collectTurns(lines: string[]): Turn[] {
+  const turns: Turn[] = [];
   for (const line of lines) {
     let entry: TranscriptEntry;
     try {
@@ -249,19 +241,63 @@ async function renderTranscript(sessionPath: string, sessionId: string): Promise
       continue;
     }
 
-    let rendered: boolean;
+    // Skip turns that would render nothing
     if (entry.type === "assistant") {
-      rendered = renderAssistantBlocks(entry);
+      const content = entry.message?.content;
+      const blocks: ContentBlock[] = typeof content === "string"
+        ? [{ type: "text", text: content }]
+        : (content ?? []);
+      const hasVisible = blocks.some(
+        (b) =>
+          (b.type === "text" && !!(b as TextBlock).text?.trim()) ||
+          (b.type === "tool_use" && !!(b as ToolUseBlock).name)
+      );
+      if (!hasVisible) continue;
     } else {
-      const text = extractText(msg.content);
-      rendered = !!text.trim();
-      if (rendered) renderTurn("user", text, entry.timestamp);
+      if (!extractText(msg.content).trim()) continue;
     }
 
-    if (rendered) turnCount++;
+    turns.push({ entry, role: entry.type as "user" | "assistant" });
+  }
+  return turns;
+}
+
+// ─── Main rendering ──────────────────────────────────────────────────────────
+
+async function renderTranscript(
+  sessionPath: string,
+  sessionId: string,
+  opts: { head?: number; tail?: number } = {}
+): Promise<void> {
+  const file = Bun.file(sessionPath);
+  if (!(await file.exists())) {
+    console.error(`Transcript not found: ${sessionPath}`);
+    process.exit(1);
   }
 
-  if (turnCount === 0) {
+  const text = await file.text();
+  const lines = text.split("\n").filter(Boolean);
+  let turns = collectTurns(lines);
+
+  if (opts.tail !== undefined) {
+    turns = turns.slice(-opts.tail);
+  } else if (opts.head !== undefined) {
+    turns = turns.slice(0, opts.head);
+  }
+
+  console.log(
+    `\n${DIM}Session: ${sessionId}${RESET}\n${DIM}${"─".repeat(60)}${RESET}`
+  );
+
+  for (const { entry, role } of turns) {
+    if (role === "assistant") {
+      renderAssistantBlocks(entry);
+    } else {
+      renderTurn("user", extractText(entry.message?.content), entry.timestamp);
+    }
+  }
+
+  if (turns.length === 0) {
     console.log(`\n  ${DIM}(no conversation turns found)${RESET}\n`);
   } else {
     console.log(`\n${DIM}${"─".repeat(60)}${RESET}\n`);
@@ -273,7 +309,7 @@ async function renderTranscript(sessionPath: string, sessionId: string): Promise
 export const transcriptCommand: Command = {
   name: "transcript",
   description: "Display Agent-User chat history for the current project",
-  usage: "swiz transcript [--session <id>] [--dir <path>] [--list]",
+  usage: "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N]",
   async run(args) {
     const HOME = process.env.HOME ?? "~";
     const PROJECTS_DIR = join(HOME, ".claude", "projects");
@@ -282,6 +318,8 @@ export const transcriptCommand: Command = {
     let sessionQuery: string | null = null;
     let targetDir: string = process.cwd();
     let listOnly = false;
+    let headCount: number | undefined;
+    let tailCount: number | undefined;
 
     for (let i = 0; i < args.length; i++) {
       if ((args[i] === "--session" || args[i] === "-s") && args[i + 1]) {
@@ -290,6 +328,10 @@ export const transcriptCommand: Command = {
         targetDir = resolve(args[++i]!);
       } else if (args[i] === "--list" || args[i] === "-l") {
         listOnly = true;
+      } else if ((args[i] === "--head" || args[i] === "-H") && args[i + 1]) {
+        headCount = parseInt(args[++i]!, 10);
+      } else if ((args[i] === "--tail" || args[i] === "-T") && args[i + 1]) {
+        tailCount = parseInt(args[++i]!, 10);
       }
     }
 
@@ -333,6 +375,6 @@ export const transcriptCommand: Command = {
       session = sessions[0]!; // newest session
     }
 
-    await renderTranscript(session.path, session.id);
+    await renderTranscript(session.path, session.id, { head: headCount, tail: tailCount });
   },
 };
