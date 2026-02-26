@@ -13,8 +13,14 @@ async function main(): Promise<void> {
 
   if (!(await isGitRepo(cwd))) return;
 
-  // List files added in the last 10 commits
-  const addedRaw = await git(["log", "--diff-filter=A", "--name-only", "--format=", "HEAD~10..HEAD"], cwd);
+  // Use HEAD~10 as the range base when available; fall back to the git empty-tree
+  // SHA so the range resolves correctly in repos with fewer than 11 commits.
+  const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+  const base = (await git(["rev-parse", "--verify", "HEAD~10"], cwd)) || GIT_EMPTY_TREE;
+  const range = `${base}..HEAD`;
+
+  // List files added in the last 10 commits (or all commits in shallow repos)
+  const addedRaw = await git(["log", "--diff-filter=A", "--name-only", "--format=", range], cwd);
   if (!addedRaw) return;
 
   const addedFiles = addedRaw.split("\n").filter(Boolean);

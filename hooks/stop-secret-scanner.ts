@@ -16,7 +16,13 @@ async function main(): Promise<void> {
 
   if (!(await isGitRepo(cwd))) return;
 
-  const diff = (await git(["diff", "HEAD~10..HEAD"], cwd)) || (await git(["diff", "HEAD"], cwd));
+  // Use HEAD~10 as the diff base when available; fall back to the git empty-tree
+  // SHA so the range resolves correctly in repos with fewer than 11 commits.
+  const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+  const base = (await git(["rev-parse", "--verify", "HEAD~10"], cwd)) || GIT_EMPTY_TREE;
+  const range = `${base}..HEAD`;
+
+  const diff = await git(["diff", range], cwd);
   if (!diff) return;
 
   const findings: string[] = [];
