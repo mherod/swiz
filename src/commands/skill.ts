@@ -100,8 +100,9 @@ async function expandInlineCommands(content: string): Promise<string> {
   return content.replace(INLINE_CMD_RE, () => results[i++]!);
 }
 
-function stripFrontmatter(content: string): string {
-  return content.replace(/^---[\s\S]*?^---\s*\n?/m, "");
+export function stripFrontmatter(content: string): string {
+  // Use [ \t]* (not \s*) to avoid consuming the blank line that may follow the closing ---
+  return content.replace(/^---[\s\S]*?^---[ \t]*\n?/m, "");
 }
 
 async function readSkill(name: string, raw: boolean, noFrontMatter: boolean) {
