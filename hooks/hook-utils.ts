@@ -122,8 +122,6 @@ export function isCodeChangeTool(name: string): boolean {
 export function denyPreToolUse(reason: string): never {
   console.log(
     JSON.stringify({
-      decision: "deny",
-      reason,
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
