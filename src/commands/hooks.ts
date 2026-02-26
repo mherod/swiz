@@ -203,8 +203,7 @@ async function showScript(allSettings: LoadedSettings[], scriptQuery: string) {
     }
   }
 
-  console.error(`No hook script matching: ${scriptQuery}`);
-  process.exit(1);
+  throw new Error(`No hook script matching: ${scriptQuery}`);
 }
 
 // ─── Command ────────────────────────────────────────────────────────────────

@@ -105,9 +105,7 @@ async function readSkill(name: string, raw: boolean) {
   const skill = skills.find((s) => s.name === name);
 
   if (!skill) {
-    console.error(`Skill not found: ${name}`);
-    console.error(`Run "swiz skill" to list available skills.`);
-    process.exit(1);
+    throw new Error(`Skill not found: ${name}\nRun "swiz skill" to list available skills.`);
   }
 
   let content = await Bun.file(skill.path).text();
