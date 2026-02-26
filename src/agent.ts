@@ -33,6 +33,8 @@ export interface PromptAgentOptions {
    *   gemini: --approval-mode plan  (read-only mode)
    */
   promptOnly?: boolean;
+  /** When provided, kills the spawned process if the signal aborts. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -66,7 +68,23 @@ export async function promptAgent(prompt: string, options?: PromptAgentOptions):
           "--prompt", prompt,
         ];
 
-  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+  // Strip CLAUDECODE so the spawned CLI accepts nested invocations from inside a session.
+  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe", env: cleanEnv });
+
+  if (options?.signal) {
+    const onAbort = () => {
+      proc.kill();
+      setTimeout(() => proc.kill(9), 2_000).unref();
+    };
+    if (options.signal.aborted) {
+      onAbort();
+    } else {
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      proc.exited.then(() => options.signal!.removeEventListener("abort", onAbort));
+    }
+  }
+
   const output = await new Response(proc.stdout).text();
   await proc.exited;
 

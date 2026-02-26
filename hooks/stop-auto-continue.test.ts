@@ -41,6 +41,20 @@ async function createFakeClaude(
   await chmod(path, 0o755);
 }
 
+/** Creates a fake `claude` binary that sleeps for `delaySecs` then prints output. */
+async function createSlowFakeClaude(
+  binDir: string,
+  output: string,
+  delaySecs: number
+): Promise<void> {
+  const script =
+    `#!/bin/sh\nsleep ${delaySecs}\n` +
+    `printf '%s' '${output.replace(/'/g, "'\\''")}'\nexit 0\n`;
+  const path = join(binDir, "claude");
+  await writeFile(path, script);
+  await chmod(path, 0o755);
+}
+
 /** Creates a fake `claude` binary that fails the first `failCount` times, then succeeds. */
 async function createFlakyFakeClaude(
   binDir: string,
@@ -84,10 +98,12 @@ async function runHook({
   transcriptContent,
   binDir,
   stopHookActive = false,
+  extraEnv = {},
 }: {
   transcriptContent: string;
   binDir: string;
   stopHookActive?: boolean;
+  extraEnv?: Record<string, string>;
 }): Promise<HookResult> {
   const workDir = await createTempDir();
   const transcriptPath = join(workDir, "transcript.jsonl");
@@ -107,6 +123,7 @@ async function runHook({
     env: {
       ...process.env,
       PATH: binDir,
+      ...extraEnv,
     },
   });
   proc.stdin.write(payload);
@@ -244,4 +261,21 @@ describe("stop-auto-continue", () => {
     expect(wsValue).toBeDefined();
     expect(wsValue).not.toContain("Development/swiz");
   });
+
+  test("times out slow backend and falls back to generic message", async () => {
+    const binDir = await createTempDir();
+    await createSlowFakeClaude(binDir, "This should never appear", 30);
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: {
+        ATTEMPT_TIMEOUT_MS: "500",
+      },
+    });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+    expect(result.reason).not.toContain("This should never appear");
+  }, 30_000);
 });

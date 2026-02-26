@@ -14,7 +14,7 @@ import {
 const MIN_TOOL_CALLS = 5;       // Don't engage for trivial sessions
 const CONTEXT_TURNS = 15;       // Recent turns to send as context
 const MAX_RETRIES = 5;
-const ATTEMPT_TIMEOUT_MS = 20_000;  // Per-attempt AI call budget (20s × 5 retries = 100s max)
+const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 20_000;
 
 const FALLBACK_SUGGESTION =
   "Review the session transcript, identify the most critical incomplete task, and complete it autonomously without asking for confirmation.";
@@ -60,19 +60,26 @@ async function main(): Promise<void> {
       `<conversation>\n${context}\n</conversation>`;
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), ATTEMPT_TIMEOUT_MS);
       try {
+        const agentP = promptAgent(prompt, { promptOnly: true, signal: ac.signal });
+        agentP.catch(() => {});
         const result = await Promise.race([
-          promptAgent(prompt, { promptOnly: true }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("timeout")), ATTEMPT_TIMEOUT_MS)
-          ),
+          agentP,
+          new Promise<never>((_, reject) => {
+            if (ac.signal.aborted) return reject(new Error("timeout"));
+            ac.signal.addEventListener("abort", () => reject(new Error("timeout")), { once: true });
+          }),
         ]);
         if (result) {
           suggestion = result;
           break;
         }
       } catch {
-        // retry (includes timeout)
+        // retry (includes timeout / abort)
+      } finally {
+        clearTimeout(timer);
       }
     }
   }
