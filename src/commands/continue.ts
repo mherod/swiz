@@ -113,9 +113,10 @@ async function generateNextStep(turns: Turn[]): Promise<string> {
   const prompt =
     `You are analyzing a conversation between a user and an AI assistant. ` +
     `Based on the conversation below, suggest a single concrete next step the ` +
-    `assistant should take. Be specific and actionable. Start with an imperative ` +
-    `verb (Run, Fix, Add, Check, Verify, Commit, etc.). ` +
-    `Write ONLY the suggestion itself — no prefix, no explanation.\n\n` +
+    `assistant should take. Be specific and actionable. ` +
+    `Reply with ONLY one sentence starting with an imperative verb ` +
+    `(Run, Fix, Add, Check, Verify, Commit, etc.) — ` +
+    `no explanation, no markdown, no prefix, no period at the end.\n\n` +
     `<conversation>\n${context}\n</conversation>`;
 
   return promptAgent(prompt);
