@@ -376,6 +376,39 @@ describe("stop-auto-continue", () => {
     expect(result.reason).not.toContain("\u27E8tool_call");
   });
 
+  test("rejects response with modifier letter left arrowhead ˂ (U+02C2)", async () => {
+    const binDir = await createTempDir();
+    await createFakeAgent(binDir, "\u02C2tool_call\u02C3");
+
+    const result = await runHook({ transcriptContent: buildTranscript(10), binDir });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+    expect(result.reason).not.toContain("\u02C2tool_call");
+  });
+
+  test("rejects response with Canadian Syllabics PA ᐸ (U+1438)", async () => {
+    const binDir = await createTempDir();
+    await createFakeAgent(binDir, "\u1438tool_call\u1433");
+
+    const result = await runHook({ transcriptContent: buildTranscript(10), binDir });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+    expect(result.reason).not.toContain("\u1438tool_call");
+  });
+
+  test("rejects response with heavy left-pointing angle quotation ❮ (U+276E)", async () => {
+    const binDir = await createTempDir();
+    await createFakeAgent(binDir, "\u276Etool_call\u276F");
+
+    const result = await runHook({ transcriptContent: buildTranscript(10), binDir });
+
+    expect(result.decision).toBe("block");
+    expect(result.reason).toContain("identify the most critical incomplete task");
+    expect(result.reason).not.toContain("\u276Etool_call");
+  });
+
   test("rejects response with leading-whitespace XML tag", async () => {
     const binDir = await createTempDir();
     await createFakeAgent(binDir, "  <tool_call>read_file</tool_call>");
