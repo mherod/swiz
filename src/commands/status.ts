@@ -15,7 +15,7 @@ const CYAN = "\x1b[36m";
 const RESET = "\x1b[0m";
 
 function isSwizManaged(cmd: string): boolean {
-  return cmd.includes(HOOKS_DIR) || cmd.includes(join(SWIZ_ROOT, "index.ts")) || /\bswiz\s+dispatch\b/.test(cmd);
+  return cmd.includes(HOOKS_DIR) || cmd.includes(join(SWIZ_ROOT, "index.ts")) || cmd.includes("swiz dispatch");
 }
 
 function collectSwizCommands(hooks: Record<string, unknown>): Set<string> {
