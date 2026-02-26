@@ -5,12 +5,10 @@
 //
 // Pure transcript scan — no sentinel files, no external state, no race conditions.
 
-import { denyPreToolUse as deny } from "./hook-utils.ts";
+import { denyPreToolUse as deny, READ_TOOLS, TASK_TOOLS } from "./hook-utils.ts";
 
 const TOOL_CALL_THRESHOLD = 10;
 const STALENESS_THRESHOLD = 20;
-
-const TASK_TOOLS = new Set(["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"]);
 
 const input = await Bun.stdin.json();
 const transcriptPath: string = input?.transcript_path ?? "";
@@ -19,8 +17,7 @@ const sessionId: string = input?.session_id ?? "";
 
 if (!transcriptPath || !sessionId) process.exit(0);
 
-// Allow Read tool without task enforcement — research is needed before planning tasks
-if (toolName === "Read") process.exit(0);
+if (READ_TOOLS.has(toolName)) process.exit(0);
 
 const transcriptFile = Bun.file(transcriptPath);
 if (!(await transcriptFile.exists())) process.exit(0);

@@ -18,7 +18,7 @@ STATS=$(jq -sr '
     calls_since_task: (
       length - 1 - (
         to_entries |
-        map(select(.value == "TaskCreate" or .value == "TaskUpdate" or .value == "TaskList" or .value == "TaskGet")) |
+        map(select(.value == "TaskCreate" or .value == "TaskUpdate" or .value == "TaskList" or .value == "TaskGet" or .value == "TodoWrite")) |
         last.key // -1
       )
     )

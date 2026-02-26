@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // PreToolUse hook: Block banned Bash commands and guide to safe alternatives.
 
-import { denyPreToolUse } from "./hook-utils.ts";
+import { denyPreToolUse, isShellTool } from "./hook-utils.ts";
 
 interface Rule {
   /** Returns true if this rule matches the command. */
@@ -151,7 +151,7 @@ const RULES: Rule[] = [
 ];
 
 const input = await Bun.stdin.json();
-if (input?.tool_name !== "Bash") process.exit(0);
+if (!isShellTool(input?.tool_name ?? "")) process.exit(0);
 
 const command: string = input?.tool_input?.command ?? "";
 

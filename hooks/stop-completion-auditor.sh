@@ -31,7 +31,7 @@ echo "Tool call count: $TOOL_CALL_COUNT (threshold: $TOOL_CALL_THRESHOLD)" >> /t
 # Check if task tools were ever used in the transcript (authoritative, survives task file deletion)
 TASK_TOOL_USED=false
 if [[ -f "$TRANSCRIPT" ]]; then
-  TASK_TOOL_COUNT=$(jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | select(.name == "TaskCreate" or .name == "TaskUpdate") | .id' "$TRANSCRIPT" 2>/dev/null | wc -l | tr -d ' ')
+  TASK_TOOL_COUNT=$(jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | select(.name == "TaskCreate" or .name == "TaskUpdate" or .name == "TodoWrite") | .id' "$TRANSCRIPT" 2>/dev/null | wc -l | tr -d ' ')
   [[ "$TASK_TOOL_COUNT" -gt 0 ]] && TASK_TOOL_USED=true
 fi
 

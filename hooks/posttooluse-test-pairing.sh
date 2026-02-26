@@ -5,8 +5,8 @@ INPUT=$(cat)
 TOOL=$(echo "$INPUT" | jq -r '.tool_name // ""')
 FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""')
 
-# Only act on Edit/Write tool calls
-if [[ "$TOOL" != "Edit" && "$TOOL" != "Write" ]]; then
+# Only act on edit/write tool calls (Edit/StrReplace/Write across agents)
+if [[ "$TOOL" != "Edit" && "$TOOL" != "StrReplace" && "$TOOL" != "Write" ]]; then
   exit 0
 fi
 

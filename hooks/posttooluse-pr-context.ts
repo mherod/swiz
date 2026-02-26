@@ -3,6 +3,8 @@
 // Detects branch switches via Bash tool, looks up the associated PR,
 // and injects PR body, merge status, and last comment as additionalContext.
 
+import { isShellTool } from "./hook-utils.ts";
+
 const input = await Bun.stdin.json().catch(() => null);
 if (!input) process.exit(0);
 
@@ -10,8 +12,7 @@ const toolName: string = input.tool_name ?? "";
 const cwd: string = input.cwd ?? "";
 const command: string = input.tool_input?.command ?? "";
 
-// Only fire on Bash tool calls
-if (toolName !== "Bash" || !cwd || !command) process.exit(0);
+if (!isShellTool(toolName) || !cwd || !command) process.exit(0);
 
 // Detect checkout patterns:
 //   git checkout <branch>  /  git checkout -b <branch>

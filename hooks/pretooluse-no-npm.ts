@@ -3,7 +3,7 @@
 // pnpm is the project-standard package manager.
 // pnpx is an alias for pnpm dlx (one-off package execution).
 
-import { denyPreToolUse } from "./hook-utils.ts";
+import { denyPreToolUse, isShellTool } from "./hook-utils.ts";
 
 interface Mapping {
   match: (subcmd: string, args: string) => boolean;
@@ -190,7 +190,7 @@ function deny(from: string, to: string, extra?: string): void {
 }
 
 const input = await Bun.stdin.json();
-if (input?.tool_name !== "Bash") process.exit(0);
+if (!isShellTool(input?.tool_name ?? "")) process.exit(0);
 
 const command: string = input?.tool_input?.command ?? "";
 

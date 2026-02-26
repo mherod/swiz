@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn } from "bun";
+import { isFileEditTool } from "./hook-utils.ts";
 
 interface HookInput {
   tool_name: string;
@@ -17,8 +18,7 @@ async function main() {
   const input: HookInput = await Bun.stdin.json();
 
   const toolName = input.tool_name ?? "";
-  // Only run on Edit and Write tools
-  if (toolName !== "Edit" && toolName !== "Write") {
+  if (!isFileEditTool(toolName)) {
     process.exit(0);
   }
 

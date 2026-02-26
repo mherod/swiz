@@ -9,13 +9,14 @@ import { denyPreToolUse as deny } from "./hook-utils.ts";
 const input = await Bun.stdin.json();
 const prompt: string = input?.tool_input?.prompt ?? "";
 
-// Match only explicit Claude task tool names — tight to avoid false positives on
+// Match task tool names across agents — tight to avoid false positives on
 // prompts that use "task" as a domain noun (e.g. "create a task queue").
 const delegationPatterns = [
   /\bTaskCreate\b/,
   /\bTaskUpdate\b/,
   /\bTaskList\b/,
   /\bTaskGet\b/,
+  /\bTodoWrite\b/,
 ];
 
 if (delegationPatterns.some((p) => p.test(prompt))) {
