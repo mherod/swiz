@@ -94,6 +94,51 @@ describe("detect", () => {
       expect(detect("Add feature and verify it works").matched).toBe(false);
     });
   });
+
+  describe("test task pairing", () => {
+    test("write tests for multi-item suffix sets pairing flag", () => {
+      const result = detect(
+        "Write ScopeInsufficientError retry tests for cal, mail, and contacts"
+      );
+      expect(result.matched).toBe(true);
+      if (!result.matched) return;
+      expect(result.pairing).toBe(true);
+      expect(result.suggestions).toHaveLength(3);
+      // Suggestions use the original verb, not mangled phrasing
+      expect(result.suggestions[0]).toContain("Write");
+      expect(result.suggestions[1]).toContain("Write");
+      expect(result.suggestions[2]).toContain("Write");
+    });
+
+    test("pairing intro advises updating existing tasks", () => {
+      const result = detect(
+        "Write ScopeInsufficientError retry tests for cal, mail, and contacts"
+      );
+      expect(result.matched).toBe(true);
+      if (!result.matched) return;
+      expect(result.intro).toContain("update them to include tests");
+      expect(result.intro).not.toContain("compound task");
+    });
+
+    test("non-test multi-item split keeps regular message and no pairing flag", () => {
+      const result = detect(
+        "Add ScopeInsufficientError retry to cal, mail, and contacts"
+      );
+      expect(result.matched).toBe(true);
+      if (!result.matched) return;
+      expect(result.intro).toContain("compound task");
+      expect(result.pairing).toBeUndefined();
+    });
+
+    test("add test cases suffix pattern triggers pairing", () => {
+      const result = detect("Add test cases for login, logout, and register flows");
+      expect(result.matched).toBe(true);
+      if (!result.matched) return;
+      expect(result.pairing).toBe(true);
+      expect(result.intro).toContain("update them to include tests");
+      expect(result.suggestions[0]).toContain("login");
+    });
+  });
 });
 
 describe("formatMessage", () => {

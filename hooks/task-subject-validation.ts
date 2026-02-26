@@ -8,6 +8,8 @@ export interface CompoundMatch {
   matched: true;
   intro: string;
   suggestions: string[];
+  /** True when the task appears to test items that likely have matching implementation tasks. */
+  pairing?: boolean;
 }
 
 export type DetectionResult = CompoundResult | CompoundMatch;
@@ -38,6 +40,12 @@ function withVerb(verb: string | null, parts: string[]): string[] {
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Check if subject indicates this is a test-focused task. */
+function isTestTask(bare: string): boolean {
+  // Match patterns like "tests for X", "test cases for X", "test coverage for X"
+  return /\b(tests?|test cases?|test coverage|test fixtures?|test suites?|test scenarios?)\b/i.test(bare);
 }
 
 export function detect(s: string): DetectionResult {
@@ -105,11 +113,15 @@ export function detect(s: string): DetectionResult {
               ? capitalize(`${prefix}${firstPart}`.trim())
               : capitalize(`${prefix}${stemBare} ${p.trim()}`.trim())
           );
-          return {
-            matched: true,
-            intro: "This is a compound task. Suggested split:",
-            suggestions,
-          };
+
+          // For test tasks, signal pairing so the agent knows to update existing
+          // implementation tasks rather than creating separate test tasks.
+          const pairing = isTestTask(bare);
+          const intro = pairing
+            ? "This test task covers multiple items. If implementation tasks already exist for each item, update them to include tests rather than creating separate test tasks. Suggested test task names:"
+            : "This is a compound task. Suggested split:";
+
+          return { matched: true, intro, suggestions, ...(pairing ? { pairing: true } : {}) };
         }
       }
     }
