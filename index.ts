@@ -8,6 +8,7 @@ import { statusCommand } from "./src/commands/status.ts";
 import { tasksCommand } from "./src/commands/tasks.ts";
 import { shimCommand } from "./src/commands/shim.ts";
 import { dispatchCommand } from "./src/commands/dispatch.ts";
+import { transcriptCommand } from "./src/commands/transcript.ts";
 
 registerCommand(skillCommand);
 registerCommand(hooksCommand);
@@ -17,5 +18,6 @@ registerCommand(statusCommand);
 registerCommand(tasksCommand);
 registerCommand(shimCommand);
 registerCommand(dispatchCommand);
+registerCommand(transcriptCommand);
 
 run();
