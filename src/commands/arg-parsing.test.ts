@@ -110,10 +110,14 @@ describe("parseTranscriptArgs", () => {
   })
 })
 
+const DAY_MS = 24 * 60 * 60 * 1000
+const HOUR_MS = 60 * 60 * 1000
+
 describe("parseCleanupArgs", () => {
   test("returns defaults for empty args", () => {
     const result = parseCleanupArgs([])
-    expect(result.olderThanDays).toBe(30)
+    expect(result.olderThanMs).toBe(30 * DAY_MS)
+    expect(result.olderThanLabel).toBe("30 days")
     expect(result.dryRun).toBe(false)
     expect(result.projectFilter).toBeUndefined()
   })
@@ -123,32 +127,49 @@ describe("parseCleanupArgs", () => {
     expect(result.dryRun).toBe(true)
   })
 
-  test("parses --older-than with valid value", () => {
+  test("parses --older-than with bare days", () => {
     const result = parseCleanupArgs(["--older-than", "7"])
-    expect(result.olderThanDays).toBe(7)
+    expect(result.olderThanMs).toBe(7 * DAY_MS)
+    expect(result.olderThanLabel).toBe("7 days")
+  })
+
+  test("parses --older-than with d suffix", () => {
+    const result = parseCleanupArgs(["--older-than", "7d"])
+    expect(result.olderThanMs).toBe(7 * DAY_MS)
+    expect(result.olderThanLabel).toBe("7 days")
+  })
+
+  test("parses --older-than with h suffix (hours)", () => {
+    const result = parseCleanupArgs(["--older-than", "48h"])
+    expect(result.olderThanMs).toBe(48 * HOUR_MS)
+    expect(result.olderThanLabel).toBe("48 hours")
+  })
+
+  test("uses singular label for 1 day", () => {
+    const result = parseCleanupArgs(["--older-than", "1"])
+    expect(result.olderThanLabel).toBe("1 day")
+  })
+
+  test("uses singular label for 1 hour", () => {
+    const result = parseCleanupArgs(["--older-than", "1h"])
+    expect(result.olderThanLabel).toBe("1 hour")
   })
 
   test("throws on --older-than with zero", () => {
-    expect(() => parseCleanupArgs(["--older-than", "0"])).toThrow(
-      "--older-than requires a positive integer"
-    )
+    expect(() => parseCleanupArgs(["--older-than", "0"])).toThrow("--older-than")
   })
 
-  test("throws on --older-than with negative value", () => {
-    expect(() => parseCleanupArgs(["--older-than", "-1"])).toThrow(
-      "--older-than requires a positive integer"
-    )
+  test("throws on --older-than with zero hours", () => {
+    expect(() => parseCleanupArgs(["--older-than", "0h"])).toThrow("--older-than")
   })
 
   test("throws on --older-than with non-numeric value", () => {
-    expect(() => parseCleanupArgs(["--older-than", "abc"])).toThrow(
-      "--older-than requires a positive integer"
-    )
+    expect(() => parseCleanupArgs(["--older-than", "abc"])).toThrow("--older-than")
   })
 
   test("ignores --older-than without value", () => {
     const result = parseCleanupArgs(["--older-than"])
-    expect(result.olderThanDays).toBe(30) // default
+    expect(result.olderThanMs).toBe(30 * DAY_MS) // default
   })
 
   test("parses --project with value", () => {
@@ -162,9 +183,9 @@ describe("parseCleanupArgs", () => {
   })
 
   test("parses all flags together", () => {
-    const result = parseCleanupArgs(["--dry-run", "--older-than", "14", "--project", "foo"])
+    const result = parseCleanupArgs(["--dry-run", "--older-than", "14d", "--project", "foo"])
     expect(result.dryRun).toBe(true)
-    expect(result.olderThanDays).toBe(14)
+    expect(result.olderThanMs).toBe(14 * DAY_MS)
     expect(result.projectFilter).toBe("foo")
   })
 })

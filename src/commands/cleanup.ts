@@ -26,7 +26,7 @@ async function readdirCached(dirPath: string): Promise<string[]> {
   }
 }
 
-async function walkDecode(currentPath: string, remainingEncoded: string): Promise<string | null> {
+export async function walkDecode(currentPath: string, remainingEncoded: string): Promise<string | null> {
   if (!remainingEncoded) return currentPath
   if (!remainingEncoded.startsWith("-")) return null
 
@@ -53,16 +53,16 @@ async function walkDecode(currentPath: string, remainingEncoded: string): Promis
   return null
 }
 
-async function decodeProjectPath(encodedName: string): Promise<string> {
-  const encodedHome = HOME.replace(/[/.]/g, "-")
+export async function decodeProjectPath(encodedName: string, homeDir = HOME): Promise<string> {
+  const encodedHome = homeDir.replace(/[/.]/g, "-")
   if (!encodedName.startsWith(encodedHome)) return encodedName
 
   const encodedRest = encodedName.slice(encodedHome.length)
   if (!encodedRest) return "~"
 
-  const decoded = await walkDecode(HOME, encodedRest)
+  const decoded = await walkDecode(homeDir, encodedRest)
   if (decoded) {
-    return decoded.startsWith(HOME) ? "~" + decoded.slice(HOME.length) : decoded
+    return decoded.startsWith(homeDir) ? "~" + decoded.slice(homeDir.length) : decoded
   }
 
   // Fallback: simple replacement (may split literal hyphens)
@@ -169,13 +169,31 @@ async function findSessions(
 // ─── Arg Parsing ─────────────────────────────────────────────────────────────
 
 export interface CleanupArgs {
-  olderThanDays: number
+  olderThanMs: number
+  olderThanLabel: string
   dryRun: boolean
   projectFilter: string | undefined
 }
 
+/** Parse a time value like "7", "7d", or "48h" into milliseconds + display label. */
+function parseOlderThan(value: string): { ms: number; label: string } {
+  const hoursMatch = /^(\d+)h$/i.exec(value)
+  if (hoursMatch) {
+    const hours = parseInt(hoursMatch[1]!, 10)
+    if (hours < 1) throw new Error("--older-than requires a positive value")
+    return { ms: hours * 60 * 60 * 1000, label: `${hours} ${hours === 1 ? "hour" : "hours"}` }
+  }
+
+  const daysStr = /^(\d+)d?$/i.exec(value)?.[1] ?? ""
+  const days = parseInt(daysStr, 10)
+  if (isNaN(days) || days < 1) {
+    throw new Error("--older-than requires a positive integer, e.g. 30, 7d, or 48h")
+  }
+  return { ms: days * 24 * 60 * 60 * 1000, label: `${days} ${days === 1 ? "day" : "days"}` }
+}
+
 export function parseCleanupArgs(args: string[]): CleanupArgs {
-  let olderThanDays = 30
+  let olderThan = parseOlderThan("30")
   let dryRun = false
   let projectFilter: string | undefined
 
@@ -186,17 +204,14 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
     if (arg === "--dry-run") {
       dryRun = true
     } else if (arg === "--older-than" && next) {
-      const days = parseInt(next, 10)
-      if (isNaN(days) || days < 1) {
-        throw new Error("--older-than requires a positive integer (days)")
-      }
-      olderThanDays = days; i++
+      olderThan = parseOlderThan(next)
+      i++
     } else if (arg === "--project" && next) {
       projectFilter = next; i++
     }
   }
 
-  return { olderThanDays, dryRun, projectFilter }
+  return { olderThanMs: olderThan.ms, olderThanLabel: olderThan.label, dryRun, projectFilter }
 }
 
 // ─── Command ─────────────────────────────────────────────────────────────────
@@ -204,20 +219,20 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
 export const cleanupCommand: Command = {
   name: "cleanup",
   description: "Remove old Claude Code session data from ~/.claude/projects/",
-  usage: "swiz cleanup [--older-than <days>] [--dry-run] [--project <name>]",
+  usage: "swiz cleanup [--older-than <time>] [--dry-run] [--project <name>]",
   options: [
     {
-      flags: "--older-than <days>",
-      description: "Remove sessions older than this many days (default: 30)",
+      flags: "--older-than <time>",
+      description: "Remove sessions older than this time: days (30, 7d) or hours (48h). Default: 30",
     },
     { flags: "--dry-run", description: "Show what would be removed without deleting" },
     { flags: "--project <name>", description: "Limit to a specific project directory name" },
   ],
 
   async run(args: string[]) {
-    const { olderThanDays, dryRun, projectFilter } = parseCleanupArgs(args)
+    const { olderThanMs, olderThanLabel, dryRun, projectFilter } = parseCleanupArgs(args)
 
-    const cutoffMs = Date.now() - olderThanDays * 24 * 60 * 60 * 1000
+    const cutoffMs = Date.now() - olderThanMs
 
     // Discover project dirs
     let projectNames: string[]
@@ -253,7 +268,7 @@ export const cleanupCommand: Command = {
     }
 
     if (results.length === 0) {
-      console.log(`No session directories found (older than ${olderThanDays} days).`)
+      console.log(`No session directories found (older than ${olderThanLabel}).`)
       return
     }
 
@@ -290,7 +305,7 @@ export const cleanupCommand: Command = {
     console.log()
 
     if (totalOldCount === 0) {
-      console.log(`  ${GREEN}No sessions older than ${olderThanDays} days found.${RESET}`)
+      console.log(`  ${GREEN}No sessions older than ${olderThanLabel} found.${RESET}`)
       return
     }
 
