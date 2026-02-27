@@ -20,8 +20,18 @@ import { decodeProjectPath, walkDecode } from "./cleanup.ts"
 //       skills/
 //       projects/
 //         <encodedHome>-Development-my-project/
-//           00000000-0000-0000-0000-000000000001/  ← fake session
+//           00000000-0000-0000-0000-000000000001/  ← valid session with content
 //             session.jsonl
+//         <encodedHome>-corrupted-project/         ← partial corruption fixture
+//           README.md                              ← non-UUID file → skipped
+//           memory/                                ← non-UUID dir → skipped
+//           00000000-0000-0000-0000-000000000002   ← UUID-named FILE → skipped
+//           00000000-0000-0000-0000-000000000003/  ← empty UUID dir → kept, 0B
+//           00000000-0000-0000-0000-000000000004/  ← UUID dir with content → kept
+//             data.json
+//         <encodedHome>-only-noise/                ← project with no UUID session dirs
+//           junk.txt
+//           not-a-uuid/
 //     ink-silly/              ← literal hyphen at top level
 
 const TMP_HOME = join(tmpdir(), `swiz-cleanup-test-${process.pid}`)
@@ -33,6 +43,11 @@ const FIXTURE_SESSION = join(
   TMP_HOME, ".claude", "projects", FIXTURE_PROJECT,
   "00000000-0000-0000-0000-000000000001",
 )
+// Corrupted project: mix of valid and invalid entries.
+const CORRUPT_PROJECT = `${ENCODED_HOME}-corrupted-project`
+const CORRUPT_PROJECT_DIR = join(TMP_HOME, ".claude", "projects", CORRUPT_PROJECT)
+// Noise-only project: no UUID session directories at all.
+const NOISE_PROJECT = `${ENCODED_HOME}-only-noise`
 
 beforeAll(async () => {
   await mkdir(join(TMP_HOME, "Development", "my-project"), { recursive: true })
@@ -40,9 +55,39 @@ beforeAll(async () => {
   await mkdir(join(TMP_HOME, "Development", "plugg-platform"), { recursive: true })
   await mkdir(join(TMP_HOME, ".claude", "skills"), { recursive: true })
   await mkdir(join(TMP_HOME, "ink-silly"), { recursive: true })
-  // Integration fixture: a fake Claude session so cleanup has something to list.
+  // Integration fixture: a valid session.
   await mkdir(FIXTURE_SESSION, { recursive: true })
   await Bun.write(join(FIXTURE_SESSION, "session.jsonl"), '{"type":"system"}\n')
+
+  // Corrupted project fixture ─────────────────────────────────────────────────
+  // Non-UUID file in project root (should be ignored by UUID_RE).
+  await Bun.write(join(CORRUPT_PROJECT_DIR, "README.md"), "docs\n")
+  // Non-UUID directory in project root (should be ignored by UUID_RE).
+  await mkdir(join(CORRUPT_PROJECT_DIR, "memory"), { recursive: true })
+  // UUID-named FILE instead of directory (should be skipped by !isDirectory()).
+  await Bun.write(
+    join(CORRUPT_PROJECT_DIR, "00000000-0000-0000-0000-000000000002"),
+    "not a dir\n",
+  )
+  // Empty UUID directory — valid session, but size 0B.
+  await mkdir(join(CORRUPT_PROJECT_DIR, "00000000-0000-0000-0000-000000000003"), {
+    recursive: true,
+  })
+  // UUID directory with content — valid session.
+  await mkdir(
+    join(CORRUPT_PROJECT_DIR, "00000000-0000-0000-0000-000000000004"),
+    { recursive: true },
+  )
+  await Bun.write(
+    join(CORRUPT_PROJECT_DIR, "00000000-0000-0000-0000-000000000004", "data.json"),
+    '{"ok":true}\n',
+  )
+
+  // Noise-only project: non-UUID entries only — should produce 0 sessions
+  // and be filtered from the output entirely (keep.length + old.length === 0).
+  const noiseDir = join(TMP_HOME, ".claude", "projects", NOISE_PROJECT)
+  await mkdir(join(noiseDir, "not-a-uuid"), { recursive: true })
+  await Bun.write(join(noiseDir, "junk.txt"), "noise\n")
 })
 
 afterAll(async () => {
@@ -253,5 +298,73 @@ describe("cleanup with no .claude/projects directory", () => {
     // Should exit non-zero because --project was specified but not found,
     // but must NOT throw an unhandled exception.
     expect(proc.exitCode).not.toBeNull()
+  })
+})
+
+// ─── Regression: partially corrupted .claude/projects ────────────────────────
+//
+// A real ~/.claude/projects directory can contain non-UUID entries (memory/,
+// README.md), UUID-named plain files, empty session dirs, and projects that
+// have no UUID session subdirectories at all. The command must tolerate all of
+// these without crashing and must count only genuine UUID session directories.
+
+describe("cleanup with partially corrupted project directory", () => {
+  const SWIZ_ROOT = join(import.meta.dir, "../..")
+  const env = { ...process.env, HOME: TMP_HOME }
+
+  async function runCleanup(...extraArgs: string[]): Promise<{ output: string; exitCode: number | null }> {
+    const proc = Bun.spawn(
+      ["bun", "run", "index.ts", "cleanup", "--dry-run", ...extraArgs],
+      { cwd: SWIZ_ROOT, env, stdout: "pipe", stderr: "pipe" },
+    )
+    const output = await new Response(proc.stdout).text()
+    await proc.exited
+    return { output, exitCode: proc.exitCode }
+  }
+
+  test("exits cleanly despite corrupted entries", async () => {
+    const { exitCode } = await runCleanup()
+    expect(exitCode).toBe(0)
+  })
+
+  test("counts only UUID session directories, not UUID-named files", async () => {
+    const { output } = await runCleanup()
+    // Corrupted project has 2 valid UUID dirs (003 + 004) and 1 UUID-named file
+    // (002) which must be excluded. Expect "2 sessions", never "3 sessions".
+    expect(output).toMatch(/2 sessions/)
+    expect(output).not.toMatch(/3 sessions/)
+  })
+
+  test("ignores non-UUID entries (README.md, memory/) in session count", async () => {
+    const { output } = await runCleanup()
+    // The decoded path for CORRUPT_PROJECT falls back to ~/corrupted/project.
+    // Non-UUID entries must not inflate the count; the line must show 2 sessions.
+    const projectLine = output.split("\n").find((l) => l.includes("corrupted"))
+    expect(projectLine).toBeDefined()
+    expect(projectLine).toMatch(/\b2 sessions\b/)
+  })
+
+  test("project with only non-UUID entries is omitted from output", async () => {
+    const { output } = await runCleanup()
+    // The noise-only project has keep.length + old.length === 0, so it must
+    // not appear in the output table at all.
+    expect(output).not.toContain(NOISE_PROJECT)
+  })
+
+  test("empty session directory is counted but reported with 0B size", async () => {
+    const { output } = await runCleanup()
+    // Empty session dir is valid; its size is 0B. The 2-session line for the
+    // corrupted project must appear with a size (may be > 0 due to 004's content).
+    expect(output).toMatch(/2 kept \(/)
+  })
+
+  test("no stderr output on corrupted input", async () => {
+    const proc = Bun.spawn(
+      ["bun", "run", "index.ts", "cleanup", "--dry-run"],
+      { cwd: SWIZ_ROOT, env, stdout: "pipe", stderr: "pipe" },
+    )
+    const stderr = await new Response(proc.stderr).text()
+    await proc.exited
+    expect(stderr.trim()).toBe("")
   })
 })
