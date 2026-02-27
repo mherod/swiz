@@ -43,19 +43,24 @@ const SKIP_LABELS = new Set([
   "backlog",
 ])
 
-async function getActionableIssueCount(cwd: string): Promise<number> {
-  const output = await gh(["issue", "list", "--state", "open", "--json", "number,labels"], cwd)
-  if (!output) return 0
-  let issues: Array<{ number: number; labels: Array<{ name: string }> }>
+interface Issue {
+  number: number
+  title: string
+  labels: Array<{ name: string }>
+}
+
+async function getActionableIssues(cwd: string): Promise<Issue[]> {
+  const output = await gh(["issue", "list", "--state", "open", "--json", "number,title,labels"], cwd)
+  if (!output) return []
+  let issues: Issue[]
   try {
     issues = JSON.parse(output)
   } catch {
-    return 0
+    return []
   }
-  const actionable = issues.filter(
+  return issues.filter(
     (i) => !i.labels.some((l) => SKIP_LABELS.has(l.name.toLowerCase()))
   )
-  return actionable.length
 }
 
 async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise<number> {
@@ -98,7 +103,8 @@ async function main(): Promise<void> {
     // Only applies to personal repos
     if (owner !== currentUser) return
 
-    const issueCount = await getActionableIssueCount(cwd)
+    const actionableIssues = await getActionableIssues(cwd)
+    const issueCount = actionableIssues.length
     const prCount = await getOpenPRsWithFeedback(cwd, currentUser)
 
     if (issueCount === 0 && prCount === 0) return
@@ -106,7 +112,10 @@ async function main(): Promise<void> {
     const reasonLines: string[] = []
 
     if (issueCount > 0) {
-      reasonLines.push(`You have ${issueCount} open issue(s) in this personal repository.`)
+      reasonLines.push(`You have ${issueCount} open issue(s) in this personal repository:`)
+      for (const issue of actionableIssues) {
+        reasonLines.push(`  #${issue.number} ${issue.title}`)
+      }
       reasonLines.push(
         skillAdvice(
           "work-on-issue",
