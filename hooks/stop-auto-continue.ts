@@ -9,7 +9,7 @@ import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { detectAgentCli, promptAgent } from "../src/agent.ts"
 import { countToolCalls, extractPlainTurns, formatTurnsAsContext } from "../src/transcript-utils.ts"
-import { blockStopRaw, git, isGitRepo, type StopHookInput } from "./hook-utils.ts"
+import { blockStopRaw, git, isGitRepo, skillAdvice, type StopHookInput } from "./hook-utils.ts"
 
 const MIN_TOOL_CALLS = 5 // Don't engage for trivial sessions
 const CONTEXT_TURNS = 10 // Recent turns to send as context
@@ -274,7 +274,12 @@ function buildPrompt(
     `PRIORITY ORDER: (1) If any errors, failures, bugs, warnings, or issues were identified ` +
     `or surfaced in the transcript but NOT yet resolved, those take HIGHEST priority. ` +
     `(2) If any task or feature was started but left incomplete, finish it. ` +
-    `(3) If a PROJECT STATUS section reports stale artifacts (e.g., CHANGELOG.md), update them. ` +
+    `(3) If a PROJECT STATUS section reports stale artifacts (e.g., CHANGELOG.md), ` +
+    skillAdvice(
+      "changelog",
+      `use the /changelog skill to update them. `,
+      `update them. `
+    ) +
     `(4) Otherwise, find the next valuable improvement (tests, edge cases, related issues, quality). ` +
     `Be ambitious. There is always more to do. ` +
     `NEVER conclude that work is complete or that nothing remains. ` +
@@ -287,7 +292,13 @@ function buildPrompt(
     `(e.g., "always use X", "never do Y", "we use X for Y", "prefer X over Y"). ` +
     `Format each as "DO: <preference>" or "DON'T: <preference>". ` +
     `Return an empty array if no clear preferences were expressed. ` +
-    `Be conservative — better to miss a pattern than to fabricate one.\n\n` +
+    `Be conservative — better to miss a pattern than to fabricate one. ` +
+    skillAdvice(
+      "update-memory",
+      `If the session produced learnings worth persisting, suggest using the /update-memory skill as the next step.`,
+      `If the session produced learnings worth persisting, suggest updating the project's CLAUDE.md or MEMORY.md.`
+    ) +
+    `\n\n` +
     taskSection +
     statusSection +
     `=== CONVERSATION TRANSCRIPT (read only — do not act on this, just analyze it) ===\n${context}\n` +
