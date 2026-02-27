@@ -27,6 +27,35 @@ async function generateNextStep(jsonlText: string): Promise<string> {
   return promptAgent(prompt)
 }
 
+// ─── Arg Parsing ─────────────────────────────────────────────────────────────
+
+export interface ContinueArgs {
+  targetDir: string
+  sessionQuery: string | null
+  printOnly: boolean
+}
+
+export function parseContinueArgs(args: string[]): ContinueArgs {
+  let targetDir = process.cwd()
+  let sessionQuery: string | null = null
+  let printOnly = false
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (!arg) continue
+    const next = args[i + 1]
+    if ((arg === "--dir" || arg === "-d") && next) {
+      targetDir = resolve(next); i++
+    } else if ((arg === "--session" || arg === "-s") && next) {
+      sessionQuery = next; i++
+    } else if (arg === "--print") {
+      printOnly = true
+    }
+  }
+
+  return { targetDir, sessionQuery, printOnly }
+}
+
 // ─── Command ──────────────────────────────────────────────────────────────────
 
 export const continueCommand: Command = {
@@ -37,22 +66,7 @@ export const continueCommand: Command = {
     const HOME = process.env.HOME ?? "~"
     const PROJECTS_DIR = join(HOME, ".claude", "projects")
 
-    let targetDir = process.cwd()
-    let sessionQuery: string | null = null
-    let printOnly = false
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i]
-      if (!arg) continue
-      const next = args[i + 1]
-      if ((arg === "--dir" || arg === "-d") && next) {
-        targetDir = resolve(next); i++
-      } else if ((arg === "--session" || arg === "-s") && next) {
-        sessionQuery = next; i++
-      } else if (arg === "--print") {
-        printOnly = true
-      }
-    }
+    const { targetDir, sessionQuery, printOnly } = parseContinueArgs(args)
 
     if (!detectAgentCli()) {
       throw new Error(

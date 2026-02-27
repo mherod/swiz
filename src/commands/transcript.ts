@@ -316,6 +316,47 @@ async function generateAutoReply(turns: Turn[]): Promise<void> {
   console.log(output)
 }
 
+// ─── Arg Parsing ─────────────────────────────────────────────────────────────
+
+export interface TranscriptArgs {
+  sessionQuery: string | null
+  targetDir: string
+  listOnly: boolean
+  headCount: number | undefined
+  tailCount: number | undefined
+  autoReply: boolean
+}
+
+export function parseTranscriptArgs(args: string[]): TranscriptArgs {
+  let sessionQuery: string | null = null
+  let targetDir: string = process.cwd()
+  let listOnly = false
+  let headCount: number | undefined
+  let tailCount: number | undefined
+  let autoReply = false
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (!arg) continue
+    const next = args[i + 1]
+    if ((arg === "--session" || arg === "-s") && next) {
+      sessionQuery = next; i++
+    } else if ((arg === "--dir" || arg === "-d") && next) {
+      targetDir = resolve(next); i++
+    } else if (arg === "--list" || arg === "-l") {
+      listOnly = true
+    } else if ((arg === "--head" || arg === "-H") && next) {
+      headCount = parseInt(next, 10); i++
+    } else if ((arg === "--tail" || arg === "-T") && next) {
+      tailCount = parseInt(next, 10); i++
+    } else if (arg === "--auto-reply") {
+      autoReply = true
+    }
+  }
+
+  return { sessionQuery, targetDir, listOnly, headCount, tailCount, autoReply }
+}
+
 // ─── Command ─────────────────────────────────────────────────────────────────
 
 export const transcriptCommand: Command = {
@@ -327,32 +368,8 @@ export const transcriptCommand: Command = {
     const HOME = process.env.HOME ?? "~"
     const PROJECTS_DIR = join(HOME, ".claude", "projects")
 
-    // Parse flags
-    let sessionQuery: string | null = null
-    let targetDir: string = process.cwd()
-    let listOnly = false
-    let headCount: number | undefined
-    let tailCount: number | undefined
-    let autoReply = false
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i]
-      if (!arg) continue
-      const next = args[i + 1]
-      if ((arg === "--session" || arg === "-s") && next) {
-        sessionQuery = next; i++
-      } else if ((arg === "--dir" || arg === "-d") && next) {
-        targetDir = resolve(next); i++
-      } else if (arg === "--list" || arg === "-l") {
-        listOnly = true
-      } else if ((arg === "--head" || arg === "-H") && next) {
-        headCount = parseInt(next, 10); i++
-      } else if ((arg === "--tail" || arg === "-T") && next) {
-        tailCount = parseInt(next, 10); i++
-      } else if (arg === "--auto-reply") {
-        autoReply = true
-      }
-    }
+    const { sessionQuery, targetDir, listOnly, headCount, tailCount, autoReply } =
+      parseTranscriptArgs(args)
 
     const projectKey = projectKeyFromCwd(targetDir)
     const projectDir = join(PROJECTS_DIR, projectKey)

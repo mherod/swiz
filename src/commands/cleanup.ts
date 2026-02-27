@@ -102,6 +102,39 @@ async function findSessions(
   return { keep, old }
 }
 
+// ─── Arg Parsing ─────────────────────────────────────────────────────────────
+
+export interface CleanupArgs {
+  olderThanDays: number
+  dryRun: boolean
+  projectFilter: string | undefined
+}
+
+export function parseCleanupArgs(args: string[]): CleanupArgs {
+  let olderThanDays = 30
+  let dryRun = false
+  let projectFilter: string | undefined
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (!arg) continue
+    const next = args[i + 1]
+    if (arg === "--dry-run") {
+      dryRun = true
+    } else if (arg === "--older-than" && next) {
+      const days = parseInt(next, 10)
+      if (isNaN(days) || days < 1) {
+        throw new Error("--older-than requires a positive integer (days)")
+      }
+      olderThanDays = days; i++
+    } else if (arg === "--project" && next) {
+      projectFilter = next; i++
+    }
+  }
+
+  return { olderThanDays, dryRun, projectFilter }
+}
+
 // ─── Command ─────────────────────────────────────────────────────────────────
 
 export const cleanupCommand: Command = {
@@ -110,26 +143,7 @@ export const cleanupCommand: Command = {
   usage: "cleanup [--older-than <days>] [--dry-run] [--project <name>]",
 
   async run(args: string[]) {
-    let olderThanDays = 30
-    let dryRun = false
-    let projectFilter: string | undefined
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i]
-      if (!arg) continue
-      const next = args[i + 1]
-      if (arg === "--dry-run") {
-        dryRun = true
-      } else if (arg === "--older-than" && next) {
-        const days = parseInt(next, 10)
-        if (isNaN(days) || days < 1) {
-          throw new Error("--older-than requires a positive integer (days)")
-        }
-        olderThanDays = days; i++
-      } else if (arg === "--project" && next) {
-        projectFilter = next; i++
-      }
-    }
+    const { olderThanDays, dryRun, projectFilter } = parseCleanupArgs(args)
 
     const cutoffMs = Date.now() - olderThanDays * 24 * 60 * 60 * 1000
 
