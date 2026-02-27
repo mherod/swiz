@@ -8,6 +8,13 @@ const TEST_FILE_RE = /\.(test|spec)\.|__tests__/
 const INFRA_FILE_RE = /hooks\/|\/commands\/|\/cli\.|index\.ts$|dispatch\.ts$/
 const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/
 
+// Debug patterns (mirrors stop-debug-statements.ts)
+const JS_DEBUG_RE = /\bconsole\.(log|debug|trace|dir|table)\b/
+const JS_COMMENT_RE = /\/\/.*console\./
+const DEBUGGER_RE = /\bdebugger\b/
+const PY_PRINT_RE = /\bprint\s*\(/
+const RUBY_DEBUG_RE = /\b(?:binding\.pry|byebug)\b/
+
 function isScanned(filePath: string): boolean {
   return (
     SOURCE_EXT_RE.test(filePath) &&
@@ -87,6 +94,109 @@ describe("stop-debug-statements file filter", () => {
 
     test("regular .js file (not minified/dart) is scanned", () => {
       expect(isScanned("src/analytics.js")).toBe(true)
+    })
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Debug statement patterns — verify proper anchoring and no false positives
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("JS_DEBUG_RE: JavaScript console methods with word boundaries", () => {
+  describe("should match valid console calls", () => {
+    const valid = [
+      "console.log('message')",
+      "console.debug(variable)",
+      "console.trace()",
+      "console.dir(obj)",
+      "console.table(data)",
+    ]
+
+    valid.forEach((code) => {
+      test(`${code}`, () => {
+        expect(JS_DEBUG_RE.test(code)).toBe(true)
+      })
+    })
+  })
+
+  describe("should not match similar identifiers", () => {
+    const invalid = [
+      "myConsole.log()", // Different object
+      "console_log()", // Underscore, not dot
+      "logConsole()", // Different method
+    ]
+
+    invalid.forEach((code) => {
+      test(`${code}`, () => {
+        expect(JS_DEBUG_RE.test(code)).toBe(false)
+      })
+    })
+  })
+})
+
+describe("DEBUGGER_RE: debugger statement with word boundaries", () => {
+  test("debugger statement", () => {
+    expect(DEBUGGER_RE.test("debugger;")).toBe(true)
+  })
+
+  test("debugger alone", () => {
+    expect(DEBUGGER_RE.test("debugger")).toBe(true)
+  })
+
+  test("should not match similar words", () => {
+    expect(DEBUGGER_RE.test("notadebugger")).toBe(false)
+    expect(DEBUGGER_RE.test("debuggered")).toBe(false)
+  })
+})
+
+describe("PY_PRINT_RE: Python print() with word boundary", () => {
+  test("print()", () => {
+    expect(PY_PRINT_RE.test("print()")).toBe(true)
+  })
+
+  test("print with argument", () => {
+    expect(PY_PRINT_RE.test('print("hello")')).toBe(true)
+  })
+
+  test("print with spaces before parens", () => {
+    expect(PY_PRINT_RE.test("print  ( )")).toBe(true)
+  })
+
+  test("should not match if print is part of a word", () => {
+    expect(PY_PRINT_RE.test("myprint()")).toBe(false)
+    expect(PY_PRINT_RE.test("printer()")).toBe(false)
+  })
+})
+
+describe("RUBY_DEBUG_RE: Ruby debuggers with word boundaries (regression test)", () => {
+  describe("should match valid Ruby debugger calls", () => {
+    const valid = [
+      "binding.pry",
+      "byebug",
+      "binding.pry  # debug",
+      "byebug if condition",
+    ]
+
+    valid.forEach((code) => {
+      test(`${code}`, () => {
+        expect(RUBY_DEBUG_RE.test(code)).toBe(true)
+      })
+    })
+  })
+
+  describe("should NOT match similar identifiers (substring vulnerability prevention)", () => {
+    const invalid = [
+      "notbyebug", // Part of a longer word — OLD PATTERN WOULD MATCH THIS
+      "byebugger", // Similar but different — OLD PATTERN WOULD MATCH THIS
+      "my_byebug_helper", // Similar — OLD PATTERN WOULD MATCH THIS
+      "notbinding.pry", // Different method
+      "binding.pryyy", // Misspelled
+    ]
+
+    invalid.forEach((code) => {
+      test(`${code} should not match`, () => {
+        expect(RUBY_DEBUG_RE.test(code)).toBe(false)
+      })
     })
   })
 })

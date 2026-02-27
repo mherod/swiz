@@ -22,7 +22,7 @@ const JS_COMMENT_RE = /\/\/.*console\./
 const DEBUGGER_RE = /\bdebugger\b/
 const PY_PRINT_RE = /\bprint\s*\(/
 const PY_EXCLUDE_RE = /# noqa|# debug ok/i
-const RUBY_DEBUG_RE = /binding\.pry|byebug/
+const RUBY_DEBUG_RE = /\b(?:binding\.pry|byebug)\b/
 
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as StopHookInput
