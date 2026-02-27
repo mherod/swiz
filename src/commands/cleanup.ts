@@ -5,6 +5,70 @@ import type { Command } from "../types.ts"
 const HOME = process.env.HOME ?? "~"
 const PROJECTS_DIR = join(HOME, ".claude", "projects")
 
+// ─── Path decoding ────────────────────────────────────────────────────────────
+
+// Claude Code encodes project paths by replacing both '/' and '.' with '-'.
+// This is lossy: a '-' in the encoded name could be from '/', '.', or a literal '-'.
+// We resolve the ambiguity by walking the real filesystem and matching directory
+// entries, using longest-match-first so "cheapshot-auto" wins over "cheapshot".
+
+const readdirCache = new Map<string, string[]>()
+
+async function readdirCached(dirPath: string): Promise<string[]> {
+  const cached = readdirCache.get(dirPath)
+  if (cached) return cached
+  try {
+    const entries = await readdir(dirPath)
+    readdirCache.set(dirPath, entries)
+    return entries
+  } catch {
+    return []
+  }
+}
+
+async function walkDecode(currentPath: string, remainingEncoded: string): Promise<string | null> {
+  if (!remainingEncoded) return currentPath
+  if (!remainingEncoded.startsWith("-")) return null
+
+  const encodedFromHere = remainingEncoded.slice(1) // strip leading '-'
+  if (!encodedFromHere) return currentPath
+
+  const entries = await readdirCached(currentPath)
+
+  // Each filesystem entry encodes to its name with '/' and '.' replaced by '-'.
+  // Find all entries whose encoding is a prefix of encodedFromHere, longest first.
+  const candidates = entries
+    .map((entry) => ({ entry, encoded: entry.replace(/[/.]/g, "-") }))
+    .filter(({ encoded }) => encodedFromHere.startsWith(encoded))
+    .sort((a, b) => b.encoded.length - a.encoded.length)
+
+  for (const { entry, encoded } of candidates) {
+    const afterEntry = encodedFromHere.slice(encoded.length)
+    if (afterEntry === "" || afterEntry.startsWith("-")) {
+      const result = await walkDecode(join(currentPath, entry), afterEntry)
+      if (result !== null) return result
+    }
+  }
+
+  return null
+}
+
+async function decodeProjectPath(encodedName: string): Promise<string> {
+  const encodedHome = HOME.replace(/[/.]/g, "-")
+  if (!encodedName.startsWith(encodedHome)) return encodedName
+
+  const encodedRest = encodedName.slice(encodedHome.length)
+  if (!encodedRest) return "~"
+
+  const decoded = await walkDecode(HOME, encodedRest)
+  if (decoded) {
+    return decoded.startsWith(HOME) ? "~" + decoded.slice(HOME.length) : decoded
+  }
+
+  // Fallback: simple replacement (may split literal hyphens)
+  return "~" + encodedRest.replace(/-/g, "/")
+}
+
 // Matches standard UUID v4 — session dirs only; named dirs (memory/, etc.) never match
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -193,6 +257,10 @@ export const cleanupCommand: Command = {
       return
     }
 
+    // Decode project paths for display
+    const decodedNames = await Promise.all(results.map((r) => decodeProjectPath(r.name)))
+    const maxNameLen = Math.max(...decodedNames.map((n) => n.length), 20)
+
     // Print table
     console.log()
     console.log(`  ${BOLD}~/.claude/projects/${RESET}`)
@@ -200,8 +268,11 @@ export const cleanupCommand: Command = {
     let totalOldCount = 0
     let totalOldBytes = 0
 
-    for (const { name, keep, old } of results) {
+    for (let i = 0; i < results.length; i++) {
+      const { keep, old } = results[i]!
+      const displayName = decodedNames[i]!
       const total = keep.length + old.length
+      const keepBytes = keep.reduce((sum, s) => sum + s.sizeBytes, 0)
       const oldBytes = old.reduce((sum, s) => sum + s.sizeBytes, 0)
       totalOldCount += old.length
       totalOldBytes += oldBytes
@@ -210,8 +281,9 @@ export const cleanupCommand: Command = {
         old.length > 0
           ? `${YELLOW}${old.length} trashable${RESET} (${formatBytes(oldBytes)})`
           : `${DIM}0 trashable${RESET}`
+      const keepPart = `${keep.length} kept (${formatBytes(keepBytes)})`
       console.log(
-        `    ${name.padEnd(44)} ${String(total).padStart(3)} sessions  →  ${keep.length} kept, ${trashPart}`
+        `    ${displayName.padEnd(maxNameLen + 2)} ${String(total).padStart(3)} sessions  →  ${keepPart}, ${trashPart}`
       )
     }
 
