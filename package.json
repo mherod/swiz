@@ -6,10 +6,13 @@
     "swiz": "index.ts"
   },
   "scripts": {
-    "start": "bun run index.ts"
+    "start": "bun run index.ts",
+    "test": "vitest"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@vitest/ui": "^4.0.18",
+    "vitest": "^4.0.18"
   },
   "peerDependencies": {
     "typescript": "^5"
