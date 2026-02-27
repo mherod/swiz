@@ -215,3 +215,129 @@ describe("allowPreToolUseWithUpdatedInput edge cases", () => {
     expect(stdout.split("\n").filter(Boolean).length).toBe(1)
   })
 })
+
+describe("PreToolUse helper isolation (integration)", () => {
+  test("sequential deny calls produce independent outputs", async () => {
+    const results: JsonObject[] = []
+    for (const reason of ["reason-A", "reason-B", "reason-C"]) {
+      const { parsed } = await runHelper(
+        `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("${reason}")`
+      )
+      results.push(parsed)
+    }
+    for (let i = 0; i < results.length; i++) {
+      const hso = results[i].hookSpecificOutput as JsonObject
+      expect(hso.permissionDecision).toBe("deny")
+      expect(hso.permissionDecisionReason).toBe(["reason-A", "reason-B", "reason-C"][i])
+      expect(hso).not.toHaveProperty("updatedInput")
+    }
+  })
+
+  test("sequential allow calls produce independent outputs", async () => {
+    const inputs = [
+      { command: "echo first" },
+      { command: "echo second", timeout: 100 },
+      { file_path: "/tmp/third.ts" },
+    ]
+    const results: JsonObject[] = []
+    for (const input of inputs) {
+      const { parsed } = await runHelper(
+        `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+          `allowPreToolUseWithUpdatedInput(${JSON.stringify(input)})`
+      )
+      results.push(parsed)
+    }
+    for (let i = 0; i < results.length; i++) {
+      const hso = results[i].hookSpecificOutput as JsonObject
+      expect(hso.permissionDecision).toBe("allow")
+      expect(hso.updatedInput).toEqual(inputs[i])
+    }
+  })
+
+  test("deny followed by allow produces clean allow (no deny residue)", async () => {
+    const { parsed: denyResult } = await runHelper(
+      `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("blocked")`
+    )
+    const denyHso = denyResult.hookSpecificOutput as JsonObject
+    expect(denyHso.permissionDecision).toBe("deny")
+
+    const { parsed: allowResult } = await runHelper(
+      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+        `allowPreToolUseWithUpdatedInput({ command: "echo clean" })`
+    )
+    const allowHso = allowResult.hookSpecificOutput as JsonObject
+    expect(allowHso.permissionDecision).toBe("allow")
+    expect(allowHso.updatedInput).toEqual({ command: "echo clean" })
+    expect(allowHso).not.toHaveProperty("permissionDecisionReason")
+  })
+
+  test("allow followed by deny produces clean deny (no allow residue)", async () => {
+    const { parsed: allowResult } = await runHelper(
+      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+        `allowPreToolUseWithUpdatedInput({ command: "echo first" }, "rewritten")`
+    )
+    const allowHso = allowResult.hookSpecificOutput as JsonObject
+    expect(allowHso.permissionDecision).toBe("allow")
+    expect(allowHso.updatedInput).toEqual({ command: "echo first" })
+
+    const { parsed: denyResult } = await runHelper(
+      `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("now blocked")`
+    )
+    const denyHso = denyResult.hookSpecificOutput as JsonObject
+    expect(denyHso.permissionDecision).toBe("deny")
+    expect(denyHso.permissionDecisionReason).toBe("now blocked")
+    expect(denyHso).not.toHaveProperty("updatedInput")
+  })
+
+  test("concurrent invocations are fully isolated", async () => {
+    const [denyA, allowB, denyC] = await Promise.all([
+      runHelper(
+        `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("concurrent-deny-A")`
+      ),
+      runHelper(
+        `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+          `allowPreToolUseWithUpdatedInput({ concurrent: "B" })`
+      ),
+      runHelper(
+        `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("concurrent-deny-C")`
+      ),
+    ])
+
+    const hsoA = denyA.parsed.hookSpecificOutput as JsonObject
+    expect(hsoA.permissionDecision).toBe("deny")
+    expect(hsoA.permissionDecisionReason).toBe("concurrent-deny-A")
+    expect(hsoA).not.toHaveProperty("updatedInput")
+
+    const hsoB = allowB.parsed.hookSpecificOutput as JsonObject
+    expect(hsoB.permissionDecision).toBe("allow")
+    expect(hsoB.updatedInput).toEqual({ concurrent: "B" })
+
+    const hsoC = denyC.parsed.hookSpecificOutput as JsonObject
+    expect(hsoC.permissionDecision).toBe("deny")
+    expect(hsoC.permissionDecisionReason).toBe("concurrent-deny-C")
+    expect(hsoC).not.toHaveProperty("updatedInput")
+  })
+
+  test("same helper called twice with different inputs yields distinct outputs", async () => {
+    const { parsed: first } = await runHelper(
+      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+        `allowPreToolUseWithUpdatedInput({ version: 1 }, "first call")`
+    )
+    const { parsed: second } = await runHelper(
+      `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
+        `allowPreToolUseWithUpdatedInput({ version: 2 }, "second call")`
+    )
+
+    const hso1 = first.hookSpecificOutput as JsonObject
+    const hso2 = second.hookSpecificOutput as JsonObject
+
+    expect(hso1.updatedInput).toEqual({ version: 1 })
+    expect(hso1.permissionDecisionReason).toBe("first call")
+
+    expect(hso2.updatedInput).toEqual({ version: 2 })
+    expect(hso2.permissionDecisionReason).toBe("second call")
+
+    expect(hso1.updatedInput).not.toEqual(hso2.updatedInput)
+    expect(hso1.permissionDecisionReason).not.toBe(hso2.permissionDecisionReason)
+  })
+})
