@@ -202,3 +202,173 @@ describe("swiz skill --no-front-matter", () => {
     expect(exitCode).toBe(0)
   })
 })
+
+// ─── listSkills (no skill name) ───────────────────────────────────────────────
+
+/** Run `swiz skill [args...]` with full control over HOME and args. No skill name appended. */
+async function runListCmd(
+  args: string[],
+  fakeHome: string
+): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+  const proc = Bun.spawn(["bun", "run", "index.ts", "skill", ...args], {
+    cwd: process.cwd(),
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, HOME: fakeHome },
+  })
+  const stdout = await new Response(proc.stdout).text()
+  const stderr = await new Response(proc.stderr).text()
+  await proc.exited
+  return { stdout, stderr, exitCode: proc.exitCode }
+}
+
+describe("swiz skill (list mode)", () => {
+  test("prints 'No skills found.' when global dir is empty", async () => {
+    const fakeHome = await createTempDir()
+    const { stdout } = await runListCmd([], fakeHome)
+    expect(stdout.trim()).toBe("No skills found.")
+  })
+
+  test("prints count header when one skill is installed", async () => {
+    const fakeHome = await createTempDir()
+    const skillDir = join(fakeHome, ".claude", "skills", "alpha-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "---\ndescription: Alpha\n---\n")
+    const { stdout } = await runListCmd([], fakeHome)
+    expect(stdout).toContain("1 skills available")
+  })
+
+  test("correct count for multiple skills", async () => {
+    const fakeHome = await createTempDir()
+    for (const name of ["skill-a", "skill-b", "skill-c"]) {
+      const dir = join(fakeHome, ".claude", "skills", name)
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, "SKILL.md"), `---\ndescription: ${name}\n---\n`)
+    }
+    const { stdout } = await runListCmd([], fakeHome)
+    expect(stdout).toContain("3 skills available")
+  })
+
+  test("description appears next to the skill name", async () => {
+    const fakeHome = await createTempDir()
+    const skillDir = join(fakeHome, ".claude", "skills", "my-featured-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\ndescription: Deploy to production\n---\n"
+    )
+    const { stdout } = await runListCmd([], fakeHome)
+    expect(stdout).toContain("my-featured-skill")
+    expect(stdout).toContain("Deploy to production")
+  })
+
+  test("skill without description is listed with no description text", async () => {
+    const fakeHome = await createTempDir()
+    const skillDir = join(fakeHome, ".claude", "skills", "nodesc-xyz")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "# No frontmatter\n")
+    const { stdout } = await runListCmd([], fakeHome)
+    expect(stdout).toContain("nodesc-xyz")
+  })
+
+  test("directory without SKILL.md is excluded from list", async () => {
+    const fakeHome = await createTempDir()
+    const base = join(fakeHome, ".claude", "skills")
+    await mkdir(join(base, "empty-dir-xyz"), { recursive: true })
+    const realDir = join(base, "real-skill-xyz")
+    await mkdir(realDir, { recursive: true })
+    await writeFile(join(realDir, "SKILL.md"), "---\ndescription: Real\n---\n")
+    const { stdout } = await runListCmd([], fakeHome)
+    expect(stdout).toContain("real-skill-xyz")
+    expect(stdout).not.toContain("empty-dir-xyz")
+  })
+
+  test("--raw flag with no name falls through to list mode", async () => {
+    const fakeHome = await createTempDir()
+    const { stdout } = await runListCmd(["--raw"], fakeHome)
+    expect(stdout.trim()).toBe("No skills found.")
+  })
+})
+
+// ─── error handling ───────────────────────────────────────────────────────────
+
+describe("swiz skill <unknown-name> (error handling)", () => {
+  test("exits non-zero when skill is not found", async () => {
+    const fakeHome = await createTempDir()
+    const { exitCode } = await runListCmd(["nonexistent-skill-zyx-123"], fakeHome)
+    expect(exitCode).not.toBe(0)
+  })
+
+  test("error message identifies the missing skill by name", async () => {
+    const fakeHome = await createTempDir()
+    const { stderr } = await runListCmd(["totally-missing-skill-abc"], fakeHome)
+    expect(stderr).toContain("totally-missing-skill-abc")
+  })
+
+  test("error message hints to run 'swiz skill' to list skills", async () => {
+    const fakeHome = await createTempDir()
+    const { stderr } = await runListCmd(["ghost-skill-xyz"], fakeHome)
+    expect(stderr).toContain("swiz skill")
+  })
+})
+
+// ─── expandInlineCommands (!`cmd`) ────────────────────────────────────────────
+
+describe("expandInlineCommands (via swiz skill, no --raw)", () => {
+  test("expands a single inline command in skill content", async () => {
+    const fakeHome = await createTempDir()
+    const skillDir = join(fakeHome, ".claude", "skills", "inline-skill-xyz")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "Output: !`echo hello-world`\n")
+    const proc = Bun.spawn(["bun", "run", "index.ts", "skill", "inline-skill-xyz"], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, HOME: fakeHome },
+    })
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+    expect(stdout).toContain("hello-world")
+    expect(stdout).not.toContain("!`echo hello-world`")
+  })
+
+  test("expands multiple inline commands in order", async () => {
+    const fakeHome = await createTempDir()
+    const skillDir = join(fakeHome, ".claude", "skills", "multi-inline-xyz")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "A: !`echo alpha-val` B: !`echo beta-val`\n"
+    )
+    const proc = Bun.spawn(["bun", "run", "index.ts", "skill", "multi-inline-xyz"], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, HOME: fakeHome },
+    })
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+    expect(stdout).toContain("alpha-val")
+    expect(stdout).toContain("beta-val")
+  })
+
+  test("--raw suppresses inline command expansion", async () => {
+    const fakeHome = await createTempDir()
+    const skillDir = join(fakeHome, ".claude", "skills", "raw-inline-xyz")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "Cmd: !`echo should-not-appear`\n")
+    const proc = Bun.spawn(
+      ["bun", "run", "index.ts", "skill", "--raw", "raw-inline-xyz"],
+      {
+        cwd: process.cwd(),
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, HOME: fakeHome },
+      }
+    )
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+    expect(stdout).toContain("!`echo should-not-appear`")
+    expect(stdout).not.toContain("should-not-appear\n")
+  })
+})
