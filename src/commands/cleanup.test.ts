@@ -60,6 +60,9 @@ beforeAll(async () => {
   await Bun.write(join(FIXTURE_SESSION, "session.jsonl"), '{"type":"system"}\n')
 
   // Corrupted project fixture ─────────────────────────────────────────────────
+  // Create the real directory so stale-path detection doesn't trigger.
+  // CORRUPT_PROJECT encodes TMP_HOME/corrupted/project — it must exist on disk.
+  await mkdir(join(TMP_HOME, "corrupted", "project"), { recursive: true })
   // Non-UUID file in project root (should be ignored by UUID_RE).
   await Bun.write(join(CORRUPT_PROJECT_DIR, "README.md"), "docs\n")
   // Non-UUID directory in project root (should be ignored by UUID_RE).

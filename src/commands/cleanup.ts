@@ -72,19 +72,6 @@ export async function decodeProjectPath(encodedName: string, homeDir = HOME): Pr
 // Matches standard UUID v4 — session dirs only; named dirs (memory/, etc.) never match
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-function expandHome(p: string, homeDir = HOME): string {
-  return p.startsWith("~/") ? join(homeDir, p.slice(2)) : p
-}
-
-async function pathExists(p: string): Promise<boolean> {
-  try {
-    await stat(p)
-    return true
-  } catch {
-    return false
-  }
-}
-
 // ─── ANSI ────────────────────────────────────────────────────────────────────
 
 const RESET = "\x1b[0m"
@@ -282,11 +269,17 @@ export const cleanupCommand: Command = {
     }
 
     // Mark projects whose real filesystem path no longer exists.
-    // For stale projects, all kept sessions also become trashable.
-    const decodedForStaleCheck = await Promise.all(results.map((r) => decodeProjectPath(r.name)))
+    // Uses walkDecode directly rather than the decodeProjectPath fallback so
+    // that projects with literal hyphens in their name are never false-positived.
+    // walkDecode returns null only when no plausible filesystem path exists for
+    // the encoded name — a reliable signal that the project is gone.
+    const encodedHome = HOME.replace(/[/.]/g, "-")
     for (let i = 0; i < results.length; i++) {
-      const realPath = expandHome(decodedForStaleCheck[i]!)
-      if (!(await pathExists(realPath))) {
+      const name = results[i]!.name
+      if (!name.startsWith(encodedHome)) continue
+      const encodedRest = name.slice(encodedHome.length)
+      if (!encodedRest) continue
+      if ((await walkDecode(HOME, encodedRest)) === null) {
         results[i]!.stale = true
         results[i]!.old = [...results[i]!.old, ...results[i]!.keep]
         results[i]!.keep = []
@@ -298,8 +291,8 @@ export const cleanupCommand: Command = {
       return
     }
 
-    // Decode project paths for display (reuse the stale-check pass)
-    const decodedNames = decodedForStaleCheck
+    // Decode project paths for display
+    const decodedNames = await Promise.all(results.map((r) => decodeProjectPath(r.name)))
     const maxNameLen = Math.max(...decodedNames.map((n) => n.length), 20)
 
     // Print table
