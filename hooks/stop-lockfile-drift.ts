@@ -33,7 +33,7 @@ async function main(): Promise<void> {
   const changedRaw = await git(["diff", "--name-only", range], cwd)
   if (!changedRaw) return
 
-  const changedFiles = new Set(changedRaw.split("\n").filter(Boolean))
+  const changedFiles = new Set(changedRaw.split("\n").filter((l) => l.trim()))
 
   // Find changed package.json files (not in node_modules)
   const changedPkgs = [...changedFiles].filter(

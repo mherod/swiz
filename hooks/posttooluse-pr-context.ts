@@ -89,12 +89,14 @@ if (pr.body) {
 }
 
 if (pr.comments?.length) {
-  const last = pr.comments[pr.comments.length - 1]!
-  const who = last.author?.login ?? "unknown"
-  const when = last.createdAt ?? ""
-  const text = last.body ?? ""
-  const truncated = text.length > 600 ? text.slice(0, 600) + "..." : text
-  lines.push("", `--- Last Comment ---`, `[${who} at ${when}]`, truncated)
+  const last = pr.comments[pr.comments.length - 1]
+  if (last) {
+    const who = last.author?.login ?? "unknown"
+    const when = last.createdAt ?? ""
+    const text = last.body ?? ""
+    const truncated = text.length > 600 ? text.slice(0, 600) + "..." : text
+    lines.push("", `--- Last Comment ---`, `[${who} at ${when}]`, truncated)
+  }
 }
 
 const context = lines.join("\n")

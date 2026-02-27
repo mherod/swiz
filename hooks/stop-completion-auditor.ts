@@ -36,7 +36,9 @@ async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as StopHookInput
   const sessionId = input.session_id ?? ""
   const transcript = input.transcript_path ?? ""
-  const tasksDir = join(process.env.HOME!, ".claude", "tasks", sessionId)
+  const home = process.env.HOME
+  if (!home) return
+  const tasksDir = join(home, ".claude", "tasks", sessionId)
 
   const { total: toolCallCount, taskToolUsed } = transcript
     ? await countToolCalls(transcript)

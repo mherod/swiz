@@ -19,10 +19,10 @@ function extractOwnerFromUrl(remoteUrl: string): string | null {
   // SSH: git@github.com:owner/repo.git
   // HTTPS: https://github.com/owner/repo.git
   const sshMatch = remoteUrl.match(/git@github\.com:([^/]+)\//)
-  if (sshMatch) return sshMatch[1]!
+  if (sshMatch?.[1]) return sshMatch[1]
 
   const httpsMatch = remoteUrl.match(/github\.com\/([^/]+)\//)
-  if (httpsMatch) return httpsMatch[1]!
+  if (httpsMatch?.[1]) return httpsMatch[1]
 
   return null
 }

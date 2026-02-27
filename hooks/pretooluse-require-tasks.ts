@@ -3,6 +3,7 @@
 //   1. The session has at least one incomplete task (pending or in_progress)
 //   2. Tasks haven't gone stale (no task tool interaction in last STALENESS_THRESHOLD calls)
 
+import { join } from "node:path"
 import {
   denyPreToolUse as deny,
   extractToolNamesFromTranscript,
@@ -26,14 +27,16 @@ if (!isBlockedTool) process.exit(0)
 
 // ── CHECK 1: Incomplete tasks exist (file-based) ──────────────────────────────
 
-const tasksDir = `${process.env.HOME}/.claude/tasks/${sessionId}`
+const home = process.env.HOME
+if (!home) process.exit(0)
+const tasksDir = join(home, ".claude", "tasks", sessionId)
 const activeTasks: string[] = []
 
 try {
   const glob = new Bun.Glob("*.json")
   for await (const file of glob.scan(tasksDir)) {
     try {
-      const task = await Bun.file(`${tasksDir}/${file}`).json()
+      const task = await Bun.file(join(tasksDir, file)).json()
       const status = task?.status
       if (status === "pending" || status === "in_progress") {
         activeTasks.push(`#${task.id} (${status}): ${task.subject}`)
@@ -67,7 +70,8 @@ if (transcriptPath) {
 
   let lastTaskIndex = -1
   for (let i = total - 1; i >= 0; i--) {
-    if (TASK_TOOLS.has(toolNames[i]!)) {
+    const name = toolNames[i]
+    if (name && TASK_TOOLS.has(name)) {
       lastTaskIndex = i
       break
     }

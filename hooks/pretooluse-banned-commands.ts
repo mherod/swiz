@@ -217,7 +217,7 @@ const RULES: Rule[] = [
     match: (c) => {
       const mMatch = c.match(/git\s+commit\s.*-m\s+["']([^"']*)/)
       if (!mMatch) return false
-      return /Co-authored-by:/i.test(mMatch[1]!)
+      return /Co-authored-by:/i.test(mMatch[1] ?? "")
     },
     message: [
       "Do not include `Co-authored-by:` in commit messages.",

@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   const addedRaw = await git(["log", "--diff-filter=A", "--name-only", "--format=", range], cwd)
   if (!addedRaw) return
 
-  const addedFiles = addedRaw.split("\n").filter(Boolean)
+  const addedFiles = addedRaw.split("\n").filter((l) => l.trim())
   const largeFiles: string[] = []
 
   for (const filePath of addedFiles) {

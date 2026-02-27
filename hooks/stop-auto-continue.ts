@@ -31,7 +31,9 @@ interface TaskEntry {
  */
 async function loadTaskContext(sessionId: string): Promise<string> {
   if (!sessionId) return ""
-  const tasksDir = join(process.env.HOME!, ".claude", "tasks", sessionId)
+  const home = process.env.HOME
+  if (!home) return ""
+  const tasksDir = join(home, ".claude", "tasks", sessionId)
   let files: string[]
   try {
     files = await readdir(tasksDir)
