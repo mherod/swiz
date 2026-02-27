@@ -583,5 +583,37 @@ describe("agents.ts", () => {
       })
       expect(await isAgentInstalled(agent)).toBe(false)
     })
+
+    it("returns false for binary that is a path to a non-executable file", async () => {
+      const agent = fakeAgent({ binary: "/dev/null" })
+      expect(await isAgentInstalled(agent)).toBe(false)
+    })
+
+    it("returns false for binary with path separators", async () => {
+      const agent = fakeAgent({ binary: "/usr/bin/nonexistent-xyz" })
+      expect(await isAgentInstalled(agent)).toBe(false)
+    })
+
+    it("returns false for binary with shell metacharacters", async () => {
+      const agent = fakeAgent({ binary: "cmd; echo hacked" })
+      const result = await isAgentInstalled(agent)
+      expect(result).toBe(false)
+    })
+
+    it("returns false for settings path with newlines", async () => {
+      const agent = fakeAgent({ settingsPath: "/tmp/foo\nbar/settings.json" })
+      expect(await isAgentInstalled(agent)).toBe(false)
+    })
+
+    it("handles very long binary name gracefully", async () => {
+      const agent = fakeAgent({ binary: "x".repeat(1000) })
+      const result = await isAgentInstalled(agent)
+      expect(typeof result).toBe("boolean")
+    })
+
+    it("handles very long settings path gracefully", async () => {
+      const agent = fakeAgent({ settingsPath: "/" + "a".repeat(1000) + "/settings.json" })
+      expect(await isAgentInstalled(agent)).toBe(false)
+    })
   })
 })
