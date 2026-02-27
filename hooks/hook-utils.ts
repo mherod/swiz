@@ -1,5 +1,5 @@
 // Shared utilities for swiz hook scripts.
-// Import with: import { denyPreToolUse, isShellTool, isEditTool, ... } from "./hook-utils.ts";
+// Import with: import { denyPreToolUse, allowPreToolUseWithUpdatedInput, isShellTool, isEditTool, ... } from "./hook-utils.ts";
 
 // ─── Runtime dependency check ───────────────────────────────────────────────
 // Verify bun is reachable on PATH. This file executes inside bun, but the
@@ -157,6 +157,24 @@ export function denyPreToolUse(reason: string): never {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
         permissionDecisionReason: reason,
+      },
+    })
+  )
+  process.exit(0)
+}
+
+/** Emit a PreToolUse allow with modified tool input and exit. Works across all agents. */
+export function allowPreToolUseWithUpdatedInput(
+  updatedInput: Record<string, unknown>,
+  reason?: string
+): never {
+  console.log(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+        ...(reason && { permissionDecisionReason: reason }),
+        updatedInput,
       },
     })
   )
