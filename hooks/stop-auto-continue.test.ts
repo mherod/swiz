@@ -68,7 +68,7 @@ function buildTranscript(toolCallCount: number, userMessage = "What is the statu
       })
     )
   }
-  return lines.join("\n") + "\n"
+  return `${lines.join("\n")}\n`
 }
 
 async function runHook({
@@ -168,6 +168,44 @@ describe("stop-auto-continue", () => {
     })
 
     expect(result.decision).toBeUndefined()
+  })
+
+  test("allows stop when auto-continue is disabled in global swiz settings", async () => {
+    const binDir = await createTempDir()
+    await createFakeAgent(binDir, "Should not appear")
+
+    const homeDir = await createTempDir()
+    await mkdir(join(homeDir, ".swiz"), { recursive: true })
+    await writeFile(join(homeDir, ".swiz", "settings.json"), '{\n  "autoContinue": false\n}\n')
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: homeDir },
+    })
+
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("session override takes precedence over global setting", async () => {
+    const binDir = await createTempDir()
+    await createFakeAgent(binDir, "Run the linter")
+
+    const homeDir = await createTempDir()
+    await mkdir(join(homeDir, ".swiz"), { recursive: true })
+    await writeFile(
+      join(homeDir, ".swiz", "settings.json"),
+      '{\n  "autoContinue": false,\n  "sessions": {\n    "test-session": {\n      "autoContinue": true\n    }\n  }\n}\n'
+    )
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: homeDir },
+    })
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("Run the linter")
   })
 
   test("falls back to generic message when agent fails", async () => {
@@ -761,7 +799,7 @@ describe("stop-auto-continue", () => {
 
   test("strips markdown fences from JSON response", async () => {
     const binDir = await createTempDir()
-    const json = "```json\n" + JSON.stringify({ next: "Fix the type errors", reflections: [] }) + "\n```"
+    const json = `\`\`\`json\n${JSON.stringify({ next: "Fix the type errors", reflections: [] })}\n\`\`\``
     await createFakeAgent(binDir, json)
 
     const result = await runHook({
@@ -792,10 +830,7 @@ describe("stop-auto-continue", () => {
     const binDir = await createTempDir()
     const json = JSON.stringify({
       next: "Run the tests",
-      reflections: [
-        "DO: Always use bun instead of npm",
-        "<script>alert('xss')</script>",
-      ],
+      reflections: ["DO: Always use bun instead of npm", "<script>alert('xss')</script>"],
     })
     await createFakeAgent(binDir, json)
 
@@ -978,7 +1013,7 @@ describe("stop-auto-continue", () => {
     const fakeHome = await createTempDir()
     const hookCwd = await createTempDir()
     // Create a memory file that's already at ~199 lines
-    const longContent = "# Memory\n" + "\n".repeat(198)
+    const longContent = `# Memory\n${"\n".repeat(198)}`
     const memoryFile = await setupMemoryDir(fakeHome, hookCwd, longContent)
 
     await runHook({

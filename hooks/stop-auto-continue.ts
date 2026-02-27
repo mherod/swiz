@@ -8,8 +8,9 @@ import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { detectAgentCli, promptAgent } from "../src/agent.ts"
+import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import { countToolCalls, extractPlainTurns, formatTurnsAsContext } from "../src/transcript-utils.ts"
-import { blockStopRaw, git, isGitRepo, skillAdvice, type StopHookInput } from "./hook-utils.ts"
+import { blockStopRaw, git, isGitRepo, type StopHookInput, skillAdvice } from "./hook-utils.ts"
 
 const MIN_TOOL_CALLS = 5 // Don't engage for trivial sessions
 const CONTEXT_TURNS = 10 // Recent turns to send as context
@@ -106,7 +107,10 @@ function hasMarkup(text: string): boolean {
 function parseAgentResponse(raw: string): AgentResponse {
   const trimmed = raw.trim()
   // Strip markdown code fences the agent might wrap around JSON
-  const jsonStr = trimmed.replace(/^```json?\s*/i, "").replace(/\s*```\s*$/, "").trim()
+  const jsonStr = trimmed
+    .replace(/^```json?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim()
 
   try {
     const parsed = JSON.parse(jsonStr)
@@ -232,11 +236,14 @@ async function checkChangelogStaleness(cwd: string): Promise<string> {
 
   if (!changelogPath) return ""
 
-  const lastCommitTime = parseInt(await git(["log", "-1", "--format=%ct"], cwd))
-  if (isNaN(lastCommitTime)) return ""
+  const lastCommitTime = parseInt(await git(["log", "-1", "--format=%ct"], cwd), 10)
+  if (Number.isNaN(lastCommitTime)) return ""
 
-  const changelogTime = parseInt(await git(["log", "-1", "--format=%ct", "--", changelogPath], cwd))
-  if (isNaN(changelogTime)) return ""
+  const changelogTime = parseInt(
+    await git(["log", "-1", "--format=%ct", "--", changelogPath], cwd),
+    10
+  )
+  if (Number.isNaN(changelogTime)) return ""
 
   const gap = lastCommitTime - changelogTime
   if (gap <= ONE_DAY) return ""
@@ -249,11 +256,7 @@ async function checkChangelogStaleness(cwd: string): Promise<string> {
 
 // ─── Prompt construction ────────────────────────────────────────────────────
 
-function buildPrompt(
-  taskSection: string,
-  projectStatus: string,
-  context: string
-): string {
+function buildPrompt(taskSection: string, projectStatus: string, context: string): string {
   const statusSection = projectStatus
     ? `=== PROJECT STATUS ===\n${projectStatus}\n=== END OF PROJECT STATUS ===\n\n`
     : ""
@@ -275,11 +278,7 @@ function buildPrompt(
     `or surfaced in the transcript but NOT yet resolved, those take HIGHEST priority. ` +
     `(2) If any task or feature was started but left incomplete, finish it. ` +
     `(3) If a PROJECT STATUS section reports stale artifacts (e.g., CHANGELOG.md), ` +
-    skillAdvice(
-      "changelog",
-      `use the /changelog skill to update them. `,
-      `update them. `
-    ) +
+    skillAdvice("changelog", `use the /changelog skill to update them. `, `update them. `) +
     `(4) Otherwise, find the next valuable improvement (tests, edge cases, related issues, quality). ` +
     `Be ambitious. There is always more to do. ` +
     `NEVER conclude that work is complete or that nothing remains. ` +
@@ -311,6 +310,10 @@ function buildPrompt(
 
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as StopHookInput
+
+  const settings = await readSwizSettings()
+  const effective = getEffectiveSwizSettings(settings, input.session_id)
+  if (!effective.autoContinue) return
 
   if (!input.transcript_path) return
 

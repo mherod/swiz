@@ -6,6 +6,7 @@ import { dispatchCommand } from "./src/commands/dispatch.ts"
 import { hooksCommand } from "./src/commands/hooks.ts"
 import { installCommand } from "./src/commands/install.ts"
 import { sessionCommand } from "./src/commands/session.ts"
+import { settingsCommand } from "./src/commands/settings.ts"
 import { shimCommand } from "./src/commands/shim.ts"
 import { skillCommand } from "./src/commands/skill.ts"
 import { statusCommand } from "./src/commands/status.ts"
@@ -18,6 +19,7 @@ registerCommand(hooksCommand)
 registerCommand(installCommand)
 registerCommand(uninstallCommand)
 registerCommand(statusCommand)
+registerCommand(settingsCommand)
 registerCommand(tasksCommand)
 registerCommand(shimCommand)
 registerCommand(dispatchCommand)

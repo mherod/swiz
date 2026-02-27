@@ -95,6 +95,21 @@ Show installation state for every agent — binary location, settings file, hook
 swiz status
 ```
 
+### `swiz settings [show | enable | disable]`
+
+View and modify global swiz behavior flags stored at `~/.swiz/settings.json`.
+
+```bash
+swiz settings                         # show effective settings
+swiz settings disable auto-continue  # disable stop auto-continue blocker
+swiz settings enable auto-continue   # re-enable it
+swiz settings show --session --dir <path>                    # show effective setting for latest session in dir
+swiz settings disable auto-continue --session --dir <path>   # set override for latest session in dir
+swiz settings enable auto-continue --session <id> --dir <path> # set override for matching session
+```
+
+Session overrides are keyed by session ID. If no override exists, that session inherits the global setting.
+
 ### `swiz hooks [event] [script]`
 
 Inspect hook configurations across all agents.
@@ -190,7 +205,7 @@ swiz tasks complete-all                     # bulk-complete remaining
 | `stop-changelog-staleness.ts` | Warns if changelog hasn't been updated alongside code changes |
 | `stop-completion-auditor.ts` | Verifies tasks have completion evidence before allowing stop |
 | `stop-personal-repo-issues.ts` | Checks for actionable open issues (skips blocked/upstream) |
-| `stop-auto-continue.ts` | Blocks stop once with an AI-generated "next step" suggestion; respects `stop_hook_active` to allow stop on second attempt |
+| `stop-auto-continue.ts` | Blocks stop with an AI-generated "next step" suggestion (enabled by default; toggle globally or per session via `swiz settings`) |
 | `stop-memory-updater.ts` | Extracts confirmed patterns from transcript to project memory (async, never blocks) |
 
 ### PreToolUse (11)
