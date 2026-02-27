@@ -1,19 +1,19 @@
-import { join, resolve } from "node:path";
-import type { Command } from "../types.ts";
-import { promptAgent, detectAgentCli } from "../agent.ts";
+import { join, resolve } from "node:path"
+import { detectAgentCli, promptAgent } from "../agent.ts"
 import {
-  projectKeyFromCwd,
-  findSessions,
   extractPlainTurns,
+  findSessions,
   formatTurnsAsContext,
+  projectKeyFromCwd,
   type Session,
-} from "../transcript-utils.ts";
+} from "../transcript-utils.ts"
+import type { Command } from "../types.ts"
 
 // ─── Next-step suggestion ─────────────────────────────────────────────────────
 
 async function generateNextStep(jsonlText: string): Promise<string> {
-  const turns = extractPlainTurns(jsonlText).slice(-20);
-  const context = formatTurnsAsContext(turns);
+  const turns = extractPlainTurns(jsonlText).slice(-20)
+  const context = formatTurnsAsContext(turns)
 
   const prompt =
     `You are analyzing a conversation between a user and an AI assistant. ` +
@@ -22,9 +22,9 @@ async function generateNextStep(jsonlText: string): Promise<string> {
     `Reply with ONLY one sentence starting with an imperative verb ` +
     `(Run, Fix, Add, Check, Verify, Commit, etc.) — ` +
     `no explanation, no markdown, no prefix, no period at the end.\n\n` +
-    `<conversation>\n${context}\n</conversation>`;
+    `<conversation>\n${context}\n</conversation>`
 
-  return promptAgent(prompt);
+  return promptAgent(prompt)
 }
 
 // ─── Command ──────────────────────────────────────────────────────────────────
@@ -34,81 +34,83 @@ export const continueCommand: Command = {
   description: "Resume the most recent session with an AI-generated next step",
   usage: "swiz continue [--dir <path>] [--session <id>] [--print]",
   async run(args) {
-    const HOME = process.env.HOME ?? "~";
-    const PROJECTS_DIR = join(HOME, ".claude", "projects");
+    const HOME = process.env.HOME ?? "~"
+    const PROJECTS_DIR = join(HOME, ".claude", "projects")
 
-    let targetDir = process.cwd();
-    let sessionQuery: string | null = null;
-    let printOnly = false;
+    let targetDir = process.cwd()
+    let sessionQuery: string | null = null
+    let printOnly = false
 
     for (let i = 0; i < args.length; i++) {
       if ((args[i] === "--dir" || args[i] === "-d") && args[i + 1]) {
-        targetDir = resolve(args[++i]!);
+        targetDir = resolve(args[++i]!)
       } else if ((args[i] === "--session" || args[i] === "-s") && args[i + 1]) {
-        sessionQuery = args[++i]!;
+        sessionQuery = args[++i]!
       } else if (args[i] === "--print") {
-        printOnly = true;
+        printOnly = true
       }
     }
 
     if (!detectAgentCli()) {
-      throw new Error("No AI backend found. Install one of: Cursor Agent (agent), Claude Code (claude), or Gemini CLI (gemini).");
+      throw new Error(
+        "No AI backend found. Install one of: Cursor Agent (agent), Claude Code (claude), or Gemini CLI (gemini)."
+      )
     }
 
-    const projectKey = projectKeyFromCwd(targetDir);
-    const projectDir = join(PROJECTS_DIR, projectKey);
-    const sessions = await findSessions(projectDir);
+    const projectKey = projectKeyFromCwd(targetDir)
+    const projectDir = join(PROJECTS_DIR, projectKey)
+    const sessions = await findSessions(projectDir)
 
     if (sessions.length === 0) {
-      throw new Error(`No transcripts found for: ${targetDir}`);
+      throw new Error(`No transcripts found for: ${targetDir}`)
     }
 
-    let session: Session;
+    let session: Session
     if (sessionQuery) {
-      const match = sessions.find((s) => s.id.startsWith(sessionQuery!));
+      const match = sessions.find((s) => s.id.startsWith(sessionQuery!))
       if (!match) {
-        throw new Error(`No session matching: ${sessionQuery}`);
+        throw new Error(`No session matching: ${sessionQuery}`)
       }
-      session = match;
+      session = match
     } else {
-      session = sessions[0]!;
+      session = sessions[0]!
     }
 
-    let raw: string;
+    let raw: string
     try {
-      raw = await Bun.file(session.path).text();
+      raw = await Bun.file(session.path).text()
     } catch {
-      throw new Error(`Could not read transcript: ${session.path}`);
+      throw new Error(`Could not read transcript: ${session.path}`)
     }
 
-    let suggestion: string;
+    let suggestion: string
     try {
-      suggestion = await generateNextStep(raw);
+      suggestion = await generateNextStep(raw)
     } catch (err) {
-      throw new Error(`Failed to generate suggestion: ${String(err)}`);
+      throw new Error(`Failed to generate suggestion: ${String(err)}`)
     }
 
     if (!suggestion) {
-      throw new Error("Empty suggestion returned from AI backend.");
+      throw new Error("Empty suggestion returned from AI backend.")
     }
 
     if (printOnly) {
-      console.log(suggestion);
-      return;
+      console.log(suggestion)
+      return
     }
 
     // Resume the session with the suggestion as the first user message.
     // --session flag maps to --resume <id>; default uses --continue (most recent).
     const resumeArgs: string[] = sessionQuery
       ? ["claude", "--resume", session.id, suggestion]
-      : ["claude", "--continue", suggestion];
+      : ["claude", "--continue", suggestion]
 
     const proc = Bun.spawn(resumeArgs, {
       stdout: "inherit",
       stderr: "inherit",
       stdin: "inherit",
-    });
-    await proc.exited;
-    process.exitCode = proc.exitCode ?? 0;
+    })
+    await proc.exited
+    process.exitCode = proc.exitCode ?? 0
   },
-};
+}

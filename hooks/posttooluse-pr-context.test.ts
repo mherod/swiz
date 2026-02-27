@@ -1,11 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test"
 
 // ─── Hook runner ─────────────────────────────────────────────────────────────
 
 interface HookResult {
-  context?: string;
-  rawOutput: string;
-  exitedCleanly: boolean;
+  context?: string
+  rawOutput: string
+  exitedCleanly: boolean
 }
 
 async function runHook(command: string, cwd = "/tmp"): Promise<HookResult> {
@@ -13,31 +13,31 @@ async function runHook(command: string, cwd = "/tmp"): Promise<HookResult> {
     tool_name: "Bash",
     tool_input: { command },
     cwd,
-  });
+  })
 
   const proc = Bun.spawn(["bun", "hooks/posttooluse-pr-context.ts"], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-  });
-  proc.stdin.write(payload);
-  proc.stdin.end();
+  })
+  proc.stdin.write(payload)
+  proc.stdin.end()
 
-  const rawOutput = await new Response(proc.stdout).text();
-  await proc.exited;
+  const rawOutput = await new Response(proc.stdout).text()
+  await proc.exited
 
-  const exitedCleanly = proc.exitCode === 0;
-  if (!rawOutput.trim()) return { rawOutput, exitedCleanly };
+  const exitedCleanly = proc.exitCode === 0
+  if (!rawOutput.trim()) return { rawOutput, exitedCleanly }
 
   try {
-    const parsed = JSON.parse(rawOutput.trim());
+    const parsed = JSON.parse(rawOutput.trim())
     return {
       context: parsed.hookSpecificOutput?.additionalContext,
       rawOutput,
       exitedCleanly,
-    };
+    }
   } catch {
-    return { rawOutput, exitedCleanly };
+    return { rawOutput, exitedCleanly }
   }
 }
 
@@ -49,78 +49,78 @@ describe("posttooluse-pr-context: checkout detection (\\s*git checkout)", () => 
   // that non-checkout commands also exit silently, i.e. both paths are stable.
 
   test("non-checkout command exits silently with no output", async () => {
-    const result = await runHook("git status");
-    expect(result.rawOutput.trim()).toBe("");
-    expect(result.exitedCleanly).toBe(true);
-  });
+    const result = await runHook("git status")
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
 
   test("git diff command exits silently", async () => {
-    const result = await runHook("git diff --stat");
-    expect(result.rawOutput.trim()).toBe("");
-    expect(result.exitedCleanly).toBe(true);
-  });
+    const result = await runHook("git diff --stat")
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
 
   test("bun test command exits silently", async () => {
-    const result = await runHook("bun test");
-    expect(result.rawOutput.trim()).toBe("");
-    expect(result.exitedCleanly).toBe(true);
-  });
+    const result = await runHook("bun test")
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
 
   test("echo command with git checkout in string exits silently (no false positive)", async () => {
     // 'echo "git checkout"' — the text appears inside quotes, not as a real command.
     // The regex requires it to follow ^, ;, &&, or ||, so this must not trigger.
-    const result = await runHook('echo "git checkout feature"');
-    expect(result.rawOutput.trim()).toBe("");
-    expect(result.exitedCleanly).toBe(true);
-  });
+    const result = await runHook('echo "git checkout feature"')
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
 
   test("git checkout command exits cleanly (no PR found)", async () => {
     // In a non-git tmp dir, git branch fails → branch empty → exits silently
-    const result = await runHook("git checkout main");
-    expect(result.exitedCleanly).toBe(true);
-  });
+    const result = await runHook("git checkout main")
+    expect(result.exitedCleanly).toBe(true)
+  })
 
   test("semicolon-separated checkout exits cleanly: echo x; git checkout main", async () => {
-    const result = await runHook("echo x; git checkout main");
-    expect(result.exitedCleanly).toBe(true);
-  });
+    const result = await runHook("echo x; git checkout main")
+    expect(result.exitedCleanly).toBe(true)
+  })
 
   test("&& checkout exits cleanly: git fetch && git checkout main", async () => {
-    const result = await runHook("git fetch && git checkout main");
-    expect(result.exitedCleanly).toBe(true);
-  });
+    const result = await runHook("git fetch && git checkout main")
+    expect(result.exitedCleanly).toBe(true)
+  })
 
   test("git checkouts (typo, no word boundary match) exits silently", async () => {
     // 'checkouts' should NOT match due to \b word boundary in the regex
-    const result = await runHook("git checkouts list");
-    expect(result.rawOutput.trim()).toBe("");
-    expect(result.exitedCleanly).toBe(true);
-  });
+    const result = await runHook("git checkouts list")
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
 
   test("gh pr checkout exits cleanly (no PR found)", async () => {
-    const result = await runHook("gh pr checkout 123");
-    expect(result.exitedCleanly).toBe(true);
-  });
+    const result = await runHook("gh pr checkout 123")
+    expect(result.exitedCleanly).toBe(true)
+  })
 
   test("non-shell tool exits silently (tool_name filtering)", async () => {
     const payload = JSON.stringify({
       tool_name: "Read",
       tool_input: { command: "git checkout main" },
       cwd: "/tmp",
-    });
+    })
 
     const proc = Bun.spawn(["bun", "hooks/posttooluse-pr-context.ts"], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-    });
-    proc.stdin.write(payload);
-    proc.stdin.end();
+    })
+    proc.stdin.write(payload)
+    proc.stdin.end()
 
-    const rawOutput = await new Response(proc.stdout).text();
-    await proc.exited;
+    const rawOutput = await new Response(proc.stdout).text()
+    await proc.exited
 
-    expect(rawOutput.trim()).toBe("");
-    expect(proc.exitCode).toBe(0);
-  });
-});
+    expect(rawOutput.trim()).toBe("")
+    expect(proc.exitCode).toBe(0)
+  })
+})

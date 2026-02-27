@@ -1,31 +1,31 @@
 #!/usr/bin/env bun
 
-import { denyPreToolUse } from "./hook-utils.ts";
+import { denyPreToolUse } from "./hook-utils.ts"
 
 interface HookInput {
-  tool_name: string;
+  tool_name: string
   tool_input?: {
-    file_path?: string;
-    new_string?: string;
-    content?: string;
-  };
+    file_path?: string
+    new_string?: string
+    content?: string
+  }
 }
 
 async function main() {
-  const input: HookInput = await Bun.stdin.json();
+  const input: HookInput = await Bun.stdin.json()
 
-  const filePath = input.tool_input?.file_path ?? "";
-  const isTypeScriptFile = /\.(ts|tsx)$/.test(filePath);
+  const filePath = input.tool_input?.file_path ?? ""
+  const isTypeScriptFile = /\.(ts|tsx)$/.test(filePath)
 
   if (!isTypeScriptFile) {
-    process.exit(0);
+    process.exit(0)
   }
 
-  const content = input.tool_input?.new_string ?? input.tool_input?.content ?? "";
+  const content = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
 
   // Scope the check to actual comment-level linter directives, not filenames or strings.
   // Keyword split across array to avoid self-triggering when editing this hook.
-  const kw = ["eslint", "disable"].join("-");
+  const kw = ["eslint", "disable"].join("-")
   if (new RegExp(`(?://|/\\*)\\s*${kw}`).test(content)) {
     const reason = [
       "ESLint is the authority. Do not bypass, ignore, or argue with it.",
@@ -41,9 +41,9 @@ async function main() {
       "The linter is not negotiable, not postponeable, not arguable with. It is the source",
       "of truth for code quality. Rules exist because they prevent bugs, enforce consistency,",
       "and maintain the codebase standard. Follow the linter, always.",
-    ].join("\n");
+    ].join("\n")
 
-    denyPreToolUse(reason);
+    denyPreToolUse(reason)
   }
 
   // Allow the edit
@@ -54,10 +54,10 @@ async function main() {
         permissionDecision: "allow",
       },
     })
-  );
+  )
 }
 
 main().catch((e) => {
-  console.error("Hook error:", e);
-  process.exit(1);
-});
+  console.error("Hook error:", e)
+  process.exit(1)
+})

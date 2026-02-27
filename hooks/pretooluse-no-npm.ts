@@ -4,27 +4,27 @@
 
 import {
   denyPreToolUse,
-  isShellTool,
   detectPackageManager,
   detectPkgRunner,
+  isShellTool,
   type PackageManager,
-} from "./hook-utils.ts";
+} from "./hook-utils.ts"
 
-const PM = detectPackageManager();
+const PM = detectPackageManager()
 
 // Equivalent subcommands across package managers
 interface CmdMap {
-  install: string;
-  add: string;
-  addDev: string;
-  addGlobal: string;
-  remove: string;
-  run: string;
-  test: string;
-  exec: string;
-  dlx: string;
-  update: string;
-  ci: string;
+  install: string
+  add: string
+  addDev: string
+  addGlobal: string
+  remove: string
+  run: string
+  test: string
+  exec: string
+  dlx: string
+  update: string
+  ci: string
 }
 
 const CMD: Record<PackageManager, CmdMap> = {
@@ -80,66 +80,71 @@ const CMD: Record<PackageManager, CmdMap> = {
     update: "npm update",
     ci: "npm ci",
   },
-};
+}
 
 function deny(from: string, to: string): void {
-  const pmLabel = PM ?? "the project's package manager";
+  const pmLabel = PM ?? "the project's package manager"
   denyPreToolUse(
     `Use ${pmLabel} instead. This project uses ${pmLabel} (detected from lockfile).\n\n` +
-    `  ${from}  →  ${to}`
-  );
+      `  ${from}  →  ${to}`
+  )
 }
 
 function classifySubcmd(subcmd: string, args: string): keyof CmdMap | null {
-  if ((subcmd === "install" || subcmd === "i") && args.includes("-g")) return "addGlobal";
-  if ((subcmd === "install" || subcmd === "i") && (args.includes("-D") || args.includes("--save-dev"))) return "addDev";
-  if ((subcmd === "install" || subcmd === "i" || subcmd === "add") && args.trim().length > 0) return "add";
-  if (subcmd === "install" || subcmd === "i" || subcmd === "") return "install";
-  if (subcmd === "ci") return "ci";
-  if (["uninstall", "remove", "rm", "un", "r", "unlink"].includes(subcmd)) return "remove";
-  if (subcmd === "run" || subcmd === "start") return "run";
-  if (subcmd === "test" || subcmd === "t") return "test";
-  if (subcmd === "exec") return "exec";
-  if (subcmd === "dlx") return "dlx";
-  if (["update", "up", "upgrade"].includes(subcmd)) return "update";
-  return null;
+  if ((subcmd === "install" || subcmd === "i") && args.includes("-g")) return "addGlobal"
+  if (
+    (subcmd === "install" || subcmd === "i") &&
+    (args.includes("-D") || args.includes("--save-dev"))
+  )
+    return "addDev"
+  if ((subcmd === "install" || subcmd === "i" || subcmd === "add") && args.trim().length > 0)
+    return "add"
+  if (subcmd === "install" || subcmd === "i" || subcmd === "") return "install"
+  if (subcmd === "ci") return "ci"
+  if (["uninstall", "remove", "rm", "un", "r", "unlink"].includes(subcmd)) return "remove"
+  if (subcmd === "run" || subcmd === "start") return "run"
+  if (subcmd === "test" || subcmd === "t") return "test"
+  if (subcmd === "exec") return "exec"
+  if (subcmd === "dlx") return "dlx"
+  if (["update", "up", "upgrade"].includes(subcmd)) return "update"
+  return null
 }
 
-const input = await Bun.stdin.json();
-if (!isShellTool(input?.tool_name ?? "")) process.exit(0);
+const input = await Bun.stdin.json()
+if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 
-const command: string = input?.tool_input?.command ?? "";
+const command: string = input?.tool_input?.command ?? ""
 
 // No lockfile found — can't enforce, allow everything
-if (!PM) process.exit(0);
+if (!PM) process.exit(0)
 
-const target = CMD[PM];
+const target = CMD[PM]
 
 // Extract the package manager being invoked
-const m = command.match(/(?:^|[|;&])\s*(npm|npx|yarn|pnpm|pnpx|bunx?)\s*(\S*)(.*?)(?=[|;&]|$)/);
-if (!m) process.exit(0);
+const m = command.match(/(?:^|[|;&])\s*(npm|npx|yarn|pnpm|pnpx|bunx?)\s*(\S*)(.*?)(?=[|;&]|$)/)
+if (!m) process.exit(0)
 
-const invoked = (m[1] ?? "").toLowerCase();
-const subcmd = m[2]?.toLowerCase() ?? "";
-const rest = m[3]?.trim() ?? "";
+const invoked = (m[1] ?? "").toLowerCase()
+const subcmd = m[2]?.toLowerCase() ?? ""
+const rest = m[3]?.trim() ?? ""
 
 // If they're using the project's PM, allow it
-if (invoked === PM) process.exit(0);
-if (PM === "bun" && (invoked === "bun" || invoked === "bunx")) process.exit(0);
-if (PM === "pnpm" && invoked === "pnpx") process.exit(0);
+if (invoked === PM) process.exit(0)
+if (PM === "bun" && (invoked === "bun" || invoked === "bunx")) process.exit(0)
+if (PM === "pnpm" && invoked === "pnpx") process.exit(0)
 
 // Package runners: npx/pnpx/bunx/yarn dlx
 if (invoked === "npx" || invoked === "pnpx" || invoked === "bunx") {
-  deny(`${invoked} <pkg>`, target.dlx);
+  deny(`${invoked} <pkg>`, target.dlx)
 }
 
 // Map the subcmd to the equivalent in the project PM
-const kind = classifySubcmd(subcmd, rest);
+const kind = classifySubcmd(subcmd, rest)
 if (kind) {
-  const fromPM = invoked as PackageManager;
-  const fromCmd = CMD[fromPM]?.[kind] ?? `${invoked} ${subcmd}`;
-  deny(fromCmd, target[kind]);
+  const fromPM = invoked as PackageManager
+  const fromCmd = CMD[fromPM]?.[kind] ?? `${invoked} ${subcmd}`
+  deny(fromCmd, target[kind])
 }
 
 // Catch-all
-deny(`${invoked} ${subcmd}`, `${PM} ${subcmd}`);
+deny(`${invoked} ${subcmd}`, `${PM} ${subcmd}`)

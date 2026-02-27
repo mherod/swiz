@@ -5,15 +5,15 @@
 // promptOnly mode (used by stop-auto-continue):
 //   agent: --workspace <tmpdir>  — no project files to read
 
-import { tmpdir } from "node:os";
+import { tmpdir } from "node:os"
 
-export type AgentBackend = "agent";
+export type AgentBackend = "agent"
 
 /**
  * Return "agent" if the Cursor Agent CLI is installed, null otherwise.
  */
 export function detectAgentCli(): AgentBackend | null {
-  return Bun.which("agent") ? "agent" : null;
+  return Bun.which("agent") ? "agent" : null
 }
 
 export interface PromptAgentOptions {
@@ -21,14 +21,14 @@ export interface PromptAgentOptions {
    * When true, runs agent with --workspace <tmpdir> so it has no access
    * to the current project's files — prompt-only Q&A mode.
    */
-  promptOnly?: boolean;
+  promptOnly?: boolean
   /** When provided, kills the spawned process if the signal aborts. */
-  signal?: AbortSignal;
+  signal?: AbortSignal
   /**
    * Per-call timeout in milliseconds. Creates an internal AbortController
    * that fires after this many ms. Ignored if `signal` is also provided.
    */
-  timeout?: number;
+  timeout?: number
 }
 
 /**
@@ -37,50 +37,54 @@ export interface PromptAgentOptions {
  */
 export async function promptAgent(prompt: string, options?: PromptAgentOptions): Promise<string> {
   if (!detectAgentCli()) {
-    throw new Error("Cursor Agent not found. Install it via the Cursor IDE.");
+    throw new Error("Cursor Agent not found. Install it via the Cursor IDE.")
   }
 
   const args = [
-    "agent", "--print", "--mode", "ask", "--trust",
+    "agent",
+    "--print",
+    "--mode",
+    "ask",
+    "--trust",
     ...(options?.promptOnly ? ["--workspace", tmpdir()] : []),
     prompt,
-  ];
+  ]
 
-  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" })
 
   // Resolve the abort signal — caller-supplied takes precedence; otherwise
   // create an internal one from timeout if provided.
-  let signal = options?.signal;
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  let signal = options?.signal
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
   if (!signal && options?.timeout) {
-    const controller = new AbortController();
-    timeoutHandle = setTimeout(() => controller.abort(), options.timeout).unref();
-    signal = controller.signal;
+    const controller = new AbortController()
+    timeoutHandle = setTimeout(() => controller.abort(), options.timeout).unref()
+    signal = controller.signal
   }
 
   if (signal) {
     const onAbort = () => {
-      proc.kill();
-      setTimeout(() => proc.kill(9), 2_000).unref();
-    };
+      proc.kill()
+      setTimeout(() => proc.kill(9), 2_000).unref()
+    }
     if (signal.aborted) {
-      onAbort();
+      onAbort()
     } else {
-      signal.addEventListener("abort", onAbort, { once: true });
+      signal.addEventListener("abort", onAbort, { once: true })
       proc.exited.then(() => {
-        signal!.removeEventListener("abort", onAbort);
-        clearTimeout(timeoutHandle);
-      });
+        signal!.removeEventListener("abort", onAbort)
+        clearTimeout(timeoutHandle)
+      })
     }
   }
 
-  const output = await new Response(proc.stdout).text();
-  await proc.exited;
+  const output = await new Response(proc.stdout).text()
+  await proc.exited
 
   if (proc.exitCode !== 0) {
-    const err = await new Response(proc.stderr).text();
-    throw new Error(`agent exited ${proc.exitCode}: ${err.trim()}`);
+    const err = await new Response(proc.stderr).text()
+    throw new Error(`agent exited ${proc.exitCode}: ${err.trim()}`)
   }
 
-  return output.trim();
+  return output.trim()
 }

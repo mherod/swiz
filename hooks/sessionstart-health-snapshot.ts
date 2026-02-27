@@ -1,16 +1,22 @@
 #!/usr/bin/env bun
+
 // SessionStart hook: Inject project health snapshot as additionalContext
 
-import { git, gh, isGitRepo, isGitHubRemote, hasGhCli, type SessionHookInput } from "./hook-utils.ts";
-import { join } from "node:path";
-import { readFileSync } from "node:fs";
-
-export {};
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import {
+  gh,
+  git,
+  hasGhCli,
+  isGitHubRemote,
+  isGitRepo,
+  type SessionHookInput,
+} from "./hook-utils.ts"
 
 interface PluginEnvRequirement {
-  plugin: string;
-  envVar: string;
-  fix: string;
+  plugin: string
+  envVar: string
+  fix: string
 }
 
 const KNOWN_PLUGIN_ENV: PluginEnvRequirement[] = [
@@ -24,40 +30,40 @@ const KNOWN_PLUGIN_ENV: PluginEnvRequirement[] = [
     envVar: "GREPTILE_API_KEY",
     fix: "Get a key at https://app.greptile.com and add GREPTILE_API_KEY to ~/.claude/settings.json env block",
   },
-];
+]
 
 function checkPluginEnv(): string[] {
-  const warnings: string[] = [];
-  const settingsPath = join(process.env.HOME ?? "~", ".claude", "settings.json");
+  const warnings: string[] = []
+  const settingsPath = join(process.env.HOME ?? "~", ".claude", "settings.json")
 
-  let enabledPlugins: Record<string, boolean> = {};
+  let enabledPlugins: Record<string, boolean> = {}
   try {
-    const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-    enabledPlugins = settings.enabledPlugins ?? {};
+    const settings = JSON.parse(readFileSync(settingsPath, "utf-8"))
+    enabledPlugins = settings.enabledPlugins ?? {}
   } catch {
-    return warnings;
+    return warnings
   }
 
   for (const req of KNOWN_PLUGIN_ENV) {
-    if (!enabledPlugins[req.plugin]) continue;
-    if (process.env[req.envVar]) continue;
-    warnings.push(`Plugin "${req.plugin}" is enabled but ${req.envVar} is not set. ${req.fix}`);
+    if (!enabledPlugins[req.plugin]) continue
+    if (process.env[req.envVar]) continue
+    warnings.push(`Plugin "${req.plugin}" is enabled but ${req.envVar} is not set. ${req.fix}`)
   }
 
-  return warnings;
+  return warnings
 }
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as SessionHookInput;
-  const cwd = input.cwd;
-  if (!cwd) return;
+  const input = (await Bun.stdin.json()) as SessionHookInput
+  const cwd = input.cwd
+  if (!cwd) return
 
-  const parts: string[] = [];
+  const parts: string[] = []
 
   // Plugin environment health — runs regardless of git context
-  const pluginWarnings = checkPluginEnv();
+  const pluginWarnings = checkPluginEnv()
   if (pluginWarnings.length > 0) {
-    parts.push(`[ENV] ${pluginWarnings.join(" | ")}`);
+    parts.push(`[ENV] ${pluginWarnings.join(" | ")}`)
   }
 
   if (!(await isGitRepo(cwd)) || !(await isGitHubRemote(cwd))) {
@@ -69,46 +75,65 @@ async function main(): Promise<void> {
             additionalContext: parts.join(" "),
           },
         })
-      );
+      )
     }
-    return;
+    return
   }
 
   // Git status summary
-  const branch = await git(["branch", "--show-current"], cwd);
-  const porcelain = await git(["status", "--porcelain"], cwd);
-  const uncommitted = porcelain ? porcelain.split("\n").length : 0;
-  const ahead = (await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd)) || "?";
+  const branch = await git(["branch", "--show-current"], cwd)
+  const porcelain = await git(["status", "--porcelain"], cwd)
+  const uncommitted = porcelain ? porcelain.split("\n").length : 0
+  const ahead = (await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd)) || "?"
 
-  parts.push(`Git: branch=${branch}, uncommitted=${uncommitted}, unpushed=${ahead}.`);
+  parts.push(`Git: branch=${branch}, uncommitted=${uncommitted}, unpushed=${ahead}.`)
 
   // Open PRs (fast, limit output)
   if (hasGhCli()) {
-    const prsRaw = await gh(["pr", "list", "--state", "open", "--limit", "5", "--json", "number,title,reviewDecision"], cwd);
+    const prsRaw = await gh(
+      ["pr", "list", "--state", "open", "--limit", "5", "--json", "number,title,reviewDecision"],
+      cwd
+    )
     if (prsRaw) {
       try {
-        const prs = JSON.parse(prsRaw) as Array<{ reviewDecision?: string }>;
+        const prs = JSON.parse(prsRaw) as Array<{ reviewDecision?: string }>
         if (prs.length > 0) {
-          const changesReq = prs.filter((p) => p.reviewDecision === "CHANGES_REQUESTED").length;
-          let prInfo = `PRs: ${prs.length} open`;
-          if (changesReq > 0) prInfo += `, ${changesReq} need changes`;
-          parts.push(prInfo + ".");
+          const changesReq = prs.filter((p) => p.reviewDecision === "CHANGES_REQUESTED").length
+          let prInfo = `PRs: ${prs.length} open`
+          if (changesReq > 0) prInfo += `, ${changesReq} need changes`
+          parts.push(prInfo + ".")
         }
       } catch {}
     }
 
     // Latest CI on current branch
     if (branch) {
-      const runRaw = await gh(["run", "list", "--branch", branch, "--limit", "1", "--json", "status,conclusion,workflowName"], cwd);
+      const runRaw = await gh(
+        [
+          "run",
+          "list",
+          "--branch",
+          branch,
+          "--limit",
+          "1",
+          "--json",
+          "status,conclusion,workflowName",
+        ],
+        cwd
+      )
       if (runRaw) {
         try {
-          const runs = JSON.parse(runRaw) as Array<{ status: string; conclusion: string; workflowName: string }>;
-          const run = runs[0];
+          const runs = JSON.parse(runRaw) as Array<{
+            status: string
+            conclusion: string
+            workflowName: string
+          }>
+          const run = runs[0]
           if (run) {
             if (run.status === "completed") {
-              parts.push(`CI (${run.workflowName}): ${run.conclusion}.`);
+              parts.push(`CI (${run.workflowName}): ${run.conclusion}.`)
             } else {
-              parts.push(`CI (${run.workflowName}): ${run.status}.`);
+              parts.push(`CI (${run.workflowName}): ${run.status}.`)
             }
           }
         } catch {}
@@ -116,7 +141,7 @@ async function main(): Promise<void> {
     }
   }
 
-  if (parts.length === 0) return;
+  if (parts.length === 0) return
 
   console.log(
     JSON.stringify({
@@ -125,7 +150,7 @@ async function main(): Promise<void> {
         additionalContext: parts.join(" "),
       },
     })
-  );
+  )
 }
 
-main();
+main()

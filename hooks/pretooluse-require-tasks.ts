@@ -5,38 +5,38 @@
 
 import {
   denyPreToolUse as deny,
+  extractToolNamesFromTranscript,
   isEditTool,
   isShellTool,
   isWriteTool,
-  extractToolNamesFromTranscript,
   TASK_TOOLS,
-} from "./hook-utils.ts";
+} from "./hook-utils.ts"
 
-const STALENESS_THRESHOLD = 20;
+const STALENESS_THRESHOLD = 20
 
-const input = await Bun.stdin.json();
-const toolName: string = input?.tool_name ?? "";
-const sessionId: string = input?.session_id ?? "";
-const transcriptPath: string = input?.transcript_path ?? "";
+const input = await Bun.stdin.json()
+const toolName: string = input?.tool_name ?? ""
+const sessionId: string = input?.session_id ?? ""
+const transcriptPath: string = input?.transcript_path ?? ""
 
-if (!sessionId) process.exit(0);
+if (!sessionId) process.exit(0)
 
-const isBlockedTool = isShellTool(toolName) || isEditTool(toolName) || isWriteTool(toolName);
-if (!isBlockedTool) process.exit(0);
+const isBlockedTool = isShellTool(toolName) || isEditTool(toolName) || isWriteTool(toolName)
+if (!isBlockedTool) process.exit(0)
 
 // ── CHECK 1: Incomplete tasks exist (file-based) ──────────────────────────────
 
-const tasksDir = `${process.env.HOME}/.claude/tasks/${sessionId}`;
-const activeTasks: string[] = [];
+const tasksDir = `${process.env.HOME}/.claude/tasks/${sessionId}`
+const activeTasks: string[] = []
 
 try {
-  const glob = new Bun.Glob("*.json");
+  const glob = new Bun.Glob("*.json")
   for await (const file of glob.scan(tasksDir)) {
     try {
-      const task = await Bun.file(`${tasksDir}/${file}`).json();
-      const status = task?.status;
+      const task = await Bun.file(`${tasksDir}/${file}`).json()
+      const status = task?.status
       if (status === "pending" || status === "in_progress") {
-        activeTasks.push(`#${task.id} (${status}): ${task.subject}`);
+        activeTasks.push(`#${task.id} (${status}): ${task.subject}`)
       }
     } catch {
       // skip unreadable task files
@@ -54,7 +54,7 @@ if (activeTasks.length === 0) {
       `1. Create or update a task so its status is pending or in_progress.\n` +
       `2. Include a concrete description of the current work and next step.\n\n` +
       `After at least one task is incomplete, ${toolName} will be unblocked automatically.`
-  );
+  )
 }
 
 // ── CHECK 2: Task staleness (transcript scan) ─────────────────────────────────
@@ -62,22 +62,22 @@ if (activeTasks.length === 0) {
 // at least once (i.e. the agent has already engaged with the task system).
 
 if (transcriptPath) {
-  const toolNames = await extractToolNamesFromTranscript(transcriptPath);
-  const total = toolNames.length;
+  const toolNames = await extractToolNamesFromTranscript(transcriptPath)
+  const total = toolNames.length
 
-  let lastTaskIndex = -1;
+  let lastTaskIndex = -1
   for (let i = total - 1; i >= 0; i--) {
     if (TASK_TOOLS.has(toolNames[i]!)) {
-      lastTaskIndex = i;
-      break;
+      lastTaskIndex = i
+      break
     }
   }
 
   // Only flag staleness if the agent has previously used task tools
   if (lastTaskIndex >= 0) {
-    const callsSinceTask = total - 1 - lastTaskIndex;
+    const callsSinceTask = total - 1 - lastTaskIndex
     if (callsSinceTask >= STALENESS_THRESHOLD) {
-      const taskList = activeTasks.map((t) => `  ${t}`).join("\n");
+      const taskList = activeTasks.map((t) => `  ${t}`).join("\n")
       deny(
         `STOP. Tasks have gone stale. ${callsSinceTask} tool calls since last task update. ` +
           `${toolName} is BLOCKED.\n\n` +
@@ -88,7 +88,7 @@ if (transcriptPath) {
           `2. Ensure the current work has an in_progress task with a clear description.\n` +
           `3. Plan ahead — ensure upcoming tasks exist beyond the current work.\n\n` +
           `After updating tasks, ${toolName} will be unblocked automatically.`
-      );
+      )
     }
   }
 }

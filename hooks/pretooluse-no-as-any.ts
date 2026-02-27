@@ -1,39 +1,39 @@
 #!/usr/bin/env bun
 
-import { denyPreToolUse } from "./hook-utils.ts";
+import { denyPreToolUse } from "./hook-utils.ts"
 
 interface HookInput {
-  tool_name: string;
+  tool_name: string
   tool_input?: {
-    file_path?: string;
-    old_string?: string;
-    new_string?: string;
-    content?: string;
-  };
+    file_path?: string
+    old_string?: string
+    new_string?: string
+    content?: string
+  }
 }
 
 async function main() {
-  const input: HookInput = await Bun.stdin.json();
+  const input: HookInput = await Bun.stdin.json()
 
-  const filePath = input.tool_input?.file_path ?? "";
-  const isTypeScriptFile = /\.(ts|tsx)$/.test(filePath);
+  const filePath = input.tool_input?.file_path ?? ""
+  const isTypeScriptFile = /\.(ts|tsx)$/.test(filePath)
 
   if (!isTypeScriptFile) {
-    process.exit(0);
+    process.exit(0)
   }
 
-  const oldString = input.tool_input?.old_string ?? "";
-  const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? "";
+  const oldString = input.tool_input?.old_string ?? ""
+  const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
 
   // If no old_string (new file), check if it has as any but don't block for new files
   // (they might be generated or have necessary escapes)
   if (!oldString) {
-    process.exit(0);
+    process.exit(0)
   }
 
   // Count "as any" in old vs new
-  const oldAsAnyCount = (oldString.match(/\bas\s+any\b/g) || []).length;
-  const newAsAnyCount = (newString.match(/\bas\s+any\b/g) || []).length;
+  const oldAsAnyCount = (oldString.match(/\bas\s+any\b/g) || []).length
+  const newAsAnyCount = (newString.match(/\bas\s+any\b/g) || []).length
 
   // Block if new "as any" is being added
   if (newAsAnyCount > oldAsAnyCount) {
@@ -52,9 +52,9 @@ async function main() {
       "",
       "Never `as any`. Fix the type instead. The type system exists to prevent bugs.",
       "Every `as any` is a future bug waiting to happen.",
-    ].join("\n");
+    ].join("\n")
 
-    denyPreToolUse(reason);
+    denyPreToolUse(reason)
   }
 
   // Allow the edit
@@ -65,10 +65,10 @@ async function main() {
         permissionDecision: "allow",
       },
     })
-  );
+  )
 }
 
 main().catch((e) => {
-  console.error("Hook error:", e);
-  process.exit(1);
-});
+  console.error("Hook error:", e)
+  process.exit(1)
+})

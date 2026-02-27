@@ -1,50 +1,48 @@
 #!/usr/bin/env bun
 
-import { denyPreToolUse } from "./hook-utils.ts";
+import { denyPreToolUse } from "./hook-utils.ts"
 
 interface HookInput {
-  tool_name: string;
+  tool_name: string
   tool_input?: {
-    file_path?: string;
-    old_string?: string;
-    new_string?: string;
-    content?: string;
-  };
+    file_path?: string
+    old_string?: string
+    new_string?: string
+    content?: string
+  }
 }
 
 // Check if file is an ESLint config file
 function isEslintConfigFile(filePath: string): boolean {
-  return /\.(eslintrc(\.json|\.js|\.cjs|\.yml|\.yaml)?|eslint\.config\.js)$/.test(
-    filePath
-  );
+  return /\.(eslintrc(\.json|\.js|\.cjs|\.yml|\.yaml)?|eslint\.config\.js)$/.test(filePath)
 }
 
 // Count occurrences of "warning" and "error" (case-insensitive, including severity values)
 function countEnforcements(content: string): { warnings: number; errors: number } {
-  const warnings = (content.match(/["']?warning["']?|"warn"|'warn'/gi) || []).length;
-  const errors = (content.match(/["']?error["']?|"off"|'off'/gi) || []).length;
-  return { warnings, errors };
+  const warnings = (content.match(/["']?warning["']?|"warn"|'warn'/gi) || []).length
+  const errors = (content.match(/["']?error["']?|"off"|'off'/gi) || []).length
+  return { warnings, errors }
 }
 
 async function main() {
-  const input: HookInput = await Bun.stdin.json();
+  const input: HookInput = await Bun.stdin.json()
 
-  const filePath = input.tool_input?.file_path ?? "";
+  const filePath = input.tool_input?.file_path ?? ""
   if (!isEslintConfigFile(filePath)) {
-    process.exit(0);
+    process.exit(0)
   }
 
   // Get old and new content
-  const oldString = input.tool_input?.old_string ?? "";
-  const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? "";
+  const oldString = input.tool_input?.old_string ?? ""
+  const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
 
   // If no old_string (new file), allow it
   if (!oldString) {
-    process.exit(0);
+    process.exit(0)
   }
 
-  const oldCounts = countEnforcements(oldString);
-  const newCounts = countEnforcements(newString);
+  const oldCounts = countEnforcements(oldString)
+  const newCounts = countEnforcements(newString)
 
   // Check if warning count decreased
   if (newCounts.warnings < oldCounts.warnings) {
@@ -61,9 +59,9 @@ async function main() {
       "",
       "Weakening ESLint config creates a slippery slope where standards gradually erode.",
       "Once a rule is in place, it stays in place. The codebase quality bar never lowers.",
-    ].join("\n");
+    ].join("\n")
 
-    denyPreToolUse(reason);
+    denyPreToolUse(reason)
   }
 
   // Check if error count decreased (off is weaker than error/warning)
@@ -81,9 +79,9 @@ async function main() {
       "",
       "Weakening ESLint config creates a slippery slope where standards gradually erode.",
       "Once a rule is in place, it stays in place. The codebase quality bar never lowers.",
-    ].join("\n");
+    ].join("\n")
 
-    denyPreToolUse(reason);
+    denyPreToolUse(reason)
   }
 
   // Allow the edit
@@ -94,10 +92,10 @@ async function main() {
         permissionDecision: "allow",
       },
     })
-  );
+  )
 }
 
 main().catch((e) => {
-  console.error("Hook error:", e);
-  process.exit(1);
-});
+  console.error("Hook error:", e)
+  process.exit(1)
+})

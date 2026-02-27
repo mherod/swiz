@@ -3,17 +3,23 @@
 // Rules with severity "warn" allow the command through with a gentle nudge.
 // Rules with severity "deny" (default) block the command entirely.
 
-import { denyPreToolUse, isShellTool, detectRuntime, detectPackageManager, skillExists } from "./hook-utils.ts";
+import {
+  denyPreToolUse,
+  detectPackageManager,
+  detectRuntime,
+  isShellTool,
+  skillExists,
+} from "./hook-utils.ts"
 
-const RUNTIME = detectRuntime();
-const PM = detectPackageManager();
+const RUNTIME = detectRuntime()
+const PM = detectPackageManager()
 
 interface Rule {
   /** Returns true if this rule matches the command. */
-  match: (command: string) => boolean;
-  message: string;
+  match: (command: string) => boolean
+  message: string
   /** "deny" blocks the command. "warn" allows it with a hint. Default: "deny". */
-  severity?: "deny" | "warn";
+  severity?: "deny" | "warn"
 }
 
 const RULES: Rule[] = [
@@ -73,12 +79,13 @@ const RULES: Rule[] = [
     // rm as standalone command (not git rm, cargo rm, etc.) or in pipe chains,
     // plus find -delete, find -exec rm, unlink, shred, rmdir
     match: (c) => {
-      const first = c.trimStart().split(/\s+/)[0];
-      if (first === "rm" || first === "rmdir" || first === "unlink" || first === "shred") return true;
-      if (/(?:\|\s*xargs\s+rm|&&\s*rm\b|;\s*rm\b)/.test(c)) return true;
-      if (/find\s.*-delete/.test(c)) return true;
-      if (/find\s.*-exec\s+rm\s/.test(c)) return true;
-      return false;
+      const first = c.trimStart().split(/\s+/)[0]
+      if (first === "rm" || first === "rmdir" || first === "unlink" || first === "shred")
+        return true
+      if (/(?:\|\s*xargs\s+rm|&&\s*rm\b|;\s*rm\b)/.test(c)) return true
+      if (/find\s.*-delete/.test(c)) return true
+      if (/find\s.*-exec\s+rm\s/.test(c)) return true
+      return false
     },
     message: [
       "Do not use destructive deletion commands. Files cannot be recovered.",
@@ -95,8 +102,10 @@ const RULES: Rule[] = [
       "Do not use `git stash`. Stashed changes are easy to lose and add hidden state.",
       "",
       "Instead:",
-      "  • Commit work-in-progress: `git commit -m \"wip: ...\"`",
-      ...(skillExists("commit") ? ["  • Use the /commit skill to preserve your current state"] : []),
+      '  • Commit work-in-progress: `git commit -m "wip: ..."`',
+      ...(skillExists("commit")
+        ? ["  • Use the /commit skill to preserve your current state"]
+        : []),
       "  • If you need a clean slate, commit first, then revert in a new commit",
     ].join("\n"),
   },
@@ -172,7 +181,7 @@ const RULES: Rule[] = [
           ]),
     ].join("\n"),
   },
-  ...(PM === "bun"
+  ...((PM === "bun"
     ? [
         {
           match: (c: string) => /(?:^|[|;&])\s*(node|ts-node)\s/.test(c),
@@ -187,7 +196,7 @@ const RULES: Rule[] = [
           ].join("\n"),
         },
       ]
-    : []) as Rule[],
+    : []) as Rule[]),
   {
     match: (c) => /git\s+commit\b.*--no-verify/.test(c) || /git\s+push\b.*--no-verify/.test(c),
     message: [
@@ -206,9 +215,9 @@ const RULES: Rule[] = [
   },
   {
     match: (c) => {
-      const mMatch = c.match(/git\s+commit\s.*-m\s+["']([^"']*)/);
-      if (!mMatch) return false;
-      return /Co-authored-by:/i.test(mMatch[1]!);
+      const mMatch = c.match(/git\s+commit\s.*-m\s+["']([^"']*)/)
+      if (!mMatch) return false
+      return /Co-authored-by:/i.test(mMatch[1]!)
     },
     message: [
       "Do not include `Co-authored-by:` in commit messages.",
@@ -224,32 +233,34 @@ const RULES: Rule[] = [
       "Ensure PRs pass all required checks and obtain proper approvals.",
     ].join("\n"),
   },
-];
+]
 
-const input = await Bun.stdin.json();
-if (!isShellTool(input?.tool_name ?? "")) process.exit(0);
+const input = await Bun.stdin.json()
+if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 
-const command: string = input?.tool_input?.command ?? "";
+const command: string = input?.tool_input?.command ?? ""
 
-const warnings: string[] = [];
+const warnings: string[] = []
 
 for (const rule of RULES) {
-  if (!rule.match(command)) continue;
+  if (!rule.match(command)) continue
 
   if (rule.severity === "warn") {
-    warnings.push(rule.message);
+    warnings.push(rule.message)
   } else {
-    denyPreToolUse(rule.message);
+    denyPreToolUse(rule.message)
   }
 }
 
 // Emit collected warnings as allow-with-hint (doesn't block the command)
 if (warnings.length > 0) {
-  console.log(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-      permissionDecisionReason: warnings.join("\n\n"),
-    },
-  }));
+  console.log(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+        permissionDecisionReason: warnings.join("\n\n"),
+      },
+    })
+  )
 }

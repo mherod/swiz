@@ -1,27 +1,27 @@
-import { join } from "node:path";
+import { join } from "node:path"
 
-const HOME = process.env.HOME ?? "~";
+const HOME = process.env.HOME ?? "~"
 
 // ─── Agent definition ───────────────────────────────────────────────────────
 
 export interface AgentDef {
-  id: string;
-  name: string;
-  settingsPath: string;
+  id: string
+  name: string
+  settingsPath: string
   /** JSON key path where hooks live inside the settings file */
-  hooksKey: string;
+  hooksKey: string
   /** Whether the hooks object is wrapped (e.g. Cursor's { version: 1, hooks }) */
-  wrapsHooks?: { version: number };
+  wrapsHooks?: { version: number }
   /** Config structure uses nested matcher groups (Claude/Gemini) vs flat list (Cursor) */
-  configStyle: "nested" | "flat";
+  configStyle: "nested" | "flat"
   /** Binary name on PATH — used for auto-detection */
-  binary: string;
+  binary: string
   /** Tool name aliases: canonical (Claude-style) → agent-specific */
-  toolAliases: Record<string, string>;
+  toolAliases: Record<string, string>
   /** Event name map: canonical → agent-specific */
-  eventMap: Record<string, string>;
+  eventMap: Record<string, string>
   /** Whether this agent supports user-configurable hooks via a settings file */
-  hooksConfigurable: boolean;
+  hooksConfigurable: boolean
 }
 
 // ─── Codex hooks status ─────────────────────────────────────────────────────
@@ -147,35 +147,29 @@ export const AGENTS: AgentDef[] = [
       preCompact: "PreCompress",
     },
   },
-];
+]
 
 export function getAgent(id: string): AgentDef | undefined {
-  return AGENTS.find((a) => a.id === id);
+  return AGENTS.find((a) => a.id === id)
 }
 
 export function getAgentByFlag(args: string[]): AgentDef[] {
-  const explicit = AGENTS.filter((a) => args.includes(`--${a.id}`));
-  return explicit.length > 0 ? explicit : AGENTS;
+  const explicit = AGENTS.filter((a) => args.includes(`--${a.id}`))
+  return explicit.length > 0 ? explicit : AGENTS
 }
 
 /** Agents that support user-configurable hooks files */
-export const CONFIGURABLE_AGENTS = AGENTS.filter((a) => a.hooksConfigurable);
+export const CONFIGURABLE_AGENTS = AGENTS.filter((a) => a.hooksConfigurable)
 
 // ─── Translation helpers ────────────────────────────────────────────────────
 
-export function translateMatcher(
-  matcher: string | undefined,
-  agent: AgentDef
-): string | undefined {
-  if (!matcher) return undefined;
-  return matcher.replace(/\b\w+\b/g, (tok) => agent.toolAliases[tok] ?? tok);
+export function translateMatcher(matcher: string | undefined, agent: AgentDef): string | undefined {
+  if (!matcher) return undefined
+  return matcher.replace(/\b\w+\b/g, (tok) => agent.toolAliases[tok] ?? tok)
 }
 
-export function translateEvent(
-  canonical: string,
-  agent: AgentDef
-): string {
-  return agent.eventMap[canonical] ?? canonical;
+export function translateEvent(canonical: string, agent: AgentDef): string {
+  return agent.eventMap[canonical] ?? canonical
 }
 
 // ─── Agent detection ────────────────────────────────────────────────────────
@@ -184,14 +178,14 @@ export async function detectInstalledAgents(): Promise<AgentDef[]> {
   const results = await Promise.all(
     AGENTS.map(async (agent) => {
       try {
-        const proc = Bun.spawnSync(["which", agent.binary]);
-        const found = proc.exitCode === 0;
-        const settingsExist = await Bun.file(agent.settingsPath).exists();
-        return found || settingsExist ? agent : null;
+        const proc = Bun.spawnSync(["which", agent.binary])
+        const found = proc.exitCode === 0
+        const settingsExist = await Bun.file(agent.settingsPath).exists()
+        return found || settingsExist ? agent : null
       } catch {
-        return null;
+        return null
       }
     })
-  );
-  return results.filter((a): a is AgentDef => a !== null);
+  )
+  return results.filter((a): a is AgentDef => a !== null)
 }

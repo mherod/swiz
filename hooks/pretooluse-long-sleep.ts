@@ -1,23 +1,23 @@
 #!/usr/bin/env bun
 
-import { denyPreToolUse } from "./hook-utils.ts";
+import { denyPreToolUse } from "./hook-utils.ts"
 
 interface HookInput {
-  tool_name: string;
+  tool_name: string
   tool_input?: {
-    command?: string;
-  };
+    command?: string
+  }
 }
 
 async function main() {
-  const input: HookInput = await Bun.stdin.json();
+  const input: HookInput = await Bun.stdin.json()
 
-  const command = input.tool_input?.command || "";
+  const command = input.tool_input?.command || ""
 
   // Detect sleep commands with durations >= 30 seconds
-  const sleepMatch = command.match(/sleep\s+(\d+)/);
+  const sleepMatch = command.match(/sleep\s+(\d+)/)
   if (sleepMatch) {
-    const duration = parseInt(sleepMatch[1] ?? "0", 10);
+    const duration = parseInt(sleepMatch[1] ?? "0", 10)
 
     if (duration >= 30) {
       const reason = [
@@ -31,9 +31,9 @@ async function main() {
         "  • Stream logs: `npm run build && tail -f logs/* &` (watch progress)",
         "",
         "All of these avoid wasting time with long static delays.",
-      ].join("\n");
+      ].join("\n")
 
-      denyPreToolUse(reason);
+      denyPreToolUse(reason)
     }
   }
 
@@ -45,10 +45,10 @@ async function main() {
         permissionDecision: "allow",
       },
     })
-  );
+  )
 }
 
 main().catch((e) => {
-  console.error("Hook error:", e);
-  process.exit(1);
-});
+  console.error("Hook error:", e)
+  process.exit(1)
+})

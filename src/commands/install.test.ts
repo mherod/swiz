@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest"
 
 describe("install.ts statusMessage field", () => {
   it("verifies statusMessage is included in nested hook configuration", () => {
@@ -12,14 +12,14 @@ describe("install.ts statusMessage field", () => {
           statusMessage: "Swizzling...",
         },
       ],
-    };
+    }
 
     // Verify the nested structure contains statusMessage
-    const firstHook = nestedHookEntry.hooks[0];
-    expect(firstHook).toBeDefined();
-    expect(firstHook).toHaveProperty("statusMessage");
-    expect(firstHook?.statusMessage).toBe("Swizzling...");
-  });
+    const firstHook = nestedHookEntry.hooks[0]
+    expect(firstHook).toBeDefined()
+    expect(firstHook).toHaveProperty("statusMessage")
+    expect(firstHook?.statusMessage).toBe("Swizzling...")
+  })
 
   it("verifies statusMessage is included in flat hook configuration", () => {
     // Test data representing flat config structure
@@ -27,29 +27,29 @@ describe("install.ts statusMessage field", () => {
       command: "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch stop Stop",
       timeout: 180,
       statusMessage: "Swizzling...",
-    };
+    }
 
     // Verify the flat structure contains statusMessage
-    expect(flatHookEntry).toHaveProperty("statusMessage");
-    expect(flatHookEntry.statusMessage).toBe("Swizzling...");
-  });
+    expect(flatHookEntry).toHaveProperty("statusMessage")
+    expect(flatHookEntry.statusMessage).toBe("Swizzling...")
+  })
 
   it("statusMessage has correct value across all hook types", () => {
-    const expectedMessage = "Swizzling...";
+    const expectedMessage = "Swizzling..."
 
     const nestedHook = {
       hooks: [{ statusMessage: expectedMessage }],
-    };
+    }
 
     const flatHook = {
       statusMessage: expectedMessage,
-    };
+    }
 
-    const nestedHookElement = nestedHook.hooks[0];
-    expect(nestedHookElement).toBeDefined();
-    expect(nestedHookElement?.statusMessage).toBe(expectedMessage);
-    expect(flatHook.statusMessage).toBe(expectedMessage);
-  });
+    const nestedHookElement = nestedHook.hooks[0]
+    expect(nestedHookElement).toBeDefined()
+    expect(nestedHookElement?.statusMessage).toBe(expectedMessage)
+    expect(flatHook.statusMessage).toBe(expectedMessage)
+  })
 
   it("hook object structure includes all required fields", () => {
     // Verify nested config hook has required fields
@@ -62,18 +62,18 @@ describe("install.ts statusMessage field", () => {
           statusMessage: "Swizzling...",
         },
       ],
-    };
+    }
 
-    const hook = nestedHook.hooks[0];
-    expect(hook).toHaveProperty("type");
-    expect(hook).toHaveProperty("command");
-    expect(hook).toHaveProperty("timeout");
-    expect(hook).toHaveProperty("statusMessage");
-  });
+    const hook = nestedHook.hooks[0]
+    expect(hook).toHaveProperty("type")
+    expect(hook).toHaveProperty("command")
+    expect(hook).toHaveProperty("timeout")
+    expect(hook).toHaveProperty("statusMessage")
+  })
 
   it("statusMessage is a non-empty string", () => {
-    const message = "Swizzling...";
-    expect(typeof message).toBe("string");
-    expect(message.length).toBeGreaterThan(0);
-  });
-});
+    const message = "Swizzling..."
+    expect(typeof message).toBe("string")
+    expect(message.length).toBeGreaterThan(0)
+  })
+})

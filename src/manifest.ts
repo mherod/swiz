@@ -3,15 +3,15 @@
 // install.ts uses it to generate agent configs; dispatch.ts uses it at runtime.
 
 export interface HookDef {
-  file: string;
-  timeout?: number;
-  async?: boolean;
+  file: string
+  timeout?: number
+  async?: boolean
 }
 
 export interface HookGroup {
-  event: string;
-  matcher?: string;
-  hooks: HookDef[];
+  event: string
+  matcher?: string
+  hooks: HookDef[]
 }
 
 export const manifest: HookGroup[] = [
@@ -113,14 +113,14 @@ export const manifest: HookGroup[] = [
       { file: "userpromptsubmit-task-advisor.ts", timeout: 5 },
     ],
   },
-];
+]
 
 // Per-event timeout budget for the dispatcher (seconds).
 // Covers worst-case sequential execution of all hooks in that event.
 export const DISPATCH_TIMEOUTS: Record<string, number> = {
-  stop: 300,          // 14 hooks × ~10s avg + 120s AI call (stop-auto-continue)
-  preToolUse: 60,     // 11 hooks × ~5s avg
-  postToolUse: 90,    // 8 hooks × ~10s avg
+  stop: 300, // 14 hooks × ~10s avg + 120s AI call (stop-auto-continue)
+  preToolUse: 60, // 11 hooks × ~5s avg
+  postToolUse: 90, // 8 hooks × ~10s avg
   sessionStart: 20,
   userPromptSubmit: 15,
-};
+}
