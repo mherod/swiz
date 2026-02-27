@@ -371,3 +371,99 @@ describe("cleanup with partially corrupted project directory", () => {
     expect(stderr.trim()).toBe("")
   })
 })
+
+// ─── Regression: stale-project detection and literal-hyphen ambiguity ─────────
+//
+// walkDecode uses longest-match-first, so "Development/cheapshot-auto" (literal
+// hyphen) wins over "Development/cheapshot/auto" (two path segments) when both
+// are conceivable encodings of "-Development-cheapshot-auto".  If the real
+// directory exists the project must NOT be flagged stale.
+//
+// Conversely, a project whose encoded name resolves to no plausible path must
+// be flagged stale and all of its sessions moved to the trashable bucket,
+// regardless of session age.
+//
+// Uses its own STALE_HOME so these fixtures don't perturb the shared TMP_HOME
+// tree (which other suites scan without --project filtering).
+
+describe("cleanup stale-project detection", () => {
+  const STALE_HOME = join(tmpdir(), `swiz-cleanup-stale-${process.pid}`)
+  const STALE_ENCODED_HOME = STALE_HOME.replace(/[/.]/g, "-")
+  const SWIZ_ROOT = join(import.meta.dir, "../..")
+  const env = { ...process.env, HOME: STALE_HOME }
+
+  // Project with a literal hyphen: encoded name is ambiguous but walkDecode
+  // must resolve it to the real directory via longest-match.
+  const LITERAL_PROJECT = `${STALE_ENCODED_HOME}-Development-cheapshot-auto`
+  const LITERAL_SESSION = join(
+    STALE_HOME, ".claude", "projects", LITERAL_PROJECT,
+    "00000000-0000-0000-0000-000000000005",
+  )
+
+  // Project whose real path does not exist — walkDecode returns null → stale.
+  const GONE_PROJECT = `${STALE_ENCODED_HOME}-gone-project`
+  const GONE_SESSION = join(
+    STALE_HOME, ".claude", "projects", GONE_PROJECT,
+    "00000000-0000-0000-0000-000000000006",
+  )
+
+  beforeAll(async () => {
+    // Real directory for the literal-hyphen project.
+    await mkdir(join(STALE_HOME, "Development", "cheapshot-auto"), { recursive: true })
+    await mkdir(LITERAL_SESSION, { recursive: true })
+    await Bun.write(join(LITERAL_SESSION, "session.jsonl"), '{"type":"system"}\n')
+    // Gone project: session data exists but no real directory was ever created.
+    await mkdir(GONE_SESSION, { recursive: true })
+    await Bun.write(join(GONE_SESSION, "session.jsonl"), '{"type":"system"}\n')
+  })
+
+  afterAll(async () => {
+    const proc = Bun.spawn(["rm", "-rf", STALE_HOME], { stdout: "pipe", stderr: "pipe" })
+    await proc.exited
+  })
+
+  async function runCleanup(...extraArgs: string[]): Promise<string> {
+    const proc = Bun.spawn(
+      ["bun", "run", "index.ts", "cleanup", "--dry-run", ...extraArgs],
+      { cwd: SWIZ_ROOT, env, stdout: "pipe", stderr: "pipe" },
+    )
+    const output = await new Response(proc.stdout).text()
+    await proc.exited
+    return output
+  }
+
+  test("literal-hyphen project is not flagged stale when real directory exists", async () => {
+    const output = await runCleanup("--project", LITERAL_PROJECT)
+    expect(output).not.toMatch(/path gone/)
+    expect(output).toMatch(/1 kept/)
+    expect(output).toMatch(/0 trashable/)
+  })
+
+  test("gone project is flagged stale and sessions become trashable", async () => {
+    const output = await runCleanup("--project", GONE_PROJECT)
+    expect(output).toMatch(/path gone/)
+    expect(output).toMatch(/1 trashable/)
+    expect(output).not.toMatch(/1 kept/)
+  })
+
+  test("stale sessions are trashable even within the --older-than window", async () => {
+    // Sessions were just created so they are within any reasonable age window.
+    // The gone project must still report them as trashable due to staleness.
+    const output = await runCleanup("--project", GONE_PROJECT, "--older-than", "30")
+    expect(output).toMatch(/path gone/)
+    expect(output).toMatch(/1 trashable/)
+  })
+
+  test("full output: literal-hyphen kept, gone project trashable", async () => {
+    const output = await runCleanup()
+    const lines = output.split("\n")
+    const cheapLine = lines.find((l) => l.includes("cheapshot-auto"))
+    expect(cheapLine).toBeDefined()
+    expect(cheapLine).not.toMatch(/path gone/)
+    expect(cheapLine).toMatch(/1 kept/)
+    const goneLine = lines.find((l) => l.includes("gone"))
+    expect(goneLine).toBeDefined()
+    expect(goneLine).toMatch(/path gone/)
+    expect(goneLine).toMatch(/1 trashable/)
+  })
+})
