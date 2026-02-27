@@ -30,7 +30,6 @@ export const manifest: HookGroup[] = [
       { file: "stop-pr-changes-requested.ts", timeout: 10 },
       { file: "stop-github-ci.ts", timeout: 15 },
       { file: "stop-todo-tracker.ts", timeout: 10 },
-      { file: "stop-changelog-staleness.ts", timeout: 10 },
       { file: "stop-completion-auditor.ts", timeout: 10 },
       { file: "stop-personal-repo-issues.ts", timeout: 10 },
       { file: "stop-auto-continue.ts", timeout: 120 },

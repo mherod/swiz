@@ -615,25 +615,6 @@ describe("stop-branch-conflicts", () => {
   })
 })
 
-describe("stop-changelog-staleness", () => {
-  const HOOK = "hooks/stop-changelog-staleness.ts"
-
-  test("non-git directory exits cleanly", async () => {
-    const tmp = await createTempDir()
-    const r = await runHook(HOOK, { cwd: tmp, session_id: "test" })
-    expect(r.exitCode).toBe(0)
-  })
-
-  test("git repo without CHANGELOG.md exits cleanly", async () => {
-    const tmp = await createTempDir()
-    Bun.spawnSync(["git", "init"], { cwd: tmp })
-    Bun.spawnSync(["git", "commit", "--allow-empty", "-m", "init"], { cwd: tmp })
-    const r = await runHook(HOOK, { cwd: tmp, session_id: "test" })
-    expect(r.exitCode).toBe(0)
-    expect(r.stdout).toBe("")
-  })
-})
-
 describe("stop-completion-auditor (extended)", () => {
   const HOOK = "hooks/stop-completion-auditor.ts"
 

@@ -650,20 +650,6 @@ describe("stop-large-files: positive paths", () => {
   })
 })
 
-describe("stop-changelog-staleness: positive paths", () => {
-  const HOOK = "hooks/stop-changelog-staleness.ts"
-
-  test("up-to-date changelog allows stop", async () => {
-    const repo = await createGitRepo()
-    await writeFile(join(repo, "CHANGELOG.md"), "# Changelog\n\n## 1.0.0\n- Initial release")
-    Bun.spawnSync(["git", "add", "."], { cwd: repo })
-    Bun.spawnSync(["git", "commit", "-m", "add changelog"], { cwd: repo })
-    const r = await runHook(HOOK, { cwd: repo, session_id: "test-fresh" })
-    expect(r.exitCode).toBe(0)
-    expect(r.stdout).toBe("")
-  })
-})
-
 describe("stop-completion-auditor: positive paths", () => {
   const HOOK = "hooks/stop-completion-auditor.ts"
 
