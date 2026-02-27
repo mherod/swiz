@@ -417,5 +417,64 @@ describe("agents.ts", () => {
         expect(agent).toBe(original)
       }
     })
+
+    it("excludes agents where neither binary nor settings exist", async () => {
+      const result = await detectInstalledAgents()
+      const detectedIds = new Set(result.map((a) => a.id))
+      const excluded = AGENTS.filter((a) => !detectedIds.has(a.id))
+      for (const agent of excluded) {
+        const binaryExists = Bun.spawnSync(["which", agent.binary]).exitCode === 0
+        const settingsExist = await Bun.file(agent.settingsPath).exists()
+        expect(binaryExists || settingsExist).toBe(false)
+      }
+    })
+
+    it("classifies each agent into exactly detected or excluded", async () => {
+      const result = await detectInstalledAgents()
+      const detectedIds = new Set(result.map((a) => a.id))
+      // Every AGENTS entry is either detected or excluded — no gaps
+      for (const agent of AGENTS) {
+        const binaryExists = Bun.spawnSync(["which", agent.binary]).exitCode === 0
+        const settingsExist = await Bun.file(agent.settingsPath).exists()
+        if (binaryExists || settingsExist) {
+          expect(detectedIds.has(agent.id)).toBe(true)
+        } else {
+          expect(detectedIds.has(agent.id)).toBe(false)
+        }
+      }
+    })
+
+    it("detects agent with settings file but no binary on PATH", async () => {
+      const result = await detectInstalledAgents()
+      // Verify the OR logic: any agent detected solely via settings is valid
+      for (const agent of result) {
+        const binaryExists = Bun.spawnSync(["which", agent.binary]).exitCode === 0
+        const settingsExist = await Bun.file(agent.settingsPath).exists()
+        // At least one must be true (already tested), but verify both states are tracked
+        if (!binaryExists) {
+          expect(settingsExist).toBe(true) // settings-only detection
+        }
+        if (!settingsExist) {
+          expect(binaryExists).toBe(true) // binary-only detection
+        }
+      }
+    })
+
+    it("returns consistent results across multiple calls", async () => {
+      const first = await detectInstalledAgents()
+      const second = await detectInstalledAgents()
+      expect(first.map((a) => a.id)).toEqual(second.map((a) => a.id))
+    })
+
+    it("preserves AGENTS order in results", async () => {
+      const result = await detectInstalledAgents()
+      const agentOrder = AGENTS.map((a) => a.id)
+      let lastIndex = -1
+      for (const agent of result) {
+        const idx = agentOrder.indexOf(agent.id)
+        expect(idx).toBeGreaterThan(lastIndex)
+        lastIndex = idx
+      }
+    })
   })
 })
