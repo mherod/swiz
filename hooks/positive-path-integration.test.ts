@@ -127,11 +127,11 @@ describe("pretooluse-eslint-config-strength: positive paths", () => {
   })
 
   test("adding new rules emits allow", async () => {
-    // isEslintConfigFile regex requires dot prefix: .eslintrc.js matches but eslint.config.js doesn't
+    // Modern flat config format: eslint.config.js (no dot prefix)
     const r = await runHook(HOOK, {
       tool_name: "Edit",
       tool_input: {
-        file_path: ".eslintrc.js",
+        file_path: "eslint.config.js",
         old_string: '"no-unused-vars": "error"',
         new_string: '"no-unused-vars": "error", "no-undef": "warning"',
       },
