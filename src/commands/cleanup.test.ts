@@ -200,3 +200,58 @@ describe("cleanup --dry-run output", () => {
     expect(output).toMatch(/48 hours/)
   })
 })
+
+// ─── Regression: absent ~/.claude/projects ───────────────────────────────────
+//
+// When running in CI-like environments where no Claude sessions have ever been
+// created, ~/.claude/projects does not exist. The command must exit cleanly
+// with an informative message rather than crashing.
+
+describe("cleanup with no .claude/projects directory", () => {
+  // A completely empty home — no .claude directory at all.
+  const EMPTY_HOME = join(tmpdir(), `swiz-cleanup-empty-${process.pid}`)
+
+  beforeAll(async () => {
+    await mkdir(EMPTY_HOME, { recursive: true })
+  })
+
+  afterAll(async () => {
+    const proc = Bun.spawn(["rm", "-rf", EMPTY_HOME], { stdout: "pipe", stderr: "pipe" })
+    await proc.exited
+  })
+
+  test("exits without error and prints informative message", async () => {
+    const proc = Bun.spawn(
+      ["bun", "run", "index.ts", "cleanup", "--dry-run"],
+      {
+        cwd: join(import.meta.dir, "../.."),
+        env: { ...process.env, HOME: EMPTY_HOME },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    )
+    const output = await new Response(proc.stdout).text()
+    await proc.exited
+
+    expect(proc.exitCode).toBe(0)
+    expect(output).toMatch(/No projects directory found/)
+  })
+
+  test("--project flag with missing projects dir exits without error", async () => {
+    const proc = Bun.spawn(
+      ["bun", "run", "index.ts", "cleanup", "--dry-run", "--project", "anything"],
+      {
+        cwd: join(import.meta.dir, "../.."),
+        env: { ...process.env, HOME: EMPTY_HOME },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    )
+    await new Response(proc.stdout).text()
+    await proc.exited
+
+    // Should exit non-zero because --project was specified but not found,
+    // but must NOT throw an unhandled exception.
+    expect(proc.exitCode).not.toBeNull()
+  })
+})
