@@ -282,14 +282,21 @@ export async function createSessionTask(
   subject: string,
   description: string
 ): Promise<void> {
-  if (!sessionId || sessionId === "null") return
-  const sentinel = `/tmp/${sentinelKey}-${sessionId}.flag`
+  if (!sessionId || sessionId === "null" || !sessionId.trim()) return
+  if (!sentinelKey.trim()) return
+  const home = process.env.HOME
+  if (!home) return
+  // Sanitize sentinel path components: strip path separators and shell metacharacters
+  const safeSentinel = sentinelKey.replace(/[^a-zA-Z0-9_-]/g, "")
+  const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
+  if (!safeSentinel || !safeSession) return
+  const sentinel = `/tmp/${safeSentinel}-${safeSession}.flag`
   if (await Bun.file(sentinel).exists()) return
   try {
     const proc = Bun.spawn(
       [
         "bun",
-        `${process.env.HOME}/.claude/hooks/tasks-list.ts`,
+        join(home, ".claude", "hooks", "tasks-list.ts"),
         "--session",
         sessionId,
         "--create",
@@ -316,6 +323,7 @@ const _skillCache = new Map<string, boolean>()
 
 /** Check if a skill exists in any of the skill directories. Cached per process. */
 export function skillExists(name: string): boolean {
+  if (!name.trim()) return false
   const cached = _skillCache.get(name)
   if (cached !== undefined) return cached
 
@@ -407,7 +415,7 @@ export async function extractToolNamesFromTranscript(transcriptPath: string): Pr
   try {
     const text = await Bun.file(transcriptPath).text()
     const toolNames: string[] = []
-    for (const line of text.split("\n").filter(Boolean)) {
+    for (const line of text.split("\n").filter((l) => l.trim())) {
       try {
         const entry = JSON.parse(line)
         if (entry?.type !== "assistant") continue

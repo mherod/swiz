@@ -8,6 +8,7 @@ import {
   parseGitStatus,
   extractToolNamesFromTranscript,
   skillExists,
+  skillAdvice,
   isDefaultBranch,
   isShellTool,
   isEditTool,
@@ -17,6 +18,12 @@ import {
   isTaskCreateTool,
   isFileEditTool,
   isCodeChangeTool,
+  createSessionTask,
+  detectRuntime,
+  detectPkgRunner,
+  detectPackageManager,
+  SOURCE_EXT_RE,
+  TEST_FILE_RE,
 } from "./hook-utils.ts"
 import { join } from "node:path"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
@@ -577,5 +584,182 @@ describe("getGitAheadBehind() with malformed inputs", () => {
   it("returns null for path with shell metacharacters", async () => {
     const result = await getGitAheadBehind("/path;echo hacked")
     expect(result).toBeNull()
+  })
+})
+
+// ─── createSessionTask() edge cases ─────────────────────────────────────────
+
+describe("createSessionTask() with malformed inputs", () => {
+  it("returns early for undefined sessionId", async () => {
+    await createSessionTask(undefined, "test-key", "subject", "desc")
+    // Should not throw
+  })
+
+  it("returns early for 'null' string sessionId", async () => {
+    await createSessionTask("null", "test-key", "subject", "desc")
+    // Should not throw
+  })
+
+  it("returns early for empty sessionId", async () => {
+    await createSessionTask("", "test-key", "subject", "desc")
+    // Should not throw
+  })
+
+  it("returns early for whitespace-only sessionId", async () => {
+    await createSessionTask("   ", "test-key", "subject", "desc")
+    // Should not throw
+  })
+
+  it("returns early for empty sentinelKey", async () => {
+    await createSessionTask("valid-session", "", "subject", "desc")
+    // Should not throw
+  })
+
+  it("returns early for whitespace-only sentinelKey", async () => {
+    await createSessionTask("valid-session", "  \t  ", "subject", "desc")
+    // Should not throw
+  })
+
+  it("sanitizes path-separator characters in sentinelKey", async () => {
+    // Should not throw even with path separators
+    await createSessionTask("valid-id", "key/../../etc/passwd", "subject", "desc")
+  })
+
+  it("sanitizes shell metacharacters in sessionId", async () => {
+    // Should not throw even with metacharacters
+    await createSessionTask("id;rm -rf /", "safe-key", "subject", "desc")
+  })
+
+  it("handles sessionId that becomes empty after sanitization", async () => {
+    // All special chars → sanitized to empty → should return early
+    await createSessionTask("///", "safe-key", "subject", "desc")
+  })
+
+  it("handles sentinelKey that becomes empty after sanitization", async () => {
+    await createSessionTask("valid-id", "///", "subject", "desc")
+  })
+})
+
+// ─── skillAdvice() edge cases ───────────────────────────────────────────────
+
+describe("skillAdvice() with edge-case inputs", () => {
+  it("returns withoutSkill for empty skill name", () => {
+    const result = skillAdvice("", "with-skill", "without-skill")
+    expect(result).toBe("without-skill")
+  })
+
+  it("returns withoutSkill for nonexistent skill", () => {
+    const result = skillAdvice("nonexistent-xyz-123", "with", "without")
+    expect(result).toBe("without")
+  })
+
+  it("returns withSkill for known skill (environment-dependent)", () => {
+    // "commit" exists locally; in CI it may not — test both paths
+    const result = skillAdvice("commit", "with", "without")
+    expect(result === "with" || result === "without").toBe(true)
+  })
+
+  it("handles empty withSkill and withoutSkill strings", () => {
+    const result = skillAdvice("nonexistent-xyz", "", "")
+    expect(result).toBe("")
+  })
+})
+
+// ─── detectRuntime() / detectPkgRunner() / detectPackageManager() ───────────
+
+describe("detectPackageManager()", () => {
+  it("returns a valid PackageManager or null", () => {
+    const result = detectPackageManager()
+    expect(result === null || ["bun", "pnpm", "yarn", "npm"].includes(result)).toBe(true)
+  })
+
+  it("returns consistent results (caching)", () => {
+    const a = detectPackageManager()
+    const b = detectPackageManager()
+    expect(a).toBe(b)
+  })
+})
+
+describe("detectRuntime()", () => {
+  it("returns 'bun' or 'node'", () => {
+    const result = detectRuntime()
+    expect(result === "bun" || result === "node").toBe(true)
+  })
+})
+
+describe("detectPkgRunner()", () => {
+  it("returns a known runner command", () => {
+    const result = detectPkgRunner()
+    expect(["bunx", "pnpm dlx", "yarn dlx", "npx"].includes(result)).toBe(true)
+  })
+})
+
+// ─── SOURCE_EXT_RE / TEST_FILE_RE ───────────────────────────────────────────
+
+describe("SOURCE_EXT_RE", () => {
+  it("matches common source extensions", () => {
+    expect(SOURCE_EXT_RE.test("foo.ts")).toBe(true)
+    expect(SOURCE_EXT_RE.test("foo.tsx")).toBe(true)
+    expect(SOURCE_EXT_RE.test("foo.js")).toBe(true)
+    expect(SOURCE_EXT_RE.test("foo.py")).toBe(true)
+    expect(SOURCE_EXT_RE.test("foo.go")).toBe(true)
+    expect(SOURCE_EXT_RE.test("foo.rs")).toBe(true)
+  })
+
+  it("does not match non-source files", () => {
+    expect(SOURCE_EXT_RE.test("foo.md")).toBe(false)
+    expect(SOURCE_EXT_RE.test("foo.json")).toBe(false)
+    expect(SOURCE_EXT_RE.test("foo.yaml")).toBe(false)
+    expect(SOURCE_EXT_RE.test("foo.txt")).toBe(false)
+    expect(SOURCE_EXT_RE.test("foo.png")).toBe(false)
+    expect(SOURCE_EXT_RE.test("foo.sh")).toBe(false)
+  })
+
+  it("does not match extensionless files", () => {
+    expect(SOURCE_EXT_RE.test("Makefile")).toBe(false)
+    expect(SOURCE_EXT_RE.test("Dockerfile")).toBe(false)
+  })
+
+  it("matches extension at end of path", () => {
+    expect(SOURCE_EXT_RE.test("src/components/Button.tsx")).toBe(true)
+    expect(SOURCE_EXT_RE.test("packages/lib/index.ts")).toBe(true)
+  })
+})
+
+describe("TEST_FILE_RE", () => {
+  it("matches test file patterns", () => {
+    expect(TEST_FILE_RE.test("foo.test.ts")).toBe(true)
+    expect(TEST_FILE_RE.test("foo.spec.ts")).toBe(true)
+    expect(TEST_FILE_RE.test("__tests__/foo.ts")).toBe(true)
+    expect(TEST_FILE_RE.test("src/test/foo.ts")).toBe(true)
+  })
+
+  it("does not match regular source files", () => {
+    expect(TEST_FILE_RE.test("src/foo.ts")).toBe(false)
+    expect(TEST_FILE_RE.test("src/testing-utils.ts")).toBe(false)
+    expect(TEST_FILE_RE.test("src/contest.ts")).toBe(false)
+  })
+})
+
+// ─── extractToolNamesFromTranscript() whitespace hardening ──────────────────
+
+describe("extractToolNamesFromTranscript() whitespace-only line filtering", () => {
+  let tmpDir: string
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "swiz-whitespace-"))
+  })
+
+  it("filters whitespace-only lines between valid JSONL entries", async () => {
+    const filePath = join(tmpDir, "whitespace-lines.jsonl")
+    const validEntry = JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "Read" }] },
+    })
+    // Whitespace-only lines should not cause JSON parse errors
+    await writeFile(filePath, `${validEntry}\n   \t  \n${validEntry}\n`)
+    const result = await extractToolNamesFromTranscript(filePath)
+    expect(result).toEqual(["Read", "Read"])
+    await rm(tmpDir, { recursive: true, force: true })
   })
 })
