@@ -225,10 +225,11 @@ describe("PreToolUse helper isolation (integration)", () => {
       )
       results.push(parsed)
     }
-    for (let i = 0; i < results.length; i++) {
-      const hso = results[i].hookSpecificOutput as JsonObject
+    const reasons = ["reason-A", "reason-B", "reason-C"]
+    for (const [i, result] of results.entries()) {
+      const hso = result.hookSpecificOutput as JsonObject
       expect(hso.permissionDecision).toBe("deny")
-      expect(hso.permissionDecisionReason).toBe(["reason-A", "reason-B", "reason-C"][i])
+      expect(hso.permissionDecisionReason).toBe(reasons[i])
       expect(hso).not.toHaveProperty("updatedInput")
     }
   })
@@ -247,8 +248,8 @@ describe("PreToolUse helper isolation (integration)", () => {
       )
       results.push(parsed)
     }
-    for (let i = 0; i < results.length; i++) {
-      const hso = results[i].hookSpecificOutput as JsonObject
+    for (const [i, result] of results.entries()) {
+      const hso = result.hookSpecificOutput as JsonObject
       expect(hso.permissionDecision).toBe("allow")
       expect(hso.updatedInput).toEqual(inputs[i])
     }
