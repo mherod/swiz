@@ -15,12 +15,12 @@ interface HookInput {
 // Check if file is an ESLint config file
 // Legacy: .eslintrc, .eslintrc.json, .eslintrc.js, .eslintrc.cjs, .eslintrc.yml, .eslintrc.yaml
 // Modern flat config: eslint.config.js, eslint.config.mjs, eslint.config.cjs, eslint.config.ts, eslint.config.mts, eslint.config.cts
-function isEslintConfigFile(filePath: string): boolean {
-  return /\.eslintrc(\.json|\.js|\.cjs|\.yml|\.yaml)?$|eslint\.config\.(js|mjs|cjs|ts|mts|cts)$/.test(filePath)
+export function isEslintConfigFile(filePath: string): boolean {
+  return /\.eslintrc(\.json|\.js|\.cjs|\.yml|\.yaml)?$|(^|[/\\])eslint\.config\.(js|mjs|cjs|ts|mts|cts)$/.test(filePath)
 }
 
 // Count occurrences of "warning" and "error" (case-insensitive, including severity values)
-function countEnforcements(content: string): { warnings: number; errors: number } {
+export function countEnforcements(content: string): { warnings: number; errors: number } {
   const warnings = (content.match(/["']?warning["']?|"warn"|'warn'/gi) || []).length
   const errors = (content.match(/["']?error["']?|"off"|'off'/gi) || []).length
   return { warnings, errors }
@@ -97,7 +97,9 @@ async function main() {
   )
 }
 
-main().catch((e) => {
-  console.error("Hook error:", e)
-  process.exit(1)
-})
+if (import.meta.main) {
+  main().catch((e) => {
+    console.error("Hook error:", e)
+    process.exit(1)
+  })
+}
