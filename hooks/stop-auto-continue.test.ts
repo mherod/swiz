@@ -1034,4 +1034,80 @@ describe("stop-auto-continue", () => {
     const memory = await Bun.file(memoryFile).text()
     expect(memory).toContain("- **DO**: Always use Bun.spawn instead of child_process")
   })
+
+  // ─── skillAdvice prompt guard tests ──────────────────────────────────────
+
+  test("prompt references /changelog skill when skill is installed", async () => {
+    const binDir = await createTempDir()
+    const argsFile = await createArgCapturingAgent(binDir)
+
+    // Create a fake skill directory so skillExists("changelog") returns true
+    const fakeHome = await createTempDir()
+    const skillDir = join(fakeHome, ".claude", "skills", "changelog")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "# Changelog skill")
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const capturedArgs = await Bun.file(argsFile).text()
+    expect(capturedArgs).toContain("/changelog skill")
+  })
+
+  test("prompt uses generic changelog fallback when skill is not installed", async () => {
+    const binDir = await createTempDir()
+    const argsFile = await createArgCapturingAgent(binDir)
+
+    // No skills installed — use an empty fake HOME
+    const fakeHome = await createTempDir()
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const capturedArgs = await Bun.file(argsFile).text()
+    expect(capturedArgs).toContain("update them")
+    expect(capturedArgs).not.toContain("/changelog skill")
+  })
+
+  test("prompt references /update-memory skill when skill is installed", async () => {
+    const binDir = await createTempDir()
+    const argsFile = await createArgCapturingAgent(binDir)
+
+    const fakeHome = await createTempDir()
+    const skillDir = join(fakeHome, ".claude", "skills", "update-memory")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "# Update memory skill")
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const capturedArgs = await Bun.file(argsFile).text()
+    expect(capturedArgs).toContain("/update-memory skill")
+  })
+
+  test("prompt uses generic memory fallback when skill is not installed", async () => {
+    const binDir = await createTempDir()
+    const argsFile = await createArgCapturingAgent(binDir)
+
+    const fakeHome = await createTempDir()
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const capturedArgs = await Bun.file(argsFile).text()
+    expect(capturedArgs).toContain("CLAUDE.md or MEMORY.md")
+    expect(capturedArgs).not.toContain("/update-memory skill")
+  })
 })
