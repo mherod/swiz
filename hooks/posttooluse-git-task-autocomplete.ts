@@ -6,11 +6,12 @@
  * task files and marks any pending/in_progress task whose subject contains
  * "Commit" or "Push" (case-insensitive) as completed.
  *
- * After a push, also creates a pending "Wait for CI" task if one doesn't
- * already exist, so Bash isn't blocked when all commit/push tasks auto-complete.
+ * After a push, emits additionalContext reminding the agent to create a
+ * "Wait for CI and verify pass" task — the only way to affect Claude's
+ * in-memory task list is via the hook output channel, not filesystem writes.
  */
 
-import { readdir, mkdir } from "node:fs/promises"
+import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { homedir } from "node:os"
 import { type ToolHookInput, isShellTool } from "./hook-utils.ts"
@@ -18,28 +19,11 @@ import { type ToolHookInput, isShellTool } from "./hook-utils.ts"
 const GIT_COMMIT_RE = /\bgit\s+commit\b/
 const GIT_PUSH_RE = /\bgit\s+push\b/
 const SUBJECT_RE = /\b(commit|push)\b/i
-const CI_SUBJECT_RE = /\b(ci|wait for ci|github ci)\b/i
 
 interface Task {
   id: string
   subject: string
-  description: string
-  activeForm?: string
   status: "pending" | "in_progress" | "completed" | "cancelled" | "deleted"
-  blocks: string[]
-  blockedBy: string[]
-}
-
-async function readAllTasks(tasksDir: string, files: string[]): Promise<Task[]> {
-  const tasks: Task[] = []
-  for (const file of files.filter((f) => f.endsWith(".json") && !f.startsWith("."))) {
-    try {
-      tasks.push(JSON.parse(await Bun.file(join(tasksDir, file)).text()))
-    } catch {
-      // skip malformed files
-    }
-  }
-  return tasks
 }
 
 async function main(): Promise<void> {
@@ -57,20 +41,22 @@ async function main(): Promise<void> {
   try {
     files = await readdir(tasksDir)
   } catch {
-    if (!isPush) return
-    // For push: create the directory so we can write the CI task
-    try {
-      await mkdir(tasksDir, { recursive: true })
-      files = []
-    } catch {
-      return
-    }
+    // No tasks directory — nothing to auto-complete; still emit CI reminder on push
+    files = []
   }
 
-  const tasks = await readAllTasks(tasksDir, files)
+  const taskFiles = files.filter((f) => f.endsWith(".json") && !f.startsWith("."))
 
   // Auto-complete matching commit/push tasks
-  for (const task of tasks) {
+  for (const file of taskFiles) {
+    const path = join(tasksDir, file)
+    let task: Task
+    try {
+      task = JSON.parse(await Bun.file(path).text())
+    } catch {
+      continue
+    }
+
     if (task.status === "completed" || task.status === "cancelled" || task.status === "deleted") {
       continue
     }
@@ -79,36 +65,25 @@ async function main(): Promise<void> {
     const subjectLower = task.subject.toLowerCase()
     if (isPush && subjectLower.includes("push")) {
       task.status = "completed"
-      await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
+      await Bun.write(path, JSON.stringify(task, null, 2))
     } else if (isCommit && subjectLower.includes("commit")) {
       task.status = "completed"
-      await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
+      await Bun.write(path, JSON.stringify(task, null, 2))
     }
   }
 
-  // After a push: ensure a CI-watching task exists so Bash isn't blocked
+  // After a push: emit additionalContext so the agent creates a CI-watching task.
+  // File writes cannot affect Claude's in-memory task list — only this output channel can.
   if (isPush) {
-    const hasCiTask = tasks.some(
-      (t) =>
-        t.status !== "completed" &&
-        t.status !== "cancelled" &&
-        t.status !== "deleted" &&
-        CI_SUBJECT_RE.test(t.subject)
+    console.log(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PostToolUse",
+          additionalContext:
+            "git push succeeded. Use TaskCreate to create a task: subject='Wait for CI and verify pass', then mark it in_progress and monitor CI before stopping.",
+        },
+      })
     )
-
-    if (!hasCiTask) {
-      const maxId = tasks.reduce((max, t) => Math.max(max, parseInt(t.id) || 0), 0)
-      const newTask: Task = {
-        id: String(maxId + 1),
-        subject: "Wait for CI and verify pass",
-        description: "CI is running after push. Wait for it to complete and confirm all checks pass.",
-        activeForm: "Waiting for CI",
-        status: "pending",
-        blocks: [],
-        blockedBy: [],
-      }
-      await Bun.write(join(tasksDir, `${newTask.id}.json`), JSON.stringify(newTask, null, 2))
-    }
   }
 }
 
