@@ -72,6 +72,19 @@ export async function decodeProjectPath(encodedName: string, homeDir = HOME): Pr
 // Matches standard UUID v4 — session dirs only; named dirs (memory/, etc.) never match
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+function expandHome(p: string, homeDir = HOME): string {
+  return p.startsWith("~/") ? join(homeDir, p.slice(2)) : p
+}
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await stat(p)
+    return true
+  } catch {
+    return false
+  }
+}
+
 // ─── ANSI ────────────────────────────────────────────────────────────────────
 
 const RESET = "\x1b[0m"
@@ -257,13 +270,26 @@ export const cleanupCommand: Command = {
       name: string
       keep: SessionInfo[]
       old: SessionInfo[]
+      stale: boolean
     }
 
     const results: ProjectResult[] = []
     for (const name of projectNames) {
       const { keep, old } = await findSessions(join(PROJECTS_DIR, name), cutoffMs)
       if (keep.length > 0 || old.length > 0) {
-        results.push({ name, keep, old })
+        results.push({ name, keep, old, stale: false })
+      }
+    }
+
+    // Mark projects whose real filesystem path no longer exists.
+    // For stale projects, all kept sessions also become trashable.
+    const decodedForStaleCheck = await Promise.all(results.map((r) => decodeProjectPath(r.name)))
+    for (let i = 0; i < results.length; i++) {
+      const realPath = expandHome(decodedForStaleCheck[i]!)
+      if (!(await pathExists(realPath))) {
+        results[i]!.stale = true
+        results[i]!.old = [...results[i]!.old, ...results[i]!.keep]
+        results[i]!.keep = []
       }
     }
 
@@ -272,8 +298,8 @@ export const cleanupCommand: Command = {
       return
     }
 
-    // Decode project paths for display
-    const decodedNames = await Promise.all(results.map((r) => decodeProjectPath(r.name)))
+    // Decode project paths for display (reuse the stale-check pass)
+    const decodedNames = decodedForStaleCheck
     const maxNameLen = Math.max(...decodedNames.map((n) => n.length), 20)
 
     // Print table
@@ -284,7 +310,7 @@ export const cleanupCommand: Command = {
     let totalOldBytes = 0
 
     for (let i = 0; i < results.length; i++) {
-      const { keep, old } = results[i]!
+      const { keep, old, stale } = results[i]!
       const displayName = decodedNames[i]!
       const total = keep.length + old.length
       const keepBytes = keep.reduce((sum, s) => sum + s.sizeBytes, 0)
@@ -292,13 +318,14 @@ export const cleanupCommand: Command = {
       totalOldCount += old.length
       totalOldBytes += oldBytes
 
+      const staleSuffix = stale ? ` ${DIM}(path gone)${RESET}` : ""
       const trashPart =
         old.length > 0
           ? `${YELLOW}${old.length} trashable${RESET} (${formatBytes(oldBytes)})`
           : `${DIM}0 trashable${RESET}`
       const keepPart = `${keep.length} kept (${formatBytes(keepBytes)})`
       console.log(
-        `    ${displayName.padEnd(maxNameLen + 2)} ${String(total).padStart(3)} sessions  →  ${keepPart}, ${trashPart}`
+        `    ${displayName.padEnd(maxNameLen + 2)} ${String(total).padStart(3)} sessions  →  ${keepPart}, ${trashPart}${staleSuffix}`
       )
     }
 
