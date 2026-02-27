@@ -42,7 +42,8 @@ async function main(): Promise<void> {
     reason += "Run: git pull --rebase --autostash\n\n"
     reason += skillAdvice(
       "resolve-conflicts",
-      "If conflicts arise during the rebase, use the /resolve-conflicts skill to resolve them, then push with /push.",
+      "If conflicts arise during the rebase, use the /resolve-conflicts skill to resolve them, then " +
+        skillAdvice("push", "push with /push.", `push: git push origin ${branch}`),
       "If conflicts arise during the rebase, resolve them manually, then run: git push origin " +
         branch
     )
