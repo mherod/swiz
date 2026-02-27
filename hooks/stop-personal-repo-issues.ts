@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 /**
- * Stop hook: Check if personal repo has open issues
- * Blocks stop if a personal GitHub repo has open issues
+ * Stop hook: Check for open issues and PRs needing attention
+ * Blocks stop if a personal GitHub repo has open issues, or if
+ * the current user has self-authored or self-assigned issues in an org repo.
  */
 
 import {
@@ -47,16 +48,26 @@ interface Issue {
   number: number
   title: string
   labels: Array<{ name: string }>
+  author?: { login: string }
+  assignees?: Array<{ login: string }>
 }
 
-async function getActionableIssues(cwd: string): Promise<Issue[]> {
-  const output = await gh(["issue", "list", "--state", "open", "--json", "number,title,labels"], cwd)
+async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {
+  const jsonFields = "number,title,labels,author,assignees"
+  const output = await gh(["issue", "list", "--state", "open", "--json", jsonFields], cwd)
   if (!output) return []
   let issues: Issue[]
   try {
     issues = JSON.parse(output)
   } catch {
     return []
+  }
+  if (filterUser) {
+    issues = issues.filter(
+      (i) =>
+        i.author?.login === filterUser ||
+        i.assignees?.some((a) => a.login === filterUser)
+    )
   }
   return issues.filter(
     (i) => !i.labels.some((l) => SKIP_LABELS.has(l.name.toLowerCase()))
@@ -100,10 +111,9 @@ async function main(): Promise<void> {
     const currentUser = await getCurrentGitHubUser()
     if (!currentUser) return
 
-    // Only applies to personal repos
-    if (owner !== currentUser) return
-
-    const actionableIssues = await getActionableIssues(cwd)
+    const isPersonalRepo = owner === currentUser
+    // For org repos filter to issues authored by or assigned to the current user
+    const actionableIssues = await getActionableIssues(cwd, isPersonalRepo ? undefined : currentUser)
     const issueCount = actionableIssues.length
     const prCount = await getOpenPRsWithFeedback(cwd, currentUser)
 
@@ -112,7 +122,10 @@ async function main(): Promise<void> {
     const reasonLines: string[] = []
 
     if (issueCount > 0) {
-      reasonLines.push(`You have ${issueCount} open issue(s) in this personal repository:`)
+      const issueContext = isPersonalRepo
+        ? "in this personal repository"
+        : "assigned to or created by you in this repository"
+      reasonLines.push(`You have ${issueCount} open issue(s) ${issueContext}:`)
       for (const issue of actionableIssues) {
         reasonLines.push(`  #${issue.number} ${issue.title}`)
       }
@@ -141,7 +154,7 @@ async function main(): Promise<void> {
 
     reasonLines.push("")
     reasonLines.push(
-      "Personal repos should stay clean. Work items represent code that needs finishing."
+      "Work items assigned to or created by you represent code that needs finishing."
     )
 
     blockStop(reasonLines.join("\n"))
