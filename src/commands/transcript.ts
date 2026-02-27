@@ -336,17 +336,20 @@ export const transcriptCommand: Command = {
     let autoReply = false
 
     for (let i = 0; i < args.length; i++) {
-      if ((args[i] === "--session" || args[i] === "-s") && args[i + 1]) {
-        sessionQuery = args[++i]!
-      } else if ((args[i] === "--dir" || args[i] === "-d") && args[i + 1]) {
-        targetDir = resolve(args[++i]!)
-      } else if (args[i] === "--list" || args[i] === "-l") {
+      const arg = args[i]
+      if (!arg) continue
+      const next = args[i + 1]
+      if ((arg === "--session" || arg === "-s") && next) {
+        sessionQuery = next; i++
+      } else if ((arg === "--dir" || arg === "-d") && next) {
+        targetDir = resolve(next); i++
+      } else if (arg === "--list" || arg === "-l") {
         listOnly = true
-      } else if ((args[i] === "--head" || args[i] === "-H") && args[i + 1]) {
-        headCount = parseInt(args[++i]!, 10)
-      } else if ((args[i] === "--tail" || args[i] === "-T") && args[i + 1]) {
-        tailCount = parseInt(args[++i]!, 10)
-      } else if (args[i] === "--auto-reply") {
+      } else if ((arg === "--head" || arg === "-H") && next) {
+        headCount = parseInt(next, 10); i++
+      } else if ((arg === "--tail" || arg === "-T") && next) {
+        tailCount = parseInt(next, 10); i++
+      } else if (arg === "--auto-reply") {
         autoReply = true
       }
     }

@@ -115,17 +115,19 @@ export const cleanupCommand: Command = {
     let projectFilter: string | undefined
 
     for (let i = 0; i < args.length; i++) {
-      const arg = args[i]!
+      const arg = args[i]
+      if (!arg) continue
+      const next = args[i + 1]
       if (arg === "--dry-run") {
         dryRun = true
-      } else if (arg === "--older-than" && args[i + 1]) {
-        const days = parseInt(args[++i]!, 10)
+      } else if (arg === "--older-than" && next) {
+        const days = parseInt(next, 10)
         if (isNaN(days) || days < 1) {
           throw new Error("--older-than requires a positive integer (days)")
         }
-        olderThanDays = days
-      } else if (arg === "--project" && args[i + 1]) {
-        projectFilter = args[++i]
+        olderThanDays = days; i++
+      } else if (arg === "--project" && next) {
+        projectFilter = next; i++
       }
     }
 

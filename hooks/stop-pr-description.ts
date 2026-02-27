@@ -67,11 +67,14 @@ async function main(): Promise<void> {
   // Check for ## Summary immediately followed by a placeholder
   const lines = body.split("\n")
   for (let i = 0; i < lines.length; i++) {
-    if (/^## Summary/.test(lines[i]!)) {
+    const line = lines[i]
+    if (!line) continue
+    if (/^## Summary/.test(line)) {
       // Check next non-blank line
       for (let j = i + 1; j < lines.length; j++) {
-        if (lines[j]!.trim() === "") continue
-        if (lines[j]!.trim().startsWith("<")) {
+        const nextLine = lines[j]
+        if (!nextLine || nextLine.trim() === "") continue
+        if (nextLine.trim().startsWith("<")) {
           blockStop(
             `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n` +
               "Replace the '<...>' placeholder under '## Summary' with actual content before stopping."

@@ -42,11 +42,14 @@ export const continueCommand: Command = {
     let printOnly = false
 
     for (let i = 0; i < args.length; i++) {
-      if ((args[i] === "--dir" || args[i] === "-d") && args[i + 1]) {
-        targetDir = resolve(args[++i]!)
-      } else if ((args[i] === "--session" || args[i] === "-s") && args[i + 1]) {
-        sessionQuery = args[++i]!
-      } else if (args[i] === "--print") {
+      const arg = args[i]
+      if (!arg) continue
+      const next = args[i + 1]
+      if ((arg === "--dir" || arg === "-d") && next) {
+        targetDir = resolve(next); i++
+      } else if ((arg === "--session" || arg === "-s") && next) {
+        sessionQuery = next; i++
+      } else if (arg === "--print") {
         printOnly = true
       }
     }
