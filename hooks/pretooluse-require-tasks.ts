@@ -25,15 +25,23 @@ if (!sessionId) process.exit(0)
 const isBlockedTool = isShellTool(toolName) || isEditTool(toolName) || isWriteTool(toolName)
 if (!isBlockedTool) process.exit(0)
 
-// ── EXEMPTION: Read-only git inspection commands ───────────────────────────────
-// git log/status/diff/show/branch/rev-parse/reflog are read-only and safe to
-// run without an active task — they're commonly used to orient, not to change.
+// ── EXEMPTION: Read-only inspection commands ──────────────────────────────────
+// Orientation commands that don't mutate state are safe to run without a task.
 if (isShellTool(toolName)) {
   const command: string = input?.tool_input?.command ?? ""
-  // Allow optional leading `pwd && ` or `pwd;` prefix, then a read-only git subcommand
+
+  // git read-only subcommands — allowed if no write subcommand also appears
   const GIT_READ_RE =
     /(?:^|\|\||&&|;)\s*git\s+(log|status|diff|show|branch|remote\b|rev-parse|rev-list|reflog|ls-files|describe|tag\b)(\s|$)/
-  if (GIT_READ_RE.test(command) && !/\bgit\s+(add|commit|push|pull|fetch|checkout|switch|restore|reset|rebase|merge|stash\s+(?!list)|cherry-pick|revert|rm|mv|apply)\b/.test(command)) {
+  const GIT_WRITE_RE =
+    /\bgit\s+(add|commit|push|pull|fetch|checkout|switch|restore|reset|rebase|merge|stash\s+(?!list)|cherry-pick|revert|rm|mv|apply)\b/
+  if (GIT_READ_RE.test(command) && !GIT_WRITE_RE.test(command)) {
+    process.exit(0)
+  }
+
+  // ls and grep/rg — pure read, safe without a task
+  const READ_CMD_RE = /(?:^|\|\||&&|;)\s*(ls|rg|grep)\b/
+  if (READ_CMD_RE.test(command)) {
     process.exit(0)
   }
 }

@@ -272,10 +272,40 @@ describe("pretooluse-require-tasks", () => {
       expect(result.decision).toBe("deny")
     })
 
-    test("still denies non-git commands without tasks", async () => {
+    test("still denies non-exempt commands without tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "cat some-file.txt" })
+      expect(result.decision).toBe("deny")
+    })
+
+    test("allows ls without tasks", async () => {
       const homeDir = await createTempHome()
       const result = await runHook({ homeDir, command: "ls -la" })
-      expect(result.decision).toBe("deny")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows ls with path without tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "ls src/" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows rg without tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "rg 'some pattern' src/" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows grep without tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "grep -r 'TODO' hooks/" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows ls chained after pwd without tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "pwd && ls -la" })
+      expect(result.decision).toBeUndefined()
     })
   })
 
