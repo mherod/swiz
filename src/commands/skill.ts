@@ -1,55 +1,9 @@
-import { readdir } from "node:fs/promises"
-import { join, resolve } from "node:path"
 import type { Command } from "../types.ts"
+import { findSkills, parseFrontmatterField, stripFrontmatter } from "../skill-utils.ts"
 
-const SKILL_DIRS = [resolve(".skills"), join(process.env.HOME ?? "~", ".claude", "skills")]
+export { parseFrontmatterField, stripFrontmatter }
 
 const INLINE_CMD_RE = /!`([^`]+)`/g
-
-interface SkillInfo {
-  name: string
-  description: string
-  source: string
-  path: string
-}
-
-async function findSkills(): Promise<SkillInfo[]> {
-  const skills: SkillInfo[] = []
-
-  for (const dir of SKILL_DIRS) {
-    let entries
-    try {
-      entries = await readdir(dir, { withFileTypes: true })
-    } catch {
-      continue
-    }
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-
-      const skillPath = join(dir, entry.name, "SKILL.md")
-      const file = Bun.file(skillPath)
-      if (!(await file.exists())) continue
-
-      const content = await file.text()
-      const description = parseFrontmatterField(content, "description") ?? ""
-
-      skills.push({
-        name: entry.name,
-        description,
-        source: dir === SKILL_DIRS[0] ? "local" : "global",
-        path: skillPath,
-      })
-    }
-  }
-
-  return skills
-}
-
-export function parseFrontmatterField(content: string, field: string): string | null {
-  const match = content.match(new RegExp(`^---[\\s\\S]*?^${field}:\\s*(.+)$[\\s\\S]*?^---`, "m"))
-  return match?.[1]?.trim() ?? null
-}
 
 async function listSkills() {
   const skills = await findSkills()
@@ -93,11 +47,6 @@ async function expandInlineCommands(content: string): Promise<string> {
 
   let i = 0
   return content.replace(INLINE_CMD_RE, () => results[i++]!)
-}
-
-export function stripFrontmatter(content: string): string {
-  // Use [ \t]* (not \s*) to avoid consuming the blank line that may follow the closing ---
-  return content.replace(/^---[\s\S]*?^---[ \t]*\n?/m, "")
 }
 
 async function readSkill(name: string, raw: boolean, noFrontMatter: boolean) {
