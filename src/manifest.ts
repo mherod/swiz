@@ -82,7 +82,10 @@ export const manifest: HookGroup[] = [
   {
     event: "postToolUse",
     matcher: "Bash",
-    hooks: [{ file: "posttooluse-pr-context.ts", timeout: 10 }],
+    hooks: [
+      { file: "posttooluse-pr-context.ts", timeout: 10 },
+      { file: "posttooluse-git-task-autocomplete.ts", timeout: 5 },
+    ],
   },
   {
     event: "postToolUse",
