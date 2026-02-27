@@ -477,6 +477,21 @@ describe("agents.ts", () => {
         lastIndex = idx
       }
     })
+
+    it("matches isAgentInstalled results for every agent in AGENTS", async () => {
+      const detected = await detectInstalledAgents()
+      const detectedIds = new Set(detected.map((a) => a.id))
+      for (const agent of AGENTS) {
+        const installed = await isAgentInstalled(agent)
+        expect(detectedIds.has(agent.id)).toBe(installed)
+      }
+    })
+
+    it("returns between 0 and AGENTS.length agents inclusive", async () => {
+      const result = await detectInstalledAgents()
+      expect(result.length).toBeGreaterThanOrEqual(0)
+      expect(result.length).toBeLessThanOrEqual(AGENTS.length)
+    })
   })
 
   describe("isAgentInstalled", () => {
