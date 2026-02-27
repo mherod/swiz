@@ -16,7 +16,7 @@ describe("install.ts statusMessage field", () => {
 
     // Verify the nested structure contains statusMessage
     expect(nestedHookEntry.hooks[0]).toHaveProperty("statusMessage");
-    expect(nestedHookEntry.hooks[0].statusMessage).toBe("Swizzling...");
+    expect(nestedHookEntry.hooks[0]!.statusMessage).toBe("Swizzling...");
   });
 
   it("verifies statusMessage is included in flat hook configuration", () => {
@@ -43,7 +43,7 @@ describe("install.ts statusMessage field", () => {
       statusMessage: expectedMessage,
     };
 
-    expect(nestedHook.hooks[0].statusMessage).toBe(expectedMessage);
+    expect(nestedHook.hooks[0]!.statusMessage).toBe(expectedMessage);
     expect(flatHook.statusMessage).toBe(expectedMessage);
   });
 
