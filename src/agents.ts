@@ -174,18 +174,21 @@ export function translateEvent(canonical: string, agent: AgentDef): string {
 
 // ─── Agent detection ────────────────────────────────────────────────────────
 
+/** Check if a single agent is installed (binary on PATH or settings file exists). */
+export async function isAgentInstalled(agent: AgentDef): Promise<boolean> {
+  try {
+    const proc = Bun.spawnSync(["which", agent.binary])
+    const found = proc.exitCode === 0
+    const settingsExist = await Bun.file(agent.settingsPath).exists()
+    return found || settingsExist
+  } catch {
+    return false
+  }
+}
+
 export async function detectInstalledAgents(): Promise<AgentDef[]> {
   const results = await Promise.all(
-    AGENTS.map(async (agent) => {
-      try {
-        const proc = Bun.spawnSync(["which", agent.binary])
-        const found = proc.exitCode === 0
-        const settingsExist = await Bun.file(agent.settingsPath).exists()
-        return found || settingsExist ? agent : null
-      } catch {
-        return null
-      }
-    })
+    AGENTS.map(async (agent) => (await isAgentInstalled(agent)) ? agent : null)
   )
   return results.filter((a): a is AgentDef => a !== null)
 }

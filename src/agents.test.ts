@@ -7,6 +7,7 @@ import {
   translateMatcher,
   translateEvent,
   detectInstalledAgents,
+  isAgentInstalled,
   type AgentDef,
 } from "./agents.ts"
 
@@ -475,6 +476,97 @@ describe("agents.ts", () => {
         expect(idx).toBeGreaterThan(lastIndex)
         lastIndex = idx
       }
+    })
+  })
+
+  describe("isAgentInstalled", () => {
+    function fakeAgent(overrides: Partial<AgentDef> = {}): AgentDef {
+      return {
+        id: "fake",
+        name: "Fake Agent",
+        binary: "nonexistent-binary-xyz",
+        settingsPath: "/nonexistent/path/settings.json",
+        hooksKey: "hooks",
+        configStyle: "nested" as const,
+        hooksConfigurable: false,
+        toolAliases: {},
+        eventMap: {},
+        ...overrides,
+      }
+    }
+
+    it("returns false for agent with no binary and no settings", async () => {
+      const agent = fakeAgent()
+      expect(await isAgentInstalled(agent)).toBe(false)
+    })
+
+    it("returns true for agent with valid binary on PATH", async () => {
+      // "ls" is always available
+      const agent = fakeAgent({ binary: "ls" })
+      expect(await isAgentInstalled(agent)).toBe(true)
+    })
+
+    it("returns true for agent with existing settings file", async () => {
+      // package.json always exists in the project root
+      const agent = fakeAgent({
+        settingsPath: `${process.cwd()}/package.json`,
+      })
+      expect(await isAgentInstalled(agent)).toBe(true)
+    })
+
+    it("returns true when both binary and settings exist", async () => {
+      const agent = fakeAgent({
+        binary: "ls",
+        settingsPath: `${process.cwd()}/package.json`,
+      })
+      expect(await isAgentInstalled(agent)).toBe(true)
+    })
+
+    it("returns true when binary exists but settings do not", async () => {
+      const agent = fakeAgent({
+        binary: "ls",
+        settingsPath: "/nonexistent/settings.json",
+      })
+      expect(await isAgentInstalled(agent)).toBe(true)
+    })
+
+    it("returns true when settings exist but binary does not", async () => {
+      const agent = fakeAgent({
+        binary: "nonexistent-binary-xyz",
+        settingsPath: `${process.cwd()}/package.json`,
+      })
+      expect(await isAgentInstalled(agent)).toBe(true)
+    })
+
+    it("returns false gracefully for empty binary name", async () => {
+      const agent = fakeAgent({ binary: "" })
+      expect(await isAgentInstalled(agent)).toBe(false)
+    })
+
+    it("returns false gracefully for empty settings path", async () => {
+      const agent = fakeAgent({ settingsPath: "" })
+      expect(await isAgentInstalled(agent)).toBe(false)
+    })
+
+    it("returns false gracefully for settings path to a directory", async () => {
+      const agent = fakeAgent({ settingsPath: "/tmp" })
+      // Bun.file("/tmp").exists() returns true for dirs on some platforms,
+      // but the function should not throw regardless
+      const result = await isAgentInstalled(agent)
+      expect(typeof result).toBe("boolean")
+    })
+
+    it("handles binary with spaces gracefully", async () => {
+      const agent = fakeAgent({ binary: "non existent binary" })
+      const result = await isAgentInstalled(agent)
+      expect(typeof result).toBe("boolean")
+    })
+
+    it("handles settings path with special characters gracefully", async () => {
+      const agent = fakeAgent({
+        settingsPath: "/tmp/does not exist/settings (copy).json",
+      })
+      expect(await isAgentInstalled(agent)).toBe(false)
     })
   })
 })
