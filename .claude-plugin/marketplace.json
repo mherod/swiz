@@ -1,0 +1,23 @@
+{
+  "name": "swiz-marketplace",
+  "owner": {
+    "name": "swiz maintainers"
+  },
+  "metadata": {
+    "description": "Marketplace for swiz Claude Code plugins",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "swiz-core",
+      "source": "./plugins/swiz-core",
+      "description": "Install and manage swiz from Claude Code",
+      "version": "1.0.0",
+      "author": {
+        "name": "swiz maintainers"
+      },
+      "category": "developer-tools",
+      "tags": ["swiz", "hooks", "automation", "claude-code"]
+    }
+  ]
+}

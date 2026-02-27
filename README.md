@@ -13,6 +13,33 @@ bun link
 
 Then use `swiz` from anywhere.
 
+## Plugin Marketplace
+
+This repo now includes a Claude Code plugin marketplace:
+
+- Marketplace catalog: `.claude-plugin/marketplace.json`
+- Plugin: `plugins/swiz-core`
+
+The `swiz-core` plugin currently provides:
+
+- Command: `install` (executes `swiz install` with optional flags)
+- Skill: `enable-auto-continue` (executes `swiz settings enable auto-continue`)
+- Skill: `disable-auto-continue` (executes `swiz settings disable auto-continue`)
+
+Public install flow:
+
+```bash
+/plugin marketplace add mherod/swiz
+/plugin install swiz-core@swiz-marketplace
+```
+
+Local development test flow:
+
+```bash
+/plugin marketplace add .
+/plugin install swiz-core@swiz-marketplace
+```
+
 ## Supported Agents
 
 | Agent | Config Path | Hooks | Status |

@@ -1,0 +1,10 @@
+{
+  "name": "swiz-core",
+  "description": "Claude Code commands and skills for swiz workflows",
+  "version": "1.0.0",
+  "author": {
+    "name": "swiz maintainers"
+  },
+  "commands": "./commands",
+  "skills": "./skills"
+}
