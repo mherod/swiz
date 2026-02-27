@@ -18,6 +18,19 @@ import { type ToolHookInput, isShellTool } from "./hook-utils.ts"
 
 const GIT_COMMIT_RE = /(?:^|\n|;|&&|\|\|)\s*git\s+commit\b/
 const GIT_PUSH_RE = /(?:^|\n|;|&&|\|\|)\s*git\s+push\b/
+
+/**
+ * Strip heredoc bodies from a shell command string before regex matching.
+ * Prevents false positives when git push/commit appears inside a heredoc body
+ * rather than as an executable command.
+ * Handles: <<WORD, <<-WORD, <<"WORD", <<'WORD'
+ */
+function stripHeredocs(command: string): string {
+  return command.replace(
+    /<<-?[ \t]*["']?(\w+)["']?[ \t]*\n[\s\S]*?\n[ \t]*\1(?=\n|$)/g,
+    ""
+  )
+}
 const SUBJECT_RE = /\b(commit|push)\b/i
 
 interface Task {
@@ -31,7 +44,7 @@ async function main(): Promise<void> {
   if (!input.session_id) return
   if (!input.tool_name || !isShellTool(input.tool_name)) return
 
-  const command = String(input.tool_input?.command ?? "")
+  const command = stripHeredocs(String(input.tool_input?.command ?? ""))
   const isCommit = GIT_COMMIT_RE.test(command)
   const isPush = GIT_PUSH_RE.test(command)
   if (!isCommit && !isPush) return

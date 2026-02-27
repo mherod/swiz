@@ -213,6 +213,70 @@ describe("posttooluse-git-task-autocomplete: mixed separator combinations", () =
   })
 })
 
+// ─── Command substitutions → no false positives ───────────────────────────────
+
+describe("posttooluse-git-task-autocomplete: command substitutions do not trigger", () => {
+  test("git push inside $() does not trigger", async () => {
+    const result = await runHook("result=$(git push origin main)")
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
+
+  test("git push inside backtick substitution does not trigger", async () => {
+    const result = await runHook("result=`git push origin main`")
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
+
+  test("git commit inside $() does not trigger", async () => {
+    const result = await runHook('MSG=$(git commit -m "fix")')
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
+
+  test("git push in $() followed by real command does not double-trigger", async () => {
+    // Only the real git push after && should trigger
+    const result = await runHook("output=$(git push 2>&1) && git push origin main")
+    expect(result.exitedCleanly).toBe(true)
+    expect(result.additionalContext).toContain("Wait for CI")
+  })
+})
+
+// ─── Heredocs → no false positives ───────────────────────────────────────────
+
+describe("posttooluse-git-task-autocomplete: heredoc bodies do not trigger", () => {
+  test("git push inside heredoc body does not trigger", async () => {
+    const result = await runHook("cat <<EOF\ngit push origin main\nEOF")
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
+
+  test("git commit inside heredoc body does not trigger", async () => {
+    const result = await runHook('cat <<EOF\ngit commit -m "fix"\nEOF')
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
+
+  test("git push in heredoc with quoted marker does not trigger", async () => {
+    const result = await runHook("cat <<'EOF'\ngit push origin main\nEOF")
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
+
+  test("heredoc with git push in body but real push in command triggers once", async () => {
+    // The real git push (before heredoc) should still trigger
+    const result = await runHook("git push origin main\ncat <<EOF\ngit push origin feature\nEOF")
+    expect(result.exitedCleanly).toBe(true)
+    expect(result.additionalContext).toContain("Wait for CI")
+  })
+
+  test("indented heredoc (<<-) with git push body does not trigger", async () => {
+    const result = await runHook("cat <<-EOF\n\tgit push origin main\n\tEOF")
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
+})
+
 // ─── Non-shell tools → silent ─────────────────────────────────────────────────
 
 describe("posttooluse-git-task-autocomplete: non-shell tool_name exits silently", () => {
