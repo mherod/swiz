@@ -76,21 +76,25 @@ async function runHook({
   binDir,
   stopHookActive = false,
   extraEnv = {},
+  cwd,
 }: {
   transcriptContent: string
   binDir: string
   stopHookActive?: boolean
   extraEnv?: Record<string, string>
+  cwd?: string
 }): Promise<HookResult> {
   const workDir = await createTempDir()
   const transcriptPath = join(workDir, "transcript.jsonl")
   await writeFile(transcriptPath, transcriptContent)
 
+  const hookCwd = cwd ?? workDir
+
   const payload = JSON.stringify({
     transcript_path: transcriptPath,
     stop_hook_active: stopHookActive,
     session_id: "test-session",
-    cwd: workDir,
+    cwd: hookCwd,
   })
 
   const { CLAUDECODE: _cc, ...cleanEnv } = process.env
@@ -251,8 +255,11 @@ describe("stop-auto-continue", () => {
     // Closing reminder after the transcript
     expect(capturedArgs).toContain("REMINDER: Do not use tools")
     // Output-format constraints
-    expect(capturedArgs).toContain("ONE sentence only")
+    expect(capturedArgs).toContain("valid JSON object")
     expect(capturedArgs).toContain("imperative verb")
+    // Reflections instructions
+    expect(capturedArgs).toContain("REFLECTIONS RULES")
+    expect(capturedArgs).toContain("conservative")
   })
 
   test("truncates multi-line response to first non-empty line", async () => {
@@ -722,4 +729,309 @@ describe("stop-auto-continue", () => {
     expect(result.reason).toContain("identify the most critical incomplete task")
     expect(result.reason).not.toContain("This should never appear")
   }, 10_000)
+
+  // ─── JSON response parsing tests ──────────────────────────────────────────
+
+  test("parses JSON response with next step", async () => {
+    const binDir = await createTempDir()
+    const json = JSON.stringify({ next: "Run the full test suite", reflections: [] })
+    await createFakeAgent(binDir, json)
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    })
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("Run the full test suite")
+  })
+
+  test("falls back to plain text when agent outputs non-JSON", async () => {
+    const binDir = await createTempDir()
+    await createFakeAgent(binDir, "Commit all pending changes now")
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    })
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("Commit all pending changes now")
+  })
+
+  test("strips markdown fences from JSON response", async () => {
+    const binDir = await createTempDir()
+    const json = "```json\n" + JSON.stringify({ next: "Fix the type errors", reflections: [] }) + "\n```"
+    await createFakeAgent(binDir, json)
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    })
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("Fix the type errors")
+  })
+
+  test("rejects markup in JSON next field and falls back", async () => {
+    const binDir = await createTempDir()
+    const json = JSON.stringify({ next: "<tool_call>bash</tool_call>", reflections: [] })
+    await createFakeAgent(binDir, json)
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    })
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("identify the most critical incomplete task")
+    expect(result.reason).not.toContain("<tool_call>")
+  })
+
+  test("filters out reflections containing XML markup", async () => {
+    const binDir = await createTempDir()
+    const json = JSON.stringify({
+      next: "Run the tests",
+      reflections: [
+        "DO: Always use bun instead of npm",
+        "<script>alert('xss')</script>",
+      ],
+    })
+    await createFakeAgent(binDir, json)
+
+    // Setup memory dir
+    const fakeHome = await createTempDir()
+    const hookCwd = await createTempDir()
+    const projectKey = hookCwd.replace(/\//g, "-")
+    const memoryDir = join(fakeHome, ".claude", "projects", projectKey, "memory")
+    await mkdir(memoryDir, { recursive: true })
+    const memoryFile = join(memoryDir, "MEMORY.md")
+    await writeFile(memoryFile, "# Memory\n")
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      cwd: hookCwd,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const memory = await Bun.file(memoryFile).text()
+    expect(memory).toContain("Always use bun instead of npm")
+    expect(memory).not.toContain("script")
+  })
+
+  // ─── Memory writing tests ────────────────────────────────────────────────
+
+  /** Sets up a fake HOME with a project memory dir matching the given cwd. */
+  async function setupMemoryDir(
+    fakeHome: string,
+    hookCwd: string,
+    initialContent = "# Memory\n"
+  ): Promise<string> {
+    const projectKey = hookCwd.replace(/\//g, "-")
+    const memoryDir = join(fakeHome, ".claude", "projects", projectKey, "memory")
+    await mkdir(memoryDir, { recursive: true })
+    const memoryFile = join(memoryDir, "MEMORY.md")
+    await writeFile(memoryFile, initialContent)
+    return memoryFile
+  }
+
+  test("writes reflections to MEMORY.md", async () => {
+    const binDir = await createTempDir()
+    const json = JSON.stringify({
+      next: "Run the tests",
+      reflections: ["DO: Always use bun instead of npm", "DON'T: Use grep, prefer rg"],
+    })
+    await createFakeAgent(binDir, json)
+
+    const fakeHome = await createTempDir()
+    const hookCwd = await createTempDir()
+    const memoryFile = await setupMemoryDir(fakeHome, hookCwd)
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      cwd: hookCwd,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const memory = await Bun.file(memoryFile).text()
+    expect(memory).toContain("## Confirmed Patterns")
+    expect(memory).toContain("**DO**: Always use bun instead of npm")
+    expect(memory).toContain("**DON'T**: Use grep, prefer rg")
+  })
+
+  test("deduplicates reflections against existing memory", async () => {
+    const binDir = await createTempDir()
+    const json = JSON.stringify({
+      next: "Run the tests",
+      reflections: ["DO: Always use bun instead of npm"],
+    })
+    await createFakeAgent(binDir, json)
+
+    const fakeHome = await createTempDir()
+    const hookCwd = await createTempDir()
+    const memoryFile = await setupMemoryDir(
+      fakeHome,
+      hookCwd,
+      "# Memory\n\n## Confirmed Patterns\n\n- **DO**: Always use bun instead of npm\n"
+    )
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      cwd: hookCwd,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const memory = await Bun.file(memoryFile).text()
+    // Should appear exactly once (not duplicated)
+    const matches = memory.match(/Always use bun instead of npm/g)
+    expect(matches).toHaveLength(1)
+  })
+
+  test("appends to existing Confirmed Patterns section without duplicate header", async () => {
+    const binDir = await createTempDir()
+    const json = JSON.stringify({
+      next: "Run the tests",
+      reflections: ["DO: Prefer Bun.file over fs.readFile"],
+    })
+    await createFakeAgent(binDir, json)
+
+    const fakeHome = await createTempDir()
+    const hookCwd = await createTempDir()
+    const memoryFile = await setupMemoryDir(
+      fakeHome,
+      hookCwd,
+      "# Memory\n\n## Confirmed Patterns\n\n- **DO**: Use TypeScript exclusively\n"
+    )
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      cwd: hookCwd,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const memory = await Bun.file(memoryFile).text()
+    // Should have exactly one "## Confirmed Patterns" header
+    const headers = memory.match(/## Confirmed Patterns/g)
+    expect(headers).toHaveLength(1)
+    expect(memory).toContain("Prefer Bun.file over fs.readFile")
+    expect(memory).toContain("Use TypeScript exclusively")
+  })
+
+  test("skips memory writing when no project dir exists", async () => {
+    const binDir = await createTempDir()
+    const json = JSON.stringify({
+      next: "Run the tests",
+      reflections: ["DO: Use bun exclusively"],
+    })
+    await createFakeAgent(binDir, json)
+
+    const fakeHome = await createTempDir()
+    // No project dir created — hook should not crash
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      cwd: "/nonexistent/project/path",
+      extraEnv: { HOME: fakeHome },
+    })
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("Run the tests")
+  })
+
+  test("skips reflections that are too short", async () => {
+    const binDir = await createTempDir()
+    const json = JSON.stringify({
+      next: "Run the tests",
+      reflections: ["short", "DO: Always use bun for running TypeScript files"],
+    })
+    await createFakeAgent(binDir, json)
+
+    const fakeHome = await createTempDir()
+    const hookCwd = await createTempDir()
+    const memoryFile = await setupMemoryDir(fakeHome, hookCwd)
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      cwd: hookCwd,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const memory = await Bun.file(memoryFile).text()
+    expect(memory).not.toContain("short")
+    expect(memory).toContain("Always use bun for running TypeScript files")
+  })
+
+  test("does not write reflections when memory file would exceed 200 lines", async () => {
+    const binDir = await createTempDir()
+    const json = JSON.stringify({
+      next: "Run the tests",
+      reflections: ["DO: This should not be written to memory"],
+    })
+    await createFakeAgent(binDir, json)
+
+    const fakeHome = await createTempDir()
+    const hookCwd = await createTempDir()
+    // Create a memory file that's already at ~199 lines
+    const longContent = "# Memory\n" + "\n".repeat(198)
+    const memoryFile = await setupMemoryDir(fakeHome, hookCwd, longContent)
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      cwd: hookCwd,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const memory = await Bun.file(memoryFile).text()
+    expect(memory).not.toContain("This should not be written")
+  })
+
+  test("does not write reflections when agent returns no reflections", async () => {
+    const binDir = await createTempDir()
+    const json = JSON.stringify({ next: "Run the tests", reflections: [] })
+    await createFakeAgent(binDir, json)
+
+    const fakeHome = await createTempDir()
+    const hookCwd = await createTempDir()
+    const memoryFile = await setupMemoryDir(fakeHome, hookCwd)
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      cwd: hookCwd,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const memory = await Bun.file(memoryFile).text()
+    expect(memory).toBe("# Memory\n")
+  })
+
+  test("formats reflections without prefix as DO directives", async () => {
+    const binDir = await createTempDir()
+    const json = JSON.stringify({
+      next: "Run the tests",
+      reflections: ["Always use Bun.spawn instead of child_process"],
+    })
+    await createFakeAgent(binDir, json)
+
+    const fakeHome = await createTempDir()
+    const hookCwd = await createTempDir()
+    const memoryFile = await setupMemoryDir(fakeHome, hookCwd)
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      cwd: hookCwd,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const memory = await Bun.file(memoryFile).text()
+    expect(memory).toContain("- **DO**: Always use Bun.spawn instead of child_process")
+  })
 })

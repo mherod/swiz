@@ -215,13 +215,13 @@ describe("dispatch.ts unit tests", () => {
       })
     })
 
-    it("fire-and-forget hooks run in parallel", () => {
-      // Async hooks are pre-launched before blocking hooks
-      const stopAsyncHooks = manifest
-        .filter((g) => g.event === "stop")
+    it("fire-and-forget hooks exist in non-stop events", () => {
+      // Async hooks are pre-launched before blocking hooks (e.g. posttooluse-prettier-ts)
+      const nonStopAsyncHooks = manifest
+        .filter((g) => g.event !== "stop")
         .flatMap((g) => g.hooks.filter((h) => h.async))
 
-      expect(stopAsyncHooks.length).toBeGreaterThan(0)
+      expect(nonStopAsyncHooks.length).toBeGreaterThan(0)
     })
   })
 

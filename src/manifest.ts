@@ -34,7 +34,6 @@ export const manifest: HookGroup[] = [
       { file: "stop-completion-auditor.ts", timeout: 10 },
       { file: "stop-personal-repo-issues.ts", timeout: 10 },
       { file: "stop-auto-continue.ts", timeout: 120 },
-      { file: "stop-memory-updater.ts", timeout: 15, async: true },
     ],
   },
   {
