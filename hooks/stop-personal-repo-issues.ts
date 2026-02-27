@@ -52,6 +52,13 @@ interface Issue {
   assignees?: Array<{ login: string }>
 }
 
+interface PR {
+  number: number
+  title: string
+  url: string
+  reviewDecision: string
+}
+
 async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {
   const jsonFields = "number,title,labels,author,assignees"
   const output = await gh(["issue", "list", "--state", "open", "--json", jsonFields], cwd)
@@ -74,7 +81,7 @@ async function getActionableIssues(cwd: string, filterUser?: string): Promise<Is
   )
 }
 
-async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise<number> {
+async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise<PR[]> {
   const output = await gh(
     [
       "pr",
@@ -84,14 +91,18 @@ async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise
       "--author",
       currentUser,
       "--json",
-      "number,reviewDecision",
+      "number,title,url,reviewDecision",
       "--jq",
-      'map(select(.reviewDecision == "CHANGES_REQUESTED" or .reviewDecision == "REVIEW_REQUIRED")) | length',
+      'map(select(.reviewDecision == "CHANGES_REQUESTED" or .reviewDecision == "REVIEW_REQUIRED"))',
     ],
     cwd
   )
-  const count = parseInt(output, 10)
-  return isNaN(count) ? 0 : count
+  if (!output) return []
+  try {
+    return JSON.parse(output) as PR[]
+  } catch {
+    return []
+  }
 }
 
 async function main(): Promise<void> {
@@ -112,16 +123,44 @@ async function main(): Promise<void> {
     if (!currentUser) return
 
     const isPersonalRepo = owner === currentUser
-    // For org repos filter to issues authored by or assigned to the current user
-    const actionableIssues = await getActionableIssues(cwd, isPersonalRepo ? undefined : currentUser)
+    const prs = await getOpenPRsWithFeedback(cwd, currentUser)
+    const changesRequestedPRs = prs.filter((p) => p.reviewDecision === "CHANGES_REQUESTED")
+    const hasChangesRequested = changesRequestedPRs.length > 0
+
+    // When there are PRs with CHANGES_REQUESTED, skip issues — the PR block is more urgent
+    const actionableIssues = hasChangesRequested
+      ? []
+      : await getActionableIssues(cwd, isPersonalRepo ? undefined : currentUser)
     const issueCount = actionableIssues.length
-    const prCount = await getOpenPRsWithFeedback(cwd, currentUser)
+    const prCount = prs.length
 
     if (issueCount === 0 && prCount === 0) return
 
     const reasonLines: string[] = []
 
+    if (prCount > 0) {
+      const allChangesRequested = prs.every((p) => p.reviewDecision === "CHANGES_REQUESTED")
+      const label = allChangesRequested
+        ? "changes requested"
+        : "pending feedback (CHANGES_REQUESTED or REVIEW_REQUIRED)"
+      reasonLines.push(`You have ${prCount} open PR(s) with ${label}:`)
+      for (const pr of prs) {
+        const decisionTag =
+          pr.reviewDecision === "CHANGES_REQUESTED" ? "[changes requested]" : "[review required]"
+        reasonLines.push(`  #${pr.number} ${pr.title} ${decisionTag}`)
+        reasonLines.push(`    ${pr.url}`)
+      }
+      reasonLines.push(
+        skillAdvice(
+          "work-on-prs",
+          "Use the /work-on-prs skill to address all feedback and resolve reviews:\n  /work-on-prs — Start working on the next PR",
+          "Address all PR feedback before stopping:\n  gh pr list --state open\n  gh pr view <number> --comments"
+        )
+      )
+    }
+
     if (issueCount > 0) {
+      if (reasonLines.length > 0) reasonLines.push("")
       const issueContext = isPersonalRepo
         ? "in this personal repository"
         : "assigned to or created by you in this repository"
@@ -134,20 +173,6 @@ async function main(): Promise<void> {
           "work-on-issue",
           "Use the /work-on-issue skill to pick up and resolve issues:\n  /work-on-issue — Start working on the next issue",
           "Pick up and resolve open issues before stopping:\n  gh issue list --state open\n  gh issue view <number>"
-        )
-      )
-    }
-
-    if (prCount > 0) {
-      if (reasonLines.length > 0) reasonLines.push("")
-      reasonLines.push(
-        `You have ${prCount} open PR(s) with pending feedback (CHANGES_REQUESTED or REVIEW_REQUIRED).`
-      )
-      reasonLines.push(
-        skillAdvice(
-          "work-on-prs",
-          "Use the /work-on-prs skill to address all feedback and resolve reviews:\n  /work-on-prs — Start working on the next PR",
-          "Address all PR feedback before stopping:\n  gh pr list --state open\n  gh pr view <number> --comments"
         )
       )
     }

@@ -46,6 +46,18 @@ function filterByActionable(issues: Issue[]): Issue[] {
   )
 }
 
+interface PR {
+  number: number
+  title: string
+  url: string
+  reviewDecision: string
+}
+
+/** Mirrors the hook's hasChangesRequested logic */
+function hasChangesRequested(prs: PR[]): boolean {
+  return prs.some((p) => p.reviewDecision === "CHANGES_REQUESTED")
+}
+
 // ─── extractOwnerFromUrl ──────────────────────────────────────────────────────
 
 describe("extractOwnerFromUrl", () => {
@@ -215,6 +227,45 @@ describe("filterByActionable — SKIP_LABELS filtering", () => {
 
   test("returns empty list for empty input", () => {
     expect(filterByActionable([])).toHaveLength(0)
+  })
+})
+
+// ─── PR priority: CHANGES_REQUESTED suppresses issue display ─────────────────
+
+describe("hasChangesRequested — PR-over-issues priority", () => {
+  const changesRequestedPR: PR = {
+    number: 10,
+    title: "Fix auth flow",
+    url: "https://github.com/mherod/repo/pull/10",
+    reviewDecision: "CHANGES_REQUESTED",
+  }
+
+  const reviewRequiredPR: PR = {
+    number: 11,
+    title: "Add dark mode",
+    url: "https://github.com/mherod/repo/pull/11",
+    reviewDecision: "REVIEW_REQUIRED",
+  }
+
+  test("true when any PR has CHANGES_REQUESTED", () => {
+    expect(hasChangesRequested([changesRequestedPR])).toBe(true)
+  })
+
+  test("false when only REVIEW_REQUIRED PRs exist", () => {
+    expect(hasChangesRequested([reviewRequiredPR])).toBe(false)
+  })
+
+  test("true when mixed CHANGES_REQUESTED and REVIEW_REQUIRED", () => {
+    expect(hasChangesRequested([reviewRequiredPR, changesRequestedPR])).toBe(true)
+  })
+
+  test("false for empty PR list", () => {
+    expect(hasChangesRequested([])).toBe(false)
+  })
+
+  test("false when PR has no relevant review decision", () => {
+    const approvedPR: PR = { ...changesRequestedPR, reviewDecision: "APPROVED" }
+    expect(hasChangesRequested([approvedPR])).toBe(false)
   })
 })
 
