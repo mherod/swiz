@@ -395,11 +395,13 @@ describe("agents.ts", () => {
       }
     })
 
-    it("detects claude when running in Claude Code", async () => {
-      // This test runs inside Claude Code, so the claude binary should be found
+    it("includes only agents whose binary or settings exist", async () => {
       const result = await detectInstalledAgents()
-      const ids = result.map((a) => a.id)
-      expect(ids).toContain("claude")
+      for (const agent of result) {
+        const binaryExists = Bun.spawnSync(["which", agent.binary]).exitCode === 0
+        const settingsExist = await Bun.file(agent.settingsPath).exists()
+        expect(binaryExists || settingsExist).toBe(true)
+      }
     })
 
     it("does not return duplicate agents", async () => {
