@@ -1,0 +1,28 @@
+fail: exit_code
+skip:
+  - merge
+  - rebase
+
+pre-commit:
+  commands:
+    lint:
+      glob: "*.{ts,tsx,js,jsx,json}"
+      run: lint-staged
+      stage_fixed: true
+      skip:
+        - merge
+        - rebase
+    typecheck:
+      glob: "*.ts"
+      run: bunx tsc --noEmit
+      skip:
+        - merge
+        - rebase
+
+pre-push:
+  commands:
+    test:
+      run: bun test
+      skip:
+        - merge
+        - rebase

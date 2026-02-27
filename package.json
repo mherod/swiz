@@ -7,11 +7,17 @@
   },
   "scripts": {
     "start": "bun run index.ts",
-    "test": "vitest"
+    "test": "vitest",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "lint:fix": "biome check --write ."
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
     "@types/bun": "latest",
     "@vitest/ui": "^4.0.18",
+    "lefthook": "^2.1.1",
+    "lint-staged": "^16.2.7",
     "vitest": "^4.0.18"
   },
   "peerDependencies": {
