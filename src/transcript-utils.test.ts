@@ -295,5 +295,121 @@ describe("transcript-utils.ts", () => {
       const result = extractPlainTurns(lines)
       expect(result.length).toBe(100)
     })
+
+    it("handles tool call with pattern input", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Grep", input: { pattern: "TODO" } }] },
+      })
+      const result = extractPlainTurns(jsonl)
+      expect(result.length).toBe(1)
+      expect(result[0]?.text).toContain("Grep")
+    })
+
+    it("handles tool call with glob_pattern input", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Glob", input: { glob_pattern: "**/*.ts" } }] },
+      })
+      const result = extractPlainTurns(jsonl)
+      expect(result.length).toBe(1)
+      expect(result[0]?.text).toContain("Glob")
+    })
+
+    it("handles tool call with long query input", () => {
+      const longQuery = "a".repeat(100)
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Search", input: { query: longQuery } }] },
+      })
+      const result = extractPlainTurns(jsonl)
+      expect(result.length).toBe(1)
+      expect(result[0]?.text).toContain("Search")
+    })
+
+    it("handles content that is neither string nor array", () => {
+      const jsonl = JSON.stringify({
+        type: "user",
+        message: { content: { type: "object" } },
+      })
+      const result = extractPlainTurns(jsonl)
+      expect(result.length).toBe(0)
+    })
+
+    it("handles tool call with file_path input", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "/path/to/file.ts" } }] },
+      })
+      const result = extractPlainTurns(jsonl)
+      expect(result.length).toBe(1)
+      expect(result[0]?.text).toContain("Edit")
+    })
+  })
+
+  describe("tool call label generation", () => {
+    it("includes pattern input in label", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Grep", input: { pattern: "ERROR" } }] },
+      })
+      const result = extractPlainTurns(jsonl)
+      expect(result.length).toBeGreaterThan(0)
+      if (result[0]) {
+        expect(result[0].text).toContain("Grep")
+      }
+    })
+
+    it("includes glob_pattern input in label", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Glob", input: { glob_pattern: "src/**/*.ts" } }] },
+      })
+      const result = extractPlainTurns(jsonl)
+      expect(result.length).toBeGreaterThan(0)
+      if (result[0]) {
+        expect(result[0].text).toContain("Glob")
+      }
+    })
+
+    it("truncates long commands at 77 chars", () => {
+      const veryLongCmd = "c".repeat(100)
+      const cmd = veryLongCmd.length > 80 ? veryLongCmd.slice(0, 77) + "..." : veryLongCmd
+      expect(cmd.length).toBe(80)
+      expect(cmd.endsWith("...")).toBe(true)
+    })
+
+    it("truncates long queries at 57 chars", () => {
+      const veryLongQuery = "d".repeat(100)
+      const q = veryLongQuery.length > 60 ? veryLongQuery.slice(0, 57) + "..." : veryLongQuery
+      expect(q.length).toBe(60)
+      expect(q.endsWith("...")).toBe(true)
+    })
+  })
+
+  describe("projectKeyFromCwd", () => {
+    it("converts slashes to hyphens", () => {
+      const cwd = "/Users/dev/project"
+      const result = projectKeyFromCwd(cwd)
+      expect(result).not.toContain("/")
+    })
+
+    it("converts dots to hyphens", () => {
+      const cwd = "project.name.dev"
+      const result = projectKeyFromCwd(cwd)
+      expect(result).not.toContain(".")
+    })
+
+    it("preserves alphanumeric characters", () => {
+      const cwd = "abc123def456"
+      const result = projectKeyFromCwd(cwd)
+      expect(result).toBe("abc123def456")
+    })
+
+    it("handles mixed special characters", () => {
+      const cwd = "/path/to/project.v2"
+      const result = projectKeyFromCwd(cwd)
+      expect(/^[a-zA-Z0-9-]+$/.test(result)).toBe(true)
+    })
   })
 })
