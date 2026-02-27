@@ -6,17 +6,33 @@ import { decodeProjectPath, walkDecode } from "./cleanup.ts"
 
 // ─── Fixture setup ────────────────────────────────────────────────────────────
 //
-// Creates a fake home directory tree:
+// Creates a fake home directory tree used by both unit tests and the
+// integration tests (the subprocess receives HOME=TMP_HOME so it reads
+// the fake ~/.claude/projects directory rather than the real one, making
+// the tests fully self-contained and CI-safe).
+//
 //   <tmp>/home/
 //     Development/
-//       my-project/
-//       cheapshot-auto/      ← literal hyphen in name
-//       plugg-platform/      ← literal hyphen in name
-//     .claude/               ← hidden dir
+//       my-project/           ← used as integration fixture project
+//       cheapshot-auto/       ← literal hyphen in name
+//       plugg-platform/       ← literal hyphen in name
+//     .claude/
 //       skills/
-//     ink-silly/             ← literal hyphen at top level
+//       projects/
+//         <encodedHome>-Development-my-project/
+//           00000000-0000-0000-0000-000000000001/  ← fake session
+//             session.jsonl
+//     ink-silly/              ← literal hyphen at top level
 
 const TMP_HOME = join(tmpdir(), `swiz-cleanup-test-${process.pid}`)
+// Claude Code encodes project paths by replacing '/' and '.' with '-'.
+const ENCODED_HOME = TMP_HOME.replace(/[/.]/g, "-")
+// Fake project directory name (represents TMP_HOME/Development/my-project).
+const FIXTURE_PROJECT = `${ENCODED_HOME}-Development-my-project`
+const FIXTURE_SESSION = join(
+  TMP_HOME, ".claude", "projects", FIXTURE_PROJECT,
+  "00000000-0000-0000-0000-000000000001",
+)
 
 beforeAll(async () => {
   await mkdir(join(TMP_HOME, "Development", "my-project"), { recursive: true })
@@ -24,6 +40,9 @@ beforeAll(async () => {
   await mkdir(join(TMP_HOME, "Development", "plugg-platform"), { recursive: true })
   await mkdir(join(TMP_HOME, ".claude", "skills"), { recursive: true })
   await mkdir(join(TMP_HOME, "ink-silly"), { recursive: true })
+  // Integration fixture: a fake Claude session so cleanup has something to list.
+  await mkdir(FIXTURE_SESSION, { recursive: true })
+  await Bun.write(join(FIXTURE_SESSION, "session.jsonl"), '{"type":"system"}\n')
 })
 
 afterAll(async () => {
@@ -142,33 +161,42 @@ describe("decodeProjectPath", () => {
 })
 
 // ─── Integration: CLI output format ──────────────────────────────────────────
+//
+// Spawns the real cleanup CLI with HOME=TMP_HOME so it reads the fake
+// ~/.claude/projects directory. This makes the tests self-contained and
+// CI-safe regardless of whether the runner has real Claude sessions.
 
 describe("cleanup --dry-run output", () => {
-  test("shows kept sizes in output", async () => {
-    const proc = Bun.spawn(["bun", "run", "index.ts", "cleanup", "--dry-run"], {
-      cwd: join(import.meta.dir, "../.."),
-      stdout: "pipe",
-      stderr: "pipe",
-    })
+  const SWIZ_ROOT = join(import.meta.dir, "../..")
+  const env = { ...process.env, HOME: TMP_HOME }
+
+  async function runCleanup(extraArgs: string[] = []): Promise<string> {
+    const proc = Bun.spawn(
+      ["bun", "run", "index.ts", "cleanup", "--dry-run", ...extraArgs],
+      { cwd: SWIZ_ROOT, env, stdout: "pipe", stderr: "pipe" },
+    )
     const output = await new Response(proc.stdout).text()
     await proc.exited
+    return output
+  }
 
-    // Every "kept" entry should include a parenthesized size
+  test("shows kept sizes in output", async () => {
+    const output = await runCleanup()
     expect(output).toMatch(/\d+ kept \(\d+/)
   })
 
   test("shows decoded ~/... paths (not raw encoded names)", async () => {
-    const proc = Bun.spawn(["bun", "run", "index.ts", "cleanup", "--dry-run"], {
-      cwd: join(import.meta.dir, "../.."),
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    const output = await new Response(proc.stdout).text()
-    await proc.exited
+    const output = await runCleanup()
+    expect(output).toMatch(/~\/Development\/my-project/)
+    // Raw encoded form should not appear
+    expect(output).not.toMatch(ENCODED_HOME)
+  })
 
-    // Output should contain tilde-prefixed paths, not raw encoded names
-    expect(output).toMatch(/~\//)
-    // Raw encoded form should NOT appear
-    expect(output).not.toMatch(/-Users-/)
+  test("--older-than 48h label appears in no-sessions-old message", async () => {
+    // Our fixture session was just created, so with a 48h window it is "kept",
+    // not trashable. The "No sessions older than 48 hours found" message confirms
+    // the label is wired through correctly.
+    const output = await runCleanup(["--older-than", "48h"])
+    expect(output).toMatch(/48 hours/)
   })
 })
