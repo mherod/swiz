@@ -37,6 +37,29 @@ describe("plugin marketplace scaffold", () => {
     expect(existsSync(installCommandPath)).toBe(true)
     expect(readFileSync(installCommandPath, "utf-8")).toContain("swiz install")
 
+    const commandSkills = [
+      "swiz-skill",
+      "swiz-hooks",
+      "swiz-install",
+      "swiz-uninstall",
+      "swiz-status",
+      "swiz-settings",
+      "swiz-tasks",
+      "swiz-shim",
+      "swiz-dispatch",
+      "swiz-transcript",
+      "swiz-continue",
+      "swiz-cleanup",
+      "swiz-session",
+    ]
+    for (const skillName of commandSkills) {
+      const commandName = skillName.replace("swiz-", "")
+      const skillPath = join(pluginRoot, "skills", skillName, "SKILL.md")
+      expect(existsSync(skillPath)).toBe(true)
+      const skillText = readFileSync(skillPath, "utf-8")
+      expect(skillText).toContain(`swiz ${commandName}`)
+    }
+
     const enableSkillPath = join(pluginRoot, "skills", "enable-auto-continue", "SKILL.md")
     const disableSkillPath = join(pluginRoot, "skills", "disable-auto-continue", "SKILL.md")
     expect(existsSync(enableSkillPath)).toBe(true)

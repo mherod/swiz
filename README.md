@@ -23,6 +23,7 @@ This repo now includes a Claude Code plugin marketplace:
 The `swiz-core` plugin currently provides:
 
 - Command: `install` (executes `swiz install` with optional flags)
+- Skills: `swiz-skill`, `swiz-hooks`, `swiz-install`, `swiz-uninstall`, `swiz-status`, `swiz-settings`, `swiz-tasks`, `swiz-shim`, `swiz-dispatch`, `swiz-transcript`, `swiz-continue`, `swiz-cleanup`, `swiz-session`
 - Skill: `enable-auto-continue` (executes `swiz settings enable auto-continue`)
 - Skill: `disable-auto-continue` (executes `swiz settings disable auto-continue`)
 
