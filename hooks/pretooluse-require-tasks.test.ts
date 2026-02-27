@@ -13,16 +13,19 @@ async function runHook({
   toolName = "Bash",
   sessionId = "session-123",
   transcriptPath,
+  command,
 }: {
   homeDir: string
   toolName?: string
   sessionId?: string
   transcriptPath?: string
+  command?: string
 }): Promise<HookResult> {
   const payload = JSON.stringify({
     tool_name: toolName,
     session_id: sessionId,
     transcript_path: transcriptPath ?? "",
+    tool_input: command !== undefined ? { command } : {},
   })
   const proc = Bun.spawn(["bun", "hooks/pretooluse-require-tasks.ts"], {
     stdin: "pipe",
@@ -200,6 +203,80 @@ describe("pretooluse-require-tasks", () => {
 
     const result = await runHook({ homeDir, toolName: "Edit", sessionId, transcriptPath })
     expect(result.decision).toBeUndefined()
+  })
+
+  describe("read-only git exemption", () => {
+    test("allows git status without any tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "git status" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows git log without any tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "git log --oneline -10" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows git diff without any tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "git diff HEAD~1" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows git show without any tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "git show HEAD" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows git branch without any tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "git branch --show-current" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows git rev-parse without any tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "git rev-parse --abbrev-ref HEAD" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows git reflog without any tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "git reflog --limit 5" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows git status with leading pwd prefix", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "pwd && git status" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("still denies git commit without tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: 'git commit -m "wip"' })
+      expect(result.decision).toBe("deny")
+    })
+
+    test("still denies git push without tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "git push origin main" })
+      expect(result.decision).toBe("deny")
+    })
+
+    test("still denies git checkout without tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "git checkout -b new-branch" })
+      expect(result.decision).toBe("deny")
+    })
+
+    test("still denies non-git commands without tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "ls -la" })
+      expect(result.decision).toBe("deny")
+    })
   })
 
   test("skips staleness check when no task tool has been used yet", async () => {
