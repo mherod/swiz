@@ -216,15 +216,15 @@ describe("parseGitStatus() with malformed inputs", () => {
     expect(result.lines).toEqual([])
   })
 
-  it("treats whitespace-only lines as unrecognized (filter(Boolean) keeps them)", () => {
-    // "   \t  " and "  " are truthy strings, so filter(Boolean) keeps them.
-    // They don't match any status prefix, so counts stay 0 but total reflects them.
+  it("filters out whitespace-only lines", () => {
+    // After hardening, filter(l => l.trim()) removes whitespace-only lines
     const result = parseGitStatus("   \t  \n  ")
-    expect(result.total).toBe(2)
+    expect(result.total).toBe(0)
     expect(result.modified).toBe(0)
     expect(result.added).toBe(0)
     expect(result.deleted).toBe(0)
     expect(result.untracked).toBe(0)
+    expect(result.lines).toEqual([])
   })
 
   it("handles valid porcelain output", () => {

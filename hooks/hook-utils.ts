@@ -239,7 +239,8 @@ export function blockStopRaw(reason: string): never {
 /** Run a git command and return trimmed stdout. Returns "" on non-zero exit or error. */
 export async function git(args: string[], cwd: string): Promise<string> {
   try {
-    const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" })
+    const effectiveCwd = cwd.trim() || process.cwd()
+    const proc = Bun.spawn(["git", ...args], { cwd: effectiveCwd, stdout: "pipe", stderr: "pipe" })
     const output = await new Response(proc.stdout).text()
     await proc.exited
     return proc.exitCode === 0 ? output.trim() : ""
@@ -251,7 +252,8 @@ export async function git(args: string[], cwd: string): Promise<string> {
 /** Run a gh CLI command and return trimmed stdout. Returns "" on failure. */
 export async function gh(args: string[], cwd: string): Promise<string> {
   try {
-    const proc = Bun.spawn(["gh", ...args], { cwd, stdout: "pipe", stderr: "pipe" })
+    const effectiveCwd = cwd.trim() || process.cwd()
+    const proc = Bun.spawn(["gh", ...args], { cwd: effectiveCwd, stdout: "pipe", stderr: "pipe" })
     const output = await new Response(proc.stdout).text()
     await proc.exited
     return proc.exitCode === 0 ? output.trim() : ""
@@ -354,7 +356,7 @@ export interface GitStatusCounts {
 
 /** Parse `git status --porcelain` output into a breakdown of file counts. */
 export function parseGitStatus(porcelain: string): GitStatusCounts {
-  const lines = porcelain.split("\n").filter(Boolean)
+  const lines = porcelain.split("\n").filter((l) => l.trim())
   let modified = 0,
     added = 0,
     deleted = 0,
