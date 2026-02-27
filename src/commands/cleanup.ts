@@ -140,7 +140,15 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
 export const cleanupCommand: Command = {
   name: "cleanup",
   description: "Remove old Claude Code session data from ~/.claude/projects/",
-  usage: "cleanup [--older-than <days>] [--dry-run] [--project <name>]",
+  usage: "swiz cleanup [--older-than <days>] [--dry-run] [--project <name>]",
+  options: [
+    {
+      flags: "--older-than <days>",
+      description: "Remove sessions older than this many days (default: 30)",
+    },
+    { flags: "--dry-run", description: "Show what would be removed without deleting" },
+    { flags: "--project <name>", description: "Limit to a specific project directory name" },
+  ],
 
   async run(args: string[]) {
     const { olderThanDays, dryRun, projectFilter } = parseCleanupArgs(args)

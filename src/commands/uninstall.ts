@@ -129,6 +129,11 @@ export const uninstallCommand: Command = {
   name: "uninstall",
   description: "Remove swiz hooks from agent settings",
   usage: `swiz uninstall [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run]`,
+  options: [
+    ...AGENTS.map((a) => ({ flags: `--${a.id}`, description: `Uninstall from ${a.name} only` })),
+    { flags: "--dry-run", description: "Preview changes without writing to disk" },
+    { flags: "(no flags)", description: "Uninstall from all agents" },
+  ],
   async run(args) {
     const dryRun = args.includes("--dry-run")
     const targets = getAgentByFlag(args)

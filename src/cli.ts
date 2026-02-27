@@ -27,6 +27,11 @@ async function run() {
     return
   }
 
+  if (rest[0] === "--help" || rest[0] === "-h") {
+    help.run([commandName])
+    return
+  }
+
   try {
     await command.run(rest)
   } catch (err) {

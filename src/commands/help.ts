@@ -14,7 +14,14 @@ export function createHelpCommand(commands: Map<string, Command>): Command {
           throw new Error(`Unknown command: ${target}`)
         }
         console.log(`\n  ${cmd.name} - ${cmd.description}`)
-        if (cmd.usage) console.log(`  Usage: ${cmd.usage}`)
+        if (cmd.usage) console.log(`\n  Usage: ${cmd.usage}`)
+        if (cmd.options && cmd.options.length > 0) {
+          console.log("\n  Options:\n")
+          const maxFlags = Math.max(...cmd.options.map((o) => o.flags.length))
+          for (const opt of cmd.options) {
+            console.log(`    ${opt.flags.padEnd(maxFlags + 2)} ${opt.description}`)
+          }
+        }
         console.log()
         return
       }

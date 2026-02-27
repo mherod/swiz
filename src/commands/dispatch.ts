@@ -257,6 +257,17 @@ export const dispatchCommand: Command = {
   name: "dispatch",
   description: "Fan out a hook event to all matching scripts (used by agent configs)",
   usage: "swiz dispatch <event> [agentEventName]",
+  options: [
+    {
+      flags: "<event>",
+      description:
+        "Canonical event name (preToolUse | postToolUse | stop | sessionStart | userPromptSubmit)",
+    },
+    {
+      flags: "[agentEventName]",
+      description: "Agent-translated event name injected into hook output (default: <event>)",
+    },
+  ],
   async run(args) {
     const canonicalEvent = args[0]
     if (!canonicalEvent) {

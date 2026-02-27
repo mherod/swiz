@@ -305,7 +305,25 @@ export const tasksCommand: Command = {
   name: "tasks",
   description: "View and manage agent tasks",
   usage:
-    "swiz tasks [create|complete|status|complete-all] [--session ID] [--all-projects] [--evidence TEXT]",
+    "swiz tasks [create|complete|status|complete-all] [--session <id>] [--all-projects] [--evidence <text>]",
+  options: [
+    { flags: "create <subject> <desc>", description: "Create a new task in the current session" },
+    {
+      flags: "complete <id>",
+      description: "Mark a task completed (requires --evidence)",
+    },
+    {
+      flags: "status <id> <status>",
+      description: "Set status: pending | in_progress | completed | cancelled",
+    },
+    { flags: "complete-all", description: "Mark all incomplete tasks in the session completed" },
+    { flags: "--session <id>", description: "Target a specific session (prefix match)" },
+    { flags: "--all-projects", description: "Show tasks from all projects, not just cwd" },
+    {
+      flags: "--evidence <text>",
+      description: "Completion evidence (required for complete/status completed)",
+    },
+  ],
   async run(args) {
     const subcommand = args[0]
 

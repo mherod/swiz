@@ -13,6 +13,10 @@ export const sessionCommand: Command = {
   name: "session",
   description: "Show the current Claude Code session ID",
   usage: "swiz session [--list] [--dir <path>]",
+  options: [
+    { flags: "--list, -l", description: "List all sessions for the project with timestamps" },
+    { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
+  ],
   async run(args) {
     const listOnly = args.includes("--list") || args.includes("-l")
     const dirIdx = args.findIndex((a) => a === "--dir" || a === "-d")

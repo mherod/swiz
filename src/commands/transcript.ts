@@ -364,6 +364,14 @@ export const transcriptCommand: Command = {
   description: "Display Agent-User chat history for the current project",
   usage:
     "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--auto-reply]",
+  options: [
+    { flags: "--session, -s <id>", description: "Show a specific session (prefix match)" },
+    { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
+    { flags: "--list, -l", description: "List available sessions without displaying content" },
+    { flags: "--head, -H <n>", description: "Show only the first N conversation turns" },
+    { flags: "--tail, -T <n>", description: "Show only the last N conversation turns" },
+    { flags: "--auto-reply", description: "Generate an AI-suggested follow-up message" },
+  ],
   async run(args) {
     const HOME = process.env.HOME ?? "~"
     const PROJECTS_DIR = join(HOME, ".claude", "projects")

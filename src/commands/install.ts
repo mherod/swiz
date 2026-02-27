@@ -449,6 +449,11 @@ export const installCommand: Command = {
   name: "install",
   description: "Install swiz hooks into agent settings",
   usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run]`,
+  options: [
+    ...AGENTS.map((a) => ({ flags: `--${a.id}`, description: `Install for ${a.name} only` })),
+    { flags: "--dry-run", description: "Preview changes without writing to disk" },
+    { flags: "(no flags)", description: "Install for all detected agents" },
+  ],
   async run(args) {
     const dryRun = args.includes("--dry-run")
     const targets = getAgentByFlag(args)

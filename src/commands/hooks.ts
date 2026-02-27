@@ -198,6 +198,11 @@ export const hooksCommand: Command = {
   name: "hooks",
   description: "Inspect agent hooks (Claude Code, Cursor, Gemini CLI)",
   usage: "swiz hooks [event] [script-name]",
+  options: [
+    { flags: "(no args)", description: "List all hook events and their hook counts" },
+    { flags: "<event>", description: "Show hooks registered for a specific event name" },
+    { flags: "<event> <script>", description: "Print the source of a hook script by name" },
+  ],
   async run(args) {
     const allSettings = await loadAllSettings()
     const [first, second] = args

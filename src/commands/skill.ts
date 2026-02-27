@@ -71,6 +71,11 @@ export const skillCommand: Command = {
   name: "skill",
   description: "Read and list skills",
   usage: "swiz skill [--raw] [--no-front-matter] [skill-name]",
+  options: [
+    { flags: "<skill-name>", description: "Print the skill content (omit to list all skills)" },
+    { flags: "--raw", description: "Skip inline command expansion (!`cmd` substitutions)" },
+    { flags: "--no-front-matter", description: "Strip YAML frontmatter from output" },
+  ],
   async run(args) {
     const raw = args.includes("--raw")
     const noFrontMatter = args.includes("--no-front-matter")

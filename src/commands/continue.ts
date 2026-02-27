@@ -62,6 +62,11 @@ export const continueCommand: Command = {
   name: "continue",
   description: "Resume the most recent session with an AI-generated next step",
   usage: "swiz continue [--dir <path>] [--session <id>] [--print]",
+  options: [
+    { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
+    { flags: "--session, -s <id>", description: "Resume a specific session (prefix match)" },
+    { flags: "--print", description: "Print the suggested next step without resuming" },
+  ],
   async run(args) {
     const HOME = process.env.HOME ?? "~"
     const PROJECTS_DIR = join(HOME, ".claude", "projects")

@@ -244,6 +244,12 @@ export const shimCommand: Command = {
   name: "shim",
   description: "Install shell-level command interception for agents",
   usage: "swiz shim [install | uninstall | status] [--dry-run]",
+  options: [
+    { flags: "install [profile]", description: "Add shim to shell profile (e.g. .zshenv, .zshrc)" },
+    { flags: "uninstall", description: "Remove shim from all detected shell profiles" },
+    { flags: "status", description: "Show shim installation status (default action)" },
+    { flags: "--dry-run", description: "Preview changes without writing to disk" },
+  ],
   async run(args) {
     const subcommand = args[0]
     const rest = args.slice(1)
