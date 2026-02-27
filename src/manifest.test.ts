@@ -157,7 +157,9 @@ describe("manifest.ts", () => {
           tools.forEach((tool) => {
             expect(tool.length).toBeGreaterThan(0)
             // Tools should be capitalized
-            expect(tool[0]).toBe(tool[0].toUpperCase())
+            if (tool.length > 0) {
+              expect(tool[0]).toBe(tool[0]?.toUpperCase())
+            }
           })
         }
       })
@@ -228,7 +230,7 @@ describe("manifest.ts", () => {
     it("can find all hooks by event name", () => {
       const stopHooks = manifest.filter((g) => g.event === "stop")
       expect(stopHooks.length).toBeGreaterThan(0)
-      expect(stopHooks[0].hooks.length).toBeGreaterThan(0)
+      expect(stopHooks[0]?.hooks.length).toBeGreaterThan(0)
     })
 
     it("can find hooks by event and matcher combination", () => {
