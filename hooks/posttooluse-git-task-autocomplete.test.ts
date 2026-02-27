@@ -117,6 +117,102 @@ describe("posttooluse-git-task-autocomplete: non-git commands exit silently", ()
   })
 })
 
+// ─── Escaped quotes → no false positives ─────────────────────────────────────
+
+describe("posttooluse-git-task-autocomplete: escaped quotes do not trigger", () => {
+  test("single-quoted git push in echo does not trigger", async () => {
+    const result = await runHook("echo 'git push origin main'")
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
+
+  test("printf with git push string does not trigger", async () => {
+    const result = await runHook("printf '%s\\n' 'git push'")
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
+
+  test("variable assignment containing git push does not trigger", async () => {
+    // PUSH_CMD="git push origin main" — git push is a value, not a command
+    const result = await runHook('PUSH_CMD="git push origin main"')
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
+
+  test("grep for git push string does not trigger", async () => {
+    const result = await runHook('grep "git push" ~/.zsh_history')
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
+})
+
+// ─── Multiline shell input ────────────────────────────────────────────────────
+
+describe("posttooluse-git-task-autocomplete: multiline commands with newline separators", () => {
+  test("git push on second line (newline separator) triggers", async () => {
+    const result = await runHook("git status\ngit push origin main")
+    expect(result.exitedCleanly).toBe(true)
+    expect(result.additionalContext).toBeDefined()
+    expect(result.additionalContext).toContain("Wait for CI")
+  })
+
+  test("git push on third line triggers", async () => {
+    const result = await runHook("git add .\ngit commit -m 'fix'\ngit push origin main")
+    expect(result.exitedCleanly).toBe(true)
+    expect(result.additionalContext).toBeDefined()
+    expect(result.additionalContext).toContain("Wait for CI")
+  })
+
+  test("git commit on second line (newline separator) auto-completes silently", async () => {
+    const result = await runHook("git add .\ngit commit -m 'fix'")
+    expect(result.exitedCleanly).toBe(true)
+    // commit-only: no additionalContext, just silent file writes
+    expect(result.rawOutput.trim()).toBe("")
+  })
+
+  test("leading newline before git push triggers", async () => {
+    const result = await runHook("\ngit push origin main")
+    expect(result.exitedCleanly).toBe(true)
+    expect(result.additionalContext).toBeDefined()
+    expect(result.additionalContext).toContain("Wait for CI")
+  })
+})
+
+// ─── Mixed separators ─────────────────────────────────────────────────────────
+
+describe("posttooluse-git-task-autocomplete: mixed separator combinations", () => {
+  test("semicolon separator triggers push", async () => {
+    const result = await runHook("git fetch; git push origin main")
+    expect(result.exitedCleanly).toBe(true)
+    expect(result.additionalContext).toContain("Wait for CI")
+  })
+
+  test("|| fallback push triggers", async () => {
+    const result = await runHook("git pull || git push origin main")
+    expect(result.exitedCleanly).toBe(true)
+    expect(result.additionalContext).toContain("Wait for CI")
+  })
+
+  test("mixed && and ; chain with push at end triggers", async () => {
+    const result = await runHook("git add . && git commit -m 'fix'; git push origin main")
+    expect(result.exitedCleanly).toBe(true)
+    expect(result.additionalContext).toContain("Wait for CI")
+  })
+
+  test("mixed && and newline chain with push at end triggers", async () => {
+    const result = await runHook("git add . && git commit -m 'fix'\ngit push origin main")
+    expect(result.exitedCleanly).toBe(true)
+    expect(result.additionalContext).toContain("Wait for CI")
+  })
+
+  test("push-like word without word boundary does not trigger (no false positive)", async () => {
+    // 'git pusher' — 'push' without \b should not match
+    const result = await runHook("git pusher list")
+    expect(result.rawOutput.trim()).toBe("")
+    expect(result.exitedCleanly).toBe(true)
+  })
+})
+
 // ─── Non-shell tools → silent ─────────────────────────────────────────────────
 
 describe("posttooluse-git-task-autocomplete: non-shell tool_name exits silently", () => {
