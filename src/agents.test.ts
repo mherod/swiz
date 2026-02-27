@@ -6,6 +6,7 @@ import {
   getAgentByFlag,
   translateMatcher,
   translateEvent,
+  detectInstalledAgents,
   type AgentDef,
 } from "./agents.ts"
 
@@ -367,6 +368,52 @@ describe("agents.ts", () => {
     it("codex does not have preToolUse in mapping (uses different name)", () => {
       const codex = getAgent("codex")!
       expect(codex.eventMap["preToolUse"]).toBeDefined()
+    })
+  })
+
+  describe("detectInstalledAgents", () => {
+    it("returns an array", async () => {
+      const result = await detectInstalledAgents()
+      expect(Array.isArray(result)).toBe(true)
+    })
+
+    it("only returns valid AgentDef objects", async () => {
+      const result = await detectInstalledAgents()
+      for (const agent of result) {
+        expect(agent).toHaveProperty("id")
+        expect(agent).toHaveProperty("name")
+        expect(agent).toHaveProperty("binary")
+        expect(agent).toHaveProperty("settingsPath")
+      }
+    })
+
+    it("returned agents are a subset of AGENTS", async () => {
+      const result = await detectInstalledAgents()
+      const agentIds = new Set(AGENTS.map((a) => a.id))
+      for (const agent of result) {
+        expect(agentIds.has(agent.id)).toBe(true)
+      }
+    })
+
+    it("detects claude when running in Claude Code", async () => {
+      // This test runs inside Claude Code, so the claude binary should be found
+      const result = await detectInstalledAgents()
+      const ids = result.map((a) => a.id)
+      expect(ids).toContain("claude")
+    })
+
+    it("does not return duplicate agents", async () => {
+      const result = await detectInstalledAgents()
+      const ids = result.map((a) => a.id)
+      expect(new Set(ids).size).toBe(ids.length)
+    })
+
+    it("returns exact AgentDef references from AGENTS", async () => {
+      const result = await detectInstalledAgents()
+      for (const agent of result) {
+        const original = AGENTS.find((a) => a.id === agent.id)
+        expect(agent).toBe(original)
+      }
     })
   })
 })
