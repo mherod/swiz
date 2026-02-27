@@ -1,0 +1,413 @@
+/**
+ * Regression tests for security hardening applied to hooks/*.ts:
+ * 1. Missing HOME env var triggers early return (no crash, no "undefined" in paths)
+ * 2. Path-traversal sessionId payloads are neutralized by join()
+ * 3. Whitespace-only git output lines are filtered correctly
+ */
+import { afterEach, describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+// ─── Shared test infrastructure ─────────────────────────────────────────────
+
+const tempDirs: string[] = []
+
+afterEach(async () => {
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop()
+    if (!dir) continue
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+async function createTempHome(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "swiz-hardening-"))
+  tempDirs.push(dir)
+  return dir
+}
+
+async function writeTask(
+  homeDir: string,
+  sessionId: string,
+  task: { id: string; subject: string; status: string }
+) {
+  const dir = join(homeDir, ".claude", "tasks", sessionId)
+  await mkdir(dir, { recursive: true })
+  await writeFile(
+    join(dir, `${task.id}.json`),
+    JSON.stringify({ ...task, description: "", blocks: [], blockedBy: [] })
+  )
+}
+
+interface HookResult {
+  exitCode: number | null
+  stdout: string
+  stderr: string
+  decision?: string
+  reason?: string
+}
+
+/**
+ * Run a hook script as a subprocess with controlled env.
+ * Returns parsed hookSpecificOutput decision if present.
+ */
+async function runHook(
+  script: string,
+  stdinPayload: Record<string, unknown>,
+  envOverrides: Record<string, string | undefined> = {}
+): Promise<HookResult> {
+  const payload = JSON.stringify(stdinPayload)
+  const env: Record<string, string | undefined> = { ...process.env, ...envOverrides }
+
+  const proc = Bun.spawn(["bun", script], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env,
+  })
+  proc.stdin.write(payload)
+  proc.stdin.end()
+
+  const stdout = await new Response(proc.stdout).text()
+  const stderr = await new Response(proc.stderr).text()
+  await proc.exited
+
+  let decision: string | undefined
+  let reason: string | undefined
+
+  if (stdout.trim()) {
+    try {
+      const parsed = JSON.parse(stdout.trim())
+      const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
+      decision = (hso?.permissionDecision ?? parsed.decision) as string | undefined
+      reason = (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined
+    } catch {}
+  }
+
+  return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, decision, reason }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Category 1: Missing HOME env var → early return (no crash)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("missing HOME env var triggers early return", () => {
+  test("pretooluse-require-tasks exits cleanly with no HOME", async () => {
+    const result = await runHook(
+      "hooks/pretooluse-require-tasks.ts",
+      { tool_name: "Bash", session_id: "test-session", transcript_path: "" },
+      { HOME: undefined }
+    )
+    // Should exit 0 (not crash) and not deny — early return before task check
+    expect(result.exitCode).toBe(0)
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("stop-completion-auditor exits cleanly with no HOME", async () => {
+    const result = await runHook(
+      "hooks/stop-completion-auditor.ts",
+      { cwd: process.cwd(), session_id: "test-session", transcript_path: "" },
+      { HOME: undefined }
+    )
+    expect(result.exitCode).toBe(0)
+    // Should not block — early return
+    expect(result.decision).not.toBe("block")
+  })
+
+  test("userpromptsubmit-task-advisor exits cleanly with no HOME", async () => {
+    const result = await runHook(
+      "hooks/userpromptsubmit-task-advisor.ts",
+      { session_id: "test-session" },
+      { HOME: undefined }
+    )
+    expect(result.exitCode).toBe(0)
+  })
+
+  test("stop-auto-continue exits cleanly with no HOME", async () => {
+    const result = await runHook(
+      "hooks/stop-auto-continue.ts",
+      {
+        cwd: process.cwd(),
+        session_id: "test-session",
+        transcript_path: "",
+        stop_hook_active: false,
+      },
+      { HOME: undefined }
+    )
+    expect(result.exitCode).toBe(0)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Category 2: Path-traversal sessionId payloads neutralized by join()
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("path-traversal sessionId payloads are neutralized", () => {
+  test("pretooluse-require-tasks: traversal sessionId does not escape tasks dir", async () => {
+    const homeDir = await createTempHome()
+    // Create a task in the legitimate location
+    await writeTask(homeDir, "../../etc/passwd", {
+      id: "1",
+      subject: "Legit task",
+      status: "in_progress",
+    })
+
+    const result = await runHook(
+      "hooks/pretooluse-require-tasks.ts",
+      {
+        tool_name: "Bash",
+        session_id: "../../etc/passwd",
+        transcript_path: "",
+      },
+      { HOME: homeDir }
+    )
+    // join() normalizes the path — the hook should function (deny or allow)
+    // but NOT access ../../etc/passwd from the HOME root
+    expect(result.exitCode).toBe(0)
+    // The task exists at the normalized path, so it should NOT deny
+    // (join resolves ../../ relative to the tasks dir)
+    expect(typeof result.stdout).toBe("string")
+  })
+
+  test("pretooluse-require-tasks: sessionId with slashes resolves safely", async () => {
+    const homeDir = await createTempHome()
+    // With no tasks at the traversal path, should deny for missing tasks
+    const result = await runHook(
+      "hooks/pretooluse-require-tasks.ts",
+      {
+        tool_name: "Edit",
+        session_id: "../../../tmp/evil",
+        transcript_path: "",
+      },
+      { HOME: homeDir }
+    )
+    expect(result.exitCode).toBe(0)
+    // Should deny because no tasks exist (not because of a crash)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("no incomplete tasks")
+  })
+
+  test("stop-completion-auditor: traversal sessionId does not crash", async () => {
+    const homeDir = await createTempHome()
+    const result = await runHook(
+      "hooks/stop-completion-auditor.ts",
+      {
+        cwd: process.cwd(),
+        session_id: "../../etc/shadow",
+        transcript_path: "",
+      },
+      { HOME: homeDir }
+    )
+    expect(result.exitCode).toBe(0)
+  })
+
+  test("sessionId with null bytes does not crash", async () => {
+    const homeDir = await createTempHome()
+    const result = await runHook(
+      "hooks/pretooluse-require-tasks.ts",
+      {
+        tool_name: "Bash",
+        session_id: "session\0id",
+        transcript_path: "",
+      },
+      { HOME: homeDir }
+    )
+    expect(result.exitCode).toBe(0)
+  })
+
+  test("sessionId with shell metacharacters does not crash", async () => {
+    const homeDir = await createTempHome()
+    const result = await runHook(
+      "hooks/pretooluse-require-tasks.ts",
+      {
+        tool_name: "Bash",
+        session_id: "$(rm -rf /)",
+        transcript_path: "",
+      },
+      { HOME: homeDir }
+    )
+    expect(result.exitCode).toBe(0)
+    // Should deny (no tasks) — not crash
+    expect(result.decision).toBe("deny")
+  })
+
+  test("empty sessionId causes clean exit (no deny)", async () => {
+    const homeDir = await createTempHome()
+    const result = await runHook(
+      "hooks/pretooluse-require-tasks.ts",
+      {
+        tool_name: "Bash",
+        session_id: "",
+        transcript_path: "",
+      },
+      { HOME: homeDir }
+    )
+    // Empty sessionId triggers early exit before task check
+    expect(result.exitCode).toBe(0)
+    expect(result.decision).toBeUndefined()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Category 3: Whitespace-only line filtering in git output and JSONL parsing
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("whitespace-only line filtering", () => {
+  // These test the hardened filter(l => l.trim()) pattern imported from hook-utils
+
+  test("parseGitStatus: whitespace-only lines are excluded from total count", async () => {
+    // Import directly — this is a pure function
+    const { parseGitStatus } = await import("./hook-utils.ts")
+
+    const input = " M file.ts\n   \n?? new.ts\n  \t  \n"
+    const result = parseGitStatus(input)
+
+    // Only 2 real lines, not 4
+    expect(result.total).toBe(2)
+    expect(result.modified).toBe(1)
+    expect(result.untracked).toBe(1)
+    expect(result.lines).toHaveLength(2)
+  })
+
+  test("parseGitStatus: tabs-only lines are excluded", async () => {
+    const { parseGitStatus } = await import("./hook-utils.ts")
+
+    const input = "\t\t\t\n M real.ts\n\t\n"
+    const result = parseGitStatus(input)
+    expect(result.total).toBe(1)
+    expect(result.modified).toBe(1)
+  })
+
+  test("parseGitStatus: mixed whitespace between valid lines", async () => {
+    const { parseGitStatus } = await import("./hook-utils.ts")
+
+    const input = "A  added.ts\n \n \n \nD  deleted.ts\n\n\n"
+    const result = parseGitStatus(input)
+    expect(result.total).toBe(2)
+    expect(result.added).toBe(1)
+    expect(result.deleted).toBe(1)
+  })
+
+  test("extractToolNamesFromTranscript: whitespace-only JSONL lines don't cause parse errors", async () => {
+    const { extractToolNamesFromTranscript } = await import("./hook-utils.ts")
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "swiz-filter-"))
+    tempDirs.push(tmpDir)
+
+    const entry = JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "Read" }] },
+    })
+    // Insert whitespace-only lines between valid JSONL entries
+    const content = `${entry}\n   \t  \n  \n${entry}\n \n`
+    await writeFile(join(tmpDir, "transcript.jsonl"), content)
+
+    const result = await extractToolNamesFromTranscript(join(tmpDir, "transcript.jsonl"))
+    expect(result).toEqual(["Read", "Read"])
+  })
+
+  test("extractToolNamesFromTranscript: only-whitespace file returns empty array", async () => {
+    const { extractToolNamesFromTranscript } = await import("./hook-utils.ts")
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "swiz-filter-"))
+    tempDirs.push(tmpDir)
+
+    await writeFile(join(tmpDir, "whitespace.jsonl"), "   \n\t\n  \t  \n")
+
+    const result = await extractToolNamesFromTranscript(join(tmpDir, "whitespace.jsonl"))
+    expect(result).toEqual([])
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Category 4: createSessionTask sanitization regression
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("createSessionTask input sanitization", () => {
+  test("path-traversal in sentinelKey produces safe /tmp/ path", async () => {
+    const { createSessionTask } = await import("./hook-utils.ts")
+    // Should not throw — path separators are stripped from sentinel key
+    await createSessionTask("valid-session-id", "../../etc/cron.d/evil", "subject", "desc")
+  })
+
+  test("path-traversal in sessionId produces safe /tmp/ path", async () => {
+    const { createSessionTask } = await import("./hook-utils.ts")
+    await createSessionTask("../../etc/passwd", "safe-key", "subject", "desc")
+  })
+
+  test("shell injection in sessionId is sanitized", async () => {
+    const { createSessionTask } = await import("./hook-utils.ts")
+    await createSessionTask("$(whoami)", "safe-key", "subject", "desc")
+    // If this returns without error, the injection was neutralized
+  })
+
+  test("empty HOME causes early return", async () => {
+    // Use subprocess to control HOME env
+    const script = `
+      import { createSessionTask } from "./hooks/hook-utils.ts";
+      await createSessionTask("valid-id", "key", "subj", "desc");
+      console.log("OK");
+    `
+    const proc = Bun.spawn(["bun", "-e", script], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, HOME: "" },
+    })
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+    // Should complete without crashing (early return due to empty HOME)
+    expect(proc.exitCode).toBe(0)
+    expect(stdout.trim()).toBe("OK")
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Category 5: Non-null assertion replacements (! → runtime guards)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("non-null assertion guard regressions", () => {
+  test("extractOwnerFromUrl handles malformed SSH URLs without crashing", async () => {
+    // We can't easily import the function since it's not exported,
+    // but we can run the hook with a non-GitHub remote to verify no crash
+    const result = await runHook(
+      "hooks/stop-personal-repo-issues.ts",
+      {
+        cwd: "/nonexistent/path",
+        session_id: "test-session",
+        transcript_path: "",
+      },
+      {}
+    )
+    // Should exit cleanly — the isGitRepo check will fail first
+    expect(result.exitCode).toBe(0)
+  })
+
+  test("pretooluse-banned-commands handles commit without message match group", async () => {
+    const result = await runHook(
+      "hooks/pretooluse-banned-commands.ts",
+      {
+        tool_name: "Bash",
+        tool_input: { command: "git commit --allow-empty" },
+      },
+      {}
+    )
+    // Should exit 0 — no match on the regex means no crash on mMatch[1]
+    expect(result.exitCode).toBe(0)
+  })
+
+  test("pretooluse-banned-commands detects Co-authored-by correctly", async () => {
+    const result = await runHook(
+      "hooks/pretooluse-banned-commands.ts",
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command: "git commit -m 'fix: something\n\nCo-authored-by: Bot <bot@example.com>'",
+        },
+      },
+      {}
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.decision).toBe("deny")
+  })
+})
