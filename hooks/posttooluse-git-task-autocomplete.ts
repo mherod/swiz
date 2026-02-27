@@ -16,8 +16,8 @@ import { join } from "node:path"
 import { homedir } from "node:os"
 import { type ToolHookInput, isShellTool } from "./hook-utils.ts"
 
-const GIT_COMMIT_RE = /\bgit\s+commit\b/
-const GIT_PUSH_RE = /\bgit\s+push\b/
+const GIT_COMMIT_RE = /(?:^|;|&&|\|\|)\s*git\s+commit\b/
+const GIT_PUSH_RE = /(?:^|;|&&|\|\|)\s*git\s+push\b/
 const SUBJECT_RE = /\b(commit|push)\b/i
 
 interface Task {
