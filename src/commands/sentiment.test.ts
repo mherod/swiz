@@ -966,3 +966,193 @@ describe("double negatives and ambiguous phrasing", () => {
     expect(hedgingLabels(text)).toContain("not a regression") // this one does fire
   })
 })
+
+// ─── Score-stability anchors ───────────────────────────────────────────────────
+//
+// Pin the exact floating-point score for single-pattern inputs.
+// If any pattern weight, regex, or aggregation formula changes these MUST be
+// updated intentionally — they must never silently drift.
+
+describe("score-stability anchors: single-pattern exact values", () => {
+  it("'CI passes.' → exactly +0.40", () => {
+    expect(score("CI passes.")).toBeCloseTo(0.4, 10)
+  })
+
+  it("'CI passed.' → exactly +0.40 (past tense covered by same pattern)", () => {
+    expect(score("CI passed.")).toBeCloseTo(0.4, 10)
+  })
+
+  it("'CI is green.' → exactly +0.40", () => {
+    expect(score("CI is green.")).toBeCloseTo(0.4, 10)
+  })
+
+  it("'Safe to merge.' → exactly +0.50", () => {
+    expect(score("Safe to merge.")).toBeCloseTo(0.5, 10)
+  })
+
+  it("'All CI checks passed.' → exactly +0.45", () => {
+    expect(score("All CI checks passed.")).toBeCloseTo(0.45, 10)
+  })
+
+  it("'All checks are passing.' → exactly +0.40", () => {
+    expect(score("All checks are passing.")).toBeCloseTo(0.4, 10)
+  })
+
+  it("'CHANGES_REQUESTED' → exactly -0.75", () => {
+    expect(score("CHANGES_REQUESTED")).toBeCloseTo(-0.75, 10)
+  })
+
+  it("'CI Failure.' → exactly -0.65", () => {
+    expect(score("CI Failure.")).toBeCloseTo(-0.65, 10)
+  })
+
+  it("'The build is failing.' → exactly -0.50", () => {
+    expect(score("The build is failing.")).toBeCloseTo(-0.5, 10)
+  })
+
+  it("'Re-request review.' → exactly -0.25", () => {
+    expect(score("Re-request review.")).toBeCloseTo(-0.25, 10)
+  })
+
+  it("'Before this can be merged.' → exactly -0.40", () => {
+    expect(score("Before this can be merged.")).toBeCloseTo(-0.4, 10)
+  })
+
+  it("'Implementation is solid.' → exactly +0.30", () => {
+    expect(score("Implementation is solid.")).toBeCloseTo(0.3, 10)
+  })
+})
+
+// ─── Compound score regressions ───────────────────────────────────────────────
+//
+// Two-signal interactions with no hedging (dampFactor=1). All values are exact.
+
+describe("compound score regressions: two patterns, no hedging", () => {
+  it("'CI passes. Safe to merge.' → +0.90", () => {
+    expect(score("CI passes. Safe to merge.")).toBeCloseTo(0.9, 10)
+  })
+
+  it("'CI passes. CHANGES_REQUESTED' → -0.35 (approval partially offsets rejection)", () => {
+    expect(score("CI passes. CHANGES_REQUESTED")).toBeCloseTo(-0.35, 10)
+  })
+
+  it("'All CI checks passed. CHANGES_REQUESTED' → -0.30", () => {
+    expect(score("All CI checks passed. CHANGES_REQUESTED")).toBeCloseTo(-0.3, 10)
+  })
+
+  it("'Safe to merge. Must be fixed.' → +0.20 (no hedging, no dampening)", () => {
+    // safe to merge (+0.5) + must be fixed (-0.3) = +0.2 with dampFactor=1
+    expect(score("Safe to merge. Must be fixed.")).toBeCloseTo(0.2, 10)
+  })
+
+  it("'CI Failure. CHANGES_REQUESTED' → clamped to -1.0", () => {
+    expect(score("CI Failure. CHANGES_REQUESTED")).toBe(-1)
+  })
+})
+
+// ─── dampFactor arithmetic regressions ────────────────────────────────────────
+//
+// Verify the hedging damping formula: density = hedgeHits / max(1, words/100)
+// dampFactor = max(0.4, 1.0 - density * 0.25). For short texts (<100 words)
+// the denominator is always 1, so density === hedgeHits.
+
+describe("dampFactor arithmetic regressions", () => {
+  it("1 hedge hit in short text → dampFactor=0.75 reduces 'CI Failure' rejection", () => {
+    // hedgeHits=1 → density=1 → dampFactor=max(0.4, 0.75)=0.75
+    // raw = hedging(+0.2) + rejection(-0.65 × 0.75) = 0.2 - 0.4875 = -0.2875
+    const text = "Non-blocking: CI Failure."
+    expect(score(text)).toBeCloseTo(-0.2875, 5)
+  })
+
+  it("3 hedge hits in short text → dampFactor floors at 0.40", () => {
+    // density = 3/1 = 3; 1.0 - 3*0.25 = 0.25 < 0.4 → floor at 0.4
+    // hedging contributes: non-blocking(+0.2) × 3 = 0.6 ... but patterns cap at count=1 for non-repeating
+    // Actually: each hedge pattern fires once but there are 3 different hedge phrases
+    const text = "Non-blocking: not a blocker. For a follow-up. CI Failure."
+    const result = scoreSentiment(text)
+    // dampFactor should floor at 0.4 with high hedge density
+    // rejection raw = -0.65 × 0.4 = -0.26
+    // hedging total: non-blocking(0.2) + not a blocker(0.18) + follow-up(0.12) = 0.5
+    // raw ≈ 0.5 - 0.26 = 0.24
+    expect(result.hedgingMatches.length).toBeGreaterThanOrEqual(3)
+    expect(result.score).toBeGreaterThan(0) // heavily hedged rejection turns positive
+  })
+
+  it("dampFactor does not affect approval match weights — only rejection", () => {
+    // 'Safe to merge' is approval; its weight must be the same with or without hedging
+    const bare = score("Safe to merge. CI Failure.")
+    const hedged = score("Non-blocking. Safe to merge. CI Failure.")
+    // hedging raises the net score by dampening rejection (and adding hedge weight)
+    expect(hedged).toBeGreaterThan(bare)
+    // The approval contribution (0.5) is identical in both
+    const bareResult = scoreSentiment("Safe to merge. CI Failure.")
+    const hedgedResult = scoreSentiment("Non-blocking. Safe to merge. CI Failure.")
+    const bareApproval = bareResult.approvalMatches.find((m) => m.label === "safe to merge")
+    const hedgedApproval = hedgedResult.approvalMatches.find((m) => m.label === "safe to merge")
+    expect(bareApproval?.weight).toBe(hedgedApproval?.weight)
+  })
+})
+
+// ─── Newly discovered false-positive regressions ──────────────────────────────
+
+describe("false-positive regressions: lookbehind scope limits", () => {
+  it("'Verify CI passes' scores +0.20 — KNOWN FALSE POSITIVE: lookbehind blocks only 'until'", () => {
+    // '/\\bVerify\\s+CI\\s+passes\\b/' fires rejection -0.2
+    // '/(?<!until )\\bCI\\s+passes/' also fires approval +0.4 (Verify ≠ until)
+    // Net: +0.20 — a pending action reads as moderate approval
+    const text = "Verify CI passes before merging."
+    expect(score(text)).toBeCloseTo(0.2, 10)
+    expect(rejectionLabels(text)).toContain("verify CI passes (pending)")
+    expect(approvalLabels(text)).toContain("CI passes") // fires despite rejection context
+  })
+
+  it("'when CI passes' scores +0.40 — lookbehind only guards 'until', not 'when'", () => {
+    // Conditional 'when' is semantically similar to 'until' but not guarded
+    const text = "We will merge when CI passes."
+    expect(score(text)).toBeCloseTo(0.4, 10)
+    expect(approvalLabels(text)).toContain("CI passes")
+  })
+
+  it("'once CI passes' scores +0.40 — 'once' is another unguarded conditional", () => {
+    const text = "Merge once CI passes."
+    expect(score(text)).toBeCloseTo(0.4, 10)
+  })
+
+  it("'should CI pass' does not fire approval — word order and tense differ", () => {
+    // 'should CI pass' is grammatically inverted — patterns expect 'CI passes/passed'
+    expect(approvalLabels("Should CI pass, we can merge.")).not.toContain("CI passes")
+    expect(score("Should CI pass, we can merge.")).toBe(0)
+  })
+})
+
+// ─── Match object shape regressions ───────────────────────────────────────────
+
+describe("match object weight-field regressions", () => {
+  it("'safe to merge' match has weight=0.5 exactly", () => {
+    const { approvalMatches } = scoreSentiment("Safe to merge.")
+    const m = approvalMatches.find((x) => x.label === "safe to merge")
+    expect(m?.weight).toBe(0.5)
+  })
+
+  it("'CHANGES_REQUESTED review state' match has weight=-0.75 exactly", () => {
+    const { rejectionMatches } = scoreSentiment("CHANGES_REQUESTED")
+    const m = rejectionMatches.find((x) => x.label === "CHANGES_REQUESTED review state")
+    expect(m?.weight).toBe(-0.75)
+  })
+
+  it("'non-blocking' hedging match has weight=0.2 exactly", () => {
+    const { hedgingMatches } = scoreSentiment("Non-blocking suggestion.")
+    const m = hedgingMatches.find((x) => x.label === "non-blocking (reduces negatives)")
+    expect(m?.weight).toBe(0.2)
+  })
+
+  it("match weight × count equals the effective contribution for repeating patterns", () => {
+    const text = "Done correctly. Wired correctly. Handled correctly."
+    const { approvalMatches } = scoreSentiment(text)
+    const m = approvalMatches.find((x) => x.label === "correctly (×N)")
+    expect(m).toBeDefined()
+    const contribution = m!.weight * m!.count
+    // weight=0.04, count=3 → contribution=0.12
+    expect(contribution).toBeCloseTo(0.12, 10)
+  })
+})
