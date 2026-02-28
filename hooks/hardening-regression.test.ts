@@ -8,6 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { parse as parseYaml } from "yaml"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
@@ -409,5 +410,74 @@ describe("non-null assertion guard regressions", () => {
     )
     expect(result.exitCode).toBe(0)
     expect(result.decision).toBe("deny")
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Category 6: lefthook.yml config integrity
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface LefthookCommand {
+  priority?: number
+  run?: string
+  skip?: string[]
+  glob?: string
+  stage_fixed?: boolean
+}
+
+interface LefthookHook {
+  commands?: Record<string, LefthookCommand>
+}
+
+interface LefthookConfig {
+  "pre-commit"?: LefthookHook
+  "pre-push"?: LefthookHook
+}
+
+describe("lefthook.yml config integrity", () => {
+  test("disk-space command is present in pre-commit", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    expect(config["pre-commit"]?.commands).toHaveProperty("disk-space")
+  })
+
+  test("disk-space command is present in pre-push", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    expect(config["pre-push"]?.commands).toHaveProperty("disk-space")
+  })
+
+  test("disk-space has priority 1 in pre-commit (runs before lint and typecheck)", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    expect(config["pre-commit"]?.commands?.["disk-space"]?.priority).toBe(1)
+  })
+
+  test("disk-space has priority 1 in pre-push (runs before test)", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    expect(config["pre-push"]?.commands?.["disk-space"]?.priority).toBe(1)
+  })
+
+  test("disk-space run command references check-disk-space.ts script", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    const preCommitRun = config["pre-commit"]?.commands?.["disk-space"]?.run ?? ""
+    const prePushRun = config["pre-push"]?.commands?.["disk-space"]?.run ?? ""
+    expect(preCommitRun).toContain("check-disk-space")
+    expect(prePushRun).toContain("check-disk-space")
+  })
+
+  test("existing pre-commit commands (lint, typecheck) are still present", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    expect(config["pre-commit"]?.commands).toHaveProperty("lint")
+    expect(config["pre-commit"]?.commands).toHaveProperty("typecheck")
+  })
+
+  test("existing pre-push test command is still present", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    expect(config["pre-push"]?.commands).toHaveProperty("test")
   })
 })
