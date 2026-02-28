@@ -746,8 +746,8 @@ describe("stop-completion-auditor: positive paths", () => {
   })
 })
 
-describe("stop-git-push: positive paths", () => {
-  const HOOK = "hooks/stop-git-push.ts"
+describe("stop-git-push: positive paths (now merged into stop-git-status)", () => {
+  const HOOK = "hooks/stop-git-status.ts"
 
   test("repo without remote allows stop", async () => {
     const repo = await createGitRepo()

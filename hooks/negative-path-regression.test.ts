@@ -647,8 +647,8 @@ describe("stop-completion-auditor (extended)", () => {
   })
 })
 
-describe("stop-git-push", () => {
-  const HOOK = "hooks/stop-git-push.ts"
+describe("stop-git-push (now merged into stop-git-status)", () => {
+  const HOOK = "hooks/stop-git-status.ts"
 
   test("non-git directory exits cleanly", async () => {
     const tmp = await createTempDir()
