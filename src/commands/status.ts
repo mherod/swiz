@@ -138,8 +138,16 @@ async function checkAgent(agent: AgentDef) {
   console.log()
 }
 
+function getParentProcessCommand(): string {
+  const proc = Bun.spawnSync(["ps", "-p", String(process.ppid), "-o", "command="])
+  return new TextDecoder().decode(proc.stdout).trim()
+}
+
 function detectCurrentAgent() {
-  return AGENTS.find((a) => a.envVar && process.env[a.envVar]) ?? null
+  const byEnv = AGENTS.find((a) => a.envVar && process.env[a.envVar])
+  if (byEnv) return byEnv
+  const parentCmd = getParentProcessCommand()
+  return AGENTS.find((a) => a.processPattern?.test(parentCmd)) ?? null
 }
 
 export const statusCommand: Command = {

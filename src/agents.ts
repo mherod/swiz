@@ -24,6 +24,8 @@ export interface AgentDef {
   hooksConfigurable: boolean
   /** Environment variable set to a truthy value when running inside this agent */
   envVar?: string
+  /** Regex matched against the parent process command to identify this agent's shell */
+  processPattern?: RegExp
 }
 
 // ─── Codex hooks status ─────────────────────────────────────────────────────
@@ -68,6 +70,7 @@ export const AGENTS: AgentDef[] = [
     configStyle: "flat",
     binary: "cursor",
     hooksConfigurable: true,
+    processPattern: /__CURSOR_SANDBOX_ENV_RESTORE/,
     toolAliases: {
       Bash: "Shell",
       Edit: "StrReplace",
@@ -128,6 +131,7 @@ export const AGENTS: AgentDef[] = [
     configStyle: "nested",
     binary: "codex",
     hooksConfigurable: false,
+    envVar: "CODEX_MANAGED_BY_NPM",
     toolAliases: {
       Bash: "shell_command",
       Edit: "apply_patch",
