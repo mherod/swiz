@@ -44,6 +44,38 @@ const SKIP_LABELS = new Set([
   "backlog",
 ])
 
+/**
+ * Heuristic scores for common label patterns.
+ * Unknown labels score 0 — the table degrades gracefully across any repo.
+ * Positive = more actionable now; negative = deprioritise.
+ */
+const LABEL_SCORE: Record<string, number> = {
+  // Priority namespace (priority:high / priority:medium / priority:low)
+  "priority:high": 4,
+  "priority:medium": 2,
+  "priority:low": -1,
+  // Readiness signals
+  ready: 3,
+  "spec-approved": 1,
+  // Size signals — prefer smaller, well-scoped work
+  "size:xs": 2,
+  "size:s": 2,
+  "size:m": 1,
+  "size:l": -1,
+  "size:xl": -2,
+  // Type signals — fixes before features
+  bug: 2,
+  maintenance: 1,
+  // Not ready to start
+  "needs-breakdown": -2,
+}
+
+const MAX_SHOWN_ISSUES = 5
+
+function scoreIssue(issue: Issue): number {
+  return issue.labels.reduce((sum, l) => sum + (LABEL_SCORE[l.name.toLowerCase()] ?? 0), 0)
+}
+
 interface Issue {
   number: number
   title: string
@@ -161,8 +193,14 @@ async function main(): Promise<void> {
         ? "in this personal repository"
         : "assigned to or created by you in this repository"
       reasonLines.push(`You have ${issueCount} open issue(s) ${issueContext}:`)
-      for (const issue of actionableIssues) {
+      const sortedIssues = [...actionableIssues].sort((a, b) => scoreIssue(b) - scoreIssue(a))
+      const shownIssues = sortedIssues.slice(0, MAX_SHOWN_ISSUES)
+      const hiddenCount = sortedIssues.length - shownIssues.length
+      for (const issue of shownIssues) {
         reasonLines.push(`  #${issue.number} ${issue.title}`)
+      }
+      if (hiddenCount > 0) {
+        reasonLines.push(`  …and ${hiddenCount} more lower-priority issue(s)`)
       }
       reasonLines.push(
         skillAdvice(
