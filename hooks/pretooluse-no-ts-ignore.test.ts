@@ -238,3 +238,129 @@ describe("pretooluse-no-ts-ignore: clean TS content is allowed", () => {
     expect(result.decision).toBe("allow")
   })
 })
+
+// ─── Whitespace variants ──────────────────────────────────────────────────────
+
+describe("pretooluse-no-ts-ignore: unusual whitespace is caught", () => {
+  test(`tab between // and @${KW_IGNORE} is blocked`, async () => {
+    const result = await runHook({ newString: `//\t@${KW_IGNORE}` })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`tab between // and @${KW_EXPECT} (bare) is blocked`, async () => {
+    const result = await runHook({ newString: `//\t@${KW_EXPECT}` })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`mixed tab+space before @${KW_IGNORE} is blocked`, async () => {
+    const result = await runHook({ newString: `// \t @${KW_IGNORE}` })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`@${KW_EXPECT} with CRLF line ending (bare) is blocked`, async () => {
+    // \r is matched by \s*, so the bare check still fires
+    const result = await runHook({ newString: `// @${KW_EXPECT}\r\nconst x = 1` })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`@${KW_EXPECT} with trailing tab (bare) is blocked`, async () => {
+    const result = await runHook({ newString: `// @${KW_EXPECT}\t` })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`@${KW_EXPECT} with description survives CRLF`, async () => {
+    const result = await runHook({
+      newString: `// @${KW_EXPECT}: upstream types wrong\r\nconst x = 1`,
+    })
+    expect(result.decision).toBe("allow")
+  })
+})
+
+// ─── Inline trailing comments ─────────────────────────────────────────────────
+
+describe("pretooluse-no-ts-ignore: inline trailing comments are caught", () => {
+  test(`inline trailing @${KW_IGNORE} after code is blocked`, async () => {
+    const result = await runHook({ newString: `const x: string = 1 // @${KW_IGNORE}` })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`inline trailing bare @${KW_EXPECT} after code is blocked`, async () => {
+    const result = await runHook({ newString: `const x: string = 1 // @${KW_EXPECT}` })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`inline trailing @${KW_EXPECT} with description is allowed`, async () => {
+    const result = await runHook({
+      newString: `const x: string = 1 // @${KW_EXPECT}: bad lib types`,
+    })
+    expect(result.decision).toBe("allow")
+  })
+})
+
+// ─── JSX / TSX block comment variants ────────────────────────────────────────
+
+describe(`pretooluse-no-ts-ignore: JSX block comments in .tsx are caught`, () => {
+  test(`JSX comment {/* @${KW_IGNORE} */} is blocked`, async () => {
+    const result = await runHook({
+      filePath: "src/App.tsx",
+      newString: `{/* @${KW_IGNORE} */}\nreturn <div />`,
+    })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`JSX bare @${KW_EXPECT} block comment is blocked`, async () => {
+    const result = await runHook({
+      filePath: "src/App.tsx",
+      newString: `{/* @${KW_EXPECT} */}\nreturn <div />`,
+    })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`JSX @${KW_EXPECT} with description is allowed`, async () => {
+    const result = await runHook({
+      filePath: "src/App.tsx",
+      newString: `{/* @${KW_EXPECT}: missing JSX overload */}\nreturn <div />`,
+    })
+    expect(result.decision).toBe("allow")
+  })
+})
+
+// ─── Mixed directive edge cases ───────────────────────────────────────────────
+
+describe("pretooluse-no-ts-ignore: mixed directives in one file", () => {
+  test(`@${KW_IGNORE} alongside documented @${KW_EXPECT} still denies`, async () => {
+    // ts-ignore must be caught even if a valid ts-expect-error is also present
+    const result = await runHook({
+      newString: [
+        `// @${KW_IGNORE}`,
+        `const a: string = 1`,
+        `// @${KW_EXPECT}: valid reason`,
+        `const b: number = "x"`,
+      ].join("\n"),
+    })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`two bare @${KW_EXPECT} directives are both caught`, async () => {
+    const result = await runHook({
+      newString: [`// @${KW_EXPECT}`, `const a = 1`, `// @${KW_EXPECT}`, `const b = 2`].join("\n"),
+    })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`directive keyword in a URL path is not a false positive`, async () => {
+    // URL contains the token but is not preceded directly by // with only whitespace
+    const result = await runHook({
+      newString: `// See https://github.com/issues/@${KW_IGNORE}-workaround for context`,
+    })
+    // "// See https://..." — after // there is " See", not @ts-ignore immediately
+    expect(result.decision).toBe("allow")
+  })
+
+  test(`@${KW_EXPECT} with only a colon (no text) is currently allowed`, async () => {
+    // Documents current behaviour: a lone ":" satisfies the non-whitespace check.
+    // If this should be tightened, update the hook regex and flip to "deny".
+    const result = await runHook({ newString: `// @${KW_EXPECT}:` })
+    expect(result.decision).toBe("allow")
+  })
+})

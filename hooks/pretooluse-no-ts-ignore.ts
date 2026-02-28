@@ -56,9 +56,15 @@ async function main() {
 
   // Allow @ts-expect-error only when accompanied by a description.
   // A bare directive with no explanation is as opaque as @ts-ignore.
-  // Valid: // @ts-expect-error: upstream types are wrong
-  // Invalid: // @ts-expect-error
-  if (new RegExp(`(?://|/\\*)\\s*@${kwExpect}\\s*$`, "m").test(content)) {
+  // Two bare forms are caught:
+  //   1. Line comment ending the line:   // @ts-expect-error<EOL>
+  //   2. Block comment with no content:  /* @ts-expect-error  */ (closing immediately after)
+  // A description — any non-whitespace text before the EOL or closing */ — is sufficient.
+  const bareExpectRe = new RegExp(
+    `(?://|/\\*)\\s*@${kwExpect}(?:\\s*$|\\s*\\*/)`,
+    "m"
+  )
+  if (bareExpectRe.test(content)) {
     const reason = [
       `\`@${kwExpect}\` requires a description explaining why suppression is necessary.`,
       "",
