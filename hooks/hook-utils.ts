@@ -152,14 +152,14 @@ export function isCodeChangeTool(name: string): boolean {
 // ─── Hook response helpers ─────────────────────────────────────────────────
 // Outputs polyglot JSON understood by Claude Code, Cursor, Gemini CLI, and Codex CLI.
 
-/** Emit a PreToolUse denial and exit. Works across all agents. */
+/** Emit a PreToolUse denial and exit. Appends ACTION REQUIRED footer. Works across all agents. */
 export function denyPreToolUse(reason: string): never {
   console.log(
     JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
-        permissionDecisionReason: reason,
+        permissionDecisionReason: reason + preToolActionRequired(),
       },
     })
   )
@@ -223,6 +223,21 @@ export function formatActionPlan(steps: string[]): string {
   if (steps.length === 0) return ""
   const numbered = steps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")
   return `Action plan:\n${numbered}\n`
+}
+
+/** Standard ACTION REQUIRED footer for PreToolUse denials. */
+export function preToolActionRequired(): string {
+  const reassess = skillAdvice(
+    "re-assess",
+    "If you believe this is a false positive, use the /re-assess skill to re-evaluate your assumptions — the hook's findings take authority over your own assessment.",
+    "If you believe this is a false positive, re-evaluate your assumptions carefully before retrying — the hook's findings take authority over your own assessment."
+  )
+  const updateMemory = skillAdvice(
+    "update-memory",
+    "Use the /update-memory skill to record a DO or DON'T rule that proactively builds the required steps into your standard development workflow.",
+    "Update your MEMORY.md with a DO or DON'T rule that proactively builds the required steps into your standard development workflow."
+  )
+  return `\n\nACTION REQUIRED: Fix the underlying issue before retrying. This hook will deny this tool call every time this violation is present. Do not attempt to bypass or work around it — address the root cause.\n\n${reassess}\n\n${updateMemory}`
 }
 
 /** Standard ACTION REQUIRED footer appended to all stop hook block reasons. */
