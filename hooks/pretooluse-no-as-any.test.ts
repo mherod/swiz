@@ -407,3 +407,111 @@ describe("concurrent stdout+stderr drain — pipe-buffer stress", () => {
     expect(exitCode).toBe(42)
   })
 })
+
+// ─── Bun eager-buffering behavior — pipe-drain correctness ───────────────────
+//
+// Bun calls uv_read_start() on BOTH stdout and stderr immediately when a
+// subprocess is spawned. This drains OS pipe data into Bun's internal buffers
+// in the background, BEFORE any JavaScript consumer ever calls .text().
+//
+// Consequence: traditional OS pipe-buffer deadlocks CANNOT be reproduced via
+// Bun.spawn() in pure JavaScript. Even with DEADLOCK_VOLUME >> pipe-buffer
+// limit, the subprocess never blocks in write(2) because Bun is already
+// consuming the reading end.
+//
+// Why Promise.all is still the correct pattern:
+//   1. Cross-runtime portability — Node.js, Deno, POSIX programs do NOT
+//      eagerly buffer, so sequential reads risk deadlock there.
+//   2. Defensive clarity — concurrent drain communicates intent clearly.
+//   3. Throughput — concurrent drain can complete faster on slow systems.
+
+describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
+  // Volume that reliably overflows the OS pipe buffer (macOS: 65 536 bytes)
+  const DEADLOCK_VOLUME = 3 * 65_536
+
+  // stderr written FIRST — in a blocking runtime this order causes deadlock
+  // when reading stdout first; in Bun it completes because uv_read_start()
+  // buffers both streams eagerly on spawn.
+  const SCRIPT = [
+    `process.stderr.write("E".repeat(${DEADLOCK_VOLUME}));`,
+    `process.stdout.write("O".repeat(${DEADLOCK_VOLUME}));`,
+  ].join(" ")
+
+  it("await proc.exited before reading completes immediately (proves eager buffering)", async () => {
+    // In a blocking runtime: awaiting proc.exited here would hang forever
+    // because the subprocess is stuck in write(2) waiting for a reader to
+    // drain the pipe. In Bun: uv_read_start() eagerly drains the OS pipe so
+    // the subprocess finishes its writes and exits before we read anything.
+    const proc = Bun.spawn(["bun", "-e", SCRIPT], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    proc.stdin.end()
+
+    // Await exit BEFORE reading any stream — the definitive eager-buffer proof.
+    await proc.exited
+
+    // Data is already in Bun's internal buffers; read it out now.
+    const stdout = await new Response(proc.stdout).text()
+    const stderr = await new Response(proc.stderr).text()
+
+    expect(stdout).toHaveLength(DEADLOCK_VOLUME)
+    expect(stderr).toHaveLength(DEADLOCK_VOLUME)
+    expect(proc.exitCode).toBe(0)
+  })
+
+  it("sequential reads complete without deadlock in Bun (cross-runtime unsafe pattern)", async () => {
+    // Sequential: read stdout to EOF first, then stderr.
+    // In Node.js / blocking runtimes this deadlocks when the subprocess
+    // writes stderr > pipe-buffer before stdout. In Bun it completes
+    // because both streams are already buffered by uv_read_start().
+    // DON'T rely on this in cross-runtime code — use Promise.all instead.
+    const proc = Bun.spawn(["bun", "-e", SCRIPT], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    proc.stdin.end()
+
+    let capturedStdout = ""
+    let capturedStderr = ""
+
+    const result = await Promise.race([
+      (async () => {
+        capturedStdout = await new Response(proc.stdout).text()
+        capturedStderr = await new Response(proc.stderr).text()
+        await proc.exited
+        return "completed" as const
+      })(),
+      new Promise<"timed-out">((resolve) => setTimeout(() => resolve("timed-out"), 3_000)),
+    ])
+
+    expect(result).toBe("completed")
+    // Sequential reads return full data when Bun's eager buffering is active
+    expect(capturedStdout).toHaveLength(DEADLOCK_VOLUME)
+    expect(capturedStderr).toHaveLength(DEADLOCK_VOLUME)
+  }, 8_000)
+
+  it("concurrent Promise.all drain works — the cross-runtime safe pattern", async () => {
+    // Promise.all drains both streams simultaneously.
+    // Safe across all runtimes: concurrent reads relieve back-pressure so the
+    // subprocess never blocks in write(2), even without eager buffering.
+    const proc = Bun.spawn(["bun", "-e", SCRIPT], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    proc.stdin.end()
+
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+
+    expect(stdout).toHaveLength(DEADLOCK_VOLUME)
+    expect(stderr).toHaveLength(DEADLOCK_VOLUME)
+    expect(proc.exitCode).toBe(0)
+  })
+})
