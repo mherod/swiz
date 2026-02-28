@@ -32,6 +32,7 @@ async function main(): Promise<void> {
 
   const branch = await git(["branch", "--show-current"], cwd)
   if (!branch) return
+  if (branch === "main" || branch === "master") return
 
   const runsRaw = await gh(
     [
