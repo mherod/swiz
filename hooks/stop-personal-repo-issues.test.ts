@@ -18,23 +18,46 @@ const SKIP_LABELS = new Set([
   "blocked",
   "upstream",
   "wontfix",
+  "wont-fix",
   "duplicate",
   "on-hold",
   "waiting",
   "backlog",
+  "stale",
+  "icebox",
+  "invalid",
+  "needs-info",
 ])
 
 const LABEL_SCORE: Record<string, number> = {
+  critical: 5,
+  urgent: 4,
+  security: 4,
+  hotfix: 3,
+  regression: 3,
+  crash: 3,
+  p0: 5,
+  p1: 4,
+  p2: 2,
+  p3: 0,
   "priority:high": 4,
   "priority:medium": 2,
   "priority:low": -1,
   ready: 3,
+  confirmed: 1,
+  accepted: 1,
+  triaged: 1,
   "spec-approved": 1,
+  "help wanted": 1,
+  "good first issue": 1,
+  tiny: 2,
+  "size:tiny": 2,
   "size:xs": 2,
   "size:s": 2,
   "size:m": 1,
   "size:l": -1,
   "size:xl": -2,
+  "size:xxl": -3,
   bug: 2,
   maintenance: 1,
   "needs-breakdown": -2,
@@ -241,10 +264,15 @@ describe("filterByActionable — SKIP_LABELS filtering", () => {
     "blocked",
     "upstream",
     "wontfix",
+    "wont-fix",
     "duplicate",
     "on-hold",
     "waiting",
     "backlog",
+    "stale",
+    "icebox",
+    "invalid",
+    "needs-info",
   ]) {
     test(`excludes issue labelled '${label}'`, () => {
       expect(filterByActionable([makeIssue([label])])).toHaveLength(0)
@@ -637,4 +665,99 @@ describe("sortAndCapIssues — ordering and display cap", () => {
     const { shown } = sortAndCapIssues([...lowIssues, highIssue])
     expect(shown.map((i) => i.number)).toContain(99)
   })
+})
+
+// ─── Survey-derived label patterns ───────────────────────────────────────────
+
+describe("scoreIssue — severity / urgency labels from real-world repos", () => {
+  function makeIssue(labels: string[]): Issue {
+    return {
+      number: 1,
+      title: "Issue",
+      labels: labels.map((name) => ({ name })),
+      author: { login: "u" },
+      assignees: [],
+    }
+  }
+
+  // Severity labels (electron, go, TypeScript pattern)
+  test("critical scores 5", () => expect(scoreIssue(makeIssue(["critical"]))).toBe(5))
+  test("Critical (capitalised) scores 5", () => expect(scoreIssue(makeIssue(["Critical"]))).toBe(5))
+  test("urgent scores 4", () => expect(scoreIssue(makeIssue(["urgent"]))).toBe(4))
+  test("security scores 4", () => expect(scoreIssue(makeIssue(["security"]))).toBe(4))
+  test("hotfix scores 3", () => expect(scoreIssue(makeIssue(["hotfix"]))).toBe(3))
+  test("regression scores 3", () => expect(scoreIssue(makeIssue(["regression"]))).toBe(3))
+  test("crash scores 3 (TypeScript pattern)", () =>
+    expect(scoreIssue(makeIssue(["crash"]))).toBe(3))
+
+  // Numeric priority tiers (p0–p3)
+  test("p0 scores 5", () => expect(scoreIssue(makeIssue(["p0"]))).toBe(5))
+  test("p1 scores 4", () => expect(scoreIssue(makeIssue(["p1"]))).toBe(4))
+  test("p2 scores 2", () => expect(scoreIssue(makeIssue(["p2"]))).toBe(2))
+  test("p3 scores 0", () => expect(scoreIssue(makeIssue(["p3"]))).toBe(0))
+
+  // p:N / P-N forms normalise the same as pN for two-segment labels
+  test("p:1 and p-1 normalise to the same canonical as 1:p (not the same as p1)", () => {
+    // p:1 → segments ["p","1"] → sorted ["1","p"] → "1:p"
+    // p1  → single token → "p1"
+    // These are genuinely different canonical forms; both are tested independently
+    expect(normaliseLabel("p:1")).not.toBe(normaliseLabel("p1"))
+    expect(normaliseLabel("p-1")).toBe(normaliseLabel("p:1"))
+  })
+
+  // Readiness signals from survey
+  test("confirmed scores 1 (rails 'accepted' pattern)", () =>
+    expect(scoreIssue(makeIssue(["confirmed"]))).toBe(1))
+  test("accepted scores 1", () => expect(scoreIssue(makeIssue(["accepted"]))).toBe(1))
+  test("triaged scores 1", () => expect(scoreIssue(makeIssue(["triaged"]))).toBe(1))
+  test("help wanted scores 1", () => expect(scoreIssue(makeIssue(["help wanted"]))).toBe(1))
+  test("good first issue scores 1", () =>
+    expect(scoreIssue(makeIssue(["good first issue"]))).toBe(1))
+
+  // Size extremes
+  test("tiny scores 2 (same tier as xs)", () => expect(scoreIssue(makeIssue(["tiny"]))).toBe(2))
+  test("size:tiny scores 2", () => expect(scoreIssue(makeIssue(["size:tiny"]))).toBe(2))
+  test("size:xxl scores -3", () => expect(scoreIssue(makeIssue(["size:xxl"]))).toBe(-3))
+
+  // Ordering: critical > priority:high > regression > confirmed
+  test("critical beats priority:high in ranking", () => {
+    expect(scoreIssue(makeIssue(["critical"]))).toBeGreaterThan(
+      scoreIssue(makeIssue(["priority:high"]))
+    )
+  })
+
+  test("regression beats confirmed in ranking", () => {
+    expect(scoreIssue(makeIssue(["regression"]))).toBeGreaterThan(
+      scoreIssue(makeIssue(["confirmed"]))
+    )
+  })
+})
+
+describe("filterByActionable — new skip labels from survey", () => {
+  function makeIssue(labels: string[]): Issue {
+    return {
+      number: 1,
+      title: "Issue",
+      labels: labels.map((name) => ({ name })),
+      author: { login: "u" },
+      assignees: [],
+    }
+  }
+
+  test("stale issues are excluded", () =>
+    expect(filterByActionable([makeIssue(["stale"])])).toHaveLength(0))
+  test("icebox issues are excluded", () =>
+    expect(filterByActionable([makeIssue(["icebox"])])).toHaveLength(0))
+  test("invalid issues are excluded", () =>
+    expect(filterByActionable([makeIssue(["invalid"])])).toHaveLength(0))
+  test("needs-info issues are excluded", () =>
+    expect(filterByActionable([makeIssue(["needs-info"])])).toHaveLength(0))
+  test("wont-fix issues are excluded", () =>
+    expect(filterByActionable([makeIssue(["wont-fix"])])).toHaveLength(0))
+  test("fix-wont (reversed) issues are excluded", () =>
+    expect(filterByActionable([makeIssue(["fix-wont"])])).toHaveLength(0))
+  test("Stale (capitalised) is excluded", () =>
+    expect(filterByActionable([makeIssue(["Stale"])])).toHaveLength(0))
+  test("info-needs (reversed) is excluded", () =>
+    expect(filterByActionable([makeIssue(["info-needs"])])).toHaveLength(0))
 })

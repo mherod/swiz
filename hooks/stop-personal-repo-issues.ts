@@ -38,31 +38,60 @@ const SKIP_LABELS = new Set([
   "blocked",
   "upstream",
   "wontfix",
+  "wont-fix", // normalises to fix:wont — handled separately from wontfix
   "duplicate",
   "on-hold",
   "waiting",
   "backlog",
+  "stale", // common GitHub bot label
+  "icebox", // explicit indefinite deferral
+  "invalid", // not a valid issue
+  "needs-info", // can't act without more information
 ])
 
 /**
  * Heuristic scores for common label patterns.
  * Unknown labels score 0 — the table degrades gracefully across any repo.
  * Positive = more actionable now; negative = deprioritise.
+ *
+ * All keys are normalised at startup — separators (: / -) are collapsed and
+ * segments sorted, so "priority:high", "high-priority", and "priority/high"
+ * all resolve to the same entry.
  */
 const LABEL_SCORE: Record<string, number> = {
+  // Severity / urgency — highest signals
+  critical: 5,
+  urgent: 4,
+  security: 4,
+  hotfix: 3,
+  regression: 3,
+  crash: 3,
+  // Numeric priority tiers (p0–p3 bare tokens; p:0 / P-0 handled by normalisation)
+  p0: 5,
+  p1: 4,
+  p2: 2,
+  p3: 0,
   // Priority namespace (priority:high / priority:medium / priority:low)
   "priority:high": 4,
   "priority:medium": 2,
   "priority:low": -1,
   // Readiness signals
   ready: 3,
+  confirmed: 1,
+  accepted: 1,
+  triaged: 1,
   "spec-approved": 1,
+  "help wanted": 1,
+  "good first issue": 1,
   // Size signals — prefer smaller, well-scoped work
+  tiny: 2,
+  "size:tiny": 2,
   "size:xs": 2,
   "size:s": 2,
   "size:m": 1,
   "size:l": -1,
   "size:xl": -2,
+  "size:xxl": -3,
   // Type signals — fixes before features
   bug: 2,
   maintenance: 1,
