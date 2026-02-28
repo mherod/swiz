@@ -279,11 +279,17 @@ function buildPrompt(
     `  "reflections": ["<directive>", ...]\n` +
     `}\n\n` +
     `CRITIQUE RULES:\n` +
-    `Write a single candid sentence (under 200 chars) critically assessing the assistant's work in this session. ` +
-    `Surface the most significant mistake, inefficiency, or missed opportunity — be specific ` +
-    `(e.g., "The assistant retried the same failing command three times without changing approach" or ` +
-    `"The fix was applied without first reproducing the bug locally"). ` +
-    `If the session was genuinely efficient and clean, say so directly. ` +
+    `Write a single brutally honest sentence (under 200 chars) calling out the most significant blind spot, ` +
+    `act of laziness, or procedural shortcoming in this session. ` +
+    `Blind spots: things the assistant never thought to check or verify. ` +
+    `Laziness: shortcuts taken, assumptions not validated, obvious steps skipped. ` +
+    `Procedural shortcomings: deviating from best practices, wrong order of operations, missing validation. ` +
+    `Be specific and direct — name the actual failure ` +
+    `(e.g., "The assistant applied the fix without first reproducing the bug" or ` +
+    `"The assistant never checked whether the existing tests covered this path before adding new ones" or ` +
+    `"The assistant skipped reading the existing implementation before modifying it"). ` +
+    `If the session had no meaningful shortcomings, say so in one sentence — but be skeptical: ` +
+    `almost every session has at least one thing that could have been done better. ` +
     `Do NOT use markup, bullet points, or line breaks.\n\n` +
     `NEXT STEP RULES:\n` +
     `Based solely on the transcript text provided, identify the boldest, highest-impact action ` +
