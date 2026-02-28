@@ -11,6 +11,56 @@ interface HookInput {
   }
 }
 
+// stripLineCommentTails removes everything from the first `//` onward on each
+// line, excluding `://` (URLs).  The result is used for block-comment detection
+// so that a block-comment opener appearing inside a `//` comment is not
+// mistaken for an active suppression directive.
+function stripLineCommentTails(content: string): string {
+  return content
+    .split(/\r?\n/)
+    .map((line) => {
+      const m = line.match(/(?<!:)\/\//)
+      return m !== null ? line.slice(0, m.index!) : line
+    })
+    .join("\n")
+}
+
+// containsDirective returns true if content contains a suppression directive.
+//
+// Three detection patterns per directive (all applied with the multiline flag):
+//   1. Line comment:   //\s*@directive         — checked on the original content
+//   2. Block comment:  /\*\s*@directive         — checked on line-comment-stripped content
+//   3. JSDoc interior: ^\s*\*+\s*@directive     — checked on the original content
+//
+// Pattern 2 uses stripLineCommentTails so that a block-comment opener inside a
+// line comment (e.g. in documentation) is not mistaken for an active directive.
+// The multiline regex is then applied to the stripped content, so cross-line
+// block-comment forms are still detected.
+function containsDirective(content: string, directive: string): boolean {
+  const re = new RegExp(
+    `(?://\\s*@${directive}|^\\s*\\*+\\s*@${directive})`,
+    "m"
+  )
+  if (re.test(content)) return true
+  return new RegExp(`/\\*\\s*@${directive}`, "m").test(
+    stripLineCommentTails(content)
+  )
+}
+
+// containsBareExpectError returns true if content has a bare ts-expect-error
+// (no description text after the directive).  Uses the same line-comment-tail
+// stripping for the block-comment branch as containsDirective.
+function containsBareExpectError(content: string, directive: string): boolean {
+  const re = new RegExp(
+    `(?://\\s*@${directive}\\s*$|^\\s*\\*+\\s*@${directive}\\s*$)`,
+    "m"
+  )
+  if (re.test(content)) return true
+  return new RegExp(`/\\*\\s*@${directive}(?:\\s*$|\\s*\\*/)`, "m").test(
+    stripLineCommentTails(content)
+  )
+}
+
 async function main() {
   const input: HookInput = await Bun.stdin.json()
 
@@ -23,31 +73,13 @@ async function main() {
 
   const content = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
 
-  // Scope the check to actual comment-level compiler directives, not filenames or strings.
   // Keywords split across arrays to avoid self-triggering when editing this hook.
-
-  // Block @ts-ignore unconditionally — it silently accumulates and never self-cleans.
   const kwIgnore = ["ts", "ignore"].join("-")
   const kwExpect = ["ts", "expect", "error"].join("-")
+  const kwNoCheck = ["ts", "nocheck"].join("-")
 
   // Block @ts-nocheck — disables ALL type checking for the entire file at once.
-  // Keywords split across array to avoid self-triggering when editing this hook.
-  //
-  // Three detection patterns (all with multiline flag):
-  //   1. //\s*@directive       — line comment
-  //   2. /\*\s*@directive      — direct block comment (/* @directive, /*@directive, /*\n@directive)
-  //   3. ^\s*\*\s*@directive   — JSDoc interior line (" * @directive"), anchored to line start
-  //
-  // Pattern 3 catches directives on any JSDoc line regardless of preceding content
-  // (e.g. "/**\n * Some doc\n * @ts-ignore\n */") without false-positiving on
-  // "/* some text, @ts-ignore */" where the * is mid-line, not line-start.
-  const kwNoCheck = ["ts", "nocheck"].join("-")
-  if (
-    new RegExp(
-      `(?://\\s*@${kwNoCheck}|/\\*\\s*@${kwNoCheck}|^\\s*\\*+\\s*@${kwNoCheck})`,
-      "m"
-    ).test(content)
-  ) {
+  if (containsDirective(content, kwNoCheck)) {
     const reason = [
       "TypeScript is the authority. Do not bypass, ignore, or argue with it.",
       "",
@@ -68,13 +100,8 @@ async function main() {
     denyPreToolUse(reason)
   }
 
-  // Same three-pattern approach for @ts-ignore.
-  if (
-    new RegExp(
-      `(?://\\s*@${kwIgnore}|/\\*\\s*@${kwIgnore}|^\\s*\\*+\\s*@${kwIgnore})`,
-      "m"
-    ).test(content)
-  ) {
+  // Block @ts-ignore unconditionally — it silently accumulates and never self-cleans.
+  if (containsDirective(content, kwIgnore)) {
     const reason = [
       "TypeScript is the authority. Do not bypass, ignore, or argue with it.",
       "",
@@ -100,16 +127,7 @@ async function main() {
 
   // Allow @ts-expect-error only when accompanied by a description.
   // A bare directive with no explanation is as opaque as @ts-ignore.
-  // Three bare forms are caught:
-  //   1. Line comment at EOL:           //\s*@directive\s*$
-  //   2. Direct block comment:          /\*\s*@directive(\s*$|\s*\*/)
-  //   3. JSDoc interior at EOL:         ^\s*\*+\s*@directive\s*$
-  // A description — any non-whitespace text after the directive — allows it through.
-  const bareExpectRe = new RegExp(
-    `(?://\\s*@${kwExpect}\\s*$|/\\*\\s*@${kwExpect}(?:\\s*$|\\s*\\*/)|^\\s*\\*+\\s*@${kwExpect}\\s*$)`,
-    "m"
-  )
-  if (bareExpectRe.test(content)) {
+  if (containsBareExpectError(content, kwExpect)) {
     const reason = [
       `\`@${kwExpect}\` requires a description explaining why suppression is necessary.`,
       "",
