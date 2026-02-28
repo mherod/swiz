@@ -31,9 +31,89 @@ async function main() {
     process.exit(0)
   }
 
-  // Count "as any" in old vs new
-  const oldAsAnyCount = (oldString.match(/\bas\s+any\b/g) || []).length
-  const newAsAnyCount = (newString.match(/\bas\s+any\b/g) || []).length
+  // Scan only the code tokens — skip string literals and comments so that
+  // natural-language phrases in test descriptions or doc-comments are not
+  // counted as casts. The function blanks out all non-code regions before
+  // the regex runs.
+  function stripNonCode(src: string): string {
+    let out = ""
+    let i = 0
+    const n = src.length
+    while (i < n) {
+      // Line comment: consume until end of line
+      if (src[i] === "/" && src[i + 1] === "/") {
+        while (i < n && src[i] !== "\n") {
+          out += " "
+          i++
+        }
+        continue
+      }
+      // Block comment: consume until closing delimiter
+      if (src[i] === "/" && src[i + 1] === "*") {
+        out += "  "
+        i += 2
+        while (i < n) {
+          if (src[i] === "*" && src[i + 1] === "/") {
+            out += "  "
+            i += 2
+            break
+          }
+          out += src[i] === "\n" ? "\n" : " "
+          i++
+        }
+        continue
+      }
+      // Template literal: consume until unescaped back-tick (no interpolation tracking needed)
+      if (src[i] === "`") {
+        out += " "
+        i++
+        while (i < n) {
+          if (src[i] === "\\") {
+            out += "  "
+            i += 2
+            continue
+          }
+          if (src[i] === "`") {
+            out += " "
+            i++
+            break
+          }
+          out += src[i] === "\n" ? "\n" : " "
+          i++
+        }
+        continue
+      }
+      // Quoted string: consume until matching unescaped close-quote
+      if (src[i] === '"' || src[i] === "'") {
+        const q = src[i]
+        out += " "
+        i++
+        while (i < n) {
+          if (src[i] === "\\") {
+            out += "  "
+            i += 2
+            continue
+          }
+          if (src[i] === q) {
+            out += " "
+            i++
+            break
+          }
+          out += src[i] === "\n" ? "\n" : " "
+          i++
+        }
+        continue
+      }
+      out += src[i]
+      i++
+    }
+    return out
+  }
+
+  // Count the cast pattern in code-only regions of old vs new
+  const castRe = /\bas\s+any\b/g
+  const oldAsAnyCount = (stripNonCode(oldString).match(castRe) || []).length
+  const newAsAnyCount = (stripNonCode(newString).match(castRe) || []).length
 
   // Block if new "as any" is being added
   if (newAsAnyCount > oldAsAnyCount) {
