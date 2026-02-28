@@ -72,8 +72,14 @@ const LABEL_SCORE: Record<string, number> = {
 
 const MAX_SHOWN_ISSUES = 5
 
+/** Normalise label name: lowercase and collapse : / - to : so that
+ *  "priority:high", "priority/high", and "priority-high" all match the same key. */
+function normaliseLabel(name: string): string {
+  return name.toLowerCase().replace(/[/-]/g, ":")
+}
+
 function scoreIssue(issue: Issue): number {
-  return issue.labels.reduce((sum, l) => sum + (LABEL_SCORE[l.name.toLowerCase()] ?? 0), 0)
+  return issue.labels.reduce((sum, l) => sum + (LABEL_SCORE[normaliseLabel(l.name)] ?? 0), 0)
 }
 
 interface Issue {
@@ -106,7 +112,7 @@ async function getActionableIssues(cwd: string, filterUser?: string): Promise<Is
       (i) => i.author?.login === filterUser || i.assignees?.some((a) => a.login === filterUser)
     )
   }
-  return issues.filter((i) => !i.labels.some((l) => SKIP_LABELS.has(l.name.toLowerCase())))
+  return issues.filter((i) => !i.labels.some((l) => SKIP_LABELS.has(normaliseLabel(l.name))))
 }
 
 async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise<PR[]> {
