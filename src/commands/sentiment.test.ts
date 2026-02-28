@@ -773,3 +773,196 @@ describe("run() CLI handler", () => {
     }
   })
 })
+
+// ─── Elaborate & ambiguous cases ──────────────────────────────────────────────
+//
+// These tests expose where heuristic patterns succeed or fail when language is
+// ambiguous, conditional, past-tense, or multi-speaker. Expected values are
+// computed from the pattern weights — not from "what a human would infer".
+
+describe("negated and qualified approvals", () => {
+  it("'I would NOT say this PR is approved' scores neutral — no stamp format fires", () => {
+    // "approved" lowercase mid-sentence does not match any approval pattern
+    expect(score("I would NOT say this PR is approved.")).toBe(0)
+  })
+
+  it("'Approved by 2 reviewers, rejected by 1' scores neutral — count-style phrasing misses stamps", () => {
+    // Neither the ✅ stamp nor the start-of-line pattern fire here
+    const s = score("Approved by 2 reviewers, rejected by 1. Majority approved.")
+    expect(s).toBe(0)
+  })
+
+  it("'Everything looks correct, except the auth logic which is incorrect' scores neutral", () => {
+    // Patterns match 'correctly' (adverb) not 'correct' (adjective) or 'incorrect'
+    expect(score("Everything looks correct, except the auth logic which is incorrect.")).toBe(0)
+  })
+
+  it("'This would be well-implemented IF the tests were present' still fires well-implemented", () => {
+    // The regex has no tense/conditionality awareness — 'would be well-implemented' still matches
+    // This is a known false-positive: conditional approval reads as endorsement
+    const s = score("This would be well-implemented IF the tests were present.")
+    expect(s).toBeGreaterThan(0)
+    expect(approvalLabels("This would be well-implemented IF the tests were present.")).toContain(
+      "well-[word] quality stamp"
+    )
+  })
+})
+
+describe("tense-shifting: past-rejection, present-resolution", () => {
+  it("'CI was failing, but now CI passes' scores positive — past rejection pattern misses 'was'", () => {
+    // '/\\bCI\\s+(?:Failure|fail(?:ing|ed))\\b/' requires CI immediately before fail*
+    // 'CI was failing' has 'was' in between, so the rejection pattern does NOT fire.
+    // 'CI passes' (no 'until' prefix) fires approval +0.4
+    const s = score("The CI was failing, but now CI passes.")
+    expect(s).toBeGreaterThan(0)
+    expect(rejectionLabels("The CI was failing, but now CI passes.")).not.toContain("CI failure")
+    expect(rejectionLabels("The CI was failing, but now CI passes.")).not.toContain("CI failing")
+  })
+
+  it("'build was failing due to lint, now fixed. CI now passes' scores near 0 — both patterns miss", () => {
+    // 'build was failing' — 'was' breaks the rejection regex (needs 'build is fail*')
+    // 'CI now passes' — 'now' breaks the approval regex (needs 'CI passes' with only whitespace)
+    const text = "The build was failing due to a lint error, now fixed. CI now passes."
+    const s = score(text)
+    expect(s).toBeGreaterThanOrEqual(-0.1)
+    expect(s).toBeLessThanOrEqual(0.1)
+  })
+
+  it("auto-requested changes with 'tests since added' still scores negative — past resolution is invisible", () => {
+    // The scorer reads the whole text; 'Auto-requested changes' (-0.4) and 'no tests added' (-0.3)
+    // fire even though the second sentence says the situation was resolved.
+    const text =
+      "The bot auto-requested changes because: no tests added. Tests have since been added."
+    expect(score(text)).toBeLessThan(-0.3)
+    expect(rejectionLabels(text)).toContain("auto-requested changes")
+    expect(rejectionLabels(text)).toContain("no tests added")
+  })
+
+  it("'Previous review said CHANGES_REQUESTED. That has been addressed. ✅ **Approved**' scores slightly positive", () => {
+    // CHANGES_REQUESTED (-0.75) vs ✅ Approved (+0.8) → net ≈ +0.05
+    const text =
+      "The previous reviewer wrote: 'CHANGES_REQUESTED'. That has now been addressed. ✅ **Approved**"
+    const s = score(text)
+    // Approval barely edges out the embedded rejection
+    expect(s).toBeGreaterThan(0)
+    expect(s).toBeLessThan(0.2)
+  })
+})
+
+describe("conditionals that falsely read as approval", () => {
+  it("'If CI passes, this would be safe to merge' scores as approval — 'if' not in lookbehind", () => {
+    // The negative lookbehind only guards against 'until'. 'If CI passes' triggers +0.4.
+    // 'safe to merge' also triggers +0.5. Net > 0.7 — a notable false positive.
+    const text = "If CI passes, this would be safe to merge."
+    expect(score(text)).toBeGreaterThan(0.7)
+    expect(approvalLabels(text)).toContain("CI passes")
+    expect(approvalLabels(text)).toContain("safe to merge")
+  })
+
+  it("'Do not merge until CI passes' scores neutral — lookbehind correctly blocks CI passes", () => {
+    // '(?<!until )' lookbehind prevents 'until CI passes' from adding approval weight
+    const text = "Do not merge until CI passes."
+    expect(score(text)).toBe(0)
+    expect(approvalLabels(text)).not.toContain("CI passes")
+  })
+
+  it("'cannot merge this until CI passes' also scores neutral — both rejection and approval miss", () => {
+    // 'cannot merge' lacks 'be merged' so rejection pattern doesn't fire
+    // 'until CI passes' blocked by lookbehind
+    const text = "We cannot merge this until CI passes and the review is complete."
+    expect(score(text)).toBe(0)
+  })
+})
+
+describe("multi-reviewer conflicts", () => {
+  it("mixed doc: ✅ Approved + CI passes + safe to merge + CHANGES_REQUESTED clamps to +1", () => {
+    // Approval signals: ✅ stamp (+0.8), Approved+CI (+0.65), CI passes (+0.4), safe to merge (+0.5) = 2.35
+    // Rejection: CHANGES_REQUESTED (-0.75)
+    // Raw ≈ 1.6 → clamped to 1.0
+    // The approval pile-on overwhelms the explicit rejection — approval wins by volume
+    const text =
+      "Reviewer A: ✅ **Approved** — CI passes. Safe to merge. Reviewer B: CHANGES_REQUESTED — missing tests."
+    expect(score(text)).toBe(1)
+    expect(rejectionLabels(text)).toContain("CHANGES_REQUESTED review state")
+  })
+
+  it("'one reviewer approved, another requested changes' scores neutral — count phrasing misses stamps", () => {
+    const text =
+      "One reviewer approved, another requested changes. The net status is unclear."
+    expect(score(text)).toBe(0)
+  })
+})
+
+describe("hedging containing rejection keywords", () => {
+  it("'Non-blocking issue: CI is failing on unrelated job. Safe to merge.' exposes false-positive", () => {
+    // ⚠ BUG: 'Non-blocking issue' contains 'blocking issue' which fires the rejection
+    // pattern '\bblocking\s+issues?\b' (-0.5). Combined with 'CI is failing' (-0.6),
+    // dampFactor 0.75 reduces rejection to -0.825, but hedging (+0.2) + safe to merge (+0.5)
+    // only total 0.7 — net score ≈ -0.125 (negative), contrary to the intent of the text.
+    const text = "Non-blocking issue: CI is failing on an unrelated job. Safe to merge the main feature."
+    expect(score(text)).toBeCloseTo(-0.125, 3)
+    // The hedging fires correctly...
+    expect(hedgingLabels(text)).toContain("non-blocking (reduces negatives)")
+    // ...but the rejection pattern also fires on the substring 'blocking issue' inside 'Non-blocking issue'
+    expect(rejectionLabels(text)).toContain("blocking issues")
+    expect(rejectionLabels(text)).toContain("CI failing")
+  })
+
+  it("'Not a blocker: there are blocking concerns in a separate PR' scores positive", () => {
+    // 'Not a blocker' adds hedging weight; 'blocking concerns' ≠ 'blocking issues' so no rejection
+    const text = "Not a blocker: there are blocking concerns in a separate PR."
+    expect(score(text)).toBeGreaterThan(0)
+    expect(rejectionLabels(text)).not.toContain("blocking issues")
+  })
+
+  it("'CI green but blocked by other PR — cannot unblock until upstream merges' scores positive", () => {
+    // 'CI green' matches '\bCI\s+(?:passes|passed|is green|green)\b' → +0.4
+    // 'blocked' alone does not match 'blocking issues\b'
+    // 'cannot unblock' does not match 'cannot be merged'
+    const text = "CI green but blocked by other PR dependencies. Cannot unblock until the upstream PR merges."
+    expect(score(text)).toBeGreaterThan(0)
+    expect(approvalLabels(text)).toContain("CI passes")
+  })
+})
+
+describe("github notification boilerplate false positives", () => {
+  it("'requested to review. CI passes. Ready for review.' scores as approval despite being a notification", () => {
+    // Notification emails contain genuine approval signals — scorer has no channel awareness
+    const text =
+      "You have been requested to review this PR. CI passes. The author is ready for review."
+    const s = score(text)
+    expect(s).toBeGreaterThan(0.5)
+    expect(approvalLabels(text)).toContain("CI passes")
+    expect(approvalLabels(text)).toContain("ready for review/merge")
+  })
+
+  it("'Review verdict missing from automated check' scores negative from notification text", () => {
+    const text = "This is an auto-generated notification. Review verdict missing from the automated check."
+    expect(score(text)).toBeLessThan(0)
+    expect(rejectionLabels(text)).toContain("review verdict missing")
+  })
+})
+
+describe("double negatives and ambiguous phrasing", () => {
+  it("'no issues not worth addressing' scores neutral — double-negative misses 'no issues found'", () => {
+    // 'no issues found' pattern requires the word 'found'; 'no issues not worth' doesn't match
+    expect(score("There are no issues not worth addressing.")).toBe(0)
+  })
+
+  it("'neither observation is a blocker' misses hedging — needs 'neither is' directly adjacent", () => {
+    // '/\\bneither\\s+is\\s+a\\s+blocker\\b/' requires 'neither is' without intervening words
+    // 'neither observation is a blocker' has 'observation' between 'neither' and 'is'
+    const text = "Neither observation is a blocker."
+    expect(hedgingLabels(text)).not.toContain("neither is a blocker")
+  })
+
+  it("comprehensive hedged approval: 'CI passed. Well-implemented. Neither observation is a blocker. Safe to merge.'", () => {
+    // 'neither observation is a blocker' misses the hedging pattern (see above)
+    // But approval signals accumulate enough to clamp at 1.0 regardless
+    const text =
+      "CI passed. Well-implemented. Not a regression. Consider adding tests. Neither observation is a blocker. Safe to merge."
+    expect(score(text)).toBe(1)
+    expect(hedgingLabels(text)).not.toContain("neither is a blocker") // wording gap confirmed
+    expect(hedgingLabels(text)).toContain("not a regression") // this one does fire
+  })
+})
