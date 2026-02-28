@@ -224,10 +224,10 @@ export function actionRequired(): string {
   )
   const updateMemory = skillAdvice(
     "update-memory",
-    "After resolving this, use the /update-memory skill to record a DO or DON'T rule that prevents this hook from firing again in future sessions.",
-    "After resolving this, update your MEMORY.md with a DO or DON'T rule that prevents this hook from firing again in future sessions."
+    "Use the /update-memory skill to record a DO or DON'T rule that proactively builds the required steps into your standard development workflow.",
+    "Update your MEMORY.md with a DO or DON'T rule that proactively builds the required steps into your standard development workflow."
   )
-  return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action. ${reassess} ${updateMemory}`
+  return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action.\n\n${reassess}\n\n${updateMemory}`
 }
 
 /** Emit a stop block decision and exit. Appends ACTION_REQUIRED footer. */
