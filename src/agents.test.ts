@@ -347,6 +347,21 @@ describe("agents.ts", () => {
       expect(codex.toolAliases.Bash).toBe("shell_command")
     })
 
+    it("codex maps TaskCreate to update_plan", () => {
+      const codex = getAgent("codex")!
+      expect(codex.toolAliases.TaskCreate).toBe("update_plan")
+    })
+
+    it("codex maps TaskUpdate to update_plan", () => {
+      const codex = getAgent("codex")!
+      expect(codex.toolAliases.TaskUpdate).toBe("update_plan")
+    })
+
+    it("codex maps Task to update_plan", () => {
+      const codex = getAgent("codex")!
+      expect(codex.toolAliases.Task).toBe("update_plan")
+    })
+
     it("claude has empty tool aliases", () => {
       const claude = getAgent("claude")!
       expect(Object.keys(claude.toolAliases).length).toBe(0)

@@ -90,7 +90,7 @@ export function detectPkgRunner(): string {
 // Grep        | Grep         | grep_search        | grep_files
 // Glob        | Glob         | glob               | list_dir
 // NotebookEdit| EditNotebook | —                  | apply_patch
-// TaskCreate  | TodoWrite    | write_todos        | spawn_agent
+// TaskCreate  | TodoWrite    | write_todos        | update_plan
 
 export const SHELL_TOOLS = new Set([
   "Bash",
@@ -112,9 +112,9 @@ export const TASK_TOOLS = new Set([
   "TaskGet",
   "TodoWrite",
   "write_todos",
-  "spawn_agent",
+  "update_plan",
 ])
-export const TASK_CREATE_TOOLS = new Set(["TaskCreate", "TodoWrite", "write_todos", "spawn_agent"])
+export const TASK_CREATE_TOOLS = new Set(["TaskCreate", "TodoWrite", "write_todos", "update_plan"])
 export const SEARCH_TOOLS = new Set([
   "Grep",
   "Glob",

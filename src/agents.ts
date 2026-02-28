@@ -141,8 +141,9 @@ export const AGENTS: AgentDef[] = [
       Read: "read_file",
       Grep: "grep_files",
       Glob: "list_dir",
-      Task: "spawn_agent",
-      TaskCreate: "spawn_agent",
+      Task: "update_plan",
+      TaskCreate: "update_plan",
+      TaskUpdate: "update_plan",
       NotebookEdit: "apply_patch",
     },
     eventMap: {
