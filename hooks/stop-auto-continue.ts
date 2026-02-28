@@ -29,6 +29,7 @@ interface TaskEntry {
 }
 
 interface AgentResponse {
+  critique: string
   next: string
   reflections: string[]
 }
@@ -114,6 +115,7 @@ function parseAgentResponse(raw: string): AgentResponse {
 
   try {
     const parsed = JSON.parse(jsonStr)
+    const critique = typeof parsed.critique === "string" ? sanitizeResponse(parsed.critique) : ""
     const next = typeof parsed.next === "string" ? sanitizeResponse(parsed.next) : ""
     const reflections = Array.isArray(parsed.reflections)
       ? parsed.reflections
@@ -123,10 +125,10 @@ function parseAgentResponse(raw: string): AgentResponse {
           )
           .slice(0, 10)
       : []
-    return { next, reflections }
+    return { critique, next, reflections }
   } catch {
     // Fallback: treat as plain text (backward compatible)
-    return { next: sanitizeResponse(raw), reflections: [] }
+    return { critique: "", next: sanitizeResponse(raw), reflections: [] }
   }
 }
 
@@ -272,9 +274,17 @@ function buildPrompt(
     `Do not call tools. Do not read files. Do not perform work. Just analyze the text and respond.\n\n` +
     `OUTPUT FORMAT: Reply with a valid JSON object containing these fields:\n` +
     `{\n` +
+    `  "critique": "<one candid sentence critiquing the session>",\n` +
     `  "next": "<one imperative sentence>",\n` +
     `  "reflections": ["<directive>", ...]\n` +
     `}\n\n` +
+    `CRITIQUE RULES:\n` +
+    `Write a single candid sentence (under 200 chars) critically assessing the assistant's work in this session. ` +
+    `Surface the most significant mistake, inefficiency, or missed opportunity — be specific ` +
+    `(e.g., "The assistant retried the same failing command three times without changing approach" or ` +
+    `"The fix was applied without first reproducing the bug locally"). ` +
+    `If the session was genuinely efficient and clean, say so directly. ` +
+    `Do NOT use markup, bullet points, or line breaks.\n\n` +
     `NEXT STEP RULES:\n` +
     `Based solely on the transcript text provided, identify the boldest, highest-impact action ` +
     `the assistant should execute next — autonomously, without asking the user any questions ` +
@@ -343,7 +353,7 @@ async function main(): Promise<void> {
 
   const taskContext = await loadTaskContext(input.session_id ?? "")
 
-  let response: AgentResponse = { next: "", reflections: [] }
+  let response: AgentResponse = { critique: "", next: "", reflections: [] }
 
   if (detectAgentCli()) {
     const context = formatTurnsAsContext(turns)
@@ -374,8 +384,9 @@ async function main(): Promise<void> {
     await writeReflections(input.cwd, response.reflections)
   }
 
+  const critiqueLine = response.critique ? `Session critique: ${response.critique}\n\n` : ""
   blockStopRaw(
-    `Continue autonomously — do not ask questions or wait for confirmation: ${response.next || FALLBACK_SUGGESTION}`
+    `${critiqueLine}Continue autonomously — do not ask questions or wait for confirmation: ${response.next || FALLBACK_SUGGESTION}`
   )
 }
 
