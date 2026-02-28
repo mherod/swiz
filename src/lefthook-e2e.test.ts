@@ -259,3 +259,16 @@ describe("lefthook pre-commit e2e: execution order", () => {
     expect(firstCmd).toBe("lint") // lint's priority 1 ran before disk-space's priority 2
   })
 })
+
+// ─── File-placement guard ─────────────────────────────────────────────────────
+
+describe("lefthook test file placement guard", () => {
+  test("all lefthook e2e test files are under src/ (not hooks/ or elsewhere)", async () => {
+    const glob = new Bun.Glob("**/lefthook*.test.ts")
+    const misplaced: string[] = []
+    for await (const file of glob.scan(".")) {
+      if (!file.startsWith("src/")) misplaced.push(file)
+    }
+    expect(misplaced).toEqual([])
+  })
+})
