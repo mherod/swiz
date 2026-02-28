@@ -1,8 +1,10 @@
 # swiz
 
-A cross-agent hooks framework that bullies AI coding agents into disciplined, accountable autonomous behaviour. One manifest of hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules.
+AI coding agents are capable of impressive things. They're also capable of forgetting to commit, shipping debug statements, ignoring failing CI, losing track of what they were supposed to do, and declaring "task complete" the moment they want to stop. **swiz** is a hook framework that doesn't let them get away with any of it.
 
-Hooks block dangerous patterns, enforce task tracking, gate completions on evidence, redirect agents to safe tool alternatives, and inject contextual awareness at every stage of the agent loop.
+One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
+
+**38 hooks. 5 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -13,47 +15,45 @@ bun link
 
 Then use `swiz` from anywhere.
 
-## Plugin Marketplace
+## How It Works
 
-This repo now includes a Claude Code plugin marketplace:
+Every agent exposes hook events at key moments in the loop. swiz intercepts those moments:
 
-- Marketplace catalog: `.claude-plugin/marketplace.json`
-- Plugin: `plugins/swiz-core`
-
-The `swiz-core` plugin currently provides:
-
-- Command: `install` (executes `swiz install` with optional flags)
-- Skills: `swiz-skill`, `swiz-hooks`, `swiz-install`, `swiz-uninstall`, `swiz-status`, `swiz-settings`, `swiz-tasks`, `swiz-shim`, `swiz-dispatch`, `swiz-transcript`, `swiz-continue`, `swiz-cleanup`, `swiz-session`
-- Skill: `enable-auto-continue` (executes `swiz settings enable auto-continue`)
-- Skill: `disable-auto-continue` (executes `swiz settings disable auto-continue`)
-
-Public install flow:
-
-```bash
-/plugin marketplace add mherod/swiz
-/plugin install swiz-core@swiz-marketplace
+```
+User prompt submitted  →  userpromptsubmit-* hooks inject context (git state, active tasks)
+                                        ↓
+Agent calls a tool     →  pretooluse-* hooks can block the call before it executes
+                                        ↓
+Tool completes         →  posttooluse-* hooks validate results, remind about tests
+                                        ↓
+Agent tries to stop    →  stop-* hooks audit the full session state and block if anything is unresolved
 ```
 
-Local development test flow:
+Hooks communicate back using **polyglot JSON** — a single output format that all four agents understand. A hook script written once works identically whether it was triggered by Claude, Cursor, Gemini, or Codex.
 
-```bash
-/plugin marketplace add .
-/plugin install swiz-core@swiz-marketplace
+```json
+{
+  "decision": "block",
+  "reason": "Uncommitted changes detected: 2 modified (3 file(s))...",
+  "hookSpecificOutput": { "permissionDecision": "deny" }
+}
 ```
 
-## Supported Agents
+## The Agent Ecosystem
 
-| Agent | Config Path | Hooks | Status |
-|-------|------------|-------|--------|
-| Claude Code | `~/.claude/settings.json` | nested matcher groups | full support |
-| Cursor IDE | `~/.cursor/hooks.json` | flat list (`version: 1`) | full support |
-| Cursor CLI | `~/.cursor/hooks.json` | flat list (`version: 1`) | **limited** — only `beforeShellExecution` / `afterShellExecution` fire ([tracking](https://forum.cursor.com/t/cursor-cli-doesnt-send-all-events-defined-in-hooks/148316)) |
-| Gemini CLI | `~/.gemini/settings.json` | nested matcher groups | full support |
-| Codex CLI | `~/.codex/config.toml` | Rust-only (no user config) | tool mappings tracked, ready when hooks ship |
+swiz supports every agent that has a hook system, with automatic translation of tool names and event names from a single canonical manifest:
+
+| Agent | Config Path | Status |
+|-------|------------|--------|
+| Claude Code | `~/.claude/settings.json` | Full support — nested matcher groups, all 5 event types |
+| Cursor IDE | `~/.cursor/hooks.json` | Full support — flat list (`version: 1`), all events |
+| Cursor CLI | `~/.cursor/hooks.json` | Limited — only `beforeShellExecution`/`afterShellExecution` fire ([tracking issue](https://forum.cursor.com/t/cursor-cli-doesnt-send-all-events-defined-in-hooks/148316)). Use `swiz shim` as workaround. |
+| Gemini CLI | `~/.gemini/settings.json` | Full support — nested matcher groups, all 5 event types |
+| Codex CLI | `~/.codex/config.toml` | Tool mappings tracked, ready when user-configurable hooks ship |
 
 ### Cross-Agent Translation
 
-Tool names, event names, and config structures are translated per-agent from a single canonical manifest. A hook script works identically regardless of which agent triggers it.
+The canonical manifest uses neutral names. At install time, `agents.ts` translates everything per-agent so hook scripts never need to know which agent ran them:
 
 **Tool Names**
 
@@ -78,15 +78,107 @@ Tool names, event names, and config structures are translated per-agent from a s
 | Session start | `SessionStart` | `sessionStart` | `SessionStart` | — |
 | User prompt | `UserPromptSubmit` | `beforeSubmitPrompt` | `BeforeAgent` | — |
 
-**Hook Output**
+Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_command")` returns `true`) so they work regardless of which agent's name lands in the payload.
 
-Hook scripts emit polyglot JSON that all agents understand — `decision`/`reason` at the top level (Gemini/Codex format) alongside nested `hookSpecificOutput` (Claude/Cursor format) in a single payload.
+## Bundled Hooks
+
+38 hook scripts across 5 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+
+### Stop (16)
+
+Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
+
+| Hook | What it does |
+|------|-------------|
+| `stop-secret-scanner.ts` | Scans staged diffs for API keys, tokens, and credentials. Blocks stop if any are found — because secrets in git history are permanent. |
+| `stop-debug-statements.ts` | Catches `console.log`, `debugger`, and other debug artifacts left in source files. Excludes infrastructure files that legitimately reference these patterns. |
+| `stop-large-files.ts` | Blocks stop if any uncommitted file exceeds the size threshold — preventing accidental binary or generated-file commits. |
+| `stop-git-status.ts` | Unified git workflow enforcer. If there are uncommitted changes, unpushed commits, or the branch is behind remote, it blocks with a numbered action plan: commit → pull → push. One hook, full workflow. |
+| `stop-lockfile-drift.ts` | Detects when `package.json` has been modified but the lockfile hasn't been updated. Agents forget to run `bun install` — this doesn't let them forget. |
+| `stop-lint-staged.ts` | Runs lint-staged on the current working tree before allowing stop. Catches lint and format issues that would block CI. |
+| `stop-branch-conflicts.ts` | Checks for potential merge conflicts with the base branch before the session ends, while there's still time to resolve them cleanly. |
+| `stop-pr-description.ts` | Validates that open PRs have a real description, not an empty template. Forces the agent to document what it built. |
+| `stop-pr-changes-requested.ts` | Blocks stop if the current PR has unresolved change requests from reviewers. The agent doesn't get to declare done while reviewers are waiting. |
+| `stop-github-ci.ts` | Blocks stop if GitHub Actions CI is still running or has failed on the current branch. No shipping broken code. |
+| `stop-todo-tracker.ts` | Scans git diffs for newly introduced `TODO`, `FIXME`, or `HACK` comments. Technical debt accumulates fast — this keeps the bar high. |
+| `stop-changelog-staleness.ts` | Warns when code has changed but the changelog hasn't been updated alongside it. |
+| `stop-completion-auditor.ts` | Reads task files and verifies that every task has actual completion evidence before the session ends. Agents can't just mark things done — they have to prove it. |
+| `stop-personal-repo-issues.ts` | Checks for actionable open GitHub issues, skipping those labelled `blocked`, `upstream`, `wontfix`, `duplicate`, `on-hold`, or `waiting`. Surfaces real work that's been left on the table. |
+| `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
+| `stop-memory-updater.ts` | Extracts confirmed patterns and decisions from the session transcript and writes them to project memory. Runs async — never blocks. The agent gets smarter every session. |
+
+### PreToolUse (11)
+
+PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
+
+| Hook | What it does |
+|------|-------------|
+| `pretooluse-banned-commands.ts` | Blocks `grep` (use `rg`), `sed`/`awk` (use Edit), `rm` (use trash), `cd`, and raw `python`. Redirects to safer, more auditable alternatives. |
+| `pretooluse-no-npm.ts` | Intercepts `npm` and `yarn` commands and redirects to the project's actual package manager. No more lock file corruption from the wrong tool. |
+| `pretooluse-long-sleep.ts` | Blocks `sleep` commands over a threshold. Agents shouldn't be waiting in loops — if they are, something is wrong. |
+| `pretooluse-no-as-any.ts` | Blocks code edits that introduce `as any` type assertions. TypeScript exists for a reason. |
+| `pretooluse-no-eslint-disable.ts` | Blocks edits that add `eslint-disable` comments. The linter is authority — the agent must fix the underlying issue, not silence it. |
+| `pretooluse-no-ts-ignore.ts` | Blocks `@ts-ignore`, `@ts-expect-error`, and `@ts-nocheck` comments in TypeScript files. The type checker is not optional. |
+| `pretooluse-eslint-config-strength.ts` | Prevents weakening ESLint configs — rules can only be added or escalated, never removed or downgraded. Enforces a quality ratchet. |
+| `pretooluse-json-validation.ts` | Validates JSON syntax before any write to a `.json` file. Catches malformed JSON before it breaks the project. |
+| `pretooluse-no-direct-deps.ts` | Blocks direct edits to dependency blocks in `package.json`. Dependencies must go through the package manager, not hand-edited. |
+| `pretooluse-require-tasks.ts` | Blocks Edit, Write, and Shell tools unless the agent has active tasks. No more undisciplined free-form editing — work must be tracked. |
+| `pretooluse-no-task-delegation.ts` | Prevents agents from creating sub-tasks to delegate work instead of doing it. Task creation is for tracking, not avoidance. |
+| `pretooluse-task-subject-validation.ts` | Validates task subjects meet quality standards before they're created — no vague "fix stuff" tasks. |
+
+### PostToolUse (7)
+
+PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
+
+| Hook | What it does |
+|------|-------------|
+| `posttooluse-git-status.ts` | Injects current git status context after every tool use. The agent always knows what state the working tree is in. |
+| `posttooluse-json-validation.ts` | Re-validates JSON files after any edit or write. Catches any JSON that got corrupted during a tool call. |
+| `posttooluse-test-pairing.ts` | Detects when source files were edited without corresponding test updates and reminds the agent. Tests aren't optional. |
+| `posttooluse-task-advisor.ts` | Issues a countdown warning as the agent approaches the task enforcement threshold — before it gets blocked. |
+| `posttooluse-pr-context.ts` | Injects PR context (description, review status, CI state) when the agent checks out a branch. Instant situational awareness. |
+| `posttooluse-prettier-ts.ts` | Auto-formats TypeScript files after edits. Runs async so it never slows the agent down. |
+| `posttooluse-task-subject-validation.ts` | Validates task subjects after creation, catching issues that the pre-creation hook might have missed. |
+
+### SessionStart (2)
+
+| Hook | What it does |
+|------|-------------|
+| `sessionstart-health-snapshot.ts` | Captures a baseline of project health (lint state, test state, git state) at session start so the agent knows what it's walking into. |
+| `sessionstart-compact-context.ts` | Re-injects core project conventions after context compaction events. The agent keeps its bearings even in long sessions. |
+
+### UserPromptSubmit (2)
+
+| Hook | What it does |
+|------|-------------|
+| `userpromptsubmit-git-context.ts` | Injects current git branch and status into every prompt. The agent always knows where it is in the repo. |
+| `userpromptsubmit-task-advisor.ts` | Surfaces active tasks before each prompt so the agent stays focused on what it was supposed to be doing. |
+
+## Plugin Marketplace
+
+swiz ships a Claude Code plugin with a marketplace catalog:
+
+```bash
+# Install from the public marketplace
+/plugin marketplace add mherod/swiz
+/plugin install swiz-core@swiz-marketplace
+
+# Or test locally during development
+/plugin marketplace add .
+/plugin install swiz-core@swiz-marketplace
+```
+
+The `swiz-core` plugin provides:
+
+- **Command**: `install` — runs `swiz install` with optional flags
+- **Skills**: `swiz-skill`, `swiz-hooks`, `swiz-install`, `swiz-uninstall`, `swiz-status`, `swiz-settings`, `swiz-tasks`, `swiz-shim`, `swiz-dispatch`, `swiz-transcript`, `swiz-continue`, `swiz-cleanup`, `swiz-session`
+- **Skills**: `enable-auto-continue`, `disable-auto-continue` — toggle the autonomous work loop per-session or globally
 
 ## Commands
 
 ### `swiz install`
 
-Deploy all 39 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 38 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks
@@ -103,7 +195,6 @@ swiz install --dry-run    # line-by-line unified diff, no writes
 - Dry run shows an LCS-based unified diff of exactly what would change, plus counts of hooks added/replaced/preserved.
 - Creates a `.bak` backup before writing.
 - If a running agent process (e.g. Claude Code) reverts the write within 1.5s, swiz detects and warns you to close sessions first.
-- Non-configurable agents (Codex) are skipped gracefully with an explanation.
 
 ### `swiz uninstall`
 
@@ -158,7 +249,7 @@ swiz skill commit       # print skill with inline commands expanded
 swiz skill --raw commit # raw SKILL.md without expansion
 ```
 
-Skills are discovered from `.skills/` (project-local) and `~/.claude/skills/` (global). The `!`command`` inline syntax is expanded by default — shell commands inside skill content are executed and their output is inlined.
+Skills are discovered from `.skills/` (project-local) and `~/.claude/skills/` (global). The `` !`command` `` inline syntax is expanded by default — shell commands inside skill content are executed and their output is inlined.
 
 ### `swiz shim`
 
@@ -195,7 +286,7 @@ swiz continue --session <id>  # resume a specific session (by ID prefix)
 
 Uses the same AI backend detection as `stop-auto-continue` (`agent` → `claude` → `gemini`). Exits gracefully if no backend is available.
 
-**The loop**: `stop-auto-continue` blocks stop with a suggestion → user runs `swiz continue` → session resumes with that suggestion as the first user prompt.
+**The autonomous loop**: `stop-auto-continue` blocks the agent from stopping, injecting an AI-generated next step suggestion → user runs `swiz continue` → session resumes with that suggestion as the opening prompt → agent works → loop repeats. The agent keeps going until the work is actually done.
 
 ### `swiz tasks [subcommand]`
 
@@ -209,74 +300,6 @@ swiz tasks complete <id> --evidence "text"  # complete with evidence (required)
 swiz tasks status <id> in_progress          # update status
 swiz tasks complete-all                     # bulk-complete remaining
 ```
-
-## Bundled Hooks
-
-39 hook scripts across 5 event types, all TypeScript, using shared utilities from `hooks/hook-utils.ts` (cross-agent tool equivalence, polyglot output, git/gh helpers, portable skill checking):
-
-### Stop (17)
-
-| Hook | What it does |
-|------|-------------|
-| `stop-secret-scanner.ts` | Blocks stop if secrets/API keys detected in staged changes |
-| `stop-debug-statements.ts` | Blocks stop if `console.log`, `debugger`, etc. left in code |
-| `stop-large-files.ts` | Blocks stop if uncommitted files exceed size threshold |
-| `stop-git-status.ts` | Blocks stop if working tree has uncommitted changes |
-| `stop-lockfile-drift.ts` | Blocks stop if lockfile is out of sync with manifest |
-| `stop-lint-staged.ts` | Runs lint-staged on staged files before allowing stop |
-| `stop-git-push.ts` | Warns if commits exist that haven't been pushed |
-| `stop-branch-conflicts.ts` | Checks for merge conflicts with the base branch |
-| `stop-pr-description.ts` | Validates PR description exists and isn't empty |
-| `stop-pr-changes-requested.ts` | Blocks stop if PR has unresolved change requests |
-| `stop-github-ci.ts` | Blocks stop if GitHub Actions CI is failing |
-| `stop-todo-tracker.ts` | Blocks stop if new TODO/FIXME/HACK comments were introduced |
-| `stop-changelog-staleness.ts` | Warns if changelog hasn't been updated alongside code changes |
-| `stop-completion-auditor.ts` | Verifies tasks have completion evidence before allowing stop |
-| `stop-personal-repo-issues.ts` | Checks for actionable open issues (skips blocked/upstream) |
-| `stop-auto-continue.ts` | Blocks stop with an AI-generated "next step" suggestion (enabled by default; toggle globally or per session via `swiz settings`) |
-| `stop-memory-updater.ts` | Extracts confirmed patterns from transcript to project memory (async, never blocks) |
-
-### PreToolUse (11)
-
-| Hook | What it does |
-|------|-------------|
-| `pretooluse-banned-commands.ts` | Blocks `grep` (use `rg`), `sed`/`awk` (use Edit), `rm` (use trash), `cd`, `touch`, raw `python` |
-| `pretooluse-no-npm.ts` | Redirects `npm`/`yarn` to the project's preferred package manager |
-| `pretooluse-long-sleep.ts` | Blocks `sleep` commands over a threshold |
-| `pretooluse-no-as-any.ts` | Blocks code edits that introduce `as any` type assertions |
-| `pretooluse-no-eslint-disable.ts` | Blocks edits adding `eslint-disable` comments |
-| `pretooluse-eslint-config-strength.ts` | Prevents weakening eslint rule severity |
-| `pretooluse-json-validation.ts` | Validates JSON syntax before write |
-| `pretooluse-no-direct-deps.ts` | Blocks direct edits to dependency blocks in package.json — use the package manager |
-| `pretooluse-require-tasks.ts` | Blocks Edit/Write/Shell tools unless at least one task is pending or in progress |
-| `pretooluse-no-task-delegation.ts` | Prevents agents from delegating work to sub-tasks instead of doing it |
-| `pretooluse-task-subject-validation.ts` | Validates task subjects meet quality standards |
-
-### PostToolUse (7)
-
-| Hook | What it does |
-|------|-------------|
-| `posttooluse-git-status.ts` | Injects git status context after any tool use |
-| `posttooluse-json-validation.ts` | Validates JSON files are still valid after edits |
-| `posttooluse-test-pairing.ts` | Reminds agent to write/update tests after code edits |
-| `posttooluse-task-advisor.ts` | Countdown warning — task enforcement is coming |
-| `posttooluse-pr-context.ts` | Injects PR context when checking out branches |
-| `posttooluse-prettier-ts.ts` | Auto-formats TypeScript files after edits (async) |
-| `posttooluse-task-subject-validation.ts` | Validates task subjects after creation |
-
-### SessionStart (2)
-
-| Hook | What it does |
-|------|-------------|
-| `sessionstart-health-snapshot.ts` | Captures project health baseline at session start |
-| `sessionstart-compact-context.ts` | Re-injects core conventions after context compaction |
-
-### UserPromptSubmit (2)
-
-| Hook | What it does |
-|------|-------------|
-| `userpromptsubmit-git-context.ts` | Injects current git branch/status into every prompt |
-| `userpromptsubmit-task-advisor.ts` | Reminds agent about active tasks before each prompt |
 
 ## Architecture
 
@@ -304,12 +327,12 @@ swiz/
     ├── hook-utils.ts         # Shared utilities: tool equivalence, polyglot output, git/gh, skill checking
     ├── shim.sh               # Shell wrapper functions (sourced from profile)
     ├── task-subject-validation.ts  # Shared validation logic
-    └── *.ts                  # 39 hook scripts (all TypeScript)
+    └── *.ts                  # 38 hook scripts (all TypeScript)
 ```
 
 The canonical hook manifest lives in `src/manifest.ts`. Each hook group specifies an event, an optional tool matcher, and a list of scripts. At install time, `agents.ts` translates matchers (`Bash` → `Shell` for Cursor, `Bash` → `run_shell_command` for Gemini) and events (`Stop` → `stop` for Cursor, `Stop` → `AfterAgent` for Gemini), then generates the correct config structure per agent.
 
-Hook scripts themselves use the equivalence sets from `hook-utils.ts` (e.g. `isShellTool("run_shell_command")` returns `true`) so they work regardless of which agent's tool name is in the payload.
+Hook scripts use the equivalence sets from `hook-utils.ts` (e.g. `isShellTool("run_shell_command")` returns `true`) so they work regardless of which agent's tool name is in the payload.
 
 ## Known Limitations
 
