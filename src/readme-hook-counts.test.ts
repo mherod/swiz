@@ -112,7 +112,114 @@ function manifestHookFiles(): Set<string> {
   return files
 }
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
+// ─── Parser unit tests (synthetic inputs) ────────────────────────────────────
+
+describe("parseReadme parser", () => {
+  test("counts table rows only outside code fences", () => {
+    const text = [
+      "### Stop (1)",
+      "| `stop-real.ts` | actual hook |",
+      "```bash",
+      "| `stop-fake.ts` | example inside fence — should not count |",
+      "```",
+    ].join("\n")
+    const { sectionCounts } = parseReadme(text)
+    expect(sectionCounts["Stop"]).toBe(1)
+  })
+
+  test("does not add hook filenames inside code fences to referencedHooks", () => {
+    const text = [
+      "### Stop (1)",
+      "| `stop-real.ts` | actual hook |",
+      "```bash",
+      "bun hooks/stop-fake.ts",
+      "```",
+    ].join("\n")
+    const { referencedHooks } = parseReadme(text)
+    expect(referencedHooks).toContain("stop-real.ts")
+    expect(referencedHooks).not.toContain("stop-fake.ts")
+  })
+
+  test("heading without parenthetical count is not added to headingClaims", () => {
+    // If the format changes from '### Stop (14)' to '### Stop', headingClaims
+    // stays empty for that section. The manifest-comparison test then catches
+    // the missing rows because sectionCounts will also be 0 (no section is
+    // activated without a matching count heading).
+    const text = ["### Stop", "| `stop-foo.ts` | desc |"].join("\n")
+    const { headingClaims, sectionCounts } = parseReadme(text)
+    expect(headingClaims["Stop"]).toBeUndefined()
+    expect(sectionCounts["Stop"]).toBeUndefined()
+  })
+
+  test("## heading resets section so subsequent rows are not miscounted", () => {
+    const text = [
+      "### Stop (1)",
+      "| `stop-real.ts` | desc |",
+      "## Commands",
+      "| `stop-fake.ts` | inside Commands section, not Stop |",
+    ].join("\n")
+    const { sectionCounts } = parseReadme(text)
+    expect(sectionCounts["Stop"]).toBe(1)
+  })
+
+  test("duplicate hook filename in a table increments row count twice", () => {
+    // Duplicates inflate sectionCounts above the manifest count — the
+    // manifest-comparison test will catch this, but preserving raw counts
+    // lets callers also detect duplicates directly.
+    const text = [
+      "### Stop (2)",
+      "| `stop-foo.ts` | first entry |",
+      "| `stop-foo.ts` | duplicate entry |",
+    ].join("\n")
+    const { sectionCounts, referencedHooks } = parseReadme(text)
+    expect(sectionCounts["Stop"]).toBe(2)
+    expect(referencedHooks.filter((f) => f === "stop-foo.ts")).toHaveLength(2)
+  })
+
+  test("multiple sections are tracked independently", () => {
+    const text = [
+      "### Stop (2)",
+      "| `stop-a.ts` | desc |",
+      "| `stop-b.ts` | desc |",
+      "### PreToolUse (1)",
+      "| `pretooluse-a.ts` | desc |",
+    ].join("\n")
+    const { sectionCounts, headingClaims } = parseReadme(text)
+    expect(sectionCounts["Stop"]).toBe(2)
+    expect(headingClaims["Stop"]).toBe(2)
+    expect(sectionCounts["PreToolUse"]).toBe(1)
+    expect(headingClaims["PreToolUse"]).toBe(1)
+  })
+
+  test("unclosed code fence causes all subsequent rows to be ignored", () => {
+    // An unclosed fence is a documentation bug, but the parser must not crash.
+    // Rows after the missing closing fence are silently ignored — this test
+    // documents that behaviour so future readers know it's intentional.
+    const text = [
+      "### Stop (1)",
+      "| `stop-before.ts` | counted |",
+      "```bash",
+      "| `stop-after.ts` | NOT counted — fence never closed |",
+    ].join("\n")
+    const { sectionCounts } = parseReadme(text)
+    expect(sectionCounts["Stop"]).toBe(1)
+  })
+
+  test("alternating fence open/close restores section tracking", () => {
+    const text = [
+      "### Stop (2)",
+      "| `stop-a.ts` | before fence |",
+      "```bash",
+      "inside fence — ignored",
+      "```",
+      "| `stop-b.ts` | after fence — should still count |",
+    ].join("\n")
+    const { sectionCounts } = parseReadme(text)
+    expect(sectionCounts["Stop"]).toBe(2)
+  })
+})
+
+// ─── Live README tests ────────────────────────────────────────────────────────
 
 describe("README hook accuracy", () => {
   const readmeText = readFileSync(README_PATH, "utf8")
@@ -153,6 +260,40 @@ describe("README hook accuracy", () => {
       }
     }
     expect(mismatches).toEqual([])
+  })
+
+  test("no section table contains duplicate hook filenames", () => {
+    // Duplicates would inflate sectionCounts above the manifest count (caught
+    // by the manifest-comparison test), but surfacing them here gives a clearer
+    // failure message pointing at the specific file and section.
+    const hooksBySection: Record<string, string[]> = {}
+    let currentSection = ""
+    let inFence = false
+    for (const line of readmeText.split("\n")) {
+      const ls = line.trim()
+      if (ls.startsWith("```")) { inFence = !inFence; continue }
+      if (inFence) continue
+      for (const name of ["Stop", "PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit"]) {
+        if (ls.match(new RegExp(`^### ${name}`))) { currentSection = name; break }
+      }
+      if (ls.startsWith("## ")) currentSection = ""
+      if (currentSection && ls.startsWith("|") && ls.includes(".ts") && !/^\|[-| :]+\|/.test(ls)) {
+        const m = ls.match(/`((?:stop|pretooluse|posttooluse|sessionstart|userpromptsubmit)-[a-z-]+\.ts)`/)
+        if (m?.[1]) {
+          hooksBySection[currentSection] ??= []
+          ;(hooksBySection[currentSection] as string[]).push(m[1])
+        }
+      }
+    }
+    const duplicates: string[] = []
+    for (const [section, hooks] of Object.entries(hooksBySection)) {
+      const seen = new Set<string>()
+      for (const h of hooks) {
+        if (seen.has(h)) duplicates.push(`${section}: ${h}`)
+        seen.add(h)
+      }
+    }
+    expect(duplicates).toEqual([])
   })
 
   test("total hook count in README intro matches manifest total", () => {
