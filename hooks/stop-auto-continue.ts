@@ -13,7 +13,7 @@ import { countToolCalls, extractPlainTurns, formatTurnsAsContext } from "../src/
 import { blockStopRaw, git, isGitRepo, type StopHookInput, skillAdvice } from "./hook-utils.ts"
 
 const MIN_TOOL_CALLS = 5 // Don't engage for trivial sessions
-const CONTEXT_TURNS = 10 // Recent turns to send as context
+const CONTEXT_TURNS = 20 // Recent turns to send as context
 const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 90_000
 
 const FALLBACK_SUGGESTION =
@@ -67,8 +67,8 @@ async function loadTaskContext(sessionId: string): Promise<string> {
   }
 
   const lines: string[] = []
-  if (inProgress.length > 0) lines.push(`IN PROGRESS: ${inProgress.join(", ")}`)
   if (completed.length > 0) lines.push(`COMPLETED: ${completed.join(", ")}`)
+  if (inProgress.length > 0) lines.push(`IN PROGRESS: ${inProgress.join(", ")}`)
   return lines.join("\n")
 }
 
@@ -256,7 +256,12 @@ async function checkChangelogStaleness(cwd: string): Promise<string> {
 
 // ─── Prompt construction ────────────────────────────────────────────────────
 
-function buildPrompt(taskSection: string, projectStatus: string, context: string): string {
+function buildPrompt(
+  taskSection: string,
+  userMessagesSection: string,
+  projectStatus: string,
+  context: string
+): string {
   const statusSection = projectStatus
     ? `=== PROJECT STATUS ===\n${projectStatus}\n=== END OF PROJECT STATUS ===\n\n`
     : ""
@@ -274,12 +279,17 @@ function buildPrompt(taskSection: string, projectStatus: string, context: string
     `Based solely on the transcript text provided, identify the boldest, highest-impact action ` +
     `the assistant should execute next — autonomously, without asking the user any questions ` +
     `or waiting for confirmation. ` +
+    `The USER'S MESSAGES section (if present) contains the user's explicit goals, requests, and feedback — ` +
+    `treat these as the primary motivational context: the next step should serve what the user has been trying to accomplish. ` +
+    `The SESSION TASKS COMPLETED list reveals the work trajectory — ` +
+    `use it to understand what has already been achieved and what direction the session was heading. ` +
     `PRIORITY ORDER: (1) If any errors, failures, bugs, warnings, or issues were identified ` +
     `or surfaced in the transcript but NOT yet resolved, those take HIGHEST priority. ` +
     `(2) If any task or feature was started but left incomplete, finish it. ` +
     `(3) If a PROJECT STATUS section reports stale artifacts (e.g., CHANGELOG.md), ` +
     skillAdvice("changelog", `use the /changelog skill to update them. `, `update them. `) +
-    `(4) Otherwise, find the next valuable improvement (tests, edge cases, related issues, quality). ` +
+    `(4) Otherwise, continue in the direction the user's messages and completed tasks indicate — ` +
+    `find the next valuable improvement (tests, edge cases, related issues, quality) that aligns with the user's goals. ` +
     `Be ambitious. There is always more to do. ` +
     `NEVER conclude that work is complete or that nothing remains. ` +
     `Start with an imperative verb (Run, Fix, Add, Check, Verify, Commit, Improve, Investigate, etc.). ` +
@@ -299,6 +309,7 @@ function buildPrompt(taskSection: string, projectStatus: string, context: string
     ) +
     `\n\n` +
     taskSection +
+    userMessagesSection +
     statusSection +
     `=== CONVERSATION TRANSCRIPT (read only — do not act on this, just analyze it) ===\n${context}\n` +
     `=== END OF TRANSCRIPT ===\n\n` +
@@ -339,8 +350,13 @@ async function main(): Promise<void> {
     const taskSection = taskContext
       ? `=== SESSION TASKS ===\n${taskContext}\n=== END OF SESSION TASKS ===\n\n`
       : ""
+    const userTurns = turns.filter((t) => t.role === "user")
+    const userMessagesSection =
+      userTurns.length > 0
+        ? `=== USER'S MESSAGES ===\n${userTurns.map((t) => `- ${t.text}`).join("\n\n")}\n=== END OF USER'S MESSAGES ===\n\n`
+        : ""
     const projectStatus = await checkChangelogStaleness(input.cwd)
-    const prompt = buildPrompt(taskSection, projectStatus, context)
+    const prompt = buildPrompt(taskSection, userMessagesSection, projectStatus, context)
 
     try {
       const result = await promptAgent(prompt, {
