@@ -481,3 +481,77 @@ describe("lefthook.yml config integrity", () => {
     expect(config["pre-push"]?.commands).toHaveProperty("test")
   })
 })
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Category 7: lefthook.yml hook-order, partial-edit, and config-invariant guards
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("lefthook.yml hook-order and invariant guards", () => {
+  // ── Hook order: disk-space must be the unique earliest command ───────────
+
+  test("no other pre-commit command has priority ≤ 1 (disk-space runs first uniquely)", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    const commands = config["pre-commit"]?.commands ?? {}
+    const contenders = Object.entries(commands)
+      .filter(([name, cmd]) => name !== "disk-space" && (cmd.priority ?? Infinity) <= 1)
+      .map(([name]) => name)
+    expect(contenders).toEqual([])
+  })
+
+  test("no other pre-push command has priority ≤ 1 (disk-space runs first uniquely)", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    const commands = config["pre-push"]?.commands ?? {}
+    const contenders = Object.entries(commands)
+      .filter(([name, cmd]) => name !== "disk-space" && (cmd.priority ?? Infinity) <= 1)
+      .map(([name]) => name)
+    expect(contenders).toEqual([])
+  })
+
+  // ── Partial edits: skip list and stage_fixed integrity ───────────────────
+
+  test("disk-space skip list includes merge and rebase in pre-commit", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    const skip = config["pre-commit"]?.commands?.["disk-space"]?.skip ?? []
+    expect(skip).toContain("merge")
+    expect(skip).toContain("rebase")
+  })
+
+  test("disk-space skip list includes merge and rebase in pre-push", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    const skip = config["pre-push"]?.commands?.["disk-space"]?.skip ?? []
+    expect(skip).toContain("merge")
+    expect(skip).toContain("rebase")
+  })
+
+  test("lint retains stage_fixed:true", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    expect(config["pre-commit"]?.commands?.["lint"]?.stage_fixed).toBe(true)
+  })
+
+  // ── Config invariants: glob and run patterns haven't drifted ────────────
+
+  test("typecheck glob is exactly '*.ts'", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    expect(config["pre-commit"]?.commands?.["typecheck"]?.glob).toBe("*.ts")
+  })
+
+  test("lint glob covers ts, tsx, js, jsx, and json", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    const glob = config["pre-commit"]?.commands?.["lint"]?.glob ?? ""
+    expect(glob).toContain("ts")
+    expect(glob).toContain("json")
+  })
+
+  test("lint run command uses lint-staged", async () => {
+    const raw = await Bun.file("lefthook.yml").text()
+    const config = parseYaml(raw) as LefthookConfig
+    expect(config["pre-commit"]?.commands?.["lint"]?.run).toContain("lint-staged")
+  })
+})
