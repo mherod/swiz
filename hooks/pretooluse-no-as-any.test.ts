@@ -408,6 +408,9 @@ describe("concurrent stdout+stderr drain — pipe-buffer stress", () => {
   })
 })
 
+// Bun runtime gate — used by skipIf/runIf guards below and in the enforcement block
+const IS_BUN = !!process.versions.bun
+
 // ─── Bun eager-buffering behavior — pipe-drain correctness ───────────────────
 //
 // Bun calls uv_read_start() on BOTH stdout and stderr immediately when a
@@ -437,61 +440,71 @@ describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
     `process.stdout.write("O".repeat(${DEADLOCK_VOLUME}));`,
   ].join(" ")
 
-  it("await proc.exited before reading completes immediately (proves eager buffering)", async () => {
-    // In a blocking runtime: awaiting proc.exited here would hang forever
-    // because the subprocess is stuck in write(2) waiting for a reader to
-    // drain the pipe. In Bun: uv_read_start() eagerly drains the OS pipe so
-    // the subprocess finishes its writes and exits before we read anything.
-    const proc = Bun.spawn(["bun", "-e", SCRIPT], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    proc.stdin.end()
+  // These two tests are Bun-specific: awaiting proc.exited before reading, or
+  // reading streams sequentially, would deadlock in non-Bun runtimes above the
+  // OS pipe buffer limit. Skip them entirely outside Bun.
+  it.skipIf(!IS_BUN)(
+    "await proc.exited before reading completes immediately (proves eager buffering)",
+    async () => {
+      // In a blocking runtime: awaiting proc.exited here would hang forever
+      // because the subprocess is stuck in write(2) waiting for a reader to
+      // drain the pipe. In Bun: uv_read_start() eagerly drains the OS pipe so
+      // the subprocess finishes its writes and exits before we read anything.
+      const proc = Bun.spawn(["bun", "-e", SCRIPT], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      proc.stdin.end()
 
-    // Await exit BEFORE reading any stream — the definitive eager-buffer proof.
-    await proc.exited
+      // Await exit BEFORE reading any stream — the definitive eager-buffer proof.
+      await proc.exited
 
-    // Data is already in Bun's internal buffers; read it out now.
-    const stdout = await new Response(proc.stdout).text()
-    const stderr = await new Response(proc.stderr).text()
+      // Data is already in Bun's internal buffers; read it out now.
+      const stdout = await new Response(proc.stdout).text()
+      const stderr = await new Response(proc.stderr).text()
 
-    expect(stdout).toHaveLength(DEADLOCK_VOLUME)
-    expect(stderr).toHaveLength(DEADLOCK_VOLUME)
-    expect(proc.exitCode).toBe(0)
-  })
+      expect(stdout).toHaveLength(DEADLOCK_VOLUME)
+      expect(stderr).toHaveLength(DEADLOCK_VOLUME)
+      expect(proc.exitCode).toBe(0)
+    }
+  )
 
-  it("sequential reads complete without deadlock in Bun (cross-runtime unsafe pattern)", async () => {
-    // Sequential: read stdout to EOF first, then stderr.
-    // In Node.js / blocking runtimes this deadlocks when the subprocess
-    // writes stderr > pipe-buffer before stdout. In Bun it completes
-    // because both streams are already buffered by uv_read_start().
-    // DON'T rely on this in cross-runtime code — use Promise.all instead.
-    const proc = Bun.spawn(["bun", "-e", SCRIPT], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    proc.stdin.end()
+  it.skipIf(!IS_BUN)(
+    "sequential reads complete without deadlock in Bun (cross-runtime unsafe pattern)",
+    async () => {
+      // Sequential: read stdout to EOF first, then stderr.
+      // In Node.js / blocking runtimes this deadlocks when the subprocess
+      // writes stderr > pipe-buffer before stdout. In Bun it completes
+      // because both streams are already buffered by uv_read_start().
+      // DON'T rely on this in cross-runtime code — use Promise.all instead.
+      const proc = Bun.spawn(["bun", "-e", SCRIPT], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      proc.stdin.end()
 
-    let capturedStdout = ""
-    let capturedStderr = ""
+      let capturedStdout = ""
+      let capturedStderr = ""
 
-    const result = await Promise.race([
-      (async () => {
-        capturedStdout = await new Response(proc.stdout).text()
-        capturedStderr = await new Response(proc.stderr).text()
-        await proc.exited
-        return "completed" as const
-      })(),
-      new Promise<"timed-out">((resolve) => setTimeout(() => resolve("timed-out"), 3_000)),
-    ])
+      const result = await Promise.race([
+        (async () => {
+          capturedStdout = await new Response(proc.stdout).text()
+          capturedStderr = await new Response(proc.stderr).text()
+          await proc.exited
+          return "completed" as const
+        })(),
+        new Promise<"timed-out">((resolve) => setTimeout(() => resolve("timed-out"), 3_000)),
+      ])
 
-    expect(result).toBe("completed")
-    // Sequential reads return full data when Bun's eager buffering is active
-    expect(capturedStdout).toHaveLength(DEADLOCK_VOLUME)
-    expect(capturedStderr).toHaveLength(DEADLOCK_VOLUME)
-  }, 8_000)
+      expect(result).toBe("completed")
+      // Sequential reads return full data when Bun's eager buffering is active
+      expect(capturedStdout).toHaveLength(DEADLOCK_VOLUME)
+      expect(capturedStderr).toHaveLength(DEADLOCK_VOLUME)
+    },
+    8_000
+  )
 
   it("concurrent Promise.all drain works — the cross-runtime safe pattern", async () => {
     // Promise.all drains both streams simultaneously.
@@ -514,4 +527,66 @@ describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
     expect(stderr).toHaveLength(DEADLOCK_VOLUME)
     expect(proc.exitCode).toBe(0)
   })
+})
+
+// ─── Promise.all drain enforcement — cross-runtime portability guard ─────────
+//
+// Two-part guard:
+//
+// 1. STATIC SCAN (all runtimes): scans every non-test hook source file for
+//    sequential stdout/stderr drain patterns. Fails immediately if any hook
+//    drains both streams with separate awaits instead of Promise.all.
+//
+// 2. RUNTIME TRIPWIRE (non-Bun only): runs only outside Bun and immediately
+//    throws, documenting that sequential drain is unsafe in these runtimes.
+
+describe("Promise.all drain enforcement — cross-runtime portability guard", () => {
+  it("hook source files must use Promise.all for concurrent stdout/stderr drain", async () => {
+    // Collect all non-test *.ts files in the hooks directory.
+    const hookFiles: string[] = []
+    for await (const f of new Bun.Glob("*.ts").scan({ cwd: import.meta.dir, absolute: true })) {
+      if (!f.endsWith(".test.ts")) hookFiles.push(f)
+    }
+
+    // Detect sequential drain: two separate awaits on proc.stdout and proc.stderr
+    // (in either order) within ~500 chars, without a Promise.all wrapping them.
+    const SEQ_DRAIN_RE =
+      /await new Response\(proc\.(stdout|stderr)\)\.text\(\)([\s\S]{1,500}?)await new Response\(proc\.(stdout|stderr)\)\.text\(\)/g
+
+    for (const file of hookFiles) {
+      const src = await Bun.file(file).text()
+      for (const m of src.matchAll(SEQ_DRAIN_RE)) {
+        const [, first, , second] = m
+        if (first === second) continue // same stream twice — not a cross-drain pattern
+        // Check that a Promise.all wraps the pair (look up to 300 chars before the match)
+        const before = src.slice(Math.max(0, (m.index ?? 0) - 300), m.index)
+        if (!before.includes("Promise.all(")) {
+          const relPath = file.slice(import.meta.dir.length + 1)
+          throw new Error(
+            `${relPath}: sequential ${first}/${second} drain detected outside Promise.all. ` +
+              `This deadlocks in non-Bun runtimes when output exceeds the OS pipe buffer. ` +
+              `Replace with:\n\n` +
+              `  const [stdout, stderr] = await Promise.all([\n` +
+              `    new Response(proc.stdout).text(),\n` +
+              `    new Response(proc.stderr).text(),\n` +
+              `  ])`
+          )
+        }
+      }
+    }
+  })
+
+  // Tripwire: runs ONLY outside Bun. Immediately fails to prevent misuse of
+  // the Bun-specific sequential drain patterns documented in this file.
+  it.skipIf(IS_BUN)(
+    "NON-BUN RUNTIME DETECTED: sequential drain deadlocks here — enforce Promise.all",
+    () => {
+      throw new Error(
+        "This test suite is running outside Bun. " +
+          "Sequential proc.stdout / proc.stderr drain will deadlock when output exceeds " +
+          "the OS pipe buffer (macOS/Linux: 65 536 bytes). " +
+          "Always use Promise.all for concurrent drain in cross-runtime code."
+      )
+    }
+  )
 })
