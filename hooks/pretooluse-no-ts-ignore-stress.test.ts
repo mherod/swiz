@@ -133,15 +133,34 @@ describe("pretooluse-no-ts-ignore: multiline block comments", () => {
     expect(result.decision).toBe("allow")
   })
 
-  // ── Known limitation ──────────────────────────────────────────────────────
-  // JSDoc-style multiline comments indent each line with " * ". The asterisk
-  // is non-whitespace, so \s* stops before it and the directive is not
-  // detected even though TypeScript itself recognises it. This is a genuine
-  // blind spot in the hook regex.
-  test(`KNOWN LIMITATION: JSDoc " * @${KW_IGNORE}" style is not caught`, async () => {
+  test(`JSDoc " * @${KW_IGNORE}" style is caught`, async () => {
+    // [\s*]* in the block-comment branch skips " * " JSDoc line prefixes
     const result = await runHook({ newString: `/**\n * @${KW_IGNORE}\n */\nconst x = 1` })
-    // If this test flips to "deny", the hook has been improved to cover JSDoc.
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`JSDoc " * @${KW_NOCHECK}" style is caught`, async () => {
+    const result = await runHook({ newString: `/**\n * @${KW_NOCHECK}\n */\nexport const x = 1` })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`JSDoc bare " * @${KW_EXPECT}" with no description is caught`, async () => {
+    const result = await runHook({ newString: `/**\n * @${KW_EXPECT}\n */\nconst x = 1` })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`JSDoc " * @${KW_EXPECT}: reason" with description is allowed`, async () => {
+    const result = await runHook({
+      newString: `/**\n * @${KW_EXPECT}: upstream types wrong\n */\nconst x = badLib()`,
+    })
     expect(result.decision).toBe("allow")
+  })
+
+  test(`deeply nested JSDoc with @${KW_IGNORE} on second line is caught`, async () => {
+    const result = await runHook({
+      newString: `/**\n * Some doc\n * @${KW_IGNORE}\n */\nconst x = 1`,
+    })
+    expect(result.decision).toBe("deny")
   })
 })
 

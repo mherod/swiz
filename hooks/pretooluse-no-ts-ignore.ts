@@ -32,8 +32,22 @@ async function main() {
 
   // Block @ts-nocheck — disables ALL type checking for the entire file at once.
   // Keywords split across array to avoid self-triggering when editing this hook.
+  //
+  // Three detection patterns (all with multiline flag):
+  //   1. //\s*@directive       — line comment
+  //   2. /\*\s*@directive      — direct block comment (/* @directive, /*@directive, /*\n@directive)
+  //   3. ^\s*\*\s*@directive   — JSDoc interior line (" * @directive"), anchored to line start
+  //
+  // Pattern 3 catches directives on any JSDoc line regardless of preceding content
+  // (e.g. "/**\n * Some doc\n * @ts-ignore\n */") without false-positiving on
+  // "/* some text, @ts-ignore */" where the * is mid-line, not line-start.
   const kwNoCheck = ["ts", "nocheck"].join("-")
-  if (new RegExp(`(?://|/\\*)\\s*@${kwNoCheck}`).test(content)) {
+  if (
+    new RegExp(
+      `(?://\\s*@${kwNoCheck}|/\\*\\s*@${kwNoCheck}|^\\s*\\*\\s*@${kwNoCheck})`,
+      "m"
+    ).test(content)
+  ) {
     const reason = [
       "TypeScript is the authority. Do not bypass, ignore, or argue with it.",
       "",
@@ -54,7 +68,13 @@ async function main() {
     denyPreToolUse(reason)
   }
 
-  if (new RegExp(`(?://|/\\*)\\s*@${kwIgnore}`).test(content)) {
+  // Same three-pattern approach for @ts-ignore.
+  if (
+    new RegExp(
+      `(?://\\s*@${kwIgnore}|/\\*\\s*@${kwIgnore}|^\\s*\\*\\s*@${kwIgnore})`,
+      "m"
+    ).test(content)
+  ) {
     const reason = [
       "TypeScript is the authority. Do not bypass, ignore, or argue with it.",
       "",
@@ -80,12 +100,13 @@ async function main() {
 
   // Allow @ts-expect-error only when accompanied by a description.
   // A bare directive with no explanation is as opaque as @ts-ignore.
-  // Two bare forms are caught:
-  //   1. Line comment ending the line:   // @ts-expect-error<EOL>
-  //   2. Block comment with no content:  /* @ts-expect-error  */ (closing immediately after)
-  // A description — any non-whitespace text before the EOL or closing */ — is sufficient.
+  // Three bare forms are caught:
+  //   1. Line comment at EOL:           //\s*@directive\s*$
+  //   2. Direct block comment:          /\*\s*@directive(\s*$|\s*\*/)
+  //   3. JSDoc interior at EOL:         ^\s*\*\s*@directive\s*$
+  // A description — any non-whitespace text after the directive — allows it through.
   const bareExpectRe = new RegExp(
-    `(?://|/\\*)\\s*@${kwExpect}(?:\\s*$|\\s*\\*/)`,
+    `(?://\\s*@${kwExpect}\\s*$|/\\*\\s*@${kwExpect}(?:\\s*$|\\s*\\*/)|^\\s*\\*\\s*@${kwExpect}\\s*$)`,
     "m"
   )
   if (bareExpectRe.test(content)) {
