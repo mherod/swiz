@@ -4,7 +4,7 @@
 
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
-import { blockStop, extractToolNamesFromTranscript, type StopHookInput } from "./hook-utils.ts"
+import { blockStop, extractToolNamesFromTranscript, formatActionPlan, type StopHookInput } from "./hook-utils.ts"
 
 const TOOL_CALL_THRESHOLD = 10
 
@@ -60,8 +60,10 @@ async function main(): Promise<void> {
       blockStop(
         `No tasks were created this session (${toolCallCount} tool calls made).\n\n` +
           "Create tasks to record the work done:\n" +
-          "  1. TaskCreate for each significant piece of work\n" +
-          "  2. TaskUpdate (status: completed) on each task"
+          formatActionPlan([
+            "TaskCreate for each significant piece of work",
+            "TaskUpdate (status: completed) on each task",
+          ])
       )
     }
     return
@@ -126,8 +128,10 @@ async function main(): Promise<void> {
       blockStop(
         `No completed tasks on record (${toolCallCount} tool calls made).\n\n` +
           "Create tasks to record the work done:\n" +
-          "  1. TaskCreate for each significant piece of work\n" +
-          "  2. TaskUpdate (status: completed) on each task"
+          formatActionPlan([
+            "TaskCreate for each significant piece of work",
+            "TaskUpdate (status: completed) on each task",
+          ])
       )
     }
     return

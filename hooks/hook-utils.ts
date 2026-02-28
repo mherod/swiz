@@ -215,6 +215,16 @@ export function emitContext(eventName: string, context: string): never {
 
 // ─── Stop hook helpers ────────────────────────────────────────────────────
 
+/**
+ * Format a numbered action plan for inclusion in stop hook block reasons.
+ * Returns an "Action plan:\n  1. ...\n  2. ..." block ready to append to a reason string.
+ */
+export function formatActionPlan(steps: string[]): string {
+  if (steps.length === 0) return ""
+  const numbered = steps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")
+  return `Action plan:\n${numbered}\n`
+}
+
 /** Standard ACTION REQUIRED footer appended to all stop hook block reasons. */
 export function actionRequired(): string {
   const reassess = skillAdvice(

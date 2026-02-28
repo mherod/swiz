@@ -6,6 +6,7 @@
 import {
   blockStop,
   createSessionTask,
+  formatActionPlan,
   getGitAheadBehind,
   git,
   isGitRepo,
@@ -115,10 +116,7 @@ async function main(): Promise<void> {
     )
   }
 
-  reason += "Action plan:\n"
-  steps.forEach((step, i) => {
-    reason += `  ${i + 1}. ${step}\n`
-  })
+  reason += formatActionPlan(steps)
 
   // ── Task creation ─────────────────────────────────────────────────────
 
