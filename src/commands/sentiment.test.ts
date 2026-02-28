@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { scoreSentiment } from "./sentiment.ts"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { scoreSentiment, sentimentCommand } from "./sentiment.ts"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -506,5 +506,270 @@ describe("return shape", () => {
     const m = approvalMatches.find((x) => x.label === "correctly (×N)")
     expect(m).toBeDefined()
     expect(m!.count).toBe(4)
+  })
+})
+
+// ─── Untested approval patterns ───────────────────────────────────────────────
+
+describe("untested approval patterns", () => {
+  it("'all checks now green' registers", () => {
+    expect(approvalLabels("All checks now green.")).toContain("all checks now green")
+    expect(approvalLabels("All now green.")).toContain("all checks now green")
+  })
+
+  it("'ready for implementation' registers", () => {
+    expect(approvalLabels("The issue is ready for implementation.")).toContain(
+      "ready for implementation"
+    )
+  })
+
+  it("'overall implementation is' registers endorsed signal", () => {
+    expect(approvalLabels("The overall implementation is clean and well-scoped.")).toContain(
+      "overall implementation endorsed"
+    )
+  })
+
+  it("'clean, minimal' registers as clean + qualifier", () => {
+    expect(approvalLabels("Clean, minimal change.")).toContain("clean + qualifier")
+  })
+
+  it("'correct, backwards-compatible' registers as clean + qualifier", () => {
+    expect(approvalLabels("Correct, backwards-compatible refactor.")).toContain("clean + qualifier")
+  })
+
+  it("'no logic changes' registers as approval signal", () => {
+    expect(approvalLabels("No logic changes in this PR.")).toContain("no logic changes")
+    expect(score("No logic changes.")).toBeGreaterThan(0)
+  })
+
+  it("'CI passes (lint, typecheck)' detail registers", () => {
+    expect(approvalLabels("CI passes (lint, typecheck, build).")).toContain(
+      "CI passes (lint/typecheck detail)"
+    )
+    expect(approvalLabels("CI passed (lint, typecheck).")).toContain(
+      "CI passes (lint/typecheck detail)"
+    )
+  })
+
+  it("'stale review dismissed, now ready' label is asserted directly", () => {
+    const text = "Stale reviews dismissed. Ready."
+    expect(approvalLabels(text)).toContain("stale review dismissed, now ready")
+    expect(score(text)).toBeGreaterThan(0.6)
+  })
+})
+
+// ─── Untested rejection patterns ──────────────────────────────────────────────
+
+describe("untested rejection patterns", () => {
+  it("'CI is failing' registers (distinct from CI Failure)", () => {
+    expect(rejectionLabels("CI is failing due to a lint error.")).toContain("CI failing")
+    expect(score("CI is failing.")).toBeLessThan(-0.5)
+  })
+
+  it("'CI is failed' also matches the CI failing pattern", () => {
+    expect(rejectionLabels("CI is failed on the functions build.")).toContain("CI failing")
+  })
+
+  it("'no tests for' registers as no tests added", () => {
+    expect(rejectionLabels("No tests for the new handler.")).toContain("no tests added")
+  })
+
+  it("'no tests were added' registers", () => {
+    expect(rejectionLabels("No tests were added in this PR.")).toContain("no tests added")
+  })
+
+  it("'no tests have been added' registers", () => {
+    expect(rejectionLabels("No tests have been added.")).toContain("no tests added")
+  })
+
+  it("'tests must cover' registers as rejection", () => {
+    expect(rejectionLabels("Tests must cover the 200, 400, and 403 cases.")).toContain(
+      "tests must cover"
+    )
+    expect(score("Tests must cover the error paths.")).toBeLessThan(-0.3)
+  })
+
+  it("'Unmet ... blocker' registers as unmet blocker condition", () => {
+    expect(rejectionLabels("Unmet condition that acts as a blocker.")).toContain(
+      "unmet blocker condition"
+    )
+  })
+})
+
+// ─── collectMatches cap-at-1 behaviour ───────────────────────────────────────
+
+describe("collectMatches cap-at-1 for non-repeating patterns", () => {
+  it("'safe to merge' appearing twice still has count=1", () => {
+    const text = "Safe to merge. Please merge safely — safe to merge when ready."
+    const { approvalMatches } = scoreSentiment(text)
+    const m = approvalMatches.find((x) => x.label === "safe to merge")
+    expect(m).toBeDefined()
+    expect(m!.count).toBe(1)
+  })
+
+  it("'CI failure' appearing twice still contributes weight once", () => {
+    const text = "CI Failure on step 1. CI Failure on step 2."
+    const { rejectionMatches } = scoreSentiment(text)
+    const m = rejectionMatches.find((x) => x.label === "CI failure")
+    expect(m).toBeDefined()
+    expect(m!.count).toBe(1)
+    // Weight × count = -0.65 × 1, not doubled
+    expect(Math.abs(m!.weight * m!.count)).toBeCloseTo(0.65)
+  })
+})
+
+// ─── Verdict LIKELY REJECTED band ────────────────────────────────────────────
+
+describe("verdict LIKELY REJECTED band", () => {
+  it("score in (-0.5, -0.2) range represents LIKELY REJECTED territory", () => {
+    // "re-request review" (-0.25) alone puts us in LIKELY REJECTED
+    const s = score("Please re-request review once the changes are made.")
+    expect(s).toBeGreaterThan(-0.5)
+    expect(s).toBeLessThan(-0.1)
+  })
+
+  it("'Review verdict missing' produces LIKELY REJECTED score", () => {
+    // -0.2 exactly maps to the -0.5 < score <= -0.2 band
+    const s = score("Review verdict missing. Human reviewer should check.")
+    expect(s).toBeGreaterThan(-0.5)
+    expect(s).toBeLessThan(0)
+  })
+})
+
+// ─── hedgingDampFactor dampens rejections ─────────────────────────────────────
+
+describe("hedgingDampFactor reduces rejection weight", () => {
+  it("hedged rejection scores better than same rejection without hedging", () => {
+    // Same rejection signal with vs without a hedging qualifier
+    const hedged = score("Must be fixed — but it's non-blocking for this release.")
+    const bare = score("Must be fixed.")
+    expect(hedged).toBeGreaterThan(bare)
+  })
+
+  it("heavy hedging (dense short text) does not push dampFactor below 0.4", () => {
+    // Dense hedges: 4 hedge phrases in ~10 words → high hedgeDensity → floor at 0.4
+    const text =
+      "Non-blocking. Non-blocking. Neither is a blocker. Not a blocker. Minor enough not to block. Must be fixed."
+    const result = scoreSentiment(text)
+    // Should still have hedging matches
+    expect(result.hedgingMatches.length).toBeGreaterThan(0)
+    // Score should be positive overall (hedging weight outweighs dampened rejection)
+    expect(result.score).toBeGreaterThan(0)
+  })
+})
+
+// ─── run() CLI handler ────────────────────────────────────────────────────────
+
+describe("run() CLI handler", () => {
+  const logs: string[] = []
+
+  beforeEach(() => {
+    logs.length = 0
+    vi.spyOn(console, "log").mockImplementation((...args) => {
+      logs.push(args.map(String).join(" "))
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("--score-only prints exactly one line with a 4-decimal numeric score", async () => {
+    await sentimentCommand.run(["Safe to merge.", "--score-only"])
+    expect(logs).toHaveLength(1)
+    expect(logs[0]).toMatch(/^-?\d+\.\d{4}$/)
+  })
+
+  it("--score-only score matches scoreSentiment() for same text", async () => {
+    const text = "✅ **Approved** — CI passes."
+    await sentimentCommand.run([text, "--score-only"])
+    const printed = parseFloat(logs[0]!)
+    const expected = scoreSentiment(text).score
+    expect(printed).toBeCloseTo(expected, 4)
+  })
+
+  it("--json prints exactly one line of valid JSON", async () => {
+    await sentimentCommand.run(["✅ **Approved** — CI passes.", "--json"])
+    expect(logs).toHaveLength(1)
+    expect(() => JSON.parse(logs[0]!)).not.toThrow()
+  })
+
+  it("--json output has score, label, approval, rejection, hedging fields", async () => {
+    await sentimentCommand.run(["✅ **Approved** — Safe to merge.", "--json"])
+    const parsed = JSON.parse(logs[0]!)
+    expect(parsed).toHaveProperty("score")
+    expect(parsed).toHaveProperty("label")
+    expect(parsed).toHaveProperty("approval")
+    expect(parsed).toHaveProperty("rejection")
+    expect(parsed).toHaveProperty("hedging")
+    expect(Array.isArray(parsed.approval)).toBe(true)
+    expect(Array.isArray(parsed.rejection)).toBe(true)
+    expect(Array.isArray(parsed.hedging)).toBe(true)
+  })
+
+  it("--json label is APPROVED for strongly positive text", async () => {
+    await sentimentCommand.run(["✅ **Approved** — Safe to merge.", "--json"])
+    const parsed = JSON.parse(logs[0]!)
+    expect(parsed.label).toBe("APPROVED")
+  })
+
+  it("--json label is REJECTED for strongly negative text", async () => {
+    await sentimentCommand.run(["CHANGES_REQUESTED. CI Failure.", "--json"])
+    const parsed = JSON.parse(logs[0]!)
+    expect(parsed.label).toBe("REJECTED")
+  })
+
+  it("full output contains Score: header and bar", async () => {
+    await sentimentCommand.run(["✅ **Approved** — CI passes."])
+    const out = logs.join("\n")
+    expect(out).toContain("Score:")
+    // Bar contains center marker ┼
+    expect(out).toContain("┼")
+  })
+
+  it("full output contains Approval signals section for approval text", async () => {
+    await sentimentCommand.run(["✅ **Approved** — CI passes. Safe to merge."])
+    expect(logs.some((l) => l.includes("Approval signals"))).toBe(true)
+  })
+
+  it("full output contains Rejection signals section for rejection text", async () => {
+    await sentimentCommand.run(["CHANGES_REQUESTED. CI Failure."])
+    expect(logs.some((l) => l.includes("Rejection signals"))).toBe(true)
+  })
+
+  it("full output omits Approval signals section when no approval matches", async () => {
+    await sentimentCommand.run(["CHANGES_REQUESTED. CI Failure."])
+    expect(logs.some((l) => l.includes("Approval signals"))).toBe(false)
+  })
+
+  it("full output omits Rejection signals section when no rejection matches", async () => {
+    await sentimentCommand.run(["✅ **Approved** — CI passes. Safe to merge."])
+    expect(logs.some((l) => l.includes("Rejection signals"))).toBe(false)
+  })
+
+  it("full output contains Hedging / context section for hedged text", async () => {
+    await sentimentCommand.run(["CI passes. Non-blocking suggestions."])
+    expect(logs.some((l) => l.includes("Hedging / context"))).toBe(true)
+  })
+
+  it("multiple word args are joined with a space before scoring", async () => {
+    // "Safe" "to" "merge" → "Safe to merge" → triggers "safe to merge" pattern
+    await sentimentCommand.run(["Safe", "to", "merge", "--score-only"])
+    const printed = parseFloat(logs[0]!)
+    expect(printed).toBeGreaterThan(0.4)
+  })
+
+  it("throws with actionable message when no args and stdin is TTY", async () => {
+    const origTTY = process.stdin.isTTY
+    Object.defineProperty(process.stdin, "isTTY", { value: true, writable: true, configurable: true })
+    try {
+      await expect(sentimentCommand.run([])).rejects.toThrow("No input provided")
+    } finally {
+      Object.defineProperty(process.stdin, "isTTY", {
+        value: origTTY,
+        writable: true,
+        configurable: true,
+      })
+    }
   })
 })
