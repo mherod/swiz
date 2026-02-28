@@ -12,6 +12,123 @@ interface HookInput {
   }
 }
 
+/**
+ * Return a copy of {@code src} where every non-code region is replaced with
+ * spaces (newlines are preserved for accurate line counts). Non-code regions:
+ *   - line comments  (// … \n)
+ *   - block comments (/* … *\/)
+ *   - quoted strings ("…"  '…')
+ *   - template literal body text (outside ${…} interpolations)
+ *
+ * Expressions inside template literal interpolations (${…}) are preserved
+ * because they are real code — a cast there is a genuine violation.
+ */
+export function stripNonCode(src: string): string {
+  let out = ""
+  let i = 0
+  const n = src.length
+  while (i < n) {
+    // Line comment — consume to end of line
+    if (src[i] === "/" && src[i + 1] === "/") {
+      while (i < n && src[i] !== "\n") {
+        out += " "
+        i++
+      }
+      continue
+    }
+    // Block comment — consume until closing delimiter
+    if (src[i] === "/" && src[i + 1] === "*") {
+      out += "  "
+      i += 2
+      while (i < n) {
+        if (src[i] === "*" && src[i + 1] === "/") {
+          out += "  "
+          i += 2
+          break
+        }
+        out += src[i] === "\n" ? "\n" : " "
+        i++
+      }
+      continue
+    }
+    // Template literal — blank body but keep interpolation content as code
+    if (src[i] === "`") {
+      out += " "
+      i++
+      let interpDepth = 0
+      while (i < n) {
+        if (src[i] === "\\" && interpDepth === 0) {
+          out += "  "
+          i += 2
+          continue
+        }
+        if (src[i] === "`" && interpDepth === 0) {
+          out += " "
+          i++
+          break
+        }
+        // ${ opens an interpolation — the content inside is real code
+        if (src[i] === "$" && src[i + 1] === "{" && interpDepth === 0) {
+          out += "  "
+          i += 2
+          interpDepth = 1
+          continue
+        }
+        if (interpDepth > 0) {
+          if (src[i] === "{") {
+            interpDepth++
+            out += src[i]
+            i++
+            continue
+          }
+          if (src[i] === "}") {
+            interpDepth--
+            if (interpDepth === 0) {
+              out += " "
+              i++
+              continue
+            }
+            out += src[i]
+            i++
+            continue
+          }
+          // Inside interpolation — preserve real code
+          out += src[i]
+          i++
+        } else {
+          out += src[i] === "\n" ? "\n" : " "
+          i++
+        }
+      }
+      continue
+    }
+    // Quoted string — consume until matching unescaped close-quote
+    if (src[i] === '"' || src[i] === "'") {
+      const q = src[i]
+      out += " "
+      i++
+      while (i < n) {
+        if (src[i] === "\\") {
+          out += "  "
+          i += 2
+          continue
+        }
+        if (src[i] === q) {
+          out += " "
+          i++
+          break
+        }
+        out += src[i] === "\n" ? "\n" : " "
+        i++
+      }
+      continue
+    }
+    out += src[i]
+    i++
+  }
+  return out
+}
+
 async function main() {
   const input: HookInput = await Bun.stdin.json()
 
@@ -29,85 +146,6 @@ async function main() {
   // (they might be generated or have necessary escapes)
   if (!oldString) {
     process.exit(0)
-  }
-
-  // Scan only the code tokens — skip string literals and comments so that
-  // natural-language phrases in test descriptions or doc-comments are not
-  // counted as casts. The function blanks out all non-code regions before
-  // the regex runs.
-  function stripNonCode(src: string): string {
-    let out = ""
-    let i = 0
-    const n = src.length
-    while (i < n) {
-      // Line comment: consume until end of line
-      if (src[i] === "/" && src[i + 1] === "/") {
-        while (i < n && src[i] !== "\n") {
-          out += " "
-          i++
-        }
-        continue
-      }
-      // Block comment: consume until closing delimiter
-      if (src[i] === "/" && src[i + 1] === "*") {
-        out += "  "
-        i += 2
-        while (i < n) {
-          if (src[i] === "*" && src[i + 1] === "/") {
-            out += "  "
-            i += 2
-            break
-          }
-          out += src[i] === "\n" ? "\n" : " "
-          i++
-        }
-        continue
-      }
-      // Template literal: consume until unescaped back-tick (no interpolation tracking needed)
-      if (src[i] === "`") {
-        out += " "
-        i++
-        while (i < n) {
-          if (src[i] === "\\") {
-            out += "  "
-            i += 2
-            continue
-          }
-          if (src[i] === "`") {
-            out += " "
-            i++
-            break
-          }
-          out += src[i] === "\n" ? "\n" : " "
-          i++
-        }
-        continue
-      }
-      // Quoted string: consume until matching unescaped close-quote
-      if (src[i] === '"' || src[i] === "'") {
-        const q = src[i]
-        out += " "
-        i++
-        while (i < n) {
-          if (src[i] === "\\") {
-            out += "  "
-            i += 2
-            continue
-          }
-          if (src[i] === q) {
-            out += " "
-            i++
-            break
-          }
-          out += src[i] === "\n" ? "\n" : " "
-          i++
-        }
-        continue
-      }
-      out += src[i]
-      i++
-    }
-    return out
   }
 
   // Count the cast pattern in code-only regions of old vs new
@@ -148,7 +186,9 @@ async function main() {
   )
 }
 
-main().catch((e) => {
-  console.error("Hook error:", e)
-  process.exit(1)
-})
+if (import.meta.main) {
+  main().catch((e) => {
+    console.error("Hook error:", e)
+    process.exit(1)
+  })
+}
