@@ -761,3 +761,266 @@ describe("filterByActionable — new skip labels from survey", () => {
   test("info-needs (reversed) is excluded", () =>
     expect(filterByActionable([makeIssue(["info-needs"])])).toHaveLength(0))
 })
+
+// ─── Integration: skip precedence over high scores ────────────────────────────
+//
+// An issue that is labelled *both* with a skip signal and a high-score signal
+// must be removed by filterByActionable before it ever reaches scoring.
+// "skip wins" is the invariant this suite protects.
+
+describe("integration — skip-label precedence over high-score labels", () => {
+  function pipeline(issues: Issue[]): Issue[] {
+    const { shown } = sortAndCapIssues(filterByActionable(issues))
+    return shown
+  }
+
+  function issue(n: number, labels: string[]): Issue {
+    return {
+      number: n,
+      title: `Issue ${n}`,
+      labels: labels.map((name) => ({ name })),
+      author: { login: "u" },
+      assignees: [],
+    }
+  }
+
+  test("critical + blocked → excluded (skip beats highest severity)", () => {
+    expect(pipeline([issue(1, ["critical", "blocked"])])).toHaveLength(0)
+  })
+
+  test("p0 + stale → excluded", () => {
+    expect(pipeline([issue(1, ["p0", "stale"])])).toHaveLength(0)
+  })
+
+  test("priority:high + ready + wont-fix → excluded", () => {
+    expect(pipeline([issue(1, ["priority:high", "ready", "wont-fix"])])).toHaveLength(0)
+  })
+
+  test("regression + bug + icebox → excluded", () => {
+    expect(pipeline([issue(1, ["regression", "bug", "icebox"])])).toHaveLength(0)
+  })
+
+  test("security + confirmed + invalid → excluded", () => {
+    expect(pipeline([issue(1, ["security", "confirmed", "invalid"])])).toHaveLength(0)
+  })
+
+  test("urgent + size:s + needs-info → excluded", () => {
+    expect(pipeline([issue(1, ["urgent", "size:s", "needs-info"])])).toHaveLength(0)
+  })
+
+  test("hotfix + on-hold → excluded even with high urgency", () => {
+    expect(pipeline([issue(1, ["hotfix", "on-hold"])])).toHaveLength(0)
+  })
+
+  test("skipped issue is excluded even when accompanied by non-skipped issues", () => {
+    const skipped = issue(1, ["critical", "stale"])
+    const actionable = issue(2, ["bug"])
+    const result = pipeline([skipped, actionable])
+    expect(result.map((i) => i.number)).not.toContain(1)
+    expect(result.map((i) => i.number)).toContain(2)
+  })
+
+  test("skip + high-score issue does not crowd out genuine actionable issues", () => {
+    // 5 real issues + 1 skip issue — all 5 real issues should be shown
+    const real = Array.from({ length: 5 }, (_, i) => issue(i + 1, ["bug"]))
+    const ghost = issue(99, ["critical", "wontfix"])
+    const result = pipeline([ghost, ...real])
+    expect(result).toHaveLength(5)
+    expect(result.map((i) => i.number)).not.toContain(99)
+  })
+})
+
+// ─── Integration: normalisation edge cases ────────────────────────────────────
+//
+// Mixed capitalisation and separator styles on multi-label issues should
+// resolve to the same scores as canonical forms.
+
+describe("integration — normalisation edge cases on multi-label issues", () => {
+  function score(labels: string[]): number {
+    return scoreIssue({
+      number: 1,
+      title: "t",
+      labels: labels.map((name) => ({ name })),
+      author: { login: "u" },
+      assignees: [],
+    })
+  }
+
+  test("PRIORITY:HIGH + SIZE:M + BUG scores same as priority:high + size:m + bug", () => {
+    expect(score(["PRIORITY:HIGH", "SIZE:M", "BUG"])).toBe(
+      score(["priority:high", "size:m", "bug"])
+    )
+  })
+
+  test("HIGH/PRIORITY (slash, reversed) scores same as priority:high", () => {
+    expect(score(["HIGH/PRIORITY"])).toBe(score(["priority:high"]))
+  })
+
+  test("HIGH-PRIORITY + READY scores same as priority:high + ready", () => {
+    expect(score(["HIGH-PRIORITY", "READY"])).toBe(score(["priority:high", "ready"]))
+  })
+
+  test("M-SIZE + HIGH-PRIORITY scores same as size:m + priority:high", () => {
+    expect(score(["M-SIZE", "HIGH-PRIORITY"])).toBe(score(["size:m", "priority:high"]))
+  })
+
+  test("STALE (caps) still skips an issue with critical label", () => {
+    const issue: Issue = {
+      number: 1,
+      title: "t",
+      labels: [{ name: "STALE" }, { name: "critical" }],
+      author: { login: "u" },
+      assignees: [],
+    }
+    expect(filterByActionable([issue])).toHaveLength(0)
+  })
+
+  test("ON/HOLD (slash) still skips an issue with p0 label", () => {
+    const issue: Issue = {
+      number: 1,
+      title: "t",
+      labels: [{ name: "ON/HOLD" }, { name: "p0" }],
+      author: { login: "u" },
+      assignees: [],
+    }
+    expect(filterByActionable([issue])).toHaveLength(0)
+  })
+
+  test("label with mixed separator in middle: priority-HIGH scores same as priority:high", () => {
+    expect(score(["priority-HIGH"])).toBe(score(["priority:high"]))
+  })
+
+  test("empty-string label scores 0 and does not throw", () => {
+    expect(score([""])).toBe(0)
+  })
+
+  test("label that is only separators scores 0", () => {
+    expect(score(["---"])).toBe(0)
+    expect(score([":::"])).toBe(0)
+  })
+})
+
+// ─── Integration: top-5 truncation under mixed real-world label sets ──────────
+//
+// Models a realistic open issue backlog (drawn from ramp3-spike patterns and
+// common OSS conventions). Runs the full filter → sort → cap pipeline and
+// asserts that the five shown are precisely the five highest-scoring issues
+// and the hidden ones are the lowest-scored.
+
+describe("integration — top-5 truncation with mixed real-world label sets", () => {
+  // Mirror the full pipeline: filter out skipped, then sort and cap
+  function pipeline(issues: Issue[]): { shown: Issue[]; hidden: number } {
+    return sortAndCapIssues(filterByActionable(issues))
+  }
+
+  function issue(n: number, labels: string[], title = `Issue ${n}`): Issue {
+    return {
+      number: n,
+      title,
+      labels: labels.map((name) => ({ name })),
+      author: { login: "u" },
+      assignees: [],
+    }
+  }
+
+  test("exact top-5 from a backlog of 8 real-world issues", () => {
+    const backlog = [
+      issue(1, ["bug", "priority:high", "ready", "size:s"], "fix(captiv8): connection before sync"),
+      issue(2, ["enhancement", "frontend", "priority:medium"], "Redesign /admin/campaigns"),
+      issue(3, ["enhancement", "frontend", "area:dashboard"], "useOptimistic filter controls"),
+      issue(4, ["maintenance", "tech-debt", "priority:medium"], "Refactor /admin/settings"),
+      issue(
+        5,
+        ["bug", "priority:high", "regression", "size:m"],
+        "fix(stats): metric label alignment"
+      ),
+      issue(6, ["enhancement", "backend", "priority:low"], "Provision GCP Memorystore"),
+      issue(7, ["tech-debt", "backend"], "Barrel cleanup"),
+      issue(
+        8,
+        ["enhancement", "frontend", "priority:medium", "good first issue", "size:s"],
+        "Auto-select campaign dialog"
+      ),
+    ]
+
+    const { shown, hidden } = pipeline(backlog)
+
+    expect(shown).toHaveLength(5)
+    expect(hidden).toBe(3)
+
+    // The top-5 should be the 5 highest-scoring issues
+    const shownNumbers = shown.map((i) => i.number)
+    const hiddenNumbers = backlog
+      .filter((i) => !shownNumbers.includes(i.number))
+      .map((i) => i.number)
+
+    // Every shown issue must outscore every hidden issue
+    const minShownScore = Math.min(...shown.map(scoreIssue))
+    const maxHiddenScore = Math.max(
+      ...backlog.filter((i) => hiddenNumbers.includes(i.number)).map(scoreIssue)
+    )
+    expect(minShownScore).toBeGreaterThanOrEqual(maxHiddenScore)
+  })
+
+  test("skip labels remove issues before truncation — skip does not consume a slot", () => {
+    // 5 real issues + 2 skipped; all 5 real issues should be shown, none hidden
+    const real = Array.from({ length: 5 }, (_, i) => issue(i + 1, ["bug", "priority:medium"]))
+    const skipped = [
+      issue(10, ["critical", "stale"], "Stale critical"),
+      issue(11, ["p0", "wontfix"], "Wontfixed blocker"),
+    ]
+    const { shown, hidden } = pipeline([...real, ...skipped])
+    expect(shown).toHaveLength(5)
+    expect(hidden).toBe(0)
+    expect(shown.map((i) => i.number).some((n) => n >= 10)).toBe(false)
+  })
+
+  test("when all issues are skipped, result is empty with nothing hidden", () => {
+    const issues = [
+      issue(1, ["blocked"]),
+      issue(2, ["stale", "priority:high"]),
+      issue(3, ["icebox", "critical"]),
+    ]
+    const { shown, hidden } = pipeline(issues)
+    expect(shown).toHaveLength(0)
+    expect(hidden).toBe(0)
+  })
+
+  test("issues shown in descending score order", () => {
+    const issues = [
+      issue(1, []), // score 0
+      issue(2, ["priority:medium"]), // score 2
+      issue(3, ["priority:high", "bug", "ready"]), // score 4+2+3=9
+      issue(4, ["bug"]), // score 2
+      issue(5, ["priority:low"]), // score -1
+    ]
+    const { shown } = pipeline(issues)
+    const scores = shown.map(scoreIssue)
+    for (let i = 1; i < scores.length; i++) {
+      expect(scores[i]!).toBeLessThanOrEqual(scores[i - 1]!)
+    }
+  })
+
+  test("ramp3-spike pattern: p0 critical regression beats enhancement with no priority", () => {
+    const issues = [
+      issue(1, ["enhancement", "frontend", "area:dashboard"]),
+      issue(2, ["enhancement", "frontend", "priority:medium", "size:m"]),
+      issue(3, ["bug", "backend", "priority:high", "regression"]), // high + regression + bug = 4+3+2=9
+      issue(4, ["tech-debt", "backend"]),
+      issue(5, ["enhancement", "backend", "priority:low"]),
+      issue(6, ["maintenance", "priority:medium", "confirmed"]), // 2+1+1=4
+      issue(7, ["bug", "critical"]), // 2+5=7
+      issue(8, ["enhancement", "size:xl"]), // 0-2=-2
+    ]
+    const { shown } = pipeline(issues)
+    // Issue 3 (regression+high+bug=9) must be #1
+    expect(shown[0]!.number).toBe(3)
+    // Issue 7 (critical+bug=7) must be #2
+    expect(shown[1]!.number).toBe(7)
+    // Issue 8 (size:xl penalty) must not appear in top 5 if something scores higher
+    const shownNumbers = shown.map((i) => i.number)
+    // Issues 3 and 7 must both be present
+    expect(shownNumbers).toContain(3)
+    expect(shownNumbers).toContain(7)
+  })
+})
