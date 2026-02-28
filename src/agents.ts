@@ -22,8 +22,8 @@ export interface AgentDef {
   eventMap: Record<string, string>
   /** Whether this agent supports user-configurable hooks via a settings file */
   hooksConfigurable: boolean
-  /** Environment variable set to a truthy value when running inside this agent */
-  envVar?: string
+  /** One or more env vars — any being set (truthy) identifies this agent */
+  envVars?: string[]
   /** Regex matched against the parent process command to identify this agent's shell */
   processPattern?: RegExp
 }
@@ -42,7 +42,7 @@ export const AGENTS: AgentDef[] = [
     configStyle: "nested",
     binary: "claude",
     hooksConfigurable: true,
-    envVar: "CLAUDECODE",
+    envVars: ["CLAUDECODE"],
     toolAliases: {},
     eventMap: {
       stop: "Stop",
@@ -131,7 +131,7 @@ export const AGENTS: AgentDef[] = [
     configStyle: "nested",
     binary: "codex",
     hooksConfigurable: false,
-    envVar: "CODEX_MANAGED_BY_NPM",
+    envVars: ["CODEX_MANAGED_BY_NPM", "CODEX_THREAD_ID"],
     toolAliases: {
       Bash: "shell_command",
       Edit: "apply_patch",

@@ -144,7 +144,7 @@ function getParentProcessCommand(): string {
 }
 
 function detectCurrentAgent() {
-  const byEnv = AGENTS.find((a) => a.envVar && process.env[a.envVar])
+  const byEnv = AGENTS.find((a) => a.envVars?.some((v) => process.env[v]))
   if (byEnv) return byEnv
   const parentCmd = getParentProcessCommand()
   return AGENTS.find((a) => a.processPattern?.test(parentCmd)) ?? null
