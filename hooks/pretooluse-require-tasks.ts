@@ -44,6 +44,18 @@ if (isShellTool(toolName)) {
   if (READ_CMD_RE.test(command)) {
     process.exit(0)
   }
+
+  // git push/pull/fetch — mechanical sync ops; don't require task tracking
+  const GIT_SYNC_RE = /(?:^|\|\||&&|;)\s*git\s+(push|pull|fetch)\b/
+  if (GIT_SYNC_RE.test(command)) {
+    process.exit(0)
+  }
+
+  // gh commands — CI/PR inspection and management; end-of-session publishing steps
+  const GH_CMD_RE = /(?:^|\|\||&&|;)\s*gh\b/
+  if (GH_CMD_RE.test(command)) {
+    process.exit(0)
+  }
 }
 
 // ── CHECK 1: Incomplete tasks exist (file-based) ──────────────────────────────
