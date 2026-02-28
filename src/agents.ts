@@ -99,6 +99,8 @@ export const AGENTS: AgentDef[] = [
     configStyle: "nested",
     binary: "gemini",
     hooksConfigurable: true,
+    // GEMINI_CLI=1 is injected by shellExecutionService; GEMINI_PROJECT_DIR by hookRunner
+    envVars: ["GEMINI_CLI", "GEMINI_PROJECT_DIR"],
     toolAliases: {
       Bash: "run_shell_command",
       Edit: "replace",
