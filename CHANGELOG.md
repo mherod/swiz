@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-02-28
+
+### New Features
+
+- Added a hook that blocks `@ts-ignore` comments in TypeScript files.
+  The TypeScript compiler's type errors must be fixed rather than
+  silenced. If suppression is genuinely unavoidable (e.g. broken
+  third-party types), `@ts-expect-error` is permitted as a last resort
+  — but only when accompanied by a description explaining why. Bare
+  `@ts-expect-error` with no reason is also rejected.
+
 ## 2026-02-27
 
 ### Bug Fixes
