@@ -188,7 +188,7 @@ export async function isAgentInstalled(agent: AgentDef): Promise<boolean> {
 
 export async function detectInstalledAgents(): Promise<AgentDef[]> {
   const results = await Promise.all(
-    AGENTS.map(async (agent) => (await isAgentInstalled(agent)) ? agent : null)
+    AGENTS.map(async (agent) => ((await isAgentInstalled(agent)) ? agent : null))
   )
   return results.filter((a): a is AgentDef => a !== null)
 }

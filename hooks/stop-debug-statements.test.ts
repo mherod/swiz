@@ -10,7 +10,7 @@ const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|
 
 // Debug patterns (mirrors stop-debug-statements.ts)
 const JS_DEBUG_RE = /\bconsole\.(log|debug|trace|dir|table)\b/
-const JS_COMMENT_RE = /\/\/.*console\./
+const _JS_COMMENT_RE = /\/\/.*console\./
 const DEBUGGER_RE = /\bdebugger\b/
 const PY_PRINT_RE = /\bprint\s*\(/
 const RUBY_DEBUG_RE = /\b(?:binding\.pry|byebug)\b/
@@ -170,12 +170,7 @@ describe("PY_PRINT_RE: Python print() with word boundary", () => {
 
 describe("RUBY_DEBUG_RE: Ruby debuggers with word boundaries (regression test)", () => {
   describe("should match valid Ruby debugger calls", () => {
-    const valid = [
-      "binding.pry",
-      "byebug",
-      "binding.pry  # debug",
-      "byebug if condition",
-    ]
+    const valid = ["binding.pry", "byebug", "binding.pry  # debug", "byebug if condition"]
 
     valid.forEach((code) => {
       test(`${code}`, () => {

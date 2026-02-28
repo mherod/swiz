@@ -34,16 +34,12 @@ interface Issue {
 
 function filterByUser(issues: Issue[], filterUser: string): Issue[] {
   return issues.filter(
-    (i) =>
-      i.author?.login === filterUser ||
-      i.assignees?.some((a) => a.login === filterUser)
+    (i) => i.author?.login === filterUser || i.assignees?.some((a) => a.login === filterUser)
   )
 }
 
 function filterByActionable(issues: Issue[]): Issue[] {
-  return issues.filter(
-    (i) => !i.labels.some((l) => SKIP_LABELS.has(l.name.toLowerCase()))
-  )
+  return issues.filter((i) => !i.labels.some((l) => SKIP_LABELS.has(l.name.toLowerCase())))
 }
 
 interface PR {
@@ -168,12 +164,7 @@ describe("filterByUser — org repo issue scoping", () => {
   })
 
   test("mixed list: returns only user's issues", () => {
-    const all = [
-      authoredByUser,
-      assignedToUser,
-      neitherAuthorNorAssignee,
-      bothAuthorAndAssignee,
-    ]
+    const all = [authoredByUser, assignedToUser, neitherAuthorNorAssignee, bothAuthorAndAssignee]
     expect(filterByUser(all, currentUser)).toHaveLength(3)
   })
 
@@ -207,7 +198,15 @@ describe("filterByActionable — SKIP_LABELS filtering", () => {
     expect(filterByActionable([makeIssue(["bug"])])).toHaveLength(1)
   })
 
-  for (const label of ["blocked", "upstream", "wontfix", "duplicate", "on-hold", "waiting", "backlog"]) {
+  for (const label of [
+    "blocked",
+    "upstream",
+    "wontfix",
+    "duplicate",
+    "on-hold",
+    "waiting",
+    "backlog",
+  ]) {
     test(`excludes issue labelled '${label}'`, () => {
       expect(filterByActionable([makeIssue([label])])).toHaveLength(0)
     })

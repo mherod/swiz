@@ -13,7 +13,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
-import { join, dirname } from "node:path"
+import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { manifest } from "./manifest.ts"
 
@@ -60,7 +60,10 @@ function parseReadme(text: string): {
     }
 
     // Reset section on any other ##-level heading
-    if (ls.startsWith("## ") || (ls.startsWith("### ") && !SECTION_NAMES.some((n) => ls.includes(`### ${n}`)))) {
+    if (
+      ls.startsWith("## ") ||
+      (ls.startsWith("### ") && !SECTION_NAMES.some((n) => ls.includes(`### ${n}`)))
+    ) {
       if (!SECTION_NAMES.some((n) => ls.match(new RegExp(`^### ${n}`)))) {
         currentSection = ""
       }
@@ -118,12 +121,18 @@ function manifestHookFiles(): Set<string> {
 function makePrng(seed: number) {
   let s = seed | 0
   return () => {
-    s = Math.imul(1664525, s) + 1013904223 | 0
+    s = (Math.imul(1664525, s) + 1013904223) | 0
     return (s >>> 0) / 0x100000000
   }
 }
 
-const SECTION_NAMES = ["Stop", "PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit"] as const
+const SECTION_NAMES = [
+  "Stop",
+  "PreToolUse",
+  "PostToolUse",
+  "SessionStart",
+  "UserPromptSubmit",
+] as const
 const HOOK_PREFIXES: Record<string, string> = {
   Stop: "stop",
   PreToolUse: "pretooluse",
@@ -135,8 +144,22 @@ const HOOK_PREFIXES: Record<string, string> = {
 // Letter suffixes for generated hook names — avoids digits which the
 // referencedHooks regex [a-z-]+ intentionally does not match.
 const LETTER_SUFFIXES = [
-  "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta",
-  "iota", "kappa", "lambda", "mu", "nu", "xi", "omicron", "pi",
+  "alpha",
+  "beta",
+  "gamma",
+  "delta",
+  "epsilon",
+  "zeta",
+  "eta",
+  "theta",
+  "iota",
+  "kappa",
+  "lambda",
+  "mu",
+  "nu",
+  "xi",
+  "omicron",
+  "pi",
 ]
 
 /** Build a syntactically correct README section with N hook rows. */
@@ -144,14 +167,20 @@ function buildSection(section: string, count: number, claimedCount = count): str
   const prefix = HOOK_PREFIXES[section] ?? "stop"
   const rows = Array.from(
     { length: count },
-    (_, i) => `| \`${prefix}-${LETTER_SUFFIXES[i % LETTER_SUFFIXES.length]}.ts\` | description ${i} |`
+    (_, i) =>
+      `| \`${prefix}-${LETTER_SUFFIXES[i % LETTER_SUFFIXES.length]}.ts\` | description ${i} |`
   )
-  return [`### ${section} (${claimedCount})`, "| Hook | What it does |", "|------|-------------|", ...rows].join("\n")
+  return [
+    `### ${section} (${claimedCount})`,
+    "| Hook | What it does |",
+    "|------|-------------|",
+    ...rows,
+  ].join("\n")
 }
 
 /** Wrap a string in a code fence. */
 function fence(content: string, lang = "bash"): string {
-  return ["```" + lang, content, "```"].join("\n")
+  return [`\`\`\`${lang}`, content, "```"].join("\n")
 }
 
 // ─── Parser unit tests (synthetic inputs) ────────────────────────────────────
@@ -166,7 +195,7 @@ describe("parseReadme parser", () => {
       "```",
     ].join("\n")
     const { sectionCounts } = parseReadme(text)
-    expect(sectionCounts["Stop"]).toBe(1)
+    expect(sectionCounts.Stop).toBe(1)
   })
 
   test("does not add hook filenames inside code fences to referencedHooks", () => {
@@ -189,8 +218,8 @@ describe("parseReadme parser", () => {
     // activated without a matching count heading).
     const text = ["### Stop", "| `stop-foo.ts` | desc |"].join("\n")
     const { headingClaims, sectionCounts } = parseReadme(text)
-    expect(headingClaims["Stop"]).toBeUndefined()
-    expect(sectionCounts["Stop"]).toBeUndefined()
+    expect(headingClaims.Stop).toBeUndefined()
+    expect(sectionCounts.Stop).toBeUndefined()
   })
 
   test("## heading resets section so subsequent rows are not miscounted", () => {
@@ -201,7 +230,7 @@ describe("parseReadme parser", () => {
       "| `stop-fake.ts` | inside Commands section, not Stop |",
     ].join("\n")
     const { sectionCounts } = parseReadme(text)
-    expect(sectionCounts["Stop"]).toBe(1)
+    expect(sectionCounts.Stop).toBe(1)
   })
 
   test("duplicate hook filename in a table increments row count twice", () => {
@@ -214,7 +243,7 @@ describe("parseReadme parser", () => {
       "| `stop-foo.ts` | duplicate entry |",
     ].join("\n")
     const { sectionCounts, referencedHooks } = parseReadme(text)
-    expect(sectionCounts["Stop"]).toBe(2)
+    expect(sectionCounts.Stop).toBe(2)
     expect(referencedHooks.filter((f) => f === "stop-foo.ts")).toHaveLength(2)
   })
 
@@ -227,10 +256,10 @@ describe("parseReadme parser", () => {
       "| `pretooluse-a.ts` | desc |",
     ].join("\n")
     const { sectionCounts, headingClaims } = parseReadme(text)
-    expect(sectionCounts["Stop"]).toBe(2)
-    expect(headingClaims["Stop"]).toBe(2)
-    expect(sectionCounts["PreToolUse"]).toBe(1)
-    expect(headingClaims["PreToolUse"]).toBe(1)
+    expect(sectionCounts.Stop).toBe(2)
+    expect(headingClaims.Stop).toBe(2)
+    expect(sectionCounts.PreToolUse).toBe(1)
+    expect(headingClaims.PreToolUse).toBe(1)
   })
 
   test("unclosed code fence causes all subsequent rows to be ignored", () => {
@@ -244,7 +273,7 @@ describe("parseReadme parser", () => {
       "| `stop-after.ts` | NOT counted — fence never closed |",
     ].join("\n")
     const { sectionCounts } = parseReadme(text)
-    expect(sectionCounts["Stop"]).toBe(1)
+    expect(sectionCounts.Stop).toBe(1)
   })
 
   test("alternating fence open/close restores section tracking", () => {
@@ -257,7 +286,7 @@ describe("parseReadme parser", () => {
       "| `stop-b.ts` | after fence — should still count |",
     ].join("\n")
     const { sectionCounts } = parseReadme(text)
-    expect(sectionCounts["Stop"]).toBe(2)
+    expect(sectionCounts.Stop).toBe(2)
   })
 })
 
@@ -313,14 +342,28 @@ describe("README hook accuracy", () => {
     let inFence = false
     for (const line of readmeText.split("\n")) {
       const ls = line.trim()
-      if (ls.startsWith("```")) { inFence = !inFence; continue }
+      if (ls.startsWith("```")) {
+        inFence = !inFence
+        continue
+      }
       if (inFence) continue
-      for (const name of ["Stop", "PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit"]) {
-        if (ls.match(new RegExp(`^### ${name}`))) { currentSection = name; break }
+      for (const name of [
+        "Stop",
+        "PreToolUse",
+        "PostToolUse",
+        "SessionStart",
+        "UserPromptSubmit",
+      ]) {
+        if (ls.match(new RegExp(`^### ${name}`))) {
+          currentSection = name
+          break
+        }
       }
       if (ls.startsWith("## ")) currentSection = ""
       if (currentSection && ls.startsWith("|") && ls.includes(".ts") && !/^\|[-| :]+\|/.test(ls)) {
-        const m = ls.match(/`((?:stop|pretooluse|posttooluse|sessionstart|userpromptsubmit)-[a-z-]+\.ts)`/)
+        const m = ls.match(
+          /`((?:stop|pretooluse|posttooluse|sessionstart|userpromptsubmit)-[a-z-]+\.ts)`/
+        )
         if (m?.[1]) {
           hooksBySection[currentSection] ??= []
           ;(hooksBySection[currentSection] as string[]).push(m[1])
@@ -363,8 +406,10 @@ describe("parseReadme properties", () => {
         const count = Math.floor(rng() * 8)
         parts.push(buildSection(s, count))
       }
-      if (rng() > 0.5) parts.splice(Math.floor(rng() * (parts.length || 1)), 0, fence("some content"))
-      if (rng() > 0.5) parts.splice(Math.floor(rng() * (parts.length || 1)), 0, "## Other\n\nProse.")
+      if (rng() > 0.5)
+        parts.splice(Math.floor(rng() * (parts.length || 1)), 0, fence("some content"))
+      if (rng() > 0.5)
+        parts.splice(Math.floor(rng() * (parts.length || 1)), 0, "## Other\n\nProse.")
       const { sectionCounts } = parseReadme(parts.join("\n\n"))
       for (const count of Object.values(sectionCounts)) {
         expect(count).toBeGreaterThanOrEqual(0)
@@ -443,7 +488,8 @@ describe("parseReadme properties", () => {
         const extra = Math.floor(rng() * 4) + 1
         const extraRows = Array.from(
           { length: extra },
-          (_, i) => `| \`${prefix}-extra-${LETTER_SUFFIXES[i % LETTER_SUFFIXES.length]}.ts\` | extra ${i} |`
+          (_, i) =>
+            `| \`${prefix}-extra-${LETTER_SUFFIXES[i % LETTER_SUFFIXES.length]}.ts\` | extra ${i} |`
         ).join("\n")
         const text = `${buildSection(section, base)}\n${extraRows}`
         const { sectionCounts } = parseReadme(text)
@@ -463,46 +509,46 @@ describe("parseReadme mutations", () => {
     const lines = BASE.split("\n")
     const mutated = lines.slice(0, lines.length - 1).join("\n")
     const { sectionCounts } = parseReadme(mutated)
-    expect(sectionCounts["Stop"]).toBe(1)
+    expect(sectionCounts.Stop).toBe(1)
   })
 
   test("adding an extra row increases count by 1", () => {
-    const mutated = BASE + "\n| `stop-extra.ts` | injected row |"
+    const mutated = `${BASE}\n| \`stop-extra.ts\` | injected row |`
     const { sectionCounts } = parseReadme(mutated)
-    expect(sectionCounts["Stop"]).toBe(3)
+    expect(sectionCounts.Stop).toBe(3)
   })
 
   test("changing heading number changes headingClaims but not sectionCounts", () => {
     const mutated = BASE.replace("### Stop (2)", "### Stop (99)")
     const { headingClaims, sectionCounts } = parseReadme(mutated)
-    expect(headingClaims["Stop"]).toBe(99)
-    expect(sectionCounts["Stop"]).toBe(2)
+    expect(headingClaims.Stop).toBe(99)
+    expect(sectionCounts.Stop).toBe(2)
   })
 
   test("removing parenthetical count drops section from both headingClaims and sectionCounts", () => {
     const mutated = BASE.replace("### Stop (2)", "### Stop")
     const { headingClaims, sectionCounts } = parseReadme(mutated)
-    expect(headingClaims["Stop"]).toBeUndefined()
-    expect(sectionCounts["Stop"]).toBeUndefined()
+    expect(headingClaims.Stop).toBeUndefined()
+    expect(sectionCounts.Stop).toBeUndefined()
   })
 
   test("inserting H4 between rows does not reset the section tracker", () => {
-    const mutated = BASE + "\n#### Sub-detail\n| `stop-after-h4.ts` | still in Stop |"
+    const mutated = `${BASE}\n#### Sub-detail\n| \`stop-after-h4.ts\` | still in Stop |`
     const { sectionCounts } = parseReadme(mutated)
-    expect(sectionCounts["Stop"]).toBe(3)
+    expect(sectionCounts.Stop).toBe(3)
   })
 
   test("inserting ## heading mid-section resets tracker and excludes trailing rows", () => {
-    const mutated = BASE + "\n## Commands\n| `stop-orphan.ts` | not in Stop |"
+    const mutated = `${BASE}\n## Commands\n| \`stop-orphan.ts\` | not in Stop |`
     const { sectionCounts } = parseReadme(mutated)
-    expect(sectionCounts["Stop"]).toBe(2)
+    expect(sectionCounts.Stop).toBe(2)
   })
 
   test("wrapping only the data rows in a code fence zeros the count", () => {
     const [heading, ...rest] = BASE.split("\n")
     const mutated = [heading, fence(rest.join("\n"))].join("\n")
     const { sectionCounts } = parseReadme(mutated)
-    expect(sectionCounts["Stop"]).toBe(0)
+    expect(sectionCounts.Stop).toBe(0)
   })
 
   test("renaming hook prefix causes filenames to not appear in referencedHooks", () => {
@@ -513,7 +559,7 @@ describe("parseReadme mutations", () => {
   })
 
   test("duplicate row appears in referencedHooks twice", () => {
-    const mutated = BASE + "\n| `stop-alpha.ts` | duplicate |"
+    const mutated = `${BASE}\n| \`stop-alpha.ts\` | duplicate |`
     const { referencedHooks } = parseReadme(mutated)
     expect(referencedHooks.filter((f) => f === "stop-alpha.ts")).toHaveLength(2)
   })
@@ -528,14 +574,14 @@ describe("parseReadme mutations", () => {
       "| `stop-c.ts` | after second fence |",
     ].join("\n")
     const { sectionCounts } = parseReadme(text)
-    expect(sectionCounts["Stop"]).toBe(3)
+    expect(sectionCounts.Stop).toBe(3)
   })
 
   test("mismatched heading count with zero rows yields headingClaims mismatch", () => {
     const text = "### Stop (5)\n| Hook | What it does |\n|------|-------------|"
     const { headingClaims, sectionCounts } = parseReadme(text)
-    expect(headingClaims["Stop"]).toBe(5)
-    expect(sectionCounts["Stop"]).toBe(0)
-    expect(headingClaims["Stop"]).not.toBe(sectionCounts["Stop"])
+    expect(headingClaims.Stop).toBe(5)
+    expect(sectionCounts.Stop).toBe(0)
+    expect(headingClaims.Stop).not.toBe(sectionCounts.Stop)
   })
 })

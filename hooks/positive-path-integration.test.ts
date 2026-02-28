@@ -83,7 +83,7 @@ async function createTranscript(dir: string, toolNames: string[]): Promise<strin
       message: { content: [{ type: "tool_use", name }] },
     })
   )
-  await writeFile(path, lines.join("\n") + "\n")
+  await writeFile(path, `${lines.join("\n")}\n`)
   return path
 }
 
@@ -731,7 +731,20 @@ describe("stop-completion-auditor: positive paths", () => {
     const homeDir = await createTempDir()
     const tmp = await createTempDir()
     // Create transcript with 12 tool calls (above TOOL_CALL_THRESHOLD=10) but no task tools
-    const tools = ["Read", "Glob", "Read", "Edit", "Bash", "Read", "Write", "Read", "Glob", "Edit", "Read", "Bash"]
+    const tools = [
+      "Read",
+      "Glob",
+      "Read",
+      "Edit",
+      "Bash",
+      "Read",
+      "Write",
+      "Read",
+      "Glob",
+      "Edit",
+      "Read",
+      "Bash",
+    ]
     const transcript = await createTranscript(tmp, tools)
     const r = await runHook(
       HOOK,
@@ -768,11 +781,11 @@ describe("stop-git-push: positive paths (now merged into stop-git-status)", () =
 
     // Create bare remote from source
     const bareDir = await createTempDir()
-    Bun.spawnSync(["git", "clone", "--bare", sourceDir, bareDir + "/repo.git"])
+    Bun.spawnSync(["git", "clone", "--bare", sourceDir, `${bareDir}/repo.git`])
 
     // Clone the bare remote to get tracking
     const cloneDir = await createTempDir()
-    Bun.spawnSync(["git", "clone", bareDir + "/repo.git", "work"], { cwd: cloneDir })
+    Bun.spawnSync(["git", "clone", `${bareDir}/repo.git`, "work"], { cwd: cloneDir })
     const workDir = join(cloneDir, "work")
     Bun.spawnSync(["git", "config", "user.email", "test@test.com"], { cwd: workDir })
     Bun.spawnSync(["git", "config", "user.name", "Test"], { cwd: workDir })

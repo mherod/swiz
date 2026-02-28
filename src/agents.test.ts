@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest"
 import {
   AGENTS,
+  type AgentDef,
   CONFIGURABLE_AGENTS,
+  detectInstalledAgents,
   getAgent,
   getAgentByFlag,
-  translateMatcher,
-  translateEvent,
-  detectInstalledAgents,
   isAgentInstalled,
-  type AgentDef,
+  translateEvent,
+  translateMatcher,
 } from "./agents.ts"
 
 describe("agents.ts", () => {
@@ -332,19 +332,19 @@ describe("agents.ts", () => {
   describe("tool alias mappings", () => {
     it("cursor has Bash alias", () => {
       const cursor = getAgent("cursor")!
-      expect(cursor.toolAliases["Bash"]).toBe("Shell")
+      expect(cursor.toolAliases.Bash).toBe("Shell")
     })
 
     it("gemini has all major tool aliases", () => {
       const gemini = getAgent("gemini")!
-      expect(gemini.toolAliases["Bash"]).toBe("run_shell_command")
-      expect(gemini.toolAliases["Edit"]).toBe("replace")
-      expect(gemini.toolAliases["Write"]).toBe("write_file")
+      expect(gemini.toolAliases.Bash).toBe("run_shell_command")
+      expect(gemini.toolAliases.Edit).toBe("replace")
+      expect(gemini.toolAliases.Write).toBe("write_file")
     })
 
     it("codex has shell_command for Bash", () => {
       const codex = getAgent("codex")!
-      expect(codex.toolAliases["Bash"]).toBe("shell_command")
+      expect(codex.toolAliases.Bash).toBe("shell_command")
     })
 
     it("claude has empty tool aliases", () => {
@@ -356,19 +356,19 @@ describe("agents.ts", () => {
   describe("event mappings", () => {
     it("all agents have preToolUse mapping", () => {
       AGENTS.forEach((agent) => {
-        expect(agent.eventMap["preToolUse"]).toBeDefined()
+        expect(agent.eventMap.preToolUse).toBeDefined()
       })
     })
 
     it("all agents have stop mapping", () => {
       AGENTS.forEach((agent) => {
-        expect(agent.eventMap["stop"]).toBeDefined()
+        expect(agent.eventMap.stop).toBeDefined()
       })
     })
 
     it("codex does not have preToolUse in mapping (uses different name)", () => {
       const codex = getAgent("codex")!
-      expect(codex.eventMap["preToolUse"]).toBeDefined()
+      expect(codex.eventMap.preToolUse).toBeDefined()
     })
   })
 
@@ -612,7 +612,7 @@ describe("agents.ts", () => {
     })
 
     it("handles very long settings path gracefully", async () => {
-      const agent = fakeAgent({ settingsPath: "/" + "a".repeat(1000) + "/settings.json" })
+      const agent = fakeAgent({ settingsPath: `/${"a".repeat(1000)}/settings.json` })
       expect(await isAgentInstalled(agent)).toBe(false)
     })
   })

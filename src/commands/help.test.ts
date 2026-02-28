@@ -1,6 +1,6 @@
-import { describe, expect, it, beforeEach, vi } from "vitest"
-import { createHelpCommand } from "./help.ts"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Command } from "../types.ts"
+import { createHelpCommand } from "./help.ts"
 
 describe("help.ts", () => {
   let commands: Map<string, Command>

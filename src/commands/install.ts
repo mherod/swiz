@@ -254,7 +254,7 @@ function formatUnifiedDiff(
     lines.push(...hunk.lines)
   }
 
-  return lines.join("\n") + "\n"
+  return `${lines.join("\n")}\n`
 }
 
 function buildHunk(
@@ -311,7 +311,7 @@ async function readJsonFile(path: string): Promise<Record<string, unknown>> {
 async function backup(path: string): Promise<boolean> {
   const file = Bun.file(path)
   if (await file.exists()) {
-    await Bun.write(path + ".bak", await file.text())
+    await Bun.write(`${path}.bak`, await file.text())
     return true
   }
   return false
@@ -416,7 +416,7 @@ async function installAgent(agent: AgentDef, dryRun: boolean) {
   }
 
   await backup(agent.settingsPath)
-  await Bun.write(agent.settingsPath, newText + "\n")
+  await Bun.write(agent.settingsPath, `${newText}\n`)
 
   // Verify the write persisted (some agents watch and revert their settings)
   await new Promise((r) => setTimeout(r, 1500))

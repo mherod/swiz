@@ -277,7 +277,8 @@ describe("pretooluse-eslint-config-strength: hook handler logic", () => {
       tool_name: "Edit",
       tool_input: {
         file_path: "eslint.config.js",
-        old_string: 'export default [{ rules: { "semi": "error", "quotes": "error", "indent": "error" } }]',
+        old_string:
+          'export default [{ rules: { "semi": "error", "quotes": "error", "indent": "error" } }]',
         new_string: 'export default [{ rules: { "semi": "error", "quotes": "error" } }]',
       },
     }
@@ -448,12 +449,8 @@ describe("pretooluse-eslint-config-strength: hook handler logic", () => {
     expect(exitCode).toBe(0)
     const json = JSON.parse(stdout)
     expect(json.hookSpecificOutput.permissionDecision).toBe("deny")
-    expect(json.hookSpecificOutput.permissionDecisionReason).toContain(
-      "Rules cannot be weakened"
-    )
-    expect(json.hookSpecificOutput.permissionDecisionReason).toContain(
-      "quality bar never lowers"
-    )
+    expect(json.hookSpecificOutput.permissionDecisionReason).toContain("Rules cannot be weakened")
+    expect(json.hookSpecificOutput.permissionDecisionReason).toContain("quality bar never lowers")
   })
 
   test("error handler catches malformed stdin and exits non-zero", async () => {

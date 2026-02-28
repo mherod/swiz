@@ -12,7 +12,7 @@ const MARKER_END = "# <<< swiz shim <<<"
 const RED = "\x1b[31m"
 const GREEN = "\x1b[32m"
 const DIM = "\x1b[2m"
-const CYAN = "\x1b[36m"
+const _CYAN = "\x1b[36m"
 const YELLOW = "\x1b[33m"
 const BOLD = "\x1b[1m"
 const RESET = "\x1b[0m"
@@ -86,12 +86,10 @@ function removeShimBlock(content: string): string {
     if (!inside) result.push(line)
   }
 
-  return (
-    result
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trimEnd() + "\n"
-  )
+  return `${result
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd()}\n`
 }
 
 async function showStatus() {
@@ -175,7 +173,7 @@ async function install(args: string[]) {
   if (hasShimBlock(content)) {
     // Replace existing block (in case path changed)
     const cleaned = removeShimBlock(content)
-    const updated = cleaned.trimEnd() + "\n\n" + shimBlock() + "\n"
+    const updated = `${cleaned.trimEnd()}\n\n${shimBlock()}\n`
 
     if (dryRun) {
       console.log(`  ${YELLOW}↻ Replacing existing shim block${RESET}\n`)
@@ -185,7 +183,7 @@ async function install(args: string[]) {
       console.log(`  ${YELLOW}↻ Replaced existing shim block in ${target.name}${RESET}\n`)
     }
   } else {
-    const updated = content.trimEnd() + "\n\n" + shimBlock() + "\n"
+    const updated = `${content.trimEnd()}\n\n${shimBlock()}\n`
 
     if (dryRun) {
       console.log(`  ${GREEN}+ Adding shim block:${RESET}\n`)

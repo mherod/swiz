@@ -45,9 +45,11 @@ export function parseContinueArgs(args: string[]): ContinueArgs {
     if (!arg) continue
     const next = args[i + 1]
     if ((arg === "--dir" || arg === "-d") && next) {
-      targetDir = resolve(next); i++
+      targetDir = resolve(next)
+      i++
     } else if ((arg === "--session" || arg === "-s") && next) {
-      sessionQuery = next; i++
+      sessionQuery = next
+      i++
     } else if (arg === "--print") {
       printOnly = true
     }

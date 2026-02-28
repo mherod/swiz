@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { parseTranscriptArgs } from "./transcript.ts"
 import { parseCleanupArgs } from "./cleanup.ts"
 import { parseContinueArgs } from "./continue.ts"
+import { parseTranscriptArgs } from "./transcript.ts"
 
 describe("parseTranscriptArgs", () => {
   test("returns defaults for empty args", () => {

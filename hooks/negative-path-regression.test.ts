@@ -86,7 +86,10 @@ describe("pretooluse-eslint-config-strength", () => {
   test("eslint config with no old_string (new file) is allowed", async () => {
     const r = await runHook(HOOK, {
       tool_name: "Write",
-      tool_input: { file_path: ".eslintrc.json", content: '{"rules": {"no-unused-vars": "error"}}' },
+      tool_input: {
+        file_path: ".eslintrc.json",
+        content: '{"rules": {"no-unused-vars": "error"}}',
+      },
     })
     expect(r.exitCode).toBe(0)
   })

@@ -80,7 +80,8 @@ describe("strong approval signals", () => {
   })
 
   it("'Approved' followed by CI passes adds both signals", () => {
-    const text = "✅ **Approved** — CI passes on all checks (typecheck, lint, build). Safe to merge."
+    const text =
+      "✅ **Approved** — CI passes on all checks (typecheck, lint, build). Safe to merge."
     const result = scoreSentiment(text)
     expect(result.score).toBe(1)
     expect(approvalLabels(text)).toContain("explicit approval stamp")
@@ -148,7 +149,9 @@ The sba-view.handler.test.ts new describe blocks correctly cover role-not-found 
   })
 
   it("'backwards-compatible' registers as positive signal", () => {
-    expect(approvalLabels("Clean, backwards-compatible addition.")).toContain("backwards-compatible")
+    expect(approvalLabels("Clean, backwards-compatible addition.")).toContain(
+      "backwards-compatible"
+    )
   })
 
   it("multiple 'correctly' occurrences accumulate weight", () => {
@@ -325,18 +328,14 @@ Neither is a blocker. Safe to merge.`
   })
 
   it("'for a follow-up' defers concern and adds hedging weight", () => {
-    expect(hedgingLabels("Worth addressing for a follow-up PR.")).toContain(
-      "deferred to follow-up"
-    )
+    expect(hedgingLabels("Worth addressing for a follow-up PR.")).toContain("deferred to follow-up")
     expect(hedgingLabels("Worth cleaning up in a follow-up.")).toContain("in a follow-up")
   })
 
   it("'Consider' (capitalised) adds soft positive weight", () => {
     const text = "Consider extracting this into a shared utility. Consider adding JSDoc."
     const result = scoreSentiment(text)
-    const considerMatch = result.hedgingMatches.find((m) =>
-      m.label.startsWith("Consider")
-    )
+    const considerMatch = result.hedgingMatches.find((m) => m.label.startsWith("Consider"))
     expect(considerMatch).toBeDefined()
     expect(considerMatch!.count).toBe(2)
   })
@@ -345,9 +344,7 @@ Neither is a blocker. Safe to merge.`
     // After fix: Consider pattern has i flag
     const text = "consider adding JSDoc for consistency."
     const result = scoreSentiment(text)
-    const considerMatch = result.hedgingMatches.find((m) =>
-      m.label.startsWith("Consider")
-    )
+    const considerMatch = result.hedgingMatches.find((m) => m.label.startsWith("Consider"))
     expect(considerMatch).toBeDefined()
   })
 
@@ -761,7 +758,11 @@ describe("run() CLI handler", () => {
 
   it("throws with actionable message when no args and stdin is TTY", async () => {
     const origTTY = process.stdin.isTTY
-    Object.defineProperty(process.stdin, "isTTY", { value: true, writable: true, configurable: true })
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      writable: true,
+      configurable: true,
+    })
     try {
       await expect(sentimentCommand.run([])).rejects.toThrow("No input provided")
     } finally {
@@ -887,8 +888,7 @@ describe("multi-reviewer conflicts", () => {
   })
 
   it("'one reviewer approved, another requested changes' scores neutral — count phrasing misses stamps", () => {
-    const text =
-      "One reviewer approved, another requested changes. The net status is unclear."
+    const text = "One reviewer approved, another requested changes. The net status is unclear."
     expect(score(text)).toBe(0)
   })
 })
@@ -899,7 +899,8 @@ describe("hedging containing rejection keywords", () => {
     // pattern '\bblocking\s+issues?\b' (-0.5). Combined with 'CI is failing' (-0.6),
     // dampFactor 0.75 reduces rejection to -0.825, but hedging (+0.2) + safe to merge (+0.5)
     // only total 0.7 — net score ≈ -0.125 (negative), contrary to the intent of the text.
-    const text = "Non-blocking issue: CI is failing on an unrelated job. Safe to merge the main feature."
+    const text =
+      "Non-blocking issue: CI is failing on an unrelated job. Safe to merge the main feature."
     expect(score(text)).toBeCloseTo(-0.125, 3)
     // The hedging fires correctly...
     expect(hedgingLabels(text)).toContain("non-blocking (reduces negatives)")
@@ -919,7 +920,8 @@ describe("hedging containing rejection keywords", () => {
     // 'CI green' matches '\bCI\s+(?:passes|passed|is green|green)\b' → +0.4
     // 'blocked' alone does not match 'blocking issues\b'
     // 'cannot unblock' does not match 'cannot be merged'
-    const text = "CI green but blocked by other PR dependencies. Cannot unblock until the upstream PR merges."
+    const text =
+      "CI green but blocked by other PR dependencies. Cannot unblock until the upstream PR merges."
     expect(score(text)).toBeGreaterThan(0)
     expect(approvalLabels(text)).toContain("CI passes")
   })
@@ -937,7 +939,8 @@ describe("github notification boilerplate false positives", () => {
   })
 
   it("'Review verdict missing from automated check' scores negative from notification text", () => {
-    const text = "This is an auto-generated notification. Review verdict missing from the automated check."
+    const text =
+      "This is an auto-generated notification. Review verdict missing from the automated check."
     expect(score(text)).toBeLessThan(0)
     expect(rejectionLabels(text)).toContain("review verdict missing")
   })

@@ -171,7 +171,7 @@ describe("pretooluse-require-tasks", () => {
     for (let i = 0; i < 21; i++) lines.push(makeEntry("Read")) // indices 1–21
 
     const transcriptPath = join(homeDir, "transcript.jsonl")
-    await writeFile(transcriptPath, lines.join("\n") + "\n")
+    await writeFile(transcriptPath, `${lines.join("\n")}\n`)
 
     const result = await runHook({ homeDir, toolName: "Bash", sessionId, transcriptPath })
     expect(result.decision).toBe("deny")
@@ -199,7 +199,7 @@ describe("pretooluse-require-tasks", () => {
     for (let i = 0; i < 5; i++) lines.push(makeEntry("Read")) // indices 1–5
 
     const transcriptPath = join(homeDir, "transcript.jsonl")
-    await writeFile(transcriptPath, lines.join("\n") + "\n")
+    await writeFile(transcriptPath, `${lines.join("\n")}\n`)
 
     const result = await runHook({ homeDir, toolName: "Edit", sessionId, transcriptPath })
     expect(result.decision).toBeUndefined()
@@ -331,7 +331,7 @@ describe("pretooluse-require-tasks", () => {
       )
     }
     const transcriptPath = join(homeDir, "transcript.jsonl")
-    await writeFile(transcriptPath, lines.join("\n") + "\n")
+    await writeFile(transcriptPath, `${lines.join("\n")}\n`)
 
     // Should allow — staleness only triggers after task tools have been used
     const result = await runHook({ homeDir, toolName: "Bash", sessionId, transcriptPath })

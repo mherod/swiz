@@ -52,7 +52,7 @@ async function runHook(opts: {
   }
 }
 
-// ─── @ts-ignore blocking ──────────────────────────────────────────────────────
+// ─── @ts-expect-error blocking ──────────────────────────────────────────────────────
 
 describe(`pretooluse-no-ts-ignore: @${KW_IGNORE} is always blocked`, () => {
   test("blocks standard line comment", async () => {
@@ -353,7 +353,7 @@ describe("pretooluse-no-ts-ignore: mixed directives in one file", () => {
     const result = await runHook({
       newString: `// See https://github.com/issues/@${KW_IGNORE}-workaround for context`,
     })
-    // "// See https://..." — after // there is " See", not @ts-ignore immediately
+    // "// See https://..." — after // there is " See", not @ts-expect-error immediately
     expect(result.decision).toBe("allow")
   })
 

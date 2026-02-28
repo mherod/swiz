@@ -292,16 +292,12 @@ describe("PreToolUse helper isolation (integration)", () => {
 
   test("concurrent invocations are fully isolated", async () => {
     const [denyA, allowB, denyC] = await Promise.all([
-      runHelper(
-        `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("concurrent-deny-A")`
-      ),
+      runHelper(`denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("concurrent-deny-A")`),
       runHelper(
         `allowPreToolUseWithUpdatedInput } from "./hook-utils.ts"; ` +
           `allowPreToolUseWithUpdatedInput({ concurrent: "B" })`
       ),
-      runHelper(
-        `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("concurrent-deny-C")`
-      ),
+      runHelper(`denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("concurrent-deny-C")`),
     ])
 
     const hsoA = denyA.parsed.hookSpecificOutput as JsonObject

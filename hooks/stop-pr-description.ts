@@ -61,7 +61,7 @@ async function main(): Promise<void> {
 
   // Empty body
   if (!bodyStripped) {
-    blockStop(`PR #${pr.number} ('${pr.title}') has an empty description.\n\n` + prAdvice)
+    blockStop(`PR #${pr.number} ('${pr.title}') has an empty description.\n\n${prAdvice}`)
   }
 
   // Check for ## Summary immediately followed by a placeholder
@@ -91,7 +91,7 @@ async function main(): Promise<void> {
   for (const pattern of PLACEHOLDER_PATTERNS) {
     if (bodyLower.includes(pattern.toLowerCase())) {
       blockStop(
-        `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n` + prAdvice
+        `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n${prAdvice}`
       )
     }
   }

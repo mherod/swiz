@@ -37,24 +37,16 @@ function stripLineCommentTails(content: string): string {
 // The multiline regex is then applied to the stripped content, so cross-line
 // block-comment forms are still detected.
 function containsDirective(content: string, directive: string): boolean {
-  const re = new RegExp(
-    `(?://\\s*@${directive}|^\\s*\\*+\\s*@${directive})`,
-    "m"
-  )
+  const re = new RegExp(`(?://\\s*@${directive}|^\\s*\\*+\\s*@${directive})`, "m")
   if (re.test(content)) return true
-  return new RegExp(`/\\*\\s*@${directive}`, "m").test(
-    stripLineCommentTails(content)
-  )
+  return new RegExp(`/\\*\\s*@${directive}`, "m").test(stripLineCommentTails(content))
 }
 
 // containsBareExpectError returns true if content has a bare ts-expect-error
 // (no description text after the directive).  Uses the same line-comment-tail
 // stripping for the block-comment branch as containsDirective.
 function containsBareExpectError(content: string, directive: string): boolean {
-  const re = new RegExp(
-    `(?://\\s*@${directive}\\s*$|^\\s*\\*+\\s*@${directive}\\s*$)`,
-    "m"
-  )
+  const re = new RegExp(`(?://\\s*@${directive}\\s*$|^\\s*\\*+\\s*@${directive}\\s*$)`, "m")
   if (re.test(content)) return true
   return new RegExp(`/\\*\\s*@${directive}(?:\\s*$|\\s*\\*/)`, "m").test(
     stripLineCommentTails(content)
@@ -100,7 +92,7 @@ async function main() {
     denyPreToolUse(reason)
   }
 
-  // Block @ts-ignore unconditionally — it silently accumulates and never self-cleans.
+  // Block @ts-expect-error unconditionally — it silently accumulates and never self-cleans.
   if (containsDirective(content, kwIgnore)) {
     const reason = [
       "TypeScript is the authority. Do not bypass, ignore, or argue with it.",
@@ -126,7 +118,7 @@ async function main() {
   }
 
   // Allow @ts-expect-error only when accompanied by a description.
-  // A bare directive with no explanation is as opaque as @ts-ignore.
+  // A bare directive with no explanation is as opaque as @ts-expect-error.
   if (containsBareExpectError(content, kwExpect)) {
     const reason = [
       `\`@${kwExpect}\` requires a description explaining why suppression is necessary.`,

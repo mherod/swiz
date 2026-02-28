@@ -3,9 +3,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
-  SKILL_DIRS,
-  findSkills,
   parseFrontmatterField,
+  SKILL_DIRS,
   skillAdvice,
   skillExists,
   stripFrontmatter,
@@ -101,7 +100,7 @@ describe("skillAdvice", () => {
   test("nested calls compose correctly when outer skill is absent", () => {
     const outer = skillAdvice(
       "nonexistent-outer-xyz",
-      "outer with " + skillAdvice("nonexistent-inner-xyz", "inner with", "inner without"),
+      `outer with ${skillAdvice("nonexistent-inner-xyz", "inner with", "inner without")}`,
       "outer fallback"
     )
     expect(outer).toBe("outer fallback")

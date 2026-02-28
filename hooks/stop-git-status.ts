@@ -108,11 +108,7 @@ async function main(): Promise<void> {
         ? `Push ${ahead} commit(s) to '${upstream}'`
         : `Push your committed changes to '${upstream}'`
     steps.push(
-      skillAdvice(
-        "push",
-        `${pushLabel} with /push`,
-        `${pushLabel}:\n  git push origin ${branch}`
-      )
+      skillAdvice("push", `${pushLabel} with /push`, `${pushLabel}:\n  git push origin ${branch}`)
     )
   }
 

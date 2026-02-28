@@ -63,7 +63,7 @@ async function runHookScript(
 
   await writeFile(
     transcriptPath,
-    JSON.stringify({ type: "user", message: { content: "hello" } }) + "\n"
+    `${JSON.stringify({ type: "user", message: { content: "hello" } })}\n`
   )
   await writeFile(sourceFile, "export const value = 1;\n")
 

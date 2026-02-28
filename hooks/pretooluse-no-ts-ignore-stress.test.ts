@@ -185,7 +185,7 @@ describe("pretooluse-no-ts-ignore: malformed and unclosed block comments", () =>
   })
 
   test(`non-whitespace text between /* and directive prevents match`, async () => {
-    // e.g. "/* some text, @ts-ignore */" — \s* stops at 's', no match.
+    // e.g. "/* some text, @ts-expect-error */" — \s* stops at 's', no match.
     // TypeScript itself also would not treat this as a suppression comment.
     const result = await runHook({ newString: `/* some text, @${KW_IGNORE} */` })
     expect(result.decision).toBe("allow")
@@ -256,7 +256,7 @@ describe("pretooluse-no-ts-ignore: template literals containing directives", () 
     // A backtick string that embeds the comment pattern is blocked conservatively.
     // To avoid this, use the split-variable technique in source files.
     const result = await runHook({
-      newString: "const example = `// @" + KW_IGNORE + "`",
+      newString: `const example = \`// @${KW_IGNORE}\``,
     })
     expect(result.decision).toBe("deny")
   })
@@ -264,14 +264,14 @@ describe("pretooluse-no-ts-ignore: template literals containing directives", () 
   test(`template literal containing directive without // prefix is allowed`, async () => {
     // No // or /* prefix — the regex does not match
     const result = await runHook({
-      newString: "const msg = `do not use @" + KW_IGNORE + " in your code`",
+      newString: `const msg = \`do not use @${KW_IGNORE} in your code\``,
     })
     expect(result.decision).toBe("allow")
   })
 
   test(`template literal with documented @${KW_EXPECT}: reason is allowed`, async () => {
     const result = await runHook({
-      newString: "const doc = `// @" + KW_EXPECT + ": reason` is the correct form",
+      newString: `const doc = \`// @${KW_EXPECT}: reason\` is the correct form`,
     })
     expect(result.decision).toBe("allow")
   })
@@ -282,11 +282,7 @@ describe("pretooluse-no-ts-ignore: template literals containing directives", () 
 describe("pretooluse-no-ts-ignore: files with multiple directive types", () => {
   test(`@${KW_NOCHECK} is caught even alongside valid @${KW_EXPECT}`, async () => {
     const result = await runHook({
-      newString: [
-        `// @${KW_NOCHECK}`,
-        `// @${KW_EXPECT}: some reason`,
-        "const x = 1",
-      ].join("\n"),
+      newString: [`// @${KW_NOCHECK}`, `// @${KW_EXPECT}: some reason`, "const x = 1"].join("\n"),
     })
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain(`@${KW_NOCHECK}`)

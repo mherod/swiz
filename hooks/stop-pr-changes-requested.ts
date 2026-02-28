@@ -49,7 +49,12 @@ async function main(): Promise<void> {
   const reviewsRaw = await gh(["api", `repos/${repo}/pulls/${pr.number}/reviews`], cwd)
   if (!reviewsRaw) return
 
-  let reviews: Array<{ state: string; user: { login: string }; body?: string; submitted_at: string }>
+  let reviews: Array<{
+    state: string
+    user: { login: string }
+    body?: string
+    submitted_at: string
+  }>
   try {
     reviews = JSON.parse(reviewsRaw)
   } catch {
@@ -77,12 +82,16 @@ async function main(): Promise<void> {
   if (reviewCommentsRaw) {
     try {
       reviewComments = JSON.parse(reviewCommentsRaw)
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   if (issueCommentsRaw) {
     try {
       issueComments = JSON.parse(issueCommentsRaw)
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   const subsequentReviewComments = reviewComments.filter((c) => c.created_at >= earliestTimestamp)

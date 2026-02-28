@@ -71,14 +71,10 @@ async function getActionableIssues(cwd: string, filterUser?: string): Promise<Is
   }
   if (filterUser) {
     issues = issues.filter(
-      (i) =>
-        i.author?.login === filterUser ||
-        i.assignees?.some((a) => a.login === filterUser)
+      (i) => i.author?.login === filterUser || i.assignees?.some((a) => a.login === filterUser)
     )
   }
-  return issues.filter(
-    (i) => !i.labels.some((l) => SKIP_LABELS.has(l.name.toLowerCase()))
-  )
+  return issues.filter((i) => !i.labels.some((l) => SKIP_LABELS.has(l.name.toLowerCase())))
 }
 
 async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise<PR[]> {

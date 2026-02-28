@@ -3,11 +3,11 @@
  *
  * For each Unicode character in the candidate table the test independently measures:
  *
- *   (A) Does TypeScript's compiler recognise `// <char>@ts-ignore` as a suppression
+ *   (A) Does TypeScript's compiler recognise `// <char>@ts-expect-error` as a suppression
  *       directive?  Measured by writing a real .ts file with a type error, running
  *       `tsc --noEmit`, and checking whether the error was suppressed (exit 0).
  *
- *   (B) Does our hook block `// <char>@ts-ignore` in a .ts file?  Measured by
+ *   (B) Does our hook block `// <char>@ts-expect-error` in a .ts file?  Measured by
  *       spawning the hook with the same content and reading its decision.
  *
  * The fundamental property asserted per character:
@@ -131,13 +131,10 @@ beforeAll(async () => {
   // hook does not trigger when this file is written or edited.
   for (const { cp } of CANDIDATES) {
     const char = String.fromCodePoint(cp)
-    // Directive line: `// <char>@ts-ignore`  (the KW_IGNORE variable expands
+    // Directive line: `// <char>@ts-expect-error`  (the KW_IGNORE variable expands
     // at runtime to "ts-ignore"; the source text contains `${KW_IGNORE}`)
     const directiveLine = `//${char}@${KW_IGNORE}`
-    await writeFile(
-      join(TMP_DIR, fileName(cp)),
-      `${directiveLine}\nconst _: string = 1;\n`
-    )
+    await writeFile(join(TMP_DIR, fileName(cp)), `${directiveLine}\nconst _: string = 1;\n`)
   }
 
   // ── Run tsc once on the entire temp directory ────────────────────────────
@@ -146,8 +143,8 @@ beforeAll(async () => {
     stdout: "pipe",
     stderr: "pipe",
   })
-  const tscOutput = (await new Response(tscProc.stdout).text()) +
-    (await new Response(tscProc.stderr).text())
+  const tscOutput =
+    (await new Response(tscProc.stdout).text()) + (await new Response(tscProc.stderr).text())
   await tscProc.exited
 
   // Files that appear in the error output had their error un-suppressed,
@@ -226,10 +223,10 @@ describe("pretooluse-no-ts-ignore: differential hook vs TypeScript compiler", ()
         const tscVerdict = ts ? "RECOGNISED (error suppressed)" : "ignored (error emitted)"
         throw new Error(
           `Semantic drift detected for ${cpHex(cp)} ${name} (char: ${JSON.stringify(char)})\n` +
-          `  Hook decision : ${hookVerdict}\n` +
-          `  TypeScript    : ${tscVerdict}\n` +
-          `  Fix required  : align the hook's whitespace pattern with TypeScript's ` +
-          `isWhiteSpaceSingleLine so both agree on this character.`
+            `  Hook decision : ${hookVerdict}\n` +
+            `  TypeScript    : ${tscVerdict}\n` +
+            `  Fix required  : align the hook's whitespace pattern with TypeScript's ` +
+            `isWhiteSpaceSingleLine so both agree on this character.`
         )
       }
 
@@ -240,7 +237,7 @@ describe("pretooluse-no-ts-ignore: differential hook vs TypeScript compiler", ()
 
 // ─── JSDoc block comment differential ────────────────────────────────────────
 //
-// TypeScript only recognises @ts-ignore / @ts-expect-error / @ts-nocheck in
+// TypeScript only recognises @ts-expect-error / @ts-expect-error / @ts-nocheck in
 // SINGLE-LINE comments (`//`) and single-line block comments (`/* directive */`
 // entirely on one line).  Multi-line JSDoc block comment forms are NOT
 // recognised as suppression directives by TypeScript.
@@ -401,8 +398,8 @@ describe("pretooluse-no-ts-ignore: JSDoc block comment differential (coverage pr
       if (tscRecog && !hookBlocked) {
         throw new Error(
           `BYPASS DETECTED: TypeScript recognises "${label}" as a suppression directive ` +
-          `but the hook allows it.  This is a security gap — the hook must block ` +
-          `every pattern TypeScript honours.`
+            `but the hook allows it.  This is a security gap — the hook must block ` +
+            `every pattern TypeScript honours.`
         )
       }
 

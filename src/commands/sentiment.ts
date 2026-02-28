@@ -354,7 +354,7 @@ interface Match {
 function collectMatches(text: string, patterns: Pattern[]): Match[] {
   const matches: Match[] = []
   for (const { re, weight, label } of patterns) {
-    const flags = re.flags.includes("g") ? re : new RegExp(re.source, re.flags + "g")
+    const flags = re.flags.includes("g") ? re : new RegExp(re.source, `${re.flags}g`)
     const hits = [...text.matchAll(flags)]
     if (hits.length > 0) {
       // For repeating patterns (correctly, Consider) count individually; others cap at 1
@@ -370,7 +370,8 @@ function collectMatches(text: string, patterns: Pattern[]): Match[] {
 // hedging phrase within a 200-char window (before or after). If so, halve its
 // effective weight.
 function hedgingDampFactor(text: string): number {
-  const hedgeRe = /\bnon.blocking\b|\bneither is a blocker\b|\bnot a blocker\b|\bfor (?:a )?follow.up\b|\bin a follow.up\b|\bminor enough not to block\b/gi
+  const hedgeRe =
+    /\bnon.blocking\b|\bneither is a blocker\b|\bnot a blocker\b|\bfor (?:a )?follow.up\b|\bin a follow.up\b|\bminor enough not to block\b/gi
   const hedgeHits = [...text.matchAll(hedgeRe)]
   if (hedgeHits.length === 0) return 1.0
   // Ratio: more hedges relative to text length means more dampening
@@ -423,9 +424,7 @@ function printMatches(matches: Match[], color: string, sign: string): void {
   for (const m of matches) {
     const weightStr = `${sign}${Math.abs(m.weight * m.count).toFixed(2)}`
     const countNote = m.count > 1 ? ` ×${m.count}` : ""
-    console.log(
-      `  ${color}${weightStr.padStart(6)}${RESET}  ${DIM}${m.label}${countNote}${RESET}`
-    )
+    console.log(`  ${color}${weightStr.padStart(6)}${RESET}  ${DIM}${m.label}${countNote}${RESET}`)
   }
 }
 
@@ -473,9 +472,21 @@ export const sentimentCommand: Command = {
           {
             score,
             label,
-            approval: approvalMatches.map((m) => ({ label: m.label, weight: m.weight, count: m.count })),
-            rejection: rejectionMatches.map((m) => ({ label: m.label, weight: m.weight, count: m.count })),
-            hedging: hedgingMatches.map((m) => ({ label: m.label, weight: m.weight, count: m.count })),
+            approval: approvalMatches.map((m) => ({
+              label: m.label,
+              weight: m.weight,
+              count: m.count,
+            })),
+            rejection: rejectionMatches.map((m) => ({
+              label: m.label,
+              weight: m.weight,
+              count: m.count,
+            })),
+            hedging: hedgingMatches.map((m) => ({
+              label: m.label,
+              weight: m.weight,
+              count: m.count,
+            })),
           },
           null,
           2
@@ -486,9 +497,7 @@ export const sentimentCommand: Command = {
 
     const scoreStr = (score >= 0 ? "+" : "") + score.toFixed(3)
     console.log()
-    console.log(
-      `  ${BOLD}Score: ${color}${scoreStr}${RESET}  ${BOLD}${color}${label}${RESET}`
-    )
+    console.log(`  ${BOLD}Score: ${color}${scoreStr}${RESET}  ${BOLD}${color}${label}${RESET}`)
     console.log(`  ${DIM}${bar(score)}${RESET}`)
     console.log()
 

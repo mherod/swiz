@@ -1,8 +1,7 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest"
-import { mkdir, writeFile, rm } from "node:fs/promises"
+import { mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { Session } from "./transcript-utils.ts"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 describe("transcript-utils integration", () => {
   describe("findSessions", () => {

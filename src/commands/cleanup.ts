@@ -26,7 +26,10 @@ async function readdirCached(dirPath: string): Promise<string[]> {
   }
 }
 
-export async function walkDecode(currentPath: string, remainingEncoded: string): Promise<string | null> {
+export async function walkDecode(
+  currentPath: string,
+  remainingEncoded: string
+): Promise<string | null> {
   if (!remainingEncoded) return currentPath
   if (!remainingEncoded.startsWith("-")) return null
 
@@ -62,11 +65,11 @@ export async function decodeProjectPath(encodedName: string, homeDir = HOME): Pr
 
   const decoded = await walkDecode(homeDir, encodedRest)
   if (decoded) {
-    return decoded.startsWith(homeDir) ? "~" + decoded.slice(homeDir.length) : decoded
+    return decoded.startsWith(homeDir) ? `~${decoded.slice(homeDir.length)}` : decoded
   }
 
   // Fallback: simple replacement (may split literal hyphens)
-  return "~" + encodedRest.replace(/-/g, "/")
+  return `~${encodedRest.replace(/-/g, "/")}`
 }
 
 // Matches standard UUID v4 — session dirs only; named dirs (memory/, etc.) never match
@@ -186,7 +189,7 @@ function parseOlderThan(value: string): { ms: number; label: string } {
 
   const daysStr = /^(\d+)d?$/i.exec(value)?.[1] ?? ""
   const days = parseInt(daysStr, 10)
-  if (isNaN(days) || days < 1) {
+  if (Number.isNaN(days) || days < 1) {
     throw new Error("--older-than requires a positive integer, e.g. 30, 7d, or 48h")
   }
   return { ms: days * 24 * 60 * 60 * 1000, label: `${days} ${days === 1 ? "day" : "days"}` }
@@ -207,7 +210,8 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
       olderThan = parseOlderThan(next)
       i++
     } else if (arg === "--project" && next) {
-      projectFilter = next; i++
+      projectFilter = next
+      i++
     }
   }
 
@@ -223,7 +227,8 @@ export const cleanupCommand: Command = {
   options: [
     {
       flags: "--older-than <time>",
-      description: "Remove sessions older than this time: days (30, 7d) or hours (48h). Default: 30",
+      description:
+        "Remove sessions older than this time: days (30, 7d) or hours (48h). Default: 30",
     },
     { flags: "--dry-run", description: "Show what would be removed without deleting" },
     { flags: "--project <name>", description: "Limit to a specific project directory name" },

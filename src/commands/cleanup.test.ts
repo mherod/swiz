@@ -40,8 +40,11 @@ const ENCODED_HOME = TMP_HOME.replace(/[/.]/g, "-")
 // Fake project directory name (represents TMP_HOME/Development/my-project).
 const FIXTURE_PROJECT = `${ENCODED_HOME}-Development-my-project`
 const FIXTURE_SESSION = join(
-  TMP_HOME, ".claude", "projects", FIXTURE_PROJECT,
-  "00000000-0000-0000-0000-000000000001",
+  TMP_HOME,
+  ".claude",
+  "projects",
+  FIXTURE_PROJECT,
+  "00000000-0000-0000-0000-000000000001"
 )
 // Corrupted project: mix of valid and invalid entries.
 const CORRUPT_PROJECT = `${ENCODED_HOME}-corrupted-project`
@@ -68,22 +71,18 @@ beforeAll(async () => {
   // Non-UUID directory in project root (should be ignored by UUID_RE).
   await mkdir(join(CORRUPT_PROJECT_DIR, "memory"), { recursive: true })
   // UUID-named FILE instead of directory (should be skipped by !isDirectory()).
-  await Bun.write(
-    join(CORRUPT_PROJECT_DIR, "00000000-0000-0000-0000-000000000002"),
-    "not a dir\n",
-  )
+  await Bun.write(join(CORRUPT_PROJECT_DIR, "00000000-0000-0000-0000-000000000002"), "not a dir\n")
   // Empty UUID directory — valid session, but size 0B.
   await mkdir(join(CORRUPT_PROJECT_DIR, "00000000-0000-0000-0000-000000000003"), {
     recursive: true,
   })
   // UUID directory with content — valid session.
-  await mkdir(
-    join(CORRUPT_PROJECT_DIR, "00000000-0000-0000-0000-000000000004"),
-    { recursive: true },
-  )
+  await mkdir(join(CORRUPT_PROJECT_DIR, "00000000-0000-0000-0000-000000000004"), {
+    recursive: true,
+  })
   await Bun.write(
     join(CORRUPT_PROJECT_DIR, "00000000-0000-0000-0000-000000000004", "data.json"),
-    '{"ok":true}\n',
+    '{"ok":true}\n'
   )
 
   // Noise-only project: non-UUID entries only — should produce 0 sessions
@@ -181,18 +180,12 @@ describe("decodeProjectPath", () => {
   })
 
   test("preserves literal hyphen in project name (cheapshot-auto)", async () => {
-    const result = await decodeProjectPath(
-      `${encodedHome}-Development-cheapshot-auto`,
-      TMP_HOME
-    )
+    const result = await decodeProjectPath(`${encodedHome}-Development-cheapshot-auto`, TMP_HOME)
     expect(result).toBe("~/Development/cheapshot-auto")
   })
 
   test("preserves literal hyphen in project name (plugg-platform)", async () => {
-    const result = await decodeProjectPath(
-      `${encodedHome}-Development-plugg-platform`,
-      TMP_HOME
-    )
+    const result = await decodeProjectPath(`${encodedHome}-Development-plugg-platform`, TMP_HOME)
     expect(result).toBe("~/Development/plugg-platform")
   })
 
@@ -219,10 +212,12 @@ describe("cleanup --dry-run output", () => {
   const env = { ...process.env, HOME: TMP_HOME }
 
   async function runCleanup(extraArgs: string[] = []): Promise<string> {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "cleanup", "--dry-run", ...extraArgs],
-      { cwd: SWIZ_ROOT, env, stdout: "pipe", stderr: "pipe" },
-    )
+    const proc = Bun.spawn(["bun", "run", "index.ts", "cleanup", "--dry-run", ...extraArgs], {
+      cwd: SWIZ_ROOT,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
     const output = await new Response(proc.stdout).text()
     await proc.exited
     return output
@@ -269,15 +264,12 @@ describe("cleanup with no .claude/projects directory", () => {
   })
 
   test("exits without error and prints informative message", async () => {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "cleanup", "--dry-run"],
-      {
-        cwd: join(import.meta.dir, "../.."),
-        env: { ...process.env, HOME: EMPTY_HOME },
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    )
+    const proc = Bun.spawn(["bun", "run", "index.ts", "cleanup", "--dry-run"], {
+      cwd: join(import.meta.dir, "../.."),
+      env: { ...process.env, HOME: EMPTY_HOME },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
     const output = await new Response(proc.stdout).text()
     await proc.exited
 
@@ -293,7 +285,7 @@ describe("cleanup with no .claude/projects directory", () => {
         env: { ...process.env, HOME: EMPTY_HOME },
         stdout: "pipe",
         stderr: "pipe",
-      },
+      }
     )
     await new Response(proc.stdout).text()
     await proc.exited
@@ -315,11 +307,15 @@ describe("cleanup with partially corrupted project directory", () => {
   const SWIZ_ROOT = join(import.meta.dir, "../..")
   const env = { ...process.env, HOME: TMP_HOME }
 
-  async function runCleanup(...extraArgs: string[]): Promise<{ output: string; exitCode: number | null }> {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "cleanup", "--dry-run", ...extraArgs],
-      { cwd: SWIZ_ROOT, env, stdout: "pipe", stderr: "pipe" },
-    )
+  async function runCleanup(
+    ...extraArgs: string[]
+  ): Promise<{ output: string; exitCode: number | null }> {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "cleanup", "--dry-run", ...extraArgs], {
+      cwd: SWIZ_ROOT,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
     const output = await new Response(proc.stdout).text()
     await proc.exited
     return { output, exitCode: proc.exitCode }
@@ -362,10 +358,12 @@ describe("cleanup with partially corrupted project directory", () => {
   })
 
   test("no stderr output on corrupted input", async () => {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "cleanup", "--dry-run"],
-      { cwd: SWIZ_ROOT, env, stdout: "pipe", stderr: "pipe" },
-    )
+    const proc = Bun.spawn(["bun", "run", "index.ts", "cleanup", "--dry-run"], {
+      cwd: SWIZ_ROOT,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
     const stderr = await new Response(proc.stderr).text()
     await proc.exited
     expect(stderr.trim()).toBe("")
@@ -396,15 +394,21 @@ describe("cleanup stale-project detection", () => {
   // must resolve it to the real directory via longest-match.
   const LITERAL_PROJECT = `${STALE_ENCODED_HOME}-Development-cheapshot-auto`
   const LITERAL_SESSION = join(
-    STALE_HOME, ".claude", "projects", LITERAL_PROJECT,
-    "00000000-0000-0000-0000-000000000005",
+    STALE_HOME,
+    ".claude",
+    "projects",
+    LITERAL_PROJECT,
+    "00000000-0000-0000-0000-000000000005"
   )
 
   // Project whose real path does not exist — walkDecode returns null → stale.
   const GONE_PROJECT = `${STALE_ENCODED_HOME}-gone-project`
   const GONE_SESSION = join(
-    STALE_HOME, ".claude", "projects", GONE_PROJECT,
-    "00000000-0000-0000-0000-000000000006",
+    STALE_HOME,
+    ".claude",
+    "projects",
+    GONE_PROJECT,
+    "00000000-0000-0000-0000-000000000006"
   )
 
   beforeAll(async () => {
@@ -423,10 +427,12 @@ describe("cleanup stale-project detection", () => {
   })
 
   async function runCleanup(...extraArgs: string[]): Promise<string> {
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "cleanup", "--dry-run", ...extraArgs],
-      { cwd: SWIZ_ROOT, env, stdout: "pipe", stderr: "pipe" },
-    )
+    const proc = Bun.spawn(["bun", "run", "index.ts", "cleanup", "--dry-run", ...extraArgs], {
+      cwd: SWIZ_ROOT,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
     const output = await new Response(proc.stdout).text()
     await proc.exited
     return output

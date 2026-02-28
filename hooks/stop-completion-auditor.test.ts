@@ -51,7 +51,7 @@ describe("formatActionPlan", () => {
 
   it("output from formatActionPlan is appendable alongside a prose prefix", () => {
     // Mirrors how stop-completion-auditor.ts uses it: prose + formatActionPlan(steps)
-    const full = "Create tasks to record the work done:\n" + formatActionPlan(["TaskCreate", "TaskUpdate"])
+    const full = `Create tasks to record the work done:\n${formatActionPlan(["TaskCreate", "TaskUpdate"])}`
     expect(full).toBe(
       "Create tasks to record the work done:\nAction plan:\n  1. TaskCreate\n  2. TaskUpdate\n"
     )
@@ -103,14 +103,14 @@ async function createFixture(): Promise<{
     )
   }
   const transcriptPath = join(home, "transcript.jsonl")
-  await writeFile(transcriptPath, lines.join("\n") + "\n")
+  await writeFile(transcriptPath, `${lines.join("\n")}\n`)
 
   return { home, tasksDir, transcriptPath }
 }
 
 /** Write an audit log with the given entries. */
 async function writeAuditLog(tasksDir: string, entries: object[]): Promise<void> {
-  const content = entries.map((e) => JSON.stringify(e)).join("\n") + "\n"
+  const content = `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`
   await writeFile(join(tasksDir, ".audit-log.jsonl"), content)
 }
 

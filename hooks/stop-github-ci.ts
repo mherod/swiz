@@ -104,7 +104,7 @@ async function main(): Promise<void> {
     reason += skillAdvice(
       "ci-status",
       "Wait for CI to complete, then check results with the /ci-status skill.",
-      "Wait for CI to complete, then check results:\n  gh run list --branch " + branch
+      `Wait for CI to complete, then check results:\n  gh run list --branch ${branch}`
     )
     blockStop(reason)
   }

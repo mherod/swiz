@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest"
 import {
-  extractText,
-  extractPlainTurns,
   countToolCalls,
+  extractPlainTurns,
+  extractText,
   formatTurnsAsContext,
   isHookFeedback,
-  projectKeyFromCwd,
   type PlainTurn,
+  projectKeyFromCwd,
 } from "./transcript-utils.ts"
 
 describe("transcript-utils.ts", () => {
@@ -126,8 +126,7 @@ describe("transcript-utils.ts", () => {
     })
 
     it("filters out non-user/assistant entries", () => {
-      const jsonl =
-        '{"type":"system"}\n{"type":"user","message":{"content":"test"}}\n'
+      const jsonl = '{"type":"system"}\n{"type":"user","message":{"content":"test"}}\n'
       const result = extractPlainTurns(jsonl)
       expect(result.length).toBe(1)
     })
@@ -309,7 +308,9 @@ describe("transcript-utils.ts", () => {
     it("handles tool call with glob_pattern input", () => {
       const jsonl = JSON.stringify({
         type: "assistant",
-        message: { content: [{ type: "tool_use", name: "Glob", input: { glob_pattern: "**/*.ts" } }] },
+        message: {
+          content: [{ type: "tool_use", name: "Glob", input: { glob_pattern: "**/*.ts" } }],
+        },
       })
       const result = extractPlainTurns(jsonl)
       expect(result.length).toBe(1)
@@ -339,7 +340,9 @@ describe("transcript-utils.ts", () => {
     it("handles tool call with file_path input", () => {
       const jsonl = JSON.stringify({
         type: "assistant",
-        message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "/path/to/file.ts" } }] },
+        message: {
+          content: [{ type: "tool_use", name: "Edit", input: { file_path: "/path/to/file.ts" } }],
+        },
       })
       const result = extractPlainTurns(jsonl)
       expect(result.length).toBe(1)
@@ -363,7 +366,9 @@ describe("transcript-utils.ts", () => {
     it("includes glob_pattern input in label", () => {
       const jsonl = JSON.stringify({
         type: "assistant",
-        message: { content: [{ type: "tool_use", name: "Glob", input: { glob_pattern: "src/**/*.ts" } }] },
+        message: {
+          content: [{ type: "tool_use", name: "Glob", input: { glob_pattern: "src/**/*.ts" } }],
+        },
       })
       const result = extractPlainTurns(jsonl)
       expect(result.length).toBeGreaterThan(0)
@@ -374,14 +379,14 @@ describe("transcript-utils.ts", () => {
 
     it("truncates long commands at 77 chars", () => {
       const veryLongCmd = "c".repeat(100)
-      const cmd = veryLongCmd.length > 80 ? veryLongCmd.slice(0, 77) + "..." : veryLongCmd
+      const cmd = veryLongCmd.length > 80 ? `${veryLongCmd.slice(0, 77)}...` : veryLongCmd
       expect(cmd.length).toBe(80)
       expect(cmd.endsWith("...")).toBe(true)
     })
 
     it("truncates long queries at 57 chars", () => {
       const veryLongQuery = "d".repeat(100)
-      const q = veryLongQuery.length > 60 ? veryLongQuery.slice(0, 57) + "..." : veryLongQuery
+      const q = veryLongQuery.length > 60 ? `${veryLongQuery.slice(0, 57)}...` : veryLongQuery
       expect(q.length).toBe(60)
       expect(q.endsWith("...")).toBe(true)
     })

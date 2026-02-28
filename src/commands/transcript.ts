@@ -130,7 +130,7 @@ function wordWrap(text: string, width: number, indent: string): string {
       if (current.length === 0) {
         current = word
       } else if (current.length + 1 + word.length <= width) {
-        current += " " + word
+        current += ` ${word}`
       } else {
         lines.push(indent + current)
         current = word
@@ -340,15 +340,19 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
     if (!arg) continue
     const next = args[i + 1]
     if ((arg === "--session" || arg === "-s") && next) {
-      sessionQuery = next; i++
+      sessionQuery = next
+      i++
     } else if ((arg === "--dir" || arg === "-d") && next) {
-      targetDir = resolve(next); i++
+      targetDir = resolve(next)
+      i++
     } else if (arg === "--list" || arg === "-l") {
       listOnly = true
     } else if ((arg === "--head" || arg === "-H") && next) {
-      headCount = parseInt(next, 10); i++
+      headCount = parseInt(next, 10)
+      i++
     } else if ((arg === "--tail" || arg === "-T") && next) {
-      tailCount = parseInt(next, 10); i++
+      tailCount = parseInt(next, 10)
+      i++
     } else if (arg === "--auto-reply") {
       autoReply = true
     }

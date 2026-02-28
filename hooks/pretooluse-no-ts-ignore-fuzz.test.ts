@@ -71,13 +71,13 @@ async function runHook(opts: {
 
 describe(`pretooluse-no-ts-ignore: mixed indentation in JSDoc`, () => {
   test(`tab-only line prefix catches @${KW_IGNORE}`, async () => {
-    // "/**\n\t* @ts-ignore\n */" — tab before asterisk
+    // "/**\n\t* @ts-expect-error\n */" — tab before asterisk
     const result = await runHook({ newString: `/**\n\t* @${KW_IGNORE}\n */` })
     expect(result.decision).toBe("deny")
   })
 
   test(`tab+space line prefix catches @${KW_IGNORE}`, async () => {
-    // "/**\n\t * @ts-ignore\n */" — tab then space then asterisk
+    // "/**\n\t * @ts-expect-error\n */" — tab then space then asterisk
     const result = await runHook({ newString: `/**\n\t * @${KW_IGNORE}\n */` })
     expect(result.decision).toBe("deny")
   })
@@ -104,7 +104,7 @@ describe(`pretooluse-no-ts-ignore: mixed indentation in JSDoc`, () => {
 
 describe(`pretooluse-no-ts-ignore: CRLF line endings in JSDoc`, () => {
   test(`CRLF in JSDoc catches @${KW_IGNORE}`, async () => {
-    // "/**\r\n * @ts-ignore\r\n */" — Windows line endings throughout
+    // "/**\r\n * @ts-expect-error\r\n */" — Windows line endings throughout
     const result = await runHook({ newString: `/**\r\n * @${KW_IGNORE}\r\n */` })
     expect(result.decision).toBe("deny")
   })
@@ -137,7 +137,7 @@ describe(`pretooluse-no-ts-ignore: CRLF line endings in JSDoc`, () => {
 
 describe(`pretooluse-no-ts-ignore: blank JSDoc lines before directive`, () => {
   test(`blank * line before @${KW_IGNORE} is caught`, async () => {
-    // "/**\n *\n * @ts-ignore\n */"
+    // "/**\n *\n * @ts-expect-error\n */"
     const result = await runHook({ newString: `/**\n *\n * @${KW_IGNORE}\n */` })
     expect(result.decision).toBe("deny")
   })
@@ -170,7 +170,7 @@ describe(`pretooluse-no-ts-ignore: blank JSDoc lines before directive`, () => {
 
 describe(`pretooluse-no-ts-ignore: no-space asterisk prefix "*@directive"`, () => {
   test(`"*@${KW_IGNORE}" (no space) is caught`, async () => {
-    // "/**\n *@ts-ignore\n */" — * immediately followed by @
+    // "/**\n *@ts-expect-error\n */" — * immediately followed by @
     const result = await runHook({ newString: `/**\n *@${KW_IGNORE}\n */` })
     expect(result.decision).toBe("deny")
   })
@@ -262,7 +262,9 @@ describe(`pretooluse-no-ts-ignore: double-asterisk JSDoc prefix is caught`, () =
   })
 
   test(`"** @${KW_EXPECT}: description" with description is allowed`, async () => {
-    const result = await runHook({ newString: `/**\n ** @${KW_EXPECT}: extra stars, still needs description\n */` })
+    const result = await runHook({
+      newString: `/**\n ** @${KW_EXPECT}: extra stars, still needs description\n */`,
+    })
     expect(result.decision).toBe("allow")
   })
 })

@@ -97,14 +97,14 @@ function toolCallLabel(block: { name?: string; input?: Record<string, unknown> }
   if (typeof pathVal === "string") return `${name}(${pathVal})`
 
   if (typeof input.command === "string") {
-    const cmd = input.command.length > 80 ? input.command.slice(0, 77) + "..." : input.command
+    const cmd = input.command.length > 80 ? `${input.command.slice(0, 77)}...` : input.command
     return `${name}(${cmd})`
   }
 
   if (typeof input.pattern === "string") return `${name}(${input.pattern})`
   if (typeof input.glob_pattern === "string") return `${name}(${input.glob_pattern})`
   if (typeof input.query === "string") {
-    const q = input.query.length > 60 ? input.query.slice(0, 57) + "..." : input.query
+    const q = input.query.length > 60 ? `${input.query.slice(0, 57)}...` : input.query
     return `${name}(${q})`
   }
 

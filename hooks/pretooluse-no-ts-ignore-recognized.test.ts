@@ -34,10 +34,7 @@ interface HookResult {
   rawOutput: string
 }
 
-async function runHook(opts: {
-  filePath?: string
-  newString: string
-}): Promise<HookResult> {
+async function runHook(opts: { filePath?: string; newString: string }): Promise<HookResult> {
   const payload = JSON.stringify({
     tool_name: "Edit",
     tool_input: {
@@ -71,7 +68,7 @@ async function runHook(opts: {
   }
 }
 
-// ─── @ts-ignore — line comment forms (TypeScript-recognised) ─────────────────
+// ─── @ts-expect-error — line comment forms (TypeScript-recognised) ─────────────────
 //
 // TypeScript recognises the directive in line comments with any amount of
 // whitespace between the opener and the at-sign, and allows trailing text
@@ -87,18 +84,12 @@ describe(`pretooluse-no-ts-ignore: @${KW_IGNORE} line comment spacing variants`,
       "trailing text after directive",
       `// @${KW_IGNORE} some explanation here\nconst x: string = 1`,
     ],
-    [
-      "colon after directive",
-      `// @${KW_IGNORE}: some explanation here\nconst x: string = 1`,
-    ],
+    ["colon after directive", `// @${KW_IGNORE}: some explanation here\nconst x: string = 1`],
     [
       "multiple spaces plus trailing text",
       `//   @${KW_IGNORE}   trailing spaces\nconst x: string = 1`,
     ],
-    [
-      "not first line in file",
-      `const ok = 1\n// @${KW_IGNORE}\nconst x: string = 1`,
-    ],
+    ["not first line in file", `const ok = 1\n// @${KW_IGNORE}\nconst x: string = 1`],
   ]
 
   for (const [label, input] of CASES) {
@@ -109,7 +100,7 @@ describe(`pretooluse-no-ts-ignore: @${KW_IGNORE} line comment spacing variants`,
   }
 })
 
-// ─── @ts-ignore — single-line block comment forms (TypeScript-recognised) ────
+// ─── @ts-expect-error — single-line block comment forms (TypeScript-recognised) ────
 //
 // TypeScript also recognises the directive in single-line block comments,
 // including forms with no spaces, extra spaces, tab, or trailing text.
@@ -118,26 +109,11 @@ describe(`pretooluse-no-ts-ignore: @${KW_IGNORE} line comment spacing variants`,
 describe(`pretooluse-no-ts-ignore: @${KW_IGNORE} single-line block comment variants`, () => {
   const CASES: [string, string][] = [
     ["no spaces around directive", `/*@${KW_IGNORE}*/\nconst x: string = 1`],
-    [
-      "space before at-sign",
-      `/* @${KW_IGNORE} */\nconst x: string = 1`,
-    ],
-    [
-      "extra spaces on both sides",
-      `/*  @${KW_IGNORE}  */\nconst x: string = 1`,
-    ],
-    [
-      "tab before at-sign",
-      `/*\t@${KW_IGNORE}*/\nconst x: string = 1`,
-    ],
-    [
-      "trailing text before close",
-      `/* @${KW_IGNORE} trailing text */\nconst x: string = 1`,
-    ],
-    [
-      "colon description before close",
-      `/* @${KW_IGNORE}: description */\nconst x: string = 1`,
-    ],
+    ["space before at-sign", `/* @${KW_IGNORE} */\nconst x: string = 1`],
+    ["extra spaces on both sides", `/*  @${KW_IGNORE}  */\nconst x: string = 1`],
+    ["tab before at-sign", `/*\t@${KW_IGNORE}*/\nconst x: string = 1`],
+    ["trailing text before close", `/* @${KW_IGNORE} trailing text */\nconst x: string = 1`],
+    ["colon description before close", `/* @${KW_IGNORE}: description */\nconst x: string = 1`],
   ]
 
   for (const [label, input] of CASES) {
@@ -160,14 +136,8 @@ describe(`pretooluse-no-ts-ignore: @${KW_NOCHECK} line comment spacing variants`
     ["one space (// @directive)", `// @${KW_NOCHECK}\nconst x: string = 1`],
     ["two spaces (//  @directive)", `//  @${KW_NOCHECK}\nconst x: string = 1`],
     ["tab between opener and at-sign", `//\t@${KW_NOCHECK}\nconst x: string = 1`],
-    [
-      "trailing text after directive",
-      `// @${KW_NOCHECK} some text\nconst x: string = 1`,
-    ],
-    [
-      "colon after directive",
-      `// @${KW_NOCHECK}: some text\nconst x: string = 1`,
-    ],
+    ["trailing text after directive", `// @${KW_NOCHECK} some text\nconst x: string = 1`],
+    ["colon after directive", `// @${KW_NOCHECK}: some text\nconst x: string = 1`],
     ["at top of file with code below", `// @${KW_NOCHECK}\nexport const x = 1`],
   ]
 
@@ -187,14 +157,8 @@ describe(`pretooluse-no-ts-ignore: @${KW_NOCHECK} line comment spacing variants`
 describe(`pretooluse-no-ts-ignore: @${KW_NOCHECK} block comment forms (conservative)`, () => {
   const CASES: [string, string][] = [
     ["no spaces around directive", `/*@${KW_NOCHECK}*/\nconst x = 1`],
-    [
-      "space before at-sign",
-      `/* @${KW_NOCHECK} */\nconst x = 1`,
-    ],
-    [
-      "extra spaces on both sides",
-      `/*  @${KW_NOCHECK}  */\nconst x = 1`,
-    ],
+    ["space before at-sign", `/* @${KW_NOCHECK} */\nconst x = 1`],
+    ["extra spaces on both sides", `/*  @${KW_NOCHECK}  */\nconst x = 1`],
   ]
 
   for (const [label, input] of CASES) {
@@ -217,10 +181,7 @@ describe(`pretooluse-no-ts-ignore: bare @${KW_EXPECT} line comment spacing varia
     ["one space (// @directive)", `// @${KW_EXPECT}\nconst x: string = 1`],
     ["two spaces (//  @directive)", `//  @${KW_EXPECT}\nconst x: string = 1`],
     ["tab between opener and at-sign", `//\t@${KW_EXPECT}\nconst x: string = 1`],
-    [
-      "only trailing whitespace after directive",
-      `// @${KW_EXPECT}   \nconst x: string = 1`,
-    ],
+    ["only trailing whitespace after directive", `// @${KW_EXPECT}   \nconst x: string = 1`],
   ]
 
   for (const [label, input] of CASES) {
@@ -238,26 +199,11 @@ describe(`pretooluse-no-ts-ignore: bare @${KW_EXPECT} line comment spacing varia
 
 describe(`pretooluse-no-ts-ignore: bare @${KW_EXPECT} single-line block comment variants`, () => {
   const CASES: [string, string][] = [
-    [
-      "no spaces around directive",
-      `/*@${KW_EXPECT}*/\nconst x: string = 1`,
-    ],
-    [
-      "space before at-sign",
-      `/* @${KW_EXPECT} */\nconst x: string = 1`,
-    ],
-    [
-      "extra spaces on both sides",
-      `/*  @${KW_EXPECT}  */\nconst x: string = 1`,
-    ],
-    [
-      "tab before at-sign",
-      `/*\t@${KW_EXPECT}*/\nconst x: string = 1`,
-    ],
-    [
-      "unclosed block comment",
-      `/* @${KW_EXPECT}\nconst x: string = 1`,
-    ],
+    ["no spaces around directive", `/*@${KW_EXPECT}*/\nconst x: string = 1`],
+    ["space before at-sign", `/* @${KW_EXPECT} */\nconst x: string = 1`],
+    ["extra spaces on both sides", `/*  @${KW_EXPECT}  */\nconst x: string = 1`],
+    ["tab before at-sign", `/*\t@${KW_EXPECT}*/\nconst x: string = 1`],
+    ["unclosed block comment", `/* @${KW_EXPECT}\nconst x: string = 1`],
   ]
 
   for (const [label, input] of CASES) {
@@ -284,10 +230,7 @@ describe(`pretooluse-no-ts-ignore: documented @${KW_EXPECT} forms are allowed`, 
       "space plus description without colon (line)",
       `// @${KW_EXPECT} upstream types are wrong\nconst x: string = 1`,
     ],
-    [
-      "tab plus description (line)",
-      `//\t@${KW_EXPECT}: bad lib\nconst x: string = 1`,
-    ],
+    ["tab plus description (line)", `//\t@${KW_EXPECT}: bad lib\nconst x: string = 1`],
     [
       "two spaces before at-sign plus description (line)",
       `//  @${KW_EXPECT}: extra space before at-sign\nconst x: string = 1`,

@@ -1,5 +1,5 @@
-import { describe, expect, it, beforeEach } from "vitest"
-import { registerCommand, commands } from "./cli.ts"
+import { describe, expect, it } from "vitest"
+import { commands, registerCommand } from "./cli.ts"
 import type { Command } from "./types.ts"
 
 describe("cli.ts", () => {
@@ -181,7 +181,7 @@ describe("cli.ts", () => {
         { name: "cmd3", description: "Third", run: async () => {} },
       ]
 
-      cmds.forEach((cmd) => registerCommand(cmd))
+      for (const cmd of cmds) registerCommand(cmd)
 
       expect(commands.get("cmd1")).toBeDefined()
       expect(commands.get("cmd2")).toBeDefined()

@@ -35,12 +35,12 @@ async function main(): Promise<void> {
 
     // Get blob size
     const sizeStr = await git(["cat-file", "-s", blobHash], cwd)
-    const sizeKb = Math.floor(parseInt(sizeStr) / 1024)
-    if (isNaN(sizeKb) || sizeKb < SIZE_LIMIT_KB) continue
+    const sizeKb = Math.floor(parseInt(sizeStr, 10) / 1024)
+    if (Number.isNaN(sizeKb) || sizeKb < SIZE_LIMIT_KB) continue
 
     // Check if tracked by LFS
     const gitattributes = await git(["show", "HEAD:.gitattributes"], cwd)
-    if (gitattributes && gitattributes.includes("filter=lfs")) {
+    if (gitattributes?.includes("filter=lfs")) {
       const escaped = filePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
       if (new RegExp(escaped).test(gitattributes)) continue
     }

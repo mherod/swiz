@@ -169,7 +169,7 @@ describe("stop-secret-scanner: GENERIC_SECRET_RE exclusions allow stop", () => {
 describe("stop-secret-scanner: TOKEN_RE patterns", () => {
   test("blocks GitHub personal access token (ghp_ prefix)", async () => {
     const dir = await makeTempGitRepo()
-    const fakeToken = "ghp_" + "a".repeat(36)
+    const fakeToken = `ghp_${"a".repeat(36)}`
     await commitFile(dir, "config.ts", `const TOKEN = "${fakeToken}";\n`)
     const result = await runHook(dir)
     expect(result.blocked).toBe(true)
@@ -178,7 +178,7 @@ describe("stop-secret-scanner: TOKEN_RE patterns", () => {
 
   test("blocks Stripe live secret key (sk_live_ prefix)", async () => {
     const dir = await makeTempGitRepo()
-    const fakeKey = "sk_live_" + "b".repeat(24)
+    const fakeKey = `sk_live_${"b".repeat(24)}`
     await commitFile(dir, "config.ts", `const STRIPE_KEY = "${fakeKey}";\n`)
     const result = await runHook(dir)
     expect(result.blocked).toBe(true)
@@ -243,7 +243,7 @@ describe("stop-secret-scanner: findings collection limit", () => {
       // API_KEY with unique numeric secret values (8+ chars minimum)
       secrets.push(`const API_KEY = "secret${i.toString().padStart(8, "0")}";`)
     }
-    await commitFile(dir, "config.ts", secrets.join("\n") + "\n")
+    await commitFile(dir, "config.ts", `${secrets.join("\n")}\n`)
     const result = await runHook(dir)
     expect(result.blocked).toBe(true)
     // Should contain reason with "Suspicious lines:" header and multiple findings

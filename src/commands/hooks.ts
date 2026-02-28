@@ -99,7 +99,7 @@ function resolveScriptPath(command: string): string | null {
 function shortName(command: string): string {
   const script = resolveScriptPath(command)
   if (script) return script.split("/").pop()!
-  if (command.length > 60) return command.slice(0, 57) + "..."
+  if (command.length > 60) return `${command.slice(0, 57)}...`
   return command
 }
 
@@ -146,7 +146,7 @@ async function showEvent(allSettings: LoadedSettings[], eventName: string) {
           const label = hook.statusMessage ?? "agent hook"
           console.log(`    ${matchLabel.padEnd(22)} ${label}${flagStr}`)
         } else if (hookType === "prompt" && hook.prompt) {
-          const preview = hook.prompt.length > 50 ? hook.prompt.slice(0, 47) + "..." : hook.prompt
+          const preview = hook.prompt.length > 50 ? `${hook.prompt.slice(0, 47)}...` : hook.prompt
           console.log(`    ${matchLabel.padEnd(22)} [prompt] ${preview}${flagStr}`)
         }
       }

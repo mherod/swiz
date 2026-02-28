@@ -1,5 +1,5 @@
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
-import { basename, join } from "node:path"
+import { join } from "node:path"
 import type { Command } from "../types.ts"
 
 const HOME = process.env.HOME ?? "~"
@@ -108,7 +108,7 @@ async function readTasks(sessionId: string): Promise<Task[]> {
         .filter((f) => f.endsWith(".json") && !f.startsWith("."))
         .map(async (f) => JSON.parse(await readFile(join(dir, f), "utf-8")) as Task)
     )
-    return tasks.sort((a, b) => parseInt(a.id) - parseInt(b.id))
+    return tasks.sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10))
   } catch {
     return []
   }
@@ -124,7 +124,7 @@ async function writeAudit(sessionId: string, entry: AuditEntry) {
   try {
     const dir = join(TASKS_DIR, sessionId)
     await mkdir(dir, { recursive: true })
-    await appendFile(join(dir, ".audit-log.jsonl"), JSON.stringify(entry) + "\n")
+    await appendFile(join(dir, ".audit-log.jsonl"), `${JSON.stringify(entry)}\n`)
   } catch {}
 }
 
@@ -183,7 +183,7 @@ async function listTasks(sessionId: string, label: string) {
 
 async function createTask(sessionId: string, subject: string, description: string) {
   const tasks = await readTasks(sessionId)
-  const maxId = tasks.reduce((m, t) => Math.max(m, parseInt(t.id)), 0)
+  const maxId = tasks.reduce((m, t) => Math.max(m, parseInt(t.id, 10)), 0)
   const id = (maxId + 1).toString()
 
   const task: Task = {

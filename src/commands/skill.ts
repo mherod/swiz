@@ -1,5 +1,5 @@
-import type { Command } from "../types.ts"
 import { findSkills, parseFrontmatterField, stripFrontmatter } from "../skill-utils.ts"
+import type { Command } from "../types.ts"
 
 export { parseFrontmatterField, stripFrontmatter }
 

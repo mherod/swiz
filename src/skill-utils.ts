@@ -61,7 +61,7 @@ export async function findSkills(): Promise<SkillInfo[]> {
   const skills: SkillInfo[] = []
 
   for (const dir of SKILL_DIRS) {
-    let entries
+    let entries: import("node:fs").Dirent[]
     try {
       entries = await readdir(dir, { withFileTypes: true })
     } catch {

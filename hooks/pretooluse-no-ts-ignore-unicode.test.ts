@@ -40,10 +40,7 @@ interface HookResult {
   rawOutput: string
 }
 
-async function runHook(opts: {
-  filePath?: string
-  newString?: string
-}): Promise<HookResult> {
+async function runHook(opts: { filePath?: string; newString?: string }): Promise<HookResult> {
   const payload = JSON.stringify({
     tool_name: "Edit",
     tool_input: {
@@ -111,8 +108,8 @@ const ZS_AND_EXTENDED_WS: [number, string][] = [
   [0x205f, "MEDIUM MATHEMATICAL SPACE"],
   [0x3000, "IDEOGRAPHIC SPACE"],
   [0xfeff, "BOM / ZERO-WIDTH NO-BREAK SPACE"], // explicitly WhiteSpace in ES spec
-  [0x2028, "LINE SEPARATOR"],                   // LineTerminator, also in \s
-  [0x2029, "PARAGRAPH SEPARATOR"],              // LineTerminator, also in \s
+  [0x2028, "LINE SEPARATOR"], // LineTerminator, also in \s
+  [0x2029, "PARAGRAPH SEPARATOR"], // LineTerminator, also in \s
 ]
 
 describe(`pretooluse-no-ts-ignore: GROUP A — Unicode \\s whitespace in // is blocked`, () => {
@@ -127,7 +124,11 @@ describe(`pretooluse-no-ts-ignore: GROUP A — Unicode \\s whitespace in // is b
 
 describe(`pretooluse-no-ts-ignore: GROUP A — Unicode \\s whitespace with @${KW_NOCHECK}`, () => {
   // Spot-check three representatives across the Zs range
-  for (const [cp, name] of [ZS_AND_EXTENDED_WS[0]!, ZS_AND_EXTENDED_WS[8]!, ZS_AND_EXTENDED_WS[15]!]) {
+  for (const [cp, name] of [
+    ZS_AND_EXTENDED_WS[0]!,
+    ZS_AND_EXTENDED_WS[8]!,
+    ZS_AND_EXTENDED_WS[15]!,
+  ]) {
     const char = String.fromCodePoint(cp)
     test(`${uStr(cp)} ${name} before @nocheck directive is blocked`, async () => {
       const result = await runHook({ newString: `//${char}@${KW_NOCHECK}` })

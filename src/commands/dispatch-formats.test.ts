@@ -157,7 +157,7 @@ describe("dispatch output formats", () => {
     const transcriptPath = join(repoDir, "transcript.jsonl")
     await writeFile(
       transcriptPath,
-      JSON.stringify({ type: "user", message: { content: "done?" } }) + "\n"
+      `${JSON.stringify({ type: "user", message: { content: "done?" } })}\n`
     )
 
     runGit(repoDir, ["init"])

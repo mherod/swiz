@@ -19,7 +19,7 @@ const LOG_PATH = "/tmp/swiz-dispatch.log"
 
 function log(msg: string): void {
   try {
-    appendFileSync(LOG_PATH, msg + "\n")
+    appendFileSync(LOG_PATH, `${msg}\n`)
   } catch {
     // Never let logging break dispatch
   }

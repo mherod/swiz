@@ -29,14 +29,14 @@ describe("isEslintConfigFile: adversarial inputs (substring prevention)", () => 
       "eslint.config.yaml", // Unsupported extension for flat config
       ".eslintrc.tsx", // Invalid legacy extension (tsx not supported)
       "eslintrc.json", // Missing dot prefix on legacy
-    ];
+    ]
 
     invalid.forEach((name) => {
       test(`${name}`, () => {
-        expect(isEslintConfigFile(name)).toBe(false);
-      });
-    });
-  });
+        expect(isEslintConfigFile(name)).toBe(false)
+      })
+    })
+  })
 
   describe("should accept (valid patterns)", () => {
     const valid = [
@@ -49,15 +49,15 @@ describe("isEslintConfigFile: adversarial inputs (substring prevention)", () => 
       "eslint.config.mjs",
       "packages/eslint.config.js",
       "src/.eslintrc.json",
-    ];
+    ]
 
     valid.forEach((name) => {
       test(`${name}`, () => {
-        expect(isEslintConfigFile(name)).toBe(true);
-      });
-    });
-  });
-});
+        expect(isEslintConfigFile(name)).toBe(true)
+      })
+    })
+  })
+})
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SOURCE_EXT_RE: Verify safe suffix matching (no substring vulnerability)
@@ -82,14 +82,14 @@ describe("SOURCE_EXT_RE: file extension detection", () => {
       "src/utils.ts",
       "packages/lib/index.tsx",
       ".ts", // Edge case: file named just ".ts"
-    ];
+    ]
 
     valid.forEach((name) => {
       test(`${name}`, () => {
-        expect(SOURCE_EXT_RE.test(name)).toBe(true);
-      });
-    });
-  });
+        expect(SOURCE_EXT_RE.test(name)).toBe(true)
+      })
+    })
+  })
 
   describe("invalid source files (should not match)", () => {
     const invalid = [
@@ -108,15 +108,15 @@ describe("SOURCE_EXT_RE: file extension detection", () => {
       "typescript", // No extension
       ".gitignore",
       "file.d.txt", // Type definition but ends with .txt, not .ts
-    ];
+    ]
 
     invalid.forEach((name) => {
       test(`${name}`, () => {
-        expect(SOURCE_EXT_RE.test(name)).toBe(false);
-      });
-    });
-  });
-});
+        expect(SOURCE_EXT_RE.test(name)).toBe(false)
+      })
+    })
+  })
+})
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TEST_FILE_RE: Verify pattern matching for test file detection
@@ -133,14 +133,14 @@ describe("TEST_FILE_RE: test file detection", () => {
       "src/test/e2e/scenario.ts", // Requires /test/ with preceding path
       "foo.test.js",
       "bar.spec.jsx",
-    ];
+    ]
 
     testFiles.forEach((name) => {
       test(`${name}`, () => {
-        expect(TEST_FILE_RE.test(name)).toBe(true);
-      });
-    });
-  });
+        expect(TEST_FILE_RE.test(name)).toBe(true)
+      })
+    })
+  })
 
   describe("non-test files (should not match)", () => {
     const nonTestFiles = [
@@ -153,15 +153,15 @@ describe("TEST_FILE_RE: test file detection", () => {
       "backend.js",
       "tester.ts", // Similar to test but not exact pattern
       "test-data.json", // Starts with "test" but file is .json
-    ];
+    ]
 
     nonTestFiles.forEach((name) => {
       test(`${name}`, () => {
-        expect(TEST_FILE_RE.test(name)).toBe(false);
-      });
-    });
-  });
-});
+        expect(TEST_FILE_RE.test(name)).toBe(false)
+      })
+    })
+  })
+})
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PRETTIER_TS: Verify TypeScript file detection for prettier hook
@@ -169,14 +169,14 @@ describe("TEST_FILE_RE: test file detection", () => {
 
 describe("PRETTIER_TS regex: TypeScript file detection", () => {
   describe("TypeScript files (should match)", () => {
-    const tsFiles = ["index.ts", "component.tsx", "src/utils.ts", ".ts"];
+    const tsFiles = ["index.ts", "component.tsx", "src/utils.ts", ".ts"]
 
     tsFiles.forEach((name) => {
       test(`${name}`, () => {
-        expect(PRETTIER_TS.test(name)).toBe(true);
-      });
-    });
-  });
+        expect(PRETTIER_TS.test(name)).toBe(true)
+      })
+    })
+  })
 
   describe("non-TypeScript files (should not match)", () => {
     const nonTsFiles = [
@@ -187,15 +187,15 @@ describe("PRETTIER_TS regex: TypeScript file detection", () => {
       "typescript-guide.md",
       "src/styles.css",
       "schema.json",
-    ];
+    ]
 
     nonTsFiles.forEach((name) => {
       test(`${name}`, () => {
-        expect(PRETTIER_TS.test(name)).toBe(false);
-      });
-    });
-  });
-});
+        expect(PRETTIER_TS.test(name)).toBe(false)
+      })
+    })
+  })
+})
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // countEnforcements: Verify keyword counting doesn't have false positives
@@ -204,36 +204,36 @@ describe("PRETTIER_TS regex: TypeScript file detection", () => {
 describe("countEnforcements: keyword counting", () => {
   describe("counts keywords regardless of context", () => {
     test("counts 'warning' even in comments", () => {
-      const r = countEnforcements('// warning: do not use\n"rule": "error"');
-      expect(r.warnings).toBe(1); // Counts the comment too
-      expect(r.errors).toBe(1);
-    });
+      const r = countEnforcements('// warning: do not use\n"rule": "error"')
+      expect(r.warnings).toBe(1) // Counts the comment too
+      expect(r.errors).toBe(1)
+    })
 
     test("counts 'error' in both comment and config", () => {
-      const r = countEnforcements('// error: something failed\n"rule": "warning"');
-      expect(r.warnings).toBe(1);
-      expect(r.errors).toBe(1); // Counts the comment "error"
-    });
+      const r = countEnforcements('// error: something failed\n"rule": "warning"')
+      expect(r.warnings).toBe(1)
+      expect(r.errors).toBe(1) // Counts the comment "error"
+    })
 
     test("counts quoted keywords with varied spacing", () => {
-      const r = countEnforcements('{ "rule" : "warning" , "other" : "error" }');
-      expect(r.warnings).toBe(1);
-      expect(r.errors).toBe(1);
-    });
+      const r = countEnforcements('{ "rule" : "warning" , "other" : "error" }')
+      expect(r.warnings).toBe(1)
+      expect(r.errors).toBe(1)
+    })
 
     test("counts partial word matches containing warning", () => {
-      const r = countEnforcements('errorProneCode warningSign');
-      expect(r.warnings).toBe(1); // "warningSign" contains "warning"
-      expect(r.errors).toBe(1); // "errorProneCode" contains "error"
-    });
+      const r = countEnforcements("errorProneCode warningSign")
+      expect(r.warnings).toBe(1) // "warningSign" contains "warning"
+      expect(r.errors).toBe(1) // "errorProneCode" contains "error"
+    })
 
     test("counts warn and off as well", () => {
-      const r = countEnforcements('"rule": "warn", "other": "off"');
-      expect(r.warnings).toBe(1); // "warn"
-      expect(r.errors).toBe(1); // "off"
-    });
-  });
-});
+      const r = countEnforcements('"rule": "warn", "other": "off"')
+      expect(r.warnings).toBe(1) // "warn"
+      expect(r.errors).toBe(1) // "off"
+    })
+  })
+})
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Cross-pattern consistency: All patterns should anchor correctly
@@ -241,26 +241,26 @@ describe("countEnforcements: keyword counting", () => {
 
 describe("cross-pattern consistency: no substring vulnerabilities", () => {
   test("isEslintConfigFile rejects my-eslint.config.ts", () => {
-    expect(isEslintConfigFile("my-eslint.config.ts")).toBe(false);
-  });
+    expect(isEslintConfigFile("my-eslint.config.ts")).toBe(false)
+  })
 
   test("isEslintConfigFile accepts eslint.config.ts", () => {
-    expect(isEslintConfigFile("eslint.config.ts")).toBe(true);
-  });
+    expect(isEslintConfigFile("eslint.config.ts")).toBe(true)
+  })
 
   test("SOURCE_EXT_RE accepts my-file.ts (suffix is correct)", () => {
-    expect(SOURCE_EXT_RE.test("my-file.ts")).toBe(true);
-  });
+    expect(SOURCE_EXT_RE.test("my-file.ts")).toBe(true)
+  })
 
   test("TEST_FILE_RE rejects my-test-file.ts (no .test. pattern)", () => {
-    expect(TEST_FILE_RE.test("my-test-file.ts")).toBe(false);
-  });
+    expect(TEST_FILE_RE.test("my-test-file.ts")).toBe(false)
+  })
 
   test("TEST_FILE_RE accepts my-file.test.ts", () => {
-    expect(TEST_FILE_RE.test("my-file.test.ts")).toBe(true);
-  });
+    expect(TEST_FILE_RE.test("my-file.test.ts")).toBe(true)
+  })
 
   test("PRETTIER_TS accepts my-prettier.ts (suffix is correct)", () => {
-    expect(PRETTIER_TS.test("my-prettier.ts")).toBe(true);
-  });
-});
+    expect(PRETTIER_TS.test("my-prettier.ts")).toBe(true)
+  })
+})

@@ -246,10 +246,7 @@ describe("install.ts statusMessage field", () => {
       // Simulate config merge
       const merged = {
         ...original,
-        hooks: [
-          ...original.hooks,
-          { statusMessage: "Swizzling..." },
-        ],
+        hooks: [...original.hooks, { statusMessage: "Swizzling..." }],
       }
 
       expect(merged.hooks).toHaveLength(2)
@@ -270,10 +267,7 @@ describe("install.ts statusMessage field", () => {
         ...config,
         stop: {
           ...config.stop,
-          hooks: [
-            ...config.stop.hooks,
-            { statusMessage: "Swizzling..." },
-          ],
+          hooks: [...config.stop.hooks, { statusMessage: "Swizzling..." }],
         },
       }
 
@@ -322,10 +316,7 @@ describe("install.ts statusMessage field", () => {
     })
 
     it("ensures config array access is bounds-safe", () => {
-      const hooks = [
-        { statusMessage: "Swizzling..." },
-        { statusMessage: "Swizzling..." },
-      ]
+      const hooks = [{ statusMessage: "Swizzling..." }, { statusMessage: "Swizzling..." }]
 
       // Valid accesses
       expect(hooks[0]).toBeDefined()

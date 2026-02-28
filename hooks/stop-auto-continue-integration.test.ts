@@ -40,7 +40,7 @@ function buildTranscript(toolCallCount: number): string {
       })
     )
   }
-  return lines.join("\n") + "\n"
+  return `${lines.join("\n")}\n`
 }
 
 /** Creates a fake `agent` binary that writes its args to a file then prints a suggestion. */

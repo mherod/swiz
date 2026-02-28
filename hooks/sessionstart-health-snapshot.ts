@@ -101,7 +101,7 @@ async function main(): Promise<void> {
           const changesReq = prs.filter((p) => p.reviewDecision === "CHANGES_REQUESTED").length
           let prInfo = `PRs: ${prs.length} open`
           if (changesReq > 0) prInfo += `, ${changesReq} need changes`
-          parts.push(prInfo + ".")
+          parts.push(`${prInfo}.`)
         }
       } catch {}
     }

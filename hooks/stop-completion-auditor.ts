@@ -4,7 +4,12 @@
 
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
-import { blockStop, extractToolNamesFromTranscript, formatActionPlan, type StopHookInput } from "./hook-utils.ts"
+import {
+  blockStop,
+  extractToolNamesFromTranscript,
+  formatActionPlan,
+  type StopHookInput,
+} from "./hook-utils.ts"
 
 const TOOL_CALL_THRESHOLD = 10
 

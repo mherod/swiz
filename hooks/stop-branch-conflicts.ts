@@ -63,8 +63,8 @@ async function main(): Promise<void> {
   if (!originMain) return
 
   const behindStr = await git(["rev-list", "--count", "HEAD..origin/main"], cwd)
-  const behind = parseInt(behindStr)
-  if (isNaN(behind) || behind === 0) return
+  const behind = parseInt(behindStr, 10)
+  if (Number.isNaN(behind) || behind === 0) return
 
   const mergeBase = await git(["merge-base", "HEAD", "origin/main"], cwd)
   if (!mergeBase) return

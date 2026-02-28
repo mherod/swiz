@@ -1,33 +1,33 @@
-import { describe, expect, it, beforeEach } from "bun:test"
-import {
-  git,
-  gh,
-  isGitRepo,
-  isGitHubRemote,
-  hasGhCli,
-  parseGitStatus,
-  extractToolNamesFromTranscript,
-  skillExists,
-  skillAdvice,
-  isDefaultBranch,
-  isShellTool,
-  isEditTool,
-  isWriteTool,
-  isNotebookTool,
-  isTaskTool,
-  isTaskCreateTool,
-  isFileEditTool,
-  isCodeChangeTool,
-  createSessionTask,
-  detectRuntime,
-  detectPkgRunner,
-  detectPackageManager,
-  SOURCE_EXT_RE,
-  TEST_FILE_RE,
-} from "./hook-utils.ts"
-import { join } from "node:path"
+import { beforeEach, describe, expect, it } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
+import { join } from "node:path"
+import {
+  createSessionTask,
+  detectPackageManager,
+  detectPkgRunner,
+  detectRuntime,
+  extractToolNamesFromTranscript,
+  gh,
+  git,
+  hasGhCli,
+  isCodeChangeTool,
+  isDefaultBranch,
+  isEditTool,
+  isFileEditTool,
+  isGitHubRemote,
+  isGitRepo,
+  isNotebookTool,
+  isShellTool,
+  isTaskCreateTool,
+  isTaskTool,
+  isWriteTool,
+  parseGitStatus,
+  SOURCE_EXT_RE,
+  skillAdvice,
+  skillExists,
+  TEST_FILE_RE,
+} from "./hook-utils.ts"
 
 // ─── git() edge cases ───────────────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ describe("git() with malformed inputs", () => {
   })
 
   it("handles very long cwd path without throwing", async () => {
-    const longPath = "/" + "a".repeat(1000) + "/" + "b".repeat(1000)
+    const longPath = `/${"a".repeat(1000)}/${"b".repeat(1000)}`
     const result = await git(["status"], longPath)
     // May return "" or fall back to cwd — either way, no throw
     expect(typeof result).toBe("string")
@@ -668,7 +668,7 @@ describe("skillAdvice() with edge-case inputs", () => {
     // When outer skill doesn't exist, inner skillAdvice is never evaluated
     const result = skillAdvice(
       "nonexistent-outer-xyz",
-      "outer with " + skillAdvice("nonexistent-inner-xyz", "inner with", "inner without"),
+      `outer with ${skillAdvice("nonexistent-inner-xyz", "inner with", "inner without")}`,
       "outer fallback"
     )
     expect(result).toBe("outer fallback")
@@ -690,12 +690,16 @@ describe("skillAdvice() with edge-case inputs", () => {
   it("nested skillAdvice evaluates inner when both skills are missing", () => {
     // Even when outer fallback is chosen, the inner skillAdvice was already evaluated
     // This tests that skillAdvice is a pure function with no side effects
-    const inner = skillAdvice("nonexistent-push-xyz", "push with /push.", "push: git push origin feat")
+    const inner = skillAdvice(
+      "nonexistent-push-xyz",
+      "push with /push.",
+      "push: git push origin feat"
+    )
     expect(inner).toBe("push: git push origin feat")
 
     const outer = skillAdvice(
       "nonexistent-resolve-xyz",
-      "use /resolve-conflicts, then " + inner,
+      `use /resolve-conflicts, then ${inner}`,
       "resolve manually, then run: git push origin feat"
     )
     expect(outer).toBe("resolve manually, then run: git push origin feat")

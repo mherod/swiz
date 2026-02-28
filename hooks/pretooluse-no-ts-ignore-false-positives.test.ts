@@ -37,10 +37,7 @@ interface HookResult {
   rawOutput: string
 }
 
-async function runHook(opts: {
-  filePath?: string
-  newString: string
-}): Promise<HookResult> {
+async function runHook(opts: { filePath?: string; newString: string }): Promise<HookResult> {
   const payload = JSON.stringify({
     tool_name: "Edit",
     tool_input: {

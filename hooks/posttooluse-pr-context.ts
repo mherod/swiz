@@ -84,7 +84,7 @@ if (pr.mergeable && pr.mergeable !== "null" && pr.mergeable !== "UNKNOWN") {
 }
 
 if (pr.body) {
-  const body = pr.body.length > 800 ? pr.body.slice(0, 800) + "..." : pr.body
+  const body = pr.body.length > 800 ? `${pr.body.slice(0, 800)}...` : pr.body
   lines.push("", "--- PR Description ---", body)
 }
 
@@ -94,7 +94,7 @@ if (pr.comments?.length) {
     const who = last.author?.login ?? "unknown"
     const when = last.createdAt ?? ""
     const text = last.body ?? ""
-    const truncated = text.length > 600 ? text.slice(0, 600) + "..." : text
+    const truncated = text.length > 600 ? `${text.slice(0, 600)}...` : text
     lines.push("", `--- Last Comment ---`, `[${who} at ${when}]`, truncated)
   }
 }

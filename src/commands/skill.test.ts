@@ -253,10 +253,7 @@ describe("swiz skill (list mode)", () => {
     const fakeHome = await createTempDir()
     const skillDir = join(fakeHome, ".claude", "skills", "my-featured-skill")
     await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\ndescription: Deploy to production\n---\n"
-    )
+    await writeFile(join(skillDir, "SKILL.md"), "---\ndescription: Deploy to production\n---\n")
     const { stdout } = await runListCmd([], fakeHome)
     expect(stdout).toContain("my-featured-skill")
     expect(stdout).toContain("Deploy to production")
@@ -336,10 +333,7 @@ describe("expandInlineCommands (via swiz skill, no --raw)", () => {
     const fakeHome = await createTempDir()
     const skillDir = join(fakeHome, ".claude", "skills", "multi-inline-xyz")
     await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "A: !`echo alpha-val` B: !`echo beta-val`\n"
-    )
+    await writeFile(join(skillDir, "SKILL.md"), "A: !`echo alpha-val` B: !`echo beta-val`\n")
     const proc = Bun.spawn(["bun", "run", "index.ts", "skill", "multi-inline-xyz"], {
       cwd: process.cwd(),
       stdout: "pipe",
@@ -357,15 +351,12 @@ describe("expandInlineCommands (via swiz skill, no --raw)", () => {
     const skillDir = join(fakeHome, ".claude", "skills", "raw-inline-xyz")
     await mkdir(skillDir, { recursive: true })
     await writeFile(join(skillDir, "SKILL.md"), "Cmd: !`echo should-not-appear`\n")
-    const proc = Bun.spawn(
-      ["bun", "run", "index.ts", "skill", "--raw", "raw-inline-xyz"],
-      {
-        cwd: process.cwd(),
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env, HOME: fakeHome },
-      }
-    )
+    const proc = Bun.spawn(["bun", "run", "index.ts", "skill", "--raw", "raw-inline-xyz"], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, HOME: fakeHome },
+    })
     const stdout = await new Response(proc.stdout).text()
     await proc.exited
     expect(stdout).toContain("!`echo should-not-appear`")

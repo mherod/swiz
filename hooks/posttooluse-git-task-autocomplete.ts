@@ -12,9 +12,9 @@
  */
 
 import { readdir } from "node:fs/promises"
-import { join } from "node:path"
 import { homedir } from "node:os"
-import { type ToolHookInput, isShellTool } from "./hook-utils.ts"
+import { join } from "node:path"
+import { isShellTool, type ToolHookInput } from "./hook-utils.ts"
 
 const GIT_COMMIT_RE = /(?:^|\n|;|&&|\|\|)\s*git\s+commit\b/
 const GIT_PUSH_RE = /(?:^|\n|;|&&|\|\|)\s*git\s+push\b/
@@ -26,10 +26,7 @@ const GIT_PUSH_RE = /(?:^|\n|;|&&|\|\|)\s*git\s+push\b/
  * Handles: <<WORD, <<-WORD, <<"WORD", <<'WORD'
  */
 function stripHeredocs(command: string): string {
-  return command.replace(
-    /<<-?[ \t]*["']?(\w+)["']?[ \t]*\n[\s\S]*?\n[ \t]*\1(?=\n|$)/g,
-    ""
-  )
+  return command.replace(/<<-?[ \t]*["']?(\w+)["']?[ \t]*\n[\s\S]*?\n[ \t]*\1(?=\n|$)/g, "")
 }
 const SUBJECT_RE = /\b(commit|push)\b/i
 

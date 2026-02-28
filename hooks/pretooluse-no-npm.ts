@@ -5,7 +5,6 @@
 import {
   denyPreToolUse,
   detectPackageManager,
-  detectPkgRunner,
   isShellTool,
   type PackageManager,
 } from "./hook-utils.ts"

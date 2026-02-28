@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { manifest, type HookDef, type HookGroup } from "./manifest.ts"
+import { type HookDef, type HookGroup, manifest } from "./manifest.ts"
 
 describe("manifest.ts", () => {
   describe("manifest structure", () => {
@@ -84,9 +84,7 @@ describe("manifest.ts", () => {
         (g) => g.event === "preToolUse" && g.matcher === "Edit|Write|Bash"
       )
       expect(requireTasksGroup).toBeDefined()
-      expect(
-        requireTasksGroup?.hooks.some((h) => h.file.includes("require-tasks"))
-      ).toBe(true)
+      expect(requireTasksGroup?.hooks.some((h) => h.file.includes("require-tasks"))).toBe(true)
     })
   })
 

@@ -374,9 +374,9 @@ export async function getGitAheadBehind(
 ): Promise<{ ahead: number; behind: number; upstream: string } | null> {
   const upstream = await git(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd)
   if (!upstream) return null
-  const ahead = parseInt(await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd))
-  const behind = parseInt(await git(["rev-list", "--count", "HEAD..@{upstream}"], cwd))
-  if (isNaN(ahead) || isNaN(behind)) return null
+  const ahead = parseInt(await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd), 10)
+  const behind = parseInt(await git(["rev-list", "--count", "HEAD..@{upstream}"], cwd), 10)
+  if (Number.isNaN(ahead) || Number.isNaN(behind)) return null
   return { ahead, behind, upstream }
 }
 
