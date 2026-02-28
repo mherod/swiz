@@ -114,6 +114,24 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DO** commit all changes before attempting to stop the session. The `stop-git-status.sh` hook blocks stop when uncommitted changes exist. The correct end-of-task sequence is: edit → commit (with task in_progress) → push → mark task completed → stop.
 
+## Push and CI
+
+This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all work — no pull request required.
+
+**Pre-push checklist:**
+1. `git log origin/main..HEAD --oneline` — review exactly which commits will be pushed before running push.
+2. `git push origin main` — lefthook's `pre-push` hook runs `bun test` (full suite, ~1900 tests, ~44s). Push only succeeds once all tests pass.
+3. `gh run list --limit 3 --branch main` — confirm a new CI run triggered for the commit.
+4. `gh run watch <run-id> --exit-status` — wait for completion; fix any failures before stopping.
+
+**Mandatory hooks — never bypass:**
+- `lefthook pre-push` runs `bun test`. DON'T use `--no-verify` or any flag that skips it. Fix test failures first.
+- CI workflow (`CI`) runs lint → typecheck → test. All three jobs must be green before the session can stop.
+
+**DO** verify CI after every push with `gh run watch <run-id> --exit-status`. The stop hook will block until the push is confirmed green.
+
+**DON'T** skip `git log origin/main..HEAD --oneline` before pushing — it prevents accidentally pushing incomplete or unintended commits.
+
 ## CLI Error Handling
 
 Commands in `src/commands/` must throw errors instead of calling `process.exit(1)`. `process.exit` terminates the process immediately, bypassing `finally` blocks and dropping any pending async work.
