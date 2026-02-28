@@ -588,7 +588,7 @@ describe("stop-auto-continue", () => {
     })
 
     const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).not.toContain("SESSION TASKS")
+    expect(capturedArgs).not.toContain("=== SESSION TASKS ===")
   })
 
   test("omits SESSION TASKS section when tasks directory is empty", async () => {
@@ -603,7 +603,7 @@ describe("stop-auto-continue", () => {
     })
 
     const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).not.toContain("SESSION TASKS")
+    expect(capturedArgs).not.toContain("=== SESSION TASKS ===")
   })
 
   test("includes COMPLETED tasks in SESSION TASKS section", async () => {

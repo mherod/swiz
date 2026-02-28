@@ -260,10 +260,10 @@ describe("pretooluse-require-tasks", () => {
       expect(result.decision).toBe("deny")
     })
 
-    test("still denies git push without tasks", async () => {
+    test("allows git push without tasks (push/pull/fetch are exempt)", async () => {
       const homeDir = await createTempHome()
       const result = await runHook({ homeDir, command: "git push origin main" })
-      expect(result.decision).toBe("deny")
+      expect(result.decision).toBeUndefined()
     })
 
     test("still denies git checkout without tasks", async () => {

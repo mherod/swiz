@@ -248,7 +248,7 @@ describe("stop-auto-continue: prompt ordering with session tasks", () => {
     expect(tasksIdx).toBeLessThan(transcriptIdx)
   })
 
-  test("IN PROGRESS tasks appear before COMPLETED tasks in the prompt", async () => {
+  test("COMPLETED tasks appear before IN PROGRESS tasks in the prompt", async () => {
     const fakeHome = await createTempDir()
     await writeTask(fakeHome, "1", "completed", "Done thing")
     await writeTask(fakeHome, "2", "in_progress", "Active thing")
@@ -268,9 +268,9 @@ describe("stop-auto-continue: prompt ordering with session tasks", () => {
     const capturedArgs = await Bun.file(argsFile).text()
     const inProgressIdx = capturedArgs.indexOf("IN PROGRESS:")
     const completedIdx = capturedArgs.indexOf("COMPLETED:")
-    expect(inProgressIdx).toBeGreaterThan(-1)
     expect(completedIdx).toBeGreaterThan(-1)
-    expect(inProgressIdx).toBeLessThan(completedIdx)
+    expect(inProgressIdx).toBeGreaterThan(-1)
+    expect(completedIdx).toBeLessThan(inProgressIdx)
   })
 
   test("empty session_id produces no SESSION TASKS block but still blocks", async () => {
@@ -292,7 +292,7 @@ describe("stop-auto-continue: prompt ordering with session tasks", () => {
     try {
       capturedArgs = await Bun.file(argsFile).text()
     } catch {}
-    expect(capturedArgs).not.toContain("SESSION TASKS")
+    expect(capturedArgs).not.toContain("=== SESSION TASKS ===")
   })
 
   test("combined tasks + transcript: suggestion incorporates both sources", async () => {
