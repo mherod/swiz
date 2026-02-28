@@ -108,6 +108,12 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 `swiz tasks complete <id>` requires `--evidence "text"` — the completion evidence is stored on the task and checked by the stop-completion-auditor hook.
 
+**DO** keep at least one task in `pending` or `in_progress` status before running `git add` or `git commit`. The `pretooluse-require-tasks.ts` hook blocks `Edit`, `Write`, and `Bash` (including `git add`/`git commit`) when no incomplete task exists. Mark the commit task `completed` only after the commit succeeds.
+
+**DON'T** create a task just for `git push` or `gh` commands — these are exempt from the task requirement. `git push`, `git pull`, `git fetch`, and all `gh` subcommands bypass the hook automatically.
+
+**DO** commit all changes before attempting to stop the session. The `stop-git-status.sh` hook blocks stop when uncommitted changes exist. The correct end-of-task sequence is: edit → commit (with task in_progress) → push → mark task completed → stop.
+
 ## CLI Error Handling
 
 Commands in `src/commands/` must throw errors instead of calling `process.exit(1)`. `process.exit` terminates the process immediately, bypassing `finally` blocks and dropping any pending async work.
