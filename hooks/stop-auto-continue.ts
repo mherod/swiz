@@ -282,7 +282,7 @@ function buildPrompt(
     `Write a single brutally honest sentence (under 200 chars) calling out the most significant blind spot, ` +
     `act of laziness, or procedural shortcoming in this session. ` +
     `Address the assistant directly in second person — always say "You", never "the assistant". ` +
-    `If you reference the user, say "Me". ` +
+    `If you reference the user, say "I". ` +
     `Blind spots: things You never thought to check or verify. ` +
     `Laziness: shortcuts You took, assumptions You didn't validate, obvious steps You skipped. ` +
     `Procedural shortcomings: deviating from best practices, wrong order of operations, missing validation. ` +
