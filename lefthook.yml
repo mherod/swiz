@@ -5,6 +5,12 @@ skip:
 
 pre-commit:
   commands:
+    disk-space:
+      priority: 1
+      run: bun scripts/check-disk-space.ts
+      skip:
+        - merge
+        - rebase
     lint:
       glob: "*.{ts,tsx,js,jsx,json}"
       run: bunx lint-staged
@@ -21,6 +27,12 @@ pre-commit:
 
 pre-push:
   commands:
+    disk-space:
+      priority: 1
+      run: bun scripts/check-disk-space.ts
+      skip:
+        - merge
+        - rebase
     test:
       run: bun test
       skip:
