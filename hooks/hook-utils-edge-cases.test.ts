@@ -662,6 +662,60 @@ describe("mutation guards — TASK_TOOLS set membership", () => {
   })
 })
 
+describe("Codex toolAliases — exhaustive table (snapshot regression)", () => {
+  // Authoritative record of every Codex alias. Any addition, removal, or
+  // value change breaks this test intentionally — that's the point.
+  const EXPECTED_CODEX_ALIASES: Record<string, string> = {
+    Bash: "shell_command",
+    Edit: "apply_patch",
+    Write: "apply_patch",
+    Read: "read_file",
+    Grep: "grep_files",
+    Glob: "list_dir",
+    Task: "update_plan",
+    TaskCreate: "update_plan",
+    TaskUpdate: "update_plan",
+    NotebookEdit: "apply_patch",
+  }
+
+  it("toolAliases object matches expected table exactly (shape + values)", async () => {
+    const { getAgent } = await import("../src/agents.ts")
+    const codex = getAgent("codex")!
+    expect(codex.toolAliases).toEqual(EXPECTED_CODEX_ALIASES)
+  })
+
+  it("every canonical tool in the table translates to its expected alias", async () => {
+    const { translateMatcher, getAgent } = await import("../src/agents.ts")
+    const codex = getAgent("codex")!
+    for (const [canonical, expected] of Object.entries(EXPECTED_CODEX_ALIASES)) {
+      expect(translateMatcher(canonical, codex), `${canonical} → ${expected}`).toBe(expected)
+    }
+  })
+
+  it("spawn_agent is absent from all Codex alias values", async () => {
+    const { getAgent } = await import("../src/agents.ts")
+    const codex = getAgent("codex")!
+    expect(Object.values(codex.toolAliases)).not.toContain("spawn_agent")
+  })
+
+  it("only Task/TaskCreate/TaskUpdate map to update_plan — no other key maps there", async () => {
+    const { getAgent } = await import("../src/agents.ts")
+    const codex = getAgent("codex")!
+    const mappedToUpdatePlan = Object.entries(codex.toolAliases)
+      .filter(([, v]) => v === "update_plan")
+      .map(([k]) => k)
+      .sort()
+    expect(mappedToUpdatePlan).toEqual(["Task", "TaskCreate", "TaskUpdate"])
+  })
+
+  it("TaskList and TaskGet are absent from Codex aliases (pass-through)", async () => {
+    const { getAgent } = await import("../src/agents.ts")
+    const codex = getAgent("codex")!
+    expect(Object.keys(codex.toolAliases)).not.toContain("TaskList")
+    expect(Object.keys(codex.toolAliases)).not.toContain("TaskGet")
+  })
+})
+
 describe("mutation guards — Codex toolAliases translateMatcher", () => {
   it("broken alias (spawn_agent) gives wrong translation; real alias (update_plan) gives right one", async () => {
     const { translateMatcher, getAgent } = await import("../src/agents.ts")
