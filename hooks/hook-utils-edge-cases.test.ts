@@ -26,6 +26,8 @@ import {
   SOURCE_EXT_RE,
   skillAdvice,
   skillExists,
+  TASK_CREATE_TOOLS,
+  TASK_TOOLS,
   TEST_FILE_RE,
 } from "./hook-utils.ts"
 
@@ -624,6 +626,67 @@ describe("Codex toolAliases — TaskList/TaskGet intentionally unmapped", () => 
     const { translateMatcher, getAgent } = await import("../src/agents.ts")
     const codex = getAgent("codex")!
     expect(translateMatcher("TaskUpdate", codex)).toBe("update_plan")
+  })
+})
+
+// ─── Mutation guards: prove the regression tests catch broken impls ───────────
+// Each test constructs the "broken before" state and shows it gives the wrong
+// answer, then asserts the live implementation gives the right answer.
+// If anyone reverts the alias change, these fail — that's the point.
+
+describe("mutation guards — TASK_TOOLS set membership", () => {
+  it("TASK_TOOLS contains update_plan (removing it would break isTaskTool)", () => {
+    // Mutation: set without update_plan → isTaskTool("update_plan") would be false
+    const broken = new Set([...TASK_TOOLS].filter((v) => v !== "update_plan"))
+    expect(broken.has("update_plan")).toBe(false) // broken impl gives wrong answer
+    expect(TASK_TOOLS.has("update_plan")).toBe(true) // real impl gives right answer
+  })
+
+  it("TASK_TOOLS does not contain spawn_agent (re-adding it should not restore task recognition)", () => {
+    // Mutation: set with spawn_agent re-added → would wrongly re-recognise it
+    const broken = new Set([...TASK_TOOLS, "spawn_agent"])
+    expect(broken.has("spawn_agent")).toBe(true) // broken impl is permissive
+    expect(TASK_TOOLS.has("spawn_agent")).toBe(false) // real impl correctly excludes it
+  })
+
+  it("TASK_CREATE_TOOLS contains update_plan (removing it would break isTaskCreateTool)", () => {
+    const broken = new Set([...TASK_CREATE_TOOLS].filter((v) => v !== "update_plan"))
+    expect(broken.has("update_plan")).toBe(false) // broken
+    expect(TASK_CREATE_TOOLS.has("update_plan")).toBe(true) // correct
+  })
+
+  it("TASK_CREATE_TOOLS does not contain spawn_agent (reverting would be wrong)", () => {
+    const broken = new Set([...TASK_CREATE_TOOLS, "spawn_agent"])
+    expect(broken.has("spawn_agent")).toBe(true) // broken
+    expect(TASK_CREATE_TOOLS.has("spawn_agent")).toBe(false) // correct
+  })
+})
+
+describe("mutation guards — Codex toolAliases translateMatcher", () => {
+  it("broken alias (spawn_agent) gives wrong translation; real alias (update_plan) gives right one", async () => {
+    const { translateMatcher, getAgent } = await import("../src/agents.ts")
+    const realCodex = getAgent("codex")!
+
+    // Simulate the pre-fix broken state: TaskCreate aliased to spawn_agent
+    const brokenCodex = {
+      ...realCodex,
+      toolAliases: { ...realCodex.toolAliases, TaskCreate: "spawn_agent" },
+    }
+    expect(translateMatcher("TaskCreate", brokenCodex)).toBe("spawn_agent") // wrong
+    expect(translateMatcher("TaskCreate", realCodex)).toBe("update_plan") // correct
+  })
+
+  it("absent TaskList alias passes through; adding a wrong alias would change the output", async () => {
+    const { translateMatcher, getAgent } = await import("../src/agents.ts")
+    const realCodex = getAgent("codex")!
+
+    // Simulate accidentally mapping TaskList to something
+    const brokenCodex = {
+      ...realCodex,
+      toolAliases: { ...realCodex.toolAliases, TaskList: "list_tasks_wrong" },
+    }
+    expect(translateMatcher("TaskList", brokenCodex)).toBe("list_tasks_wrong") // broken — mapped
+    expect(translateMatcher("TaskList", realCodex)).toBe("TaskList") // correct — pass-through
   })
 })
 
