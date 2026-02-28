@@ -222,7 +222,12 @@ export function actionRequired(): string {
     "If you believe this is a false positive, use the /re-assess skill to re-evaluate your assumptions — the hook's findings take authority over your own assessment.",
     "If you believe this is a false positive, re-evaluate your assumptions carefully before retrying — the hook's findings take authority over your own assessment."
   )
-  return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action. ${reassess}`
+  const updateMemory = skillAdvice(
+    "update-memory",
+    "After resolving this, use the /update-memory skill to record a DO or DON'T rule that prevents this hook from firing again in future sessions.",
+    "After resolving this, update your MEMORY.md with a DO or DON'T rule that prevents this hook from firing again in future sessions."
+  )
+  return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action. ${reassess} ${updateMemory}`
 }
 
 /** Emit a stop block decision and exit. Appends ACTION_REQUIRED footer. */
