@@ -328,3 +328,82 @@ describe("pretooluse-no-as-any — CLI failure paths", () => {
     expect(stderr.toLowerCase()).toMatch(/json|syntax|parse|unexpected/)
   })
 })
+
+// ─── pipe-buffer stress tests ─────────────────────────────────────────────────
+//
+// The OS pipe buffer on macOS is 65 536 bytes. A subprocess that writes more
+// than that to a channel whose reader is not yet consuming will block inside
+// the kernel write() syscall. If the reader is simultaneously waiting for the
+// subprocess to exit (or for the other channel to drain), both sides stall —
+// the classic pipe-buffer deadlock. Writing 3 × 65 536 bytes to BOTH stdout
+// and stderr simultaneously surfaces this condition reliably.
+//
+// These tests validate that the Promise.all concurrent-drain pattern used in
+// runRaw handles real deadlock-inducing volumes correctly.
+
+describe("concurrent stdout+stderr drain — pipe-buffer stress", () => {
+  // 3× the macOS default pipe buffer size
+  const LARGE = 3 * 65_536
+
+  /** Spawn an arbitrary bun -e script and drain both channels concurrently. */
+  async function drainBoth(
+    script: string
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    const proc = Bun.spawn(["bun", "-e", script], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    proc.stdin.end()
+    // Must drain concurrently — sequential reads would deadlock above pipe-buffer size
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    return { stdout, stderr, exitCode: proc.exitCode ?? -1 }
+  }
+
+  it("captures all stdout bytes when both channels exceed the pipe buffer", async () => {
+    const script = `process.stdout.write("O".repeat(${LARGE})); process.stderr.write("E".repeat(${LARGE}))`
+    const { stdout, exitCode } = await drainBoth(script)
+    expect(exitCode).toBe(0)
+    expect(stdout).toHaveLength(LARGE)
+  })
+
+  it("captures all stderr bytes when both channels exceed the pipe buffer", async () => {
+    const script = `process.stdout.write("O".repeat(${LARGE})); process.stderr.write("E".repeat(${LARGE}))`
+    const { stderr, exitCode } = await drainBoth(script)
+    expect(exitCode).toBe(0)
+    expect(stderr).toHaveLength(LARGE)
+  })
+
+  it("handles stderr-written-first ordering (stdout large, stderr large)", async () => {
+    const script = `process.stderr.write("E".repeat(${LARGE})); process.stdout.write("O".repeat(${LARGE}))`
+    const { stdout, stderr, exitCode } = await drainBoth(script)
+    expect(exitCode).toBe(0)
+    expect(stdout).toHaveLength(LARGE)
+    expect(stderr).toHaveLength(LARGE)
+  })
+
+  it("handles many small interleaved writes filling both channels repeatedly", async () => {
+    const PER_WRITE = 4_096
+    const ROUNDS = 60 // 60 × 4 096 = 245 760 bytes per channel
+    const script = [
+      `for (let i = 0; i < ${ROUNDS}; i++) {`,
+      `  process.stdout.write("O".repeat(${PER_WRITE}));`,
+      `  process.stderr.write("E".repeat(${PER_WRITE}));`,
+      `}`,
+    ].join(" ")
+    const { stdout, stderr, exitCode } = await drainBoth(script)
+    expect(exitCode).toBe(0)
+    expect(stdout).toHaveLength(ROUNDS * PER_WRITE)
+    expect(stderr).toHaveLength(ROUNDS * PER_WRITE)
+  })
+
+  it("correctly captures exit code alongside large output", async () => {
+    const script = `process.stdout.write("O".repeat(${LARGE})); process.stderr.write("E".repeat(${LARGE})); process.exit(42)`
+    const { exitCode } = await drainBoth(script)
+    expect(exitCode).toBe(42)
+  })
+})
