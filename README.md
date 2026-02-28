@@ -84,7 +84,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 38 hook scripts across 5 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
-### Stop (16)
+### Stop (14)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -101,13 +101,11 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-pr-changes-requested.ts` | Blocks stop if the current PR has unresolved change requests from reviewers. The agent doesn't get to declare done while reviewers are waiting. |
 | `stop-github-ci.ts` | Blocks stop if GitHub Actions CI is still running or has failed on the current branch. No shipping broken code. |
 | `stop-todo-tracker.ts` | Scans git diffs for newly introduced `TODO`, `FIXME`, or `HACK` comments. Technical debt accumulates fast — this keeps the bar high. |
-| `stop-changelog-staleness.ts` | Warns when code has changed but the changelog hasn't been updated alongside it. |
 | `stop-completion-auditor.ts` | Reads task files and verifies that every task has actual completion evidence before the session ends. Agents can't just mark things done — they have to prove it. |
 | `stop-personal-repo-issues.ts` | Checks for actionable open GitHub issues, skipping those labelled `blocked`, `upstream`, `wontfix`, `duplicate`, `on-hold`, or `waiting`. Surfaces real work that's been left on the table. |
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
-| `stop-memory-updater.ts` | Extracts confirmed patterns and decisions from the session transcript and writes them to project memory. Runs async — never blocks. The agent gets smarter every session. |
 
-### PreToolUse (11)
+### PreToolUse (12)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -126,13 +124,14 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-no-task-delegation.ts` | Prevents agents from creating sub-tasks to delegate work instead of doing it. Task creation is for tracking, not avoidance. |
 | `pretooluse-task-subject-validation.ts` | Validates task subjects meet quality standards before they're created — no vague "fix stuff" tasks. |
 
-### PostToolUse (7)
+### PostToolUse (8)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
 | Hook | What it does |
 |------|-------------|
 | `posttooluse-git-status.ts` | Injects current git status context after every tool use. The agent always knows what state the working tree is in. |
+| `posttooluse-git-task-autocomplete.ts` | After a successful `git commit` or `git push`, automatically marks any matching "Commit" or "Push" tasks as completed. After a push, reminds the agent to create a CI-wait task. |
 | `posttooluse-json-validation.ts` | Re-validates JSON files after any edit or write. Catches any JSON that got corrupted during a tool call. |
 | `posttooluse-test-pairing.ts` | Detects when source files were edited without corresponding test updates and reminds the agent. Tests aren't optional. |
 | `posttooluse-task-advisor.ts` | Issues a countdown warning as the agent approaches the task enforcement threshold — before it gets blocked. |
