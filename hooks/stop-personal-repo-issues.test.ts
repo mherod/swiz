@@ -24,6 +24,33 @@ const SKIP_LABELS = new Set([
   "backlog",
 ])
 
+const LABEL_SCORE: Record<string, number> = {
+  "priority:high": 4,
+  "priority:medium": 2,
+  "priority:low": -1,
+  ready: 3,
+  "spec-approved": 1,
+  "size:xs": 2,
+  "size:s": 2,
+  "size:m": 1,
+  "size:l": -1,
+  "size:xl": -2,
+  bug: 2,
+  maintenance: 1,
+  "needs-breakdown": -2,
+}
+
+const MAX_SHOWN_ISSUES = 5
+
+function normaliseLabel(name: string): string {
+  return name.toLowerCase().replace(/[/-]/g, ":").split(":").sort().join(":")
+}
+
+const SKIP_NORM = new Set([...SKIP_LABELS].map(normaliseLabel))
+const SCORE_NORM: Record<string, number> = Object.fromEntries(
+  Object.entries(LABEL_SCORE).map(([k, v]) => [normaliseLabel(k), v])
+)
+
 interface Issue {
   number: number
   title: string
@@ -39,7 +66,19 @@ function filterByUser(issues: Issue[], filterUser: string): Issue[] {
 }
 
 function filterByActionable(issues: Issue[]): Issue[] {
-  return issues.filter((i) => !i.labels.some((l) => SKIP_LABELS.has(l.name.toLowerCase())))
+  return issues.filter((i) => !i.labels.some((l) => SKIP_NORM.has(normaliseLabel(l.name))))
+}
+
+function scoreIssue(issue: Issue): number {
+  return issue.labels.reduce((sum, l) => sum + (SCORE_NORM[normaliseLabel(l.name)] ?? 0), 0)
+}
+
+function sortAndCapIssues(issues: Issue[]): { shown: Issue[]; hidden: number } {
+  const sorted = [...issues].sort((a, b) => scoreIssue(b) - scoreIssue(a))
+  return {
+    shown: sorted.slice(0, MAX_SHOWN_ISSUES),
+    hidden: Math.max(0, sorted.length - MAX_SHOWN_ISSUES),
+  }
 }
 
 interface PR {
@@ -339,5 +378,263 @@ describe("org vs personal repo combined filter pipeline", () => {
     ]
     const userIssues = filterByUser(issues, currentUser)
     expect(filterByActionable(userIssues)).toHaveLength(1)
+  })
+})
+
+// ─── normaliseLabel ───────────────────────────────────────────────────────────
+
+describe("normaliseLabel — separator and word-order canonicalization", () => {
+  test("colon-separated label is canonical baseline", () => {
+    expect(normaliseLabel("priority:high")).toBe(normaliseLabel("priority:high"))
+  })
+
+  test("slash separator matches colon: priority/high === priority:high", () => {
+    expect(normaliseLabel("priority/high")).toBe(normaliseLabel("priority:high"))
+  })
+
+  test("dash separator matches colon: priority-high === priority:high", () => {
+    expect(normaliseLabel("priority-high")).toBe(normaliseLabel("priority:high"))
+  })
+
+  test("reversed word order matches: high-priority === priority:high", () => {
+    expect(normaliseLabel("high-priority")).toBe(normaliseLabel("priority:high"))
+  })
+
+  test("case insensitive: HIGH-PRIORITY matches priority:high", () => {
+    expect(normaliseLabel("HIGH-PRIORITY")).toBe(normaliseLabel("priority:high"))
+  })
+
+  test("all four variants of priority:high normalise identically", () => {
+    const canon = normaliseLabel("priority:high")
+    expect(normaliseLabel("priority/high")).toBe(canon)
+    expect(normaliseLabel("priority-high")).toBe(canon)
+    expect(normaliseLabel("high-priority")).toBe(canon)
+    expect(normaliseLabel("high/priority")).toBe(canon)
+  })
+
+  test("single-word label is unchanged (lowercase)", () => {
+    expect(normaliseLabel("bug")).toBe("bug")
+    expect(normaliseLabel("ready")).toBe("ready")
+  })
+
+  test("single-word label case-folded", () => {
+    expect(normaliseLabel("BUG")).toBe("bug")
+    expect(normaliseLabel("Ready")).toBe("ready")
+  })
+
+  test("size:m and m:size normalise identically", () => {
+    expect(normaliseLabel("m:size")).toBe(normaliseLabel("size:m"))
+  })
+
+  test("on-hold and hold-on normalise identically", () => {
+    expect(normaliseLabel("on-hold")).toBe(normaliseLabel("hold-on"))
+  })
+
+  test("spec-approved and approved-spec normalise identically", () => {
+    expect(normaliseLabel("spec-approved")).toBe(normaliseLabel("approved-spec"))
+  })
+})
+
+// ─── SKIP_NORM — separator and word-order variants ───────────────────────────
+
+describe("SKIP_NORM — matches across separator and word-order variants", () => {
+  test("blocked is matched", () => {
+    expect(SKIP_NORM.has(normaliseLabel("blocked"))).toBe(true)
+  })
+
+  test("on-hold is matched (canonical form)", () => {
+    expect(SKIP_NORM.has(normaliseLabel("on-hold"))).toBe(true)
+  })
+
+  test("hold-on is matched (reversed word order)", () => {
+    expect(SKIP_NORM.has(normaliseLabel("hold-on"))).toBe(true)
+  })
+
+  test("on/hold is matched (slash separator)", () => {
+    expect(SKIP_NORM.has(normaliseLabel("on/hold"))).toBe(true)
+  })
+
+  test("wontfix is matched", () => {
+    expect(SKIP_NORM.has(normaliseLabel("wontfix"))).toBe(true)
+  })
+
+  test("bug is NOT a skip label", () => {
+    expect(SKIP_NORM.has(normaliseLabel("bug"))).toBe(false)
+  })
+
+  test("filterByActionable excludes on/hold (slash) variant", () => {
+    const issue: Issue = {
+      number: 1,
+      title: "On hold",
+      labels: [{ name: "on/hold" }],
+      author: { login: "u" },
+      assignees: [],
+    }
+    expect(filterByActionable([issue])).toHaveLength(0)
+  })
+
+  test("filterByActionable excludes hold-on (reversed) variant", () => {
+    const issue: Issue = {
+      number: 2,
+      title: "Hold on",
+      labels: [{ name: "hold-on" }],
+      author: { login: "u" },
+      assignees: [],
+    }
+    expect(filterByActionable([issue])).toHaveLength(0)
+  })
+})
+
+// ─── SCORE_NORM — label scoring via normalised keys ──────────────────────────
+
+describe("SCORE_NORM — canonical keys cover all source table entries", () => {
+  test("priority:high key exists in SCORE_NORM", () => {
+    expect(SCORE_NORM[normaliseLabel("priority:high")]).toBe(4)
+  })
+
+  test("priority:medium key exists in SCORE_NORM", () => {
+    expect(SCORE_NORM[normaliseLabel("priority:medium")]).toBe(2)
+  })
+
+  test("priority:low key exists in SCORE_NORM", () => {
+    expect(SCORE_NORM[normaliseLabel("priority:low")]).toBe(-1)
+  })
+
+  test("ready key exists in SCORE_NORM", () => {
+    expect(SCORE_NORM[normaliseLabel("ready")]).toBe(3)
+  })
+
+  test("bug key exists in SCORE_NORM", () => {
+    expect(SCORE_NORM[normaliseLabel("bug")]).toBe(2)
+  })
+
+  test("needs-breakdown key exists in SCORE_NORM", () => {
+    expect(SCORE_NORM[normaliseLabel("needs-breakdown")]).toBe(-2)
+  })
+})
+
+// ─── scoreIssue — heuristic scoring across label variants ────────────────────
+
+describe("scoreIssue — label heuristic scoring", () => {
+  function makeIssue(labels: string[]): Issue {
+    return {
+      number: 1,
+      title: "Issue",
+      labels: labels.map((name) => ({ name })),
+      author: { login: "u" },
+      assignees: [],
+    }
+  }
+
+  test("priority:high scores 4", () => {
+    expect(scoreIssue(makeIssue(["priority:high"]))).toBe(4)
+  })
+
+  test("priority-high (dash) scores same as priority:high", () => {
+    expect(scoreIssue(makeIssue(["priority-high"]))).toBe(scoreIssue(makeIssue(["priority:high"])))
+  })
+
+  test("high-priority (reversed) scores same as priority:high", () => {
+    expect(scoreIssue(makeIssue(["high-priority"]))).toBe(scoreIssue(makeIssue(["priority:high"])))
+  })
+
+  test("priority/high (slash) scores same as priority:high", () => {
+    expect(scoreIssue(makeIssue(["priority/high"]))).toBe(scoreIssue(makeIssue(["priority:high"])))
+  })
+
+  test("size:m scores 1", () => {
+    expect(scoreIssue(makeIssue(["size:m"]))).toBe(1)
+  })
+
+  test("m-size (reversed) scores same as size:m", () => {
+    expect(scoreIssue(makeIssue(["m-size"]))).toBe(scoreIssue(makeIssue(["size:m"])))
+  })
+
+  test("bug scores 2", () => {
+    expect(scoreIssue(makeIssue(["bug"]))).toBe(2)
+  })
+
+  test("unknown label scores 0", () => {
+    expect(scoreIssue(makeIssue(["some-unknown-label"]))).toBe(0)
+  })
+
+  test("no labels scores 0", () => {
+    expect(scoreIssue(makeIssue([]))).toBe(0)
+  })
+
+  test("multiple labels sum: priority:high + ready + bug = 4+3+2 = 9", () => {
+    expect(scoreIssue(makeIssue(["priority:high", "ready", "bug"]))).toBe(9)
+  })
+
+  test("priority:medium + size:m = 2+1 = 3", () => {
+    expect(scoreIssue(makeIssue(["priority:medium", "size:m"]))).toBe(3)
+  })
+
+  test("needs-breakdown reduces score by 2", () => {
+    const base = scoreIssue(makeIssue(["priority:medium"]))
+    const withBreakdown = scoreIssue(makeIssue(["priority:medium", "needs-breakdown"]))
+    expect(withBreakdown).toBe(base - 2)
+  })
+
+  test("high priority + ready + small scores higher than medium + no readiness", () => {
+    const highReadySmall = scoreIssue(makeIssue(["priority:high", "ready", "size:s"]))
+    const mediumOnly = scoreIssue(makeIssue(["priority:medium"]))
+    expect(highReadySmall).toBeGreaterThan(mediumOnly)
+  })
+})
+
+// ─── sortAndCapIssues — ordering and display cap ─────────────────────────────
+
+describe("sortAndCapIssues — ordering and display cap", () => {
+  function makeIssue(n: number, labels: string[]): Issue {
+    return {
+      number: n,
+      title: `Issue ${n}`,
+      labels: labels.map((name) => ({ name })),
+      author: { login: "u" },
+      assignees: [],
+    }
+  }
+
+  test("single issue: shown, none hidden", () => {
+    const { shown, hidden } = sortAndCapIssues([makeIssue(1, ["bug"])])
+    expect(shown).toHaveLength(1)
+    expect(hidden).toBe(0)
+  })
+
+  test("five issues: all shown, none hidden", () => {
+    const issues = Array.from({ length: 5 }, (_, i) => makeIssue(i + 1, []))
+    const { shown, hidden } = sortAndCapIssues(issues)
+    expect(shown).toHaveLength(5)
+    expect(hidden).toBe(0)
+  })
+
+  test("six issues: five shown, one hidden", () => {
+    const issues = Array.from({ length: 6 }, (_, i) => makeIssue(i + 1, []))
+    const { shown, hidden } = sortAndCapIssues(issues)
+    expect(shown).toHaveLength(5)
+    expect(hidden).toBe(1)
+  })
+
+  test("ten issues: five shown, five hidden", () => {
+    const issues = Array.from({ length: 10 }, (_, i) => makeIssue(i + 1, []))
+    const { shown, hidden } = sortAndCapIssues(issues)
+    expect(shown).toHaveLength(5)
+    expect(hidden).toBe(5)
+  })
+
+  test("highest scoring issue appears first", () => {
+    const low = makeIssue(1, ["priority:low"])
+    const high = makeIssue(2, ["priority:high", "ready"])
+    const { shown } = sortAndCapIssues([low, high])
+    expect(shown[0]!.number).toBe(2)
+  })
+
+  test("cap preserves the highest-scoring items (not just first five)", () => {
+    // 6 issues: one high-priority, five no-label — high-priority must survive the cap
+    const lowIssues = Array.from({ length: 5 }, (_, i) => makeIssue(i + 1, []))
+    const highIssue = makeIssue(99, ["priority:high", "ready", "bug"])
+    const { shown } = sortAndCapIssues([...lowIssues, highIssue])
+    expect(shown.map((i) => i.number)).toContain(99)
   })
 })
