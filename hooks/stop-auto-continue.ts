@@ -281,13 +281,15 @@ function buildPrompt(
     `CRITIQUE RULES:\n` +
     `Write a single brutally honest sentence (under 200 chars) calling out the most significant blind spot, ` +
     `act of laziness, or procedural shortcoming in this session. ` +
-    `Blind spots: things the assistant never thought to check or verify. ` +
-    `Laziness: shortcuts taken, assumptions not validated, obvious steps skipped. ` +
+    `Address the assistant directly in second person — always say "You", never "the assistant". ` +
+    `If you reference the user, say "Me". ` +
+    `Blind spots: things You never thought to check or verify. ` +
+    `Laziness: shortcuts You took, assumptions You didn't validate, obvious steps You skipped. ` +
     `Procedural shortcomings: deviating from best practices, wrong order of operations, missing validation. ` +
     `Be specific and direct — name the actual failure ` +
-    `(e.g., "The assistant applied the fix without first reproducing the bug" or ` +
-    `"The assistant never checked whether the existing tests covered this path before adding new ones" or ` +
-    `"The assistant skipped reading the existing implementation before modifying it"). ` +
+    `(e.g., "You applied the fix without first reproducing the bug" or ` +
+    `"You never checked whether the existing tests covered this path before adding new ones" or ` +
+    `"You skipped reading the existing implementation before modifying it"). ` +
     `If the session had no meaningful shortcomings, say so in one sentence — but be skeptical: ` +
     `almost every session has at least one thing that could have been done better. ` +
     `Do NOT use markup, bullet points, or line breaks.\n\n` +
@@ -390,7 +392,7 @@ async function main(): Promise<void> {
     await writeReflections(input.cwd, response.reflections)
   }
 
-  const critiqueLine = response.critique ? `Session critique: ${response.critique}\n\n` : ""
+  const critiqueLine = response.critique ? `${response.critique}\n\n` : ""
   blockStopRaw(
     `${critiqueLine}Continue autonomously — do not ask questions or wait for confirmation: ${response.next || FALLBACK_SUGGESTION}`
   )

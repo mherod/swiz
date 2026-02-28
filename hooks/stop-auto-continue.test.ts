@@ -1072,10 +1072,10 @@ describe("stop-auto-continue", () => {
 
   // ─── Critique field tests ────────────────────────────────────────────────
 
-  test("prepends critique prefix when JSON response includes critique field", async () => {
+  test("includes critique inline (no label prefix) when JSON response includes critique field", async () => {
     const binDir = await createTempDir()
     const json = JSON.stringify({
-      critique: "The assistant skipped reading the existing implementation before modifying it.",
+      critique: "You skipped reading the existing implementation before modifying it.",
       next: "Run the full test suite",
       reflections: [],
     })
@@ -1085,16 +1085,17 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBe("block")
     expect(result.reason).toContain(
-      "Session critique: The assistant skipped reading the existing implementation before modifying it."
+      "You skipped reading the existing implementation before modifying it."
     )
+    expect(result.reason).not.toContain("Session critique:")
     expect(result.reason).toContain("Run the full test suite")
     // Critique must appear before the continue instruction
-    const critiqueIdx = result.reason!.indexOf("Session critique:")
+    const critiqueIdx = result.reason!.indexOf("You skipped reading")
     const continueIdx = result.reason!.indexOf("Continue autonomously")
     expect(critiqueIdx).toBeLessThan(continueIdx)
   })
 
-  test("omits critique prefix when JSON response has no critique field", async () => {
+  test("omits critique when JSON response has no critique field", async () => {
     const binDir = await createTempDir()
     const json = JSON.stringify({ next: "Run the full test suite", reflections: [] })
     await createFakeAgent(binDir, json)
@@ -1103,10 +1104,11 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBe("block")
     expect(result.reason).not.toContain("Session critique:")
+    expect(result.reason!.trimStart()).toMatch(/^Continue autonomously/)
     expect(result.reason).toContain("Run the full test suite")
   })
 
-  test("omits critique prefix when critique field is empty string", async () => {
+  test("omits critique when critique field is empty string", async () => {
     const binDir = await createTempDir()
     const json = JSON.stringify({ critique: "", next: "Run the linter", reflections: [] })
     await createFakeAgent(binDir, json)
@@ -1115,10 +1117,11 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBe("block")
     expect(result.reason).not.toContain("Session critique:")
+    expect(result.reason!.trimStart()).toMatch(/^Continue autonomously/)
     expect(result.reason).toContain("Run the linter")
   })
 
-  test("rejects markup in critique field and omits critique prefix", async () => {
+  test("rejects markup in critique field and omits critique", async () => {
     const binDir = await createTempDir()
     const json = JSON.stringify({
       critique: "<tool_call>bash</tool_call>",
@@ -1132,13 +1135,14 @@ describe("stop-auto-continue", () => {
     expect(result.decision).toBe("block")
     expect(result.reason).not.toContain("Session critique:")
     expect(result.reason).not.toContain("<tool_call>")
+    expect(result.reason!.trimStart()).toMatch(/^Continue autonomously/)
     expect(result.reason).toContain("Run the tests")
   })
 
   test("truncates multi-line critique to first non-empty line", async () => {
     const binDir = await createTempDir()
     const json = JSON.stringify({
-      critique: "The assistant retried the same command repeatedly.\nThis was the second line.",
+      critique: "You retried the same command repeatedly.\nThis was the second line.",
       next: "Fix the root cause of the failure",
       reflections: [],
     })
@@ -1147,9 +1151,8 @@ describe("stop-auto-continue", () => {
     const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain(
-      "Session critique: The assistant retried the same command repeatedly."
-    )
+    expect(result.reason).toContain("You retried the same command repeatedly.")
+    expect(result.reason).not.toContain("Session critique:")
     expect(result.reason).not.toContain("This was the second line.")
   })
 
