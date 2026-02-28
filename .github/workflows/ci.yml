@@ -7,6 +7,25 @@ on:
     branches: [main]
 
 jobs:
+  file-placement:
+    name: Enforce test file placement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject lefthook test files outside src/
+        run: |
+          misplaced=$(find . -name "lefthook*.test.ts" \
+            -not -path "./src/*" \
+            -not -path "./node_modules/*")
+          if [ -n "$misplaced" ]; then
+            echo "ERROR: lefthook e2e test files found outside src/:"
+            echo "$misplaced"
+            echo ""
+            echo "Move them to src/ — see src/lefthook-e2e.test.ts for canonical location."
+            exit 1
+          fi
+          echo "OK: all lefthook test files are under src/"
+
   ci:
     runs-on: ubuntu-latest
     steps:
