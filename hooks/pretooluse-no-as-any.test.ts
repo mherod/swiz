@@ -259,3 +259,72 @@ describe("pretooluse-no-as-any — CLI subprocess (import.meta.main guard)", () 
     expect(proc.exitCode).toBe(0)
   })
 })
+
+// ─── failure-path tests ───────────────────────────────────────────────────────
+
+describe("pretooluse-no-as-any — CLI failure paths", () => {
+  const HOOK_PATH = join(import.meta.dir, "pretooluse-no-as-any.ts")
+
+  /** Spawn the hook, write raw bytes to stdin, drain stdout+stderr concurrently. */
+  async function runRaw(
+    input: string
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    const proc = Bun.spawn(["bun", HOOK_PATH], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    proc.stdin.write(input)
+    proc.stdin.end()
+    // Drain both streams concurrently to avoid pipe-buffer deadlock
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    return { stdout, stderr, exitCode: proc.exitCode ?? -1 }
+  }
+
+  it("exits 1 and reports to stderr when stdin contains invalid JSON", async () => {
+    const { exitCode, stderr } = await runRaw("not-valid-json{{{")
+    expect(exitCode).toBe(1)
+    expect(stderr).toContain("Hook error:")
+  })
+
+  it("exits 1 and reports to stderr when stdin is empty", async () => {
+    const { exitCode, stderr } = await runRaw("")
+    expect(exitCode).toBe(1)
+    expect(stderr).toContain("Hook error:")
+  })
+
+  it("exits 1 and reports to stderr when stdin is truncated JSON", async () => {
+    const { exitCode, stderr } = await runRaw('{"tool_name":"Edit"')
+    expect(exitCode).toBe(1)
+    expect(stderr).toContain("Hook error:")
+  })
+
+  it("exits 0 with no stdout for valid JSON missing tool_input (non-TS passthrough)", async () => {
+    // file_path defaults to "" which does not match /\.(ts|tsx)$/ → early exit 0
+    const { exitCode, stdout } = await runRaw(JSON.stringify({ tool_name: "Edit" }))
+    expect(exitCode).toBe(0)
+    expect(stdout).toBe("")
+  })
+
+  it("exits 0 with no stdout when old_string is absent (new-file passthrough)", async () => {
+    // Empty old_string triggers the new-file early-exit guard → no hook JSON emitted
+    const { exitCode, stdout } = await runRaw(
+      JSON.stringify({
+        tool_name: "Edit",
+        tool_input: { file_path: "src/x.ts", old_string: "", new_string: "const x = 1" },
+      })
+    )
+    expect(exitCode).toBe(0)
+    expect(stdout).toBe("")
+  })
+
+  it("stderr message names the error for invalid JSON (not just a generic crash)", async () => {
+    const { stderr } = await runRaw("{bad json}")
+    // The catch handler logs the thrown error; the message should hint at JSON parsing
+    expect(stderr.toLowerCase()).toMatch(/json|syntax|parse|unexpected/)
+  })
+})
