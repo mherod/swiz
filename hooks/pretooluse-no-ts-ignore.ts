@@ -30,6 +30,30 @@ async function main() {
   const kwIgnore = ["ts", "ignore"].join("-")
   const kwExpect = ["ts", "expect", "error"].join("-")
 
+  // Block @ts-nocheck — disables ALL type checking for the entire file at once.
+  // Keywords split across array to avoid self-triggering when editing this hook.
+  const kwNoCheck = ["ts", "nocheck"].join("-")
+  if (new RegExp(`(?://|/\\*)\\s*@${kwNoCheck}`).test(content)) {
+    const reason = [
+      "TypeScript is the authority. Do not bypass, ignore, or argue with it.",
+      "",
+      `You cannot add \`@${kwNoCheck}\` directives. This disables ALL type checking`,
+      "for the entire file, hiding every type error simultaneously.",
+      "",
+      "Your only path forward:",
+      "  1. Run tsc to see every type error in the file",
+      "  2. Fix each error to satisfy the type system",
+      "  3. Remove the directive once all errors are resolved",
+      "  4. Never suppress type errors—fix the underlying issues",
+      "",
+      "The type checker is not negotiable, not postponeable, not arguable with. It is the source",
+      "of truth for type safety. Rules exist because they prevent bugs, enforce correctness,",
+      "and maintain the codebase standard. Follow the type checker, always.",
+    ].join("\n")
+
+    denyPreToolUse(reason)
+  }
+
   if (new RegExp(`(?://|/\\*)\\s*@${kwIgnore}`).test(content)) {
     const reason = [
       "TypeScript is the authority. Do not bypass, ignore, or argue with it.",
