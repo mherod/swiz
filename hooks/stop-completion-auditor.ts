@@ -115,7 +115,7 @@ async function main(): Promise<void> {
           latestStatus.set(e.taskId, e.newStatus)
         }
       }
-      const incomplete = [...latestStatus.values()].filter(
+      const incomplete = Array.from(latestStatus.values()).filter(
         (s) => s === "pending" || s === "in_progress"
       ).length
 
