@@ -494,6 +494,62 @@ describe("agents.ts", () => {
     })
   })
 
+  describe("envVars detection signatures", () => {
+    it("claude has CLAUDECODE in envVars", () => {
+      const claude = getAgent("claude")!
+      expect(claude.envVars).toContain("CLAUDECODE")
+    })
+
+    it("gemini has GEMINI_CLI in envVars", () => {
+      const gemini = getAgent("gemini")!
+      expect(gemini.envVars).toContain("GEMINI_CLI")
+    })
+
+    it("gemini has GEMINI_PROJECT_DIR in envVars", () => {
+      const gemini = getAgent("gemini")!
+      expect(gemini.envVars).toContain("GEMINI_PROJECT_DIR")
+    })
+
+    it("codex has CODEX_MANAGED_BY_NPM in envVars", () => {
+      const codex = getAgent("codex")!
+      expect(codex.envVars).toContain("CODEX_MANAGED_BY_NPM")
+    })
+
+    it("codex has CODEX_THREAD_ID in envVars", () => {
+      const codex = getAgent("codex")!
+      expect(codex.envVars).toContain("CODEX_THREAD_ID")
+    })
+
+    it("cursor has no envVars (relies on processPattern)", () => {
+      const cursor = getAgent("cursor")!
+      expect(cursor.envVars).toBeUndefined()
+    })
+
+    it("cursor has processPattern set", () => {
+      const cursor = getAgent("cursor")!
+      expect(cursor.processPattern).toBeInstanceOf(RegExp)
+    })
+
+    it("cursor processPattern matches __CURSOR_SANDBOX_ENV_RESTORE", () => {
+      const cursor = getAgent("cursor")!
+      expect(cursor.processPattern!.test("__CURSOR_SANDBOX_ENV_RESTORE=...")).toBe(true)
+    })
+
+    it("cursor processPattern does not match unrelated strings", () => {
+      const cursor = getAgent("cursor")!
+      expect(cursor.processPattern!.test("CLAUDECODE=1")).toBe(false)
+      expect(cursor.processPattern!.test("GEMINI_CLI=1")).toBe(false)
+    })
+
+    it("agents with envVars have at least one entry", () => {
+      for (const agent of AGENTS) {
+        if (agent.envVars !== undefined) {
+          expect(agent.envVars.length).toBeGreaterThan(0)
+        }
+      }
+    })
+  })
+
   describe("isAgentInstalled", () => {
     function fakeAgent(overrides: Partial<AgentDef> = {}): AgentDef {
       return {
