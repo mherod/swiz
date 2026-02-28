@@ -22,6 +22,8 @@ export interface AgentDef {
   eventMap: Record<string, string>
   /** Whether this agent supports user-configurable hooks via a settings file */
   hooksConfigurable: boolean
+  /** Environment variable set to a truthy value when running inside this agent */
+  envVar?: string
 }
 
 // ─── Codex hooks status ─────────────────────────────────────────────────────
@@ -38,6 +40,7 @@ export const AGENTS: AgentDef[] = [
     configStyle: "nested",
     binary: "claude",
     hooksConfigurable: true,
+    envVar: "CLAUDECODE",
     toolAliases: {},
     eventMap: {
       stop: "Stop",

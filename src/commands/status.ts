@@ -138,12 +138,22 @@ async function checkAgent(agent: AgentDef) {
   console.log()
 }
 
+function detectCurrentAgent() {
+  return AGENTS.find((a) => a.envVar && process.env[a.envVar]) ?? null
+}
+
 export const statusCommand: Command = {
   name: "status",
   description: "Show swiz installation status across agents",
   usage: "swiz status",
   async run() {
     console.log(`\n  ${BOLD}swiz status${RESET}\n`)
+
+    const current = detectCurrentAgent()
+    if (current) {
+      console.log(`  Running inside: ${GREEN}${current.name}${RESET}\n`)
+    }
+
     console.log(`  Hooks directory: ${HOOKS_DIR}\n`)
 
     for (const agent of AGENTS) {
