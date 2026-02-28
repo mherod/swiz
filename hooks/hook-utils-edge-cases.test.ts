@@ -551,6 +551,82 @@ describe("tool classification with edge-case inputs", () => {
   })
 })
 
+// ─── update_plan / TaskList / TaskGet mapping regressions ───────────────────
+// These guard the Codex task-tool alias mapping introduced in
+// feat(agents): map Codex task tools to update_plan, replace spawn_agent
+
+describe("isTaskTool — update_plan recognition (Codex alias)", () => {
+  it("recognises update_plan as a task tool", () => {
+    expect(isTaskTool("update_plan")).toBe(true)
+  })
+
+  it("recognises update_plan as a task-create tool", () => {
+    expect(isTaskCreateTool("update_plan")).toBe(true)
+  })
+
+  it("does not recognise spawn_agent as a task tool (removed)", () => {
+    expect(isTaskTool("spawn_agent")).toBe(false)
+  })
+
+  it("does not recognise spawn_agent as a task-create tool (removed)", () => {
+    expect(isTaskCreateTool("spawn_agent")).toBe(false)
+  })
+
+  it("still recognises all canonical Claude task tools", () => {
+    for (const name of ["Task", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet"]) {
+      expect(isTaskTool(name)).toBe(true)
+    }
+  })
+
+  it("still recognises Cursor TodoWrite as a task tool", () => {
+    expect(isTaskTool("TodoWrite")).toBe(true)
+    expect(isTaskCreateTool("TodoWrite")).toBe(true)
+  })
+
+  it("still recognises Gemini write_todos as a task tool", () => {
+    expect(isTaskTool("write_todos")).toBe(true)
+    expect(isTaskCreateTool("write_todos")).toBe(true)
+  })
+})
+
+describe("Codex toolAliases — TaskList/TaskGet intentionally unmapped", () => {
+  it("Codex has no TaskList alias (read-only, no Codex equivalent)", async () => {
+    const { getAgent } = await import("../src/agents.ts")
+    const codex = getAgent("codex")!
+    expect(codex.toolAliases).not.toHaveProperty("TaskList")
+  })
+
+  it("Codex has no TaskGet alias (read-only, no Codex equivalent)", async () => {
+    const { getAgent } = await import("../src/agents.ts")
+    const codex = getAgent("codex")!
+    expect(codex.toolAliases).not.toHaveProperty("TaskGet")
+  })
+
+  it("translateMatcher passes TaskList through unchanged for Codex", async () => {
+    const { translateMatcher, getAgent } = await import("../src/agents.ts")
+    const codex = getAgent("codex")!
+    expect(translateMatcher("TaskList", codex)).toBe("TaskList")
+  })
+
+  it("translateMatcher passes TaskGet through unchanged for Codex", async () => {
+    const { translateMatcher, getAgent } = await import("../src/agents.ts")
+    const codex = getAgent("codex")!
+    expect(translateMatcher("TaskGet", codex)).toBe("TaskGet")
+  })
+
+  it("translateMatcher still maps TaskCreate to update_plan for Codex", async () => {
+    const { translateMatcher, getAgent } = await import("../src/agents.ts")
+    const codex = getAgent("codex")!
+    expect(translateMatcher("TaskCreate", codex)).toBe("update_plan")
+  })
+
+  it("translateMatcher still maps TaskUpdate to update_plan for Codex", async () => {
+    const { translateMatcher, getAgent } = await import("../src/agents.ts")
+    const codex = getAgent("codex")!
+    expect(translateMatcher("TaskUpdate", codex)).toBe("update_plan")
+  })
+})
+
 // ─── getGitAheadBehind() edge cases ─────────────────────────────────────────
 
 describe("getGitAheadBehind() with malformed inputs", () => {
