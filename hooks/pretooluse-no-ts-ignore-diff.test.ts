@@ -237,3 +237,177 @@ describe("pretooluse-no-ts-ignore: differential hook vs TypeScript compiler", ()
     })
   }
 })
+
+// ─── JSDoc block comment differential ────────────────────────────────────────
+//
+// TypeScript only recognises @ts-ignore / @ts-expect-error / @ts-nocheck in
+// SINGLE-LINE comments (`//`) and single-line block comments (`/* directive */`
+// entirely on one line).  Multi-line JSDoc block comment forms are NOT
+// recognised as suppression directives by TypeScript.
+//
+// The hook intentionally blocks ALL attempted suppression patterns — including
+// multi-line JSDoc forms — as a conservative policy.  The relevant property
+// asserted here is therefore ONE-DIRECTIONAL:
+//
+//   tsc_recognises(pattern) → hook_blocks(pattern)       (no bypass)
+//
+// When tsc_recognises is false (TypeScript ignores the pattern), we document
+// whether the hook is conservative (blocks) or permissive (allows) for that form.
+
+interface JsDocCandidate {
+  label: string
+  /** Multi-line content; the type error is appended on the next line */
+  commentBlock: string
+  /** Expected hook decision regardless of tsc result */
+  expectedHookDecision: "deny" | "allow"
+}
+
+// KW_EXPECT is constructed the same way as in the diff test's main section —
+// the variable expands to the real keyword at runtime, keeping source safe.
+const KW_EXPECT_D = ["ts", "expect", "error"].join("-")
+const KW_IGNORE_D = ["ts", "ignore"].join("-")
+const KW_NOCHECK_D = ["ts", "nocheck"].join("-")
+
+const JSDOC_CANDIDATES: JsDocCandidate[] = [
+  // ── Forms TypeScript DOES recognise ────────────────────────────────────────
+  {
+    label: `inline block comment /* @${KW_IGNORE_D} */`,
+    commentBlock: `/* @${KW_IGNORE_D} */`,
+    expectedHookDecision: "deny",
+  },
+  // ── Multi-line JSDoc forms TypeScript does NOT recognise ───────────────────
+  // The hook blocks these as attempted suppressions (conservative policy).
+  {
+    label: `JSDoc /** \\n * @${KW_IGNORE_D} \\n */`,
+    commentBlock: `/**\n * @${KW_IGNORE_D}\n */`,
+    expectedHookDecision: "deny",
+  },
+  {
+    label: `JSDoc /** \\n ** @${KW_IGNORE_D} \\n */ (double-asterisk, fixed)`,
+    commentBlock: `/**\n ** @${KW_IGNORE_D}\n */`,
+    expectedHookDecision: "deny",
+  },
+  {
+    label: `JSDoc /** \\n *** @${KW_IGNORE_D} \\n */ (triple-asterisk)`,
+    commentBlock: `/**\n *** @${KW_IGNORE_D}\n */`,
+    expectedHookDecision: "deny",
+  },
+  {
+    label: `multi-line block /* @${KW_IGNORE_D} \\n */`,
+    commentBlock: `/* @${KW_IGNORE_D}\n */`,
+    expectedHookDecision: "deny",
+  },
+  {
+    label: `JSDoc @${KW_NOCHECK_D} double-asterisk`,
+    commentBlock: `/**\n ** @${KW_NOCHECK_D}\n */`,
+    expectedHookDecision: "deny",
+  },
+  {
+    label: `JSDoc bare @${KW_EXPECT_D} double-asterisk`,
+    commentBlock: `/**\n ** @${KW_EXPECT_D}\n */`,
+    expectedHookDecision: "deny",
+  },
+]
+
+describe("pretooluse-no-ts-ignore: JSDoc block comment differential (coverage property)", () => {
+  // Results filled in beforeAll below
+  const jsdocTscRecognised = new Map<string, boolean>()
+  const jsdocHookBlocks = new Map<string, boolean>()
+  let jsdocTmpDir = ""
+
+  beforeAll(async () => {
+    if (!tscBin) return
+
+    jsdocTmpDir = join(tmpdir(), `no-ts-ignore-jsdoc-diff-${process.pid}`)
+    await mkdir(jsdocTmpDir, { recursive: true })
+    await writeFile(
+      join(jsdocTmpDir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { noEmit: true, strict: true, target: "ES2022", skipLibCheck: true },
+        include: ["*.ts"],
+      })
+    )
+
+    // Write one TS file per JSDoc candidate
+    for (let i = 0; i < JSDOC_CANDIDATES.length; i++) {
+      const { commentBlock } = JSDOC_CANDIDATES[i]!
+      // File name is index-based; variable names are unique per file
+      const content = `${commentBlock}\nconst v${i}: string = 1;\nexport {};\n`
+      await writeFile(join(jsdocTmpDir, `jsdoc_${i}.ts`), content)
+    }
+
+    // Run tsc once on the temp directory
+    const proc = Bun.spawn([tscBin, "--project", join(jsdocTmpDir, "tsconfig.json")], {
+      cwd: jsdocTmpDir,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const tscOut =
+      (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text())
+    await proc.exited
+
+    const filesWithErrors = new Set<string>()
+    for (const line of tscOut.split("\n")) {
+      const m = line.match(/^(.+\.ts)\(\d+,/)
+      if (m) filesWithErrors.add(basename(m[1]!))
+    }
+
+    for (let i = 0; i < JSDOC_CANDIDATES.length; i++) {
+      const key = JSDOC_CANDIDATES[i]!.label
+      jsdocTscRecognised.set(key, !filesWithErrors.has(`jsdoc_${i}.ts`))
+    }
+
+    // Run hook for all candidates in parallel
+    await Promise.all(
+      JSDOC_CANDIDATES.map(async ({ commentBlock, label }) => {
+        const newString = `${commentBlock}\nconst x: string = 1;\n`
+        const payload = JSON.stringify({
+          tool_name: "Edit",
+          tool_input: { file_path: "src/app.ts", new_string: newString },
+        })
+        const p = Bun.spawn(["bun", "hooks/pretooluse-no-ts-ignore.ts"], {
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+        })
+        p.stdin.write(payload)
+        p.stdin.end()
+        const raw = await new Response(p.stdout).text()
+        await p.exited
+        let blocked = false
+        if (raw.trim()) {
+          try {
+            const parsed = JSON.parse(raw.trim())
+            const hso = parsed.hookSpecificOutput
+            blocked = (hso?.permissionDecision ?? parsed.decision) === "deny"
+          } catch {}
+        }
+        jsdocHookBlocks.set(label, blocked)
+      })
+    )
+
+    await rm(jsdocTmpDir, { recursive: true, force: true })
+  })
+
+  for (const { label, expectedHookDecision } of JSDOC_CANDIDATES) {
+    test(label, () => {
+      if (!tscBin) return // skip if tsc unavailable
+
+      const tscRecog = jsdocTscRecognised.get(label) ?? false
+      const hookBlocked = jsdocHookBlocks.get(label) ?? false
+
+      // COVERAGE PROPERTY: if TypeScript recognises the directive, hook must block it.
+      // A false here means a bypass is possible — that is a critical bug.
+      if (tscRecog && !hookBlocked) {
+        throw new Error(
+          `BYPASS DETECTED: TypeScript recognises "${label}" as a suppression directive ` +
+          `but the hook allows it.  This is a security gap — the hook must block ` +
+          `every pattern TypeScript honours.`
+        )
+      }
+
+      // Assert hook decision matches the expected policy (may be more conservative than tsc).
+      expect(hookBlocked).toBe(expectedHookDecision === "deny")
+    })
+  }
+})

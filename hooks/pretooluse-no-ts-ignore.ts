@@ -44,7 +44,7 @@ async function main() {
   const kwNoCheck = ["ts", "nocheck"].join("-")
   if (
     new RegExp(
-      `(?://\\s*@${kwNoCheck}|/\\*\\s*@${kwNoCheck}|^\\s*\\*\\s*@${kwNoCheck})`,
+      `(?://\\s*@${kwNoCheck}|/\\*\\s*@${kwNoCheck}|^\\s*\\*+\\s*@${kwNoCheck})`,
       "m"
     ).test(content)
   ) {
@@ -71,7 +71,7 @@ async function main() {
   // Same three-pattern approach for @ts-ignore.
   if (
     new RegExp(
-      `(?://\\s*@${kwIgnore}|/\\*\\s*@${kwIgnore}|^\\s*\\*\\s*@${kwIgnore})`,
+      `(?://\\s*@${kwIgnore}|/\\*\\s*@${kwIgnore}|^\\s*\\*+\\s*@${kwIgnore})`,
       "m"
     ).test(content)
   ) {
@@ -103,10 +103,10 @@ async function main() {
   // Three bare forms are caught:
   //   1. Line comment at EOL:           //\s*@directive\s*$
   //   2. Direct block comment:          /\*\s*@directive(\s*$|\s*\*/)
-  //   3. JSDoc interior at EOL:         ^\s*\*\s*@directive\s*$
+  //   3. JSDoc interior at EOL:         ^\s*\*+\s*@directive\s*$
   // A description — any non-whitespace text after the directive — allows it through.
   const bareExpectRe = new RegExp(
-    `(?://\\s*@${kwExpect}\\s*$|/\\*\\s*@${kwExpect}(?:\\s*$|\\s*\\*/)|^\\s*\\*\\s*@${kwExpect}\\s*$)`,
+    `(?://\\s*@${kwExpect}\\s*$|/\\*\\s*@${kwExpect}(?:\\s*$|\\s*\\*/)|^\\s*\\*+\\s*@${kwExpect}\\s*$)`,
     "m"
   )
   if (bareExpectRe.test(content)) {

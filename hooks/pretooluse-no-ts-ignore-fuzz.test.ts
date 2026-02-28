@@ -231,26 +231,38 @@ describe(`pretooluse-no-ts-ignore: directive sandwiched between content lines`, 
   })
 })
 
-// ─── Double-asterisk prefix (known limitation) ────────────────────────────────
+// ─── Double-asterisk prefix ───────────────────────────────────────────────────
+//
+// The JSDoc branch uses ^\s*\*+\s*@directive (\*+ = one or more asterisks) so
+// that extra leading asterisks in JSDoc interior lines are caught as attempted
+// suppression directives.  The hook is intentionally more conservative than
+// TypeScript's own parser (which does not recognise multi-line JSDoc block
+// comment forms as directives): blocking attempted suppressions regardless of
+// whether TypeScript would honour them is the correct policy.
 
-describe(`pretooluse-no-ts-ignore: double-asterisk JSDoc prefix (known limitation)`, () => {
-  test(`"** @${KW_IGNORE}" does NOT trigger (known limitation)`, async () => {
-    // The regex anchors to a single * preceded by whitespace: ^\s*\*\s*@directive
-    // "** @ts-ignore" has a second * after whitespace-star, which is not matched.
-    // TypeScript itself doesn't treat "** @ts-ignore" as a suppression directive either,
-    // so this is an acceptable false-negative — the hook matches TypeScript's own rules.
+describe(`pretooluse-no-ts-ignore: double-asterisk JSDoc prefix is caught`, () => {
+  test(`"** @${KW_IGNORE}" is caught`, async () => {
     const result = await runHook({ newString: `/**\n ** @${KW_IGNORE}\n */` })
-    // Document current behaviour: double-asterisk prefix is not caught
-    expect(result.decision).toBe("allow")
+    expect(result.decision).toBe("deny")
   })
 
-  test(`"** @${KW_NOCHECK}" does NOT trigger (known limitation)`, async () => {
+  test(`"** @${KW_NOCHECK}" is caught`, async () => {
     const result = await runHook({ newString: `/**\n ** @${KW_NOCHECK}\n */` })
-    expect(result.decision).toBe("allow")
+    expect(result.decision).toBe("deny")
   })
 
-  test(`"** @${KW_EXPECT}" bare does NOT trigger (known limitation)`, async () => {
+  test(`"** @${KW_EXPECT}" bare is caught`, async () => {
     const result = await runHook({ newString: `/**\n ** @${KW_EXPECT}\n */` })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`"*** @${KW_IGNORE}" (triple asterisk) is caught`, async () => {
+    const result = await runHook({ newString: `/**\n *** @${KW_IGNORE}\n */` })
+    expect(result.decision).toBe("deny")
+  })
+
+  test(`"** @${KW_EXPECT}: description" with description is allowed`, async () => {
+    const result = await runHook({ newString: `/**\n ** @${KW_EXPECT}: extra stars, still needs description\n */` })
     expect(result.decision).toBe("allow")
   })
 })
