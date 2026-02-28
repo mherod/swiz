@@ -7,7 +7,7 @@ pre-commit:
   commands:
     lint:
       glob: "*.{ts,tsx,js,jsx,json}"
-      run: lint-staged
+      run: bunx lint-staged
       stage_fixed: true
       skip:
         - merge
