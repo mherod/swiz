@@ -125,23 +125,27 @@ Follow this order for every unit of work. Deviating from it causes hook blocks.
 2. Edit / Bash                              (implementation)
 3. git add + git commit                     (hooks: lint, typecheck; task still in_progress)
 4. TaskUpdate → completed                   (after commit succeeds, before push)
-5. git log origin/main..HEAD --oneline      (review commits)
-6. git push origin main                     (hook: bun test full suite; push/gh exempt from task req)
-7. gh run list --limit 1 --branch main      (get run ID)
-8. gh run watch <run-id> --exit-status      (wait)
-9. gh run view <run-id> \
+5. SHA=$(git rev-parse HEAD)                (capture SHA before push)
+6. git log origin/main..HEAD --oneline      (review commits)
+7. git push origin main                     (hook: bun test full suite; push/gh exempt from task req)
+8. gh run list --commit $SHA \
+     --json databaseId --jq '.[0].databaseId'
+                                            (get run ID for exact SHA — not latest)
+9. gh run watch <run-id> --exit-status      (wait)
+10. gh run view <run-id> \
      --json conclusion,status,jobs \
      --jq '{conclusion,status,
             jobs:[.jobs[]|{name,conclusion,status}]}'
                                             (confirm conclusion === "success")
-10. Announce result — done.
+11. Announce result — done.
 ```
 
 **Enforcement summary:**
 - Steps 1–3 require an in_progress task (hook blocks otherwise)
-- Step 4 must happen after commit and before push (no TaskUpdate at steps 6–10)
-- Step 9 is mandatory — `gh run watch` output alone is not verification
-- No TaskUpdate/TaskList calls at steps 6–10
+- Step 4 must happen after commit and before push (no TaskUpdate at steps 7–11)
+- Capture SHA (step 5) before push so step 8 can filter by exact commit — never use `--limit 1 --branch` which may return a stale run
+- Step 10 is mandatory — `gh run watch` output alone is not verification
+- No TaskUpdate/TaskList calls at steps 7–11
 
 ## Push and CI
 
@@ -153,10 +157,11 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
    - `git branch --show-current` — confirm you're on the expected branch.
    - `gh pr list --state open --head $(git branch --show-current)` — check for an existing open PR; if one exists, the push updates it rather than requiring a new PR.
    - Confirm the repo is a solo personal project (no org, no other recent contributors, no open PRs) before pushing directly to `main`.
-3. `git push origin main` — lefthook's `pre-push` hook runs `bun test` (full suite, ~1900 tests, ~44s). Push only succeeds once all tests pass.
-4. `gh run list --limit 3 --branch main` — confirm a new CI run triggered for the commit.
-5. `gh run watch <run-id> --exit-status` — wait for completion; fix any failures before stopping.
-6. `gh run view <run-id> --json conclusion,status,jobs --jq '{conclusion,status,jobs:[.jobs[]|{name,conclusion,status}]}'` — fetch the explicit conclusion and per-job statuses; only announce success when `conclusion` is `"success"` and every job shows `"success"`.
+3. `SHA=$(git rev-parse HEAD)` — capture the commit SHA before pushing.
+4. `git push origin main` — lefthook's `pre-push` hook runs `bun test` (full suite, ~1900 tests, ~44s). Push only succeeds once all tests pass.
+5. `gh run list --commit $SHA --json databaseId --jq '.[0].databaseId'` — get the run ID for the exact pushed SHA. Do NOT use `--limit 1 --branch main` — that returns the latest run which may be stale.
+6. `gh run watch <run-id> --exit-status` — wait for completion; fix any failures before stopping.
+7. `gh run view <run-id> --json conclusion,status,jobs --jq '{conclusion,status,jobs:[.jobs[]|{name,conclusion,status}]}'` — fetch the explicit conclusion and per-job statuses; only announce success when `conclusion` is `"success"` and every job shows `"success"`.
 
 **Mandatory hooks — never bypass:**
 - `lefthook pre-push` runs `bun test`. DON'T use `--no-verify` or any flag that skips it. Fix test failures first.
