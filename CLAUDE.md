@@ -114,7 +114,34 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DON'T** create a task just for `git push` or `gh` commands — these are exempt from the task requirement. `git push`, `git pull`, `git fetch`, and all `gh` subcommands bypass the hook automatically.
 
-**DO** commit all changes before attempting to stop the session. The `stop-git-status.sh` hook blocks stop when uncommitted changes exist. The correct end-of-task sequence is: edit → mark task completed → commit → push → CI watch → `gh run view --json` → announce result → stop.
+**DO** commit all changes before attempting to stop the session. The `stop-git-status.sh` hook blocks stop when uncommitted changes exist. The correct end-of-task sequence is: edit → commit (task still in_progress) → mark task completed → push → CI watch → `gh run view --json` → announce result → stop.
+
+## Standard Work Sequence
+
+Follow this order for every unit of work. Deviating from it causes hook blocks.
+
+```
+1. TaskCreate / TaskUpdate → in_progress   (required before any Edit/Bash)
+2. Edit / Bash                              (implementation)
+3. git add + git commit                     (hooks: lint, typecheck; task still in_progress)
+4. TaskUpdate → completed                   (after commit succeeds, before push)
+5. git log origin/main..HEAD --oneline      (review commits)
+6. git push origin main                     (hook: bun test full suite; push/gh exempt from task req)
+7. gh run list --limit 1 --branch main      (get run ID)
+8. gh run watch <run-id> --exit-status      (wait)
+9. gh run view <run-id> \
+     --json conclusion,status,jobs \
+     --jq '{conclusion,status,
+            jobs:[.jobs[]|{name,conclusion,status}]}'
+                                            (confirm conclusion === "success")
+10. Announce result — done.
+```
+
+**Enforcement summary:**
+- Steps 1–3 require an in_progress task (hook blocks otherwise)
+- Step 4 must happen after commit and before push (no TaskUpdate at steps 6–10)
+- Step 9 is mandatory — `gh run watch` output alone is not verification
+- No TaskUpdate/TaskList calls at steps 6–10
 
 ## Push and CI
 
