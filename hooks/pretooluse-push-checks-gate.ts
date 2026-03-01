@@ -51,8 +51,10 @@ async function extractBashCommands(path: string): Promise<string[]> {
 
 const priorCommands = await extractBashCommands(transcriptPath)
 
-// Check 1: branch check (`git branch --show-current` or bare `git branch`)
-const BRANCH_CHECK_RE = /\bgit\s+branch\b/
+// Check 1: branch check — must use `git branch --show-current` explicitly.
+// Bare `git branch`, `git branch -a`, `git branch -d foo` etc. do NOT satisfy
+// the gate because they don't confirm which branch is currently checked out.
+const BRANCH_CHECK_RE = /\bgit\s+branch\s+--show-current\b/
 const hasBranchCheck = priorCommands.some((c) => BRANCH_CHECK_RE.test(c))
 
 // Check 2: open-PR check (`gh pr list` with `--head`)
