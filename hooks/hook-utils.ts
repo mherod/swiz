@@ -21,9 +21,11 @@ if (!Bun.which("bun")) {
 
 import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
 import { skillAdvice, skillExists } from "../src/skill-utils.ts"
 
 export { skillAdvice, skillExists }
+export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
 
 export type PackageManager = "bun" | "pnpm" | "yarn" | "npm"
 export type Runtime = "bun" | "node"

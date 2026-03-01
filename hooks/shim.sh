@@ -58,11 +58,14 @@ _swiz_detect_runner() {
 }
 
 # ── Agent detection ──────────────────────────────────────────────────────────
+# Mirrors the logic in src/detect.ts:isRunningInAgent() for shell context.
+# The TypeScript version is used by hooks and commands (src/commands/status.ts).
+# This bash version is for shell-level enforcement before tools are invoked.
 
 _swiz_is_agent() {
   # Non-interactive shell is almost certainly an agent
   [[ $- != *i* ]] && return 0
-  # Known agent environment indicators
+  # Known agent environment indicators (from AGENTS array in src/agents.ts)
   [[ -n "${CURSOR_TRACE_ID:-}" ]] && return 0
   [[ -n "${CLAUDE_CODE:-}" ]] && return 0
   # Force via env var

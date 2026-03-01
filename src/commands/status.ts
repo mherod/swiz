@@ -1,5 +1,6 @@
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
+import { detectCurrentAgent } from "../detect.ts"
 import type { Command } from "../types.ts"
 
 const SWIZ_ROOT = dirname(Bun.main)
@@ -136,18 +137,6 @@ async function checkAgent(agent: AgentDef) {
   }
 
   console.log()
-}
-
-function getParentProcessCommand(): string {
-  const proc = Bun.spawnSync(["ps", "-p", String(process.ppid), "-o", "command="])
-  return new TextDecoder().decode(proc.stdout).trim()
-}
-
-function detectCurrentAgent() {
-  const byEnv = AGENTS.find((a) => a.envVars?.some((v) => process.env[v]))
-  if (byEnv) return byEnv
-  const parentCmd = getParentProcessCommand()
-  return AGENTS.find((a) => a.processPattern?.test(parentCmd)) ?? null
 }
 
 export const statusCommand: Command = {
