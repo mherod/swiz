@@ -38,7 +38,9 @@ const PUSH_APPROVAL_PATTERNS = [
   // Explicit user approval phrases
   /\bgo ahead and push\b/i,
   /\bpush now\b/i,
-  /^\/push\b/m,
+  // /push on its own (skill invocation or bare command) — require whitespace or
+  // end-of-line after "push" so "/push-something" file paths don't match.
+  /^\/push(?:\s|$)/m,
   /\bplease push\b/i,
 ]
 

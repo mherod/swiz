@@ -380,4 +380,283 @@ describe("pretooluse-no-push-when-instructed", () => {
       expect(result.blocked).toBe(false)
     })
   })
+
+  describe("ambiguous consent — phrases that resemble approval but do not match", () => {
+    const BLOCK = "DO NOT push to remote without approval"
+
+    test("'I'll push it to staging later' does not lift block", async () => {
+      const transcript = makeTranscript(userText(BLOCK), userText("I'll push it to staging later"))
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+
+    test("'you should push when CI is green' does not lift block", async () => {
+      const transcript = makeTranscript(
+        userText(BLOCK),
+        userText("you should push when CI is green")
+      )
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+
+    test("'push changes to staging' does not lift block", async () => {
+      const transcript = makeTranscript(userText(BLOCK), userText("push changes to staging"))
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+
+    test("'a force push could lose history' does not lift block", async () => {
+      const transcript = makeTranscript(
+        userText(BLOCK),
+        userText("a force push could lose history")
+      )
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+
+    test("'Push 0 commits remaining' does not lift block", async () => {
+      // Digit required by /Push \d+ commit/i — but 0 is a digit, so this WOULD
+      // match. Document that "Push 0 commit" is intentionally accepted as an
+      // approval signal because it only appears in stop-hook action plans.
+      const transcript = makeTranscript(
+        userText(BLOCK),
+        userText("Push 0 commits remaining in queue")
+      )
+      // 0 matches \d+, so this IS treated as an approval signal (stop-hook format)
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(false)
+    })
+
+    test("bare 'push' on its own does not lift block", async () => {
+      const transcript = makeTranscript(userText(BLOCK), userText("push"))
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+  })
+
+  describe("approval pattern precision — path-like strings must not grant approval", () => {
+    const BLOCK = "DO NOT push to remote without approval"
+
+    test("'/push-notifications.ts' on its own line does NOT lift block", async () => {
+      // Fixed: ^\/push\b was matching /push-anything; now requires whitespace/EOL
+      const transcript = makeTranscript(userText(BLOCK), userText("/push-notifications.ts"))
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+
+    test("'/push-to-deploy.sh' mentioned in a sentence does NOT lift block", async () => {
+      const transcript = makeTranscript(
+        userText(BLOCK),
+        userText("run /push-to-deploy.sh to release")
+      )
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+
+    test("'/push ' with trailing space DOES lift block (legitimate invocation)", async () => {
+      const transcript = makeTranscript(userText(BLOCK), userText("/push some args"))
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(false)
+    })
+
+    test("'/push' at end of line (no trailing chars) DOES lift block", async () => {
+      const transcript = makeTranscript(userText(BLOCK), userText("invoke /push"))
+      // "/push" is NOT at the start of the line here, so ^ won't match
+      // but the whole text "invoke /push" — /push is not at line start
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+
+    test("'/push' alone on its own line DOES lift block", async () => {
+      const transcript = makeTranscript(userText(BLOCK), userText("/push"))
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(false)
+    })
+  })
+
+  describe("blocking phrase precision — word boundaries and phrase variants", () => {
+    test("'never push to main' does NOT trigger a block (not in pattern)", async () => {
+      // NO_PUSH_RE requires 'do not' or "don't" — "never" is not covered
+      const transcript = makeTranscript(userText("never push to main directly"))
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(false)
+    })
+
+    test("'must not push' does NOT trigger a block (not in pattern)", async () => {
+      const transcript = makeTranscript(userText("you must not push this branch"))
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(false)
+    })
+
+    test("'do NOT push' (mixed caps) blocks correctly", async () => {
+      const transcript = makeTranscript(userText("do NOT push this to remote"))
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+
+    test("'don't push the button' blocks (phrase matches even with unrelated object)", async () => {
+      // The pattern is about the phrase structure, not the object of push
+      const transcript = makeTranscript(userText("don't push the button on prod"))
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+
+    test("'do not pushover' does NOT block — word boundary prevents partial match", async () => {
+      // \bpush\b ensures 'pushover' is not matched
+      const transcript = makeTranscript(userText("do not pushover the team"))
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(false)
+    })
+
+    test("blocking phrase buried in a long multiline user message is found", async () => {
+      const longMessage = [
+        "Here are the tasks for today:",
+        "1. Run lint checks",
+        "2. Fix any TypeScript errors",
+        "3. DO NOT push to remote without approval",
+        "4. Update the README",
+        "5. Close resolved issues",
+      ].join("\n")
+      const transcript = makeTranscript(userText(longMessage))
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(true)
+      expect(result.reason).toContain("DO NOT push to remote without approval")
+    })
+  })
+
+  describe("transcript resilience — malformed and mixed-type entries are skipped", () => {
+    test("non-JSON lines in transcript are skipped gracefully", async () => {
+      const content = [
+        "not valid json at all",
+        JSON.stringify({
+          type: "user",
+          message: { content: [{ type: "text", text: "DO NOT push to remote" }] },
+        }),
+        "another bad line }{",
+      ].join("\n")
+      const result = await runHook({ command: "git push origin main", transcriptContent: content })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("entry with missing content array is skipped without error", async () => {
+      const content = [
+        JSON.stringify({ type: "user", message: {} }),
+        JSON.stringify({
+          type: "user",
+          message: { content: [{ type: "text", text: "DO NOT push to remote" }] },
+        }),
+      ].join("\n")
+      const result = await runHook({ command: "git push origin main", transcriptContent: content })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("tool_result type blocks in a user message are skipped", async () => {
+      // User message with a tool_result block (not text) containing the phrase
+      const content = JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", content: "DO NOT push to remote" },
+            { type: "text", text: "Normal instruction without the phrase" },
+          ],
+        },
+      })
+      // Only the text block is checked — tool_result is not scanned
+      const result = await runHook({ command: "git push origin main", transcriptContent: content })
+      expect(result.blocked).toBe(false)
+    })
+
+    test("system-role entries are ignored entirely", async () => {
+      const content = JSON.stringify({
+        type: "system",
+        message: { content: [{ type: "text", text: "DO NOT push to remote" }] },
+      })
+      const result = await runHook({ command: "git push origin main", transcriptContent: content })
+      expect(result.blocked).toBe(false)
+    })
+  })
+
+  describe("complex ordering — long interleaved block/approve sequences", () => {
+    test("5 alternating block/approve entries — last state (approve) wins", async () => {
+      const transcript = makeTranscript(
+        userText("DO NOT push to remote"),
+        userText("Get committed changes pushed to remote."),
+        userText("DO NOT push — wait for review"),
+        userText("go ahead and push"),
+        userText("DO NOT push yet — CI still running"),
+        userText("CI finished. Push 3 commits to origin/main")
+      )
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(false)
+    })
+
+    test("5 alternating entries — last state (block) wins", async () => {
+      const transcript = makeTranscript(
+        userText("DO NOT push to remote"),
+        userText("Get committed changes pushed to remote."),
+        userText("DO NOT push — wait for review"),
+        userText("go ahead and push"),
+        userText("DO NOT push yet — CI still running")
+      )
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("approval then 3 rapid block entries — still blocked", async () => {
+      const transcript = makeTranscript(
+        userText("Get committed changes pushed to remote."),
+        userText("DO NOT push to remote"),
+        userText("DO NOT push — CI is red"),
+        userText("DO NOT push — conflicts exist")
+      )
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("many unrelated entries between block and approval are ignored", async () => {
+      const transcript = makeTranscript(
+        userText("DO NOT push to remote without approval"),
+        userText("Run the tests first"),
+        assistantText("Running tests now"),
+        userText("Fix the failing test"),
+        assistantText("Fixed. Tests pass."),
+        userText("Update the README"),
+        assistantText("README updated."),
+        userText("go ahead and push")
+      )
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(false)
+    })
+  })
 })
