@@ -460,6 +460,99 @@ export async function extractToolNamesFromTranscript(transcriptPath: string): Pr
   }
 }
 
+// ─── Command normalisation & matching ───────────────────────────────────
+//
+// Utilities for parsing and classifying shell commands in hook scripts.
+// Centralised here so all hooks use the same patterns and normalisation steps.
+
+/**
+ * Normalize shell backslash-newline continuations so that
+ *   git branch \<newline>  --show-current
+ * is treated identically to
+ *   git branch --show-current
+ * before the regex checks run.
+ */
+export function normalizeCommand(cmd: string): string {
+  // \r?\n handles both LF and CRLF line endings in backslash continuations
+  return cmd.replace(/\\\r?\n\s*/g, " ")
+}
+
+/**
+ * Strip heredoc bodies from a shell command string before regex matching.
+ * Prevents false positives when git push/commit appears inside a heredoc body
+ * rather than as an executable command.
+ * Handles: <<WORD, <<-WORD, <<"WORD", <<'WORD'
+ */
+export function stripHeredocs(command: string): string {
+  return command.replace(/<<-?[ \t]*["']?(\w+)["']?[ \t]*\n[\s\S]*?\n[ \t]*\1(?=\n|$)/g, "")
+}
+
+/**
+ * Extract all shell commands from assistant Bash tool_use blocks in a transcript.
+ * Each command is normalised (backslash-newline continuations collapsed) before
+ * being returned.
+ */
+export async function extractBashCommands(path: string): Promise<string[]> {
+  const commands: string[] = []
+  try {
+    const text = await Bun.file(path).text()
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue
+      try {
+        const entry = JSON.parse(line)
+        if (entry?.type !== "assistant") continue
+        const content = entry?.message?.content
+        if (!Array.isArray(content)) continue
+        for (const block of content) {
+          if (block?.type !== "tool_use") continue
+          if (!isShellTool(block?.name ?? "")) continue
+          const cmd: string = block?.input?.command ?? ""
+          if (cmd) commands.push(normalizeCommand(cmd))
+        }
+      } catch {}
+    }
+  } catch {}
+  return commands
+}
+
+// ── Git command regexes ───────────────────────────────────────────────────
+
+/** Matches `git push` anywhere in a shell command string. */
+export const GIT_PUSH_RE = /(?:^|\n|;|&&|\|\|)\s*git\s+push\b/
+/** Matches `git commit` anywhere in a shell command string. */
+export const GIT_COMMIT_RE = /(?:^|\n|;|&&|\|\|)\s*git\s+commit\b/
+
+/**
+ * Matches git read-only subcommands.
+ * Used with `!GIT_WRITE_RE.test(cmd)` to gate purely read-only git calls.
+ */
+export const GIT_READ_RE =
+  /(?:^|\|\||&&|;)\s*git\s+(log|status|diff|show|branch|remote\b|rev-parse|rev-list|reflog|ls-files|describe|tag\b)(\s|$)/
+
+/** Matches git subcommands that mutate state. */
+export const GIT_WRITE_RE =
+  /\bgit\s+(add|commit|push|pull|fetch|checkout|switch|restore|reset|rebase|merge|stash\s+(?!list)|cherry-pick|revert|rm|mv|apply)\b/
+
+/** Matches `git push`, `git pull`, or `git fetch` — mechanical sync ops. */
+export const GIT_SYNC_RE = /(?:^|\|\||&&|;)\s*git\s+(push|pull|fetch)\b/
+
+/** Matches `ls`, `rg`, or `grep` — pure read commands. */
+export const READ_CMD_RE = /(?:^|\|\||&&|;)\s*(ls|rg|grep)\b/
+
+/** Matches any `gh` CLI invocation. */
+export const GH_CMD_RE = /(?:^|\|\||&&|;)\s*gh\b/
+
+// ── Push-gate check regexes ───────────────────────────────────────────────
+
+/**
+ * Matches `git branch --show-current` (exact flag, no suffix like -upstream).
+ * (?!\S) ensures `--show-current` is the last token, not a prefix of another flag.
+ */
+export const BRANCH_CHECK_RE = /\bgit\s+branch\s+--show-current(?!\S)/
+
+/** Matches `gh pr list --head` (open-PR check). */
+export const PR_CHECK_RE = /\bgh\s+pr\s+list\b.*--head\b/
+
 // ─── Common input types ─────────────────────────────────────────────────
 
 export interface StopHookInput {

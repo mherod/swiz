@@ -7,9 +7,14 @@ import { join } from "node:path"
 import {
   denyPreToolUse as deny,
   extractToolNamesFromTranscript,
+  GH_CMD_RE,
+  GIT_READ_RE,
+  GIT_SYNC_RE,
+  GIT_WRITE_RE,
   isEditTool,
   isShellTool,
   isWriteTool,
+  READ_CMD_RE,
   TASK_TOOLS,
 } from "./hook-utils.ts"
 
@@ -31,28 +36,21 @@ if (isShellTool(toolName)) {
   const command: string = input?.tool_input?.command ?? ""
 
   // git read-only subcommands — allowed if no write subcommand also appears
-  const GIT_READ_RE =
-    /(?:^|\|\||&&|;)\s*git\s+(log|status|diff|show|branch|remote\b|rev-parse|rev-list|reflog|ls-files|describe|tag\b)(\s|$)/
-  const GIT_WRITE_RE =
-    /\bgit\s+(add|commit|push|pull|fetch|checkout|switch|restore|reset|rebase|merge|stash\s+(?!list)|cherry-pick|revert|rm|mv|apply)\b/
   if (GIT_READ_RE.test(command) && !GIT_WRITE_RE.test(command)) {
     process.exit(0)
   }
 
   // ls and grep/rg — pure read, safe without a task
-  const READ_CMD_RE = /(?:^|\|\||&&|;)\s*(ls|rg|grep)\b/
   if (READ_CMD_RE.test(command)) {
     process.exit(0)
   }
 
   // git push/pull/fetch — mechanical sync ops; don't require task tracking
-  const GIT_SYNC_RE = /(?:^|\|\||&&|;)\s*git\s+(push|pull|fetch)\b/
   if (GIT_SYNC_RE.test(command)) {
     process.exit(0)
   }
 
   // gh commands — CI/PR inspection and management; end-of-session publishing steps
-  const GH_CMD_RE = /(?:^|\|\||&&|;)\s*gh\b/
   if (GH_CMD_RE.test(command)) {
     process.exit(0)
   }

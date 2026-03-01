@@ -335,3 +335,113 @@ describe("pretooluse-push-checks-gate", () => {
     })
   })
 })
+
+// ─── Parametric regression matrix ────────────────────────────────────────────
+// Table-driven: every realistic multiline form of `git branch --show-current`.
+// All cases include a valid PR check so the branch check is the only variable.
+
+const PR_CHECK = "gh pr list --state open --head main"
+
+interface BranchVariantCase {
+  label: string
+  command: string
+  /** true = gate should ALLOW push (check satisfied) */
+  satisfied: boolean
+}
+
+const BRANCH_VARIANT_CASES: BranchVariantCase[] = [
+  // ── Canonical forms — must be satisfied ──────────────────────────────────
+  {
+    label: "single-line canonical",
+    command: "git branch --show-current",
+    satisfied: true,
+  },
+  {
+    label: "single continuation (LF)",
+    command: "git branch \\\n  --show-current",
+    satisfied: true,
+  },
+  {
+    label: "single continuation (tab indent)",
+    command: "git branch \\\n\t--show-current",
+    satisfied: true,
+  },
+  {
+    label: "multiple continuations",
+    command: "git \\\n  branch \\\n  --show-current",
+    satisfied: true,
+  },
+  {
+    label: "extra trailing whitespace after flag",
+    command: "git branch --show-current   ",
+    satisfied: true,
+  },
+  {
+    label: "flag followed by comment",
+    command: "git branch --show-current # current branch",
+    satisfied: true,
+  },
+  {
+    label: "bundled in pipeline after &&",
+    command: "git log --oneline -3 && git branch --show-current",
+    satisfied: true,
+  },
+  {
+    label: "CRLF line endings in continuation",
+    command: "git branch \\\r\n  --show-current",
+    satisfied: true,
+  },
+
+  // ── Rejected variants — must NOT be satisfied ────────────────────────────
+  {
+    label: "bare git branch (no flag)",
+    command: "git branch",
+    satisfied: false,
+  },
+  {
+    label: "git branch -a",
+    command: "git branch -a",
+    satisfied: false,
+  },
+  {
+    label: "git branch -vv",
+    command: "git branch -vv",
+    satisfied: false,
+  },
+  {
+    label: "git branch -d old-feature",
+    command: "git branch -d old-feature",
+    satisfied: false,
+  },
+  {
+    label: "--show-current-upstream (suffixed flag)",
+    command: "git branch --show-current-upstream",
+    satisfied: false,
+  },
+  {
+    label: "--show-current with continuation then -upstream suffix",
+    command: "git branch \\\n  --show-current-upstream",
+    satisfied: false,
+  },
+  {
+    label: "flag in a comment only (not a real invocation)",
+    command: "echo '# git branch --show-current'",
+    satisfied: false,
+  },
+]
+
+describe("parametric: git branch --show-current variant regression matrix", () => {
+  for (const { label, command, satisfied } of BRANCH_VARIANT_CASES) {
+    test(label, async () => {
+      const transcript = makeTranscript(command, PR_CHECK)
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(!satisfied)
+      if (!satisfied) {
+        expect(result.reason).toContain("git branch --show-current")
+      }
+    })
+  }
+})

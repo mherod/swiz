@@ -9,7 +9,15 @@
 // Rationale: pushing without these checks risks pushing large work directly
 // to main in a collaborative repo, or creating duplicate PRs.
 
-import { denyPreToolUse, isShellTool, type ToolHookInput } from "./hook-utils.ts"
+import {
+  BRANCH_CHECK_RE,
+  denyPreToolUse,
+  extractBashCommands,
+  GIT_PUSH_RE,
+  isShellTool,
+  PR_CHECK_RE,
+  type ToolHookInput,
+} from "./hook-utils.ts"
 
 const input: ToolHookInput = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
@@ -17,48 +25,12 @@ if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 const command: string = (input?.tool_input?.command as string) ?? ""
 
 // Only gate on git push commands
-const GIT_PUSH_RE = /(?:^|\|\||&&|;)\s*git\s+push\b/
 if (!GIT_PUSH_RE.test(command)) process.exit(0)
 
 // ── Scan transcript for prior checks ─────────────────────────────────────────
 
 const transcriptPath: string = input?.transcript_path ?? ""
 if (!transcriptPath) process.exit(0) // no transcript → can't enforce; allow
-
-/**
- * Normalize shell backslash-newline continuations so that
- *   git branch \<newline>  --show-current
- * is treated identically to
- *   git branch --show-current
- * before the regex checks run.
- */
-function normalizeCommand(cmd: string): string {
-  return cmd.replace(/\\\n\s*/g, " ")
-}
-
-/** Extract all shell commands from assistant Bash tool_use blocks in transcript. */
-async function extractBashCommands(path: string): Promise<string[]> {
-  const commands: string[] = []
-  try {
-    const text = await Bun.file(path).text()
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue
-      try {
-        const entry = JSON.parse(line)
-        if (entry?.type !== "assistant") continue
-        const content = entry?.message?.content
-        if (!Array.isArray(content)) continue
-        for (const block of content) {
-          if (block?.type !== "tool_use") continue
-          if (!isShellTool(block?.name ?? "")) continue
-          const cmd: string = block?.input?.command ?? ""
-          if (cmd) commands.push(normalizeCommand(cmd))
-        }
-      } catch {}
-    }
-  } catch {}
-  return commands
-}
 
 const priorCommands = await extractBashCommands(transcriptPath)
 
@@ -67,11 +39,9 @@ const priorCommands = await extractBashCommands(transcriptPath)
 // the gate because they don't confirm which branch is currently checked out.
 // Use (?!\S) so `--show-current-upstream` (a non-existent but theoretically
 // matchable string) does not falsely satisfy the gate.
-const BRANCH_CHECK_RE = /\bgit\s+branch\s+--show-current(?!\S)/
 const hasBranchCheck = priorCommands.some((c) => BRANCH_CHECK_RE.test(c))
 
 // Check 2: open-PR check (`gh pr list` with `--head`)
-const PR_CHECK_RE = /\bgh\s+pr\s+list\b.*--head\b/
 const hasPRCheck = priorCommands.some((c) => PR_CHECK_RE.test(c))
 
 if (hasBranchCheck && hasPRCheck) process.exit(0)
