@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-03-01
+
+### New Features
+
+- Added a hook that blocks `git push` unless the required branch and
+  open-PR checks have already been run in the current session. Before
+  any push, `git branch --show-current` and
+  `gh pr list --state open --head <branch>` must have been executed.
+  This prevents accidentally pushing large work directly to a shared
+  branch, or creating duplicate pull requests, by enforcing the
+  verification steps as a mandatory gate rather than an optional
+  reminder.
+
 ## 2026-02-28
 
 ### New Features
