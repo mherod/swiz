@@ -9,9 +9,9 @@
   any push, `git branch --show-current` and
   `gh pr list --state open --head <branch>` must have been executed.
   This prevents accidentally pushing large work directly to a shared
-  branch, or creating duplicate pull requests, by enforcing the
+  branch or creating duplicate pull requests, by enforcing the
   verification steps as a mandatory gate rather than an optional
-  reminder.
+  reminder. (#13)
 
 ## 2026-02-28
 
