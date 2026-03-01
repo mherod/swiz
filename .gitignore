@@ -5,6 +5,9 @@ package-lock.json
 # IDE
 .cursor
 
+# Claude Code local settings (machine-specific, not shared)
+.claude/settings.local.json
+
 # output
 out
 dist
