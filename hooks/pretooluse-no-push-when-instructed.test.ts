@@ -250,7 +250,10 @@ describe("pretooluse-no-push-when-instructed", () => {
   })
 
   describe("approval after block — push is allowed", () => {
-    test("/push skill header after block lifts restriction", async () => {
+    test("/push skill header after block does NOT lift restriction (skill content ≠ user authorisation)", async () => {
+      // Regression: "Get committed changes pushed to remote" is the /push skill header.
+      // It loads automatically when the agent invokes the skill — it is NOT the user
+      // explicitly authorising a push, so it must never lift a block.
       const transcript = makeTranscript(
         userText("DO NOT push to remote without approval"),
         userText(
@@ -261,7 +264,7 @@ describe("pretooluse-no-push-when-instructed", () => {
         command: "git push origin main",
         transcriptContent: transcript,
       })
-      expect(result.blocked).toBe(false)
+      expect(result.blocked).toBe(true)
     })
 
     test("stop hook action plan 'Push N commit(s)' lifts restriction", async () => {
@@ -328,7 +331,7 @@ describe("pretooluse-no-push-when-instructed", () => {
       // approval check doesn't restrict to user role — any role counts
       const transcript = makeTranscript(
         userText("DO NOT push to remote without approval"),
-        assistantText("Get committed changes pushed to remote.")
+        assistantText("Push 1 commit to origin/main")
       )
       const result = await runHook({
         command: "git push origin main",
@@ -342,7 +345,7 @@ describe("pretooluse-no-push-when-instructed", () => {
     test("approval before block does not lift restriction", async () => {
       // Approval appears first, then the blocking instruction — still blocked
       const transcript = makeTranscript(
-        userText("Get committed changes pushed to remote. Push skill content."),
+        userText("go ahead and push"),
         userText("DO NOT push to remote without approval")
       )
       const result = await runHook({
@@ -356,7 +359,7 @@ describe("pretooluse-no-push-when-instructed", () => {
       // block → approval → block: the last state is blocked
       const transcript = makeTranscript(
         userText("DO NOT push to remote without approval"),
-        userText("Get committed changes pushed to remote."),
+        userText("go ahead and push"),
         userText("DO NOT push to remote — wait for CI to finish")
       )
       const result = await runHook({
@@ -369,7 +372,7 @@ describe("pretooluse-no-push-when-instructed", () => {
     test("second approval after second block lifts restriction again", async () => {
       const transcript = makeTranscript(
         userText("DO NOT push to remote without approval"),
-        userText("Get committed changes pushed to remote."),
+        userText("push now"),
         userText("DO NOT push to remote — wait for CI"),
         userText("CI is green. go ahead and push")
       )
@@ -599,7 +602,7 @@ describe("pretooluse-no-push-when-instructed", () => {
     test("5 alternating block/approve entries — last state (approve) wins", async () => {
       const transcript = makeTranscript(
         userText("DO NOT push to remote"),
-        userText("Get committed changes pushed to remote."),
+        userText("push now"),
         userText("DO NOT push — wait for review"),
         userText("go ahead and push"),
         userText("DO NOT push yet — CI still running"),
@@ -615,7 +618,7 @@ describe("pretooluse-no-push-when-instructed", () => {
     test("5 alternating entries — last state (block) wins", async () => {
       const transcript = makeTranscript(
         userText("DO NOT push to remote"),
-        userText("Get committed changes pushed to remote."),
+        userText("push now"),
         userText("DO NOT push — wait for review"),
         userText("go ahead and push"),
         userText("DO NOT push yet — CI still running")
@@ -629,7 +632,7 @@ describe("pretooluse-no-push-when-instructed", () => {
 
     test("approval then 3 rapid block entries — still blocked", async () => {
       const transcript = makeTranscript(
-        userText("Get committed changes pushed to remote."),
+        userText("go ahead and push"),
         userText("DO NOT push to remote"),
         userText("DO NOT push — CI is red"),
         userText("DO NOT push — conflicts exist")

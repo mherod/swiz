@@ -138,8 +138,6 @@ const NEUTRAL_LINES = [
 
 /** Recognised approval phrase cores */
 const APPROVAL_CORES = [
-  "Get committed changes pushed to remote",
-  "get committed changes pushed to remote", // lowercase
   "Push 1 commit to origin/main",
   "Push 3 commits to origin",
   "Push 10 commits",
@@ -159,6 +157,9 @@ const APPROVAL_CORES = [
 
 /** Approval phrases that must NOT be recognised (not in patterns) */
 const NON_APPROVAL_PHRASES = [
+  // Skill content — loads automatically when agent invokes /push, NOT user authorisation
+  "Get committed changes pushed to remote",
+  "get committed changes pushed to remote",
   "push",
   "PUSH",
   "push it",
@@ -246,7 +247,7 @@ describe("P3 NEUTRAL_NO_CHANGE — neutral text never changes hook state", () =>
 
 describe("P4 FINAL_STATE_WINS — result always reflects the last block or approve entry", () => {
   const BLOCK = "DO NOT push to remote"
-  const APPROVE = "Get committed changes pushed to remote."
+  const APPROVE = "go ahead and push"
 
   /** Build a sequence of N block/approve entries; return [transcript, expectedBlocked] */
   function buildSequence(pattern: ("B" | "A")[]): [string, boolean] {
@@ -300,7 +301,6 @@ describe("P6 APPROVAL_ANY_ROLE — approval phrases lift block from both user an
   const BLOCK_ENTRY = entry("user", "DO NOT push to remote without approval")
 
   const REPRESENTATIVE_APPROVALS = [
-    "Get committed changes pushed to remote.",
     "Push 2 commits to origin/main",
     "go ahead and push",
     "push now",

@@ -8,9 +8,13 @@
 // unless approval appears AFTER the blocking instruction in the transcript.
 //
 // Approval signals (must appear AFTER the "do not push" instruction):
-//   - The /push skill being loaded (contains its distinctive header text)
 //   - A stop hook action-plan requiring push ("Push N commit(s) to")
 //   - An explicit user message ("go ahead and push", "/push", "push now", etc.)
+//
+// NOTE: Skill content (e.g. the /push skill header) is NOT an approval signal.
+// Skills load automatically when the agent invokes them — that is agent behaviour,
+// not human authorisation. Only stop-hook action plans and deliberate human phrases
+// are accepted.
 
 import { denyPreToolUse, GIT_PUSH_RE, isShellTool, type ToolHookInput } from "./hook-utils.ts"
 
@@ -30,16 +34,20 @@ const NO_PUSH_RE = /\bdo(?:n't| not)\s+push\b/i
 
 // Approval signals — any of these appearing AFTER the blocking instruction
 // count as explicit authorisation to push.
+//
+// IMPORTANT: Skill content (e.g. the /push skill header "Get committed changes
+// pushed to remote") must NOT appear here. Skill content loads into the
+// transcript whenever the agent invokes a skill — that is not the same as the
+// user explicitly authorising a push. Only phrases that require deliberate
+// human typing or a system stop-hook action plan are accepted.
 const PUSH_APPROVAL_PATTERNS = [
-  // /push skill header (loaded as user text block when skill is invoked)
-  /Get committed changes pushed to remote/i,
-  // Stop hook action plan requiring push
+  // Stop hook action plan requiring push — system-generated, unambiguous
   /Push \d+ commit/i,
-  // Explicit user approval phrases
+  // Explicit user approval phrases that cannot be produced by skill loading
   /\bgo ahead and push\b/i,
   /\bpush now\b/i,
-  // /push on its own (skill invocation or bare command) — require whitespace or
-  // end-of-line after "push" so "/push-something" file paths don't match.
+  // /push on its own line (user typed the skill invocation directly) —
+  // require whitespace or end-of-line so "/push-something" paths don't match.
   /^\/push(?:\s|$)/m,
   /\bplease push\b/i,
 ]
