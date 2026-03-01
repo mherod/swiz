@@ -8,13 +8,13 @@
 // unless approval appears AFTER the blocking instruction in the transcript.
 //
 // Approval signals (must appear AFTER the "do not push" instruction):
-//   - A stop hook action-plan requiring push ("Push N commit(s) to")
 //   - An explicit user message ("go ahead and push", "/push", "push now", etc.)
 //
-// NOTE: Skill content (e.g. the /push skill header) is NOT an approval signal.
-// Skills load automatically when the agent invokes them — that is agent behaviour,
-// not human authorisation. Only stop-hook action plans and deliberate human phrases
-// are accepted.
+// NOTE: Stop-hook action plans ("Push N commit(s) to") are NOT approval signals.
+// They are machine-generated system messages, not deliberate human authorisation.
+// Skill content (e.g. the /push skill header) is also NOT an approval signal —
+// skills load automatically when the agent invokes them. Only deliberate human
+// phrases are accepted as authorisation to push.
 
 import { denyPreToolUse, GIT_PUSH_RE, isShellTool, type ToolHookInput } from "./hook-utils.ts"
 
@@ -41,9 +41,8 @@ const NO_PUSH_RE = /\bdo(?:n't| not)\s+push\b/i
 // user explicitly authorising a push. Only phrases that require deliberate
 // human typing or a system stop-hook action plan are accepted.
 const PUSH_APPROVAL_PATTERNS = [
-  // Stop hook action plan requiring push — system-generated, unambiguous
-  /Push \d+ commit/i,
   // Explicit user approval phrases that cannot be produced by skill loading
+  // or system-generated stop-hook action plans.
   /\bgo ahead and push\b/i,
   /\bpush now\b/i,
   // /push on its own line (user typed the skill invocation directly) —

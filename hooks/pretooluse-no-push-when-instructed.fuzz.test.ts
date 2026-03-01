@@ -138,9 +138,6 @@ const NEUTRAL_LINES = [
 
 /** Recognised approval phrase cores */
 const APPROVAL_CORES = [
-  "Push 1 commit to origin/main",
-  "Push 3 commits to origin",
-  "Push 10 commits",
   "go ahead and push",
   "Go Ahead And Push",
   "GO AHEAD AND PUSH",
@@ -157,6 +154,12 @@ const APPROVAL_CORES = [
 
 /** Approval phrases that must NOT be recognised (not in patterns) */
 const NON_APPROVAL_PHRASES = [
+  // Stop-hook action plans — system-generated, NOT explicit human authorisation
+  "Push 1 commit(s) to 'origin/main' with /push",
+  "Push 2 commits to origin/main",
+  "Push 3 commits to origin",
+  "Push 10 commits",
+  "Push 0 commits remaining in queue",
   // Skill content — loads automatically when agent invokes /push, NOT user authorisation
   "Get committed changes pushed to remote",
   "get committed changes pushed to remote",
@@ -300,12 +303,7 @@ describe("P5 ROLE_INVARIANT — blocking phrases in assistant text never block",
 describe("P6 APPROVAL_ANY_ROLE — approval phrases lift block from both user and assistant roles", () => {
   const BLOCK_ENTRY = entry("user", "DO NOT push to remote without approval")
 
-  const REPRESENTATIVE_APPROVALS = [
-    "Push 2 commits to origin/main",
-    "go ahead and push",
-    "push now",
-    "please push",
-  ]
+  const REPRESENTATIVE_APPROVALS = ["go ahead and push", "push now", "please push"]
 
   for (const approvalText of REPRESENTATIVE_APPROVALS) {
     test(`user approval lifts: ${JSON.stringify(approvalText)}`, async () => {

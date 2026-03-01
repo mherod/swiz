@@ -267,7 +267,9 @@ describe("pretooluse-no-push-when-instructed", () => {
       expect(result.blocked).toBe(true)
     })
 
-    test("stop hook action plan 'Push N commit(s)' lifts restriction", async () => {
+    test("stop hook action plan 'Push N commit(s)' does NOT lift restriction", async () => {
+      // Stop-hook action plans are system-generated, not explicit human authorisation.
+      // "Push N commit(s) to origin/main" must never be accepted as approval.
       const transcript = makeTranscript(
         userText("DO NOT push to remote without approval"),
         userText("Push 1 commit(s) to 'origin/main' with /push")
@@ -276,7 +278,7 @@ describe("pretooluse-no-push-when-instructed", () => {
         command: "git push origin main",
         transcriptContent: transcript,
       })
-      expect(result.blocked).toBe(false)
+      expect(result.blocked).toBe(true)
     })
 
     test("'go ahead and push' from user lifts restriction", async () => {
@@ -331,7 +333,7 @@ describe("pretooluse-no-push-when-instructed", () => {
       // approval check doesn't restrict to user role — any role counts
       const transcript = makeTranscript(
         userText("DO NOT push to remote without approval"),
-        assistantText("Push 1 commit to origin/main")
+        assistantText("go ahead and push")
       )
       const result = await runHook({
         command: "git push origin main",
@@ -422,17 +424,16 @@ describe("pretooluse-no-push-when-instructed", () => {
     })
 
     test("'Push 0 commits remaining' does not lift block", async () => {
-      // Digit required by /Push \d+ commit/i — but 0 is a digit, so this WOULD
-      // match. Document that "Push 0 commit" is intentionally accepted as an
-      // approval signal because it only appears in stop-hook action plans.
+      // "Push N commit" was previously an approval signal for stop-hook action plans.
+      // It is no longer accepted — stop-hook messages are machine-generated, not
+      // explicit human authorisation.
       const transcript = makeTranscript(
         userText(BLOCK),
         userText("Push 0 commits remaining in queue")
       )
-      // 0 matches \d+, so this IS treated as an approval signal (stop-hook format)
       expect(
         (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
-      ).toBe(false)
+      ).toBe(true)
     })
 
     test("bare 'push' on its own does not lift block", async () => {
@@ -606,7 +607,7 @@ describe("pretooluse-no-push-when-instructed", () => {
         userText("DO NOT push — wait for review"),
         userText("go ahead and push"),
         userText("DO NOT push yet — CI still running"),
-        userText("CI finished. Push 3 commits to origin/main")
+        userText("CI finished. go ahead and push")
       )
       const result = await runHook({
         command: "git push origin main",
