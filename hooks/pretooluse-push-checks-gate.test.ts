@@ -281,4 +281,57 @@ describe("pretooluse-push-checks-gate", () => {
       expect(result.blocked).toBe(true)
     })
   })
+
+  describe("backslash-continuation normalisation", () => {
+    test("branch check with backslash-newline continuation is recognised", async () => {
+      // normalizeCommand strips \<newline>\s* → " " before regex runs
+      const transcript = makeTranscript(
+        "git branch \\\n  --show-current",
+        "gh pr list --state open --head main"
+      )
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(false)
+    })
+
+    test("PR check with backslash-newline continuation is recognised", async () => {
+      const transcript = makeTranscript(
+        "git branch --show-current",
+        "gh pr list --state open \\\n  --head main"
+      )
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(false)
+    })
+
+    test("multiple continuations in one command are all collapsed", async () => {
+      const transcript = makeTranscript(
+        "git \\\n  branch \\\n  --show-current",
+        "gh pr list \\\n  --state open \\\n  --head main"
+      )
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(false)
+    })
+
+    test("--show-current-upstream still blocked after normalisation", async () => {
+      // Normalization must not inadvertently allow the suffixed variant
+      const transcript = makeTranscript(
+        "git branch \\\n  --show-current-upstream",
+        "gh pr list --state open --head main"
+      )
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(true)
+      expect(result.reason).toContain("git branch --show-current")
+    })
+  })
 })

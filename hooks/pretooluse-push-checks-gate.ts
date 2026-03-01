@@ -25,6 +25,17 @@ if (!GIT_PUSH_RE.test(command)) process.exit(0)
 const transcriptPath: string = input?.transcript_path ?? ""
 if (!transcriptPath) process.exit(0) // no transcript → can't enforce; allow
 
+/**
+ * Normalize shell backslash-newline continuations so that
+ *   git branch \<newline>  --show-current
+ * is treated identically to
+ *   git branch --show-current
+ * before the regex checks run.
+ */
+function normalizeCommand(cmd: string): string {
+  return cmd.replace(/\\\n\s*/g, " ")
+}
+
 /** Extract all shell commands from assistant Bash tool_use blocks in transcript. */
 async function extractBashCommands(path: string): Promise<string[]> {
   const commands: string[] = []
@@ -41,7 +52,7 @@ async function extractBashCommands(path: string): Promise<string[]> {
           if (block?.type !== "tool_use") continue
           if (!isShellTool(block?.name ?? "")) continue
           const cmd: string = block?.input?.command ?? ""
-          if (cmd) commands.push(cmd)
+          if (cmd) commands.push(normalizeCommand(cmd))
         }
       } catch {}
     }

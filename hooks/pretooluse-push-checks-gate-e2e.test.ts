@@ -422,24 +422,21 @@ describe("E2E: push-checks-gate escaped/multiline/truncated JSON payload hardeni
     expect(result.blocked).toBe(false)
   })
 
-  test("backslash-continuation commands do NOT satisfy the gate (known limitation)", async () => {
+  test("backslash-continuation commands ARE normalised and satisfy the gate", async () => {
     const dir = await makeTempDir("-backslash")
     const transcriptPath = join(dir, "transcript.jsonl")
 
-    // Shell backslash-continuation splits `git branch \<newline>  --show-current`
-    // into `branch ` + `\` + newline + spaces + `--show-current`.
-    // The `\` character is not `\s`, so the regex does not match.
-    // This is an accepted limitation: the push skill always instructs the
-    // plain single-line form `git branch --show-current`.
+    // Shell backslash-newline continuation is normalised to a space before
+    // regex matching, so `git branch \<newline>  --show-current` is treated
+    // identically to `git branch --show-current`.
     const lines = [
       bashEntry("git branch \\\n  --show-current"),
-      bashEntry("gh pr list --state open --head main"),
+      bashEntry("gh pr list --state open \\\n  --head main"),
     ]
     await writeFile(transcriptPath, lines.join("\n"))
 
     const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
-    expect(result.blocked).toBe(true)
-    expect(result.reason).toContain("git branch --show-current")
+    expect(result.blocked).toBe(false)
   })
 
   test("check commands embedded in a semicolon-chained pipeline are recognised", async () => {
