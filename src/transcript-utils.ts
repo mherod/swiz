@@ -15,7 +15,18 @@ export interface ToolUseBlock {
   input?: Record<string, unknown>
 }
 
-export type ContentBlock = TextBlock | ToolUseBlock | { type: string; [key: string]: unknown }
+export interface ToolResultBlock {
+  type: "tool_result"
+  tool_use_id?: string
+  content?: string | ContentBlock[]
+  is_error?: boolean
+}
+
+export type ContentBlock =
+  | TextBlock
+  | ToolUseBlock
+  | ToolResultBlock
+  | { type: string; [key: string]: unknown }
 
 export interface TranscriptEntry {
   type: string
@@ -111,6 +122,32 @@ function toolCallLabel(block: { name?: string; input?: Record<string, unknown> }
   return name
 }
 
+const TOOL_RESULT_TRUNCATE = 400
+
+export function extractToolResultText(block: {
+  content?: string | ContentBlock[]
+  is_error?: boolean
+}): string {
+  const c = block.content
+  let text: string
+  if (typeof c === "string") {
+    text = c.trim()
+  } else if (Array.isArray(c)) {
+    text = c
+      .filter((b: any) => b?.type === "text" && b?.text)
+      .map((b: any) => String(b.text))
+      .join("\n")
+      .trim()
+  } else {
+    return ""
+  }
+  if (!text) return ""
+  const prefix = block.is_error ? "Error: " : ""
+  const truncated =
+    text.length > TOOL_RESULT_TRUNCATE ? `${text.slice(0, TOOL_RESULT_TRUNCATE)}…` : text
+  return `${prefix}${truncated}`
+}
+
 function summarizeToolCalls(content: unknown[]): string {
   const calls = content
     .filter((b: any) => b?.type === "tool_use" && b?.name)
@@ -143,6 +180,17 @@ export function extractPlainTurns(jsonlText: string): PlainTurn[] {
 
         const toolSummary = summarizeToolCalls(content)
         if (toolSummary) text = text ? `${text}\n${toolSummary}` : toolSummary
+
+        if (entry.type === "user") {
+          const resultTexts = content
+            .filter((b: any) => b?.type === "tool_result")
+            .map((b: any) => extractToolResultText(b))
+            .filter(Boolean)
+          if (resultTexts.length > 0) {
+            const resultSummary = resultTexts.map((t) => `[Result: ${t}]`).join("\n")
+            text = text ? `${text}\n${resultSummary}` : resultSummary
+          }
+        }
       } else {
         continue
       }

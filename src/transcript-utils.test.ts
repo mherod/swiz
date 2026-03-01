@@ -3,6 +3,7 @@ import {
   countToolCalls,
   extractPlainTurns,
   extractText,
+  extractToolResultText,
   formatTurnsAsContext,
   isHookFeedback,
   type PlainTurn,
@@ -389,6 +390,114 @@ describe("transcript-utils.ts", () => {
       const q = veryLongQuery.length > 60 ? `${veryLongQuery.slice(0, 57)}...` : veryLongQuery
       expect(q.length).toBe(60)
       expect(q.endsWith("...")).toBe(true)
+    })
+  })
+
+  describe("extractToolResultText", () => {
+    it("extracts string content from tool_result block", () => {
+      const result = extractToolResultText({ content: "file contents here", is_error: false })
+      expect(result).toBe("file contents here")
+    })
+
+    it("prefixes error results with 'Error: '", () => {
+      const result = extractToolResultText({ content: "command not found", is_error: true })
+      expect(result).toBe("Error: command not found")
+    })
+
+    it("extracts text from array content blocks", () => {
+      const result = extractToolResultText({
+        content: [{ type: "text", text: "array output" }],
+        is_error: false,
+      })
+      expect(result).toBe("array output")
+    })
+
+    it("truncates content longer than 400 chars", () => {
+      const long = "x".repeat(500)
+      const result = extractToolResultText({ content: long, is_error: false })
+      expect(result.length).toBeLessThan(510) // truncated + ellipsis
+      expect(result).toContain("…")
+    })
+
+    it("returns empty string for empty content", () => {
+      const result = extractToolResultText({ content: "", is_error: false })
+      expect(result).toBe("")
+    })
+
+    it("returns empty string for undefined content", () => {
+      const result = extractToolResultText({ content: undefined, is_error: false })
+      expect(result).toBe("")
+    })
+  })
+
+  describe("extractPlainTurns with tool_result entries", () => {
+    it("includes tool_result content in user turns", () => {
+      const jsonl = JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", tool_use_id: "id1", content: "ls output here", is_error: false },
+          ],
+        },
+      })
+      const turns = extractPlainTurns(jsonl)
+      expect(turns.length).toBe(1)
+      expect(turns[0]?.role).toBe("user")
+      expect(turns[0]?.text).toContain("ls output here")
+    })
+
+    it("prefixes error tool results with 'Error:'", () => {
+      const jsonl = JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", tool_use_id: "id1", content: "command failed", is_error: true },
+          ],
+        },
+      })
+      const turns = extractPlainTurns(jsonl)
+      expect(turns.length).toBe(1)
+      expect(turns[0]?.text).toContain("Error:")
+    })
+
+    it("wraps tool_result content in [Result: ...] marker", () => {
+      const jsonl = JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", tool_use_id: "id1", content: "output", is_error: false },
+          ],
+        },
+      })
+      const turns = extractPlainTurns(jsonl)
+      expect(turns[0]?.text).toContain("[Result:")
+    })
+
+    it("skips tool_result blocks with empty content", () => {
+      const jsonl = JSON.stringify({
+        type: "user",
+        message: {
+          content: [{ type: "tool_result", tool_use_id: "id1", content: "", is_error: false }],
+        },
+      })
+      const turns = extractPlainTurns(jsonl)
+      expect(turns.length).toBe(0)
+    })
+
+    it("includes multiple tool_result blocks from same entry", () => {
+      const jsonl = JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", tool_use_id: "id1", content: "result one", is_error: false },
+            { type: "tool_result", tool_use_id: "id2", content: "result two", is_error: false },
+          ],
+        },
+      })
+      const turns = extractPlainTurns(jsonl)
+      expect(turns.length).toBe(1)
+      expect(turns[0]?.text).toContain("result one")
+      expect(turns[0]?.text).toContain("result two")
     })
   })
 

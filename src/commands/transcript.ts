@@ -17,7 +17,18 @@ interface ToolUseBlock {
   input?: Record<string, unknown>
 }
 
-type ContentBlock = TextBlock | ToolUseBlock | { type: string; [key: string]: unknown }
+interface ToolResultBlock {
+  type: "tool_result"
+  tool_use_id?: string
+  content?: string | ContentBlock[]
+  is_error?: boolean
+}
+
+type ContentBlock =
+  | TextBlock
+  | ToolUseBlock
+  | ToolResultBlock
+  | { type: string; [key: string]: unknown }
 
 interface TranscriptEntry {
   type: string
@@ -114,6 +125,7 @@ const DIM = "\x1b[2m"
 const CYAN = "\x1b[36m"
 const YELLOW = "\x1b[33m"
 const GREEN = "\x1b[32m"
+const RED = "\x1b[31m"
 const RESET = "\x1b[0m"
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
@@ -202,6 +214,48 @@ function renderAssistantBlocks(entry: TranscriptEntry): boolean {
   return true
 }
 
+const TOOL_RESULT_MAX = 600
+
+function extractToolResultContent(block: ToolResultBlock): string {
+  const c = block.content
+  if (typeof c === "string") return c.trim()
+  if (Array.isArray(c)) {
+    return (c as ContentBlock[])
+      .filter((b): b is TextBlock => b.type === "text" && !!(b as TextBlock).text?.trim())
+      .map((b) => b.text!)
+      .join("\n")
+      .trim()
+  }
+  return ""
+}
+
+function renderToolResults(entry: TranscriptEntry): boolean {
+  const content = entry.message?.content
+  if (!Array.isArray(content)) return false
+
+  const results = content.filter((b): b is ToolResultBlock => b.type === "tool_result")
+  if (results.length === 0) return false
+
+  const cols = process.stdout.columns ?? 80
+  const wrapWidth = Math.min(cols - 6, 100)
+
+  for (const result of results) {
+    const text = extractToolResultContent(result)
+    if (!text) continue
+
+    const truncated =
+      text.length > TOOL_RESULT_MAX
+        ? `${text.slice(0, TOOL_RESULT_MAX)}\n  ${DIM}… (truncated)${RESET}`
+        : text
+
+    const indicator = result.is_error ? `${RED}✗${RESET}` : `${DIM}│${RESET}`
+    const wrapped = wordWrap(truncated, wrapWidth, "    ")
+    console.log(`  ${indicator} ${DIM}${wrapped}${RESET}`)
+  }
+
+  return true
+}
+
 // ─── Turn collection ─────────────────────────────────────────────────────────
 
 interface Turn {
@@ -244,7 +298,10 @@ function collectTurns(lines: string[]): Turn[] {
       )
       if (!hasVisible) continue
     } else {
-      if (!extractText(msg.content).trim()) continue
+      const content = msg.content
+      const hasToolResults =
+        Array.isArray(content) && (content as ContentBlock[]).some((b) => b.type === "tool_result")
+      if (!hasToolResults && !extractText(content).trim()) continue
     }
 
     turns.push({ entry, role: entry.type as "user" | "assistant" })
@@ -272,7 +329,14 @@ function renderTurns(turns: Turn[], sessionId: string): void {
     if (role === "assistant") {
       renderAssistantBlocks(entry)
     } else {
-      renderTurn("user", extractText(entry.message?.content), entry.timestamp)
+      const content = entry.message?.content
+      const hasToolResults =
+        Array.isArray(content) && (content as ContentBlock[]).some((b) => b.type === "tool_result")
+      if (hasToolResults) {
+        renderToolResults(entry)
+      } else {
+        renderTurn("user", extractText(content), entry.timestamp)
+      }
     }
   }
 
