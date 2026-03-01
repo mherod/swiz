@@ -20,6 +20,27 @@
 
 import { denyPreToolUse, GIT_PUSH_RE, isShellTool, type ToolHookInput } from "./hook-utils.ts"
 
+// ── Feature flag: disabled by default ────────────────────────────────────────
+// Enable with: swiz settings enable push-gate
+const HOME = process.env.HOME ?? ""
+if (HOME) {
+  try {
+    const settingsPath = `${HOME}/.swiz/settings.json`
+    const settingsFile = Bun.file(settingsPath)
+    if (await settingsFile.exists()) {
+      const settings = await settingsFile.json()
+      if (settings?.pushGate !== true) process.exit(0)
+    } else {
+      // No settings file → use default (disabled)
+      process.exit(0)
+    }
+  } catch {
+    process.exit(0)
+  }
+} else {
+  process.exit(0)
+}
+
 const input: ToolHookInput = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 

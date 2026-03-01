@@ -7,16 +7,19 @@ export interface SessionSwizSettings {
 
 export interface SwizSettings {
   autoContinue: boolean
+  pushGate: boolean
   sessions: Record<string, SessionSwizSettings>
 }
 
 export interface EffectiveSwizSettings {
   autoContinue: boolean
+  pushGate: boolean
   source: "global" | "session"
 }
 
 export const DEFAULT_SETTINGS: SwizSettings = {
   autoContinue: true,
+  pushGate: false,
   sessions: {},
 }
 
@@ -56,6 +59,7 @@ function normalizeSettings(value: unknown): SwizSettings {
   return {
     autoContinue:
       typeof obj.autoContinue === "boolean" ? obj.autoContinue : DEFAULT_SETTINGS.autoContinue,
+    pushGate: typeof obj.pushGate === "boolean" ? obj.pushGate : DEFAULT_SETTINGS.pushGate,
     sessions,
   }
 }
@@ -87,9 +91,13 @@ export function getEffectiveSwizSettings(
   sessionId?: string | null
 ): EffectiveSwizSettings {
   if (sessionId && settings.sessions[sessionId]) {
-    return { autoContinue: settings.sessions[sessionId]!.autoContinue, source: "session" }
+    return {
+      autoContinue: settings.sessions[sessionId]!.autoContinue,
+      pushGate: settings.pushGate,
+      source: "session",
+    }
   }
-  return { autoContinue: settings.autoContinue, source: "global" }
+  return { autoContinue: settings.autoContinue, pushGate: settings.pushGate, source: "global" }
 }
 
 export async function writeSwizSettings(

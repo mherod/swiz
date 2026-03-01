@@ -8,7 +8,7 @@ import {
 import { findSessions, projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
-type SettingKey = "autoContinue"
+type SettingKey = "autoContinue" | "pushGate"
 type Action = "show" | "enable" | "disable"
 
 interface ParsedSettingsArgs {
@@ -25,7 +25,7 @@ const PROJECTS_DIR = join(HOME, ".claude", "projects")
 function usage(): string {
   return (
     "Usage: swiz settings [show | enable <setting> | disable <setting>] [--session [id]] [--dir <path>]\n" +
-    "Supported settings: auto-continue"
+    "Supported settings: auto-continue, push-gate"
   )
 }
 
@@ -34,6 +34,9 @@ function parseSetting(raw: string | undefined): SettingKey {
   const value = raw.trim().toLowerCase()
   if (value === "auto-continue" || value === "autocontinue" || value === "auto_continue") {
     return "autoContinue"
+  }
+  if (value === "push-gate" || value === "pushgate" || value === "push_gate") {
+    return "pushGate"
   }
   throw new Error(`Unknown setting: ${raw}\n${usage()}`)
 }
@@ -102,6 +105,7 @@ async function resolveSessionId(query: string | null, targetDir: string): Promis
 
 function printSettings(
   autoContinue: boolean,
+  pushGate: boolean,
   path: string | null,
   fileExists: boolean,
   sessionId: string | null,
@@ -116,7 +120,8 @@ function printSettings(
   }
   if (sessionId) console.log(`  scope: session ${sessionId}`)
   const sourceLabel = source === "session" ? "session override" : "global/default"
-  console.log(`  auto-continue: ${autoContinue ? "enabled" : "disabled"} (${sourceLabel})\n`)
+  console.log(`  auto-continue: ${autoContinue ? "enabled" : "disabled"} (${sourceLabel})`)
+  console.log(`  push-gate:     ${pushGate ? "enabled" : "disabled"} (global)\n`)
 }
 
 async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
@@ -127,7 +132,14 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
   const effective = getEffectiveSwizSettings(settings, sessionId)
   const path = getSwizSettingsPath()
   const fileExists = path ? await Bun.file(path).exists() : false
-  printSettings(effective.autoContinue, path, fileExists, sessionId, effective.source)
+  printSettings(
+    effective.autoContinue,
+    effective.pushGate,
+    path,
+    fileExists,
+    sessionId,
+    effective.source
+  )
 }
 
 async function setSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise<void> {

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -56,6 +56,7 @@ async function runHook(opts: {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    env: { ...process.env, HOME: fakeHome },
   })
   proc.stdin.write(payload)
   proc.stdin.end()
@@ -75,9 +76,16 @@ async function runHook(opts: {
 // ─── Temp dir lifecycle ──────────────────────────────────────────────────────
 
 let tmpDir: string
+let fakeHome: string // HOME with pushGate:true settings file — enables the hook in tests
 
 beforeAll(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "no-push-instructed-test-"))
+  fakeHome = join(tmpDir, "home")
+  await mkdir(join(fakeHome, ".swiz"), { recursive: true })
+  await Bun.write(
+    join(fakeHome, ".swiz", "settings.json"),
+    JSON.stringify({ pushGate: true }, null, 2)
+  )
 })
 
 afterAll(async () => {
