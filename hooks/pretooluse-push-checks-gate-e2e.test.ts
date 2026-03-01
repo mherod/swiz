@@ -395,3 +395,141 @@ describe("E2E: push-checks-gate transcript resilience", () => {
     expect(result.blocked).toBe(true)
   })
 })
+
+describe("E2E: push-checks-gate escaped/multiline/truncated JSON payload hardening", () => {
+  /** Build a single assistant Bash tool_use JSONL line. */
+  function bashEntry(command: string): string {
+    return JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", name: "Bash", input: { command } }],
+      },
+    })
+  }
+
+  test("commands with escaped quotes are parsed correctly", async () => {
+    const dir = await makeTempDir("-escaped")
+    const transcriptPath = join(dir, "transcript.jsonl")
+
+    // Commands that contain escaped quotes — JSON.stringify handles this safely
+    const lines = [
+      bashEntry('git branch --show-current  # "check current branch"'),
+      bashEntry("gh pr list --state open --head main  # check PR's"),
+    ]
+    await writeFile(transcriptPath, lines.join("\n"))
+
+    const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
+    expect(result.blocked).toBe(false)
+  })
+
+  test("backslash-continuation commands do NOT satisfy the gate (known limitation)", async () => {
+    const dir = await makeTempDir("-backslash")
+    const transcriptPath = join(dir, "transcript.jsonl")
+
+    // Shell backslash-continuation splits `git branch \<newline>  --show-current`
+    // into `branch ` + `\` + newline + spaces + `--show-current`.
+    // The `\` character is not `\s`, so the regex does not match.
+    // This is an accepted limitation: the push skill always instructs the
+    // plain single-line form `git branch --show-current`.
+    const lines = [
+      bashEntry("git branch \\\n  --show-current"),
+      bashEntry("gh pr list --state open --head main"),
+    ]
+    await writeFile(transcriptPath, lines.join("\n"))
+
+    const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("git branch --show-current")
+  })
+
+  test("check commands embedded in a semicolon-chained pipeline are recognised", async () => {
+    const dir = await makeTempDir("-semicolon")
+    const transcriptPath = join(dir, "transcript.jsonl")
+
+    // Real-world: checks bundled with other commands in one Bash call
+    const lines = [
+      bashEntry("git log origin/main..HEAD --oneline && git branch --show-current"),
+      bashEntry("git remote get-url origin; gh pr list --state open --head main"),
+    ]
+    await writeFile(transcriptPath, lines.join("\n"))
+
+    const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
+    expect(result.blocked).toBe(false)
+  })
+
+  test("truncated JSON at end of file does not crash the hook", async () => {
+    const dir = await makeTempDir("-truncated")
+    const transcriptPath = join(dir, "transcript.jsonl")
+
+    // Valid entries followed by a truncated (incomplete) JSON line
+    const lines = [
+      bashEntry("git branch --show-current"),
+      bashEntry("gh pr list --state open --head main"),
+      '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"git pu', // truncated
+    ]
+    await writeFile(transcriptPath, lines.join("\n"))
+
+    // Should allow — valid checks found; truncated line is silently skipped
+    const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
+    expect(result.blocked).toBe(false)
+  })
+
+  test("assistant message with multiple tool_use blocks in one content array", async () => {
+    const dir = await makeTempDir("-multi-block")
+    const transcriptPath = join(dir, "transcript.jsonl")
+
+    // Claude sometimes emits multiple tool calls in a single assistant message
+    const entry = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "tool_use", name: "Bash", input: { command: "git branch --show-current" } },
+          { type: "text", text: "Let me also check for open PRs." },
+          {
+            type: "tool_use",
+            name: "Bash",
+            input: { command: "gh pr list --state open --head main" },
+          },
+        ],
+      },
+    })
+    await writeFile(transcriptPath, entry + "\n")
+
+    const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
+    expect(result.blocked).toBe(false)
+  })
+
+  test("unicode and special characters in commands do not confuse the parser", async () => {
+    const dir = await makeTempDir("-unicode")
+    const transcriptPath = join(dir, "transcript.jsonl")
+
+    const lines = [
+      // Surrounding noise with unicode, but the checks are present
+      bashEntry("echo '🚀 deploying…'; git branch --show-current"),
+      bashEntry("gh pr list --state open --head main  # ✅"),
+    ]
+    await writeFile(transcriptPath, lines.join("\n"))
+
+    const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
+    expect(result.blocked).toBe(false)
+  })
+
+  test("--show-current-upstream does NOT satisfy the branch gate", async () => {
+    const dir = await makeTempDir("-substring")
+    const transcriptPath = join(dir, "transcript.jsonl")
+
+    // 'git branch --show-current-upstream' contains '--show-current' as a prefix.
+    // \b alone would match here because '-' is \W, creating a false positive.
+    // The (?!\S) lookahead in BRANCH_CHECK_RE prevents this: '--show-current'
+    // must be followed by whitespace or end-of-string, not '-upstream'.
+    const lines = [
+      bashEntry("git branch --show-current-upstream 2>/dev/null || git branch"),
+      bashEntry("gh pr list --state open --head main"),
+    ]
+    await writeFile(transcriptPath, lines.join("\n"))
+
+    const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("git branch --show-current")
+  })
+})
