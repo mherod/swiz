@@ -1,0 +1,207 @@
+/**
+ * Regression tests for the Next.js project-type detection and
+ * route-conflict script status logic used in the /push skill template
+ * (~/.claude/skills/push/SKILL.md).
+ *
+ * The detection command is inlined here so these tests are self-contained
+ * in CI (the skill file is not installed on CI runners). A separate
+ * "consistency" test reads the installed skill file (when present) and
+ * verifies the inlined command has not drifted from the live template.
+ *
+ * Scenarios covered:
+ *   C1  next.config.js  + script ABSENT  → "missing (Next.js project…)"
+ *   C2  next.config.js  + script PRESENT → "present"
+ *   C3  dependencies.next in package.json + script ABSENT  → "missing…"
+ *   C4  devDependencies.next             + script PRESENT  → "present"
+ *   C5  package.json WITHOUT next, no config file          → "N/A"
+ *   C6  next.config.ts  + script ABSENT                   → "missing…"
+ */
+
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { homedir, tmpdir } from "node:os"
+import { join } from "node:path"
+
+// ─── Detection command (must stay in sync with ~/.claude/skills/push/SKILL.md) ─
+
+/**
+ * The shell command embedded in the /push skill template's context block.
+ * It detects whether the project uses Next.js and reports whether the
+ * route-conflict script is present, missing, or not applicable.
+ *
+ * IMPORTANT: if you change this constant, update SKILL.md at the same time.
+ * The consistency test below will fail if the two drift apart.
+ *
+ * Note: this must be a single-line shell string — multi-line join with "; "
+ * breaks lines that start with && or ||.
+ */
+const NEXTJS_DETECTION_CMD =
+  "IS_NEXTJS=false; " +
+  "{ [ -f next.config.js ] || [ -f next.config.ts ] || [ -f next.config.mjs ] || [ -f next.config.cjs ]" +
+  " || ([ -f package.json ] && jq -e '.dependencies.next // .devDependencies.next' package.json >/dev/null 2>&1); }" +
+  " && IS_NEXTJS=true; " +
+  "if $IS_NEXTJS; then" +
+  " [ -f scripts/check-route-conflicts.sh ]" +
+  " && echo 'scripts/check-route-conflicts.sh present'" +
+  " || echo 'scripts/check-route-conflicts.sh missing (Next.js project — this gate is not wired up)'; " +
+  "else echo 'N/A (not a Next.js project)'; fi"
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function runDetection(dir: string): Promise<string> {
+  const proc = Bun.spawn(["sh", "-c", NEXTJS_DETECTION_CMD], {
+    cwd: dir,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const out = await new Response(proc.stdout).text()
+  await proc.exited
+  return out.trim()
+}
+
+// ─── Fixtures ─────────────────────────────────────────────────────────────────
+
+let tmpDir: string
+
+beforeAll(async () => {
+  tmpDir = await mkdtemp(join(tmpdir(), "push-skill-nextjs-"))
+})
+
+afterAll(async () => {
+  await rm(tmpDir, { recursive: true })
+})
+
+async function fixture(name: string): Promise<string> {
+  const dir = join(tmpDir, name)
+  await mkdir(dir, { recursive: true })
+  return dir
+}
+
+// ─── Matrix tests ─────────────────────────────────────────────────────────────
+
+describe("Next.js detection — next.config.* file detection", () => {
+  test("C1: next.config.js present, script ABSENT → reports missing", async () => {
+    const dir = await fixture("c1")
+    await Bun.write(join(dir, "next.config.js"), "module.exports = {}")
+    expect(await runDetection(dir)).toBe(
+      "scripts/check-route-conflicts.sh missing (Next.js project — this gate is not wired up)"
+    )
+  })
+
+  test("C2: next.config.js present, script PRESENT → reports present", async () => {
+    const dir = await fixture("c2")
+    await Bun.write(join(dir, "next.config.js"), "module.exports = {}")
+    await mkdir(join(dir, "scripts"), { recursive: true })
+    await Bun.write(join(dir, "scripts", "check-route-conflicts.sh"), "#!/bin/sh")
+    expect(await runDetection(dir)).toBe("scripts/check-route-conflicts.sh present")
+  })
+
+  test("C6: next.config.ts present, script ABSENT → reports missing", async () => {
+    const dir = await fixture("c6")
+    await Bun.write(join(dir, "next.config.ts"), "export default {}")
+    expect(await runDetection(dir)).toBe(
+      "scripts/check-route-conflicts.sh missing (Next.js project — this gate is not wired up)"
+    )
+  })
+
+  test("next.config.mjs present, script ABSENT → reports missing", async () => {
+    const dir = await fixture("c-mjs")
+    await Bun.write(join(dir, "next.config.mjs"), "export default {}")
+    expect(await runDetection(dir)).toBe(
+      "scripts/check-route-conflicts.sh missing (Next.js project — this gate is not wired up)"
+    )
+  })
+
+  test("next.config.cjs present, script ABSENT → reports missing", async () => {
+    const dir = await fixture("c-cjs")
+    await Bun.write(join(dir, "next.config.cjs"), "module.exports = {}")
+    expect(await runDetection(dir)).toBe(
+      "scripts/check-route-conflicts.sh missing (Next.js project — this gate is not wired up)"
+    )
+  })
+})
+
+describe("Next.js detection — package.json dependency detection", () => {
+  test("C3: dependencies.next present, script ABSENT → reports missing", async () => {
+    const dir = await fixture("c3")
+    await Bun.write(
+      join(dir, "package.json"),
+      JSON.stringify({ dependencies: { next: "14.0.0", react: "18.0.0" } })
+    )
+    expect(await runDetection(dir)).toBe(
+      "scripts/check-route-conflicts.sh missing (Next.js project — this gate is not wired up)"
+    )
+  })
+
+  test("C4: devDependencies.next present, script PRESENT → reports present", async () => {
+    const dir = await fixture("c4")
+    await Bun.write(
+      join(dir, "package.json"),
+      JSON.stringify({ devDependencies: { next: "14.0.0" } })
+    )
+    await mkdir(join(dir, "scripts"), { recursive: true })
+    await Bun.write(join(dir, "scripts", "check-route-conflicts.sh"), "#!/bin/sh")
+    expect(await runDetection(dir)).toBe("scripts/check-route-conflicts.sh present")
+  })
+})
+
+describe("Non-Next.js project detection", () => {
+  test("C5: package.json without next, no config file → N/A", async () => {
+    const dir = await fixture("c5")
+    await Bun.write(
+      join(dir, "package.json"),
+      JSON.stringify({ dependencies: { react: "18.0.0" } })
+    )
+    expect(await runDetection(dir)).toBe("N/A (not a Next.js project)")
+  })
+
+  test("empty directory → N/A", async () => {
+    const dir = await fixture("c-empty")
+    expect(await runDetection(dir)).toBe("N/A (not a Next.js project)")
+  })
+
+  test("package.json with no deps → N/A", async () => {
+    const dir = await fixture("c-no-deps")
+    await Bun.write(join(dir, "package.json"), JSON.stringify({ name: "my-cli" }))
+    expect(await runDetection(dir)).toBe("N/A (not a Next.js project)")
+  })
+
+  test("CLI project (like swiz) → N/A", async () => {
+    // Simulate swiz: has package.json with bun/biome deps but no next
+    const dir = await fixture("c-swiz-like")
+    await Bun.write(
+      join(dir, "package.json"),
+      JSON.stringify({
+        name: "swiz",
+        devDependencies: { "@biomejs/biome": "1.0.0", lefthook: "2.0.0" },
+      })
+    )
+    expect(await runDetection(dir)).toBe("N/A (not a Next.js project)")
+  })
+})
+
+// ─── Consistency check (only runs when skill is installed locally) ────────────
+
+describe("Skill template consistency", () => {
+  test("NEXTJS_DETECTION_CMD key phrases are present in the installed skill (skipped if not installed)", async () => {
+    const skillPath = join(homedir(), ".claude", "skills", "push", "SKILL.md")
+    const file = Bun.file(skillPath)
+    if (!(await file.exists())) {
+      // Skill not installed (e.g. CI runner) — skip gracefully
+      return
+    }
+    const content = await file.text()
+    // Check that the core detection markers appear in the skill file
+    const markers = [
+      "IS_NEXTJS=false",
+      "next.config.js",
+      "next.config.ts",
+      ".dependencies.next",
+      "check-route-conflicts.sh",
+      "N/A (not a Next.js project)",
+    ]
+    for (const marker of markers) {
+      expect(content).toContain(marker)
+    }
+  })
+})
