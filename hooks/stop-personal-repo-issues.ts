@@ -7,7 +7,8 @@
 
 import {
   blockStop,
-  gh,
+  extractOwnerFromUrl,
+  getCurrentGitHubUser,
   ghJson,
   git,
   hasGhCli,
@@ -16,23 +17,6 @@ import {
   type StopHookInput,
   skillAdvice,
 } from "./hook-utils.ts"
-
-function extractOwnerFromUrl(remoteUrl: string): string | null {
-  // SSH: git@github.com:owner/repo.git
-  // HTTPS: https://github.com/owner/repo.git
-  const sshMatch = remoteUrl.match(/git@github\.com:([^/]+)\//)
-  if (sshMatch?.[1]) return sshMatch[1]
-
-  const httpsMatch = remoteUrl.match(/github\.com\/([^/]+)\//)
-  if (httpsMatch?.[1]) return httpsMatch[1]
-
-  return null
-}
-
-async function getCurrentGitHubUser(): Promise<string | null> {
-  const login = await gh(["api", "user", "--jq", ".login"], process.cwd())
-  return login || null
-}
 
 /** Labels that indicate an issue is not actionable right now. */
 const SKIP_LABELS = new Set([
@@ -184,7 +168,7 @@ async function main(): Promise<void> {
     const owner = extractOwnerFromUrl(remoteUrl)
     if (!owner) return
 
-    const currentUser = await getCurrentGitHubUser()
+    const currentUser = await getCurrentGitHubUser(cwd)
     if (!currentUser) return
 
     const isPersonalRepo = owner === currentUser

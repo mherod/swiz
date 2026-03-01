@@ -4,7 +4,7 @@
 import {
   blockStop,
   getOpenPrForBranch,
-  gh,
+  getRepoNameWithOwner,
   ghJson,
   git,
   hasGhCli,
@@ -33,8 +33,7 @@ async function main(): Promise<void> {
   )
   if (!pr) return
 
-  // Get repo name
-  const repo = await gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], cwd)
+  const repo = await getRepoNameWithOwner(cwd)
   if (!repo) return
 
   type Review = {

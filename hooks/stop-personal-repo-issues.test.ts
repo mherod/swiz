@@ -1,18 +1,5 @@
 import { describe, expect, test } from "bun:test"
-
-// Mirror the pure functions from stop-personal-repo-issues.ts.
-// These are not exported so we duplicate the logic here and test it directly,
-// following the same pattern as stop-todo-tracker.test.ts.
-
-function extractOwnerFromUrl(remoteUrl: string): string | null {
-  const sshMatch = remoteUrl.match(/git@github\.com:([^/]+)\//)
-  if (sshMatch?.[1]) return sshMatch[1]
-
-  const httpsMatch = remoteUrl.match(/github\.com\/([^/]+)\//)
-  if (httpsMatch?.[1]) return httpsMatch[1]
-
-  return null
-}
+import { extractOwnerFromUrl } from "./hook-utils.ts"
 
 const SKIP_LABELS = new Set([
   "blocked",

@@ -553,6 +553,44 @@ export const BRANCH_CHECK_RE = /\bgit\s+branch\s+--show-current(?!\S)/
 /** Matches `gh pr list --head` (open-PR check). */
 export const PR_CHECK_RE = /\bgh\s+pr\s+list\b.*--head\b/
 
+// ─── GitHub identity ────────────────────────────────────────────────────
+
+/**
+ * Extract the repository owner login from a git remote URL.
+ * Handles both SSH (`git@github.com:owner/repo.git`) and
+ * HTTPS (`https://github.com/owner/repo.git`) formats.
+ * Returns `null` for non-GitHub remotes or unrecognised formats.
+ */
+export function extractOwnerFromUrl(remoteUrl: string): string | null {
+  const sshMatch = remoteUrl.match(/git@github\.com:([^/]+)\//)
+  if (sshMatch?.[1]) return sshMatch[1]
+
+  const httpsMatch = remoteUrl.match(/github\.com\/([^/]+)\//)
+  if (httpsMatch?.[1]) return httpsMatch[1]
+
+  return null
+}
+
+/**
+ * Return the login of the currently-authenticated GitHub user via
+ * `gh api user --jq .login`. Returns `null` when the `gh` CLI is
+ * unavailable or unauthenticated.
+ */
+export async function getCurrentGitHubUser(cwd: string): Promise<string | null> {
+  const login = await gh(["api", "user", "--jq", ".login"], cwd)
+  return login || null
+}
+
+/**
+ * Return the `owner/repo` slug for the GitHub remote at `cwd` via
+ * `gh repo view --json nameWithOwner`. Returns `null` when the `gh`
+ * CLI is unavailable or the directory is not a GitHub-backed repo.
+ */
+export async function getRepoNameWithOwner(cwd: string): Promise<string | null> {
+  const name = await gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], cwd)
+  return name || null
+}
+
 // ─── Common input types ─────────────────────────────────────────────────
 
 export interface StopHookInput {
