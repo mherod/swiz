@@ -62,7 +62,9 @@ try {
         if (block?.type !== "text") continue
         const txt: string = block?.text ?? ""
 
-        if (NO_PUSH_RE.test(txt)) {
+        // Only treat user-role text as a potential "do not push" directive.
+        // Assistant text (the agent's own reasoning) must never trigger a block.
+        if (role === "user" && NO_PUSH_RE.test(txt)) {
           // Found a blocking instruction — record it and reset approval flag
           blockingLine =
             txt
@@ -71,7 +73,7 @@ try {
               ?.trim() ?? txt.slice(0, 120)
           approvedAfter = false
         } else if (blockingLine && PUSH_APPROVAL_PATTERNS.some((re) => re.test(txt))) {
-          // Approval appeared after the blocking instruction
+          // Approval appeared after the blocking instruction (any role)
           approvedAfter = true
         }
       }
