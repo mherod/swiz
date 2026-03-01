@@ -249,6 +249,69 @@ describe("pretooluse-no-push-when-instructed", () => {
     })
   })
 
+  describe("no approval — assistant-generated approval phrases are ignored", () => {
+    // Regression suite: every approval pattern must be ignored when it appears
+    // in assistant-role text. The agent must not self-approve a push.
+    const BLOCK = "DO NOT push to remote without approval"
+
+    test("assistant 'go ahead and push' does NOT lift block", async () => {
+      // Risky: agent reasoning often paraphrases user intent with this phrase
+      const transcript = makeTranscript(
+        userText(BLOCK),
+        assistantText("I'll go ahead and push once CI passes")
+      )
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+
+    test("assistant 'push now' does NOT lift block", async () => {
+      // Risky: agent narrating its own actions ("let me push now")
+      const transcript = makeTranscript(
+        userText(BLOCK),
+        assistantText("The tests pass so I need to push now")
+      )
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+
+    test("assistant 'please push' does NOT lift block", async () => {
+      // Risky: agent instructing itself or summarising user intent
+      const transcript = makeTranscript(
+        userText(BLOCK),
+        assistantText("please push the changes to origin")
+      )
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+
+    test("assistant '/push' at start of a line does NOT lift block", async () => {
+      // Risky: agent formatting a skill invocation suggestion on its own line
+      const transcript = makeTranscript(
+        userText(BLOCK),
+        assistantText("Use the skill:\n/push --dry-run")
+      )
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+
+    test("assistant quoting block reason with 'go ahead and push' does NOT lift block", async () => {
+      // Risky: agent explains the hook message, which contains the phrase
+      const transcript = makeTranscript(
+        userText(BLOCK),
+        assistantText(
+          "The hook says: 'To push, you must receive explicit approval (e.g. \"go ahead and push\").'"
+        )
+      )
+      expect(
+        (await runHook({ command: "git push origin main", transcriptContent: transcript })).blocked
+      ).toBe(true)
+    })
+  })
+
   describe("approval after block — push is allowed", () => {
     test("/push skill header after block does NOT lift restriction (skill content ≠ user authorisation)", async () => {
       // Regression: "Get committed changes pushed to remote" is the /push skill header.
@@ -329,8 +392,9 @@ describe("pretooluse-no-push-when-instructed", () => {
       expect(result.blocked).toBe(false)
     })
 
-    test("approval from assistant (not just user) lifts restriction", async () => {
-      // approval check doesn't restrict to user role — any role counts
+    test("approval from assistant does NOT lift restriction", async () => {
+      // Approval is restricted to user-role only — agent reasoning must never
+      // self-approve a push it was instructed not to do.
       const transcript = makeTranscript(
         userText("DO NOT push to remote without approval"),
         assistantText("go ahead and push")
@@ -339,7 +403,7 @@ describe("pretooluse-no-push-when-instructed", () => {
         command: "git push origin main",
         transcriptContent: transcript,
       })
-      expect(result.blocked).toBe(false)
+      expect(result.blocked).toBe(true)
     })
   })
 

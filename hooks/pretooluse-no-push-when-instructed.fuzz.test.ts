@@ -13,7 +13,8 @@
  *   P3 NEUTRAL_NO_CHANGE     — text not matching any pattern never changes state
  *   P4 FINAL_STATE_WINS      — only the last block/approve in a sequence matters
  *   P5 ROLE_INVARIANT        — blocking never fires from assistant-role text
- *   P6 APPROVAL_ANY_ROLE     — approval fires from both user and assistant role
+ *   P6 APPROVAL_USER_ONLY   — approval fires only from user-role, never assistant
+ *   P7 ASSISTANT_NEVER_SELF_APPROVES — approval phrases in assistant text are ignored
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
@@ -296,11 +297,12 @@ describe("P5 ROLE_INVARIANT — blocking phrases in assistant text never block",
   }
 })
 
-// ─── P6: APPROVAL_ANY_ROLE ───────────────────────────────────────────────────
-// Approval phrases lift the block regardless of whether they appear in
-// user-role or assistant-role entries.
+// ─── P6: APPROVAL_USER_ONLY ──────────────────────────────────────────────────
+// Approval phrases lift the block only when they appear in user-role entries.
+// Both blocking and approval are restricted to user-role so the agent cannot
+// self-approve a push through its own reasoning text.
 
-describe("P6 APPROVAL_ANY_ROLE — approval phrases lift block from both user and assistant roles", () => {
+describe("P6 APPROVAL_USER_ONLY — approval phrases lift block only from user role", () => {
   const BLOCK_ENTRY = entry("user", "DO NOT push to remote without approval")
 
   const REPRESENTATIVE_APPROVALS = ["go ahead and push", "push now", "please push"]
@@ -310,10 +312,22 @@ describe("P6 APPROVAL_ANY_ROLE — approval phrases lift block from both user an
       const t = transcript(BLOCK_ENTRY, entry("user", approvalText))
       expect((await runHook(t)).blocked).toBe(false)
     })
+  }
+})
 
-    test(`assistant approval lifts: ${JSON.stringify(approvalText)}`, async () => {
+// ─── P7: ASSISTANT_NEVER_SELF_APPROVES ───────────────────────────────────────
+// Approval phrases in assistant-role entries must NEVER lift a block.
+// Prevents the agent's own reasoning from self-approving a push.
+
+describe("P7 ASSISTANT_NEVER_SELF_APPROVES — approval phrases in assistant text never lift block", () => {
+  const BLOCK_ENTRY = entry("user", "DO NOT push to remote without approval")
+
+  const REPRESENTATIVE_APPROVALS = ["go ahead and push", "push now", "please push", "/push"]
+
+  for (const approvalText of REPRESENTATIVE_APPROVALS) {
+    test(`assistant approval ignored: ${JSON.stringify(approvalText)}`, async () => {
       const t = transcript(BLOCK_ENTRY, entry("assistant", approvalText))
-      expect((await runHook(t)).blocked).toBe(false)
+      expect((await runHook(t)).blocked).toBe(true)
     })
   }
 })

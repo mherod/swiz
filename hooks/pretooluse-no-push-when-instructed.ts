@@ -8,13 +8,15 @@
 // unless approval appears AFTER the blocking instruction in the transcript.
 //
 // Approval signals (must appear AFTER the "do not push" instruction):
-//   - An explicit user message ("go ahead and push", "/push", "push now", etc.)
+//   - An explicit USER message ("go ahead and push", "/push", "push now", etc.)
 //
-// NOTE: Stop-hook action plans ("Push N commit(s) to") are NOT approval signals.
-// They are machine-generated system messages, not deliberate human authorisation.
-// Skill content (e.g. the /push skill header) is also NOT an approval signal —
-// skills load automatically when the agent invokes them. Only deliberate human
-// phrases are accepted as authorisation to push.
+// Both blocking and approval are restricted to user-role entries. This prevents
+// the agent's own reasoning from self-approving a push it was told not to do.
+//
+// NOT accepted as approval (all machine-generated):
+//   - Stop-hook action plans ("Push N commit(s) to") — system messages
+//   - Skill content (e.g. /push skill header) — auto-loaded by the agent
+//   - Assistant reasoning ("I'll go ahead and push") — agent-generated text
 
 import { denyPreToolUse, GIT_PUSH_RE, isShellTool, type ToolHookInput } from "./hook-utils.ts"
 
@@ -81,8 +83,13 @@ try {
               .find((l) => NO_PUSH_RE.test(l))
               ?.trim() ?? txt.slice(0, 120)
           approvedAfter = false
-        } else if (blockingLine && PUSH_APPROVAL_PATTERNS.some((re) => re.test(txt))) {
-          // Approval appeared after the blocking instruction (any role)
+        } else if (
+          role === "user" &&
+          blockingLine &&
+          PUSH_APPROVAL_PATTERNS.some((re) => re.test(txt))
+        ) {
+          // Approval appeared after the blocking instruction — user role only.
+          // Assistant text (agent reasoning) must never self-approve a push.
           approvedAfter = true
         }
       }
