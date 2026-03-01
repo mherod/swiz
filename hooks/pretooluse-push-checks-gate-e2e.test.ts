@@ -261,3 +261,137 @@ describe("E2E: push-checks-gate progressive session simulation", () => {
     }
   })
 })
+
+describe("E2E: push-checks-gate transcript resilience", () => {
+  test("malformed JSONL lines are skipped without crashing", async () => {
+    const dir = await makeTempDir("-malformed")
+    const transcriptPath = join(dir, "transcript.jsonl")
+
+    // Mix valid entries with malformed lines
+    const lines = [
+      "not json at all",
+      "{broken json",
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", name: "Bash", input: { command: "git branch --show-current" } },
+          ],
+        },
+      }),
+      "",
+      "   ",
+      "{]invalid[}",
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "Bash",
+              input: { command: "gh pr list --state open --head main" },
+            },
+          ],
+        },
+      }),
+    ]
+    await writeFile(transcriptPath, lines.join("\n"))
+
+    // Valid checks are present despite surrounding garbage — should allow
+    const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
+    expect(result.blocked).toBe(false)
+  })
+
+  test("checks in user messages (not tool_use) do NOT satisfy the gate", async () => {
+    const dir = await makeTempDir("-user-msgs")
+    const transcriptPath = join(dir, "transcript.jsonl")
+
+    // The check commands appear as user message text, not as Bash tool calls
+    const lines = [
+      JSON.stringify({ type: "user", message: { content: "git branch --show-current" } }),
+      JSON.stringify({ type: "user", message: { content: "gh pr list --state open --head main" } }),
+    ]
+    await writeFile(transcriptPath, lines.join("\n"))
+
+    const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
+    expect(result.blocked).toBe(true)
+  })
+
+  test("checks in tool_result entries (not tool_use) do NOT satisfy the gate", async () => {
+    const dir = await makeTempDir("-tool-result")
+    const transcriptPath = join(dir, "transcript.jsonl")
+
+    // Simulates the result content of a prior Bash call containing the commands
+    const lines = [
+      JSON.stringify({
+        type: "tool",
+        content: [
+          {
+            type: "tool_result",
+            content: "git branch --show-current\nmain\ngh pr list --state open --head main",
+          },
+        ],
+      }),
+    ]
+    await writeFile(transcriptPath, lines.join("\n"))
+
+    const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
+    expect(result.blocked).toBe(true)
+  })
+
+  test("checks buried early in a large transcript are still found", async () => {
+    const dir = await makeTempDir("-large")
+    const transcriptPath = join(dir, "transcript.jsonl")
+    const t = new SessionTranscript(transcriptPath)
+
+    // Both checks appear early
+    await t.appendBashCommand("git branch --show-current")
+    await t.appendBashCommand("gh pr list --state open --head main")
+
+    // Followed by many unrelated commands
+    for (let i = 0; i < 50; i++) {
+      await t.appendBashCommand(`bun test hooks/hook-${i}.test.ts`)
+    }
+
+    const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
+    expect(result.blocked).toBe(false)
+  })
+
+  test("non-Bash tool calls with matching text in input do NOT satisfy the gate", async () => {
+    const dir = await makeTempDir("-non-bash")
+    const transcriptPath = join(dir, "transcript.jsonl")
+
+    // Read/Edit tools whose input happens to contain the check strings
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "Read",
+              input: { file_path: "/tmp/notes.md", command: "git branch --show-current" },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "Edit",
+              input: { old_string: "gh pr list --state open --head main" },
+            },
+          ],
+        },
+      }),
+    ]
+    await writeFile(transcriptPath, lines.join("\n"))
+
+    // Non-Bash tools must not satisfy the gate even if their input contains the strings
+    const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
+    expect(result.blocked).toBe(true)
+  })
+})
