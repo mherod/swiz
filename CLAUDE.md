@@ -118,6 +118,8 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DO** run `git diff` (or `git diff --staged` after `git add`) to review the consolidated result before committing, especially after multiple edits to the same file. Piecemeal edits each look correct in isolation but can produce incoherent or contradictory content when combined. The diff review is the final sanity check — skip it and you commit blindly.
 
+**DO** check for conflicts with existing nearby guidance before adding new rules to CLAUDE.md. Read the surrounding paragraphs and search for related DO/DON'T blocks before writing. Adding a rule that contradicts an existing one causes silent policy drift — both rules will be followed inconsistently.
+
 ## Standard Work Sequence
 
 Follow this order for every unit of work. Deviating from it causes hook blocks.
@@ -171,7 +173,7 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
 
 **DO** verify CI after every push with `gh run view --json conclusion,status,jobs` and confirm `conclusion === "success"` before announcing completion. `gh run watch` output alone is not sufficient — always follow up with the explicit JSON fetch.
 
-**DON'T** call TaskUpdate or TaskList during or after the push+CI verification sequence. Mark tasks completed *before* committing so the push+CI loop is purely mechanical: push → watch → `gh run view --json` → announce. Any TaskUpdate call after `git push` is a sign the task ordering is wrong — fix it by completing tasks earlier.
+**DON'T** call TaskUpdate or TaskList during or after the push+CI verification sequence. Mark tasks completed *after commit but before push* so the push+CI loop is purely mechanical: push → watch → `gh run view --json` → announce. Any TaskUpdate call after `git push` is a sign the task ordering is wrong — fix it by completing tasks at step 4 of the Standard Work Sequence.
 
 **DON'T** skip `git log origin/main..HEAD --oneline` before pushing — it prevents accidentally pushing incomplete or unintended commits.
 
