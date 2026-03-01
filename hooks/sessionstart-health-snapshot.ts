@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
-  gh,
+  ghJson,
   git,
   hasGhCli,
   isGitHubRemote,
@@ -90,25 +90,26 @@ async function main(): Promise<void> {
 
   // Open PRs (fast, limit output)
   if (hasGhCli()) {
-    const prsRaw = await gh(
+    const prs = await ghJson<Array<{ reviewDecision?: string }>>(
       ["pr", "list", "--state", "open", "--limit", "5", "--json", "number,title,reviewDecision"],
       cwd
     )
-    if (prsRaw) {
-      try {
-        const prs = JSON.parse(prsRaw) as Array<{ reviewDecision?: string }>
-        if (prs.length > 0) {
-          const changesReq = prs.filter((p) => p.reviewDecision === "CHANGES_REQUESTED").length
-          let prInfo = `PRs: ${prs.length} open`
-          if (changesReq > 0) prInfo += `, ${changesReq} need changes`
-          parts.push(`${prInfo}.`)
-        }
-      } catch {}
+    if (prs?.length) {
+      const changesReq = prs.filter((p) => p.reviewDecision === "CHANGES_REQUESTED").length
+      let prInfo = `PRs: ${prs.length} open`
+      if (changesReq > 0) prInfo += `, ${changesReq} need changes`
+      parts.push(`${prInfo}.`)
     }
 
     // Latest CI on current branch
     if (branch) {
-      const runRaw = await gh(
+      const runs = await ghJson<
+        Array<{
+          status: string
+          conclusion: string
+          workflowName: string
+        }>
+      >(
         [
           "run",
           "list",
@@ -121,22 +122,13 @@ async function main(): Promise<void> {
         ],
         cwd
       )
-      if (runRaw) {
-        try {
-          const runs = JSON.parse(runRaw) as Array<{
-            status: string
-            conclusion: string
-            workflowName: string
-          }>
-          const run = runs[0]
-          if (run) {
-            if (run.status === "completed") {
-              parts.push(`CI (${run.workflowName}): ${run.conclusion}.`)
-            } else {
-              parts.push(`CI (${run.workflowName}): ${run.status}.`)
-            }
-          }
-        } catch {}
+      const run = runs?.[0]
+      if (run) {
+        if (run.status === "completed") {
+          parts.push(`CI (${run.workflowName}): ${run.conclusion}.`)
+        } else {
+          parts.push(`CI (${run.workflowName}): ${run.status}.`)
+        }
       }
     }
   }

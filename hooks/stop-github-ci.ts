@@ -3,7 +3,7 @@
 
 import {
   blockStop,
-  gh,
+  ghJson,
   git,
   hasGhCli,
   isGitHubRemote,
@@ -34,7 +34,7 @@ async function main(): Promise<void> {
   if (!branch) return
   if (branch === "main" || branch === "master") return
 
-  const runsRaw = await gh(
+  const runs = await ghJson<CIRun[]>(
     [
       "run",
       "list",
@@ -47,16 +47,7 @@ async function main(): Promise<void> {
     ],
     cwd
   )
-  if (!runsRaw) return
-
-  let runs: CIRun[]
-  try {
-    runs = JSON.parse(runsRaw)
-  } catch {
-    return
-  }
-
-  if (runs.length === 0) return
+  if (!runs?.length) return
 
   // Exclude automated/downstream runs
   const relevant = runs.filter((r) => r.event !== "dynamic" && r.event !== "workflow_run")

@@ -297,6 +297,31 @@ export async function gh(args: string[], cwd: string): Promise<string> {
   }
 }
 
+/** Run a gh CLI command and parse JSON output. Returns null on failure or invalid JSON. */
+export async function ghJson<T>(args: string[], cwd: string): Promise<T | null> {
+  const output = await gh(args, cwd)
+  if (!output) return null
+  try {
+    return JSON.parse(output) as T
+  } catch {
+    return null
+  }
+}
+
+/** Find the first open PR for a branch and return the requested JSON fields. */
+export async function getOpenPrForBranch<T>(
+  branch: string,
+  cwd: string,
+  jsonFields: string
+): Promise<T | null> {
+  if (!branch) return null
+  const prs = await ghJson<T[]>(
+    ["pr", "list", "--head", branch, "--state", "open", "--json", jsonFields],
+    cwd
+  )
+  return prs?.[0] ?? null
+}
+
 export async function isGitRepo(cwd: string): Promise<boolean> {
   return (await git(["rev-parse", "--git-dir"], cwd)) !== ""
 }

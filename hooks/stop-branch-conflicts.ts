@@ -4,7 +4,7 @@
 
 import {
   blockStop,
-  gh,
+  ghJson,
   git,
   hasGhCli,
   isDefaultBranch,
@@ -27,34 +27,27 @@ async function main(): Promise<void> {
 
   // --- GitHub PR merge state check (authoritative) ---
   if (hasGhCli()) {
-    const prRaw = await gh(
-      ["pr", "view", branch, "--json", "mergeable,mergeStateStatus,state,number,url"],
-      cwd
-    )
-    if (prRaw) {
-      try {
-        const pr = JSON.parse(prRaw) as {
-          state: string
-          mergeable: string
-          mergeStateStatus: string
-          number: number
-          url: string
-        }
+    const pr = await ghJson<{
+      state: string
+      mergeable: string
+      mergeStateStatus: string
+      number: number
+      url: string
+    }>(["pr", "view", branch, "--json", "mergeable,mergeStateStatus,state,number,url"], cwd)
+    if (pr) {
+      if (pr.state === "OPEN" && pr.mergeable === "CONFLICTING") {
+        let reason = `PR #${pr.number} for branch '${branch}' has merge conflicts (GitHub: mergeable=CONFLICTING, mergeStateStatus=${pr.mergeStateStatus}).\n\n`
+        reason += `${pr.url}\n\n`
+        reason += skillAdvice(
+          "rebase-onto-main",
+          "Use the /rebase-onto-main skill to rebase and resolve conflicts before stopping.",
+          "Rebase and resolve conflicts before stopping:\n  git fetch origin main\n  git rebase origin/main"
+        )
+        blockStop(reason)
+      }
 
-        if (pr.state === "OPEN" && pr.mergeable === "CONFLICTING") {
-          let reason = `PR #${pr.number} for branch '${branch}' has merge conflicts (GitHub: mergeable=CONFLICTING, mergeStateStatus=${pr.mergeStateStatus}).\n\n`
-          reason += `${pr.url}\n\n`
-          reason += skillAdvice(
-            "rebase-onto-main",
-            "Use the /rebase-onto-main skill to rebase and resolve conflicts before stopping.",
-            "Rebase and resolve conflicts before stopping:\n  git fetch origin main\n  git rebase origin/main"
-          )
-          blockStop(reason)
-        }
-
-        // If GitHub says it's clean, trust it
-        if (pr.state === "OPEN" && pr.mergeable === "MERGEABLE") return
-      } catch {}
+      // If GitHub says it's clean, trust it
+      if (pr.state === "OPEN" && pr.mergeable === "MERGEABLE") return
     }
   }
 

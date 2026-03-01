@@ -3,7 +3,7 @@
 // Detects branch switches via Bash tool, looks up the associated PR,
 // and injects PR body, merge status, and last comment as additionalContext.
 
-import { isShellTool } from "./hook-utils.ts"
+import { ghJson, git, isShellTool } from "./hook-utils.ts"
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)
@@ -23,17 +23,7 @@ const isCheckout =
 
 if (!isCheckout) process.exit(0)
 
-// Get current branch after checkout
-function run(cmd: string, cwd: string): string {
-  try {
-    const proc = Bun.spawnSync(["bash", "-c", cmd], { cwd })
-    return new TextDecoder().decode(proc.stdout).trim()
-  } catch {
-    return ""
-  }
-}
-
-const branch = run("git branch --show-current", cwd)
+const branch = await git(["branch", "--show-current"], cwd)
 if (!branch) process.exit(0)
 
 // Fetch PR JSON for this branch (gh times out after ~5s itself)
@@ -48,23 +38,16 @@ interface GhPr {
   comments: Array<{ author?: { login?: string }; createdAt?: string; body?: string }>
 }
 
-function ghJson(args: string[]): GhPr | null {
-  try {
-    const proc = Bun.spawnSync(["gh", ...args], { cwd })
-    const out = new TextDecoder().decode(proc.stdout).trim()
-    return out ? JSON.parse(out) : null
-  } catch {
-    return null
-  }
-}
-
-const pr = ghJson([
-  "pr",
-  "view",
-  branch,
-  "--json",
-  "number,title,state,mergeable,mergeStateStatus,body,comments,reviewDecision",
-])
+const pr = await ghJson<GhPr>(
+  [
+    "pr",
+    "view",
+    branch,
+    "--json",
+    "number,title,state,mergeable,mergeStateStatus,body,comments,reviewDecision",
+  ],
+  cwd
+)
 
 if (!pr?.number) process.exit(0)
 

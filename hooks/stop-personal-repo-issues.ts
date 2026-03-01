@@ -8,6 +8,7 @@
 import {
   blockStop,
   gh,
+  ghJson,
   git,
   hasGhCli,
   isGitHubRemote,
@@ -140,14 +141,8 @@ interface PR {
 
 async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {
   const jsonFields = "number,title,labels,author,assignees"
-  const output = await gh(["issue", "list", "--state", "open", "--json", jsonFields], cwd)
-  if (!output) return []
-  let issues: Issue[]
-  try {
-    issues = JSON.parse(output)
-  } catch {
-    return []
-  }
+  let issues =
+    (await ghJson<Issue[]>(["issue", "list", "--state", "open", "--json", jsonFields], cwd)) ?? []
   if (filterUser) {
     issues = issues.filter(
       (i) => i.author?.login === filterUser || i.assignees?.some((a) => a.login === filterUser)
@@ -157,7 +152,7 @@ async function getActionableIssues(cwd: string, filterUser?: string): Promise<Is
 }
 
 async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise<PR[]> {
-  const output = await gh(
+  const prs = await ghJson<PR[]>(
     [
       "pr",
       "list",
@@ -172,12 +167,7 @@ async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise
     ],
     cwd
   )
-  if (!output) return []
-  try {
-    return JSON.parse(output) as PR[]
-  } catch {
-    return []
-  }
+  return prs ?? []
 }
 
 async function main(): Promise<void> {

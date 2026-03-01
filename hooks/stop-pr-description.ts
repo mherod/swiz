@@ -3,7 +3,7 @@
 
 import {
   blockStop,
-  gh,
+  getOpenPrForBranch,
   git,
   hasGhCli,
   isDefaultBranch,
@@ -33,21 +33,11 @@ async function main(): Promise<void> {
   const branch = await git(["branch", "--show-current"], cwd)
   if (!branch || isDefaultBranch(branch)) return
 
-  // Find open PR for this branch
-  const prRaw = await gh(
-    ["pr", "list", "--head", branch, "--state", "open", "--json", "number,title,body"],
-    cwd
+  const pr = await getOpenPrForBranch<{ number: number; title: string; body: string }>(
+    branch,
+    cwd,
+    "number,title,body"
   )
-  if (!prRaw) return
-
-  let prs: Array<{ number: number; title: string; body: string }>
-  try {
-    prs = JSON.parse(prRaw)
-  } catch {
-    return
-  }
-
-  const pr = prs[0]
   if (!pr) return
 
   const body = pr.body ?? ""

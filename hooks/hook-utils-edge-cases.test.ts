@@ -9,6 +9,7 @@ import {
   detectRuntime,
   extractToolNamesFromTranscript,
   gh,
+  ghJson,
   git,
   hasGhCli,
   isCodeChangeTool,
@@ -118,6 +119,18 @@ describe("gh() with malformed inputs", () => {
   it("returns empty string for cwd with shell metacharacters", async () => {
     const result = await gh(["version"], "/path;rm -rf /;echo")
     expect(typeof result).toBe("string")
+  })
+})
+
+describe("ghJson() with malformed inputs", () => {
+  it("returns null for invalid gh subcommand", async () => {
+    const result = await ghJson<string>(["not-a-real-command-xyz"], process.cwd())
+    expect(result).toBe(null)
+  })
+
+  it("returns null for non-JSON gh output", async () => {
+    const result = await ghJson<string>(["version"], process.cwd())
+    expect(result).toBe(null)
   })
 })
 

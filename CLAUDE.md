@@ -79,6 +79,8 @@ All output helpers return `never` and call `process.exit(0)` after writing JSON.
 **Git / CLI helpers:**
 - `git(args, cwd)` — run git command, returns trimmed stdout or `""` on failure
 - `gh(args, cwd)` — run gh CLI command, returns trimmed stdout or `""` on failure
+- `ghJson(args, cwd)` — run gh command and parse JSON, returns `null` on failure or invalid JSON
+- `getOpenPrForBranch(branch, cwd, jsonFields)` — returns the first open PR for a branch or `null`
 - `isGitRepo(cwd)` / `isGitHubRemote(cwd)` / `hasGhCli()` — environment checks
 
 **Skill existence checking** — hooks reference skills portably by checking if they're installed:
