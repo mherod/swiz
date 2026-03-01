@@ -114,7 +114,7 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DON'T** create a task just for `git push` or `gh` commands — these are exempt from the task requirement. `git push`, `git pull`, `git fetch`, and all `gh` subcommands bypass the hook automatically.
 
-**DO** commit all changes before attempting to stop the session. The `stop-git-status.sh` hook blocks stop when uncommitted changes exist. The correct end-of-task sequence is: edit → commit (with task in_progress) → push → mark task completed → stop.
+**DO** commit all changes before attempting to stop the session. The `stop-git-status.sh` hook blocks stop when uncommitted changes exist. The correct end-of-task sequence is: edit → mark task completed → commit → push → CI watch → `gh run view --json` → announce result → stop.
 
 ## Push and CI
 
@@ -137,7 +137,7 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
 
 **DO** verify CI after every push with `gh run view --json conclusion,status,jobs` and confirm `conclusion === "success"` before announcing completion. `gh run watch` output alone is not sufficient — always follow up with the explicit JSON fetch.
 
-**DON'T** call TaskUpdate or TaskList anywhere in the push+CI verification sequence — not before, during, or after. Task tracking and CI verification are separate concerns. `TaskUpdate` calls that target sessions or IDs that no longer exist produce "Task not found" errors and pollute the output. The verification sequence ends at the `gh run view --json` step; announce the conclusion and stop.
+**DON'T** call TaskUpdate or TaskList during or after the push+CI verification sequence. Mark tasks completed *before* committing so the push+CI loop is purely mechanical: push → watch → `gh run view --json` → announce. Any TaskUpdate call after `git push` is a sign the task ordering is wrong — fix it by completing tasks earlier.
 
 **DON'T** skip `git log origin/main..HEAD --oneline` before pushing — it prevents accidentally pushing incomplete or unintended commits.
 
