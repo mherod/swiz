@@ -137,7 +137,7 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
 
 **DO** verify CI after every push with `gh run view --json conclusion,status,jobs` and confirm `conclusion === "success"` before announcing completion. `gh run watch` output alone is not sufficient — always follow up with the explicit JSON fetch.
 
-**DON'T** interleave TaskUpdate/TaskList calls inside the push+CI verification sequence. Those calls can fail (task not found) and add noise without value. Complete the push → watch → verify-json loop first, then handle task bookkeeping separately.
+**DON'T** call TaskUpdate or TaskList anywhere in the push+CI verification sequence — not before, during, or after. Task tracking and CI verification are separate concerns. `TaskUpdate` calls that target sessions or IDs that no longer exist produce "Task not found" errors and pollute the output. The verification sequence ends at the `gh run view --json` step; announce the conclusion and stop.
 
 **DON'T** skip `git log origin/main..HEAD --oneline` before pushing — it prevents accidentally pushing incomplete or unintended commits.
 
