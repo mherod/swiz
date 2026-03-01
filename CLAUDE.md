@@ -116,6 +116,8 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DO** commit all changes before attempting to stop the session. The `stop-git-status.sh` hook blocks stop when uncommitted changes exist. The correct end-of-task sequence is: edit → commit (task still in_progress) → mark task completed → push → CI watch → `gh run view --json` → announce result → stop.
 
+**DO** run `git diff` (or `git diff --staged` after `git add`) to review the consolidated result before committing, especially after multiple edits to the same file. Piecemeal edits each look correct in isolation but can produce incoherent or contradictory content when combined. The diff review is the final sanity check — skip it and you commit blindly.
+
 ## Standard Work Sequence
 
 Follow this order for every unit of work. Deviating from it causes hook blocks.
