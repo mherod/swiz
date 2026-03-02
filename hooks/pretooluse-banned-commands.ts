@@ -259,14 +259,17 @@ const SUPPORTED_BUN_REPORTERS = new Set(["dots", "junit"])
 const BUN_TEST_SEGMENT_RE = /(?:^|[|;&])\s*bun\s+test\b([^|;&]*)/g
 for (const segMatch of command.matchAll(BUN_TEST_SEGMENT_RE)) {
   const segment = segMatch[1] ?? ""
-  // Matches --reporter=value, --reporter value, --reporter='value', --reporter "value"
-  const reporterMatch = segment.match(/--reporter(?:=|\s+)(['"]?)([a-z][a-z0-9-]*)\1/)
+  // Matches --reporter and its short alias -r, with optional escaped or unescaped
+  // surrounding quotes: --reporter=value, --reporter value, --reporter='v', -r="v",
+  // --reporter=\'v\', -r verbose, etc.
+  const reporterMatch = segment.match(/(?:--reporter|-r)(?:=|\s+)(\\?['"]?)([a-z][a-z0-9-]*)\1/)
   if (!reporterMatch) continue
   const reporter = reporterMatch[2]
   if (reporter && !SUPPORTED_BUN_REPORTERS.has(reporter)) {
-    // Replace every unsupported --reporter occurrence across the full command
+    // Replace every unsupported --reporter/-r occurrence across the full command.
+    // Closing group is \\?['"]? (backslash-then-quote) to mirror the opening sequence.
     const corrected = command.replace(
-      /--reporter(?:=|\s+)['"]?[a-z][a-z0-9-]*['"]?/g,
+      /(?:--reporter|-r)(?:=|\s+)\\?['"]?[a-z][a-z0-9-]*\\?['"]?/g,
       "--reporter=dots"
     )
     denyPreToolUse(

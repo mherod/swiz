@@ -119,6 +119,34 @@ describe("pretooluse-banned-commands", () => {
       expect(result.reason).toContain("b.test.ts --reporter=dots")
     })
 
+    test('bun test --reporter="verbose" (double-quoted) is blocked', async () => {
+      const result = await runHook('bun test foo.ts --reporter="verbose"')
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("'verbose' is not valid")
+      expect(result.reason).toContain("--reporter=dots")
+    })
+
+    test("bun test --reporter=\\'verbose\\' (escaped single-quote) is blocked", async () => {
+      const result = await runHook("bun test foo.ts --reporter=\\'verbose\\'")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("'verbose' is not valid")
+      expect(result.reason).toContain("--reporter=dots")
+    })
+
+    test("-r verbose (short alias, space form) is blocked", async () => {
+      const result = await runHook("bun test foo.ts -r verbose")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("'verbose' is not valid")
+      expect(result.reason).toContain("--reporter=dots")
+    })
+
+    test("-r=verbose (short alias, equals form) is blocked", async () => {
+      const result = await runHook("bun test foo.ts -r=verbose")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("'verbose' is not valid")
+      expect(result.reason).toContain("--reporter=dots")
+    })
+
     test("bun test --reporter=pretty is blocked with corrected command", async () => {
       const result = await runHook("bun test --reporter=pretty src/")
       expect(result.decision).toBe("deny")
@@ -160,6 +188,16 @@ describe("pretooluse-banned-commands", () => {
 
     test("bun test --reporter dots (space form) passes through", async () => {
       const result = await runHook("bun test hooks/foo.test.ts --reporter dots")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("-r dots (short alias) passes through", async () => {
+      const result = await runHook("bun test hooks/foo.test.ts -r dots")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("-r=junit (short alias) passes through", async () => {
+      const result = await runHook("bun test hooks/foo.test.ts -r=junit")
       expect(result.decision).toBeUndefined()
     })
 
