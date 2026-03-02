@@ -252,6 +252,20 @@ for (const rule of RULES) {
   }
 }
 
+// Reporter normalization: bun test only supports 'dots' and 'junit'
+const SUPPORTED_BUN_REPORTERS = new Set(["dots", "junit"])
+const reporterMatch = command.match(/(?:^|[|;&])\s*bun\s+test\b.*?--reporter[= ]([a-z][a-z0-9-]*)/)
+if (reporterMatch) {
+  const reporter = reporterMatch[1]
+  if (reporter && !SUPPORTED_BUN_REPORTERS.has(reporter)) {
+    const corrected = command.replace(/--reporter[= ]\S+/, "--reporter=dots")
+    denyPreToolUse(
+      `Bun only supports 'dots' and 'junit' reporters — '${reporter}' is not valid.\n\n` +
+        `Use this corrected command instead:\n  ${corrected}`
+    )
+  }
+}
+
 // Emit collected warnings as allow-with-hint (doesn't block the command)
 if (warnings.length > 0) {
   console.log(
