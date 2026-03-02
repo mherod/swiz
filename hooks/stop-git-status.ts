@@ -155,6 +155,23 @@ async function main(): Promise<void> {
     if (await isPushCooldownActive(input.session_id, cwd, branch)) return
   }
 
+  // In-flight push guard: if a background `git push` is currently running, defer
+  // the unpushed-commits block rather than emitting a false positive.
+  // Only applies when the sole issue is unpushed commits (no uncommitted changes,
+  // not behind). Once the push exits the next stop attempt will re-evaluate correctly.
+  if (!hasUncommitted && ahead > 0 && behind === 0) {
+    const pgrepProc = Bun.spawn(["pgrep", "-f", "git push"], { stdout: "pipe", stderr: "pipe" })
+    await pgrepProc.exited
+    if (pgrepProc.exitCode === 0) {
+      blockStop(
+        "A `git push` is currently running in the background.\n\n" +
+          "Wait for it to complete before stopping. " +
+          "Check the background task output with `TaskOutput <task-id>` to verify it succeeded, " +
+          "then try stopping again."
+      )
+    }
+  }
+
   // ── Build the reason ──────────────────────────────────────────────────
 
   const steps: string[] = []
