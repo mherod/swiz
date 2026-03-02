@@ -62,6 +62,13 @@ DO NOT hard-code agent-specific event names or tool names in hook scripts. The t
 
 ## Writing Hooks
 
+**DO** update `README.md` whenever adding a hook to `src/manifest.ts`. The `src/readme-hook-counts.test.ts` test enforces three invariants that will fail at pre-push if not updated:
+1. The `### <EventName> (N)` section heading count must match the number of table rows in that section.
+2. The `**N hooks**` bold total in the README intro (line 7) must match `manifest.ts` total.
+3. Every hook filename referenced in the README must exist on disk.
+
+When adding a hook: (a) increment `### PreToolUse (N)` by 1, (b) add a table row for the new `.ts` file, (c) increment the `**N hooks**` intro count. Run `bun test src/readme-hook-counts.test.ts` locally to verify before pushing.
+
 All hooks are TypeScript and import from `hooks/hook-utils.ts` for shared utilities. Hook scripts receive a JSON payload on stdin from the agent and exit `0` in all cases — the JSON output determines the decision, not the exit code.
 
 **Output helpers** — emit polyglot JSON understood by all agents (Claude, Cursor, Gemini, Codex):
