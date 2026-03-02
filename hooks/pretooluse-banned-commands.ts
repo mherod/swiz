@@ -259,12 +259,16 @@ const SUPPORTED_BUN_REPORTERS = new Set(["dots", "junit"])
 const BUN_TEST_SEGMENT_RE = /(?:^|[|;&])\s*bun\s+test\b([^|;&]*)/g
 for (const segMatch of command.matchAll(BUN_TEST_SEGMENT_RE)) {
   const segment = segMatch[1] ?? ""
+  // Collect ALL --reporter/-r occurrences in this segment so we can apply
+  // Bun's last-flag-wins semantics: only the final value matters.
   // Matches --reporter and its short alias -r, with optional escaped or unescaped
   // surrounding quotes: --reporter=value, --reporter value, --reporter='v', -r="v",
   // --reporter=\'v\', -r verbose, etc.
-  const reporterMatch = segment.match(/(?:--reporter|-r)(?:=|\s+)(\\?['"]?)([a-z][a-z0-9-]*)\1/)
-  if (!reporterMatch) continue
-  const reporter = reporterMatch[2]
+  const REPORTER_FLAG_RE = /(?:--reporter|-r)(?:=|\s+)(\\?['"]?)([a-z][a-z0-9-]*)\1/g
+  const reporterMatches = [...segment.matchAll(REPORTER_FLAG_RE)]
+  if (reporterMatches.length === 0) continue
+  // Last match wins — earlier flags are overridden by later ones.
+  const reporter = reporterMatches[reporterMatches.length - 1]?.[2]
   if (reporter && !SUPPORTED_BUN_REPORTERS.has(reporter)) {
     // Replace every unsupported --reporter/-r occurrence across the full command.
     // Closing group is \\?['"]? (backslash-then-quote) to mirror the opening sequence.

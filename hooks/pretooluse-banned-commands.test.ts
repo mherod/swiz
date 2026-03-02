@@ -154,6 +154,29 @@ describe("pretooluse-banned-commands", () => {
       expect(result.reason).toContain("--reporter=dots")
     })
 
+    // Last-flag-wins: Bun resolves multiple --reporter/-r flags by using the final one.
+    test("last-flag-wins: invalid then valid passes through (last is dots)", async () => {
+      const result = await runHook("bun test foo.ts --reporter=verbose --reporter=dots")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("last-flag-wins: valid then invalid is blocked (last is verbose)", async () => {
+      const result = await runHook("bun test foo.ts --reporter=dots --reporter=verbose")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("'verbose' is not valid")
+    })
+
+    test("last-flag-wins: mixed alias forms — -r verbose then --reporter=dots passes", async () => {
+      const result = await runHook("bun test foo.ts -r verbose --reporter=dots")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("last-flag-wins: multiple invalids — last unsupported value named in reason", async () => {
+      const result = await runHook("bun test foo.ts --reporter=verbose --reporter=pretty")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("'pretty' is not valid")
+    })
+
     test("git commit --no-verify is blocked", async () => {
       const result = await runHook("git commit --no-verify -m 'test'")
       expect(result.decision).toBe("deny")
