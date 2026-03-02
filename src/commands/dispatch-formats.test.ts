@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -23,6 +23,17 @@ afterEach(async () => {
 async function createTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), prefix))
   tempDirs.push(dir)
+  return dir
+}
+
+/** Create a git repo + old-mtime CLAUDE.md so enforcement hooks fire without cooldown bypass. */
+async function createProjectDir(): Promise<string> {
+  const dir = await createTempDir("swiz-dispatch-project-")
+  Bun.spawnSync(["git", "init"], { cwd: dir, stdout: "pipe", stderr: "pipe" })
+  const claudeMd = join(dir, "CLAUDE.md")
+  await writeFile(claudeMd, "# Guide\n")
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
+  await utimes(claudeMd, twoHoursAgo, twoHoursAgo)
   return dir
 }
 
@@ -101,7 +112,9 @@ async function writeTask(
 describe("dispatch output formats", () => {
   test("preToolUse deny uses hookSpecificOutput.permissionDecision", async () => {
     const homeDir = await createTempDir("swiz-dispatch-home-")
-    const cwd = await createTempDir("swiz-dispatch-cwd-")
+    // createProjectDir() ensures the cwd is a git repo with CLAUDE.md so enforcement hooks
+    // apply (the guard added in issue #28 skips enforcement in non-project directories).
+    const cwd = await createProjectDir()
     const result = await dispatch({
       event: "preToolUse",
       hookEventName: "PreToolUse",

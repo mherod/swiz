@@ -10,6 +10,7 @@ interface HookResult {
 
 async function runHook({
   homeDir,
+  cwd,
   toolName = "Bash",
   sessionId = "session-123",
   transcriptPath,
@@ -18,6 +19,7 @@ async function runHook({
   envOverrides = {},
 }: {
   homeDir: string
+  cwd?: string
   toolName?: string
   sessionId?: string
   transcriptPath?: string
@@ -33,6 +35,8 @@ async function runHook({
     session_id: sessionId,
     transcript_path: transcriptPath ?? "",
     tool_input: toolInput,
+    // cwd defaults to the swiz project root (a git repo with CLAUDE.md) when omitted
+    ...(cwd !== undefined ? { cwd } : {}),
   })
   const env: Record<string, string | undefined> = { ...process.env, HOME: homeDir }
   delete env.CLAUDECODE
@@ -446,6 +450,59 @@ describe("pretooluse-require-tasks", () => {
         filePath: "/Users/test/project/src/index.ts",
       })
       expect(result.decision).toBe("deny")
+    })
+  })
+
+  describe("git repo + CLAUDE.md guard", () => {
+    test("allows Bash when cwd is not a git repo (no tasks required)", async () => {
+      const homeDir = await createTempHome()
+      // homeDir is not a git repo — enforcement must be skipped entirely
+      const result = await runHook({ homeDir, cwd: homeDir, toolName: "Bash" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows Edit when cwd is not a git repo (no tasks required)", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({
+        homeDir,
+        cwd: homeDir,
+        toolName: "Edit",
+        filePath: "/some/file.ts",
+      })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows Bash when cwd is a git repo but no CLAUDE.md exists in the tree", async () => {
+      const homeDir = await createTempHome()
+      // Init a bare git repo with no CLAUDE.md
+      const repoDir = join(homeDir, "myrepo")
+      await mkdir(repoDir, { recursive: true })
+      const init = Bun.spawn(["git", "init"], { cwd: repoDir, stdout: "pipe", stderr: "pipe" })
+      await init.exited
+      // No CLAUDE.md written — guard must exit 0
+      const result = await runHook({ homeDir, cwd: repoDir, toolName: "Bash" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("enforces tasks when cwd is a git repo with CLAUDE.md present", async () => {
+      const homeDir = await createTempHome()
+      const repoDir = join(homeDir, "myrepo")
+      await mkdir(repoDir, { recursive: true })
+      const init = Bun.spawn(["git", "init"], { cwd: repoDir, stdout: "pipe", stderr: "pipe" })
+      await init.exited
+      // Write CLAUDE.md so the guard lets enforcement through
+      await writeFile(join(repoDir, "CLAUDE.md"), "# Guide\n")
+
+      const sessionId = "session-guarded"
+      // No tasks → enforcement fires
+      const result = await runHook({
+        homeDir,
+        cwd: repoDir,
+        toolName: "Bash",
+        sessionId,
+      })
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("no incomplete tasks")
     })
   })
 

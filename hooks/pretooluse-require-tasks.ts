@@ -3,6 +3,7 @@
 //   1. The session has at least one incomplete task (pending or in_progress)
 //   2. Tasks haven't gone stale (no task tool interaction in last STALENESS_THRESHOLD calls)
 
+import { dirname, join } from "node:path"
 import {
   denyPreToolUse as deny,
   extractToolNamesFromTranscript,
@@ -11,6 +12,7 @@ import {
   GIT_SYNC_RE,
   GIT_WRITE_RE,
   isEditTool,
+  isGitRepo,
   isShellTool,
   isWriteTool,
   READ_CMD_RE,
@@ -26,8 +28,28 @@ const input = await Bun.stdin.json()
 const toolName: string = input?.tool_name ?? ""
 const sessionId: string = input?.session_id ?? ""
 const transcriptPath: string = input?.transcript_path ?? ""
+const cwd: string = input?.cwd ?? process.cwd()
 
 if (!sessionId) process.exit(0)
+
+// ── GUARD: Only enforce inside a git repo that has a CLAUDE.md ───────────────
+// Enforcement in non-project directories (e.g. ~) creates an unrecoverable
+// deadlock: the unlock steps (skills, markdown writes) fail without git context.
+if (!(await isGitRepo(cwd))) process.exit(0)
+{
+  let dir = cwd
+  let foundClaudeMd = false
+  while (true) {
+    if (await Bun.file(join(dir, "CLAUDE.md")).exists()) {
+      foundClaudeMd = true
+      break
+    }
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  if (!foundClaudeMd) process.exit(0)
+}
 
 const isBlockedTool = isShellTool(toolName) || isEditTool(toolName) || isWriteTool(toolName)
 if (!isBlockedTool) process.exit(0)

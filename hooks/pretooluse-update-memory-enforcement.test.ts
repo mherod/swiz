@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -21,6 +21,23 @@ afterEach(async () => {
 async function createTempDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "swiz-update-memory-"))
   tempDirs.push(dir)
+  return dir
+}
+
+/**
+ * Create a temp dir that looks like a real project: git repo + CLAUDE.md with
+ * an OLD mtime so the 30-minute cooldown in isMemoryRecentlyUpdated does not fire.
+ * Tests that expect enforcement to run must use this helper for their `cwd`.
+ */
+async function createProjectDir(): Promise<string> {
+  const dir = await createTempDir()
+  const init = Bun.spawn(["git", "init"], { cwd: dir, stdout: "pipe", stderr: "pipe" })
+  await init.exited
+  const claudeMd = join(dir, "CLAUDE.md")
+  await writeFile(claudeMd, "# Guide\n")
+  // Set mtime 2 hours in the past — outside the 30-min cooldown window
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
+  await utimes(claudeMd, twoHoursAgo, twoHoursAgo)
   return dir
 }
 
@@ -77,7 +94,9 @@ function toolUse(name: string, input: Record<string, unknown>): Record<string, u
 
 describe("pretooluse-update-memory-enforcement", () => {
   test("denies normal work until the update-memory skill is read", async () => {
-    const dir = await createTempDir()
+    // createProjectDir() gives a git repo + CLAUDE.md with an old mtime so the
+    // cooldown does not fire and enforcement runs as expected.
+    const dir = await createProjectDir()
     const transcript = await createTranscript(dir, [
       hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
     ])
@@ -223,7 +242,7 @@ describe("pretooluse-update-memory-enforcement", () => {
   test("still enforces when compaction occurred BEFORE the trigger (new post-compact trigger)", async () => {
     // Compaction happened, THEN a new stop hook fired with a fresh REMINDER_FRAGMENT.
     // The gate should still enforce — this is a new, genuine trigger.
-    const dir = await createTempDir()
+    const dir = await createProjectDir()
     const POST_COMPACT_MARKER = "Post-compaction context"
     const transcript = await createTranscript(dir, [
       // Compaction happened first
@@ -265,5 +284,66 @@ describe("pretooluse-update-memory-enforcement", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toBe("") // allowed — cooldown active
+  })
+
+  describe("git repo + CLAUDE.md guard", () => {
+    test("skips enforcement when cwd is not a git repo", async () => {
+      const nonGitDir = await createTempDir()
+      const transcript = await createTranscript(nonGitDir, [
+        hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+      ])
+
+      // cwd is not a git repo — enforcement must be skipped entirely
+      const result = await runHook({
+        cwd: nonGitDir,
+        tool_name: "Edit",
+        tool_input: { file_path: "src/app.ts", new_string: "export const x = 1\n" },
+        transcript_path: transcript,
+      })
+
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe("") // skipped — not a git repo
+    })
+
+    test("skips enforcement when cwd is a git repo but has no CLAUDE.md in the tree", async () => {
+      const repoDir = await createTempDir()
+      // Init a git repo with no CLAUDE.md
+      const init = Bun.spawn(["git", "init"], { cwd: repoDir, stdout: "pipe", stderr: "pipe" })
+      await init.exited
+
+      const transcript = await createTranscript(repoDir, [
+        hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+      ])
+
+      const result = await runHook({
+        cwd: repoDir,
+        tool_name: "Edit",
+        tool_input: { file_path: "src/app.ts", new_string: "export const x = 1\n" },
+        transcript_path: transcript,
+      })
+
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe("") // skipped — no CLAUDE.md
+    })
+
+    test("enforces when cwd is a git repo with CLAUDE.md present", async () => {
+      // createProjectDir() gives git repo + CLAUDE.md with old mtime (cooldown inactive)
+      const repoDir = await createProjectDir()
+
+      const transcript = await createTranscript(repoDir, [
+        hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+      ])
+
+      const result = await runHook({
+        cwd: repoDir,
+        tool_name: "Edit",
+        tool_input: { file_path: "src/app.ts", new_string: "export const x = 1\n" },
+        transcript_path: transcript,
+      })
+
+      expect(result.exitCode).toBe(0)
+      const hso = result.json?.hookSpecificOutput as Record<string, unknown>
+      expect(hso?.permissionDecision).toBe("deny") // enforcement active
+    })
   })
 })

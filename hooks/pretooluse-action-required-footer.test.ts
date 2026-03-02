@@ -5,7 +5,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
@@ -29,6 +29,18 @@ afterEach(async () => {
 async function makeTempDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "swiz-footer-"))
   tempDirs.push(dir)
+  return dir
+}
+
+/** Create a git repo with an old-mtime CLAUDE.md so enforcement hooks fire without cooldown bypass. */
+async function makeProjectDir(): Promise<string> {
+  const dir = await makeTempDir()
+  const init = Bun.spawn(["git", "init"], { cwd: dir, stdout: "pipe", stderr: "pipe" })
+  await init.exited
+  const claudeMd = join(dir, "CLAUDE.md")
+  await writeFile(claudeMd, "# Guide\n")
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
+  await utimes(claudeMd, twoHoursAgo, twoHoursAgo)
   return dir
 }
 
@@ -252,7 +264,8 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
   })
 
   test("pretooluse-update-memory-enforcement: reminder denial includes footer", async () => {
-    const dir = await makeTempDir()
+    // makeProjectDir() gives git repo + CLAUDE.md with old mtime so guard passes and cooldown stays off
+    const dir = await makeProjectDir()
     const transcriptPath = join(dir, "transcript.jsonl")
     await writeFile(
       transcriptPath,

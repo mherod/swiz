@@ -12,6 +12,7 @@ import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import {
   denyPreToolUse,
   isEditTool,
+  isGitRepo,
   isNotebookTool,
   isShellTool,
   isWriteTool,
@@ -154,8 +155,28 @@ async function main(): Promise<void> {
   const transcriptPath = input.transcript_path ?? ""
   const toolName = input.tool_name ?? ""
   const toolInput = input.tool_input ?? {}
+  const cwd = input.cwd ?? process.cwd()
 
   if (!transcriptPath || !toolName) return
+
+  // ── GUARD: Only enforce inside a git repo that has a CLAUDE.md ─────────────
+  // Enforcement outside a project directory creates an unrecoverable deadlock:
+  // the unlock steps (reading skills, writing CLAUDE.md) require git context.
+  if (!(await isGitRepo(cwd))) return
+  {
+    let dir = cwd
+    let foundClaudeMd = false
+    while (true) {
+      if (await Bun.file(join(dir, "CLAUDE.md")).exists()) {
+        foundClaudeMd = true
+        break
+      }
+      const parent = dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+    if (!foundClaudeMd) return
+  }
 
   let transcriptText = ""
   try {
