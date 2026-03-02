@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test"
-import { parseGitStatSummary } from "../hooks/hook-utils.ts"
+import {
+  classifyChangeScope,
+  type GitStatSummary,
+  parseGitStatSummary,
+} from "../hooks/hook-utils.ts"
 
 describe("parseGitStatSummary", () => {
   it("parses both insertions and deletions", () => {
@@ -139,5 +143,164 @@ describe("parseGitStatSummary", () => {
       insertions: 0,
       deletions: 0,
     })
+  })
+})
+
+// ─── classifyChangeScope ────────────────────────────────────────────────
+
+describe("classifyChangeScope", () => {
+  const stat = (f: number, i: number, d: number): GitStatSummary => ({
+    filesChanged: f,
+    insertions: i,
+    deletions: d,
+  })
+
+  // ── Fail-closed: stat parsing failed ────────────────────────────────
+
+  it("detects stat parsing failure when files exist but stat is zero", () => {
+    const result = classifyChangeScope(stat(0, 0, 0), ["src/app.ts"])
+    expect(result.statParsingFailed).toBe(true)
+    expect(result.isTrivial).toBe(false)
+    expect(result.isSmallFix).toBe(false)
+    expect(result.scopeDescription).toContain("stat-unparseable")
+    expect(result.scopeDescription).toContain("1 files detected")
+  })
+
+  it("stat parsing failure with multiple files", () => {
+    const result = classifyChangeScope(stat(0, 0, 0), ["a.ts", "b.ts", "c.ts"])
+    expect(result.statParsingFailed).toBe(true)
+    expect(result.isTrivial).toBe(false)
+    expect(result.isSmallFix).toBe(false)
+    expect(result.scopeDescription).toContain("3 files detected")
+  })
+
+  it("no failure when both stat and file list are empty (no changes)", () => {
+    const result = classifyChangeScope(stat(0, 0, 0), [])
+    expect(result.statParsingFailed).toBe(false)
+    // Zero files, zero lines → trivial
+    expect(result.isTrivial).toBe(true)
+  })
+
+  // ── Trivial classification ──────────────────────────────────────────
+
+  it("classifies small doc change as trivial", () => {
+    const result = classifyChangeScope(stat(1, 5, 2), ["README.md"])
+    expect(result.isTrivial).toBe(true)
+    expect(result.isDocsOnly).toBe(true)
+    expect(result.scopeDescription).toBe("docs-only")
+  })
+
+  it("classifies small config change as trivial", () => {
+    const result = classifyChangeScope(stat(2, 10, 3), ["tsconfig.json", ".eslintrc.yaml"])
+    expect(result.isTrivial).toBe(true)
+    expect(result.isDocsOnly).toBe(true)
+  })
+
+  it("classifies small non-src change as trivial", () => {
+    const result = classifyChangeScope(stat(2, 8, 4), ["hooks/gate.ts", "scripts/build.sh"])
+    expect(result.isTrivial).toBe(true)
+    expect(result.scopeDescription).toBe("trivial")
+  })
+
+  // ── Non-trivial: src files ──────────────────────────────────────────
+
+  it("rejects trivial when src/ files are changed even if small", () => {
+    const result = classifyChangeScope(stat(1, 5, 2), ["src/app.ts"])
+    expect(result.isTrivial).toBe(false)
+    expect(result.isSmallFix).toBe(true)
+    expect(result.scopeDescription).toBe("small-fix")
+  })
+
+  it("rejects trivial when lib/ files are changed", () => {
+    const result = classifyChangeScope(stat(1, 3, 1), ["lib/utils.ts"])
+    expect(result.isTrivial).toBe(false)
+  })
+
+  it("rejects trivial when components/ files are changed", () => {
+    const result = classifyChangeScope(stat(1, 3, 1), ["components/Button.tsx"])
+    expect(result.isTrivial).toBe(false)
+  })
+
+  // ── Non-trivial: too many files ─────────────────────────────────────
+
+  it("rejects trivial when > 3 files changed", () => {
+    const result = classifyChangeScope(stat(4, 15, 5), ["a.ts", "b.ts", "c.ts", "d.ts"])
+    expect(result.isTrivial).toBe(false)
+    expect(result.isSmallFix).toBe(false)
+    expect(result.scopeDescription).toBe("4-files, 20-lines")
+  })
+
+  // ── Non-trivial: too many lines ─────────────────────────────────────
+
+  it("rejects trivial when > 20 lines changed", () => {
+    const result = classifyChangeScope(stat(2, 15, 10), ["hooks/a.ts", "hooks/b.ts"])
+    expect(result.isTrivial).toBe(false)
+    // 25 lines > 20 but 2 files ≤ 2 and 25 lines ≤ 30 → small-fix
+    expect(result.isSmallFix).toBe(true)
+    expect(result.scopeDescription).toBe("small-fix")
+  })
+
+  it("rejects small-fix when > 30 lines changed", () => {
+    const result = classifyChangeScope(stat(2, 20, 15), ["hooks/a.ts", "hooks/b.ts"])
+    expect(result.isTrivial).toBe(false)
+    expect(result.isSmallFix).toBe(false)
+    expect(result.scopeDescription).toBe("2-files, 35-lines")
+  })
+
+  // ── Large non-trivial ───────────────────────────────────────────────
+
+  it("classifies large change correctly", () => {
+    const result = classifyChangeScope(stat(10, 500, 200), [
+      "src/a.ts",
+      "src/b.ts",
+      "src/c.ts",
+      "src/d.ts",
+      "src/e.ts",
+      "lib/f.ts",
+      "lib/g.ts",
+      "lib/h.ts",
+      "lib/i.ts",
+      "lib/j.ts",
+    ])
+    expect(result.isTrivial).toBe(false)
+    expect(result.isSmallFix).toBe(false)
+    expect(result.scopeDescription).toBe("10-files, 700-lines")
+  })
+
+  // ── Docs-only detection ─────────────────────────────────────────────
+
+  it("detects docs-only when all files match docs pattern", () => {
+    const result = classifyChangeScope(stat(3, 50, 20), [
+      "README.md",
+      "docs/api.md",
+      "CHANGELOG.md",
+    ])
+    expect(result.isDocsOnly).toBe(true)
+  })
+
+  it("rejects docs-only when mixed with code files", () => {
+    const result = classifyChangeScope(stat(2, 30, 10), ["README.md", "src/app.ts"])
+    expect(result.isDocsOnly).toBe(false)
+  })
+
+  // ── Deletions-only stat ─────────────────────────────────────────────
+
+  it("handles deletions-only stat correctly", () => {
+    const result = classifyChangeScope(stat(1, 0, 45), ["src/deprecated.ts"])
+    expect(result.statParsingFailed).toBe(false)
+    expect(result.fileCount).toBe(1)
+    expect(result.totalLinesChanged).toBe(45)
+    expect(result.isTrivial).toBe(false)
+    expect(result.isSmallFix).toBe(false)
+  })
+
+  // ── Rename-only (zero insertions/deletions but fileCount > 0) ──────
+
+  it("handles rename-only stat (fileCount > 0 but zero lines)", () => {
+    const result = classifyChangeScope(stat(1, 0, 0), ["src/renamed.ts"])
+    expect(result.statParsingFailed).toBe(false)
+    // fileCount=1 so stat didn't fail; 0 lines but src/ → not trivial
+    expect(result.isTrivial).toBe(false)
+    expect(result.isSmallFix).toBe(true)
   })
 })

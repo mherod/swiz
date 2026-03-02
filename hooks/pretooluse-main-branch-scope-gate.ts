@@ -15,6 +15,7 @@
 //   Collaborative + non-trivial: BLOCKED — must use feature branch + PR
 
 import {
+  classifyChangeScope,
   denyPreToolUse,
   getCurrentGitHubUser,
   gh,
@@ -46,31 +47,13 @@ let diffStat = await git(["diff", "origin/main..HEAD", "--stat"], cwd)
 if (!diffStat.trim()) {
   diffStat = await git(["diff", "HEAD~1..HEAD", "--stat"], cwd)
 }
-const { filesChanged: fileCount, insertions, deletions } = parseGitStatSummary(diffStat)
-const totalLinesChanged = insertions + deletions
 
 // Check if changes are docs-only or config-only
 const diffFiles = await git(["diff", "--name-only", "origin/main..HEAD"], cwd)
 const changedFiles = diffFiles.trim().split("\n").filter(Boolean)
-const docsOnlyRe =
-  /\.(md|txt|rst)$|^(README|CHANGELOG|LICENSE|docs\/)|(\.config\.|\.json|\.yaml|\.yml|\.toml)$/i
-const isDocsOnly = changedFiles.length > 0 && changedFiles.every((f) => docsOnlyRe.test(f))
 
-// Classify change scope
-const isTrivial =
-  fileCount <= 3 &&
-  totalLinesChanged <= 20 &&
-  !changedFiles.some((f) => /src\/|lib\/|components\//.test(f))
-
-const isSmallFix = fileCount <= 2 && totalLinesChanged <= 30
-
-const scopeDescription = isDocsOnly
-  ? "docs-only"
-  : isTrivial
-    ? "trivial"
-    : isSmallFix
-      ? "small-fix"
-      : `${fileCount}-files, ${totalLinesChanged}-lines`
+const { isTrivial, isDocsOnly, scopeDescription, fileCount, totalLinesChanged } =
+  classifyChangeScope(parseGitStatSummary(diffStat), changedFiles)
 
 // ─── Check collaborator activity ──────────────────────────────────────
 

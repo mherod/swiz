@@ -596,6 +596,67 @@ export function parseGitStatSummary(statOutput: string): GitStatSummary {
   }
 }
 
+export interface ChangeScopeResult {
+  /** True when --stat returned zero files but --name-only found changes */
+  statParsingFailed: boolean
+  isTrivial: boolean
+  isSmallFix: boolean
+  isDocsOnly: boolean
+  scopeDescription: string
+  fileCount: number
+  totalLinesChanged: number
+}
+
+/**
+ * Classify a set of changes as trivial, small-fix, docs-only, or non-trivial.
+ *
+ * Fail-closed: when stat parsing disagrees with the file list (fileCount === 0
+ * but changedFiles is non-empty), forces non-trivial classification so the
+ * caller blocks rather than allows.
+ */
+export function classifyChangeScope(
+  stat: GitStatSummary,
+  changedFiles: string[]
+): ChangeScopeResult {
+  const { filesChanged: fileCount, insertions, deletions } = stat
+  const totalLinesChanged = insertions + deletions
+
+  // Fail-closed: stat returned zeros but files actually changed
+  const statParsingFailed = changedFiles.length > 0 && fileCount === 0
+
+  const docsOnlyRe =
+    /\.(md|txt|rst)$|^(README|CHANGELOG|LICENSE|docs\/)|(\.config\.|\.json|\.yaml|\.yml|\.toml)$/i
+  const isDocsOnly = changedFiles.length > 0 && changedFiles.every((f) => docsOnlyRe.test(f))
+
+  const isTrivial =
+    !statParsingFailed &&
+    fileCount <= 3 &&
+    totalLinesChanged <= 20 &&
+    !changedFiles.some((f) => /src\/|lib\/|components\//.test(f))
+
+  const isSmallFix = !statParsingFailed && fileCount <= 2 && totalLinesChanged <= 30
+
+  const scopeDescription = statParsingFailed
+    ? `stat-unparseable (${changedFiles.length} files detected)`
+    : isDocsOnly
+      ? "docs-only"
+      : isTrivial
+        ? "trivial"
+        : isSmallFix
+          ? "small-fix"
+          : `${fileCount}-files, ${totalLinesChanged}-lines`
+
+  return {
+    statParsingFailed,
+    isTrivial,
+    isSmallFix,
+    isDocsOnly,
+    scopeDescription,
+    fileCount,
+    totalLinesChanged,
+  }
+}
+
 // ─── Git ahead/behind ───────────────────────────────────────────────────
 
 /**
