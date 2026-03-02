@@ -15,8 +15,23 @@ afterEach(async () => {
   }
 })
 
+/** Create a temp dir under tmpdir() — used for cwd and fakeHome fixtures. */
 async function createTempDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "swiz-sandboxed-"))
+  tempDirs.push(dir)
+  return dir
+}
+
+/**
+ * Create a temp dir under the real HOME — used for "outside" repo fixtures.
+ *
+ * On Linux, tmpdir() returns /tmp which is hardcoded in allowedRoots. Using
+ * HOME as the base ensures "outside" dirs are never inside any allowed root
+ * on either macOS or Linux.
+ */
+async function createOutsideDir(): Promise<string> {
+  const realHome = process.env.HOME ?? tmpdir()
+  const dir = await mkdtemp(join(realHome, ".swiz-sandboxed-outside-"))
   tempDirs.push(dir)
   return dir
 }
@@ -45,12 +60,16 @@ async function runHook(
   cwd: string,
   toolName: string,
   filePath: string,
-  { sandboxedEdits = true }: { sandboxedEdits?: boolean } = {}
+  {
+    sandboxedEdits = true,
+    fakeHomeOverride,
+  }: { sandboxedEdits?: boolean; fakeHomeOverride?: string } = {}
 ): Promise<HookResult> {
   // Build an env with a fake HOME so we can control whether sandboxedEdits is on/off.
   // readSwizSettings() reads from HOME/.swiz/settings.json.
-  const fakeHome = await mkdtemp(join(tmpdir(), "swiz-sandboxed-home-"))
-  tempDirs.push(fakeHome)
+  const fakeHome = fakeHomeOverride ?? (await mkdtemp(join(tmpdir(), "swiz-sandboxed-home-")))
+  if (!fakeHomeOverride) tempDirs.push(fakeHome)
+
   if (!sandboxedEdits) {
     await mkdir(join(fakeHome, ".swiz"), { recursive: true })
     await writeFile(
@@ -67,7 +86,9 @@ async function runHook(
 
   // Override TMPDIR so the hook's tmpdir() returns a path that test fixture dirs
   // are NOT inside — otherwise allowedRoots includes the real tmpdir and all
-  // mkdtemp-created "outside" dirs would be silently allowed.
+  // mkdtemp-created "outside" dirs would be silently allowed on macOS.
+  // On Linux tmpdir() IS /tmp so TMPDIR alone is insufficient; createOutsideDir()
+  // creates "outside" dirs under HOME to avoid the hardcoded /tmp entry.
   const fakeTmpDir = join(fakeHome, "tmp")
   await mkdir(fakeTmpDir, { recursive: true })
 
@@ -108,9 +129,19 @@ describe("pretooluse-sandboxed-edits", () => {
     expect(result.stdout).toBe("")
   })
 
+  test("allows edits within ~/.claude/projects/ (auto-memory)", async () => {
+    const cwd = await createTempDir()
+    // Use a known fakeHome so we can construct the expected allowed path.
+    const fakeHome = await createTempDir()
+    const memoryPath = join(fakeHome, ".claude", "projects", "test-project", "memory", "MEMORY.md")
+    const result = await runHook(cwd, "Write", memoryPath, { fakeHomeOverride: fakeHome })
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("")
+  })
+
   test("blocks edits outside cwd with generic message when no GitHub repo", async () => {
     const cwd = await createTempDir()
-    const outside = await createTempDir()
+    const outside = await createOutsideDir()
     // outside is NOT a git repo — no cross-repo hint expected
     const result = await runHook(cwd, "Edit", join(outside, "file.ts"))
     expect(result.exitCode).toBe(0)
@@ -123,7 +154,7 @@ describe("pretooluse-sandboxed-edits", () => {
 
   test("appends cross-repo hint when blocked path is inside a GitHub repo", async () => {
     const cwd = await createTempDir()
-    const otherRepo = await createTempDir()
+    const otherRepo = await createOutsideDir()
     await initGitRepo(otherRepo, "https://github.com/acme/widget.git")
 
     const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"))
@@ -138,7 +169,7 @@ describe("pretooluse-sandboxed-edits", () => {
 
   test("appends cross-repo hint for SSH remote format", async () => {
     const cwd = await createTempDir()
-    const otherRepo = await createTempDir()
+    const otherRepo = await createOutsideDir()
     await initGitRepo(otherRepo, "git@github.com:acme/widget.git")
 
     const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"))
@@ -150,7 +181,7 @@ describe("pretooluse-sandboxed-edits", () => {
 
   test("no cross-repo hint when other repo remote is not GitHub", async () => {
     const cwd = await createTempDir()
-    const otherRepo = await createTempDir()
+    const otherRepo = await createOutsideDir()
     await initGitRepo(otherRepo, "https://gitlab.com/acme/widget.git")
 
     const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"))
@@ -162,7 +193,7 @@ describe("pretooluse-sandboxed-edits", () => {
 
   test("no cross-repo hint when other repo has no remote", async () => {
     const cwd = await createTempDir()
-    const otherRepo = await createTempDir()
+    const otherRepo = await createOutsideDir()
     await initGitRepo(otherRepo) // no remote
 
     const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"))
@@ -174,7 +205,7 @@ describe("pretooluse-sandboxed-edits", () => {
 
   test("allows all tools when sandboxedEdits is disabled", async () => {
     const cwd = await createTempDir()
-    const otherRepo = await createTempDir()
+    const otherRepo = await createOutsideDir()
     await initGitRepo(otherRepo, "https://github.com/acme/widget.git")
 
     const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"), {

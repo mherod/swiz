@@ -27,7 +27,11 @@ function isWithin(parent: string, child: string): boolean {
 }
 
 const tmp = tmpdir()
-const allowedRoots = [cwd, tmp, "/tmp"]
+// ~/.claude/projects/ is always allowed: Claude Code stores per-project
+// auto-memory files there (e.g. memory/MEMORY.md). Blocking it creates a
+// deadlock with the memory-enforcement hook.
+const claudeProjectsDir = process.env.HOME ? `${process.env.HOME}/.claude/projects` : null
+const allowedRoots = [cwd, tmp, "/tmp", ...(claudeProjectsDir ? [claudeProjectsDir] : [])]
 
 if (allowedRoots.some((root) => isWithin(root, target))) process.exit(0)
 
