@@ -266,6 +266,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
     )
 
     const result = await runHook("pretooluse-update-memory-enforcement.ts", {
+      cwd: dir,
       tool_name: "Edit",
       tool_input: { file_path: "src/main.ts", new_string: "export const main = true\n" },
       transcript_path: transcriptPath,
