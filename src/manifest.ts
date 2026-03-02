@@ -63,6 +63,7 @@ export const manifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Edit|Write|NotebookEdit",
     hooks: [
+      { file: "pretooluse-sandboxed-edits.ts", timeout: 5 },
       { file: "pretooluse-json-validation.ts", timeout: 5 },
       { file: "pretooluse-no-direct-deps.ts", timeout: 5 },
       { file: "pretooluse-no-eslint-disable.ts", timeout: 5 },

@@ -8,7 +8,7 @@ import {
 import { findSessions, projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
-type SettingKey = "autoContinue" | "pushGate"
+type SettingKey = "autoContinue" | "pushGate" | "sandboxedEdits"
 type Action = "show" | "enable" | "disable"
 
 interface ParsedSettingsArgs {
@@ -25,7 +25,7 @@ const PROJECTS_DIR = join(HOME, ".claude", "projects")
 function usage(): string {
   return (
     "Usage: swiz settings [show | enable <setting> | disable <setting>] [--session [id]] [--dir <path>]\n" +
-    "Supported settings: auto-continue, push-gate"
+    "Supported settings: auto-continue, push-gate, sandboxed-edits"
   )
 }
 
@@ -37,6 +37,9 @@ function parseSetting(raw: string | undefined): SettingKey {
   }
   if (value === "push-gate" || value === "pushgate" || value === "push_gate") {
     return "pushGate"
+  }
+  if (value === "sandboxed-edits" || value === "sandboxededits" || value === "sandboxed_edits") {
+    return "sandboxedEdits"
   }
   throw new Error(`Unknown setting: ${raw}\n${usage()}`)
 }
@@ -106,6 +109,7 @@ async function resolveSessionId(query: string | null, targetDir: string): Promis
 function printSettings(
   autoContinue: boolean,
   pushGate: boolean,
+  sandboxedEdits: boolean,
   path: string | null,
   fileExists: boolean,
   sessionId: string | null,
@@ -120,8 +124,9 @@ function printSettings(
   }
   if (sessionId) console.log(`  scope: session ${sessionId}`)
   const sourceLabel = source === "session" ? "session override" : "global/default"
-  console.log(`  auto-continue: ${autoContinue ? "enabled" : "disabled"} (${sourceLabel})`)
-  console.log(`  push-gate:     ${pushGate ? "enabled" : "disabled"} (global)\n`)
+  console.log(`  auto-continue:   ${autoContinue ? "enabled" : "disabled"} (${sourceLabel})`)
+  console.log(`  push-gate:       ${pushGate ? "enabled" : "disabled"} (global)`)
+  console.log(`  sandboxed-edits: ${sandboxedEdits ? "enabled" : "disabled"} (global)\n`)
 }
 
 async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
@@ -135,6 +140,7 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
   printSettings(
     effective.autoContinue,
     effective.pushGate,
+    effective.sandboxedEdits,
     path,
     fileExists,
     sessionId,
@@ -162,7 +168,7 @@ async function setSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise
     : { ...current, [key]: enabled }
   const path = await writeSwizSettings(next)
   console.log(
-    `\n  ${enabled ? "Enabled" : "Disabled"} auto-continue${sessionId ? ` for session ${sessionId}` : ""}`
+    `\n  ${enabled ? "Enabled" : "Disabled"} ${parsed.settingArg ?? key}${sessionId ? ` for session ${sessionId}` : ""}`
   )
   console.log(`  Saved: ${path}\n`)
 }
@@ -176,6 +182,14 @@ export const settingsCommand: Command = {
     { flags: "show", description: "Show current effective settings (default action)" },
     { flags: "enable auto-continue", description: "Enable stop auto-continue behavior" },
     { flags: "disable auto-continue", description: "Disable stop auto-continue behavior" },
+    {
+      flags: "enable sandboxed-edits",
+      description: "Block file edits outside cwd and /tmp (default: enabled)",
+    },
+    {
+      flags: "disable sandboxed-edits",
+      description: "Allow file edits anywhere on the filesystem",
+    },
     {
       flags: "--session, -s [id]",
       description: "Target session scope (latest for --dir by default, or prefix match by id)",
