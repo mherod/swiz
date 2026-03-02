@@ -252,13 +252,23 @@ for (const rule of RULES) {
   }
 }
 
-// Reporter normalization: bun test only supports 'dots' and 'junit'
+// Reporter normalization: bun test only supports 'dots' and 'junit'.
+// Split the command into per-invocation segments at chain operators (|, &, ;)
+// so we never match --reporter flags outside a bun test invocation.
 const SUPPORTED_BUN_REPORTERS = new Set(["dots", "junit"])
-const reporterMatch = command.match(/(?:^|[|;&])\s*bun\s+test\b.*?--reporter[= ]([a-z][a-z0-9-]*)/)
-if (reporterMatch) {
-  const reporter = reporterMatch[1]
+const BUN_TEST_SEGMENT_RE = /(?:^|[|;&])\s*bun\s+test\b([^|;&]*)/g
+for (const segMatch of command.matchAll(BUN_TEST_SEGMENT_RE)) {
+  const segment = segMatch[1] ?? ""
+  // Matches --reporter=value, --reporter value, --reporter='value', --reporter "value"
+  const reporterMatch = segment.match(/--reporter(?:=|\s+)(['"]?)([a-z][a-z0-9-]*)\1/)
+  if (!reporterMatch) continue
+  const reporter = reporterMatch[2]
   if (reporter && !SUPPORTED_BUN_REPORTERS.has(reporter)) {
-    const corrected = command.replace(/--reporter[= ]\S+/, "--reporter=dots")
+    // Replace every unsupported --reporter occurrence across the full command
+    const corrected = command.replace(
+      /--reporter(?:=|\s+)['"]?[a-z][a-z0-9-]*['"]?/g,
+      "--reporter=dots"
+    )
     denyPreToolUse(
       `Bun only supports 'dots' and 'junit' reporters — '${reporter}' is not valid.\n\n` +
         `Use this corrected command instead:\n  ${corrected}`

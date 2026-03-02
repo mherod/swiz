@@ -92,8 +92,31 @@ describe("pretooluse-banned-commands", () => {
       const result = await runHook("bun test hooks/foo.test.ts --reporter=verbose")
       expect(result.decision).toBe("deny")
       expect(result.reason).toContain("'verbose' is not valid")
-      expect(result.reason).toContain("--reporter=dots")
       expect(result.reason).toContain("bun test hooks/foo.test.ts --reporter=dots")
+    })
+
+    test("bun test --reporter verbose (space form) is blocked", async () => {
+      const result = await runHook("bun test hooks/foo.test.ts --reporter verbose")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("'verbose' is not valid")
+      expect(result.reason).toContain("--reporter=dots")
+    })
+
+    test("bun test --reporter='verbose' (quoted equals form) is blocked", async () => {
+      const result = await runHook("bun test foo.ts --reporter='verbose'")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("'verbose' is not valid")
+      expect(result.reason).toContain("--reporter=dots")
+    })
+
+    test("chained: second invocation with bad reporter is blocked", async () => {
+      const result = await runHook(
+        "bun test a.test.ts --reporter=dots && bun test b.test.ts --reporter=verbose"
+      )
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("'verbose' is not valid")
+      // Both occurrences replaced in the corrected command
+      expect(result.reason).toContain("b.test.ts --reporter=dots")
     })
 
     test("bun test --reporter=pretty is blocked with corrected command", async () => {
@@ -135,8 +158,20 @@ describe("pretooluse-banned-commands", () => {
       expect(result.decision).toBeUndefined()
     })
 
+    test("bun test --reporter dots (space form) passes through", async () => {
+      const result = await runHook("bun test hooks/foo.test.ts --reporter dots")
+      expect(result.decision).toBeUndefined()
+    })
+
     test("bun test --reporter=junit passes through", async () => {
       const result = await runHook("bun test hooks/foo.test.ts --reporter=junit")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("chained: both invocations with valid reporters pass through", async () => {
+      const result = await runHook(
+        "bun test a.test.ts --reporter=dots && bun test b.test.ts --reporter=junit"
+      )
       expect(result.decision).toBeUndefined()
     })
 
