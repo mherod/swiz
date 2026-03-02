@@ -1,5 +1,6 @@
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
+import { projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
 const HOME = process.env.HOME ?? "~"
@@ -41,7 +42,7 @@ export async function walkDecode(
   // Each filesystem entry encodes to its name with '/' and '.' replaced by '-'.
   // Find all entries whose encoding is a prefix of encodedFromHere, longest first.
   const candidates = entries
-    .map((entry) => ({ entry, encoded: entry.replace(/[/.]/g, "-") }))
+    .map((entry) => ({ entry, encoded: projectKeyFromCwd(entry) }))
     .filter(({ encoded }) => encodedFromHere.startsWith(encoded))
     .sort((a, b) => b.encoded.length - a.encoded.length)
 
@@ -57,7 +58,7 @@ export async function walkDecode(
 }
 
 export async function decodeProjectPath(encodedName: string, homeDir = HOME): Promise<string> {
-  const encodedHome = homeDir.replace(/[/.]/g, "-")
+  const encodedHome = projectKeyFromCwd(homeDir)
   if (!encodedName.startsWith(encodedHome)) return encodedName
 
   const encodedRest = encodedName.slice(encodedHome.length)
@@ -278,7 +279,7 @@ export const cleanupCommand: Command = {
     // that projects with literal hyphens in their name are never false-positived.
     // walkDecode returns null only when no plausible filesystem path exists for
     // the encoded name — a reliable signal that the project is gone.
-    const encodedHome = HOME.replace(/[/.]/g, "-")
+    const encodedHome = projectKeyFromCwd(HOME)
     for (let i = 0; i < results.length; i++) {
       const name = results[i]!.name
       if (!name.startsWith(encodedHome)) continue

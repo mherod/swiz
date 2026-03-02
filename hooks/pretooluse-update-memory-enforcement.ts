@@ -8,6 +8,7 @@
 
 import { stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import {
   denyPreToolUse,
   isEditTool,
@@ -90,7 +91,7 @@ async function isMemoryRecentlyUpdated(cwd: string): Promise<boolean> {
   // Also check the project auto-memory file
   const home = process.env.HOME
   if (home) {
-    const encodedCwd = cwd.replace(/[/.]/g, "-")
+    const encodedCwd = projectKeyFromCwd(cwd)
     candidates.push(join(home, ".claude", "projects", encodedCwd, "memory", "MEMORY.md"))
     candidates.push(join(home, ".claude", "MEMORY.md"))
   }
