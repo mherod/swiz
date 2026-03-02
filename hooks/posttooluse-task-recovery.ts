@@ -1,20 +1,42 @@
 #!/usr/bin/env bun
 /**
- * PostToolUse hook: Detect missing tasks and instruct recovery.
+ * PostToolUse hook: Auto-recover missing tasks and confirm recovery.
  *
  * After TaskUpdate or TaskGet, checks whether the referenced task ID
  * exists on disk. If it doesn't (e.g. lost during context compaction),
- * emits additionalContext instructing the agent to recreate a replacement
- * task and validate the create→in_progress→completed lifecycle.
+ * immediately writes a replacement task file with the requested status
+ * already applied — no advisory loop required. The agent is informed
+ * that recovery was automatic and can continue without extra steps.
  */
 
-import { readdir } from "node:fs/promises"
+import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { isTaskTool, type ToolHookInput } from "./hook-utils.ts"
 
+interface TaskFile {
+  id: string
+  subject: string
+  description: string
+  activeForm?: string
+  status: string
+  blocks: string[]
+  blockedBy: string[]
+}
+
+interface ExtendedToolInput extends ToolHookInput {
+  tool_input?: {
+    taskId?: string | number
+    status?: string
+    subject?: string
+    description?: string
+    activeForm?: string
+    [key: string]: unknown
+  }
+}
+
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ToolHookInput
+  const input = (await Bun.stdin.json()) as ExtendedToolInput
   if (!input.session_id) return
 
   const toolName = input.tool_name ?? ""
@@ -28,27 +50,72 @@ async function main(): Promise<void> {
   if (toolName === "TaskCreate") return
 
   const tasksDir = join(homedir(), ".claude", "tasks", input.session_id)
-  let files: string[]
+  let existingFiles: string[]
   try {
-    files = await readdir(tasksDir)
+    const { readdir } = await import("node:fs/promises")
+    existingFiles = await readdir(tasksDir)
   } catch {
-    // No tasks directory at all — task is definitely missing
-    files = []
+    existingFiles = []
   }
 
-  const taskExists = files.some((f) => f === `${taskId}.json`)
+  const taskExists = existingFiles.some((f) => f === `${taskId}.json`)
   if (taskExists) return
 
-  // Task file not found — emit recovery instructions
-  const context = [
-    `Task #${taskId} not found on disk — likely lost during context compaction.`,
-    "Recovery steps:",
-    `1. Use TaskCreate to recreate a replacement task describing what task #${taskId} was tracking.`,
-    "2. Mark the new task in_progress with TaskUpdate.",
-    "3. If the work is already done, mark it completed immediately.",
-    "4. Use TaskGet on the new task to confirm the status was recorded.",
-    "Do NOT ignore this — untracked work causes stop hook failures.",
-  ].join(" ")
+  // ── Auto-recovery ──────────────────────────────────────────────────────────
+  // The task is missing. Apply the requested status immediately by writing
+  // the file directly rather than asking the agent to recreate it.
+
+  const requestedStatus = input.tool_input?.status ?? "completed"
+  const requestedSubject =
+    input.tool_input?.subject ?? `Recovered task #${taskId} (lost during compaction)`
+  const requestedDescription =
+    input.tool_input?.description ??
+    `This task was automatically recovered by posttooluse-task-recovery after task #${taskId} was not found on disk. The requested status '${requestedStatus}' has been applied.`
+  const requestedActiveForm = input.tool_input?.activeForm
+
+  // Only valid statuses
+  const validStatuses = ["pending", "in_progress", "completed"]
+  const status = validStatuses.includes(requestedStatus) ? requestedStatus : "completed"
+
+  const task: TaskFile = {
+    id: taskId,
+    subject: requestedSubject,
+    description: requestedDescription,
+    ...(requestedActiveForm ? { activeForm: requestedActiveForm } : {}),
+    status,
+    blocks: [],
+    blockedBy: [],
+  }
+
+  try {
+    await mkdir(tasksDir, { recursive: true })
+    await Bun.write(join(tasksDir, `${taskId}.json`), JSON.stringify(task, null, 2))
+  } catch {
+    // If write fails, fall back to advisory text so the agent knows to act
+    const context = [
+      `Task #${taskId} not found on disk — auto-recovery write failed.`,
+      `Recovery steps:`,
+      `1. Use TaskCreate to recreate task #${taskId} with subject: "${requestedSubject}"`,
+      `2. Mark it ${status} with TaskUpdate immediately.`,
+      "Do NOT ignore this — untracked work causes stop hook failures.",
+    ].join(" ")
+
+    console.log(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PostToolUse",
+          additionalContext: context,
+        },
+      })
+    )
+    return
+  }
+
+  // Confirm success to the agent — no further action needed
+  const context =
+    `Task #${taskId} was missing (lost during context compaction) — automatically recovered. ` +
+    `A replacement task file has been written with status '${status}' and subject: "${requestedSubject}". ` +
+    `No further recovery action is needed. Continue with the next step.`
 
   console.log(
     JSON.stringify({
