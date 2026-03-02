@@ -5,13 +5,21 @@
 // After any git push the last-push timestamp is written to a per-repo file in
 // /tmp. If another git push is attempted within 60 seconds, the hook blocks it.
 //
-// Bypass: include --force or -f in the push command to skip the cooldown.
+// Bypass: include any force flag in the push command to skip the cooldown:
+//   --force, -f, --force-with-lease, --force-with-lease=<ref>, --force-if-includes
 // Rationale: prevents accidental rapid-fire pushes that could trigger CI
 // loops, burn through rate limits, or push partially-prepared commits.
 
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
-import { denyPreToolUse, GIT_PUSH_RE, git, isShellTool, type ToolHookInput } from "./hook-utils.ts"
+import {
+  denyPreToolUse,
+  FORCE_PUSH_RE,
+  GIT_PUSH_RE,
+  git,
+  isShellTool,
+  type ToolHookInput,
+} from "./hook-utils.ts"
 
 const COOLDOWN_MS = 60_000
 
@@ -23,13 +31,9 @@ const command: string = (input?.tool_input?.command as string) ?? ""
 // Only gate on git push commands
 if (!GIT_PUSH_RE.test(command)) process.exit(0)
 
-// --force or -f bypasses the cooldown
-if (
-  /\bgit\s+push\b.*(?:--force|-f)\b/.test(command) ||
-  /\bgit\s+push\b.*-[a-zA-Z]*f/.test(command)
-) {
-  process.exit(0)
-}
+// Any force flag bypasses the cooldown (--force, --force-with-lease[=<ref>],
+// --force-if-includes, -f, combined short flags containing f).
+if (FORCE_PUSH_RE.test(command)) process.exit(0)
 
 // Derive a per-repo sentinel path keyed on the git root (or cwd as fallback)
 const cwd: string = (input?.tool_input?.cwd as string) ?? process.cwd()
@@ -53,8 +57,9 @@ if (existsSync(sentinelPath)) {
         `BLOCKED: git push cooldown active — ${remaining}s remaining.\n\n` +
           `A push was made ${Math.floor(elapsed / 1000)}s ago. ` +
           `Wait ${remaining}s before pushing again.\n\n` +
-          `To bypass the cooldown, add --force to your push command:\n` +
-          `  git push --force origin <branch>`
+          `To bypass the cooldown, add a force flag to your push command:\n` +
+          `  git push --force-with-lease origin <branch>  (safe force)\n` +
+          `  git push --force origin <branch>             (unconditional)`
       )
     }
   }

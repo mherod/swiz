@@ -709,6 +709,15 @@ export const GIT_WRITE_RE =
 /** Matches `git push`, `git pull`, or `git fetch` — mechanical sync ops. */
 export const GIT_SYNC_RE = /(?:^|\|\||&&|;)\s*git\s+(push|pull|fetch)\b/
 
+/**
+ * Matches any force-push flag on a `git push` command:
+ *   --force, --force-with-lease, --force-with-lease=<ref>,
+ *   --force-if-includes, -f, or combined short flags containing f (e.g. -fu).
+ * Used by pretooluse-push-cooldown.ts to bypass the cooldown.
+ */
+export const FORCE_PUSH_RE =
+  /\bgit\s+push\b.*(?:--force(?:-with-lease(?:=[^\s]+)?|-if-includes)?(?!\S)|-[a-zA-Z]*f)/
+
 /** Matches `ls`, `rg`, or `grep` — pure read commands. */
 export const READ_CMD_RE = /(?:^|\|\||&&|;)\s*(ls|rg|grep)\b/
 
