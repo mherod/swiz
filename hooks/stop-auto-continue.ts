@@ -294,25 +294,30 @@ function buildPrompt(
     `almost every session has at least one thing that could have been done better. ` +
     `Do NOT use markup, bullet points, or line breaks.\n\n` +
     `NEXT STEP RULES:\n` +
-    `Based solely on the transcript text provided, identify the boldest, highest-impact action ` +
+    `Based solely on the transcript text provided, identify the boldest, highest-impact CODE action ` +
     `the assistant should execute next — autonomously, without asking the user any questions ` +
     `or waiting for confirmation. ` +
     `The USER'S MESSAGES section (if present) contains the user's explicit goals, requests, and feedback — ` +
     `treat these as the primary motivational context: the next step should serve what the user has been trying to accomplish. ` +
     `The SESSION TASKS COMPLETED list reveals the work trajectory — ` +
     `use it to understand what has already been achieved and what direction the session was heading. ` +
-    `PRIORITY ORDER: (1) If any errors, failures, bugs, warnings, or issues were identified ` +
-    `or surfaced in the transcript but NOT yet resolved, those take HIGHEST priority. ` +
-    `(2) If any task or feature was started but left incomplete, finish it. ` +
+    `PRIORITY ORDER: ` +
+    `(1) If any feature, capability, or behaviour was described or started but is not yet fully implemented in code, implement it. ` +
+    `(2) If any errors, failures, bugs, or broken functionality were identified but NOT resolved, fix them. ` +
     `(3) If a PROJECT STATUS section reports stale artifacts (e.g., CHANGELOG.md), ` +
     skillAdvice("changelog", `use the /changelog skill to update them. `, `update them. `) +
-    `(4) Otherwise, continue in the direction the user's messages and completed tasks indicate — ` +
-    `find the next valuable improvement (tests, edge cases, related issues, quality) that aligns with the user's goals. ` +
-    `Be ambitious. There is always more to do. ` +
+    `(4) Otherwise, find the most impactful missing functionality, incomplete API surface, ` +
+    `or unhandled real-world case in the code changed this session — and implement it. ` +
+    `Be ambitious: extend the feature, handle the obvious next case, fill the gap that would block a real user. ` +
     `NEVER conclude that work is complete or that nothing remains. ` +
-    `Start with an imperative verb (Run, Fix, Add, Check, Verify, Commit, Improve, Investigate, etc.). ` +
-    `The step must be something the assistant can do right now on its own. ` +
-    `Do NOT suggest asking the user, confirming scope, or presenting options.\n\n` +
+    `ABSOLUTE PROHIBITIONS — never suggest any of these regardless of session content:\n` +
+    `  - git commit, git add, git push, or any git workflow step\n` +
+    `  - writing, adding, or improving tests (unless the transcript explicitly shows a specific behavioral bug ` +
+    `    in existing code that a test would directly catch — even then, fix the bug first, not the test)\n` +
+    `  - code review, cleanup, refactoring, or "quality" work with no concrete functional outcome\n` +
+    `  - asking the user a question, confirming scope, or presenting options\n` +
+    `Start with an imperative verb that names a code action (Implement, Add, Fix, Build, Extend, Wire up, etc.). ` +
+    `The step must be something the assistant can do right now by editing source files.\n\n` +
     `REFLECTIONS RULES:\n` +
     `Extract user preferences and conventions confirmed during the session. ` +
     `Only include items where the user explicitly stated a preference ` +
