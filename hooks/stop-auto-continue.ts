@@ -29,7 +29,8 @@ interface TaskEntry {
 }
 
 interface AgentResponse {
-  critique: string
+  processCritique: string
+  productCritique: string
   next: string
   reflections: string[]
 }
@@ -115,7 +116,10 @@ function parseAgentResponse(raw: string): AgentResponse {
 
   try {
     const parsed = JSON.parse(jsonStr)
-    const critique = typeof parsed.critique === "string" ? sanitizeResponse(parsed.critique) : ""
+    const processCritique =
+      typeof parsed.processCritique === "string" ? sanitizeResponse(parsed.processCritique) : ""
+    const productCritique =
+      typeof parsed.productCritique === "string" ? sanitizeResponse(parsed.productCritique) : ""
     const next = typeof parsed.next === "string" ? sanitizeResponse(parsed.next) : ""
     const reflections = Array.isArray(parsed.reflections)
       ? parsed.reflections
@@ -125,10 +129,15 @@ function parseAgentResponse(raw: string): AgentResponse {
           )
           .slice(0, 10)
       : []
-    return { critique, next, reflections }
+    return { processCritique, productCritique, next, reflections }
   } catch {
     // Fallback: treat as plain text (backward compatible)
-    return { critique: "", next: sanitizeResponse(raw), reflections: [] }
+    return {
+      processCritique: "",
+      productCritique: "",
+      next: sanitizeResponse(raw),
+      reflections: [],
+    }
   }
 }
 
@@ -274,25 +283,28 @@ function buildPrompt(
     `Do not call tools. Do not read files. Do not perform work. Just analyze the text and respond.\n\n` +
     `OUTPUT FORMAT: Reply with a valid JSON object containing these fields:\n` +
     `{\n` +
-    `  "critique": "<one candid sentence critiquing the session>",\n` +
+    `  "processCritique": "<one sentence on HOW work was done>",\n` +
+    `  "productCritique": "<one sentence on WHAT was built or missed>",\n` +
     `  "next": "<one imperative sentence>",\n` +
     `  "reflections": ["<directive>", ...]\n` +
     `}\n\n` +
     `CRITIQUE RULES:\n` +
-    `Write a single brutally honest sentence (under 200 chars) calling out the most significant blind spot, ` +
-    `act of laziness, or procedural shortcoming in this session. ` +
-    `Address the assistant directly in second person — always say "You", never "the assistant". ` +
-    `If you reference the user, say "I". ` +
-    `Blind spots: things You never thought to check or verify. ` +
-    `Laziness: shortcuts You took, assumptions You didn't validate, obvious steps You skipped. ` +
-    `Procedural shortcomings: deviating from best practices, wrong order of operations, missing validation. ` +
-    `Be specific and direct — name the actual failure ` +
+    `Write two separate critiques — keep each under 160 chars, no markup, no bullet points, no line breaks.\n\n` +
+    `PROCESS CRITIQUE ("processCritique"): Call out the most significant failure in HOW the work was executed. ` +
+    `Address the assistant directly — always say "You", never "the assistant"; if referencing the user say "I". ` +
+    `Focus on: wrong order of operations, steps skipped, assumptions not validated, verification missed, ` +
+    `tools used incorrectly, work done without reading the relevant code first. ` +
+    `Be specific — name the actual failure ` +
     `(e.g., "You applied the fix without first reproducing the bug" or ` +
-    `"You never checked whether the existing tests covered this path before adding new ones" or ` +
     `"You skipped reading the existing implementation before modifying it"). ` +
-    `If the session had no meaningful shortcomings, say so in one sentence — but be skeptical: ` +
-    `almost every session has at least one thing that could have been done better. ` +
-    `Do NOT use markup, bullet points, or line breaks.\n\n` +
+    `If the process was genuinely sound, say so briefly — but be skeptical.\n\n` +
+    `PRODUCT CRITIQUE ("productCritique"): Call out the most significant gap in WHAT was built or what was missed. ` +
+    `Focus on: features left incomplete, user needs not addressed, edge cases ignored in the implementation, ` +
+    `wrong problem solved, scope too narrow or too broad, output that doesn't actually serve the user's goal. ` +
+    `Be specific — name the actual gap ` +
+    `(e.g., "The fix handles the happy path but leaves the error case broken" or ` +
+    `"You solved a surface symptom but the root cause is still unaddressed"). ` +
+    `If the product outcome was genuinely complete, say so briefly — but be skeptical.\n\n` +
     `NEXT STEP RULES:\n` +
     `Based solely on the transcript text provided, identify the boldest, highest-impact CODE action ` +
     `the assistant should execute next — autonomously, without asking the user any questions ` +
@@ -366,7 +378,12 @@ async function main(): Promise<void> {
 
   const taskContext = await loadTaskContext(input.session_id ?? "")
 
-  let response: AgentResponse = { critique: "", next: "", reflections: [] }
+  let response: AgentResponse = {
+    processCritique: "",
+    productCritique: "",
+    next: "",
+    reflections: [],
+  }
 
   if (detectAgentCli()) {
     const context = formatTurnsAsContext(turns)
@@ -397,7 +414,13 @@ async function main(): Promise<void> {
     await writeReflections(input.cwd, response.reflections)
   }
 
-  const critiqueLine = response.critique ? `${response.critique}\n\n` : ""
+  const critiqueLines = [
+    response.processCritique ? `Process: ${response.processCritique}` : "",
+    response.productCritique ? `Product: ${response.productCritique}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+  const critiqueLine = critiqueLines ? `${critiqueLines}\n\n` : ""
   blockStopRaw(
     `${critiqueLine}Continue autonomously — do not ask questions or wait for confirmation: ${response.next || FALLBACK_SUGGESTION}`
   )

@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**40 hooks. 5 event types. Every agent. Zero compromises.**
+**41 hooks. 5 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -82,7 +82,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-40 hook scripts across 5 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+41 hook scripts across 5 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
 ### Stop (14)
 
@@ -126,7 +126,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-push-checks-gate.ts` | Blocks `git push` unless branch and open-PR checks have already been run in the current session. Prevents pushing without verifying context and avoiding duplicate PRs. |
 | `pretooluse-no-push-when-instructed.ts` | Blocks `git push` when the transcript contains an explicit "do not push" instruction (e.g. from the `/commit` skill) without a subsequent push-approval signal. Push requires explicit user authorisation. |
 
-### PostToolUse (8)
+### PostToolUse (9)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -140,6 +140,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-pr-context.ts` | Injects PR context (description, review status, CI state) when the agent checks out a branch. Instant situational awareness. |
 | `posttooluse-prettier-ts.ts` | Auto-formats TypeScript files after edits. Runs async so it never slows the agent down. |
 | `posttooluse-task-subject-validation.ts` | Validates task subjects after creation, catching issues that the pre-creation hook might have missed. |
+| `posttooluse-task-recovery.ts` | After a TaskUpdate or TaskGet, re-checks the session task list and recovers any tasks that were lost during context compaction. |
 
 ### SessionStart (2)
 
@@ -328,7 +329,7 @@ swiz/
     ├── hook-utils.ts         # Shared utilities: tool equivalence, polyglot output, git/gh, skill checking
     ├── shim.sh               # Shell wrapper functions (sourced from profile)
     ├── task-subject-validation.ts  # Shared validation logic
-    └── *.ts                  # 40 hook scripts (all TypeScript)
+    └── *.ts                  # 41 hook scripts (all TypeScript)
 ```
 
 The canonical hook manifest lives in `src/manifest.ts`. Each hook group specifies an event, an optional tool matcher, and a list of scripts. At install time, `agents.ts` translates matchers (`Bash` → `Shell` for Cursor, `Bash` → `run_shell_command` for Gemini) and events (`Stop` → `stop` for Cursor, `Stop` → `AfterAgent` for Gemini), then generates the correct config structure per agent.
