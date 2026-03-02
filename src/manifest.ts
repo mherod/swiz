@@ -79,6 +79,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-banned-commands.ts", timeout: 5 },
       { file: "pretooluse-no-npm.ts", timeout: 5 },
       { file: "pretooluse-long-sleep.ts", timeout: 5 },
+      { file: "pretooluse-commit-checks-gate.ts", timeout: 5 },
       { file: "pretooluse-push-checks-gate.ts", timeout: 5 },
       { file: "pretooluse-no-push-when-instructed.ts", timeout: 5 },
     ],
