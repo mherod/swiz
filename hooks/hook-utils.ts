@@ -426,6 +426,53 @@ export async function readSessionTasks(
   return tasks
 }
 
+/**
+ * Walk upward from `startDir` to the filesystem root looking for `fileName`.
+ * Returns true on first match, false when no match exists.
+ */
+export async function hasFileInTree(startDir: string, fileName: string): Promise<boolean> {
+  if (!startDir || !fileName) return false
+  let dir = startDir
+  while (true) {
+    if (await Bun.file(join(dir, fileName)).exists()) return true
+    const parent = dirname(dir)
+    if (parent === dir) return false
+    dir = parent
+  }
+}
+
+/** True when a task status counts as incomplete work. */
+export function isIncompleteTaskStatus(status: string): boolean {
+  return status === "pending" || status === "in_progress"
+}
+
+/**
+ * Find the most recent index in `toolNames` that corresponds to any task tool.
+ * Returns -1 when no task tool is present.
+ */
+export function findLastTaskToolCallIndex(toolNames: string[]): number {
+  for (let i = toolNames.length - 1; i >= 0; i--) {
+    const name = toolNames[i]
+    if (name && TASK_TOOLS.has(name)) return i
+  }
+  return -1
+}
+
+/**
+ * Format task subjects for denial messages.
+ * Uses active task lines when present; otherwise falls back to all tasks.
+ */
+export function formatTaskSubjectsForDisplay(
+  allTasks: SessionTask[],
+  activeTaskSubjects: string[]
+): string {
+  const displayTasks =
+    activeTaskSubjects.length > 0
+      ? activeTaskSubjects
+      : allTasks.map((t) => `#${t.id} (${t.status}): ${t.subject}`)
+  return displayTasks.map((t) => `  ${t}`).join("\n")
+}
+
 /** Create a session task via tasks-list.ts. Uses a sentinel file to fire only once per session. */
 export async function createSessionTask(
   sessionId: string | undefined,
@@ -637,6 +684,17 @@ export const GH_CMD_RE = /(?:^|\|\||&&|;)\s*gh\b/
 
 /** Matches `swiz issue close` or `swiz issue comment` — thin gh-issue wrappers. */
 export const SWIZ_ISSUE_RE = /(?:^|\|\||&&|;)\s*swiz\s+issue\s+(close|comment)\b/
+
+/** True when a shell command is exempt from task-tracking enforcement. */
+export function isTaskTrackingExemptShellCommand(command: string): boolean {
+  return (
+    (GIT_READ_RE.test(command) && !GIT_WRITE_RE.test(command)) ||
+    READ_CMD_RE.test(command) ||
+    GIT_SYNC_RE.test(command) ||
+    GH_CMD_RE.test(command) ||
+    SWIZ_ISSUE_RE.test(command)
+  )
+}
 
 // ── Push-gate check regexes ───────────────────────────────────────────────
 
