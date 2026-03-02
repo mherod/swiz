@@ -210,8 +210,15 @@ async function main(): Promise<void> {
           stdout: "pipe",
           stderr: "pipe",
         })
+        let lsofKilled = false
+        const killTimer = setTimeout(() => {
+          lsofKilled = true
+          lsofProc.kill()
+        }, 2000)
         const lsofOut = await new Response(lsofProc.stdout).text()
         await lsofProc.exited
+        clearTimeout(killTimer)
+        if (lsofKilled) continue // Skip this PID if lsof timed out
         const procCwd = lsofOut
           .split("\n")
           .find((l) => l.startsWith("n"))
