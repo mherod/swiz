@@ -5,6 +5,7 @@ import { continueCommand } from "./src/commands/continue.ts"
 import { dispatchCommand } from "./src/commands/dispatch.ts"
 import { hooksCommand } from "./src/commands/hooks.ts"
 import { installCommand } from "./src/commands/install.ts"
+import { issueCommand } from "./src/commands/issue.ts"
 import { sentimentCommand } from "./src/commands/sentiment.ts"
 import { sessionCommand } from "./src/commands/session.ts"
 import { settingsCommand } from "./src/commands/settings.ts"
@@ -27,6 +28,7 @@ registerCommand(dispatchCommand)
 registerCommand(transcriptCommand)
 registerCommand(continueCommand)
 registerCommand(cleanupCommand)
+registerCommand(issueCommand)
 registerCommand(sentimentCommand)
 registerCommand(sessionCommand)
 
