@@ -61,7 +61,7 @@ class SessionTranscript {
       },
     })
     this.lines.push(entry)
-    await writeFile(this.path, this.lines.join("\n") + "\n")
+    await writeFile(this.path, `${this.lines.join("\n")}\n`)
   }
 
   /** Record a non-bash tool_use entry (e.g. Read, Edit). */
@@ -73,7 +73,7 @@ class SessionTranscript {
       },
     })
     this.lines.push(entry)
-    await writeFile(this.path, this.lines.join("\n") + "\n")
+    await writeFile(this.path, `${this.lines.join("\n")}\n`)
   }
 
   get commandCount(): number {
@@ -490,7 +490,7 @@ describe("E2E: push-checks-gate escaped/multiline/truncated JSON payload hardeni
         ],
       },
     })
-    await writeFile(transcriptPath, entry + "\n")
+    await writeFile(transcriptPath, `${entry}\n`)
 
     const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
     expect(result.blocked).toBe(false)

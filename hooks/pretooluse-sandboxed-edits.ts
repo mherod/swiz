@@ -57,7 +57,7 @@ async function resolveCanonical(p: string): Promise<string> {
 }
 
 function isWithin(parent: string, child: string): boolean {
-  const prefix = parent.endsWith("/") ? parent : parent + "/"
+  const prefix = parent.endsWith("/") ? parent : `${parent}/`
   return child === parent || child.startsWith(prefix)
 }
 

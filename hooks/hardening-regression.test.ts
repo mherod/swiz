@@ -530,7 +530,7 @@ describe("lefthook.yml hook-order and invariant guards", () => {
   test("lint retains stage_fixed:true", async () => {
     const raw = await Bun.file("lefthook.yml").text()
     const config = parseYaml(raw) as LefthookConfig
-    expect(config["pre-commit"]?.commands?.["lint"]?.stage_fixed).toBe(true)
+    expect(config["pre-commit"]?.commands?.lint?.stage_fixed).toBe(true)
   })
 
   // ── Config invariants: glob and run patterns haven't drifted ────────────
@@ -538,13 +538,13 @@ describe("lefthook.yml hook-order and invariant guards", () => {
   test("typecheck glob is exactly '*.ts'", async () => {
     const raw = await Bun.file("lefthook.yml").text()
     const config = parseYaml(raw) as LefthookConfig
-    expect(config["pre-commit"]?.commands?.["typecheck"]?.glob).toBe("*.ts")
+    expect(config["pre-commit"]?.commands?.typecheck?.glob).toBe("*.ts")
   })
 
   test("lint glob covers ts, tsx, js, jsx, and json", async () => {
     const raw = await Bun.file("lefthook.yml").text()
     const config = parseYaml(raw) as LefthookConfig
-    const glob = config["pre-commit"]?.commands?.["lint"]?.glob ?? ""
+    const glob = config["pre-commit"]?.commands?.lint?.glob ?? ""
     expect(glob).toContain("ts")
     expect(glob).toContain("json")
   })
@@ -552,6 +552,6 @@ describe("lefthook.yml hook-order and invariant guards", () => {
   test("lint run command uses lint-staged", async () => {
     const raw = await Bun.file("lefthook.yml").text()
     const config = parseYaml(raw) as LefthookConfig
-    expect(config["pre-commit"]?.commands?.["lint"]?.run).toContain("lint-staged")
+    expect(config["pre-commit"]?.commands?.lint?.run).toContain("lint-staged")
   })
 })
