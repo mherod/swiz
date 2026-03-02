@@ -16,6 +16,7 @@ import {
   isWriteTool,
   READ_CMD_RE,
   TASK_TOOLS,
+  toolNameForCurrentAgent,
 } from "./hook-utils.ts"
 
 const STALENESS_THRESHOLD = 20
@@ -112,6 +113,8 @@ if (transcriptPath) {
   if (lastTaskIndex >= 0) {
     const callsSinceTask = total - 1 - lastTaskIndex
     if (callsSinceTask >= STALENESS_THRESHOLD) {
+      const taskUpdateName = toolNameForCurrentAgent("TaskUpdate")
+      const taskCreateName = toolNameForCurrentAgent("TaskCreate")
       const taskList = activeTasks.map((t) => `  ${t}`).join("\n")
       deny(
         `STOP. Tasks have gone stale. ${callsSinceTask} tool calls since last task update. ` +
@@ -119,9 +122,9 @@ if (transcriptPath) {
           `Active tasks:\n${taskList}\n\n` +
           `Tasks are not suggestions — they are your execution plan. Stale tasks mean you are operating without accountability.\n\n` +
           `YOU MUST DO THE FOLLOWING BEFORE CONTINUING:\n` +
-          `1. Update tasks with latest progress — mark completed work done, update in-progress tasks with current status.\n` +
+          `1. Use ${taskUpdateName} to update in-progress tasks with the latest progress and mark completed work done.\n` +
           `2. Ensure the current work has an in_progress task with a clear description.\n` +
-          `3. Plan ahead — ensure upcoming tasks exist beyond the current work.\n\n` +
+          `3. Use ${taskCreateName} to create at least one further task for the next concrete step based on the work underway.\n\n` +
           `After updating tasks, ${toolName} will be unblocked automatically.`
       )
     }

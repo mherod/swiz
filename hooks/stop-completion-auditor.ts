@@ -8,6 +8,7 @@ import {
   blockStop,
   extractToolNamesFromTranscript,
   formatActionPlan,
+  isTaskCreateTool,
   type StopHookInput,
 } from "./hook-utils.ts"
 
@@ -29,11 +30,10 @@ interface AuditEntry {
 async function countToolCalls(
   transcriptPath: string
 ): Promise<{ total: number; taskToolUsed: boolean }> {
-  const TASK_TOOLS = new Set(["TaskCreate", "TaskUpdate", "TodoWrite"])
   const toolNames = await extractToolNamesFromTranscript(transcriptPath)
   return {
     total: toolNames.length,
-    taskToolUsed: toolNames.some((n) => TASK_TOOLS.has(n)),
+    taskToolUsed: toolNames.some((n) => n === "TaskUpdate" || isTaskCreateTool(n)),
   }
 }
 
@@ -65,10 +65,13 @@ async function main(): Promise<void> {
       blockStop(
         `No tasks were created this session (${toolCallCount} tool calls made).\n\n` +
           "Create tasks to record the work done:\n" +
-          formatActionPlan([
-            "TaskCreate for each significant piece of work",
-            "TaskUpdate (status: completed) on each task",
-          ])
+          formatActionPlan(
+            [
+              "Use TaskCreate to create one task for each significant piece of work",
+              "Use TaskUpdate to mark each task completed after recording the work",
+            ],
+            { translateToolNames: true }
+          )
       )
     }
     return
@@ -133,10 +136,13 @@ async function main(): Promise<void> {
       blockStop(
         `No completed tasks on record (${toolCallCount} tool calls made).\n\n` +
           "Create tasks to record the work done:\n" +
-          formatActionPlan([
-            "TaskCreate for each significant piece of work",
-            "TaskUpdate (status: completed) on each task",
-          ])
+          formatActionPlan(
+            [
+              "Use TaskCreate to create one task for each significant piece of work",
+              "Use TaskUpdate to mark each task completed after recording the work",
+            ],
+            { translateToolNames: true }
+          )
       )
     }
     return

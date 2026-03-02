@@ -14,12 +14,14 @@ async function runHook({
   sessionId = "session-123",
   transcriptPath,
   command,
+  envOverrides = {},
 }: {
   homeDir: string
   toolName?: string
   sessionId?: string
   transcriptPath?: string
   command?: string
+  envOverrides?: Record<string, string | undefined>
 }): Promise<HookResult> {
   const payload = JSON.stringify({
     tool_name: toolName,
@@ -27,11 +29,18 @@ async function runHook({
     transcript_path: transcriptPath ?? "",
     tool_input: command !== undefined ? { command } : {},
   })
+  const env: Record<string, string | undefined> = { ...process.env, HOME: homeDir }
+  delete env.CLAUDECODE
+  delete env.CURSOR_TRACE_ID
+  delete env.GEMINI_CLI
+  delete env.GEMINI_PROJECT_DIR
+  delete env.CODEX_MANAGED_BY_NPM
+  delete env.CODEX_THREAD_ID
   const proc = Bun.spawn(["bun", "hooks/pretooluse-require-tasks.ts"], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, HOME: homeDir },
+    env: { ...env, ...envOverrides },
   })
   proc.stdin.write(payload)
   proc.stdin.end()
@@ -176,6 +185,42 @@ describe("pretooluse-require-tasks", () => {
     const result = await runHook({ homeDir, toolName: "Bash", sessionId, transcriptPath })
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("stale")
+    expect(result.reason).toContain("Use TaskUpdate")
+    expect(result.reason).toContain("Use TaskCreate")
+  })
+
+  test("stale-task denial uses the current agent task tool aliases", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-stale-codex"
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Active task",
+      status: "in_progress",
+    })
+
+    const lines: string[] = []
+    const makeEntry = (toolName: string) =>
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", name: toolName, id: "x", input: {} }],
+        },
+      })
+    lines.push(makeEntry("update_plan"))
+    for (let i = 0; i < 21; i++) lines.push(makeEntry("Read"))
+
+    const transcriptPath = join(homeDir, "transcript-codex.jsonl")
+    await writeFile(transcriptPath, `${lines.join("\n")}\n`)
+
+    const result = await runHook({
+      homeDir,
+      toolName: "Bash",
+      sessionId,
+      transcriptPath,
+      envOverrides: { CODEX_THREAD_ID: "test-codex" },
+    })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("Use update_plan")
   })
 
   test("allows when tasks exist and transcript is fresh (< 20 calls since last task tool)", async () => {

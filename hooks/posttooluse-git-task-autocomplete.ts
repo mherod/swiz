@@ -20,6 +20,7 @@ import {
   isShellTool,
   stripHeredocs,
   type ToolHookInput,
+  toolNameForCurrentAgent,
 } from "./hook-utils.ts"
 
 const SUBJECT_RE = /\b(commit|push)\b/i
@@ -79,12 +80,12 @@ async function main(): Promise<void> {
   // After a push: emit additionalContext so the agent creates a CI-watching task.
   // File writes cannot affect Claude's in-memory task list — only this output channel can.
   if (isPush) {
+    const taskCreateName = toolNameForCurrentAgent("TaskCreate")
     console.log(
       JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "PostToolUse",
-          additionalContext:
-            "git push succeeded. Use TaskCreate to create a task: subject='Wait for CI and verify pass', then mark it in_progress and monitor CI before stopping.",
+          additionalContext: `git push succeeded. Use ${taskCreateName} to create a "Wait for CI and verify pass" task, then mark it in_progress and monitor CI before stopping.`,
         },
       })
     )

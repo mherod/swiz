@@ -3,6 +3,7 @@
 
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { toolNameForCurrentAgent } from "./hook-utils.ts"
 
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as { session_id?: string }
@@ -30,12 +31,12 @@ async function main(): Promise<void> {
   }
 
   if (pendingCount === 0) {
+    const taskCreateName = toolNameForCurrentAgent("TaskCreate")
     console.log(
       JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "UserPromptSubmit",
-          additionalContext:
-            "No pending tasks in this session. If the upcoming work is non-trivial, use TaskCreate to plan it before starting.",
+          additionalContext: `No pending tasks in this session. If the upcoming work is non-trivial, use ${taskCreateName} to plan it before starting.`,
         },
       })
     )

@@ -12,7 +12,7 @@
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { isTaskTool, type ToolHookInput } from "./hook-utils.ts"
+import { isTaskTool, type ToolHookInput, toolNameForCurrentAgent } from "./hook-utils.ts"
 
 interface TaskFile {
   id: string
@@ -91,12 +91,14 @@ async function main(): Promise<void> {
     await mkdir(tasksDir, { recursive: true })
     await Bun.write(join(tasksDir, `${taskId}.json`), JSON.stringify(task, null, 2))
   } catch {
+    const taskCreateName = toolNameForCurrentAgent("TaskCreate")
+    const taskUpdateName = toolNameForCurrentAgent("TaskUpdate")
     // If write fails, fall back to advisory text so the agent knows to act
     const context = [
       `Task #${taskId} not found on disk — auto-recovery write failed.`,
       `Recovery steps:`,
-      `1. Use TaskCreate to recreate task #${taskId} with subject: "${requestedSubject}"`,
-      `2. Mark it ${status} with TaskUpdate immediately.`,
+      `1. Use ${taskCreateName} to recreate task #${taskId} with subject: "${requestedSubject}"`,
+      `2. Mark it ${status} with ${taskUpdateName} immediately.`,
       "Do NOT ignore this — untracked work causes stop hook failures.",
     ].join(" ")
 

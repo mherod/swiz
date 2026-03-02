@@ -4,7 +4,7 @@
 // to pretooluse-require-tasks.ts — the parent session stays blocked as if no
 // tasks exist. TaskCreate must always be called directly in the parent session.
 
-import { denyPreToolUse as deny } from "./hook-utils.ts"
+import { denyPreToolUse as deny, toolNameForCurrentAgent } from "./hook-utils.ts"
 
 const input = await Bun.stdin.json()
 const prompt: string = input?.tool_input?.prompt ?? ""
@@ -17,19 +17,20 @@ const delegationPatterns = [
   /\bTaskList\b/,
   /\bTaskGet\b/,
   /\bTodoWrite\b/,
+  /\bwrite_todos\b/,
+  /\bupdate_plan\b/,
 ]
 
 if (delegationPatterns.some((p) => p.test(prompt))) {
+  const taskCreateName = toolNameForCurrentAgent("TaskCreate")
   deny(
     "NEVER delegate task creation to a subagent.\n\n" +
       "Tasks created inside a subagent land in a different session and are invisible to the " +
       "pretooluse-require-tasks.ts hook. The parent session will remain blocked as if no tasks exist.\n\n" +
       "WRONG — do not do this:\n" +
-      '  Task(prompt: "Create tasks for the upcoming work. Use TaskCreate for each step.")\n\n' +
-      "CORRECT — call the tool directly in this session:\n" +
-      '  TaskCreate(subject: "Implement X", description: "...", activeForm: "Implementing X")\n' +
-      '  TaskCreate(subject: "Run quality checks", description: "...", activeForm: "Running checks")\n' +
-      '  TaskCreate(subject: "Commit and push", description: "...", activeForm: "Committing")\n\n' +
-      "TaskCreate is a tool available directly to you — use it now, in this session, without launching any agent."
+      `  Ask another agent to use ${taskCreateName} to create the upcoming tasks for you.\n\n` +
+      "CORRECT — call the task tool directly in this session:\n" +
+      `  Use ${taskCreateName} yourself to create separate tasks for "Implement X", "Run quality checks", and "Commit and push".\n\n` +
+      `${taskCreateName} is a tool available directly to you — use it now, in this session, without launching any agent.`
   )
 }

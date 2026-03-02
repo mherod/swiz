@@ -21,6 +21,7 @@ if (!Bun.which("bun")) {
 
 import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { translateMatcher } from "../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
 import { skillAdvice, skillExists } from "../src/skill-utils.ts"
 
@@ -220,11 +221,25 @@ export function emitContext(eventName: string, context: string): never {
 /**
  * Format a numbered action plan for inclusion in stop hook block reasons.
  * Returns an "Action plan:\n  1. ...\n  2. ..." block ready to append to a reason string.
+ * When requested, canonical tool names (for example "TaskCreate") are
+ * translated to the current agent's tool alias before rendering.
  */
-export function formatActionPlan(steps: string[]): string {
+export function formatActionPlan(
+  steps: string[],
+  options?: { translateToolNames?: boolean }
+): string {
   if (steps.length === 0) return ""
-  const numbered = steps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")
+  const agent = options?.translateToolNames ? detectCurrentAgent() : null
+  const renderedSteps = agent ? steps.map((step) => translateMatcher(step, agent) ?? step) : steps
+  const numbered = renderedSteps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")
   return `Action plan:\n${numbered}\n`
+}
+
+/** Return the current agent's tool name for a canonical tool identifier. */
+export function toolNameForCurrentAgent(canonicalName: string): string {
+  const agent = detectCurrentAgent()
+  if (!agent) return canonicalName
+  return translateMatcher(canonicalName, agent) ?? canonicalName
 }
 
 /** Standard ACTION REQUIRED footer for PreToolUse denials. */

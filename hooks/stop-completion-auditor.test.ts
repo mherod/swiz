@@ -56,6 +56,26 @@ describe("formatActionPlan", () => {
       "Create tasks to record the work done:\nAction plan:\n  1. TaskCreate\n  2. TaskUpdate\n"
     )
   })
+
+  it("translates canonical tool names when agent-aware rendering is requested", () => {
+    const originalEnv = { ...process.env }
+    process.env = {
+      ...process.env,
+      CODEX_THREAD_ID: "test-thread",
+    }
+
+    try {
+      expect(
+        formatActionPlan(["Use TaskCreate to create tasks", "Use TaskUpdate to complete them"], {
+          translateToolNames: true,
+        })
+      ).toBe(
+        "Action plan:\n  1. Use update_plan to create tasks\n  2. Use update_plan to complete them\n"
+      )
+    } finally {
+      process.env = originalEnv
+    }
+  })
 })
 
 // ─── stop-completion-auditor — audit log path ────────────────────────────────
@@ -87,18 +107,25 @@ async function createFixture(): Promise<{
   tasksDir: string
   transcriptPath: string
 }> {
+  return createFixtureWithTools(Array.from({ length: 12 }, () => "Read"))
+}
+
+async function createFixtureWithTools(toolNames: string[]): Promise<{
+  home: string
+  tasksDir: string
+  transcriptPath: string
+}> {
   const home = await mkdtemp(join(tmpdir(), "swiz-auditor-test-"))
   tempDirs.push(home)
   const tasksDir = join(home, ".claude", "tasks", SESSION_ID)
   await mkdir(tasksDir, { recursive: true })
 
-  // 12 Read tool calls — above TOOL_CALL_THRESHOLD (10), but not task tools
   const lines: string[] = []
-  for (let i = 0; i < 12; i++) {
+  for (const [i, toolName] of toolNames.entries()) {
     lines.push(
       JSON.stringify({
         type: "assistant",
-        message: { content: [{ type: "tool_use", name: "Read", id: `t${i}`, input: {} }] },
+        message: { content: [{ type: "tool_use", name: toolName, id: `t${i}`, input: {} }] },
       })
     )
   }
@@ -117,18 +144,27 @@ async function writeAuditLog(tasksDir: string, entries: object[]): Promise<void>
 /** Run the auditor hook and return whether it blocked and why. */
 async function runAuditor(
   home: string,
-  transcriptPath: string
+  transcriptPath: string,
+  envOverrides: Record<string, string> = {}
 ): Promise<{ blocked: boolean; reason?: string; raw: string }> {
   const payload = JSON.stringify({
     cwd: process.cwd(),
     session_id: SESSION_ID,
     transcript_path: transcriptPath,
   })
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDECODE
+  delete env.CURSOR_TRACE_ID
+  delete env.GEMINI_CLI
+  delete env.GEMINI_PROJECT_DIR
+  delete env.CODEX_MANAGED_BY_NPM
+  delete env.CODEX_THREAD_ID
+
   const proc = Bun.spawn(["bun", HOOK_PATH], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, HOME: home },
+    env: { ...env, ...envOverrides },
   })
   proc.stdin.write(payload)
   proc.stdin.end()
@@ -238,7 +274,29 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     expect(result.blocked).toBe(true)
     // Verify the numbered action plan appears in the reason
     expect(result.reason).toContain("Action plan:")
-    expect(result.reason).toContain("  1. TaskCreate")
-    expect(result.reason).toContain("  2. TaskUpdate")
+    expect(result.reason).toContain("  1. Use TaskCreate")
+    expect(result.reason).toContain("  2. Use TaskUpdate")
+  })
+
+  it("uses the current agent's task tool alias in the action plan", async () => {
+    const { home, tasksDir: _tasksDir, transcriptPath } = await createFixture()
+    const result = await runAuditor(home, transcriptPath, {
+      CODEX_THREAD_ID: "test-codex-thread",
+    })
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("  1. Use update_plan")
+    expect(result.reason).toContain("  2. Use update_plan")
+  })
+
+  it("recognises update_plan as task activity and does not block when tasks were used", async () => {
+    const {
+      home,
+      tasksDir: _tasksDir,
+      transcriptPath,
+    } = await createFixtureWithTools(Array.from({ length: 12 }, () => "update_plan"))
+    const result = await runAuditor(home, transcriptPath, {
+      CODEX_THREAD_ID: "test-codex-thread",
+    })
+    expect(result.blocked).toBe(false)
   })
 })

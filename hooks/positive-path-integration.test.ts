@@ -41,13 +41,19 @@ async function runHook(
   envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
   const payload = JSON.stringify(stdinPayload)
-  const env: Record<string, string | undefined> = { ...process.env, ...envOverrides }
+  const env: Record<string, string | undefined> = { ...process.env }
+  delete env.CLAUDECODE
+  delete env.CURSOR_TRACE_ID
+  delete env.GEMINI_CLI
+  delete env.GEMINI_PROJECT_DIR
+  delete env.CODEX_MANAGED_BY_NPM
+  delete env.CODEX_THREAD_ID
 
   const proc = Bun.spawn(["bun", script], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env,
+    env: { ...env, ...envOverrides },
   })
   proc.stdin.write(payload)
   proc.stdin.end()
@@ -446,6 +452,20 @@ describe("posttooluse-task-advisor: positive paths", () => {
     expect(ctx).toContain("blocked")
   })
 
+  test("uses the current agent's create-task alias in countdown messaging", async () => {
+    const tmp = await createTempDir()
+    const transcript = await createTranscript(tmp, ["Read", "Glob", "Read"])
+    const r = await runHook(
+      HOOK,
+      { transcript_path: transcript },
+      { CODEX_THREAD_ID: "test-codex" }
+    )
+    expect(r.exitCode).toBe(0)
+    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const ctx = hso?.additionalContext as string
+    expect(ctx).toContain("update_plan required")
+  })
+
   test("no output for small transcript (below threshold)", async () => {
     const tmp = await createTempDir()
     // 1 tool call → remaining = 5 - 1 = 4 (> 3, and total < 2)
@@ -461,6 +481,21 @@ describe("posttooluse-task-advisor: positive paths", () => {
     const tools = ["TaskCreate", "Read", "Glob", "Read", "Edit", "Bash", "Read", "Glob", "Read"]
     const transcript = await createTranscript(tmp, tools)
     const r = await runHook(HOOK, { transcript_path: transcript })
+    expect(r.exitCode).toBe(0)
+    const hso = r.json?.hookSpecificOutput as Record<string, unknown>
+    const ctx = hso?.additionalContext as string
+    expect(ctx).toContain("Task update required")
+  })
+
+  test("treats update_plan as a task tool for staleness countdown", async () => {
+    const tmp = await createTempDir()
+    const tools = ["update_plan", "Read", "Glob", "Read", "Edit", "Bash", "Read", "Glob", "Read"]
+    const transcript = await createTranscript(tmp, tools)
+    const r = await runHook(
+      HOOK,
+      { transcript_path: transcript },
+      { CODEX_THREAD_ID: "test-codex" }
+    )
     expect(r.exitCode).toBe(0)
     const hso = r.json?.hookSpecificOutput as Record<string, unknown>
     const ctx = hso?.additionalContext as string

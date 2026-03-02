@@ -11,7 +11,8 @@ interface HookResult {
 async function runHook(
   command: string,
   toolName = "Bash",
-  sessionId = "test-session-id"
+  sessionId = "test-session-id",
+  envOverrides: Record<string, string | undefined> = {}
 ): Promise<HookResult> {
   const payload = JSON.stringify({
     tool_name: toolName,
@@ -19,11 +20,19 @@ async function runHook(
     cwd: "/tmp",
     session_id: sessionId,
   })
+  const env: Record<string, string | undefined> = { ...process.env }
+  delete env.CLAUDECODE
+  delete env.CURSOR_TRACE_ID
+  delete env.GEMINI_CLI
+  delete env.GEMINI_PROJECT_DIR
+  delete env.CODEX_MANAGED_BY_NPM
+  delete env.CODEX_THREAD_ID
 
   const proc = Bun.spawn(["bun", "hooks/posttooluse-git-task-autocomplete.ts"], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    env: { ...env, ...envOverrides },
   })
   proc.stdin.write(payload)
   proc.stdin.end()
@@ -62,6 +71,14 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
     expect(result.exitedCleanly).toBe(true)
     expect(result.additionalContext).toBeDefined()
     expect(result.additionalContext).toContain("Wait for CI")
+  })
+
+  test("git push uses the current agent's create-task alias", async () => {
+    const result = await runHook("git push origin main", "Bash", "test-session-id", {
+      CODEX_THREAD_ID: "test-codex",
+    })
+    expect(result.exitedCleanly).toBe(true)
+    expect(result.additionalContext).toContain("update_plan")
   })
 
   test("git push in a chained command emits additionalContext", async () => {

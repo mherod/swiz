@@ -3,7 +3,12 @@
 // Provides countdown hints showing remaining calls until mandatory enforcement
 // Uses transcript scan (no external state) to determine position
 
-import { extractToolNamesFromTranscript, type ToolHookInput } from "./hook-utils.ts"
+import {
+  extractToolNamesFromTranscript,
+  isTaskTool,
+  type ToolHookInput,
+  toolNameForCurrentAgent,
+} from "./hook-utils.ts"
 
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as ToolHookInput
@@ -12,8 +17,8 @@ async function main(): Promise<void> {
 
   const toolNames = await extractToolNamesFromTranscript(transcript)
   const total = toolNames.length
-  const TASK_TOOLS = new Set(["TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TodoWrite"])
-  const lastTaskIdx = toolNames.reduce((acc, name, i) => (TASK_TOOLS.has(name) ? i : acc), -1)
+  const taskCreateName = toolNameForCurrentAgent("TaskCreate")
+  const lastTaskIdx = toolNames.reduce((acc, name, i) => (isTaskTool(name) ? i : acc), -1)
   const callsSinceTask = total - 1 - lastTaskIdx
 
   const CREATION_THRESHOLD = 5
@@ -25,14 +30,14 @@ async function main(): Promise<void> {
     if (remaining <= 0) return // PreToolUse will block
     if (remaining <= 1) {
       emit(
-        `TaskCreate required in ${remaining} tool call(s) — tools will be blocked until tasks are defined.`
+        `${taskCreateName} required in ${remaining} tool call(s) — tools will be blocked until tasks are defined.`
       )
     } else if (remaining <= 3) {
       emit(
-        `TaskCreate required in ${remaining} tool calls. Plan your tasks now to avoid interruption.`
+        `${taskCreateName} required in ${remaining} tool calls. Plan your tasks now to avoid interruption.`
       )
     } else if (total >= 2) {
-      emit(`${total}/${CREATION_THRESHOLD} tool calls before TaskCreate is required.`)
+      emit(`${total}/${CREATION_THRESHOLD} tool calls before ${taskCreateName} is required.`)
     }
     return
   }
