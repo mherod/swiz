@@ -19,23 +19,24 @@ if (!filePath) process.exit(0)
 const settings = await readSwizSettings()
 if (!settings.sandboxedEdits) process.exit(0)
 
-/** Resolve real path following all symlinks; falls back to resolve() on failure. */
-async function realpathOrResolve(p: string): Promise<string> {
-  try {
-    return await realpath(p)
-  } catch {
-    return resolve(p)
-  }
-}
-
 /**
- * Resolve the real path of a file that may not yet exist.
- * Walks up to the nearest existing ancestor, realpaths it, then re-appends
- * the remaining path segments. This blocks symlink escapes even for new files:
- * if a symlink inside cwd points to /etc, writing cwd/link/new-file is blocked
- * because realpath(cwd/link) resolves to /etc before the non-existent segment.
+ * Resolve the canonical (real) path for any path, whether or not it exists.
+ *
+ * Algorithm:
+ *   1. Attempt fs.realpath() on the full path — succeeds for existing paths,
+ *      following every symlink in the chain recursively (handles chained symlinks).
+ *   2. If the path doesn't exist, walk up to the nearest existing ancestor,
+ *      realpath() that ancestor, then re-append the remaining segments.
+ *
+ * This ensures ALL path comparisons operate in a consistent canonical namespace,
+ * preventing bypass via:
+ *   - Chained symlinks  (link1→link2→/outside): realpath() follows every hop
+ *   - Symlinks in allowed roots (tmpdir→/private/tmp on macOS): all roots use
+ *     the same resolution so isWithin() comparisons are always apples-to-apples
+ *   - New-file creation through a symlink dir (cwd/link/new.ts where link→/etc):
+ *     realpath(cwd/link) resolves to /etc before the non-existent file segment
  */
-async function resolveTarget(p: string): Promise<string> {
+async function resolveCanonical(p: string): Promise<string> {
   const absolute = resolve(p)
   try {
     return await realpath(absolute)
@@ -60,29 +61,31 @@ function isWithin(parent: string, child: string): boolean {
   return child === parent || child.startsWith(prefix)
 }
 
-// Resolve all paths to their real (symlink-free) equivalents so that a
-// symlink inside an allowed root cannot escape to a path outside it.
-const cwd = await realpathOrResolve(resolve(input.cwd ?? process.cwd()))
-const target = await resolveTarget(filePath)
+// All paths are resolved through resolveCanonical so the isWithin() check
+// operates in a uniform canonical namespace — no mix of logical and real paths.
+const cwd = await resolveCanonical(input.cwd ?? process.cwd())
+const target = await resolveCanonical(filePath)
 
-const tmp = await realpathOrResolve(tmpdir())
-// /tmp is a symlink on macOS (/tmp -> /private/tmp); realpath ensures the
-// namespace is consistent between allowedRoots and resolved target paths.
-const tmpLiteral = await realpathOrResolve("/tmp")
+// /tmp is a symlink on macOS (/tmp → /private/tmp); resolveCanonical gives the
+// real path so the namespace stays consistent with the resolved target.
+const tmp = await resolveCanonical(tmpdir())
+const tmpLiteral = await resolveCanonical("/tmp")
 // ~/.claude/projects/ is always allowed: Claude Code stores per-project
 // auto-memory files there (e.g. memory/MEMORY.md). Blocking it creates a
 // deadlock with the memory-enforcement hook.
-// Realpath HOME itself (which exists) so the prefix matches resolveTarget()
-// output even when .claude/projects hasn't been created yet.
-const homeReal = process.env.HOME ? await realpathOrResolve(process.env.HOME) : null
-const claudeProjectsDir = homeReal ? `${homeReal}/.claude/projects` : null
+// resolveCanonical walks up to HOME (which exists) when .claude/projects
+// hasn't been created yet, ensuring the prefix always matches the target's
+// canonical form.
+const claudeProjectsDir = process.env.HOME
+  ? await resolveCanonical(`${process.env.HOME}/.claude/projects`)
+  : null
 const allowedRoots = [cwd, tmp, tmpLiteral, ...(claudeProjectsDir ? [claudeProjectsDir] : [])]
 
 if (allowedRoots.some((root) => isWithin(root, target))) process.exit(0)
 
 // Discover if the blocked path lives inside a different GitHub repo.
-// Use dirname(target) — target is already the realpath, so the git walk
-// correctly identifies the true owning repo even through symlinks.
+// dirname(target) is already canonical so the git walk identifies the true
+// owning repo even when the path arrived through symlinks.
 let targetDir = dirname(target)
 {
   const { stat } = await import("node:fs/promises")
