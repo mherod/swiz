@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-03-02
+
+### Bug Fixes
+
+- Fixed `createSessionTask` in `hook-utils.ts` writing its sentinel file
+  even when the underlying `tasks-list.ts` subprocess failed. A non-zero
+  exit no longer leaves an orphaned sentinel, so a failed task-creation
+  attempt is retried on the next stop rather than silently skipped. (#15)
+- Fixed `stop-auto-continue` path encoding so project directories with
+  dots in their names (e.g. `/Users/jane.doe/project`) are found
+  correctly. The encoding now replaces both `/` and `.` with `-`,
+  matching Claude Code's own project-directory scheme. (#16)
+- Fixed `swiz dispatch` routing `subagentStart` and `subagentStop` events
+  through `runBlocking` instead of `runContext`. Context output emitted by
+  hooks on those events is now forwarded to the agent instead of being
+  discarded. (#17)
+- Fixed a potential deadlock in `agent.ts` where large stderr output could
+  fill the OS pipe buffer and stall the subprocess before it exited. Both
+  stdout and stderr are now drained concurrently via `Promise.all`. (#18)
+
 ## 2026-03-01
 
 ### New Features
