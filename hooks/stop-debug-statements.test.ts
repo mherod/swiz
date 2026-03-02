@@ -1,22 +1,15 @@
 import { describe, expect, test } from "bun:test"
-
-// Test the GENERATED_FILE_RE and INFRA_FILE_RE exclusion logic in isolation,
-// mirroring the filter applied in stop-debug-statements.ts.
-
-const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|py|rb|go|java|kt|swift|php|cs|cpp|c|rs|vue|svelte)$/
-const TEST_FILE_RE = /\.(test|spec)\.|__tests__/
-const INFRA_FILE_RE = /hooks\/|\/commands\/|\/cli\.|index\.ts$|dispatch\.ts$/
-const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/
-const CONFIG_FILE_RE =
-  /(?:^|\/)\.[a-z]+rc\.(js|mjs|cjs|ts)$|\.config\.(js|mjs|cjs|ts)$|(?:^|\/)\.eslintrc(\.json)?$/
-
-// Debug patterns (mirrors stop-debug-statements.ts)
-const JS_DEBUG_RE = /\bconsole\.(log|debug|trace|dir|table)\b/
-const _JS_COMMENT_RE = /\/\/.*console\./
-const DEBUGGER_RE = /\bdebugger\b/
-const ESLINT_DEBUGGER_RULE_RE = /no-debugger/
-const PY_PRINT_RE = /\bprint\s*\(/
-const RUBY_DEBUG_RE = /\b(?:binding\.pry|byebug)\b/
+import { SOURCE_EXT_RE, TEST_FILE_RE } from "./hook-utils.ts"
+import {
+  CONFIG_FILE_RE,
+  DEBUGGER_RE,
+  ESLINT_DEBUGGER_RULE_RE,
+  GENERATED_FILE_RE,
+  INFRA_FILE_RE,
+  JS_DEBUG_RE,
+  PY_PRINT_RE,
+  RUBY_DEBUG_RE,
+} from "./stop-debug-statements.ts"
 
 function isScanned(filePath: string): boolean {
   return (

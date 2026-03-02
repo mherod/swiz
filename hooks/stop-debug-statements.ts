@@ -11,23 +11,23 @@ import {
 } from "./hook-utils.ts"
 
 // CLI and hook infrastructure uses console.log as its output channel — not debugging
-const INFRA_FILE_RE = /hooks\/|\/commands\/|\/cli\.|index\.ts$|dispatch\.ts$/
+export const INFRA_FILE_RE = /hooks\/|\/commands\/|\/cli\.|index\.ts$|dispatch\.ts$/
 
 // Compiled/generated artifacts contain machine-written console calls — not authored debug statements
-const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/
+export const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/
 
 // Config files reference debug-related rule names (e.g. "no-debugger", "no-console") — not debug statements
-const CONFIG_FILE_RE =
+export const CONFIG_FILE_RE =
   /(?:^|\/)\.[a-z]+rc\.(js|mjs|cjs|ts)$|\.config\.(js|mjs|cjs|ts)$|(?:^|\/)\.eslintrc(\.json)?$/
 
 // Debug patterns per language
-const JS_DEBUG_RE = /\bconsole\.(log|debug|trace|dir|table)\b/
-const JS_COMMENT_RE = /\/\/.*console\./
-const DEBUGGER_RE = /\bdebugger\b/
-const ESLINT_DEBUGGER_RULE_RE = /no-debugger/
-const PY_PRINT_RE = /\bprint\s*\(/
-const PY_EXCLUDE_RE = /# noqa|# debug ok/i
-const RUBY_DEBUG_RE = /\b(?:binding\.pry|byebug)\b/
+export const JS_DEBUG_RE = /\bconsole\.(log|debug|trace|dir|table)\b/
+export const JS_COMMENT_RE = /\/\/.*console\./
+export const DEBUGGER_RE = /\bdebugger\b/
+export const ESLINT_DEBUGGER_RULE_RE = /no-debugger/
+export const PY_PRINT_RE = /\bprint\s*\(/
+export const PY_EXCLUDE_RE = /# noqa|# debug ok/i
+export const RUBY_DEBUG_RE = /\b(?:binding\.pry|byebug)\b/
 
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as StopHookInput
@@ -98,4 +98,4 @@ async function main(): Promise<void> {
   blockStop(reason)
 }
 
-main()
+if (import.meta.main) main()
