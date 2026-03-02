@@ -131,6 +131,8 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 `swiz tasks complete <id>` requires `--evidence "text"` — the completion evidence is stored on the task and checked by the stop-completion-auditor hook.
 
+**DON'T** create compound tasks that bundle multiple distinct steps (e.g., "Commit, push, and verify CI"). The `pretooluse-task-subject-validation.ts` hook rejects them. Split into separate tasks: one for commit, one for push, one for CI verification. Each task should describe a single atomic action.
+
 **DO** keep at least one task in `pending` or `in_progress` status before running `git add` or `git commit`. The `pretooluse-require-tasks.ts` hook blocks `Edit`, `Write`, and `Bash` (including `git add`/`git commit`) when no incomplete task exists. Mark the commit task `completed` only after the commit succeeds.
 
 **DO** call a task tool (TaskUpdate, TaskCreate, TaskList, or TaskGet) at least every 15 tool calls. The staleness gate fires after 20 consecutive tool calls with no task tool interaction — staying under 15 provides a safe buffer. When the staleness gate fires mid-task, call `TaskUpdate` on the active task with current progress notes; if that doesn't unblock, call `TaskCreate` for the next concrete step.
