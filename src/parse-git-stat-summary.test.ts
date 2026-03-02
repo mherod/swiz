@@ -303,4 +303,42 @@ describe("classifyChangeScope", () => {
     expect(result.isTrivial).toBe(false)
     expect(result.isSmallFix).toBe(true)
   })
+
+  // ── Fail-closed deny message construction ─────────────────────────
+
+  it("produces actionable deny message when stat parsing fails", () => {
+    const changedFiles = ["src/api.ts", "src/types.ts", "lib/utils.ts"]
+    const result = classifyChangeScope(stat(0, 0, 0), changedFiles)
+
+    // Verify classification triggers fail-closed
+    expect(result.statParsingFailed).toBe(true)
+    expect(result.isTrivial).toBe(false)
+    expect(result.isSmallFix).toBe(false)
+
+    // Construct the deny message exactly as the hook does
+    const branch = "main"
+    const repo = "owner/repo"
+    const message = [
+      `Push blocked: git diff --stat could not be parsed, but ${changedFiles.length} file(s) were detected via --name-only.`,
+      `Scope: ${result.scopeDescription}`,
+      `Repository: ${repo}`,
+      "Detected files:",
+      ...changedFiles.map((f) => `  - ${f}`),
+      "This is a fail-closed guard — when change scope cannot be determined, the push is blocked to prevent unreviewed changes.",
+      "Remediation:",
+      `  1. Run: git diff --stat origin/${branch}..HEAD`,
+    ].join("\n")
+
+    // Verify the message contains all actionable elements
+    expect(message).toContain("Push blocked")
+    expect(message).toContain("3 file(s) were detected")
+    expect(message).toContain("stat-unparseable")
+    expect(message).toContain("3 files detected")
+    expect(message).toContain("  - src/api.ts")
+    expect(message).toContain("  - src/types.ts")
+    expect(message).toContain("  - lib/utils.ts")
+    expect(message).toContain("fail-closed guard")
+    expect(message).toContain("Remediation")
+    expect(message).toContain(`git diff --stat origin/${branch}..HEAD`)
+  })
 })

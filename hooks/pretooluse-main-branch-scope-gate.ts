@@ -52,7 +52,7 @@ if (!diffStat.trim()) {
 const diffFiles = await git(["diff", "--name-only", "origin/main..HEAD"], cwd)
 const changedFiles = diffFiles.trim().split("\n").filter(Boolean)
 
-const { isTrivial, isDocsOnly, scopeDescription, fileCount, totalLinesChanged } =
+const { statParsingFailed, isTrivial, isDocsOnly, scopeDescription, fileCount, totalLinesChanged } =
   classifyChangeScope(parseGitStatSummary(diffStat), changedFiles)
 
 // ─── Check collaborator activity ──────────────────────────────────────
@@ -112,6 +112,27 @@ if (!isCollaborative) {
 if (isDocsOnly || isTrivial) {
   // Docs and trivial changes are allowed even in collaborative repos
   process.exit(0)
+}
+
+// Fail-closed: stat parsing failed but files were detected
+if (statParsingFailed) {
+  denyPreToolUse(`
+Push blocked: git diff --stat could not be parsed, but ${changedFiles.length} file(s) were detected via --name-only.
+
+Scope: ${scopeDescription}
+Repository: ${owner}/${repo}
+Detected files:
+${changedFiles.map((f) => `  - ${f}`).join("\n")}
+
+This is a fail-closed guard — when change scope cannot be determined, the push is blocked to prevent unreviewed changes.
+
+Remediation:
+  1. Run: git diff --stat origin/${currentBranch}..HEAD
+  2. Verify the output shows a summary line (e.g. "3 files changed, 10 insertions(+)")
+  3. If the summary is missing or malformed, check for binary-only or rename-only changes
+  4. If this is a false positive, use a feature branch instead:
+     git checkout -b feat/description && git push origin feat/description && gh pr create --base ${currentBranch}
+`)
 }
 
 // Non-trivial work in collaborative repo: BLOCK
