@@ -48,7 +48,7 @@ describe("posttooluse-task-recovery", () => {
     expect(stdout).toBe("")
   })
 
-  test("emits recovery context when task is missing", async () => {
+  test("auto-recovers missing task and confirms recovery in context", async () => {
     const { stdout, exitCode } = await runHook({
       cwd: "/tmp",
       session_id: SESSION_ID,
@@ -59,11 +59,12 @@ describe("posttooluse-task-recovery", () => {
     expect(stdout).not.toBe("")
     const parsed = JSON.parse(stdout)
     expect(parsed.hookSpecificOutput.hookEventName).toBe("PostToolUse")
-    expect(parsed.hookSpecificOutput.additionalContext).toContain("Task #999 not found on disk")
-    expect(parsed.hookSpecificOutput.additionalContext).toContain("TaskCreate")
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("Task #999 was missing")
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("automatically recovered")
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("status 'completed'")
   })
 
-  test("emits recovery context for TaskGet on missing task", async () => {
+  test("auto-recovers missing task for TaskGet and confirms recovery", async () => {
     const { stdout, exitCode } = await runHook({
       cwd: "/tmp",
       session_id: SESSION_ID,
@@ -72,7 +73,8 @@ describe("posttooluse-task-recovery", () => {
     })
     expect(exitCode).toBe(0)
     const parsed = JSON.parse(stdout)
-    expect(parsed.hookSpecificOutput.additionalContext).toContain("Task #42 not found")
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("Task #42 was missing")
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("automatically recovered")
   })
 
   test("no output for TaskCreate (no taskId reference)", async () => {
@@ -107,7 +109,7 @@ describe("posttooluse-task-recovery", () => {
     expect(stdout).toBe("")
   })
 
-  test("emits recovery when tasks directory does not exist", async () => {
+  test("auto-recovers when tasks directory does not exist", async () => {
     const { stdout, exitCode } = await runHook({
       cwd: "/tmp",
       session_id: "nonexistent-session",
@@ -116,7 +118,8 @@ describe("posttooluse-task-recovery", () => {
     })
     expect(exitCode).toBe(0)
     const parsed = JSON.parse(stdout)
-    expect(parsed.hookSpecificOutput.additionalContext).toContain("Task #1 not found on disk")
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("Task #1 was missing")
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("automatically recovered")
   })
 
   test("no output when taskId is empty", async () => {
