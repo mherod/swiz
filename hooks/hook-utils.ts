@@ -327,14 +327,20 @@ export async function git(args: string[], cwd: string): Promise<string> {
   }
 }
 
-/** Run a gh CLI command and return trimmed stdout. Returns "" on failure. */
+/** Run a gh CLI command and return trimmed stdout. Returns "" on failure or timeout (3s). */
 export async function gh(args: string[], cwd: string): Promise<string> {
   try {
     const effectiveCwd = cwd.trim() || process.cwd()
     const proc = Bun.spawn(["gh", ...args], { cwd: effectiveCwd, stdout: "pipe", stderr: "pipe" })
+    let killed = false
+    const killTimer = setTimeout(() => {
+      killed = true
+      proc.kill()
+    }, 3000)
     const output = await new Response(proc.stdout).text()
     await proc.exited
-    return proc.exitCode === 0 ? output.trim() : ""
+    clearTimeout(killTimer)
+    return !killed && proc.exitCode === 0 ? output.trim() : ""
   } catch {
     return ""
   }
@@ -653,6 +659,33 @@ export async function extractBashCommands(path: string): Promise<string[]> {
     }
   } catch {}
   return commands
+}
+
+/**
+ * Extract the names of all skills invoked via the Skill tool in a transcript.
+ * Returns an array of skill name strings (e.g. ["commit", "push"]).
+ */
+export async function extractSkillInvocations(path: string): Promise<string[]> {
+  const skills: string[] = []
+  try {
+    const text = await Bun.file(path).text()
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue
+      try {
+        const entry = JSON.parse(line)
+        if (entry?.type !== "assistant") continue
+        const content = entry?.message?.content
+        if (!Array.isArray(content)) continue
+        for (const block of content) {
+          if (block?.type !== "tool_use") continue
+          if (block?.name !== "Skill") continue
+          const skill: string = block?.input?.skill ?? ""
+          if (skill) skills.push(skill)
+        }
+      } catch {}
+    }
+  } catch {}
+  return skills
 }
 
 // ── Git command regexes ───────────────────────────────────────────────────
