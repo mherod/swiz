@@ -33,6 +33,7 @@ async function waitForCiCompletion(
   return new Promise((resolve, reject) => {
     const pollInterval = 2000 // 2 second poll interval
     let lastLogged = 0
+    let foundAnyRun = false
 
     const pollTimer = setInterval(async () => {
       const elapsed = Date.now() - startTime
@@ -46,11 +47,28 @@ async function waitForCiCompletion(
       // Check timeout
       if (elapsed > timeoutMs) {
         clearInterval(pollTimer)
-        reject(new Error(`CI run timeout after ${timeoutSeconds}s`))
+        if (foundAnyRun) {
+          reject(
+            new Error(
+              `CI run still running after ${timeoutSeconds}s timeout (run exists but has not completed)`
+            )
+          )
+        } else {
+          reject(
+            new Error(
+              `No CI run found for commit ${commitSha} within ${timeoutSeconds}s timeout (run may not have been created yet)`
+            )
+          )
+        }
         return
       }
 
       const conclusion = await getCiRunConclusion(commitSha)
+
+      // Track that we found a run (even if still running)
+      if (conclusion !== null) {
+        foundAnyRun = true
+      }
 
       // conclusion is "success", "failure", or null/empty if still running
       if (conclusion && conclusion.length > 0) {
@@ -123,8 +141,14 @@ export const ciWaitCommand: Command = {
         process.exitCode = 2
       }
     } catch (err) {
-      console.error(`✗ Error: ${String(err)}`)
-      process.exitCode = 1
+      const errMsg = String(err)
+      console.error(`✗ Error: ${errMsg}`)
+      // Exit code 1 for timeout or CI failure; 2 for unexpected errors
+      if (errMsg.includes("timeout")) {
+        process.exitCode = 1
+      } else {
+        process.exitCode = 2
+      }
     }
   },
 }
