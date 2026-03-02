@@ -120,6 +120,8 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DO** keep at least one task in `pending` or `in_progress` status before running `git add` or `git commit`. The `pretooluse-require-tasks.ts` hook blocks `Edit`, `Write`, and `Bash` (including `git add`/`git commit`) when no incomplete task exists. Mark the commit task `completed` only after the commit succeeds.
 
+**DO** create a task before any session that will involve Bash commands beyond the read-only exemptions. The hook exempts: `ls`, `rg`, `grep` (always); git read-only subcommands (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`, etc.) when no write subcommand is present; `git push/pull/fetch`; and all `gh` commands. `find` is NOT exempt — use `rg` or Glob tool for file discovery instead.
+
 **DON'T** create a task just for `git push` or `gh` commands — these are exempt from the task requirement. `git push`, `git pull`, `git fetch`, and all `gh` subcommands bypass the hook automatically.
 
 **DO** commit all changes before attempting to stop the session. The `stop-git-status.sh` hook blocks stop when uncommitted changes exist. The correct end-of-task sequence is: edit → commit (task still in_progress) → mark task completed → push → CI watch → `gh run view --json` → announce result → stop.

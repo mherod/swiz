@@ -9,7 +9,12 @@ import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { detectAgentCli, promptAgent } from "../src/agent.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
-import { countToolCalls, extractPlainTurns, formatTurnsAsContext } from "../src/transcript-utils.ts"
+import {
+  countToolCalls,
+  extractPlainTurns,
+  formatTurnsAsContext,
+  projectKeyFromCwd,
+} from "../src/transcript-utils.ts"
 import { blockStopRaw, git, isGitRepo, type StopHookInput, skillAdvice } from "./hook-utils.ts"
 
 const MIN_TOOL_CALLS = 5 // Don't engage for trivial sessions
@@ -142,10 +147,6 @@ function parseAgentResponse(raw: string): AgentResponse {
 }
 
 // ─── Memory file resolution ─────────────────────────────────────────────────
-
-function projectKeyFromCwd(cwd: string): string {
-  return cwd.replace(/[/.]/g, "-")
-}
 
 async function findProjectDir(cwd: string): Promise<string | null> {
   const derived = join(PROJECTS_DIR, projectKeyFromCwd(cwd))

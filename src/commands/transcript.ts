@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { promptAgent } from "../agent.ts"
+import { projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -45,12 +46,6 @@ interface Session {
   id: string
   path: string
   mtime: number
-}
-
-// ─── Project key ─────────────────────────────────────────────────────────────
-
-function projectKeyFromCwd(cwd: string): string {
-  return cwd.replace(/[/.]/g, "-")
 }
 
 // ─── Session discovery ───────────────────────────────────────────────────────
