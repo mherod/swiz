@@ -3,8 +3,9 @@
 // PreToolUse hook: Block file edits outside the session's cwd and temporary directories.
 // Enabled by default; disable with: swiz settings disable sandboxed-edits
 
+import { realpath } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { readSwizSettings } from "../src/settings.ts"
 import { denyPreToolUse, git, isFileEditTool, type ToolHookInput } from "./hook-utils.ts"
 
@@ -18,26 +19,70 @@ if (!filePath) process.exit(0)
 const settings = await readSwizSettings()
 if (!settings.sandboxedEdits) process.exit(0)
 
-const cwd = resolve(input.cwd ?? process.cwd())
-const target = resolve(filePath)
+/** Resolve real path following all symlinks; falls back to resolve() on failure. */
+async function realpathOrResolve(p: string): Promise<string> {
+  try {
+    return await realpath(p)
+  } catch {
+    return resolve(p)
+  }
+}
+
+/**
+ * Resolve the real path of a file that may not yet exist.
+ * Walks up to the nearest existing ancestor, realpaths it, then re-appends
+ * the remaining path segments. This blocks symlink escapes even for new files:
+ * if a symlink inside cwd points to /etc, writing cwd/link/new-file is blocked
+ * because realpath(cwd/link) resolves to /etc before the non-existent segment.
+ */
+async function resolveTarget(p: string): Promise<string> {
+  const absolute = resolve(p)
+  try {
+    return await realpath(absolute)
+  } catch {
+    let dir = dirname(absolute)
+    let rest = basename(absolute)
+    while (dir !== dirname(dir)) {
+      try {
+        const realDir = await realpath(dir)
+        return join(realDir, rest)
+      } catch {
+        rest = join(basename(dir), rest)
+        dir = dirname(dir)
+      }
+    }
+    return absolute
+  }
+}
 
 function isWithin(parent: string, child: string): boolean {
   const prefix = parent.endsWith("/") ? parent : parent + "/"
   return child === parent || child.startsWith(prefix)
 }
 
-const tmp = tmpdir()
+// Resolve all paths to their real (symlink-free) equivalents so that a
+// symlink inside an allowed root cannot escape to a path outside it.
+const cwd = await realpathOrResolve(resolve(input.cwd ?? process.cwd()))
+const target = await resolveTarget(filePath)
+
+const tmp = await realpathOrResolve(tmpdir())
+// /tmp is a symlink on macOS (/tmp -> /private/tmp); realpath ensures the
+// namespace is consistent between allowedRoots and resolved target paths.
+const tmpLiteral = await realpathOrResolve("/tmp")
 // ~/.claude/projects/ is always allowed: Claude Code stores per-project
 // auto-memory files there (e.g. memory/MEMORY.md). Blocking it creates a
 // deadlock with the memory-enforcement hook.
-const claudeProjectsDir = process.env.HOME ? `${process.env.HOME}/.claude/projects` : null
-const allowedRoots = [cwd, tmp, "/tmp", ...(claudeProjectsDir ? [claudeProjectsDir] : [])]
+// Realpath HOME itself (which exists) so the prefix matches resolveTarget()
+// output even when .claude/projects hasn't been created yet.
+const homeReal = process.env.HOME ? await realpathOrResolve(process.env.HOME) : null
+const claudeProjectsDir = homeReal ? `${homeReal}/.claude/projects` : null
+const allowedRoots = [cwd, tmp, tmpLiteral, ...(claudeProjectsDir ? [claudeProjectsDir] : [])]
 
 if (allowedRoots.some((root) => isWithin(root, target))) process.exit(0)
 
 // Discover if the blocked path lives inside a different GitHub repo.
-// Walk up from dirname(target) to find the nearest existing directory —
-// the target file may not exist yet (new file creation).
+// Use dirname(target) — target is already the realpath, so the git walk
+// correctly identifies the true owning repo even through symlinks.
 let targetDir = dirname(target)
 {
   const { stat } = await import("node:fs/promises")

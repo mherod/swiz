@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -201,6 +201,34 @@ describe("pretooluse-sandboxed-edits", () => {
     const msg = String(reason?.permissionDecisionReason)
     expect(msg).toContain("File edit blocked")
     expect(msg).not.toContain("different repository")
+  })
+
+  describe("symlink escape prevention", () => {
+    test("blocks edit through a symlink inside cwd that points outside cwd", async () => {
+      const cwd = await createTempDir()
+      const outside = await createOutsideDir()
+      // Symlink inside cwd → outside dir
+      await symlink(outside, join(cwd, "link"))
+
+      // Agent tries to edit through the symlink — realpath resolves it to outside
+      const result = await runHook(cwd, "Edit", join(cwd, "link", "evil.ts"))
+      expect(result.exitCode).toBe(0)
+      const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+      expect(reason?.permissionDecision).toBe("deny")
+      const msg = String(reason?.permissionDecisionReason)
+      expect(msg).toContain("File edit blocked")
+    })
+
+    test("allows edit of a file inside cwd even when cwd itself contains symlinks in its path", async () => {
+      const real = await createTempDir()
+      const link = join(real, "link-to-self")
+      await symlink(real, link)
+
+      // The session cwd is the real dir; target is inside the real dir
+      const result = await runHook(real, "Edit", join(real, "src", "app.ts"))
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe("")
+    })
   })
 
   test("allows all tools when sandboxedEdits is disabled", async () => {
