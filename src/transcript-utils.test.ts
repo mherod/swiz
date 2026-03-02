@@ -111,6 +111,21 @@ describe("transcript-utils.ts", () => {
       const result = projectKeyFromCwd(cwd)
       expect(result).toBe("project123")
     })
+
+    it("converts Windows backslashes to hyphens", () => {
+      const cwd = "C:\\Users\\test\\project"
+      const result = projectKeyFromCwd(cwd)
+      expect(result).not.toContain("\\")
+      expect(/^[a-zA-Z0-9-]+$/.test(result)).toBe(true)
+    })
+
+    it("converts Windows drive colon to hyphen", () => {
+      const cwd = "C:\\Users\\test"
+      const result = projectKeyFromCwd(cwd)
+      expect(result).not.toContain(":")
+      // C + : + \ each become -, so "C:\" → "C--"
+      expect(result).toBe("C--Users-test")
+    })
   })
 
   describe("extractPlainTurns", () => {
@@ -524,6 +539,21 @@ describe("transcript-utils.ts", () => {
       const cwd = "/path/to/project.v2"
       const result = projectKeyFromCwd(cwd)
       expect(/^[a-zA-Z0-9-]+$/.test(result)).toBe(true)
+    })
+
+    it("converts Windows backslashes to hyphens", () => {
+      const cwd = "C:\\Users\\dev\\project"
+      const result = projectKeyFromCwd(cwd)
+      expect(result).not.toContain("\\")
+      expect(/^[a-zA-Z0-9-]+$/.test(result)).toBe(true)
+    })
+
+    it("converts Windows drive colon to hyphen", () => {
+      const cwd = "C:\\Users\\dev"
+      const result = projectKeyFromCwd(cwd)
+      expect(result).not.toContain(":")
+      // C + : + \ each become -, so "C:\" → "C--"
+      expect(result).toBe("C--Users-dev")
     })
   })
 })

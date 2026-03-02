@@ -48,7 +48,7 @@ export interface Session {
 }
 
 export function projectKeyFromCwd(cwd: string): string {
-  return cwd.replace(/[/.]/g, "-")
+  return cwd.replace(/[/.\\:]/g, "-")
 }
 
 export async function findSessions(projectDir: string): Promise<Session[]> {
