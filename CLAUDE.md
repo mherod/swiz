@@ -113,6 +113,12 @@ All output helpers return `never` and call `process.exit(0)` after writing JSON.
 
 **DON'T** use `/tmp` sentinel files with hardcoded session IDs in tests. Sentinel files outlive test runs; on re-run the file exists from the prior run, causing cooldown logic to fire when it shouldn't. Use unique session IDs per test (e.g. appending `Date.now()`) or check the sentinel's own `mtime` against the cooldown window rather than just its existence.
 
+**DO** use a two-stage filter when detecting background processes with `pgrep` in hooks. A bare `pgrep -f 'git push'` produces false positives in two distinct ways: (1) it matches the parent `git push` process when the hook is invoked from inside a pre-push test run, and (2) it matches unrelated pushes in other repositories open in other terminals. Apply both filters:
+- **Ancestry filter**: walk `process.ppid` upward via `ps -p <pid> -o ppid=` to build a `Set<number>` of ancestors; exclude any pgrep PIDs that appear in the set.
+- **Repo-scope filter**: for each remaining (non-ancestor) PID, use `lsof -p <pid> -d cwd -Fn` to get the process CWD; only treat it as in-flight if its CWD starts with the current repo's git root (`git rev-parse --show-toplevel`).
+
+See `hooks/stop-git-status.ts` for the reference implementation of this pattern.
+
 **DO** import `projectKeyFromCwd` from `src/transcript-utils.ts` when any hook needs to locate a project directory under `~/.claude/projects/`. The canonical encoding replaces **both** `/` and `.` with `-` (`cwd.replace(/[/.]/g, "-")`). DON'T reimplement it locally — a slash-only variant (`/\//g`) silently misses dots in paths like `/Users/jane.doe/...`, causing memory reads/writes to fail without any error.
 
 **DO** implement workflow-enforcement hooks by scanning `transcript_path` for both the triggering reminder and the completion evidence, not by adding separate state files or in-memory flags. `pretooluse-update-memory-enforcement.ts` is the pattern: after a hook tells the agent to use `/update-memory`, the follow-up gate must verify the transcript shows a read of `update-memory/SKILL.md` and a write to a `.md` file such as `CLAUDE.md` before unblocking normal work. The reminder itself must also include the triggering cause (for example, the ignored user instruction or the specific blocked workflow violation) so the recorded DO/DON'T rule preserves why the enforcement fired.

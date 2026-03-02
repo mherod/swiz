@@ -155,20 +155,70 @@ async function main(): Promise<void> {
     if (await isPushCooldownActive(input.session_id, cwd, branch)) return
   }
 
-  // In-flight push guard: if a background `git push` is currently running, defer
-  // the unpushed-commits block rather than emitting a false positive.
+  // In-flight push guard: if a background `git push` is currently running in THIS
+  // repository, defer the unpushed-commits block rather than emitting a false positive.
   // Only applies when the sole issue is unpushed commits (no uncommitted changes,
   // not behind). Once the push exits the next stop attempt will re-evaluate correctly.
+  //
+  // Two-stage filter:
+  //   1. Ancestry-aware: exclude git push processes that are ancestors of this process
+  //      (e.g., the pre-push hook running bun test during push verification).
+  //   2. Repo-aware: exclude git push processes whose CWD is outside our git repo root,
+  //      so a push in an unrelated repo doesn't trigger a false positive here.
   if (!hasUncommitted && ahead > 0 && behind === 0) {
     const pgrepProc = Bun.spawn(["pgrep", "-f", "git push"], { stdout: "pipe", stderr: "pipe" })
+    const pgrepOut = await new Response(pgrepProc.stdout).text()
     await pgrepProc.exited
     if (pgrepProc.exitCode === 0) {
-      blockStop(
-        "A `git push` is currently running in the background.\n\n" +
-          "Wait for it to complete before stopping. " +
-          "Check the background task output with `TaskOutput <task-id>` to verify it succeeded, " +
-          "then try stopping again."
-      )
+      const pushPids = pgrepOut.trim().split("\n").map(Number).filter(Boolean)
+
+      // Walk our process ancestry to exclude inherited git push processes
+      const ancestors = new Set<number>()
+      let cur = process.ppid
+      for (let i = 0; i < 20 && cur > 1; i++) {
+        ancestors.add(cur)
+        const psProc = Bun.spawn(["ps", "-p", cur.toString(), "-o", "ppid="], {
+          stdout: "pipe",
+          stderr: "pipe",
+        })
+        const psOut = await new Response(psProc.stdout).text()
+        await psProc.exited
+        const ppid = parseInt(psOut.trim(), 10)
+        if (isNaN(ppid) || ppid === cur) break
+        cur = ppid
+      }
+
+      // Get our git root so we only react to pushes within this repo
+      const gitRoot = await git(["rev-parse", "--show-toplevel"], cwd)
+
+      // Filter candidates: non-ancestor, and CWD is within our git root
+      const nonAncestorPids = pushPids.filter((pid) => !ancestors.has(pid))
+      let hasBackgroundPush = false
+      for (const pid of nonAncestorPids) {
+        const lsofProc = Bun.spawn(["lsof", "-p", pid.toString(), "-d", "cwd", "-Fn"], {
+          stdout: "pipe",
+          stderr: "pipe",
+        })
+        const lsofOut = await new Response(lsofProc.stdout).text()
+        await lsofProc.exited
+        const procCwd = lsofOut
+          .split("\n")
+          .find((l) => l.startsWith("n"))
+          ?.slice(1)
+        if (procCwd && gitRoot && procCwd.startsWith(gitRoot)) {
+          hasBackgroundPush = true
+          break
+        }
+      }
+
+      if (hasBackgroundPush) {
+        blockStop(
+          "A `git push` is currently running in the background.\n\n" +
+            "Wait for it to complete before stopping. " +
+            "Check the background task output with `TaskOutput <task-id>` to verify it succeeded, " +
+            "then try stopping again."
+        )
+      }
     }
   }
 
