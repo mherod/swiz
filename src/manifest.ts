@@ -88,6 +88,11 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "postToolUse",
+    matcher: "TaskOutput",
+    hooks: [{ file: "posttooluse-task-output.ts", timeout: 15 }],
+  },
+  {
+    event: "postToolUse",
     matcher: "Bash",
     hooks: [
       { file: "posttooluse-pr-context.ts", timeout: 10 },
