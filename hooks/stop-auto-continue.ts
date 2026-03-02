@@ -320,6 +320,10 @@ function buildPrompt(
     `    in existing code that a test would directly catch — even then, fix the bug first, not the test)\n` +
     `  - code review, cleanup, refactoring, or "quality" work with no concrete functional outcome\n` +
     `  - asking the user a question, confirming scope, or presenting options\n` +
+    `  - implementing, modifying, or wiring stop hooks, pre-push hooks, or any hook scripts. ` +
+    `    Hook implementations belong to the swiz project, not to the agent or the repository being worked in. ` +
+    `    If a hook appears defective, the correct action is to file a GitHub issue on mherod/swiz — ` +
+    `    never to implement or fix the hook locally.\n` +
     `Start with an imperative verb that names a code action (Implement, Add, Fix, Build, Extend, Wire up, etc.). ` +
     `The step must be something the assistant can do right now by editing source files.\n\n` +
     `REFLECTIONS RULES:\n` +
