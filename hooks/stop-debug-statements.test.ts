@@ -152,12 +152,76 @@ describe("stop-debug-statements file filter", () => {
       expect(isScanned(".stylelintrc.mjs")).toBe(false)
     })
 
+    // CJS variants
+    test("postcss.config.cjs is excluded", () => {
+      expect(isScanned("postcss.config.cjs")).toBe(false)
+    })
+
+    test(".eslintrc.mjs is excluded", () => {
+      expect(isScanned(".eslintrc.mjs")).toBe(false)
+    })
+
+    // Less common tooling configs
+    test("rollup.config.js is excluded", () => {
+      expect(isScanned("rollup.config.js")).toBe(false)
+    })
+
+    test("svelte.config.js is excluded", () => {
+      expect(isScanned("svelte.config.js")).toBe(false)
+    })
+
+    test("nuxt.config.ts is excluded", () => {
+      expect(isScanned("nuxt.config.ts")).toBe(false)
+    })
+
+    test("drizzle.config.ts is excluded", () => {
+      expect(isScanned("drizzle.config.ts")).toBe(false)
+    })
+
+    test("knip.config.ts is excluded", () => {
+      expect(isScanned("knip.config.ts")).toBe(false)
+    })
+
+    test("playwright.config.ts is excluded", () => {
+      expect(isScanned("playwright.config.ts")).toBe(false)
+    })
+
+    test(".commitlintrc.js is excluded", () => {
+      expect(isScanned(".commitlintrc.js")).toBe(false)
+    })
+
+    test(".lintstagedrc.mjs is excluded", () => {
+      expect(isScanned(".lintstagedrc.mjs")).toBe(false)
+    })
+
+    // Monorepo nested configs
+    test("nested postcss.config.cjs in packages/ is excluded", () => {
+      expect(isScanned("packages/ui/postcss.config.cjs")).toBe(false)
+    })
+
+    test("nested .commitlintrc.ts in apps/ is excluded", () => {
+      expect(isScanned("apps/web/.commitlintrc.ts")).toBe(false)
+    })
+
+    // Edge cases that must NOT be excluded
     test("regular source file with 'config' in path is still scanned", () => {
       expect(isScanned("src/config/logger.ts")).toBe(true)
     })
 
     test("config.ts as a module (not *.config.ts) is still scanned", () => {
       expect(isScanned("src/config.ts")).toBe(true)
+    })
+
+    test("file named debugger.ts is still scanned", () => {
+      expect(isScanned("src/debugger.ts")).toBe(true)
+    })
+
+    test("debugger-utils.ts is still scanned", () => {
+      expect(isScanned("src/debugger-utils.ts")).toBe(true)
+    })
+
+    test("console.ts module is still scanned", () => {
+      expect(isScanned("src/console.ts")).toBe(true)
     })
   })
 
@@ -201,6 +265,20 @@ describe("JS_DEBUG_RE: JavaScript console methods with word boundaries", () => {
     })
   })
 
+  describe("should not match production logging methods", () => {
+    const production = [
+      "console.warn('deprecated')",
+      "console.error('fatal')",
+      "console.info('startup')",
+    ]
+
+    production.forEach((code) => {
+      test(`${code}`, () => {
+        expect(JS_DEBUG_RE.test(code)).toBe(false)
+      })
+    })
+  })
+
   describe("should not match similar identifiers", () => {
     const invalid = [
       "myConsole.log()", // Different object
@@ -228,6 +306,12 @@ describe("DEBUGGER_RE: debugger statement with word boundaries", () => {
   test("should not match similar words", () => {
     expect(DEBUGGER_RE.test("notadebugger")).toBe(false)
     expect(DEBUGGER_RE.test("debuggered")).toBe(false)
+  })
+
+  test("should not match compound identifiers containing debugger", () => {
+    expect(DEBUGGER_RE.test("debuggerPort")).toBe(false)
+    expect(DEBUGGER_RE.test("isDebuggerAttached")).toBe(false)
+    expect(DEBUGGER_RE.test("startDebuggerSession")).toBe(false)
   })
 
   describe("ESLint rule config exclusion (issue #14)", () => {
@@ -318,10 +402,32 @@ describe("DEBUGGER_RE: config-name false positives beyond no-debugger (regressio
     expect(isDebuggerFinding("// Enable the no-debugger rule for production")).toBe(false)
   })
 
+  test('"@typescript-eslint/no-debugger" scoped rule is excluded', () => {
+    expect(isDebuggerFinding('"@typescript-eslint/no-debugger": "error"')).toBe(false)
+  })
+
+  test("rules array containing no-debugger is excluded", () => {
+    expect(isDebuggerFinding('rules: ["no-debugger", "no-console"]')).toBe(false)
+  })
+
+  test("JSDoc mentioning no-debugger is excluded", () => {
+    expect(isDebuggerFinding(" * Enforces the no-debugger ESLint rule")).toBe(false)
+  })
+
+  // Real debugger statements must still be caught
   test("standalone debugger in non-config context is still caught", () => {
     expect(isDebuggerFinding("  debugger;")).toBe(true)
     expect(isDebuggerFinding("debugger")).toBe(true)
     expect(isDebuggerFinding("if (x) debugger")).toBe(true)
+  })
+
+  test("debugger inside conditional is still caught", () => {
+    expect(isDebuggerFinding("if (process.env.DEBUG) debugger;")).toBe(true)
+  })
+
+  test("debugger with leading whitespace variants is still caught", () => {
+    expect(isDebuggerFinding("    debugger")).toBe(true)
+    expect(isDebuggerFinding("\tdebugger;")).toBe(true)
   })
 })
 
