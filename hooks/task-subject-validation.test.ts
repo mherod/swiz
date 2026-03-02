@@ -2,6 +2,31 @@ import { describe, expect, test } from "bun:test"
 import { type CompoundMatch, detect, formatMessage } from "./task-subject-validation.ts"
 
 describe("detect", () => {
+  describe("recovered task rejection", () => {
+    test("rejects subject starting with 'Recovered task'", () => {
+      const result = detect("Recovered task #5")
+      expect(result.matched).toBe(true)
+      if (!result.matched) return
+      expect(result.intro).toContain("compaction-recovery placeholder")
+      expect(result.suggestions.length).toBeGreaterThan(0)
+    })
+
+    test("rejects 'Recovered task' case-insensitively", () => {
+      const result = detect("recovered task from compaction")
+      expect(result.matched).toBe(true)
+    })
+
+    test("does not reject 'Recover' without the full word 'task'", () => {
+      expect(detect("Recover the lost data").matched).toBe(false)
+    })
+
+    test("does not reject 'Recovered tasks' (plural — not a placeholder pattern)", () => {
+      // The pattern is /^recovered task\b/i — word boundary after "task" means
+      // "tasks" (extra 's') does NOT match.
+      expect(detect("Recovered tasks for the sprint").matched).toBe(false)
+    })
+  })
+
   describe("no match (single concern)", () => {
     test("plain imperative subject", () => {
       expect(detect("Fix authentication bug").matched).toBe(false)

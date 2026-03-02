@@ -52,6 +52,21 @@ function isTestTask(bare: string): boolean {
 }
 
 export function detect(s: string): DetectionResult {
+  // Reject compaction-recovery placeholder subjects — these have no real work content
+  // and pollute task history with meaningless entries.
+  if (/^recovered task\b/i.test(s)) {
+    return {
+      matched: true,
+      intro:
+        '"Recovered task" subjects are compaction-recovery placeholders with no real work content. Use a specific, actionable subject describing what you are actually doing. Examples:',
+      suggestions: [
+        "Verify CI for last pushed commit",
+        "Continue work on open GitHub issue",
+        "Run quality checks before pushing",
+      ],
+    }
+  }
+
   const verb = extractVerb(s)
   const bare = verb ? s.slice(verb.length).trim() : s
 
