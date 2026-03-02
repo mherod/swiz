@@ -14,9 +14,9 @@ import { createHash } from "node:crypto"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import {
   denyPreToolUse,
-  FORCE_PUSH_RE,
   GIT_PUSH_RE,
   git,
+  hasGitPushForceFlag,
   isShellTool,
   type ToolHookInput,
 } from "./hook-utils.ts"
@@ -31,9 +31,9 @@ const command: string = (input?.tool_input?.command as string) ?? ""
 // Only gate on git push commands
 if (!GIT_PUSH_RE.test(command)) process.exit(0)
 
-// Any force flag bypasses the cooldown (--force, --force-with-lease[=<ref>],
-// --force-if-includes, -f, combined short flags containing f).
-if (FORCE_PUSH_RE.test(command)) process.exit(0)
+// Any force flag bypasses the cooldown. Uses token-based parsing to correctly
+// handle -- end-of-flags, git global options, and flags in any operand position.
+if (hasGitPushForceFlag(command)) process.exit(0)
 
 // Derive a per-repo sentinel path keyed on the git root (or cwd as fallback)
 const cwd: string = (input?.tool_input?.cwd as string) ?? process.cwd()

@@ -718,6 +718,108 @@ export const GIT_SYNC_RE = /(?:^|\|\||&&|;)\s*git\s+(push|pull|fetch)\b/
 export const FORCE_PUSH_RE =
   /\bgit\s+push\b.*(?:--force(?:-with-lease(?:=[^\s]+)?|-if-includes)?(?!\S)|-[a-zA-Z]*f)/
 
+// ── Token-based git push argument parser ─────────────────────────────────────
+
+/** Long force flags for git push (without = suffix). */
+const FORCE_LONG_FLAG_NAMES = new Set(["--force", "--force-with-lease", "--force-if-includes"])
+
+/** Returns true if a single parsed flag token is a force-push flag. */
+function isGitPushForceToken(token: string): boolean {
+  if (!token.startsWith("-")) return false
+  if (token.startsWith("--")) {
+    // Strip optional =<value> suffix before looking up the flag name
+    const name = token.includes("=") ? token.slice(0, token.indexOf("=")) : token
+    return FORCE_LONG_FLAG_NAMES.has(name)
+  }
+  // Short flags: -f alone or combined like -fu
+  return token.slice(1).includes("f")
+}
+
+/**
+ * Minimal shell tokenizer — splits on unquoted whitespace, respects single
+ * and double quotes and backslash escapes.  Returns a flat list of tokens.
+ */
+function shellTokenize(segment: string): string[] {
+  const tokens: string[] = []
+  let token = ""
+  let quote: '"' | "'" | null = null
+
+  for (let i = 0; i < segment.length; i++) {
+    const ch = segment[i]!
+    if (quote) {
+      if (ch === quote) quote = null
+      else token += ch
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+    } else if (ch === "\\" && i + 1 < segment.length) {
+      token += segment[++i]!
+    } else if (ch === " " || ch === "\t") {
+      if (token) {
+        tokens.push(token)
+        token = ""
+      }
+    } else {
+      token += ch
+    }
+  }
+  if (token) tokens.push(token)
+  return tokens
+}
+
+/**
+ * Token-based detection of force flags in a `git push` command.
+ *
+ * Handles edge cases that regex cannot:
+ *   - `git push -- --force`   → `--force` is a refspec, NOT a flag (blocked correctly)
+ *   - `git -C /path push -f`  → git global option before subcommand (detected correctly)
+ *   - `git push origin --force main` → force flag between operands (detected correctly)
+ *   - Chained commands via `&&`, `||`, `;`, newlines
+ */
+export function hasGitPushForceFlag(command: string): boolean {
+  // Split on shell command separators to process each command in a chain
+  const segments = command
+    .split(/&&|\|\||;|\n/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  for (const segment of segments) {
+    const tokens = shellTokenize(segment)
+    let i = 0
+
+    while (i < tokens.length) {
+      if (tokens[i] !== "git") {
+        i++
+        continue
+      }
+      i++ // skip "git"
+
+      // Skip git's own global options before the subcommand (e.g. -C <dir>, -c key=val).
+      // Options that consume the next token as a value are listed explicitly.
+      const GIT_VALUE_OPTS = new Set(["-C", "-c", "--work-tree", "--git-dir", "--namespace"])
+      while (i < tokens.length && tokens[i]!.startsWith("-")) {
+        if (GIT_VALUE_OPTS.has(tokens[i]!)) i++ // skip the value token
+        i++
+      }
+
+      if (tokens[i] !== "push") continue
+      i++ // skip "push"
+
+      // Walk git push flags, respecting the -- end-of-flags sentinel
+      let endOfFlags = false
+      while (i < tokens.length) {
+        const t = tokens[i]!
+        i++
+        if (t === "--") {
+          endOfFlags = true
+          continue
+        }
+        if (!endOfFlags && isGitPushForceToken(t)) return true
+      }
+    }
+  }
+  return false
+}
+
 /** Matches `ls`, `rg`, or `grep` — pure read commands. */
 export const READ_CMD_RE = /(?:^|\|\||&&|;)\s*(ls|rg|grep)\b/
 

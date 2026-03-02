@@ -198,7 +198,9 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
 - `lefthook pre-push` runs `bun test`. DON'T use `--no-verify` or any flag that skips it. Fix test failures first.
 - CI workflow (`CI`) runs lint → typecheck → test. All three jobs must be green before the session can stop.
 
-**DO** verify CI after every push with `gh run view --json conclusion,status,jobs` and confirm `conclusion === "success"` before announcing completion. `gh run watch` output alone is not sufficient — always follow up with the explicit JSON fetch.
+**DO** verify CI after every push with `gh run view --json conclusion,status,jobs` and confirm `conclusion === "success"` before announcing completion. `gh run watch` output alone is not sufficient — always follow up with the explicit JSON fetch tied to the same SHA captured before push (`SHA=$(git rev-parse HEAD)`).
+
+**DO** use token-based parsing (not regex) when writing hooks that must distinguish `git push --force` (force flag) from `git push -- --force` (refspec after end-of-flags sentinel). Regex cannot correctly handle the `--` sentinel, git global options like `-C <path>`, or flags in arbitrary operand positions. Export the parser from `hook-utils.ts` so it can be unit-tested independently without triggering stdin reads from the hook file itself.
 
 **DON'T** call TaskUpdate or TaskList during or after the push+CI verification sequence. Mark tasks completed *after commit but before push* so the push+CI loop is purely mechanical: push → watch → `gh run view --json` → announce. Any TaskUpdate call after `git push` is a sign the task ordering is wrong — fix it by completing tasks at step 4 of the Standard Work Sequence.
 
