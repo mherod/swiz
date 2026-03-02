@@ -51,6 +51,11 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "preToolUse",
+    matcher: "Edit|Write|NotebookEdit|Bash",
+    hooks: [{ file: "pretooluse-update-memory-enforcement.ts", timeout: 5 }],
+  },
+  {
+    event: "preToolUse",
     matcher: "Edit|Write|Bash",
     hooks: [{ file: "pretooluse-require-tasks.ts", timeout: 5 }],
   },
@@ -137,7 +142,7 @@ export const manifest: HookGroup[] = [
 // Covers worst-case sequential execution of all hooks in that event.
 export const DISPATCH_TIMEOUTS: Record<string, number> = {
   stop: 300, // 14 hooks × ~10s avg + 120s AI call (stop-auto-continue)
-  preToolUse: 60, // 11 hooks × ~5s avg
+  preToolUse: 60, // 12 hooks × ~5s avg
   postToolUse: 90, // 8 hooks × ~10s avg
   sessionStart: 20,
   userPromptSubmit: 15,

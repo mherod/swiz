@@ -86,6 +86,16 @@ describe("manifest.ts", () => {
       expect(requireTasksGroup).toBeDefined()
       expect(requireTasksGroup?.hooks.some((h) => h.file.includes("require-tasks"))).toBe(true)
     })
+
+    it("Edit|Write|NotebookEdit|Bash matcher has update-memory enforcement hook", () => {
+      const updateMemoryGroup = manifest.find(
+        (g) => g.event === "preToolUse" && g.matcher === "Edit|Write|NotebookEdit|Bash"
+      )
+      expect(updateMemoryGroup).toBeDefined()
+      expect(
+        updateMemoryGroup?.hooks.some((h) => h.file.includes("update-memory-enforcement"))
+      ).toBe(true)
+    })
   })
 
   describe("postToolUse event hooks", () => {

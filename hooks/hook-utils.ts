@@ -162,7 +162,7 @@ export function denyPreToolUse(reason: string): never {
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
-        permissionDecisionReason: reason + preToolActionRequired(),
+        permissionDecisionReason: reason + preToolActionRequired(reason),
       },
     })
   )
@@ -242,39 +242,67 @@ export function toolNameForCurrentAgent(canonicalName: string): string {
   return translateMatcher(canonicalName, agent) ?? canonicalName
 }
 
+function summarizeUpdateMemoryCause(reason: string): string {
+  const firstParagraph = reason
+    .replace(/\r/g, "")
+    .split(/\n\s*\n/)[0]
+    ?.replace(/\s+/g, " ")
+    .trim()
+
+  const cleaned = (firstParagraph ?? "")
+    .replace(/^STOP\.\s*/i, "")
+    .replace(/^ACTION REQUIRED:\s*/i, "")
+    .trim()
+
+  if (!cleaned) {
+    return "A required workflow step or explicit instruction was not followed."
+  }
+
+  return cleaned.length > 180 ? `${cleaned.slice(0, 177).trimEnd()}...` : cleaned
+}
+
+function describeUpdateMemoryCause(reason: string): string {
+  const summary = summarizeUpdateMemoryCause(reason)
+  if (/\b(user|instruction|requested|asked|told)\b/i.test(reason)) {
+    return `A user instruction was missed: ${summary}`
+  }
+  return `A hook detected missing or unstructured workflow behavior: ${summary}`
+}
+
+function updateMemoryAdvice(reason: string): string {
+  const cause = describeUpdateMemoryCause(reason)
+  return skillAdvice(
+    "update-memory",
+    `Use the /update-memory skill to record a DO or DON'T rule that proactively builds the required steps into your standard development workflow. Cause to capture: ${cause}`,
+    `Update your MEMORY.md with a DO or DON'T rule that proactively builds the required steps into your standard development workflow. Cause to capture: ${cause}`
+  )
+}
+
 /** Standard ACTION REQUIRED footer for PreToolUse denials. */
-export function preToolActionRequired(): string {
+export function preToolActionRequired(reason = ""): string {
   const reassess = skillAdvice(
     "re-assess",
     "If you believe this is a false positive, use the /re-assess skill to re-evaluate your assumptions — the hook's findings take authority over your own assessment.",
     "If you believe this is a false positive, re-evaluate your assumptions carefully before retrying — the hook's findings take authority over your own assessment."
   )
-  const updateMemory = skillAdvice(
-    "update-memory",
-    "Use the /update-memory skill to record a DO or DON'T rule that proactively builds the required steps into your standard development workflow.",
-    "Update your MEMORY.md with a DO or DON'T rule that proactively builds the required steps into your standard development workflow."
-  )
+  const updateMemory = updateMemoryAdvice(reason)
   return `\n\nACTION REQUIRED: Fix the underlying issue before retrying. This hook will deny this tool call every time this violation is present. Do not attempt to bypass or work around it — address the root cause.\n\n${reassess}\n\n${updateMemory}`
 }
 
 /** Standard ACTION REQUIRED footer appended to all stop hook block reasons. */
-export function actionRequired(): string {
+export function actionRequired(reason = ""): string {
   const reassess = skillAdvice(
     "re-assess",
     "If you believe this is a false positive, use the /re-assess skill to re-evaluate your assumptions — the hook's findings take authority over your own assessment.",
     "If you believe this is a false positive, re-evaluate your assumptions carefully before retrying — the hook's findings take authority over your own assessment."
   )
-  const updateMemory = skillAdvice(
-    "update-memory",
-    "Use the /update-memory skill to record a DO or DON'T rule that proactively builds the required steps into your standard development workflow.",
-    "Update your MEMORY.md with a DO or DON'T rule that proactively builds the required steps into your standard development workflow."
-  )
+  const updateMemory = updateMemoryAdvice(reason)
   return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action.\n\n${reassess}\n\n${updateMemory}`
 }
 
 /** Emit a stop block decision and exit. Appends ACTION_REQUIRED footer. */
 export function blockStop(reason: string): never {
-  console.log(JSON.stringify({ decision: "block", reason: reason + actionRequired() }))
+  console.log(JSON.stringify({ decision: "block", reason: reason + actionRequired(reason) }))
   process.exit(0)
 }
 

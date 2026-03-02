@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**43 hooks. 5 event types. Every agent. Zero compromises.**
+**44 hooks. 5 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -105,7 +105,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-personal-repo-issues.ts` | Checks for actionable open GitHub issues, skipping those labelled `blocked`, `upstream`, `wontfix`, `duplicate`, `on-hold`, or `waiting`. Surfaces real work that's been left on the table. |
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 
-### PreToolUse (15)
+### PreToolUse (16)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -120,6 +120,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-eslint-config-strength.ts` | Prevents weakening ESLint configs — rules can only be added or escalated, never removed or downgraded. Enforces a quality ratchet. |
 | `pretooluse-json-validation.ts` | Validates JSON syntax before any write to a `.json` file. Catches malformed JSON before it breaks the project. |
 | `pretooluse-no-direct-deps.ts` | Blocks direct edits to dependency blocks in `package.json`. Dependencies must go through the package manager, not hand-edited. |
+| `pretooluse-update-memory-enforcement.ts` | If a prior hook explicitly told the agent to record an `/update-memory` DO/DON'T rule, blocks normal work until the agent reads that skill and writes the rule into a markdown file. |
 | `pretooluse-require-tasks.ts` | Blocks Edit, Write, and Shell tools unless the agent has active tasks. No more undisciplined free-form editing — work must be tracked. |
 | `pretooluse-no-task-delegation.ts` | Prevents agents from creating sub-tasks to delegate work instead of doing it. Task creation is for tracking, not avoidance. |
 | `pretooluse-task-subject-validation.ts` | Validates task subjects meet quality standards before they're created — no vague "fix stuff" tasks. |
@@ -182,7 +183,7 @@ The `swiz-core` plugin provides:
 
 ### `swiz install`
 
-Deploy all 40 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 44 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks

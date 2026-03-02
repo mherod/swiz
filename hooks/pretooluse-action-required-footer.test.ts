@@ -250,4 +250,27 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
     expect(result.denied).toBe(true)
     expect(result.reason).toContain(FOOTER_MARKER)
   })
+
+  test("pretooluse-update-memory-enforcement: reminder denial includes footer", async () => {
+    const dir = await makeTempDir()
+    const transcriptPath = join(dir, "transcript.jsonl")
+    await writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        type: "user",
+        message: {
+          content:
+            "Stop hook feedback: Use the /update-memory skill to record a DO or DON'T rule that proactively builds the required steps into your standard development workflow.",
+        },
+      })}\n`
+    )
+
+    const result = await runHook("pretooluse-update-memory-enforcement.ts", {
+      tool_name: "Edit",
+      tool_input: { file_path: "src/main.ts", new_string: "export const main = true\n" },
+      transcript_path: transcriptPath,
+    })
+    expect(result.denied).toBe(true)
+    expect(result.reason).toContain(FOOTER_MARKER)
+  })
 })
