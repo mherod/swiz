@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { denyPreToolUse } from "./hook-utils.ts"
+import { denyPreToolUse, formatActionPlan } from "./hook-utils.ts"
 
 interface HookInput {
   tool_name: string
@@ -33,10 +33,12 @@ async function main() {
       "You cannot add `eslint-disable` comments. The linter has identified a problem in your code.",
       "",
       "Your only path forward:",
-      "  1. Read the exact ESLint error message and understand what rule is violated",
-      "  2. Fix your code to satisfy the rule",
-      "  3. Re-run lint to confirm the error is gone",
-      "  4. Never disable the lint—fix the underlying issue",
+      formatActionPlan([
+        "Read the exact ESLint error message and understand what rule is violated",
+        "Fix your code to satisfy the rule",
+        "Re-run lint to confirm the error is gone",
+        "Never disable the lint-fix the underlying issue",
+      ]).trimEnd(),
       "",
       "The linter is not negotiable, not postponeable, not arguable with. It is the source",
       "of truth for code quality. Rules exist because they prevent bugs, enforce consistency,",

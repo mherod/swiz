@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { denyPreToolUse } from "./hook-utils.ts"
+import { denyPreToolUse, formatActionPlan } from "./hook-utils.ts"
 
 interface HookInput {
   tool_name: string
@@ -79,10 +79,12 @@ async function main() {
       "for the entire file, hiding every type error simultaneously.",
       "",
       "Your only path forward:",
-      "  1. Run tsc to see every type error in the file",
-      "  2. Fix each error to satisfy the type system",
-      "  3. Remove the directive once all errors are resolved",
-      "  4. Never suppress type errors—fix the underlying issues",
+      formatActionPlan([
+        "Run tsc to see every type error in the file",
+        "Fix each error to satisfy the type system",
+        "Remove the directive once all errors are resolved",
+        "Never suppress type errors-fix the underlying issues",
+      ]).trimEnd(),
       "",
       "The type checker is not negotiable, not postponeable, not arguable with. It is the source",
       "of truth for type safety. Rules exist because they prevent bugs, enforce correctness,",
@@ -100,10 +102,12 @@ async function main() {
       `You cannot add \`@${kwIgnore}\` comments. The compiler has identified a type error in your code.`,
       "",
       "Your only path forward:",
-      "  1. Read the exact TypeScript error message and understand what type constraint is violated",
-      "  2. Fix your code to satisfy the type system",
-      "  3. Re-run tsc to confirm the error is gone",
-      "  4. Never suppress the type error—fix the underlying issue",
+      formatActionPlan([
+        "Read the exact TypeScript error message and understand what type constraint is violated",
+        "Fix your code to satisfy the type system",
+        "Re-run tsc to confirm the error is gone",
+        "Never suppress the type error-fix the underlying issue",
+      ]).trimEnd(),
       "",
       `If fixing is genuinely impossible (third-party types, impossible narrowing), use \`@${kwExpect}\``,
       `instead. Unlike \`@${kwIgnore}\`, \`@${kwExpect}\` fails compilation when the error goes away,`,

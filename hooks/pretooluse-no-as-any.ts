@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { denyPreToolUse } from "./hook-utils.ts"
+import { denyPreToolUse, formatActionPlan } from "./hook-utils.ts"
 
 interface HookInput {
   tool_name: string
@@ -162,11 +162,13 @@ async function main() {
       "silent agreement to abandon the type system at that point in the code.",
       "",
       "Your only options:",
-      "  1. Type the value correctly using proper TypeScript types",
-      "  2. Use `unknown` temporarily with proper type guards to narrow it down",
-      "  3. If the library is untyped, add or use @types definitions",
-      "  4. Use `as const` if you need to constrain a literal value",
-      "  5. Use generic types to accept the value's actual type",
+      formatActionPlan([
+        "Type the value correctly using proper TypeScript types",
+        "Use `unknown` temporarily with proper type guards to narrow it down",
+        "If the library is untyped, add or use @types definitions",
+        "Use `as const` if you need to constrain a literal value",
+        "Use generic types to accept the value's actual type",
+      ]).trimEnd(),
       "",
       "Never `as any`. Fix the type instead. The type system exists to prevent bugs.",
       "Every `as any` is a future bug waiting to happen.",

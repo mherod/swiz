@@ -13,6 +13,7 @@ import {
   BRANCH_CHECK_RE,
   denyPreToolUse,
   extractBashCommands,
+  formatActionPlan,
   GIT_PUSH_RE,
   isShellTool,
   PR_CHECK_RE,
@@ -50,19 +51,19 @@ if (hasBranchCheck && hasPRCheck) process.exit(0)
 
 const missing: string[] = []
 if (!hasBranchCheck) {
-  missing.push("1. Branch check (not run yet):\n" + "     git branch --show-current")
+  missing.push("Branch check (not run yet): `git branch --show-current`")
 }
 if (!hasPRCheck) {
   missing.push(
-    `${hasBranchCheck ? "1" : "2"}. Open-PR check (not run yet):\n` +
-      "     gh pr list --state open --head $(git branch --show-current)"
+    "Open-PR check (not run yet): " +
+      "`gh pr list --state open --head $(git branch --show-current)`"
   )
 }
 
 denyPreToolUse(
   `BLOCKED: git push requires branch/PR checks to run first.\n\n` +
-    `The following mandatory checks have not been run in this session:\n\n` +
-    missing.join("\n\n") +
+    `The following mandatory checks have not been run in this session.\n\n` +
+    formatActionPlan(missing) +
     `\n\nRun the missing checks, review the output, then retry git push.\n\n` +
     `Why this matters: pushing without these checks risks pushing large work\n` +
     `directly to main in a collaborative repo, or creating duplicate PRs.`

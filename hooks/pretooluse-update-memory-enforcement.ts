@@ -11,6 +11,7 @@ import { dirname, join } from "node:path"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import {
   denyPreToolUse,
+  formatActionPlan,
   isEditTool,
   isGitRepo,
   isNotebookTool,
@@ -221,13 +222,17 @@ async function main(): Promise<void> {
   const missingSkill = !state.skillReadComplete
   const reason = missingSkill
     ? `${SELF_SENTINEL}: ${toolName} is BLOCKED until you finish the required memory follow-through from an earlier hook response.\n\n` +
-      `Required now:\n` +
-      `1. Read the /update-memory skill by opening its SKILL.md.\n` +
-      `2. Write the resulting DO or DON'T rule into a project markdown file such as CLAUDE.md.\n\n` +
+      formatActionPlan([
+        "Read the /update-memory skill by opening its SKILL.md.",
+        "Write the resulting DO or DON'T rule into a project markdown file such as CLAUDE.md.",
+      ]) +
+      `\n` +
       `This gate clears automatically once the transcript shows both steps after the original reminder.`
     : `${SELF_SENTINEL}: ${toolName} is BLOCKED until you record the required workflow rule in a markdown file.\n\n` +
-      `Required now:\n` +
-      `1. Write the DO or DON'T rule into a project markdown file such as CLAUDE.md.\n\n` +
+      formatActionPlan([
+        "Write the DO or DON'T rule into a project markdown file such as CLAUDE.md.",
+      ]) +
+      `\n` +
       `This gate clears automatically once the transcript shows that markdown write after the original reminder.`
 
   denyPreToolUse(reason)
