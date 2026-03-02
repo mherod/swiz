@@ -203,6 +203,79 @@ describe("pretooluse-sandboxed-edits", () => {
     expect(msg).not.toContain("different repository")
   })
 
+  test("appends cross-repo hint for SSH slash remote format (ssh://)", async () => {
+    const cwd = await createTempDir()
+    const otherRepo = await createOutsideDir()
+    await initGitRepo(otherRepo, "ssh://git@github.com/acme/widget.git")
+
+    const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"))
+    const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+    const msg = String(reason?.permissionDecisionReason)
+    expect(msg).toContain("acme/widget")
+    expect(msg).toContain("gh issue create --repo acme/widget")
+    expect(msg).not.toContain("--hostname")
+  })
+
+  test("appends cross-repo hint with --hostname for GHE HTTPS remote", async () => {
+    const cwd = await createTempDir()
+    const otherRepo = await createOutsideDir()
+    await initGitRepo(otherRepo, "https://github.example.com/acme/widget.git")
+
+    // Provide a fake HOME with a hosts.yml that registers github.example.com
+    const fakeHome = await createTempDir()
+    await mkdir(join(fakeHome, ".config", "gh"), { recursive: true })
+    await writeFile(
+      join(fakeHome, ".config", "gh", "hosts.yml"),
+      "github.example.com:\n  oauth_token: test\n"
+    )
+
+    const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"), {
+      fakeHomeOverride: fakeHome,
+    })
+    const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+    const msg = String(reason?.permissionDecisionReason)
+    expect(msg).toContain("acme/widget")
+    expect(msg).toContain("--hostname github.example.com")
+  })
+
+  test("appends cross-repo hint with --hostname for GHE SSH colon remote", async () => {
+    const cwd = await createTempDir()
+    const otherRepo = await createOutsideDir()
+    await initGitRepo(otherRepo, "git@github.example.com:acme/widget.git")
+
+    const fakeHome = await createTempDir()
+    await mkdir(join(fakeHome, ".config", "gh"), { recursive: true })
+    await writeFile(
+      join(fakeHome, ".config", "gh", "hosts.yml"),
+      "github.example.com:\n  oauth_token: test\n"
+    )
+
+    const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"), {
+      fakeHomeOverride: fakeHome,
+    })
+    const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+    const msg = String(reason?.permissionDecisionReason)
+    expect(msg).toContain("acme/widget")
+    expect(msg).toContain("--hostname github.example.com")
+  })
+
+  test("no cross-repo hint for host not registered in gh hosts.yml", async () => {
+    const cwd = await createTempDir()
+    const otherRepo = await createOutsideDir()
+    await initGitRepo(otherRepo, "https://git.company.com/acme/widget.git")
+
+    // fakeHome has no hosts.yml — unregistered host → no hint
+    const fakeHome = await createTempDir()
+
+    const result = await runHook(cwd, "Edit", join(otherRepo, "src", "widget.ts"), {
+      fakeHomeOverride: fakeHome,
+    })
+    const reason = result.json?.hookSpecificOutput as Record<string, unknown>
+    const msg = String(reason?.permissionDecisionReason)
+    expect(msg).toContain("File edit blocked")
+    expect(msg).not.toContain("different repository")
+  })
+
   describe("symlink escape prevention", () => {
     test("blocks edit through a symlink inside cwd that points outside cwd", async () => {
       const cwd = await createTempDir()

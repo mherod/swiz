@@ -61,6 +61,56 @@ function isWithin(parent: string, child: string): boolean {
   return child === parent || child.startsWith(prefix)
 }
 
+interface RemoteInfo {
+  host: string
+  slug: string // "owner/repo"
+}
+
+/**
+ * Parse a git remote URL into {host, slug} for HTTPS, SSH colon, SSH slash,
+ * and git+ssh:// formats. Returns null if the URL cannot be recognised.
+ *
+ * Handled formats:
+ *   https://host/owner/repo[.git][/]
+ *   [git+]ssh://[user@]host/owner/repo[.git]
+ *   [user@]host:owner/repo[.git]     (SSH colon / SCP-like notation)
+ */
+function parseRemoteUrl(url: string): RemoteInfo | null {
+  if (!url) return null
+
+  // HTTPS: https://host/owner/repo[.git][/]
+  let m = url.match(/^https?:\/\/([^/:]+)\/([^/\s]+\/[^/\s]+?)(?:\.git)?(?:\/)?$/)
+  if (m?.[1] && m?.[2]) return { host: m[1], slug: m[2] }
+
+  // SSH slash notation: [git+]ssh://[user@]host/owner/repo[.git]
+  m = url.match(/^(?:git\+)?ssh:\/\/(?:[^@/]+@)?([^/]+)\/([^/\s]+\/[^/\s]+?)(?:\.git)?$/)
+  if (m?.[1] && m?.[2]) return { host: m[1], slug: m[2] }
+
+  // SSH colon notation: [user@]host:owner/repo[.git]  (SCP-like, e.g. git@github.com:owner/repo)
+  m = url.match(/^(?:[^@\s:]+@)?([^:/\s]+):([^/\s]+\/[^/\s]+?)(?:\.git)?$/)
+  if (m?.[1] && m?.[2]) return { host: m[1], slug: m[2] }
+
+  return null
+}
+
+/**
+ * Returns true when host is github.com or a GitHub Enterprise Server instance
+ * registered in the gh CLI config (~/.config/gh/hosts.yml).
+ */
+async function isGitHubHost(host: string): Promise<boolean> {
+  if (host === "github.com") return true
+  const home = process.env.HOME
+  if (!home) return false
+  try {
+    const content = await Bun.file(`${home}/.config/gh/hosts.yml`).text()
+    // hosts.yml has each hostname as a top-level YAML key followed by ":"
+    const escaped = host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    return new RegExp(`^${escaped}:`, "m").test(content)
+  } catch {
+    return false
+  }
+}
+
 // All paths are resolved through resolveCanonical so the isWithin() check
 // operates in a uniform canonical namespace — no mix of logical and real paths.
 const cwd = await resolveCanonical(input.cwd ?? process.cwd())
@@ -102,14 +152,14 @@ const repoRoot = await git(["rev-parse", "--show-toplevel"], targetDir)
 let crossRepoHint = ""
 if (repoRoot && repoRoot !== cwd) {
   const remoteUrl = await git(["remote", "get-url", "origin"], repoRoot)
-  const match = remoteUrl.match(/github\.com[/:]([^/]+\/[^\s.]+?)(?:\.git)?$/)
-  if (match?.[1]) {
-    const slug = match[1]
+  const remote = parseRemoteUrl(remoteUrl)
+  if (remote && (await isGitHubHost(remote.host))) {
+    const hostnameFlag = remote.host !== "github.com" ? ` --hostname ${remote.host}` : ""
     crossRepoHint = [
       "",
-      `The blocked path is inside a different repository: ${slug}`,
+      `The blocked path is inside a different repository: ${remote.slug}`,
       "If this change is needed, consider filing an issue there so the repo can triage it:",
-      `  gh issue create --repo ${slug} --title "..." --body "..."`,
+      `  gh issue create --repo ${remote.slug}${hostnameFlag} --title "..." --body "..."`,
     ].join("\n")
   }
 }
