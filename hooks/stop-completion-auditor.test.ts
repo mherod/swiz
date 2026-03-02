@@ -63,6 +63,9 @@ describe("formatActionPlan", () => {
       ...process.env,
       CODEX_THREAD_ID: "test-thread",
     }
+    delete process.env.CLAUDECODE
+    delete process.env.CURSOR_TRACE_ID
+    delete process.env.GEMINI_CLI
 
     try {
       expect(

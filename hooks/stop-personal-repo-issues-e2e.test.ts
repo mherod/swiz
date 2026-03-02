@@ -164,9 +164,9 @@ const RAMP3_ISSUES = [
     "backend",
     "priority:high",
   ]),
-  makeIssue(934, "Redesign /admin/campaigns for campaign management", ["enhancement", "frontend"]),
+  makeIssue(934, "Redesign /admin/campaigns for campaign management", ["feature", "frontend"]),
   makeIssue(933, "Apply useOptimistic to URL-synced filter controls", [
-    "enhancement",
+    "feature",
     "frontend",
     "area:dashboard",
   ]),
@@ -303,12 +303,12 @@ describe("E2E stop-personal-repo-issues: priority ranking in block reason", () =
     const result = await runHook(dir, {
       user: "testuser",
       issues: [
-        makeIssue(1, "Low priority enhancement", ["enhancement", "priority:low"]),
+        makeIssue(1, "Low priority task", ["priority:low"]),
         makeIssue(2, "Critical regression", ["critical", "regression", "bug"]),
       ],
     })
     expect(result.blocked).toBe(true)
-    // Issue 2 (critical+regression+bug = 5+3+2 = 10) must appear before issue 1 (score -1)
+    // Issue 2 (critical+regression+bug = 5+3+2 = 10) must appear before issue 1 (priority:low = 1)
     const r = result.reason!
     expect(r.indexOf("#2")).toBeLessThan(r.indexOf("#1"))
   })
