@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { registerCommand, run } from "./src/cli.ts"
+import { ciWaitCommand } from "./src/commands/ci-wait.ts"
 import { cleanupCommand } from "./src/commands/cleanup.ts"
 import { continueCommand } from "./src/commands/continue.ts"
 import { dispatchCommand } from "./src/commands/dispatch.ts"
@@ -31,5 +32,6 @@ registerCommand(cleanupCommand)
 registerCommand(issueCommand)
 registerCommand(sentimentCommand)
 registerCommand(sessionCommand)
+registerCommand(ciWaitCommand)
 
 await run()
