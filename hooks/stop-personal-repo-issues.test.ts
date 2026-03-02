@@ -14,6 +14,7 @@ const SKIP_LABELS = new Set([
   "icebox",
   "invalid",
   "needs-info",
+  "enhancement",
 ])
 
 const LABEL_SCORE: Record<string, number> = {
@@ -913,19 +914,19 @@ describe("integration — top-5 truncation with mixed real-world label sets", ()
   test("exact top-5 from a backlog of 8 real-world issues", () => {
     const backlog = [
       issue(1, ["bug", "priority:high", "ready", "size:s"], "fix(captiv8): connection before sync"),
-      issue(2, ["enhancement", "frontend", "priority:medium"], "Redesign /admin/campaigns"),
-      issue(3, ["enhancement", "frontend", "area:dashboard"], "useOptimistic filter controls"),
+      issue(2, ["feature", "frontend", "priority:medium"], "Redesign /admin/campaigns"),
+      issue(3, ["feature", "frontend", "area:dashboard"], "useOptimistic filter controls"),
       issue(4, ["maintenance", "tech-debt", "priority:medium"], "Refactor /admin/settings"),
       issue(
         5,
         ["bug", "priority:high", "regression", "size:m"],
         "fix(stats): metric label alignment"
       ),
-      issue(6, ["enhancement", "backend", "priority:low"], "Provision GCP Memorystore"),
+      issue(6, ["feature", "backend", "priority:low"], "Provision GCP Memorystore"),
       issue(7, ["tech-debt", "backend"], "Barrel cleanup"),
       issue(
         8,
-        ["enhancement", "frontend", "priority:medium", "good first issue", "size:s"],
+        ["feature", "frontend", "priority:medium", "good first issue", "size:s"],
         "Auto-select campaign dialog"
       ),
     ]
@@ -988,23 +989,22 @@ describe("integration — top-5 truncation with mixed real-world label sets", ()
     }
   })
 
-  test("ramp3-spike pattern: p0 critical regression beats enhancement with no priority", () => {
+  test("ramp3-spike pattern: p0 critical regression beats low-priority feature work", () => {
     const issues = [
-      issue(1, ["enhancement", "frontend", "area:dashboard"]),
-      issue(2, ["enhancement", "frontend", "priority:medium", "size:m"]),
+      issue(1, ["feature", "frontend", "area:dashboard"]),
+      issue(2, ["feature", "frontend", "priority:medium", "size:m"]),
       issue(3, ["bug", "backend", "priority:high", "regression"]), // high + regression + bug = 4+3+2=9
       issue(4, ["tech-debt", "backend"]),
-      issue(5, ["enhancement", "backend", "priority:low"]),
+      issue(5, ["feature", "backend", "priority:low"]),
       issue(6, ["maintenance", "priority:medium", "confirmed"]), // 2+1+1=4
       issue(7, ["bug", "critical"]), // 2+5=7
-      issue(8, ["enhancement", "size:xl"]), // 0-2=-2
+      issue(8, ["feature", "size:xl"]), // 0-2=-2
     ]
     const { shown } = pipeline(issues)
     // Issue 3 (regression+high+bug=9) must be #1
     expect(shown[0]!.number).toBe(3)
     // Issue 7 (critical+bug=7) must be #2
     expect(shown[1]!.number).toBe(7)
-    // Issue 8 (size:xl penalty) must not appear in top 5 if something scores higher
     const shownNumbers = shown.map((i) => i.number)
     // Issues 3 and 7 must both be present
     expect(shownNumbers).toContain(3)

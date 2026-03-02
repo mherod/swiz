@@ -32,6 +32,7 @@ const SKIP_LABELS = new Set([
   "icebox", // explicit indefinite deferral
   "invalid", // not a valid issue
   "needs-info", // can't act without more information
+  "enhancement", // deferred future-work tracking; not actionable in current session
 ])
 
 /**
