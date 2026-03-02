@@ -20,6 +20,7 @@ import {
   gh,
   git,
   isShellTool,
+  parseGitStatSummary,
   type ToolHookInput,
 } from "./hook-utils.ts"
 
@@ -45,22 +46,8 @@ let diffStat = await git(["diff", "origin/main..HEAD", "--stat"], cwd)
 if (!diffStat.trim()) {
   diffStat = await git(["diff", "HEAD~1..HEAD", "--stat"], cwd)
 }
-const lines = diffStat.trim().split("\n").filter(Boolean)
-
-let totalLinesAdded = 0
-let totalLinesRemoved = 0
-
-// Parse the summary line at the bottom of --stat output:
-// "3 files changed, 160 insertions(+), 2 deletions(-)"
-const summaryLine = lines[lines.length - 1] ?? ""
-const filesMatch = summaryLine.match(/(\d+)\s+files?\s+changed/)
-const fileCount = filesMatch ? parseInt(filesMatch[1]!, 10) : 0
-const insertMatch = summaryLine.match(/(\d+)\s+insertions?\(\+\)/)
-if (insertMatch) totalLinesAdded = parseInt(insertMatch[1]!, 10)
-const deleteMatch = summaryLine.match(/(\d+)\s+deletions?\(-\)/)
-if (deleteMatch) totalLinesRemoved = parseInt(deleteMatch[1]!, 10)
-
-const totalLinesChanged = totalLinesAdded + totalLinesRemoved
+const { filesChanged: fileCount, insertions, deletions } = parseGitStatSummary(diffStat)
+const totalLinesChanged = insertions + deletions
 
 // Check if changes are docs-only or config-only
 const diffFiles = await git(["diff", "--name-only", "origin/main..HEAD"], cwd)

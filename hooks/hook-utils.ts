@@ -550,6 +550,52 @@ export function parseGitStatus(porcelain: string): GitStatusCounts {
   return { total: lines.length, modified, added, deleted, untracked, lines }
 }
 
+// ─── Git diff --stat summary parsing ────────────────────────────────────
+
+export interface GitStatSummary {
+  filesChanged: number
+  insertions: number
+  deletions: number
+}
+
+/**
+ * Parse the summary line from `git diff --stat` output.
+ *
+ * Handles all variants:
+ * - Both: "3 files changed, 160 insertions(+), 2 deletions(-)"
+ * - Insertions only: "2 files changed, 21 insertions(+)"
+ * - Deletions only: "1 file changed, 5 deletions(-)"
+ * - Rename only: "1 file changed" (no insertions/deletions)
+ * - Empty/no changes: returns zeros
+ *
+ * Pass the full `--stat` output; the function finds and parses
+ * the summary line (last non-empty line matching "file(s) changed").
+ */
+export function parseGitStatSummary(statOutput: string): GitStatSummary {
+  const lines = statOutput.trim().split("\n")
+
+  // Find the summary line — last line matching "N file(s) changed"
+  let summaryLine = ""
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/\d+\s+files?\s+changed/.test(lines[i]!)) {
+      summaryLine = lines[i]!
+      break
+    }
+  }
+
+  if (!summaryLine) return { filesChanged: 0, insertions: 0, deletions: 0 }
+
+  const filesMatch = summaryLine.match(/(\d+)\s+files?\s+changed/)
+  const insertMatch = summaryLine.match(/(\d+)\s+insertions?\(\+\)/)
+  const deleteMatch = summaryLine.match(/(\d+)\s+deletions?\(-\)/)
+
+  return {
+    filesChanged: filesMatch ? parseInt(filesMatch[1]!, 10) : 0,
+    insertions: insertMatch ? parseInt(insertMatch[1]!, 10) : 0,
+    deletions: deleteMatch ? parseInt(deleteMatch[1]!, 10) : 0,
+  }
+}
+
 // ─── Git ahead/behind ───────────────────────────────────────────────────
 
 /**
