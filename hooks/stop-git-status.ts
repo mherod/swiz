@@ -2,6 +2,10 @@
 // Stop hook: Block stop if git repository has uncommitted changes or unpushed commits.
 // Combines both checks into one cohesive action plan so the agent sees the full
 // commit → pull → push workflow in a single message.
+//
+// Push cooldown: if we've already prompted the agent to push in this session AND
+// the last remote commit is within PUSH_COOLDOWN_MS, skip the push block.
+// Uncommitted changes are always enforced regardless of cooldown.
 
 import {
   blockStop,
@@ -14,6 +18,42 @@ import {
   type StopHookInput,
   skillAdvice,
 } from "./hook-utils.ts"
+
+const PUSH_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
+
+function pushSentinelPath(sessionId: string): string {
+  const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
+  return `/tmp/stop-git-push-prompted-${safeSession}.flag`
+}
+
+async function isPushCooldownActive(
+  sessionId: string | undefined,
+  cwd: string,
+  branch: string
+): Promise<boolean> {
+  if (!sessionId || sessionId === "null") return false
+  const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
+  if (!safeSession) return false
+
+  // Must have prompted to push in this session already
+  if (!(await Bun.file(pushSentinelPath(sessionId)).exists())) return false
+
+  // Remote branch must have been updated within the cooldown window
+  const rawTime = await git(["log", "-1", "--format=%ct", `origin/${branch}`], cwd)
+  const remoteCommitTime = parseInt(rawTime, 10)
+  if (Number.isNaN(remoteCommitTime)) return false
+
+  return Date.now() - remoteCommitTime * 1000 < PUSH_COOLDOWN_MS
+}
+
+async function markPushPrompted(sessionId: string | undefined): Promise<void> {
+  if (!sessionId || sessionId === "null") return
+  const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
+  if (!safeSession) return
+  try {
+    await Bun.write(pushSentinelPath(sessionId), "")
+  } catch {}
+}
 
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as StopHookInput
@@ -41,6 +81,12 @@ async function main(): Promise<void> {
 
   // Nothing to report
   if (!hasUncommitted && ahead === 0 && behind === 0) return
+
+  // Push-only cooldown: skip push enforcement if we already prompted this session
+  // and the remote was updated recently (≤ 10 min). Still enforce uncommitted changes.
+  if (!hasUncommitted && behind === 0 && ahead > 0) {
+    if (await isPushCooldownActive(input.session_id, cwd, branch)) return
+  }
 
   // ── Build the reason ──────────────────────────────────────────────────
 
@@ -113,6 +159,12 @@ async function main(): Promise<void> {
   }
 
   reason += formatActionPlan(steps)
+
+  // ── Mark push as prompted (for cooldown on subsequent stop attempts) ─────
+  // Record once so future stops within PUSH_COOLDOWN_MS skip re-blocking for push.
+  if (ahead > 0 || (hasUncommitted && hasRemote)) {
+    await markPushPrompted(input.session_id)
+  }
 
   // ── Task creation ─────────────────────────────────────────────────────
 

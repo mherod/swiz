@@ -102,6 +102,8 @@ All output helpers return `never` and call `process.exit(0)` after writing JSON.
 
 **Diff file tracking** — When scanning git diffs line-by-line, track the current file by reading `+++ b/<path>` headers, then apply file-level exclusions (e.g., `if (TEST_FILE_RE.test(currentFile)) continue`). This pattern is lighter than splitting the diff into file chunks and allows consistent file-based filtering across all checked lines.
 
+**DO** import `projectKeyFromCwd` from `src/transcript-utils.ts` when any hook needs to locate a project directory under `~/.claude/projects/`. The canonical encoding replaces **both** `/` and `.` with `-` (`cwd.replace(/[/.]/g, "-")`). DON'T reimplement it locally — a slash-only variant (`/\//g`) silently misses dots in paths like `/Users/jane.doe/...`, causing memory reads/writes to fail without any error.
+
 **DO** implement workflow-enforcement hooks by scanning `transcript_path` for both the triggering reminder and the completion evidence, not by adding separate state files or in-memory flags. `pretooluse-update-memory-enforcement.ts` is the pattern: after a hook tells the agent to use `/update-memory`, the follow-up gate must verify the transcript shows a read of `update-memory/SKILL.md` and a write to a `.md` file such as `CLAUDE.md` before unblocking normal work. The reminder itself must also include the triggering cause (for example, the ignored user instruction or the specific blocked workflow violation) so the recorded DO/DON'T rule preserves why the enforcement fired.
 
 ## Task Data
