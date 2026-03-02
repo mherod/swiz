@@ -830,7 +830,7 @@ describe("stop-git-push: positive paths (now merged into stop-git-status)", () =
     Bun.spawnSync(["git", "add", "."], { cwd: workDir })
     Bun.spawnSync(["git", "commit", "-m", "unpushed"], { cwd: workDir })
 
-    const r = await runHook(HOOK, { cwd: workDir, session_id: "test-unpushed" })
+    const r = await runHook(HOOK, { cwd: workDir, session_id: `test-unpushed-${Date.now()}` })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
     expect(r.json?.decision).toBe("block")
