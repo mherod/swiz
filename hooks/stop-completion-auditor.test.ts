@@ -51,9 +51,9 @@ describe("formatActionPlan", () => {
 
   it("output from formatActionPlan is appendable alongside a prose prefix", () => {
     // Mirrors how stop-completion-auditor.ts uses it: prose + formatActionPlan(steps)
-    const full = `Create tasks to record the work done:\n${formatActionPlan(["TaskCreate", "TaskUpdate"])}`
+    const full = `Create tasks to record the work done.\n\n${formatActionPlan(["TaskCreate", "TaskUpdate"])}`
     expect(full).toBe(
-      "Create tasks to record the work done:\nAction plan:\n  1. TaskCreate\n  2. TaskUpdate\n"
+      "Create tasks to record the work done.\n\nAction plan:\n  1. TaskCreate\n  2. TaskUpdate\n"
     )
   })
 

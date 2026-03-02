@@ -67,7 +67,7 @@ async function main(): Promise<void> {
     if (toolCallCount >= TOOL_CALL_THRESHOLD) {
       blockStop(
         `No tasks were created this session (${toolCallCount} tool calls made).\n\n` +
-          "Create tasks to record the work done:\n" +
+          "Create tasks to record the work done.\n\n" +
           formatActionPlan(
             [
               "Use TaskCreate to create one task for each significant piece of work",
@@ -125,7 +125,7 @@ async function main(): Promise<void> {
     if (toolCallCount >= TOOL_CALL_THRESHOLD) {
       blockStop(
         `No completed tasks on record (${toolCallCount} tool calls made).\n\n` +
-          "Create tasks to record the work done:\n" +
+          "Create tasks to record the work done.\n\n" +
           formatActionPlan(
             [
               "Use TaskCreate to create one task for each significant piece of work",

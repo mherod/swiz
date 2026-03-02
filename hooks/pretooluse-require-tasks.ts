@@ -72,9 +72,14 @@ async function main() {
     deny(
       `STOP. ${toolName} is BLOCKED because this session has no incomplete tasks.\n\n` +
         `You must keep at least one task in pending or in_progress status before using bash/shell/edit tools.\n\n` +
-        `Required now:\n` +
-        `1. Create or update a task so its status is pending or in_progress.\n` +
-        `2. Include a concrete description of the current work and next step.\n\n` +
+        formatActionPlan(
+          [
+            "Create or update a task so its status is pending or in_progress.",
+            "Include a concrete description of the current work and next step.",
+          ],
+          { translateToolNames: true }
+        ) +
+        `\n` +
         `After at least one task is incomplete, ${toolName} will be unblocked automatically.`
     )
   }
@@ -106,7 +111,6 @@ async function main() {
             `However, it's been a while since we've updated the task list. Good task hygiene means the list should stay fully reflective of what we're currently doing.\n\n` +
             `Tasks are not suggestions - they are our execution plan. Stale tasks mean we are operating without clear accountability.\n\n` +
             `Our current work has clearly grown in scope beyond the original task definition. We should update the in-progress task with current status, and create a new task that represents the work now underway.\n\n` +
-            `YOU MUST DO THE FOLLOWING BEFORE CONTINUING:\n` +
             formatActionPlan(
               [
                 "Use TaskUpdate to update in-progress tasks with the latest progress and mark completed work done.",
