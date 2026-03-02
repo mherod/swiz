@@ -1072,10 +1072,11 @@ describe("stop-auto-continue", () => {
 
   // ─── Critique field tests ────────────────────────────────────────────────
 
-  test("includes critique inline (no label prefix) when JSON response includes critique field", async () => {
+  test("includes process and product critiques with labels before the continue instruction", async () => {
     const binDir = await createTempDir()
     const json = JSON.stringify({
-      critique: "You skipped reading the existing implementation before modifying it.",
+      processCritique: "You skipped reading the existing implementation before modifying it.",
+      productCritique: "The fix handles the happy path but leaves the error case broken.",
       next: "Run the full test suite",
       reflections: [],
     })
@@ -1084,13 +1085,17 @@ describe("stop-auto-continue", () => {
     const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
     expect(result.decision).toBe("block")
+    expect(result.reason).toContain("Process:")
+    expect(result.reason).toContain("Product:")
     expect(result.reason).toContain(
       "You skipped reading the existing implementation before modifying it."
     )
-    expect(result.reason).not.toContain("Session critique:")
+    expect(result.reason).toContain(
+      "The fix handles the happy path but leaves the error case broken."
+    )
     expect(result.reason).toContain("Run the full test suite")
-    // Critique must appear before the continue instruction
-    const critiqueIdx = result.reason!.indexOf("You skipped reading")
+    // Critiques must appear before the continue instruction
+    const critiqueIdx = result.reason!.indexOf("Process:")
     const continueIdx = result.reason!.indexOf("Continue autonomously")
     expect(critiqueIdx).toBeLessThan(continueIdx)
   })
@@ -1108,23 +1113,30 @@ describe("stop-auto-continue", () => {
     expect(result.reason).toContain("Run the full test suite")
   })
 
-  test("omits critique when critique field is empty string", async () => {
+  test("omits critique labels when both critique fields are empty strings", async () => {
     const binDir = await createTempDir()
-    const json = JSON.stringify({ critique: "", next: "Run the linter", reflections: [] })
+    const json = JSON.stringify({
+      processCritique: "",
+      productCritique: "",
+      next: "Run the linter",
+      reflections: [],
+    })
     await createFakeAgent(binDir, json)
 
     const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
     expect(result.decision).toBe("block")
-    expect(result.reason).not.toContain("Session critique:")
+    expect(result.reason).not.toContain("Process:")
+    expect(result.reason).not.toContain("Product:")
     expect(result.reason!.trimStart()).toMatch(/^Continue autonomously/)
     expect(result.reason).toContain("Run the linter")
   })
 
-  test("rejects markup in critique field and omits critique", async () => {
+  test("rejects markup in critique fields and omits those critiques", async () => {
     const binDir = await createTempDir()
     const json = JSON.stringify({
-      critique: "<tool_call>bash</tool_call>",
+      processCritique: "<tool_call>bash</tool_call>",
+      productCritique: "<tool_call>bash</tool_call>",
       next: "Run the tests",
       reflections: [],
     })
@@ -1133,16 +1145,16 @@ describe("stop-auto-continue", () => {
     const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
     expect(result.decision).toBe("block")
-    expect(result.reason).not.toContain("Session critique:")
     expect(result.reason).not.toContain("<tool_call>")
     expect(result.reason!.trimStart()).toMatch(/^Continue autonomously/)
     expect(result.reason).toContain("Run the tests")
   })
 
-  test("truncates multi-line critique to first non-empty line", async () => {
+  test("truncates multi-line processCritique to first non-empty line", async () => {
     const binDir = await createTempDir()
     const json = JSON.stringify({
-      critique: "You retried the same command repeatedly.\nThis was the second line.",
+      processCritique: "You retried the same command repeatedly.\nThis was the second line.",
+      productCritique: "",
       next: "Fix the root cause of the failure",
       reflections: [],
     })
@@ -1152,11 +1164,10 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBe("block")
     expect(result.reason).toContain("You retried the same command repeatedly.")
-    expect(result.reason).not.toContain("Session critique:")
     expect(result.reason).not.toContain("This was the second line.")
   })
 
-  test("prompt contains CRITIQUE RULES section with key failure categories", async () => {
+  test("prompt contains CRITIQUE RULES section with process and product axes", async () => {
     const binDir = await createTempDir()
     const argsFile = await createArgCapturingAgent(binDir)
     const fakeHome = await createTempDir()
@@ -1165,13 +1176,13 @@ describe("stop-auto-continue", () => {
 
     const capturedArgs = await Bun.file(argsFile).text()
     expect(capturedArgs).toContain("CRITIQUE RULES")
-    expect(capturedArgs).toContain("blind spot")
-    expect(capturedArgs).toContain("laziness")
-    expect(capturedArgs).toContain("procedural")
-    expect(capturedArgs).toContain("brutally honest")
+    expect(capturedArgs).toContain("PROCESS CRITIQUE")
+    expect(capturedArgs).toContain("PRODUCT CRITIQUE")
+    expect(capturedArgs).toContain("HOW the work was executed")
+    expect(capturedArgs).toContain("WHAT was built")
   })
 
-  test("prompt OUTPUT FORMAT includes critique field", async () => {
+  test("prompt OUTPUT FORMAT includes processCritique and productCritique fields", async () => {
     const binDir = await createTempDir()
     const argsFile = await createArgCapturingAgent(binDir)
     const fakeHome = await createTempDir()
@@ -1179,7 +1190,8 @@ describe("stop-auto-continue", () => {
     await runHook({ transcriptContent: buildTranscript(10), binDir, extraEnv: { HOME: fakeHome } })
 
     const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain('"critique"')
+    expect(capturedArgs).toContain('"processCritique"')
+    expect(capturedArgs).toContain('"productCritique"')
   })
 
   // ─── skillAdvice prompt guard tests ──────────────────────────────────────
