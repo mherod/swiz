@@ -20,6 +20,7 @@ const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|
 const JS_DEBUG_RE = /\bconsole\.(log|debug|trace|dir|table)\b/
 const JS_COMMENT_RE = /\/\/.*console\./
 const DEBUGGER_RE = /\bdebugger\b/
+const ESLINT_DEBUGGER_RULE_RE = /["']no-debugger["']/
 const PY_PRINT_RE = /\bprint\s*\(/
 const PY_EXCLUDE_RE = /# noqa|# debug ok/i
 const RUBY_DEBUG_RE = /\b(?:binding\.pry|byebug)\b/
@@ -65,8 +66,8 @@ async function main(): Promise<void> {
     if (JS_DEBUG_RE.test(content) && !JS_COMMENT_RE.test(content)) {
       findings.push(line.slice(0, 150))
     }
-    // debugger statement
-    else if (DEBUGGER_RE.test(content)) {
+    // debugger statement (exclude ESLint rule configs like "no-debugger": "warn")
+    else if (DEBUGGER_RE.test(content) && !ESLINT_DEBUGGER_RULE_RE.test(content)) {
       findings.push(line.slice(0, 150))
     }
     // Python: print()

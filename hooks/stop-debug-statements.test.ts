@@ -12,6 +12,7 @@ const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|
 const JS_DEBUG_RE = /\bconsole\.(log|debug|trace|dir|table)\b/
 const _JS_COMMENT_RE = /\/\/.*console\./
 const DEBUGGER_RE = /\bdebugger\b/
+const ESLINT_DEBUGGER_RULE_RE = /["']no-debugger["']/
 const PY_PRINT_RE = /\bprint\s*\(/
 const RUBY_DEBUG_RE = /\b(?:binding\.pry|byebug)\b/
 
@@ -146,6 +147,33 @@ describe("DEBUGGER_RE: debugger statement with word boundaries", () => {
   test("should not match similar words", () => {
     expect(DEBUGGER_RE.test("notadebugger")).toBe(false)
     expect(DEBUGGER_RE.test("debuggered")).toBe(false)
+  })
+
+  describe("ESLint rule config exclusion (issue #14)", () => {
+    function isDebuggerFinding(content: string): boolean {
+      return DEBUGGER_RE.test(content) && !ESLINT_DEBUGGER_RULE_RE.test(content)
+    }
+
+    test("standalone debugger statement is still flagged", () => {
+      expect(isDebuggerFinding("debugger;")).toBe(true)
+      expect(isDebuggerFinding("  debugger")).toBe(true)
+    })
+
+    test('"no-debugger": "warn" is not flagged', () => {
+      expect(isDebuggerFinding('"no-debugger": "warn"')).toBe(false)
+    })
+
+    test('"no-debugger": "error" is not flagged', () => {
+      expect(isDebuggerFinding('"no-debugger": "error"')).toBe(false)
+    })
+
+    test("'no-debugger': 'warn' (single quotes) is not flagged", () => {
+      expect(isDebuggerFinding("'no-debugger': 'warn'")).toBe(false)
+    })
+
+    test('"no-debugger": "off" is not flagged', () => {
+      expect(isDebuggerFinding('"no-debugger": "off"')).toBe(false)
+    })
   })
 })
 
