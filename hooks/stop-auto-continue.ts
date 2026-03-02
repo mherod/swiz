@@ -339,8 +339,8 @@ function buildPrompt(
     `Be conservative — better to miss a pattern than to fabricate one. ` +
     skillAdvice(
       "update-memory",
-      `If the session produced learnings worth persisting, suggest using the /update-memory skill as the next step.`,
-      `If the session produced learnings worth persisting, suggest updating the project's CLAUDE.md or MEMORY.md.`
+      `If the session produced learnings worth persisting, suggest using the /update-memory skill as the next step and explicitly include "Cause to capture: <specific cause>" naming the exact ignored instruction, blocked workflow gap, or failure mode that should be recorded.`,
+      `If the session produced learnings worth persisting, suggest updating the project's CLAUDE.md or MEMORY.md as the next step and explicitly include "Cause to capture: <specific cause>" naming the exact ignored instruction, blocked workflow gap, or failure mode that should be recorded.`
     ) +
     `\n\n` +
     taskSection +

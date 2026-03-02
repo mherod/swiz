@@ -1251,6 +1251,8 @@ describe("stop-auto-continue", () => {
 
     const capturedArgs = await Bun.file(argsFile).text()
     expect(capturedArgs).toContain("/update-memory skill")
+    expect(capturedArgs).toContain("Cause to capture: <specific cause>")
+    expect(capturedArgs).toContain("ignored instruction, blocked workflow gap, or failure mode")
   })
 
   test("prompt uses generic memory fallback when skill is not installed", async () => {
@@ -1268,5 +1270,6 @@ describe("stop-auto-continue", () => {
     const capturedArgs = await Bun.file(argsFile).text()
     expect(capturedArgs).toContain("CLAUDE.md or MEMORY.md")
     expect(capturedArgs).not.toContain("/update-memory skill")
+    expect(capturedArgs).toContain("Cause to capture: <specific cause>")
   })
 })
