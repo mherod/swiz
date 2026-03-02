@@ -14,7 +14,14 @@
 //   Collaborative + trivial: allowed
 //   Collaborative + non-trivial: BLOCKED — must use feature branch + PR
 
-import { denyPreToolUse, gh, git, isShellTool, type ToolHookInput } from "./hook-utils.ts"
+import {
+  denyPreToolUse,
+  getCurrentGitHubUser,
+  gh,
+  git,
+  isShellTool,
+  type ToolHookInput,
+} from "./hook-utils.ts"
 
 const input: ToolHookInput = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
@@ -40,19 +47,18 @@ if (!diffStat.trim()) {
 }
 const lines = diffStat.trim().split("\n").filter(Boolean)
 
-let fileCount = 0
 let totalLinesAdded = 0
 let totalLinesRemoved = 0
 
-for (const line of lines) {
-  // Format: "filename | X insertions(+), Y deletions(-)"
-  const match = line.match(/\|\s*(\d+)\s*insertions?\(\+\)(?:,\s*(\d+)\s*deletions?\(?-\))?/)
-  if (match) {
-    fileCount++
-    totalLinesAdded += parseInt(match[1] ?? "0", 10)
-    totalLinesRemoved += parseInt(match[2] ?? "0", 10)
-  }
-}
+// Parse the summary line at the bottom of --stat output:
+// "3 files changed, 160 insertions(+), 2 deletions(-)"
+const summaryLine = lines[lines.length - 1] ?? ""
+const filesMatch = summaryLine.match(/(\d+)\s+files?\s+changed/)
+const fileCount = filesMatch ? parseInt(filesMatch[1]!, 10) : 0
+const insertMatch = summaryLine.match(/(\d+)\s+insertions?\(\+\)/)
+if (insertMatch) totalLinesAdded = parseInt(insertMatch[1]!, 10)
+const deleteMatch = summaryLine.match(/(\d+)\s+deletions?\(-\)/)
+if (deleteMatch) totalLinesRemoved = parseInt(deleteMatch[1]!, 10)
 
 const totalLinesChanged = totalLinesAdded + totalLinesRemoved
 
@@ -101,13 +107,16 @@ const recentContributors = await gh(
   cwd
 )
 
+// Get current user to exclude from contributor list
+const currentUser = await getCurrentGitHubUser(cwd)
+
 const otherContributors = Array.from(
   new Set(
     recentContributors
       .trim()
       .split("\n")
       .filter(Boolean)
-      .filter((c) => c !== "null" && c !== "")
+      .filter((c) => c !== "null" && c !== "" && c !== currentUser)
   )
 )
 
