@@ -21,8 +21,14 @@ import {
 
 const PUSH_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
 
-function pushSentinelPath(sessionId: string): string {
-  const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
+/** Returns a filesystem-safe session identifier, or null if the session is invalid/missing. */
+function sanitizeSessionId(sessionId: string | undefined): string | null {
+  if (!sessionId || sessionId === "null") return null
+  const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
+  return safe || null
+}
+
+function pushSentinelPath(safeSession: string): string {
   return `/tmp/stop-git-push-prompted-${safeSession}.flag`
 }
 
@@ -31,13 +37,12 @@ async function isPushCooldownActive(
   cwd: string,
   branch: string
 ): Promise<boolean> {
-  if (!sessionId || sessionId === "null") return false
-  const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
+  const safeSession = sanitizeSessionId(sessionId)
   if (!safeSession) return false
 
   // Sentinel must exist and itself be within the cooldown window. Stale files from
   // prior sessions / test runs must not trigger a false-positive cooldown.
-  const sentinelFile = Bun.file(pushSentinelPath(sessionId))
+  const sentinelFile = Bun.file(pushSentinelPath(safeSession))
   if (!(await sentinelFile.exists())) return false
   const sentinelMtime = (await sentinelFile.stat()).mtime.getTime()
   if (Date.now() - sentinelMtime > PUSH_COOLDOWN_MS) return false
@@ -51,12 +56,70 @@ async function isPushCooldownActive(
 }
 
 async function markPushPrompted(sessionId: string | undefined): Promise<void> {
-  if (!sessionId || sessionId === "null") return
-  const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
+  const safeSession = sanitizeSessionId(sessionId)
   if (!safeSession) return
   try {
-    await Bun.write(pushSentinelPath(sessionId), "")
+    await Bun.write(pushSentinelPath(safeSession), "")
   } catch {}
+}
+
+function buildUncommittedReason(
+  porcelain: string,
+  branch: string,
+  upstream: string,
+  behind: number
+): string {
+  const { total, modified, added, deleted, untracked, lines } = parseGitStatus(porcelain)
+
+  const summary = [
+    modified > 0 ? `${modified} modified` : "",
+    added > 0 ? `${added} added` : "",
+    deleted > 0 ? `${deleted} deleted` : "",
+    untracked > 0 ? `${untracked} untracked` : "",
+  ]
+    .filter(Boolean)
+    .join(", ")
+
+  let reason = `Uncommitted changes detected: ${summary} (${total} file(s))\n\n`
+  reason += "Files with changes:\n"
+  reason += lines
+    .slice(0, 20)
+    .map((l) => `  ${l}`)
+    .join("\n")
+  if (total > 20) reason += `\n  ... and ${total - 20} more file(s)`
+  reason += "\n\n"
+
+  if (behind > 0) {
+    reason += `Note: branch '${branch}' is also ${behind} commit(s) behind '${upstream}' — after committing you will need to pull before pushing.\n\n`
+  }
+
+  return reason
+}
+
+function describeRemoteState(
+  branch: string,
+  upstream: string,
+  ahead: number,
+  behind: number
+): string {
+  if (behind > 0 && ahead > 0) {
+    return (
+      `Branch '${branch}' has diverged from '${upstream}'.\n` +
+      `  ${ahead} local commit(s) not yet pushed\n` +
+      `  ${behind} remote commit(s) not yet pulled\n\n`
+    )
+  }
+  if (behind > 0) {
+    return `Branch '${branch}' is ${behind} commit(s) behind '${upstream}'.\n\n`
+  }
+  return `Unpushed commits on branch '${branch}': ${ahead} commit(s) ahead of '${upstream}'.\n\n`
+}
+
+function selectTaskSubject(hasUncommitted: boolean, ahead: number, behind: number): string {
+  if (hasUncommitted && (ahead > 0 || behind > 0)) return "Commit changes and sync with remote"
+  if (hasUncommitted) return "Commit uncommitted changes"
+  if (behind > 0) return "Pull remote changes before pushing"
+  return "Push branch to remote"
 }
 
 async function main(): Promise<void> {
@@ -94,31 +157,13 @@ async function main(): Promise<void> {
 
   // ── Build the reason ──────────────────────────────────────────────────
 
-  let reason = ""
   const steps: string[] = []
 
+  let reason = hasUncommitted
+    ? buildUncommittedReason(porcelain, branch, upstream, behind)
+    : describeRemoteState(branch, upstream, ahead, behind)
+
   if (hasUncommitted) {
-    const { total, modified, added, deleted, untracked, lines } = parseGitStatus(porcelain)
-    const parts: string[] = []
-    if (modified > 0) parts.push(`${modified} modified`)
-    if (added > 0) parts.push(`${added} added`)
-    if (deleted > 0) parts.push(`${deleted} deleted`)
-    if (untracked > 0) parts.push(`${untracked} untracked`)
-    const summary = parts.join(", ")
-
-    reason += `Uncommitted changes detected: ${summary} (${total} file(s))\n\n`
-    reason += "Files with changes:\n"
-    reason += lines
-      .slice(0, 20)
-      .map((l) => `  ${l}`)
-      .join("\n")
-    if (total > 20) reason += `\n  ... and ${total - 20} more file(s)`
-    reason += "\n\n"
-
-    if (behind > 0) {
-      reason += `Note: branch '${branch}' is also ${behind} commit(s) behind '${upstream}' — after committing you will need to pull before pushing.\n\n`
-    }
-
     steps.push(
       skillAdvice(
         "commit",
@@ -126,17 +171,6 @@ async function main(): Promise<void> {
         'Commit your changes:\n  git add .\n  git commit -m "<type>(<scope>): <summary>"'
       )
     )
-  } else {
-    // No uncommitted changes — report the remote state upfront
-    if (behind > 0 && ahead > 0) {
-      reason += `Branch '${branch}' has diverged from '${upstream}'.\n`
-      reason += `  ${ahead} local commit(s) not yet pushed\n`
-      reason += `  ${behind} remote commit(s) not yet pulled\n\n`
-    } else if (behind > 0) {
-      reason += `Branch '${branch}' is ${behind} commit(s) behind '${upstream}'.\n\n`
-    } else {
-      reason += `Unpushed commits on branch '${branch}': ${ahead} commit(s) ahead of '${upstream}'.\n\n`
-    }
   }
 
   if (behind > 0) {
@@ -151,10 +185,10 @@ async function main(): Promise<void> {
 
   // Show a push step when: already ahead, or has uncommitted changes and a remote
   // (committing will create at least one new commit to push)
-  if (ahead > 0 || (hasUncommitted && hasRemote)) {
-    const totalAfterCommit = hasUncommitted ? ahead + 1 : ahead
+  const willNeedPush = ahead > 0 || (hasUncommitted && hasRemote)
+  if (willNeedPush) {
     const pushLabel =
-      totalAfterCommit > 0 && ahead > 0
+      ahead > 0
         ? `Push ${ahead} commit(s) to '${upstream}'`
         : `Push your committed changes to '${upstream}'`
     steps.push(
@@ -166,21 +200,13 @@ async function main(): Promise<void> {
 
   // ── Mark push as prompted (for cooldown on subsequent stop attempts) ─────
   // Record once so future stops within PUSH_COOLDOWN_MS skip re-blocking for push.
-  if (ahead > 0 || (hasUncommitted && hasRemote)) {
+  if (willNeedPush) {
     await markPushPrompted(input.session_id)
   }
 
   // ── Task creation ─────────────────────────────────────────────────────
 
-  const taskSubject =
-    hasUncommitted && (ahead > 0 || behind > 0)
-      ? "Commit changes and sync with remote"
-      : hasUncommitted
-        ? "Commit uncommitted changes"
-        : behind > 0
-          ? "Pull remote changes before pushing"
-          : "Push branch to remote"
-
+  const taskSubject = selectTaskSubject(hasUncommitted, ahead, behind)
   const taskDesc = [
     hasUncommitted && `Git repository has uncommitted changes at ${cwd}.`,
     behind > 0 && `Branch '${branch}' is ${behind} commit(s) behind '${upstream}'.`,

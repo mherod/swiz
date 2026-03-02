@@ -23,7 +23,7 @@ const SELF_SENTINEL = "MEMORY CAPTURE ENFORCEMENT"
 const UPDATE_MEMORY_SKILL_PATH_FRAGMENT = "update-memory/SKILL.md"
 const MARKDOWN_FILE_RE = /(?:^|[\\/])[^\\/\n]+\.md$/i
 const APPLY_PATCH_MARKDOWN_RE = /^\*\*\* (?:Add|Update) File: .+\.md$/m
-const COOLDOWN_MS = 5 * 60 * 1000 // 5 minutes
+const COOLDOWN_MS = 30 * 60 * 1000 // 30 minutes
 
 interface EnforcementState {
   skillReadComplete: boolean
