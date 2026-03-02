@@ -684,6 +684,31 @@ export async function getRepoNameWithOwner(cwd: string): Promise<string | null> 
   return name || null
 }
 
+/**
+ * Return the open/closed state of a GitHub issue, or `null` when the `gh`
+ * CLI is unavailable or the issue cannot be found.
+ *
+ * Use this before posting a comment or closing an issue to avoid redundant
+ * operations and the confusing error output they produce.
+ *
+ * @example
+ * const state = await issueState(19, cwd)
+ * if (state !== "OPEN") { console.log(`#19 already ${state ?? "unknown"} — skipping`); return }
+ * await gh(["issue", "comment", "19", "--body", body], cwd)
+ * await gh(["issue", "close", "19"], cwd)
+ */
+export async function issueState(
+  issueNumber: number | string,
+  cwd: string
+): Promise<"OPEN" | "CLOSED" | null> {
+  const raw = await gh(
+    ["issue", "view", String(issueNumber), "--json", "state", "--jq", ".state"],
+    cwd
+  )
+  if (raw === "OPEN" || raw === "CLOSED") return raw
+  return null
+}
+
 // ─── Common input types ─────────────────────────────────────────────────
 
 export interface StopHookInput {
