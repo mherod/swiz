@@ -7,18 +7,36 @@
 - Fixed `createSessionTask` in `hook-utils.ts` writing its sentinel file
   even when the underlying `tasks-list.ts` subprocess failed. A non-zero
   exit no longer leaves an orphaned sentinel, so a failed task-creation
-  attempt is retried on the next stop rather than silently skipped. (#15)
+  attempt is retried on the next stop rather than silently skipped.
+  **Upgrade impact:** sessions where task creation previously failed
+  silently (disk-full, missing binary, corrupt task dir) will now retry
+  on the next stop attempt instead of permanently losing the task prompt.
+  ([#15](https://github.com/mherod/swiz/issues/15))
 - Fixed `stop-auto-continue` path encoding so project directories with
   dots in their names (e.g. `/Users/jane.doe/project`) are found
   correctly. The encoding now replaces both `/` and `.` with `-`,
-  matching Claude Code's own project-directory scheme. (#16)
+  matching Claude Code's own project-directory scheme.
+  **Upgrade impact:** users whose home directory or project path contains
+  a dot (common with dotted usernames or paths like `~/work/v2.0`) were
+  silently receiving no task context in auto-continue suggestions; this
+  is now resolved.
+  ([#16](https://github.com/mherod/swiz/issues/16))
 - Fixed `swiz dispatch` routing `subagentStart` and `subagentStop` events
   through `runBlocking` instead of `runContext`. Context output emitted by
   hooks on those events is now forwarded to the agent instead of being
-  discarded. (#17)
+  discarded.
+  **Upgrade impact:** any hooks registered for `subagentStart` or
+  `subagentStop` that use `emitContext()` were previously no-ops; they
+  now inject their context as intended.
+  ([#17](https://github.com/mherod/swiz/issues/17))
 - Fixed a potential deadlock in `agent.ts` where large stderr output could
   fill the OS pipe buffer and stall the subprocess before it exited. Both
-  stdout and stderr are now drained concurrently via `Promise.all`. (#18)
+  stdout and stderr are now drained concurrently via `Promise.all`.
+  **Upgrade impact:** `swiz continue` and other commands using the agent
+  backend could hang indefinitely when the underlying CLI wrote more than
+  ~64 KB to stderr (e.g. verbose error traces); they now complete
+  normally.
+  ([#18](https://github.com/mherod/swiz/issues/18))
 
 ## 2026-03-01
 
