@@ -88,6 +88,21 @@ describe("pretooluse-banned-commands", () => {
       expect(result.decision).toBe("deny")
     })
 
+    test("bun test --reporter=verbose is blocked with corrected command", async () => {
+      const result = await runHook("bun test hooks/foo.test.ts --reporter=verbose")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("'verbose' is not valid")
+      expect(result.reason).toContain("--reporter=dots")
+      expect(result.reason).toContain("bun test hooks/foo.test.ts --reporter=dots")
+    })
+
+    test("bun test --reporter=pretty is blocked with corrected command", async () => {
+      const result = await runHook("bun test --reporter=pretty src/")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("'pretty' is not valid")
+      expect(result.reason).toContain("--reporter=dots")
+    })
+
     test("git commit --no-verify is blocked", async () => {
       const result = await runHook("git commit --no-verify -m 'test'")
       expect(result.decision).toBe("deny")
@@ -112,6 +127,24 @@ describe("pretooluse-banned-commands", () => {
 
     test("bun test passes through", async () => {
       const result = await runHook("bun test")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("bun test --reporter=dots passes through", async () => {
+      const result = await runHook("bun test hooks/foo.test.ts --reporter=dots")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("bun test --reporter=junit passes through", async () => {
+      const result = await runHook("bun test hooks/foo.test.ts --reporter=junit")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("echo with bun test --reporter=verbose in JSON payload is not blocked", async () => {
+      // The reporter check must not fire when bun test appears inside a quoted
+      // string that is an argument to echo (e.g. piping JSON to a hook script).
+      const cmd = `echo '{"tool_input":{"command":"bun test foo.ts --reporter=verbose"}}' | bun hooks/pretooluse-banned-commands.ts`
+      const result = await runHook(cmd)
       expect(result.decision).toBeUndefined()
     })
 
