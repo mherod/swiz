@@ -172,19 +172,30 @@ async function main(): Promise<void> {
     if (pgrepProc.exitCode === 0) {
       const pushPids = pgrepOut.trim().split("\n").map(Number).filter(Boolean)
 
-      // Walk our process ancestry to exclude inherited git push processes
+      // Build the full PID→PPID map with one `ps -eo pid,ppid` call, then walk
+      // ancestry in-memory. This replaces up to 20 individual `ps -p <pid>` spawns
+      // (each ~20–50 ms) with a single subprocess invocation (~50 ms total).
+      const psAllProc = Bun.spawn(["ps", "-eo", "pid,ppid"], {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      const psAllOut = await new Response(psAllProc.stdout).text()
+      await psAllProc.exited
+
+      const parentMap = new Map<number, number>()
+      for (const line of psAllOut.trim().split("\n").slice(1)) {
+        const parts = line.trim().split(/\s+/)
+        const pid = parseInt(parts[0] ?? "", 10)
+        const ppid = parseInt(parts[1] ?? "", 10)
+        if (!Number.isNaN(pid) && !Number.isNaN(ppid)) parentMap.set(pid, ppid)
+      }
+
       const ancestors = new Set<number>()
       let cur = process.ppid
       for (let i = 0; i < 20 && cur > 1; i++) {
         ancestors.add(cur)
-        const psProc = Bun.spawn(["ps", "-p", cur.toString(), "-o", "ppid="], {
-          stdout: "pipe",
-          stderr: "pipe",
-        })
-        const psOut = await new Response(psProc.stdout).text()
-        await psProc.exited
-        const ppid = parseInt(psOut.trim(), 10)
-        if (Number.isNaN(ppid) || ppid === cur) break
+        const ppid = parentMap.get(cur)
+        if (!ppid || ppid === cur) break
         cur = ppid
       }
 
