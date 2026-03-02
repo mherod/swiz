@@ -15,6 +15,7 @@ import {
   isWriteTool,
   READ_CMD_RE,
   readSessionTasks,
+  SWIZ_ISSUE_RE,
   TASK_TOOLS,
   toolNameForCurrentAgent,
 } from "./hook-utils.ts"
@@ -53,6 +54,11 @@ if (isShellTool(toolName)) {
 
   // gh commands — CI/PR inspection and management; end-of-session publishing steps
   if (GH_CMD_RE.test(command)) {
+    process.exit(0)
+  }
+
+  // swiz issue close/comment — thin wrappers around gh issue; same exemption applies
+  if (SWIZ_ISSUE_RE.test(command)) {
     process.exit(0)
   }
 }

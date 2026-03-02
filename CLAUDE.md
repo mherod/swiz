@@ -135,9 +135,9 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DO** call a task tool (TaskUpdate, TaskCreate, TaskList, or TaskGet) at least every 15 tool calls. The staleness gate fires after 20 consecutive tool calls with no task tool interaction — staying under 15 provides a safe buffer. When the staleness gate fires mid-task, call `TaskUpdate` on the active task with current progress notes; if that doesn't unblock, call `TaskCreate` for the next concrete step.
 
-**DO** create a task before any session that will involve Bash commands beyond the read-only exemptions. The hook exempts: `ls`, `rg`, `grep` (always); git read-only subcommands (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`, etc.) when no write subcommand is present; `git push/pull/fetch`; and all `gh` commands. `find` is NOT exempt — use `rg` or Glob tool for file discovery instead.
+**DO** create a task before any session that will involve Bash commands beyond the read-only exemptions. The hook exempts: `ls`, `rg`, `grep` (always); git read-only subcommands (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`, etc.) when no write subcommand is present; `git push/pull/fetch`; all `gh` commands; and `swiz issue close/comment`. `find` is NOT exempt — use `rg` or Glob tool for file discovery instead.
 
-**DON'T** create a task just for `git push` or `gh` commands — these are exempt from the task requirement. `git push`, `git pull`, `git fetch`, and all `gh` subcommands bypass the hook automatically.
+**DON'T** create a task just for `git push`, `gh`, or `swiz issue close/comment` — these are exempt from the task requirement. `git push`, `git pull`, `git fetch`, all `gh` subcommands, and `swiz issue close/comment` bypass the hook automatically. The exemption for `swiz issue` is defined by `SWIZ_ISSUE_RE` in `hook-utils.ts` and is wired into the exemption block in `pretooluse-require-tasks.ts` alongside `GH_CMD_RE`.
 
 **DO** commit all changes before attempting to stop the session. The `stop-git-status.sh` hook blocks stop when uncommitted changes exist. The correct end-of-task sequence is: edit → commit (task still in_progress) → mark task completed → push → CI watch → `gh run view --json` → announce result → stop.
 

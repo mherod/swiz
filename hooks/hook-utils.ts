@@ -635,6 +635,9 @@ export const READ_CMD_RE = /(?:^|\|\||&&|;)\s*(ls|rg|grep)\b/
 /** Matches any `gh` CLI invocation. */
 export const GH_CMD_RE = /(?:^|\|\||&&|;)\s*gh\b/
 
+/** Matches `swiz issue close` or `swiz issue comment` — thin gh-issue wrappers. */
+export const SWIZ_ISSUE_RE = /(?:^|\|\||&&|;)\s*swiz\s+issue\s+(close|comment)\b/
+
 // ── Push-gate check regexes ───────────────────────────────────────────────
 
 /**
