@@ -83,6 +83,7 @@ describe("pretooluse-update-memory-enforcement", () => {
     ])
 
     const result = await runHook({
+      cwd: dir,
       tool_name: "Edit",
       tool_input: { file_path: "src/app.ts", new_string: "export const x = 1\n" },
       transcript_path: transcript,
@@ -192,5 +193,27 @@ describe("pretooluse-update-memory-enforcement", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toBe("")
+  })
+
+  test("skips enforcement when a CLAUDE.md in cwd was modified within the cooldown window", async () => {
+    const dir = await createTempDir()
+    // Write a fresh CLAUDE.md into the temp dir — mtime will be "now"
+    const { writeFile } = await import("node:fs/promises")
+    await writeFile(`${dir}/CLAUDE.md`, "DO: update memory immediately.\n")
+
+    const transcript = await createTranscript(dir, [
+      hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+      // No skill read, no markdown write in transcript — but cooldown should bypass
+    ])
+
+    const result = await runHook({
+      cwd: dir,
+      tool_name: "Edit",
+      tool_input: { file_path: "src/app.ts", new_string: "export const z = 3\n" },
+      transcript_path: transcript,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("") // allowed — cooldown active
   })
 })

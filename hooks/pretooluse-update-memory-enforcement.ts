@@ -3,7 +3,11 @@
 // update-memory DO/DON'T rule, block normal work until the transcript shows:
 //   1. The update-memory skill was read
 //   2. A markdown file write was performed
+// Cooldown: if any CLAUDE.md (or MEMORY.md) in the project tree was modified
+// within COOLDOWN_MS, skip enforcement — the agent is actively maintaining memory.
 
+import { stat } from "node:fs/promises"
+import { dirname, join } from "node:path"
 import {
   denyPreToolUse,
   isEditTool,
@@ -19,6 +23,7 @@ const SELF_SENTINEL = "MEMORY CAPTURE ENFORCEMENT"
 const UPDATE_MEMORY_SKILL_PATH_FRAGMENT = "update-memory/SKILL.md"
 const MARKDOWN_FILE_RE = /(?:^|[\\/])[^\\/\n]+\.md$/i
 const APPLY_PATCH_MARKDOWN_RE = /^\*\*\* (?:Add|Update) File: .+\.md$/m
+const COOLDOWN_MS = 5 * 60 * 1000 // 5 minutes
 
 interface EnforcementState {
   skillReadComplete: boolean
@@ -63,6 +68,43 @@ function toolWritesMarkdown(toolName: string, toolInput: unknown): boolean {
   return strings.some(
     (value) => MARKDOWN_FILE_RE.test(value.trim()) || APPLY_PATCH_MARKDOWN_RE.test(value)
   )
+}
+
+/**
+ * Returns true if any CLAUDE.md (or project MEMORY.md) file was modified
+ * within COOLDOWN_MS. When true, the enforcement gate is skipped — the agent
+ * is already actively maintaining memory.
+ */
+async function isMemoryRecentlyUpdated(cwd: string): Promise<boolean> {
+  const candidates: string[] = []
+
+  // Walk up from cwd collecting CLAUDE.md paths
+  let dir = cwd
+  while (true) {
+    candidates.push(join(dir, "CLAUDE.md"))
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+
+  // Also check the project auto-memory file
+  const home = process.env.HOME
+  if (home) {
+    const encodedCwd = cwd.replace(/[/.]/g, "-")
+    candidates.push(join(home, ".claude", "projects", encodedCwd, "memory", "MEMORY.md"))
+    candidates.push(join(home, ".claude", "MEMORY.md"))
+  }
+
+  const now = Date.now()
+  for (const p of candidates) {
+    try {
+      const s = await stat(p)
+      if (now - s.mtimeMs < COOLDOWN_MS) return true
+    } catch {
+      // File doesn't exist or stat failed — skip
+    }
+  }
+  return false
 }
 
 function scanTranscript(lines: string[], startIndex: number): EnforcementState {
@@ -135,6 +177,10 @@ async function main(): Promise<void> {
   }
 
   if (lastTriggerIndex < 0) return
+
+  // Cooldown: if a memory file was recently updated, the agent is actively
+  // maintaining memory — skip enforcement to avoid cascading re-triggers.
+  if (await isMemoryRecentlyUpdated(input.cwd ?? process.cwd())) return
 
   const state = scanTranscript(lines, lastTriggerIndex)
   if (state.skillReadComplete && state.markdownWriteComplete) return
