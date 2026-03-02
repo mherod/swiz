@@ -74,6 +74,11 @@ describe("stop-debug-statements file filter", () => {
     test("*.spec.js is excluded", () => {
       expect(isScanned("src/utils.spec.js")).toBe(false)
     })
+
+    test("files under /test/ directory are excluded", () => {
+      expect(isScanned("src/test/helper.ts")).toBe(false)
+      expect(isScanned("packages/core/test/fixtures.ts")).toBe(false)
+    })
   })
 
   describe("CONFIG_FILE_RE — config files are excluded (issue #14)", () => {
