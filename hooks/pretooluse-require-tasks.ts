@@ -57,6 +57,17 @@ if (isShellTool(toolName)) {
   }
 }
 
+// ── EXEMPTION: Memory markdown edits ─────────────────────────────────────────
+// CLAUDE.md and MEMORY.md edits are memory-maintenance work and must never be
+// gated on task existence — the task hook must not prevent the agent from
+// recording learnings or following memory-enforcement instructions.
+if (isEditTool(toolName) || isWriteTool(toolName)) {
+  const filePath: string = input?.tool_input?.file_path ?? ""
+  if (/(?:^|[\\/])(?:CLAUDE|MEMORY)\.md$/i.test(filePath)) {
+    process.exit(0)
+  }
+}
+
 // ── CHECK 1: Incomplete tasks exist (file-based) ──────────────────────────────
 
 const home = process.env.HOME

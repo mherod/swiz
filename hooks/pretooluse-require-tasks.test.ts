@@ -14,6 +14,7 @@ async function runHook({
   sessionId = "session-123",
   transcriptPath,
   command,
+  filePath,
   envOverrides = {},
 }: {
   homeDir: string
@@ -21,13 +22,17 @@ async function runHook({
   sessionId?: string
   transcriptPath?: string
   command?: string
+  filePath?: string
   envOverrides?: Record<string, string | undefined>
 }): Promise<HookResult> {
+  const toolInput: Record<string, string> = {}
+  if (command !== undefined) toolInput.command = command
+  if (filePath !== undefined) toolInput.file_path = filePath
   const payload = JSON.stringify({
     tool_name: toolName,
     session_id: sessionId,
     transcript_path: transcriptPath ?? "",
-    tool_input: command !== undefined ? { command } : {},
+    tool_input: toolInput,
   })
   const env: Record<string, string | undefined> = { ...process.env, HOME: homeDir }
   delete env.CLAUDECODE
@@ -351,6 +356,58 @@ describe("pretooluse-require-tasks", () => {
       const homeDir = await createTempHome()
       const result = await runHook({ homeDir, command: "pwd && ls -la" })
       expect(result.decision).toBeUndefined()
+    })
+  })
+
+  describe("memory markdown exemption", () => {
+    test("allows Edit targeting CLAUDE.md with no tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({
+        homeDir,
+        toolName: "Edit",
+        filePath: "/Users/test/project/CLAUDE.md",
+      })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows Write targeting MEMORY.md with no tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({
+        homeDir,
+        toolName: "Write",
+        filePath: "/Users/test/.claude/projects/foo/memory/MEMORY.md",
+      })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows Edit targeting CLAUDE.md at repo root with no tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({
+        homeDir,
+        toolName: "Edit",
+        filePath: "CLAUDE.md",
+      })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("still denies Edit targeting other .md files with no tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({
+        homeDir,
+        toolName: "Edit",
+        filePath: "/Users/test/project/README.md",
+      })
+      expect(result.decision).toBe("deny")
+    })
+
+    test("still denies Edit targeting .ts files with no tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({
+        homeDir,
+        toolName: "Edit",
+        filePath: "/Users/test/project/src/index.ts",
+      })
+      expect(result.decision).toBe("deny")
     })
   })
 
