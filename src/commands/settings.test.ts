@@ -53,7 +53,7 @@ describe("swiz settings", () => {
     const home = await createTempHome()
     const result = await runSwiz(["settings"], home)
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("auto-continue: enabled")
+    expect(result.stdout).toContain("auto-continue:   enabled")
     expect(result.stdout).toContain("(defaults)")
   })
 
@@ -105,7 +105,7 @@ describe("swiz settings", () => {
     )
     expect(showSession.exitCode).toBe(0)
     expect(showSession.stdout).toContain(`scope: session ${sessionId}`)
-    expect(showSession.stdout).toContain("auto-continue: disabled (global/default)")
+    expect(showSession.stdout).toContain("auto-continue:   disabled (global/default)")
   })
 
   test("session-scoped disable stores override under sessions map", async () => {
