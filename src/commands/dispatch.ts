@@ -305,6 +305,8 @@ export const dispatchCommand: Command = {
         !payload.tool_name &&
         !payload.toolName &&
         canonicalEvent !== "sessionStart" &&
+        canonicalEvent !== "subagentStart" &&
+        canonicalEvent !== "subagentStop" &&
         canonicalEvent !== "userPromptSubmit" &&
         canonicalEvent !== "stop"
       )
@@ -330,6 +332,8 @@ export const dispatchCommand: Command = {
         await runBlocking(matchingGroups, payloadStr)
         break
       case "sessionStart":
+      case "subagentStart":
+      case "subagentStop":
       case "userPromptSubmit":
         await runContext(matchingGroups, payloadStr, hookEventName)
         break

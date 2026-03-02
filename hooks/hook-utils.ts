@@ -409,7 +409,9 @@ export async function createSessionTask(
       { stdout: "pipe", stderr: "pipe" }
     )
     await proc.exited
-    await Bun.write(sentinel, "")
+    if (proc.exitCode === 0) {
+      await Bun.write(sentinel, "")
+    }
   } catch {}
 }
 

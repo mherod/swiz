@@ -144,7 +144,7 @@ function parseAgentResponse(raw: string): AgentResponse {
 // ─── Memory file resolution ─────────────────────────────────────────────────
 
 function projectKeyFromCwd(cwd: string): string {
-  return cwd.replace(/\//g, "-")
+  return cwd.replace(/[/.]/g, "-")
 }
 
 async function findProjectDir(cwd: string): Promise<string | null> {
@@ -155,7 +155,7 @@ async function findProjectDir(cwd: string): Promise<string | null> {
   try {
     const dirs = await readdir(PROJECTS_DIR)
     for (const dir of dirs) {
-      if (cwd.replace(/\//g, "-") === dir) return join(PROJECTS_DIR, dir)
+      if (projectKeyFromCwd(cwd) === dir) return join(PROJECTS_DIR, dir)
     }
   } catch {}
 

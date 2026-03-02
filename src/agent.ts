@@ -78,11 +78,17 @@ export async function promptAgent(prompt: string, options?: PromptAgentOptions):
     }
   }
 
-  const output = await new Response(proc.stdout).text()
+  // Drain both pipes concurrently before awaiting exit.
+  // Reading stderr only after proc.exited risks deadlock when the process writes
+  // more than the pipe buffer (~64 KB) to stderr: the process blocks on write,
+  // stdout never closes, proc.stdout.text() hangs, and proc.exited never fires.
+  const [output, err] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
 
   if (proc.exitCode !== 0) {
-    const err = await new Response(proc.stderr).text()
     throw new Error(`agent exited ${proc.exitCode}: ${err.trim()}`)
   }
 
