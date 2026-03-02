@@ -43,13 +43,15 @@ if (currentBranch !== "main" && currentBranch !== "master") process.exit(0)
 
 // Count files and lines changed
 // Try diff against origin/main first, fall back to HEAD~1 if no remote history exists
-let diffStat = await git(["diff", "origin/main..HEAD", "--stat"], cwd)
+let diffRange = `origin/${currentBranch}..HEAD`
+let diffStat = await git(["diff", diffRange, "--stat"], cwd)
 if (!diffStat.trim()) {
-  diffStat = await git(["diff", "HEAD~1..HEAD", "--stat"], cwd)
+  diffRange = "HEAD~1..HEAD"
+  diffStat = await git(["diff", diffRange, "--stat"], cwd)
 }
 
-// Check if changes are docs-only or config-only
-const diffFiles = await git(["diff", "--name-only", "origin/main..HEAD"], cwd)
+// Use the same diff range for file list to avoid data source mismatch
+const diffFiles = await git(["diff", "--name-only", diffRange], cwd)
 const changedFiles = diffFiles.trim().split("\n").filter(Boolean)
 
 const { statParsingFailed, isTrivial, isDocsOnly, scopeDescription, fileCount, totalLinesChanged } =

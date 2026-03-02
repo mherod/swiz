@@ -144,6 +144,40 @@ describe("parseGitStatSummary", () => {
       deletions: 0,
     })
   })
+
+  it("parses rename with 0 insertions/deletions summary", () => {
+    // Real git output for pure rename (git v2.53)
+    const input = ` file.txt => renamed.txt | 0
+ 1 file changed, 0 insertions(+), 0 deletions(-)`
+
+    expect(parseGitStatSummary(input)).toEqual({
+      filesChanged: 1,
+      insertions: 0,
+      deletions: 0,
+    })
+  })
+
+  it("parses chmod-only change", () => {
+    const input = ` script.sh | 0
+ 1 file changed, 0 insertions(+), 0 deletions(-)`
+
+    expect(parseGitStatSummary(input)).toEqual({
+      filesChanged: 1,
+      insertions: 0,
+      deletions: 0,
+    })
+  })
+
+  it("parses binary modify (Bin X -> Y bytes)", () => {
+    const input = ` real-binary.bin | Bin 100 -> 200 bytes
+ 1 file changed, 0 insertions(+), 0 deletions(-)`
+
+    expect(parseGitStatSummary(input)).toEqual({
+      filesChanged: 1,
+      insertions: 0,
+      deletions: 0,
+    })
+  })
 })
 
 // ─── classifyChangeScope ────────────────────────────────────────────────
@@ -302,6 +336,43 @@ describe("classifyChangeScope", () => {
     // fileCount=1 so stat didn't fail; 0 lines but src/ → not trivial
     expect(result.isTrivial).toBe(false)
     expect(result.isSmallFix).toBe(true)
+  })
+
+  // ── No false fail-closed on rename/binary/chmod ────────────────────
+
+  it("does not false-positive on pure rename stat", () => {
+    const statOutput = ` file.txt => renamed.txt | 0\n 1 file changed, 0 insertions(+), 0 deletions(-)`
+    const result = classifyChangeScope(parseGitStatSummary(statOutput), ["renamed.txt"])
+    expect(result.statParsingFailed).toBe(false)
+    expect(result.fileCount).toBe(1)
+  })
+
+  it("does not false-positive on binary add stat", () => {
+    const statOutput = ` image.bin | Bin 0 -> 100 bytes\n 1 file changed, 0 insertions(+), 0 deletions(-)`
+    const result = classifyChangeScope(parseGitStatSummary(statOutput), ["image.bin"])
+    expect(result.statParsingFailed).toBe(false)
+    expect(result.fileCount).toBe(1)
+  })
+
+  it("does not false-positive on binary-only change (no counts)", () => {
+    const statOutput = ` image.bin | Bin 100 -> 200 bytes\n 1 file changed`
+    const result = classifyChangeScope(parseGitStatSummary(statOutput), ["image.bin"])
+    expect(result.statParsingFailed).toBe(false)
+    expect(result.fileCount).toBe(1)
+  })
+
+  it("does not false-positive on chmod-only stat", () => {
+    const statOutput = ` script.sh | 0\n 1 file changed, 0 insertions(+), 0 deletions(-)`
+    const result = classifyChangeScope(parseGitStatSummary(statOutput), ["script.sh"])
+    expect(result.statParsingFailed).toBe(false)
+    expect(result.fileCount).toBe(1)
+  })
+
+  it("does not false-positive on rename-only (no summary counts)", () => {
+    const statOutput = ` src/{old.ts => new.ts} | 0\n 1 file changed`
+    const result = classifyChangeScope(parseGitStatSummary(statOutput), ["src/new.ts"])
+    expect(result.statParsingFailed).toBe(false)
+    expect(result.fileCount).toBe(1)
   })
 
   // ── Fail-closed deny message construction ─────────────────────────
