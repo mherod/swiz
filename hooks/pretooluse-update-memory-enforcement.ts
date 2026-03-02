@@ -179,6 +179,14 @@ async function main(): Promise<void> {
 
   if (lastTriggerIndex < 0) return
 
+  // Compaction guard: if context was compacted after the trigger, compliance
+  // evidence (Read SKILL.md + Edit .md) was in the archived pre-compact window
+  // and is legitimately no longer visible. Skip enforcement — the agent starts
+  // fresh after compaction and cannot re-satisfy a pre-compaction gate.
+  const POST_COMPACTION_MARKER = "Post-compaction context"
+  const postTriggerLines = lines.slice(lastTriggerIndex + 1)
+  if (postTriggerLines.some((l) => l.includes(POST_COMPACTION_MARKER))) return
+
   // Cooldown: if a memory file was recently updated, the agent is actively
   // maintaining memory — skip enforcement to avoid cascading re-triggers.
   if (await isMemoryRecentlyUpdated(input.cwd ?? process.cwd())) return

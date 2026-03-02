@@ -97,6 +97,12 @@ if (allTasks.length === 0) {
   )
 }
 
+// ── WRAP-UP EXEMPTION: All tasks completed ────────────────────────────────────
+// When every task in the session is done, the agent is in wrap-up mode
+// (CI checks, closing issues, pushing, etc.). Staleness enforcement is
+// meaningless at this point — skip CHECK 2 entirely.
+if (activeTasks.length === 0) process.exit(0)
+
 // ── CHECK 2: Task staleness (transcript scan) ─────────────────────────────────
 // Only enforced when a transcript is available and task tools have been used
 // at least once (i.e. the agent has already engaged with the task system).

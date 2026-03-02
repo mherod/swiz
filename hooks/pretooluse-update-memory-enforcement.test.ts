@@ -195,6 +195,56 @@ describe("pretooluse-update-memory-enforcement", () => {
     expect(result.stdout).toBe("")
   })
 
+  test("skips enforcement when context compaction occurred after the trigger (issue #22)", async () => {
+    // Regression test for: memory gate fires in resumed session even though
+    // compliance evidence was in the archived pre-compaction window.
+    // The post-compaction marker injected by sessionstart-compact-context.ts
+    // must cause the gate to skip — the agent cannot re-satisfy a pre-compact gate.
+    const dir = await createTempDir()
+    const POST_COMPACT_MARKER = "Post-compaction context"
+    const transcript = await createTranscript(dir, [
+      hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+      // Compaction happened — compliance evidence is now in archived window
+      { type: "system", content: `${POST_COMPACT_MARKER}: Use rg instead of grep. ...` },
+      // No skill read, no markdown write visible post-compaction
+    ])
+
+    const result = await runHook({
+      cwd: dir,
+      tool_name: "Bash",
+      tool_input: { command: "git commit -m 'wip'" },
+      transcript_path: transcript,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("") // allowed — compaction cleared the gate
+  })
+
+  test("still enforces when compaction occurred BEFORE the trigger (new post-compact trigger)", async () => {
+    // Compaction happened, THEN a new stop hook fired with a fresh REMINDER_FRAGMENT.
+    // The gate should still enforce — this is a new, genuine trigger.
+    const dir = await createTempDir()
+    const POST_COMPACT_MARKER = "Post-compaction context"
+    const transcript = await createTranscript(dir, [
+      // Compaction happened first
+      { type: "system", content: `${POST_COMPACT_MARKER}: Use rg instead of grep. ...` },
+      // Then a new stop hook fired with a fresh trigger
+      hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+      // No compliance evidence
+    ])
+
+    const result = await runHook({
+      cwd: dir,
+      tool_name: "Edit",
+      tool_input: { file_path: "src/app.ts", new_string: "export const a = 1\n" },
+      transcript_path: transcript,
+    })
+
+    expect(result.exitCode).toBe(0)
+    const hso = result.json?.hookSpecificOutput as Record<string, unknown>
+    expect(hso?.permissionDecision).toBe("deny") // new post-compact trigger must enforce
+  })
+
   test("skips enforcement when a CLAUDE.md in cwd was modified within the cooldown window", async () => {
     const dir = await createTempDir()
     // Write a fresh CLAUDE.md into the temp dir — mtime will be "now"

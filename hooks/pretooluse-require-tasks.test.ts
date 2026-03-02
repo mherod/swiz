@@ -135,7 +135,33 @@ describe("pretooluse-require-tasks", () => {
     })
 
     const result = await runHook({ homeDir, toolName: "Edit", sessionId })
-    // All tasks completed — wrap-up work should be allowed (staleness check still applies)
+    // All tasks completed — wrap-up work should be allowed; staleness check skipped
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("allows Bash when all tasks completed even with stale transcript (wrap-up exemption)", async () => {
+    // Regression test for #23: stop-blocked + bash-blocked deadlock.
+    // When all tasks are completed, the staleness check must NOT fire —
+    // the agent needs to run git commit during wrap-up without being blocked.
+    const homeDir = await createTempHome()
+    const sessionId = "session-all-done-stale"
+    await writeTask(homeDir, sessionId, { id: "1", subject: "Done", status: "completed" })
+
+    // Transcript with a TaskCreate at the start, then 25 non-task calls
+    const lines: string[] = []
+    const makeEntry = (toolName: string) =>
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: toolName, id: "x", input: {} }] },
+      })
+    lines.push(makeEntry("TaskCreate"))
+    for (let i = 0; i < 25; i++) lines.push(makeEntry("Read"))
+
+    const transcriptPath = join(homeDir, "transcript-all-done.jsonl")
+    await writeFile(transcriptPath, `${lines.join("\n")}\n`)
+
+    // Should allow — all tasks done, staleness check is bypassed
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId, transcriptPath })
     expect(result.decision).toBeUndefined()
   })
 
