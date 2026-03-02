@@ -184,7 +184,7 @@ async function main(): Promise<void> {
         const psOut = await new Response(psProc.stdout).text()
         await psProc.exited
         const ppid = parseInt(psOut.trim(), 10)
-        if (isNaN(ppid) || ppid === cur) break
+        if (Number.isNaN(ppid) || ppid === cur) break
         cur = ppid
       }
 

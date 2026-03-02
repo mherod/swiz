@@ -68,7 +68,11 @@ if (isEditTool(toolName) || isWriteTool(toolName)) {
   }
 }
 
-// ── CHECK 1: Incomplete tasks exist (file-based) ──────────────────────────────
+// ── CHECK 1: Tasks have been created for this session (file-based) ────────────
+// Blocks when NO tasks have ever been created — the agent is working without a plan.
+// Does NOT block when all tasks are completed: that is legitimate wrap-up work
+// (CI verification, issue comments, closing issues, etc.). CHECK 2 (staleness)
+// still fires if the agent does excessive unplanned work after completion.
 
 if (!process.env.HOME) process.exit(0)
 const allTasks = await readSessionTasks(sessionId)
@@ -76,7 +80,7 @@ const activeTasks = allTasks
   .filter((t) => t.status === "pending" || t.status === "in_progress")
   .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
 
-if (activeTasks.length === 0) {
+if (allTasks.length === 0) {
   deny(
     `STOP. ${toolName} is BLOCKED because this session has no incomplete tasks.\n\n` +
       `You must keep at least one task in pending or in_progress status before using bash/shell/edit tools.\n\n` +
@@ -110,7 +114,12 @@ if (transcriptPath) {
     if (callsSinceTask >= STALENESS_THRESHOLD) {
       const taskUpdateName = toolNameForCurrentAgent("TaskUpdate")
       const taskCreateName = toolNameForCurrentAgent("TaskCreate")
-      const taskList = activeTasks.map((t) => `  ${t}`).join("\n")
+      // Show active tasks if any; fall back to all tasks so context is never empty
+      const displayTasks =
+        activeTasks.length > 0
+          ? activeTasks
+          : allTasks.map((t) => `#${t.id} (${t.status}): ${t.subject}`)
+      const taskList = displayTasks.map((t) => `  ${t}`).join("\n")
       deny(
         `STOP. Tasks have gone stale. ${callsSinceTask} tool calls since last task update. ` +
           `${toolName} is BLOCKED.\n\n` +

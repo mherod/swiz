@@ -118,7 +118,9 @@ describe("pretooluse-require-tasks", () => {
     expect(result.reason).toContain("no incomplete tasks")
   })
 
-  test("denies Edit when only completed/cancelled tasks exist", async () => {
+  test("allows Edit when all tasks are completed (wrap-up work)", async () => {
+    // Regression test for: hook was blocking Bash after all tasks marked completed,
+    // preventing legitimate wrap-up operations (CI verification, issue comments, etc.)
     const homeDir = await createTempHome()
     const sessionId = "session-abc"
     await writeTask(homeDir, sessionId, {
@@ -131,6 +133,16 @@ describe("pretooluse-require-tasks", () => {
       subject: "Cancelled task",
       status: "cancelled",
     })
+
+    const result = await runHook({ homeDir, toolName: "Edit", sessionId })
+    // All tasks completed — wrap-up work should be allowed (staleness check still applies)
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("denies Edit when no tasks have ever been created", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-no-tasks"
+    // No tasks written — agent is working without any plan
 
     const result = await runHook({ homeDir, toolName: "Edit", sessionId })
     expect(result.decision).toBe("deny")
