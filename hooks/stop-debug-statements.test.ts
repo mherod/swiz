@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test"
 // Test the GENERATED_FILE_RE and INFRA_FILE_RE exclusion logic in isolation,
 // mirroring the filter applied in stop-debug-statements.ts.
 
-const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs|py|rb|go|java|kt|swift)$/
+const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|py|rb|go|java|kt|swift|php|cs|cpp|c|rs|vue|svelte)$/
 const TEST_FILE_RE = /\.(test|spec)\.|__tests__/
 const INFRA_FILE_RE = /hooks\/|\/commands\/|\/cli\.|index\.ts$|dispatch\.ts$/
 const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/
@@ -223,6 +223,22 @@ describe("stop-debug-statements file filter", () => {
     test("console.ts module is still scanned", () => {
       expect(isScanned("src/console.ts")).toBe(true)
     })
+
+    // CJS extension: CONFIG_FILE_RE is the operative exclusion (SOURCE_EXT_RE accepts .cjs)
+    test(".eslintrc.cjs is excluded by CONFIG_FILE_RE, not SOURCE_EXT_RE", () => {
+      expect(SOURCE_EXT_RE.test(".eslintrc.cjs")).toBe(true) // .cjs IS a source extension
+      expect(CONFIG_FILE_RE.test(".eslintrc.cjs")).toBe(true) // CONFIG_FILE_RE catches it
+      expect(isScanned(".eslintrc.cjs")).toBe(false) // excluded
+    })
+
+    // .vue/.svelte config files — CONFIG_FILE_RE does not cover these extensions,
+    // so they pass through and ARE scanned. This is acceptable because nuxt.config.vue
+    // and svelte.config.svelte do not exist in practice (those frameworks use .ts/.js).
+    test("nuxt.config.vue is scanned (CONFIG_FILE_RE only covers js/mjs/cjs/ts)", () => {
+      expect(SOURCE_EXT_RE.test("nuxt.config.vue")).toBe(true) // .vue IS a source extension
+      expect(CONFIG_FILE_RE.test("nuxt.config.vue")).toBe(false) // CONFIG_FILE_RE misses .vue
+      expect(isScanned("nuxt.config.vue")).toBe(true)
+    })
   })
 
   describe("normal source files are scanned", () => {
@@ -236,6 +252,18 @@ describe("stop-debug-statements file filter", () => {
 
     test("Python file is scanned", () => {
       expect(isScanned("scripts/migrate.py")).toBe(true)
+    })
+
+    test("CJS source file is scanned", () => {
+      expect(isScanned("src/utils.cjs")).toBe(true)
+    })
+
+    test("Vue SFC is scanned", () => {
+      expect(isScanned("src/components/App.vue")).toBe(true)
+    })
+
+    test("Svelte component is scanned", () => {
+      expect(isScanned("src/components/App.svelte")).toBe(true)
     })
 
     test("regular .js file (not minified/dart) is scanned", () => {
