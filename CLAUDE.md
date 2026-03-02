@@ -150,6 +150,7 @@ Follow this order for every unit of work. Deviating from it causes hook blocks.
 - Capture SHA (step 5) before push so step 8 can filter by exact commit — never use `--limit 1 --branch` which may return a stale run
 - Step 10 is mandatory — `gh run watch` output alone is not verification
 - No TaskUpdate/TaskList calls at steps 7–11
+- **DON'T stop or declare work done after step 3 alone** — a commit without a push is incomplete work. The stop-git-push hook blocks every stop attempt until origin is up to date. Always complete steps 5–11 before stopping.
 
 ## Push and CI
 
@@ -174,6 +175,8 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
 **DO** verify CI after every push with `gh run view --json conclusion,status,jobs` and confirm `conclusion === "success"` before announcing completion. `gh run watch` output alone is not sufficient — always follow up with the explicit JSON fetch.
 
 **DON'T** call TaskUpdate or TaskList during or after the push+CI verification sequence. Mark tasks completed *after commit but before push* so the push+CI loop is purely mechanical: push → watch → `gh run view --json` → announce. Any TaskUpdate call after `git push` is a sign the task ordering is wrong — fix it by completing tasks at step 4 of the Standard Work Sequence.
+
+**DON'T** stop the session after committing without pushing. A local commit that hasn't reached `origin/main` is incomplete work — the stop hook blocks until `git push` succeeds and CI is verified. Every commit must be followed by steps 5–11 of the Standard Work Sequence before the session ends.
 
 **DON'T** skip `git log origin/main..HEAD --oneline` before pushing — it prevents accidentally pushing incomplete or unintended commits.
 
