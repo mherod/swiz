@@ -8,7 +8,10 @@ async function main(): Promise<void> {
   const sessionId = input.session_id
   if (!sessionId) return
 
-  const tasks = await readSessionTasks(sessionId)
+  const home = process.env.HOME
+  if (!home) return
+
+  const tasks = await readSessionTasks(sessionId, home)
   const pendingCount = tasks.filter(
     (t) => t.status === "pending" || t.status === "in_progress"
   ).length

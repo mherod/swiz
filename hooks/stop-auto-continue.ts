@@ -50,7 +50,9 @@ interface AgentResponse {
  */
 async function loadTaskContext(sessionId: string): Promise<string> {
   if (!sessionId) return ""
-  const tasks = await readSessionTasks(sessionId)
+  const home = process.env.HOME
+  if (!home) return ""
+  const tasks = await readSessionTasks(sessionId, home)
 
   const inProgress: string[] = []
   const completed: string[] = []
