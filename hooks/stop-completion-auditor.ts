@@ -9,16 +9,14 @@ import {
   extractToolNamesFromTranscript,
   formatActionPlan,
   isTaskCreateTool,
+  readSessionTasks,
+  type SessionTask,
   type StopHookInput,
 } from "./hook-utils.ts"
 
 const TOOL_CALL_THRESHOLD = 10
 
-interface TaskFile {
-  id: string
-  status: string
-  subject: string
-}
+type TaskFile = SessionTask
 
 interface AuditEntry {
   action: string
@@ -49,12 +47,17 @@ async function main(): Promise<void> {
     ? await countToolCalls(transcript)
     : { total: 0, taskToolUsed: false }
 
-  // Check if tasks directory exists
-  let tasksDirExists = false
-  try {
-    await readdir(tasksDir)
-    tasksDirExists = true
-  } catch {}
+  const allTasks = await readSessionTasks(sessionId, home)
+  const tasksDirExists =
+    allTasks.length > 0 ||
+    (await (async () => {
+      try {
+        await readdir(tasksDir)
+        return true
+      } catch {
+        return false
+      }
+    })())
 
   if (!tasksDirExists) {
     // If task tools were used, tasks existed and were completed
@@ -78,24 +81,11 @@ async function main(): Promise<void> {
   }
 
   // Read task files
-  const incompleteDetails: string[] = []
-  let anyTaskFound = false
-
-  try {
-    const files = await readdir(tasksDir)
-    for (const f of files) {
-      if (!f.endsWith(".json")) continue
-      try {
-        const task = (await Bun.file(join(tasksDir, f)).json()) as TaskFile
-        if (!task.id || task.id === "null") continue
-        anyTaskFound = true
-
-        if (task.status === "pending" || task.status === "in_progress") {
-          incompleteDetails.push(`#${task.id} [${task.status}]: ${task.subject}`)
-        }
-      } catch {}
-    }
-  } catch {}
+  const anyTaskFound = allTasks.length > 0
+  const incompleteDetails = allTasks
+    .filter((t) => t.id && t.id !== "null")
+    .filter((t): t is TaskFile => t.status === "pending" || t.status === "in_progress")
+    .map((t) => `#${t.id} [${t.status}]: ${t.subject}`)
 
   // If no live task files found, check audit log
   if (!anyTaskFound) {

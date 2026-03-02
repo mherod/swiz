@@ -11,25 +11,19 @@
  * in-memory task list is via the hook output channel, not filesystem writes.
  */
 
-import { readdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import {
   GIT_COMMIT_RE,
   GIT_PUSH_RE,
   isShellTool,
+  readSessionTasks,
   stripHeredocs,
   type ToolHookInput,
   toolNameForCurrentAgent,
 } from "./hook-utils.ts"
 
 const SUBJECT_RE = /\b(commit|push)\b/i
-
-interface Task {
-  id: string
-  subject: string
-  status: "pending" | "in_progress" | "completed" | "cancelled" | "deleted"
-}
 
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as ToolHookInput
@@ -41,27 +35,12 @@ async function main(): Promise<void> {
   const isPush = GIT_PUSH_RE.test(command)
   if (!isCommit && !isPush) return
 
-  const tasksDir = join(homedir(), ".claude", "tasks", input.session_id)
-  let files: string[]
-  try {
-    files = await readdir(tasksDir)
-  } catch {
-    // No tasks directory — nothing to auto-complete; still emit CI reminder on push
-    files = []
-  }
-
-  const taskFiles = files.filter((f) => f.endsWith(".json") && !f.startsWith("."))
+  const home = homedir()
+  const tasksDir = join(home, ".claude", "tasks", input.session_id)
+  const tasks = await readSessionTasks(input.session_id, home)
 
   // Auto-complete matching commit/push tasks
-  for (const file of taskFiles) {
-    const path = join(tasksDir, file)
-    let task: Task
-    try {
-      task = JSON.parse(await Bun.file(path).text())
-    } catch {
-      continue
-    }
-
+  for (const task of tasks) {
     if (task.status === "completed" || task.status === "cancelled" || task.status === "deleted") {
       continue
     }
@@ -70,10 +49,10 @@ async function main(): Promise<void> {
     const subjectLower = task.subject.toLowerCase()
     if (isPush && subjectLower.includes("push")) {
       task.status = "completed"
-      await Bun.write(path, JSON.stringify(task, null, 2))
+      await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
     } else if (isCommit && subjectLower.includes("commit")) {
       task.status = "completed"
-      await Bun.write(path, JSON.stringify(task, null, 2))
+      await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
     }
   }
 

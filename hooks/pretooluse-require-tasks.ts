@@ -3,7 +3,6 @@
 //   1. The session has at least one incomplete task (pending or in_progress)
 //   2. Tasks haven't gone stale (no task tool interaction in last STALENESS_THRESHOLD calls)
 
-import { join } from "node:path"
 import {
   denyPreToolUse as deny,
   extractToolNamesFromTranscript,
@@ -15,6 +14,7 @@ import {
   isShellTool,
   isWriteTool,
   READ_CMD_RE,
+  readSessionTasks,
   TASK_TOOLS,
   toolNameForCurrentAgent,
 } from "./hook-utils.ts"
@@ -70,27 +70,11 @@ if (isEditTool(toolName) || isWriteTool(toolName)) {
 
 // ── CHECK 1: Incomplete tasks exist (file-based) ──────────────────────────────
 
-const home = process.env.HOME
-if (!home) process.exit(0)
-const tasksDir = join(home, ".claude", "tasks", sessionId)
-const activeTasks: string[] = []
-
-try {
-  const glob = new Bun.Glob("*.json")
-  for await (const file of glob.scan(tasksDir)) {
-    try {
-      const task = await Bun.file(join(tasksDir, file)).json()
-      const status = task?.status
-      if (status === "pending" || status === "in_progress") {
-        activeTasks.push(`#${task.id} (${status}): ${task.subject}`)
-      }
-    } catch {
-      // skip unreadable task files
-    }
-  }
-} catch {
-  // tasksDir may not exist yet
-}
+if (!process.env.HOME) process.exit(0)
+const allTasks = await readSessionTasks(sessionId)
+const activeTasks = allTasks
+  .filter((t) => t.status === "pending" || t.status === "in_progress")
+  .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
 
 if (activeTasks.length === 0) {
   deny(

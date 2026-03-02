@@ -15,7 +15,14 @@ import {
   formatTurnsAsContext,
   projectKeyFromCwd,
 } from "../src/transcript-utils.ts"
-import { blockStopRaw, git, isGitRepo, type StopHookInput, skillAdvice } from "./hook-utils.ts"
+import {
+  blockStopRaw,
+  git,
+  isGitRepo,
+  readSessionTasks,
+  type StopHookInput,
+  skillAdvice,
+} from "./hook-utils.ts"
 
 const MIN_TOOL_CALLS = 5 // Don't engage for trivial sessions
 const CONTEXT_TURNS = 20 // Recent turns to send as context
@@ -26,12 +33,6 @@ const FALLBACK_SUGGESTION =
 
 const HOME = process.env.HOME ?? "~"
 const PROJECTS_DIR = join(HOME, ".claude", "projects")
-
-interface TaskEntry {
-  id: string
-  status: string
-  subject: string
-}
 
 interface AgentResponse {
   processCritique: string
@@ -49,28 +50,16 @@ interface AgentResponse {
  */
 async function loadTaskContext(sessionId: string): Promise<string> {
   if (!sessionId) return ""
-  const home = process.env.HOME
-  if (!home) return ""
-  const tasksDir = join(home, ".claude", "tasks", sessionId)
-  let files: string[]
-  try {
-    files = await readdir(tasksDir)
-  } catch {
-    return ""
-  }
+  const tasks = await readSessionTasks(sessionId)
 
   const inProgress: string[] = []
   const completed: string[] = []
 
-  for (const f of files) {
-    if (!f.endsWith(".json")) continue
-    try {
-      const task = (await Bun.file(join(tasksDir, f)).json()) as TaskEntry
-      if (!task.id || task.id === "null") continue
-      const label = `${task.subject} (#${task.id})`
-      if (task.status === "in_progress") inProgress.push(label)
-      else if (task.status === "completed") completed.push(label)
-    } catch {}
+  for (const task of tasks) {
+    if (!task.id || task.id === "null") continue
+    const label = `${task.subject} (#${task.id})`
+    if (task.status === "in_progress") inProgress.push(label)
+    else if (task.status === "completed") completed.push(label)
   }
 
   const lines: string[] = []

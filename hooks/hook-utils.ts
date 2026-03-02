@@ -378,6 +378,54 @@ export function hasGhCli(): boolean {
   return !!Bun.which("gh")
 }
 
+// ─── Session task I/O ────────────────────────────────────────────────────────
+
+/**
+ * Canonical shape for a task file stored in ~/.claude/tasks/<session-id>/<id>.json.
+ * All fields except id/subject/status are optional so callers that only need
+ * the minimal shape don't have to cast.
+ */
+export interface SessionTask {
+  id: string
+  subject: string
+  status: string
+  description?: string
+  activeForm?: string
+  blocks?: string[]
+  blockedBy?: string[]
+}
+
+/**
+ * Read all task files for a session from ~/.claude/tasks/<sessionId>/.
+ * Returns an empty array when the directory doesn't exist or can't be read.
+ * Skips files that fail to parse or don't end with .json.
+ */
+export async function readSessionTasks(
+  sessionId: string,
+  home: string = process.env.HOME ?? ""
+): Promise<SessionTask[]> {
+  if (!home || !sessionId) return []
+  const tasksDir = join(home, ".claude", "tasks", sessionId)
+  let files: string[]
+  try {
+    const { readdir } = await import("node:fs/promises")
+    files = await readdir(tasksDir)
+  } catch {
+    return []
+  }
+  const tasks: SessionTask[] = []
+  for (const f of files) {
+    if (!f.endsWith(".json") || f.startsWith(".")) continue
+    try {
+      const task = (await Bun.file(join(tasksDir, f)).json()) as SessionTask
+      if (task.id && task.subject && task.status) tasks.push(task)
+    } catch {
+      // skip unreadable or malformed task files
+    }
+  }
+  return tasks
+}
+
 /** Create a session task via tasks-list.ts. Uses a sentinel file to fire only once per session. */
 export async function createSessionTask(
   sessionId: string | undefined,

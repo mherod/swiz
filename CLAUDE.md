@@ -120,6 +120,8 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DO** keep at least one task in `pending` or `in_progress` status before running `git add` or `git commit`. The `pretooluse-require-tasks.ts` hook blocks `Edit`, `Write`, and `Bash` (including `git add`/`git commit`) when no incomplete task exists. Mark the commit task `completed` only after the commit succeeds.
 
+**DO** call a task tool (TaskUpdate, TaskCreate, TaskList, or TaskGet) at least every 15 tool calls. The staleness gate fires after 20 consecutive tool calls with no task tool interaction — staying under 15 provides a safe buffer. When the staleness gate fires mid-task, call `TaskUpdate` on the active task with current progress notes; if that doesn't unblock, call `TaskCreate` for the next concrete step.
+
 **DO** create a task before any session that will involve Bash commands beyond the read-only exemptions. The hook exempts: `ls`, `rg`, `grep` (always); git read-only subcommands (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`, etc.) when no write subcommand is present; `git push/pull/fetch`; and all `gh` commands. `find` is NOT exempt — use `rg` or Glob tool for file discovery instead.
 
 **DON'T** create a task just for `git push` or `gh` commands — these are exempt from the task requirement. `git push`, `git pull`, `git fetch`, and all `gh` subcommands bypass the hook automatically.
