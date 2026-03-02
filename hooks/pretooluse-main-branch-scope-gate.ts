@@ -33,7 +33,11 @@ if (currentBranch !== "main" && currentBranch !== "master") process.exit(0)
 // ─── Analyze change scope ──────────────────────────────────────────────
 
 // Count files and lines changed
-const diffStat = await git(["diff", "origin/main..HEAD", "--stat"], cwd)
+// Try diff against origin/main first, fall back to HEAD~1 if no remote history exists
+let diffStat = await git(["diff", "origin/main..HEAD", "--stat"], cwd)
+if (!diffStat.trim()) {
+  diffStat = await git(["diff", "HEAD~1..HEAD", "--stat"], cwd)
+}
 const lines = diffStat.trim().split("\n").filter(Boolean)
 
 let fileCount = 0
@@ -97,11 +101,15 @@ const recentContributors = await gh(
   cwd
 )
 
-const otherContributors = recentContributors
-  .trim()
-  .split("\n")
-  .filter(Boolean)
-  .filter((c) => c !== "null" && c !== "")
+const otherContributors = Array.from(
+  new Set(
+    recentContributors
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .filter((c) => c !== "null" && c !== "")
+  )
+)
 
 // Check for open PRs
 const openPrs = await gh(["pr", "list", "--state", "open", "--limit", "1", "--json", "number"], cwd)
