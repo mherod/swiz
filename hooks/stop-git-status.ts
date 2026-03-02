@@ -35,10 +35,14 @@ async function isPushCooldownActive(
   const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
   if (!safeSession) return false
 
-  // Must have prompted to push in this session already
-  if (!(await Bun.file(pushSentinelPath(sessionId)).exists())) return false
+  // Sentinel must exist and itself be within the cooldown window. Stale files from
+  // prior sessions / test runs must not trigger a false-positive cooldown.
+  const sentinelFile = Bun.file(pushSentinelPath(sessionId))
+  if (!(await sentinelFile.exists())) return false
+  const sentinelMtime = (await sentinelFile.stat()).mtime.getTime()
+  if (Date.now() - sentinelMtime > PUSH_COOLDOWN_MS) return false
 
-  // Remote branch must have been updated within the cooldown window
+  // Remote branch must also have been updated within the cooldown window
   const rawTime = await git(["log", "-1", "--format=%ct", `origin/${branch}`], cwd)
   const remoteCommitTime = parseInt(rawTime, 10)
   if (Number.isNaN(remoteCommitTime)) return false
