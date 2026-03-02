@@ -176,6 +176,7 @@ Follow this order for every unit of work. Deviating from it causes hook blocks.
 - Step 10 is mandatory — `gh run watch` output alone is not verification
 - No TaskUpdate/TaskList calls at steps 7–11
 - **DON'T stop or declare work done after step 3 alone** — a commit without a push is incomplete work. The stop-git-push hook blocks every stop attempt until origin is up to date. Always complete steps 5–11 before stopping.
+- **DO** treat push as inseparable from commit — after any `/commit` skill or manual `git commit`, immediately continue with steps 5–11 (capture SHA → log review → push → CI watch → verify conclusion). The stop hook will block every stop attempt until `origin/main` is up to date.
 
 ## Push and CI
 
