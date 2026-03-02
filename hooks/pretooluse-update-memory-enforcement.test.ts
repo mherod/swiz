@@ -151,6 +151,26 @@ describe("pretooluse-update-memory-enforcement", () => {
     expect(result.stdout).toBe("")
   })
 
+  test("allows the markdown write even when the skill read is not yet in the transcript (same-turn case)", async () => {
+    // Reproduces the deadlock: skill Read and Edit happen in the same response turn,
+    // so the transcript hasn't captured the skill Read yet when the Edit hook fires.
+    const dir = await createTempDir()
+    const transcript = await createTranscript(dir, [
+      hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+      // Skill read is absent — simulating the same-turn case where the transcript
+      // hasn't been written yet for the current assistant turn.
+    ])
+
+    const result = await runHook({
+      tool_name: "Edit",
+      tool_input: { file_path: "CLAUDE.md", new_string: "DO: update memory immediately.\n" },
+      transcript_path: transcript,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("")
+  })
+
   test("ignores its own prior denials when locating the active reminder", async () => {
     const dir = await createTempDir()
     const transcript = await createTranscript(dir, [

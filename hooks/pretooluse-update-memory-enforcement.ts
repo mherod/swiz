@@ -140,13 +140,7 @@ async function main(): Promise<void> {
   if (state.skillReadComplete && state.markdownWriteComplete) return
 
   if (!state.skillReadComplete && toolReadsUpdateMemorySkill(toolName, toolInput)) return
-  if (
-    state.skillReadComplete &&
-    !state.markdownWriteComplete &&
-    toolWritesMarkdown(toolName, toolInput)
-  ) {
-    return
-  }
+  if (!state.markdownWriteComplete && toolWritesMarkdown(toolName, toolInput)) return
 
   const missingSkill = !state.skillReadComplete
   const reason = missingSkill
