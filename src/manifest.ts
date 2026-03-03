@@ -32,6 +32,7 @@ export const manifest: HookGroup[] = [
       { file: "stop-completion-auditor.ts", timeout: 10 },
       { file: "stop-personal-repo-issues.ts", timeout: 10 },
       { file: "stop-auto-continue.ts", timeout: 120 },
+      { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
     ],
   },
   {
@@ -91,7 +92,10 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "postToolUse",
-    hooks: [{ file: "posttooluse-git-status.ts", timeout: 5 }],
+    hooks: [
+      { file: "posttooluse-git-status.ts", timeout: 5 },
+      { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
+    ],
   },
   {
     event: "postToolUse",
@@ -153,7 +157,7 @@ export const manifest: HookGroup[] = [
 // Per-event timeout budget for the dispatcher (seconds).
 // Covers worst-case sequential execution of all hooks in that event.
 export const DISPATCH_TIMEOUTS: Record<string, number> = {
-  stop: 300, // 14 hooks × ~10s avg + 120s AI call (stop-auto-continue)
+  stop: 300, // 15 hooks × ~10s avg + 120s AI call (stop-auto-continue)
   preToolUse: 60, // 12 hooks × ~5s avg
   postToolUse: 90, // 8 hooks × ~10s avg
   sessionStart: 20,
