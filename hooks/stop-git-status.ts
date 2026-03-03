@@ -7,6 +7,7 @@
 // the last remote commit is within PUSH_COOLDOWN_MS, skip the push block.
 // Uncommitted changes are always enforced regardless of cooldown.
 
+import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
   createSessionTask,
@@ -127,6 +128,11 @@ async function main(): Promise<void> {
   const cwd = input.cwd
 
   if (!(await isGitRepo(cwd))) return
+
+  // Respect the gitStatusGate setting — allow bypassing the hook
+  const settings = await readSwizSettings()
+  const effective = getEffectiveSwizSettings(settings, input.session_id)
+  if (!effective.gitStatusGate) return
 
   const branch = await git(["branch", "--show-current"], cwd)
   if (!branch) return // detached HEAD — nothing sensible to report

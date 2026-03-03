@@ -18,6 +18,7 @@ type BooleanSettingKey =
   | "pushGate"
   | "sandboxedEdits"
   | "speak"
+  | "gitStatusGate"
 type NumericSettingKey = "prAgeGateMinutes" | "narratorSpeed"
 type StringSettingKey = "narratorVoice" | "ambitionMode"
 type SettingKey = BooleanSettingKey | NumericSettingKey | StringSettingKey
@@ -76,6 +77,14 @@ function parseSetting(raw: string | undefined): SettingKey {
   }
   if (value === "speak" || value === "tts") {
     return "speak"
+  }
+  if (
+    value === "git-status-gate" ||
+    value === "gitstatusgate" ||
+    value === "git_status_gate" ||
+    value === "git-status"
+  ) {
+    return "gitStatusGate"
   }
   if (
     value === "critiques-enabled" ||
@@ -200,6 +209,7 @@ function printSettings(
     pushGate: boolean
     sandboxedEdits: boolean
     speak: boolean
+    gitStatusGate: boolean
     source: "global" | "session"
   },
   path: string | null,
@@ -234,6 +244,7 @@ function printSettings(
   console.log(`  push-gate:       ${effective.pushGate ? "enabled" : "disabled"} (global)`)
   console.log(`  sandboxed-edits: ${effective.sandboxedEdits ? "enabled" : "disabled"} (global)`)
   console.log(`  speak:           ${effective.speak ? "enabled" : "disabled"} (global)`)
+  console.log(`  git-status-gate: ${effective.gitStatusGate ? "enabled" : "disabled"} (global)`)
   const voiceLabel = effective.narratorVoice || "system default"
   console.log(`  narrator-voice:  ${voiceLabel} (global)`)
   const speedLabel =
@@ -410,6 +421,15 @@ export const settingsCommand: Command = {
     {
       flags: "disable pr-merge-mode",
       description: "Disable merge-oriented PR hooks; keep creation-oriented guidance only",
+    },
+    {
+      flags: "enable git-status-gate",
+      description: "Enable stop-hook enforcement of git status / push state (default: enabled)",
+    },
+    {
+      flags: "disable git-status-gate",
+      description:
+        "Disable stop-hook git status enforcement (allow stopping with uncommitted changes)",
     },
     {
       flags: "set narrator-voice <name>",
