@@ -72,19 +72,76 @@ async function getSessionIdsForProject(projectKey: string): Promise<Set<string>>
   return ids
 }
 
+/** Slow fallback: scan all project transcript directories for sessions whose cwd matches. */
+async function getSessionIdsByCwdScan(
+  filterCwd: string,
+  candidates: string[]
+): Promise<Set<string>> {
+  const ids = new Set<string>()
+  let dirs: string[]
+  try {
+    dirs = await readdir(PROJECTS_DIR)
+  } catch {
+    return ids
+  }
+
+  const candidateSet = new Set(candidates)
+  for (const dir of dirs) {
+    const projectDir = join(PROJECTS_DIR, dir)
+    let files: string[]
+    try {
+      files = await readdir(projectDir)
+    } catch {
+      continue
+    }
+    for (const f of files) {
+      if (!f.endsWith(".jsonl")) continue
+      const sessionId = f.slice(0, -6)
+      if (!candidateSet.has(sessionId)) continue
+      if (ids.has(sessionId)) continue
+      try {
+        const content = await readFile(join(projectDir, f), "utf-8")
+        for (const line of content.split("\n").slice(0, 10)) {
+          if (!line.trim()) continue
+          try {
+            const data = JSON.parse(line)
+            if (data.cwd === filterCwd) {
+              ids.add(sessionId)
+              break
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+  }
+  return ids
+}
+
 async function getSessions(filterCwd?: string): Promise<string[]> {
   try {
     const entries = await readdir(TASKS_DIR)
 
-    // When filtering by cwd, derive the project key directly and intersect
-    // with task session directories — avoids the O(sessions × projects) scan.
-    const projectSessionIds = filterCwd
-      ? await getSessionIdsForProject(projectKeyFromCwd(filterCwd))
-      : null
+    let matchedSessionIds: Set<string> | null = null
+
+    if (filterCwd) {
+      // Fast path: derive project key directly and intersect with task sessions.
+      const projectSessionIds = await getSessionIdsForProject(projectKeyFromCwd(filterCwd))
+      matchedSessionIds = new Set<string>()
+      for (const s of entries) {
+        if (projectSessionIds.has(s)) matchedSessionIds.add(s)
+      }
+
+      // Fallback: if no sessions matched, the project key may not correspond to
+      // an on-disk directory (e.g. older encoding). Scan transcript cwd values
+      // for the remaining task sessions that weren't matched.
+      if (matchedSessionIds.size === 0) {
+        matchedSessionIds = await getSessionIdsByCwdScan(filterCwd, entries)
+      }
+    }
 
     const stats = await Promise.all(
       entries
-        .filter((s) => !projectSessionIds || projectSessionIds.has(s))
+        .filter((s) => !matchedSessionIds || matchedSessionIds.has(s))
         .map(async (s) => {
           const p = join(TASKS_DIR, s)
           const st = await stat(p)
