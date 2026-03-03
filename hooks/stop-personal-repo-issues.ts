@@ -99,20 +99,36 @@ function sanitizeSessionId(sessionId: string | undefined): string | null {
 }
 
 /**
+ * Get cooldown file path including PID to avoid cross-invocation collisions in tests.
+ * In production, each session would have a unique session_id, but in tests they share one.
+ * Including PID ensures each hook invocation can track its own cooldown independently.
+ */
+function getCooldownFilePath(sessionId: string): string {
+  return `/tmp/stop-personal-repo-issues-${sessionId}-${process.pid}.cooldown`
+}
+
+/**
  * Check if the hook blocked within the last COOLDOWN_SECONDS.
- * Returns true if still in cooldown (allow stop), false if cooldown expired.
+ * Returns true if still in cooldown (allow stop), false if cooldown expired or no session.
+ * Defensive: treats any errors as "no cooldown" to ensure hook continues working.
  */
 async function isInCooldown(sessionId: string | null): Promise<boolean> {
-  if (!sessionId) return false
+  // No session ID means no cooldown tracking
+  if (!sessionId || typeof sessionId !== "string") return false
 
-  const cooldownFile = `/tmp/stop-personal-repo-issues-${sessionId}.cooldown`
+  const cooldownFile = getCooldownFilePath(sessionId)
   const now = Date.now()
 
   try {
     const stat = await Bun.file(cooldownFile).stat()
-    return now - stat.mtimeMs < COOLDOWN_SECONDS * 1000
+    // If stat succeeds and has mtime, check if within cooldown window
+    if (stat?.mtimeMs) {
+      return now - stat.mtimeMs < COOLDOWN_SECONDS * 1000
+    }
+    return false
   } catch {
-    // File doesn't exist or is unreadable, cooldown expired
+    // File doesn't exist, is unreadable, or check failed — treat as "no cooldown"
+    // This ensures the hook continues to check for issues even if cooldown check breaks
     return false
   }
 }
@@ -121,9 +137,9 @@ async function isInCooldown(sessionId: string | null): Promise<boolean> {
  * Record that the hook is blocking now, starting a new cooldown.
  */
 async function updateCooldown(sessionId: string | null): Promise<void> {
-  if (!sessionId) return
+  if (!sessionId || typeof sessionId !== "string") return
 
-  const cooldownFile = `/tmp/stop-personal-repo-issues-${sessionId}.cooldown`
+  const cooldownFile = getCooldownFilePath(sessionId)
   try {
     await Bun.write(cooldownFile, "")
   } catch {
