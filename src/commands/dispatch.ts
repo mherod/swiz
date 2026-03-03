@@ -146,10 +146,9 @@ function extractContext(resp: Record<string, unknown>): string | null {
 
 // ─── Dispatch strategies ─────────────────────────────────────────────────────
 
-/** PreToolUse: short-circuit on first deny; collect and merge allow-with-reason hints.
- *  Async hooks are launched first so they run even if a deny short-circuits. */
-async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<void> {
-  // Pre-launch async hooks (fire-and-forget) before blocking hooks can short-circuit
+/** Fire all async hooks immediately without awaiting — they run in the background
+ *  regardless of whether a blocking hook short-circuits the pipeline. */
+function launchAsyncHooks(groups: HookGroup[], payloadStr: string): void {
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) {
@@ -158,7 +157,12 @@ async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<v
       }
     }
   }
-  // Process blocking hooks sequentially
+}
+
+/** PreToolUse: short-circuit on first deny; collect and merge allow-with-reason hints.
+ *  Async hooks are launched first so they run even if a deny short-circuits. */
+async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<void> {
+  launchAsyncHooks(groups, payloadStr)
   const hints: string[] = []
   for (const group of groups) {
     for (const hook of group.hooks) {
@@ -201,16 +205,7 @@ async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<v
 /** Stop / PostToolUse: short-circuit and forward the first block.
  *  Async hooks are launched first so they run even if a blocker short-circuits. */
 async function runBlocking(groups: HookGroup[], payloadStr: string): Promise<void> {
-  // Pre-launch async hooks (fire-and-forget) before blocking hooks can short-circuit
-  for (const group of groups) {
-    for (const hook of group.hooks) {
-      if (hook.async) {
-        log(`   → ${hook.file} [async, fire-and-forget]`)
-        runHook(hook.file, payloadStr, hook.timeout).catch(() => {})
-      }
-    }
-  }
-  // Process blocking hooks sequentially
+  launchAsyncHooks(groups, payloadStr)
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
@@ -234,16 +229,7 @@ async function runContext(
   payloadStr: string,
   eventName: string
 ): Promise<void> {
-  // Pre-launch async hooks (fire-and-forget)
-  for (const group of groups) {
-    for (const hook of group.hooks) {
-      if (hook.async) {
-        log(`   → ${hook.file} [async, fire-and-forget]`)
-        runHook(hook.file, payloadStr, hook.timeout).catch(() => {})
-      }
-    }
-  }
-  // Process blocking hooks sequentially
+  launchAsyncHooks(groups, payloadStr)
   const contexts: string[] = []
   for (const group of groups) {
     for (const hook of group.hooks) {
