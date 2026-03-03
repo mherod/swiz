@@ -37,6 +37,10 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "preToolUse",
+    hooks: [{ file: "posttooluse-speak-narrator.ts", timeout: 30, async: true }],
+  },
+  {
+    event: "preToolUse",
     matcher: "Task",
     hooks: [{ file: "pretooluse-no-task-delegation.ts", timeout: 5 }],
   },
@@ -138,7 +142,10 @@ export const manifest: HookGroup[] = [
   {
     event: "sessionStart",
     matcher: "startup",
-    hooks: [{ file: "sessionstart-health-snapshot.ts", timeout: 10 }],
+    hooks: [
+      { file: "sessionstart-health-snapshot.ts", timeout: 10 },
+      { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
+    ],
   },
   {
     event: "sessionStart",
@@ -147,13 +154,17 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "preCompact",
-    hooks: [{ file: "precompact-speak.ts", timeout: 10 }],
+    hooks: [
+      { file: "precompact-speak.ts", timeout: 10 },
+      { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
+    ],
   },
   {
     event: "userPromptSubmit",
     hooks: [
       { file: "userpromptsubmit-git-context.ts", timeout: 5 },
       { file: "userpromptsubmit-task-advisor.ts", timeout: 5 },
+      { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
     ],
   },
 ]

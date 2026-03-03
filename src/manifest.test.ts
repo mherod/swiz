@@ -61,11 +61,13 @@ describe("manifest.ts", () => {
   })
 
   describe("preToolUse event hooks", () => {
-    it("preToolUse hooks have matchers for tool filtering", () => {
+    it("preToolUse hooks have matchers for tool filtering (async-only groups exempt)", () => {
       const preToolUseGroups = manifest.filter((g) => g.event === "preToolUse")
       expect(preToolUseGroups.length).toBeGreaterThan(0)
 
       preToolUseGroups.forEach((group) => {
+        const allAsync = group.hooks.every((h) => h.async === true)
+        if (allAsync) return // async-only groups don't need matchers (e.g. narrator)
         expect(group.matcher).toBeDefined()
         expect(typeof group.matcher).toBe("string")
       })

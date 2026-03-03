@@ -106,7 +106,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (23)
+### PreToolUse (24)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -135,6 +135,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-pr-age-gate.ts` | Blocks `gh pr merge` if the PR has been open for less than 10 minutes. Enforces a minimum visibility period so team members have time to review. Redirects the agent to other work instead of waiting. |
 | `pretooluse-workflow-permissions-gate.ts` | Blocks changes to `permissions:` blocks in `.github/workflows/*.yml` files on non-default branches. GitHub Actions permission changes don't take effect until merged — this prevents accidental privilege escalation that silently activates upon merge. |
 | `pretooluse-sandboxed-edits.ts` | Blocks Edit, Write, and NotebookEdit calls targeting paths outside the session's working directory and temporary directories. Enabled by default; disable with `swiz settings disable sandboxed-edits`. |
+| `posttooluse-speak-narrator.ts` | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async. |
 
 ### PostToolUse (12)
 
@@ -155,11 +156,12 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS. Incremental — only speaks text added since the last invocation. Runs async so it never slows the agent down. |
 | `posttooluse-task-output.ts` | Parses TaskOutput results: blocks on non-zero exits with actionable error context; on successful git push, injects the CI run ID and watch commands so the agent can verify CI without extra plumbing. |
 
-### SessionStart (2)
+### SessionStart (3)
 
 | Hook | What it does |
 |------|-------------|
 | `sessionstart-health-snapshot.ts` | Captures a baseline of project health (lint state, test state, git state) at session start so the agent knows what it's walking into. |
+| `posttooluse-speak-narrator.ts` | Speaks any assistant text generated during session startup. Catches up on the transcript before the first tool call. Runs async. |
 | `sessionstart-compact-context.ts` | Re-injects core project conventions after context compaction events. The agent keeps its bearings even in long sessions. |
 
 ### PreCompact (1)
@@ -168,12 +170,13 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 |------|-------------|
 | `precompact-speak.ts` | Speaks "Just a moment while I gather my thoughts" before context compaction begins, giving audible feedback that the agent is about to pause for compaction. |
 
-### UserPromptSubmit (2)
+### UserPromptSubmit (3)
 
 | Hook | What it does |
 |------|-------------|
 | `userpromptsubmit-git-context.ts` | Injects current git branch and status into every prompt. The agent always knows where it is in the repo. |
 | `userpromptsubmit-task-advisor.ts` | Surfaces active tasks before each prompt so the agent stays focused on what it was supposed to be doing. |
+| `posttooluse-speak-narrator.ts` | Catches up on any unspoken assistant text when the user submits a prompt. Ensures narration stays current even during idle periods. Runs async. |
 
 ## Plugin Marketplace
 
