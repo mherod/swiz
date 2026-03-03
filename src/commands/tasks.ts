@@ -60,8 +60,11 @@ function timeAgo(date: Date): string {
 // ─── Session discovery ──────────────────────────────────────────────────────
 
 /** Derive session IDs from a single project transcript directory (constant-time lookup). */
-async function getSessionIdsForProject(projectKey: string): Promise<Set<string>> {
-  const projectDir = join(PROJECTS_DIR, projectKey)
+export async function getSessionIdsForProject(
+  projectKey: string,
+  projectsDir = PROJECTS_DIR
+): Promise<Set<string>> {
+  const projectDir = join(projectsDir, projectKey)
   const ids = new Set<string>()
   try {
     const files = await readdir(projectDir)
@@ -73,21 +76,22 @@ async function getSessionIdsForProject(projectKey: string): Promise<Set<string>>
 }
 
 /** Slow fallback: scan all project transcript directories for sessions whose cwd matches. */
-async function getSessionIdsByCwdScan(
+export async function getSessionIdsByCwdScan(
   filterCwd: string,
-  candidates: string[]
+  candidates: string[],
+  projectsDir = PROJECTS_DIR
 ): Promise<Set<string>> {
   const ids = new Set<string>()
   let dirs: string[]
   try {
-    dirs = await readdir(PROJECTS_DIR)
+    dirs = await readdir(projectsDir)
   } catch {
     return ids
   }
 
   const candidateSet = new Set(candidates)
   for (const dir of dirs) {
-    const projectDir = join(PROJECTS_DIR, dir)
+    const projectDir = join(projectsDir, dir)
     let files: string[]
     try {
       files = await readdir(projectDir)
@@ -117,25 +121,34 @@ async function getSessionIdsByCwdScan(
   return ids
 }
 
-async function getSessions(filterCwd?: string): Promise<string[]> {
+export async function getSessions(
+  filterCwd?: string,
+  tasksDir = TASKS_DIR,
+  projectsDir = PROJECTS_DIR
+): Promise<string[]> {
   try {
-    const entries = await readdir(TASKS_DIR)
+    const entries = await readdir(tasksDir)
 
     let matchedSessionIds: Set<string> | null = null
 
     if (filterCwd) {
       // Fast path: derive project key directly and intersect with task sessions.
-      const projectSessionIds = await getSessionIdsForProject(projectKeyFromCwd(filterCwd))
+      const projectSessionIds = await getSessionIdsForProject(
+        projectKeyFromCwd(filterCwd),
+        projectsDir
+      )
       matchedSessionIds = new Set<string>()
       for (const s of entries) {
         if (projectSessionIds.has(s)) matchedSessionIds.add(s)
       }
 
-      // Fallback: if no sessions matched, the project key may not correspond to
-      // an on-disk directory (e.g. older encoding). Scan transcript cwd values
-      // for the remaining task sessions that weren't matched.
-      if (matchedSessionIds.size === 0) {
-        matchedSessionIds = await getSessionIdsByCwdScan(filterCwd, entries)
+      // Fallback: scan transcript cwd values for any task entries NOT already
+      // matched by the fast path. This catches sessions under older or
+      // mismatched project-key encodings, even when the fast path found some.
+      const unmatched = entries.filter((s) => !matchedSessionIds!.has(s))
+      if (unmatched.length > 0) {
+        const fallbackIds = await getSessionIdsByCwdScan(filterCwd, unmatched, projectsDir)
+        for (const id of fallbackIds) matchedSessionIds.add(id)
       }
     }
 
@@ -143,7 +156,7 @@ async function getSessions(filterCwd?: string): Promise<string[]> {
       entries
         .filter((s) => !matchedSessionIds || matchedSessionIds.has(s))
         .map(async (s) => {
-          const p = join(TASKS_DIR, s)
+          const p = join(tasksDir, s)
           const st = await stat(p)
           return { session: s, mtime: st.mtime }
         })
