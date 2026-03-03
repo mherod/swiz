@@ -170,7 +170,7 @@ Follow this order for every unit of work. Deviating from it causes hook blocks.
 
 **Enforcement summary:**
 - Steps 1–3 require an in_progress task (hook blocks otherwise)
-- Step 4 must happen after commit and before push (no TaskUpdate at steps 7–10)
+- **DO** create a separate "Push and verify CI" task before step 4 and mark it `in_progress`. Complete the implementation task at step 4, but keep the push+CI task alive through steps 5–10. Mark the push+CI task completed only after `gh run view --json` confirms `conclusion: "success"`. Without this, the task-require hook blocks Bash at steps 5–10 because no task is in_progress.
 - Capture SHA (step 5) before push so step 8 can filter by exact commit
 - Step 7 uses `swiz push-wait` which polls for cooldown expiry then runs `git push` (no sleeps, no force bypasses)
 - Step 8 uses `swiz ci-wait` for timeout-based polling (replaces manual gh run watch/view)
