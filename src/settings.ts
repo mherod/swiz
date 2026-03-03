@@ -38,6 +38,7 @@ export interface SwizSettings {
   gitStatusGate: boolean
   nonDefaultBranchGate: boolean
   githubCiGate: boolean
+  changesRequestedGate: boolean
   sessions: Record<string, SessionSwizSettings>
 }
 
@@ -55,6 +56,7 @@ export interface EffectiveSwizSettings {
   gitStatusGate: boolean
   nonDefaultBranchGate: boolean
   githubCiGate: boolean
+  changesRequestedGate: boolean
   source: "global" | "session"
 }
 
@@ -115,6 +117,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   gitStatusGate: true,
   nonDefaultBranchGate: true,
   githubCiGate: true,
+  changesRequestedGate: true,
   sessions: {},
 }
 
@@ -190,6 +193,10 @@ function normalizeSettings(value: unknown): SwizSettings {
         : DEFAULT_SETTINGS.nonDefaultBranchGate,
     githubCiGate:
       typeof obj.githubCiGate === "boolean" ? obj.githubCiGate : DEFAULT_SETTINGS.githubCiGate,
+    changesRequestedGate:
+      typeof obj.changesRequestedGate === "boolean"
+        ? obj.changesRequestedGate
+        : DEFAULT_SETTINGS.changesRequestedGate,
     sessions,
   }
 }
@@ -272,6 +279,7 @@ export function getEffectiveSwizSettings(
       gitStatusGate: settings.gitStatusGate,
       nonDefaultBranchGate: settings.nonDefaultBranchGate,
       githubCiGate: settings.githubCiGate,
+      changesRequestedGate: settings.changesRequestedGate,
       source: "session",
     }
   }
@@ -289,6 +297,7 @@ export function getEffectiveSwizSettings(
     gitStatusGate: settings.gitStatusGate,
     nonDefaultBranchGate: settings.nonDefaultBranchGate,
     githubCiGate: settings.githubCiGate,
+    changesRequestedGate: settings.changesRequestedGate,
     source: "global",
   }
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if current branch has CHANGES_REQUESTED reviews
 
+import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
   getOpenPrForBranch,
@@ -18,6 +19,10 @@ import {
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as StopHookInput
   const cwd = input.cwd
+
+  const settings = await readSwizSettings()
+  const effective = getEffectiveSwizSettings(settings, input.session_id)
+  if (!effective.changesRequestedGate) return
 
   if (!(await isGitRepo(cwd))) return
   if (!hasGhCli()) return

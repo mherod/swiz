@@ -101,6 +101,28 @@ describe("swiz settings", () => {
     expect(json.prMergeMode).toBe(false)
   })
 
+  test("disables changes-requested-gate and persists to user config", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "disable", "changes-requested-gate"], home)
+    expect(result.exitCode).toBe(0)
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { changesRequestedGate?: boolean }
+    expect(json.changesRequestedGate).toBe(false)
+  })
+
+  test("accepts pr-review-gate as alias for changes-requested-gate", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "disable", "pr-review-gate"], home)
+    expect(result.exitCode).toBe(0)
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { changesRequestedGate?: boolean }
+    expect(json.changesRequestedGate).toBe(false)
+  })
+
   test("fails for unknown setting key", async () => {
     const home = await createTempHome()
     const result = await runSwiz(["settings", "disable", "unknown-flag"], home)

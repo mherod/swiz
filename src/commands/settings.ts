@@ -21,6 +21,7 @@ type BooleanSettingKey =
   | "gitStatusGate"
   | "nonDefaultBranchGate"
   | "githubCiGate"
+  | "changesRequestedGate"
 type NumericSettingKey = "prAgeGateMinutes" | "narratorSpeed"
 type StringSettingKey = "narratorVoice" | "ambitionMode"
 type SettingKey = BooleanSettingKey | NumericSettingKey | StringSettingKey
@@ -103,6 +104,14 @@ function parseSetting(raw: string | undefined): SettingKey {
     value === "ci-gate"
   ) {
     return "githubCiGate"
+  }
+  if (
+    value === "changes-requested-gate" ||
+    value === "changesrequestedgate" ||
+    value === "changes_requested_gate" ||
+    value === "pr-review-gate"
+  ) {
+    return "changesRequestedGate"
   }
   if (
     value === "critiques-enabled" ||
@@ -230,6 +239,7 @@ function printSettings(
     gitStatusGate: boolean
     nonDefaultBranchGate: boolean
     githubCiGate: boolean
+    changesRequestedGate: boolean
     source: "global" | "session"
   },
   path: string | null,
@@ -272,6 +282,9 @@ function printSettings(
   )
   console.log(
     `  github-ci-gate:          ${effective.githubCiGate ? "enabled" : "disabled"} (global)`
+  )
+  console.log(
+    `  changes-requested-gate:  ${effective.changesRequestedGate ? "enabled" : "disabled"} (global)`
   )
   const voiceLabel = effective.narratorVoice || "system default"
   console.log(`  narrator-voice:  ${voiceLabel} (global)`)
