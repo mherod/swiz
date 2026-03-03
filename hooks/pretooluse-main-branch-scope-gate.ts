@@ -31,12 +31,18 @@ if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 const command: string = (input?.tool_input?.command as string) ?? ""
 const cwd: string = (input?.tool_input?.cwd as string) ?? process.cwd()
 
-// Only check git push commands to main/master
-const pushToMainRe = /\bgit\s+(?:-\w+\s+)*push\s+(?:-\w+\s+)*origin\s+(?:main|master)\b/
-if (!pushToMainRe.test(command)) process.exit(0)
+// Only check git push commands to main/master — capture the target branch name
+const pushToMainRe = /\bgit\s+(?:-\w+\s+)*push\s+(?:-\w+\s+)*origin\s+(main|master)\b/
+const pushMatch = command.match(pushToMainRe)
+if (!pushMatch) process.exit(0)
 
-// Verify we're actually on main/master
-const currentBranch = await git(["branch", "--show-current"], cwd)
+// Determine the effective branch: prefer current branch, fall back to push target.
+// Detached HEAD (CI runners, specific SHA checkouts) returns "" from --show-current,
+// but the push command explicitly names the target branch.
+const checkedOutBranch = await git(["branch", "--show-current"], cwd)
+const targetBranch = pushMatch[1]!
+const currentBranch = checkedOutBranch || targetBranch
+
 if (currentBranch !== "main" && currentBranch !== "master") process.exit(0)
 
 // ─── Resolve diff range once, use everywhere ─────────────────────────
@@ -51,12 +57,20 @@ if (currentBranch !== "main" && currentBranch !== "master") process.exit(0)
 const remoteRef = `origin/${currentBranch}`
 
 async function resolveDiffRange(): Promise<string> {
+  // Pre-step: deepen shallow clones so diff/merge-base have full history.
+  // CI runners often use --depth 1; without unshallowing, merge-base and
+  // HEAD~1 fail because parent commits aren't fetched.
+  const isShallow = await git(["rev-parse", "--is-shallow-repository"], cwd)
+  if (isShallow === "true") {
+    await git(["fetch", "--unshallow", "origin"], cwd)
+  }
+
   // 1. Direct remote ref comparison
   if ((await git(["rev-parse", "--verify", remoteRef], cwd)) !== "") {
     return `${remoteRef}..HEAD`
   }
 
-  // 2. Merge-base fallback for shallow/rebased histories
+  // 2. Merge-base fallback for rebased/diverged histories
   const mergeBase = await git(["merge-base", remoteRef, "HEAD"], cwd)
   if (mergeBase) {
     return `${mergeBase}..HEAD`
