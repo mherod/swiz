@@ -33,6 +33,8 @@ export async function createBootstrapTask(
   home: string = process.env.HOME ?? ""
 ): Promise<string | null> {
   if (!home || !sessionId) return null
+  // Sanitize sessionId to prevent path traversal
+  if (/[/\\]|\.\./.test(sessionId)) return null
   const tasksDir = join(home, ".claude", "tasks", sessionId)
   try {
     const { mkdir, readdir } = await import("node:fs/promises")
@@ -70,6 +72,8 @@ async function main() {
   const cwd: string = input?.cwd ?? process.cwd()
 
   if (!sessionId) process.exit(0)
+  // Sanitize sessionId to prevent path traversal
+  if (/[/\\]|\.\./.test(sessionId)) process.exit(0)
 
   // ── GUARD: Only enforce inside a git repo that has a CLAUDE.md ───────────────
   // Enforcement in non-project directories (e.g. ~) creates an unrecoverable

@@ -173,7 +173,7 @@ describe("path-traversal sessionId payloads are neutralized", () => {
 
   test("pretooluse-require-tasks: sessionId with slashes resolves safely", async () => {
     const homeDir = await createTempHome()
-    // With no tasks at the traversal path, should deny for missing tasks
+    // Traversal sessionId is sanitized — hook exits cleanly without enforcement
     const result = await runHook(
       "hooks/pretooluse-require-tasks.ts",
       {
@@ -184,9 +184,8 @@ describe("path-traversal sessionId payloads are neutralized", () => {
       { HOME: homeDir }
     )
     expect(result.exitCode).toBe(0)
-    // Should deny because no tasks exist (not because of a crash)
-    expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("no incomplete tasks")
+    // Traversal sessionId is rejected early — no deny, no crash, just silent exit
+    expect(result.decision).toBeUndefined()
   })
 
   test("stop-completion-auditor: traversal sessionId does not crash", async () => {
@@ -229,8 +228,8 @@ describe("path-traversal sessionId payloads are neutralized", () => {
       { HOME: homeDir }
     )
     expect(result.exitCode).toBe(0)
-    // Should deny (no tasks) — not crash
-    expect(result.decision).toBe("deny")
+    // sessionId contains / — sanitized and rejected early, no crash
+    expect(result.decision).toBeUndefined()
   })
 
   test("empty sessionId causes clean exit (no deny)", async () => {
