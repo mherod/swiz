@@ -2,6 +2,7 @@
 // Stop hook: Block stop if current branch is not the default branch (main/master).
 // Runs late in the manifest so higher-priority blockers (secrets, git state, CI) win first.
 
+import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
   git,
@@ -16,6 +17,10 @@ async function main(): Promise<void> {
   const cwd = input.cwd
 
   if (!(await isGitRepo(cwd))) return
+
+  const settings = await readSwizSettings()
+  const effective = getEffectiveSwizSettings(settings, input.session_id)
+  if (!effective.nonDefaultBranchGate) return
 
   const branch = await git(["branch", "--show-current"], cwd)
   if (!branch) return // detached HEAD — not a named branch

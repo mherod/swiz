@@ -19,6 +19,7 @@ type BooleanSettingKey =
   | "sandboxedEdits"
   | "speak"
   | "gitStatusGate"
+  | "nonDefaultBranchGate"
 type NumericSettingKey = "prAgeGateMinutes" | "narratorSpeed"
 type StringSettingKey = "narratorVoice" | "ambitionMode"
 type SettingKey = BooleanSettingKey | NumericSettingKey | StringSettingKey
@@ -85,6 +86,14 @@ function parseSetting(raw: string | undefined): SettingKey {
     value === "git-status"
   ) {
     return "gitStatusGate"
+  }
+  if (
+    value === "non-default-branch-gate" ||
+    value === "nondefaultbranchgate" ||
+    value === "non_default_branch_gate" ||
+    value === "branch-gate"
+  ) {
+    return "nonDefaultBranchGate"
   }
   if (
     value === "critiques-enabled" ||
@@ -210,6 +219,7 @@ function printSettings(
     sandboxedEdits: boolean
     speak: boolean
     gitStatusGate: boolean
+    nonDefaultBranchGate: boolean
     source: "global" | "session"
   },
   path: string | null,
@@ -244,7 +254,12 @@ function printSettings(
   console.log(`  push-gate:       ${effective.pushGate ? "enabled" : "disabled"} (global)`)
   console.log(`  sandboxed-edits: ${effective.sandboxedEdits ? "enabled" : "disabled"} (global)`)
   console.log(`  speak:           ${effective.speak ? "enabled" : "disabled"} (global)`)
-  console.log(`  git-status-gate: ${effective.gitStatusGate ? "enabled" : "disabled"} (global)`)
+  console.log(
+    `  git-status-gate:         ${effective.gitStatusGate ? "enabled" : "disabled"} (global)`
+  )
+  console.log(
+    `  non-default-branch-gate: ${effective.nonDefaultBranchGate ? "enabled" : "disabled"} (global)`
+  )
   const voiceLabel = effective.narratorVoice || "system default"
   console.log(`  narrator-voice:  ${voiceLabel} (global)`)
   const speedLabel =
@@ -430,6 +445,15 @@ export const settingsCommand: Command = {
       flags: "disable git-status-gate",
       description:
         "Disable stop-hook git status enforcement (allow stopping with uncommitted changes)",
+    },
+    {
+      flags: "enable non-default-branch-gate",
+      description: "Enable stop-hook blocking on feature branches (default: enabled)",
+    },
+    {
+      flags: "disable non-default-branch-gate",
+      description:
+        "Disable stop-hook non-default-branch enforcement (allow stopping on any branch)",
     },
     {
       flags: "set narrator-voice <name>",

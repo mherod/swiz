@@ -36,6 +36,7 @@ export interface SwizSettings {
   sandboxedEdits: boolean
   speak: boolean
   gitStatusGate: boolean
+  nonDefaultBranchGate: boolean
   sessions: Record<string, SessionSwizSettings>
 }
 
@@ -51,6 +52,7 @@ export interface EffectiveSwizSettings {
   sandboxedEdits: boolean
   speak: boolean
   gitStatusGate: boolean
+  nonDefaultBranchGate: boolean
   source: "global" | "session"
 }
 
@@ -109,6 +111,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   sandboxedEdits: true,
   speak: false,
   gitStatusGate: true,
+  nonDefaultBranchGate: true,
   sessions: {},
 }
 
@@ -178,6 +181,10 @@ function normalizeSettings(value: unknown): SwizSettings {
     speak: typeof obj.speak === "boolean" ? obj.speak : DEFAULT_SETTINGS.speak,
     gitStatusGate:
       typeof obj.gitStatusGate === "boolean" ? obj.gitStatusGate : DEFAULT_SETTINGS.gitStatusGate,
+    nonDefaultBranchGate:
+      typeof obj.nonDefaultBranchGate === "boolean"
+        ? obj.nonDefaultBranchGate
+        : DEFAULT_SETTINGS.nonDefaultBranchGate,
     sessions,
   }
 }
@@ -258,6 +265,7 @@ export function getEffectiveSwizSettings(
       sandboxedEdits: settings.sandboxedEdits,
       speak: settings.speak,
       gitStatusGate: settings.gitStatusGate,
+      nonDefaultBranchGate: settings.nonDefaultBranchGate,
       source: "session",
     }
   }
@@ -273,6 +281,7 @@ export function getEffectiveSwizSettings(
     sandboxedEdits: settings.sandboxedEdits,
     speak: settings.speak,
     gitStatusGate: settings.gitStatusGate,
+    nonDefaultBranchGate: settings.nonDefaultBranchGate,
     source: "global",
   }
 }
