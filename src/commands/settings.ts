@@ -14,6 +14,7 @@ import type { Command } from "../types.ts"
 type BooleanSettingKey =
   | "autoContinue"
   | "critiquesEnabled"
+  | "prMergeMode"
   | "pushGate"
   | "sandboxedEdits"
   | "speak"
@@ -37,9 +38,9 @@ const PROJECTS_DIR = join(HOME, ".claude", "projects")
 function usage(): string {
   return (
     "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value>] [--session [id]] [--dir <path>]\n" +
-    "Supported settings: auto-continue, push-gate, sandboxed-edits, speak, pr-age-gate (minutes, 0 to disable),\n" +
-    "  narrator-voice (string, e.g. Samantha), narrator-speed (words per minute, 0 for default),\n" +
-    "  critiques-enabled (boolean), ambition-mode (standard|aggressive)"
+    "Supported settings: auto-continue, critiques-enabled, pr-merge-mode, push-gate, sandboxed-edits, speak,\n" +
+    "  pr-age-gate (minutes, 0 to disable), narrator-voice (string, e.g. Samantha),\n" +
+    "  narrator-speed (words per minute, 0 for default), ambition-mode (standard|aggressive)"
   )
 }
 
@@ -48,6 +49,15 @@ function parseSetting(raw: string | undefined): SettingKey {
   const value = raw.trim().toLowerCase()
   if (value === "auto-continue" || value === "autocontinue" || value === "auto_continue") {
     return "autoContinue"
+  }
+  if (
+    value === "pr-merge-mode" ||
+    value === "prmergemode" ||
+    value === "pr_merge_mode" ||
+    value === "pr-merge" ||
+    value === "prmerge"
+  ) {
+    return "prMergeMode"
   }
   if (
     value === "pr-age-gate" ||
@@ -186,6 +196,7 @@ function printSettings(
     narratorVoice: string
     narratorSpeed: number
     prAgeGateMinutes: number
+    prMergeMode: boolean
     pushGate: boolean
     sandboxedEdits: boolean
     speak: boolean
@@ -219,6 +230,7 @@ function printSettings(
   const ageGateLabel =
     effective.prAgeGateMinutes > 0 ? `${effective.prAgeGateMinutes} minutes` : "disabled"
   console.log(`  pr-age-gate:     ${ageGateLabel} (global)`)
+  console.log(`  pr-merge-mode:   ${effective.prMergeMode ? "enabled" : "disabled"} (global)`)
   console.log(`  push-gate:       ${effective.pushGate ? "enabled" : "disabled"} (global)`)
   console.log(`  sandboxed-edits: ${effective.sandboxedEdits ? "enabled" : "disabled"} (global)`)
   console.log(`  speak:           ${effective.speak ? "enabled" : "disabled"} (global)`)
@@ -390,6 +402,14 @@ export const settingsCommand: Command = {
     {
       flags: "set pr-age-gate <minutes>",
       description: "Set PR merge grace period in minutes (0 to disable, default: 10)",
+    },
+    {
+      flags: "enable pr-merge-mode",
+      description: "Enable merge-oriented PR hooks (default: enabled)",
+    },
+    {
+      flags: "disable pr-merge-mode",
+      description: "Disable merge-oriented PR hooks; keep creation-oriented guidance only",
     },
     {
       flags: "set narrator-voice <name>",

@@ -6,6 +6,7 @@ export type AmbitionMode = "standard" | "aggressive"
 
 export interface SessionSwizSettings {
   autoContinue: boolean
+  prMergeMode?: boolean
 }
 
 /** Project-local policy config — lives in <repo>/.swiz/config.json */
@@ -30,6 +31,7 @@ export interface SwizSettings {
   narratorVoice: string
   narratorSpeed: number
   prAgeGateMinutes: number
+  prMergeMode: boolean
   pushGate: boolean
   sandboxedEdits: boolean
   speak: boolean
@@ -43,6 +45,7 @@ export interface EffectiveSwizSettings {
   narratorVoice: string
   narratorSpeed: number
   prAgeGateMinutes: number
+  prMergeMode: boolean
   pushGate: boolean
   sandboxedEdits: boolean
   speak: boolean
@@ -99,6 +102,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   narratorVoice: "",
   narratorSpeed: 0,
   prAgeGateMinutes: 10,
+  prMergeMode: true,
   pushGate: false,
   sandboxedEdits: true,
   speak: false,
@@ -122,7 +126,9 @@ function normalizeSessionSettings(value: unknown): SessionSwizSettings | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const obj = value as Record<string, unknown>
   if (typeof obj.autoContinue !== "boolean") return null
-  return { autoContinue: obj.autoContinue }
+  const session: SessionSwizSettings = { autoContinue: obj.autoContinue }
+  if (typeof obj.prMergeMode === "boolean") session.prMergeMode = obj.prMergeMode
+  return session
 }
 
 function normalizeSettings(value: unknown): SwizSettings {
@@ -159,6 +165,8 @@ function normalizeSettings(value: unknown): SwizSettings {
       typeof obj.prAgeGateMinutes === "number" && obj.prAgeGateMinutes >= 0
         ? obj.prAgeGateMinutes
         : DEFAULT_SETTINGS.prAgeGateMinutes,
+    prMergeMode:
+      typeof obj.prMergeMode === "boolean" ? obj.prMergeMode : DEFAULT_SETTINGS.prMergeMode,
     pushGate: typeof obj.pushGate === "boolean" ? obj.pushGate : DEFAULT_SETTINGS.pushGate,
     sandboxedEdits:
       typeof obj.sandboxedEdits === "boolean"
@@ -229,13 +237,18 @@ export function getEffectiveSwizSettings(
   sessionId?: string | null
 ): EffectiveSwizSettings {
   if (sessionId && settings.sessions[sessionId]) {
+    const sessionSettings = settings.sessions[sessionId]!
     return {
-      autoContinue: settings.sessions[sessionId]!.autoContinue,
+      autoContinue: sessionSettings.autoContinue,
       critiquesEnabled: settings.critiquesEnabled,
       ambitionMode: settings.ambitionMode,
       narratorVoice: settings.narratorVoice,
       narratorSpeed: settings.narratorSpeed,
       prAgeGateMinutes: settings.prAgeGateMinutes,
+      prMergeMode:
+        typeof sessionSettings.prMergeMode === "boolean"
+          ? sessionSettings.prMergeMode
+          : settings.prMergeMode,
       pushGate: settings.pushGate,
       sandboxedEdits: settings.sandboxedEdits,
       speak: settings.speak,
@@ -249,6 +262,7 @@ export function getEffectiveSwizSettings(
     narratorVoice: settings.narratorVoice,
     narratorSpeed: settings.narratorSpeed,
     prAgeGateMinutes: settings.prAgeGateMinutes,
+    prMergeMode: settings.prMergeMode,
     pushGate: settings.pushGate,
     sandboxedEdits: settings.sandboxedEdits,
     speak: settings.speak,
