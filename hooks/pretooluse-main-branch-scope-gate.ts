@@ -41,21 +41,36 @@ if (currentBranch !== "main" && currentBranch !== "master") process.exit(0)
 
 // ─── Resolve diff range once, use everywhere ─────────────────────────
 
-// Determine the correct diff range by verifying each candidate ref exists.
+// Determine the correct diff range by trying progressively weaker strategies.
 // All git diff queries MUST use this resolved range to avoid data source mismatch.
+//
+// Candidate order:
+//   1. origin/branch..HEAD       — normal case (remote ref exists, linear history)
+//   2. merge-base..HEAD          — rebased or diverged history (finds common ancestor)
+//   3. HEAD~1..HEAD              — no remote ref (single-commit fallback)
 const remoteRef = `origin/${currentBranch}`
-const candidates = [
-  { range: `${remoteRef}..HEAD`, ref: remoteRef },
-  { range: "HEAD~1..HEAD", ref: "HEAD~1" },
-]
 
-let diffRange = ""
-for (const c of candidates) {
-  if ((await git(["rev-parse", "--verify", c.ref], cwd)) !== "") {
-    diffRange = c.range
-    break
+async function resolveDiffRange(): Promise<string> {
+  // 1. Direct remote ref comparison
+  if ((await git(["rev-parse", "--verify", remoteRef], cwd)) !== "") {
+    return `${remoteRef}..HEAD`
   }
+
+  // 2. Merge-base fallback for shallow/rebased histories
+  const mergeBase = await git(["merge-base", remoteRef, "HEAD"], cwd)
+  if (mergeBase) {
+    return `${mergeBase}..HEAD`
+  }
+
+  // 3. Single parent fallback
+  if ((await git(["rev-parse", "--verify", "HEAD~1"], cwd)) !== "") {
+    return "HEAD~1..HEAD"
+  }
+
+  return ""
 }
+
+const diffRange = await resolveDiffRange()
 
 // If no valid diff range could be resolved, block with actionable guidance.
 // This can happen on repos with only one commit and no remote tracking branch.
@@ -63,7 +78,7 @@ if (!diffRange) {
   denyPreToolUse(`
 Push blocked: could not determine diff range for change analysis.
 
-Neither origin/${currentBranch} nor HEAD~1 exist as valid refs.
+No valid comparison ref found (tried origin/${currentBranch}, merge-base, HEAD~1).
 This typically means the repository has only one commit and no remote tracking branch.
 
 Remediation:
