@@ -143,6 +143,8 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DO** commit all changes before attempting to stop the session. The `stop-git-status.sh` hook blocks stop when uncommitted changes exist. The correct end-of-task sequence is: edit → commit (task still in_progress) → mark task completed → push → CI watch → `gh run view --json` → announce result → stop.
 
+**DO** mark tasks as completed immediately when their work finishes, not postponed to later steps. Task status must reflect reality. If a task describes "migrate three callers to use shared utility", mark it completed once all three are migrated and committed—do not defer the status update until after push or CI. The `stop-completion-auditor` hook reads actual task files and blocks session end if any tasks remain incomplete, so stale task status prevents the session from concluding even when the work is done.
+
 **DO** run `git diff` before `git add` and output the result explicitly — do not skip straight to staging and rely on hooks or CI to catch logic errors. The staged-diff review is the final pre-commit sanity check and must be visible in the conversation so the agent can verify the exact changed logic before committing. After multiple edits to the same file, piecemeal edits can produce incoherent or contradictory content when combined; only the diff reveals this. Pattern: `git diff <files>` → inspect output → `git add <files>` → `git commit`.
 
 **DO** check for conflicts with existing nearby guidance before adding new rules to CLAUDE.md. Read the surrounding paragraphs and search for related DO/DON'T blocks before writing. Adding a rule that contradicts an existing one causes silent policy drift — both rules will be followed inconsistently.
