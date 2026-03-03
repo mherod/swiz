@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**56 hooks. 6 event types. Every agent. Zero compromises.**
+**57 hooks. 6 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -84,7 +84,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 46 hook scripts across 6 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
-### Stop (16)
+### Stop (17)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -96,6 +96,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-git-status.ts` | Unified git workflow enforcer. If there are uncommitted changes, unpushed commits, or the branch is behind remote, it blocks with a numbered action plan: commit → pull → push. One hook, full workflow. |
 | `stop-lockfile-drift.ts` | Detects when `package.json` has been modified but the lockfile hasn't been updated. Agents forget to run `bun install` — this doesn't let them forget. |
 | `stop-lint-staged.ts` | Runs lint-staged on the current working tree before allowing stop. Catches lint and format issues that would block CI. |
+| `stop-quality-checks.ts` | Discovers and runs the project's lint and typecheck scripts from `package.json` (e.g. `lint`, `typecheck`) before allowing stop. Covers issues in already-committed code that lint-staged misses. |
 | `stop-branch-conflicts.ts` | Checks for potential merge conflicts with the base branch before the session ends, while there's still time to resolve them cleanly. |
 | `stop-pr-description.ts` | Validates that open PRs have a real description, not an empty template. Forces the agent to document what it built. |
 | `stop-pr-changes-requested.ts` | Blocks stop if the current PR has unresolved change requests from reviewers. The agent doesn't get to declare done while reviewers are waiting. |

@@ -24,6 +24,7 @@ export const manifest: HookGroup[] = [
       { file: "stop-git-status.ts", timeout: 10 },
       { file: "stop-lockfile-drift.ts", timeout: 10 },
       { file: "stop-lint-staged.ts", timeout: 30 },
+      { file: "stop-quality-checks.ts", timeout: 60 },
       { file: "stop-branch-conflicts.ts", timeout: 10 },
       { file: "stop-pr-description.ts", timeout: 10 },
       { file: "stop-pr-changes-requested.ts", timeout: 10 },
