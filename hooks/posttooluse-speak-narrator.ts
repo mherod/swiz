@@ -132,9 +132,12 @@ const heartbeatInterval = setInterval(heartbeat, HEARTBEAT_MS)
 
 // Speak, then release lock — invoke sibling speak.ts from the hooks directory
 const speakScript = join(dirname(import.meta.path), "speak.ts")
+const speakArgs = ["bun", speakScript]
+if (settings.narratorVoice) speakArgs.push("--voice", settings.narratorVoice)
+if (settings.narratorSpeed > 0) speakArgs.push("--speed", String(settings.narratorSpeed))
 
 try {
-  const proc = Bun.spawn(["bun", speakScript], {
+  const proc = Bun.spawn(speakArgs, {
     stdin: new Response(truncated).body!,
     stderr: "pipe",
   })

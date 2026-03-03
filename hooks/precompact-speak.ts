@@ -13,7 +13,10 @@ async function main(): Promise<void> {
 
   const speakScript = join(dirname(import.meta.path), "speak.ts")
   const message = "Just a moment while I gather my thoughts"
-  const proc = Bun.spawn(["bun", speakScript], {
+  const speakArgs = ["bun", speakScript]
+  if (settings.narratorVoice) speakArgs.push("--voice", settings.narratorVoice)
+  if (settings.narratorSpeed > 0) speakArgs.push("--speed", String(settings.narratorSpeed))
+  const proc = Bun.spawn(speakArgs, {
     stdin: new Response(message).body!,
     stderr: "pipe",
   })

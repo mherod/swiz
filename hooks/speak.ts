@@ -11,12 +11,27 @@
 const platform = process.platform
 const diagnose = process.argv.includes("--diagnose")
 
+// Parse --voice and --speed flags
+let voiceArg = ""
+let speedArg = 0
+const filteredArgs: string[] = []
+const rawArgs = process.argv.slice(2)
+for (let i = 0; i < rawArgs.length; i++) {
+  const arg = rawArgs[i]
+  if (arg === "--diagnose") continue
+  if (arg === "--voice" && rawArgs[i + 1]) {
+    voiceArg = rawArgs[++i]!
+    continue
+  }
+  if (arg === "--speed" && rawArgs[i + 1]) {
+    speedArg = parseInt(rawArgs[++i]!, 10) || 0
+    continue
+  }
+  filteredArgs.push(arg!)
+}
+
 // Resolve text: CLI args first (excluding flags), then stdin
-let text = process.argv
-  .slice(2)
-  .filter((a) => a !== "--diagnose")
-  .join(" ")
-  .trim()
+let text = filteredArgs.join(" ").trim()
 
 if (!text && !diagnose) {
   const stdin = await new Response(Bun.stdin.stream()).text().catch(() => "")
@@ -113,19 +128,32 @@ if (diagnose) {
 let ok = false
 
 if (platform === "darwin") {
-  ok = await safeSpawn(["say", text])
+  const sayArgs = ["say"]
+  if (voiceArg) sayArgs.push("-v", voiceArg)
+  if (speedArg > 0) sayArgs.push("-r", String(speedArg))
+  sayArgs.push(text)
+  ok = await safeSpawn(sayArgs)
 } else if (platform === "win32") {
   const escaped = text.replace(/'/g, "''")
+  const escapedVoice = voiceArg.replace(/'/g, "''")
+  const voiceLine = voiceArg ? `$synth.SelectVoice('${escapedVoice}');` : ""
+  const rateLine = speedArg > 0 ? `$synth.Rate = ${Math.round((speedArg - 200) / 20)};` : ""
   ok = await safeSpawn([
     "powershell",
     "-NoProfile",
     "-Command",
-    `Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('${escaped}')`,
+    `Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; ${voiceLine}${rateLine}$synth.Speak('${escaped}')`,
   ])
 } else {
   for (const engine of linuxEngines) {
     if (await binaryExists(engine.name)) {
-      ok = await safeSpawn([engine.name, text])
+      const cmd = [engine.name]
+      if (engine.name === "espeak-ng" || engine.name === "espeak") {
+        if (voiceArg) cmd.push("-v", voiceArg)
+        if (speedArg > 0) cmd.push("-s", String(speedArg))
+      }
+      cmd.push(text)
+      ok = await safeSpawn(cmd)
       break
     }
   }

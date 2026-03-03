@@ -7,6 +7,8 @@ export interface SessionSwizSettings {
 
 export interface SwizSettings {
   autoContinue: boolean
+  narratorVoice: string
+  narratorSpeed: number
   prAgeGateMinutes: number
   pushGate: boolean
   sandboxedEdits: boolean
@@ -16,6 +18,8 @@ export interface SwizSettings {
 
 export interface EffectiveSwizSettings {
   autoContinue: boolean
+  narratorVoice: string
+  narratorSpeed: number
   prAgeGateMinutes: number
   pushGate: boolean
   sandboxedEdits: boolean
@@ -25,6 +29,8 @@ export interface EffectiveSwizSettings {
 
 export const DEFAULT_SETTINGS: SwizSettings = {
   autoContinue: true,
+  narratorVoice: "",
+  narratorSpeed: 0,
   prAgeGateMinutes: 10,
   pushGate: false,
   sandboxedEdits: true,
@@ -68,6 +74,12 @@ function normalizeSettings(value: unknown): SwizSettings {
   return {
     autoContinue:
       typeof obj.autoContinue === "boolean" ? obj.autoContinue : DEFAULT_SETTINGS.autoContinue,
+    narratorVoice:
+      typeof obj.narratorVoice === "string" ? obj.narratorVoice : DEFAULT_SETTINGS.narratorVoice,
+    narratorSpeed:
+      typeof obj.narratorSpeed === "number" && obj.narratorSpeed >= 0
+        ? obj.narratorSpeed
+        : DEFAULT_SETTINGS.narratorSpeed,
     prAgeGateMinutes:
       typeof obj.prAgeGateMinutes === "number" && obj.prAgeGateMinutes >= 0
         ? obj.prAgeGateMinutes
@@ -111,6 +123,8 @@ export function getEffectiveSwizSettings(
   if (sessionId && settings.sessions[sessionId]) {
     return {
       autoContinue: settings.sessions[sessionId]!.autoContinue,
+      narratorVoice: settings.narratorVoice,
+      narratorSpeed: settings.narratorSpeed,
       prAgeGateMinutes: settings.prAgeGateMinutes,
       pushGate: settings.pushGate,
       sandboxedEdits: settings.sandboxedEdits,
@@ -120,6 +134,8 @@ export function getEffectiveSwizSettings(
   }
   return {
     autoContinue: settings.autoContinue,
+    narratorVoice: settings.narratorVoice,
+    narratorSpeed: settings.narratorSpeed,
     prAgeGateMinutes: settings.prAgeGateMinutes,
     pushGate: settings.pushGate,
     sandboxedEdits: settings.sandboxedEdits,

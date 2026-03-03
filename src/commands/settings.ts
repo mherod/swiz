@@ -9,8 +9,9 @@ import { findSessions, projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
 type BooleanSettingKey = "autoContinue" | "pushGate" | "sandboxedEdits" | "speak"
-type NumericSettingKey = "prAgeGateMinutes"
-type SettingKey = BooleanSettingKey | NumericSettingKey
+type NumericSettingKey = "prAgeGateMinutes" | "narratorSpeed"
+type StringSettingKey = "narratorVoice"
+type SettingKey = BooleanSettingKey | NumericSettingKey | StringSettingKey
 type Action = "show" | "enable" | "disable" | "set"
 
 interface ParsedSettingsArgs {
@@ -28,7 +29,8 @@ const PROJECTS_DIR = join(HOME, ".claude", "projects")
 function usage(): string {
   return (
     "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value>] [--session [id]] [--dir <path>]\n" +
-    "Supported settings: auto-continue, push-gate, sandboxed-edits, speak, pr-age-gate (minutes, 0 to disable)"
+    "Supported settings: auto-continue, push-gate, sandboxed-edits, speak, pr-age-gate (minutes, 0 to disable),\n" +
+    "  narrator-voice (string, e.g. Samantha), narrator-speed (words per minute, 0 for default)"
   )
 }
 
@@ -56,11 +58,31 @@ function parseSetting(raw: string | undefined): SettingKey {
   if (value === "speak" || value === "tts") {
     return "speak"
   }
+  if (
+    value === "narrator-voice" ||
+    value === "narratorvoice" ||
+    value === "narrator_voice" ||
+    value === "voice"
+  ) {
+    return "narratorVoice"
+  }
+  if (
+    value === "narrator-speed" ||
+    value === "narratorspeed" ||
+    value === "narrator_speed" ||
+    value === "speed"
+  ) {
+    return "narratorSpeed"
+  }
   throw new Error(`Unknown setting: ${raw}\n${usage()}`)
 }
 
 function isNumericSetting(key: SettingKey): key is NumericSettingKey {
-  return key === "prAgeGateMinutes"
+  return key === "prAgeGateMinutes" || key === "narratorSpeed"
+}
+
+function isStringSetting(key: SettingKey): key is StringSettingKey {
+  return key === "narratorVoice"
 }
 
 function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
@@ -134,6 +156,8 @@ async function resolveSessionId(query: string | null, targetDir: string): Promis
 function printSettings(
   effective: {
     autoContinue: boolean
+    narratorVoice: string
+    narratorSpeed: number
     prAgeGateMinutes: number
     pushGate: boolean
     sandboxedEdits: boolean
@@ -161,7 +185,12 @@ function printSettings(
   console.log(`  pr-age-gate:     ${ageGateLabel} (global)`)
   console.log(`  push-gate:       ${effective.pushGate ? "enabled" : "disabled"} (global)`)
   console.log(`  sandboxed-edits: ${effective.sandboxedEdits ? "enabled" : "disabled"} (global)`)
-  console.log(`  speak:           ${effective.speak ? "enabled" : "disabled"} (global)\n`)
+  console.log(`  speak:           ${effective.speak ? "enabled" : "disabled"} (global)`)
+  const voiceLabel = effective.narratorVoice || "system default"
+  console.log(`  narrator-voice:  ${voiceLabel} (global)`)
+  const speedLabel =
+    effective.narratorSpeed > 0 ? `${effective.narratorSpeed} wpm` : "system default"
+  console.log(`  narrator-speed:  ${speedLabel} (global)\n`)
 }
 
 async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
@@ -177,9 +206,9 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
 
 async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise<void> {
   const key = parseSetting(parsed.settingArg)
-  if (isNumericSetting(key)) {
+  if (isNumericSetting(key) || isStringSetting(key)) {
     throw new Error(
-      `"${parsed.settingArg}" is a numeric setting. Use: swiz settings set ${parsed.settingArg} <value>\n${usage()}`
+      `"${parsed.settingArg}" is not a boolean setting. Use: swiz settings set ${parsed.settingArg} <value>\n${usage()}`
     )
   }
   const sessionId = parsed.sessionRequested
@@ -204,11 +233,17 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
   )
   console.log(`  Saved: ${path}\n`)
 
-  // Test TTS immediately when enabling speak
+  // Test TTS immediately when enabling speak — use configured voice/speed
   if (enabled && key === "speak") {
     const speakScript = join(dirname(Bun.main), "hooks", "speak.ts")
+    const speakArgs = ["bun", speakScript]
+    const updatedSettings = await readSwizSettings()
+    if (updatedSettings.narratorVoice) speakArgs.push("--voice", updatedSettings.narratorVoice)
+    if (updatedSettings.narratorSpeed > 0)
+      speakArgs.push("--speed", String(updatedSettings.narratorSpeed))
+    speakArgs.push("TTS enabled")
     try {
-      const proc = Bun.spawn(["bun", speakScript, "TTS enabled"], {
+      const proc = Bun.spawn(speakArgs, {
         stdout: "pipe",
         stderr: "pipe",
       })
@@ -220,13 +255,23 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
   }
 }
 
-async function setNumericSetting(parsed: ParsedSettingsArgs): Promise<void> {
+async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
   const key = parseSetting(parsed.settingArg)
   if (!parsed.settingValue) {
     throw new Error(
-      `Missing value. Usage: swiz settings set ${parsed.settingArg} <number>\n${usage()}`
+      `Missing value. Usage: swiz settings set ${parsed.settingArg} <value>\n${usage()}`
     )
   }
+
+  if (isStringSetting(key)) {
+    const current = await readSwizSettings({ strict: true })
+    const next = { ...current, [key]: parsed.settingValue }
+    const path = await writeSwizSettings(next)
+    console.log(`\n  Set ${parsed.settingArg} = ${parsed.settingValue}`)
+    console.log(`  Saved: ${path}\n`)
+    return
+  }
+
   const value = parseInt(parsed.settingValue, 10)
   if (isNaN(value) || value < 0) {
     throw new Error(
@@ -236,7 +281,7 @@ async function setNumericSetting(parsed: ParsedSettingsArgs): Promise<void> {
   const current = await readSwizSettings({ strict: true })
   const next = { ...current, [key]: value }
   const path = await writeSwizSettings(next)
-  const label = key === "prAgeGateMinutes" && value === 0 ? "disabled" : `${value}`
+  const label = value === 0 ? "system default" : `${value}`
   console.log(`\n  Set ${parsed.settingArg} = ${label}`)
   console.log(`  Saved: ${path}\n`)
 }
@@ -265,6 +310,14 @@ export const settingsCommand: Command = {
       description: "Set PR merge grace period in minutes (0 to disable, default: 10)",
     },
     {
+      flags: "set narrator-voice <name>",
+      description: "Set TTS voice (e.g. Samantha, Alex; empty for system default)",
+    },
+    {
+      flags: "set narrator-speed <wpm>",
+      description: "Set TTS speaking rate in words per minute (0 for system default)",
+    },
+    {
       flags: "--session, -s [id]",
       description: "Target session scope (latest for --dir by default, or prefix match by id)",
     },
@@ -280,7 +333,7 @@ export const settingsCommand: Command = {
       case "disable":
         return setBooleanSetting(false, parsed)
       case "set":
-        return setNumericSetting(parsed)
+        return setValueSetting(parsed)
     }
   },
 }

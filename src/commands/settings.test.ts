@@ -144,4 +144,76 @@ describe("swiz settings", () => {
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toContain("No session matching")
   })
+
+  test("shows default narrator-voice and narrator-speed as system default", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("narrator-voice:  system default")
+    expect(result.stdout).toContain("narrator-speed:  system default")
+  })
+
+  test("sets narrator-voice and persists to config", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "set", "narrator-voice", "Samantha"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Set narrator-voice = Samantha")
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { narratorVoice?: string }
+    expect(json.narratorVoice).toBe("Samantha")
+  })
+
+  test("sets narrator-speed and persists to config", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "set", "narrator-speed", "250"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Set narrator-speed = 250")
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { narratorSpeed?: number }
+    expect(json.narratorSpeed).toBe(250)
+  })
+
+  test("shows configured narrator-voice in settings output", async () => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "set", "narrator-voice", "Alex"], home)
+    const result = await runSwiz(["settings"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("narrator-voice:  Alex")
+  })
+
+  test("shows configured narrator-speed in settings output", async () => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "set", "narrator-speed", "180"], home)
+    const result = await runSwiz(["settings"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("narrator-speed:  180 wpm")
+  })
+
+  test("rejects enable/disable for narrator-voice", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "enable", "narrator-voice"], home)
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("not a boolean setting")
+  })
+
+  test("existing settings files load cleanly without narrator fields", async () => {
+    const home = await createTempHome()
+    const configDir = join(home, ".swiz")
+    await mkdir(configDir, { recursive: true })
+    // Write a settings file without narratorVoice/narratorSpeed (backward compat)
+    await writeFile(
+      join(configDir, "settings.json"),
+      JSON.stringify({ autoContinue: false, speak: true })
+    )
+    const result = await runSwiz(["settings"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("auto-continue:   disabled")
+    expect(result.stdout).toContain("speak:           enabled")
+    expect(result.stdout).toContain("narrator-voice:  system default")
+    expect(result.stdout).toContain("narrator-speed:  system default")
+  })
 })
