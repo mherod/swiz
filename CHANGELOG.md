@@ -1,6 +1,50 @@
 # Changelog
 
+## 2026-03-03
+
+### Bug Fixes
+
+- Fixed the main-branch scope gate failing in detached-HEAD state
+  (common during CI checkouts) by extracting the target branch from
+  the push command rather than relying on `--show-current`.
+- Fixed the scope gate producing incorrect diffs in shallow clones
+  by unshallowing the repository before resolving the diff range.
+- Added a local-history fallback when `git fetch --unshallow` fails
+  (e.g. no network or unavailable origin), so the scope gate no
+  longer blocks pushes in offline shallow clones.
+
+### Improvements
+
+- The scope gate now tries three progressively weaker strategies to
+  resolve the diff range: remote ref, merge-base, and single-commit
+  fallback. Previously only the remote ref was attempted, causing
+  false blocks on rebased or diverged branches.
+
 ## 2026-03-02
+
+### New Features
+
+- Added `swiz ci-wait <SHA>` command for timeout-based CI polling.
+  Replaces manual `gh run watch`/`gh run view` loops with a single
+  command that polls until completion or timeout.
+- Added `swiz issue` command with `close`, `comment`, and `resolve`
+  subcommands. Validates issue state before acting (e.g. prevents
+  closing an already-closed issue).
+- Added a main-branch scope gate that validates push size, file
+  count, and contributor scope before allowing pushes directly to
+  `main`. Prevents accidentally pushing large multi-contributor
+  work without a pull request.
+- Added a sandboxed-edits hook that restricts file writes to the
+  current repository, preventing accidental edits to files outside
+  the project directory.
+- Added a commit-checks gate that enforces branch verification
+  before `git commit`, complementing the existing push-checks gate.
+- Added automatic task recovery after context compaction — if tasks
+  are lost due to conversation compression, they are transparently
+  recreated from the session task directory.
+- Added a hook that normalises invalid `bun test --reporter` values
+  to `dots` (the only supported reporter), preventing silent test
+  failures from typos like `--reporter=dot`.
 
 ### Bug Fixes
 
@@ -37,6 +81,11 @@
   ~64 KB to stderr (e.g. verbose error traces); they now complete
   normally.
   ([#18](https://github.com/mherod/swiz/issues/18))
+- Fixed debug-statement detection producing false positives on ESLint
+  `no-debugger` rule configuration lines.
+- Fixed task and memory enforcement hooks deadlocking outside git
+  repositories — they now skip enforcement gracefully when no
+  project context is available.
 
 ## 2026-03-01
 
@@ -50,19 +99,74 @@
   branch or creating duplicate pull requests, by enforcing the
   verification steps as a mandatory gate rather than an optional
   reminder. (#13)
+- Added a hook that blocks `git push` when the conversation transcript
+  contains an explicit "do not push" instruction from the user,
+  with an override when the user subsequently approves the push.
+- `swiz transcript` now includes tool outputs alongside tool calls,
+  giving a more complete picture of what happened in a session.
+- Added a configurable push-gate setting (`swiz settings`) that can
+  be enabled or disabled per project.
 
 ## 2026-02-28
 
 ### New Features
 
-- Added a hook that blocks `@ts-ignore` comments in TypeScript files.
-  The TypeScript compiler's type errors must be fixed rather than
-  silenced. If suppression is genuinely unavoidable (e.g. broken
-  third-party types), `@ts-expect-error` is permitted as a last resort
-  — but only when accompanied by a description explaining why. Bare
-  `@ts-expect-error` with no reason is also rejected.
+- Added a hook that blocks `@ts-ignore` and `@ts-nocheck` comments
+  in TypeScript files. The TypeScript compiler's type errors must be
+  fixed rather than silenced. If suppression is genuinely unavoidable
+  (e.g. broken third-party types), `@ts-expect-error` is permitted
+  as a last resort — but only when accompanied by a description
+  explaining why. Bare `@ts-expect-error` with no reason is also
+  rejected.
+- Added heuristic approval/rejection scoring for PR review sentiment,
+  allowing hooks to detect whether a review is broadly positive or
+  negative without relying solely on GitHub's formal review state.
+- `swiz status` now detects the current agent environment
+  automatically — Claude Code, Cursor, Codex, and Gemini CLI are
+  all identified via environment variables or parent-process
+  inspection.
+- Issue-priority stop hook now ranks issues by label heuristics
+  (e.g. `bug` > `enhancement` > `question`) and supports a broader
+  set of real-world label conventions.
+- Auto-continue suggestions now include a session critique that
+  highlights blind spots and missed opportunities, encouraging more
+  thorough autonomous work.
+
+### Bug Fixes
+
+- Fixed CI-status stop hook incorrectly blocking on `main`/`master`
+  branches where no PR-based CI run exists.
+- Fixed `as any` cast detection producing false positives on casts
+  inside string literals and comments.
 
 ## 2026-02-27
+
+### New Features
+
+- Added per-option help text to all CLI commands — running
+  `swiz <command> --help` now describes each flag individually.
+- `swiz cleanup` now decodes project paths in its output, shows
+  kept session sizes, supports hour/day units for `--older-than`,
+  and marks stale projects (where the original path no longer
+  exists) as eligible for cleanup.
+- Added a hook that automatically completes Commit and Push tasks
+  after the corresponding git operations succeed, and creates a
+  CI-watch task after `git push` to track the pipeline.
+- Stop hook now includes issue titles (not just numbers) in its
+  message, and prioritises PRs with `CHANGES_REQUESTED` status
+  over open issues.
+- Issue-checking stop hook now works for organisation repos,
+  filtering to self-authored or self-assigned issues.
+- Added session-level settings overrides via `swiz settings`.
+- Added a plugin catalogue (`swiz marketplace`) for discovering
+  and managing swiz plugins.
+- Added command wrapper skills for common plugin operations.
+- Read-only git commands (`git log`, `git status`, `git diff`,
+  etc.) and `ls`/`grep` are now exempt from the task-creation
+  requirement, so quick inspections no longer force a task to be
+  created first.
+- `swiz install` now shows a spinner with status messages during
+  hook installation.
 
 ### Bug Fixes
 
@@ -72,6 +176,10 @@
 - Fixed Ruby debug-statement detection producing false positives on
   identifiers that contain "byebug" as a substring (e.g. helper method
   names). Only bare `byebug` and `binding.pry` calls are now flagged.
+- Fixed Prettier hook running even when Prettier was not installed in
+  the project. (#6)
+- Fixed dispatch not enforcing per-hook timeouts from the manifest.
+  (#5)
 
 ### Improvements
 
@@ -82,3 +190,66 @@
   prompting agents to update `CHANGELOG.md` when it has fallen behind.
 - Session learnings are now written to persistent memory as part of the
   auto-continue workflow, so useful patterns are retained across sessions.
+- Memory-updater directive patterns are now broader, catching more
+  variations of update-memory instructions. (#7)
+
+## 2026-02-26
+
+### New Features
+
+- Added cross-agent compatibility — `swiz install` now generates
+  configuration for Claude Code, Cursor, Gemini CLI, and Codex,
+  with automatic tool-name and event-name translation per agent.
+- Added `swiz dispatch` command for runtime hook fan-out, allowing
+  hooks to be invoked programmatically outside of agent events.
+- Added `swiz transcript` command to view chat history with
+  `--head`/`--tail` turn-count options and `--auto-reply` for
+  AI-suggested user continuations.
+- Added `swiz continue` command to resume sessions with an
+  AI-generated next step, using the available agent backend.
+- Added `swiz cleanup` command for managing and pruning session
+  data.
+- Added `swiz session` command to inspect the current session.
+- Added a stop-auto-continue hook that generates autonomous
+  next-step suggestions when a session ends, encouraging
+  continuous productive work.
+- Added a stop-memory-updater hook that prompts agents to persist
+  session learnings to long-term memory. (closes #4)
+- Added a shell shim for agent-agnostic command interception,
+  allowing hooks to intercept CLI commands regardless of agent.
+- Merge-based install now preserves user hooks alongside swiz
+  hooks, so custom configurations are not overwritten.
+- Added Bun availability checks at install time and runtime, with
+  clear error messages when Bun is not found.
+- Package manager and runtime enforcement is now project-aware,
+  only enforcing Bun in projects that use it.
+- `grep` and `find` command restrictions are now gentle nudges
+  (suggesting `rg` and `Glob` alternatives) rather than hard
+  blocks.
+- `swiz skill` now supports `--no-front-matter` to strip YAML
+  headers from skill output.
+- Added session-start hook that checks plugin environment
+  variables and warns about missing configuration.
+
+### Bug Fixes
+
+- Fixed dispatch not passing the agent event name correctly, so
+  `hookEventName` now matches the agent's configuration format.
+- Fixed async hooks not firing when a blocking hook short-circuited
+  the dispatch — async hooks now always run.
+- Fixed issue-checking stop hook incorrectly showing issues labelled
+  `blocked`, `upstream`, `wontfix`, `duplicate`, or `backlog`.
+
+## 2026-02-25
+
+### New Features
+
+- Initial release of the swiz CLI.
+- Added `swiz skill` command to read and expand skill files with
+  inline command expansion.
+- Added `swiz hooks` command to inspect installed hooks across
+  agents.
+- Added `swiz install` command to install swiz hooks into the
+  current agent's configuration.
+- Added `swiz tasks` command for session-scoped task management,
+  allowing agents to create, list, and update tasks per session.
