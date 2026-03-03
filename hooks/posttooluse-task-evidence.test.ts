@@ -23,11 +23,15 @@ async function createFixture(): Promise<{ home: string; tasksDir: string }> {
   return { home, tasksDir }
 }
 
-async function runHook(home: string, toolInput: Record<string, unknown>): Promise<string> {
+async function runHook(
+  home: string,
+  toolInput: Record<string, unknown>,
+  toolName = "TaskUpdate"
+): Promise<string> {
   const payload = JSON.stringify({
     cwd: process.cwd(),
     session_id: SESSION_ID,
-    tool_name: "TaskUpdate",
+    tool_name: toolName,
     tool_input: toolInput,
   })
   const env: Record<string, string | undefined> = { ...process.env, HOME: home }
@@ -149,5 +153,90 @@ describe("posttooluse-task-evidence", () => {
     })
     // Should exit cleanly with no output
     expect(output).toBe("")
+  })
+
+  it("extracts evidence from metadata.completionEvidence", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "5", subject: "Alt key", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "5.json"), JSON.stringify(task, null, 2))
+
+    await runHook(home, {
+      taskId: "5",
+      status: "completed",
+      metadata: { completionEvidence: "CI green — all jobs passed" },
+    })
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "5.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI green — all jobs passed")
+    expect(updated.completionTimestamp).toBeDefined()
+  })
+
+  it("works with update_plan tool name (Codex)", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "6", subject: "Codex task", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "6.json"), JSON.stringify(task, null, 2))
+
+    await runHook(
+      home,
+      { taskId: "6", status: "completed", metadata: { evidence: "CI passed" } },
+      "update_plan"
+    )
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "6.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI passed")
+  })
+
+  it("is idempotent — does not overwrite identical evidence", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = {
+      id: "7",
+      subject: "Idempotent test",
+      status: "completed",
+      blocks: [],
+      blockedBy: [],
+      completionEvidence: "CI green",
+      completionTimestamp: "2026-01-01T00:00:00.000Z",
+    }
+    await writeFile(join(tasksDir, "7.json"), JSON.stringify(task, null, 2))
+
+    await runHook(home, {
+      taskId: "7",
+      status: "completed",
+      metadata: { evidence: "CI green" },
+    })
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "7.json"), "utf-8"))
+    // Timestamp should be unchanged since evidence was identical
+    expect(updated.completionTimestamp).toBe("2026-01-01T00:00:00.000Z")
+  })
+
+  it("handles numeric taskId", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "8", subject: "Numeric ID", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "8.json"), JSON.stringify(task, null, 2))
+
+    await runHook(home, {
+      taskId: 8,
+      status: "completed",
+      metadata: { evidence: "CI green" },
+    })
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "8.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI green")
+  })
+
+  it("ignores non-update task tools", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "9", subject: "Ignore me", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "9.json"), JSON.stringify(task, null, 2))
+
+    await runHook(
+      home,
+      { taskId: "9", status: "completed", metadata: { evidence: "CI green" } },
+      "TaskCreate"
+    )
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "9.json"), "utf-8"))
+    expect(updated.completionEvidence).toBeUndefined()
   })
 })
