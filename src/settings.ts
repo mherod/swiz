@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
 export type PolicyProfile = "solo" | "team" | "strict"
+export type AmbitionMode = "standard" | "aggressive"
 
 export interface SessionSwizSettings {
   autoContinue: boolean
@@ -24,6 +25,8 @@ export interface ResolvedPolicy {
 
 export interface SwizSettings {
   autoContinue: boolean
+  critiquesEnabled: boolean
+  ambitionMode: AmbitionMode
   narratorVoice: string
   narratorSpeed: number
   prAgeGateMinutes: number
@@ -35,6 +38,8 @@ export interface SwizSettings {
 
 export interface EffectiveSwizSettings {
   autoContinue: boolean
+  critiquesEnabled: boolean
+  ambitionMode: AmbitionMode
   narratorVoice: string
   narratorSpeed: number
   prAgeGateMinutes: number
@@ -89,6 +94,8 @@ export function resolvePolicy(project: ProjectSwizSettings | null): ResolvedPoli
 
 export const DEFAULT_SETTINGS: SwizSettings = {
   autoContinue: true,
+  critiquesEnabled: true,
+  ambitionMode: "standard",
   narratorVoice: "",
   narratorSpeed: 0,
   prAgeGateMinutes: 10,
@@ -134,6 +141,14 @@ function normalizeSettings(value: unknown): SwizSettings {
   return {
     autoContinue:
       typeof obj.autoContinue === "boolean" ? obj.autoContinue : DEFAULT_SETTINGS.autoContinue,
+    critiquesEnabled:
+      typeof obj.critiquesEnabled === "boolean"
+        ? obj.critiquesEnabled
+        : DEFAULT_SETTINGS.critiquesEnabled,
+    ambitionMode:
+      obj.ambitionMode === "standard" || obj.ambitionMode === "aggressive"
+        ? obj.ambitionMode
+        : DEFAULT_SETTINGS.ambitionMode,
     narratorVoice:
       typeof obj.narratorVoice === "string" ? obj.narratorVoice : DEFAULT_SETTINGS.narratorVoice,
     narratorSpeed:
@@ -216,6 +231,8 @@ export function getEffectiveSwizSettings(
   if (sessionId && settings.sessions[sessionId]) {
     return {
       autoContinue: settings.sessions[sessionId]!.autoContinue,
+      critiquesEnabled: settings.critiquesEnabled,
+      ambitionMode: settings.ambitionMode,
       narratorVoice: settings.narratorVoice,
       narratorSpeed: settings.narratorSpeed,
       prAgeGateMinutes: settings.prAgeGateMinutes,
@@ -227,6 +244,8 @@ export function getEffectiveSwizSettings(
   }
   return {
     autoContinue: settings.autoContinue,
+    critiquesEnabled: settings.critiquesEnabled,
+    ambitionMode: settings.ambitionMode,
     narratorVoice: settings.narratorVoice,
     narratorSpeed: settings.narratorSpeed,
     prAgeGateMinutes: settings.prAgeGateMinutes,

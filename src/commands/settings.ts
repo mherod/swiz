@@ -11,9 +11,14 @@ import {
 import { findSessions, projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
-type BooleanSettingKey = "autoContinue" | "pushGate" | "sandboxedEdits" | "speak"
+type BooleanSettingKey =
+  | "autoContinue"
+  | "critiquesEnabled"
+  | "pushGate"
+  | "sandboxedEdits"
+  | "speak"
 type NumericSettingKey = "prAgeGateMinutes" | "narratorSpeed"
-type StringSettingKey = "narratorVoice"
+type StringSettingKey = "narratorVoice" | "ambitionMode"
 type SettingKey = BooleanSettingKey | NumericSettingKey | StringSettingKey
 type Action = "show" | "enable" | "disable" | "set"
 
@@ -33,7 +38,8 @@ function usage(): string {
   return (
     "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value>] [--session [id]] [--dir <path>]\n" +
     "Supported settings: auto-continue, push-gate, sandboxed-edits, speak, pr-age-gate (minutes, 0 to disable),\n" +
-    "  narrator-voice (string, e.g. Samantha), narrator-speed (words per minute, 0 for default)"
+    "  narrator-voice (string, e.g. Samantha), narrator-speed (words per minute, 0 for default),\n" +
+    "  critiques-enabled (boolean), ambition-mode (standard|aggressive)"
   )
 }
 
@@ -60,6 +66,22 @@ function parseSetting(raw: string | undefined): SettingKey {
   }
   if (value === "speak" || value === "tts") {
     return "speak"
+  }
+  if (
+    value === "critiques-enabled" ||
+    value === "critiquesenabled" ||
+    value === "critiques_enabled" ||
+    value === "critiques"
+  ) {
+    return "critiquesEnabled"
+  }
+  if (
+    value === "ambition-mode" ||
+    value === "ambitionmode" ||
+    value === "ambition_mode" ||
+    value === "ambition"
+  ) {
+    return "ambitionMode"
   }
   if (
     value === "narrator-voice" ||
@@ -159,6 +181,8 @@ async function resolveSessionId(query: string | null, targetDir: string): Promis
 function printSettings(
   effective: {
     autoContinue: boolean
+    critiquesEnabled: boolean
+    ambitionMode: string
     narratorVoice: string
     narratorSpeed: number
     prAgeGateMinutes: number
@@ -190,6 +214,8 @@ function printSettings(
   console.log(
     `  auto-continue:   ${effective.autoContinue ? "enabled" : "disabled"} (${scopeLabel})`
   )
+  console.log(`  critiques:       ${effective.critiquesEnabled ? "enabled" : "disabled"} (global)`)
+  console.log(`  ambition-mode:   ${effective.ambitionMode} (global)`)
   const ageGateLabel =
     effective.prAgeGateMinutes > 0 ? `${effective.prAgeGateMinutes} minutes` : "disabled"
   console.log(`  pr-age-gate:     ${ageGateLabel} (global)`)
@@ -300,6 +326,13 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
   }
 
   if (isStringSetting(key)) {
+    if (key === "ambitionMode") {
+      if (parsed.settingValue !== "standard" && parsed.settingValue !== "aggressive") {
+        throw new Error(
+          `Invalid value "${parsed.settingValue}" for ambition-mode. Must be: standard | aggressive\n${usage()}`
+        )
+      }
+    }
     const current = await readSwizSettings({ strict: true })
     const next = { ...current, [key]: parsed.settingValue }
     const path = await writeSwizSettings(next)
@@ -309,7 +342,7 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
   }
 
   const value = parseInt(parsed.settingValue, 10)
-  if (isNaN(value) || value < 0) {
+  if (Number.isNaN(value) || value < 0) {
     throw new Error(
       `Invalid value "${parsed.settingValue}". Must be a non-negative integer.\n${usage()}`
     )
@@ -341,6 +374,19 @@ export const settingsCommand: Command = {
     },
     { flags: "enable speak", description: "Enable TTS narrator (speaks assistant text aloud)" },
     { flags: "disable speak", description: "Disable TTS narrator (default: disabled)" },
+    {
+      flags: "enable critiques-enabled",
+      description: "Show Process/Product critique lines in auto-continue output (default: enabled)",
+    },
+    {
+      flags: "disable critiques-enabled",
+      description: "Suppress critique lines — only emit the next-step directive",
+    },
+    {
+      flags: "set ambition-mode <standard|aggressive>",
+      description:
+        "Set auto-continue ambition level: standard (balanced) or aggressive (feature-gap focused)",
+    },
     {
       flags: "set pr-age-gate <minutes>",
       description: "Set PR merge grace period in minutes (0 to disable, default: 10)",

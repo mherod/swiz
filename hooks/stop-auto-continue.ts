@@ -309,7 +309,8 @@ function buildPrompt(
   taskSection: string,
   userMessagesSection: string,
   projectStatus: string,
-  context: string
+  context: string,
+  ambitionMode: "standard" | "aggressive" = "standard"
 ): string {
   const statusSection = projectStatus
     ? `=== PROJECT STATUS ===\n${projectStatus}\n=== END OF PROJECT STATUS ===\n\n`
@@ -366,6 +367,14 @@ function buildPrompt(
     `or unhandled real-world case in the code changed this session — and implement it. ` +
     `Be ambitious: extend the feature, handle the obvious next case, fill the gap that would block a real user. ` +
     `NEVER conclude that work is complete or that nothing remains. ` +
+    (ambitionMode === "aggressive"
+      ? `AGGRESSIVE MODE: Ignore polish and incremental improvements. ` +
+        `Identify the single biggest missing capability in the current feature area — ` +
+        `the one that would deliver the most user-facing value — and name it explicitly as the target. ` +
+        `Treat any partially-built system as incomplete; name the completion target. ` +
+        `Do not suggest fixes or improvements to existing functionality. ` +
+        `Only suggest implementing something that does not exist yet. `
+      : "") +
     `ABSOLUTE PROHIBITIONS — never suggest any of these regardless of session content:\n` +
     `  - git commit, git add, git push, or any git workflow step\n` +
     `  - writing, adding, or improving tests (unless the transcript explicitly shows a specific behavioral bug ` +
@@ -466,7 +475,13 @@ async function main(): Promise<void> {
         : ""
     const statusParts = [await checkChangelogStaleness(input.cwd), refinementStatus].filter(Boolean)
     const projectStatus = statusParts.join("\n")
-    const prompt = buildPrompt(taskSection, userMessagesSection, projectStatus, context)
+    const prompt = buildPrompt(
+      taskSection,
+      userMessagesSection,
+      projectStatus,
+      context,
+      effective.ambitionMode
+    )
 
     try {
       const result = await promptAgent(prompt, {
@@ -484,12 +499,14 @@ async function main(): Promise<void> {
     await writeReflections(input.cwd, response.reflections)
   }
 
-  const critiqueLines = [
-    response.processCritique ? `Process: ${response.processCritique}` : "",
-    response.productCritique ? `Product: ${response.productCritique}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n")
+  const critiqueLines = effective.critiquesEnabled
+    ? [
+        response.processCritique ? `Process: ${response.processCritique}` : "",
+        response.productCritique ? `Product: ${response.productCritique}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : ""
   const critiqueLine = critiqueLines ? `${critiqueLines}\n\n` : ""
 
   // Runtime gate: if issues need refinement, inject a direct directive
