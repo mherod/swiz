@@ -444,4 +444,116 @@ describe("stop-completion-auditor — CI verification enforcement", () => {
     const result = await runAuditor(home, transcriptPath)
     expect(result.blocked).toBe(false)
   })
+
+  it("finds CI evidence from sibling session in same project", async () => {
+    const home = await mkdtemp(join(tmpdir(), "swiz-auditor-cross-session-"))
+    tempDirs.push(home)
+
+    const CURRENT_SESSION = "current-session-aaa"
+    const SIBLING_SESSION = "sibling-session-bbb"
+
+    // Set up project directory with two transcript files (sibling sessions)
+    const projectDir = join(home, ".claude", "projects", "test-project")
+    await mkdir(projectDir, { recursive: true })
+
+    // Build transcript lines with a git push for the current session
+    const lines: string[] = []
+    for (let i = 0; i < 12; i++) {
+      lines.push(
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "tool_use", name: "Read", id: `t${i}`, input: {} }] },
+        })
+      )
+    }
+    lines.push(
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "Bash",
+              id: "push1",
+              input: { command: "git push origin main" },
+            },
+          ],
+        },
+      })
+    )
+    lines.push(
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "TaskCreate", id: "tc1", input: {} }] },
+      })
+    )
+
+    // Write both transcript files in project dir
+    const currentTranscript = join(projectDir, `${CURRENT_SESSION}.jsonl`)
+    const siblingTranscript = join(projectDir, `${SIBLING_SESSION}.jsonl`)
+    await writeFile(currentTranscript, `${lines.join("\n")}\n`)
+    await writeFile(siblingTranscript, `${lines.join("\n")}\n`)
+
+    // Current session: completed task WITHOUT CI evidence
+    const currentTasksDir = join(home, ".claude", "tasks", CURRENT_SESSION)
+    await mkdir(currentTasksDir, { recursive: true })
+    await writeFile(
+      join(currentTasksDir, "1.json"),
+      JSON.stringify({
+        id: "1",
+        subject: "Implement feature",
+        status: "completed",
+        completionEvidence: "tests pass",
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+
+    // Sibling session: completed task WITH CI evidence
+    const siblingTasksDir = join(home, ".claude", "tasks", SIBLING_SESSION)
+    await mkdir(siblingTasksDir, { recursive: true })
+    await writeFile(
+      join(siblingTasksDir, "1.json"),
+      JSON.stringify({
+        id: "1",
+        subject: "Push and verify CI",
+        status: "completed",
+        completionEvidence: "CI green — conclusion: success, run 12345",
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+
+    // Run auditor with the custom session ID
+    const payload = JSON.stringify({
+      cwd: process.cwd(),
+      session_id: CURRENT_SESSION,
+      transcript_path: currentTranscript,
+    })
+    const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+    delete env.CLAUDECODE
+    delete env.CURSOR_TRACE_ID
+    delete env.GEMINI_CLI
+    delete env.GEMINI_PROJECT_DIR
+    delete env.CODEX_MANAGED_BY_NPM
+    delete env.CODEX_THREAD_ID
+
+    const proc = Bun.spawn(["bun", HOOK_PATH], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env,
+    })
+    proc.stdin.write(payload)
+    proc.stdin.end()
+    const raw = await new Response(proc.stdout).text()
+    await proc.exited
+
+    const trimmed = raw.trim()
+    if (trimmed) {
+      const parsed = JSON.parse(trimmed)
+      expect(parsed.decision).not.toBe("block")
+    }
+    // Empty output = allowed stop (no block)
+  })
 })

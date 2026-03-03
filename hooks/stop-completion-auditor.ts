@@ -3,7 +3,7 @@
 // Current session tasks must be complete before stopping, regardless of stop_hook_active
 
 import { readdir } from "node:fs/promises"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import {
   blockStop,
   computeTranscriptSummary,
@@ -18,6 +18,27 @@ import {
 } from "./hook-utils.ts"
 
 const TOOL_CALL_THRESHOLD = 10
+
+/**
+ * Extract sibling session IDs from the same project directory.
+ * The transcript path is `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`.
+ * All `.jsonl` files in the parent directory are sibling sessions.
+ */
+async function findProjectSessionIds(
+  transcriptPath: string,
+  currentSessionId: string
+): Promise<string[]> {
+  const projectDir = dirname(transcriptPath)
+  try {
+    const files = await readdir(projectDir)
+    return files
+      .filter((f) => f.endsWith(".jsonl"))
+      .map((f) => f.slice(0, -6))
+      .filter((id) => id !== currentSessionId)
+  } catch {
+    return []
+  }
+}
 
 type TaskFile = SessionTask
 
@@ -177,11 +198,27 @@ async function main(): Promise<void> {
     if (sessionPushed) {
       const CI_EVIDENCE_RE = /\bci\b.*(?:green|pass|success)|conclusion.*success/i
       const completedTasks = allTasks.filter((t) => t.status === "completed")
-      const hasCiEvidence = completedTasks.some(
+      let hasCiEvidence = completedTasks.some(
         (t) =>
           (t.completionEvidence && CI_EVIDENCE_RE.test(t.completionEvidence)) ||
           (t.subject && CI_EVIDENCE_RE.test(t.subject))
       )
+
+      // Cross-session lookup: check sibling sessions from the same project
+      if (!hasCiEvidence && transcript) {
+        const siblingIds = await findProjectSessionIds(transcript, sessionId)
+        for (const sibId of siblingIds) {
+          if (hasCiEvidence) break
+          const sibTasks = await readSessionTasks(sibId, home)
+          hasCiEvidence = sibTasks
+            .filter((t) => t.status === "completed")
+            .some(
+              (t) =>
+                (t.completionEvidence && CI_EVIDENCE_RE.test(t.completionEvidence)) ||
+                (t.subject && CI_EVIDENCE_RE.test(t.subject))
+            )
+        }
+      }
 
       if (!hasCiEvidence) {
         blockStop(
