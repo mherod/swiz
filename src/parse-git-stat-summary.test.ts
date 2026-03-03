@@ -377,6 +377,17 @@ describe("classifyChangeScope", () => {
 
   // ── Fail-closed deny message construction ─────────────────────────
 
+  it("classifies empty stat + empty files as trivial (no changes)", () => {
+    // When diffRange is unresolvable, both --stat and --name-only return empty.
+    // The hook handles this before classifyChangeScope is called (denyPreToolUse),
+    // but if it somehow reaches classification, it should be trivial (no changes).
+    const result = classifyChangeScope(parseGitStatSummary(""), [])
+    expect(result.statParsingFailed).toBe(false)
+    expect(result.isTrivial).toBe(true)
+    expect(result.fileCount).toBe(0)
+    expect(result.totalLinesChanged).toBe(0)
+  })
+
   it("produces actionable deny message when stat parsing fails", () => {
     const changedFiles = ["src/api.ts", "src/types.ts", "lib/utils.ts"]
     const result = classifyChangeScope(stat(0, 0, 0), changedFiles)

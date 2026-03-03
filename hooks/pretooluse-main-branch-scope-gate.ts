@@ -41,11 +41,38 @@ if (currentBranch !== "main" && currentBranch !== "master") process.exit(0)
 
 // ─── Resolve diff range once, use everywhere ─────────────────────────
 
-// Determine the correct diff range by checking if the remote tracking ref exists.
+// Determine the correct diff range by verifying each candidate ref exists.
 // All git diff queries MUST use this resolved range to avoid data source mismatch.
 const remoteRef = `origin/${currentBranch}`
-const hasRemoteRef = (await git(["rev-parse", "--verify", remoteRef], cwd)) !== ""
-const diffRange = hasRemoteRef ? `${remoteRef}..HEAD` : "HEAD~1..HEAD"
+const candidates = [
+  { range: `${remoteRef}..HEAD`, ref: remoteRef },
+  { range: "HEAD~1..HEAD", ref: "HEAD~1" },
+]
+
+let diffRange = ""
+for (const c of candidates) {
+  if ((await git(["rev-parse", "--verify", c.ref], cwd)) !== "") {
+    diffRange = c.range
+    break
+  }
+}
+
+// If no valid diff range could be resolved, block with actionable guidance.
+// This can happen on repos with only one commit and no remote tracking branch.
+if (!diffRange) {
+  denyPreToolUse(`
+Push blocked: could not determine diff range for change analysis.
+
+Neither origin/${currentBranch} nor HEAD~1 exist as valid refs.
+This typically means the repository has only one commit and no remote tracking branch.
+
+Remediation:
+  1. Verify the remote is configured: git remote -v
+  2. Fetch remote refs: git fetch origin
+  3. If this is the initial push, use a feature branch:
+     git checkout -b feat/description && git push origin feat/description && gh pr create --base ${currentBranch}
+`)
+}
 
 const diffStat = await git(["diff", diffRange, "--stat"], cwd)
 const diffFiles = await git(["diff", "--name-only", diffRange], cwd)
