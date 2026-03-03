@@ -239,4 +239,168 @@ describe("posttooluse-task-evidence", () => {
     const updated = JSON.parse(await readFile(join(tasksDir, "9.json"), "utf-8"))
     expect(updated.completionEvidence).toBeUndefined()
   })
+
+  // ─── Cross-agent tool name coverage ────────────────────────────────────────
+
+  it("works with TodoWrite tool name (Cursor)", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = {
+      id: "10",
+      subject: "Cursor task",
+      status: "completed",
+      blocks: [],
+      blockedBy: [],
+    }
+    await writeFile(join(tasksDir, "10.json"), JSON.stringify(task, null, 2))
+
+    await runHook(
+      home,
+      { taskId: "10", status: "completed", metadata: { evidence: "CI passed" } },
+      "TodoWrite"
+    )
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "10.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI passed")
+  })
+
+  it("works with write_todos tool name (Gemini)", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = {
+      id: "11",
+      subject: "Gemini task",
+      status: "completed",
+      blocks: [],
+      blockedBy: [],
+    }
+    await writeFile(join(tasksDir, "11.json"), JSON.stringify(task, null, 2))
+
+    await runHook(
+      home,
+      { taskId: "11", status: "completed", metadata: { evidence: "CI green" } },
+      "write_todos"
+    )
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "11.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI green")
+  })
+
+  // ─── Alternative payload shapes ────────────────────────────────────────────
+
+  it("extracts evidence from top-level tool_input.evidence (flat payload)", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = {
+      id: "12",
+      subject: "Flat payload",
+      status: "completed",
+      blocks: [],
+      blockedBy: [],
+    }
+    await writeFile(join(tasksDir, "12.json"), JSON.stringify(task, null, 2))
+
+    await runHook(home, {
+      taskId: "12",
+      status: "completed",
+      evidence: "CI green — flat",
+    })
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "12.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI green — flat")
+  })
+
+  it("extracts evidence from top-level tool_input.completionEvidence", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = {
+      id: "13",
+      subject: "Flat alt key",
+      status: "completed",
+      blocks: [],
+      blockedBy: [],
+    }
+    await writeFile(join(tasksDir, "13.json"), JSON.stringify(task, null, 2))
+
+    await runHook(home, {
+      taskId: "13",
+      status: "completed",
+      completionEvidence: "CI green — flat alt",
+    })
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "13.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI green — flat alt")
+  })
+
+  it("prefers metadata.evidence over top-level evidence", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "14", subject: "Priority", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "14.json"), JSON.stringify(task, null, 2))
+
+    await runHook(home, {
+      taskId: "14",
+      status: "completed",
+      evidence: "top-level evidence",
+      metadata: { evidence: "metadata evidence" },
+    })
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "14.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("metadata evidence")
+  })
+
+  // ─── Alternative task ID field names ───────────────────────────────────────
+
+  it("resolves task ID from task_id field (snake_case)", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "15", subject: "Snake ID", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "15.json"), JSON.stringify(task, null, 2))
+
+    await runHook(home, {
+      task_id: "15",
+      status: "completed",
+      metadata: { evidence: "CI green" },
+    })
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "15.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI green")
+  })
+
+  it("resolves task ID from id field", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "16", subject: "Bare ID", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "16.json"), JSON.stringify(task, null, 2))
+
+    await runHook(home, {
+      id: "16",
+      status: "completed",
+      metadata: { evidence: "CI green" },
+    })
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "16.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI green")
+  })
+
+  it("prefers taskId over task_id over id", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task17 = {
+      id: "17",
+      subject: "Preferred",
+      status: "completed",
+      blocks: [],
+      blockedBy: [],
+    }
+    const task18 = { id: "18", subject: "Fallback", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "17.json"), JSON.stringify(task17, null, 2))
+    await writeFile(join(tasksDir, "18.json"), JSON.stringify(task18, null, 2))
+
+    // taskId takes priority — task 17 should get evidence, not 18
+    await runHook(home, {
+      taskId: "17",
+      task_id: "18",
+      id: "18",
+      status: "completed",
+      metadata: { evidence: "CI green" },
+    })
+
+    const updated17 = JSON.parse(await readFile(join(tasksDir, "17.json"), "utf-8"))
+    const updated18 = JSON.parse(await readFile(join(tasksDir, "18.json"), "utf-8"))
+    expect(updated17.completionEvidence).toBe("CI green")
+    expect(updated18.completionEvidence).toBeUndefined()
+  })
 })
