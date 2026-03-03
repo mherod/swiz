@@ -20,6 +20,7 @@ type BooleanSettingKey =
   | "speak"
   | "gitStatusGate"
   | "nonDefaultBranchGate"
+  | "githubCiGate"
 type NumericSettingKey = "prAgeGateMinutes" | "narratorSpeed"
 type StringSettingKey = "narratorVoice" | "ambitionMode"
 type SettingKey = BooleanSettingKey | NumericSettingKey | StringSettingKey
@@ -94,6 +95,14 @@ function parseSetting(raw: string | undefined): SettingKey {
     value === "branch-gate"
   ) {
     return "nonDefaultBranchGate"
+  }
+  if (
+    value === "github-ci-gate" ||
+    value === "githubcigate" ||
+    value === "github_ci_gate" ||
+    value === "ci-gate"
+  ) {
+    return "githubCiGate"
   }
   if (
     value === "critiques-enabled" ||
@@ -220,6 +229,7 @@ function printSettings(
     speak: boolean
     gitStatusGate: boolean
     nonDefaultBranchGate: boolean
+    githubCiGate: boolean
     source: "global" | "session"
   },
   path: string | null,
@@ -259,6 +269,9 @@ function printSettings(
   )
   console.log(
     `  non-default-branch-gate: ${effective.nonDefaultBranchGate ? "enabled" : "disabled"} (global)`
+  )
+  console.log(
+    `  github-ci-gate:          ${effective.githubCiGate ? "enabled" : "disabled"} (global)`
   )
   const voiceLabel = effective.narratorVoice || "system default"
   console.log(`  narrator-voice:  ${voiceLabel} (global)`)
@@ -454,6 +467,14 @@ export const settingsCommand: Command = {
       flags: "disable non-default-branch-gate",
       description:
         "Disable stop-hook non-default-branch enforcement (allow stopping on any branch)",
+    },
+    {
+      flags: "enable github-ci-gate",
+      description: "Enable stop-hook GitHub CI enforcement (default: enabled)",
+    },
+    {
+      flags: "disable github-ci-gate",
+      description: "Disable stop-hook GitHub CI enforcement (manage CI follow-through manually)",
     },
     {
       flags: "set narrator-voice <name>",

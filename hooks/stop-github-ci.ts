@@ -3,6 +3,7 @@
 // When CI is in_progress, polls up to MAX_POLL_MS before blocking — avoids
 // false-positive blocks for short CI runs that complete within seconds.
 
+import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
   ghJson,
@@ -70,6 +71,11 @@ async function main(): Promise<void> {
   const cwd = input.cwd
 
   if (!(await isGitRepo(cwd))) return
+
+  const settings = await readSwizSettings()
+  const effective = getEffectiveSwizSettings(settings, input.session_id)
+  if (!effective.githubCiGate) return
+
   if (!hasGhCli()) return
   if (!(await isGitHubRemote(cwd))) return
 
