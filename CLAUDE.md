@@ -209,7 +209,7 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
 
 **DON'T** call TaskUpdate or TaskList during or after the push+CI verification sequence. Mark tasks completed *after commit but before push* so the push+CI loop is purely mechanical: push → watch → `gh run view --json` → announce. Any TaskUpdate call after `git push` is a sign the task ordering is wrong — fix it by completing tasks at step 4 of the Standard Work Sequence.
 
-**DON'T** stop the session after committing without pushing. A local commit that hasn't reached `origin/main` is incomplete work — the stop hook blocks until `git push` succeeds and CI is verified. Every commit must be followed by steps 5–11 of the Standard Work Sequence before the session ends.
+**DON'T** stop the session after committing without pushing. A local commit that hasn't reached `origin/main` is incomplete work — the stop hook blocks until `git push` succeeds and CI is verified. Every commit must be followed by steps 5–11 of the Standard Work Sequence before the session ends. When resuming a session with unpushed commits from a prior session, push them immediately before starting new work.
 
 **DON'T** skip `git log origin/main..HEAD --oneline` before pushing — it prevents accidentally pushing incomplete or unintended commits.
 
