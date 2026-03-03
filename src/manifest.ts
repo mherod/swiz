@@ -169,6 +169,58 @@ export const manifest: HookGroup[] = [
   },
 ]
 
+// ─── Runtime routing validator ──────────────────────────────────────────────
+// Called at dispatch startup and install time to catch manifest/route/agent drift
+// before it causes silent misrouting. Throws with actionable fix instructions.
+
+export function validateDispatchRoutes(
+  dispatchRoutes: Record<string, string>,
+  agents: { id: string; hooksConfigurable: boolean; eventMap: Record<string, string> }[]
+): void {
+  const manifestEvents = [...new Set(manifest.map((g) => g.event))]
+  const routeEvents = Object.keys(dispatchRoutes)
+  const errors: string[] = []
+
+  // 1. Every manifest event must have a dispatch route
+  for (const event of manifestEvents) {
+    if (!(event in dispatchRoutes)) {
+      errors.push(
+        `Manifest event "${event}" has no DISPATCH_ROUTES entry. ` +
+          `Add it to DISPATCH_ROUTES in src/commands/dispatch.ts.`
+      )
+    }
+  }
+
+  // 2. Every dispatch route must have at least one manifest entry
+  for (const event of routeEvents) {
+    if (!manifest.some((g) => g.event === event)) {
+      errors.push(
+        `DISPATCH_ROUTES contains "${event}" but no manifest hooks subscribe to it. ` +
+          `Remove it from DISPATCH_ROUTES or add hooks in src/manifest.ts.`
+      )
+    }
+  }
+
+  // 3. Configurable agents must map all manifest events
+  for (const agent of agents.filter((a) => a.hooksConfigurable)) {
+    for (const event of manifestEvents) {
+      if (!(event in agent.eventMap)) {
+        errors.push(
+          `Agent "${agent.id}" is missing eventMap entry for manifest event "${event}". ` +
+            `Add "${event}" to the eventMap in src/agents.ts.`
+        )
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(
+      `Dispatch routing validation failed (${errors.length} error${errors.length > 1 ? "s" : ""}):\n\n` +
+        errors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")
+    )
+  }
+}
+
 // Per-event timeout budget for the dispatcher (seconds).
 // Covers worst-case sequential execution of all hooks in that event.
 export const DISPATCH_TIMEOUTS: Record<string, number> = {

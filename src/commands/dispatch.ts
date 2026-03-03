@@ -8,7 +8,8 @@ import {
   isTaskTool,
   isWriteTool,
 } from "../../hooks/hook-utils.ts"
-import { type HookGroup, manifest } from "../manifest.ts"
+import { CONFIGURABLE_AGENTS } from "../agents.ts"
+import { type HookGroup, manifest, validateDispatchRoutes } from "../manifest.ts"
 import type { Command } from "../types.ts"
 
 const SWIZ_ROOT = dirname(Bun.main)
@@ -296,6 +297,8 @@ export const dispatchCommand: Command = {
     },
   ],
   async run(args) {
+    validateDispatchRoutes(DISPATCH_ROUTES, CONFIGURABLE_AGENTS)
+
     const canonicalEvent = args[0]
     if (!canonicalEvent) {
       throw new Error("Usage: swiz dispatch <event> [agentEventName]")

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { AGENTS, CONFIGURABLE_AGENTS } from "./agents.ts"
 import { DISPATCH_ROUTES } from "./commands/dispatch.ts"
-import { manifest } from "./manifest.ts"
+import { manifest, validateDispatchRoutes } from "./manifest.ts"
 
 // ─── Dispatch routing validation ────────────────────────────────────────────
 // Cross-checks manifest events, dispatch routing table, and agent event maps
@@ -10,6 +10,36 @@ import { manifest } from "./manifest.ts"
 describe("dispatch routing validation", () => {
   const manifestEvents = [...new Set(manifest.map((g) => g.event))]
   const dispatchEvents = Object.keys(DISPATCH_ROUTES)
+
+  it("runtime validator passes with current configuration", () => {
+    expect(() => validateDispatchRoutes(DISPATCH_ROUTES, CONFIGURABLE_AGENTS)).not.toThrow()
+  })
+
+  it("runtime validator catches missing dispatch route", () => {
+    const incomplete = { ...DISPATCH_ROUTES }
+    delete incomplete.preCompact
+    expect(() => validateDispatchRoutes(incomplete, CONFIGURABLE_AGENTS)).toThrow(
+      /preCompact.*DISPATCH_ROUTES/
+    )
+  })
+
+  it("runtime validator catches orphaned dispatch route", () => {
+    const extra = { ...DISPATCH_ROUTES, bogusEvent: "blocking" as const }
+    expect(() => validateDispatchRoutes(extra, CONFIGURABLE_AGENTS)).toThrow(
+      /bogusEvent.*no manifest hooks/
+    )
+  })
+
+  it("runtime validator catches missing agent eventMap entry", () => {
+    const agents = CONFIGURABLE_AGENTS.map((a) => ({
+      ...a,
+      eventMap: { ...a.eventMap },
+    }))
+    delete agents[0]!.eventMap.preCompact
+    expect(() => validateDispatchRoutes(DISPATCH_ROUTES, agents)).toThrow(
+      /missing eventMap.*preCompact/
+    )
+  })
 
   it("every manifest event has an explicit dispatch route", () => {
     const missing = manifestEvents.filter((e) => !(e in DISPATCH_ROUTES))
@@ -37,20 +67,15 @@ describe("dispatch routing validation", () => {
   })
 
   it("non-configurable agents map all manifest events they can handle", () => {
-    // Non-configurable agents (e.g. Codex) may intentionally omit some events.
-    // This test documents the gaps rather than enforcing full coverage.
     for (const agent of AGENTS.filter((a) => !a.hooksConfigurable)) {
       const unmapped = manifestEvents.filter((e) => !(e in agent.eventMap))
       if (unmapped.length > 0) {
-        // Log for visibility but don't fail — these are known limitations
         expect(unmapped.length).toBeGreaterThanOrEqual(0)
       }
     }
   })
 
   it("context-strategy events do not use blocking strategy", () => {
-    // Events that merge additionalContext (sessionStart, userPromptSubmit, etc.)
-    // must use "context" strategy, not "blocking" which discards context output.
     const contextEvents = ["sessionStart", "userPromptSubmit", "preCompact"]
     for (const event of contextEvents) {
       if (event in DISPATCH_ROUTES) {
