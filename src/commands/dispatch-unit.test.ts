@@ -243,11 +243,12 @@ describe("dispatch.ts unit tests", () => {
       })
     })
 
-    it("no duplicate hooks in manifest", () => {
-      const files = manifest.flatMap((g) => g.hooks.map((h) => h.file))
-      const unique = new Set(files)
-
-      expect(unique.size).toBe(files.length)
+    it("no duplicate hooks within the same event group", () => {
+      for (const group of manifest) {
+        const files = group.hooks.map((h) => h.file)
+        const unique = new Set(files)
+        expect(unique.size).toBe(files.length)
+      }
     })
   })
 

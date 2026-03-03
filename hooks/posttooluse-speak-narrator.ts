@@ -8,6 +8,11 @@
 
 import { existsSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { readSwizSettings } from "../src/settings.ts"
+
+// Check if speak is enabled in swiz settings (disabled by default)
+const settings = await readSwizSettings()
+if (!settings.speak) process.exit(0)
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)

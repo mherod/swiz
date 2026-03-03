@@ -10,6 +10,7 @@ export interface SwizSettings {
   prAgeGateMinutes: number
   pushGate: boolean
   sandboxedEdits: boolean
+  speak: boolean
   sessions: Record<string, SessionSwizSettings>
 }
 
@@ -18,6 +19,7 @@ export interface EffectiveSwizSettings {
   prAgeGateMinutes: number
   pushGate: boolean
   sandboxedEdits: boolean
+  speak: boolean
   source: "global" | "session"
 }
 
@@ -26,6 +28,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   prAgeGateMinutes: 10,
   pushGate: false,
   sandboxedEdits: true,
+  speak: false,
   sessions: {},
 }
 
@@ -74,6 +77,7 @@ function normalizeSettings(value: unknown): SwizSettings {
       typeof obj.sandboxedEdits === "boolean"
         ? obj.sandboxedEdits
         : DEFAULT_SETTINGS.sandboxedEdits,
+    speak: typeof obj.speak === "boolean" ? obj.speak : DEFAULT_SETTINGS.speak,
     sessions,
   }
 }
@@ -110,6 +114,7 @@ export function getEffectiveSwizSettings(
       prAgeGateMinutes: settings.prAgeGateMinutes,
       pushGate: settings.pushGate,
       sandboxedEdits: settings.sandboxedEdits,
+      speak: settings.speak,
       source: "session",
     }
   }
@@ -118,6 +123,7 @@ export function getEffectiveSwizSettings(
     prAgeGateMinutes: settings.prAgeGateMinutes,
     pushGate: settings.pushGate,
     sandboxedEdits: settings.sandboxedEdits,
+    speak: settings.speak,
     source: "global",
   }
 }

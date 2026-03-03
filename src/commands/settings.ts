@@ -8,7 +8,7 @@ import {
 import { findSessions, projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
-type BooleanSettingKey = "autoContinue" | "pushGate" | "sandboxedEdits"
+type BooleanSettingKey = "autoContinue" | "pushGate" | "sandboxedEdits" | "speak"
 type NumericSettingKey = "prAgeGateMinutes"
 type SettingKey = BooleanSettingKey | NumericSettingKey
 type Action = "show" | "enable" | "disable" | "set"
@@ -28,7 +28,7 @@ const PROJECTS_DIR = join(HOME, ".claude", "projects")
 function usage(): string {
   return (
     "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value>] [--session [id]] [--dir <path>]\n" +
-    "Supported settings: auto-continue, push-gate, sandboxed-edits, pr-age-gate (minutes, 0 to disable)"
+    "Supported settings: auto-continue, push-gate, sandboxed-edits, speak, pr-age-gate (minutes, 0 to disable)"
   )
 }
 
@@ -52,6 +52,9 @@ function parseSetting(raw: string | undefined): SettingKey {
   }
   if (value === "sandboxed-edits" || value === "sandboxededits" || value === "sandboxed_edits") {
     return "sandboxedEdits"
+  }
+  if (value === "speak" || value === "tts") {
+    return "speak"
   }
   throw new Error(`Unknown setting: ${raw}\n${usage()}`)
 }
@@ -134,6 +137,7 @@ function printSettings(
     prAgeGateMinutes: number
     pushGate: boolean
     sandboxedEdits: boolean
+    speak: boolean
     source: "global" | "session"
   },
   path: string | null,
@@ -156,7 +160,8 @@ function printSettings(
     effective.prAgeGateMinutes > 0 ? `${effective.prAgeGateMinutes} minutes` : "disabled"
   console.log(`  pr-age-gate:     ${ageGateLabel} (global)`)
   console.log(`  push-gate:       ${effective.pushGate ? "enabled" : "disabled"} (global)`)
-  console.log(`  sandboxed-edits: ${effective.sandboxedEdits ? "enabled" : "disabled"} (global)\n`)
+  console.log(`  sandboxed-edits: ${effective.sandboxedEdits ? "enabled" : "disabled"} (global)`)
+  console.log(`  speak:           ${effective.speak ? "enabled" : "disabled"} (global)\n`)
 }
 
 async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
@@ -238,6 +243,8 @@ export const settingsCommand: Command = {
       flags: "disable sandboxed-edits",
       description: "Allow file edits anywhere on the filesystem",
     },
+    { flags: "enable speak", description: "Enable TTS narrator (speaks assistant text aloud)" },
+    { flags: "disable speak", description: "Disable TTS narrator (default: disabled)" },
     {
       flags: "set pr-age-gate <minutes>",
       description: "Set PR merge grace period in minutes (0 to disable, default: 10)",
