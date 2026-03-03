@@ -57,6 +57,43 @@ async function runHook(
   return raw.trim()
 }
 
+async function runHookFull(
+  home: string,
+  toolInput: Record<string, unknown>,
+  toolName = "TaskUpdate",
+  configPath?: string
+): Promise<{ stdout: string; stderr: string }> {
+  const payload = JSON.stringify({
+    cwd: process.cwd(),
+    session_id: SESSION_ID,
+    tool_name: toolName,
+    tool_input: toolInput,
+  })
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDECODE
+  delete env.CURSOR_TRACE_ID
+  delete env.GEMINI_CLI
+  delete env.GEMINI_PROJECT_DIR
+  delete env.CODEX_MANAGED_BY_NPM
+  delete env.CODEX_THREAD_ID
+  if (configPath) env.TASK_EVIDENCE_CONFIG = configPath
+
+  const proc = Bun.spawn(["bun", HOOK_PATH], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env,
+  })
+  proc.stdin.write(payload)
+  proc.stdin.end()
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  return { stdout: stdout.trim(), stderr: stderr.trim() }
+}
+
 describe("posttooluse-task-evidence", () => {
   it("writes completionEvidence when metadata.evidence is provided", async () => {
     const { home, tasksDir } = await createFixture()
@@ -581,5 +618,193 @@ describe("posttooluse-task-evidence config", () => {
 
     const updated = JSON.parse(await readFile(join(tasksDir, "26.json"), "utf-8"))
     expect(updated.completionEvidence).toBeUndefined()
+  })
+})
+
+// ─── Config validation warning tests ───────────────────────────────────────
+
+describe("posttooluse-task-evidence config validation warnings", () => {
+  async function writeConfig(dir: string, config: Record<string, unknown>): Promise<string> {
+    const configPath = join(dir, "warn-evidence-config.json")
+    await writeFile(configPath, JSON.stringify(config, null, 2))
+    return configPath
+  }
+
+  const defaultInput = {
+    taskId: "30",
+    status: "completed",
+    metadata: { evidence: "CI green" },
+  }
+
+  it("warns when toolNames is not an array", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "30", subject: "Warn", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "30.json"), JSON.stringify(task, null, 2))
+    const configPath = await writeConfig(home, {
+      toolNames: "not-array",
+      evidenceKeys: ["evidence"],
+      taskIdFields: ["taskId"],
+    })
+
+    const result = await runHookFull(home, defaultInput, "TaskUpdate", configPath)
+    expect(result.stderr).toContain("[task-evidence-config] toolNames:")
+    expect(result.stderr).toContain("expected array, got string")
+    // Falls back to defaults — TaskUpdate still works
+    const updated = JSON.parse(await readFile(join(tasksDir, "30.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI green")
+  })
+
+  it("warns and removes non-string elements", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "31", subject: "Warn", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "31.json"), JSON.stringify(task, null, 2))
+    const configPath = await writeConfig(home, {
+      toolNames: ["TaskUpdate", 42, true, null],
+      evidenceKeys: ["evidence"],
+      taskIdFields: ["taskId"],
+    })
+
+    const result = await runHookFull(
+      home,
+      { taskId: "31", status: "completed", metadata: { evidence: "works" } },
+      "TaskUpdate",
+      configPath
+    )
+    expect(result.stderr).toContain("non-string element(s) removed")
+    const updated = JSON.parse(await readFile(join(tasksDir, "31.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("works")
+  })
+
+  it("warns and removes empty strings", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "32", subject: "Warn", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "32.json"), JSON.stringify(task, null, 2))
+    const configPath = await writeConfig(home, {
+      toolNames: ["TaskUpdate", "", "  "],
+      evidenceKeys: ["evidence"],
+      taskIdFields: ["taskId"],
+    })
+
+    const result = await runHookFull(
+      home,
+      { taskId: "32", status: "completed", metadata: { evidence: "works" } },
+      "TaskUpdate",
+      configPath
+    )
+    expect(result.stderr).toContain("empty string(s) removed")
+    const updated = JSON.parse(await readFile(join(tasksDir, "32.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("works")
+  })
+
+  it("warns and removes duplicates", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "33", subject: "Warn", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "33.json"), JSON.stringify(task, null, 2))
+    const configPath = await writeConfig(home, {
+      toolNames: ["TaskUpdate", "TaskUpdate", "TodoWrite"],
+      evidenceKeys: ["evidence"],
+      taskIdFields: ["taskId"],
+    })
+
+    const result = await runHookFull(
+      home,
+      { taskId: "33", status: "completed", metadata: { evidence: "works" } },
+      "TaskUpdate",
+      configPath
+    )
+    expect(result.stderr).toContain("duplicate(s) removed")
+    const updated = JSON.parse(await readFile(join(tasksDir, "33.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("works")
+  })
+
+  it("warns and falls back when array resolves to empty after cleaning", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "34", subject: "Warn", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "34.json"), JSON.stringify(task, null, 2))
+    const configPath = await writeConfig(home, {
+      toolNames: ["", "  "],
+      evidenceKeys: ["evidence"],
+      taskIdFields: ["taskId"],
+    })
+
+    const input = { taskId: "34", status: "completed", metadata: { evidence: "CI green" } }
+    const result = await runHookFull(home, input, "TaskUpdate", configPath)
+    expect(result.stderr).toContain("resolved to empty array")
+    expect(result.stderr).toContain("using defaults")
+    // Falls back — TaskUpdate still works
+    const updated = JSON.parse(await readFile(join(tasksDir, "34.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI green")
+  })
+
+  it("warns about unknown config keys", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "35", subject: "Warn", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "35.json"), JSON.stringify(task, null, 2))
+    const configPath = await writeConfig(home, {
+      toolNames: ["TaskUpdate"],
+      evidenceKeys: ["evidence"],
+      taskIdFields: ["taskId"],
+      unknownField: true,
+      anotherBadKey: "value",
+    })
+
+    const input = { taskId: "35", status: "completed", metadata: { evidence: "CI green" } }
+    const result = await runHookFull(home, input, "TaskUpdate", configPath)
+    expect(result.stderr).toContain("unknown config key(s) ignored")
+    expect(result.stderr).toContain("unknownField")
+    const updated = JSON.parse(await readFile(join(tasksDir, "35.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI green")
+  })
+
+  it("warns when config root is not an object", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "36", subject: "Warn", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "36.json"), JSON.stringify(task, null, 2))
+    const configPath = join(home, "array-config.json")
+    await writeFile(configPath, JSON.stringify(["not", "an", "object"]))
+
+    const input = { taskId: "36", status: "completed", metadata: { evidence: "CI green" } }
+    const result = await runHookFull(home, input, "TaskUpdate", configPath)
+    expect(result.stderr).toContain("config root must be an object")
+    // Falls back to all defaults
+    const updated = JSON.parse(await readFile(join(tasksDir, "36.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI green")
+  })
+
+  it("allows $schema and $comment keys without warning", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "37", subject: "Warn", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "37.json"), JSON.stringify(task, null, 2))
+    const configPath = await writeConfig(home, {
+      $schema: "./some-schema.json",
+      $comment: "This is fine",
+      toolNames: ["TaskUpdate"],
+      evidenceKeys: ["evidence"],
+      taskIdFields: ["taskId"],
+    })
+
+    const input = { taskId: "37", status: "completed", metadata: { evidence: "CI green" } }
+    const result = await runHookFull(home, input, "TaskUpdate", configPath)
+    // No warning about $schema or $comment
+    expect(result.stderr).not.toContain("unknown config key")
+    const updated = JSON.parse(await readFile(join(tasksDir, "37.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI green")
+  })
+
+  it("produces no warnings for valid config", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "38", subject: "Warn", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "38.json"), JSON.stringify(task, null, 2))
+    const configPath = await writeConfig(home, {
+      toolNames: ["TaskUpdate"],
+      evidenceKeys: ["evidence"],
+      taskIdFields: ["taskId"],
+    })
+
+    const input = { taskId: "38", status: "completed", metadata: { evidence: "CI green" } }
+    const result = await runHookFull(home, input, "TaskUpdate", configPath)
+    expect(result.stderr).not.toContain("[task-evidence-config]")
+    const updated = JSON.parse(await readFile(join(tasksDir, "38.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("CI green")
   })
 })
