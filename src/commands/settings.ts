@@ -1,4 +1,4 @@
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import {
   getEffectiveSwizSettings,
   getSwizSettingsPath,
@@ -203,6 +203,21 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
     `\n  ${enabled ? "Enabled" : "Disabled"} ${parsed.settingArg ?? key}${sessionId ? ` for session ${sessionId}` : ""}`
   )
   console.log(`  Saved: ${path}\n`)
+
+  // Test TTS immediately when enabling speak
+  if (enabled && key === "speak") {
+    const speakScript = join(dirname(Bun.main), "hooks", "speak.ts")
+    try {
+      const proc = Bun.spawn(["bun", speakScript, "TTS enabled"], {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      await proc.exited
+      // Silent failure is OK — if TTS doesn't work, user discovers it when assistant speaks
+    } catch {
+      // Ignore errors during verification
+    }
+  }
 }
 
 async function setNumericSetting(parsed: ParsedSettingsArgs): Promise<void> {
