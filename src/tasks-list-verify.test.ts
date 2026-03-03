@@ -26,16 +26,16 @@ async function runTasksList(args: string[], env?: Record<string, string>): Promi
   return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode: proc.exitCode }
 }
 
-describe("tasks-list.ts --complete with recovered tasks", () => {
+describe("tasks-list.ts --complete with placeholder subjects", () => {
   let tmpHome: string
-  const sessionId = `test-recovered-${Date.now()}`
+  const sessionId = `test-placeholder-${Date.now()}`
 
   beforeAll(async () => {
     tmpHome = await mkdtemp(join(tmpdir(), "swiz-tasklist-verify-"))
     const tasksDir = join(tmpHome, ".claude", "tasks", sessionId)
     await mkdir(tasksDir, { recursive: true })
 
-    // Create a recovered task (subject doesn't match original work)
+    // Create a recovered task (compaction placeholder)
     await Bun.write(
       join(tasksDir, "1.json"),
       JSON.stringify({
@@ -55,6 +55,19 @@ describe("tasks-list.ts --complete with recovered tasks", () => {
         id: "2",
         subject: "Push and verify CI",
         description: "Normal task with real subject",
+        status: "in_progress",
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+
+    // Create a bootstrap placeholder task
+    await Bun.write(
+      join(tasksDir, "3.json"),
+      JSON.stringify({
+        id: "3",
+        subject: "Session bootstrap — describe current work",
+        description: "Auto-created by pretooluse-require-tasks",
         status: "in_progress",
         blocks: [],
         blockedBy: [],
@@ -130,6 +143,27 @@ describe("tasks-list.ts --complete with recovered tasks", () => {
     expect(result.exitCode).toBe(0)
 
     const taskPath = join(tmpHome, ".claude", "tasks", sessionId, "2.json")
+    const task = await Bun.file(taskPath).json()
+    expect(task.status).toBe("completed")
+  })
+
+  test("completes a bootstrap placeholder with mismatched verification text", async () => {
+    const result = await runTasksList(
+      [
+        "--all-projects",
+        "--session",
+        sessionId,
+        "--complete",
+        "3",
+        "Investigate codebase",
+        "--evidence",
+        "Investigation complete",
+      ],
+      { HOME: tmpHome }
+    )
+    expect(result.exitCode).toBe(0)
+
+    const taskPath = join(tmpHome, ".claude", "tasks", sessionId, "3.json")
     const task = await Bun.file(taskPath).json()
     expect(task.status).toBe("completed")
   })
