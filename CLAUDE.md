@@ -182,6 +182,7 @@ Follow this order for every unit of work. Deviating from it causes hook blocks.
 - No TaskUpdate/TaskList calls at steps 7–10
 - **DON'T stop or declare work done after step 3 alone** — a commit without a push is incomplete work. The stop hook blocks every stop attempt until origin is up to date. Always complete steps 5–10 before stopping. Even when waiting for explicit push approval, do not attempt to stop — the `stop-git-status` hook will block until `git log origin/main..HEAD` is empty.
 - **DO** treat push as inseparable from commit — after any `/commit` skill or manual `git commit`, immediately continue with steps 5–10 (capture SHA → log review → push → CI wait → verify exit code). The stop hook will block every stop attempt until `origin/main` is up to date.
+- **DO** use `swiz issue resolve <number> --body "<text>"` to finalize issues instead of separate `gh issue comment` + `gh issue close` calls. `swiz issue resolve` is idempotent: it fetches state first, posts the comment, and only closes if the issue is still OPEN. When a commit message contains `Fixes #N`, GitHub auto-closes the issue on push — a subsequent raw `gh issue close` then fails noisily. `swiz issue resolve` handles this gracefully. For close-only (no comment), use `swiz issue close <number>`.
 
 ## Push and CI
 
