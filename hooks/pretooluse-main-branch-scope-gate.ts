@@ -39,18 +39,15 @@ if (!pushToMainRe.test(command)) process.exit(0)
 const currentBranch = await git(["branch", "--show-current"], cwd)
 if (currentBranch !== "main" && currentBranch !== "master") process.exit(0)
 
-// ─── Analyze change scope ──────────────────────────────────────────────
+// ─── Resolve diff range once, use everywhere ─────────────────────────
 
-// Count files and lines changed
-// Try diff against origin/main first, fall back to HEAD~1 if no remote history exists
-let diffRange = `origin/${currentBranch}..HEAD`
-let diffStat = await git(["diff", diffRange, "--stat"], cwd)
-if (!diffStat.trim()) {
-  diffRange = "HEAD~1..HEAD"
-  diffStat = await git(["diff", diffRange, "--stat"], cwd)
-}
+// Determine the correct diff range by checking if the remote tracking ref exists.
+// All git diff queries MUST use this resolved range to avoid data source mismatch.
+const remoteRef = `origin/${currentBranch}`
+const hasRemoteRef = (await git(["rev-parse", "--verify", remoteRef], cwd)) !== ""
+const diffRange = hasRemoteRef ? `${remoteRef}..HEAD` : "HEAD~1..HEAD"
 
-// Use the same diff range for file list to avoid data source mismatch
+const diffStat = await git(["diff", diffRange, "--stat"], cwd)
 const diffFiles = await git(["diff", "--name-only", diffRange], cwd)
 const changedFiles = diffFiles.trim().split("\n").filter(Boolean)
 
