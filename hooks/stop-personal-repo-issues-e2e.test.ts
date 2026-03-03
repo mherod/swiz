@@ -258,6 +258,18 @@ describe("E2E stop-personal-repo-issues: personal repo issue blocking", () => {
     expect(result.reason).toContain("Fix login redirect bug")
   })
 
+  test("open-issue stop block omits memory-capture advice", async () => {
+    const dir = await createGitRepoWithGitHubRemote("-nomemoryfooter", "testuser", "myrepo")
+    const result = await runHook(dir, {
+      user: "testuser",
+      issues: [makeIssue(67, "Detect project tech stack for per-stack hook config", ["ready"])],
+    })
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("ACTION REQUIRED")
+    expect(result.reason).not.toContain("Cause to capture:")
+    expect(result.reason).not.toContain("Use the /update-memory skill")
+  })
+
   test("skip-only issues allow stop (no actionable issues)", async () => {
     const dir = await createGitRepoWithGitHubRemote("-skiponly", "testuser", "myrepo")
     const result = await runHook(dir, {

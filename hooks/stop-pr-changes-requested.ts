@@ -93,7 +93,8 @@ async function main(): Promise<void> {
     `Address all review feedback before stopping:\n  gh pr view ${pr.number} --comments`
   )
 
-  blockStop(reason)
+  // Review-feedback triage is actionable queue work, not a memory-capture miss.
+  blockStop(reason, { includeUpdateMemoryAdvice: false })
 }
 
 main()

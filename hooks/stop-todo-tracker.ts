@@ -72,7 +72,8 @@ async function main(): Promise<void> {
       'Either resolve these now, or file them as GitHub issues before stopping:\n  gh issue create --title "<title>" --body "<description>"'
     )
 
-  blockStop(reason)
+  // TODO hygiene is a quality/process gate, not a workflow-memory miss.
+  blockStop(reason, { includeUpdateMemoryAdvice: false })
 }
 
 main()

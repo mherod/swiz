@@ -365,4 +365,17 @@ describe("blockStop", () => {
     expect(reason).toContain("A hook detected missing or unstructured workflow behavior")
     expect(reason).toContain("Tasks have gone stale after 20 tool calls.")
   })
+
+  test("supports opt-out of update-memory advice for triage-only blockers", async () => {
+    const { exitCode, parsed } = await runHelper(
+      `blockStop } from "./hook-utils.ts"; ` +
+        `blockStop("Stop due to triage-only blocker.", { includeUpdateMemoryAdvice: false })`
+    )
+    expect(exitCode).toBe(0)
+    expect(parsed.decision).toBe("block")
+    const reason = parsed.reason as string
+    expect(reason).toContain("ACTION REQUIRED")
+    expect(reason).not.toContain("Cause to capture:")
+    expect(reason).not.toContain("Use the /update-memory skill")
+  })
 })

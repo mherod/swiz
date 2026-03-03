@@ -53,7 +53,8 @@ async function main(): Promise<void> {
   reason += `Failures:\n${combined}\n\n`
   reason += "Fix every linting issue, then try stopping again."
 
-  blockStop(reason)
+  // Lint failures are quality gates, not workflow-memory misses.
+  blockStop(reason, { includeUpdateMemoryAdvice: false })
 }
 
 main()

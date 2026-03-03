@@ -95,7 +95,8 @@ async function main(): Promise<void> {
   reason +=
     "\nRemove debug statements before stopping. If intentional logging is needed, use a proper logger (e.g., pino, winston) instead."
 
-  blockStop(reason)
+  // Code-quality findings should be fixed directly, not turned into memory-capture reminders.
+  blockStop(reason, { includeUpdateMemoryAdvice: false })
 }
 
 if (import.meta.main) main()

@@ -394,7 +394,8 @@ async function main(): Promise<void> {
 
     // Update cooldown before blocking
     await updateCooldown(sessionId, cwd)
-    blockStop(reasonLines.join("\n"))
+    // Open-issue reminders are actionable work triage, not workflow-memory misses.
+    blockStop(reasonLines.join("\n"), { includeUpdateMemoryAdvice: false })
   } catch {
     // On error, allow stop (fail open)
   }

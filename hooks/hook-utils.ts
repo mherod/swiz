@@ -339,19 +339,28 @@ export function preToolActionRequired(reason = ""): string {
 }
 
 /** Standard ACTION REQUIRED footer appended to all stop hook block reasons. */
-export function actionRequired(reason = ""): string {
+export function actionRequired(
+  reason = "",
+  options: { includeUpdateMemoryAdvice?: boolean } = {}
+): string {
+  const { includeUpdateMemoryAdvice = true } = options
   const reassess = skillAdvice(
     "re-assess",
     "If you believe this is a false positive, use the /re-assess skill to re-evaluate your assumptions — the hook's findings take authority over your own assessment.",
     "If you believe this is a false positive, re-evaluate your assumptions carefully before retrying — the hook's findings take authority over your own assessment."
   )
-  const updateMemory = updateMemoryAdvice(reason)
-  return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action.\n\n${reassess}\n\n${updateMemory}`
+  const updateMemory = includeUpdateMemoryAdvice ? `\n\n${updateMemoryAdvice(reason)}` : ""
+  return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action.\n\n${reassess}${updateMemory}`
 }
 
 /** Emit a stop block decision and exit. Appends ACTION_REQUIRED footer. */
-export function blockStop(reason: string): never {
-  console.log(JSON.stringify({ decision: "block", reason: reason + actionRequired(reason) }))
+export function blockStop(
+  reason: string,
+  options: { includeUpdateMemoryAdvice?: boolean } = {}
+): never {
+  console.log(
+    JSON.stringify({ decision: "block", reason: reason + actionRequired(reason, options) })
+  )
   process.exit(0)
 }
 

@@ -111,7 +111,8 @@ async function main(): Promise<void> {
   for (const d of drifted) reason += `  ${d}\n`
   reason += "\nRun the install command to regenerate the lockfile, then commit it before stopping."
 
-  blockStop(reason)
+  // Dependency/lockfile consistency is a quality gate, not memory-capture enforcement.
+  blockStop(reason, { includeUpdateMemoryAdvice: false })
 }
 
 main()

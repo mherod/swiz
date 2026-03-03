@@ -57,7 +57,8 @@ async function main(): Promise<void> {
   reason +=
     "\nConsider adding these to Git LFS or removing them from the repository. Large committed files bloat git history permanently."
 
-  blockStop(reason)
+  // Large-file hygiene is a quality policy, not a workflow-memory issue.
+  blockStop(reason, { includeUpdateMemoryAdvice: false })
 }
 
 main()

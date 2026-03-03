@@ -55,7 +55,8 @@ async function main(): Promise<void> {
   reason +=
     "\nReview and remove secrets before stopping. If these are false positives, ensure values come from environment variables, not hardcoded strings."
 
-  blockStop(reason)
+  // Secret-scanning findings are security quality issues, not workflow-memory misses.
+  blockStop(reason, { includeUpdateMemoryAdvice: false })
 }
 
 main()

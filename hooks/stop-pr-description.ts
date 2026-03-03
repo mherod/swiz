@@ -22,6 +22,11 @@ const PLACEHOLDER_PATTERNS = [
   "Your description here",
 ]
 
+function blockPrDescription(reason: string): never {
+  // PR-description refinement is triage/completion work, not memory-capture follow-through.
+  return blockStop(reason, { includeUpdateMemoryAdvice: false })
+}
+
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as StopHookInput
   const cwd = input.cwd
@@ -51,7 +56,7 @@ async function main(): Promise<void> {
 
   // Empty body
   if (!bodyStripped) {
-    blockStop(`PR #${pr.number} ('${pr.title}') has an empty description.\n\n${prAdvice}`)
+    blockPrDescription(`PR #${pr.number} ('${pr.title}') has an empty description.\n\n${prAdvice}`)
   }
 
   // Check for ## Summary immediately followed by a placeholder
@@ -65,7 +70,7 @@ async function main(): Promise<void> {
         const nextLine = lines[j]
         if (!nextLine || nextLine.trim() === "") continue
         if (nextLine.trim().startsWith("<")) {
-          blockStop(
+          blockPrDescription(
             `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n` +
               "Replace the '<...>' placeholder under '## Summary' with actual content before stopping."
           )
@@ -80,7 +85,7 @@ async function main(): Promise<void> {
   const bodyLower = body.toLowerCase()
   for (const pattern of PLACEHOLDER_PATTERNS) {
     if (bodyLower.includes(pattern.toLowerCase())) {
-      blockStop(
+      blockPrDescription(
         `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n${prAdvice}`
       )
     }
@@ -88,7 +93,7 @@ async function main(): Promise<void> {
 
   // Minimum length
   if (bodyStripped.length < 20) {
-    blockStop(
+    blockPrDescription(
       `PR #${pr.number} ('${pr.title}') description is too short (${bodyStripped.length} chars).\n\n` +
         prAdvice
     )
