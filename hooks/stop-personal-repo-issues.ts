@@ -86,6 +86,50 @@ const LABEL_SCORE: Record<string, number> = {
 }
 
 const MAX_SHOWN_ISSUES = 5
+const COOLDOWN_SECONDS = 60
+
+/**
+ * Sanitize session ID for use in /tmp sentinel filename.
+ * Only allows alphanumeric, hyphens, underscores to prevent path traversal.
+ */
+function sanitizeSessionId(sessionId: string | undefined): string | null {
+  if (!sessionId || typeof sessionId !== "string") return null
+  if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) return null
+  return sessionId
+}
+
+/**
+ * Check if the hook blocked within the last COOLDOWN_SECONDS.
+ * Returns true if still in cooldown (allow stop), false if cooldown expired.
+ */
+async function isInCooldown(sessionId: string | null): Promise<boolean> {
+  if (!sessionId) return false
+
+  const cooldownFile = `/tmp/stop-personal-repo-issues-${sessionId}.cooldown`
+  const now = Date.now()
+
+  try {
+    const stat = await Bun.file(cooldownFile).stat()
+    return now - stat.mtimeMs < COOLDOWN_SECONDS * 1000
+  } catch {
+    // File doesn't exist or is unreadable, cooldown expired
+    return false
+  }
+}
+
+/**
+ * Record that the hook is blocking now, starting a new cooldown.
+ */
+async function updateCooldown(sessionId: string | null): Promise<void> {
+  if (!sessionId) return
+
+  const cooldownFile = `/tmp/stop-personal-repo-issues-${sessionId}.cooldown`
+  try {
+    await Bun.write(cooldownFile, "")
+  } catch {
+    // Best-effort; don't fail the hook if we can't write
+  }
+}
 
 /**
  * Normalise a label name for agnostic matching:
@@ -159,10 +203,14 @@ async function main(): Promise<void> {
   try {
     const input = (await Bun.stdin.json()) as StopHookInput
     const cwd = input.cwd
+    const sessionId = sanitizeSessionId(input.session_id)
 
     if (!(await isGitRepo(cwd))) return
     if (!hasGhCli()) return
     if (!(await isGitHubRemote(cwd))) return
+
+    // Check if already blocked within cooldown window
+    if (await isInCooldown(sessionId)) return
 
     // Extract owner from remote URL
     const remoteUrl = await git(["remote", "get-url", "origin"], cwd)
@@ -238,6 +286,8 @@ async function main(): Promise<void> {
       "Work items assigned to or created by you represent code that needs finishing."
     )
 
+    // Update cooldown before blocking
+    await updateCooldown(sessionId)
     blockStop(reasonLines.join("\n"))
   } catch {
     // On error, allow stop (fail open)

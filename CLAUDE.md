@@ -153,6 +153,8 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 ## Standard Work Sequence
 
+**DO** create at least one task with `pending` or `in_progress` status before using any file modification (Edit/Write) or non-exempt Bash tools. The `pretooluse-require-tasks.ts` hook enforces this — it blocks Edit, Write, and Bash calls when no incomplete task exists. This applies to every session that involves code changes, not just large features.
+
 Follow this order for every unit of work. Deviating from it causes hook blocks.
 
 ```
