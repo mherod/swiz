@@ -161,7 +161,7 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DON'T** add, restore, or preserve inferred issue labels once the user gives explicit label instructions. The user's latest label state overrides prior assumptions: if they say an issue is `ready`, remove conflicting labels such as `backlog` instead of re-adding them for classification.
 
-**DO** include a readiness label (`ready`, `backlog`, or `blocked`) in every `gh issue create` call. Use `--label "enhancement,backlog"` or `--label "bug,ready"` directly in the create command — do not rely on a separate refinement step. The `stop-personal-repo-issues.ts` hook blocks session stop when any issue lacks a readiness label. If using `/report-issue`, follow immediately with `/refine-issue <number>` to add the label. Treat issue creation and labelling as a single atomic step.
+**DO** refine and label issues immediately after creating them. The `stop-personal-repo-issues.ts` hook blocks session stop when issues lack a readiness label (`ready`, `triaged`, `confirmed`, `accepted`, `spec-approved`). Note: `backlog` is NOT a readiness label — it means "seen but not yet refined". After creating an issue with `/report-issue` or `gh issue create`, run `/refine-issue <number>` to add acceptance criteria and label it `ready`. Treat issue creation and refinement as a single atomic workflow.
 
 **DO** pick up at least one open issue per session when the stop hook lists actionable issues. The `stop-personal-repo-issues.ts` hook blocks stop when open issues exist in a personal repo. Use `/work-on-issue <number>` to resolve one issue before stopping — this satisfies the cooldown and demonstrates forward progress. Prioritize issues labelled `ready` over `backlog`.
 
