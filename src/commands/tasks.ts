@@ -1,5 +1,6 @@
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
 const HOME = process.env.HOME ?? "~"
@@ -58,40 +59,40 @@ function timeAgo(date: Date): string {
 
 // ─── Session discovery ──────────────────────────────────────────────────────
 
-async function getSessionCwd(sessionId: string): Promise<string | null> {
+/** Derive session IDs from a single project transcript directory (constant-time lookup). */
+async function getSessionIdsForProject(projectKey: string): Promise<Set<string>> {
+  const projectDir = join(PROJECTS_DIR, projectKey)
+  const ids = new Set<string>()
   try {
-    const dirs = await readdir(PROJECTS_DIR)
-    for (const dir of dirs) {
-      const transcriptPath = join(PROJECTS_DIR, dir, `${sessionId}.jsonl`)
-      try {
-        const content = await readFile(transcriptPath, "utf-8")
-        for (const line of content.split("\n").slice(0, 10)) {
-          if (!line.trim()) continue
-          try {
-            const data = JSON.parse(line)
-            if (data.cwd) return data.cwd
-          } catch {}
-        }
-      } catch {}
+    const files = await readdir(projectDir)
+    for (const f of files) {
+      if (f.endsWith(".jsonl")) ids.add(f.slice(0, -6))
     }
   } catch {}
-  return null
+  return ids
 }
 
 async function getSessions(filterCwd?: string): Promise<string[]> {
   try {
     const entries = await readdir(TASKS_DIR)
+
+    // When filtering by cwd, derive the project key directly and intersect
+    // with task session directories — avoids the O(sessions × projects) scan.
+    const projectSessionIds = filterCwd
+      ? await getSessionIdsForProject(projectKeyFromCwd(filterCwd))
+      : null
+
     const stats = await Promise.all(
-      entries.map(async (s) => {
-        const p = join(TASKS_DIR, s)
-        const st = await stat(p)
-        const cwd = await getSessionCwd(s)
-        return { session: s, mtime: st.mtime, cwd }
-      })
+      entries
+        .filter((s) => !projectSessionIds || projectSessionIds.has(s))
+        .map(async (s) => {
+          const p = join(TASKS_DIR, s)
+          const st = await stat(p)
+          return { session: s, mtime: st.mtime }
+        })
     )
-    const filtered = filterCwd ? stats.filter((s) => s.cwd === filterCwd) : stats
-    filtered.sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
-    return filtered.map((s) => s.session)
+    stats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+    return stats.map((s) => s.session)
   } catch {
     return []
   }
