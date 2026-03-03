@@ -2,6 +2,13 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import {
+  DEFAULT_TRIVIAL_MAX_FILES,
+  DEFAULT_TRIVIAL_MAX_LINES,
+  POLICY_PROFILES,
+  readProjectSettings,
+  resolvePolicy,
+} from "../settings.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 
 const tempDirs: string[] = []
@@ -215,5 +222,133 @@ describe("swiz settings", () => {
     expect(result.stdout).toContain("speak:           enabled")
     expect(result.stdout).toContain("narrator-voice:  system default")
     expect(result.stdout).toContain("narrator-speed:  system default")
+  })
+
+  test("shows project policy section in settings output", async () => {
+    const home = await createTempHome()
+    const projectDir = await mkdtemp(join(tmpdir(), "swiz-policy-test-"))
+    tempDirs.push(projectDir)
+    const swizDir = join(projectDir, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await writeFile(join(swizDir, "config.json"), JSON.stringify({ profile: "strict" }))
+
+    const result = await runSwiz(["settings", "--dir", projectDir], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("project policy")
+    expect(result.stdout).toContain("profile:         strict")
+    expect(result.stdout).toContain("trivial-max-files: 1")
+    expect(result.stdout).toContain("trivial-max-lines: 10")
+  })
+
+  test("shows default project policy when no config.json present", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("project policy")
+    expect(result.stdout).toContain(`trivial-max-files: ${DEFAULT_TRIVIAL_MAX_FILES}`)
+    expect(result.stdout).toContain(`trivial-max-lines: ${DEFAULT_TRIVIAL_MAX_LINES}`)
+    expect(result.stdout).toContain("(default)")
+  })
+})
+
+// ─── resolvePolicy unit tests ───────────────────────────────────────────────
+
+describe("resolvePolicy", () => {
+  test("returns defaults when no project settings", () => {
+    const policy = resolvePolicy(null)
+    expect(policy.trivialMaxFiles).toBe(DEFAULT_TRIVIAL_MAX_FILES)
+    expect(policy.trivialMaxLines).toBe(DEFAULT_TRIVIAL_MAX_LINES)
+    expect(policy.profile).toBeNull()
+    expect(policy.source).toBe("default")
+  })
+
+  test("applies solo profile preset", () => {
+    const policy = resolvePolicy({ profile: "solo" })
+    expect(policy.trivialMaxFiles).toBe(POLICY_PROFILES.solo.trivialMaxFiles)
+    expect(policy.trivialMaxLines).toBe(POLICY_PROFILES.solo.trivialMaxLines)
+    expect(policy.profile).toBe("solo")
+    expect(policy.source).toBe("project")
+  })
+
+  test("applies team profile preset", () => {
+    const policy = resolvePolicy({ profile: "team" })
+    expect(policy.trivialMaxFiles).toBe(POLICY_PROFILES.team.trivialMaxFiles)
+    expect(policy.trivialMaxLines).toBe(POLICY_PROFILES.team.trivialMaxLines)
+    expect(policy.profile).toBe("team")
+    expect(policy.source).toBe("project")
+  })
+
+  test("applies strict profile preset", () => {
+    const policy = resolvePolicy({ profile: "strict" })
+    expect(policy.trivialMaxFiles).toBe(POLICY_PROFILES.strict.trivialMaxFiles)
+    expect(policy.trivialMaxLines).toBe(POLICY_PROFILES.strict.trivialMaxLines)
+    expect(policy.profile).toBe("strict")
+    expect(policy.source).toBe("project")
+  })
+
+  test("per-field override takes precedence over profile", () => {
+    // Start with solo (permissive), but override files count to be strict
+    const policy = resolvePolicy({ profile: "solo", trivialMaxFiles: 2 })
+    expect(policy.trivialMaxFiles).toBe(2)
+    // Lines still come from the solo profile
+    expect(policy.trivialMaxLines).toBe(POLICY_PROFILES.solo.trivialMaxLines)
+    expect(policy.profile).toBe("solo")
+  })
+
+  test("per-field overrides work without a profile", () => {
+    const policy = resolvePolicy({ trivialMaxFiles: 7, trivialMaxLines: 50 })
+    expect(policy.trivialMaxFiles).toBe(7)
+    expect(policy.trivialMaxLines).toBe(50)
+    expect(policy.profile).toBeNull()
+    expect(policy.source).toBe("project")
+  })
+})
+
+// ─── readProjectSettings unit tests ────────────────────────────────────────
+
+describe("readProjectSettings", () => {
+  test("returns null when config.json does not exist", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
+    tempDirs.push(dir)
+    expect(await readProjectSettings(dir)).toBeNull()
+  })
+
+  test("reads valid profile from config.json", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
+    tempDirs.push(dir)
+    await mkdir(join(dir, ".swiz"), { recursive: true })
+    await writeFile(join(dir, ".swiz", "config.json"), JSON.stringify({ profile: "strict" }))
+    const settings = await readProjectSettings(dir)
+    expect(settings?.profile).toBe("strict")
+  })
+
+  test("reads trivialMaxFiles and trivialMaxLines overrides", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
+    tempDirs.push(dir)
+    await mkdir(join(dir, ".swiz"), { recursive: true })
+    await writeFile(
+      join(dir, ".swiz", "config.json"),
+      JSON.stringify({ trivialMaxFiles: 8, trivialMaxLines: 60 })
+    )
+    const settings = await readProjectSettings(dir)
+    expect(settings?.trivialMaxFiles).toBe(8)
+    expect(settings?.trivialMaxLines).toBe(60)
+    expect(settings?.profile).toBeUndefined()
+  })
+
+  test("returns null for invalid profile value", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
+    tempDirs.push(dir)
+    await mkdir(join(dir, ".swiz"), { recursive: true })
+    await writeFile(join(dir, ".swiz", "config.json"), JSON.stringify({ profile: "invalid" }))
+    expect(await readProjectSettings(dir)).toBeNull()
+  })
+
+  test("returns null for malformed JSON", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
+    tempDirs.push(dir)
+    await mkdir(join(dir, ".swiz"), { recursive: true })
+    await writeFile(join(dir, ".swiz", "config.json"), "not-json{{{")
+    expect(await readProjectSettings(dir)).toBeNull()
   })
 })

@@ -1,8 +1,25 @@
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
+export type PolicyProfile = "solo" | "team" | "strict"
+
 export interface SessionSwizSettings {
   autoContinue: boolean
+}
+
+/** Project-local policy config — lives in <repo>/.swiz/config.json */
+export interface ProjectSwizSettings {
+  profile?: PolicyProfile
+  trivialMaxFiles?: number
+  trivialMaxLines?: number
+}
+
+/** Resolved policy thresholds after merging global + project config */
+export interface ResolvedPolicy {
+  trivialMaxFiles: number
+  trivialMaxLines: number
+  profile: PolicyProfile | null
+  source: "project" | "default"
 }
 
 export interface SwizSettings {
@@ -25,6 +42,49 @@ export interface EffectiveSwizSettings {
   sandboxedEdits: boolean
   speak: boolean
   source: "global" | "session"
+}
+
+/** Default trivial-change thresholds (mirrors the gate hook's original hard-coded values) */
+export const DEFAULT_TRIVIAL_MAX_FILES = 3
+export const DEFAULT_TRIVIAL_MAX_LINES = 20
+
+/** Named policy profiles with preset thresholds */
+export const POLICY_PROFILES: Record<
+  PolicyProfile,
+  { trivialMaxFiles: number; trivialMaxLines: number }
+> = {
+  solo: { trivialMaxFiles: 10, trivialMaxLines: 100 },
+  team: { trivialMaxFiles: 3, trivialMaxLines: 20 },
+  strict: { trivialMaxFiles: 1, trivialMaxLines: 10 },
+}
+
+/** Resolve effective policy thresholds from a project config (if any). */
+export function resolvePolicy(project: ProjectSwizSettings | null): ResolvedPolicy {
+  if (!project) {
+    return {
+      trivialMaxFiles: DEFAULT_TRIVIAL_MAX_FILES,
+      trivialMaxLines: DEFAULT_TRIVIAL_MAX_LINES,
+      profile: null,
+      source: "default",
+    }
+  }
+
+  let trivialMaxFiles = DEFAULT_TRIVIAL_MAX_FILES
+  let trivialMaxLines = DEFAULT_TRIVIAL_MAX_LINES
+  let resolvedProfile: PolicyProfile | null = null
+
+  if (project.profile) {
+    resolvedProfile = project.profile
+    const preset = POLICY_PROFILES[project.profile]
+    trivialMaxFiles = preset.trivialMaxFiles
+    trivialMaxLines = preset.trivialMaxLines
+  }
+
+  // Per-field overrides take precedence over the named profile
+  if (project.trivialMaxFiles !== undefined) trivialMaxFiles = project.trivialMaxFiles
+  if (project.trivialMaxLines !== undefined) trivialMaxLines = project.trivialMaxLines
+
+  return { trivialMaxFiles, trivialMaxLines, profile: resolvedProfile, source: "project" }
 }
 
 export const DEFAULT_SETTINGS: SwizSettings = {
@@ -91,6 +151,39 @@ function normalizeSettings(value: unknown): SwizSettings {
         : DEFAULT_SETTINGS.sandboxedEdits,
     speak: typeof obj.speak === "boolean" ? obj.speak : DEFAULT_SETTINGS.speak,
     sessions,
+  }
+}
+
+export function getProjectSettingsPath(cwd: string): string {
+  return join(cwd, ".swiz", "config.json")
+}
+
+function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const obj = value as Record<string, unknown>
+  const result: ProjectSwizSettings = {}
+  const profile = obj.profile
+  if (profile !== undefined) {
+    if (profile !== "solo" && profile !== "team" && profile !== "strict") return null
+    result.profile = profile as PolicyProfile
+  }
+  if (typeof obj.trivialMaxFiles === "number" && obj.trivialMaxFiles > 0) {
+    result.trivialMaxFiles = obj.trivialMaxFiles
+  }
+  if (typeof obj.trivialMaxLines === "number" && obj.trivialMaxLines > 0) {
+    result.trivialMaxLines = obj.trivialMaxLines
+  }
+  return result
+}
+
+export async function readProjectSettings(cwd: string): Promise<ProjectSwizSettings | null> {
+  const path = getProjectSettingsPath(cwd)
+  const file = Bun.file(path)
+  if (!(await file.exists())) return null
+  try {
+    return normalizeProjectSettings(await file.json())
+  } catch {
+    return null
   }
 }
 

@@ -1,8 +1,11 @@
 import { dirname, join } from "node:path"
 import {
   getEffectiveSwizSettings,
+  getProjectSettingsPath,
   getSwizSettingsPath,
+  readProjectSettings,
   readSwizSettings,
+  resolvePolicy,
   writeSwizSettings,
 } from "../settings.ts"
 import { findSessions, projectKeyFromCwd } from "../transcript-utils.ts"
@@ -166,7 +169,14 @@ function printSettings(
   },
   path: string | null,
   fileExists: boolean,
-  sessionId: string | null
+  sessionId: string | null,
+  projectPolicyInfo?: {
+    configPath: string
+    profile: string | null
+    trivialMaxFiles: number
+    trivialMaxLines: number
+    source: "project" | "default"
+  }
 ): void {
   console.log("\n  swiz settings\n")
   if (!path) {
@@ -190,7 +200,22 @@ function printSettings(
   console.log(`  narrator-voice:  ${voiceLabel} (global)`)
   const speedLabel =
     effective.narratorSpeed > 0 ? `${effective.narratorSpeed} wpm` : "system default"
-  console.log(`  narrator-speed:  ${speedLabel} (global)\n`)
+  console.log(`  narrator-speed:  ${speedLabel} (global)`)
+
+  if (projectPolicyInfo) {
+    console.log("\n  project policy")
+    console.log(`  config: ${projectPolicyInfo.configPath} (${projectPolicyInfo.source})`)
+    const profileLabel = projectPolicyInfo.profile ?? "none"
+    console.log(`  profile:         ${profileLabel} (${projectPolicyInfo.source})`)
+    console.log(
+      `  trivial-max-files: ${projectPolicyInfo.trivialMaxFiles} (${projectPolicyInfo.source})`
+    )
+    console.log(
+      `  trivial-max-lines: ${projectPolicyInfo.trivialMaxLines} (${projectPolicyInfo.source})`
+    )
+  }
+
+  console.log("")
 }
 
 async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
@@ -201,7 +226,18 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
   const effective = getEffectiveSwizSettings(settings, sessionId)
   const path = getSwizSettingsPath()
   const fileExists = path ? await Bun.file(path).exists() : false
-  printSettings(effective, path, fileExists, sessionId)
+
+  const projectSettings = await readProjectSettings(parsed.targetDir)
+  const policy = resolvePolicy(projectSettings)
+  const projectPolicyInfo = {
+    configPath: getProjectSettingsPath(parsed.targetDir),
+    profile: policy.profile,
+    trivialMaxFiles: policy.trivialMaxFiles,
+    trivialMaxLines: policy.trivialMaxLines,
+    source: policy.source,
+  }
+
+  printSettings(effective, path, fileExists, sessionId, projectPolicyInfo)
 }
 
 async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise<void> {

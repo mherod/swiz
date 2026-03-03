@@ -712,6 +712,13 @@ export interface ChangeScopeResult {
   totalLinesChanged: number
 }
 
+export interface ClassifyChangeScopeOptions {
+  /** Override the max file count for trivial classification (default: 3) */
+  trivialMaxFiles?: number
+  /** Override the max line count for trivial classification (default: 20) */
+  trivialMaxLines?: number
+}
+
 /**
  * Classify a set of changes as trivial, small-fix, docs-only, or non-trivial.
  *
@@ -721,10 +728,13 @@ export interface ChangeScopeResult {
  */
 export function classifyChangeScope(
   stat: GitStatSummary,
-  changedFiles: string[]
+  changedFiles: string[],
+  options: ClassifyChangeScopeOptions = {}
 ): ChangeScopeResult {
   const { filesChanged: fileCount, insertions, deletions } = stat
   const totalLinesChanged = insertions + deletions
+  const trivialMaxFiles = options.trivialMaxFiles ?? 3
+  const trivialMaxLines = options.trivialMaxLines ?? 20
 
   // Fail-closed: stat returned zeros but files actually changed
   const statParsingFailed = changedFiles.length > 0 && fileCount === 0
@@ -735,8 +745,8 @@ export function classifyChangeScope(
 
   const isTrivial =
     !statParsingFailed &&
-    fileCount <= 3 &&
-    totalLinesChanged <= 20 &&
+    fileCount <= trivialMaxFiles &&
+    totalLinesChanged <= trivialMaxLines &&
     !changedFiles.some((f) => /src\/|lib\/|components\//.test(f))
 
   const isSmallFix = !statParsingFailed && fileCount <= 2 && totalLinesChanged <= 30

@@ -388,6 +388,56 @@ describe("classifyChangeScope", () => {
     expect(result.totalLinesChanged).toBe(0)
   })
 
+  // ── Custom thresholds via options ──────────────────────────────────
+
+  it("treats change as trivial under solo profile (10 files, 100 lines)", () => {
+    // 5 files, 50 lines — non-trivial under defaults (3/20) but trivial under solo (10/100)
+    const result = classifyChangeScope(stat(5, 30, 20), ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts"], {
+      trivialMaxFiles: 10,
+      trivialMaxLines: 100,
+    })
+    expect(result.isTrivial).toBe(true)
+    expect(result.scopeDescription).toBe("trivial")
+  })
+
+  it("treats change as non-trivial under strict profile (1 file, 10 lines)", () => {
+    // 2 files, 15 lines — trivial under defaults (3/20) but non-trivial under strict (1/10)
+    const result = classifyChangeScope(stat(2, 8, 7), ["hooks/a.ts", "hooks/b.ts"], {
+      trivialMaxFiles: 1,
+      trivialMaxLines: 10,
+    })
+    expect(result.isTrivial).toBe(false)
+  })
+
+  it("respects trivialMaxFiles boundary exactly", () => {
+    // Exactly at the custom threshold — should still be trivial
+    const result = classifyChangeScope(stat(5, 10, 5), ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts"], {
+      trivialMaxFiles: 5,
+      trivialMaxLines: 50,
+    })
+    expect(result.isTrivial).toBe(true)
+  })
+
+  it("blocks when one over trivialMaxFiles boundary", () => {
+    // One over — should NOT be trivial
+    const result = classifyChangeScope(
+      stat(6, 10, 5),
+      ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts"],
+      { trivialMaxFiles: 5, trivialMaxLines: 50 }
+    )
+    expect(result.isTrivial).toBe(false)
+  })
+
+  it("defaults match hard-coded constants when options are omitted", () => {
+    // 3 files, 20 lines — exactly at the boundary; trivial with defaults
+    const withOptions = classifyChangeScope(stat(3, 12, 8), ["a.ts", "b.ts", "c.ts"], {
+      trivialMaxFiles: 3,
+      trivialMaxLines: 20,
+    })
+    const withoutOptions = classifyChangeScope(stat(3, 12, 8), ["a.ts", "b.ts", "c.ts"])
+    expect(withOptions.isTrivial).toBe(withoutOptions.isTrivial)
+  })
+
   it("produces actionable deny message when stat parsing fails", () => {
     const changedFiles = ["src/api.ts", "src/types.ts", "lib/utils.ts"]
     const result = classifyChangeScope(stat(0, 0, 0), changedFiles)

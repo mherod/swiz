@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Enforce scope-based push policy for main branch.
 // Classifies changes as trivial (typos, small fixes, docs) or non-trivial (features, refactors).
 // Blocks non-trivial work on main in collaborative repositories.
@@ -14,6 +15,7 @@
 //   Collaborative + trivial: allowed
 //   Collaborative + non-trivial: BLOCKED — must use feature branch + PR
 
+import { readProjectSettings, resolvePolicy } from "../src/settings.ts"
 import {
   classifyChangeScope,
   denyPreToolUse,
@@ -116,8 +118,14 @@ const diffStat = await git(["diff", diffRange, "--stat"], cwd)
 const diffFiles = await git(["diff", "--name-only", diffRange], cwd)
 const changedFiles = diffFiles.trim().split("\n").filter(Boolean)
 
+const projectSettings = await readProjectSettings(cwd)
+const policy = resolvePolicy(projectSettings)
+
 const { statParsingFailed, isTrivial, isDocsOnly, scopeDescription, fileCount, totalLinesChanged } =
-  classifyChangeScope(parseGitStatSummary(diffStat), changedFiles)
+  classifyChangeScope(parseGitStatSummary(diffStat), changedFiles, {
+    trivialMaxFiles: policy.trivialMaxFiles,
+    trivialMaxLines: policy.trivialMaxLines,
+  })
 
 // ─── Check collaborator activity ──────────────────────────────────────
 
