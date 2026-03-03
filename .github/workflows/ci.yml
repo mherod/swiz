@@ -26,6 +26,23 @@ jobs:
           fi
           echo "OK: all lefthook test files are under src/"
 
+  workflow-permissions:
+    name: Block workflow permission escalation
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Check for permissions changes in workflow files
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          bun scripts/check-workflow-permissions.ts --base "origin/$BASE_REF"
+
   ci:
     runs-on: ubuntu-latest
     steps:
