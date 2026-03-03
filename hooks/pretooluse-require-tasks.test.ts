@@ -82,6 +82,15 @@ async function createTempHome(): Promise<string> {
   return dir
 }
 
+/** Write a stub transcript file for project discovery */
+async function writeTranscript(homeDir: string, cwd: string, sessionId: string) {
+  const { projectKeyFromCwd } = await import("../src/transcript-utils.ts")
+  const projectKey = projectKeyFromCwd(cwd)
+  const dir = join(homeDir, ".claude", "projects", projectKey)
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, `${sessionId}.jsonl`), "")
+}
+
 async function writeTask(
   homeDir: string,
   sessionId: string,
@@ -120,6 +129,27 @@ describe("pretooluse-require-tasks", () => {
     const result = await runHook({ homeDir, toolName: "Bash" })
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("bootstrap task")
+  })
+
+  test("denies Bash with prior-session restore message when prior session has incomplete tasks", async () => {
+    const homeDir = await createTempHome()
+    const cwd = process.cwd() // must be a git repo with CLAUDE.md — swiz root qualifies
+    const priorSessionId = `prior-session-${Date.now()}`
+    const currentSessionId = `current-session-${Date.now()}`
+
+    // Seed prior session with an incomplete task
+    await writeTask(homeDir, priorSessionId, {
+      id: "1",
+      subject: "Implement cross-session restore",
+      status: "in_progress",
+    })
+    await writeTranscript(homeDir, cwd, priorSessionId)
+
+    // Current session has no tasks
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId: currentSessionId, cwd })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("prior session")
+    expect(result.reason).toContain("Implement cross-session restore")
   })
 
   test("allows Edit when all tasks are completed (wrap-up work)", async () => {

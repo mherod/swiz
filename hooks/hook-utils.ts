@@ -489,6 +489,55 @@ export async function readSessionTasks(
 }
 
 /**
+ * Find incomplete tasks from the most recent prior session for a given project.
+ *
+ * Scans ~/.claude/projects/<projectKey>/ for session transcript IDs, then checks
+ * ~/.claude/tasks/<sessionId>/ for incomplete tasks (pending | in_progress).
+ * Returns tasks from the most recently-modified session that has any tasks,
+ * excluding `excludeSessionId` (the current session).
+ */
+export async function findPriorSessionTasks(
+  cwd: string,
+  excludeSessionId: string,
+  home: string = process.env.HOME ?? ""
+): Promise<SessionTask[]> {
+  if (!home || !cwd) return []
+  const { projectKeyFromCwd } = await import("../src/transcript-utils.ts")
+  const { readdir, stat } = await import("node:fs/promises")
+
+  const projectKey = projectKeyFromCwd(cwd)
+  const projectDir = join(home, ".claude", "projects", projectKey)
+
+  // Collect session IDs from transcript files (sorted by mtime, newest first)
+  let transcriptFiles: string[]
+  try {
+    transcriptFiles = await readdir(projectDir)
+  } catch {
+    return []
+  }
+
+  const sessions: { id: string; mtime: number }[] = []
+  for (const f of transcriptFiles) {
+    if (!f.endsWith(".jsonl")) continue
+    const id = f.slice(0, -6)
+    if (id === excludeSessionId) continue
+    try {
+      const s = await stat(join(projectDir, f))
+      sessions.push({ id, mtime: s.mtimeMs })
+    } catch {}
+  }
+  sessions.sort((a, b) => b.mtime - a.mtime)
+
+  // Walk sessions newest-first; return incomplete tasks from first session with tasks
+  for (const { id } of sessions) {
+    const tasks = await readSessionTasks(id, home)
+    const incomplete = tasks.filter((t) => isIncompleteTaskStatus(t.status))
+    if (incomplete.length > 0) return incomplete
+  }
+  return []
+}
+
+/**
  * Walk upward from `startDir` to the filesystem root looking for `fileName`.
  * Returns true on first match, false when no match exists.
  */

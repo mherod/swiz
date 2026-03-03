@@ -9,6 +9,7 @@ import {
   denyPreToolUse as deny,
   extractToolNamesFromTranscript,
   findLastTaskToolCallIndex,
+  findPriorSessionTasks,
   formatActionPlan,
   formatTaskSubjectsForDisplay,
   getTranscriptSummary,
@@ -114,6 +115,26 @@ async function main() {
     .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
 
   if (allTasks.length === 0) {
+    // Before auto-creating a bootstrap task, check if the prior session for this
+    // project had incomplete tasks. If so, direct the agent to restore them
+    // rather than resetting the plan with a new generic bootstrap task.
+    const priorTasks = await findPriorSessionTasks(cwd, sessionId)
+    if (priorTasks.length > 0) {
+      const taskLines = priorTasks.map((t) => `  • #${t.id} [${t.status}]: ${t.subject}`).join("\n")
+      deny(
+        `STOP. This session has no tasks, but the prior session had ${priorTasks.length} incomplete task(s):\n` +
+          taskLines +
+          `\n\n` +
+          formatActionPlan(
+            [
+              "Use TaskCreate to re-create these tasks and mark the current one in_progress.",
+              `Retry this ${toolName} call — it will succeed once an in_progress task exists.`,
+            ],
+            { translateToolNames: true }
+          )
+      )
+    }
+
     // Auto-create a bootstrap task so the agent isn't hard-blocked.
     // The tool call is still denied this time — on retry the task exists and CHECK 1 passes.
     const bootstrapId = await createBootstrapTask(sessionId)
