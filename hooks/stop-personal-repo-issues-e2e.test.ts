@@ -363,12 +363,18 @@ describe("E2E stop-personal-repo-issues: top-5 truncation", () => {
     expect(r).toContain("and 1 more")
   })
 
-  test("ramp3-spike 8-issue backlog: 5 shown plus '…and 3 more'", async () => {
+  test("ramp3-spike 8-issue backlog: refinement and actionable sections shown separately", async () => {
     const dir = await createGitRepoWithGitHubRemote("-trunc8", "testuser", "ramp3")
     const result = await runHook(dir, { user: "testuser", issues: RAMP3_ISSUES })
     expect(result.blocked).toBe(true)
     const r = result.reason!
-    expect(r).toContain("and 3 more")
+    // 5 issues lack readiness labels → refinement section
+    expect(r).toContain("need refinement")
+    expect(r).toContain("[no readiness label]")
+    // 3 issues have `ready` → actionable section
+    expect(r).toContain("3 open issue(s)")
+    // No truncation — 5 refinement + 3 actionable both fit within MAX_SHOWN_ISSUES
+    expect(r).not.toContain("and 3 more")
   })
 
   test("5 issues exactly: no 'more' line present", async () => {

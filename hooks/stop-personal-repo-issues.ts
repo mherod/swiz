@@ -86,6 +86,24 @@ const LABEL_SCORE: Record<string, number> = {
   "needs-breakdown": -2,
 }
 
+/**
+ * Labels that signal an issue is refined and ready for implementation.
+ * An issue lacking ALL of these (and not in SKIP_LABELS) needs refinement.
+ * Keys are normalised at startup via normaliseLabel().
+ */
+const READINESS_LABELS = new Set([
+  "ready",
+  "ready-for-dev",
+  "ready-for-development",
+  "triaged",
+  "confirmed",
+  "accepted",
+  "spec-approved",
+])
+
+/** Label that explicitly marks an issue as needing refinement. */
+const NEEDS_REFINEMENT_LABEL = "needs-refinement"
+
 const MAX_SHOWN_ISSUES = 5
 const COOLDOWN_SECONDS = 60
 
@@ -188,12 +206,28 @@ const SKIP_NORM = new Set([...SKIP_LABELS].map(normaliseLabel))
 const SCORE_NORM: Record<string, number> = Object.fromEntries(
   Object.entries(LABEL_SCORE).map(([k, v]) => [normaliseLabel(k), v])
 )
+const READINESS_NORM = new Set([...READINESS_LABELS].map(normaliseLabel))
+const NEEDS_REFINEMENT_NORM = normaliseLabel(NEEDS_REFINEMENT_LABEL)
 
 function scoreIssue(issue: Issue): number {
   return issue.labels.reduce((sum, l) => sum + (SCORE_NORM[normaliseLabel(l.name)] ?? 0), 0)
 }
 
-interface Issue {
+/**
+ * Check if an issue needs refinement before it's ready for implementation.
+ * An issue needs refinement if:
+ *   1. It has a `needs-refinement` label, OR
+ *   2. It lacks ALL readiness labels (ready, triaged, confirmed, etc.)
+ */
+export function needsRefinement(issue: Issue): boolean {
+  const normLabels = issue.labels.map((l) => normaliseLabel(l.name))
+  // Explicit refinement label
+  if (normLabels.some((nl) => nl === NEEDS_REFINEMENT_NORM)) return true
+  // No readiness signal at all
+  return !normLabels.some((nl) => READINESS_NORM.has(nl))
+}
+
+export interface Issue {
   number: number
   title: string
   labels: Array<{ name: string }>
@@ -266,13 +300,19 @@ async function main(): Promise<void> {
     const hasChangesRequested = changesRequestedPRs.length > 0
 
     // When there are PRs with CHANGES_REQUESTED, skip issues — the PR block is more urgent
-    const actionableIssues = hasChangesRequested
+    const allIssues = hasChangesRequested
       ? []
       : await getActionableIssues(cwd, isPersonalRepo ? undefined : currentUser)
+
+    // Partition: issues needing refinement vs ready for implementation
+    const refinementIssues = allIssues.filter((i) => needsRefinement(i))
+    const actionableIssues = allIssues.filter((i) => !needsRefinement(i))
+
     const issueCount = actionableIssues.length
+    const refinementCount = refinementIssues.length
     const prCount = prs.length
 
-    if (issueCount === 0 && prCount === 0) return
+    if (issueCount === 0 && prCount === 0 && refinementCount === 0) return
 
     const reasonLines: string[] = []
 
@@ -293,6 +333,33 @@ async function main(): Promise<void> {
           "work-on-prs",
           "Use the /work-on-prs skill to address all feedback and resolve reviews:\n  /work-on-prs — Start working on the next PR",
           "Address all PR feedback before stopping:\n  gh pr list --state open\n  gh pr view <number> --comments"
+        )
+      )
+    }
+
+    if (refinementCount > 0) {
+      if (reasonLines.length > 0) reasonLines.push("")
+      reasonLines.push(
+        `${refinementCount} issue(s) need refinement before they are ready for implementation:`
+      )
+      const sortedRefinement = [...refinementIssues].sort((a, b) => scoreIssue(b) - scoreIssue(a))
+      const shownRefinement = sortedRefinement.slice(0, MAX_SHOWN_ISSUES)
+      const hiddenRefinement = sortedRefinement.length - shownRefinement.length
+      for (const issue of shownRefinement) {
+        const hasExplicitLabel = issue.labels.some(
+          (l) => normaliseLabel(l.name) === NEEDS_REFINEMENT_NORM
+        )
+        const tag = hasExplicitLabel ? "[needs-refinement]" : "[no readiness label]"
+        reasonLines.push(`  #${issue.number} ${issue.title} ${tag}`)
+      }
+      if (hiddenRefinement > 0) {
+        reasonLines.push(`  …and ${hiddenRefinement} more issue(s) needing refinement`)
+      }
+      reasonLines.push(
+        skillAdvice(
+          "refine-issue",
+          "Use the /refine-issue skill to refine and label issues:\n  /refine-issue — Refine the next issue needing attention",
+          "Refine issues before implementation:\n  gh issue view <number>\n  gh issue edit <number> --add-label ready"
         )
       )
     }
@@ -334,4 +401,6 @@ async function main(): Promise<void> {
   }
 }
 
-main()
+if (import.meta.main) {
+  main()
+}

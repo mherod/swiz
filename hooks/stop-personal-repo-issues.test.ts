@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { extractOwnerFromUrl } from "./hook-utils.ts"
+import { type Issue as HookIssue, needsRefinement } from "./stop-personal-repo-issues.ts"
 
 const SKIP_LABELS = new Set([
   "blocked",
@@ -1008,5 +1009,119 @@ describe("integration — top-5 truncation with mixed real-world label sets", ()
     // Issues 3 and 7 must both be present
     expect(shownNumbers).toContain(3)
     expect(shownNumbers).toContain(7)
+  })
+})
+
+// ─── needsRefinement — issue refinement detection ─────────────────────────────
+
+describe("needsRefinement — explicit needs-refinement label", () => {
+  function issue(labels: string[]): HookIssue {
+    return { number: 1, title: "Test", labels: labels.map((name) => ({ name })) }
+  }
+
+  test("issue with needs-refinement label needs refinement", () => {
+    expect(needsRefinement(issue(["needs-refinement"]))).toBe(true)
+  })
+
+  test("issue with needs-refinement plus other labels still needs refinement", () => {
+    expect(needsRefinement(issue(["needs-refinement", "bug"]))).toBe(true)
+  })
+
+  test("case-insensitive: Needs-Refinement is detected", () => {
+    expect(needsRefinement(issue(["Needs-Refinement"]))).toBe(true)
+  })
+
+  test("separator variant: needs/refinement is detected", () => {
+    expect(needsRefinement(issue(["needs/refinement"]))).toBe(true)
+  })
+
+  test("reversed: refinement-needs is detected", () => {
+    expect(needsRefinement(issue(["refinement-needs"]))).toBe(true)
+  })
+})
+
+describe("needsRefinement — missing readiness labels", () => {
+  function issue(labels: string[]): HookIssue {
+    return { number: 1, title: "Test", labels: labels.map((name) => ({ name })) }
+  }
+
+  test("issue with no labels needs refinement", () => {
+    expect(needsRefinement(issue([]))).toBe(true)
+  })
+
+  test("issue with only bug label needs refinement (no readiness signal)", () => {
+    expect(needsRefinement(issue(["bug"]))).toBe(true)
+  })
+
+  test("issue with only enhancement label needs refinement", () => {
+    expect(needsRefinement(issue(["enhancement"]))).toBe(true)
+  })
+
+  test("issue with priority:high but no readiness label needs refinement", () => {
+    expect(needsRefinement(issue(["priority:high"]))).toBe(true)
+  })
+
+  test("issue with unknown labels needs refinement", () => {
+    expect(needsRefinement(issue(["frontend", "area:dashboard"]))).toBe(true)
+  })
+})
+
+describe("needsRefinement — issues that are ready (should NOT need refinement)", () => {
+  function issue(labels: string[]): HookIssue {
+    return { number: 1, title: "Test", labels: labels.map((name) => ({ name })) }
+  }
+
+  test("issue with ready label does not need refinement", () => {
+    expect(needsRefinement(issue(["ready"]))).toBe(false)
+  })
+
+  test("issue with ready-for-dev label does not need refinement", () => {
+    expect(needsRefinement(issue(["ready-for-dev"]))).toBe(false)
+  })
+
+  test("issue with ready-for-development label does not need refinement", () => {
+    expect(needsRefinement(issue(["ready-for-development"]))).toBe(false)
+  })
+
+  test("issue with triaged label does not need refinement", () => {
+    expect(needsRefinement(issue(["triaged"]))).toBe(false)
+  })
+
+  test("issue with confirmed label does not need refinement", () => {
+    expect(needsRefinement(issue(["confirmed"]))).toBe(false)
+  })
+
+  test("issue with accepted label does not need refinement", () => {
+    expect(needsRefinement(issue(["accepted"]))).toBe(false)
+  })
+
+  test("issue with spec-approved label does not need refinement", () => {
+    expect(needsRefinement(issue(["spec-approved"]))).toBe(false)
+  })
+
+  test("case-insensitive: Ready is recognised", () => {
+    expect(needsRefinement(issue(["Ready"]))).toBe(false)
+  })
+
+  test("separator variant: ready/for/dev is recognised", () => {
+    expect(needsRefinement(issue(["ready/for/dev"]))).toBe(false)
+  })
+
+  test("ready + bug: readiness signal present, does not need refinement", () => {
+    expect(needsRefinement(issue(["ready", "bug"]))).toBe(false)
+  })
+})
+
+describe("needsRefinement — edge case: needs-refinement overrides readiness", () => {
+  function issue(labels: string[]): HookIssue {
+    return { number: 1, title: "Test", labels: labels.map((name) => ({ name })) }
+  }
+
+  test("needs-refinement + ready: explicit refinement label wins", () => {
+    expect(needsRefinement(issue(["needs-refinement", "ready"]))).toBe(true)
+  })
+
+  test("needs-refinement + triaged: explicit refinement label wins", () => {
+    expect(needsRefinement(issue(["needs-refinement", "triaged"]))).toBe(true)
   })
 })
