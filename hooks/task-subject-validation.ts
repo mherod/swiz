@@ -1,5 +1,7 @@
 // Shared logic for compound task subject detection and splitting.
 
+import { isPlaceholderSubject } from "./hook-utils.ts"
+
 export interface CompoundResult {
   matched: false
 }
@@ -52,13 +54,15 @@ function isTestTask(bare: string): boolean {
 }
 
 export function detect(s: string): DetectionResult {
-  // Reject compaction-recovery placeholder subjects — these have no real work content
+  // Reject auto-generated placeholder subjects — these have no real work content
   // and pollute task history with meaningless entries.
-  if (/^recovered task\b/i.test(s)) {
+  // Uses shared matcher from hook-utils.ts to stay in sync with tasks-list.ts
+  // verifyTaskMatch() which exempts the same subjects from verification.
+  if (isPlaceholderSubject(s)) {
     return {
       matched: true,
       intro:
-        '"Recovered task" subjects are compaction-recovery placeholders with no real work content. Use a specific, actionable subject describing what you are actually doing. Examples:',
+        "Auto-generated placeholder subjects have no real work content. Use a specific, actionable subject describing what you are actually doing. Examples:",
       suggestions: [
         "Verify CI for last pushed commit",
         "Continue work on open GitHub issue",

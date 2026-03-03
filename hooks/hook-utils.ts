@@ -183,6 +183,24 @@ export function isCodeChangeTool(name: string): boolean {
   return EDIT_TOOLS.has(name) || WRITE_TOOLS.has(name) || NOTEBOOK_TOOLS.has(name)
 }
 
+// ─── Placeholder subject detection ──────────────────────────────────────────
+// Shared by task-subject-validation (rejects placeholders for new tasks) and
+// tasks-list verifyTaskMatch (exempts placeholders from subject verification).
+// All auto-generated placeholder subjects must be captured here so both
+// validators stay in sync.
+
+/**
+ * Matches all auto-generated placeholder task subjects:
+ *   - "Recovered task #N (lost during compaction)" — pretooluse-task-recovery / posttooluse-task-recovery
+ *   - "Session bootstrap — describe current work"  — pretooluse-require-tasks
+ */
+export const PLACEHOLDER_SUBJECT_RE = /^(?:recovered task|session bootstrap)\b/i
+
+/** Returns true if the subject is an auto-generated placeholder (not real agent work). */
+export function isPlaceholderSubject(subject: string): boolean {
+  return PLACEHOLDER_SUBJECT_RE.test(subject.trim())
+}
+
 // ─── Hook response helpers ─────────────────────────────────────────────────
 // Outputs polyglot JSON understood by Claude Code, Cursor, Gemini CLI, and Codex CLI.
 
