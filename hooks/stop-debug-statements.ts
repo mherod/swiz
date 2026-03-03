@@ -11,7 +11,8 @@ import {
 } from "./hook-utils.ts"
 
 // CLI and hook infrastructure uses console.log as its output channel — not debugging
-export const INFRA_FILE_RE = /hooks\/|\/commands\/|\/cli\.|index\.ts$|dispatch\.ts$/
+export const INFRA_FILE_RE =
+  /hooks\/|\/commands\/|\/cli\.|index\.ts$|dispatch\.ts$|(?:^|\/)scripts\//
 
 // Compiled/generated artifacts contain machine-written console calls — not authored debug statements
 export const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/

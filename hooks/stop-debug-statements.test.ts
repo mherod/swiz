@@ -248,8 +248,14 @@ describe("stop-debug-statements file filter", () => {
       expect(isScanned("src/utils.js")).toBe(true)
     })
 
-    test("Python file is scanned", () => {
-      expect(isScanned("scripts/migrate.py")).toBe(true)
+    test("Python file outside scripts/ is scanned", () => {
+      expect(isScanned("src/utils.py")).toBe(true)
+    })
+
+    test("scripts/ files are excluded (intentional CLI output)", () => {
+      expect(isScanned("scripts/migrate.py")).toBe(false)
+      expect(isScanned("functions/scripts/migrate-database.ts")).toBe(false)
+      expect(isScanned("packages/lib/scripts/seed-data.ts")).toBe(false)
     })
 
     test("CJS source file is scanned", () => {
