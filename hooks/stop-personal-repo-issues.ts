@@ -28,7 +28,6 @@ const SKIP_LABELS = new Set([
   "duplicate",
   "on-hold",
   "waiting",
-  "backlog",
   "stale", // common GitHub bot label
   "icebox", // explicit indefinite deferral
   "invalid", // not a valid issue
