@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**55 hooks. 6 event types. Every agent. Zero compromises.**
+**56 hooks. 6 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -82,7 +82,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-45 hook scripts across 6 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+46 hook scripts across 6 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
 ### Stop (16)
 
@@ -157,10 +157,11 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS. Incremental — only speaks text added since the last invocation. Runs async so it never slows the agent down. |
 | `posttooluse-task-output.ts` | Parses TaskOutput results: blocks on non-zero exits with actionable error context; on successful git push, injects the CI run ID and watch commands so the agent can verify CI without extra plumbing. |
 
-### SessionStart (3)
+### SessionStart (4)
 
 | Hook | What it does |
 |------|-------------|
+| `sessionstart-self-heal.ts` | Detects manifest drift by hashing `src/manifest.ts` and comparing to a stored hash. Automatically runs `swiz install` if they differ, keeping agent configs in sync after `git pull`. |
 | `sessionstart-health-snapshot.ts` | Captures a baseline of project health (lint state, test state, git state) at session start so the agent knows what it's walking into. |
 | `posttooluse-speak-narrator.ts` | Speaks any assistant text generated during session startup. Catches up on the transcript before the first tool call. Runs async. |
 | `sessionstart-compact-context.ts` | Re-injects core project conventions after context compaction events. The agent keeps its bearings even in long sessions. |

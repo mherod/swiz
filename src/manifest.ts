@@ -144,6 +144,7 @@ export const manifest: HookGroup[] = [
     event: "sessionStart",
     matcher: "startup",
     hooks: [
+      { file: "sessionstart-self-heal.ts", timeout: 15 },
       { file: "sessionstart-health-snapshot.ts", timeout: 10 },
       { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
     ],
