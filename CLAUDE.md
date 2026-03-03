@@ -131,6 +131,8 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 `swiz tasks complete <id>` requires `--evidence "text"` — the completion evidence is stored on the task and checked by the stop-completion-auditor hook.
 
+**DO** create a task as the very first action when starting a new session. Before attempting any Edit, Write, or Bash commands, use `TaskCreate` to document what you're working on. The `pretooluse-require-tasks.ts` hook blocks all file modifications when no tasks exist in the session. Creating a task upfront unblocks the session and provides a clear record of intent.
+
 **DON'T** create compound tasks that bundle multiple distinct steps (e.g., "Commit, push, and verify CI"). The `pretooluse-task-subject-validation.ts` hook rejects them. Split into separate tasks: one for commit, one for push, one for CI verification. Each task should describe a single atomic action.
 
 **DO** keep at least one task in `pending` or `in_progress` status before running `git add` or `git commit`. The `pretooluse-require-tasks.ts` hook blocks `Edit`, `Write`, and `Bash` (including `git add`/`git commit`) when no incomplete task exists. Mark the commit task `completed` only after the commit succeeds.
