@@ -146,6 +146,10 @@ export const manifest: HookGroup[] = [
     hooks: [{ file: "sessionstart-compact-context.ts", timeout: 5 }],
   },
   {
+    event: "preCompact",
+    hooks: [{ file: "precompact-speak.ts", timeout: 10 }],
+  },
+  {
     event: "userPromptSubmit",
     hooks: [
       { file: "userpromptsubmit-git-context.ts", timeout: 5 },
@@ -161,5 +165,6 @@ export const DISPATCH_TIMEOUTS: Record<string, number> = {
   preToolUse: 60, // 12 hooks × ~5s avg
   postToolUse: 90, // 8 hooks × ~10s avg
   sessionStart: 20,
+  preCompact: 15,
   userPromptSubmit: 15,
 }
