@@ -1272,4 +1272,41 @@ describe("stop-auto-continue", () => {
     expect(capturedArgs).not.toContain("/update-memory skill")
     expect(capturedArgs).toContain("Cause to capture: <specific cause>")
   })
+
+  test("prompt references /refine-issue skill in priority order when skill is installed", async () => {
+    const binDir = await createTempDir()
+    const argsFile = await createArgCapturingAgent(binDir)
+
+    const fakeHome = await createTempDir()
+    const skillDir = join(fakeHome, ".claude", "skills", "refine-issue")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "# Refine issue skill")
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const capturedArgs = await Bun.file(argsFile).text()
+    expect(capturedArgs).toContain("/refine-issue skill")
+    expect(capturedArgs).toContain("issues needing refinement")
+  })
+
+  test("prompt uses generic refinement fallback when refine-issue skill is not installed", async () => {
+    const binDir = await createTempDir()
+    const argsFile = await createArgCapturingAgent(binDir)
+
+    const fakeHome = await createTempDir()
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      extraEnv: { HOME: fakeHome },
+    })
+
+    const capturedArgs = await Bun.file(argsFile).text()
+    expect(capturedArgs).toContain("readiness labels")
+    expect(capturedArgs).not.toContain("/refine-issue skill")
+  })
 })

@@ -17,12 +17,17 @@ import {
 } from "../src/transcript-utils.ts"
 import {
   blockStopRaw,
+  extractOwnerFromUrl,
+  getCurrentGitHubUser,
   git,
+  hasGhCli,
+  isGitHubRemote,
   isGitRepo,
   readSessionTasks,
   type StopHookInput,
   skillAdvice,
 } from "./hook-utils.ts"
+import { getActionableIssues, needsRefinement } from "./stop-personal-repo-issues.ts"
 
 const MIN_TOOL_CALLS = 5 // Don't engage for trivial sessions
 const CONTEXT_TURNS = 20 // Recent turns to send as context
@@ -257,6 +262,47 @@ async function checkChangelogStaleness(cwd: string): Promise<string> {
   return `CHANGELOG.md is stale — last updated ${days}d ${hours}h before the most recent commit. It should be updated.`
 }
 
+// ─── Issue refinement detection ──────────────────────────────────────────────
+
+/**
+ * Check for open issues that need refinement (missing readiness labels or
+ * explicitly labelled needs-refinement). Returns a formatted status string
+ * for injection into the auto-continue prompt, or "" if none found.
+ */
+async function checkRefinementNeeds(cwd: string): Promise<string> {
+  if (!(await isGitRepo(cwd))) return ""
+  if (!hasGhCli()) return ""
+  if (!(await isGitHubRemote(cwd))) return ""
+
+  const remoteUrl = await git(["remote", "get-url", "origin"], cwd)
+  const owner = extractOwnerFromUrl(remoteUrl)
+  if (!owner) return ""
+
+  const currentUser = await getCurrentGitHubUser(cwd)
+  if (!currentUser) return ""
+
+  const isPersonalRepo = owner === currentUser
+  const allIssues = await getActionableIssues(cwd, isPersonalRepo ? undefined : currentUser)
+  const refinementIssues = allIssues.filter((i) => needsRefinement(i))
+
+  if (refinementIssues.length === 0) return ""
+
+  const issueRefs = refinementIssues
+    .slice(0, 5)
+    .map((i) => `#${i.number}`)
+    .join(", ")
+  const extra = refinementIssues.length > 5 ? ` (and ${refinementIssues.length - 5} more)` : ""
+
+  return (
+    `${refinementIssues.length} open issue(s) need refinement before implementation: ${issueRefs}${extra}. ` +
+    skillAdvice(
+      "refine-issue",
+      "Use /refine-issue to refine and label them before working on implementation.",
+      "Refine issues by adding readiness labels (ready, triaged, confirmed) before implementing."
+    )
+  )
+}
+
 // ─── Prompt construction ────────────────────────────────────────────────────
 
 function buildPrompt(
@@ -310,7 +356,13 @@ function buildPrompt(
     `(2) If any errors, failures, bugs, or broken functionality were identified but NOT resolved, fix them. ` +
     `(3) If a PROJECT STATUS section reports stale artifacts (e.g., CHANGELOG.md), ` +
     skillAdvice("changelog", `use the /changelog skill to update them. `, `update them. `) +
-    `(4) Otherwise, find the most impactful missing functionality, incomplete API surface, ` +
+    `(4) If a PROJECT STATUS section reports issues needing refinement, ` +
+    skillAdvice(
+      "refine-issue",
+      `use the /refine-issue skill to refine and label them before implementing. `,
+      `refine and label them (add readiness labels like ready, triaged, confirmed) before implementing. `
+    ) +
+    `(5) Otherwise, find the most impactful missing functionality, incomplete API surface, ` +
     `or unhandled real-world case in the code changed this session — and implement it. ` +
     `Be ambitious: extend the feature, handle the obvious next case, fill the gap that would block a real user. ` +
     `NEVER conclude that work is complete or that nothing remains. ` +
@@ -391,7 +443,11 @@ async function main(): Promise<void> {
       userTurns.length > 0
         ? `=== USER'S MESSAGES ===\n${userTurns.map((t) => `- ${t.text}`).join("\n\n")}\n=== END OF USER'S MESSAGES ===\n\n`
         : ""
-    const projectStatus = await checkChangelogStaleness(input.cwd)
+    const statusParts = [
+      await checkChangelogStaleness(input.cwd),
+      await checkRefinementNeeds(input.cwd),
+    ].filter(Boolean)
+    const projectStatus = statusParts.join("\n")
     const prompt = buildPrompt(taskSection, userMessagesSection, projectStatus, context)
 
     try {

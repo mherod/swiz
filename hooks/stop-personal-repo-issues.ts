@@ -242,7 +242,7 @@ interface PR {
   reviewDecision: string
 }
 
-async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {
+export async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {
   const jsonFields = "number,title,labels,author,assignees"
   let issues =
     (await ghJson<Issue[]>(["issue", "list", "--state", "open", "--json", jsonFields], cwd)) ?? []
