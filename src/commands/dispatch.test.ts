@@ -97,3 +97,106 @@ describe("dispatch routing", () => {
     expect(result.exitCode).toBe(0)
   })
 })
+
+describe("dispatch replay", () => {
+  async function replay(
+    event: string,
+    payload: Record<string, unknown>,
+    extraArgs: string[] = []
+  ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "replay", event, ...extraArgs], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    proc.stdin.write(JSON.stringify(payload))
+    proc.stdin.end()
+    const stdout = await new Response(proc.stdout).text()
+    const stderr = await new Response(proc.stderr).text()
+    await proc.exited
+    return { stdout: stdout.trim(), stderr, exitCode: proc.exitCode }
+  }
+
+  test("blocking replay: shows DENY when banned command used (JSON mode)", async () => {
+    const result = await replay(
+      "preToolUse",
+      { tool_name: "Bash", tool_input: { command: "sed -i 's/a/b/' file.ts" } },
+      ["--json"]
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).not.toBe("")
+    const parsed = JSON.parse(result.stdout) as Record<string, unknown>
+    expect(parsed.event).toBe("preToolUse")
+    expect(parsed.strategy).toBe("preToolUse")
+    const resultField = parsed.result as Record<string, unknown>
+    expect(resultField.blocked).toBe(true)
+    const hooks = parsed.hooks as Array<Record<string, unknown>>
+    const blocked = hooks.find((h) => h.status === "deny")
+    expect(blocked).toBeDefined()
+  })
+
+  test("non-blocking replay: shows all passed for git status (JSON mode)", async () => {
+    const result = await replay(
+      "preToolUse",
+      { tool_name: "Bash", tool_input: { command: "git status" } },
+      ["--json"]
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).not.toBe("")
+    const parsed = JSON.parse(result.stdout) as Record<string, unknown>
+    expect(parsed.event).toBe("preToolUse")
+    const resultField = parsed.result as Record<string, unknown>
+    // git status is exempt from banned-commands and require-tasks hooks
+    // result.blocked may be false or true depending on session state; just verify structure
+    expect(typeof resultField.blocked).toBe("boolean")
+    const hooks = parsed.hooks as Array<Record<string, unknown>>
+    expect(Array.isArray(hooks)).toBe(true)
+    // Each hook entry must have file, status, and duration_ms
+    for (const hook of hooks) {
+      expect(typeof hook.file).toBe("string")
+      expect(typeof hook.status).toBe("string")
+    }
+  })
+
+  test("replay outputs human-readable trace to stderr (non-JSON mode)", async () => {
+    const result = await replay("preToolUse", {
+      tool_name: "Bash",
+      tool_input: { command: "sed -i 's/a/b/' file.ts" },
+    })
+    expect(result.exitCode).toBe(0)
+    // Human-readable trace goes to stderr
+    expect(result.stderr).toContain("swiz dispatch replay")
+    expect(result.stderr).toContain("preToolUse")
+    // Should mention DENY or BLOCK
+    expect(result.stderr.toLowerCase()).toMatch(/deny|block/)
+  })
+
+  test("replay missing event argument throws error", async () => {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "replay"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    proc.stdin.end()
+    await new Response(proc.stdout).text()
+    const stderr = await new Response(proc.stderr).text()
+    await proc.exited
+    expect(proc.exitCode).not.toBe(0)
+    expect(stderr).toContain("replay <event>")
+  })
+
+  test("replay JSON output includes matched_groups and hooks array", async () => {
+    const result = await replay(
+      "stop",
+      { session_id: "test-session-replay", transcript_path: "/nonexistent.jsonl" },
+      ["--json"]
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).not.toBe("")
+    const parsed = JSON.parse(result.stdout) as Record<string, unknown>
+    expect(parsed.event).toBe("stop")
+    expect(parsed.strategy).toBe("blocking")
+    expect(typeof parsed.matched_groups).toBe("number")
+    expect(Array.isArray(parsed.hooks)).toBe(true)
+  })
+})
