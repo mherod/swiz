@@ -347,6 +347,7 @@ export const dispatchCommand: Command = {
       case "subagentStart":
       case "subagentStop":
       case "userPromptSubmit":
+      case "preCompact":
         await runContext(matchingGroups, payloadStr, hookEventName)
         break
       default:
