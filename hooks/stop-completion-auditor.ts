@@ -197,7 +197,7 @@ async function main(): Promise<void> {
               [
                 'Create a "Push and verify CI" task and mark it in_progress.',
                 "Run CI verification: swiz ci-wait <SHA> or gh run view --json conclusion.",
-                'Mark the task completed with --evidence "CI green — conclusion: success".',
+                'Mark the task completed: swiz tasks complete <id> --evidence "note:CI green — conclusion: success, run <run-id>"',
               ],
               { translateToolNames: true }
             )
