@@ -236,6 +236,7 @@ Hook scripts (`hooks/*.ts`) are the exception — their `process.exit(0)` calls 
 
 - ANSI escape codes for terminal output — no chalk or color libraries
 - Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks
+- **DO drain stdout and stderr concurrently** when using `Bun.spawn` with piped streams. Sequential reads (`await stdout` then `await stderr`) deadlock when the child fills the unread pipe's buffer (~64KB). Always use `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
 - All hooks are `.ts` and invoked with `bun hooks/<file>.ts`
 - All settings file writes create a `.bak` backup first
 - **Multiline regex with `\s*`**: DO NOT use `\s*` after a closing delimiter like `---` if you need to preserve blank lines. Use `[ \t]*` instead to match only horizontal whitespace. The pattern `/^---[\s\S]*?^---\s*\n?/m` greedily consumes newlines after the closing `---`, eating blank lines that should remain. Change to `[ \t]*\n?` to avoid this.

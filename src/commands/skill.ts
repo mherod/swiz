@@ -36,7 +36,10 @@ async function expandInlineCommands(content: string): Promise<string> {
           stderr: "pipe",
           env: { ...process.env, PATH: process.env.PATH },
         })
-        const stdout = await new Response(proc.stdout).text()
+        const [stdout] = await Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+        ])
         await proc.exited
         return stdout.trim()
       } catch {

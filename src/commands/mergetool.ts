@@ -62,7 +62,10 @@ async function getRepoRoot(cwd: string): Promise<string | null> {
     stdout: "pipe",
     stderr: "pipe",
   })
-  const output = await new Response(proc.stdout).text()
+  const [output] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
   if (proc.exitCode !== 0) return null
   return output.trim()

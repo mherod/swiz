@@ -90,8 +90,10 @@ async function runHook(
     proc.kill()
   }, deadline)
 
-  const output = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
+  const [output, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
   clearTimeout(timer)
 

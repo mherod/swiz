@@ -319,7 +319,10 @@ export async function git(args: string[], cwd: string): Promise<string> {
   try {
     const effectiveCwd = cwd.trim() || process.cwd()
     const proc = Bun.spawn(["git", ...args], { cwd: effectiveCwd, stdout: "pipe", stderr: "pipe" })
-    const output = await new Response(proc.stdout).text()
+    const [output] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
     await proc.exited
     return proc.exitCode === 0 ? output.trim() : ""
   } catch {
@@ -337,7 +340,10 @@ export async function gh(args: string[], cwd: string): Promise<string> {
       killed = true
       proc.kill()
     }, 3000)
-    const output = await new Response(proc.stdout).text()
+    const [output] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
     await proc.exited
     clearTimeout(killTimer)
     return !killed && proc.exitCode === 0 ? output.trim() : ""
