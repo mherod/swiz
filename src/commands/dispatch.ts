@@ -263,6 +263,21 @@ async function runContext(
   console.log(output)
 }
 
+// ─── Dispatch routing table ─────────────────────────────────────────────────
+// Maps canonical event names to their dispatch strategy.
+// Exported so tests can cross-check against manifest events and agent event maps.
+
+export type DispatchStrategy = "preToolUse" | "blocking" | "context"
+
+export const DISPATCH_ROUTES: Record<string, DispatchStrategy> = {
+  preToolUse: "preToolUse",
+  stop: "blocking",
+  postToolUse: "blocking",
+  sessionStart: "context",
+  userPromptSubmit: "context",
+  preCompact: "context",
+}
+
 // ─── Command ────────────────────────────────────────────────────────────────
 
 export const dispatchCommand: Command = {
@@ -335,23 +350,17 @@ export const dispatchCommand: Command = {
 
     if (matchingGroups.length === 0) return
 
-    switch (canonicalEvent) {
+    const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
+    switch (strategy) {
       case "preToolUse":
         await runPreToolUse(matchingGroups, payloadStr)
         break
-      case "stop":
-      case "postToolUse":
+      case "blocking":
         await runBlocking(matchingGroups, payloadStr)
         break
-      case "sessionStart":
-      case "subagentStart":
-      case "subagentStop":
-      case "userPromptSubmit":
-      case "preCompact":
+      case "context":
         await runContext(matchingGroups, payloadStr, hookEventName)
         break
-      default:
-        await runBlocking(matchingGroups, payloadStr)
     }
   },
 }
