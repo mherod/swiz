@@ -3,12 +3,13 @@ import { existsSync, readFileSync } from "node:fs"
 import type { Command } from "../types.ts"
 
 // Must match the values in hooks/pretooluse-push-cooldown.ts
-const COOLDOWN_MS = 60_000
+export const COOLDOWN_MS = 60_000
 const SENTINEL_PREFIX = "/tmp/swiz-push-cooldown-"
+const POLL_INTERVAL_MS = 2_000
 
 // ─── Cooldown utilities ──────────────────────────────────────────────────
 
-function getSentinelPath(cwd: string): string {
+export function getSentinelPath(cwd: string): string {
   const proc = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
     cwd,
     stdout: "pipe",
@@ -19,44 +20,66 @@ function getSentinelPath(cwd: string): string {
   return `${SENTINEL_PREFIX}${repoKey}.timestamp`
 }
 
-function getRemainingCooldownMs(sentinelPath: string): number {
-  if (!existsSync(sentinelPath)) return 0
-  const raw = readFileSync(sentinelPath, "utf8").trim()
-  const lastPush = parseInt(raw, 10)
-  if (isNaN(lastPush)) return 0
-  const remaining = COOLDOWN_MS - (Date.now() - lastPush)
-  return remaining > 0 ? remaining : 0
+export function getRemainingCooldownMs(sentinelPath: string): number {
+  try {
+    if (!existsSync(sentinelPath)) return 0
+    const raw = readFileSync(sentinelPath, "utf8").trim()
+    if (raw === "") return 0
+    const lastPush = parseInt(raw, 10)
+    if (isNaN(lastPush)) return 0
+    const remaining = COOLDOWN_MS - (Date.now() - lastPush)
+    return remaining > 0 ? remaining : 0
+  } catch {
+    // Permission error, file disappeared between exists/read — treat as no cooldown
+    return 0
+  }
 }
 
-async function waitForCooldown(sentinelPath: string, timeoutSeconds: number): Promise<void> {
+export interface WaitForCooldownOptions {
+  sentinelPath: string
+  timeoutSeconds: number
+  pollIntervalMs?: number
+  log?: (msg: string) => void
+}
+
+export async function waitForCooldown(opts: WaitForCooldownOptions): Promise<{ waitedMs: number }> {
+  const { sentinelPath, timeoutSeconds, log = console.log } = opts
+  const pollInterval = opts.pollIntervalMs ?? POLL_INTERVAL_MS
   const startTime = Date.now()
   const timeoutMs = timeoutSeconds * 1000
-  const pollInterval = 2000
+
+  // Check immediately — cooldown may already be clear
+  const initial = getRemainingCooldownMs(sentinelPath)
+  if (initial === 0) {
+    return { waitedMs: 0 }
+  }
+
+  log(`⏳ Push cooldown active — ${Math.ceil(initial / 1000)}s remaining`)
 
   return new Promise((resolve, reject) => {
-    // Check immediately — cooldown may already be clear
-    const initial = getRemainingCooldownMs(sentinelPath)
-    if (initial === 0) {
-      resolve()
-      return
-    }
-
-    console.log(`⏳ Push cooldown active — ${Math.ceil(initial / 1000)}s remaining`)
-
     const timer = setInterval(() => {
       const elapsed = Date.now() - startTime
 
+      // Timeout check — deterministic exit
       if (elapsed > timeoutMs) {
         clearInterval(timer)
-        reject(new Error(`Cooldown did not expire within ${timeoutSeconds}s timeout`))
+        const remaining = getRemainingCooldownMs(sentinelPath)
+        reject(
+          new Error(
+            `Cooldown did not expire within ${timeoutSeconds}s timeout` +
+              (remaining > 0 ? ` (${Math.ceil(remaining / 1000)}s still remaining)` : "")
+          )
+        )
         return
       }
 
       const remaining = getRemainingCooldownMs(sentinelPath)
       if (remaining === 0) {
         clearInterval(timer)
-        console.log(`✓ Cooldown expired after ${Math.round(elapsed / 1000)}s`)
-        resolve()
+        log(`✓ Cooldown expired after ${Math.round(elapsed / 1000)}s`)
+        resolve({ waitedMs: elapsed })
+      } else {
+        log(`⏳ Cooldown: ${Math.ceil(remaining / 1000)}s remaining...`)
       }
     }, pollInterval)
   })
@@ -132,7 +155,7 @@ export const pushWaitCommand: Command = {
     const sentinelPath = getSentinelPath(cwd)
 
     // Wait for cooldown to clear
-    await waitForCooldown(sentinelPath, timeout)
+    await waitForCooldown({ sentinelPath, timeoutSeconds: timeout })
 
     // Execute git push
     const pushArgs = ["push", ...extraArgs, remote, targetBranch]
