@@ -4,6 +4,25 @@ import { dirname, join } from "node:path"
 export type PolicyProfile = "solo" | "team" | "strict"
 export type AmbitionMode = "standard" | "aggressive"
 
+export type ProjectState = "in-development" | "awaiting-feedback" | "released" | "paused"
+
+/** Valid transitions from each project state. Empty array = terminal state. */
+export const STATE_TRANSITIONS: Record<ProjectState, ProjectState[]> = {
+  "in-development": ["awaiting-feedback", "paused", "released"],
+  "awaiting-feedback": ["in-development", "released", "paused"],
+  released: ["in-development", "paused"],
+  paused: ["in-development"],
+}
+
+export const PROJECT_STATES: ProjectState[] = [
+  "in-development",
+  "awaiting-feedback",
+  "released",
+  "paused",
+]
+
+export const TERMINAL_STATES: ProjectState[] = ["released"]
+
 export interface SessionSwizSettings {
   autoContinue: boolean
   prMergeMode?: boolean
@@ -14,6 +33,7 @@ export interface ProjectSwizSettings {
   profile?: PolicyProfile
   trivialMaxFiles?: number
   trivialMaxLines?: number
+  state?: ProjectState
 }
 
 /** Resolved policy thresholds after merging global + project config */
@@ -220,7 +240,30 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   if (typeof obj.trivialMaxLines === "number" && obj.trivialMaxLines > 0) {
     result.trivialMaxLines = obj.trivialMaxLines
   }
+  if (typeof obj.state === "string" && obj.state in STATE_TRANSITIONS) {
+    result.state = obj.state as ProjectState
+  }
   return result
+}
+
+export async function readProjectState(cwd: string): Promise<ProjectState | null> {
+  const settings = await readProjectSettings(cwd)
+  return settings?.state ?? null
+}
+
+export async function writeProjectState(cwd: string, state: ProjectState): Promise<void> {
+  const path = getProjectSettingsPath(cwd)
+  await mkdir(dirname(path), { recursive: true })
+  let existing: Record<string, unknown> = {}
+  const file = Bun.file(path)
+  if (await file.exists()) {
+    try {
+      existing = (await file.json()) as Record<string, unknown>
+    } catch {
+      // Ignore parse errors — overwrite with clean object
+    }
+  }
+  await Bun.write(path, JSON.stringify({ ...existing, state }, null, 2))
 }
 
 export async function readProjectSettings(cwd: string): Promise<ProjectSwizSettings | null> {

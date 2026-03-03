@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**57 hooks. 6 event types. Every agent. Zero compromises.**
+**60 hooks. 6 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -82,9 +82,9 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-46 hook scripts across 6 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+49 hook scripts across 6 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
-### Stop (17)
+### Stop (18)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -103,12 +103,13 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-github-ci.ts` | Blocks stop if GitHub Actions CI has failed on the current branch. If CI is still running, polls up to 30 s before blocking — eliminating false-positive blocks for short CI runs that finish within seconds. No shipping broken code. |
 | `stop-todo-tracker.ts` | Scans git diffs for newly introduced `TODO`, `FIXME`, or `HACK` comments. Technical debt accumulates fast — this keeps the bar high. |
 | `stop-non-default-branch.ts` | Blocks stop when the session is on a non-default branch (not `main` or `master`). Even a clean feature branch signals unfinished workflow — this keeps the agent from declaring done while still on it. |
+| `stop-session-state.ts` | Warns when the session ends while the project is in a non-terminal state (not `released`). Prompts the agent to transition state or acknowledge the unfinished lifecycle stage. |
 | `stop-completion-auditor.ts` | Reads task files and verifies that every task has actual completion evidence before the session ends. Agents can't just mark things done — they have to prove it. |
 | `stop-personal-repo-issues.ts` | Checks for actionable open GitHub issues, skipping those labelled `blocked`, `upstream`, `wontfix`, `duplicate`, `on-hold`, or `waiting`. Surfaces real work that's been left on the table. |
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (24)
+### PreToolUse (25)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -124,6 +125,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-json-validation.ts` | Validates JSON syntax before any write to a `.json` file. Catches malformed JSON before it breaks the project. |
 | `pretooluse-no-direct-deps.ts` | Blocks direct edits to dependency blocks in `package.json`. Dependencies must go through the package manager, not hand-edited. |
 | `pretooluse-update-memory-enforcement.ts` | If a prior hook explicitly told the agent to record an `/update-memory` DO/DON'T rule, blocks normal work until the agent reads that skill and writes the rule into a markdown file. |
+| `pretooluse-state-gate.ts` | Blocks disallowed tool categories based on current project state. In `released` state, code-change and shell tools are blocked — the project is done. |
 | `pretooluse-require-tasks.ts` | Blocks Edit, Write, and Shell tools unless the agent has active tasks. No more undisciplined free-form editing — work must be tracked. |
 | `pretooluse-no-task-delegation.ts` | Prevents agents from creating sub-tasks to delegate work instead of doing it. Task creation is for tracking, not avoidance. |
 | `pretooluse-task-subject-validation.ts` | Validates task subjects meet quality standards before they're created — no vague "fix stuff" tasks. |
@@ -158,12 +160,13 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS. Incremental — only speaks text added since the last invocation. Runs async so it never slows the agent down. |
 | `posttooluse-task-output.ts` | Parses TaskOutput results: blocks on non-zero exits with actionable error context; on successful git push, injects the CI run ID and watch commands so the agent can verify CI without extra plumbing. |
 
-### SessionStart (4)
+### SessionStart (5)
 
 | Hook | What it does |
 |------|-------------|
 | `sessionstart-self-heal.ts` | Detects manifest drift by hashing `src/manifest.ts` and comparing to a stored hash. Automatically runs `swiz install` if they differ, keeping agent configs in sync after `git pull`. |
 | `sessionstart-health-snapshot.ts` | Captures a baseline of project health (lint state, test state, git state) at session start so the agent knows what it's walking into. |
+| `sessionstart-state-context.ts` | Injects the current project state (e.g., `in-development`, `awaiting-feedback`) and allowed transitions into the session context so the agent always knows its lifecycle position. |
 | `posttooluse-speak-narrator.ts` | Speaks any assistant text generated during session startup. Catches up on the transcript before the first tool call. Runs async. |
 | `sessionstart-compact-context.ts` | Re-injects core project conventions after context compaction events. The agent keeps its bearings even in long sessions. |
 
@@ -520,7 +523,7 @@ swiz/
     ├── hook-utils.ts         # Shared utilities: tool equivalence, polyglot output, git/gh, skill checking
     ├── shim.sh               # Shell wrapper functions (sourced from profile)
     ├── task-subject-validation.ts  # Shared validation logic
-    └── *.ts                  # 43 hook scripts (all TypeScript)
+    └── *.ts                  # 46 hook scripts (all TypeScript)
 ```
 
 The canonical hook manifest lives in `src/manifest.ts`. Each hook group specifies an event, an optional tool matcher, and a list of scripts. At install time, `agents.ts` translates matchers (`Bash` → `Shell` for Cursor, `Bash` → `run_shell_command` for Gemini) and events (`Stop` → `stop` for Cursor, `Stop` → `AfterAgent` for Gemini), then generates the correct config structure per agent.

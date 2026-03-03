@@ -15,6 +15,7 @@ import { sessionCommand } from "./src/commands/session.ts"
 import { settingsCommand } from "./src/commands/settings.ts"
 import { shimCommand } from "./src/commands/shim.ts"
 import { skillCommand } from "./src/commands/skill.ts"
+import { stateCommand } from "./src/commands/state.ts"
 import { statusCommand } from "./src/commands/status.ts"
 import { tasksCommand } from "./src/commands/tasks.ts"
 import { transcriptCommand } from "./src/commands/transcript.ts"
@@ -26,6 +27,7 @@ registerCommand(installCommand)
 registerCommand(uninstallCommand)
 registerCommand(statusCommand)
 registerCommand(settingsCommand)
+registerCommand(stateCommand)
 registerCommand(tasksCommand)
 registerCommand(shimCommand)
 registerCommand(dispatchCommand)

@@ -33,6 +33,7 @@ export const manifest: HookGroup[] = [
       { file: "stop-github-ci.ts", timeout: 45 },
       { file: "stop-todo-tracker.ts", timeout: 10 },
       { file: "stop-non-default-branch.ts", timeout: 10 },
+      { file: "stop-session-state.ts", timeout: 5 },
       { file: "stop-completion-auditor.ts", timeout: 10 },
       { file: "stop-personal-repo-issues.ts", timeout: 10, cooldownSeconds: 300 },
       { file: "stop-auto-continue.ts", timeout: 120 },
@@ -66,7 +67,10 @@ export const manifest: HookGroup[] = [
   {
     event: "preToolUse",
     matcher: "Edit|Write|Bash",
-    hooks: [{ file: "pretooluse-require-tasks.ts", timeout: 5 }],
+    hooks: [
+      { file: "pretooluse-require-tasks.ts", timeout: 5 },
+      { file: "pretooluse-state-gate.ts", timeout: 5 },
+    ],
   },
   {
     event: "preToolUse",
@@ -149,6 +153,7 @@ export const manifest: HookGroup[] = [
     hooks: [
       { file: "sessionstart-self-heal.ts", timeout: 15 },
       { file: "sessionstart-health-snapshot.ts", timeout: 10 },
+      { file: "sessionstart-state-context.ts", timeout: 5 },
       { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
     ],
   },
