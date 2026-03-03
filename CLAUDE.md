@@ -147,6 +147,10 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DO** check for conflicts with existing nearby guidance before adding new rules to CLAUDE.md. Read the surrounding paragraphs and search for related DO/DON'T blocks before writing. Adding a rule that contradicts an existing one causes silent policy drift — both rules will be followed inconsistently.
 
+**DO** verify the repository's actual label taxonomy with `gh label list` before categorizing or updating a GitHub issue. If the user asks for a literal label such as `feature` or `ready`, use that exact label when it exists; if it does not exist, ask before substituting a different label such as `enhancement`.
+
+**DON'T** add, restore, or preserve inferred issue labels once the user gives explicit label instructions. The user's latest label state overrides prior assumptions: if they say an issue is `ready`, remove conflicting labels such as `backlog` instead of re-adding them for classification.
+
 ## Standard Work Sequence
 
 Follow this order for every unit of work. Deviating from it causes hook blocks.
