@@ -30,8 +30,9 @@ async function runSwiz(
   args: string[],
   cwd: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  const proc = Bun.spawn(["bun", "run", "index.ts", ...args], {
-    cwd: process.cwd(),
+  const indexPath = join(process.cwd(), "index.ts")
+  const proc = Bun.spawn(["bun", "run", indexPath, ...args], {
+    cwd,
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
