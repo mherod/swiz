@@ -158,7 +158,7 @@ Follow this order for every unit of work. Deviating from it causes hook blocks.
 4. TaskUpdate → completed                   (after commit succeeds, before push)
 5. SHA=$(git rev-parse HEAD)                (capture SHA before push)
 6. git log origin/main..HEAD --oneline      (review commits)
-7. git push origin main                     (hook: bun test full suite; push/gh exempt from task req)
+7. swiz push-wait origin main               (waits for cooldown, then pushes; pre-push runs bun test)
 8. swiz ci-wait $SHA --timeout 300          (poll CI run for completion with timeout)
 9. Verify CI passed (exit code 0); if failed, fix and re-push
 10. Announce result — done.
@@ -168,8 +168,9 @@ Follow this order for every unit of work. Deviating from it causes hook blocks.
 - Steps 1–3 require an in_progress task (hook blocks otherwise)
 - Step 4 must happen after commit and before push (no TaskUpdate at steps 7–10)
 - Capture SHA (step 5) before push so step 8 can filter by exact commit
+- Step 7 uses `swiz push-wait` which polls for cooldown expiry then runs `git push` (no sleeps, no force bypasses)
 - Step 8 uses `swiz ci-wait` for timeout-based polling (replaces manual gh run watch/view)
-- **DO NOT** use fixed sleeps or manual polling — use `swiz ci-wait` instead
+- **DO NOT** use fixed sleeps, manual polling, or `--force-with-lease` to bypass cooldown — use `swiz push-wait` instead
 - No TaskUpdate/TaskList calls at steps 7–10
 - **DON'T stop or declare work done after step 3 alone** — a commit without a push is incomplete work. The stop hook blocks every stop attempt until origin is up to date. Always complete steps 5–10 before stopping.
 - **DO** treat push as inseparable from commit — after any `/commit` skill or manual `git commit`, immediately continue with steps 5–10 (capture SHA → log review → push → CI wait → verify exit code). The stop hook will block every stop attempt until `origin/main` is up to date.

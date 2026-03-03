@@ -7,6 +7,7 @@ import { dispatchCommand } from "./src/commands/dispatch.ts"
 import { hooksCommand } from "./src/commands/hooks.ts"
 import { installCommand } from "./src/commands/install.ts"
 import { issueCommand } from "./src/commands/issue.ts"
+import { pushWaitCommand } from "./src/commands/push-wait.ts"
 import { sentimentCommand } from "./src/commands/sentiment.ts"
 import { sessionCommand } from "./src/commands/session.ts"
 import { settingsCommand } from "./src/commands/settings.ts"
@@ -33,5 +34,6 @@ registerCommand(issueCommand)
 registerCommand(sentimentCommand)
 registerCommand(sessionCommand)
 registerCommand(ciWaitCommand)
+registerCommand(pushWaitCommand)
 
 await run()
