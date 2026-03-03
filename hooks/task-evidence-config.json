@@ -1,0 +1,7 @@
+{
+  "$schema": "./task-evidence-config.schema.json",
+  "$comment": "Config for posttooluse-task-evidence.ts — add new agent tool names, evidence keys, or task ID fields here without editing hook code.",
+  "toolNames": ["TaskUpdate", "TodoWrite", "write_todos", "update_plan"],
+  "evidenceKeys": ["evidence", "completionEvidence"],
+  "taskIdFields": ["taskId", "task_id", "id"]
+}

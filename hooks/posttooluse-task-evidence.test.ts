@@ -26,7 +26,8 @@ async function createFixture(): Promise<{ home: string; tasksDir: string }> {
 async function runHook(
   home: string,
   toolInput: Record<string, unknown>,
-  toolName = "TaskUpdate"
+  toolName = "TaskUpdate",
+  configPath?: string
 ): Promise<string> {
   const payload = JSON.stringify({
     cwd: process.cwd(),
@@ -41,6 +42,7 @@ async function runHook(
   delete env.GEMINI_PROJECT_DIR
   delete env.CODEX_MANAGED_BY_NPM
   delete env.CODEX_THREAD_ID
+  if (configPath) env.TASK_EVIDENCE_CONFIG = configPath
 
   const proc = Bun.spawn(["bun", HOOK_PATH], {
     stdin: "pipe",
@@ -402,5 +404,182 @@ describe("posttooluse-task-evidence", () => {
     const updated18 = JSON.parse(await readFile(join(tasksDir, "18.json"), "utf-8"))
     expect(updated17.completionEvidence).toBe("CI green")
     expect(updated18.completionEvidence).toBeUndefined()
+  })
+})
+
+// ─── Config-driven normalization tests ─────────────────────────────────────
+
+describe("posttooluse-task-evidence config", () => {
+  async function writeConfig(dir: string, config: Record<string, unknown>): Promise<string> {
+    const configPath = join(dir, "custom-evidence-config.json")
+    await writeFile(configPath, JSON.stringify(config, null, 2))
+    return configPath
+  }
+
+  it("accepts a custom tool name added via config", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = {
+      id: "20",
+      subject: "Custom tool",
+      status: "completed",
+      blocks: [],
+      blockedBy: [],
+    }
+    await writeFile(join(tasksDir, "20.json"), JSON.stringify(task, null, 2))
+
+    const configPath = await writeConfig(home, {
+      toolNames: ["TaskUpdate", "FutureAgentTool"],
+      evidenceKeys: ["evidence"],
+      taskIdFields: ["taskId"],
+    })
+
+    await runHook(
+      home,
+      { taskId: "20", status: "completed", metadata: { evidence: "custom tool works" } },
+      "FutureAgentTool",
+      configPath
+    )
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "20.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("custom tool works")
+  })
+
+  it("accepts a custom evidence key added via config", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "21", subject: "Custom key", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "21.json"), JSON.stringify(task, null, 2))
+
+    const configPath = await writeConfig(home, {
+      toolNames: ["TaskUpdate"],
+      evidenceKeys: ["evidence", "ciResult"],
+      taskIdFields: ["taskId"],
+    })
+
+    await runHook(
+      home,
+      { taskId: "21", status: "completed", metadata: { ciResult: "all green" } },
+      "TaskUpdate",
+      configPath
+    )
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "21.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("all green")
+  })
+
+  it("accepts a custom task ID field added via config", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "22", subject: "Custom ID", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "22.json"), JSON.stringify(task, null, 2))
+
+    const configPath = await writeConfig(home, {
+      toolNames: ["TaskUpdate"],
+      evidenceKeys: ["evidence"],
+      taskIdFields: ["planItemId", "taskId"],
+    })
+
+    await runHook(
+      home,
+      { planItemId: "22", status: "completed", metadata: { evidence: "custom ID field" } },
+      "TaskUpdate",
+      configPath
+    )
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "22.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("custom ID field")
+  })
+
+  it("falls back to defaults when config is missing", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "23", subject: "No config", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "23.json"), JSON.stringify(task, null, 2))
+
+    await runHook(
+      home,
+      { taskId: "23", status: "completed", metadata: { evidence: "defaults work" } },
+      "TaskUpdate",
+      join(home, "nonexistent-config.json")
+    )
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "23.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("defaults work")
+  })
+
+  it("falls back to defaults when config has invalid JSON", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = { id: "24", subject: "Bad config", status: "completed", blocks: [], blockedBy: [] }
+    await writeFile(join(tasksDir, "24.json"), JSON.stringify(task, null, 2))
+
+    const configPath = join(home, "bad-config.json")
+    await writeFile(configPath, "not valid json {{{")
+
+    await runHook(
+      home,
+      { taskId: "24", status: "completed", metadata: { evidence: "fallback works" } },
+      "TaskUpdate",
+      configPath
+    )
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "24.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("fallback works")
+  })
+
+  it("falls back per-field when config has partial invalid types", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = {
+      id: "25",
+      subject: "Partial bad",
+      status: "completed",
+      blocks: [],
+      blockedBy: [],
+    }
+    await writeFile(join(tasksDir, "25.json"), JSON.stringify(task, null, 2))
+
+    const configPath = await writeConfig(home, {
+      toolNames: "not-an-array",
+      evidenceKeys: ["evidence", "customKey"],
+      taskIdFields: [123, "taskId"],
+    })
+
+    // toolNames is invalid (string, not array) → falls back to defaults → TaskUpdate works
+    // taskIdFields has a number → falls back to defaults → taskId works
+    // evidenceKeys is valid → customKey should work
+    await runHook(
+      home,
+      { taskId: "25", status: "completed", metadata: { customKey: "partial fallback" } },
+      "TaskUpdate",
+      configPath
+    )
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "25.json"), "utf-8"))
+    expect(updated.completionEvidence).toBe("partial fallback")
+  })
+
+  it("rejects unknown tool name not in custom config", async () => {
+    const { home, tasksDir } = await createFixture()
+    const task = {
+      id: "26",
+      subject: "Rejected tool",
+      status: "completed",
+      blocks: [],
+      blockedBy: [],
+    }
+    await writeFile(join(tasksDir, "26.json"), JSON.stringify(task, null, 2))
+
+    const configPath = await writeConfig(home, {
+      toolNames: ["OnlyThisTool"],
+      evidenceKeys: ["evidence"],
+      taskIdFields: ["taskId"],
+    })
+
+    // TaskUpdate is NOT in the custom config's toolNames
+    await runHook(
+      home,
+      { taskId: "26", status: "completed", metadata: { evidence: "should not write" } },
+      "TaskUpdate",
+      configPath
+    )
+
+    const updated = JSON.parse(await readFile(join(tasksDir, "26.json"), "utf-8"))
+    expect(updated.completionEvidence).toBeUndefined()
   })
 })
