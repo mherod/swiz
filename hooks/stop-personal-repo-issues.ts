@@ -5,6 +5,7 @@
  * the current user has self-authored or self-assigned issues in an org repo.
  */
 
+import { resolve } from "node:path"
 import {
   blockStop,
   extractOwnerFromUrl,
@@ -99,16 +100,29 @@ function sanitizeSessionId(sessionId: string | undefined): string | null {
 }
 
 /**
+ * Generate a canonical cooldown key for a session + cwd.
+ * Uses canonicalized path (resolves symlinks, relative paths) and full untruncated hash.
+ * Shared by all cooldown functions to ensure consistent key generation.
+ * Production: same session + same repo = same key (persists across invocations)
+ * Tests: different repos = different keys (no collisions)
+ */
+function getCooldownKey(sessionId: string, cwd: string): string {
+  // Canonicalize the path to handle symlinks, relative paths, and normalize separators.
+  const canonicalCwd = resolve(cwd)
+  // Hash the full canonical path without truncation to avoid collisions.
+  const fullHash = Bun.hash(canonicalCwd).toString(16)
+  return `${sessionId}-${fullHash}`
+}
+
+/**
  * Get cooldown file path using session_id and repo for stable persistence.
  * Production: same session + same repo = same cooldown file (persists across invocations)
  * Tests: different test repos = different cooldown files (no collisions)
- * Uses Bun.hash() for proper differentiation even with path prefixes.
+ * Uses getCooldownKey() with full untruncated hash and path canonicalization.
  */
 function getCooldownFilePath(sessionId: string, cwd: string): string {
-  // Create a hash of the cwd path for repo-level uniqueness.
-  // Bun.hash() produces good differentiation for different paths.
-  const cwdHash = Bun.hash(cwd).toString(16).slice(0, 8)
-  return `/tmp/stop-personal-repo-issues-${sessionId}-${cwdHash}.cooldown`
+  const key = getCooldownKey(sessionId, cwd)
+  return `/tmp/stop-personal-repo-issues-${key}.cooldown`
 }
 
 /**
