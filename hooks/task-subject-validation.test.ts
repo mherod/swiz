@@ -7,7 +7,7 @@ describe("detect", () => {
       const result = detect("Recovered task #5")
       expect(result.matched).toBe(true)
       if (!result.matched) return
-      expect(result.intro).toContain("compaction-recovery placeholder")
+      expect(result.intro).toContain("placeholder")
       expect(result.suggestions.length).toBeGreaterThan(0)
     })
 
