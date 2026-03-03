@@ -117,4 +117,122 @@ describe("swiz doctor", () => {
     expect(result.stdout).toContain("Gemini CLI binary")
     expect(result.stdout).toContain("Codex CLI binary")
   })
+
+  test("reports config sync check for configurable agents", async () => {
+    const home = await createTempHome()
+    const result = await runDoctor(home)
+    // All configurable agents should have a config sync check
+    expect(result.stdout).toContain("config sync")
+  })
+
+  test("warns when agent config is missing dispatch entries", async () => {
+    const home = await createTempHome()
+    // Create a Claude Code settings file with hooks but no dispatch entries
+    const claudeDir = join(home, ".claude")
+    await mkdir(claudeDir, { recursive: true })
+    await writeFile(
+      join(claudeDir, "settings.json"),
+      JSON.stringify({
+        hooks: {
+          Stop: [{ hooks: [{ type: "command", command: "echo hello" }] }],
+        },
+      })
+    )
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Claude Code config sync")
+    expect(result.stdout).toContain("missing dispatch")
+  })
+
+  test("passes config sync when all dispatch entries present", async () => {
+    const home = await createTempHome()
+    const claudeDir = join(home, ".claude")
+    await mkdir(claudeDir, { recursive: true })
+    // Create settings with all expected dispatch entries
+    await writeFile(
+      join(claudeDir, "settings.json"),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch stop Stop",
+                },
+              ],
+            },
+          ],
+          PreToolUse: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch preToolUse PreToolUse",
+                },
+              ],
+            },
+          ],
+          PostToolUse: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch postToolUse PostToolUse",
+                },
+              ],
+            },
+          ],
+          SessionStart: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch sessionStart SessionStart",
+                },
+              ],
+            },
+          ],
+          UserPromptSubmit: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch userPromptSubmit UserPromptSubmit",
+                },
+              ],
+            },
+          ],
+          PreCompact: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch preCompact PreCompact",
+                },
+              ],
+            },
+          ],
+        },
+      })
+    )
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Claude Code config sync")
+    expect(result.stdout).toContain("dispatch entries in sync")
+  })
+
+  test("warns about stale configs with fix hint", async () => {
+    const home = await createTempHome()
+    // Empty settings file = no dispatch entries
+    const claudeDir = join(home, ".claude")
+    await mkdir(claudeDir, { recursive: true })
+    await writeFile(join(claudeDir, "settings.json"), JSON.stringify({ hooks: {} }))
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("missing dispatch")
+    expect(result.stdout).toContain("swiz install")
+  })
 })

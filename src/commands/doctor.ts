@@ -1,5 +1,5 @@
 import { dirname, join } from "node:path"
-import { AGENTS, type AgentDef } from "../agents.ts"
+import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
 import { manifest } from "../manifest.ts"
 import { readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
@@ -195,6 +195,95 @@ async function checkSwizSettings(): Promise<CheckResult> {
   }
 }
 
+// ─── Config sync check ──────────────────────────────────────────────────────
+
+/** Extract canonical event names from `swiz dispatch <event> ...` commands in a config. */
+function extractDispatchEvents(hooks: Record<string, unknown>): Set<string> {
+  const events = new Set<string>()
+  const dispatchRe = /swiz dispatch (\S+)/
+  for (const entries of Object.values(hooks)) {
+    if (!Array.isArray(entries)) continue
+    for (const entry of entries) {
+      const e = entry as Record<string, unknown>
+      if (typeof e.command === "string") {
+        const m = dispatchRe.exec(e.command)
+        if (m?.[1]) events.add(m[1])
+      }
+      if (Array.isArray(e.hooks)) {
+        for (const h of e.hooks) {
+          const hh = h as Record<string, unknown>
+          if (typeof hh.command === "string") {
+            const m = dispatchRe.exec(hh.command)
+            if (m?.[1]) events.add(m[1])
+          }
+        }
+      }
+    }
+  }
+  return events
+}
+
+/** Get the set of canonical events the manifest expects to be dispatched. */
+function getExpectedCanonicalEvents(): Set<string> {
+  const events = new Set<string>()
+  for (const group of manifest) {
+    events.add(group.event)
+  }
+  return events
+}
+
+export async function checkAgentConfigSync(agent: AgentDef): Promise<CheckResult> {
+  const file = Bun.file(agent.settingsPath)
+  if (!(await file.exists())) {
+    return {
+      name: `${agent.name} config sync`,
+      status: "warn",
+      detail: "settings file not found — run: swiz install",
+    }
+  }
+
+  let settings: Record<string, unknown>
+  try {
+    settings = await file.json()
+  } catch {
+    return {
+      name: `${agent.name} config sync`,
+      status: "fail",
+      detail: "settings file is malformed JSON",
+    }
+  }
+
+  const hooksRaw = agent.wrapsHooks
+    ? ((settings.hooks as Record<string, unknown>) ?? {})
+    : ((settings[agent.hooksKey] as Record<string, unknown>) ?? {})
+  const hooks = typeof hooksRaw === "object" && !Array.isArray(hooksRaw) ? hooksRaw : {}
+
+  const installed = extractDispatchEvents(hooks)
+  const expected = getExpectedCanonicalEvents()
+
+  const missing: string[] = []
+  for (const event of expected) {
+    if (!installed.has(event)) {
+      const agentEvent = translateEvent(event, agent)
+      missing.push(`${event} (${agentEvent})`)
+    }
+  }
+
+  if (missing.length === 0) {
+    return {
+      name: `${agent.name} config sync`,
+      status: "pass",
+      detail: `${installed.size} dispatch entries in sync with manifest`,
+    }
+  }
+
+  return {
+    name: `${agent.name} config sync`,
+    status: "warn",
+    detail: `${missing.length} missing dispatch: ${missing.join(", ")} — run: swiz install`,
+  }
+}
+
 // ─── Runner ─────────────────────────────────────────────────────────────────
 
 function printResult(result: CheckResult): void {
@@ -206,8 +295,12 @@ function printResult(result: CheckResult): void {
 export const doctorCommand: Command = {
   name: "doctor",
   description: "Check environment health and prerequisites",
-  usage: "swiz doctor",
-  async run() {
+  usage: "swiz doctor [--fix]",
+  options: [
+    { flags: "--fix", description: "Auto-fix stale agent configs by running swiz install" },
+  ],
+  async run(args) {
+    const fix = args.includes("--fix")
     console.log(`\n  ${BOLD}swiz doctor${RESET}\n`)
 
     const results: CheckResult[] = []
@@ -223,6 +316,11 @@ export const doctorCommand: Command = {
 
     // Hook scripts
     results.push(await checkHookScripts())
+
+    // Agent config sync (detect stale dispatch entries)
+    for (const agent of CONFIGURABLE_AGENTS) {
+      results.push(await checkAgentConfigSync(agent))
+    }
 
     // GitHub CLI
     results.push(await checkGhAuth())
@@ -248,6 +346,29 @@ export const doctorCommand: Command = {
         (failures.length > 0 ? `, ${RED}${failures.length} failed${RESET}` : "")
     )
     console.log()
+
+    // Auto-fix stale configs
+    const staleConfigs = results.filter(
+      (r) =>
+        r.name.endsWith("config sync") &&
+        r.status === "warn" &&
+        r.detail.includes("missing dispatch")
+    )
+    if (staleConfigs.length > 0 && fix) {
+      console.log(`  ${BOLD}Auto-fixing stale configs...${RESET}\n`)
+      const proc = Bun.spawn(["bun", "run", join(SWIZ_ROOT, "index.ts"), "install"], {
+        stdout: "inherit",
+        stderr: "inherit",
+      })
+      await proc.exited
+      if (proc.exitCode === 0) {
+        console.log(`  ${GREEN}✓ Configs updated successfully${RESET}\n`)
+      } else {
+        console.log(`  ${RED}✗ Install failed (exit ${proc.exitCode})${RESET}\n`)
+      }
+    } else if (staleConfigs.length > 0) {
+      console.log(`  ${YELLOW}Stale configs detected. Run: swiz doctor --fix${RESET}\n`)
+    }
 
     if (failures.length > 0) {
       throw new Error(
