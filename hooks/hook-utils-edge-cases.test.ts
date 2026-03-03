@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  CI_WAIT_RE,
   createSessionTask,
   detectPackageManager,
   detectPkgRunner,
@@ -22,6 +23,7 @@ import {
   isShellTool,
   isTaskCreateTool,
   isTaskTool,
+  isTaskTrackingExemptShellCommand,
   isWriteTool,
   parseGitStatus,
   SOURCE_EXT_RE,
@@ -1008,5 +1010,60 @@ describe("extractToolNamesFromTranscript() whitespace-only line filtering", () =
     const result = await extractToolNamesFromTranscript(filePath)
     expect(result).toEqual(["Read", "Read"])
     await rm(tmpDir, { recursive: true, force: true })
+  })
+})
+
+// ─── CI_WAIT_RE ─────────────────────────────────────────────────────────────
+
+describe("CI_WAIT_RE", () => {
+  it("matches bare 'swiz ci-wait'", () => {
+    expect(CI_WAIT_RE.test("swiz ci-wait abc123")).toBe(true)
+  })
+
+  it("matches 'bun run index.ts ci-wait'", () => {
+    expect(CI_WAIT_RE.test("bun run index.ts ci-wait abc123")).toBe(true)
+  })
+
+  it("matches 'bun ci-wait'", () => {
+    expect(CI_WAIT_RE.test("bun ci-wait abc123")).toBe(true)
+  })
+
+  it("matches ci-wait after && separator", () => {
+    expect(CI_WAIT_RE.test("echo done && swiz ci-wait abc")).toBe(true)
+  })
+
+  it("matches ci-wait after || separator", () => {
+    expect(CI_WAIT_RE.test("false || swiz ci-wait abc")).toBe(true)
+  })
+
+  it("does not match unrelated commands", () => {
+    expect(CI_WAIT_RE.test("git push origin main")).toBe(false)
+  })
+
+  it("does not match partial prefix like 'ci-waiter'", () => {
+    // \b after ci-wait ensures word boundary
+    expect(CI_WAIT_RE.test("swiz ci-waiter")).toBe(false)
+  })
+})
+
+// ─── isTaskTrackingExemptShellCommand — ci-wait ─────────────────────────────
+
+describe("isTaskTrackingExemptShellCommand — ci-wait exemption", () => {
+  it("exempts 'swiz ci-wait abc123'", () => {
+    expect(isTaskTrackingExemptShellCommand("swiz ci-wait abc123")).toBe(true)
+  })
+
+  it("exempts 'bun run index.ts ci-wait SHA --timeout 300'", () => {
+    expect(isTaskTrackingExemptShellCommand("bun run index.ts ci-wait SHA --timeout 300")).toBe(
+      true
+    )
+  })
+
+  it("does not exempt 'git add .'", () => {
+    expect(isTaskTrackingExemptShellCommand("git add .")).toBe(false)
+  })
+
+  it("does not exempt 'bun test'", () => {
+    expect(isTaskTrackingExemptShellCommand("bun test")).toBe(false)
   })
 })

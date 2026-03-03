@@ -303,3 +303,145 @@ describe("stop-completion-auditor — audit log / Array.from(latestStatus.values
     expect(result.blocked).toBe(false)
   })
 })
+
+// ─── CI verification enforcement ──────────────────────────────────────────────
+
+/** Create a transcript that includes a Bash tool_use with `git push`. */
+async function createFixtureWithPush(): Promise<{
+  home: string
+  tasksDir: string
+  transcriptPath: string
+}> {
+  const home = await mkdtemp(join(tmpdir(), "swiz-auditor-ci-test-"))
+  tempDirs.push(home)
+  const tasksDir = join(home, ".claude", "tasks", SESSION_ID)
+  await mkdir(tasksDir, { recursive: true })
+
+  const lines: string[] = []
+  // 12 regular tool calls to exceed threshold
+  for (let i = 0; i < 12; i++) {
+    lines.push(
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Read", id: `t${i}`, input: {} }] },
+      })
+    )
+  }
+  // A Bash tool call with `git push`
+  lines.push(
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            name: "Bash",
+            id: "push1",
+            input: { command: "git push origin main" },
+          },
+        ],
+      },
+    })
+  )
+  // TaskCreate + TaskUpdate to satisfy task detection
+  lines.push(
+    JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "TaskCreate", id: "tc1", input: {} }] },
+    })
+  )
+
+  const transcriptPath = join(home, "transcript.jsonl")
+  await writeFile(transcriptPath, `${lines.join("\n")}\n`)
+  return { home, tasksDir, transcriptPath }
+}
+
+describe("stop-completion-auditor — CI verification enforcement", () => {
+  it("blocks when all tasks completed, push detected, but no CI evidence", async () => {
+    const { home, tasksDir, transcriptPath } = await createFixtureWithPush()
+    // Write a completed task WITHOUT CI evidence
+    await writeFile(
+      join(tasksDir, "1.json"),
+      JSON.stringify({
+        id: "1",
+        subject: "Implement feature",
+        status: "completed",
+        completionEvidence: "tests pass locally",
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+    const result = await runAuditor(home, transcriptPath)
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("CI verification evidence")
+  })
+
+  it("allows stop when a completed task has CI evidence in completionEvidence", async () => {
+    const { home, tasksDir, transcriptPath } = await createFixtureWithPush()
+    await writeFile(
+      join(tasksDir, "1.json"),
+      JSON.stringify({
+        id: "1",
+        subject: "Implement feature",
+        status: "completed",
+        completionEvidence: "CI green — conclusion: success",
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+    const result = await runAuditor(home, transcriptPath)
+    expect(result.blocked).toBe(false)
+  })
+
+  it("allows stop when a completed task has CI evidence in subject", async () => {
+    const { home, tasksDir, transcriptPath } = await createFixtureWithPush()
+    await writeFile(
+      join(tasksDir, "1.json"),
+      JSON.stringify({
+        id: "1",
+        subject: "Push and verify CI — CI passed",
+        status: "completed",
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+    const result = await runAuditor(home, transcriptPath)
+    expect(result.blocked).toBe(false)
+  })
+
+  it("does not trigger CI check when no push detected in transcript", async () => {
+    // Use regular fixture (no push in transcript)
+    const { home, tasksDir, transcriptPath } = await createFixture()
+    await writeFile(
+      join(tasksDir, "1.json"),
+      JSON.stringify({
+        id: "1",
+        subject: "Implement feature",
+        status: "completed",
+        completionEvidence: "done",
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+    const result = await runAuditor(home, transcriptPath)
+    // No push → no CI enforcement → allow stop
+    expect(result.blocked).toBe(false)
+  })
+
+  it("recognises 'conclusion: success' as valid CI evidence", async () => {
+    const { home, tasksDir, transcriptPath } = await createFixtureWithPush()
+    await writeFile(
+      join(tasksDir, "1.json"),
+      JSON.stringify({
+        id: "1",
+        subject: "Push and verify CI",
+        status: "completed",
+        completionEvidence: "conclusion: success",
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+    const result = await runAuditor(home, transcriptPath)
+    expect(result.blocked).toBe(false)
+  })
+})

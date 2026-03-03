@@ -405,6 +405,7 @@ export interface SessionTask {
   activeForm?: string
   blocks?: string[]
   blockedBy?: string[]
+  completionEvidence?: string
 }
 
 /**
@@ -942,6 +943,9 @@ export const GH_CMD_RE = /(?:^|\|\||&&|;)\s*gh\b/
 /** Matches `swiz issue close` or `swiz issue comment` — thin gh-issue wrappers. */
 export const SWIZ_ISSUE_RE = /(?:^|\|\||&&|;)\s*swiz\s+issue\s+(close|comment)\b/
 
+/** Matches CI verification commands: `swiz ci-wait`, `bun ... ci-wait`, `bun run index.ts ci-wait`. */
+export const CI_WAIT_RE = /(?:^|\|\||&&|;)\s*(?:swiz|bun\b[^|;]*)\s+ci-wait\b/
+
 /** True when a shell command is exempt from task-tracking enforcement. */
 export function isTaskTrackingExemptShellCommand(command: string): boolean {
   return (
@@ -949,7 +953,8 @@ export function isTaskTrackingExemptShellCommand(command: string): boolean {
     READ_CMD_RE.test(command) ||
     GIT_SYNC_RE.test(command) ||
     GH_CMD_RE.test(command) ||
-    SWIZ_ISSUE_RE.test(command)
+    SWIZ_ISSUE_RE.test(command) ||
+    CI_WAIT_RE.test(command)
   )
 }
 
