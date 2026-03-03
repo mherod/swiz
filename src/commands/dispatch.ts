@@ -146,11 +146,23 @@ function extractContext(resp: Record<string, unknown>): string | null {
 
 // ─── Dispatch strategies ─────────────────────────────────────────────────────
 
-/** PreToolUse: short-circuit on first deny; collect and merge allow-with-reason hints. */
+/** PreToolUse: short-circuit on first deny; collect and merge allow-with-reason hints.
+ *  Async hooks are launched first so they run even if a deny short-circuits. */
 async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<void> {
+  // Pre-launch async hooks (fire-and-forget) before blocking hooks can short-circuit
+  for (const group of groups) {
+    for (const hook of group.hooks) {
+      if (hook.async) {
+        log(`   → ${hook.file} [async, fire-and-forget]`)
+        runHook(hook.file, payloadStr, hook.timeout).catch(() => {})
+      }
+    }
+  }
+  // Process blocking hooks sequentially
   const hints: string[] = []
   for (const group of groups) {
     for (const hook of group.hooks) {
+      if (hook.async) continue
       log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`)
       const resp = await runHook(hook.file, payloadStr, hook.timeout)
       if (resp && isDeny(resp)) {
@@ -215,15 +227,27 @@ async function runBlocking(groups: HookGroup[], payloadStr: string): Promise<voi
   log(`   result: all passed`)
 }
 
-/** SessionStart / UserPromptSubmit: run all hooks, merge additionalContext. */
+/** SessionStart / UserPromptSubmit: run all hooks, merge additionalContext.
+ *  Async hooks are launched first as fire-and-forget. */
 async function runContext(
   groups: HookGroup[],
   payloadStr: string,
   eventName: string
 ): Promise<void> {
+  // Pre-launch async hooks (fire-and-forget)
+  for (const group of groups) {
+    for (const hook of group.hooks) {
+      if (hook.async) {
+        log(`   → ${hook.file} [async, fire-and-forget]`)
+        runHook(hook.file, payloadStr, hook.timeout).catch(() => {})
+      }
+    }
+  }
+  // Process blocking hooks sequentially
   const contexts: string[] = []
   for (const group of groups) {
     for (const hook of group.hooks) {
+      if (hook.async) continue
       log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`)
       const resp = await runHook(hook.file, payloadStr, hook.timeout)
       if (!resp) {
