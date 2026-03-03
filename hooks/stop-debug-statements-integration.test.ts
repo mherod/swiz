@@ -123,9 +123,16 @@ describe("stop-debug-statements: detects debug statements in source files", () =
 
   test("print() in .py file is blocked", async () => {
     const dir = await makeTempGitRepo("-py-print")
-    await commitFile(dir, "scripts/migrate.py", "def run():\n    print('migrating')\n")
+    await commitFile(dir, "src/utils.py", "def run():\n    print('migrating')\n")
     const result = await runHook(dir)
     expect(result.blocked).toBe(true)
+  })
+
+  test("print() in scripts/ .py file is NOT blocked (intentional CLI output)", async () => {
+    const dir = await makeTempGitRepo("-py-scripts")
+    await commitFile(dir, "scripts/migrate.py", "def run():\n    print('migrating')\n")
+    const result = await runHook(dir)
+    expect(result.blocked).toBe(false)
   })
 
   test("binding.pry in .rb file is blocked", async () => {
