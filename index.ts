@@ -4,6 +4,7 @@ import { ciWaitCommand } from "./src/commands/ci-wait.ts"
 import { cleanupCommand } from "./src/commands/cleanup.ts"
 import { continueCommand } from "./src/commands/continue.ts"
 import { dispatchCommand } from "./src/commands/dispatch.ts"
+import { doctorCommand } from "./src/commands/doctor.ts"
 import { hooksCommand } from "./src/commands/hooks.ts"
 import { installCommand } from "./src/commands/install.ts"
 import { issueCommand } from "./src/commands/issue.ts"
@@ -37,5 +38,6 @@ registerCommand(sessionCommand)
 registerCommand(ciWaitCommand)
 registerCommand(mergetoolCommand)
 registerCommand(pushWaitCommand)
+registerCommand(doctorCommand)
 
 await run()
