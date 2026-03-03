@@ -19,7 +19,7 @@ if (!Bun.which("bun")) {
 // manager and runtime. Cached per process so hooks don't stat the filesystem
 // on every import.
 
-import { existsSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { translateMatcher } from "../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
@@ -27,6 +27,37 @@ import { skillAdvice, skillExists } from "../src/skill-utils.ts"
 
 export { skillAdvice, skillExists }
 export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
+
+// ─── Canonical path hashing utility ────────────────────────────────────────
+// Shared by all cache-key generation in hooks and commands to ensure consistent
+// behavior across symlink aliases, relative paths, and other path variants.
+
+/**
+ * Generate a canonical hash for a filesystem path.
+ * Uses realpathSync() to dereference symlinks, ensuring equivalent repos
+ * (accessed via symlink or real path) generate identical hashes.
+ * Returns the full untruncated hash to avoid collision vulnerabilities.
+ *
+ * Usage:
+ *   const hash = getCanonicalPathHash(cwd)
+ *   const cooldownKey = `${sessionId}-${hash}`
+ *   const cooldownFile = `/tmp/myapp-${cooldownKey}.sentinel`
+ */
+export function getCanonicalPathHash(cwd: string): string {
+  // Canonicalize the path using realpath to dereference symlinks.
+  // This ensures /path/to/repo and /symlink/to/repo generate the same hash.
+  let realPath: string
+  try {
+    realPath = realpathSync(cwd)
+  } catch {
+    // If realpath fails (e.g., path doesn't exist), fall back to the original path.
+    // This ensures the function is defensive and doesn't crash on edge cases.
+    realPath = cwd
+  }
+  // Hash the canonical path without truncation to avoid collisions.
+  const fullHash = Bun.hash(realPath).toString(16)
+  return fullHash
+}
 
 export type PackageManager = "bun" | "pnpm" | "yarn" | "npm"
 export type Runtime = "bun" | "node"

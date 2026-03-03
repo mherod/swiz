@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
+import { getCanonicalPathHash } from "../../hooks/hook-utils.ts"
 import type { Command } from "../types.ts"
 
 // Must match the values in hooks/pretooluse-push-cooldown.ts
@@ -16,7 +16,7 @@ export function getSentinelPath(cwd: string): string {
     stderr: "pipe",
   })
   const repoRoot = new TextDecoder().decode(proc.stdout).trim() || cwd
-  const repoKey = createHash("sha1").update(repoRoot).digest("hex").slice(0, 12)
+  const repoKey = getCanonicalPathHash(repoRoot)
   return `${SENTINEL_PREFIX}${repoKey}.timestamp`
 }
 

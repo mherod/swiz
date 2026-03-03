@@ -5,10 +5,10 @@
  * the current user has self-authored or self-assigned issues in an org repo.
  */
 
-import { realpathSync } from "node:fs"
 import {
   blockStop,
   extractOwnerFromUrl,
+  getCanonicalPathHash,
   getCurrentGitHubUser,
   ghJson,
   git,
@@ -101,25 +101,12 @@ function sanitizeSessionId(sessionId: string | undefined): string | null {
 
 /**
  * Generate a canonical cooldown key for a session + cwd.
- * Uses realpath canonicalization (dereferences symlinks) and full untruncated hash.
- * Shared by all cooldown functions to ensure consistent key generation.
- * Production: same session + same repo = same key (persists across invocations, even via symlinks)
- * Tests: different repos = different keys (no collisions, even with symlink aliases)
+ * Uses the shared getCanonicalPathHash utility for consistent key generation
+ * across all hooks and commands.
  */
 function getCooldownKey(sessionId: string, cwd: string): string {
-  // Canonicalize the path using realpath to dereference symlinks.
-  // This ensures /path/to/repo and /symlink/to/repo generate the same key.
-  let canonicalCwd: string
-  try {
-    canonicalCwd = realpathSync(cwd)
-  } catch {
-    // If realpath fails (e.g., path doesn't exist), fall back to absolute path.
-    // This ensures the function is defensive and doesn't crash the hook.
-    canonicalCwd = cwd
-  }
-  // Hash the full canonical path without truncation to avoid collisions.
-  const fullHash = Bun.hash(canonicalCwd).toString(16)
-  return `${sessionId}-${fullHash}`
+  const pathHash = getCanonicalPathHash(cwd)
+  return `${sessionId}-${pathHash}`
 }
 
 /**

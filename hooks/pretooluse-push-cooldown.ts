@@ -10,11 +10,11 @@
 // Rationale: prevents accidental rapid-fire pushes that could trigger CI
 // loops, burn through rate limits, or push partially-prepared commits.
 
-import { createHash } from "node:crypto"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import {
   denyPreToolUse,
   GIT_PUSH_RE,
+  getCanonicalPathHash,
   git,
   hasGitPushForceFlag,
   isShellTool,
@@ -35,13 +35,11 @@ if (!GIT_PUSH_RE.test(command)) process.exit(0)
 // handle -- end-of-flags, git global options, and flags in any operand position.
 if (hasGitPushForceFlag(command)) process.exit(0)
 
-// Derive a per-repo sentinel path keyed on the git root (or cwd as fallback)
+// Derive a per-repo sentinel path using shared canonical-path hashing.
+// Uses git root when available, falls back to cwd for non-git directories.
 const cwd: string = (input?.tool_input?.cwd as string) ?? process.cwd()
 const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
-const repoKey = createHash("sha1")
-  .update(repoRoot || cwd)
-  .digest("hex")
-  .slice(0, 12)
+const repoKey = getCanonicalPathHash(repoRoot || cwd)
 const sentinelPath = `/tmp/swiz-push-cooldown-${repoKey}.timestamp`
 
 // Read last push time
