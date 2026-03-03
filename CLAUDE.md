@@ -176,7 +176,7 @@ Follow this order for every unit of work. Deviating from it causes hook blocks.
 - Step 8 uses `swiz ci-wait` for timeout-based polling (replaces manual gh run watch/view)
 - **DO NOT** use fixed sleeps, manual polling, or `--force-with-lease` to bypass cooldown — use `swiz push-wait` instead
 - No TaskUpdate/TaskList calls at steps 7–10
-- **DON'T stop or declare work done after step 3 alone** — a commit without a push is incomplete work. The stop hook blocks every stop attempt until origin is up to date. Always complete steps 5–10 before stopping.
+- **DON'T stop or declare work done after step 3 alone** — a commit without a push is incomplete work. The stop hook blocks every stop attempt until origin is up to date. Always complete steps 5–10 before stopping. Even when waiting for explicit push approval, do not attempt to stop — the `stop-git-status` hook will block until `git log origin/main..HEAD` is empty.
 - **DO** treat push as inseparable from commit — after any `/commit` skill or manual `git commit`, immediately continue with steps 5–10 (capture SHA → log review → push → CI wait → verify exit code). The stop hook will block every stop attempt until `origin/main` is up to date.
 
 ## Push and CI
