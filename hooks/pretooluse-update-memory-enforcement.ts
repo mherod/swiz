@@ -6,7 +6,7 @@
 // Cooldown: if any CLAUDE.md (or MEMORY.md) in the project tree was modified
 // within COOLDOWN_MS, skip enforcement — the agent is actively maintaining memory.
 
-import { stat } from "node:fs/promises"
+import { readdir, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import {
@@ -108,6 +108,29 @@ async function isMemoryRecentlyUpdated(cwd: string): Promise<boolean> {
     }
   }
   return false
+}
+
+/**
+ * Returns true if the current session has at least one task with status
+ * "in_progress". When true, enforcement is deferred — the agent is actively
+ * working on a task and should not be interrupted by memory-update detours.
+ * Enforcement resumes naturally when no active task remains.
+ */
+async function hasActiveTask(sessionId: string | undefined): Promise<boolean> {
+  if (!sessionId) return false
+  const home = process.env.HOME
+  if (!home) return false
+  const tasksDir = join(home, ".claude", "tasks", sessionId)
+  const files = await readdir(tasksDir).catch(() => [] as string[])
+  const jsonFiles = files.filter((f) => f.endsWith(".json"))
+  if (jsonFiles.length === 0) return false
+  return Promise.any(
+    jsonFiles.map(async (f) => {
+      const data = await Bun.file(join(tasksDir, f)).json()
+      if (data?.status === "in_progress") return true
+      throw new Error("not active")
+    })
+  ).catch(() => false)
 }
 
 function scanTranscript(lines: string[], startIndex: number): EnforcementState {
@@ -212,6 +235,12 @@ async function main(): Promise<void> {
   // Cooldown: if a memory file was recently updated, the agent is actively
   // maintaining memory — skip enforcement to avoid cascading re-triggers.
   if (await isMemoryRecentlyUpdated(input.cwd ?? process.cwd())) return
+
+  // Active task exemption: if the session has an in_progress task, the agent is
+  // actively working on a feature and the stop hook fired for routine workflow
+  // reasons (uncommitted changes, unpushed commits) — not a novel violation.
+  // Defer enforcement until the task completes naturally.
+  if (await hasActiveTask(input.session_id)) return
 
   const state = scanTranscript(lines, lastTriggerIndex)
   if (state.skillReadComplete && state.markdownWriteComplete) return

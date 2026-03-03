@@ -53,12 +53,15 @@ interface HookResult {
   json: Record<string, unknown> | null
 }
 
-async function runHook(stdinPayload: Record<string, unknown>): Promise<HookResult> {
+async function runHook(
+  stdinPayload: Record<string, unknown>,
+  extraEnv?: Record<string, string>
+): Promise<HookResult> {
   const proc = Bun.spawn(["bun", HOOK], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: process.env,
+    env: { ...process.env, ...extraEnv },
   })
   proc.stdin.write(JSON.stringify(stdinPayload))
   proc.stdin.end()
@@ -284,6 +287,127 @@ describe("pretooluse-update-memory-enforcement", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toBe("") // allowed — cooldown active
+  })
+
+  describe("in-progress task exemption", () => {
+    test("skips enforcement when session has an in_progress task", async () => {
+      const dir = await createProjectDir()
+      const fakeHome = await createTempDir()
+      const sessionId = `test-session-${Date.now()}`
+      const tasksDir = join(fakeHome, ".claude", "tasks", sessionId)
+      await Bun.write(
+        join(tasksDir, "task-1.json"),
+        JSON.stringify({ id: "1", status: "in_progress", subject: "Implement fix" })
+      )
+
+      const transcript = await createTranscript(dir, [
+        hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+        // No compliance evidence — but exemption should skip enforcement
+      ])
+
+      const result = await runHook(
+        {
+          cwd: dir,
+          tool_name: "Edit",
+          tool_input: { file_path: "src/app.ts", new_string: "export const x = 1\n" },
+          transcript_path: transcript,
+          session_id: sessionId,
+        },
+        { HOME: fakeHome }
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe("") // skipped — active task in progress
+    })
+
+    test("enforces when session has only completed tasks (no in_progress)", async () => {
+      const dir = await createProjectDir()
+      const fakeHome = await createTempDir()
+      const sessionId = `test-session-${Date.now()}`
+      const tasksDir = join(fakeHome, ".claude", "tasks", sessionId)
+      await Bun.write(
+        join(tasksDir, "task-1.json"),
+        JSON.stringify({ id: "1", status: "completed", subject: "Done task" })
+      )
+
+      const transcript = await createTranscript(dir, [
+        hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+      ])
+
+      const result = await runHook(
+        {
+          cwd: dir,
+          tool_name: "Edit",
+          tool_input: { file_path: "src/app.ts", new_string: "export const x = 1\n" },
+          transcript_path: transcript,
+          session_id: sessionId,
+        },
+        { HOME: fakeHome }
+      )
+
+      expect(result.exitCode).toBe(0)
+      const hso = result.json?.hookSpecificOutput as Record<string, unknown>
+      expect(hso?.permissionDecision).toBe("deny") // enforcement active — no in_progress tasks
+    })
+
+    test("enforces when session has no task files", async () => {
+      const dir = await createProjectDir()
+      const fakeHome = await createTempDir()
+      const sessionId = `test-session-${Date.now()}`
+      // No tasks directory created for this session
+
+      const transcript = await createTranscript(dir, [
+        hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+      ])
+
+      const result = await runHook(
+        {
+          cwd: dir,
+          tool_name: "Edit",
+          tool_input: { file_path: "src/app.ts", new_string: "export const x = 1\n" },
+          transcript_path: transcript,
+          session_id: sessionId,
+        },
+        { HOME: fakeHome }
+      )
+
+      expect(result.exitCode).toBe(0)
+      const hso = result.json?.hookSpecificOutput as Record<string, unknown>
+      expect(hso?.permissionDecision).toBe("deny") // enforcement active — no task directory
+    })
+
+    test("skips enforcement when one task is in_progress and another is completed", async () => {
+      const dir = await createProjectDir()
+      const fakeHome = await createTempDir()
+      const sessionId = `test-session-${Date.now()}`
+      const tasksDir = join(fakeHome, ".claude", "tasks", sessionId)
+      await Bun.write(
+        join(tasksDir, "task-1.json"),
+        JSON.stringify({ id: "1", status: "completed", subject: "Done task" })
+      )
+      await Bun.write(
+        join(tasksDir, "task-2.json"),
+        JSON.stringify({ id: "2", status: "in_progress", subject: "Active work" })
+      )
+
+      const transcript = await createTranscript(dir, [
+        hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
+      ])
+
+      const result = await runHook(
+        {
+          cwd: dir,
+          tool_name: "Bash",
+          tool_input: { command: "git diff" },
+          transcript_path: transcript,
+          session_id: sessionId,
+        },
+        { HOME: fakeHome }
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe("") // skipped — still has active task
+    })
   })
 
   describe("git repo + CLAUDE.md guard", () => {
