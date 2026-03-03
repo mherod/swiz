@@ -252,6 +252,31 @@ describe("dispatch.ts unit tests", () => {
     })
   })
 
+  describe("cooldownSeconds configuration", () => {
+    it("hooks without cooldownSeconds are not throttled", () => {
+      const allHooks = manifest.flatMap((g) => g.hooks)
+      const withoutCooldown = allHooks.filter((h) => !h.cooldownSeconds)
+      expect(withoutCooldown.length).toBeGreaterThan(0)
+    })
+
+    it("cooldownSeconds is a positive number when set", () => {
+      const allHooks = manifest.flatMap((g) => g.hooks)
+      allHooks.forEach((hook) => {
+        if (hook.cooldownSeconds !== undefined) {
+          expect(typeof hook.cooldownSeconds).toBe("number")
+          expect(hook.cooldownSeconds).toBeGreaterThan(0)
+        }
+      })
+    })
+
+    it("stop-personal-repo-issues has a 5-minute cooldown", () => {
+      const stopGroup = manifest.find((g) => g.event === "stop")
+      const hook = stopGroup?.hooks.find((h) => h.file === "stop-personal-repo-issues.ts")
+      expect(hook).toBeDefined()
+      expect(hook?.cooldownSeconds).toBe(300)
+    })
+  })
+
   describe("event type coverage", () => {
     it("has hooks for all major events", () => {
       const events = manifest.map((g) => g.event)

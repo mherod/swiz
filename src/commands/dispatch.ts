@@ -1,4 +1,4 @@
-import { appendFileSync } from "node:fs"
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import {
   computeTranscriptSummary,
@@ -50,6 +50,47 @@ function logHeader(
   log(`\n── ${ts} ── ${event} (hookEventName=${hookEventName}) ──`)
   if (toolName) log(`   tool: ${toolName}`)
   if (trigger) log(`   trigger: ${trigger}`)
+}
+
+// ─── Per-hook cooldown ───────────────────────────────────────────────────────
+// Prevents noisy hooks from running more than once per cooldownSeconds window.
+// Sentinel files are scoped per hook file + project cwd to avoid cross-project
+// interference (e.g. stop-personal-repo-issues firing for repo A shouldn't
+// suppress it for repo B).
+
+export function hookCooldownPath(hookFile: string, cwd: string): string {
+  const key = Bun.hash(hookFile + cwd).toString(16)
+  return `/tmp/swiz-hook-cooldown-${key}.timestamp`
+}
+
+export function isWithinCooldown(hookFile: string, cooldownSeconds: number, cwd: string): boolean {
+  const sentinelPath = hookCooldownPath(hookFile, cwd)
+  if (!existsSync(sentinelPath)) return false
+  try {
+    const raw = readFileSync(sentinelPath, "utf8").trim()
+    const lastRun = parseInt(raw, 10)
+    if (isNaN(lastRun)) return false
+    return Date.now() - lastRun < cooldownSeconds * 1000
+  } catch {
+    return false
+  }
+}
+
+export function markHookCooldown(hookFile: string, cwd: string): void {
+  try {
+    writeFileSync(hookCooldownPath(hookFile, cwd), String(Date.now()))
+  } catch {
+    // Non-fatal: if sentinel write fails the hook just runs again next time
+  }
+}
+
+export function extractCwd(payloadStr: string): string {
+  try {
+    const parsed = JSON.parse(payloadStr) as Record<string, unknown>
+    return (parsed.cwd as string) || ""
+  } catch {
+    return ""
+  }
 }
 
 // ─── Cross-agent matcher ─────────────────────────────────────────────────────
@@ -178,12 +219,18 @@ function launchAsyncHooks(groups: HookGroup[], payloadStr: string): void {
  *  Async hooks are launched first so they run even if a deny short-circuits. */
 async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<void> {
   launchAsyncHooks(groups, payloadStr)
+  const cwd = extractCwd(payloadStr)
   const hints: string[] = []
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
+      if (hook.cooldownSeconds && isWithinCooldown(hook.file, hook.cooldownSeconds, cwd)) {
+        log(`   ⏭ ${hook.file} [cooldown active, skipping]`)
+        continue
+      }
       log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`)
       const resp = await runHook(hook.file, payloadStr, hook.timeout)
+      if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
       if (resp && isDeny(resp)) {
         log(`   ✗ DENY from ${hook.file}`)
         console.log(JSON.stringify(resp))
@@ -221,11 +268,17 @@ async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<v
  *  Async hooks are launched first so they run even if a blocker short-circuits. */
 async function runBlocking(groups: HookGroup[], payloadStr: string): Promise<void> {
   launchAsyncHooks(groups, payloadStr)
+  const cwd = extractCwd(payloadStr)
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
+      if (hook.cooldownSeconds && isWithinCooldown(hook.file, hook.cooldownSeconds, cwd)) {
+        log(`   ⏭ ${hook.file} [cooldown active, skipping]`)
+        continue
+      }
       log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`)
       const resp = await runHook(hook.file, payloadStr, hook.timeout)
+      if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
       if (resp && isBlock(resp)) {
         log(`   ✗ BLOCK from ${hook.file}`)
         console.log(JSON.stringify(resp))
@@ -245,12 +298,18 @@ async function runContext(
   eventName: string
 ): Promise<void> {
   launchAsyncHooks(groups, payloadStr)
+  const cwd = extractCwd(payloadStr)
   const contexts: string[] = []
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
+      if (hook.cooldownSeconds && isWithinCooldown(hook.file, hook.cooldownSeconds, cwd)) {
+        log(`   ⏭ ${hook.file} [cooldown active, skipping]`)
+        continue
+      }
       log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`)
       const resp = await runHook(hook.file, payloadStr, hook.timeout)
+      if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
       if (!resp) {
         log(`   ✓ ${hook.file} (no output)`)
         continue
