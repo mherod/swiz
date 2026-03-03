@@ -8,12 +8,15 @@ import {
 import { findSessions, projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
-type SettingKey = "autoContinue" | "pushGate" | "sandboxedEdits"
-type Action = "show" | "enable" | "disable"
+type BooleanSettingKey = "autoContinue" | "pushGate" | "sandboxedEdits"
+type NumericSettingKey = "prAgeGateMinutes"
+type SettingKey = BooleanSettingKey | NumericSettingKey
+type Action = "show" | "enable" | "disable" | "set"
 
 interface ParsedSettingsArgs {
   action: Action
   settingArg?: string
+  settingValue?: string
   targetDir: string
   sessionRequested: boolean
   sessionQuery: string | null
@@ -24,8 +27,8 @@ const PROJECTS_DIR = join(HOME, ".claude", "projects")
 
 function usage(): string {
   return (
-    "Usage: swiz settings [show | enable <setting> | disable <setting>] [--session [id]] [--dir <path>]\n" +
-    "Supported settings: auto-continue, push-gate, sandboxed-edits"
+    "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value>] [--session [id]] [--dir <path>]\n" +
+    "Supported settings: auto-continue, push-gate, sandboxed-edits, pr-age-gate (minutes, 0 to disable)"
   )
 }
 
@@ -35,6 +38,15 @@ function parseSetting(raw: string | undefined): SettingKey {
   if (value === "auto-continue" || value === "autocontinue" || value === "auto_continue") {
     return "autoContinue"
   }
+  if (
+    value === "pr-age-gate" ||
+    value === "pragegate" ||
+    value === "pr_age_gate" ||
+    value === "pragegateminutes" ||
+    value === "pr-age-gate-minutes"
+  ) {
+    return "prAgeGateMinutes"
+  }
   if (value === "push-gate" || value === "pushgate" || value === "push_gate") {
     return "pushGate"
   }
@@ -42,6 +54,10 @@ function parseSetting(raw: string | undefined): SettingKey {
     return "sandboxedEdits"
   }
   throw new Error(`Unknown setting: ${raw}\n${usage()}`)
+}
+
+function isNumericSetting(key: SettingKey): key is NumericSettingKey {
+  return key === "prAgeGateMinutes"
 }
 
 function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
@@ -75,13 +91,19 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
   }
 
   const rawAction = (positionals[0] ?? "show").toLowerCase()
-  if (rawAction !== "show" && rawAction !== "enable" && rawAction !== "disable") {
+  if (
+    rawAction !== "show" &&
+    rawAction !== "enable" &&
+    rawAction !== "disable" &&
+    rawAction !== "set"
+  ) {
     throw new Error(`Unknown subcommand: ${positionals[0]}\n${usage()}`)
   }
 
   return {
-    action: rawAction,
+    action: rawAction as Action,
     settingArg: positionals[1],
+    settingValue: positionals[2],
     targetDir,
     sessionRequested,
     sessionQuery,
@@ -107,26 +129,34 @@ async function resolveSessionId(query: string | null, targetDir: string): Promis
 }
 
 function printSettings(
-  autoContinue: boolean,
-  pushGate: boolean,
-  sandboxedEdits: boolean,
+  effective: {
+    autoContinue: boolean
+    prAgeGateMinutes: number
+    pushGate: boolean
+    sandboxedEdits: boolean
+    source: "global" | "session"
+  },
   path: string | null,
   fileExists: boolean,
-  sessionId: string | null,
-  source: "global" | "session"
+  sessionId: string | null
 ): void {
   console.log("\n  swiz settings\n")
   if (!path) {
     console.log("  config: unavailable (HOME not set)")
   } else {
-    const source = fileExists ? "custom" : "defaults"
-    console.log(`  config: ${path} (${source})`)
+    const sourceLabel = fileExists ? "custom" : "defaults"
+    console.log(`  config: ${path} (${sourceLabel})`)
   }
   if (sessionId) console.log(`  scope: session ${sessionId}`)
-  const sourceLabel = source === "session" ? "session override" : "global/default"
-  console.log(`  auto-continue:   ${autoContinue ? "enabled" : "disabled"} (${sourceLabel})`)
-  console.log(`  push-gate:       ${pushGate ? "enabled" : "disabled"} (global)`)
-  console.log(`  sandboxed-edits: ${sandboxedEdits ? "enabled" : "disabled"} (global)\n`)
+  const scopeLabel = effective.source === "session" ? "session override" : "global/default"
+  console.log(
+    `  auto-continue:   ${effective.autoContinue ? "enabled" : "disabled"} (${scopeLabel})`
+  )
+  const ageGateLabel =
+    effective.prAgeGateMinutes > 0 ? `${effective.prAgeGateMinutes} minutes` : "disabled"
+  console.log(`  pr-age-gate:     ${ageGateLabel} (global)`)
+  console.log(`  push-gate:       ${effective.pushGate ? "enabled" : "disabled"} (global)`)
+  console.log(`  sandboxed-edits: ${effective.sandboxedEdits ? "enabled" : "disabled"} (global)\n`)
 }
 
 async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
@@ -137,19 +167,16 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
   const effective = getEffectiveSwizSettings(settings, sessionId)
   const path = getSwizSettingsPath()
   const fileExists = path ? await Bun.file(path).exists() : false
-  printSettings(
-    effective.autoContinue,
-    effective.pushGate,
-    effective.sandboxedEdits,
-    path,
-    fileExists,
-    sessionId,
-    effective.source
-  )
+  printSettings(effective, path, fileExists, sessionId)
 }
 
-async function setSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise<void> {
+async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise<void> {
   const key = parseSetting(parsed.settingArg)
+  if (isNumericSetting(key)) {
+    throw new Error(
+      `"${parsed.settingArg}" is a numeric setting. Use: swiz settings set ${parsed.settingArg} <value>\n${usage()}`
+    )
+  }
   const sessionId = parsed.sessionRequested
     ? await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
     : null
@@ -173,6 +200,27 @@ async function setSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise
   console.log(`  Saved: ${path}\n`)
 }
 
+async function setNumericSetting(parsed: ParsedSettingsArgs): Promise<void> {
+  const key = parseSetting(parsed.settingArg)
+  if (!parsed.settingValue) {
+    throw new Error(
+      `Missing value. Usage: swiz settings set ${parsed.settingArg} <number>\n${usage()}`
+    )
+  }
+  const value = parseInt(parsed.settingValue, 10)
+  if (isNaN(value) || value < 0) {
+    throw new Error(
+      `Invalid value "${parsed.settingValue}". Must be a non-negative integer.\n${usage()}`
+    )
+  }
+  const current = await readSwizSettings({ strict: true })
+  const next = { ...current, [key]: value }
+  const path = await writeSwizSettings(next)
+  const label = key === "prAgeGateMinutes" && value === 0 ? "disabled" : `${value}`
+  console.log(`\n  Set ${parsed.settingArg} = ${label}`)
+  console.log(`  Saved: ${path}\n`)
+}
+
 export const settingsCommand: Command = {
   name: "settings",
   description: "View and modify swiz global and per-session settings",
@@ -191,6 +239,10 @@ export const settingsCommand: Command = {
       description: "Allow file edits anywhere on the filesystem",
     },
     {
+      flags: "set pr-age-gate <minutes>",
+      description: "Set PR merge grace period in minutes (0 to disable, default: 10)",
+    },
+    {
       flags: "--session, -s [id]",
       description: "Target session scope (latest for --dir by default, or prefix match by id)",
     },
@@ -202,9 +254,11 @@ export const settingsCommand: Command = {
       case "show":
         return showSettings(parsed)
       case "enable":
-        return setSetting(true, parsed)
+        return setBooleanSetting(true, parsed)
       case "disable":
-        return setSetting(false, parsed)
+        return setBooleanSetting(false, parsed)
+      case "set":
+        return setNumericSetting(parsed)
     }
   },
 }

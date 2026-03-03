@@ -7,6 +7,7 @@ export interface SessionSwizSettings {
 
 export interface SwizSettings {
   autoContinue: boolean
+  prAgeGateMinutes: number
   pushGate: boolean
   sandboxedEdits: boolean
   sessions: Record<string, SessionSwizSettings>
@@ -14,6 +15,7 @@ export interface SwizSettings {
 
 export interface EffectiveSwizSettings {
   autoContinue: boolean
+  prAgeGateMinutes: number
   pushGate: boolean
   sandboxedEdits: boolean
   source: "global" | "session"
@@ -21,6 +23,7 @@ export interface EffectiveSwizSettings {
 
 export const DEFAULT_SETTINGS: SwizSettings = {
   autoContinue: true,
+  prAgeGateMinutes: 10,
   pushGate: false,
   sandboxedEdits: true,
   sessions: {},
@@ -62,6 +65,10 @@ function normalizeSettings(value: unknown): SwizSettings {
   return {
     autoContinue:
       typeof obj.autoContinue === "boolean" ? obj.autoContinue : DEFAULT_SETTINGS.autoContinue,
+    prAgeGateMinutes:
+      typeof obj.prAgeGateMinutes === "number" && obj.prAgeGateMinutes >= 0
+        ? obj.prAgeGateMinutes
+        : DEFAULT_SETTINGS.prAgeGateMinutes,
     pushGate: typeof obj.pushGate === "boolean" ? obj.pushGate : DEFAULT_SETTINGS.pushGate,
     sandboxedEdits:
       typeof obj.sandboxedEdits === "boolean"
@@ -100,6 +107,7 @@ export function getEffectiveSwizSettings(
   if (sessionId && settings.sessions[sessionId]) {
     return {
       autoContinue: settings.sessions[sessionId]!.autoContinue,
+      prAgeGateMinutes: settings.prAgeGateMinutes,
       pushGate: settings.pushGate,
       sandboxedEdits: settings.sandboxedEdits,
       source: "session",
@@ -107,6 +115,7 @@ export function getEffectiveSwizSettings(
   }
   return {
     autoContinue: settings.autoContinue,
+    prAgeGateMinutes: settings.prAgeGateMinutes,
     pushGate: settings.pushGate,
     sandboxedEdits: settings.sandboxedEdits,
     source: "global",
