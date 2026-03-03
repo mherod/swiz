@@ -1,5 +1,6 @@
 import { dirname, join } from "node:path"
-import { AGENTS, type AgentDef, getAgentByFlag } from "../agents.ts"
+import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, getAgentByFlag } from "../agents.ts"
+import { validateDispatchRoutes } from "../manifest.ts"
 import type { Command } from "../types.ts"
 
 const SWIZ_ROOT = dirname(Bun.main)
@@ -135,6 +136,8 @@ export const uninstallCommand: Command = {
     { flags: "(no flags)", description: "Uninstall from all agents" },
   ],
   async run(args) {
+    validateDispatchRoutes((await import("./dispatch.ts")).DISPATCH_ROUTES, CONFIGURABLE_AGENTS)
+
     const dryRun = args.includes("--dry-run")
     const targets = getAgentByFlag(args)
 
