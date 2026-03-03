@@ -26,60 +26,49 @@ async function getCiRunConclusion(commitSha: string): Promise<string | null> {
   }
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
 async function waitForCiCompletion(
   commitSha: string,
   timeoutSeconds: number = 300
 ): Promise<{ conclusion: string; elapsed: number }> {
   const startTime = Date.now()
   const timeoutMs = timeoutSeconds * 1000
+  const pollInterval = 2000
+  let lastLogged = 0
+  let foundAnyRun = false
 
-  return new Promise((resolve, reject) => {
-    const pollInterval = 2000 // 2 second poll interval
-    let lastLogged = 0
-    let foundAnyRun = false
+  while (true) {
+    const elapsed = Date.now() - startTime
 
-    const pollTimer = setInterval(async () => {
-      const elapsed = Date.now() - startTime
+    if (elapsed - lastLogged >= 10000) {
+      console.log(`⏳ Waiting for CI... (${Math.round(elapsed / 1000)}s)`)
+      lastLogged = elapsed
+    }
 
-      // Log progress every 10 seconds
-      if (elapsed - lastLogged >= 10000) {
-        console.log(`⏳ Waiting for CI... (${Math.round(elapsed / 1000)}s)`)
-        lastLogged = elapsed
+    if (elapsed > timeoutMs) {
+      if (foundAnyRun) {
+        throw new Error(
+          `CI run still running after ${timeoutSeconds}s timeout (run exists but has not completed)`
+        )
       }
+      throw new Error(
+        `No CI run found for commit ${commitSha} within ${timeoutSeconds}s timeout (run may not have been created yet)`
+      )
+    }
 
-      // Check timeout
-      if (elapsed > timeoutMs) {
-        clearInterval(pollTimer)
-        if (foundAnyRun) {
-          reject(
-            new Error(
-              `CI run still running after ${timeoutSeconds}s timeout (run exists but has not completed)`
-            )
-          )
-        } else {
-          reject(
-            new Error(
-              `No CI run found for commit ${commitSha} within ${timeoutSeconds}s timeout (run may not have been created yet)`
-            )
-          )
-        }
-        return
-      }
+    const conclusion = await getCiRunConclusion(commitSha)
 
-      const conclusion = await getCiRunConclusion(commitSha)
+    if (conclusion !== null) {
+      foundAnyRun = true
+    }
 
-      // Track that we found a run (even if still running)
-      if (conclusion !== null) {
-        foundAnyRun = true
-      }
+    if (conclusion && conclusion.length > 0) {
+      return { conclusion, elapsed }
+    }
 
-      // conclusion is "success", "failure", or null/empty if still running
-      if (conclusion && conclusion.length > 0) {
-        clearInterval(pollTimer)
-        resolve({ conclusion, elapsed })
-      }
-    }, pollInterval)
-  })
+    await sleep(pollInterval)
+  }
 }
 
 // ─── Arg parsing ──────────────────────────────────────────────────────────
