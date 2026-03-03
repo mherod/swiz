@@ -1,6 +1,5 @@
 import { join } from "node:path"
-import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS } from "../agents.ts"
-import { validateDispatchRoutes } from "../manifest.ts"
+import { AGENTS, type AgentDef } from "../agents.ts"
 import type { Command } from "../types.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -205,8 +204,6 @@ export const hooksCommand: Command = {
     { flags: "<event> <script>", description: "Print the source of a hook script by name" },
   ],
   async run(args) {
-    validateDispatchRoutes((await import("./dispatch.ts")).DISPATCH_ROUTES, CONFIGURABLE_AGENTS)
-
     const allSettings = await loadAllSettings()
     const [first, second] = args
 

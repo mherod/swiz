@@ -1,4 +1,6 @@
+import { CONFIGURABLE_AGENTS } from "./agents.ts"
 import { createHelpCommand } from "./commands/help.ts"
+import { validateDispatchRoutes } from "./manifest.ts"
 import type { Command } from "./types.ts"
 
 const commands = new Map<string, Command>()
@@ -10,6 +12,10 @@ export function registerCommand(command: Command) {
 async function run() {
   const help = createHelpCommand(commands)
   commands.set("help", help)
+
+  // Validate manifest/route/agent symmetry before any command runs
+  const { DISPATCH_ROUTES } = await import("./commands/dispatch.ts")
+  validateDispatchRoutes(DISPATCH_ROUTES, CONFIGURABLE_AGENTS)
 
   const [commandName, ...rest] = process.argv.slice(2)
 

@@ -1,7 +1,6 @@
 import { dirname, join } from "node:path"
-import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS } from "../agents.ts"
+import { AGENTS, type AgentDef } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
-import { validateDispatchRoutes } from "../manifest.ts"
 import type { Command } from "../types.ts"
 
 const SWIZ_ROOT = dirname(Bun.main)
@@ -145,8 +144,6 @@ export const statusCommand: Command = {
   description: "Show swiz installation status across agents",
   usage: "swiz status",
   async run() {
-    validateDispatchRoutes((await import("./dispatch.ts")).DISPATCH_ROUTES, CONFIGURABLE_AGENTS)
-
     console.log(`\n  ${BOLD}swiz status${RESET}\n`)
 
     const current = detectCurrentAgent()

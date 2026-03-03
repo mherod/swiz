@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, getAgentByFlag, translateEvent } from "../agents.ts"
-import { DISPATCH_TIMEOUTS, manifest, validateDispatchRoutes } from "../manifest.ts"
+import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import type { Command } from "../types.ts"
 
 const SWIZ_ROOT = dirname(Bun.main)
@@ -490,13 +490,6 @@ export const installCommand: Command = {
     { flags: "(no flags)", description: "Install for all detected agents" },
   ],
   async run(args) {
-    // Validate routing symmetry before generating any configs
-    validateDispatchRoutes(
-      // Import DISPATCH_ROUTES lazily to avoid circular dependency
-      (await import("./dispatch.ts")).DISPATCH_ROUTES,
-      AGENTS.filter((a) => a.hooksConfigurable)
-    )
-
     const dryRun = args.includes("--dry-run")
     const mergeTool = args.includes("--merge-tool")
     const targets = getAgentByFlag(args)
