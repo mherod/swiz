@@ -99,31 +99,46 @@ function sanitizeSessionId(sessionId: string | undefined): string | null {
 }
 
 /**
- * Get cooldown file path including PID to avoid cross-invocation collisions in tests.
- * In production, each session would have a unique session_id, but in tests they share one.
- * Including PID ensures each hook invocation can track its own cooldown independently.
+ * Get cooldown file path using session_id and repo for stable persistence.
+ * Production: same session + same repo = same cooldown file (persists across invocations)
+ * Tests: different test repos = different cooldown files (no collisions)
+ * Uses Bun.hash() for proper differentiation even with path prefixes.
  */
-function getCooldownFilePath(sessionId: string): string {
-  return `/tmp/stop-personal-repo-issues-${sessionId}-${process.pid}.cooldown`
+function getCooldownFilePath(sessionId: string, cwd: string): string {
+  // Create a hash of the cwd path for repo-level uniqueness.
+  // Bun.hash() produces good differentiation for different paths.
+  const cwdHash = Bun.hash(cwd).toString(16).slice(0, 8)
+  return `/tmp/stop-personal-repo-issues-${sessionId}-${cwdHash}.cooldown`
 }
 
 /**
  * Check if the hook blocked within the last COOLDOWN_SECONDS.
  * Returns true if still in cooldown (allow stop), false if cooldown expired or no session.
+ * Cooldown is per-repo-per-session to prevent production persistence while keeping tests isolated.
  * Defensive: treats any errors as "no cooldown" to ensure hook continues working.
  */
-async function isInCooldown(sessionId: string | null): Promise<boolean> {
+async function isInCooldown(sessionId: string | null, cwd: string): Promise<boolean> {
   // No session ID means no cooldown tracking
   if (!sessionId || typeof sessionId !== "string") return false
 
-  const cooldownFile = getCooldownFilePath(sessionId)
+  const cooldownFile = getCooldownFilePath(sessionId, cwd)
   const now = Date.now()
 
   try {
     const stat = await Bun.file(cooldownFile).stat()
     // If stat succeeds and has mtime, check if within cooldown window
     if (stat?.mtimeMs) {
-      return now - stat.mtimeMs < COOLDOWN_SECONDS * 1000
+      const ageMs = now - stat.mtimeMs
+      if (ageMs < COOLDOWN_SECONDS * 1000) {
+        // Still in cooldown window
+        return true
+      }
+      // Stale file — delete it to clean up
+      try {
+        await Bun.file(cooldownFile).unlink()
+      } catch {
+        // Best-effort cleanup, ignore errors
+      }
     }
     return false
   } catch {
@@ -136,10 +151,10 @@ async function isInCooldown(sessionId: string | null): Promise<boolean> {
 /**
  * Record that the hook is blocking now, starting a new cooldown.
  */
-async function updateCooldown(sessionId: string | null): Promise<void> {
+async function updateCooldown(sessionId: string | null, cwd: string): Promise<void> {
   if (!sessionId || typeof sessionId !== "string") return
 
-  const cooldownFile = getCooldownFilePath(sessionId)
+  const cooldownFile = getCooldownFilePath(sessionId, cwd)
   try {
     await Bun.write(cooldownFile, "")
   } catch {
@@ -226,7 +241,7 @@ async function main(): Promise<void> {
     if (!(await isGitHubRemote(cwd))) return
 
     // Check if already blocked within cooldown window
-    if (await isInCooldown(sessionId)) return
+    if (await isInCooldown(sessionId, cwd)) return
 
     // Extract owner from remote URL
     const remoteUrl = await git(["remote", "get-url", "origin"], cwd)
@@ -303,7 +318,7 @@ async function main(): Promise<void> {
     )
 
     // Update cooldown before blocking
-    await updateCooldown(sessionId)
+    await updateCooldown(sessionId, cwd)
     blockStop(reasonLines.join("\n"))
   } catch {
     // On error, allow stop (fail open)
