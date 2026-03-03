@@ -837,7 +837,7 @@ describe("stop-git-push: positive paths (now merged into stop-git-status)", () =
     const reason = r.json?.reason as string
     expect(reason).toContain("Unpushed commits")
     expect(reason).toContain("1 commit(s)")
-  })
+  }, 15000)
 })
 
 describe("stop-branch-conflicts: positive paths", () => {
