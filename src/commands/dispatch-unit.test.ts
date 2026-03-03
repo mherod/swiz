@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { manifest } from "../manifest.ts"
+import { filterPrMergeModeHooks } from "./dispatch.ts"
 
 describe("dispatch.ts unit tests", () => {
   describe("cross-agent tool matching patterns", () => {
@@ -117,6 +118,46 @@ describe("dispatch.ts unit tests", () => {
       const stopGroup = manifest.find((g) => g.event === "stop")
       expect(stopGroup).toBeDefined()
       expect(stopGroup?.hooks.length).toBeGreaterThan(10)
+    })
+  })
+
+  describe("pr-merge-mode hook filtering", () => {
+    it("removes merge-oriented hooks when pr-merge-mode is disabled", () => {
+      const groups = [
+        {
+          event: "stop",
+          hooks: [{ file: "stop-github-ci.ts" }, { file: "stop-non-default-branch.ts" }],
+        },
+        {
+          event: "postToolUse",
+          matcher: "Bash",
+          hooks: [
+            { file: "posttooluse-pr-context.ts" },
+            { file: "posttooluse-git-task-autocomplete.ts" },
+          ],
+        },
+      ]
+
+      const filtered = filterPrMergeModeHooks(groups, false)
+
+      expect(filtered).toHaveLength(2)
+      expect(filtered[0]?.hooks.map((hook) => hook.file)).toEqual(["stop-non-default-branch.ts"])
+      expect(filtered[1]?.hooks.map((hook) => hook.file)).toEqual([
+        "posttooluse-git-task-autocomplete.ts",
+      ])
+    })
+
+    it("leaves hooks untouched when pr-merge-mode is enabled", () => {
+      const groups = [
+        {
+          event: "stop",
+          hooks: [{ file: "stop-github-ci.ts" }, { file: "stop-non-default-branch.ts" }],
+        },
+      ]
+
+      const filtered = filterPrMergeModeHooks(groups, true)
+
+      expect(filtered).toEqual(groups)
     })
   })
 

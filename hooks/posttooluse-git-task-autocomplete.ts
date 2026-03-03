@@ -6,13 +6,15 @@
  * task files and marks any pending/in_progress task whose subject contains
  * "Commit" or "Push" (case-insensitive) as completed.
  *
- * After a push, emits additionalContext reminding the agent to create a
- * "Wait for CI and verify pass" task — the only way to affect Claude's
- * in-memory task list is via the hook output channel, not filesystem writes.
+ * After a push, emits additionalContext reminding the agent to create the next
+ * workflow task (either CI follow-through or PR creation, depending on
+ * settings) — the only way to affect Claude's in-memory task list is via the
+ * hook output channel, not filesystem writes.
  */
 
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   GIT_COMMIT_RE,
   GIT_PUSH_RE,
@@ -56,15 +58,20 @@ async function main(): Promise<void> {
     }
   }
 
-  // After a push: emit additionalContext so the agent creates a CI-watching task.
+  // After a push: emit additionalContext so the agent advances the workflow in-memory.
   // File writes cannot affect Claude's in-memory task list — only this output channel can.
   if (isPush) {
     const taskCreateName = toolNameForCurrentAgent("TaskCreate")
+    const settings = await readSwizSettings()
+    const effective = getEffectiveSwizSettings(settings, input.session_id)
+    const additionalContext = effective.prMergeMode
+      ? `git push succeeded. Use ${taskCreateName} to create a "Wait for CI and verify pass" task, then mark it in_progress and monitor CI before stopping.`
+      : `git push succeeded. Use ${taskCreateName} to create an "Open PR for this branch" task, then mark it in_progress and open the pull request before stopping.`
     console.log(
       JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "PostToolUse",
-          additionalContext: `git push succeeded. Use ${taskCreateName} to create a "Wait for CI and verify pass" task, then mark it in_progress and monitor CI before stopping.`,
+          additionalContext,
         },
       })
     )

@@ -10,6 +10,7 @@ import {
   isWriteTool,
 } from "../../hooks/hook-utils.ts"
 import { type HookGroup, manifest } from "../manifest.ts"
+import { getEffectiveSwizSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 
 // ─── Replay trace types ──────────────────────────────────────────────────────
@@ -29,6 +30,14 @@ interface TraceEntry {
 const SWIZ_ROOT = dirname(Bun.main)
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
 const LOG_PATH = "/tmp/swiz-dispatch.log"
+const PR_MERGE_MODE_DISABLED_HOOKS = new Set([
+  "posttooluse-pr-context.ts",
+  "pretooluse-pr-age-gate.ts",
+  "stop-branch-conflicts.ts",
+  "stop-pr-description.ts",
+  "stop-pr-changes-requested.ts",
+  "stop-github-ci.ts",
+])
 
 // ─── Debug logger ────────────────────────────────────────────────────────────
 
@@ -69,7 +78,7 @@ export function isWithinCooldown(hookFile: string, cooldownSeconds: number, cwd:
   try {
     const raw = readFileSync(sentinelPath, "utf8").trim()
     const lastRun = parseInt(raw, 10)
-    if (isNaN(lastRun)) return false
+    if (Number.isNaN(lastRun)) return false
     return Date.now() - lastRun < cooldownSeconds * 1000
   } catch {
     return false
@@ -91,6 +100,32 @@ export function extractCwd(payloadStr: string): string {
   } catch {
     return ""
   }
+}
+
+function countHooks(groups: HookGroup[]): number {
+  return groups.reduce((total, group) => total + group.hooks.length, 0)
+}
+
+export function filterPrMergeModeHooks(groups: HookGroup[], prMergeMode: boolean): HookGroup[] {
+  if (prMergeMode) return groups
+
+  return groups
+    .map((group) => {
+      const hooks = group.hooks.filter((hook) => !PR_MERGE_MODE_DISABLED_HOOKS.has(hook.file))
+      return hooks.length === group.hooks.length ? group : { ...group, hooks }
+    })
+    .filter((group) => group.hooks.length > 0)
+}
+
+async function applyHookSettingFilters(
+  groups: HookGroup[],
+  payload: Record<string, unknown>
+): Promise<HookGroup[]> {
+  const settings = await readSwizSettings()
+  const rawSessionId = payload.session_id ?? payload.sessionId
+  const sessionId = typeof rawSessionId === "string" ? rawSessionId : null
+  const effective = getEffectiveSwizSettings(settings, sessionId)
+  return filterPrMergeModeHooks(groups, effective.prMergeMode)
 }
 
 // ─── Cross-agent matcher ─────────────────────────────────────────────────────
@@ -601,23 +636,24 @@ export const dispatchCommand: Command = {
       const matchingGroups = manifest.filter(
         (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
       )
+      const filteredGroups = await applyHookSettingFilters(matchingGroups, payload)
 
       const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
 
       let traces: TraceEntry[]
       switch (strategy) {
         case "preToolUse":
-          traces = await replayPreToolUse(matchingGroups, payloadStr)
+          traces = await replayPreToolUse(filteredGroups, payloadStr)
           break
         case "blocking":
-          traces = await replayBlocking(matchingGroups, payloadStr)
+          traces = await replayBlocking(filteredGroups, payloadStr)
           break
         case "context":
-          traces = await replayContext(matchingGroups, payloadStr)
+          traces = await replayContext(filteredGroups, payloadStr)
           break
       }
 
-      formatTrace(canonicalEvent, strategy, matchingGroups.length, traces, jsonMode)
+      formatTrace(canonicalEvent, strategy, filteredGroups.length, traces, jsonMode)
       return
     }
 
@@ -668,12 +704,17 @@ export const dispatchCommand: Command = {
     const matchingGroups = manifest.filter(
       (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
     )
+    const filteredGroups = await applyHookSettingFilters(matchingGroups, payload)
 
     log(
       `   matched ${matchingGroups.length} group(s) from ${manifest.filter((g) => g.event === canonicalEvent).length} total`
     )
+    const skippedHooks = countHooks(matchingGroups) - countHooks(filteredGroups)
+    if (skippedHooks > 0) {
+      log(`   skipped ${skippedHooks} PR-merge hook(s) (pr-merge-mode disabled)`)
+    }
 
-    if (matchingGroups.length === 0) return
+    if (filteredGroups.length === 0) return
 
     // ── Pre-compute transcript summary for hooks ──────────────────────────
     // Parse the transcript once and inject the summary into the payload so
@@ -694,13 +735,13 @@ export const dispatchCommand: Command = {
     const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
     switch (strategy) {
       case "preToolUse":
-        await runPreToolUse(matchingGroups, enrichedPayloadStr)
+        await runPreToolUse(filteredGroups, enrichedPayloadStr)
         break
       case "blocking":
-        await runBlocking(matchingGroups, enrichedPayloadStr)
+        await runBlocking(filteredGroups, enrichedPayloadStr)
         break
       case "context":
-        await runContext(matchingGroups, enrichedPayloadStr, hookEventName)
+        await runContext(filteredGroups, enrichedPayloadStr, hookEventName)
         break
     }
   },

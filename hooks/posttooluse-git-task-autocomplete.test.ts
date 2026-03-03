@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 // ─── Hook runner ─────────────────────────────────────────────────────────────
 
@@ -55,6 +58,13 @@ async function runHook(
   }
 }
 
+function createTempHomeWithSettings(settings: Record<string, unknown>): string {
+  const home = mkdtempSync(join(tmpdir(), "swiz-posttooluse-git-task-"))
+  mkdirSync(join(home, ".swiz"), { recursive: true })
+  writeFileSync(join(home, ".swiz", "settings.json"), `${JSON.stringify(settings)}\n`)
+  return home
+}
+
 // ─── git push → additionalContext ────────────────────────────────────────────
 
 describe("posttooluse-git-task-autocomplete: git push emits additionalContext", () => {
@@ -79,6 +89,22 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
     })
     expect(result.exitedCleanly).toBe(true)
     expect(result.additionalContext).toContain("update_plan")
+  })
+
+  test("git push emits PR creation context when pr-merge-mode is disabled", async () => {
+    const home = createTempHomeWithSettings({ prMergeMode: false })
+
+    try {
+      const result = await runHook("git push origin main", "Bash", "test-session-id", {
+        HOME: home,
+      })
+      expect(result.exitedCleanly).toBe(true)
+      expect(result.additionalContext).toBeDefined()
+      expect(result.additionalContext).toContain("Open PR for this branch")
+      expect(result.additionalContext).not.toContain("Wait for CI")
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 
   test("git push in a chained command emits additionalContext", async () => {

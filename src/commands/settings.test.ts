@@ -61,6 +61,7 @@ describe("swiz settings", () => {
     const result = await runSwiz(["settings"], home)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("auto-continue:   enabled")
+    expect(result.stdout).toContain("pr-merge-mode:   enabled")
     expect(result.stdout).toContain("(defaults)")
   })
 
@@ -87,6 +88,17 @@ describe("swiz settings", () => {
     const text = await readFile(configPath, "utf-8")
     const json = JSON.parse(text) as { autoContinue?: boolean }
     expect(json.autoContinue).toBe(true)
+  })
+
+  test("disables pr-merge-mode and persists to user config", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "disable", "pr-merge-mode"], home)
+    expect(result.exitCode).toBe(0)
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { prMergeMode?: boolean }
+    expect(json.prMergeMode).toBe(false)
   })
 
   test("fails for unknown setting key", async () => {
@@ -219,6 +231,7 @@ describe("swiz settings", () => {
     const result = await runSwiz(["settings"], home)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("auto-continue:   disabled")
+    expect(result.stdout).toContain("pr-merge-mode:   enabled")
     expect(result.stdout).toContain("speak:           enabled")
     expect(result.stdout).toContain("narrator-voice:  system default")
     expect(result.stdout).toContain("narrator-speed:  system default")
