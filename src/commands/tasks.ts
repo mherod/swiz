@@ -284,7 +284,8 @@ async function updateStatus(
   sessionId: string,
   taskId: string,
   newStatus: Task["status"],
-  evidence?: string
+  evidence?: string,
+  verifyText?: string
 ) {
   const tasks = await readTasks(sessionId)
   const task = tasks.find((t) => t.id === taskId)
@@ -293,8 +294,18 @@ async function updateStatus(
     throw new Error(`Task #${taskId} not found.`)
   }
 
+  if (verifyText) {
+    const verifyError = verifyTaskSubject(task.subject, verifyText)
+    if (verifyError) throw new Error(verifyError)
+  }
+
   if (newStatus === "completed" && !evidence) {
     throw new Error("Evidence required when completing a task. Use --evidence.")
+  }
+
+  if (evidence) {
+    const validationError = validateEvidence(evidence)
+    if (validationError) throw new Error(validationError)
   }
 
   const oldStatus = task.status
@@ -337,6 +348,65 @@ async function completeAll(sessionId: string) {
   }
 }
 
+// ─── Verification & Evidence ─────────────────────────────────────────────────
+
+const EVIDENCE_PREFIXES = ["commit:", "pr:", "file:", "test:", "note:"]
+
+export function validateEvidence(evidence: string): string | null {
+  if (EVIDENCE_PREFIXES.some((p) => evidence.startsWith(p))) return null
+  return (
+    `Invalid evidence format: "${evidence}"\n` +
+    "Evidence must start with a recognized prefix:\n" +
+    EVIDENCE_PREFIXES.map((p) => `  ${p}<value>`).join("\n") +
+    '\n\nExample: --evidence "commit:abc123f" or --evidence "note:CI green"'
+  )
+}
+
+export function verifyTaskSubject(taskSubject: string, verifyText: string): string | null {
+  const normalizedSubject = taskSubject.toLowerCase().trim()
+  const normalizedVerify = verifyText.toLowerCase().trim()
+  if (normalizedSubject.startsWith(normalizedVerify)) return null
+  return (
+    `Verification failed.\n` +
+    `  Expected subject to start with: "${verifyText}"\n` +
+    `  Actual subject: "${taskSubject}"`
+  )
+}
+
+async function submitEvidence(sessionId: string, taskId: string, evidence: string) {
+  const tasks = await readTasks(sessionId)
+  const task = tasks.find((t) => t.id === taskId)
+
+  if (!task) {
+    throw new Error(`Task #${taskId} not found.`)
+  }
+
+  const validationError = validateEvidence(evidence)
+  if (validationError) {
+    throw new Error(validationError)
+  }
+
+  task.completionEvidence = evidence
+  if (!task.completionTimestamp) {
+    task.completionTimestamp = new Date().toISOString()
+  }
+
+  await writeTask(sessionId, task)
+  await writeAudit(sessionId, {
+    timestamp: new Date().toISOString(),
+    taskId,
+    action: "status_change",
+    oldStatus: task.status,
+    newStatus: task.status,
+    evidence,
+    subject: task.subject,
+  })
+
+  console.log(`\n  ${STATUS_STYLE[task.status].emoji} #${taskId}: evidence submitted`)
+  console.log(`     ${task.subject}`)
+  console.log(`     ${DIM}Evidence: ${evidence}${RESET}\n`)
+}
+
 // ─── Arg parsing ────────────────────────────────────────────────────────────
 
 function extractFlag(args: string[], flag: string): string | undefined {
@@ -376,12 +446,16 @@ export const tasksCommand: Command = {
   name: "tasks",
   description: "View and manage agent tasks",
   usage:
-    "swiz tasks [create|complete|status|complete-all] [--session <id>] [--all-projects] [--evidence <text>]",
+    "swiz tasks [create|complete|evidence|status|complete-all] [--session <id>] [--all-projects] [--evidence <text>] [--verify <text>]",
   options: [
     { flags: "create <subject> <desc>", description: "Create a new task in the current session" },
     {
       flags: "complete <id>",
       description: "Mark a task completed (requires --evidence)",
+    },
+    {
+      flags: "evidence <id> <text>",
+      description: "Submit evidence to a task (commit:, pr:, file:, test:, note:)",
     },
     {
       flags: "status <id> <status>",
@@ -392,7 +466,11 @@ export const tasksCommand: Command = {
     { flags: "--all-projects", description: "Show tasks from all projects, not just cwd" },
     {
       flags: "--evidence <text>",
-      description: "Completion evidence (required for complete/status completed)",
+      description: "Completion evidence (commit:, pr:, file:, test:, note:)",
+    },
+    {
+      flags: "--verify <text>",
+      description: "Verify task subject starts with this text (safety check)",
     },
   ],
   async run(args) {
@@ -443,11 +521,26 @@ export const tasksCommand: Command = {
       case "complete": {
         const taskId = rest[0]
         if (!taskId) {
-          throw new Error("Usage: swiz tasks complete <task-id> [--evidence TEXT]")
+          throw new Error("Usage: swiz tasks complete <task-id> --evidence TEXT [--verify TEXT]")
         }
         const evidence = extractFlag(rest, "--evidence")
+        const verify = extractFlag(rest, "--verify")
         const sessionId = await resolveSession(rest.slice(1))
-        await updateStatus(sessionId, taskId, "completed", evidence)
+        await updateStatus(sessionId, taskId, "completed", evidence, verify)
+        break
+      }
+
+      case "evidence": {
+        const taskId = rest[0]
+        const evidenceText = rest[1]
+        if (!taskId || !evidenceText) {
+          throw new Error(
+            'Usage: swiz tasks evidence <task-id> "<evidence>"\n' +
+              "Prefixes: commit:, pr:, file:, test:, note:"
+          )
+        }
+        const sessionId = await resolveSession(rest.slice(2))
+        await submitEvidence(sessionId, taskId, evidenceText)
         break
       }
 
@@ -457,12 +550,13 @@ export const tasksCommand: Command = {
         const valid: Task["status"][] = ["pending", "in_progress", "completed", "cancelled"]
         if (!taskId || !newStatus || !valid.includes(newStatus)) {
           throw new Error(
-            `Usage: swiz tasks status <task-id> <${valid.join("|")}> [--evidence TEXT]`
+            `Usage: swiz tasks status <task-id> <${valid.join("|")}> [--evidence TEXT] [--verify TEXT]`
           )
         }
         const evidence = extractFlag(rest, "--evidence")
+        const verify = extractFlag(rest, "--verify")
         const sessionId = await resolveSession(rest.slice(2))
-        await updateStatus(sessionId, taskId, newStatus, evidence)
+        await updateStatus(sessionId, taskId, newStatus, evidence, verify)
         break
       }
 

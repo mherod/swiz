@@ -3,7 +3,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
-import { getSessionIdsByCwdScan, getSessionIdsForProject, getSessions } from "./tasks.ts"
+import {
+  getSessionIdsByCwdScan,
+  getSessionIdsForProject,
+  getSessions,
+  validateEvidence,
+  verifyTaskSubject,
+} from "./tasks.ts"
 
 const TMP = join(tmpdir(), `swiz-tasks-test-${process.pid}-${Date.now()}`)
 const TASKS = join(TMP, "tasks")
@@ -131,5 +137,53 @@ describe("getSessions", () => {
   it("returns empty array when filterCwd matches no sessions", async () => {
     const sessions = await getSessions("/nonexistent/path", TASKS, PROJECTS)
     expect(sessions).toEqual([])
+  })
+})
+
+// ─── validateEvidence ─────────────────────────────────────────────────────────
+
+describe("validateEvidence", () => {
+  it("accepts valid evidence prefixes", () => {
+    expect(validateEvidence("commit:abc123f")).toBeNull()
+    expect(validateEvidence("pr:42")).toBeNull()
+    expect(validateEvidence("file:src/feature.ts")).toBeNull()
+    expect(validateEvidence("test:all-passed")).toBeNull()
+    expect(validateEvidence("note:CI green — conclusion: success")).toBeNull()
+  })
+
+  it("rejects evidence without a recognized prefix", () => {
+    const error = validateEvidence("just some text")
+    expect(error).not.toBeNull()
+    expect(error).toContain("Invalid evidence format")
+    expect(error).toContain("commit:")
+  })
+
+  it("rejects empty-ish evidence without prefix", () => {
+    expect(validateEvidence("CI passed")).not.toBeNull()
+  })
+})
+
+// ─── verifyTaskSubject ────────────────────────────────────────────────────────
+
+describe("verifyTaskSubject", () => {
+  it("passes when verify text is a prefix of the subject", () => {
+    expect(verifyTaskSubject("Push and verify CI", "Push and")).toBeNull()
+    expect(verifyTaskSubject("Implement feature X", "implement")).toBeNull()
+  })
+
+  it("is case-insensitive", () => {
+    expect(verifyTaskSubject("Push and verify CI", "PUSH AND")).toBeNull()
+    expect(verifyTaskSubject("IMPLEMENT FEATURE", "implement")).toBeNull()
+  })
+
+  it("fails when verify text does not match the subject prefix", () => {
+    const error = verifyTaskSubject("Push and verify CI", "Fix bug")
+    expect(error).not.toBeNull()
+    expect(error).toContain("Verification failed")
+    expect(error).toContain("Push and verify CI")
+  })
+
+  it("matches the full subject exactly", () => {
+    expect(verifyTaskSubject("Fix bug", "Fix bug")).toBeNull()
   })
 })
