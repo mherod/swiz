@@ -5,8 +5,9 @@
 // After any git push the last-push timestamp is written to a per-repo file in
 // /tmp. If another git push is attempted within 60 seconds, the hook blocks it.
 //
-// Bypass: include any force flag in the push command to skip the cooldown:
-//   --force, -f, --force-with-lease, --force-with-lease=<ref>, --force-if-includes
+// Bypass: force flags (--force, -f, --force-with-lease, --force-if-includes)
+// skip the cooldown. Recommended alternative: `swiz push-wait` which waits
+// for cooldown expiry then pushes automatically.
 // Rationale: prevents accidental rapid-fire pushes that could trigger CI
 // loops, burn through rate limits, or push partially-prepared commits.
 
@@ -55,9 +56,7 @@ if (existsSync(sentinelPath)) {
         `BLOCKED: git push cooldown active — ${remaining}s remaining.\n\n` +
           `A push was made ${Math.floor(elapsed / 1000)}s ago. ` +
           `Wait ${remaining}s before pushing again.\n\n` +
-          `To bypass the cooldown, add a force flag to your push command:\n` +
-          `  git push --force-with-lease origin <branch>  (safe force)\n` +
-          `  git push --force origin <branch>             (unconditional)`
+          `Use \`swiz push-wait origin <branch>\` to automatically wait and push when the cooldown clears.`
       )
     }
   }
