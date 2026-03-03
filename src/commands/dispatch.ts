@@ -1,6 +1,7 @@
 import { appendFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import {
+  computeTranscriptSummary,
   isEditTool,
   isNotebookTool,
   isShellTool,
@@ -350,16 +351,32 @@ export const dispatchCommand: Command = {
 
     if (matchingGroups.length === 0) return
 
+    // ── Pre-compute transcript summary for hooks ──────────────────────────
+    // Parse the transcript once and inject the summary into the payload so
+    // individual hooks don't each re-read and re-parse the file.
+    let enrichedPayloadStr = payloadStr
+    const transcriptPath = payload.transcript_path as string | undefined
+    if (transcriptPath && !parseError) {
+      const summary = await computeTranscriptSummary(transcriptPath)
+      if (summary) {
+        const enriched = { ...payload, _transcriptSummary: summary }
+        enrichedPayloadStr = JSON.stringify(enriched)
+        log(
+          `   transcript summary: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`
+        )
+      }
+    }
+
     const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
     switch (strategy) {
       case "preToolUse":
-        await runPreToolUse(matchingGroups, payloadStr)
+        await runPreToolUse(matchingGroups, enrichedPayloadStr)
         break
       case "blocking":
-        await runBlocking(matchingGroups, payloadStr)
+        await runBlocking(matchingGroups, enrichedPayloadStr)
         break
       case "context":
-        await runContext(matchingGroups, payloadStr, hookEventName)
+        await runContext(matchingGroups, enrichedPayloadStr, hookEventName)
         break
     }
   },

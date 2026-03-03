@@ -2,16 +2,19 @@
 // Stop hook: Check for in_progress/pending tasks in ~/.claude/tasks/
 // Current session tasks must be complete before stopping, regardless of stop_hook_active
 
-import { readdir, readFile } from "node:fs/promises"
+import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import {
   blockStop,
+  computeTranscriptSummary,
   extractToolNamesFromTranscript,
   formatActionPlan,
+  getTranscriptSummary,
   isTaskCreateTool,
   readSessionTasks,
   type SessionTask,
   type StopHookInput,
+  type TranscriptSummary,
 } from "./hook-utils.ts"
 
 const TOOL_CALL_THRESHOLD = 10
@@ -25,6 +28,16 @@ interface AuditEntry {
   timestamp?: string
 }
 
+function deriveToolCallStats(summary: TranscriptSummary): {
+  total: number
+  taskToolUsed: boolean
+} {
+  return {
+    total: summary.toolCallCount,
+    taskToolUsed: summary.toolNames.some((n) => n === "TaskUpdate" || isTaskCreateTool(n)),
+  }
+}
+
 async function countToolCalls(
   transcriptPath: string
 ): Promise<{ total: number; taskToolUsed: boolean }> {
@@ -35,41 +48,21 @@ async function countToolCalls(
   }
 }
 
-const GIT_PUSH_RE = /\bgit\s+push\b/
-
-/** Scan transcript for any Bash tool call containing `git push`. */
-async function transcriptContainsPush(transcriptPath: string): Promise<boolean> {
-  try {
-    const text = await readFile(transcriptPath, "utf-8")
-    for (const line of text.split("\n")) {
-      if (!line) continue
-      try {
-        const entry = JSON.parse(line)
-        if (entry?.type !== "assistant") continue
-        const content = entry?.message?.content
-        if (!Array.isArray(content)) continue
-        for (const block of content) {
-          if (block?.type !== "tool_use") continue
-          const cmd = block?.input?.command
-          if (typeof cmd === "string" && GIT_PUSH_RE.test(cmd)) return true
-        }
-      } catch {}
-    }
-  } catch {}
-  return false
-}
-
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput
+  const input = (await Bun.stdin.json()) as StopHookInput & Record<string, unknown>
   const sessionId = input.session_id ?? ""
   const transcript = input.transcript_path ?? ""
   const home = process.env.HOME
   if (!home) return
   const tasksDir = join(home, ".claude", "tasks", sessionId)
 
-  const { total: toolCallCount, taskToolUsed } = transcript
-    ? await countToolCalls(transcript)
-    : { total: 0, taskToolUsed: false }
+  // Prefer pre-computed summary from dispatch; fall back to reading transcript
+  const summary = getTranscriptSummary(input)
+  const { total: toolCallCount, taskToolUsed } = summary
+    ? deriveToolCallStats(summary)
+    : transcript
+      ? await countToolCalls(transcript)
+      : { total: 0, taskToolUsed: false }
 
   const allTasks = await readSessionTasks(sessionId, home)
   const tasksDirExists =
@@ -177,7 +170,9 @@ async function main(): Promise<void> {
   // "CI green", "conclusion: success", "CI passed"). This enforces the
   // push+CI task lifecycle rule programmatically.
   if (allTasks.length > 0 && incompleteDetails.length === 0 && transcript) {
-    const sessionPushed = await transcriptContainsPush(transcript)
+    // Use summary if available; otherwise compute from transcript for push detection
+    const effectiveSummary = summary ?? (await computeTranscriptSummary(transcript))
+    const sessionPushed = effectiveSummary?.hasGitPush ?? false
 
     if (sessionPushed) {
       const CI_EVIDENCE_RE = /\bci\b.*(?:green|pass|success)|conclusion.*success/i

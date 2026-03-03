@@ -10,7 +10,6 @@ import { join } from "node:path"
 import { detectAgentCli, promptAgent } from "../src/agent.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
-  countToolCalls,
   extractPlainTurns,
   formatTurnsAsContext,
   projectKeyFromCwd,
@@ -19,6 +18,7 @@ import {
   blockStopRaw,
   extractOwnerFromUrl,
   getCurrentGitHubUser,
+  getTranscriptSummary,
   git,
   hasGhCli,
   isGitHubRemote,
@@ -403,13 +403,18 @@ function buildPrompt(
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput
+  const input = (await Bun.stdin.json()) as StopHookInput & Record<string, unknown>
 
   const settings = await readSwizSettings()
   const effective = getEffectiveSwizSettings(settings, input.session_id)
   if (!effective.autoContinue) return
 
   if (!input.transcript_path) return
+
+  // Use pre-computed summary for the tool-call threshold check when available.
+  // This avoids reading the transcript file at all for trivial sessions.
+  const summary = getTranscriptSummary(input)
+  if (summary && summary.toolCallCount < MIN_TOOL_CALLS) return
 
   let raw: string
   try {
@@ -418,8 +423,20 @@ async function main(): Promise<void> {
     return
   }
 
-  // Only engage for substantive sessions
-  if (countToolCalls(raw) < MIN_TOOL_CALLS) return
+  // Fallback: count tool calls from raw text if no summary was available
+  if (!summary) {
+    let count = 0
+    for (const line of raw.split("\n").filter(Boolean)) {
+      try {
+        const entry = JSON.parse(line)
+        if (entry?.type !== "assistant") continue
+        const content = entry?.message?.content
+        if (!Array.isArray(content)) continue
+        count += content.filter((b: { type?: string }) => b?.type === "tool_use").length
+      } catch {}
+    }
+    if (count < MIN_TOOL_CALLS) return
+  }
 
   const turns = extractPlainTurns(raw).slice(-CONTEXT_TURNS)
   if (turns.length === 0) return

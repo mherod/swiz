@@ -11,6 +11,7 @@ import {
   findLastTaskToolCallIndex,
   formatActionPlan,
   formatTaskSubjectsForDisplay,
+  getTranscriptSummary,
   hasFileInTree,
   isEditTool,
   isGitRepo,
@@ -156,7 +157,8 @@ async function main() {
   // at least once (i.e. the agent has already engaged with the task system).
 
   if (transcriptPath) {
-    const toolNames = await extractToolNamesFromTranscript(transcriptPath)
+    const summary = getTranscriptSummary(input)
+    const toolNames = summary?.toolNames ?? (await extractToolNamesFromTranscript(transcriptPath))
     const total = toolNames.length
     const lastTaskIndex = findLastTaskToolCallIndex(toolNames)
 

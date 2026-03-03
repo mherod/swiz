@@ -5,17 +5,19 @@
 
 import {
   extractToolNamesFromTranscript,
+  getTranscriptSummary,
   isTaskTool,
   type ToolHookInput,
   toolNameForCurrentAgent,
 } from "./hook-utils.ts"
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ToolHookInput
+  const input = (await Bun.stdin.json()) as ToolHookInput & Record<string, unknown>
   const transcript = input.transcript_path
   if (!transcript) return
 
-  const toolNames = await extractToolNamesFromTranscript(transcript)
+  const summary = getTranscriptSummary(input)
+  const toolNames = summary?.toolNames ?? (await extractToolNamesFromTranscript(transcript))
   const total = toolNames.length
   const taskCreateName = toolNameForCurrentAgent("TaskCreate")
   const lastTaskIdx = toolNames.reduce((acc, name, i) => (isTaskTool(name) ? i : acc), -1)
