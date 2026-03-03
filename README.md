@@ -99,7 +99,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-branch-conflicts.ts` | Checks for potential merge conflicts with the base branch before the session ends, while there's still time to resolve them cleanly. |
 | `stop-pr-description.ts` | Validates that open PRs have a real description, not an empty template. Forces the agent to document what it built. |
 | `stop-pr-changes-requested.ts` | Blocks stop if the current PR has unresolved change requests from reviewers. The agent doesn't get to declare done while reviewers are waiting. |
-| `stop-github-ci.ts` | Blocks stop if GitHub Actions CI is still running or has failed on the current branch. No shipping broken code. |
+| `stop-github-ci.ts` | Blocks stop if GitHub Actions CI has failed on the current branch. If CI is still running, polls up to 30 s before blocking — eliminating false-positive blocks for short CI runs that finish within seconds. No shipping broken code. |
 | `stop-todo-tracker.ts` | Scans git diffs for newly introduced `TODO`, `FIXME`, or `HACK` comments. Technical debt accumulates fast — this keeps the bar high. |
 | `stop-non-default-branch.ts` | Blocks stop when the session is on a non-default branch (not `main` or `master`). Even a clean feature branch signals unfinished workflow — this keeps the agent from declaring done while still on it. |
 | `stop-completion-auditor.ts` | Reads task files and verifies that every task has actual completion evidence before the session ends. Agents can't just mark things done — they have to prove it. |

@@ -27,7 +27,7 @@ export const manifest: HookGroup[] = [
       { file: "stop-branch-conflicts.ts", timeout: 10 },
       { file: "stop-pr-description.ts", timeout: 10 },
       { file: "stop-pr-changes-requested.ts", timeout: 10 },
-      { file: "stop-github-ci.ts", timeout: 15 },
+      { file: "stop-github-ci.ts", timeout: 45 },
       { file: "stop-todo-tracker.ts", timeout: 10 },
       { file: "stop-non-default-branch.ts", timeout: 10 },
       { file: "stop-completion-auditor.ts", timeout: 10 },
@@ -225,7 +225,7 @@ export function validateDispatchRoutes(
 // Per-event timeout budget for the dispatcher (seconds).
 // Covers worst-case sequential execution of all hooks in that event.
 export const DISPATCH_TIMEOUTS: Record<string, number> = {
-  stop: 300, // 15 hooks × ~10s avg + 120s AI call (stop-auto-continue)
+  stop: 360, // 16 hooks × ~10s avg + 120s AI call (stop-auto-continue) + 30s CI polling (stop-github-ci)
   preToolUse: 60, // 12 hooks × ~5s avg
   postToolUse: 90, // 8 hooks × ~10s avg
   sessionStart: 20,

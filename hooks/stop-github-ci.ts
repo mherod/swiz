@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
-// Stop hook: Block stop if GitHub CI checks are pending or failing
+// Stop hook: Block stop if GitHub CI checks are pending or failing.
+// When CI is in_progress, polls up to MAX_POLL_MS before blocking — avoids
+// false-positive blocks for short CI runs that complete within seconds.
 
 import {
   blockStop,
@@ -12,6 +14,9 @@ import {
   skillAdvice,
 } from "./hook-utils.ts"
 
+const POLL_INTERVAL_MS = 5_000
+const MAX_POLL_MS = 30_000
+
 interface CIRun {
   databaseId: number
   status: string
@@ -20,6 +25,44 @@ interface CIRun {
   workflowName: string
   createdAt: string
   event: string
+}
+
+async function fetchRuns(branch: string, cwd: string): Promise<CIRun[]> {
+  const runs = await ghJson<CIRun[]>(
+    [
+      "run",
+      "list",
+      "--branch",
+      branch,
+      "--limit",
+      "5",
+      "--json",
+      "databaseId,status,conclusion,displayTitle,workflowName,createdAt,event",
+    ],
+    cwd
+  )
+  return (runs ?? []).filter((r) => r.event !== "dynamic" && r.event !== "workflow_run")
+}
+
+export function findActive(runs: CIRun[]): CIRun[] {
+  return runs.filter((r) => r.status === "in_progress" || r.status === "queued")
+}
+
+export function findFailing(runs: CIRun[]): CIRun[] {
+  const byWorkflow = new Map<string, CIRun>()
+  for (const run of runs) {
+    const existing = byWorkflow.get(run.workflowName)
+    if (!existing || run.createdAt > existing.createdAt) {
+      byWorkflow.set(run.workflowName, run)
+    }
+  }
+  return [...byWorkflow.values()].filter(
+    (r) =>
+      r.status === "completed" &&
+      (r.conclusion === "failure" ||
+        r.conclusion === "timed_out" ||
+        r.conclusion === "action_required")
+  )
 }
 
 async function main(): Promise<void> {
@@ -34,44 +77,20 @@ async function main(): Promise<void> {
   if (!branch) return
   if (branch === "main" || branch === "master") return
 
-  const runs = await ghJson<CIRun[]>(
-    [
-      "run",
-      "list",
-      "--branch",
-      branch,
-      "--limit",
-      "5",
-      "--json",
-      "databaseId,status,conclusion,displayTitle,workflowName,createdAt,event",
-    ],
-    cwd
-  )
-  if (!runs?.length) return
+  let relevant = await fetchRuns(branch, cwd)
+  if (!relevant.length) return
 
-  // Exclude automated/downstream runs
-  const relevant = runs.filter((r) => r.event !== "dynamic" && r.event !== "workflow_run")
-
-  // Check for active runs
-  const active = relevant.filter((r) => r.status === "in_progress" || r.status === "queued")
-
-  // Check for failing runs — group by workflow, take most recent of each
-  const byWorkflow = new Map<string, CIRun>()
-  for (const run of relevant) {
-    const existing = byWorkflow.get(run.workflowName)
-    if (!existing || run.createdAt > existing.createdAt) {
-      byWorkflow.set(run.workflowName, run)
+  // If runs are active, poll until they complete or the timeout expires.
+  // This avoids blocking on CI that will finish within seconds.
+  if (findActive(relevant).length > 0) {
+    const deadline = Date.now() + MAX_POLL_MS
+    while (Date.now() < deadline && findActive(relevant).length > 0) {
+      await Bun.sleep(POLL_INTERVAL_MS)
+      relevant = await fetchRuns(branch, cwd)
     }
   }
 
-  const failing = [...byWorkflow.values()].filter(
-    (r) =>
-      r.status === "completed" &&
-      (r.conclusion === "failure" ||
-        r.conclusion === "timed_out" ||
-        r.conclusion === "action_required")
-  )
-
+  const failing = findFailing(relevant)
   if (failing.length > 0) {
     const names = failing.map((r) => `${r.workflowName} (${r.conclusion})`).join(", ")
     let reason = `GitHub CI is failing on branch '${branch}'.\n\n`
@@ -88,10 +107,11 @@ async function main(): Promise<void> {
     blockStop(reason)
   }
 
-  if (active.length > 0) {
-    const names = active.map((r) => `${r.workflowName} (${r.status})`).join(", ")
-    let reason = `GitHub CI is still running on branch '${branch}'.\n\n`
-    reason += `Active checks (${active.length}): ${names}\n\n`
+  const stillActive = findActive(relevant)
+  if (stillActive.length > 0) {
+    const names = stillActive.map((r) => `${r.workflowName} (${r.status})`).join(", ")
+    let reason = `GitHub CI is still running on branch '${branch}' after waiting ${MAX_POLL_MS / 1000}s.\n\n`
+    reason += `Active checks (${stillActive.length}): ${names}\n\n`
     reason += skillAdvice(
       "ci-status",
       "Wait for CI to complete, then check results with the /ci-status skill.",
@@ -101,4 +121,4 @@ async function main(): Promise<void> {
   }
 }
 
-main()
+if (import.meta.main) main()
