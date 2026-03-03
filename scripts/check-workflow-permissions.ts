@@ -88,14 +88,14 @@ if (import.meta.main) {
 
   if (!diff.trim()) {
     // No workflow file changes — nothing to check
-    console.log("OK: no workflow file changes detected")
+    console.error("OK: no workflow file changes detected")
     process.exit(0)
   }
 
   const violations = detectPermissionChanges(diff)
 
   if (violations.length === 0) {
-    console.log("OK: workflow changes do not modify permissions")
+    console.error("OK: workflow changes do not modify permissions")
     process.exit(0)
   }
 

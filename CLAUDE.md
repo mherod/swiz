@@ -239,6 +239,8 @@ The top-level handler in `src/cli.ts` catches thrown errors and sets `process.ex
 
 Hook scripts (`hooks/*.ts`) are the exception — their `process.exit(0)` calls are intentional and must stay.
 
+**DON'T** use `console.log` in CI scripts (`scripts/*.ts`) or hook scripts (`hooks/*.ts`). The `stop-debug-statements` hook flags `console.log` as debug output. Use `console.error` for status/progress messages (stderr) — only use `console.log` when the script produces structured data on stdout that another process consumes.
+
 ## Conventions
 
 - ANSI escape codes for terminal output — no chalk or color libraries
