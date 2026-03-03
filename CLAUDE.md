@@ -56,7 +56,10 @@ Translation to agent-specific formats happens at config generation time:
 When adding a hook:
 1. Add a `.ts` script to `hooks/`
 2. Add the entry to `manifest` in `src/manifest.ts`
-3. Run `swiz install --dry-run` to verify
+3. If the hook uses a new event name, add it to `DISPATCH_ROUTES` in `src/commands/dispatch.ts` and to every configurable agent's `eventMap` in `src/agents.ts`
+4. Run `swiz install --dry-run` to verify
+
+**DO** keep `DISPATCH_ROUTES`, `manifest`, and agent `eventMap` entries in sync. `validateDispatchRoutes()` in `src/manifest.ts` enforces symmetry at runtime — both `swiz dispatch` and `swiz install` call it on startup and throw actionable errors on mismatch. The `src/dispatch-routing.test.ts` suite also catches drift in CI.
 
 DO NOT hard-code agent-specific event names or tool names in hook scripts. The translation layer handles this.
 
