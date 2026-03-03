@@ -14,7 +14,6 @@ const SKIP_LABELS = new Set([
   "icebox",
   "invalid",
   "needs-info",
-  "enhancement",
 ])
 
 const LABEL_SCORE: Record<string, number> = {

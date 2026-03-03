@@ -32,7 +32,6 @@ const SKIP_LABELS = new Set([
   "icebox", // explicit indefinite deferral
   "invalid", // not a valid issue
   "needs-info", // can't act without more information
-  "enhancement", // deferred future-work tracking; not actionable in current session
 ])
 
 /**
@@ -78,8 +77,9 @@ const LABEL_SCORE: Record<string, number> = {
   "size:l": -1,
   "size:xl": -2,
   "size:xxl": -3,
-  // Type signals — fixes before features
+  // Type signals — fixes before features, enhancements still actionable
   bug: 2,
+  enhancement: 0,
   maintenance: 1,
   // Not ready to start
   "needs-breakdown": -2,
