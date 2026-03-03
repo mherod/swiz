@@ -1309,4 +1309,142 @@ describe("stop-auto-continue", () => {
     expect(capturedArgs).toContain("readiness labels")
     expect(capturedArgs).not.toContain("/refine-issue skill")
   })
+
+  // ─── Runtime refinement gate tests ───────────────────────────────────────────
+
+  /**
+   * Creates a fake git repo at `dir` with a GitHub-style remote.
+   * Uses Bun.spawn to avoid execSync security hook.
+   */
+  async function initFakeGitRepo(dir: string, remoteUrl: string): Promise<void> {
+    const run = async (args: string[]) => {
+      const proc = Bun.spawn(args, { cwd: dir, stdout: "pipe", stderr: "pipe" })
+      await new Response(proc.stdout).text()
+      await proc.exited
+    }
+    await run(["git", "init"])
+    await run(["git", "remote", "add", "origin", remoteUrl])
+  }
+
+  /**
+   * Creates a fake `gh` binary that responds to specific subcommands.
+   * - `gh api user`: returns {"login":"testuser"}
+   * - `gh issue list`: returns the provided issues JSON
+   * - `gh pr list`: returns []
+   * Also places a fake `agent` binary for the AI response.
+   */
+  async function createFakeGhAndAgent(binDir: string, issuesJson: string): Promise<void> {
+    // Fake gh binary — handles --jq for api user (returns plain login)
+    const ghScript =
+      `#!/bin/sh\n` +
+      `case "$*" in\n` +
+      `  *"api user"*)\n` +
+      `    printf '%s' 'testuser'\n` +
+      `    ;;\n` +
+      `  *"issue list"*)\n` +
+      `    printf '%s' '${issuesJson.replace(/'/g, "'\\''")}'\n` +
+      `    ;;\n` +
+      `  *"pr list"*)\n` +
+      `    printf '%s' '[]'\n` +
+      `    ;;\n` +
+      `  *)\n` +
+      `    exit 1\n` +
+      `    ;;\n` +
+      `esac\n`
+    await writeFile(join(binDir, "gh"), ghScript)
+    await chmod(join(binDir, "gh"), 0o755)
+
+    // Fake agent binary (returns minimal JSON response)
+    await createFakeAgent(
+      binDir,
+      JSON.stringify({
+        processCritique: "",
+        productCritique: "",
+        next: "Implement the next feature",
+        reflections: [],
+      })
+    )
+  }
+
+  test("appends refinement directive when issues need refinement", async () => {
+    const repoDir = await createTempDir()
+    await initFakeGitRepo(repoDir, "https://github.com/testuser/testrepo.git")
+
+    const binDir = await createTempDir()
+    // Issue #99 has no readiness labels → needsRefinement returns true
+    const issues = JSON.stringify([
+      {
+        number: 99,
+        title: "Unrefined issue",
+        labels: [{ name: "bug" }],
+        author: { login: "testuser" },
+        assignees: [],
+      },
+    ])
+    await createFakeGhAndAgent(binDir, issues)
+
+    // binDir must come first so fake gh/agent win, but real git must be reachable
+    const gitDir = (Bun.which("git") ?? "/usr/bin/git").replace(/\/git$/, "")
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      cwd: repoDir,
+      extraEnv: { PATH: `${binDir}:${gitDir}:/bin:/usr/bin` },
+    })
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("Note:")
+    expect(result.reason).toContain("need refinement")
+    expect(result.reason).toContain("#99")
+  })
+
+  test("omits refinement directive when all issues are refined", async () => {
+    const repoDir = await createTempDir()
+    await initFakeGitRepo(repoDir, "https://github.com/testuser/testrepo.git")
+
+    const binDir = await createTempDir()
+    // Issue #50 has "ready" label → needsRefinement returns false
+    const issues = JSON.stringify([
+      {
+        number: 50,
+        title: "Ready issue",
+        labels: [{ name: "ready" }],
+        author: { login: "testuser" },
+        assignees: [],
+      },
+    ])
+    await createFakeGhAndAgent(binDir, issues)
+
+    const gitDir = (Bun.which("git") ?? "/usr/bin/git").replace(/\/git$/, "")
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      cwd: repoDir,
+      extraEnv: { PATH: `${binDir}:${gitDir}:/bin:/usr/bin` },
+    })
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("Note:")
+    expect(result.reason).not.toContain("need refinement")
+  })
+
+  test("omits refinement directive when no issues exist", async () => {
+    const repoDir = await createTempDir()
+    await initFakeGitRepo(repoDir, "https://github.com/testuser/testrepo.git")
+
+    const binDir = await createTempDir()
+    await createFakeGhAndAgent(binDir, "[]")
+
+    const gitDir = (Bun.which("git") ?? "/usr/bin/git").replace(/\/git$/, "")
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+      cwd: repoDir,
+      extraEnv: { PATH: `${binDir}:${gitDir}:/bin:/usr/bin` },
+    })
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("Note:")
+    expect(result.reason).not.toContain("need refinement")
+  })
 })

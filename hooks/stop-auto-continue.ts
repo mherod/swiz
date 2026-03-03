@@ -426,6 +426,10 @@ async function main(): Promise<void> {
 
   const taskContext = await loadTaskContext(input.session_id ?? "")
 
+  // Detect refinement-needed issues early — this drives both the AI prompt
+  // and a direct runtime gate in the block message.
+  const refinementStatus = await checkRefinementNeeds(input.cwd)
+
   let response: AgentResponse = {
     processCritique: "",
     productCritique: "",
@@ -443,10 +447,7 @@ async function main(): Promise<void> {
       userTurns.length > 0
         ? `=== USER'S MESSAGES ===\n${userTurns.map((t) => `- ${t.text}`).join("\n\n")}\n=== END OF USER'S MESSAGES ===\n\n`
         : ""
-    const statusParts = [
-      await checkChangelogStaleness(input.cwd),
-      await checkRefinementNeeds(input.cwd),
-    ].filter(Boolean)
+    const statusParts = [await checkChangelogStaleness(input.cwd), refinementStatus].filter(Boolean)
     const projectStatus = statusParts.join("\n")
     const prompt = buildPrompt(taskSection, userMessagesSection, projectStatus, context)
 
@@ -473,8 +474,13 @@ async function main(): Promise<void> {
     .filter(Boolean)
     .join("\n")
   const critiqueLine = critiqueLines ? `${critiqueLines}\n\n` : ""
+
+  // Runtime gate: if issues need refinement, inject a direct directive
+  // regardless of what the AI suggested. This ensures refinement guidance
+  // is never lost to AI interpretation.
+  const refinementDirective = refinementStatus ? `\n\nNote: ${refinementStatus}` : ""
   blockStopRaw(
-    `${critiqueLine}Continue autonomously — do not ask questions or wait for confirmation: ${response.next || FALLBACK_SUGGESTION}`
+    `${critiqueLine}Continue autonomously — do not ask questions or wait for confirmation: ${response.next || FALLBACK_SUGGESTION}${refinementDirective}`
   )
 }
 
