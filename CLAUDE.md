@@ -157,6 +157,8 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DON'T** add, restore, or preserve inferred issue labels once the user gives explicit label instructions. The user's latest label state overrides prior assumptions: if they say an issue is `ready`, remove conflicting labels such as `backlog` instead of re-adding them for classification.
 
+**DO** refine issues immediately after creating them with `/report-issue`. The `stop-personal-repo-issues.ts` hook blocks session stop when any issue lacks a readiness label (`ready`, `backlog`, `blocked`, etc.). After `/report-issue` creates the issue, run `/refine-issue <number>` to add the appropriate label and update the body with a proposal before attempting to stop. Treat issue creation and refinement as a single atomic workflow.
+
 ## Standard Work Sequence
 
 **DO** create at least one task with `pending` or `in_progress` status before using any file modification (Edit/Write) or non-exempt Bash tools. The `pretooluse-require-tasks.ts` hook enforces this — it blocks Edit, Write, and Bash calls when no incomplete task exists. This applies to every session that involves code changes, not just large features. Create tasks as the very first action in any workflow — before running any Bash commands, even investigatory ones like `gh issue view`. While `gh` commands are technically exempt, delaying task creation risks the bootstrap hook auto-creating a generic task that then requires manual cleanup.
