@@ -445,17 +445,53 @@ function checkBunAvailable(): boolean {
   }
 }
 
+// ─── Git mergetool configuration ─────────────────────────────────────────────
+
+async function installMergeTool(dryRun: boolean): Promise<void> {
+  const configs = [
+    ["merge.tool", "swiz"],
+    ["mergetool.swiz.cmd", 'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"'],
+    ["mergetool.swiz.trustExitCode", "true"],
+  ]
+
+  if (dryRun) {
+    console.log("  Git mergetool configuration (global):\n")
+    for (const [key, value] of configs) {
+      console.log(`    ${GREEN}+ git config --global ${key} ${value}${RESET}`)
+    }
+    console.log()
+    return
+  }
+
+  for (const [key, value] of configs) {
+    if (!key || !value) continue
+    const proc = Bun.spawnSync(["git", "config", "--global", key, value])
+    if (proc.exitCode !== 0) {
+      throw new Error(`Failed to set git config ${key}`)
+    }
+  }
+
+  console.log(`  ${GREEN}✓${RESET} Git mergetool configured globally:\n`)
+  console.log(`    merge.tool = swiz`)
+  console.log(`    mergetool.swiz.cmd = swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"`)
+  console.log(`    mergetool.swiz.trustExitCode = true\n`)
+}
+
+// ─── Command ────────────────────────────────────────────────────────────────
+
 export const installCommand: Command = {
   name: "install",
   description: "Install swiz hooks into agent settings",
-  usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run]`,
+  usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run] [--merge-tool]`,
   options: [
     ...AGENTS.map((a) => ({ flags: `--${a.id}`, description: `Install for ${a.name} only` })),
     { flags: "--dry-run", description: "Preview changes without writing to disk" },
+    { flags: "--merge-tool", description: "Configure swiz as the global Git mergetool" },
     { flags: "(no flags)", description: "Install for all detected agents" },
   ],
   async run(args) {
     const dryRun = args.includes("--dry-run")
+    const mergeTool = args.includes("--merge-tool")
     const targets = getAgentByFlag(args)
 
     if (!checkBunAvailable()) {
@@ -467,11 +503,19 @@ export const installCommand: Command = {
     }
 
     console.log(`\n  swiz install${dryRun ? " (dry run)" : ""}\n`)
-    console.log(`  Hooks: ${HOOKS_DIR}`)
-    console.log(`  Agents: ${targets.map((a) => a.name).join(", ")}\n`)
 
-    for (const agent of targets) {
-      await installAgent(agent, dryRun)
+    if (mergeTool) {
+      await installMergeTool(dryRun)
+    }
+
+    // Skip hook installation if only --merge-tool was requested
+    if (!mergeTool || args.some((a) => AGENTS.some((ag) => `--${ag.id}` === a))) {
+      console.log(`  Hooks: ${HOOKS_DIR}`)
+      console.log(`  Agents: ${targets.map((a) => a.name).join(", ")}\n`)
+
+      for (const agent of targets) {
+        await installAgent(agent, dryRun)
+      }
     }
 
     if (dryRun) {
