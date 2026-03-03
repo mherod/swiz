@@ -57,9 +57,9 @@ if (currentBranch !== "main" && currentBranch !== "master") process.exit(0)
 const remoteRef = `origin/${currentBranch}`
 
 async function resolveDiffRange(): Promise<string> {
-  // Pre-step: deepen shallow clones so diff/merge-base have full history.
-  // CI runners often use --depth 1; without unshallowing, merge-base and
-  // HEAD~1 fail because parent commits aren't fetched.
+  // Pre-step: attempt to deepen shallow clones so diff/merge-base have full
+  // history. If unshallow fails (no network, origin unavailable), the
+  // strategies below still try with whatever local history is available.
   const isShallow = await git(["rev-parse", "--is-shallow-repository"], cwd)
   if (isShallow === "true") {
     await git(["fetch", "--unshallow", "origin"], cwd)
@@ -81,6 +81,15 @@ async function resolveDiffRange(): Promise<string> {
     return "HEAD~1..HEAD"
   }
 
+  // 4. Conservative local-history fallback: use all locally available commits.
+  // In shallow clones where unshallow failed and no remote ref exists, git
+  // may still have N > 1 commits locally. Diff against the oldest available.
+  const countStr = await git(["rev-list", "--count", "HEAD"], cwd)
+  const count = parseInt(countStr, 10)
+  if (count > 1) {
+    return `HEAD~${count - 1}..HEAD`
+  }
+
   return ""
 }
 
@@ -92,7 +101,7 @@ if (!diffRange) {
   denyPreToolUse(`
 Push blocked: could not determine diff range for change analysis.
 
-No valid comparison ref found (tried origin/${currentBranch}, merge-base, HEAD~1).
+No valid comparison ref found (tried origin/${currentBranch}, merge-base, HEAD~N, local history).
 This typically means the repository has only one commit and no remote tracking branch.
 
 Remediation:
