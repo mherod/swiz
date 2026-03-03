@@ -327,6 +327,172 @@ swiz tasks status <id> in_progress          # update status
 swiz tasks complete-all                     # bulk-complete remaining
 ```
 
+### `swiz dispatch`
+
+Fan out a hook event to all matching scripts in the manifest. This is the command that agent configs invoke — it reads a JSON payload from stdin and calls every hook registered for the event.
+
+```bash
+swiz dispatch <event>                       # dispatch an event, reading payload from stdin
+swiz dispatch <event> --replay <file>       # replay a captured payload for debugging
+swiz dispatch <event> --replay <file> --json  # replay with machine-readable trace output
+```
+
+| Flag | Description |
+|------|-------------|
+| `--replay <file>` | Replay a captured payload file instead of reading stdin |
+| `--json` | Output trace in machine-readable JSON format (replay mode only) |
+
+### `swiz transcript`
+
+Display Agent-User chat history for the current project. Useful for reviewing what happened in a previous session or generating a follow-up suggestion.
+
+```bash
+swiz transcript                             # show latest session transcript
+swiz transcript --list                      # list all sessions for the project
+swiz transcript --session <id>              # show a specific session (prefix match)
+swiz transcript --tail 10                   # show last 10 turns
+swiz transcript --auto-reply                # generate an AI-suggested follow-up
+```
+
+| Flag | Description |
+|------|-------------|
+| `--session, -s <id>` | Show a specific session (prefix match) |
+| `--dir, -d <path>` | Target project directory (default: cwd) |
+| `--list, -l` | List available sessions without displaying content |
+| `--head, -H <n>` | Show only the first N conversation turns |
+| `--tail, -T <n>` | Show only the last N conversation turns |
+| `--auto-reply` | Generate an AI-suggested follow-up message |
+
+### `swiz cleanup`
+
+Remove old Claude Code session data from `~/.claude/projects/`. Keeps disk usage under control for long-running projects.
+
+```bash
+swiz cleanup                                # remove sessions older than 30 days
+swiz cleanup --older-than 7d               # remove sessions older than 7 days
+swiz cleanup --dry-run                     # preview what would be removed
+swiz cleanup --project myrepo              # limit to a specific project
+```
+
+| Flag | Description |
+|------|-------------|
+| `--older-than <time>` | Remove sessions older than this time: days (`30`, `7d`) or hours (`48h`). Default: 30 |
+| `--dry-run` | Show what would be removed without deleting |
+| `--project <name>` | Limit to a specific project directory name |
+
+### `swiz issue`
+
+Interact with GitHub issues with guards against accidentally operating on already-closed issues.
+
+```bash
+swiz issue close 42                         # close an issue (skips if already closed)
+swiz issue comment 42 --body "text"        # comment on an issue (skips if closed)
+swiz issue resolve 42 --body "text"        # comment + close in one idempotent call
+```
+
+| Flag | Description |
+|------|-------------|
+| `close <number>` | Close an issue (skips if already closed) |
+| `comment <number>` | Comment on an issue (skips if already closed) |
+| `resolve <number>` | Comment and close in one idempotent operation |
+| `--body, -b <text>` | Comment body (for `comment` and `resolve`) |
+
+### `swiz sentiment`
+
+Score text for approval/rejection sentiment using heuristic regex clusters. Useful for parsing hook feedback, user confirmations, or any text where positive/negative intent matters.
+
+```bash
+swiz sentiment "looks good to me"          # score text from arg
+echo "LGTM" | swiz sentiment               # score text from stdin
+swiz sentiment --json "ship it"            # output result as JSON
+swiz sentiment --score-only "no thanks"    # print only the numeric score
+```
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output result as JSON |
+| `--score-only` | Print only the numeric score |
+
+### `swiz session`
+
+Show or list Claude Code session identifiers for the current project.
+
+```bash
+swiz session                                # print the current session ID
+swiz session --list                        # list all sessions with timestamps
+swiz session --dir /path/to/project        # target a specific project directory
+```
+
+| Flag | Description |
+|------|-------------|
+| `--list, -l` | List all sessions for the project with timestamps |
+| `--dir, -d <path>` | Target project directory (default: cwd) |
+
+### `swiz ci-wait`
+
+Poll GitHub Actions run status for a specific commit until the run completes. More reliable than `gh run watch` for scripted workflows because it ties polling to an exact commit SHA rather than the latest run.
+
+```bash
+swiz ci-wait <commit-sha>                  # poll until CI completes (5 min timeout)
+swiz ci-wait <commit-sha> --timeout 600   # custom timeout in seconds
+```
+
+| Flag | Description |
+|------|-------------|
+| `--timeout, -t <seconds>` | Timeout in seconds (default: 300) |
+
+Exit code is `0` on CI success, `1` on failure or timeout.
+
+### `swiz mergetool`
+
+AI-powered Git merge conflict resolver. Resolves conflicts in a file using an AI agent and writes the result to the merged output path. Designed to be used as a `git mergetool` backend.
+
+```bash
+# One-time git config setup:
+git config merge.tool swiz
+git config mergetool.swiz.cmd 'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"'
+git config mergetool.swiz.trustExitCode true
+
+# Then use normally:
+git mergetool
+```
+
+### `swiz push-wait`
+
+Wait for the push cooldown to expire, then push. The cooldown (configured in `swiz settings`) prevents rapid successive pushes that could race with CI. Use this instead of manual `sleep` + `git push` sequences.
+
+```bash
+swiz push-wait                              # wait for cooldown, then push to origin main
+swiz push-wait origin feat/my-branch       # specify remote and branch
+swiz push-wait --timeout 180               # custom max wait in seconds
+```
+
+| Flag | Description |
+|------|-------------|
+| `--timeout, -t <seconds>` | Max wait for cooldown to expire (default: 120) |
+
+### `swiz doctor`
+
+Check environment health and prerequisites. Reports the status of each detected agent (Claude Code, Cursor, Gemini CLI, Codex) and whether its hook configuration is up to date.
+
+```bash
+swiz doctor                                 # show health report
+swiz doctor --fix                          # auto-fix stale agent configs (runs swiz install)
+```
+
+| Flag | Description |
+|------|-------------|
+| `--fix` | Auto-fix stale agent configs by running `swiz install` |
+
+### `swiz help`
+
+Display usage information for all registered commands. Automatically available — no explicit registration required.
+
+```bash
+swiz help                                   # list all commands
+swiz help <command>                        # show usage for a specific command
+```
+
 ## Architecture
 
 ```
