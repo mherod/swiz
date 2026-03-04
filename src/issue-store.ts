@@ -184,14 +184,18 @@ export async function replayPendingMutations(
   const result: ReplayResult = { replayed: 0, failed: 0, discarded: 0 }
 
   for (const row of pending) {
+    const mutation: MutationPayload = JSON.parse(row.mutation)
+
     if (row.attempts >= MAX_ATTEMPTS) {
       s.removeMutation(row.id)
       result.discarded++
+      console.error(
+        `[swiz] REPLAY_DISCARDED repo=${repo} issue=#${mutation.number} type=${mutation.type} attempts=${row.attempts}`
+      )
       continue
     }
 
-    const mutation: MutationPayload = JSON.parse(row.mutation)
-    const ok = await executeMutation(mutation, cwd)
+    const ok = await executeMutation(mutation, cwd, repo)
 
     if (ok) {
       s.removeMutation(row.id)
@@ -209,7 +213,11 @@ export async function replayPendingMutations(
 }
 
 /** Execute a single mutation against live GitHub. Returns true on success. */
-async function executeMutation(mutation: MutationPayload, cwd: string): Promise<boolean> {
+async function executeMutation(
+  mutation: MutationPayload,
+  cwd: string,
+  repo: string
+): Promise<boolean> {
   const num = String(mutation.number)
 
   switch (mutation.type) {
@@ -225,7 +233,7 @@ async function executeMutation(mutation: MutationPayload, cwd: string): Promise<
       ])
       await proc.exited
       if (proc.exitCode !== 0) {
-        logReplayError(`gh issue close #${num}`, stderr)
+        logReplayExecFailed(repo, mutation, proc.exitCode ?? 1, stderr)
         return false
       }
       return true
@@ -243,7 +251,7 @@ async function executeMutation(mutation: MutationPayload, cwd: string): Promise<
       ])
       await proc.exited
       if (proc.exitCode !== 0) {
-        logReplayError(`gh issue comment #${num}`, stderr)
+        logReplayExecFailed(repo, mutation, proc.exitCode ?? 1, stderr)
         return false
       }
       return true
@@ -262,7 +270,7 @@ async function executeMutation(mutation: MutationPayload, cwd: string): Promise<
         ])
         await cp.exited
         if (cp.exitCode !== 0) {
-          logReplayError(`gh issue comment #${num} (resolve)`, cpStderr)
+          logReplayExecFailed(repo, { ...mutation, type: "comment" }, cp.exitCode ?? 1, cpStderr)
           return false
         }
       }
@@ -277,7 +285,7 @@ async function executeMutation(mutation: MutationPayload, cwd: string): Promise<
       ])
       await cl.exited
       if (cl.exitCode !== 0) {
-        logReplayError(`gh issue close #${num} (resolve)`, clStderr)
+        logReplayExecFailed(repo, { ...mutation, type: "close" }, cl.exitCode ?? 1, clStderr)
         return false
       }
       return true
@@ -287,10 +295,17 @@ async function executeMutation(mutation: MutationPayload, cwd: string): Promise<
   }
 }
 
-/** Log a replay error to stderr. Truncates long messages. */
-function logReplayError(action: string, stderr: string): void {
-  const msg = stderr.trim().slice(0, 200)
-  console.error(`[swiz] replay failed: ${action}${msg ? ` — ${msg}` : ""}`)
+/** Log a structured execution failure for a single mutation replay. */
+function logReplayExecFailed(
+  repo: string,
+  mutation: MutationPayload,
+  exitCode: number,
+  stderr: string
+): void {
+  const detail = stderr.trim().slice(0, 200)
+  console.error(
+    `[swiz] REPLAY_EXEC_FAILED repo=${repo} issue=#${mutation.number} type=${mutation.type} exit=${exitCode}${detail ? ` detail=${detail}` : ""}`
+  )
 }
 
 /**
@@ -310,20 +325,20 @@ export async function tryReplayPendingMutations(cwd?: string): Promise<void> {
     const pending = store.pendingCount(slug)
     if (pending === 0) return
     const result = await replayPendingMutations(slug, dir, store)
-    logReplayResult(result, pending)
+    logReplayResult(result, pending, slug)
   } catch (err) {
-    console.error(`[swiz] replay error: ${err instanceof Error ? err.message : String(err)}`)
+    console.error(`[swiz] REPLAY_INFRA_ERROR ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 
-/** Log the outcome of a replay attempt to stderr. */
-function logReplayResult(result: ReplayResult, originalCount: number): void {
+/** Log the outcome of a replay attempt to stderr with structured error code. */
+function logReplayResult(result: ReplayResult, originalCount: number, repo: string): void {
   const parts: string[] = []
   if (result.replayed > 0) parts.push(`${result.replayed} replayed`)
   if (result.failed > 0) parts.push(`${result.failed} failed`)
   if (result.discarded > 0) parts.push(`${result.discarded} discarded`)
   if (parts.length === 0) return
-  console.error(`[swiz] mutation replay (${originalCount} pending): ${parts.join(", ")}`)
+  console.error(`[swiz] REPLAY_SUMMARY repo=${repo} pending=${originalCount} ${parts.join(", ")}`)
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

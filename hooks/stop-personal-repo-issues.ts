@@ -268,13 +268,13 @@ export async function getActionableIssues(cwd: string, filterUser?: string): Pro
         if (result.failed > 0) parts.push(`${result.failed} failed`)
         if (result.discarded > 0) parts.push(`${result.discarded} discarded`)
         if (parts.length > 0) {
-          console.error(`[swiz] mutation replay (${pending} pending): ${parts.join(", ")}`)
+          console.error(
+            `[swiz] REPLAY_SUMMARY repo=${repoSlug} pending=${pending} ${parts.join(", ")}`
+          )
         }
       }
     } catch (err) {
-      console.error(
-        `[swiz] issue cache/replay error: ${err instanceof Error ? err.message : String(err)}`
-      )
+      console.error(`[swiz] REPLAY_INFRA_ERROR ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
