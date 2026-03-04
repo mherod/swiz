@@ -222,6 +222,10 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
 6. `gh run watch <run-id> --exit-status` — wait for completion; fix any failures before stopping.
 7. `gh run view <run-id> --json conclusion,status,jobs --jq '{conclusion,status,jobs:[.jobs[]|{name,conclusion,status}]}'` — fetch the explicit conclusion and per-job statuses; only announce success when `conclusion` is `"success"` and every job shows `"success"`.
 
+**DON'T** use `gh run view --commit <SHA>` — that flag does not exist and fails with "unknown flag: --commit". Always use the two-step pattern: `gh run list --commit $SHA --json databaseId --jq '.[0].databaseId'` to get the run ID, then `gh run view <id>`.
+
+**DO** use `swiz push-wait origin <branch>` instead of raw `git push` when a push cooldown may be active. The `pretooluse-push-cooldown` hook blocks `git push` during the cooldown window. `swiz push-wait` polls automatically and pushes when the cooldown clears — no manual sleep or retry needed.
+
 **Mandatory hooks — never bypass:**
 - `lefthook pre-push` runs `bun test`. DON'T use `--no-verify` or any flag that skips it. Fix test failures first.
 - CI workflow (`CI`) runs lint → typecheck → test. All three jobs must be green before the session can stop.
