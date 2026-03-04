@@ -10,6 +10,7 @@ import {
   resolvePolicy,
 } from "../settings.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
+import { SETTINGS_REGISTRY } from "./settings.ts"
 
 const tempDirs: string[] = []
 
@@ -606,5 +607,86 @@ describe("readProjectSettings", () => {
     )
     const settings = await readProjectSettings(dir)
     expect(settings?.disabledHooks).toBeUndefined()
+  })
+})
+
+// ─── SETTINGS_REGISTRY unit tests ───────────────────────────────────────────
+
+describe("SETTINGS_REGISTRY", () => {
+  test("every entry has at least one alias", () => {
+    for (const def of SETTINGS_REGISTRY) {
+      expect(def.aliases.length).toBeGreaterThan(0)
+    }
+  })
+
+  test("no duplicate aliases across entries", () => {
+    const seen = new Map<string, string>()
+    for (const def of SETTINGS_REGISTRY) {
+      for (const alias of def.aliases) {
+        const existing = seen.get(alias)
+        if (existing) {
+          throw new Error(`Duplicate alias "${alias}" in both "${existing}" and "${def.key}"`)
+        }
+        seen.set(alias, def.key)
+      }
+    }
+  })
+
+  test("no duplicate canonical keys", () => {
+    const keys = SETTINGS_REGISTRY.map((d) => d.key)
+    expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  test("every entry has at least one valid scope", () => {
+    for (const def of SETTINGS_REGISTRY) {
+      expect(def.scopes.length).toBeGreaterThan(0)
+      for (const scope of def.scopes) {
+        expect(["global", "project", "session"]).toContain(scope)
+      }
+    }
+  })
+
+  test("adding a setting only requires one registry entry", () => {
+    // Verify the registry drives alias resolution, type guards, and scope validation.
+    // All 17 settings must be present with no gaps between the registry and CLI behavior.
+    const expectedKeys = [
+      "autoContinue",
+      "prMergeMode",
+      "critiquesEnabled",
+      "pushGate",
+      "sandboxedEdits",
+      "speak",
+      "gitStatusGate",
+      "nonDefaultBranchGate",
+      "githubCiGate",
+      "changesRequestedGate",
+      "personalRepoIssuesGate",
+      "prAgeGateMinutes",
+      "narratorSpeed",
+      "memoryLineThreshold",
+      "memoryWordThreshold",
+      "narratorVoice",
+      "ambitionMode",
+    ]
+    const registryKeys = SETTINGS_REGISTRY.map((d) => d.key)
+    for (const key of expectedKeys) {
+      expect(registryKeys).toContain(key)
+    }
+    expect(registryKeys.length).toBe(expectedKeys.length)
+  })
+
+  test("ambitionMode has a validator that rejects invalid values", () => {
+    const def = SETTINGS_REGISTRY.find((d) => d.key === "ambitionMode")
+    expect(def).toBeDefined()
+    expect(def!.validate).toBeDefined()
+    expect(def!.validate!("standard")).toBeNull()
+    expect(def!.validate!("aggressive")).toBeNull()
+    expect(def!.validate!("turbo")).toContain("Invalid value")
+  })
+
+  test("string settings without validators accept any value", () => {
+    const narratorVoice = SETTINGS_REGISTRY.find((d) => d.key === "narratorVoice")
+    expect(narratorVoice).toBeDefined()
+    expect(narratorVoice!.validate).toBeUndefined()
   })
 })

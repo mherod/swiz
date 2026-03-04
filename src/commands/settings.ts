@@ -14,27 +14,166 @@ import {
 import { findSessions, projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
-type BooleanSettingKey =
-  | "autoContinue"
-  | "critiquesEnabled"
-  | "prMergeMode"
-  | "pushGate"
-  | "sandboxedEdits"
-  | "speak"
-  | "gitStatusGate"
-  | "nonDefaultBranchGate"
-  | "githubCiGate"
-  | "changesRequestedGate"
-  | "personalRepoIssuesGate"
-type NumericSettingKey =
-  | "prAgeGateMinutes"
-  | "narratorSpeed"
-  | "memoryLineThreshold"
-  | "memoryWordThreshold"
-type StringSettingKey = "narratorVoice" | "ambitionMode"
-type SettingKey = BooleanSettingKey | NumericSettingKey | StringSettingKey
-type Action = "show" | "enable" | "disable" | "set" | "disable-hook" | "enable-hook"
 type SettingsScope = "global" | "project" | "session"
+type ValueKind = "boolean" | "numeric" | "string"
+type Action = "show" | "enable" | "disable" | "set" | "disable-hook" | "enable-hook"
+
+export interface SettingDef {
+  key: string
+  aliases: string[]
+  kind: ValueKind
+  scopes: readonly SettingsScope[]
+  validate?: (value: string) => string | null // returns error message or null
+}
+
+/**
+ * Single source of truth for all CLI settings.
+ *
+ * To add a new setting: add one entry here. Alias resolution, type guards,
+ * scope validation, and value validation are all derived from this registry.
+ */
+export const SETTINGS_REGISTRY: SettingDef[] = [
+  // ── Boolean settings ──────────────────────────────────────────────────────
+  {
+    key: "autoContinue",
+    aliases: ["auto-continue", "autocontinue", "auto_continue"],
+    kind: "boolean",
+    scopes: ["global", "session"],
+  },
+  {
+    key: "prMergeMode",
+    aliases: ["pr-merge-mode", "prmergemode", "pr_merge_mode", "pr-merge", "prmerge"],
+    kind: "boolean",
+    scopes: ["global", "session"],
+  },
+  {
+    key: "critiquesEnabled",
+    aliases: ["critiques-enabled", "critiquesenabled", "critiques_enabled", "critiques"],
+    kind: "boolean",
+    scopes: ["global"],
+  },
+  {
+    key: "pushGate",
+    aliases: ["push-gate", "pushgate", "push_gate"],
+    kind: "boolean",
+    scopes: ["global"],
+  },
+  {
+    key: "sandboxedEdits",
+    aliases: ["sandboxed-edits", "sandboxededits", "sandboxed_edits"],
+    kind: "boolean",
+    scopes: ["global"],
+  },
+  {
+    key: "speak",
+    aliases: ["speak", "tts"],
+    kind: "boolean",
+    scopes: ["global"],
+  },
+  {
+    key: "gitStatusGate",
+    aliases: ["git-status-gate", "gitstatusgate", "git_status_gate", "git-status"],
+    kind: "boolean",
+    scopes: ["global"],
+  },
+  {
+    key: "nonDefaultBranchGate",
+    aliases: [
+      "non-default-branch-gate",
+      "nondefaultbranchgate",
+      "non_default_branch_gate",
+      "branch-gate",
+    ],
+    kind: "boolean",
+    scopes: ["global"],
+  },
+  {
+    key: "githubCiGate",
+    aliases: ["github-ci-gate", "githubcigate", "github_ci_gate", "ci-gate"],
+    kind: "boolean",
+    scopes: ["global"],
+  },
+  {
+    key: "changesRequestedGate",
+    aliases: [
+      "changes-requested-gate",
+      "changesrequestedgate",
+      "changes_requested_gate",
+      "pr-review-gate",
+    ],
+    kind: "boolean",
+    scopes: ["global"],
+  },
+  {
+    key: "personalRepoIssuesGate",
+    aliases: [
+      "personal-repo-issues-gate",
+      "personalrepoissuesgate",
+      "personal_repo_issues_gate",
+      "issue-gate",
+    ],
+    kind: "boolean",
+    scopes: ["global"],
+  },
+  // ── Numeric settings ──────────────────────────────────────────────────────
+  {
+    key: "prAgeGateMinutes",
+    aliases: ["pr-age-gate", "pragegate", "pr_age_gate", "pragegateminutes", "pr-age-gate-minutes"],
+    kind: "numeric",
+    scopes: ["global"],
+  },
+  {
+    key: "narratorSpeed",
+    aliases: ["narrator-speed", "narratorspeed", "narrator_speed", "speed"],
+    kind: "numeric",
+    scopes: ["global"],
+  },
+  {
+    key: "memoryLineThreshold",
+    aliases: ["memory-line-threshold", "memorylinethreshold", "memory_line_threshold"],
+    kind: "numeric",
+    scopes: ["global", "project"],
+  },
+  {
+    key: "memoryWordThreshold",
+    aliases: ["memory-word-threshold", "memorywordthreshold", "memory_word_threshold"],
+    kind: "numeric",
+    scopes: ["global", "project"],
+  },
+  // ── String settings ───────────────────────────────────────────────────────
+  {
+    key: "narratorVoice",
+    aliases: ["narrator-voice", "narratorvoice", "narrator_voice", "voice"],
+    kind: "string",
+    scopes: ["global"],
+  },
+  {
+    key: "ambitionMode",
+    aliases: ["ambition-mode", "ambitionmode", "ambition_mode", "ambition"],
+    kind: "string",
+    scopes: ["global"],
+    validate: (v) =>
+      v === "standard" || v === "aggressive"
+        ? null
+        : `Invalid value "${v}" for ambition-mode. Must be: standard | aggressive`,
+  },
+]
+
+// ── Derived lookups (built once from the registry) ────────────────────────
+
+/** Alias → canonical key lookup. */
+const ALIAS_MAP = new Map<string, string>()
+for (const def of SETTINGS_REGISTRY) {
+  for (const alias of def.aliases) ALIAS_MAP.set(alias, def.key)
+}
+
+/** Canonical key → definition lookup. */
+const DEF_BY_KEY = new Map<string, SettingDef>()
+for (const def of SETTINGS_REGISTRY) DEF_BY_KEY.set(def.key, def)
+
+// ── Type aliases (kept for external consumers / printSettings signature) ──
+
+type SettingKey = string & { readonly __brand?: "SettingKey" }
 
 interface ParsedSettingsArgs {
   action: Action
@@ -45,31 +184,10 @@ interface ParsedSettingsArgs {
   sessionQuery: string | null
 }
 
-/** Maps each CLI-exposed setting to the scopes that actually persist and apply it. */
-const SETTING_SCOPES: Record<SettingKey, readonly SettingsScope[]> = {
-  autoContinue: ["global", "session"],
-  prMergeMode: ["global", "session"],
-  critiquesEnabled: ["global"],
-  ambitionMode: ["global"],
-  pushGate: ["global"],
-  sandboxedEdits: ["global"],
-  speak: ["global"],
-  gitStatusGate: ["global"],
-  nonDefaultBranchGate: ["global"],
-  githubCiGate: ["global"],
-  changesRequestedGate: ["global"],
-  personalRepoIssuesGate: ["global"],
-  prAgeGateMinutes: ["global"],
-  narratorVoice: ["global"],
-  narratorSpeed: ["global"],
-  memoryLineThreshold: ["global", "project"],
-  memoryWordThreshold: ["global", "project"],
-}
-
 function validateSettingScope(key: SettingKey, scope: SettingsScope, settingArg: string): void {
-  const allowed = SETTING_SCOPES[key]
-  if (!allowed.includes(scope)) {
-    const scopeList = allowed.join(", ")
+  const def = getSettingDef(key)
+  if (!def.scopes.includes(scope)) {
+    const scopeList = def.scopes.join(", ")
     throw new Error(
       `"${settingArg}" does not support --${scope} scope. Supported: ${scopeList}\n${usage()}`
     )
@@ -94,137 +212,24 @@ function usage(): string {
 
 function parseSetting(raw: string | undefined): SettingKey {
   if (!raw) throw new Error(`Missing setting name.\n${usage()}`)
-  const value = raw.trim().toLowerCase()
-  if (value === "auto-continue" || value === "autocontinue" || value === "auto_continue") {
-    return "autoContinue"
-  }
-  if (
-    value === "pr-merge-mode" ||
-    value === "prmergemode" ||
-    value === "pr_merge_mode" ||
-    value === "pr-merge" ||
-    value === "prmerge"
-  ) {
-    return "prMergeMode"
-  }
-  if (
-    value === "pr-age-gate" ||
-    value === "pragegate" ||
-    value === "pr_age_gate" ||
-    value === "pragegateminutes" ||
-    value === "pr-age-gate-minutes"
-  ) {
-    return "prAgeGateMinutes"
-  }
-  if (value === "push-gate" || value === "pushgate" || value === "push_gate") {
-    return "pushGate"
-  }
-  if (value === "sandboxed-edits" || value === "sandboxededits" || value === "sandboxed_edits") {
-    return "sandboxedEdits"
-  }
-  if (value === "speak" || value === "tts") {
-    return "speak"
-  }
-  if (
-    value === "git-status-gate" ||
-    value === "gitstatusgate" ||
-    value === "git_status_gate" ||
-    value === "git-status"
-  ) {
-    return "gitStatusGate"
-  }
-  if (
-    value === "non-default-branch-gate" ||
-    value === "nondefaultbranchgate" ||
-    value === "non_default_branch_gate" ||
-    value === "branch-gate"
-  ) {
-    return "nonDefaultBranchGate"
-  }
-  if (
-    value === "github-ci-gate" ||
-    value === "githubcigate" ||
-    value === "github_ci_gate" ||
-    value === "ci-gate"
-  ) {
-    return "githubCiGate"
-  }
-  if (
-    value === "changes-requested-gate" ||
-    value === "changesrequestedgate" ||
-    value === "changes_requested_gate" ||
-    value === "pr-review-gate"
-  ) {
-    return "changesRequestedGate"
-  }
-  if (
-    value === "personal-repo-issues-gate" ||
-    value === "personalrepoissuesgate" ||
-    value === "personal_repo_issues_gate" ||
-    value === "issue-gate"
-  ) {
-    return "personalRepoIssuesGate"
-  }
-  if (
-    value === "critiques-enabled" ||
-    value === "critiquesenabled" ||
-    value === "critiques_enabled" ||
-    value === "critiques"
-  ) {
-    return "critiquesEnabled"
-  }
-  if (
-    value === "ambition-mode" ||
-    value === "ambitionmode" ||
-    value === "ambition_mode" ||
-    value === "ambition"
-  ) {
-    return "ambitionMode"
-  }
-  if (
-    value === "narrator-voice" ||
-    value === "narratorvoice" ||
-    value === "narrator_voice" ||
-    value === "voice"
-  ) {
-    return "narratorVoice"
-  }
-  if (
-    value === "narrator-speed" ||
-    value === "narratorspeed" ||
-    value === "narrator_speed" ||
-    value === "speed"
-  ) {
-    return "narratorSpeed"
-  }
-  if (
-    value === "memory-line-threshold" ||
-    value === "memorylinethreshold" ||
-    value === "memory_line_threshold"
-  ) {
-    return "memoryLineThreshold"
-  }
-  if (
-    value === "memory-word-threshold" ||
-    value === "memorywordthreshold" ||
-    value === "memory_word_threshold"
-  ) {
-    return "memoryWordThreshold"
-  }
+  const normalized = raw.trim().toLowerCase()
+  const key = ALIAS_MAP.get(normalized)
+  if (key) return key as SettingKey
   throw new Error(`Unknown setting: ${raw}\n${usage()}`)
 }
 
-function isNumericSetting(key: SettingKey): key is NumericSettingKey {
-  return (
-    key === "prAgeGateMinutes" ||
-    key === "narratorSpeed" ||
-    key === "memoryLineThreshold" ||
-    key === "memoryWordThreshold"
-  )
+function getSettingDef(key: SettingKey): SettingDef {
+  const def = DEF_BY_KEY.get(key)
+  if (!def) throw new Error(`No registry entry for setting: ${key}`)
+  return def
 }
 
-function isStringSetting(key: SettingKey): key is StringSettingKey {
-  return key === "narratorVoice" || key === "ambitionMode"
+function isNumericSetting(key: SettingKey): boolean {
+  return getSettingDef(key).kind === "numeric"
+}
+
+function isStringSetting(key: SettingKey): boolean {
+  return getSettingDef(key).kind === "string"
 }
 
 function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
@@ -510,13 +515,12 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
   }
   validateSettingScope(key, parsed.scope, parsed.settingArg ?? key)
 
-  if (isStringSetting(key)) {
-    if (key === "ambitionMode") {
-      if (parsed.settingValue !== "standard" && parsed.settingValue !== "aggressive") {
-        throw new Error(
-          `Invalid value "${parsed.settingValue}" for ambition-mode. Must be: standard | aggressive\n${usage()}`
-        )
-      }
+  const def = getSettingDef(key)
+
+  if (def.kind === "string") {
+    if (def.validate) {
+      const error = def.validate(parsed.settingValue)
+      if (error) throw new Error(`${error}\n${usage()}`)
     }
     const path = await writeSettingToScope(parsed, key, parsed.settingValue)
     console.log(`\n  Set ${parsed.settingArg} = ${parsed.settingValue} (${parsed.scope})`)
