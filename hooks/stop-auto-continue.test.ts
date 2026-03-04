@@ -834,6 +834,24 @@ describe("stop-auto-continue", () => {
     expect(result.reason).not.toContain("<tool_call>")
   })
 
+  test("replaces workflow implementation prescriptions with a policy finding", async () => {
+    const binDir = await createTempDir()
+    const json = JSON.stringify({
+      next: "Implement a guard-aware push orchestration module in plugg-platform",
+      reflections: [],
+    })
+    await createFakeAgent(binDir, json)
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      binDir,
+    })
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("Collaboration/workflow policy finding detected")
+    expect(result.reason).not.toContain("guard-aware push orchestration module in plugg-platform")
+  })
+
   test("filters out reflections containing XML markup", async () => {
     const binDir = await createTempDir()
     const json = JSON.stringify({
@@ -1080,7 +1098,7 @@ describe("stop-auto-continue", () => {
 
   // ─── Critique field tests ────────────────────────────────────────────────
 
-  test("includes process and product critiques with labels before the continue instruction", async () => {
+  test("includes process and product critiques with labels before the finding line", async () => {
     const binDir = await createTempDir()
     const json = JSON.stringify({
       processCritique: "You skipped reading the existing implementation before modifying it.",
@@ -1102,10 +1120,10 @@ describe("stop-auto-continue", () => {
       "The fix handles the happy path but leaves the error case broken."
     )
     expect(result.reason).toContain("Run the full test suite")
-    // Critiques must appear before the continue instruction
+    // Critiques must appear before the finding line
     const critiqueIdx = result.reason!.indexOf("Process:")
-    const continueIdx = result.reason!.indexOf("Continue autonomously")
-    expect(critiqueIdx).toBeLessThan(continueIdx)
+    const findingIdx = result.reason!.indexOf("Stop blocked — unresolved finding")
+    expect(critiqueIdx).toBeLessThan(findingIdx)
   })
 
   test("omits critique when JSON response has no critique field", async () => {
@@ -1117,7 +1135,7 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBe("block")
     expect(result.reason).not.toContain("Session critique:")
-    expect(result.reason!.trimStart()).toMatch(/^Continue autonomously/)
+    expect(result.reason!.trimStart()).toMatch(/^Stop blocked — unresolved finding:/)
     expect(result.reason).toContain("Run the full test suite")
   })
 
@@ -1136,7 +1154,7 @@ describe("stop-auto-continue", () => {
     expect(result.decision).toBe("block")
     expect(result.reason).not.toContain("Process:")
     expect(result.reason).not.toContain("Product:")
-    expect(result.reason!.trimStart()).toMatch(/^Continue autonomously/)
+    expect(result.reason!.trimStart()).toMatch(/^Stop blocked — unresolved finding:/)
     expect(result.reason).toContain("Run the linter")
   })
 
@@ -1154,7 +1172,7 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBe("block")
     expect(result.reason).not.toContain("<tool_call>")
-    expect(result.reason!.trimStart()).toMatch(/^Continue autonomously/)
+    expect(result.reason!.trimStart()).toMatch(/^Stop blocked — unresolved finding:/)
     expect(result.reason).toContain("Run the tests")
   })
 
@@ -1464,6 +1482,7 @@ import { isWorkflowSuggestion } from "./stop-auto-continue.ts"
 describe("isWorkflowSuggestion", () => {
   describe("blocks workflow/git-process suggestions", () => {
     const blocked = [
+      "Implement a guard-aware push orchestration module in plugg-platform",
       "Implement a hard-fail in the push skill that blocks any direct main push",
       "Implement bot-aware collaboration detection in the push skill by excluding bot-authored PRs",
       "Implement hook-bot suggestion filtering so outputs exclude workflow/git-process guidance",

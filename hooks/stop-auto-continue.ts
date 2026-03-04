@@ -36,6 +36,9 @@ const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 90_000
 const FALLBACK_SUGGESTION =
   "Review the session transcript, identify the most critical incomplete task, and complete it autonomously without asking for confirmation."
 
+const WORKFLOW_FINDING =
+  "Collaboration/workflow policy finding detected. Report the violation and enforce the gate; do not prescribe project-specific implementation details."
+
 const HOME = process.env.HOME ?? "~"
 const PROJECTS_DIR = join(HOME, ".claude", "projects")
 
@@ -120,6 +123,9 @@ const WORKFLOW_PATTERNS = [
   /\bcollaboration\s+(signal|guard|detection|check)\b/i,
   /\bbranch\s+(policy|protection|enforcement)\b/i,
   /\b(push|commit)\s+guard\b/i,
+  /\b(push|git)\s+orchestration\b/i,
+  /\bguard-?aware\b/i,
+  /\b(implement|add|fix|build|extend|wire(?:\s+up)?|update)\b.*\bin\s+[a-z0-9]+-[a-z0-9-]+\b/i,
 ]
 
 export function isWorkflowSuggestion(text: string): boolean {
@@ -412,6 +418,8 @@ function buildPrompt(
     `    Hook implementations belong to the swiz project, not to the agent or the repository being worked in. ` +
     `    If a hook appears defective, the correct action is to file a GitHub issue on mherod/swiz — ` +
     `    never to implement or fix the hook locally.\n` +
+    `  - prescribing project-specific infrastructure or architecture changes in the checked project ` +
+    `    in response to a policy finding (for example "implement a guard-aware push orchestration module").\n` +
     (cwd
       ? `  - suggesting code edits, implementations, or fixes in any repository other than the session project (${cwd}). ` +
         `    If a bug is found in an external tool or dependency, the correct action is to file a GitHub issue on that repo — ` +
@@ -529,10 +537,9 @@ async function main(): Promise<void> {
 
   // Post-generation filter: reject workflow/git-process suggestions that violate
   // the ABSOLUTE PROHIBITIONS. The AI backend doesn't always comply with prompt
-  // instructions, so this deterministic check is the backstop. When filtered,
-  // response.next becomes "" which triggers FALLBACK_SUGGESTION downstream.
+  // instructions, so this deterministic check is the backstop.
   if (response.next && isWorkflowSuggestion(response.next)) {
-    response.next = ""
+    response.next = WORKFLOW_FINDING
   }
 
   // Write reflections to memory (never blocks, never throws)
@@ -555,7 +562,7 @@ async function main(): Promise<void> {
   // is never lost to AI interpretation.
   const refinementDirective = refinementStatus ? `\n\nNote: ${refinementStatus}` : ""
   blockStopRaw(
-    `${critiqueLine}Continue autonomously — do not ask questions or wait for confirmation: ${response.next || FALLBACK_SUGGESTION}${refinementDirective}`
+    `${critiqueLine}Stop blocked — unresolved finding: ${response.next || FALLBACK_SUGGESTION}${refinementDirective}`
   )
 }
 
