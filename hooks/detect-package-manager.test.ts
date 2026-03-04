@@ -67,6 +67,182 @@ async function pnpmDecisionInDir(dir: string): Promise<string | undefined> {
   return parsed.hookSpecificOutput?.permissionDecision ?? parsed.decision
 }
 
+// ─── package.json packageManager field (primary detection) ─────────────────
+
+describe("detectPackageManager — package.json packageManager field", () => {
+  test('packageManager: "pnpm@10.29.3" → detects pnpm, npm is blocked', async () => {
+    const dir = await makeTempDir("-pkg-pnpm")
+    await writeFile(join(dir, "package.json"), JSON.stringify({ packageManager: "pnpm@10.29.3" }))
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm")
+  })
+
+  test('packageManager: "npm@9.8.1" → detects npm, npm install allowed', async () => {
+    const dir = await makeTempDir("-pkg-npm")
+    await writeFile(join(dir, "package.json"), JSON.stringify({ packageManager: "npm@9.8.1" }))
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBeUndefined() // npm is allowed (passes through)
+  })
+
+  test('packageManager: "yarn@3.6.0" → detects yarn, npm is blocked', async () => {
+    const dir = await makeTempDir("-pkg-yarn")
+    await writeFile(join(dir, "package.json"), JSON.stringify({ packageManager: "yarn@3.6.0" }))
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("yarn")
+  })
+
+  test('packageManager: "bun@1.0.0" → detects bun, npm is blocked', async () => {
+    const dir = await makeTempDir("-pkg-bun")
+    await writeFile(join(dir, "package.json"), JSON.stringify({ packageManager: "bun@1.0.0" }))
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("bun")
+  })
+
+  test("packageManager field takes priority over lock files", async () => {
+    const dir = await makeTempDir("-pkg-priority")
+    // package.json says pnpm, but lock files suggest bun
+    await writeFile(join(dir, "package.json"), JSON.stringify({ packageManager: "pnpm@10.29.3" }))
+    await writeFile(join(dir, "bun.lock"), "")
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm") // packageManager field wins
+  })
+})
+
+// ─── .npmrc pnpm-specific config detection (secondary detection) ──────────────
+
+describe("detectPackageManager — .npmrc pnpm config hints", () => {
+  test(".npmrc with node-linker=hoisted → detects pnpm", async () => {
+    const dir = await makeTempDir("-npmrc-hoisted")
+    await writeFile(join(dir, ".npmrc"), "node-linker=hoisted\n")
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm")
+  })
+
+  test(".npmrc with shamefully-hoist=true → detects pnpm", async () => {
+    const dir = await makeTempDir("-npmrc-shameful")
+    await writeFile(join(dir, ".npmrc"), "shamefully-hoist=true\n")
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm")
+  })
+
+  test(".npmrc with strict-peer-dependencies=false → detects pnpm", async () => {
+    const dir = await makeTempDir("-npmrc-strict")
+    await writeFile(join(dir, ".npmrc"), "strict-peer-dependencies=false\n")
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm")
+  })
+
+  test(".npmrc with multiple pnpm config keys → detects pnpm", async () => {
+    const dir = await makeTempDir("-npmrc-multi")
+    await writeFile(
+      join(dir, ".npmrc"),
+      "node-linker=hoisted\nshamefully-hoist=true\nstrict-peer-dependencies=false\n"
+    )
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm")
+  })
+
+  test(".npmrc without pnpm keys → passes through (falls to lock files)", async () => {
+    const dir = await makeTempDir("-npmrc-no-pnpm")
+    await writeFile(join(dir, ".npmrc"), "registry=https://registry.npmjs.org\n")
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBeUndefined() // No PM detected
+  })
+
+  test(".npmrc pnpm config takes priority over lock files", async () => {
+    const dir = await makeTempDir("-npmrc-priority")
+    // .npmrc says pnpm, but lock files suggest yarn
+    await writeFile(join(dir, ".npmrc"), "node-linker=hoisted\n")
+    await writeFile(join(dir, "yarn.lock"), "")
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm") // .npmrc config wins
+  })
+})
+
+// ─── Priority ordering (packageManager > .npmrc > lock files) ────────────────
+
+describe("detectPackageManager — detection priority", () => {
+  test("packageManager field overrides .npmrc config", async () => {
+    const dir = await makeTempDir("-priority-pkg-npmrc")
+    // package.json says npm, .npmrc says pnpm
+    await writeFile(join(dir, "package.json"), JSON.stringify({ packageManager: "npm@9.8.1" }))
+    await writeFile(join(dir, ".npmrc"), "node-linker=hoisted\n")
+    const result = await npmDecisionInDir(dir)
+    // npm is allowed (passes through), pnpm detection never runs
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("packageManager field overrides all lock files", async () => {
+    const dir = await makeTempDir("-priority-pkg-locks")
+    // package.json says yarn, all lock files present
+    await writeFile(join(dir, "package.json"), JSON.stringify({ packageManager: "yarn@3.6.0" }))
+    await writeFile(join(dir, "bun.lock"), "")
+    await writeFile(join(dir, "pnpm-lock.yaml"), "")
+    await writeFile(join(dir, "package-lock.json"), "{}")
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("yarn") // packageManager field is used
+  })
+})
+
+// ─── Walk-up behavior for new detection methods ───────────────────────────────
+
+describe("detectPackageManager — walk-up for package.json and .npmrc", () => {
+  test("package.json in parent directory is found", async () => {
+    const parent = await makeTempDir("-walk-pkg-parent")
+    const child = join(parent, "packages", "app")
+    await mkdir(child, { recursive: true })
+    await writeFile(
+      join(parent, "package.json"),
+      JSON.stringify({ packageManager: "pnpm@10.29.3" })
+    )
+    const result = await npmDecisionInDir(child)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm")
+  })
+
+  test(".npmrc in parent directory is found", async () => {
+    const parent = await makeTempDir("-walk-npmrc-parent")
+    const child = join(parent, "subdir")
+    await mkdir(child, { recursive: true })
+    await writeFile(join(parent, ".npmrc"), "node-linker=hoisted\n")
+    const result = await npmDecisionInDir(child)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm")
+  })
+
+  test("child package.json takes priority over parent package.json", async () => {
+    const parent = await makeTempDir("-walk-pkg-precedence")
+    const child = join(parent, "child")
+    await mkdir(child)
+    await writeFile(join(parent, "package.json"), JSON.stringify({ packageManager: "yarn@3.6.0" }))
+    await writeFile(join(child, "package.json"), JSON.stringify({ packageManager: "pnpm@10.29.3" }))
+    const result = await npmDecisionInDir(child)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm") // child wins
+  })
+
+  test("child .npmrc takes priority over parent .npmrc", async () => {
+    const parent = await makeTempDir("-walk-npmrc-precedence")
+    const child = join(parent, "child")
+    await mkdir(child)
+    await writeFile(join(parent, ".npmrc"), "registry=https://npm.com\n")
+    await writeFile(join(child, ".npmrc"), "node-linker=hoisted\n")
+    const result = await npmDecisionInDir(child)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm") // child's pnpm config wins
+  })
+})
+
 // ─── No lockfile ─────────────────────────────────────────────────────────────
 
 describe("detectPackageManager — no lockfile", () => {

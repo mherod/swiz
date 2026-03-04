@@ -19,7 +19,7 @@ if (!Bun.which("bun")) {
 // manager and runtime. Cached per process so hooks don't stat the filesystem
 // on every import.
 
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { translateMatcher } from "../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
@@ -61,6 +61,45 @@ export function detectPackageManager(): PackageManager | null {
 
   let dir = process.cwd()
   while (true) {
+    // Primary: Check for packageManager field in package.json (Node.js standard)
+    const pkgJsonPath = join(dir, "package.json")
+    if (existsSync(pkgJsonPath)) {
+      try {
+        const content = readFileSync(pkgJsonPath, "utf-8")
+        const pkg = JSON.parse(content)
+        if (pkg.packageManager && typeof pkg.packageManager === "string") {
+          // Format: "pnpm@10.29.3" → extract "pnpm"
+          const pmName = pkg.packageManager.split("@")[0] as PackageManager
+          if (pmName === "bun" || pmName === "pnpm" || pmName === "yarn" || pmName === "npm") {
+            _pmCache = pmName
+            return _pmCache
+          }
+        }
+      } catch {
+        // If package.json is invalid JSON, continue to other detection methods
+      }
+    }
+
+    // Secondary: Check for pnpm-specific config hints in .npmrc
+    const npmrcPath = join(dir, ".npmrc")
+    if (existsSync(npmrcPath)) {
+      try {
+        const content = readFileSync(npmrcPath, "utf-8")
+        // Look for pnpm-specific config keys
+        if (
+          /^\s*node-linker\s*=\s*hoisted/m.test(content) ||
+          /^\s*shamefully-hoist\s*=\s*true/m.test(content) ||
+          /^\s*strict-peer-dependencies\s*=\s*false/m.test(content)
+        ) {
+          _pmCache = "pnpm"
+          return _pmCache
+        }
+      } catch {
+        // If .npmrc is unreadable, continue to lock file detection
+      }
+    }
+
+    // Tertiary: Check for lock files (existing behavior)
     if (existsSync(join(dir, "bun.lockb")) || existsSync(join(dir, "bun.lock"))) {
       _pmCache = "bun"
       return _pmCache
