@@ -1,6 +1,22 @@
 import { getRepoSlug, issueState } from "../../hooks/hook-utils.ts"
-import { getIssueStore } from "../issue-store.ts"
+import { getIssueStore, replayPendingMutations } from "../issue-store.ts"
 import type { Command } from "../types.ts"
+
+/**
+ * Replay any pending mutations for the current repo before executing a command.
+ * Best-effort — failures are silently ignored.
+ */
+async function replayBeforeCommand(): Promise<void> {
+  try {
+    const cwd = process.cwd()
+    const slug = await getRepoSlug(cwd)
+    if (slug) {
+      await replayPendingMutations(slug, cwd)
+    }
+  } catch {
+    // Non-fatal — don't block the current command
+  }
+}
 
 function usage(): string {
   return (
@@ -208,6 +224,8 @@ export const issueCommand: Command = {
     { flags: "--body, -b <text>", description: "Comment body (for comment and resolve)" },
   ],
   async run(args) {
+    await replayBeforeCommand()
+
     const sub = args[0]
     const number = args[1]
 

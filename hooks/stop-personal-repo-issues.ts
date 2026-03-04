@@ -6,7 +6,7 @@
  * the current user has self-authored or self-assigned issues in an org repo.
  */
 
-import { getIssueStore } from "../src/issue-store.ts"
+import { getIssueStore, replayPendingMutations } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
@@ -256,10 +256,11 @@ export async function getActionableIssues(cwd: string, filterUser?: string): Pro
   )
 
   if (issues && repoSlug) {
-    // Cache successful result
+    // Cache successful result and replay any queued mutations
     try {
       const store = getIssueStore()
       store.upsertIssues(repoSlug, issues)
+      await replayPendingMutations(repoSlug, cwd, store)
     } catch {
       // SQLite write failure is non-fatal
     }

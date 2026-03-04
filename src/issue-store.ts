@@ -156,6 +156,106 @@ export class IssueStore {
   }
 }
 
+// ─── Replay ─────────────────────────────────────────────────────────────────
+
+/** Maximum attempts before a mutation is discarded. */
+const MAX_ATTEMPTS = 5
+
+export interface ReplayResult {
+  replayed: number
+  failed: number
+  discarded: number
+}
+
+/**
+ * Replay pending mutations for a repo against live GitHub.
+ * Runs each queued mutation via `gh`, removes on success, bumps attempt count
+ * on failure, and discards after MAX_ATTEMPTS.
+ *
+ * Call this opportunistically when a live GitHub connection is confirmed.
+ */
+export async function replayPendingMutations(
+  repo: string,
+  cwd: string,
+  store?: IssueStore
+): Promise<ReplayResult> {
+  const s = store ?? getIssueStore()
+  const pending = s.getPendingMutations(repo)
+  const result: ReplayResult = { replayed: 0, failed: 0, discarded: 0 }
+
+  for (const row of pending) {
+    if (row.attempts >= MAX_ATTEMPTS) {
+      s.removeMutation(row.id)
+      result.discarded++
+      continue
+    }
+
+    const mutation: MutationPayload = JSON.parse(row.mutation)
+    const ok = await executeMutation(mutation, cwd)
+
+    if (ok) {
+      s.removeMutation(row.id)
+      if (mutation.type === "close" || mutation.type === "resolve") {
+        s.removeIssue(repo, mutation.number)
+      }
+      result.replayed++
+    } else {
+      s.markAttempted(row.id)
+      result.failed++
+    }
+  }
+
+  return result
+}
+
+/** Execute a single mutation against live GitHub. Returns true on success. */
+async function executeMutation(mutation: MutationPayload, cwd: string): Promise<boolean> {
+  const num = String(mutation.number)
+
+  switch (mutation.type) {
+    case "close": {
+      const proc = Bun.spawn(["gh", "issue", "close", num], {
+        cwd,
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      await proc.exited
+      return proc.exitCode === 0
+    }
+    case "comment": {
+      if (!mutation.body) return true // nothing to post
+      const proc = Bun.spawn(["gh", "issue", "comment", num, "--body", mutation.body], {
+        cwd,
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      await proc.exited
+      return proc.exitCode === 0
+    }
+    case "resolve": {
+      // Resolve = comment (if body) + close
+      if (mutation.body) {
+        const cp = Bun.spawn(["gh", "issue", "comment", num, "--body", mutation.body], {
+          cwd,
+          stdout: "pipe",
+          stderr: "pipe",
+        })
+        await cp.exited
+        if (cp.exitCode !== 0) return false
+      }
+      const cl = Bun.spawn(["gh", "issue", "close", num], {
+        cwd,
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      await cl.exited
+      return cl.exitCode === 0
+    }
+    default:
+      return false
+  }
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function getDefaultDbPath(): string {
