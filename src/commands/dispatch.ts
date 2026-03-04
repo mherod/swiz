@@ -785,8 +785,14 @@ export const dispatchCommand: Command = {
     let combinedManifest: HookGroup[] = [...manifest]
     const projectSettings = await readProjectSettings(cwd)
     if (projectSettings?.plugins?.length) {
-      const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
+      const debugMode = process.env.SWIZ_DEBUG === "1"
+      const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd, {
+        verbose: debugMode,
+      })
       const pluginHooks = pluginResults.flatMap((r) => r.hooks)
+      for (const r of pluginResults) {
+        if (r.error) log(`   ⚠ plugin ${r.name}: ${r.error}`)
+      }
       if (pluginHooks.length > 0) {
         combinedManifest = [...combinedManifest, ...pluginHooks]
         log(`   loaded ${pluginHooks.length} plugin hook group(s)`)

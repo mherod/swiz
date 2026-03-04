@@ -97,6 +97,7 @@ export interface LoadPluginsOptions {
  * Error visibility policy:
  * - verbose=true  → logs errors to stderr (install, status, hooks commands)
  * - verbose=false → silent; callers inspect result.error (dispatch, runtime)
+ * Dispatch uses verbose=SWIZ_DEBUG so errors surface in debug mode.
  */
 export async function loadAllPlugins(
   plugins: string[],
