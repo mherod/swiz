@@ -118,6 +118,34 @@ function resolveHookPaths(groups: HookGroup[], pluginDir: string): HookGroup[] {
   }))
 }
 
+/** Human-readable hint for a plugin error code. */
+export function pluginErrorHint(code: PluginErrorCode): string {
+  switch (code) {
+    case "not-found":
+      return "not installed"
+    case "no-entry-point":
+      return "missing swiz-hooks entry"
+    case "invalid-export":
+      return "bad export format"
+    case "parse-error":
+      return "invalid JSON"
+    case "load-error":
+      return "load failed"
+  }
+}
+
+/** Serialize plugin results to a JSON-friendly array for machine consumption. */
+export function pluginResultsToJson(
+  results: PluginResult[]
+): { name: string; ok: boolean; hookCount: number; errorCode?: string; hint?: string }[] {
+  return results.map((r) => ({
+    name: r.name,
+    ok: !r.errorCode,
+    hookCount: r.hooks.reduce((n, g) => n + g.hooks.length, 0),
+    ...(r.errorCode ? { errorCode: r.errorCode, hint: pluginErrorHint(r.errorCode) } : {}),
+  }))
+}
+
 export interface LoadPluginsOptions {
   /** When true, also log the full error detail to stderr. */
   verbose?: boolean

@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { manifest } from "../manifest.ts"
-import { loadAllPlugins } from "../plugins.ts"
+import { loadAllPlugins, pluginResultsToJson } from "../plugins.ts"
 import { readProjectSettings, readSwizSettings, resolveProjectHooks } from "../settings.ts"
 import type { Command } from "../types.ts"
 
@@ -219,7 +219,7 @@ const DIM = "\x1b[2m"
 const CYAN_H = "\x1b[36m"
 const RST = "\x1b[0m"
 
-async function showSources() {
+async function showSources(jsonOutput = false) {
   const cwd = process.cwd()
 
   // Built-in hooks
@@ -235,8 +235,13 @@ async function showSources() {
   // Plugin hooks
   const projectSettings = await readProjectSettings(cwd)
   const pluginResults = projectSettings?.plugins?.length
-    ? await loadAllPlugins(projectSettings.plugins, cwd, { verbose: true })
+    ? await loadAllPlugins(projectSettings.plugins, cwd, { verbose: !jsonOutput })
     : []
+
+  if (jsonOutput) {
+    console.log(JSON.stringify(pluginResultsToJson(pluginResults), null, 2))
+    return
+  }
 
   const failedPlugins = pluginResults.filter((r) => r.errorCode)
   const pluginByEvent = new Map<string, { file: string; plugin: string }[]>()
@@ -306,16 +311,19 @@ async function showSources() {
 export const hooksCommand: Command = {
   name: "hooks",
   description: "Inspect agent hooks (Claude Code, Cursor, Gemini CLI)",
-  usage: "swiz hooks [--source] [event] [script-name]",
+  usage: "swiz hooks [--source] [--json] [event] [script-name]",
   options: [
     { flags: "(no args)", description: "List all hook events and their hook counts" },
     { flags: "--source", description: "Show origin (built-in / plugin) for every hook" },
+    { flags: "--json", description: "Output plugin status as JSON (use with --source)" },
     { flags: "<event>", description: "Show hooks registered for a specific event name" },
     { flags: "<event> <script>", description: "Print the source of a hook script by name" },
   ],
   async run(args) {
-    if (args.includes("--source")) {
-      await showSources()
+    const jsonOutput = args.includes("--json")
+
+    if (args.includes("--source") || jsonOutput) {
+      await showSources(jsonOutput)
       return
     }
 

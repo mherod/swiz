@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, getAgentByFlag, translateEvent } from "../agents.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
-import { loadAllPlugins } from "../plugins.ts"
+import { loadAllPlugins, pluginErrorHint, pluginResultsToJson } from "../plugins.ts"
 import { readProjectSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 
@@ -489,10 +489,12 @@ export const installCommand: Command = {
     ...AGENTS.map((a) => ({ flags: `--${a.id}`, description: `Install for ${a.name} only` })),
     { flags: "--dry-run", description: "Preview changes without writing to disk" },
     { flags: "--merge-tool", description: "Configure swiz as the global Git mergetool" },
+    { flags: "--json", description: "Output plugin status as JSON (implies --dry-run)" },
     { flags: "(no flags)", description: "Install for all detected agents" },
   ],
   async run(args) {
-    const dryRun = args.includes("--dry-run")
+    const jsonOutput = args.includes("--json")
+    const dryRun = jsonOutput || args.includes("--dry-run")
     const mergeTool = args.includes("--merge-tool")
     const targets = getAgentByFlag(args)
 
@@ -519,28 +521,31 @@ export const installCommand: Command = {
       const cwd = process.cwd()
       const projectSettings = await readProjectSettings(cwd)
       if (projectSettings?.plugins?.length) {
-        const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd, { verbose: true })
+        const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd, {
+          verbose: !jsonOutput,
+        })
+
+        if (jsonOutput) {
+          console.log(JSON.stringify(pluginResultsToJson(pluginResults), null, 2))
+          return
+        }
+
         const YELLOW = "\x1b[33m"
         console.log(`  Plugins:`)
         for (const result of pluginResults) {
           if (result.errorCode) {
-            const hint =
-              result.errorCode === "not-found"
-                ? "not installed"
-                : result.errorCode === "no-entry-point"
-                  ? "missing swiz-hooks entry"
-                  : result.errorCode === "invalid-export"
-                    ? "bad export format"
-                    : result.errorCode === "parse-error"
-                      ? "invalid JSON"
-                      : "load failed"
-            console.log(`    ${YELLOW}⚠ ${result.name}${RESET} (${hint})`)
+            console.log(
+              `    ${YELLOW}⚠ ${result.name}${RESET} (${pluginErrorHint(result.errorCode)})`
+            )
           } else {
             const hookCount = result.hooks.reduce((n, g) => n + g.hooks.length, 0)
             console.log(`    ${GREEN}✓${RESET} ${result.name} (${hookCount} hook(s))`)
           }
         }
         console.log()
+      } else if (jsonOutput) {
+        console.log("[]")
+        return
       }
 
       for (const agent of targets) {
