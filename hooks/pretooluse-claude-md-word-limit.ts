@@ -14,8 +14,15 @@ interface ToolInput {
 }
 
 async function countWords(text: string): Promise<number> {
+  // Remove YAML frontmatter (--- ... --- at file start)
+  let processed = text.replace(/^---\n[\s\S]*?\n---\n/, "")
+
   // Strip fenced code blocks (```...```)
-  let processed = text.replace(/```[\s\S]*?```/g, "")
+  processed = processed.replace(/```[\s\S]*?```/g, "")
+
+  // Remove indented code blocks (consecutive lines with 4+ spaces or tab indentation)
+  // Matches one or more lines that start with 4+ spaces or a tab
+  processed = processed.replace(/(?:^(?: {4}|\t).*\n?)+/gm, "")
 
   // Strip HTML comments (<!-- ... -->)
   processed = processed.replace(/<!--[\s\S]*?-->/g, "")

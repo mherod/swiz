@@ -2,8 +2,15 @@ import { describe, expect, test } from "bun:test"
 
 // Extracted from the hook for testing
 async function countWords(text: string): Promise<number> {
+  // Remove YAML frontmatter (--- ... --- at file start)
+  let processed = text.replace(/^---\n[\s\S]*?\n---\n/, "")
+
   // Strip fenced code blocks (```...```)
-  let processed = text.replace(/```[\s\S]*?```/g, "")
+  processed = processed.replace(/```[\s\S]*?```/g, "")
+
+  // Remove indented code blocks (consecutive lines with 4+ spaces or tab indentation)
+  // Matches one or more lines that start with 4+ spaces or a tab
+  processed = processed.replace(/(?:^(?: {4}|\t).*\n?)+/gm, "")
 
   // Strip HTML comments (<!-- ... -->)
   processed = processed.replace(/<!--[\s\S]*?-->/g, "")
@@ -275,6 +282,145 @@ Final thoughts.
       // Rough count: 2 + 6 + 2 + 6 + 2 = 18 words
       expect(count).toBeGreaterThan(10)
       expect(count).toBeLessThan(30)
+    })
+  })
+
+  describe("YAML frontmatter removal", () => {
+    test("removes YAML frontmatter at file start", async () => {
+      const text = `---
+title: Example
+description: Test document
+---
+
+This is the main content.`
+      const count = await countWords(text)
+      expect(count).toBe(5) // "This", "is", "the", "main", "content"
+    })
+
+    test("preserves content after frontmatter", async () => {
+      const text = `---
+key: value
+---
+Main content here.`
+      const count = await countWords(text)
+      expect(count).toBe(3) // "Main", "content", "here"
+    })
+
+    test("leaves non-frontmatter dashes alone", async () => {
+      const text = `Some content --- divider --- more content`
+      const count = await countWords(text)
+      expect(count).toBe(7) // "Some", "content", "---", "divider", "---", "more", "content"
+    })
+
+    test("handles empty frontmatter", async () => {
+      const text = `---
+---
+Content after empty frontmatter`
+      const count = await countWords(text)
+      expect(count).toBe(4) // "Content", "after", "empty", "frontmatter"
+    })
+  })
+
+  describe("indented code block removal", () => {
+    test("removes 4-space indented code blocks", async () => {
+      const text = `Before indented code.
+
+    const x = 42;
+    console.log(x);
+
+After indented code.`
+      const count = await countWords(text)
+      expect(count).toBe(6) // "Before", "indented", "code", "After", "indented", "code"
+    })
+
+    test("removes tab-indented code blocks", async () => {
+      const text = `Before tab-indented code.
+
+\t\tfunction test() {
+\t\t  return true;
+\t\t}
+
+After tab-indented code.`
+      const count = await countWords(text)
+      expect(count).toBe(6) // "Before", "tab", "indented", "code", "After", "tab", "indented", "code"
+    })
+
+    test("removes multiple consecutive indented blocks", async () => {
+      const text = `Content.
+
+    block one line one
+    block one line two
+
+    block two line one
+    block two line two
+
+More content.`
+      const count = await countWords(text)
+      expect(count).toBe(3) // "Content", "More", "content"
+    })
+
+    test("preserves non-indented code-like syntax", async () => {
+      const text = `This is code-like text without indentation.
+const x = 42;
+More text here.`
+      const count = await countWords(text)
+      expect(count).toBe(13) // All words counted since no 4+ space indent
+    })
+
+    test("mixed indented and fenced code blocks", async () => {
+      const text = `Intro text.
+
+\`\`\`
+fenced code here
+\`\`\`
+
+Middle text.
+
+    indented code
+    more lines
+
+Final text.`
+      const count = await countWords(text)
+      expect(count).toBe(6) // "Intro", "text", "Middle", "text", "Final", "text"
+    })
+  })
+
+  describe("combined YAML and indented code", () => {
+    test("removes both YAML and indented code blocks", async () => {
+      const text = `---
+title: Document
+author: Someone
+---
+
+Introduction paragraph.
+
+    indented code block
+    with multiple lines
+
+Conclusion paragraph.`
+      const count = await countWords(text)
+      expect(count).toBe(4) // "Introduction", "paragraph", "Conclusion", "paragraph"
+    })
+  })
+
+  describe("parametric indented code variants", () => {
+    test("single line with 4 spaces", async () => {
+      const text = "Before.\n    code line\nAfter."
+      const count = await countWords(text)
+      expect(count).toBe(2) // "Before", "After"
+    })
+
+    test("single line with tab", async () => {
+      const text = "Before.\n\tcode line\nAfter."
+      const count = await countWords(text)
+      expect(count).toBe(2) // "Before", "After"
+    })
+
+    test("mixed spaces and tabs in same block", async () => {
+      const text = "Before.\n    line1\n\tline2\n  line3\nAfter."
+      const count = await countWords(text)
+      // "line3" is only 2 spaces, not 4, so it won't be removed
+      expect(count).toBeGreaterThan(2)
     })
   })
 })
