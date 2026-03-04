@@ -92,12 +92,14 @@ export interface PushWaitArgs {
   branch: string
   timeout: number
   extraArgs: string[]
+  cwd?: string
 }
 
 export function parsePushWaitArgs(args: string[]): PushWaitArgs {
   let remote = "origin"
   let branch = ""
   let timeout = 120
+  let cwd: string | undefined
   const extraArgs: string[] = []
   const positional: string[] = []
 
@@ -112,6 +114,9 @@ export function parsePushWaitArgs(args: string[]): PushWaitArgs {
         throw new Error("Timeout must be a positive number")
       }
       i++
+    } else if (arg === "--cwd" && next) {
+      cwd = next
+      i++
     } else if (arg.startsWith("-")) {
       extraArgs.push(arg)
     } else {
@@ -122,7 +127,7 @@ export function parsePushWaitArgs(args: string[]): PushWaitArgs {
   if (positional.length >= 1 && positional[0]) remote = positional[0]
   if (positional.length >= 2 && positional[1]) branch = positional[1]
 
-  return { remote, branch, timeout, extraArgs }
+  return { remote, branch, timeout, extraArgs, cwd }
 }
 
 // ─── Command ─────────────────────────────────────────────────────────────
@@ -130,13 +135,14 @@ export function parsePushWaitArgs(args: string[]): PushWaitArgs {
 export const pushWaitCommand: Command = {
   name: "push-wait",
   description: "Wait for push cooldown to expire, then push",
-  usage: "swiz push-wait [remote] [branch] [--timeout <seconds>]",
+  usage: "swiz push-wait [remote] [branch] [--cwd <dir>] [--timeout <seconds>]",
   options: [
+    { flags: "--cwd <dir>", description: "Working directory for the git push (default: cwd)" },
     { flags: "--timeout, -t <seconds>", description: "Max wait for cooldown (default: 120)" },
   ],
   async run(args) {
-    const { remote, branch, timeout, extraArgs } = parsePushWaitArgs(args)
-    const cwd = process.cwd()
+    const { remote, branch, timeout, extraArgs, cwd: cwdArg } = parsePushWaitArgs(args)
+    const cwd = cwdArg ?? process.cwd()
 
     // Resolve branch from git if not provided
     let targetBranch = branch

@@ -87,6 +87,25 @@ describe("parsePushWaitArgs", () => {
     expect(result.branch).toBe("main")
     expect(result.timeout).toBe(90)
   })
+
+  it("parses --cwd flag", () => {
+    const result = parsePushWaitArgs(["--cwd", "/some/path", "origin", "main"])
+    expect(result.cwd).toBe("/some/path")
+    expect(result.remote).toBe("origin")
+    expect(result.branch).toBe("main")
+    expect(result.extraArgs).toEqual([])
+  })
+
+  it("does not include --cwd in extraArgs", () => {
+    const result = parsePushWaitArgs(["--cwd", "/repo", "--dry-run"])
+    expect(result.cwd).toBe("/repo")
+    expect(result.extraArgs).toEqual(["--dry-run"])
+  })
+
+  it("returns undefined cwd when not provided", () => {
+    const result = parsePushWaitArgs(["origin", "main"])
+    expect(result.cwd).toBeUndefined()
+  })
 })
 
 // ─── getRemainingCooldownMs ──────────────────────────────────────────────
