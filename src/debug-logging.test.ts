@@ -23,6 +23,8 @@ const STDERR_ALLOWLIST = new Set([
   "src/commands/mergetool.ts",
   // User-invoked replay trace (`swiz dispatch replay`)
   "src/commands/dispatch.ts",
+  // Dispatch replay ANSI trace output (extracted from dispatch.ts)
+  "src/dispatch/replay.ts",
   // The shared debug utility itself
   "src/debug.ts",
 ])
@@ -34,6 +36,10 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/cleanup.ts",
   "src/commands/continue.ts",
   "src/commands/dispatch.ts",
+  // Dispatch engine structured JSON output to stdout (extracted from dispatch.ts)
+  "src/dispatch/engine.ts",
+  // Dispatch replay JSON trace output (extracted from dispatch.ts)
+  "src/dispatch/replay.ts",
   "src/commands/doctor.ts",
   "src/commands/help.ts",
   "src/commands/hooks.ts",
