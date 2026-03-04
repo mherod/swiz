@@ -151,7 +151,22 @@ function fileSize(path: string): string {
   }
 }
 
-function printSource(source: MemorySource, index: number): void {
+async function getFileStats(
+  path: string
+): Promise<{ lines: number; words: number; chars: number } | null> {
+  try {
+    const file = Bun.file(path)
+    const content = await file.text()
+    const lines = content.split("\n").length
+    const words = content.split(/\s+/).filter((w) => w.length > 0).length
+    const chars = content.length
+    return { lines, words, chars }
+  } catch {
+    return null
+  }
+}
+
+async function printSource(source: MemorySource, index: number): Promise<void> {
   const exists = existsSync(source.path)
   const marker = exists ? `${GREEN}✓${RESET}` : `${DIM}✗${RESET}`
   const pathDisplay = exists ? source.path : `${DIM}${source.path}${RESET}`
@@ -161,7 +176,13 @@ function printSource(source: MemorySource, index: number): void {
 
   if (exists) {
     const size = fileSize(source.path)
-    console.log(`     ${DIM}${size}${RESET}`)
+    const stats = await getFileStats(source.path)
+
+    let statsStr = size
+    if (stats) {
+      statsStr += ` · ${stats.lines} lines · ${stats.words} words · ${stats.chars} chars`
+    }
+    console.log(`     ${DIM}${statsStr}${RESET}`)
   }
 
   console.log()
@@ -215,7 +236,7 @@ export const memoryCommand: Command = {
     )
 
     for (const [i, source] of sources.entries()) {
-      printSource(source, i)
+      await printSource(source, i)
     }
   },
 }
