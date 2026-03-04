@@ -254,6 +254,7 @@ export const manifest: HookGroup[] = [
   {
     event: "preCompact",
     hooks: [
+      { file: "precompact-task-snapshot.ts", timeout: 5 },
       { file: "precompact-speak.ts", timeout: 10 },
       { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
     ],

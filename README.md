@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**65 hooks. 6 event types. Every agent. Zero compromises.**
+**66 hooks. 6 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -175,10 +175,11 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-speak-narrator.ts` | Speaks any assistant text generated during session startup. Catches up on the transcript before the first tool call. Runs async. |
 | `sessionstart-compact-context.ts` | Re-injects core project conventions after context compaction events. The agent keeps its bearings even in long sessions. |
 
-### PreCompact (1)
+### PreCompact (2)
 
 | Hook | What it does |
 |------|-------------|
+| `precompact-task-snapshot.ts` | Snapshots all current-session task IDs and statuses to disk before context compaction rewrites the transcript. The sessionstart-compact-context hook reads this snapshot on resume to verify and recreate any missing task files. |
 | `precompact-speak.ts` | Speaks "Just a moment while I gather my thoughts" before context compaction begins, giving audible feedback that the agent is about to pause for compaction. |
 
 ### UserPromptSubmit (3)
