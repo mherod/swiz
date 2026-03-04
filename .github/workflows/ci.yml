@@ -13,6 +13,12 @@ on:
       - "**/*.md"
       - ".claude/**"
       - "docs/**"
+  pull_request_target:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - ".claude/**"
+      - "docs/**"
 
 jobs:
   file-placement:
@@ -36,7 +42,7 @@ jobs:
 
   workflow-permissions:
     name: Block workflow permission escalation
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
