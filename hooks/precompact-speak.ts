@@ -1,14 +1,15 @@
 #!/usr/bin/env bun
 // PreCompact hook: Speak a narration before context compaction begins.
 
-import { readSwizSettings } from "../src/settings.ts"
+import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import { spawnSpeak } from "./hook-utils.ts"
 
 async function main(): Promise<void> {
-  // Consume stdin (required by hook protocol)
-  await Bun.stdin.json().catch(() => null)
+  const input = await Bun.stdin.json().catch(() => null)
+  const sessionId: string = ((input as Record<string, unknown>)?.session_id as string) ?? ""
 
-  const settings = await readSwizSettings()
+  const rawSettings = await readSwizSettings()
+  const settings = getEffectiveSwizSettings(rawSettings, sessionId || null)
   if (!settings.speak) return
 
   await spawnSpeak("Just a moment while I gather my thoughts", settings)

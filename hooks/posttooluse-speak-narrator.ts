@@ -7,18 +7,19 @@
  */
 
 import { existsSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs"
-import { readSwizSettings } from "../src/settings.ts"
+import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import { spawnSpeak } from "./hook-utils.ts"
-
-// Check if speak is enabled in swiz settings (disabled by default)
-const settings = await readSwizSettings()
-if (!settings.speak) process.exit(0)
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)
 
 const transcriptPath: string = ((input as Record<string, unknown>).transcript_path as string) ?? ""
 const sessionId: string = ((input as Record<string, unknown>).session_id as string) ?? ""
+
+// Check if speak is enabled using session-effective settings
+const rawSettings = await readSwizSettings()
+const settings = getEffectiveSwizSettings(rawSettings, sessionId || null)
+if (!settings.speak) process.exit(0)
 
 if (!transcriptPath || !sessionId || !existsSync(transcriptPath)) process.exit(0)
 
