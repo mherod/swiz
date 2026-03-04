@@ -509,6 +509,7 @@ export interface SessionTask {
 // ─── Subject fingerprinting ──────────────────────────────────────────────
 
 const FINGERPRINT_STOP_WORDS = new Set([
+  // Articles & conjunctions
   "the",
   "a",
   "an",
@@ -520,14 +521,55 @@ const FINGERPRINT_STOP_WORDS = new Set([
   "of",
   "on",
   "with",
-  "is",
-  "was",
-  "be",
   "this",
   "that",
   "all",
   "its",
   "from",
+  "by",
+  "at",
+  "as",
+  "so",
+  "but",
+  "not",
+  "if",
+  "up",
+  "out",
+  "into",
+  "then",
+  "than",
+  "also",
+  "just",
+  "only",
+  "each",
+  "after",
+  "before",
+  "about",
+  "when",
+  // Auxiliary verbs (filler in task subjects)
+  "is",
+  "am",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "has",
+  "have",
+  "had",
+  "having",
+  // Modal verbs (don't change task intent)
+  "can",
+  "could",
+  "will",
+  "would",
+  "shall",
+  "should",
+  "may",
+  "might",
+  "must",
+  "need",
 ])
 
 /**
@@ -650,6 +692,82 @@ const IRREGULAR_STEMS = new Map<string, string>([
   ["held", "hold"],
   // tell
   ["told", "tell"],
+  // lead
+  ["led", "lead"],
+  // lose
+  ["lost", "lose"],
+  // leave
+  ["left", "leave"],
+  // spend
+  ["spent", "spend"],
+  // think
+  ["thought", "think"],
+  // bind
+  ["bound", "bind"],
+  // stick
+  ["stuck", "stick"],
+  // hide
+  ["hid", "hide"],
+  ["hidden", "hide"],
+  // withdraw
+  ["withdrew", "withdraw"],
+  ["withdrawn", "withdraw"],
+  // grow
+  ["grew", "grow"],
+  ["grown", "grow"],
+  // draw
+  ["drew", "draw"],
+  ["drawn", "draw"],
+  // spin
+  ["spun", "spin"],
+  // wake
+  ["woke", "wake"],
+  ["woken", "wake"],
+  // lay
+  ["laid", "lay"],
+  // deal
+  ["dealt", "deal"],
+  // mean
+  ["meant", "mean"],
+  // understand
+  ["understood", "understand"],
+  // feel
+  ["felt", "feel"],
+  // teach
+  ["taught", "teach"],
+  // slide
+  ["slid", "slide"],
+  // steal
+  ["stole", "steal"],
+  ["stolen", "steal"],
+  // sweep
+  ["swept", "sweep"],
+  // speak
+  ["spoke", "speak"],
+  ["spoken", "speak"],
+  // tear
+  ["tore", "tear"],
+  ["torn", "tear"],
+  // feed
+  ["fed", "feed"],
+  // fight
+  ["fought", "fight"],
+  // seek
+  ["sought", "seek"],
+  // sleep
+  ["slept", "sleep"],
+  // sing
+  ["sang", "sing"],
+  ["sung", "sing"],
+  // sink
+  ["sank", "sink"],
+  ["sunk", "sink"],
+  // sit
+  ["sat", "sit"],
+  // stand
+  ["stood", "stand"],
+  // swing
+  ["swung", "swing"],
   // split (irregular plurals / noun forms)
   ["indices", "index"],
   ["statuses", "status"],

@@ -149,6 +149,29 @@ describe("stemWord", () => {
     expect(stemWord("done")).toBe("do")
   })
 
+  test("stems broader irregular verbs", () => {
+    expect(stemWord("led")).toBe("lead")
+    expect(stemWord("lost")).toBe("lose")
+    expect(stemWord("left")).toBe("leave")
+    expect(stemWord("spent")).toBe("spend")
+    expect(stemWord("thought")).toBe("think")
+    expect(stemWord("bound")).toBe("bind")
+    expect(stemWord("stuck")).toBe("stick")
+    expect(stemWord("hidden")).toBe("hide")
+    expect(stemWord("withdrawn")).toBe("withdraw")
+    expect(stemWord("grown")).toBe("grow")
+    expect(stemWord("drawn")).toBe("draw")
+    expect(stemWord("spun")).toBe("spin")
+    expect(stemWord("dealt")).toBe("deal")
+    expect(stemWord("meant")).toBe("mean")
+    expect(stemWord("understood")).toBe("understand")
+    expect(stemWord("felt")).toBe("feel")
+    expect(stemWord("taught")).toBe("teach")
+    expect(stemWord("swept")).toBe("sweep")
+    expect(stemWord("stolen")).toBe("steal")
+    expect(stemWord("stood")).toBe("stand")
+  })
+
   test("stems irregular plural nouns", () => {
     expect(stemWord("indices")).toBe("index")
     expect(stemWord("statuses")).toBe("status")
@@ -322,6 +345,52 @@ describe("computeSubjectFingerprint", () => {
   test("matches irregular plural (branches/branch)", () => {
     const fp1 = computeSubjectFingerprint("Clean stale branches")
     const fp2 = computeSubjectFingerprint("Clean stale branch")
+    expect(fp1).toBe(fp2)
+  })
+
+  // ── Auxiliary/modal filtering ─────────────────────────────────────────
+
+  test("ignores auxiliary verbs (has/have/been)", () => {
+    const fp1 = computeSubjectFingerprint("Has been verified CI status")
+    const fp2 = computeSubjectFingerprint("Verify CI status")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("ignores modal verbs (should/must/will)", () => {
+    const fp1 = computeSubjectFingerprint("Should fix lint errors")
+    const fp2 = computeSubjectFingerprint("Must fix lint errors")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("ignores will/would (future/conditional)", () => {
+    const fp1 = computeSubjectFingerprint("Will implement feature")
+    const fp2 = computeSubjectFingerprint("Implement feature")
+    expect(fp1).toBe(fp2)
+  })
+
+  // ── Broader irregular stems in fingerprint ────────────────────────────
+
+  test("matches led/lead via irregular stem", () => {
+    const fp1 = computeSubjectFingerprint("Led the refactoring effort")
+    const fp2 = computeSubjectFingerprint("Lead the refactoring effort")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("matches lost/lose via irregular stem", () => {
+    const fp1 = computeSubjectFingerprint("Lost connection handler")
+    const fp2 = computeSubjectFingerprint("Lose connection handler")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("matches left/leave via irregular stem", () => {
+    const fp1 = computeSubjectFingerprint("Left TODO comments")
+    const fp2 = computeSubjectFingerprint("Leave TODO comments")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("matches thought/think via irregular stem", () => {
+    const fp1 = computeSubjectFingerprint("Thought about approach")
+    const fp2 = computeSubjectFingerprint("Think about approach")
     expect(fp1).toBe(fp2)
   })
 })
