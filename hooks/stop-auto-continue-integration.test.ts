@@ -27,6 +27,17 @@ async function createTempDir(): Promise<string> {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Seed a fake HOME with ~/.swiz/settings.json containing autoContinue: true.
+ * This isolates tests from the real user settings so the hook doesn't exit
+ * early when the real setting is false.
+ */
+async function seedSettings(fakeHome: string): Promise<void> {
+  const dir = join(fakeHome, ".swiz")
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, "settings.json"), JSON.stringify({ autoContinue: true }))
+}
+
 /** Minimal JSONL transcript with the given number of tool-use turns. */
 function buildTranscript(toolCallCount: number): string {
   const lines: string[] = [JSON.stringify({ type: "user", message: { content: "What next?" } })]
@@ -75,6 +86,13 @@ async function runHookRaw(
   binDir: string,
   extraEnv: Record<string, string> = {}
 ): Promise<RunResult> {
+  // Ensure an isolated HOME with autoContinue:true so the hook doesn't
+  // short-circuit based on the developer's real ~/.swiz/settings.json.
+  let home = extraEnv.HOME
+  if (!home) {
+    home = await createTempDir()
+    await seedSettings(home)
+  }
   const { CLAUDECODE: _cc, ...cleanEnv } = process.env
   const proc = Bun.spawn([BUN_EXE, HOOK_PATH], {
     stdin: "pipe",
@@ -83,6 +101,7 @@ async function runHookRaw(
     env: {
       ...cleanEnv,
       PATH: `${binDir}:/bin:/usr/bin`,
+      HOME: home,
       ...extraEnv,
     },
   })
@@ -225,6 +244,7 @@ describe("stop-auto-continue: prompt ordering with session tasks", () => {
 
   test("SESSION TASKS block appears before CONVERSATION TRANSCRIPT in the prompt", async () => {
     const fakeHome = await createTempDir()
+    await seedSettings(fakeHome)
     await writeTask(fakeHome, "1", "completed", "Write tests")
     await writeTask(fakeHome, "2", "in_progress", "Fix types")
 
@@ -250,6 +270,7 @@ describe("stop-auto-continue: prompt ordering with session tasks", () => {
 
   test("COMPLETED tasks appear before IN PROGRESS tasks in the prompt", async () => {
     const fakeHome = await createTempDir()
+    await seedSettings(fakeHome)
     await writeTask(fakeHome, "1", "completed", "Done thing")
     await writeTask(fakeHome, "2", "in_progress", "Active thing")
 
@@ -297,6 +318,7 @@ describe("stop-auto-continue: prompt ordering with session tasks", () => {
 
   test("combined tasks + transcript: suggestion incorporates both sources", async () => {
     const fakeHome = await createTempDir()
+    await seedSettings(fakeHome)
     await writeTask(fakeHome, "1", "in_progress", "Implement auth flow")
 
     const binDir = await createTempDir()
