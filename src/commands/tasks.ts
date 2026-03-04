@@ -189,8 +189,8 @@ export async function getSessions(
 
 // ─── Task I/O ───────────────────────────────────────────────────────────────
 
-async function readTasks(sessionId: string): Promise<Task[]> {
-  const dir = join(TASKS_DIR, sessionId)
+async function readTasks(sessionId: string, tasksDir = TASKS_DIR): Promise<Task[]> {
+  const dir = join(tasksDir, sessionId)
   try {
     const files = await readdir(dir)
     const tasks = await Promise.all(
@@ -216,6 +216,56 @@ async function writeAudit(sessionId: string, entry: AuditEntry) {
     await mkdir(dir, { recursive: true })
     await appendFile(join(dir, ".audit-log.jsonl"), `${JSON.stringify(entry)}\n`)
   } catch {}
+}
+
+// ─── Cross-session task lookup ───────────────────────────────────────────────
+
+/**
+ * Search for a task by ID across all sessions for the current project.
+ * Returns the session ID and task if found, or null if not found anywhere.
+ * This handles compaction-induced session ID changes where task files
+ * end up in a different session directory than the CLI resolves.
+ */
+export async function findTaskAcrossSessions(
+  taskId: string,
+  filterCwd?: string,
+  tasksDir = TASKS_DIR,
+  projectsDir = PROJECTS_DIR
+): Promise<{ sessionId: string; task: Task } | null> {
+  const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
+  for (const sessionId of sessions) {
+    const tasks = await readTasks(sessionId, tasksDir)
+    const task = tasks.find((t) => t.id === taskId)
+    if (task) return { sessionId, task }
+  }
+  return null
+}
+
+/**
+ * Resolve a task by ID: first checks the primary session, then falls back
+ * to scanning all project sessions. Returns the actual session ID and tasks.
+ */
+async function resolveTaskSession(
+  taskId: string,
+  primarySessionId: string,
+  filterCwd?: string
+): Promise<{ sessionId: string; tasks: Task[] }> {
+  const tasks = await readTasks(primarySessionId)
+  const task = tasks.find((t) => t.id === taskId)
+  if (task) return { sessionId: primarySessionId, tasks }
+
+  // Fallback: search across all project sessions
+  const found = await findTaskAcrossSessions(taskId, filterCwd)
+  if (found) {
+    console.error(
+      `  ${DIM}Task #${taskId} found in session ${found.sessionId.slice(0, 8)}... (not current session)${RESET}`
+    )
+    const allTasks = await readTasks(found.sessionId)
+    return { sessionId: found.sessionId, tasks: allTasks }
+  }
+
+  // Not found anywhere — let the caller handle the error
+  return { sessionId: primarySessionId, tasks }
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
@@ -314,13 +364,15 @@ async function updateStatus(
   taskId: string,
   newStatus: Task["status"],
   evidence?: string,
-  verifyText?: string
+  verifyText?: string,
+  filterCwd?: string
 ) {
-  const tasks = await readTasks(sessionId)
-  const task = tasks.find((t) => t.id === taskId)
+  const resolved = await resolveTaskSession(taskId, sessionId, filterCwd)
+  const effectiveSessionId = resolved.sessionId
+  const task = resolved.tasks.find((t) => t.id === taskId)
 
   if (!task) {
-    throw new Error(`Task #${taskId} not found.`)
+    throw new Error(`Task #${taskId} not found in any session for this project.`)
   }
 
   if (verifyText) {
@@ -353,8 +405,8 @@ async function updateStatus(
     task.completionTimestamp = now
   }
 
-  await writeTask(sessionId, task)
-  await writeAudit(sessionId, {
+  await writeTask(effectiveSessionId, task)
+  await writeAudit(effectiveSessionId, {
     timestamp: new Date().toISOString(),
     taskId,
     action: "status_change",
@@ -411,12 +463,18 @@ export function verifyTaskSubject(taskSubject: string, verifyText: string): stri
   )
 }
 
-async function submitEvidence(sessionId: string, taskId: string, evidence: string) {
-  const tasks = await readTasks(sessionId)
-  const task = tasks.find((t) => t.id === taskId)
+async function submitEvidence(
+  sessionId: string,
+  taskId: string,
+  evidence: string,
+  filterCwd?: string
+) {
+  const resolved = await resolveTaskSession(taskId, sessionId, filterCwd)
+  const effectiveSessionId = resolved.sessionId
+  const task = resolved.tasks.find((t) => t.id === taskId)
 
   if (!task) {
-    throw new Error(`Task #${taskId} not found.`)
+    throw new Error(`Task #${taskId} not found in any session for this project.`)
   }
 
   const validationError = validateEvidence(evidence)
@@ -429,8 +487,8 @@ async function submitEvidence(sessionId: string, taskId: string, evidence: strin
     task.completionTimestamp = new Date().toISOString()
   }
 
-  await writeTask(sessionId, task)
-  await writeAudit(sessionId, {
+  await writeTask(effectiveSessionId, task)
+  await writeAudit(effectiveSessionId, {
     timestamp: new Date().toISOString(),
     taskId,
     action: "status_change",
@@ -563,8 +621,10 @@ export const tasksCommand: Command = {
         }
         const evidence = extractFlag(rest, "--evidence")
         const verify = extractFlag(rest, "--verify")
+        const allProjects = rest.includes("--all-projects")
+        const filterCwd = allProjects ? undefined : process.cwd()
         const sessionId = await resolveSession(rest.slice(1))
-        await updateStatus(sessionId, taskId, "completed", evidence, verify)
+        await updateStatus(sessionId, taskId, "completed", evidence, verify, filterCwd)
         break
       }
 
@@ -577,8 +637,10 @@ export const tasksCommand: Command = {
               "Prefixes: commit:, pr:, file:, test:, note:"
           )
         }
+        const allProjects = rest.includes("--all-projects")
+        const filterCwd = allProjects ? undefined : process.cwd()
         const sessionId = await resolveSession(rest.slice(2))
-        await submitEvidence(sessionId, taskId, evidenceText)
+        await submitEvidence(sessionId, taskId, evidenceText, filterCwd)
         break
       }
 
@@ -593,8 +655,10 @@ export const tasksCommand: Command = {
         }
         const evidence = extractFlag(rest, "--evidence")
         const verify = extractFlag(rest, "--verify")
+        const allProjects = rest.includes("--all-projects")
+        const filterCwd = allProjects ? undefined : process.cwd()
         const sessionId = await resolveSession(rest.slice(2))
-        await updateStatus(sessionId, taskId, newStatus, evidence, verify)
+        await updateStatus(sessionId, taskId, newStatus, evidence, verify, filterCwd)
         break
       }
 

@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import {
+  findTaskAcrossSessions,
   getSessionIdsByCwdScan,
   getSessionIdsForProject,
   getSessions,
@@ -28,8 +29,30 @@ beforeAll(async () => {
   await mkdir(join(TASKS, SESSION_C), { recursive: true })
   // Write a dummy task file so stat works
   for (const s of [SESSION_A, SESSION_B, SESSION_C]) {
-    await writeFile(join(TASKS, s, "1.json"), JSON.stringify({ id: "1", status: "completed" }))
+    await writeFile(
+      join(TASKS, s, "1.json"),
+      JSON.stringify({
+        id: "1",
+        subject: "Test task",
+        description: "desc",
+        status: "completed",
+        blocks: [],
+        blockedBy: [],
+      })
+    )
   }
+  // Write a task #120 only in SESSION_B (simulates compaction-orphaned task)
+  await writeFile(
+    join(TASKS, SESSION_B, "120.json"),
+    JSON.stringify({
+      id: "120",
+      subject: "Push and verify CI",
+      description: "Verify CI after push",
+      status: "in_progress",
+      blocks: [],
+      blockedBy: [],
+    })
+  )
 
   // ── Project directory matching the canonical key ──
   // This directory holds transcripts for SESSION_A only (fast-path match).
@@ -185,5 +208,47 @@ describe("verifyTaskSubject", () => {
 
   it("matches the full subject exactly", () => {
     expect(verifyTaskSubject("Fix bug", "Fix bug")).toBeNull()
+  })
+})
+
+// ─── findTaskAcrossSessions ──────────────────────────────────────────────────
+
+describe("findTaskAcrossSessions", () => {
+  it("finds a task in a non-primary session", async () => {
+    // Task #120 exists only in SESSION_B
+    const result = await findTaskAcrossSessions("120", undefined, TASKS, PROJECTS)
+    expect(result).not.toBeNull()
+    expect(result!.sessionId).toBe(SESSION_B)
+    expect(result!.task.id).toBe("120")
+    expect(result!.task.subject).toBe("Push and verify CI")
+  })
+
+  it("finds a task in the primary session first", async () => {
+    // Task #1 exists in all sessions — should find it in the first one returned
+    const result = await findTaskAcrossSessions("1", undefined, TASKS, PROJECTS)
+    expect(result).not.toBeNull()
+    expect(result!.task.id).toBe("1")
+  })
+
+  it("returns null for a nonexistent task ID", async () => {
+    const result = await findTaskAcrossSessions("999", undefined, TASKS, PROJECTS)
+    expect(result).toBeNull()
+  })
+
+  it("scopes search to project sessions when filterCwd is provided", async () => {
+    // Create an isolated setup where only SESSION_A matches the CWD
+    const isolatedProjects = join(TMP, "projects-isolated-cross")
+    const key = projectKeyFromCwd(FILTER_CWD)
+    await mkdir(join(isolatedProjects, key), { recursive: true })
+    await writeFile(
+      join(isolatedProjects, key, `${SESSION_A}.jsonl`),
+      JSON.stringify({ type: "user", cwd: FILTER_CWD }) + "\n"
+    )
+
+    // Task #120 is in SESSION_B which is NOT in this isolated project dir
+    const result = await findTaskAcrossSessions("120", FILTER_CWD, TASKS, isolatedProjects)
+    // SESSION_B isn't matched by filterCwd in the isolated setup, so fallback scan runs
+    // But the alt-legacy-encoding dir doesn't exist in isolatedProjects
+    expect(result).toBeNull()
   })
 })
