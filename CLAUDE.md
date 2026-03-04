@@ -115,13 +115,13 @@ All output helpers return `never` and call `process.exit(0)` after writing JSON.
 
 **Diff file tracking** — Track the current file by reading `+++ b/<path>` headers when scanning diffs, then apply file-level exclusions (e.g., `if (TEST_FILE_RE.test(currentFile)) continue`). Lighter than splitting diffs into chunks; enables consistent file-based filtering.
 
-**DO** extract a `sanitizeSessionId(sessionId: string | undefined): string | null` helper whenever a hook uses `/tmp` sentinel files keyed on session ID. Both the read path (cooldown check) and write path (mark prompted) need the same sanitization — extracting it eliminates duplication and prevents divergence between the two paths.
+**DO** extract `sanitizeSessionId()` helper when hooks use `/tmp` sentinel files keyed on session ID. Prevents duplication between read/write paths.
 
-**DON'T** use `/tmp` sentinel files with hardcoded session IDs in tests. Sentinel files outlive test runs; on re-run the file exists from the prior run, causing cooldown logic to fire when it shouldn't. Use unique session IDs per test (e.g. appending `Date.now()`) or check the sentinel's own `mtime` against the cooldown window rather than just its existence.
+**DON'T** use `/tmp` sentinels with hardcoded session IDs in tests. Sentinels outlive test runs. Use unique session IDs per test or check `mtime` against cooldown window.
 
-**DO** use a two-stage filter when detecting background processes with `pgrep` in hooks. A bare `pgrep -f 'git push'` produces false positives in two distinct ways: (1) it matches the parent `git push` process when the hook is invoked from inside a pre-push test run, and (2) it matches unrelated pushes in other repositories open in other terminals. Apply both filters:
-- **Ancestry filter**: walk `process.ppid` upward via `ps -p <pid> -o ppid=` to build a `Set<number>` of ancestors; exclude any pgrep PIDs that appear in the set.
-- **Repo-scope filter**: for each remaining (non-ancestor) PID, use `lsof -p <pid> -d cwd -Fn` to get the process CWD; only treat it as in-flight if its CWD starts with the current repo's git root (`git rev-parse --show-toplevel`).
+**DO** use a two-stage filter for `pgrep` in hooks:
+- **Ancestry filter**: walk `process.ppid` to build ancestor set; exclude pgrep PIDs in set.
+- **Repo-scope filter**: use `lsof -p <pid> -d cwd -Fn` to get CWD; only treat as in-flight if CWD is in current repo's git root.
 
 See `hooks/stop-git-status.ts` for the reference implementation of this pattern.
 
@@ -256,19 +256,19 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
 
 Memory thresholds follow a 3-tier hierarchy with per-value source tracking.
 
-**DO** implement settings resolvers with explicit 3-tier hierarchy: project-level overrides take precedence over user-level settings, which take precedence over defaults. Each value independently resolves to its source tier.
+**DO** implement 3-tier hierarchy: project > user > default. Each value resolves to its source tier.
 
-**DO** track the source of each resolved value independently. Use separate `source` fields for each setting (e.g., `memoryLineSource`, `memoryWordSource`), not a single `source` field covering all values. This allows each threshold to report where it actually comes from.
+**DO** track source independently per setting. Use separate `source` fields (`memoryLineSource`, `memoryWordSource`), not one field covering all values. This enables precise tracking of where each value originates.
 
-**DO** always display effective configuration values in settings output, regardless of which tier they resolve to. Never hide values based on whether they are project-level overrides, user-level, or defaults. The settings display is the source of truth for the effective configuration.
+**DO** always display effective configuration values, never hide based on tier. Settings output is the source of truth for effective configuration.
 
-**DO** label each displayed setting with its source tier: `(project)`, `(user)`, or `(default)`. This provides complete visibility into the configuration hierarchy and helps users understand where values originate.
+**DO** label each setting with its source tier: `(project)`, `(user)`, or `(default)` for visibility into hierarchy.
 
-**DON'T** conditionally hide settings based on source tier. A conditional like "only show if source === 'project'" breaks transparency by hiding user and default values. All tiers are valid configuration sources.
+**DON'T** hide settings based on source tier. Conditionals like "only show if source === 'project'" hide user/default values. All tiers are valid.
 
-**DON'T** use a single `source` field when multiple settings need independent source tracking. Per-value source fields enable precise tracking and make the resolver's logic clear.
+**DON'T** use one `source` field for multiple settings. Per-value source fields enable precise tracking.
 
-**DON'T** declare settings resolution complete without reading the actual implementation. Validate that: (1) the resolver correctly implements the 3-tier hierarchy, (2) per-value sources are tracked independently, (3) the display always shows all effective values with their sources.
+**DON'T** declare resolution complete without reading implementation. Verify: (1) 3-tier hierarchy correct, (2) per-value sources tracked, (3) display shows all effective values.
 
 ## CLI Error Handling
 
@@ -289,7 +289,7 @@ Hook scripts (`hooks/*.ts`) are the exception — their `process.exit(0)` calls 
 
 **DON'T** use `console.log` in CI scripts (`scripts/*.ts`) or hook scripts (`hooks/*.ts`). The `stop-debug-statements` hook flags `console.log` as debug output. Use `console.error` for status/progress messages (stderr) — only use `console.log` when the script produces structured data on stdout that another process consumes.
 
-**DO** gate diagnostic stderr behind `SWIZ_DEBUG` in library modules (`src/*.ts`, `src/commands/*.ts`). Use `const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {}` at module scope, then call `debugLog(...)` instead of `console.error(...)` for informational messages (replay status, cross-session resolution notices, unknown condition warnings). These messages clutter pre-push test output — `bun test` runs the full suite and every `console.error` in library code appears as red stderr. Reserve direct `console.error` for user-facing CLI output and hard failures only. See `src/issue-store.ts`, `src/manifest.ts`, and `src/commands/tasks.ts` for the established pattern.
+**DO** gate diagnostic stderr behind `SWIZ_DEBUG` in library modules. Use `const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {}`, then call `debugLog(...)` for informational messages. Reserve direct `console.error` for user-facing CLI output. See `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts` for patterns.
 
 ## Conventions
 
