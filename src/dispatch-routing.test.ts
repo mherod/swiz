@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { AGENTS, CONFIGURABLE_AGENTS } from "./agents.ts"
 import { DISPATCH_ROUTES } from "./commands/dispatch.ts"
@@ -105,5 +107,27 @@ describe("dispatch routing validation", () => {
         ).toBe(true)
       }
     }
+  })
+})
+
+describe("mutation replay wiring", () => {
+  const SRC = join(import.meta.dirname ?? ".", "..")
+
+  it("cli.ts imports and calls tryReplayPendingMutations", () => {
+    const src = readFileSync(join(SRC, "src", "cli.ts"), "utf8")
+    expect(src).toContain("tryReplayPendingMutations")
+    expect(src).toMatch(/await\s+tryReplayPendingMutations\(/)
+  })
+
+  it("dispatch.ts imports and calls tryReplayPendingMutations", () => {
+    const src = readFileSync(join(SRC, "src", "commands", "dispatch.ts"), "utf8")
+    expect(src).toContain("tryReplayPendingMutations")
+    expect(src).toMatch(/await\s+tryReplayPendingMutations\(/)
+  })
+
+  it("stop-personal-repo-issues.ts calls replayPendingMutations", () => {
+    const src = readFileSync(join(SRC, "hooks", "stop-personal-repo-issues.ts"), "utf8")
+    expect(src).toContain("replayPendingMutations")
+    expect(src).toMatch(/await\s+replayPendingMutations\(/)
   })
 })
