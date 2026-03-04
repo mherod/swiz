@@ -108,7 +108,7 @@ const READINESS_LABELS = new Set([
 const NEEDS_REFINEMENT_LABEL = "needs-refinement"
 
 const MAX_SHOWN_ISSUES = 5
-const COOLDOWN_SECONDS = 60
+const COOLDOWN_SECONDS = 30
 
 /**
  * Sanitize session ID for use in /tmp sentinel filename.
@@ -442,8 +442,12 @@ async function main(): Promise<void> {
       "Work items assigned to or created by you represent code that needs finishing."
     )
 
-    // Update cooldown before blocking
-    await updateCooldown(sessionId, cwd)
+    // Only set cooldown when actionable issues or PRs are shown (pickup phase).
+    // Refinement-only blocks should NOT set cooldown — resolving the refinement
+    // should allow the pickup check to run immediately on the next stop attempt.
+    if (issueCount > 0 || prCount > 0) {
+      await updateCooldown(sessionId, cwd)
+    }
     // Open-issue reminders are actionable work triage, not workflow-memory misses.
     blockStop(reasonLines.join("\n"), { includeUpdateMemoryAdvice: false })
   } catch {
