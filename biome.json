@@ -8,7 +8,8 @@
       },
       "suspicious": {
         "noExplicitAny": "off",
-        "noTemplateCurlyInString": "off"
+        "noTemplateCurlyInString": "off",
+        "noConsole": "error"
       }
     }
   },
@@ -23,5 +24,27 @@
       "trailingCommas": "es5",
       "semicolons": "asNeeded"
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["src/cli.ts", "src/debug.ts", "src/commands/*.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["hooks/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
+    }
+  ]
 }
