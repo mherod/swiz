@@ -240,6 +240,8 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
 
 **DO** verify CI with `gh run view --json` after every push. Don't rely on `gh run watch` alone.
 
+**DO** design workflow jobs that depend on `github.base_ref` (e.g., `git diff origin/BASE_REF...HEAD`) to only run on `pull_request` or `pull_request_target` events. **DON'T** include `push` in the job condition. On push events, `github.base_ref` is empty, causing git commands like `git diff origin/...HEAD` to fail with "fatal: bad revision". Example: `.github/workflows/ci.yml` workflow-permissions job (line 45) checks that `permissions:` blocks weren't added to workflow files—this check only makes sense on PR submissions, not after push to main where changes are already merged. Workflow job condition should be `if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'`, never `if: github.event_name == 'push' || ...`.
+
 **DO** use token-based parsing (not regex) when hooks must distinguish `git push --force` from `git push -- --force`. Regex cannot handle the `--` sentinel or `-C <path>` global options. Export the parser from `hook-utils.ts` for independent unit testing.
 
 **DON'T** call TaskUpdate or TaskList after push starts. Mark tasks completed before pushing so push+CI loop is mechanical: push → watch → `gh run view --json` → announce. TaskUpdate after `git push` indicates wrong task ordering.
