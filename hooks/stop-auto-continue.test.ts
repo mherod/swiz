@@ -97,6 +97,13 @@ async function runHook({
     cwd: hookCwd,
   })
 
+  // Isolate HOME so the hook reads autoContinue: true from a temp settings file
+  // instead of the real ~/.swiz/settings.json (which may have autoContinue: false).
+  const fakeHome = await createTempDir()
+  const fakeSwizDir = join(fakeHome, ".swiz")
+  await mkdir(fakeSwizDir, { recursive: true })
+  await writeFile(join(fakeSwizDir, "settings.json"), JSON.stringify({ autoContinue: true }))
+
   const { CLAUDECODE: _cc, ...cleanEnv } = process.env
   const proc = Bun.spawn([BUN_EXE, "hooks/stop-auto-continue.ts"], {
     stdin: "pipe",
@@ -104,6 +111,7 @@ async function runHook({
     stderr: "pipe",
     env: {
       ...cleanEnv,
+      HOME: fakeHome,
       PATH: `${binDir}:/bin:/usr/bin`,
       ...extraEnv,
     },
