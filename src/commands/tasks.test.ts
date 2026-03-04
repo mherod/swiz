@@ -54,6 +54,20 @@ beforeAll(async () => {
       blockedBy: [],
     })
   )
+  // Write task #200 in SESSION_B and SESSION_C (simulates cross-session ID collision)
+  for (const s of [SESSION_B, SESSION_C]) {
+    await writeFile(
+      join(TASKS, s, "200.json"),
+      JSON.stringify({
+        id: "200",
+        subject: s === SESSION_B ? "Deploy staging" : "Deploy production",
+        description: "Colliding task ID across sessions",
+        status: s === SESSION_B ? "in_progress" : "completed",
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+  }
 
   // ── Project directory matching the canonical key ──
   // This directory holds transcripts for SESSION_A only (fast-path match).
@@ -217,23 +231,24 @@ describe("verifyTaskSubject", () => {
 describe("findTaskAcrossSessions", () => {
   it("finds a task in a non-primary session", async () => {
     // Task #120 exists only in SESSION_B
-    const result = await findTaskAcrossSessions("120", undefined, TASKS, PROJECTS)
-    expect(result).not.toBeNull()
-    expect(result!.sessionId).toBe(SESSION_B)
-    expect(result!.task.id).toBe("120")
-    expect(result!.task.subject).toBe("Push and verify CI")
+    const results = await findTaskAcrossSessions("120", undefined, TASKS, PROJECTS)
+    expect(results.length).toBe(1)
+    expect(results[0]!.sessionId).toBe(SESSION_B)
+    expect(results[0]!.task.id).toBe("120")
+    expect(results[0]!.task.subject).toBe("Push and verify CI")
   })
 
-  it("finds a task in the primary session first", async () => {
-    // Task #1 exists in all sessions — should find it in the first one returned
-    const result = await findTaskAcrossSessions("1", undefined, TASKS, PROJECTS)
-    expect(result).not.toBeNull()
-    expect(result!.task.id).toBe("1")
+  it("returns all matches when task ID exists in multiple sessions", async () => {
+    // Task #1 exists in all three sessions
+    const results = await findTaskAcrossSessions("1", undefined, TASKS, PROJECTS)
+    expect(results.length).toBe(3)
+    const sessionIds = results.map((r) => r.sessionId).sort()
+    expect(sessionIds).toEqual([SESSION_A, SESSION_B, SESSION_C].sort())
   })
 
-  it("returns null for a nonexistent task ID", async () => {
-    const result = await findTaskAcrossSessions("999", undefined, TASKS, PROJECTS)
-    expect(result).toBeNull()
+  it("returns empty array for a nonexistent task ID", async () => {
+    const results = await findTaskAcrossSessions("999", undefined, TASKS, PROJECTS)
+    expect(results.length).toBe(0)
   })
 
   it("scopes search to project sessions when filterCwd is provided", async () => {
@@ -247,10 +262,8 @@ describe("findTaskAcrossSessions", () => {
     )
 
     // Task #120 is in SESSION_B which is NOT in this isolated project dir
-    const result = await findTaskAcrossSessions("120", FILTER_CWD, TASKS, isolatedProjects)
-    // SESSION_B isn't matched by filterCwd in the isolated setup, so fallback scan runs
-    // But the alt-legacy-encoding dir doesn't exist in isolatedProjects
-    expect(result).toBeNull()
+    const results = await findTaskAcrossSessions("120", FILTER_CWD, TASKS, isolatedProjects)
+    expect(results.length).toBe(0)
   })
 })
 
@@ -282,5 +295,24 @@ describe("resolveTaskById", () => {
     // Task #1 exists in all sessions — primary should win
     const result = await resolveTaskById("1", SESSION_C, undefined, TASKS, PROJECTS)
     expect(result.sessionId).toBe(SESSION_C)
+  })
+
+  it("throws disambiguation error when task ID collides across sessions", async () => {
+    // Task #200 exists in SESSION_B and SESSION_C but not SESSION_A
+    await expect(resolveTaskById("200", SESSION_A, undefined, TASKS, PROJECTS)).rejects.toThrow(
+      /Task #200 exists in 2 sessions/
+    )
+  })
+
+  it("disambiguation error includes session details", async () => {
+    try {
+      await resolveTaskById("200", SESSION_A, undefined, TASKS, PROJECTS)
+      expect.unreachable("should have thrown")
+    } catch (err: unknown) {
+      const msg = (err as Error).message
+      expect(msg).toContain("--session")
+      expect(msg).toContain("Deploy staging")
+      expect(msg).toContain("Deploy production")
+    }
   })
 })

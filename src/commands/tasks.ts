@@ -222,23 +222,23 @@ async function writeAudit(sessionId: string, entry: AuditEntry) {
 
 /**
  * Search for a task by ID across all sessions for the current project.
- * Returns the session ID and task if found, or null if not found anywhere.
- * This handles compaction-induced session ID changes where task files
- * end up in a different session directory than the CLI resolves.
+ * Returns all matches (session + task pairs). Callers must handle the
+ * case where multiple sessions contain the same task ID.
  */
 export async function findTaskAcrossSessions(
   taskId: string,
   filterCwd?: string,
   tasksDir = TASKS_DIR,
   projectsDir = PROJECTS_DIR
-): Promise<{ sessionId: string; task: Task } | null> {
+): Promise<{ sessionId: string; task: Task }[]> {
   const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
+  const matches: { sessionId: string; task: Task }[] = []
   for (const sessionId of sessions) {
     const tasks = await readTasks(sessionId, tasksDir)
     const task = tasks.find((t) => t.id === taskId)
-    if (task) return { sessionId, task }
+    if (task) matches.push({ sessionId, task })
   }
-  return null
+  return matches
 }
 
 /**
@@ -259,12 +259,22 @@ export async function resolveTaskById(
   if (task) return { sessionId: primarySessionId, task }
 
   // Fallback: search across all project sessions
-  const found = await findTaskAcrossSessions(taskId, filterCwd, tasksDir, projectsDir)
-  if (found) {
+  const matches = await findTaskAcrossSessions(taskId, filterCwd, tasksDir, projectsDir)
+
+  if (matches.length === 1) {
     console.error(
-      `  ${DIM}Task #${taskId} found in session ${found.sessionId.slice(0, 8)}... (not current session)${RESET}`
+      `  ${DIM}Task #${taskId} found in session ${matches[0]!.sessionId.slice(0, 8)}... (not current session)${RESET}`
     )
-    return found
+    return matches[0]!
+  }
+
+  if (matches.length > 1) {
+    const sessionList = matches
+      .map((m) => `  - ${m.sessionId.slice(0, 8)}... [${m.task.status}]: ${m.task.subject}`)
+      .join("\n")
+    throw new Error(
+      `Task #${taskId} exists in ${matches.length} sessions. Use --session <id> to disambiguate:\n${sessionList}`
+    )
   }
 
   throw new Error(`Task #${taskId} not found in any session for this project.`)
