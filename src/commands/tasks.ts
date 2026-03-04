@@ -240,7 +240,16 @@ async function readTasks(sessionId: string, tasksDir = TASKS_DIR): Promise<Task[
     const tasks = await Promise.all(
       files
         .filter((f) => f.endsWith(".json") && !f.startsWith("."))
-        .map(async (f) => JSON.parse(await readFile(join(dir, f), "utf-8")) as Task)
+        .map(async (f) => {
+          const filePath = join(dir, f)
+          const task = JSON.parse(await readFile(filePath, "utf-8")) as Task
+          // Backfill statusChangedAt from file mtime for legacy tasks
+          if (!task.statusChangedAt) {
+            const st = await stat(filePath)
+            task.statusChangedAt = st.mtime.toISOString()
+          }
+          return task
+        })
     )
     return tasks.sort((a, b) => compareTaskIds(a.id, b.id))
   } catch {
@@ -368,6 +377,41 @@ async function collectIncompleteTasks(
   return results
 }
 
+// ─── Rendering ──────────────────────────────────────────────────────────────
+
+/** Render a single task to stdout. `sessionTag` is an optional `[shortId]` prefix for cross-session views. */
+function renderTask(task: Task, sessionTag?: string) {
+  const { emoji, color } = STATUS_STYLE[task.status]
+  const tag = sessionTag ? `${DIM}[${sessionTag}]${RESET} ` : ""
+  console.log(
+    `  ${emoji} ${BOLD}#${task.id}${RESET} ${tag}${color}[${task.status.replace("_", " ").toUpperCase()}]${RESET} ${task.subject}`
+  )
+  if (task.description) {
+    const lines = task.description.split("\n").slice(0, 3)
+    for (const line of lines) console.log(`     ${DIM}${line}${RESET}`)
+    if (task.description.split("\n").length > 3) console.log(`     ${DIM}...${RESET}`)
+  }
+  // Show date — statusChangedAt is always present (backfilled from file mtime)
+  if (task.statusChangedAt) {
+    console.log(`     ${DIM}📅 ${timeAgo(new Date(task.statusChangedAt))}${RESET}`)
+  }
+  // Show elapsed time for in_progress (live) and completed tasks
+  if (task.status === "in_progress" && task.statusChangedAt) {
+    const live = (task.elapsedMs ?? 0) + (Date.now() - new Date(task.statusChangedAt).getTime())
+    console.log(`     ${DIM}⏱  ${formatElapsed(Math.max(0, live))} elapsed${RESET}`)
+  } else if ((task.elapsedMs ?? 0) > 0) {
+    console.log(`     ${DIM}⏱  ${formatElapsed(task.elapsedMs!)} elapsed${RESET}`)
+  }
+  if (task.completionEvidence)
+    console.log(`     ${DIM}✓ Evidence: ${task.completionEvidence}${RESET}`)
+  if (task.completionTimestamp)
+    console.log(`     ${DIM}✓ Completed: ${timeAgo(new Date(task.completionTimestamp))}${RESET}`)
+  if (task.blockedBy.length)
+    console.log(`     ${DIM}Blocked by: #${task.blockedBy.join(", #")}${RESET}`)
+  if (task.blocks.length) console.log(`     ${DIM}Blocks: #${task.blocks.join(", #")}${RESET}`)
+  console.log()
+}
+
 // ─── Actions ────────────────────────────────────────────────────────────────
 
 async function listTasks(sessionId: string, label: string) {
@@ -389,34 +433,7 @@ async function listTasks(sessionId: string, label: string) {
   for (const [title, group] of groups) {
     if (group.length === 0) continue
     console.log(`  ${BOLD}${title}${RESET} (${group.length})\n`)
-    for (const task of group) {
-      const { emoji, color } = STATUS_STYLE[task.status]
-      console.log(
-        `  ${emoji} ${BOLD}#${task.id}${RESET} ${color}[${task.status.replace("_", " ").toUpperCase()}]${RESET} ${task.subject}`
-      )
-      if (task.description) {
-        const lines = task.description.split("\n").slice(0, 3)
-        for (const line of lines) console.log(`     ${DIM}${line}${RESET}`)
-        if (task.description.split("\n").length > 3) console.log(`     ${DIM}...${RESET}`)
-      }
-      // Show elapsed time for in_progress (live) and completed tasks
-      if (task.status === "in_progress" && task.statusChangedAt) {
-        const live = (task.elapsedMs ?? 0) + (Date.now() - new Date(task.statusChangedAt).getTime())
-        console.log(`     ${DIM}⏱  ${formatElapsed(Math.max(0, live))} elapsed${RESET}`)
-      } else if ((task.elapsedMs ?? 0) > 0) {
-        console.log(`     ${DIM}⏱  ${formatElapsed(task.elapsedMs!)} elapsed${RESET}`)
-      }
-      if (task.completionEvidence)
-        console.log(`     ${DIM}✓ Evidence: ${task.completionEvidence}${RESET}`)
-      if (task.completionTimestamp)
-        console.log(
-          `     ${DIM}✓ Completed: ${timeAgo(new Date(task.completionTimestamp))}${RESET}`
-        )
-      if (task.blockedBy.length)
-        console.log(`     ${DIM}Blocked by: #${task.blockedBy.join(", #")}${RESET}`)
-      if (task.blocks.length) console.log(`     ${DIM}Blocks: #${task.blocks.join(", #")}${RESET}`)
-      console.log()
-    }
+    for (const task of group) renderTask(task)
   }
 
   const incomplete = tasks.filter(
@@ -463,35 +480,7 @@ async function listAllSessionsTasks(filterCwd?: string) {
     for (const [title, group] of groups) {
       if (group.length === 0) continue
       console.log(`  ${BOLD}${title}${RESET} (${group.length})\n`)
-      for (const task of group) {
-        const { emoji, color } = STATUS_STYLE[task.status]
-        console.log(
-          `  ${emoji} ${BOLD}#${task.id}${RESET} ${DIM}[${shortId}]${RESET} ${color}[${task.status.replace("_", " ").toUpperCase()}]${RESET} ${task.subject}`
-        )
-        if (task.description) {
-          const lines = task.description.split("\n").slice(0, 3)
-          for (const line of lines) console.log(`     ${DIM}${line}${RESET}`)
-          if (task.description.split("\n").length > 3) console.log(`     ${DIM}...${RESET}`)
-        }
-        if (task.status === "in_progress" && task.statusChangedAt) {
-          const live =
-            (task.elapsedMs ?? 0) + (Date.now() - new Date(task.statusChangedAt).getTime())
-          console.log(`     ${DIM}⏱  ${formatElapsed(Math.max(0, live))} elapsed${RESET}`)
-        } else if ((task.elapsedMs ?? 0) > 0) {
-          console.log(`     ${DIM}⏱  ${formatElapsed(task.elapsedMs!)} elapsed${RESET}`)
-        }
-        if (task.completionEvidence)
-          console.log(`     ${DIM}✓ Evidence: ${task.completionEvidence}${RESET}`)
-        if (task.completionTimestamp)
-          console.log(
-            `     ${DIM}✓ Completed: ${timeAgo(new Date(task.completionTimestamp))}${RESET}`
-          )
-        if (task.blockedBy.length)
-          console.log(`     ${DIM}Blocked by: #${task.blockedBy.join(", #")}${RESET}`)
-        if (task.blocks.length)
-          console.log(`     ${DIM}Blocks: #${task.blocks.join(", #")}${RESET}`)
-        console.log()
-      }
+      for (const task of group) renderTask(task, shortId)
     }
 
     const incomplete = tasks.filter(
