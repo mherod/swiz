@@ -27,7 +27,7 @@
   },
   "overrides": [
     {
-      "includes": ["src/cli.ts", "src/debug.ts", "src/commands/*.ts"],
+      "includes": ["src/cli.ts", "src/debug.ts", "src/commands/*.ts", "src/dispatch/**"],
       "linter": {
         "rules": {
           "suspicious": {
