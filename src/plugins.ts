@@ -95,11 +95,7 @@ export async function loadAllPlugins(
 ): Promise<PluginResult[]> {
   const results: PluginResult[] = []
   for (const entry of plugins) {
-    const result = await loadPlugin(entry, projectRoot)
-    if (result.error) {
-      console.error(`[swiz] Warning: ${result.error}`)
-    }
-    results.push(result)
+    results.push(await loadPlugin(entry, projectRoot))
   }
   return results
 }

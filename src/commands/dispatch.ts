@@ -786,6 +786,9 @@ export const dispatchCommand: Command = {
     const projectSettings = await readProjectSettings(cwd)
     if (projectSettings?.plugins?.length) {
       const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
+      for (const r of pluginResults) {
+        if (r.error) log(`   ⚠ plugin ${r.name}: ${r.error}`)
+      }
       const pluginHooks = pluginResults.flatMap((r) => r.hooks)
       if (pluginHooks.length > 0) {
         combinedManifest = [...combinedManifest, ...pluginHooks]
