@@ -124,6 +124,28 @@ describe("swiz settings", () => {
     expect(json.changesRequestedGate).toBe(false)
   })
 
+  test("disables personal-repo-issues-gate and persists to user config", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "disable", "personal-repo-issues-gate"], home)
+    expect(result.exitCode).toBe(0)
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { personalRepoIssuesGate?: boolean }
+    expect(json.personalRepoIssuesGate).toBe(false)
+  })
+
+  test("accepts issue-gate as alias for personalRepoIssuesGate", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "disable", "issue-gate"], home)
+    expect(result.exitCode).toBe(0)
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { personalRepoIssuesGate?: boolean }
+    expect(json.personalRepoIssuesGate).toBe(false)
+  })
+
   test("fails for unknown setting key", async () => {
     const home = await createTempHome()
     const result = await runSwiz(["settings", "disable", "unknown-flag"], home)

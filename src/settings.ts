@@ -61,6 +61,7 @@ export interface SwizSettings {
   nonDefaultBranchGate: boolean
   githubCiGate: boolean
   changesRequestedGate: boolean
+  personalRepoIssuesGate: boolean
   sessions: Record<string, SessionSwizSettings>
   /** Global hook filenames to skip (e.g. "stop-github-ci.ts") */
   disabledHooks?: string[]
@@ -81,6 +82,7 @@ export interface EffectiveSwizSettings {
   nonDefaultBranchGate: boolean
   githubCiGate: boolean
   changesRequestedGate: boolean
+  personalRepoIssuesGate: boolean
   source: "global" | "session"
 }
 
@@ -142,6 +144,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   nonDefaultBranchGate: true,
   githubCiGate: true,
   changesRequestedGate: true,
+  personalRepoIssuesGate: true,
   sessions: {},
 }
 
@@ -221,6 +224,10 @@ function normalizeSettings(value: unknown): SwizSettings {
       typeof obj.changesRequestedGate === "boolean"
         ? obj.changesRequestedGate
         : DEFAULT_SETTINGS.changesRequestedGate,
+    personalRepoIssuesGate:
+      typeof obj.personalRepoIssuesGate === "boolean"
+        ? obj.personalRepoIssuesGate
+        : DEFAULT_SETTINGS.personalRepoIssuesGate,
     sessions,
     ...(Array.isArray(obj.disabledHooks) &&
     obj.disabledHooks.every((h: unknown) => typeof h === "string")
@@ -337,6 +344,7 @@ export function getEffectiveSwizSettings(
       nonDefaultBranchGate: settings.nonDefaultBranchGate,
       githubCiGate: settings.githubCiGate,
       changesRequestedGate: settings.changesRequestedGate,
+      personalRepoIssuesGate: settings.personalRepoIssuesGate,
       source: "session",
     }
   }
@@ -355,6 +363,7 @@ export function getEffectiveSwizSettings(
     nonDefaultBranchGate: settings.nonDefaultBranchGate,
     githubCiGate: settings.githubCiGate,
     changesRequestedGate: settings.changesRequestedGate,
+    personalRepoIssuesGate: settings.personalRepoIssuesGate,
     source: "global",
   }
 }

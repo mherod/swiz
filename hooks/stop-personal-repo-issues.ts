@@ -5,6 +5,7 @@
  * the current user has self-authored or self-assigned issues in an org repo.
  */
 
+import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
   extractOwnerFromUrl,
@@ -279,6 +280,11 @@ async function main(): Promise<void> {
     const sessionId = sanitizeSessionId(input.session_id)
 
     if (!(await isGitRepo(cwd))) return
+
+    const settings = await readSwizSettings()
+    const effective = getEffectiveSwizSettings(settings, input.session_id)
+    if (!effective.personalRepoIssuesGate) return
+
     if (!hasGhCli()) return
     if (!(await isGitHubRemote(cwd))) return
 

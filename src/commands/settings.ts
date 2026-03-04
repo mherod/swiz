@@ -23,6 +23,7 @@ type BooleanSettingKey =
   | "nonDefaultBranchGate"
   | "githubCiGate"
   | "changesRequestedGate"
+  | "personalRepoIssuesGate"
 type NumericSettingKey = "prAgeGateMinutes" | "narratorSpeed"
 type StringSettingKey = "narratorVoice" | "ambitionMode"
 type SettingKey = BooleanSettingKey | NumericSettingKey | StringSettingKey
@@ -114,6 +115,14 @@ function parseSetting(raw: string | undefined): SettingKey {
     value === "pr-review-gate"
   ) {
     return "changesRequestedGate"
+  }
+  if (
+    value === "personal-repo-issues-gate" ||
+    value === "personalrepoissuesgate" ||
+    value === "personal_repo_issues_gate" ||
+    value === "issue-gate"
+  ) {
+    return "personalRepoIssuesGate"
   }
   if (
     value === "critiques-enabled" ||
@@ -244,6 +253,7 @@ function printSettings(
     nonDefaultBranchGate: boolean
     githubCiGate: boolean
     changesRequestedGate: boolean
+    personalRepoIssuesGate: boolean
     source: "global" | "session"
     disabledHooks?: string[]
   },
