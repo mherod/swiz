@@ -256,6 +256,26 @@ async function executeMutation(mutation: MutationPayload, cwd: string): Promise<
   }
 }
 
+/**
+ * Best-effort replay: resolve repo slug from cwd and drain pending mutations.
+ * Catches all errors — never throws. Safe to call from any entry point.
+ */
+export async function tryReplayPendingMutations(cwd?: string): Promise<void> {
+  try {
+    const dir = cwd ?? process.cwd()
+    const { getRepoSlug, isGitRepo, hasGhCli } = await import("../hooks/hook-utils.ts")
+    if (!hasGhCli()) return
+    if (!(await isGitRepo(dir))) return
+    const slug = await getRepoSlug(dir)
+    if (!slug) return
+    const store = getIssueStore()
+    if (store.pendingCount(slug) === 0) return
+    await replayPendingMutations(slug, dir, store)
+  } catch {
+    // Non-fatal — never block the calling command
+  }
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function getDefaultDbPath(): string {

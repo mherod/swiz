@@ -1,5 +1,6 @@
 import { CONFIGURABLE_AGENTS } from "./agents.ts"
 import { createHelpCommand } from "./commands/help.ts"
+import { tryReplayPendingMutations } from "./issue-store.ts"
 import { validateDispatchRoutes } from "./manifest.ts"
 import type { Command } from "./types.ts"
 
@@ -37,6 +38,9 @@ async function run() {
     help.run([commandName])
     return
   }
+
+  // Best-effort: drain any offline issue mutations before running commands
+  await tryReplayPendingMutations()
 
   try {
     await command.run(rest)
