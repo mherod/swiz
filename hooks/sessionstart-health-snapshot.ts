@@ -16,19 +16,16 @@ import {
 interface PluginEnvRequirement {
   plugin: string
   envVar: string
-  fix: string
 }
 
 const KNOWN_PLUGIN_ENV: PluginEnvRequirement[] = [
   {
     plugin: "github@claude-plugins-official",
     envVar: "GITHUB_PERSONAL_ACCESS_TOKEN",
-    fix: "Run: gh auth token | pbcopy, then add GITHUB_PERSONAL_ACCESS_TOKEN to ~/.claude/settings.json env block",
   },
   {
     plugin: "greptile@claude-plugins-official",
     envVar: "GREPTILE_API_KEY",
-    fix: "Get a key at https://app.greptile.com and add GREPTILE_API_KEY to ~/.claude/settings.json env block",
   },
 ]
 
@@ -47,7 +44,7 @@ function checkPluginEnv(): string[] {
   for (const req of KNOWN_PLUGIN_ENV) {
     if (!enabledPlugins[req.plugin]) continue
     if (process.env[req.envVar]) continue
-    warnings.push(`Plugin "${req.plugin}" is enabled but ${req.envVar} is not set. ${req.fix}`)
+    warnings.push(`${req.plugin}: missing ${req.envVar}`)
   }
 
   return warnings

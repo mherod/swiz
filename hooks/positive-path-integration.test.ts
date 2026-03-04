@@ -701,6 +701,36 @@ describe("sessionstart-compact-context: positive paths", () => {
     expect(ctx).toContain("2 incomplete task(s)")
   })
 
+  test("caps current-session task preview to keep context bounded", async () => {
+    const home = await createTempDir()
+    const sessionId = `compact-test-${Date.now()}`
+
+    for (const [id, subject] of [
+      ["1", "Task one"],
+      ["2", "Task two"],
+      ["3", "Task three"],
+      ["4", "Task four"],
+      ["5", "Task five"],
+    ] as const) {
+      await createTaskFile(home, sessionId, { id, subject, status: "pending" })
+    }
+
+    const r = await runHook(
+      HOOK,
+      { matcher: "compact", cwd: process.cwd(), session_id: sessionId },
+      { HOME: home }
+    )
+    expect(r.exitCode).toBe(0)
+    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    expect(ctx).toContain("5 incomplete task(s)")
+    expect(ctx).toContain("Task one")
+    expect(ctx).toContain("Task two")
+    expect(ctx).toContain("Task three")
+    expect(ctx).not.toContain("Task four")
+    expect(ctx).not.toContain("Task five")
+    expect(ctx).toContain("... 2 more incomplete task(s)")
+  })
+
   test("prior-session completed tasks are excluded from context", async () => {
     const home = await createTempDir()
     const currentSessionId = `current-${Date.now()}`
@@ -803,6 +833,44 @@ describe("sessionstart-health-snapshot: positive paths", () => {
     expect(ctx).toContain("Git:")
     expect(ctx).toContain("branch=")
     expect(ctx).toContain("uncommitted=")
+  })
+})
+
+describe("userpromptsubmit-task-advisor: positive paths", () => {
+  const HOOK = "hooks/userpromptsubmit-task-advisor.ts"
+
+  test("caps prior-session task preview to keep per-turn context bounded", async () => {
+    const home = await createTempDir()
+    const currentSessionId = `current-${Date.now()}`
+    const priorSessionId = `prior-${Date.now()}`
+    const cwd = "/Users/testuser/bounded-project"
+
+    const projectKey = projectKeyFromCwd(cwd)
+    const projectDir = join(home, ".claude", "projects", projectKey)
+    await mkdir(projectDir, { recursive: true })
+    await writeFile(join(projectDir, `${priorSessionId}.jsonl`), "")
+
+    for (const [id, subject] of [
+      ["1", "Resume task one"],
+      ["2", "Resume task two"],
+      ["3", "Resume task three"],
+      ["4", "Resume task four"],
+      ["5", "Resume task five"],
+    ] as const) {
+      await createTaskFile(home, priorSessionId, { id, subject, status: "in_progress" })
+    }
+
+    const r = await runHook(HOOK, { cwd, session_id: currentSessionId }, { HOME: home })
+    expect(r.exitCode).toBe(0)
+    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    expect(ctx).toContain("5 incomplete task(s)")
+    expect(ctx).toContain(`swiz tasks complete <id> --session ${priorSessionId}`)
+    expect(ctx).toContain("Resume task one")
+    expect(ctx).toContain("Resume task two")
+    expect(ctx).toContain("Resume task three")
+    expect(ctx).not.toContain("Resume task four")
+    expect(ctx).not.toContain("Resume task five")
+    expect(ctx).toContain("... 2 more incomplete task(s)")
   })
 })
 

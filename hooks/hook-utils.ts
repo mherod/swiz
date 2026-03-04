@@ -429,6 +429,21 @@ export interface PriorSessionResult {
   tasks: SessionTask[]
 }
 
+export interface LimitedItems<T> {
+  visible: T[]
+  remaining: number
+}
+
+/** Limit repeated context items so hook output stays bounded. */
+export function limitItems<T>(items: T[], limit = 3): LimitedItems<T> {
+  if (limit <= 0) return { visible: [], remaining: items.length }
+  const visible = items.slice(0, limit)
+  return {
+    visible,
+    remaining: Math.max(items.length - visible.length, 0),
+  }
+}
+
 /**
  * Find incomplete tasks from the most recent prior session for a given project.
  *

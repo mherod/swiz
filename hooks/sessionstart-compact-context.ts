@@ -8,11 +8,18 @@ import {
   emitContext,
   findPriorSessionTasks,
   isIncompleteTaskStatus,
+  limitItems,
   readSessionTasks,
   type SessionHookInput,
   type SessionTask,
 } from "./hook-utils.ts"
 import type { CompactSnapshot } from "./precompact-task-snapshot.ts"
+
+const TASK_PREVIEW_LIMIT = 3
+
+function overflowLine(remaining: number, label: string): string {
+  return remaining > 0 ? `\n  ... ${remaining} more ${label}` : ""
+}
 
 /**
  * Read the compact snapshot for a session if it exists.
@@ -63,7 +70,7 @@ async function main(): Promise<void> {
   if (matcher !== "compact" && matcher !== "resume") return
 
   let ctx =
-    "Post-compaction context: Always use rg instead of grep. Always use Edit tool, never sed/awk. " +
+    "Post-compaction context: Always use rg instead of grep. Use Edit tool, not sed/awk. " +
     "Do not co-author commits. Never disable code checks or quality gates. " +
     "Run git diff after reaching success."
 
@@ -88,9 +95,11 @@ async function main(): Promise<void> {
       }
     }
     if (recreated.length > 0) {
+      const { visible, remaining } = limitItems(recreated, TASK_PREVIEW_LIMIT)
       ctx +=
         `\n\nCompact snapshot restored ${recreated.length} missing task file(s):\n` +
-        recreated.map((r) => `  • ${r}`).join("\n") +
+        visible.map((r) => `  • ${r}`).join("\n") +
+        overflowLine(remaining, "restored task file(s)") +
         `\n\nThese task files were recreated from the pre-compaction snapshot. ` +
         `Verify their status reflects reality and update as needed.`
     }
@@ -101,12 +110,12 @@ async function main(): Promise<void> {
   const currentTasks = await readSessionTasks(sessionId, home)
   const currentIncomplete = currentTasks.filter((t) => isIncompleteTaskStatus(t.status))
   if (currentIncomplete.length > 0) {
-    const taskLines = currentIncomplete
-      .map((t) => `  • #${t.id} [${t.status}]: ${t.subject}`)
-      .join("\n")
+    const { visible, remaining } = limitItems(currentIncomplete, TASK_PREVIEW_LIMIT)
+    const taskLines = visible.map((t) => `  • #${t.id} [${t.status}]: ${t.subject}`).join("\n")
     ctx +=
       `\n\nThis session has ${currentIncomplete.length} incomplete task(s) that survived compaction:\n` +
       taskLines +
+      overflowLine(remaining, "incomplete task(s)") +
       `\n\nIMPORTANT: Complete or update these tasks using TaskUpdate — do NOT create new tasks ` +
       `for the same work. The stop hook will block until every task in this session is completed. ` +
       `If the work described by a task is already done, mark it completed immediately.`
@@ -117,17 +126,15 @@ async function main(): Promise<void> {
     const priorResult = await findPriorSessionTasks(cwd, sessionId)
     if (priorResult && priorResult.tasks.length > 0) {
       const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
-      const taskLines = priorTasks.map((t) => `  • #${t.id} [${t.status}]: ${t.subject}`).join("\n")
-      const completeHint = priorTasks
-        .map(
-          (t) => `  swiz tasks complete ${t.id} --session ${priorSessionId} --evidence "note:done"`
-        )
-        .join("\n")
+      const { visible, remaining } = limitItems(priorTasks, TASK_PREVIEW_LIMIT)
+      const taskLines = visible.map((t) => `  • #${t.id} [${t.status}]: ${t.subject}`).join("\n")
+      const completeHint = `swiz tasks complete <id> --session ${priorSessionId} --evidence "note:done"`
       ctx +=
-        `\n\nPrior session (${priorSessionId}) had ${priorTasks.length} incomplete task(s). ` +
-        `If already done, complete them:\n${completeHint}\n` +
-        `Otherwise continue these instead of creating new tasks:\n` +
-        taskLines
+        `\n\nPrior session (${priorSessionId}) has ${priorTasks.length} incomplete task(s). ` +
+        `If already done, run: ${completeHint}\n` +
+        `Otherwise continue these before creating new tasks:\n` +
+        taskLines +
+        overflowLine(remaining, "incomplete task(s)")
     }
   }
 

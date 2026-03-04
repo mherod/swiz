@@ -1,7 +1,14 @@
 #!/usr/bin/env bun
 // UserPromptSubmit hook: Gently suggest TaskCreate when no pending tasks exist
 
-import { findPriorSessionTasks, readSessionTasks, toolNameForCurrentAgent } from "./hook-utils.ts"
+import {
+  findPriorSessionTasks,
+  limitItems,
+  readSessionTasks,
+  toolNameForCurrentAgent,
+} from "./hook-utils.ts"
+
+const TASK_PREVIEW_LIMIT = 3
 
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as { session_id?: string; cwd?: string }
@@ -26,17 +33,16 @@ async function main(): Promise<void> {
     let additionalContext: string
     if (priorResult && priorResult.tasks.length > 0) {
       const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
-      const taskLines = priorTasks.map((t) => `  • #${t.id} [${t.status}]: ${t.subject}`).join("\n")
-      const completeHint = priorTasks
-        .map(
-          (t) => `  swiz tasks complete ${t.id} --session ${priorSessionId} --evidence "note:done"`
-        )
-        .join("\n")
+      const { visible, remaining } = limitItems(priorTasks, TASK_PREVIEW_LIMIT)
+      const taskLines = visible.map((t) => `  • #${t.id} [${t.status}]: ${t.subject}`).join("\n")
+      const overflow = remaining > 0 ? `\n  ... ${remaining} more incomplete task(s)` : ""
+      const completeHint = `swiz tasks complete <id> --session ${priorSessionId} --evidence "note:done"`
       additionalContext =
-        `Prior session (${priorSessionId}) had ${priorTasks.length} incomplete task(s). ` +
-        `If already done, complete them:\n${completeHint}\n` +
-        `Otherwise resume using ${taskCreateName} before starting new work:\n` +
-        taskLines
+        `Prior session (${priorSessionId}) has ${priorTasks.length} incomplete task(s). ` +
+        `If already done, run: ${completeHint}\n` +
+        `Resume using ${taskCreateName} before starting new work:\n` +
+        taskLines +
+        overflow
     } else {
       additionalContext = `No pending tasks in this session. If the upcoming work is non-trivial, use ${taskCreateName} to plan it before starting.`
     }
