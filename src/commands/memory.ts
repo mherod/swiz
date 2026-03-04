@@ -156,10 +156,54 @@ async function getFileStats(
 ): Promise<{ lines: number; words: number; chars: number } | null> {
   try {
     const file = Bun.file(path)
+    const size = file.size
+
+    // Empty file edge case
+    if (size === 0) {
+      return { lines: 0, words: 0, chars: 0 }
+    }
+
+    // Guard against binary files: check first 512 bytes for null bytes
+    const headerBuffer = await file.slice(0, 512).arrayBuffer()
+    const headerView = new Uint8Array(headerBuffer)
+    for (let i = 0; i < headerView.length; i++) {
+      if (headerView[i] === 0) {
+        return null // Binary file detected
+      }
+    }
+
+    // Read and parse file for stats
     const content = await file.text()
-    const lines = content.split("\n").length
-    const words = content.split(/\s+/).filter((w) => w.length > 0).length
     const chars = content.length
+
+    // Count lines (handle CRLF and LF)
+    let lines = 0
+    let words = 0
+    let inWord = false
+
+    for (let i = 0; i < content.length; i++) {
+      const char = content.charAt(i)
+
+      // Line counting: count newlines, add 1 if content doesn't end with newline
+      if (char === "\n") {
+        lines++
+      }
+
+      // Word counting: track whitespace boundaries
+      const isWhitespace = /\s/.test(char)
+      if (!isWhitespace && !inWord) {
+        words++
+        inWord = true
+      } else if (isWhitespace) {
+        inWord = false
+      }
+    }
+
+    // If file doesn't end with newline, add 1 to line count
+    if (content.length > 0 && content[content.length - 1] !== "\n") {
+      lines++
+    }
+
     return { lines, words, chars }
   } catch {
     return null
