@@ -111,6 +111,8 @@ All output helpers return `never` and call `process.exit(0)` after writing JSON.
 
 **Test file detection** — `TEST_FILE_RE` from `hook-utils.ts` identifies test files (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`). Use this constant in hooks that scan source code to exclude test files from checks, allowing test fixtures to contain literal patterns without triggering the hook.
 
+**DON'T write tests for external code in this repository.** Tests must live in the repository that owns the code under test. For example, `src/tasks-list-verify.test.ts` tested `~/.claude/hooks/tasks-list.ts` from the `mherod/.claude` repository — this was incorrect. The fix: delete the test from swiz and file an issue in `mherod/.claude` instead. This ensures each repository owns the maintenance, updates, and test coverage for its own code.
+
 **Diff file tracking** — When scanning git diffs line-by-line, track the current file by reading `+++ b/<path>` headers, then apply file-level exclusions (e.g., `if (TEST_FILE_RE.test(currentFile)) continue`). This pattern is lighter than splitting the diff into file chunks and allows consistent file-based filtering across all checked lines.
 
 **DO** extract a `sanitizeSessionId(sessionId: string | undefined): string | null` helper whenever a hook uses `/tmp` sentinel files keyed on session ID. Both the read path (cooldown check) and write path (mark prompted) need the same sanitization — extracting it eliminates duplication and prevents divergence between the two paths.
