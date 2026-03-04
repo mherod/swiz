@@ -1,5 +1,5 @@
 import { dirname, join } from "node:path"
-import { spawnSpeak } from "../../hooks/hook-utils.ts"
+import { detectProjectStack, spawnSpeak } from "../../hooks/hook-utils.ts"
 import {
   getEffectiveSwizSettings,
   getProjectSettingsPath,
@@ -257,7 +257,8 @@ function printSettings(
     trivialMaxLines: number
     source: "project" | "default"
     disabledHooks?: string[]
-  }
+  },
+  detectedStacks?: string[]
 ): void {
   console.log("\n  swiz settings\n")
   if (!path) {
@@ -318,6 +319,10 @@ function printSettings(
     if (projectDisabled.length > 0) {
       console.log(`  disabled-hooks:  ${projectDisabled.join(", ")} (project)`)
     }
+    if (detectedStacks !== undefined) {
+      const stacksLabel = detectedStacks.length > 0 ? detectedStacks.join(", ") : "none detected"
+      console.log(`  detected-stacks: ${stacksLabel}`)
+    }
   }
 
   console.log("")
@@ -348,7 +353,8 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
     path,
     fileExists,
     sessionId,
-    projectPolicyInfo
+    projectPolicyInfo,
+    detectProjectStack(parsed.targetDir)
   )
 }
 

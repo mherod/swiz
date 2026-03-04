@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { dirname, join } from "node:path"
 import {
   computeTranscriptSummary,
+  detectProjectStack,
   isEditTool,
   isNotebookTool,
   isShellTool,
@@ -128,6 +129,24 @@ export function filterDisabledHooks(groups: HookGroup[], disabledHooks: Set<stri
     .filter((group) => group.hooks.length > 0)
 }
 
+/**
+ * Filter hooks whose `stacks` list does not include any of the detected stacks.
+ * Hooks without a `stacks` field are always included (backwards-compatible default).
+ */
+export function filterStackHooks(groups: HookGroup[], detectedStacks: string[]): HookGroup[] {
+  if (detectedStacks.length === 0) return groups
+
+  const stackSet = new Set(detectedStacks)
+  return groups
+    .map((group) => {
+      const hooks = group.hooks.filter(
+        (hook) => !hook.stacks || hook.stacks.some((s) => stackSet.has(s))
+      )
+      return hooks.length === group.hooks.length ? group : { ...group, hooks }
+    })
+    .filter((group) => group.hooks.length > 0)
+}
+
 async function applyHookSettingFilters(
   groups: HookGroup[],
   payload: Record<string, unknown>
@@ -144,8 +163,10 @@ async function applyHookSettingFilters(
     ...(projectSettings?.disabledHooks ?? []),
   ])
 
+  const detectedStacks = cwd ? detectProjectStack(cwd) : []
   const filtered = filterPrMergeModeHooks(groups, effective.prMergeMode)
-  return filterDisabledHooks(filtered, disabledSet)
+  const stackFiltered = filterStackHooks(filtered, detectedStacks)
+  return filterDisabledHooks(stackFiltered, disabledSet)
 }
 
 // ─── Cross-agent matcher ─────────────────────────────────────────────────────

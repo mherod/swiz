@@ -67,8 +67,12 @@ export type Runtime = "bun" | "node"
 // via the single hook-utils.ts import, and so src/manifest.ts can import
 // directly from src/ without creating a src→hooks dependency.
 
-export type { Framework } from "../src/detect-frameworks.ts"
-export { _clearFrameworkCache, detectFrameworks } from "../src/detect-frameworks.ts"
+export type { Framework, ProjectStack } from "../src/detect-frameworks.ts"
+export {
+  _clearFrameworkCache,
+  detectFrameworks,
+  detectProjectStack,
+} from "../src/detect-frameworks.ts"
 
 let _pmCache: PackageManager | null | undefined
 

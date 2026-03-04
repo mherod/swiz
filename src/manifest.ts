@@ -24,6 +24,17 @@ export interface HookDef {
    * Example: `"env:CI!=true"` — skip hook when running in CI
    */
   condition?: string
+  /**
+   * Optional list of project stacks that activate this hook.
+   * When present, the hook only runs when `detectProjectStack(cwd)` returns
+   * at least one stack in this list.  Hooks with no `stacks` field run for
+   * all projects (backwards-compatible default).
+   *
+   * Supported stack names: "bun", "node", "go", "python", "ruby", "rust", "java", "php"
+   *
+   * Example: `stacks: ["bun", "node"]` — skip for Go / Python / Rust projects
+   */
+  stacks?: string[]
 }
 
 /**
