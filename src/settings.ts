@@ -34,6 +34,8 @@ export interface ProjectSwizSettings {
   trivialMaxFiles?: number
   trivialMaxLines?: number
   state?: ProjectState
+  /** Hook filenames to skip for this project (e.g. "stop-github-ci.ts") */
+  disabledHooks?: string[]
 }
 
 /** Resolved policy thresholds after merging global + project config */
@@ -60,6 +62,8 @@ export interface SwizSettings {
   githubCiGate: boolean
   changesRequestedGate: boolean
   sessions: Record<string, SessionSwizSettings>
+  /** Global hook filenames to skip (e.g. "stop-github-ci.ts") */
+  disabledHooks?: string[]
 }
 
 export interface EffectiveSwizSettings {
@@ -218,6 +222,10 @@ function normalizeSettings(value: unknown): SwizSettings {
         ? obj.changesRequestedGate
         : DEFAULT_SETTINGS.changesRequestedGate,
     sessions,
+    ...(Array.isArray(obj.disabledHooks) &&
+    obj.disabledHooks.every((h: unknown) => typeof h === "string")
+      ? { disabledHooks: obj.disabledHooks as string[] }
+      : {}),
   }
 }
 
@@ -242,6 +250,12 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   }
   if (typeof obj.state === "string" && obj.state in STATE_TRANSITIONS) {
     result.state = obj.state as ProjectState
+  }
+  if (
+    Array.isArray(obj.disabledHooks) &&
+    obj.disabledHooks.every((h: unknown) => typeof h === "string")
+  ) {
+    result.disabledHooks = obj.disabledHooks as string[]
   }
   return result
 }

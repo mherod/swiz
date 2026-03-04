@@ -26,7 +26,7 @@ type BooleanSettingKey =
 type NumericSettingKey = "prAgeGateMinutes" | "narratorSpeed"
 type StringSettingKey = "narratorVoice" | "ambitionMode"
 type SettingKey = BooleanSettingKey | NumericSettingKey | StringSettingKey
-type Action = "show" | "enable" | "disable" | "set"
+type Action = "show" | "enable" | "disable" | "set" | "disable-hook" | "enable-hook"
 
 interface ParsedSettingsArgs {
   action: Action
@@ -42,10 +42,11 @@ const PROJECTS_DIR = join(HOME, ".claude", "projects")
 
 function usage(): string {
   return (
-    "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value>] [--session [id]] [--dir <path>]\n" +
+    "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--session [id]] [--dir <path>]\n" +
     "Supported settings: auto-continue, critiques-enabled, pr-merge-mode, push-gate, sandboxed-edits, speak,\n" +
     "  pr-age-gate (minutes, 0 to disable), narrator-voice (string, e.g. Samantha),\n" +
-    "  narrator-speed (words per minute, 0 for default), ambition-mode (standard|aggressive)"
+    "  narrator-speed (words per minute, 0 for default), ambition-mode (standard|aggressive)\n" +
+    "Hook management: disable-hook <filename> (e.g. stop-github-ci.ts), enable-hook <filename>"
   )
 }
 
@@ -192,7 +193,9 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
     rawAction !== "show" &&
     rawAction !== "enable" &&
     rawAction !== "disable" &&
-    rawAction !== "set"
+    rawAction !== "set" &&
+    rawAction !== "disable-hook" &&
+    rawAction !== "enable-hook"
   ) {
     throw new Error(`Unknown subcommand: ${positionals[0]}\n${usage()}`)
   }
@@ -242,6 +245,7 @@ function printSettings(
     githubCiGate: boolean
     changesRequestedGate: boolean
     source: "global" | "session"
+    disabledHooks?: string[]
   },
   path: string | null,
   fileExists: boolean,
@@ -252,6 +256,7 @@ function printSettings(
     trivialMaxFiles: number
     trivialMaxLines: number
     source: "project" | "default"
+    disabledHooks?: string[]
   }
 ): void {
   console.log("\n  swiz settings\n")
@@ -293,6 +298,11 @@ function printSettings(
     effective.narratorSpeed > 0 ? `${effective.narratorSpeed} wpm` : "system default"
   console.log(`  narrator-speed:  ${speedLabel} (global)`)
 
+  const globalDisabled = effective.disabledHooks ?? []
+  if (globalDisabled.length > 0) {
+    console.log(`  disabled-hooks:  ${globalDisabled.join(", ")} (global)`)
+  }
+
   if (projectPolicyInfo) {
     console.log("\n  project policy")
     console.log(`  config: ${projectPolicyInfo.configPath} (${projectPolicyInfo.source})`)
@@ -304,6 +314,10 @@ function printSettings(
     console.log(
       `  trivial-max-lines: ${projectPolicyInfo.trivialMaxLines} (${projectPolicyInfo.source})`
     )
+    const projectDisabled = projectPolicyInfo.disabledHooks ?? []
+    if (projectDisabled.length > 0) {
+      console.log(`  disabled-hooks:  ${projectDisabled.join(", ")} (project)`)
+    }
   }
 
   console.log("")
@@ -326,9 +340,16 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
     trivialMaxFiles: policy.trivialMaxFiles,
     trivialMaxLines: policy.trivialMaxLines,
     source: policy.source,
+    disabledHooks: projectSettings?.disabledHooks,
   }
 
-  printSettings(effective, path, fileExists, sessionId, projectPolicyInfo)
+  printSettings(
+    { ...effective, disabledHooks: settings.disabledHooks },
+    path,
+    fileExists,
+    sessionId,
+    projectPolicyInfo
+  )
 }
 
 async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise<void> {
@@ -403,6 +424,38 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
   const path = await writeSwizSettings(next)
   const label = value === 0 ? "system default" : `${value}`
   console.log(`\n  Set ${parsed.settingArg} = ${label}`)
+  console.log(`  Saved: ${path}\n`)
+}
+
+async function disableHook(parsed: ParsedSettingsArgs): Promise<void> {
+  const filename = parsed.settingArg
+  if (!filename)
+    throw new Error(`Missing hook filename.\nUsage: swiz settings disable-hook <filename>`)
+  const current = await readSwizSettings({ strict: true })
+  const existing = current.disabledHooks ?? []
+  if (existing.includes(filename)) {
+    console.log(`\n  ${filename} is already disabled\n`)
+    return
+  }
+  const next = { ...current, disabledHooks: [...existing, filename] }
+  const path = await writeSwizSettings(next)
+  console.log(`\n  Disabled hook: ${filename}`)
+  console.log(`  Saved: ${path}\n`)
+}
+
+async function enableHook(parsed: ParsedSettingsArgs): Promise<void> {
+  const filename = parsed.settingArg
+  if (!filename)
+    throw new Error(`Missing hook filename.\nUsage: swiz settings enable-hook <filename>`)
+  const current = await readSwizSettings({ strict: true })
+  const existing = current.disabledHooks ?? []
+  if (!existing.includes(filename)) {
+    console.log(`\n  ${filename} is not in the disabled list\n`)
+    return
+  }
+  const next = { ...current, disabledHooks: existing.filter((f) => f !== filename) }
+  const path = await writeSwizSettings(next)
+  console.log(`\n  Re-enabled hook: ${filename}`)
   console.log(`  Saved: ${path}\n`)
 }
 
@@ -501,6 +554,10 @@ export const settingsCommand: Command = {
         return setBooleanSetting(false, parsed)
       case "set":
         return setValueSetting(parsed)
+      case "disable-hook":
+        return disableHook(parsed)
+      case "enable-hook":
+        return enableHook(parsed)
     }
   },
 }

@@ -285,6 +285,85 @@ describe("swiz settings", () => {
     expect(result.stdout).toContain(`trivial-max-lines: ${DEFAULT_TRIVIAL_MAX_LINES}`)
     expect(result.stdout).toContain("(default)")
   })
+
+  test("disable-hook adds filename to user-level disabledHooks", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Disabled hook: stop-github-ci.ts")
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { disabledHooks?: string[] }
+    expect(json.disabledHooks).toEqual(["stop-github-ci.ts"])
+  })
+
+  test("disable-hook is idempotent when hook already disabled", async () => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
+    const result = await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("already disabled")
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { disabledHooks?: string[] }
+    expect(json.disabledHooks).toEqual(["stop-github-ci.ts"])
+  })
+
+  test("enable-hook removes filename from disabledHooks", async () => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
+    await runSwiz(["settings", "disable-hook", "stop-lint-staged.ts"], home)
+    const result = await runSwiz(["settings", "enable-hook", "stop-github-ci.ts"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Re-enabled hook: stop-github-ci.ts")
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { disabledHooks?: string[] }
+    expect(json.disabledHooks).toEqual(["stop-lint-staged.ts"])
+  })
+
+  test("enable-hook is a no-op when hook is not in the disabled list", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "enable-hook", "stop-github-ci.ts"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("not in the disabled list")
+  })
+
+  test("settings show includes disabled-hooks line when hooks are disabled", async () => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
+    const result = await runSwiz(["settings"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("disabled-hooks:  stop-github-ci.ts (global)")
+  })
+
+  test("settings show lists multiple disabled hooks", async () => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
+    await runSwiz(["settings", "disable-hook", "stop-lint-staged.ts"], home)
+    const result = await runSwiz(["settings"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("stop-github-ci.ts, stop-lint-staged.ts")
+  })
+
+  test("settings show includes project-level disabled hooks", async () => {
+    const home = await createTempHome()
+    const projectDir = await mkdtemp(join(tmpdir(), "swiz-disabled-hooks-test-"))
+    tempDirs.push(projectDir)
+    const swizDir = join(projectDir, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await writeFile(
+      join(swizDir, "config.json"),
+      JSON.stringify({ disabledHooks: ["stop-git-status.ts"] })
+    )
+
+    const result = await runSwiz(["settings", "--dir", projectDir], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("disabled-hooks:  stop-git-status.ts (project)")
+  })
 })
 
 // ─── resolvePolicy unit tests ───────────────────────────────────────────────
@@ -386,5 +465,29 @@ describe("readProjectSettings", () => {
     await mkdir(join(dir, ".swiz"), { recursive: true })
     await writeFile(join(dir, ".swiz", "config.json"), "not-json{{{")
     expect(await readProjectSettings(dir)).toBeNull()
+  })
+
+  test("reads disabledHooks array from config.json", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
+    tempDirs.push(dir)
+    await mkdir(join(dir, ".swiz"), { recursive: true })
+    await writeFile(
+      join(dir, ".swiz", "config.json"),
+      JSON.stringify({ disabledHooks: ["stop-github-ci.ts", "stop-lint-staged.ts"] })
+    )
+    const settings = await readProjectSettings(dir)
+    expect(settings?.disabledHooks).toEqual(["stop-github-ci.ts", "stop-lint-staged.ts"])
+  })
+
+  test("ignores disabledHooks when entries contain non-string values", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
+    tempDirs.push(dir)
+    await mkdir(join(dir, ".swiz"), { recursive: true })
+    await writeFile(
+      join(dir, ".swiz", "config.json"),
+      JSON.stringify({ disabledHooks: ["stop-github-ci.ts", 42] })
+    )
+    const settings = await readProjectSettings(dir)
+    expect(settings?.disabledHooks).toBeUndefined()
   })
 })

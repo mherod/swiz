@@ -1,6 +1,18 @@
 import { join } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
+import { readProjectSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
+
+async function buildDisabledSet(cwd: string): Promise<Set<string>> {
+  const [globalSettings, projectSettings] = await Promise.all([
+    readSwizSettings(),
+    readProjectSettings(cwd),
+  ])
+  return new Set([
+    ...(globalSettings.disabledHooks ?? []),
+    ...(projectSettings?.disabledHooks ?? []),
+  ])
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -120,8 +132,9 @@ async function listEvents(allSettings: LoadedSettings[]) {
   console.log()
 }
 
-async function showEvent(allSettings: LoadedSettings[], eventName: string) {
+async function showEvent(allSettings: LoadedSettings[], eventName: string, cwd: string) {
   let found = false
+  const disabled = await buildDisabledSet(cwd)
 
   for (const { source, agent, hooks } of allSettings) {
     const key = Object.keys(hooks).find((k) => k.toLowerCase() === eventName.toLowerCase())
@@ -139,15 +152,19 @@ async function showEvent(allSettings: LoadedSettings[], eventName: string) {
         if (hook.async) flags.push("async")
         if (hook.type === "agent") flags.push(`agent:${hook.model ?? "default"}`)
         if (hook.condition) flags.push(`if:${hook.condition}`)
-        const flagStr = flags.length ? ` (${flags.join(", ")})` : ""
 
         const hookType = hook.type ?? "command"
         if (hookType === "command" && hook.command) {
-          console.log(`    ${matchLabel.padEnd(22)} ${shortName(hook.command)}${flagStr}`)
+          const name = shortName(hook.command)
+          if (disabled.has(name)) flags.push("disabled")
+          const flagStr = flags.length ? ` (${flags.join(", ")})` : ""
+          console.log(`    ${matchLabel.padEnd(22)} ${name}${flagStr}`)
         } else if (hookType === "agent") {
+          const flagStr = flags.length ? ` (${flags.join(", ")})` : ""
           const label = hook.statusMessage ?? "agent hook"
           console.log(`    ${matchLabel.padEnd(22)} ${label}${flagStr}`)
         } else if (hookType === "prompt" && hook.prompt) {
+          const flagStr = flags.length ? ` (${flags.join(", ")})` : ""
           const preview = hook.prompt.length > 50 ? `${hook.prompt.slice(0, 47)}...` : hook.prompt
           console.log(`    ${matchLabel.padEnd(22)} [prompt] ${preview}${flagStr}`)
         }
@@ -212,7 +229,7 @@ export const hooksCommand: Command = {
     if (!first) {
       await listEvents(allSettings)
     } else if (!second) {
-      await showEvent(allSettings, first)
+      await showEvent(allSettings, first, process.cwd())
     } else {
       await showScript(allSettings, second)
     }

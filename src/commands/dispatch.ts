@@ -10,7 +10,7 @@ import {
   isWriteTool,
 } from "../../hooks/hook-utils.ts"
 import { evalCondition, type HookGroup, manifest } from "../manifest.ts"
-import { getEffectiveSwizSettings, readSwizSettings } from "../settings.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 
 // ─── Replay trace types ──────────────────────────────────────────────────────
@@ -117,15 +117,35 @@ export function filterPrMergeModeHooks(groups: HookGroup[], prMergeMode: boolean
     .filter((group) => group.hooks.length > 0)
 }
 
+export function filterDisabledHooks(groups: HookGroup[], disabledHooks: Set<string>): HookGroup[] {
+  if (disabledHooks.size === 0) return groups
+
+  return groups
+    .map((group) => {
+      const hooks = group.hooks.filter((hook) => !disabledHooks.has(hook.file))
+      return hooks.length === group.hooks.length ? group : { ...group, hooks }
+    })
+    .filter((group) => group.hooks.length > 0)
+}
+
 async function applyHookSettingFilters(
   groups: HookGroup[],
   payload: Record<string, unknown>
 ): Promise<HookGroup[]> {
   const settings = await readSwizSettings()
+  const cwd = (payload.cwd as string | undefined) ?? ""
+  const projectSettings = cwd ? await readProjectSettings(cwd) : null
   const rawSessionId = payload.session_id ?? payload.sessionId
   const sessionId = typeof rawSessionId === "string" ? rawSessionId : null
   const effective = getEffectiveSwizSettings(settings, sessionId)
-  return filterPrMergeModeHooks(groups, effective.prMergeMode)
+
+  const disabledSet = new Set([
+    ...(settings.disabledHooks ?? []),
+    ...(projectSettings?.disabledHooks ?? []),
+  ])
+
+  const filtered = filterPrMergeModeHooks(groups, effective.prMergeMode)
+  return filterDisabledHooks(filtered, disabledSet)
 }
 
 // ─── Cross-agent matcher ─────────────────────────────────────────────────────
