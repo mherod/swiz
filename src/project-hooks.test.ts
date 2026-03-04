@@ -79,6 +79,65 @@ describe("ProjectSwizSettings hooks normalization", () => {
     expect(settings?.hooks).toBeUndefined()
   })
 
+  test("preserves cooldownSeconds on hooks", async () => {
+    const dir = await createTempDir()
+    await mkdir(join(dir, ".swiz"), { recursive: true })
+    await Bun.write(
+      join(dir, ".swiz", "config.json"),
+      JSON.stringify({
+        hooks: [
+          {
+            event: "stop",
+            hooks: [{ file: "rate-limited.ts", cooldownSeconds: 60 }],
+          },
+        ],
+      })
+    )
+
+    const settings = await readProjectSettings(dir)
+    expect(settings!.hooks![0]!.hooks[0]!.cooldownSeconds).toBe(60)
+  })
+
+  test("preserves stacks on hooks", async () => {
+    const dir = await createTempDir()
+    await mkdir(join(dir, ".swiz"), { recursive: true })
+    await Bun.write(
+      join(dir, ".swiz", "config.json"),
+      JSON.stringify({
+        hooks: [
+          {
+            event: "preToolUse",
+            hooks: [{ file: "node-only.ts", stacks: ["bun", "node"] }],
+          },
+        ],
+      })
+    )
+
+    const settings = await readProjectSettings(dir)
+    expect(settings!.hooks![0]!.hooks[0]!.stacks).toEqual(["bun", "node"])
+  })
+
+  test("ignores stacks with non-string values", async () => {
+    const dir = await createTempDir()
+    await mkdir(join(dir, ".swiz"), { recursive: true })
+    await Bun.write(
+      join(dir, ".swiz", "config.json"),
+      JSON.stringify({
+        hooks: [
+          {
+            event: "preToolUse",
+            hooks: [{ file: "bad-stacks.ts", stacks: [1, 2] }],
+          },
+        ],
+      })
+    )
+
+    const settings = await readProjectSettings(dir)
+    // Hook is preserved but stacks is dropped (invalid type)
+    expect(settings!.hooks![0]!.hooks[0]!.file).toBe("bad-stacks.ts")
+    expect(settings!.hooks![0]!.hooks[0]!.stacks).toBeUndefined()
+  })
+
   test("preserves matcher field on hook groups", async () => {
     const dir = await createTempDir()
     await mkdir(join(dir, ".swiz"), { recursive: true })

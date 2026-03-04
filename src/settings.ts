@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { dirname, isAbsolute, join } from "node:path"
-import type { HookGroup } from "./manifest.ts"
+import type { HookDef, HookGroup } from "./manifest.ts"
 
 export type PolicyProfile = "solo" | "team" | "strict"
 export type AmbitionMode = "standard" | "aggressive"
@@ -337,12 +337,17 @@ function normalizeProjectHooks(raw: unknown[]): HookGroup[] {
           !Array.isArray(h) &&
           typeof (h as Record<string, unknown>).file === "string"
       )
-      .map((h) => ({
-        file: h.file as string,
-        ...(typeof h.timeout === "number" ? { timeout: h.timeout } : {}),
-        ...(typeof h.async === "boolean" ? { async: h.async } : {}),
-        ...(typeof h.condition === "string" ? { condition: h.condition } : {}),
-      }))
+      .map((h): HookDef => {
+        const def: HookDef = { file: h.file as string }
+        if (typeof h.timeout === "number") def.timeout = h.timeout
+        if (typeof h.async === "boolean") def.async = h.async
+        if (typeof h.condition === "string") def.condition = h.condition
+        if (typeof h.cooldownSeconds === "number") def.cooldownSeconds = h.cooldownSeconds
+        if (Array.isArray(h.stacks) && h.stacks.every((s: unknown) => typeof s === "string")) {
+          def.stacks = h.stacks as string[]
+        }
+        return def
+      })
     if (hooks.length > 0) {
       groups.push({
         event: g.event,
