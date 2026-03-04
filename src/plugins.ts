@@ -211,7 +211,10 @@ export function pluginResultsToJson(results: PluginResult[]): {
   hookCount: number
   errorCode?: string
   hint?: string
-  error?: PluginErrorDetail
+  /** Flat error message string (backward-compatible). */
+  error?: string
+  /** Structured error detail with name/code/cause/stack/truncated. */
+  errorDetail?: PluginErrorDetail
 }[] {
   return results.map((r) => ({
     name: r.name,
@@ -221,7 +224,8 @@ export function pluginResultsToJson(results: PluginResult[]): {
       ? {
           errorCode: r.errorCode,
           hint: pluginErrorHint(r.errorCode),
-          error: structuredError(r.error),
+          error: normalizeError(r.error),
+          errorDetail: structuredError(r.error),
         }
       : {}),
   }))
