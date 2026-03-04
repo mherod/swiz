@@ -2,9 +2,8 @@
 //
 // This combines push-wait + ci-wait into a single command so the agent never has to
 // manually sequence: push → capture SHA → gh run list → gh run watch → gh run view.
-// The pretooluse-push-phase-task-guard hook recognises `swiz push-ci` in the
-// transcript as a CI-verified signal, so TaskUpdate/TaskList unblock automatically
-// once this command returns successfully.
+// It emits the same CI verification evidence the manual sequence would produce,
+// so transcript-based workflow checks can treat the result as verified.
 
 import type { Command } from "../types.ts"
 import { waitForCiCompletion } from "./ci-wait.ts"

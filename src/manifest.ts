@@ -142,11 +142,6 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "preToolUse",
-    matcher: "TaskUpdate|TaskList",
-    hooks: [{ file: "pretooluse-push-phase-task-guard.ts", timeout: 5 }],
-  },
-  {
-    event: "preToolUse",
     matcher: "Edit|Write|NotebookEdit|Bash",
     hooks: [{ file: "pretooluse-update-memory-enforcement.ts", timeout: 5, cooldownSeconds: 300 }],
   },
