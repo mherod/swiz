@@ -318,7 +318,7 @@ function logReplayExecFailed(
 export async function tryReplayPendingMutations(cwd?: string): Promise<void> {
   try {
     const dir = cwd ?? process.cwd()
-    const { getRepoSlug, isGitRepo, hasGhCli } = await import("../hooks/hook-utils.ts")
+    const { getRepoSlug, isGitRepo, hasGhCli } = await import("./git-helpers.ts")
     if (!hasGhCli()) return
     if (!(await isGitRepo(dir))) return
     const slug = await getRepoSlug(dir)
