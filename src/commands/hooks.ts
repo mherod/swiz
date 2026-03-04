@@ -2,7 +2,7 @@ import { join } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { manifest } from "../manifest.ts"
 import { loadAllPlugins } from "../plugins.ts"
-import { readProjectSettings, readSwizSettings } from "../settings.ts"
+import { readProjectSettings, readSwizSettings, resolveProjectHooks } from "../settings.ts"
 import type { Command } from "../types.ts"
 
 async function buildDisabledSet(cwd: string): Promise<Set<string>> {
@@ -250,13 +250,32 @@ async function showSources() {
     }
   }
 
-  const allEvents = new Set([...builtinByEvent.keys(), ...pluginByEvent.keys()])
+  // Project-local hooks
+  const GREEN_H = "\x1b[32m"
+  const localByEvent = new Map<string, { file: string }[]>()
+  if (projectSettings?.hooks?.length) {
+    const { resolved } = resolveProjectHooks(projectSettings.hooks, cwd)
+    for (const group of resolved) {
+      const list = localByEvent.get(group.event) ?? []
+      for (const hook of group.hooks) {
+        list.push({ file: hook.file })
+      }
+      localByEvent.set(group.event, list)
+    }
+  }
+
+  const allEvents = new Set([
+    ...builtinByEvent.keys(),
+    ...pluginByEvent.keys(),
+    ...localByEvent.keys(),
+  ])
 
   console.log("\n  Hook sources:\n")
   for (const event of [...allEvents].sort()) {
     const builtins = builtinByEvent.get(event) ?? []
     const plugins = pluginByEvent.get(event) ?? []
-    console.log(`  ${event} (${builtins.length + plugins.length})`)
+    const locals = localByEvent.get(event) ?? []
+    console.log(`  ${event} (${builtins.length + plugins.length + locals.length})`)
     for (const h of builtins) {
       const name = h.file.split("/").pop() ?? h.file
       console.log(`    ${DIM}built-in${RST}  ${name}`)
@@ -264,6 +283,10 @@ async function showSources() {
     for (const h of plugins) {
       const name = h.file.split("/").pop() ?? h.file
       console.log(`    ${CYAN_H}${h.plugin}${RST}  ${name}`)
+    }
+    for (const h of locals) {
+      const name = h.file.split("/").pop() ?? h.file
+      console.log(`    ${GREEN_H}project${RST}   ${name}`)
     }
   }
   console.log()

@@ -12,7 +12,12 @@ import {
 } from "../../hooks/hook-utils.ts"
 import { evalCondition, type HookGroup, manifest } from "../manifest.ts"
 import { loadAllPlugins } from "../plugins.ts"
-import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../settings.ts"
+import {
+  getEffectiveSwizSettings,
+  readProjectSettings,
+  readSwizSettings,
+  resolveProjectHooks,
+} from "../settings.ts"
 import type { Command } from "../types.ts"
 
 // ─── Replay trace types ──────────────────────────────────────────────────────
@@ -771,16 +776,24 @@ export const dispatchCommand: Command = {
         log(`   ⚠ missing tool_name`)
     }
 
-    // ── Load plugin hooks and merge with built-in manifest ───────────
+    // ── Load plugin + project-local hooks and merge with built-in manifest ──
     const cwd = (payload.cwd as string) ?? process.cwd()
-    let combinedManifest = manifest
+    let combinedManifest: HookGroup[] = [...manifest]
     const projectSettings = await readProjectSettings(cwd)
     if (projectSettings?.plugins?.length) {
       const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
       const pluginHooks = pluginResults.flatMap((r) => r.hooks)
       if (pluginHooks.length > 0) {
-        combinedManifest = [...manifest, ...pluginHooks]
+        combinedManifest = [...combinedManifest, ...pluginHooks]
         log(`   loaded ${pluginHooks.length} plugin hook group(s)`)
+      }
+    }
+    if (projectSettings?.hooks?.length) {
+      const { resolved, warnings } = resolveProjectHooks(projectSettings.hooks, cwd)
+      for (const w of warnings) log(`   ⚠ ${w}`)
+      if (resolved.length > 0) {
+        combinedManifest = [...combinedManifest, ...resolved]
+        log(`   loaded ${resolved.length} project-local hook group(s)`)
       }
     }
 

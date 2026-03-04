@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { dirname, isAbsolute, join } from "node:path"
+import type { HookGroup } from "./manifest.ts"
 
 export type PolicyProfile = "solo" | "team" | "strict"
 export type AmbitionMode = "standard" | "aggressive"
@@ -45,6 +47,8 @@ export interface ProjectSwizSettings {
   disabledHooks?: string[]
   /** External hook plugin bundles — package names or local paths */
   plugins?: string[]
+  /** Project-local hook groups — merged after built-in and plugin hooks */
+  hooks?: HookGroup[]
 }
 
 /** Resolved policy thresholds after merging global + project config */
@@ -285,7 +289,74 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   if (Array.isArray(obj.plugins) && obj.plugins.every((p: unknown) => typeof p === "string")) {
     result.plugins = obj.plugins as string[]
   }
+  if (Array.isArray(obj.hooks)) {
+    const validated = normalizeProjectHooks(obj.hooks as unknown[])
+    if (validated.length > 0) result.hooks = validated
+  }
   return result
+}
+
+/** Validate and normalize project-local hook groups from config JSON */
+function normalizeProjectHooks(raw: unknown[]): HookGroup[] {
+  const groups: HookGroup[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue
+    const g = item as Record<string, unknown>
+    if (typeof g.event !== "string") continue
+    if (!Array.isArray(g.hooks)) continue
+    const hooks = (g.hooks as unknown[])
+      .filter(
+        (h): h is Record<string, unknown> =>
+          !!h &&
+          typeof h === "object" &&
+          !Array.isArray(h) &&
+          typeof (h as Record<string, unknown>).file === "string"
+      )
+      .map((h) => ({
+        file: h.file as string,
+        ...(typeof h.timeout === "number" ? { timeout: h.timeout } : {}),
+        ...(typeof h.async === "boolean" ? { async: h.async } : {}),
+        ...(typeof h.condition === "string" ? { condition: h.condition } : {}),
+      }))
+    if (hooks.length > 0) {
+      groups.push({
+        event: g.event,
+        ...(typeof g.matcher === "string" ? { matcher: g.matcher } : {}),
+        hooks,
+      })
+    }
+  }
+  return groups
+}
+
+/**
+ * Resolve project-local hook file paths relative to the project root.
+ * Returns the resolved groups and any validation warnings for missing files.
+ */
+export function resolveProjectHooks(
+  hooks: HookGroup[],
+  projectRoot: string
+): { resolved: HookGroup[]; warnings: string[] } {
+  const warnings: string[] = []
+  const resolved = hooks
+    .map((g) => ({
+      ...g,
+      hooks: g.hooks
+        .filter((h) => {
+          const absPath = isAbsolute(h.file) ? h.file : join(projectRoot, h.file)
+          if (!existsSync(absPath)) {
+            warnings.push(`Project hook file not found: ${h.file} (resolved to ${absPath})`)
+            return false
+          }
+          return true
+        })
+        .map((h) => ({
+          ...h,
+          file: isAbsolute(h.file) ? h.file : join(projectRoot, h.file),
+        })),
+    }))
+    .filter((g) => g.hooks.length > 0)
+  return { resolved, warnings }
 }
 
 export async function readProjectState(cwd: string): Promise<ProjectState | null> {
