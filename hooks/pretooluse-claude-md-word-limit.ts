@@ -14,8 +14,10 @@ interface ToolInput {
 }
 
 async function countWords(text: string): Promise<number> {
-  // Remove YAML frontmatter (--- ... --- at file start)
-  let processed = text.replace(/^---\n[\s\S]*?\n---\n/, "")
+  // Remove YAML frontmatter with BOM and line-ending variants
+  // Matches: [optional BOM] + 3+ dashes + [line ending] + [content] + [line ending] + 3+ dashes + [line ending]
+  // Handles CRLF (\r\n), CR (\r), and LF (\n) line endings, plus UTF-8 BOM
+  let processed = text.replace(/^\uFEFF?---+[\r\n]+[\s\S]*?[\r\n]+---+[\r\n]+/, "")
 
   // Strip fenced code blocks (```...```)
   processed = processed.replace(/```[\s\S]*?```/g, "")

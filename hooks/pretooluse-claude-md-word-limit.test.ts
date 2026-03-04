@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test"
 
 // Extracted from the hook for testing
 async function countWords(text: string): Promise<number> {
-  // Remove YAML frontmatter (--- ... --- at file start)
-  let processed = text.replace(/^---\n[\s\S]*?\n---\n/, "")
+  // Remove YAML frontmatter with BOM and line-ending variants
+  // Matches: [optional BOM] + 3+ dashes + [line ending] + [content] + [line ending] + 3+ dashes + [line ending]
+  // Handles CRLF (\r\n), CR (\r), and LF (\n) line endings, plus UTF-8 BOM
+  let processed = text.replace(/^\uFEFF?---+[\r\n]+[\s\S]*?[\r\n]+---+[\r\n]+/, "")
 
   // Strip fenced code blocks (```...```)
   processed = processed.replace(/```[\s\S]*?```/g, "")
@@ -318,6 +320,50 @@ Main content here.`
 Content after empty frontmatter`
       const count = await countWords(text)
       expect(count).toBe(4) // "Content", "after", "empty", "frontmatter"
+    })
+
+    test("handles UTF-8 BOM at file start", async () => {
+      const text = `\uFEFF---
+title: Example
+---
+
+This is the main content.`
+      const count = await countWords(text)
+      expect(count).toBe(5) // "This", "is", "the", "main", "content"
+    })
+
+    test("handles CRLF line endings in frontmatter", async () => {
+      const text = `---\r\ntitle: Example\r\ndescription: Test\r\n---\r\n\r\nThis is the main content.`
+      const count = await countWords(text)
+      expect(count).toBe(5) // "This", "is", "the", "main", "content"
+    })
+
+    test("handles CR line endings in frontmatter", async () => {
+      const text = `---\rtitle: Example\rdescription: Test\r---\r\rThis is the main content.`
+      const count = await countWords(text)
+      expect(count).toBe(5) // "This", "is", "the", "main", "content"
+    })
+
+    test("handles multiple dashes in frontmatter delimiter", async () => {
+      const text = `-----
+title: Example
+-----
+
+This is the main content.`
+      const count = await countWords(text)
+      expect(count).toBe(5) // "This", "is", "the", "main", "content"
+    })
+
+    test("handles BOM with CRLF line endings", async () => {
+      const text = `\uFEFF---\r\ntitle: Example\r\n---\r\n\r\nThis is the main content.`
+      const count = await countWords(text)
+      expect(count).toBe(5) // "This", "is", "the", "main", "content"
+    })
+
+    test("handles mixed line endings (LF/CRLF in same file)", async () => {
+      const text = `---\r\ntitle: Example\ndescription: Test\r\n---\n\nThis is the main content.`
+      const count = await countWords(text)
+      expect(count).toBe(5) // "This", "is", "the", "main", "content"
     })
   })
 
