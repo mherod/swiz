@@ -22,11 +22,11 @@ describe("createBootstrapTask", () => {
   test("creates task file with in_progress status", async () => {
     const sessionId = `test-session-${Date.now()}`
     const id = await createBootstrapTask(sessionId, tmpHome)
-    expect(id).toBe("1")
+    expect(id).toBe("test-1")
 
-    const taskPath = join(tmpHome, ".claude", "tasks", sessionId, "1.json")
+    const taskPath = join(tmpHome, ".claude", "tasks", sessionId, "test-1.json")
     const task = await Bun.file(taskPath).json()
-    expect(task.id).toBe("1")
+    expect(task.id).toBe("test-1")
     expect(task.status).toBe("in_progress")
     expect(task.subject).toContain("bootstrap")
   })
@@ -59,9 +59,9 @@ describe("createBootstrapTask", () => {
     )
 
     const id = await createBootstrapTask(sessionId, tmpHome)
-    expect(id).toBe("6")
+    expect(id).toBe("test-6")
 
-    const task = await Bun.file(join(tasksDir, "6.json")).json()
+    const task = await Bun.file(join(tasksDir, "test-6.json")).json()
     expect(task.status).toBe("in_progress")
   })
 
@@ -161,7 +161,7 @@ describe("pretooluse-require-tasks hook", () => {
       expect(reason?.permissionDecision).toBe("deny")
 
       // Verify the bootstrap task file was created
-      const taskPath = join(tmpHome, ".claude", "tasks", sessionId, "1.json")
+      const taskPath = join(tmpHome, ".claude", "tasks", sessionId, "test-1.json")
       const task = await Bun.file(taskPath).json()
       expect(task.status).toBe("in_progress")
       expect(task.subject).toContain("bootstrap")
