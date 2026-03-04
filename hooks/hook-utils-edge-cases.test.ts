@@ -21,6 +21,7 @@ import {
   isGitRepo,
   isNotebookTool,
   isShellTool,
+  isSwizCommand,
   isTaskCreateTool,
   isTaskTool,
   isTaskTrackingExemptShellCommand,
@@ -1046,17 +1047,31 @@ describe("CI_WAIT_RE", () => {
   })
 })
 
-// ─── isTaskTrackingExemptShellCommand — ci-wait ─────────────────────────────
+// ─── isTaskTrackingExemptShellCommand — swiz commands ───────────────────────
 
-describe("isTaskTrackingExemptShellCommand — ci-wait exemption", () => {
+describe("isTaskTrackingExemptShellCommand — swiz command exemption", () => {
   it("exempts 'swiz ci-wait abc123'", () => {
     expect(isTaskTrackingExemptShellCommand("swiz ci-wait abc123")).toBe(true)
   })
 
-  it("exempts 'bun run index.ts ci-wait SHA --timeout 300'", () => {
-    expect(isTaskTrackingExemptShellCommand("bun run index.ts ci-wait SHA --timeout 300")).toBe(
-      true
-    )
+  it("exempts 'swiz state set in-development'", () => {
+    expect(isTaskTrackingExemptShellCommand("swiz state set in-development")).toBe(true)
+  })
+
+  it("exempts 'swiz tasks complete-all'", () => {
+    expect(isTaskTrackingExemptShellCommand("swiz tasks complete-all")).toBe(true)
+  })
+
+  it("exempts 'swiz push-wait origin main'", () => {
+    expect(isTaskTrackingExemptShellCommand("swiz push-wait origin main")).toBe(true)
+  })
+
+  it("exempts 'swiz status'", () => {
+    expect(isTaskTrackingExemptShellCommand("swiz status")).toBe(true)
+  })
+
+  it("exempts 'swiz install'", () => {
+    expect(isTaskTrackingExemptShellCommand("swiz install")).toBe(true)
   })
 
   it("does not exempt 'git add .'", () => {
@@ -1065,5 +1080,43 @@ describe("isTaskTrackingExemptShellCommand — ci-wait exemption", () => {
 
   it("does not exempt 'bun test'", () => {
     expect(isTaskTrackingExemptShellCommand("bun test")).toBe(false)
+  })
+})
+
+// ─── isSwizCommand ──────────────────────────────────────────────────────────
+
+describe("isSwizCommand", () => {
+  const input = (cmd: string) => ({ cwd: "/tmp", tool_name: "Bash", tool_input: { command: cmd } })
+
+  it("matches 'swiz state set released'", () => {
+    expect(isSwizCommand(input("swiz state set released"))).toBe(true)
+  })
+
+  it("matches 'swiz tasks complete-all'", () => {
+    expect(isSwizCommand(input("swiz tasks complete-all"))).toBe(true)
+  })
+
+  it("matches swiz after && operator", () => {
+    expect(isSwizCommand(input("echo done && swiz status"))).toBe(true)
+  })
+
+  it("matches swiz after ; separator", () => {
+    expect(isSwizCommand(input("echo done; swiz install"))).toBe(true)
+  })
+
+  it("does not match 'git push origin main'", () => {
+    expect(isSwizCommand(input("git push origin main"))).toBe(false)
+  })
+
+  it("does not match 'bun test'", () => {
+    expect(isSwizCommand(input("bun test"))).toBe(false)
+  })
+
+  it("does not match empty command", () => {
+    expect(isSwizCommand(input(""))).toBe(false)
+  })
+
+  it("does not match when no tool_input", () => {
+    expect(isSwizCommand({ cwd: "/tmp", tool_name: "Bash" })).toBe(false)
   })
 })

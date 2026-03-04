@@ -2,7 +2,13 @@
 // PreToolUse hook: block disallowed tool categories based on current project state
 
 import { readProjectState } from "../src/settings.ts"
-import { denyPreToolUse, isCodeChangeTool, isShellTool, type ToolHookInput } from "./hook-utils.ts"
+import {
+  denyPreToolUse,
+  isCodeChangeTool,
+  isShellTool,
+  isSwizCommand,
+  type ToolHookInput,
+} from "./hook-utils.ts"
 
 /** Tool categories blocked in each state */
 const STATE_BLOCKED_CATEGORIES: Record<string, ((name: string) => boolean)[]> = {
@@ -13,6 +19,9 @@ async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as ToolHookInput
   const cwd = input.cwd ?? process.cwd()
   const toolName = input.tool_name ?? ""
+
+  // Swiz commands are always allowed — they have their own validation
+  if (isShellTool(toolName) && isSwizCommand(input)) return
 
   const state = await readProjectState(cwd)
   if (!state) return

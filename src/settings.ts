@@ -21,7 +21,7 @@ export const PROJECT_STATES: ProjectState[] = [
   "paused",
 ]
 
-export const TERMINAL_STATES: ProjectState[] = ["released"]
+export const TERMINAL_STATES: ProjectState[] = ["released", "paused"]
 
 export interface SessionSwizSettings {
   autoContinue: boolean

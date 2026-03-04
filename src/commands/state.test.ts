@@ -84,8 +84,10 @@ describe("STATE_TRANSITIONS", () => {
     expect(STATE_TRANSITIONS["awaiting-feedback"]).toContain("in-development")
   })
 
-  test("released is a terminal state with no outbound transitions", () => {
+  test("released and paused are terminal states", () => {
     expect(TERMINAL_STATES).toContain("released")
+    expect(TERMINAL_STATES).toContain("paused")
+    expect(TERMINAL_STATES).toHaveLength(2)
   })
 
   test("paused can return to in-development", () => {

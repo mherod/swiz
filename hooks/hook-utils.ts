@@ -183,6 +183,19 @@ export function isCodeChangeTool(name: string): boolean {
   return EDIT_TOOLS.has(name) || WRITE_TOOLS.has(name) || NOTEBOOK_TOOLS.has(name)
 }
 
+/**
+ * Returns true if the Bash command is a `swiz` CLI invocation.
+ * Swiz commands are globally exempt from PreToolUse blocking because the CLI
+ * performs its own validation — blocking the project's own entry point creates
+ * unrecoverable deadlocks (e.g. can't run `swiz state set` to escape a state
+ * that blocks Bash).
+ */
+const SWIZ_CMD_RE = /(?:^|\s|&&|\|\||;)swiz(?:\s|$)/
+export function isSwizCommand(input: ToolHookInput): boolean {
+  const cmd = String(input.tool_input?.command ?? "")
+  return SWIZ_CMD_RE.test(cmd)
+}
+
 // ─── Placeholder subject detection ──────────────────────────────────────────
 // Shared by task-subject-validation (rejects placeholders for new tasks) and
 // tasks-list verifyTaskMatch (exempts placeholders from subject verification).
@@ -1172,8 +1185,7 @@ export function isTaskTrackingExemptShellCommand(command: string): boolean {
     READ_CMD_RE.test(command) ||
     GIT_SYNC_RE.test(command) ||
     GH_CMD_RE.test(command) ||
-    SWIZ_ISSUE_RE.test(command) ||
-    CI_WAIT_RE.test(command)
+    SWIZ_CMD_RE.test(command)
   )
 }
 
