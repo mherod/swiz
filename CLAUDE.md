@@ -265,6 +265,8 @@ Hook scripts (`hooks/*.ts`) are the exception — their `process.exit(0)` calls 
 
 **DON'T** use `console.log` in CI scripts (`scripts/*.ts`) or hook scripts (`hooks/*.ts`). The `stop-debug-statements` hook flags `console.log` as debug output. Use `console.error` for status/progress messages (stderr) — only use `console.log` when the script produces structured data on stdout that another process consumes.
 
+**DO** gate diagnostic stderr behind `SWIZ_DEBUG` in library modules (`src/*.ts`, `src/commands/*.ts`). Use `const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {}` at module scope, then call `debugLog(...)` instead of `console.error(...)` for informational messages (replay status, cross-session resolution notices, unknown condition warnings). These messages clutter pre-push test output — `bun test` runs the full suite and every `console.error` in library code appears as red stderr. Reserve direct `console.error` for user-facing CLI output and hard failures only. See `src/issue-store.ts`, `src/manifest.ts`, and `src/commands/tasks.ts` for the established pattern.
+
 ## Conventions
 
 - ANSI escape codes for terminal output — no chalk or color libraries
