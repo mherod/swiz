@@ -14,7 +14,7 @@ import {
 import { isFileEditTool, skillAdvice, type ToolHookInput } from "./hook-utils.ts"
 
 /** Check whether the given path is a CLAUDE.md or a memory .md file. */
-function isMemoryFile(filePath: string): boolean {
+export function isMemoryFile(filePath: string): boolean {
   if (/\/CLAUDE\.md$/.test(filePath)) return true
   if (/\/MEMORY\.md$/.test(filePath)) return true
   // Memory files under .claude/projects/*/memory/*.md or .claude/memory/*.md
@@ -22,14 +22,14 @@ function isMemoryFile(filePath: string): boolean {
   return false
 }
 
-function countStats(content: string): { lines: number; words: number } {
+export function countStats(content: string): { lines: number; words: number } {
   const lines = content.split("\n").length
   const words = content.split(/\s+/).filter(Boolean).length
   return { lines, words }
 }
 
 /** Resolve thresholds: project config > global config > defaults. */
-async function resolveThresholds(
+export async function resolveThresholds(
   cwd: string
 ): Promise<{ lineThreshold: number; wordThreshold: number }> {
   const globalSettings = await readSwizSettings()

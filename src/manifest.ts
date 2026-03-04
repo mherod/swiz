@@ -116,6 +116,7 @@ export const manifest: HookGroup[] = [
       { file: "stop-session-state.ts", timeout: 5 },
       { file: "stop-completion-auditor.ts", timeout: 10 },
       { file: "stop-personal-repo-issues.ts", timeout: 10, cooldownSeconds: 300 },
+      { file: "stop-memory-size.ts", timeout: 10 },
       { file: "stop-auto-continue.ts", timeout: 120 },
       { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
     ],

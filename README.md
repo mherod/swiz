@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**64 hooks. 6 event types. Every agent. Zero compromises.**
+**65 hooks. 6 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -82,9 +82,9 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-49 hook scripts across 6 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+50 hook scripts across 6 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
-### Stop (18)
+### Stop (19)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -106,6 +106,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-session-state.ts` | Warns when the session ends while the project is in a non-terminal state (not `released`). Prompts the agent to transition state or acknowledge the unfinished lifecycle stage. |
 | `stop-completion-auditor.ts` | Reads task files and verifies that every task has actual completion evidence before the session ends. Agents can't just mark things done — they have to prove it. |
 | `stop-personal-repo-issues.ts` | Checks for actionable open GitHub issues, skipping those labelled `blocked`, `upstream`, `wontfix`, `duplicate`, `on-hold`, or `waiting`. Surfaces real work that's been left on the table. |
+| `stop-memory-size.ts` | Scans `CLAUDE.md` and `MEMORY.md` files against the configured line and word thresholds. Blocks stop with file-level details and `/compact-memory` guidance when any file is over threshold. |
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
