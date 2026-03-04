@@ -182,6 +182,7 @@ const RAMP3_ISSUES = [
     "frontend",
     "area:stats",
     "ready",
+    "priority:high",
   ]),
   makeIssue(756, "Remove entity_type filtering — all entities are brands", [
     "tech-debt",
@@ -189,12 +190,14 @@ const RAMP3_ISSUES = [
     "frontend",
   ]),
   makeIssue(569, "Split monolithic functions/src/index.ts into modules", [
+    "maintenance",
     "tech-debt",
     "backend",
     "priority:high",
     "ready",
   ]),
   makeIssue(492, "Move business logic from route to handler", [
+    "maintenance",
     "tech-debt",
     "backend",
     "priority:medium",
@@ -380,9 +383,9 @@ describe("E2E stop-personal-repo-issues: top-5 truncation", () => {
     const result = await runHook(dir, { user: "testuser", issues: RAMP3_ISSUES })
     expect(result.blocked).toBe(true)
     const r = result.reason!
-    // 5 issues lack readiness labels → refinement section
+    // 5 issues are missing one or more required refinement categories
     expect(r).toContain("need refinement")
-    expect(r).toContain("[no readiness label]")
+    expect(r).toContain("[missing labels:")
     // 3 issues have `ready` → actionable section
     expect(r).toContain("3 open issue(s)")
     // No truncation — 5 refinement + 3 actionable both fit within MAX_SHOWN_ISSUES

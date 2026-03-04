@@ -330,7 +330,7 @@ async function checkRefinementNeeds(cwd: string): Promise<string> {
     skillAdvice(
       "refine-issue",
       "Use /refine-issue to refine and label them before working on implementation.",
-      "Refine issues by adding readiness labels (ready, triaged, confirmed) before implementing."
+      "Refine issues by adding type, readiness, and priority labels before implementing."
     )
   )
 }
@@ -394,7 +394,7 @@ function buildPrompt(
     skillAdvice(
       "refine-issue",
       `use the /refine-issue skill to refine and label them before implementing. `,
-      `refine and label them (add readiness labels like ready, triaged, confirmed) before implementing. `
+      `refine and label them (add type, readiness, and priority labels) before implementing. `
     ) +
     `(5) Otherwise, find the most impactful missing functionality, incomplete API surface, ` +
     `or unhandled real-world case in the code changed this session — and implement it. ` +

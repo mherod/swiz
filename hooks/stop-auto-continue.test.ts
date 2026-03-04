@@ -1332,7 +1332,7 @@ describe("stop-auto-continue", () => {
     })
 
     const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("readiness labels")
+    expect(capturedArgs).toContain("type, readiness, and priority labels")
     expect(capturedArgs).not.toContain("/refine-issue skill")
   })
 
@@ -1429,12 +1429,12 @@ describe("stop-auto-continue", () => {
     await initFakeGitRepo(repoDir, "https://github.com/testuser/testrepo.git")
 
     const binDir = await createTempDir()
-    // Issue #50 has "ready" label → needsRefinement returns false
+    // Issue #50 has type + readiness + priority labels → needsRefinement returns false
     const issues = JSON.stringify([
       {
         number: 50,
         title: "Ready issue",
-        labels: [{ name: "ready" }],
+        labels: [{ name: "bug" }, { name: "ready" }, { name: "priority-high" }],
         author: { login: "testuser" },
         assignees: [],
       },

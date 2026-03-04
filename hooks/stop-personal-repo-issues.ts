@@ -90,8 +90,24 @@ const LABEL_SCORE: Record<string, number> = {
 }
 
 /**
- * Labels that signal an issue is refined and ready for implementation.
- * An issue lacking ALL of these (and not in SKIP_LABELS) needs refinement.
+ * Labels that satisfy the "type" category for refined issues.
+ * Keys are normalised at startup via normaliseLabel().
+ */
+const TYPE_LABELS = new Set([
+  "bug",
+  "enhancement",
+  "documentation",
+  "chore",
+  "feature",
+  "question",
+  "maintenance",
+  "tech-debt",
+  "help wanted",
+  "good first issue",
+])
+
+/**
+ * Labels that satisfy the "readiness/status" category for refined issues.
  * Keys are normalised at startup via normaliseLabel().
  */
 const READINESS_LABELS = new Set([
@@ -102,6 +118,22 @@ const READINESS_LABELS = new Set([
   "confirmed",
   "accepted",
   "spec-approved",
+  "backlog",
+])
+
+/**
+ * Labels that satisfy the "priority" category for refined issues.
+ * Keys are normalised at startup via normaliseLabel().
+ */
+const PRIORITY_LABELS = new Set([
+  "priority:critical",
+  "priority:high",
+  "priority:medium",
+  "priority:low",
+  "p0",
+  "p1",
+  "p2",
+  "p3",
 ])
 
 /** Label that explicitly marks an issue as needing refinement. */
@@ -209,7 +241,9 @@ const SKIP_NORM = new Set([...SKIP_LABELS].map(normaliseLabel))
 const SCORE_NORM: Record<string, number> = Object.fromEntries(
   Object.entries(LABEL_SCORE).map(([k, v]) => [normaliseLabel(k), v])
 )
+const TYPE_NORM = new Set([...TYPE_LABELS].map(normaliseLabel))
 const READINESS_NORM = new Set([...READINESS_LABELS].map(normaliseLabel))
+const PRIORITY_NORM = new Set([...PRIORITY_LABELS].map(normaliseLabel))
 const NEEDS_REFINEMENT_NORM = normaliseLabel(NEEDS_REFINEMENT_LABEL)
 
 function scoreIssue(issue: Issue): number {
@@ -217,17 +251,32 @@ function scoreIssue(issue: Issue): number {
 }
 
 /**
+ * Return missing label categories required for issue refinement.
+ * Every refined issue must include at least one label for:
+ *   - type (bug/feature/etc.)
+ *   - readiness/status (ready/triaged/etc.)
+ *   - priority (priority-high, p0, etc.)
+ */
+export function missingRefinementCategories(issue: Issue): string[] {
+  const normLabels = issue.labels.map((l) => normaliseLabel(l.name))
+  const missing: string[] = []
+  if (!normLabels.some((nl) => TYPE_NORM.has(nl))) missing.push("type")
+  if (!normLabels.some((nl) => READINESS_NORM.has(nl))) missing.push("readiness")
+  if (!normLabels.some((nl) => PRIORITY_NORM.has(nl))) missing.push("priority")
+  return missing
+}
+
+/**
  * Check if an issue needs refinement before it's ready for implementation.
  * An issue needs refinement if:
  *   1. It has a `needs-refinement` label, OR
- *   2. It lacks ALL readiness labels (ready, triaged, confirmed, etc.)
+ *   2. It is missing one or more required label categories
+ *      (type + readiness/status + priority)
  */
 export function needsRefinement(issue: Issue): boolean {
   const normLabels = issue.labels.map((l) => normaliseLabel(l.name))
-  // Explicit refinement label
   if (normLabels.some((nl) => nl === NEEDS_REFINEMENT_NORM)) return true
-  // No readiness signal at all
-  return !normLabels.some((nl) => READINESS_NORM.has(nl))
+  return missingRefinementCategories(issue).length > 0
 }
 
 export interface Issue {
@@ -398,7 +447,10 @@ async function main(): Promise<void> {
         const hasExplicitLabel = issue.labels.some(
           (l) => normaliseLabel(l.name) === NEEDS_REFINEMENT_NORM
         )
-        const tag = hasExplicitLabel ? "[needs-refinement]" : "[no readiness label]"
+        const missing = missingRefinementCategories(issue)
+        const tag = hasExplicitLabel
+          ? "[needs-refinement]"
+          : `[missing labels: ${missing.join(", ")}]`
         reasonLines.push(`  #${issue.number} ${issue.title} ${tag}`)
       }
       if (hiddenRefinement > 0) {
@@ -408,7 +460,7 @@ async function main(): Promise<void> {
         skillAdvice(
           "refine-issue",
           "Use the /refine-issue skill to refine and label issues:\n  /refine-issue — Refine the next issue needing attention",
-          "Refine issues before implementation:\n  gh issue view <number>\n  gh issue edit <number> --add-label ready"
+          "Refine issues before implementation:\n  gh issue view <number>\n  gh issue edit <number> --add-label bug --add-label ready --add-label priority-high"
         )
       )
     }

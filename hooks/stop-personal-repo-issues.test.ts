@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { extractOwnerFromUrl } from "./hook-utils.ts"
-import { type Issue as HookIssue, needsRefinement } from "./stop-personal-repo-issues.ts"
+import {
+  type Issue as HookIssue,
+  missingRefinementCategories,
+  needsRefinement,
+} from "./stop-personal-repo-issues.ts"
 
 const SKIP_LABELS = new Set([
   "blocked",
@@ -1057,8 +1061,16 @@ describe("needsRefinement — missing readiness labels", () => {
     expect(needsRefinement(issue(["enhancement"]))).toBe(true)
   })
 
-  test("issue with priority:high but no readiness label needs refinement", () => {
-    expect(needsRefinement(issue(["priority:high"]))).toBe(true)
+  test("issue with bug + readiness but no priority needs refinement", () => {
+    expect(needsRefinement(issue(["bug", "ready"]))).toBe(true)
+  })
+
+  test("issue with readiness + priority but no type needs refinement", () => {
+    expect(needsRefinement(issue(["ready", "priority:high"]))).toBe(true)
+  })
+
+  test("issue with type + priority but no readiness needs refinement", () => {
+    expect(needsRefinement(issue(["bug", "priority:high"]))).toBe(true)
   })
 
   test("issue with unknown labels needs refinement", () => {
@@ -1071,44 +1083,42 @@ describe("needsRefinement — issues that are ready (should NOT need refinement)
     return { number: 1, title: "Test", labels: labels.map((name) => ({ name })) }
   }
 
-  test("issue with ready label does not need refinement", () => {
-    expect(needsRefinement(issue(["ready"]))).toBe(false)
+  test("bug + ready + priority-high does not need refinement", () => {
+    expect(needsRefinement(issue(["bug", "ready", "priority-high"]))).toBe(false)
   })
 
-  test("issue with ready-for-dev label does not need refinement", () => {
-    expect(needsRefinement(issue(["ready-for-dev"]))).toBe(false)
+  test("feature + ready-for-dev + p1 does not need refinement", () => {
+    expect(needsRefinement(issue(["feature", "ready-for-dev", "p1"]))).toBe(false)
   })
 
-  test("issue with ready-for-development label does not need refinement", () => {
-    expect(needsRefinement(issue(["ready-for-development"]))).toBe(false)
+  test("maintenance + confirmed + priority/medium does not need refinement", () => {
+    expect(needsRefinement(issue(["maintenance", "confirmed", "priority/medium"]))).toBe(false)
   })
 
-  test("issue with triaged label does not need refinement", () => {
-    expect(needsRefinement(issue(["triaged"]))).toBe(false)
+  test("documentation + backlog + priority-low does not need refinement", () => {
+    expect(needsRefinement(issue(["documentation", "backlog", "priority-low"]))).toBe(false)
   })
 
-  test("issue with confirmed label does not need refinement", () => {
-    expect(needsRefinement(issue(["confirmed"]))).toBe(false)
+  test("case-insensitive: BUG + Ready + HIGH-PRIORITY is recognised", () => {
+    expect(needsRefinement(issue(["BUG", "Ready", "HIGH-PRIORITY"]))).toBe(false)
+  })
+})
+
+describe("missingRefinementCategories", () => {
+  function issue(labels: string[]): HookIssue {
+    return { number: 1, title: "Test", labels: labels.map((name) => ({ name })) }
+  }
+
+  test("returns all categories when labels are missing", () => {
+    expect(missingRefinementCategories(issue([]))).toEqual(["type", "readiness", "priority"])
   })
 
-  test("issue with accepted label does not need refinement", () => {
-    expect(needsRefinement(issue(["accepted"]))).toBe(false)
+  test("returns only readiness+priority when type exists", () => {
+    expect(missingRefinementCategories(issue(["bug"]))).toEqual(["readiness", "priority"])
   })
 
-  test("issue with spec-approved label does not need refinement", () => {
-    expect(needsRefinement(issue(["spec-approved"]))).toBe(false)
-  })
-
-  test("case-insensitive: Ready is recognised", () => {
-    expect(needsRefinement(issue(["Ready"]))).toBe(false)
-  })
-
-  test("separator variant: ready/for/dev is recognised", () => {
-    expect(needsRefinement(issue(["ready/for/dev"]))).toBe(false)
-  })
-
-  test("ready + bug: readiness signal present, does not need refinement", () => {
-    expect(needsRefinement(issue(["ready", "bug"]))).toBe(false)
+  test("returns empty array for fully-labelled issue", () => {
+    expect(missingRefinementCategories(issue(["bug", "ready", "priority:high"]))).toEqual([])
   })
 })
 
