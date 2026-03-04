@@ -118,25 +118,73 @@ function resolveHookPaths(groups: HookGroup[], pluginDir: string): HookGroup[] {
   }))
 }
 
+/** Truncate a string and flag if it was shortened. */
+function truncate(value: string, maxLen: number): { text: string; truncated: boolean } {
+  if (value.length <= maxLen) return { text: value, truncated: false }
+  return { text: value.slice(0, maxLen), truncated: true }
+}
+
 /**
  * Coerce an unknown thrown value into a safe, bounded string.
- * Handles non-Error throws, objects with circular refs, and
- * excessively long stack traces.
+ * Used for the flat `error` field on PluginResult (stderr output).
  */
 function normalizeError(value: unknown, maxLen = 1024): string {
-  if (value === null || value === undefined) return "unknown error"
+  const s = structuredError(value, maxLen)
+  return s.truncated ? `${s.message}…` : s.message
+}
+
+/** Structured error detail for JSON serialization. */
+export interface PluginErrorDetail {
+  name?: string
+  message: string
+  code?: string
+  cause?: string
+  stack?: string
+  truncated: boolean
+}
+
+/**
+ * Extract structured error fields from an unknown thrown value.
+ * Handles Error instances, plain strings, objects with circular refs,
+ * and applies a length bound to message and stack.
+ */
+function structuredError(value: unknown, maxLen = 1024): PluginErrorDetail {
+  if (value === null || value === undefined) {
+    return { message: "unknown error", truncated: false }
+  }
+
   if (value instanceof Error) {
-    const msg = value.stack ?? value.message
-    return msg.length > maxLen ? `${msg.slice(0, maxLen)}…` : msg
+    const msg = truncate(value.message, maxLen)
+    const stk = value.stack ? truncate(value.stack, maxLen) : undefined
+    const causeStr = value.cause != null ? safeStringify(value.cause, maxLen) : undefined
+
+    return {
+      name: value.name !== "Error" ? value.name : undefined,
+      message: msg.text,
+      ...("code" in value && (value as { code?: unknown }).code != null
+        ? { code: String((value as { code?: unknown }).code) }
+        : {}),
+      ...(causeStr != null ? { cause: causeStr.text } : {}),
+      ...(stk != null ? { stack: stk.text } : {}),
+      truncated: msg.truncated || (stk?.truncated ?? false) || (causeStr?.truncated ?? false),
+    }
   }
+
   if (typeof value === "string") {
-    return value.length > maxLen ? `${value.slice(0, maxLen)}…` : value
+    const t = truncate(value, maxLen)
+    return { message: t.text, truncated: t.truncated }
   }
+
+  const s = safeStringify(value, maxLen)
+  return { message: s.text, truncated: s.truncated }
+}
+
+/** JSON.stringify with circular-ref safety and length bound. */
+function safeStringify(value: unknown, maxLen: number): { text: string; truncated: boolean } {
   try {
-    const json = JSON.stringify(value)
-    return json.length > maxLen ? `${json.slice(0, maxLen)}…` : json
+    return truncate(JSON.stringify(value), maxLen)
   } catch {
-    return String(value)
+    return truncate(String(value), maxLen)
   }
 }
 
@@ -163,7 +211,7 @@ export function pluginResultsToJson(results: PluginResult[]): {
   hookCount: number
   errorCode?: string
   hint?: string
-  error?: string
+  error?: PluginErrorDetail
 }[] {
   return results.map((r) => ({
     name: r.name,
@@ -173,7 +221,7 @@ export function pluginResultsToJson(results: PluginResult[]): {
       ? {
           errorCode: r.errorCode,
           hint: pluginErrorHint(r.errorCode),
-          error: normalizeError(r.error),
+          error: structuredError(r.error),
         }
       : {}),
   }))
