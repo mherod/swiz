@@ -105,7 +105,7 @@ All output helpers return `never` and call `process.exit(0)` after writing JSON.
 - `isCodeChangeTool(name)` — edit, write, or notebook tools
 - `isTaskTool(name)` / `isTaskCreateTool(name)` — task management tools
 
-**Package manager detection** — `detectPackageManager()` walks up from CWD to find the lockfile; `detectPkgRunner()` returns the appropriate `bunx`/`npx`/`pnpm dlx` command.
+**Package manager detection** — `detectPackageManager()` walks up to find lockfile; `detectPkgRunner()` returns the appropriate `bunx`/`npx`/`pnpm dlx` command.
 
 **Input types** — `StopHookInput`, `ToolHookInput`, `SessionHookInput` for typed stdin parsing.
 
@@ -113,7 +113,7 @@ All output helpers return `never` and call `process.exit(0)` after writing JSON.
 
 **DON'T write tests for external code.** Tests belong in the repository that owns them. Example: `src/tasks-list-verify.test.ts` tested `~/.claude/hooks/tasks-list.ts` from `mherod/.claude` (incorrect). Fix: delete test and file issue in owning repository.
 
-**Diff file tracking** — Track the current file by reading `+++ b/<path>` headers when scanning diffs, then apply file-level exclusions (e.g., `if (TEST_FILE_RE.test(currentFile)) continue`). Lighter than splitting diffs into chunks; enables consistent file-based filtering.
+**Diff file tracking** — Track current file by reading `+++ b/<path>` headers in diffs, then apply file-level exclusions (e.g., `if (TEST_FILE_RE.test(currentFile)) continue`). Lighter than splitting diffs into chunks; enables consistent file-based filtering.
 
 **DO** extract `sanitizeSessionId()` helper when hooks use `/tmp` sentinel files keyed on session ID. Prevents duplication between read/write paths.
 
@@ -137,7 +137,7 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 `swiz tasks complete <id>` requires `--evidence "text"` — the completion evidence is stored on the task and checked by the stop-completion-auditor hook.
 
-**DO** create a task as the very first action when starting a new session — including after context compaction resumes. Before any Edit, Write, or Bash, use `TaskCreate`. The `pretooluse-require-tasks.ts` hook blocks file modifications when no tasks exist. After compaction, zero tasks exist — call `TaskCreate` before any Bash command to avoid the bootstrap block.
+**DO** create a task as the very first action when starting session — including after context compaction resumes. Before any Edit, Write, or Bash, use `TaskCreate`. The `pretooluse-require-tasks.ts` hook blocks file modifications when no tasks exist. After compaction, zero tasks exist — call `TaskCreate` before Bash to avoid bootstrap block.
 
 **DO** re-create incomplete tasks from a prior session when a stop-hook bootstrap block fires. The block message lists prior-session tasks still `in_progress`. Fix: `TaskCreate` an equivalent subject, mark it `in_progress`, retry the blocked call. DON'T debug the hook — compliance is the only unblock path.
 
@@ -283,13 +283,13 @@ console.error("No session found.");
 process.exit(1);
 ```
 
-The top-level handler in `src/cli.ts` catches thrown errors and sets `process.exitCode = 1`, letting the event loop drain naturally. The pass-through in `src/commands/continue.ts` uses `process.exitCode = proc.exitCode ?? 0; return` for the same reason.
+The handler in `src/cli.ts` catches errors and sets `process.exitCode = 1`, draining the event loop naturally. `src/commands/continue.ts` uses `process.exitCode = proc.exitCode ?? 0; return` for the same reason.
 
 Hook scripts (`hooks/*.ts`) are the exception — their `process.exit(0)` calls are intentional and must stay.
 
-**DON'T** use `console.log` in CI scripts (`scripts/*.ts`) or hook scripts (`hooks/*.ts`). The `stop-debug-statements` hook flags `console.log` as debug output. Use `console.error` for status/progress messages (stderr) — only use `console.log` when the script produces structured data on stdout that another process consumes.
+**DON'T** use `console.log` in CI or hook scripts. The `stop-debug-statements` hook flags it as debug output. Use `console.error` for status messages — only `console.log` when outputting structured data for another process.
 
-**DO** gate diagnostic stderr behind `SWIZ_DEBUG` in library modules. Use `const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {}`, then call `debugLog(...)` for informational messages. Reserve direct `console.error` for user-facing CLI output. See `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts` for patterns.
+**DO** gate diagnostic stderr behind `SWIZ_DEBUG`. Use `const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {}`, then call `debugLog(...)` for info messages. Reserve `console.error` for user-facing CLI output. See `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts`.
 
 ## Conventions
 
