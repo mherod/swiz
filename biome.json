@@ -45,6 +45,16 @@
           }
         }
       }
+    },
+    {
+      "includes": ["scripts/**", "push/scripts/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
     }
   ]
 }
