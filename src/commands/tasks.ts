@@ -4,6 +4,7 @@ import { computeSubjectFingerprint } from "../../hooks/hook-utils.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
+const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {}
 const HOME = process.env.HOME ?? "~"
 const TASKS_DIR = join(HOME, ".claude", "tasks")
 const PROJECTS_DIR = join(HOME, ".claude", "projects")
@@ -307,7 +308,7 @@ export async function resolveTaskById(
       const task = tasks.find((t) => t.id === taskId)
       if (task) {
         if (matchingSession !== primarySessionId) {
-          console.error(
+          debugLog(
             `  ${DIM}Task #${taskId} resolved via prefix to session ${matchingSession.slice(0, 8)}...${RESET}`
           )
         }
@@ -328,7 +329,7 @@ export async function resolveTaskById(
   const matches = await findTaskAcrossSessions(taskId, filterCwd, tasksDir, projectsDir)
 
   if (matches.length === 1) {
-    console.error(
+    debugLog(
       `  ${DIM}Task #${taskId} found in session ${matches[0]!.sessionId.slice(0, 8)}... (not current session)${RESET}`
     )
     return matches[0]!

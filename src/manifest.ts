@@ -4,6 +4,8 @@
 
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
 
+const debugLog = process.env.SWIZ_DEBUG ? console.warn.bind(console) : () => {}
+
 export interface HookDef {
   file: string
   timeout?: number
@@ -66,7 +68,7 @@ export function evalCondition(condition: string | undefined): boolean {
   if (condition.startsWith("framework:")) {
     const name = condition.slice("framework:".length)
     if (!VALID_FRAMEWORKS.has(name)) {
-      console.warn(`[swiz] Unknown framework in condition: "${name}" — running hook anyway`)
+      debugLog(`[swiz] Unknown framework in condition: "${name}" — running hook anyway`)
       return true
     }
     return detectFrameworks().has(name as Framework)
@@ -74,7 +76,7 @@ export function evalCondition(condition: string | undefined): boolean {
 
   const envMatch = condition.match(/^env:([^!=]+)(!=|=)?(.*)$/)
   if (!envMatch) {
-    console.warn(`[swiz] Unknown hook condition syntax: "${condition}" — running hook anyway`)
+    debugLog(`[swiz] Unknown hook condition syntax: "${condition}" — running hook anyway`)
     return true
   }
 

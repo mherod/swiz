@@ -11,6 +11,8 @@ import { Database } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 
+const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface CachedIssue {
@@ -189,7 +191,7 @@ export async function replayPendingMutations(
     if (row.attempts >= MAX_ATTEMPTS) {
       s.removeMutation(row.id)
       result.discarded++
-      console.error(
+      debugLog(
         `[swiz] REPLAY_DISCARDED repo=${repo} issue=#${mutation.number} type=${mutation.type} attempts=${row.attempts}`
       )
       continue
@@ -303,7 +305,7 @@ function logReplayExecFailed(
   stderr: string
 ): void {
   const detail = stderr.trim().slice(0, 200)
-  console.error(
+  debugLog(
     `[swiz] REPLAY_EXEC_FAILED repo=${repo} issue=#${mutation.number} type=${mutation.type} exit=${exitCode}${detail ? ` detail=${detail}` : ""}`
   )
 }
