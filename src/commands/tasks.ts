@@ -1,10 +1,10 @@
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { computeSubjectFingerprint } from "../../hooks/hook-utils.ts"
+import { debugLog } from "../debug.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
-const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {}
 const HOME = process.env.HOME ?? "~"
 const TASKS_DIR = join(HOME, ".claude", "tasks")
 const PROJECTS_DIR = join(HOME, ".claude", "projects")

@@ -2,9 +2,8 @@
 // Single source of truth for all hook scripts and event bindings.
 // install.ts uses it to generate agent configs; dispatch.ts uses it at runtime.
 
+import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
-
-const debugLog = process.env.SWIZ_DEBUG ? console.warn.bind(console) : () => {}
 
 export interface HookDef {
   file: string
@@ -87,7 +86,7 @@ export function evalCondition(condition: string | undefined): boolean {
   if (op === "=") return actual === expected
   if (op === "!=") return actual !== expected
 
-  console.warn(`[swiz] Unknown operator in hook condition: "${condition}" — running hook anyway`)
+  debugLog(`[swiz] Unknown operator in hook condition: "${condition}" — running hook anyway`)
   return true
 }
 

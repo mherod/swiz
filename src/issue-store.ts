@@ -11,7 +11,7 @@ import { Database } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 
-const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {}
+import { debugLog } from "./debug.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -329,7 +329,7 @@ export async function tryReplayPendingMutations(cwd?: string): Promise<void> {
     const result = await replayPendingMutations(slug, dir, store)
     logReplayResult(result, pending, slug)
   } catch (err) {
-    console.error(`[swiz] REPLAY_INFRA_ERROR ${err instanceof Error ? err.message : String(err)}`)
+    debugLog(`[swiz] REPLAY_INFRA_ERROR ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 
@@ -340,7 +340,7 @@ function logReplayResult(result: ReplayResult, originalCount: number, repo: stri
   if (result.failed > 0) parts.push(`${result.failed} failed`)
   if (result.discarded > 0) parts.push(`${result.discarded} discarded`)
   if (parts.length === 0) return
-  console.error(`[swiz] REPLAY_SUMMARY repo=${repo} pending=${originalCount} ${parts.join(", ")}`)
+  debugLog(`[swiz] REPLAY_SUMMARY repo=${repo} pending=${originalCount} ${parts.join(", ")}`)
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
