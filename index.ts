@@ -8,6 +8,7 @@ import { doctorCommand } from "./src/commands/doctor.ts"
 import { hooksCommand } from "./src/commands/hooks.ts"
 import { installCommand } from "./src/commands/install.ts"
 import { issueCommand } from "./src/commands/issue.ts"
+import { memoryCommand } from "./src/commands/memory.ts"
 import { mergetoolCommand } from "./src/commands/mergetool.ts"
 import { pushWaitCommand } from "./src/commands/push-wait.ts"
 import { sentimentCommand } from "./src/commands/sentiment.ts"
@@ -38,6 +39,7 @@ registerCommand(issueCommand)
 registerCommand(sentimentCommand)
 registerCommand(sessionCommand)
 registerCommand(ciWaitCommand)
+registerCommand(memoryCommand)
 registerCommand(mergetoolCommand)
 registerCommand(pushWaitCommand)
 registerCommand(doctorCommand)
