@@ -189,7 +189,7 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
       if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
       if (resp && isDeny(resp)) {
         log(`   ✗ DENY from ${hook.file}`)
-        console.log(JSON.stringify(resp))
+        process.stdout.write(`${JSON.stringify(resp)}\n`)
         return
       }
       if (resp && isAllowWithReason(resp)) {
@@ -206,14 +206,14 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
   // Forward collected hints as a single allow-with-reason response
   if (hints.length > 0) {
     log(`   result: passed with ${hints.length} hint(s)`)
-    console.log(
-      JSON.stringify({
+    process.stdout.write(
+      `${JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
           permissionDecision: "allow",
           permissionDecisionReason: hints.join("\n\n"),
         },
-      })
+      })}\n`
     )
     return
   }
@@ -240,7 +240,7 @@ export async function runBlocking(groups: HookGroup[], payloadStr: string): Prom
       if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
       if (resp && isBlock(resp)) {
         log(`   ✗ BLOCK from ${hook.file}`)
-        console.log(JSON.stringify(resp))
+        process.stdout.write(`${JSON.stringify(resp)}\n`)
         return
       }
       log(`   ✓ ${hook.file} (${resp ? "ok" : "no output"})`)
@@ -296,5 +296,5 @@ export async function runContext(
     },
   })
   log(`   result: merged ${contexts.length} context(s), hookEventName=${eventName}`)
-  console.log(output)
+  process.stdout.write(`${output}\n`)
 }

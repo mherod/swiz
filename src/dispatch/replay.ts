@@ -165,8 +165,8 @@ export function formatTrace(
 ): void {
   if (jsonMode) {
     const blocked = traces.find((t) => t.status === "block" || t.status === "deny")
-    console.log(
-      JSON.stringify({
+    process.stdout.write(
+      `${JSON.stringify({
         event,
         strategy,
         matched_groups: matchedCount,
@@ -181,7 +181,7 @@ export function formatTrace(
         result: blocked
           ? { blocked: true, by: blocked.file, status: blocked.status }
           : { blocked: false },
-      })
+      })}\n`
     )
     return
   }
