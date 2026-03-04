@@ -523,14 +523,133 @@ const FINGERPRINT_STOP_WORDS = new Set([
   "is",
   "was",
   "be",
+  "this",
+  "that",
+  "all",
+  "its",
+  "from",
 ])
 
 /**
+ * Synonym map: maps variant words to a single canonical form.
+ * Covers task-domain verbs and nouns that agents use interchangeably.
+ */
+const SYNONYM_MAP = new Map<string, string>([
+  // verify / check / confirm / validate → verify
+  ["check", "verify"],
+  ["confirm", "verify"],
+  ["validate", "verify"],
+  ["assert", "verify"],
+  ["ensure", "verify"],
+  // implement / add / create / build → implement
+  ["add", "implement"],
+  ["create", "implement"],
+  ["build", "implement"],
+  ["introduce", "implement"],
+  ["wire", "implement"],
+  // fix / repair / resolve / patch → fix
+  ["repair", "fix"],
+  ["resolve", "fix"],
+  ["patch", "fix"],
+  ["correct", "fix"],
+  // update / modify / edit / change / revise → update
+  ["modify", "update"],
+  ["edit", "update"],
+  ["change", "update"],
+  ["revise", "update"],
+  ["adjust", "update"],
+  ["refine", "update"],
+  // remove / delete / drop / clean → remove
+  ["delete", "remove"],
+  ["drop", "remove"],
+  ["clean", "remove"],
+  ["prune", "remove"],
+  ["strip", "remove"],
+  // push / deploy / ship / publish → push
+  ["deploy", "push"],
+  ["ship", "push"],
+  ["publish", "push"],
+  // commit / save / stage → commit
+  ["save", "commit"],
+  ["stage", "commit"],
+  // test / spec → test
+  ["spec", "test"],
+  // run / execute / invoke → run
+  ["execute", "run"],
+  ["invoke", "run"],
+  // changes / diff / modifications → changes
+  ["diff", "changes"],
+  ["modifications", "changes"],
+])
+
+/**
+ * Lightweight suffix-stripping stemmer for task-domain English.
+ * Reduces inflected forms to a common root so "committing" and "commit",
+ * "verifying" and "verify", "formatted" and "format" match.
+ */
+export function stemWord(word: string): string {
+  let stem = word
+  // Order matters: try longest suffixes first
+
+  // -ing forms: strip suffix, reconstruct final consonant
+  if (word.endsWith("ting") && word.length > 5) stem = word.slice(0, -4) + "t"
+  else if (word.endsWith("ning") && word.length > 5) stem = word.slice(0, -4) + "n"
+  else if (word.endsWith("ring") && word.length > 5) stem = word.slice(0, -4) + "r"
+  else if (word.endsWith("ling") && word.length > 5) stem = word.slice(0, -4) + "l"
+  else if (word.endsWith("ying") && word.length > 5) stem = word.slice(0, -4) + "y"
+  else if (word.endsWith("ding") && word.length > 5) stem = word.slice(0, -4) + "d"
+  else if (word.endsWith("ping") && word.length > 5) stem = word.slice(0, -4) + "p"
+  else if (word.endsWith("sing") && word.length > 5) stem = word.slice(0, -4) + "s"
+  else if (word.endsWith("zing") && word.length > 5) stem = word.slice(0, -4) + "z"
+  else if (word.endsWith("bing") && word.length > 5) stem = word.slice(0, -4) + "b"
+  else if (word.endsWith("ming") && word.length > 5) stem = word.slice(0, -4) + "m"
+  else if (word.endsWith("king") && word.length > 5) stem = word.slice(0, -4) + "k"
+  else if (word.endsWith("ing") && word.length > 5) stem = word.slice(0, -3)
+  // -ation before -tion (implementation → implement)
+  else if (word.endsWith("ation") && word.length > 7) stem = word.slice(0, -5)
+  else if (word.endsWith("tion") && word.length > 5) stem = word.slice(0, -4)
+  // -ment: require > 9 chars to avoid stripping root words (implement, comment)
+  else if (word.endsWith("ment") && word.length > 9) stem = word.slice(0, -4)
+  else if (word.endsWith("ated") && word.length > 5) stem = word.slice(0, -2)
+  else if (word.endsWith("ized") && word.length > 5) stem = word.slice(0, -2)
+  // -ed forms: strip suffix, reconstruct final consonant
+  else if (word.endsWith("ted") && word.length > 5) stem = word.slice(0, -3) + "t"
+  else if (word.endsWith("ned") && word.length > 5) stem = word.slice(0, -3) + "n"
+  else if (word.endsWith("red") && word.length > 5) stem = word.slice(0, -3) + "r"
+  else if (word.endsWith("led") && word.length > 5) stem = word.slice(0, -3) + "l"
+  else if (word.endsWith("sed") && word.length > 5) stem = word.slice(0, -3) + "s"
+  else if (word.endsWith("ped") && word.length > 5) stem = word.slice(0, -3) + "p"
+  else if (word.endsWith("zed") && word.length > 5) stem = word.slice(0, -3) + "z"
+  else if (word.endsWith("bed") && word.length > 5) stem = word.slice(0, -3) + "b"
+  else if (word.endsWith("med") && word.length > 5) stem = word.slice(0, -3) + "m"
+  else if (word.endsWith("ked") && word.length > 5) stem = word.slice(0, -3) + "k"
+  // -ied → -y (verified → verify, modified → modify)
+  else if (word.endsWith("ied") && word.length > 5) stem = word.slice(0, -3) + "y"
+  else if (word.endsWith("ed") && word.length > 4) stem = word.slice(0, -2)
+  else if (word.endsWith("ly") && word.length > 4) stem = word.slice(0, -2)
+  else if (word.endsWith("er") && word.length > 4) stem = word.slice(0, -2)
+  else if (word.endsWith("es") && word.length > 4) stem = word.slice(0, -2)
+  else if (word.endsWith("s") && !word.endsWith("ss") && word.length > 4) stem = word.slice(0, -1)
+
+  // Collapse doubled trailing consonants (committ → commit, formatt → format)
+  if (stem.length >= 4 && stem[stem.length - 1] === stem[stem.length - 2]) {
+    const ch = stem[stem.length - 1]!
+    if (ch >= "a" && ch <= "z" && !"aeiou".includes(ch)) {
+      stem = stem.slice(0, -1)
+    }
+  }
+
+  return stem
+}
+
+/**
  * Compute a deterministic fingerprint from a task subject.
- * Normalizes (lowercase, strip punctuation), extracts significant words
- * (>2 chars, no stop words), sorts alphabetically, and hashes.
+ *
+ * Pipeline: lowercase → strip punctuation → tokenize → filter stop words →
+ * stem each word → apply synonym mapping → sort → hash.
+ *
  * Two subjects describing the same work produce the same fingerprint
- * regardless of word order or minor wording differences.
+ * regardless of word order, inflection, or synonym choice.
  */
 export function computeSubjectFingerprint(subject: string): string {
   const normalized = subject
@@ -541,9 +660,13 @@ export function computeSubjectFingerprint(subject: string): string {
   const words = normalized
     .split(" ")
     .filter((w) => w.length > 2 && !FINGERPRINT_STOP_WORDS.has(w))
+    .map((w) => {
+      const stemmed = stemWord(w)
+      // Try stem directly, then with silent-e restored (creat→create)
+      return SYNONYM_MAP.get(stemmed) ?? SYNONYM_MAP.get(stemmed + "e") ?? stemmed
+    })
     .sort()
   const canonical = words.join(" ")
-  // Use Bun's fast hash, truncated to 16 hex chars for readability
   return Bun.hash(canonical).toString(16).padStart(16, "0")
 }
 
