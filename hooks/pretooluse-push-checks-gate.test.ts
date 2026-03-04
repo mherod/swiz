@@ -22,6 +22,7 @@ function makeTranscript(...commands: string[]): string {
 interface HookResult {
   blocked: boolean
   reason: string
+  advisory: boolean
 }
 
 async function runHook(opts: {
@@ -54,13 +55,14 @@ async function runHook(opts: {
   const out = await new Response(proc.stdout).text()
   await proc.exited
 
-  if (!out.trim()) return { blocked: false, reason: "" }
+  if (!out.trim()) return { blocked: false, reason: "", advisory: false }
   const parsed = JSON.parse(out.trim())
   const hso = parsed?.hookSpecificOutput
   const decision = hso?.permissionDecision ?? parsed?.decision
   return {
     blocked: decision === "deny",
     reason: hso?.permissionDecisionReason ?? parsed?.reason ?? "",
+    advisory: decision === "allow" && !!hso?.permissionDecisionReason,
   }
 }
 
@@ -156,27 +158,29 @@ describe("pretooluse-push-checks-gate", () => {
     })
   })
 
-  describe("block — missing branch check", () => {
-    test("bare 'git branch' does NOT satisfy the gate", async () => {
+  describe("advisory — missing branch check", () => {
+    test("bare 'git branch' triggers advisory", async () => {
       const transcript = makeTranscript("git branch", "gh pr list --state open --head main")
       const result = await runHook({
         command: "git push origin main",
         transcriptContent: transcript,
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
       expect(result.reason).toContain("git branch --show-current")
     })
 
-    test("'git branch -a' does NOT satisfy the gate", async () => {
+    test("'git branch -a' triggers advisory", async () => {
       const transcript = makeTranscript("git branch -a", "gh pr list --state open --head main")
       const result = await runHook({
         command: "git push origin main",
         transcriptContent: transcript,
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
     })
 
-    test("'git branch -d feature' does NOT satisfy the gate", async () => {
+    test("'git branch -d feature' triggers advisory", async () => {
       const transcript = makeTranscript(
         "git branch -d old-feature",
         "gh pr list --state open --head main"
@@ -185,76 +189,83 @@ describe("pretooluse-push-checks-gate", () => {
         command: "git push origin main",
         transcriptContent: transcript,
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
     })
 
-    test("'git branch -vv' does NOT satisfy the gate", async () => {
+    test("'git branch -vv' triggers advisory", async () => {
       const transcript = makeTranscript("git branch -vv", "gh pr list --state open --head main")
       const result = await runHook({
         command: "git push origin main",
         transcriptContent: transcript,
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
     })
   })
 
-  describe("block — missing PR check", () => {
-    test("gh pr list without --head does NOT satisfy the gate", async () => {
+  describe("advisory — missing PR check", () => {
+    test("gh pr list without --head triggers advisory", async () => {
       const transcript = makeTranscript("git branch --show-current", "gh pr list --state open")
       const result = await runHook({
         command: "git push origin main",
         transcriptContent: transcript,
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
       expect(result.reason).toContain("gh pr list")
     })
 
-    test("--show-current present but no PR check → blocked", async () => {
+    test("--show-current present but no PR check → advisory", async () => {
       const transcript = makeTranscript("git branch --show-current")
       const result = await runHook({
         command: "git push origin main",
         transcriptContent: transcript,
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
     })
   })
 
-  describe("block — both checks missing", () => {
-    test("empty transcript blocks push", async () => {
+  describe("advisory — both checks missing", () => {
+    test("empty transcript emits advisory", async () => {
       const result = await runHook({
         command: "git push origin main",
         transcriptContent: "",
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
       expect(result.reason).toContain("git branch --show-current")
       expect(result.reason).toContain("gh pr list")
     })
 
-    test("unrelated commands do not satisfy either check", async () => {
+    test("unrelated commands trigger advisory for both checks", async () => {
       const transcript = makeTranscript("git status", "bun test", "git log --oneline -5")
       const result = await runHook({
         command: "git push origin main",
         transcriptContent: transcript,
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
     })
   })
 
-  describe("block message content", () => {
-    test("block reason names the specific missing checks", async () => {
+  describe("advisory message content", () => {
+    test("advisory names the specific missing checks", async () => {
       const transcript = makeTranscript("git branch --show-current")
       const result = await runHook({
         command: "git push origin main",
         transcriptContent: transcript,
       })
-      expect(result.blocked).toBe(true)
-      expect(result.reason).toContain("BLOCKED")
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
+      expect(result.reason).toContain("Advisory")
       expect(result.reason).toContain("gh pr list --state open --head")
-      // The block lists only the PR check as missing — no "Branch check" line
+      // The advisory lists only the PR check as missing — no "Branch check" line
       expect(result.reason).not.toContain("Branch check (not run yet)")
     })
 
-    test("block reason lists both checks when both are missing", async () => {
+    test("advisory lists both checks when both are missing", async () => {
       const result = await runHook({
         command: "git push origin main",
         transcriptContent: "",
@@ -265,20 +276,22 @@ describe("pretooluse-push-checks-gate", () => {
   })
 
   describe("push command variants", () => {
-    test("git push with upstream flag is also gated", async () => {
+    test("git push with upstream flag gets advisory", async () => {
       const result = await runHook({
         command: "git push -u origin feature/x",
         transcriptContent: "",
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
     })
 
-    test("git push --force-with-lease is also gated", async () => {
+    test("git push --force-with-lease gets advisory", async () => {
       const result = await runHook({
         command: "git push --force-with-lease origin main",
         transcriptContent: "",
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
     })
   })
 
@@ -320,8 +333,8 @@ describe("pretooluse-push-checks-gate", () => {
       expect(result.blocked).toBe(false)
     })
 
-    test("--show-current-upstream still blocked after normalisation", async () => {
-      // Normalization must not inadvertently allow the suffixed variant
+    test("--show-current-upstream still triggers advisory after normalisation", async () => {
+      // Normalization must not inadvertently satisfy the branch check for the suffixed variant
       const transcript = makeTranscript(
         "git branch \\\n  --show-current-upstream",
         "gh pr list --state open --head main"
@@ -330,7 +343,8 @@ describe("pretooluse-push-checks-gate", () => {
         command: "git push origin main",
         transcriptContent: transcript,
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
       expect(result.reason).toContain("git branch --show-current")
     })
   })
@@ -438,8 +452,9 @@ describe("parametric: git branch --show-current variant regression matrix", () =
         command: "git push origin main",
         transcriptContent: transcript,
       })
-      expect(result.blocked).toBe(!satisfied)
+      expect(result.blocked).toBe(false) // never blocks — advisory only
       if (!satisfied) {
+        expect(result.advisory).toBe(true)
         expect(result.reason).toContain("git branch --show-current")
       }
     })

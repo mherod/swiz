@@ -227,6 +227,20 @@ export function denyPreToolUse(reason: string): never {
   process.exit(0)
 }
 
+/** Emit a PreToolUse allow with advisory context and exit. Does NOT block. Works across all agents. */
+export function allowPreToolUse(reason: string): never {
+  console.log(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+        permissionDecisionReason: reason,
+      },
+    })
+  )
+  process.exit(0)
+}
+
 /** Emit a PreToolUse allow with modified tool input and exit. Works across all agents. */
 export function allowPreToolUseWithUpdatedInput(
   updatedInput: Record<string, unknown>,

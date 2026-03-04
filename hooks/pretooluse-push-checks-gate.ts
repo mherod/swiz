@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
-// PreToolUse hook: Block `git push` unless the required branch/PR/collaboration
-// checks have already been run in this transcript session.
+// PreToolUse hook: Advise on branch/PR/collaboration checks before `git push`.
+// Non-blocking — provides advisory context when checks haven't been run.
 //
-// Required checks (must appear as Bash tool calls before any git push):
+// Checked items (surfaced as advisory context if missing):
 //   1. Branch check  — `git branch` (confirms current branch)
 //   2. PR check      — `gh pr list ... --head` (checks for open PR on branch)
 //
@@ -10,8 +10,8 @@
 // to main in a collaborative repo, or creating duplicate PRs.
 
 import {
+  allowPreToolUse,
   BRANCH_CHECK_RE,
-  denyPreToolUse,
   extractBashCommands,
   formatActionPlan,
   GIT_PUSH_RE,
@@ -47,7 +47,7 @@ const hasPRCheck = priorCommands.some((c) => PR_CHECK_RE.test(c))
 
 if (hasBranchCheck && hasPRCheck) process.exit(0)
 
-// ── Block with actionable instructions ────────────────────────────────────────
+// ── Advise on missing checks ─────────────────────────────────────────────────
 
 const missing: string[] = []
 if (!hasBranchCheck) {
@@ -60,11 +60,9 @@ if (!hasPRCheck) {
   )
 }
 
-denyPreToolUse(
-  `BLOCKED: git push requires branch/PR checks to run first.\n\n` +
-    `The following mandatory checks have not been run in this session.\n\n` +
+allowPreToolUse(
+  `Advisory: the following checks have not been run in this session:\n\n` +
     formatActionPlan(missing) +
-    `\n\nRun the missing checks, review the output, then retry git push.\n\n` +
-    `Why this matters: pushing without these checks risks pushing large work\n` +
-    `directly to main in a collaborative repo, or creating duplicate PRs.`
+    `\n\nConsider running these checks to avoid pushing large work directly\n` +
+    `to main in a collaborative repo, or creating duplicate PRs.`
 )
