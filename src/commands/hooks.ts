@@ -238,9 +238,10 @@ async function showSources() {
     ? await loadAllPlugins(projectSettings.plugins, cwd, { verbose: true })
     : []
 
+  const failedPlugins = pluginResults.filter((r) => r.errorCode)
   const pluginByEvent = new Map<string, { file: string; plugin: string }[]>()
   for (const result of pluginResults) {
-    if (result.error) continue
+    if (result.errorCode) continue
     for (const group of result.hooks) {
       const list = pluginByEvent.get(group.event) ?? []
       for (const hook of group.hooks) {
@@ -287,6 +288,14 @@ async function showSources() {
     for (const h of locals) {
       const name = h.file.split("/").pop() ?? h.file
       console.log(`    ${GREEN_H}project${RST}   ${name}`)
+    }
+  }
+
+  if (failedPlugins.length > 0) {
+    const YELLOW_H = "\x1b[33m"
+    console.log(`\n  Failed plugins:\n`)
+    for (const r of failedPlugins) {
+      console.log(`    ${YELLOW_H}⚠ ${r.name}${RST}  ${r.errorCode}`)
     }
   }
   console.log()

@@ -41,6 +41,7 @@ describe("loadAllPlugins", () => {
     expect(results).toHaveLength(1)
     expect(results[0]!.name).toBe("./my-hooks")
     expect(results[0]!.error).toBeUndefined()
+    expect(results[0]!.errorCode).toBeUndefined()
     expect(results[0]!.hooks).toHaveLength(1)
     expect(results[0]!.hooks[0]!.event).toBe("preToolUse")
     // Path should be resolved to absolute
@@ -54,6 +55,7 @@ describe("loadAllPlugins", () => {
 
     expect(results).toHaveLength(1)
     expect(results[0]!.name).toBe("swiz-plugin-nonexistent")
+    expect(results[0]!.errorCode).toBe("not-found")
     expect(results[0]!.error).toContain("Plugin not found")
     expect(results[0]!.hooks).toHaveLength(0)
   })
@@ -64,6 +66,7 @@ describe("loadAllPlugins", () => {
     const results = await loadAllPlugins(["./nonexistent-hooks"], projectRoot)
 
     expect(results).toHaveLength(1)
+    expect(results[0]!.errorCode).toBe("no-entry-point")
     expect(results[0]!.error).toContain("No swiz-hooks.ts or swiz-hooks.json")
     expect(results[0]!.hooks).toHaveLength(0)
   })
@@ -77,6 +80,7 @@ describe("loadAllPlugins", () => {
     const results = await loadAllPlugins(["./empty-plugin"], projectRoot)
 
     expect(results).toHaveLength(1)
+    expect(results[0]!.errorCode).toBe("no-entry-point")
     expect(results[0]!.error).toContain("No swiz-hooks.ts or swiz-hooks.json")
   })
 
@@ -89,6 +93,7 @@ describe("loadAllPlugins", () => {
     const results = await loadAllPlugins(["./bad-json"], projectRoot)
 
     expect(results).toHaveLength(1)
+    expect(results[0]!.errorCode).toBe("parse-error")
     expect(results[0]!.error).toContain("Failed to load")
   })
 
@@ -101,6 +106,7 @@ describe("loadAllPlugins", () => {
     const results = await loadAllPlugins(["./not-array"], projectRoot)
 
     expect(results).toHaveLength(1)
+    expect(results[0]!.errorCode).toBe("invalid-export")
     expect(results[0]!.error).toContain("is not a HookGroup[]")
   })
 
@@ -160,8 +166,8 @@ describe("loadAllPlugins", () => {
     const results = await loadAllPlugins(["./missing", "./valid"], projectRoot)
 
     expect(results).toHaveLength(2)
-    expect(results[0]!.error).toBeTruthy()
-    expect(results[1]!.error).toBeUndefined()
+    expect(results[0]!.errorCode).toBe("no-entry-point")
+    expect(results[1]!.errorCode).toBeUndefined()
     expect(results[1]!.hooks).toHaveLength(1)
   })
 

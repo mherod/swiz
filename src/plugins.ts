@@ -8,10 +8,18 @@ import { readFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 import type { HookGroup } from "./manifest.ts"
 
+export type PluginErrorCode =
+  | "not-found"
+  | "no-entry-point"
+  | "invalid-export"
+  | "parse-error"
+  | "load-error"
+
 export interface PluginResult {
   name: string
   hooks: HookGroup[]
   error?: string
+  errorCode?: PluginErrorCode
 }
 
 /**
@@ -25,7 +33,7 @@ async function loadPlugin(entry: string, projectRoot: string): Promise<PluginRes
   const base = isLocal ? resolve(projectRoot, entry) : findNodeModulesPlugin(entry, projectRoot)
 
   if (!base) {
-    return { name: entry, hooks: [], error: `Plugin not found: ${entry}` }
+    return { name: entry, hooks: [], errorCode: "not-found", error: `Plugin not found: ${entry}` }
   }
 
   // Try swiz-hooks.ts first (ESM import), then swiz-hooks.json
@@ -37,11 +45,21 @@ async function loadPlugin(entry: string, projectRoot: string): Promise<PluginRes
       const mod = await import(tsPath)
       const hooks = (mod.hooks ?? mod.default) as HookGroup[] | undefined
       if (!Array.isArray(hooks)) {
-        return { name: entry, hooks: [], error: `${tsPath} does not export hooks: HookGroup[]` }
+        return {
+          name: entry,
+          hooks: [],
+          errorCode: "invalid-export",
+          error: `${tsPath} does not export hooks: HookGroup[]`,
+        }
       }
       return { name: entry, hooks: resolveHookPaths(hooks, base) }
     } catch (err) {
-      return { name: entry, hooks: [], error: `Failed to load ${tsPath}: ${String(err)}` }
+      return {
+        name: entry,
+        hooks: [],
+        errorCode: "load-error",
+        error: `Failed to load ${tsPath}: ${String(err)}`,
+      }
     }
   }
 
@@ -50,15 +68,30 @@ async function loadPlugin(entry: string, projectRoot: string): Promise<PluginRes
       const raw = await readFile(jsonPath, "utf-8")
       const hooks = JSON.parse(raw) as HookGroup[]
       if (!Array.isArray(hooks)) {
-        return { name: entry, hooks: [], error: `${jsonPath} is not a HookGroup[]` }
+        return {
+          name: entry,
+          hooks: [],
+          errorCode: "invalid-export",
+          error: `${jsonPath} is not a HookGroup[]`,
+        }
       }
       return { name: entry, hooks: resolveHookPaths(hooks, base) }
     } catch (err) {
-      return { name: entry, hooks: [], error: `Failed to load ${jsonPath}: ${String(err)}` }
+      return {
+        name: entry,
+        hooks: [],
+        errorCode: "parse-error",
+        error: `Failed to load ${jsonPath}: ${String(err)}`,
+      }
     }
   }
 
-  return { name: entry, hooks: [], error: `No swiz-hooks.ts or swiz-hooks.json found in ${base}` }
+  return {
+    name: entry,
+    hooks: [],
+    errorCode: "no-entry-point",
+    error: `No swiz-hooks.ts or swiz-hooks.json found in ${base}`,
+  }
 }
 
 /** Walk up from projectRoot looking for node_modules/<name> */

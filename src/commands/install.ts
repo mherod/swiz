@@ -523,8 +523,18 @@ export const installCommand: Command = {
         const YELLOW = "\x1b[33m"
         console.log(`  Plugins:`)
         for (const result of pluginResults) {
-          if (result.error) {
-            console.log(`    ${YELLOW}⚠ ${result.name}${RESET}`)
+          if (result.errorCode) {
+            const hint =
+              result.errorCode === "not-found"
+                ? "not installed"
+                : result.errorCode === "no-entry-point"
+                  ? "missing swiz-hooks entry"
+                  : result.errorCode === "invalid-export"
+                    ? "bad export format"
+                    : result.errorCode === "parse-error"
+                      ? "invalid JSON"
+                      : "load failed"
+            console.log(`    ${YELLOW}⚠ ${result.name}${RESET} (${hint})`)
           } else {
             const hookCount = result.hooks.reduce((n, g) => n + g.hooks.length, 0)
             console.log(`    ${GREEN}✓${RESET} ${result.name} (${hookCount} hook(s))`)
