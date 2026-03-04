@@ -235,7 +235,7 @@ async function showSources(jsonOutput = false) {
   // Plugin hooks
   const projectSettings = await readProjectSettings(cwd)
   const pluginResults = projectSettings?.plugins?.length
-    ? await loadAllPlugins(projectSettings.plugins, cwd, { verbose: !jsonOutput })
+    ? await loadAllPlugins(projectSettings.plugins, cwd)
     : []
 
   if (jsonOutput) {

@@ -15,9 +15,6 @@ export type PluginErrorCode =
   | "parse-error"
   | "load-error"
 
-/** Error codes that indicate an expected missing-plugin condition (non-fatal). */
-const NON_FATAL_CODES: ReadonlySet<PluginErrorCode> = new Set(["not-found", "no-entry-point"])
-
 export interface PluginResult {
   name: string
   hooks: HookGroup[]
@@ -234,41 +231,22 @@ export function pluginResultsToJson(results: PluginResult[]): {
   }))
 }
 
-export interface LoadPluginsOptions {
-  /** When true, also log the full error detail to stderr. */
-  verbose?: boolean
-}
-
 /**
  * Load all plugins from the project config and return their hooks
  * along with load status for each plugin.
  *
- * Error visibility policy:
- * - A brief warning is always emitted to stderr on failure so users
- *   notice broken integrations regardless of the calling context.
- * - verbose=true additionally logs the full error detail to stderr.
+ * This function is side-effect-free — it returns PluginResult objects
+ * with errorCode/error fields for callers to handle. Callers decide
+ * their own logging strategy (e.g. dispatch uses its own log(),
+ * install uses colored output, hooks formats a table).
  */
 export async function loadAllPlugins(
   plugins: string[],
-  projectRoot: string,
-  options?: LoadPluginsOptions
+  projectRoot: string
 ): Promise<PluginResult[]> {
-  const verbose = options?.verbose ?? false
   const results: PluginResult[] = []
   for (const entry of plugins) {
-    const result = await loadPlugin(entry, projectRoot)
-    if (result.errorCode) {
-      const isFatal = !NON_FATAL_CODES.has(result.errorCode)
-      if (isFatal) {
-        console.error(`[swiz] plugin ${result.name} failed to load`)
-        if (verbose && result.error) {
-          console.error(`[swiz]   ${result.error}`)
-        }
-      } else if (verbose && result.error) {
-        console.error(`[swiz] plugin ${result.name} skipped (${pluginErrorHint(result.errorCode)})`)
-      }
-    }
-    results.push(result)
+    results.push(await loadPlugin(entry, projectRoot))
   }
   return results
 }

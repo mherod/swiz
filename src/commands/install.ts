@@ -521,9 +521,7 @@ export const installCommand: Command = {
       const cwd = process.cwd()
       const projectSettings = await readProjectSettings(cwd)
       if (projectSettings?.plugins?.length) {
-        const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd, {
-          verbose: !jsonOutput,
-        })
+        const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
 
         if (jsonOutput) {
           console.log(JSON.stringify(pluginResultsToJson(pluginResults), null, 2))
