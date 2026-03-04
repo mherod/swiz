@@ -9,6 +9,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
@@ -582,6 +583,192 @@ describe("sessionstart-compact-context: positive paths", () => {
     expect(ctx).toContain("rg instead of grep")
     expect(ctx).toContain("Edit")
     expect(ctx).toContain("co-author")
+  })
+
+  test("current-session incomplete tasks appear in context", async () => {
+    const home = await createTempDir()
+    const sessionId = `compact-test-${Date.now()}`
+    await createTaskFile(home, sessionId, {
+      id: "1",
+      subject: "Implement feature A",
+      status: "in_progress",
+    })
+    await createTaskFile(home, sessionId, {
+      id: "2",
+      subject: "Write tests for A",
+      status: "pending",
+    })
+
+    const r = await runHook(
+      HOOK,
+      { matcher: "compact", cwd: process.cwd(), session_id: sessionId },
+      { HOME: home }
+    )
+    expect(r.exitCode).toBe(0)
+    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    expect(ctx).toContain("Implement feature A")
+    expect(ctx).toContain("Write tests for A")
+    expect(ctx).toContain("2 incomplete task(s)")
+  })
+
+  test("current-session completed tasks are excluded from context", async () => {
+    const home = await createTempDir()
+    const sessionId = `compact-test-${Date.now()}`
+    await createTaskFile(home, sessionId, {
+      id: "1",
+      subject: "Already done work",
+      status: "completed",
+    })
+    await createTaskFile(home, sessionId, {
+      id: "2",
+      subject: "Still pending work",
+      status: "pending",
+    })
+
+    const r = await runHook(
+      HOOK,
+      { matcher: "compact", cwd: process.cwd(), session_id: sessionId },
+      { HOME: home }
+    )
+    expect(r.exitCode).toBe(0)
+    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    expect(ctx).not.toContain("Already done work")
+    expect(ctx).toContain("Still pending work")
+    expect(ctx).toContain("1 incomplete task(s)")
+  })
+
+  test("all-completed current-session tasks produce no task section", async () => {
+    const home = await createTempDir()
+    const sessionId = `compact-test-${Date.now()}`
+    await createTaskFile(home, sessionId, {
+      id: "1",
+      subject: "Finished task X",
+      status: "completed",
+    })
+    await createTaskFile(home, sessionId, {
+      id: "2",
+      subject: "Finished task Y",
+      status: "completed",
+    })
+
+    const r = await runHook(
+      HOOK,
+      { matcher: "compact", cwd: process.cwd(), session_id: sessionId },
+      { HOME: home }
+    )
+    expect(r.exitCode).toBe(0)
+    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    expect(ctx).not.toContain("Finished task X")
+    expect(ctx).not.toContain("Finished task Y")
+    expect(ctx).not.toContain("incomplete task(s)")
+  })
+
+  test("mixed-state current-session tasks: only incomplete appear", async () => {
+    const home = await createTempDir()
+    const sessionId = `compact-test-${Date.now()}`
+    await createTaskFile(home, sessionId, {
+      id: "1",
+      subject: "Done: set up DB",
+      status: "completed",
+    })
+    await createTaskFile(home, sessionId, {
+      id: "2",
+      subject: "Done: write schema",
+      status: "completed",
+    })
+    await createTaskFile(home, sessionId, {
+      id: "3",
+      subject: "WIP: add migrations",
+      status: "in_progress",
+    })
+    await createTaskFile(home, sessionId, {
+      id: "4",
+      subject: "TODO: add seeds",
+      status: "pending",
+    })
+
+    const r = await runHook(
+      HOOK,
+      { matcher: "compact", cwd: process.cwd(), session_id: sessionId },
+      { HOME: home }
+    )
+    expect(r.exitCode).toBe(0)
+    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    expect(ctx).not.toContain("Done: set up DB")
+    expect(ctx).not.toContain("Done: write schema")
+    expect(ctx).toContain("WIP: add migrations")
+    expect(ctx).toContain("TODO: add seeds")
+    expect(ctx).toContain("2 incomplete task(s)")
+  })
+
+  test("prior-session completed tasks are excluded from context", async () => {
+    const home = await createTempDir()
+    const currentSessionId = `current-${Date.now()}`
+    const priorSessionId = `prior-${Date.now()}`
+    const cwd = "/Users/testuser/myproject"
+
+    // Create a transcript for the prior session so findPriorSessionTasks can discover it
+    const projectKey = projectKeyFromCwd(cwd)
+    const projectDir = join(home, ".claude", "projects", projectKey)
+    await mkdir(projectDir, { recursive: true })
+    await writeFile(join(projectDir, `${priorSessionId}.jsonl`), "")
+
+    // Prior session has mixed tasks
+    await createTaskFile(home, priorSessionId, {
+      id: "1",
+      subject: "Prior completed work",
+      status: "completed",
+    })
+    await createTaskFile(home, priorSessionId, {
+      id: "2",
+      subject: "Prior incomplete work",
+      status: "in_progress",
+    })
+
+    const r = await runHook(
+      HOOK,
+      { matcher: "compact", cwd, session_id: currentSessionId },
+      { HOME: home }
+    )
+    expect(r.exitCode).toBe(0)
+    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    expect(ctx).not.toContain("Prior completed work")
+    expect(ctx).toContain("Prior incomplete work")
+    expect(ctx).toContain("1 incomplete task(s)")
+  })
+
+  test("prior-session all-completed tasks produce no prior-session section", async () => {
+    const home = await createTempDir()
+    const currentSessionId = `current-${Date.now()}`
+    const priorSessionId = `prior-${Date.now()}`
+    const cwd = "/Users/testuser/myproject2"
+
+    const projectKey = projectKeyFromCwd(cwd)
+    const projectDir = join(home, ".claude", "projects", projectKey)
+    await mkdir(projectDir, { recursive: true })
+    await writeFile(join(projectDir, `${priorSessionId}.jsonl`), "")
+
+    await createTaskFile(home, priorSessionId, {
+      id: "1",
+      subject: "All done A",
+      status: "completed",
+    })
+    await createTaskFile(home, priorSessionId, {
+      id: "2",
+      subject: "All done B",
+      status: "completed",
+    })
+
+    const r = await runHook(
+      HOOK,
+      { matcher: "compact", cwd, session_id: currentSessionId },
+      { HOME: home }
+    )
+    expect(r.exitCode).toBe(0)
+    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    expect(ctx).not.toContain("All done A")
+    expect(ctx).not.toContain("All done B")
+    expect(ctx).not.toContain("Prior session")
   })
 })
 
