@@ -260,9 +260,21 @@ export async function getActionableIssues(cwd: string, filterUser?: string): Pro
     try {
       const store = getIssueStore()
       store.upsertIssues(repoSlug, issues)
-      await replayPendingMutations(repoSlug, cwd, store)
-    } catch {
-      // SQLite write failure is non-fatal
+      const pending = store.pendingCount(repoSlug)
+      if (pending > 0) {
+        const result = await replayPendingMutations(repoSlug, cwd, store)
+        const parts: string[] = []
+        if (result.replayed > 0) parts.push(`${result.replayed} replayed`)
+        if (result.failed > 0) parts.push(`${result.failed} failed`)
+        if (result.discarded > 0) parts.push(`${result.discarded} discarded`)
+        if (parts.length > 0) {
+          console.error(`[swiz] mutation replay (${pending} pending): ${parts.join(", ")}`)
+        }
+      }
+    } catch (err) {
+      console.error(
+        `[swiz] issue cache/replay error: ${err instanceof Error ? err.message : String(err)}`
+      )
     }
   }
 

@@ -219,8 +219,16 @@ async function executeMutation(mutation: MutationPayload, cwd: string): Promise<
         stdout: "pipe",
         stderr: "pipe",
       })
+      const [, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
       await proc.exited
-      return proc.exitCode === 0
+      if (proc.exitCode !== 0) {
+        logReplayError(`gh issue close #${num}`, stderr)
+        return false
+      }
+      return true
     }
     case "comment": {
       if (!mutation.body) return true // nothing to post
@@ -229,8 +237,16 @@ async function executeMutation(mutation: MutationPayload, cwd: string): Promise<
         stdout: "pipe",
         stderr: "pipe",
       })
+      const [, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
       await proc.exited
-      return proc.exitCode === 0
+      if (proc.exitCode !== 0) {
+        logReplayError(`gh issue comment #${num}`, stderr)
+        return false
+      }
+      return true
     }
     case "resolve": {
       // Resolve = comment (if body) + close
@@ -240,25 +256,47 @@ async function executeMutation(mutation: MutationPayload, cwd: string): Promise<
           stdout: "pipe",
           stderr: "pipe",
         })
+        const [, cpStderr] = await Promise.all([
+          new Response(cp.stdout).text(),
+          new Response(cp.stderr).text(),
+        ])
         await cp.exited
-        if (cp.exitCode !== 0) return false
+        if (cp.exitCode !== 0) {
+          logReplayError(`gh issue comment #${num} (resolve)`, cpStderr)
+          return false
+        }
       }
       const cl = Bun.spawn(["gh", "issue", "close", num], {
         cwd,
         stdout: "pipe",
         stderr: "pipe",
       })
+      const [, clStderr] = await Promise.all([
+        new Response(cl.stdout).text(),
+        new Response(cl.stderr).text(),
+      ])
       await cl.exited
-      return cl.exitCode === 0
+      if (cl.exitCode !== 0) {
+        logReplayError(`gh issue close #${num} (resolve)`, clStderr)
+        return false
+      }
+      return true
     }
     default:
       return false
   }
 }
 
+/** Log a replay error to stderr. Truncates long messages. */
+function logReplayError(action: string, stderr: string): void {
+  const msg = stderr.trim().slice(0, 200)
+  console.error(`[swiz] replay failed: ${action}${msg ? ` — ${msg}` : ""}`)
+}
+
 /**
  * Best-effort replay: resolve repo slug from cwd and drain pending mutations.
  * Catches all errors — never throws. Safe to call from any entry point.
+ * Logs outcomes to stderr so failures are visible without blocking execution.
  */
 export async function tryReplayPendingMutations(cwd?: string): Promise<void> {
   try {
@@ -269,11 +307,23 @@ export async function tryReplayPendingMutations(cwd?: string): Promise<void> {
     const slug = await getRepoSlug(dir)
     if (!slug) return
     const store = getIssueStore()
-    if (store.pendingCount(slug) === 0) return
-    await replayPendingMutations(slug, dir, store)
-  } catch {
-    // Non-fatal — never block the calling command
+    const pending = store.pendingCount(slug)
+    if (pending === 0) return
+    const result = await replayPendingMutations(slug, dir, store)
+    logReplayResult(result, pending)
+  } catch (err) {
+    console.error(`[swiz] replay error: ${err instanceof Error ? err.message : String(err)}`)
   }
+}
+
+/** Log the outcome of a replay attempt to stderr. */
+function logReplayResult(result: ReplayResult, originalCount: number): void {
+  const parts: string[] = []
+  if (result.replayed > 0) parts.push(`${result.replayed} replayed`)
+  if (result.failed > 0) parts.push(`${result.failed} failed`)
+  if (result.discarded > 0) parts.push(`${result.discarded} discarded`)
+  if (parts.length === 0) return
+  console.error(`[swiz] mutation replay (${originalCount} pending): ${parts.join(", ")}`)
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
