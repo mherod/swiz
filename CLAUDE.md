@@ -219,6 +219,8 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
 
 **DO** invoke the `/push` skill before running `git push` or `swiz push-wait`. A PreToolUse hook blocks push if the skill has not been invoked in the current session. Always call `/push` first — it enforces collaboration checks and the complete push workflow.
 
+**DON'T** proceed with a main-branch push if the collaboration guard check fails or errors. The push skill's Step 0 collaboration guard is a mandatory safety gate that verifies the repository collaboration state. If the guard errors (e.g., zsh parsing errors with `! $GH_AVAILABLE`), stop immediately, fix the check, and rerun the guard before pushing. Bypassing a failed guard leaves the push decision unsafe.
+
 **Pre-push checklist:**
 1. `git log origin/main..HEAD --oneline` — review commits before pushing.
 2. Before `git push`: `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`; confirm solo personal project before pushing to `main`.
