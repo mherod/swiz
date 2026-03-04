@@ -275,10 +275,25 @@ async function main(): Promise<void> {
 
   // Block if incomplete tasks exist
   if (incompleteDetails.length > 0) {
+    const incompleteTasks = allTasks.filter(
+      (t) => t.id && t.id !== "null" && (t.status === "pending" || t.status === "in_progress")
+    )
+    const completeCommands = incompleteTasks
+      .map(
+        (t) => `  swiz tasks complete ${t.id} --session ${sessionId} --evidence "note:completed"`
+      )
+      .join("\n")
     blockStop(
       "Incomplete tasks found:\n\n" +
         incompleteDetails.join("\n") +
-        "\n\nComplete the work described in each task before stopping."
+        "\n\n" +
+        formatActionPlan(
+          [
+            `If the work is already done, mark the tasks complete:\n${completeCommands}`,
+            "If the work is still needed, complete it before stopping.",
+          ],
+          { translateToolNames: true }
+        )
     )
   }
 

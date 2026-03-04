@@ -735,6 +735,9 @@ describe("sessionstart-compact-context: positive paths", () => {
     expect(ctx).not.toContain("Prior completed work")
     expect(ctx).toContain("Prior incomplete work")
     expect(ctx).toContain("1 incomplete task(s)")
+    // Verify session-specific completion command is offered
+    expect(ctx).toContain("swiz tasks complete")
+    expect(ctx).toContain(`--session ${priorSessionId}`)
   })
 
   test("prior-session all-completed tasks produce no prior-session section", async () => {

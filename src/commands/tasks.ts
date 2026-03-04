@@ -808,11 +808,21 @@ export const tasksCommand: Command = {
           const filterCwd = process.cwd()
           const sessions = await getSessions(filterCwd)
           for (let i = 1; i < sessions.length; i++) {
-            const prev = await readTasks(sessions[i]!)
-            if (prev.some((t) => t.status === "pending" || t.status === "in_progress")) {
+            const prevSessionId = sessions[i]!
+            const prev = await readTasks(prevSessionId)
+            const prevIncomplete = prev.filter(
+              (t) => t.status === "pending" || t.status === "in_progress"
+            )
+            if (prevIncomplete.length > 0) {
               console.log(
-                `  ${DIM}Incomplete tasks in previous session: ${sessions[i]!.slice(0, 8)}...${RESET}\n`
+                `  ${DIM}Incomplete tasks in previous session: ${prevSessionId.slice(0, 8)}...${RESET}`
               )
+              for (const t of prevIncomplete) {
+                console.log(
+                  `    ${DIM}swiz tasks complete ${t.id} --session ${prevSessionId} --evidence "note:done"${RESET}`
+                )
+              }
+              console.log()
               break
             }
           }
