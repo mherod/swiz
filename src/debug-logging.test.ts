@@ -2,14 +2,14 @@ import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import { describe, expect, it } from "vitest"
 
-// ─── debugLog enforcement ──────────────────────────────────────────────────
-// Prevents diagnostic stderr from bypassing the shared `debugLog` utility
-// in `src/debug.ts`. All non-user-facing console.error/console.warn calls
-// must use `debugLog` so they stay silent by default (gated on SWIZ_DEBUG).
+// ─── console usage enforcement ─────────────────────────────────────────────
+// Guards ALL console methods in src/ behind explicit allowlists.
+// - console.error/console.warn → STDERR_ALLOWLIST (diagnostic → use debugLog)
+// - console.log/console.info   → STDOUT_ALLOWLIST (CLI commands only)
 //
-// Files that legitimately produce user-facing stderr are allowlisted below.
-// Adding a file here requires justification — it must be intentional CLI
-// output, not diagnostic logging.
+// Adding a file to either allowlist requires a justification comment.
+// Non-command files must use `debugLog` from `src/debug.ts` for diagnostics
+// and must not produce stdout/stderr directly.
 
 const SRC_ROOT = join(import.meta.dirname ?? ".", "..")
 
@@ -25,6 +25,31 @@ const STDERR_ALLOWLIST = new Set([
   "src/commands/dispatch.ts",
   // The shared debug utility itself
   "src/debug.ts",
+])
+
+/** Files in src/ that legitimately use console.log/console.info for CLI output. */
+const STDOUT_ALLOWLIST = new Set([
+  // CLI command implementations — each produces user-facing terminal output
+  "src/commands/ci-wait.ts",
+  "src/commands/cleanup.ts",
+  "src/commands/continue.ts",
+  "src/commands/dispatch.ts",
+  "src/commands/doctor.ts",
+  "src/commands/help.ts",
+  "src/commands/hooks.ts",
+  "src/commands/install.ts",
+  "src/commands/issue.ts",
+  "src/commands/push-wait.ts",
+  "src/commands/sentiment.ts",
+  "src/commands/session.ts",
+  "src/commands/settings.ts",
+  "src/commands/shim.ts",
+  "src/commands/skill.ts",
+  "src/commands/state.ts",
+  "src/commands/status.ts",
+  "src/commands/tasks.ts",
+  "src/commands/transcript.ts",
+  "src/commands/uninstall.ts",
 ])
 
 /** Collect all .ts files under src/, excluding test files. */
@@ -80,6 +105,36 @@ describe("debugLog enforcement", () => {
     ).toEqual([])
   })
 
+  it("no non-allowlisted file uses console.log or console.info", () => {
+    const violations: string[] = []
+
+    for (const filePath of sourceFiles) {
+      const rel = relative(SRC_ROOT, filePath)
+      if (STDOUT_ALLOWLIST.has(rel)) continue
+
+      const content = readFileSync(filePath, "utf8")
+      const lines = content.split("\n")
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!
+        const trimmed = line.trim()
+        if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue
+
+        if (/\bconsole\.(log|info)\b/.test(line)) {
+          violations.push(`${rel}:${i + 1}: ${trimmed}`)
+        }
+      }
+    }
+
+    expect(
+      violations,
+      `Found console.log/console.info in non-allowlisted files. ` +
+        `CLI output belongs in src/commands/ files only. ` +
+        `For diagnostics, use \`import { debugLog } from "./debug.ts"\`.\n\n` +
+        violations.map((v) => `  ${v}`).join("\n")
+    ).toEqual([])
+  })
+
   it("all non-allowlisted files that import debugLog use src/debug.ts", () => {
     const wrongImports: string[] = []
 
@@ -106,7 +161,11 @@ describe("debugLog enforcement", () => {
   it("allowlisted files actually exist", () => {
     for (const rel of STDERR_ALLOWLIST) {
       const full = join(SRC_ROOT, rel)
-      expect(statSync(full).isFile(), `Allowlisted file missing: ${rel}`).toBe(true)
+      expect(statSync(full).isFile(), `STDERR_ALLOWLIST file missing: ${rel}`).toBe(true)
+    }
+    for (const rel of STDOUT_ALLOWLIST) {
+      const full = join(SRC_ROOT, rel)
+      expect(statSync(full).isFile(), `STDOUT_ALLOWLIST file missing: ${rel}`).toBe(true)
     }
   })
 })
