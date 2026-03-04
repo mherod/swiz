@@ -411,6 +411,25 @@ export async function writeProjectState(cwd: string, state: ProjectState): Promi
   await Bun.write(path, JSON.stringify({ ...existing, state, stateHistory: history }, null, 2))
 }
 
+export async function writeProjectSettings(
+  cwd: string,
+  updates: Partial<ProjectSwizSettings>
+): Promise<string> {
+  const path = getProjectSettingsPath(cwd)
+  await mkdir(dirname(path), { recursive: true })
+  let existing: Record<string, unknown> = {}
+  const file = Bun.file(path)
+  if (await file.exists()) {
+    try {
+      existing = (await file.json()) as Record<string, unknown>
+    } catch {
+      // Ignore parse errors — overwrite with clean object
+    }
+  }
+  await Bun.write(path, JSON.stringify({ ...existing, ...updates }, null, 2))
+  return path
+}
+
 export async function readProjectSettings(cwd: string): Promise<ProjectSwizSettings | null> {
   const path = getProjectSettingsPath(cwd)
   const file = Bun.file(path)

@@ -183,7 +183,7 @@ describe("swiz settings", () => {
       home
     )
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain(`for session ${sessionId}`)
+    expect(result.stdout).toContain(`(session ${sessionId})`)
 
     const configPath = join(home, ".swiz", "settings.json")
     const text = await readFile(configPath, "utf-8")

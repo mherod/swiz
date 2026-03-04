@@ -7,6 +7,7 @@ import {
   readProjectSettings,
   readSwizSettings,
   resolvePolicy,
+  writeProjectSettings,
   writeSwizSettings,
 } from "../settings.ts"
 import { findSessions, projectKeyFromCwd } from "../transcript-utils.ts"
@@ -32,13 +33,14 @@ type NumericSettingKey =
 type StringSettingKey = "narratorVoice" | "ambitionMode"
 type SettingKey = BooleanSettingKey | NumericSettingKey | StringSettingKey
 type Action = "show" | "enable" | "disable" | "set" | "disable-hook" | "enable-hook"
+type SettingsScope = "global" | "project" | "session"
 
 interface ParsedSettingsArgs {
   action: Action
   settingArg?: string
   settingValue?: string
   targetDir: string
-  sessionRequested: boolean
+  scope: SettingsScope
   sessionQuery: string | null
 }
 
@@ -47,7 +49,8 @@ const PROJECTS_DIR = join(HOME, ".claude", "projects")
 
 function usage(): string {
   return (
-    "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--session [id]] [--dir <path>]\n" +
+    "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--global | --project | --session [id]] [--dir <path>]\n" +
+    "Scope: --global (default, ~/.swiz/settings.json), --project (.swiz/config.json), --session [id] (per-session)\n" +
     "Supported settings: auto-continue, critiques-enabled, pr-merge-mode, push-gate, sandboxed-edits, speak,\n" +
     "  pr-age-gate (minutes, 0 to disable), narrator-voice (string, e.g. Samantha),\n" +
     "  narrator-speed (words per minute, 0 for default), ambition-mode (standard|aggressive),\n" +
@@ -194,8 +197,9 @@ function isStringSetting(key: SettingKey): key is StringSettingKey {
 function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
   const positionals: string[] = []
   let targetDir = process.cwd()
-  let sessionRequested = false
+  let scope: SettingsScope = "global"
   let sessionQuery: string | null = null
+  let scopeExplicit = false
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -209,8 +213,21 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
       continue
     }
 
+    if (arg === "--global" || arg === "-g") {
+      scope = "global"
+      scopeExplicit = true
+      continue
+    }
+
+    if (arg === "--project" || arg === "-p") {
+      scope = "project"
+      scopeExplicit = true
+      continue
+    }
+
     if (arg === "--session" || arg === "-s") {
-      sessionRequested = true
+      scope = "session"
+      scopeExplicit = true
       if (next && !next.startsWith("-")) {
         sessionQuery = next
         i++
@@ -220,6 +237,10 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
 
     positionals.push(arg)
   }
+
+  // Backwards compat: if no explicit scope flag was given but --session was the old pattern
+  // The new default is "global" which matches old behavior when --session was absent
+  void scopeExplicit
 
   const rawAction = (positionals[0] ?? "show").toLowerCase()
   if (
@@ -238,7 +259,7 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
     settingArg: positionals[1],
     settingValue: positionals[2],
     targetDir,
-    sessionRequested,
+    scope,
     sessionQuery,
   }
 }
@@ -367,9 +388,10 @@ function printSettings(
 }
 
 async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
-  const sessionId = parsed.sessionRequested
-    ? await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
-    : null
+  const sessionId =
+    parsed.scope === "session"
+      ? await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
+      : null
   const settings = await readSwizSettings({ strict: true })
   const effective = getEffectiveSwizSettings(settings, sessionId)
   const path = getSwizSettingsPath()
@@ -403,26 +425,38 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
       `"${parsed.settingArg}" is not a boolean setting. Use: swiz settings set ${parsed.settingArg} <value>\n${usage()}`
     )
   }
-  const sessionId = parsed.sessionRequested
-    ? await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
-    : null
-  const current = await readSwizSettings({ strict: true })
-  const next = sessionId
-    ? {
-        ...current,
-        sessions: {
-          ...current.sessions,
-          [sessionId]: {
-            ...(current.sessions[sessionId] ?? { autoContinue: current.autoContinue }),
-            [key]: enabled,
-          },
+
+  const scopeLabel = parsed.scope
+  let path: string
+
+  if (parsed.scope === "session") {
+    const sessionId = await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
+    const current = await readSwizSettings({ strict: true })
+    const next = {
+      ...current,
+      sessions: {
+        ...current.sessions,
+        [sessionId]: {
+          ...(current.sessions[sessionId] ?? { autoContinue: current.autoContinue }),
+          [key]: enabled,
         },
-      }
-    : { ...current, [key]: enabled }
-  const path = await writeSwizSettings(next)
-  console.log(
-    `\n  ${enabled ? "Enabled" : "Disabled"} ${parsed.settingArg ?? key}${sessionId ? ` for session ${sessionId}` : ""}`
-  )
+      },
+    }
+    path = await writeSwizSettings(next)
+    console.log(
+      `\n  ${enabled ? "Enabled" : "Disabled"} ${parsed.settingArg ?? key} (session ${sessionId})`
+    )
+  } else if (parsed.scope === "project") {
+    path = await writeProjectSettings(parsed.targetDir, { [key]: enabled })
+    console.log(`\n  ${enabled ? "Enabled" : "Disabled"} ${parsed.settingArg ?? key} (project)`)
+  } else {
+    const current = await readSwizSettings({ strict: true })
+    path = await writeSwizSettings({ ...current, [key]: enabled })
+    console.log(
+      `\n  ${enabled ? "Enabled" : "Disabled"} ${parsed.settingArg ?? key} (${scopeLabel})`
+    )
+  }
+
   console.log(`  Saved: ${path}\n`)
 
   // Test TTS immediately when enabling speak — use configured voice/speed
@@ -449,10 +483,8 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
         )
       }
     }
-    const current = await readSwizSettings({ strict: true })
-    const next = { ...current, [key]: parsed.settingValue }
-    const path = await writeSwizSettings(next)
-    console.log(`\n  Set ${parsed.settingArg} = ${parsed.settingValue}`)
+    const path = await writeSettingToScope(parsed, key, parsed.settingValue)
+    console.log(`\n  Set ${parsed.settingArg} = ${parsed.settingValue} (${parsed.scope})`)
     console.log(`  Saved: ${path}\n`)
     return
   }
@@ -463,27 +495,69 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
       `Invalid value "${parsed.settingValue}". Must be a non-negative integer.\n${usage()}`
     )
   }
-  const current = await readSwizSettings({ strict: true })
-  const next = { ...current, [key]: value }
-  const path = await writeSwizSettings(next)
+  const path = await writeSettingToScope(parsed, key, value)
   const label = value === 0 ? "system default" : `${value}`
-  console.log(`\n  Set ${parsed.settingArg} = ${label}`)
+  console.log(`\n  Set ${parsed.settingArg} = ${label} (${parsed.scope})`)
   console.log(`  Saved: ${path}\n`)
+}
+
+/** Write a single key-value pair to the appropriate scope. */
+async function writeSettingToScope(
+  parsed: ParsedSettingsArgs,
+  key: string,
+  value: unknown
+): Promise<string> {
+  if (parsed.scope === "project") {
+    return writeProjectSettings(parsed.targetDir, { [key]: value })
+  }
+  if (parsed.scope === "session") {
+    const sessionId = await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
+    const current = await readSwizSettings({ strict: true })
+    return writeSwizSettings({
+      ...current,
+      sessions: {
+        ...current.sessions,
+        [sessionId]: {
+          ...(current.sessions[sessionId] ?? { autoContinue: current.autoContinue }),
+          [key]: value,
+        },
+      },
+    })
+  }
+  // global
+  const current = await readSwizSettings({ strict: true })
+  return writeSwizSettings({ ...current, [key]: value })
 }
 
 async function disableHook(parsed: ParsedSettingsArgs): Promise<void> {
   const filename = parsed.settingArg
   if (!filename)
     throw new Error(`Missing hook filename.\nUsage: swiz settings disable-hook <filename>`)
+
+  if (parsed.scope === "project") {
+    const projectSettings = await readProjectSettings(parsed.targetDir)
+    const existing = projectSettings?.disabledHooks ?? []
+    if (existing.includes(filename)) {
+      console.log(`\n  ${filename} is already disabled (project)\n`)
+      return
+    }
+    const path = await writeProjectSettings(parsed.targetDir, {
+      disabledHooks: [...existing, filename],
+    })
+    console.log(`\n  Disabled hook: ${filename} (project)`)
+    console.log(`  Saved: ${path}\n`)
+    return
+  }
+
   const current = await readSwizSettings({ strict: true })
   const existing = current.disabledHooks ?? []
   if (existing.includes(filename)) {
-    console.log(`\n  ${filename} is already disabled\n`)
+    console.log(`\n  ${filename} is already disabled (global)\n`)
     return
   }
   const next = { ...current, disabledHooks: [...existing, filename] }
   const path = await writeSwizSettings(next)
-  console.log(`\n  Disabled hook: ${filename}`)
+  console.log(`\n  Disabled hook: ${filename} (global)`)
   console.log(`  Saved: ${path}\n`)
 }
 
@@ -491,15 +565,31 @@ async function enableHook(parsed: ParsedSettingsArgs): Promise<void> {
   const filename = parsed.settingArg
   if (!filename)
     throw new Error(`Missing hook filename.\nUsage: swiz settings enable-hook <filename>`)
+
+  if (parsed.scope === "project") {
+    const projectSettings = await readProjectSettings(parsed.targetDir)
+    const existing = projectSettings?.disabledHooks ?? []
+    if (!existing.includes(filename)) {
+      console.log(`\n  ${filename} is not in the disabled list (project)\n`)
+      return
+    }
+    const path = await writeProjectSettings(parsed.targetDir, {
+      disabledHooks: existing.filter((f) => f !== filename),
+    })
+    console.log(`\n  Re-enabled hook: ${filename} (project)`)
+    console.log(`  Saved: ${path}\n`)
+    return
+  }
+
   const current = await readSwizSettings({ strict: true })
   const existing = current.disabledHooks ?? []
   if (!existing.includes(filename)) {
-    console.log(`\n  ${filename} is not in the disabled list\n`)
+    console.log(`\n  ${filename} is not in the disabled list (global)\n`)
     return
   }
   const next = { ...current, disabledHooks: existing.filter((f) => f !== filename) }
   const path = await writeSwizSettings(next)
-  console.log(`\n  Re-enabled hook: ${filename}`)
+  console.log(`\n  Re-enabled hook: ${filename} (global)`)
   console.log(`  Saved: ${path}\n`)
 }
 
@@ -507,7 +597,7 @@ export const settingsCommand: Command = {
   name: "settings",
   description: "View and modify swiz global and per-session settings",
   usage:
-    "swiz settings [show | enable <setting> | disable <setting>] [--session [id]] [--dir <path>]",
+    "swiz settings [show | enable <setting> | disable <setting>] [--global | --project | --session [id]] [--dir <path>]",
   options: [
     { flags: "show", description: "Show current effective settings (default action)" },
     { flags: "enable auto-continue", description: "Enable stop auto-continue behavior" },
@@ -590,10 +680,21 @@ export const settingsCommand: Command = {
       description: "Max words for CLAUDE.md/memory files before compaction advice (default: 5000)",
     },
     {
-      flags: "--session, -s [id]",
-      description: "Target session scope (latest for --dir by default, or prefix match by id)",
+      flags: "--global, -g",
+      description: "Write to global settings (~/.swiz/settings.json) [default]",
     },
-    { flags: "--dir, -d <path>", description: "Target project directory for session lookup" },
+    {
+      flags: "--project, -p",
+      description: "Write to project settings (.swiz/config.json in --dir or cwd)",
+    },
+    {
+      flags: "--session, -s [id]",
+      description: "Write to session scope (latest for --dir by default, or prefix match by id)",
+    },
+    {
+      flags: "--dir, -d <path>",
+      description: "Target project directory for project/session scope",
+    },
   ],
   async run(args) {
     const parsed = parseSettingsArgs(args)
