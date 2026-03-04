@@ -7,8 +7,8 @@
  */
 
 import { existsSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
 import { readSwizSettings } from "../src/settings.ts"
+import { spawnSpeak } from "./hook-utils.ts"
 
 // Check if speak is enabled in swiz settings (disabled by default)
 const settings = await readSwizSettings()
@@ -130,24 +130,9 @@ if (!(await acquireLock())) process.exit(0)
 // Start heartbeat interval to keep lock alive during long say invocations
 const heartbeatInterval = setInterval(heartbeat, HEARTBEAT_MS)
 
-// Speak, then release lock — invoke sibling speak.ts from the hooks directory
-const speakScript = join(dirname(import.meta.path), "speak.ts")
-const speakArgs = ["bun", speakScript]
-if (settings.narratorVoice) speakArgs.push("--voice", settings.narratorVoice)
-if (settings.narratorSpeed > 0) speakArgs.push("--speed", String(settings.narratorSpeed))
-
+// Speak, then release lock — delegate to shared spawnSpeak helper
 try {
-  const proc = Bun.spawn(speakArgs, {
-    stdin: new Response(truncated).body!,
-    stderr: "pipe",
-  })
-
-  const stderr = await new Response(proc.stderr).text()
-  await proc.exited
-
-  if (proc.exitCode !== 0 && stderr) {
-    writeFileSync(`/tmp/speak-error-${sessionId}.log`, stderr)
-  }
+  await spawnSpeak(truncated, settings)
 } finally {
   clearInterval(heartbeatInterval)
   try {

@@ -1,4 +1,5 @@
 import { dirname, join } from "node:path"
+import { spawnSpeak } from "../../hooks/hook-utils.ts"
 import {
   getEffectiveSwizSettings,
   getProjectSettingsPath,
@@ -361,23 +362,9 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
 
   // Test TTS immediately when enabling speak — use configured voice/speed
   if (enabled && key === "speak") {
-    const speakScript = join(dirname(Bun.main), "hooks", "speak.ts")
-    const speakArgs = ["bun", speakScript]
     const updatedSettings = await readSwizSettings()
-    if (updatedSettings.narratorVoice) speakArgs.push("--voice", updatedSettings.narratorVoice)
-    if (updatedSettings.narratorSpeed > 0)
-      speakArgs.push("--speed", String(updatedSettings.narratorSpeed))
-    speakArgs.push("TTS enabled")
-    try {
-      const proc = Bun.spawn(speakArgs, {
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      await proc.exited
-      // Silent failure is OK — if TTS doesn't work, user discovers it when assistant speaks
-    } catch {
-      // Ignore errors during verification
-    }
+    const speakScriptPath = join(dirname(Bun.main), "hooks", "speak.ts")
+    await spawnSpeak("TTS enabled", updatedSettings, speakScriptPath)
   }
 }
 

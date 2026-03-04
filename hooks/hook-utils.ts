@@ -1287,3 +1287,33 @@ export interface SessionHookInput {
   matcher?: string
   hook_event_name?: string
 }
+
+/**
+ * Shared speak invocation helper. Resolves the speak.ts path, builds narrator
+ * CLI args from settings, pipes `text` to stdin, and awaits completion.
+ *
+ * @param text            Text to speak (piped to speak.ts via stdin).
+ * @param settings        Object with `narratorVoice` and `narratorSpeed` fields.
+ * @param speakScriptPath Absolute path to speak.ts. Defaults to sibling speak.ts
+ *                        next to hook-utils.ts (hooks/ directory).
+ */
+export async function spawnSpeak(
+  text: string,
+  settings: { narratorVoice: string; narratorSpeed: number },
+  speakScriptPath?: string
+): Promise<void> {
+  const scriptPath = speakScriptPath ?? join(dirname(import.meta.path), "speak.ts")
+  const speakArgs = ["bun", scriptPath]
+  if (settings.narratorVoice) speakArgs.push("--voice", settings.narratorVoice)
+  if (settings.narratorSpeed > 0) speakArgs.push("--speed", String(settings.narratorSpeed))
+  try {
+    const proc = Bun.spawn(speakArgs, {
+      stdin: new Response(text).body!,
+      stderr: "pipe",
+    })
+    await new Response(proc.stderr).text()
+    await proc.exited
+  } catch {
+    // Silent failure — TTS errors must not affect hook behaviour
+  }
+}
