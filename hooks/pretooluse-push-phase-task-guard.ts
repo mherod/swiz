@@ -14,6 +14,9 @@ import {
 
 const GIT_PUSH_RE = /\bgit\s+push\b/
 const GH_RUN_VIEW_CONCLUSION_RE = /\bgh\s+run\s+view\b.*\b(?:conclusion|--json)\b/
+// swiz push-ci runs push + CI polling internally; treat it as equivalent to
+// a manual `gh run view --json conclusion` verification in the transcript.
+const SWIZ_PUSH_CI_RE = /\bswiz\s+push-ci\b/
 
 const input: Record<string, unknown> = await Bun.stdin.json()
 const transcriptPath = input?.transcript_path as string | undefined
@@ -41,10 +44,11 @@ for (let i = cmds.length - 1; i >= 0; i--) {
 
 if (lastPushIdx === -1) process.exit(0)
 
-// Check if any gh run view with conclusion check appears after the push
+// Check if any CI verification appears after the push — either manual
+// `gh run view --json conclusion` or automatic `swiz push-ci`
 let hasPostPushCiVerification = false
 for (let i = lastPushIdx + 1; i < cmds.length; i++) {
-  if (GH_RUN_VIEW_CONCLUSION_RE.test(cmds[i]!)) {
+  if (GH_RUN_VIEW_CONCLUSION_RE.test(cmds[i]!) || SWIZ_PUSH_CI_RE.test(cmds[i]!)) {
     hasPostPushCiVerification = true
     break
   }

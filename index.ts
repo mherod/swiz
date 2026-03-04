@@ -10,6 +10,7 @@ import { installCommand } from "./src/commands/install.ts"
 import { issueCommand } from "./src/commands/issue.ts"
 import { memoryCommand } from "./src/commands/memory.ts"
 import { mergetoolCommand } from "./src/commands/mergetool.ts"
+import { pushCiCommand } from "./src/commands/push-ci.ts"
 import { pushWaitCommand } from "./src/commands/push-wait.ts"
 import { sentimentCommand } from "./src/commands/sentiment.ts"
 import { sessionCommand } from "./src/commands/session.ts"
@@ -42,6 +43,7 @@ registerCommand(ciWaitCommand)
 registerCommand(memoryCommand)
 registerCommand(mergetoolCommand)
 registerCommand(pushWaitCommand)
+registerCommand(pushCiCommand)
 registerCommand(doctorCommand)
 
 await run()

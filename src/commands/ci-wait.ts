@@ -28,7 +28,7 @@ async function getCiRunConclusion(commitSha: string): Promise<string | null> {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
-async function waitForCiCompletion(
+export async function waitForCiCompletion(
   commitSha: string,
   timeoutSeconds: number = 300
 ): Promise<{ conclusion: string; elapsed: number }> {

@@ -19,6 +19,8 @@ const STDERR_ALLOWLIST = new Set([
   "src/cli.ts",
   // CI failure/error status reporting with exit codes
   "src/commands/ci-wait.ts",
+  // push-ci failure reporting (CI conclusion !== "success")
+  "src/commands/push-ci.ts",
   // Interactive merge progress indicators (→ Gathering..., ✓ Resolved)
   "src/commands/mergetool.ts",
   // User-invoked replay trace (`swiz dispatch replay`)
@@ -46,6 +48,7 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/install.ts",
   "src/commands/issue.ts",
   "src/commands/memory.ts",
+  "src/commands/push-ci.ts",
   "src/commands/push-wait.ts",
   "src/commands/sentiment.ts",
   "src/commands/session.ts",
