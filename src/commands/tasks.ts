@@ -428,6 +428,88 @@ async function listTasks(sessionId: string, label: string) {
   )
 }
 
+async function listAllSessionsTasks(filterCwd?: string) {
+  const sessions = await getSessions(filterCwd)
+  const label = filterCwd ? "current project" : "all projects"
+
+  if (sessions.length === 0) {
+    console.log(`\n  ${BOLD}Tasks${RESET} ${DIM}(${label}, all sessions)${RESET}\n`)
+    console.log("  No sessions found.\n")
+    return
+  }
+
+  let totalTasks = 0
+  let totalIncomplete = 0
+  let totalCompleted = 0
+  let sessionsWithTasks = 0
+
+  for (const sessionId of sessions) {
+    const tasks = await readTasks(sessionId)
+    if (tasks.length === 0) continue
+
+    sessionsWithTasks++
+    totalTasks += tasks.length
+
+    console.log(`\n  ${BOLD}Session${RESET} ${DIM}${sessionId.slice(0, 8)}...${RESET}\n`)
+
+    const groups: [string, Task[]][] = [
+      ["IN PROGRESS", tasks.filter((t) => t.status === "in_progress")],
+      ["PENDING", tasks.filter((t) => t.status === "pending")],
+      ["COMPLETED", tasks.filter((t) => t.status === "completed")],
+      ["CANCELLED", tasks.filter((t) => t.status === "cancelled")],
+    ]
+
+    for (const [title, group] of groups) {
+      if (group.length === 0) continue
+      console.log(`  ${BOLD}${title}${RESET} (${group.length})\n`)
+      for (const task of group) {
+        const { emoji, color } = STATUS_STYLE[task.status]
+        console.log(
+          `  ${emoji} ${BOLD}#${task.id}${RESET} ${color}[${task.status.replace("_", " ").toUpperCase()}]${RESET} ${task.subject}`
+        )
+        if (task.description) {
+          const lines = task.description.split("\n").slice(0, 3)
+          for (const line of lines) console.log(`     ${DIM}${line}${RESET}`)
+          if (task.description.split("\n").length > 3) console.log(`     ${DIM}...${RESET}`)
+        }
+        if (task.status === "in_progress" && task.statusChangedAt) {
+          const live =
+            (task.elapsedMs ?? 0) + (Date.now() - new Date(task.statusChangedAt).getTime())
+          console.log(`     ${DIM}⏱  ${formatElapsed(Math.max(0, live))} elapsed${RESET}`)
+        } else if ((task.elapsedMs ?? 0) > 0) {
+          console.log(`     ${DIM}⏱  ${formatElapsed(task.elapsedMs!)} elapsed${RESET}`)
+        }
+        if (task.completionEvidence)
+          console.log(`     ${DIM}✓ Evidence: ${task.completionEvidence}${RESET}`)
+        if (task.completionTimestamp)
+          console.log(
+            `     ${DIM}✓ Completed: ${timeAgo(new Date(task.completionTimestamp))}${RESET}`
+          )
+        if (task.blockedBy.length)
+          console.log(`     ${DIM}Blocked by: #${task.blockedBy.join(", #")}${RESET}`)
+        if (task.blocks.length)
+          console.log(`     ${DIM}Blocks: #${task.blocks.join(", #")}${RESET}`)
+        console.log()
+      }
+    }
+
+    const incomplete = tasks.filter(
+      (t) => t.status === "pending" || t.status === "in_progress"
+    ).length
+    const completed = tasks.filter((t) => t.status === "completed").length
+    totalIncomplete += incomplete
+    totalCompleted += completed
+    console.log(
+      `  ${DIM}${incomplete}/${tasks.length} incomplete, ${completed} completed${RESET}\n`
+    )
+  }
+
+  console.log(
+    `\n  ${BOLD}All sessions summary:${RESET} ${sessionsWithTasks} session(s), ` +
+      `${totalIncomplete}/${totalTasks} incomplete, ${totalCompleted} completed\n`
+  )
+}
+
 async function createTask(sessionId: string, subject: string, description: string) {
   const tasks = await readTasks(sessionId)
   const prefix = sessionPrefix(sessionId)
@@ -646,7 +728,7 @@ export const tasksCommand: Command = {
   name: "tasks",
   description: "View and manage agent tasks",
   usage:
-    "swiz tasks [create|complete|evidence|status|complete-all] [--session <id>] [--all-projects] [--evidence <text>] [--verify <text>]",
+    "swiz tasks [create|complete|evidence|status|complete-all] [--session <id>] [--all-projects] [--all-sessions] [--evidence <text>] [--verify <text>]",
   options: [
     { flags: "create <subject> <desc>", description: "Create a new task in the current session" },
     {
@@ -665,6 +747,10 @@ export const tasksCommand: Command = {
     { flags: "--session <id>", description: "Target a specific session (prefix match)" },
     { flags: "--all-projects", description: "Show tasks from all projects, not just cwd" },
     {
+      flags: "--all-sessions",
+      description: "Show tasks from all sessions (not just the most recent)",
+    },
+    {
       flags: "--evidence <text>",
       description: "Completion evidence (commit:, pr:, file:, test:, note:)",
     },
@@ -676,10 +762,22 @@ export const tasksCommand: Command = {
   async run(args) {
     const subcommand = args[0]
 
-    if (!subcommand || subcommand === "--session" || subcommand === "--all-projects") {
-      const sessionId = await resolveSession(args)
+    if (
+      !subcommand ||
+      subcommand === "--session" ||
+      subcommand === "--all-projects" ||
+      subcommand === "--all-sessions"
+    ) {
       const allProjects = args.includes("--all-projects")
+      const allSessions = args.includes("--all-sessions")
+      const filterCwd = allProjects ? undefined : process.cwd()
 
+      if (allSessions) {
+        await listAllSessionsTasks(filterCwd)
+        return
+      }
+
+      const sessionId = await resolveSession(args)
       await listTasks(sessionId, allProjects ? "all projects" : "current project")
 
       if (!args.includes("--session") && !allProjects) {
