@@ -64,6 +64,12 @@ describe("stop-debug-statements file filter", () => {
     test("dispatch.ts is excluded", () => {
       expect(isScanned("dispatch.ts")).toBe(false)
     })
+
+    test("src/dispatch/ files are excluded", () => {
+      expect(isScanned("src/dispatch/engine.ts")).toBe(false)
+      expect(isScanned("src/dispatch/replay.ts")).toBe(false)
+      expect(isScanned("src/dispatch/filters.ts")).toBe(false)
+    })
   })
 
   describe("TEST_FILE_RE — test files are excluded", () => {
