@@ -617,7 +617,11 @@ async function updateStatus(
   console.log()
 }
 
-async function completeAll(filterCwd?: string) {
+async function completeAll(filterCwd?: string, evidence?: string) {
+  const resolvedEvidence = evidence ?? "note:bulk-complete"
+  const evidenceError = validateEvidence(resolvedEvidence)
+  if (evidenceError) throw new Error(evidenceError)
+
   const incomplete = await collectIncompleteTasks(filterCwd)
 
   if (incomplete.length === 0) {
@@ -629,7 +633,7 @@ async function completeAll(filterCwd?: string) {
     `\n  Completing ${incomplete.length} task(s) across ${new Set(incomplete.map((i) => i.sessionId)).size} session(s)...\n`
   )
   for (const { sessionId, task } of incomplete) {
-    await updateStatus(sessionId, task.id, "completed", "bulk-complete", undefined, filterCwd)
+    await updateStatus(sessionId, task.id, "completed", resolvedEvidence, undefined, filterCwd)
   }
 }
 
@@ -890,7 +894,8 @@ export const tasksCommand: Command = {
       }
 
       case "complete-all": {
-        await completeAll(filterCwd)
+        const evidence = extractFlag(rest, "--evidence")
+        await completeAll(filterCwd, evidence ?? undefined)
         break
       }
 
