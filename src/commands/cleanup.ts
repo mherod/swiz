@@ -5,6 +5,7 @@ import type { Command } from "../types.ts"
 
 const HOME = process.env.HOME ?? "~"
 const PROJECTS_DIR = join(HOME, ".claude", "projects")
+const TASKS_DIR = join(HOME, ".claude", "tasks")
 
 // ─── Path decoding ────────────────────────────────────────────────────────────
 
@@ -124,9 +125,12 @@ async function trashDir(path: string): Promise<boolean> {
 // ─── Session discovery ───────────────────────────────────────────────────────
 
 interface SessionInfo {
+  sessionId: string
   path: string
   birthtimeMs: number
   sizeBytes: number
+  taskDirPath: string | null
+  taskDirSizeBytes: number
 }
 
 async function findSessions(
@@ -154,10 +158,26 @@ async function findSessions(
     }
     if (!s.isDirectory()) continue
 
+    const taskDirPath = join(TASKS_DIR, entry)
+    let taskDirSizeBytes = 0
+    let taskDirExists = false
+    try {
+      const tStat = await stat(taskDirPath)
+      if (tStat.isDirectory()) {
+        taskDirExists = true
+        taskDirSizeBytes = await dirSize(taskDirPath)
+      }
+    } catch {
+      // No matching task directory — that's fine
+    }
+
     const info: SessionInfo = {
+      sessionId: entry,
       path: sessionPath,
       birthtimeMs: s.birthtimeMs,
       sizeBytes: await dirSize(sessionPath),
+      taskDirPath: taskDirExists ? taskDirPath : null,
+      taskDirSizeBytes,
     }
 
     if (s.birthtimeMs < cutoffMs) {
@@ -223,7 +243,7 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
 
 export const cleanupCommand: Command = {
   name: "cleanup",
-  description: "Remove old Claude Code session data from ~/.claude/projects/",
+  description: "Remove old Claude Code session data from ~/.claude/projects/ and ~/.claude/tasks/",
   usage: "swiz cleanup [--older-than <time>] [--dry-run] [--project <name>]",
   options: [
     {
@@ -307,15 +327,18 @@ export const cleanupCommand: Command = {
 
     let totalOldCount = 0
     let totalOldBytes = 0
+    let totalOldTaskDirs = 0
 
     for (let i = 0; i < results.length; i++) {
       const { keep, old, stale } = results[i]!
       const displayName = decodedNames[i]!
       const total = keep.length + old.length
-      const keepBytes = keep.reduce((sum, s) => sum + s.sizeBytes, 0)
-      const oldBytes = old.reduce((sum, s) => sum + s.sizeBytes, 0)
+      const keepBytes = keep.reduce((sum, s) => sum + s.sizeBytes + s.taskDirSizeBytes, 0)
+      const oldBytes = old.reduce((sum, s) => sum + s.sizeBytes + s.taskDirSizeBytes, 0)
+      const oldTaskDirCount = old.filter((s) => s.taskDirPath !== null).length
       totalOldCount += old.length
       totalOldBytes += oldBytes
+      totalOldTaskDirs += oldTaskDirCount
 
       const staleSuffix = stale ? ` ${DIM}(path gone)${RESET}` : ""
       const trashPart =
@@ -335,8 +358,12 @@ export const cleanupCommand: Command = {
       return
     }
 
+    const taskSuffix =
+      totalOldTaskDirs > 0
+        ? ` + ${totalOldTaskDirs} task ${totalOldTaskDirs === 1 ? "dir" : "dirs"}`
+        : ""
     console.log(
-      `  Total: ${BOLD}${totalOldCount} sessions${RESET} trashable, ~${formatBytes(totalOldBytes)}`
+      `  Total: ${BOLD}${totalOldCount} sessions${RESET}${taskSuffix} trashable, ~${formatBytes(totalOldBytes)}`
     )
     console.log()
 
@@ -345,21 +372,26 @@ export const cleanupCommand: Command = {
       return
     }
 
-    // Trash sessions
-    console.log(`  Moving ${totalOldCount} session(s) to Trash...`)
+    // Trash sessions and their matching task directories
+    console.log(`  Moving ${totalOldCount} session(s)${taskSuffix} to Trash...`)
     let succeeded = 0
     let failed = 0
+    let taskDirsRemoved = 0
 
     for (const { old } of results) {
       for (const session of old) {
         if (await trashDir(session.path)) succeeded++
         else failed++
+        if (session.taskDirPath && (await trashDir(session.taskDirPath))) {
+          taskDirsRemoved++
+        }
       }
     }
 
     console.log()
+    const taskDirNote = taskDirsRemoved > 0 ? ` + ${taskDirsRemoved} task dir(s)` : ""
     console.log(
-      `  ${GREEN}${BOLD}Done.${RESET} ${succeeded} session(s) moved to Trash (~${formatBytes(totalOldBytes)} reclaimed).`
+      `  ${GREEN}${BOLD}Done.${RESET} ${succeeded} session(s)${taskDirNote} moved to Trash (~${formatBytes(totalOldBytes)} reclaimed).`
     )
     if (failed > 0) {
       console.log(
