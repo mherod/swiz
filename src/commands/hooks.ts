@@ -235,7 +235,7 @@ async function showSources() {
   // Plugin hooks
   const projectSettings = await readProjectSettings(cwd)
   const pluginResults = projectSettings?.plugins?.length
-    ? await loadAllPlugins(projectSettings.plugins, cwd)
+    ? await loadAllPlugins(projectSettings.plugins, cwd, { verbose: true })
     : []
 
   const pluginByEvent = new Map<string, { file: string; plugin: string }[]>()

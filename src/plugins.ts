@@ -85,17 +85,32 @@ function resolveHookPaths(groups: HookGroup[], pluginDir: string): HookGroup[] {
   }))
 }
 
+export interface LoadPluginsOptions {
+  /** When true, log plugin errors to stderr. Use for install/status flows. */
+  verbose?: boolean
+}
+
 /**
  * Load all plugins from the project config and return their hooks
  * along with load status for each plugin.
+ *
+ * Error visibility policy:
+ * - verbose=true  → logs errors to stderr (install, status, hooks commands)
+ * - verbose=false → silent; callers inspect result.error (dispatch, runtime)
  */
 export async function loadAllPlugins(
   plugins: string[],
-  projectRoot: string
+  projectRoot: string,
+  options?: LoadPluginsOptions
 ): Promise<PluginResult[]> {
+  const verbose = options?.verbose ?? false
   const results: PluginResult[] = []
   for (const entry of plugins) {
-    results.push(await loadPlugin(entry, projectRoot))
+    const result = await loadPlugin(entry, projectRoot)
+    if (result.error && verbose) {
+      console.error(`[swiz] Warning: plugin ${result.name}: ${result.error}`)
+    }
+    results.push(result)
   }
   return results
 }

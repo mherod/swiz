@@ -519,12 +519,12 @@ export const installCommand: Command = {
       const cwd = process.cwd()
       const projectSettings = await readProjectSettings(cwd)
       if (projectSettings?.plugins?.length) {
-        const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
+        const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd, { verbose: true })
         const YELLOW = "\x1b[33m"
         console.log(`  Plugins:`)
         for (const result of pluginResults) {
           if (result.error) {
-            console.log(`    ${YELLOW}⚠ ${result.name}: ${result.error}${RESET}`)
+            console.log(`    ${YELLOW}⚠ ${result.name}${RESET}`)
           } else {
             const hookCount = result.hooks.reduce((n, g) => n + g.hooks.length, 0)
             console.log(`    ${GREEN}✓${RESET} ${result.name} (${hookCount} hook(s))`)
