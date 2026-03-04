@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { computeSubjectFingerprint } from "../hooks/hook-utils.ts"
 import {
   normalizeSubject,
   significantWords,
@@ -83,5 +84,49 @@ describe("subjectsOverlap", () => {
         normalizeSubject("Push CLAUDE.md commit update")
       )
     ).toBe(true)
+  })
+})
+
+describe("computeSubjectFingerprint", () => {
+  test("produces deterministic output", () => {
+    const fp1 = computeSubjectFingerprint("Push backward-compat error commit")
+    const fp2 = computeSubjectFingerprint("Push backward-compat error commit")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("is order-independent", () => {
+    const fp1 = computeSubjectFingerprint("Push backward-compat commit")
+    const fp2 = computeSubjectFingerprint("commit backward-compat Push")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("ignores punctuation and case", () => {
+    const fp1 = computeSubjectFingerprint("Push backward-compat commit")
+    const fp2 = computeSubjectFingerprint("push backward compat COMMIT")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("ignores stop words", () => {
+    const fp1 = computeSubjectFingerprint("Push the commit to main")
+    const fp2 = computeSubjectFingerprint("Push commit main")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("differs for unrelated subjects", () => {
+    const fp1 = computeSubjectFingerprint("Push backward-compat error commit")
+    const fp2 = computeSubjectFingerprint("Implement stale-task deduplication")
+    expect(fp1).not.toBe(fp2)
+  })
+
+  test("returns a hex string", () => {
+    const fp = computeSubjectFingerprint("Verify CI status")
+    expect(fp).toMatch(/^[0-9a-f]+$/)
+  })
+
+  test("identical subjects produce identical fingerprints", () => {
+    // The primary dedup case: same work described with same words
+    const fp1 = computeSubjectFingerprint("Verify CI for commit 11afbc8")
+    const fp2 = computeSubjectFingerprint("Verify CI for commit 11afbc8")
+    expect(fp1).toBe(fp2)
   })
 })

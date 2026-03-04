@@ -6,6 +6,7 @@
 import { join } from "node:path"
 
 import {
+  computeSubjectFingerprint,
   denyPreToolUse as deny,
   extractToolNamesFromTranscript,
   findLastTaskToolCallIndex,
@@ -48,14 +49,16 @@ export async function createBootstrapTask(
       .map((f) => parseInt(f.replace(".json", ""), 10))
       .filter((n) => !Number.isNaN(n))
     const nextId = ids.length > 0 ? Math.max(...ids) + 1 : 1
+    const subject = "Session bootstrap — describe current work"
     const task = {
       id: String(nextId),
-      subject: "Session bootstrap — describe current work",
+      subject,
       description:
         "Auto-created by pretooluse-require-tasks because no tasks existed. " +
         "Update this task with a description of the current work, then create follow-up tasks.",
       activeForm: "Bootstrapping session tasks",
       status: "in_progress",
+      subjectFingerprint: computeSubjectFingerprint(subject),
       blocks: [],
       blockedBy: [],
     }

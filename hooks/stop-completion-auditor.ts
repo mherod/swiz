@@ -6,6 +6,7 @@ import { readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import {
   blockStop,
+  computeSubjectFingerprint,
   computeTranscriptSummary,
   extractToolNamesFromTranscript,
   formatActionPlan,
@@ -172,20 +173,34 @@ async function main(): Promise<void> {
 
   // ── Stale-task deduplication ──────────────────────────────────────────────
   // After context compaction the agent may create a new task for work that an
-  // older task already described. When a completed task's subject substantially
-  // overlaps an incomplete task's subject, auto-complete the stale duplicate.
+  // older task already described. Use deterministic fingerprint matching as
+  // the primary key; fall back to fuzzy word overlap for legacy tasks.
   const completedTasks = allTasks.filter((t) => t.status === "completed")
   const incompleteTasks = allTasks.filter(
     (t) => t.id && t.id !== "null" && (t.status === "pending" || t.status === "in_progress")
   )
 
   if (completedTasks.length > 0 && incompleteTasks.length > 0) {
-    const completedSubjects = completedTasks.map((t) => normalizeSubject(t.subject))
+    // Build a set of completed fingerprints for O(1) lookup
+    const completedFingerprints = new Set<string>()
+    for (const t of completedTasks) {
+      const fp = t.subjectFingerprint ?? computeSubjectFingerprint(t.subject)
+      completedFingerprints.add(fp)
+    }
+
+    // Fuzzy fallback: precompute normalized subjects for legacy tasks without fingerprints
+    const completedNormalized = completedTasks.map((t) => normalizeSubject(t.subject))
+
     for (const stale of incompleteTasks) {
-      const staleNorm = normalizeSubject(stale.subject)
-      const isDuplicate = completedSubjects.some((cs) => subjectsOverlap(staleNorm, cs))
+      const staleFp = stale.subjectFingerprint ?? computeSubjectFingerprint(stale.subject)
+      // Primary: exact fingerprint match
+      let isDuplicate = completedFingerprints.has(staleFp)
+      // Fallback: fuzzy word overlap for edge cases (e.g., minor rewording)
+      if (!isDuplicate) {
+        const staleNorm = normalizeSubject(stale.subject)
+        isDuplicate = completedNormalized.some((cs) => subjectsOverlap(staleNorm, cs))
+      }
       if (isDuplicate) {
-        // Auto-complete: write the updated task file
         try {
           const taskPath = join(tasksDir, `${stale.id}.json`)
           const updated = {
@@ -194,7 +209,7 @@ async function main(): Promise<void> {
             completionEvidence: "note:auto-completed — duplicate of a completed task",
           }
           await Bun.write(taskPath, JSON.stringify(updated, null, 2))
-          stale.status = "completed" // Update in-memory for the rest of this run
+          stale.status = "completed"
         } catch {
           // Write failed — leave as-is and let the normal block message fire
         }

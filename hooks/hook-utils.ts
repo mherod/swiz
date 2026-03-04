@@ -502,6 +502,49 @@ export interface SessionTask {
   blocks?: string[]
   blockedBy?: string[]
   completionEvidence?: string
+  /** Deterministic fingerprint of the normalized subject for deduplication. */
+  subjectFingerprint?: string
+}
+
+// ─── Subject fingerprinting ──────────────────────────────────────────────
+
+const FINGERPRINT_STOP_WORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "for",
+  "to",
+  "in",
+  "of",
+  "on",
+  "with",
+  "is",
+  "was",
+  "be",
+])
+
+/**
+ * Compute a deterministic fingerprint from a task subject.
+ * Normalizes (lowercase, strip punctuation), extracts significant words
+ * (>2 chars, no stop words), sorts alphabetically, and hashes.
+ * Two subjects describing the same work produce the same fingerprint
+ * regardless of word order or minor wording differences.
+ */
+export function computeSubjectFingerprint(subject: string): string {
+  const normalized = subject
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  const words = normalized
+    .split(" ")
+    .filter((w) => w.length > 2 && !FINGERPRINT_STOP_WORDS.has(w))
+    .sort()
+  const canonical = words.join(" ")
+  // Use Bun's fast hash, truncated to 16 hex chars for readability
+  return Bun.hash(canonical).toString(16).padStart(16, "0")
 }
 
 /**
@@ -527,7 +570,13 @@ export async function readSessionTasks(
     if (!f.endsWith(".json") || f.startsWith(".")) continue
     try {
       const task = (await Bun.file(join(tasksDir, f)).json()) as SessionTask
-      if (task.id && task.subject && task.status) tasks.push(task)
+      if (task.id && task.subject && task.status) {
+        // Backfill fingerprint for tasks that predate the field
+        if (!task.subjectFingerprint) {
+          task.subjectFingerprint = computeSubjectFingerprint(task.subject)
+        }
+        tasks.push(task)
+      }
     } catch {
       // skip unreadable or malformed task files
     }

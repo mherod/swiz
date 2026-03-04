@@ -1,5 +1,6 @@
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { computeSubjectFingerprint } from "../../hooks/hook-utils.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
@@ -23,6 +24,8 @@ interface Task {
   statusChangedAt?: string
   /** Cumulative milliseconds spent in in_progress status */
   elapsedMs?: number
+  /** Deterministic fingerprint of the normalized subject for deduplication. */
+  subjectFingerprint?: string
 }
 
 interface AuditEntry {
@@ -287,6 +290,7 @@ async function createTask(sessionId: string, subject: string, description: strin
     status: "pending",
     statusChangedAt: new Date().toISOString(),
     elapsedMs: 0,
+    subjectFingerprint: computeSubjectFingerprint(subject),
     blocks: [],
     blockedBy: [],
   }
