@@ -179,6 +179,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-banned-commands.ts", timeout: 5 },
       { file: "pretooluse-git-index-lock.ts", timeout: 5 },
       { file: "pretooluse-no-npm.ts", timeout: 5 },
+      { file: "pretooluse-protect-sandbox.ts", timeout: 5 },
       { file: "pretooluse-long-sleep.ts", timeout: 5 },
       { file: "pretooluse-commit-checks-gate.ts", timeout: 5 },
       { file: "pretooluse-stale-approval-gate.ts", timeout: 10, cooldownSeconds: 300 },

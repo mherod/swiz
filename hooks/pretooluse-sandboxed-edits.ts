@@ -172,8 +172,8 @@ denyPreToolUse(
     `  Session cwd: ${cwd}`,
     "",
     "Only edits within the current project directory or temporary directories are allowed.",
-    "If you need to edit a file outside the project, disable the sandbox:",
-    "  swiz settings disable sandboxed-edits",
+    "If you need to edit a file outside the project, file an issue on the target repo instead:",
+    "  gh issue create --repo <owner>/<repo> --title '...' --body '...'",
     crossRepoHint,
   ]
     .filter(Boolean)
