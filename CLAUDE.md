@@ -252,6 +252,24 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
 
 **DON'T** use destructive git commands: `git revert`, `git restore`, `git stash`, `git reset --hard`, `git checkout -- <file>`. These discard or risk losing uncommitted work. If changes are accidentally lost, use `git reflog` to recover before doing anything else.
 
+## Settings Configuration
+
+Memory thresholds follow a 3-tier hierarchy with per-value source tracking.
+
+**DO** implement settings resolvers with explicit 3-tier hierarchy: project-level overrides take precedence over user-level settings, which take precedence over defaults. Each value independently resolves to its source tier.
+
+**DO** track the source of each resolved value independently. Use separate `source` fields for each setting (e.g., `memoryLineSource`, `memoryWordSource`), not a single `source` field covering all values. This allows each threshold to report where it actually comes from.
+
+**DO** always display effective configuration values in settings output, regardless of which tier they resolve to. Never hide values based on whether they are project-level overrides, user-level, or defaults. The settings display is the source of truth for the effective configuration.
+
+**DO** label each displayed setting with its source tier: `(project)`, `(user)`, or `(default)`. This provides complete visibility into the configuration hierarchy and helps users understand where values originate.
+
+**DON'T** conditionally hide settings based on source tier. A conditional like "only show if source === 'project'" breaks transparency by hiding user and default values. All tiers are valid configuration sources.
+
+**DON'T** use a single `source` field when multiple settings need independent source tracking. Per-value source fields enable precise tracking and make the resolver's logic clear.
+
+**DON'T** declare settings resolution complete without reading the actual implementation. Validate that: (1) the resolver correctly implements the 3-tier hierarchy, (2) per-value sources are tracked independently, (3) the display always shows all effective values with their sources.
+
 ## CLI Error Handling
 
 Commands in `src/commands/` must throw errors instead of calling `process.exit(1)`. `process.exit` terminates the process immediately, bypassing `finally` blocks and dropping any pending async work.
