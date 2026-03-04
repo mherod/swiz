@@ -13,7 +13,10 @@ import {
   isNotebookTool,
   isShellTool,
   isTaskCreateTool,
+  isTaskGetTool,
+  isTaskListTool,
   isTaskTool,
+  isTaskUpdateTool,
   isWriteTool,
 } from "../tool-matchers.ts"
 import { extractCwd, isWithinCooldown, markHookCooldown } from "./filters.ts"
@@ -55,8 +58,14 @@ export function toolMatchesToken(toolName: string, token: string): boolean {
   if (isEditTool(toolName) && isEditTool(token)) return true
   if (isWriteTool(toolName) && isWriteTool(token)) return true
   if (isNotebookTool(toolName) && isNotebookTool(token)) return true
-  if (isTaskTool(toolName) && isTaskTool(token)) return true
+  // Task tools: specific families first, then broad "Task" family
   if (isTaskCreateTool(toolName) && isTaskCreateTool(token)) return true
+  if (isTaskUpdateTool(toolName) && isTaskUpdateTool(token)) return true
+  if (isTaskListTool(toolName) && isTaskListTool(token)) return true
+  if (isTaskGetTool(toolName) && isTaskGetTool(token)) return true
+  // Broad "Task" family: only when token or toolName is the umbrella "Task"
+  if (token === "Task" && isTaskTool(toolName)) return true
+  if (toolName === "Task" && isTaskTool(token)) return true
   return false
 }
 
