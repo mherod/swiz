@@ -135,14 +135,21 @@ export function pluginErrorHint(code: PluginErrorCode): string {
 }
 
 /** Serialize plugin results to a JSON-friendly array for machine consumption. */
-export function pluginResultsToJson(
-  results: PluginResult[]
-): { name: string; ok: boolean; hookCount: number; errorCode?: string; hint?: string }[] {
+export function pluginResultsToJson(results: PluginResult[]): {
+  name: string
+  ok: boolean
+  hookCount: number
+  errorCode?: string
+  hint?: string
+  error?: string
+}[] {
   return results.map((r) => ({
     name: r.name,
     ok: !r.errorCode,
     hookCount: r.hooks.reduce((n, g) => n + g.hooks.length, 0),
-    ...(r.errorCode ? { errorCode: r.errorCode, hint: pluginErrorHint(r.errorCode) } : {}),
+    ...(r.errorCode
+      ? { errorCode: r.errorCode, hint: pluginErrorHint(r.errorCode), error: r.error }
+      : {}),
   }))
 }
 
