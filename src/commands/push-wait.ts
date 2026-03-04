@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs"
-import { getCanonicalPathHash } from "../../hooks/hook-utils.ts"
+import { getCanonicalPathHash } from "../git-helpers.ts"
 import type { Command } from "../types.ts"
 
 // Must match the values in hooks/pretooluse-push-cooldown.ts

@@ -7,6 +7,7 @@
 
 import { appendFileSync } from "node:fs"
 import { join } from "node:path"
+import { evalCondition, type HookGroup } from "../manifest.ts"
 import {
   isEditTool,
   isNotebookTool,
@@ -14,8 +15,7 @@ import {
   isTaskCreateTool,
   isTaskTool,
   isWriteTool,
-} from "../../hooks/hook-utils.ts"
-import { evalCondition, type HookGroup } from "../manifest.ts"
+} from "../tool-matchers.ts"
 import { extractCwd, isWithinCooldown, markHookCooldown } from "./filters.ts"
 
 // ─── Module-level constants ─────────────────────────────────────────────────

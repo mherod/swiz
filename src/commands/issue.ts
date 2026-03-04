@@ -1,4 +1,4 @@
-import { getRepoSlug, issueState } from "../../hooks/hook-utils.ts"
+import { getRepoSlug, issueState } from "../git-helpers.ts"
 import { getIssueStore } from "../issue-store.ts"
 import type { Command } from "../types.ts"
 

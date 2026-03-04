@@ -6,7 +6,6 @@
  * and re-exports all public symbols for backward compatibility.
  */
 
-import { computeTranscriptSummary } from "../../hooks/hook-utils.ts"
 import {
   applyHookSettingFilters,
   countHooks,
@@ -27,6 +26,7 @@ import type { HookGroup } from "../manifest.ts"
 import { manifest } from "../manifest.ts"
 import { loadAllPlugins } from "../plugins.ts"
 import { readProjectSettings, resolveProjectHooks } from "../settings.ts"
+import { computeTranscriptSummary } from "../transcript-summary.ts"
 import type { Command } from "../types.ts"
 
 // ─── Backward-compatible re-exports ─────────────────────────────────────────

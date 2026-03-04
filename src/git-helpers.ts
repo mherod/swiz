@@ -4,6 +4,8 @@
 // layer (src/) and the hook layer (hooks/). Extracted from hooks/hook-utils.ts
 // to remove the src-to-hooks coupling (issue #85).
 
+import { realpathSync } from "node:fs"
+
 /** Run a git command and return trimmed stdout. Returns "" on failure. */
 export async function git(args: string[], cwd: string): Promise<string> {
   try {
@@ -91,4 +93,39 @@ export async function getRepoSlug(cwd: string): Promise<string | null> {
 
 export function hasGhCli(): boolean {
   return !!Bun.which("gh")
+}
+
+// ─── Path hashing ────────────────────────────────────────────────────────────
+
+/**
+ * Generate a canonical hash for a filesystem path.
+ * Uses realpathSync() to dereference symlinks, ensuring equivalent repos
+ * (accessed via symlink or real path) generate identical hashes.
+ * Returns the full untruncated hash to avoid collision vulnerabilities.
+ */
+export function getCanonicalPathHash(cwd: string): string {
+  let realPath: string
+  try {
+    realPath = realpathSync(cwd)
+  } catch {
+    realPath = cwd
+  }
+  return Bun.hash(realPath).toString(16)
+}
+
+// ─── Issue helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Fetch the state of a GitHub issue. Returns "OPEN", "CLOSED", or null on failure.
+ */
+export async function issueState(
+  issueNumber: number | string,
+  cwd: string
+): Promise<"OPEN" | "CLOSED" | null> {
+  const raw = await gh(
+    ["issue", "view", String(issueNumber), "--json", "state", "--jq", ".state"],
+    cwd
+  )
+  if (raw === "OPEN" || raw === "CLOSED") return raw
+  return null
 }

@@ -1,5 +1,6 @@
 import { dirname, join } from "node:path"
-import { detectProjectStack, spawnSpeak } from "../../hooks/hook-utils.ts"
+import { spawnSpeak } from "../../hooks/hook-utils.ts"
+import { detectProjectStack } from "../detect-frameworks.ts"
 import {
   getEffectiveSwizSettings,
   getProjectSettingsPath,

@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { computeSubjectFingerprint } from "../../hooks/hook-utils.ts"
 import { debugLog } from "../debug.ts"
+import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 

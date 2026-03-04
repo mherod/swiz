@@ -6,7 +6,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
-import { detectProjectStack } from "../../hooks/hook-utils.ts"
+import { detectProjectStack } from "../detect-frameworks.ts"
 import type { HookGroup } from "../manifest.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../settings.ts"
 

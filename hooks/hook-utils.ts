@@ -19,7 +19,7 @@ if (!Bun.which("bun")) {
 // manager and runtime. Cached per process so hooks don't stat the filesystem
 // on every import.
 
-import { existsSync, realpathSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { translateMatcher } from "../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
@@ -28,43 +28,15 @@ import { skillAdvice, skillExists } from "../src/skill-utils.ts"
 export { skillAdvice, skillExists }
 export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
 
-// ─── Canonical path hashing utility ────────────────────────────────────────
-// Shared by all cache-key generation in hooks and commands to ensure consistent
-// behavior across symlink aliases, relative paths, and other path variants.
+// ─── Canonical path hashing — re-exported from src/git-helpers.ts ────────────
+export { getCanonicalPathHash } from "../src/git-helpers.ts"
 
-/**
- * Generate a canonical hash for a filesystem path.
- * Uses realpathSync() to dereference symlinks, ensuring equivalent repos
- * (accessed via symlink or real path) generate identical hashes.
- * Returns the full untruncated hash to avoid collision vulnerabilities.
- *
- * Usage:
- *   const hash = getCanonicalPathHash(cwd)
- *   const cooldownKey = `${sessionId}-${hash}`
- *   const cooldownFile = `/tmp/myapp-${cooldownKey}.sentinel`
- */
 /**
  * Derive a short prefix from a session UUID for namespaced task IDs.
  * First 4 hex characters of the session ID (e.g., "a3f2").
  */
 export function sessionPrefix(sessionId: string): string {
   return sessionId.replace(/-/g, "").slice(0, 4).toLowerCase()
-}
-
-export function getCanonicalPathHash(cwd: string): string {
-  // Canonicalize the path using realpath to dereference symlinks.
-  // This ensures /path/to/repo and /symlink/to/repo generate the same hash.
-  let realPath: string
-  try {
-    realPath = realpathSync(cwd)
-  } catch {
-    // If realpath fails (e.g., path doesn't exist), fall back to the original path.
-    // This ensures the function is defensive and doesn't crash on edge cases.
-    realPath = cwd
-  }
-  // Hash the canonical path without truncation to avoid collisions.
-  const fullHash = Bun.hash(realPath).toString(16)
-  return fullHash
 }
 
 export type PackageManager = "bun" | "pnpm" | "yarn" | "npm"
@@ -137,71 +109,30 @@ export function detectPkgRunner(): string {
 // ─── Cross-agent tool equivalence ──────────────────────────────────────────
 // Each set contains all names an agent might use for the same concept.
 // Claude Code | Cursor       | Gemini CLI        | Codex CLI
-// Bash        | Shell        | run_shell_command  | shell / shell_command / exec_command
-// Edit        | StrReplace   | replace            | apply_patch
-// Write       | Write        | write_file         | apply_patch
-// Read        | Read         | read_file          | read_file
-// Grep        | Grep         | grep_search        | grep_files
-// Glob        | Glob         | glob               | list_dir
-// NotebookEdit| EditNotebook | —                  | apply_patch
-// TaskCreate  | TodoWrite    | write_todos        | update_plan
+// Re-exported from src/tool-matchers.ts so hook scripts keep using the
+// single hook-utils.ts import, while src/ modules can import directly
+// without reaching into hooks/.
+export {
+  EDIT_TOOLS,
+  isCodeChangeTool,
+  isEditTool,
+  isFileEditTool,
+  isNotebookTool,
+  isShellTool,
+  isTaskCreateTool,
+  isTaskTool,
+  isWriteTool,
+  NOTEBOOK_TOOLS,
+  READ_TOOLS,
+  SEARCH_TOOLS,
+  SHELL_TOOLS,
+  TASK_CREATE_TOOLS,
+  TASK_TOOLS,
+  WRITE_TOOLS,
+} from "../src/tool-matchers.ts"
 
-export const SHELL_TOOLS = new Set([
-  "Bash",
-  "Shell",
-  "run_shell_command",
-  "shell",
-  "shell_command",
-  "exec_command",
-])
-export const EDIT_TOOLS = new Set(["Edit", "StrReplace", "replace", "apply_patch"])
-export const WRITE_TOOLS = new Set(["Write", "write_file", "apply_patch"])
-export const READ_TOOLS = new Set(["Read", "read_file", "read_many_files"])
-export const NOTEBOOK_TOOLS = new Set(["NotebookEdit", "EditNotebook", "apply_patch"])
-export const TASK_TOOLS = new Set([
-  "Task",
-  "TaskCreate",
-  "TaskUpdate",
-  "TaskList",
-  "TaskGet",
-  "TodoWrite",
-  "write_todos",
-  "update_plan",
-])
-export const TASK_CREATE_TOOLS = new Set(["TaskCreate", "TodoWrite", "write_todos", "update_plan"])
-export const SEARCH_TOOLS = new Set([
-  "Grep",
-  "Glob",
-  "grep_search",
-  "glob",
-  "grep_files",
-  "list_dir",
-])
-
-export function isShellTool(name: string): boolean {
-  return SHELL_TOOLS.has(name)
-}
-export function isEditTool(name: string): boolean {
-  return EDIT_TOOLS.has(name)
-}
-export function isWriteTool(name: string): boolean {
-  return WRITE_TOOLS.has(name)
-}
-export function isNotebookTool(name: string): boolean {
-  return NOTEBOOK_TOOLS.has(name)
-}
-export function isTaskTool(name: string): boolean {
-  return TASK_TOOLS.has(name)
-}
-export function isTaskCreateTool(name: string): boolean {
-  return TASK_CREATE_TOOLS.has(name)
-}
-export function isFileEditTool(name: string): boolean {
-  return EDIT_TOOLS.has(name) || WRITE_TOOLS.has(name)
-}
-export function isCodeChangeTool(name: string): boolean {
-  return EDIT_TOOLS.has(name) || WRITE_TOOLS.has(name) || NOTEBOOK_TOOLS.has(name)
-}
+// Local import for names used within this file (re-exports don't create local bindings)
+import { isShellTool, TASK_TOOLS } from "../src/tool-matchers.ts"
 
 /**
  * Returns true if the Bash command is a `swiz` CLI invocation.
@@ -441,364 +372,10 @@ export interface SessionTask {
   subjectFingerprint?: string
 }
 
-// ─── Subject fingerprinting ──────────────────────────────────────────────
+// ─── Subject fingerprinting (re-exported from src/) ─────────────────────
+export { computeSubjectFingerprint, stemWord } from "../src/subject-fingerprint.ts"
 
-const FINGERPRINT_STOP_WORDS = new Set([
-  // Articles & conjunctions
-  "the",
-  "a",
-  "an",
-  "and",
-  "or",
-  "for",
-  "to",
-  "in",
-  "of",
-  "on",
-  "with",
-  "this",
-  "that",
-  "all",
-  "its",
-  "from",
-  "by",
-  "at",
-  "as",
-  "so",
-  "but",
-  "not",
-  "if",
-  "up",
-  "out",
-  "into",
-  "then",
-  "than",
-  "also",
-  "just",
-  "only",
-  "each",
-  "after",
-  "before",
-  "about",
-  "when",
-  // Auxiliary verbs (filler in task subjects)
-  "is",
-  "am",
-  "are",
-  "was",
-  "were",
-  "be",
-  "been",
-  "being",
-  "has",
-  "have",
-  "had",
-  "having",
-  // Modal verbs (don't change task intent)
-  "can",
-  "could",
-  "will",
-  "would",
-  "shall",
-  "should",
-  "may",
-  "might",
-  "must",
-  "need",
-])
-
-/**
- * Synonym map: maps variant words to a single canonical form.
- * Covers task-domain verbs and nouns that agents use interchangeably.
- */
-const SYNONYM_MAP = new Map<string, string>([
-  // verify / check / confirm / validate → verify
-  ["check", "verify"],
-  ["confirm", "verify"],
-  ["validate", "verify"],
-  ["assert", "verify"],
-  ["ensure", "verify"],
-  // implement / add / create / build → implement
-  ["add", "implement"],
-  ["create", "implement"],
-  ["build", "implement"],
-  ["introduce", "implement"],
-  ["wire", "implement"],
-  // fix / repair / resolve / patch → fix
-  ["repair", "fix"],
-  ["resolve", "fix"],
-  ["patch", "fix"],
-  ["correct", "fix"],
-  // update / modify / edit / change / revise → update
-  ["modify", "update"],
-  ["edit", "update"],
-  ["change", "update"],
-  ["revise", "update"],
-  ["adjust", "update"],
-  ["refine", "update"],
-  // remove / delete / drop / clean → remove
-  ["delete", "remove"],
-  ["drop", "remove"],
-  ["clean", "remove"],
-  ["prune", "remove"],
-  ["strip", "remove"],
-  // push / deploy / ship / publish → push
-  ["deploy", "push"],
-  ["ship", "push"],
-  ["publish", "push"],
-  // commit / save / stage → commit
-  ["save", "commit"],
-  ["stage", "commit"],
-  // test / spec → test
-  ["spec", "test"],
-  // run / execute / invoke → run
-  ["execute", "run"],
-  ["invoke", "run"],
-  // changes / diff / modifications → changes
-  ["diff", "changes"],
-  ["modifications", "changes"],
-])
-
-/**
- * Lightweight suffix-stripping stemmer for task-domain English.
- * Reduces inflected forms to a common root so "committing" and "commit",
- * "verifying" and "verify", "formatted" and "format" match.
- */
-// Irregular verb past tenses and participles → base form.
-// Checked before suffix rules since these can't be handled by pattern stripping.
-const IRREGULAR_STEMS = new Map<string, string>([
-  // build
-  ["built", "build"],
-  // run
-  ["ran", "run"],
-  // write
-  ["wrote", "write"],
-  ["written", "write"],
-  // send
-  ["sent", "send"],
-  // make
-  ["made", "make"],
-  // find
-  ["found", "find"],
-  // get
-  ["got", "get"],
-  ["gotten", "get"],
-  // take
-  ["took", "take"],
-  ["taken", "take"],
-  // give
-  ["gave", "give"],
-  ["given", "give"],
-  // break
-  ["broke", "break"],
-  ["broken", "break"],
-  // set (past = base, but "reset" variants)
-  ["reset", "reset"],
-  // keep
-  ["kept", "keep"],
-  // know
-  ["knew", "know"],
-  ["known", "know"],
-  // show
-  ["shown", "show"],
-  // begin
-  ["began", "begin"],
-  ["begun", "begin"],
-  // choose
-  ["chose", "choose"],
-  ["chosen", "choose"],
-  // see
-  ["saw", "see"],
-  ["seen", "see"],
-  // go
-  ["went", "go"],
-  ["gone", "go"],
-  // do
-  ["did", "do"],
-  ["done", "do"],
-  // bring
-  ["brought", "bring"],
-  // catch
-  ["caught", "catch"],
-  // throw
-  ["threw", "throw"],
-  ["thrown", "throw"],
-  // hold
-  ["held", "hold"],
-  // tell
-  ["told", "tell"],
-  // lead
-  ["led", "lead"],
-  // lose
-  ["lost", "lose"],
-  // leave
-  ["left", "leave"],
-  // spend
-  ["spent", "spend"],
-  // think
-  ["thought", "think"],
-  // bind
-  ["bound", "bind"],
-  // stick
-  ["stuck", "stick"],
-  // hide
-  ["hid", "hide"],
-  ["hidden", "hide"],
-  // withdraw
-  ["withdrew", "withdraw"],
-  ["withdrawn", "withdraw"],
-  // grow
-  ["grew", "grow"],
-  ["grown", "grow"],
-  // draw
-  ["drew", "draw"],
-  ["drawn", "draw"],
-  // spin
-  ["spun", "spin"],
-  // wake
-  ["woke", "wake"],
-  ["woken", "wake"],
-  // lay
-  ["laid", "lay"],
-  // deal
-  ["dealt", "deal"],
-  // mean
-  ["meant", "mean"],
-  // understand
-  ["understood", "understand"],
-  // feel
-  ["felt", "feel"],
-  // teach
-  ["taught", "teach"],
-  // slide
-  ["slid", "slide"],
-  // steal
-  ["stole", "steal"],
-  ["stolen", "steal"],
-  // sweep
-  ["swept", "sweep"],
-  // speak
-  ["spoke", "speak"],
-  ["spoken", "speak"],
-  // tear
-  ["tore", "tear"],
-  ["torn", "tear"],
-  // feed
-  ["fed", "feed"],
-  // fight
-  ["fought", "fight"],
-  // seek
-  ["sought", "seek"],
-  // sleep
-  ["slept", "sleep"],
-  // sing
-  ["sang", "sing"],
-  ["sung", "sing"],
-  // sink
-  ["sank", "sink"],
-  ["sunk", "sink"],
-  // sit
-  ["sat", "sit"],
-  // stand
-  ["stood", "stand"],
-  // swing
-  ["swung", "swing"],
-  // split (irregular plurals / noun forms)
-  ["indices", "index"],
-  ["statuses", "status"],
-  ["patches", "patch"],
-  ["branches", "branch"],
-  ["matches", "match"],
-  ["caches", "cache"],
-  ["batches", "batch"],
-])
-
-export function stemWord(word: string): string {
-  // Check irregular forms first (can't be suffix-stripped)
-  const irregular = IRREGULAR_STEMS.get(word)
-  if (irregular) return irregular
-
-  let stem = word
-  // Order matters: try longest suffixes first
-
-  // -ing forms: strip suffix, reconstruct final consonant
-  if (word.endsWith("ting") && word.length > 5) stem = word.slice(0, -4) + "t"
-  else if (word.endsWith("ning") && word.length > 5) stem = word.slice(0, -4) + "n"
-  else if (word.endsWith("ring") && word.length > 5) stem = word.slice(0, -4) + "r"
-  else if (word.endsWith("ling") && word.length > 5) stem = word.slice(0, -4) + "l"
-  else if (word.endsWith("ying") && word.length > 5) stem = word.slice(0, -4) + "y"
-  else if (word.endsWith("ding") && word.length > 5) stem = word.slice(0, -4) + "d"
-  else if (word.endsWith("ping") && word.length > 5) stem = word.slice(0, -4) + "p"
-  else if (word.endsWith("sing") && word.length > 5) stem = word.slice(0, -4) + "s"
-  else if (word.endsWith("zing") && word.length > 5) stem = word.slice(0, -4) + "z"
-  else if (word.endsWith("bing") && word.length > 5) stem = word.slice(0, -4) + "b"
-  else if (word.endsWith("ming") && word.length > 5) stem = word.slice(0, -4) + "m"
-  else if (word.endsWith("king") && word.length > 5) stem = word.slice(0, -4) + "k"
-  else if (word.endsWith("ing") && word.length > 5) stem = word.slice(0, -3)
-  // -ation before -tion (implementation → implement)
-  else if (word.endsWith("ation") && word.length > 7) stem = word.slice(0, -5)
-  else if (word.endsWith("tion") && word.length > 5) stem = word.slice(0, -4)
-  // -ment: require > 9 chars to avoid stripping root words (implement, comment)
-  else if (word.endsWith("ment") && word.length > 9) stem = word.slice(0, -4)
-  else if (word.endsWith("ated") && word.length > 5) stem = word.slice(0, -2)
-  else if (word.endsWith("ized") && word.length > 5) stem = word.slice(0, -2)
-  // -ed forms: strip suffix, reconstruct final consonant
-  else if (word.endsWith("ted") && word.length > 5) stem = word.slice(0, -3) + "t"
-  else if (word.endsWith("ned") && word.length > 5) stem = word.slice(0, -3) + "n"
-  else if (word.endsWith("red") && word.length > 5) stem = word.slice(0, -3) + "r"
-  else if (word.endsWith("led") && word.length > 5) stem = word.slice(0, -3) + "l"
-  else if (word.endsWith("sed") && word.length > 5) stem = word.slice(0, -3) + "s"
-  else if (word.endsWith("ped") && word.length > 5) stem = word.slice(0, -3) + "p"
-  else if (word.endsWith("zed") && word.length > 5) stem = word.slice(0, -3) + "z"
-  else if (word.endsWith("bed") && word.length > 5) stem = word.slice(0, -3) + "b"
-  else if (word.endsWith("med") && word.length > 5) stem = word.slice(0, -3) + "m"
-  else if (word.endsWith("ked") && word.length > 5) stem = word.slice(0, -3) + "k"
-  // -ied → -y (verified → verify, modified → modify)
-  else if (word.endsWith("ied") && word.length > 5) stem = word.slice(0, -3) + "y"
-  else if (word.endsWith("ed") && word.length > 4) stem = word.slice(0, -2)
-  else if (word.endsWith("ly") && word.length > 4) stem = word.slice(0, -2)
-  else if (word.endsWith("er") && word.length > 4) stem = word.slice(0, -2)
-  else if (word.endsWith("es") && word.length > 4) stem = word.slice(0, -2)
-  else if (word.endsWith("s") && !word.endsWith("ss") && word.length > 4) stem = word.slice(0, -1)
-
-  // Collapse doubled trailing consonants (committ → commit, formatt → format)
-  if (stem.length >= 4 && stem[stem.length - 1] === stem[stem.length - 2]) {
-    const ch = stem[stem.length - 1]!
-    if (ch >= "a" && ch <= "z" && !"aeiou".includes(ch)) {
-      stem = stem.slice(0, -1)
-    }
-  }
-
-  return stem
-}
-
-/**
- * Compute a deterministic fingerprint from a task subject.
- *
- * Pipeline: lowercase → strip punctuation → tokenize → filter stop words →
- * stem each word (irregular lookup then suffix strip) → synonym map → sort → hash.
- *
- * Two subjects describing the same work produce the same fingerprint
- * regardless of word order, inflection, or synonym choice.
- */
-export function computeSubjectFingerprint(subject: string): string {
-  const normalized = subject
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-  const words = normalized
-    .split(" ")
-    .filter((w) => w.length > 2 && !FINGERPRINT_STOP_WORDS.has(w))
-    .map((w) => {
-      const stemmed = stemWord(w)
-      // Try stem directly, then with silent-e restored (creat→create)
-      return SYNONYM_MAP.get(stemmed) ?? SYNONYM_MAP.get(stemmed + "e") ?? stemmed
-    })
-    .sort()
-  const canonical = words.join(" ")
-  return Bun.hash(canonical).toString(16).padStart(16, "0")
-}
+import { computeSubjectFingerprint } from "../src/subject-fingerprint.ts"
 
 /**
  * Read all task files for a session from ~/.claude/tasks/<sessionId>/.
@@ -1177,134 +754,17 @@ export async function extractToolNamesFromTranscript(transcriptPath: string): Pr
   }
 }
 
-// ─── Shared transcript summary ──────────────────────────────────────────
-// Single-pass parser that extracts all derived facts hooks need from a
-// transcript JSONL file. dispatch.ts computes this once per cycle and
-// injects it into hook payloads as `_transcriptSummary`.
+// ─── Command normalisation (re-exported from src/) ──────────────────────
+export { normalizeCommand, stripHeredocs } from "../src/command-utils.ts"
+// ─── Transcript summary (re-exported from src/) ────────────────────────
+export {
+  computeTranscriptSummary,
+  getTranscriptSummary,
+  parseTranscriptSummary,
+  type TranscriptSummary,
+} from "../src/transcript-summary.ts"
 
-/**
- * Pre-parsed transcript summary injected by dispatch.ts into hook payloads.
- * Hooks should prefer consuming this over re-reading transcript_path.
- */
-export interface TranscriptSummary {
-  /** Every tool name called by the assistant, in order. */
-  toolNames: string[]
-  /** Total number of tool_use blocks (same as toolNames.length). */
-  toolCallCount: number
-  /** Normalized shell commands from Bash/Shell tool calls. */
-  bashCommands: string[]
-  /** Skill names invoked via the Skill tool. */
-  skillInvocations: string[]
-  /** Whether any Bash tool call contains `git push`. */
-  hasGitPush: boolean
-}
-
-const GIT_PUSH_PATTERN = /\bgit\s+push\b/
-
-/**
- * Parse a transcript JSONL string in a single pass and extract all derived
- * facts that hooks need. Returns a TranscriptSummary.
- */
-export function parseTranscriptSummary(jsonlText: string): TranscriptSummary {
-  const toolNames: string[] = []
-  const bashCommands: string[] = []
-  const skillInvocations: string[] = []
-  let hasGitPush = false
-
-  for (const line of jsonlText.split("\n")) {
-    if (!line.trim()) continue
-    try {
-      const entry = JSON.parse(line)
-      if (entry?.type !== "assistant") continue
-      const content = entry?.message?.content
-      if (!Array.isArray(content)) continue
-      for (const block of content) {
-        if (block?.type !== "tool_use") continue
-        const name: string = block?.name ?? ""
-        if (name) toolNames.push(name)
-
-        // Extract bash commands
-        if (isShellTool(name)) {
-          const cmd: string = block?.input?.command ?? ""
-          if (cmd) {
-            bashCommands.push(normalizeCommand(cmd))
-            if (!hasGitPush && GIT_PUSH_PATTERN.test(cmd)) hasGitPush = true
-          }
-        }
-
-        // Extract skill invocations
-        if (name === "Skill") {
-          const skill: string = block?.input?.skill ?? ""
-          if (skill) skillInvocations.push(skill)
-        }
-      }
-    } catch {
-      // Skip malformed lines
-    }
-  }
-
-  return {
-    toolNames,
-    toolCallCount: toolNames.length,
-    bashCommands,
-    skillInvocations,
-    hasGitPush,
-  }
-}
-
-/**
- * Read a transcript file and compute the summary. Returns null if the file
- * is missing or unreadable.
- */
-export async function computeTranscriptSummary(
-  transcriptPath: string
-): Promise<TranscriptSummary | null> {
-  try {
-    const text = await Bun.file(transcriptPath).text()
-    return parseTranscriptSummary(text)
-  } catch {
-    return null
-  }
-}
-
-/**
- * Extract the TranscriptSummary from a hook input payload (injected by dispatch).
- * Returns null if the summary is not present.
- */
-export function getTranscriptSummary(input: Record<string, unknown>): TranscriptSummary | null {
-  const summary = input?._transcriptSummary
-  if (!summary || typeof summary !== "object") return null
-  const s = summary as Record<string, unknown>
-  if (!Array.isArray(s.toolNames)) return null
-  return summary as TranscriptSummary
-}
-
-// ─── Command normalisation & matching ───────────────────────────────────
-//
-// Utilities for parsing and classifying shell commands in hook scripts.
-// Centralised here so all hooks use the same patterns and normalisation steps.
-
-/**
- * Normalize shell backslash-newline continuations so that
- *   git branch \<newline>  --show-current
- * is treated identically to
- *   git branch --show-current
- * before the regex checks run.
- */
-export function normalizeCommand(cmd: string): string {
-  // \r?\n handles both LF and CRLF line endings in backslash continuations
-  return cmd.replace(/\\\r?\n\s*/g, " ")
-}
-
-/**
- * Strip heredoc bodies from a shell command string before regex matching.
- * Prevents false positives when git push/commit appears inside a heredoc body
- * rather than as an executable command.
- * Handles: <<WORD, <<-WORD, <<"WORD", <<'WORD'
- */
-export function stripHeredocs(command: string): string {
-  return command.replace(/<<-?[ \t]*["']?(\w+)["']?[ \t]*\n[\s\S]*?\n[ \t]*\1(?=\n|$)/g, "")
-}
+import { normalizeCommand } from "../src/command-utils.ts"
 
 /**
  * Extract all shell commands from assistant Bash tool_use blocks in a transcript.
@@ -1565,30 +1025,8 @@ export async function getRepoNameWithOwner(cwd: string): Promise<string | null> 
   return name || null
 }
 
-/**
- * Return the open/closed state of a GitHub issue, or `null` when the `gh`
- * CLI is unavailable or the issue cannot be found.
- *
- * Use this before posting a comment or closing an issue to avoid redundant
- * operations and the confusing error output they produce.
- *
- * @example
- * const state = await issueState(19, cwd)
- * if (state !== "OPEN") { console.log(`#19 already ${state ?? "unknown"} — skipping`); return }
- * await gh(["issue", "comment", "19", "--body", body], cwd)
- * await gh(["issue", "close", "19"], cwd)
- */
-export async function issueState(
-  issueNumber: number | string,
-  cwd: string
-): Promise<"OPEN" | "CLOSED" | null> {
-  const raw = await gh(
-    ["issue", "view", String(issueNumber), "--json", "state", "--jq", ".state"],
-    cwd
-  )
-  if (raw === "OPEN" || raw === "CLOSED") return raw
-  return null
-}
+// Re-exported from src/git-helpers.ts
+export { issueState } from "../src/git-helpers.ts"
 
 // ─── Common input types ─────────────────────────────────────────────────
 
