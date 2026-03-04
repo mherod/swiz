@@ -6,7 +6,9 @@
 import {
   extractToolNamesFromTranscript,
   getTranscriptSummary,
+  isEditTool,
   isTaskTool,
+  isWriteTool,
   type ToolHookInput,
   toolNameForCurrentAgent,
 } from "./hook-utils.ts"
@@ -46,7 +48,19 @@ async function main(): Promise<void> {
 
   // --- Tasks exist: countdown to staleness enforcement ---
   const staleRemaining = STALENESS_THRESHOLD - callsSinceTask
-  if (staleRemaining <= 0) return // PreToolUse will block
+  if (staleRemaining <= 0) {
+    // Edit/Write tools with large content may have been exempted from the
+    // pre-tool hard block — provide stale-task guidance post-completion.
+    const completedTool = (input.tool_name ?? "") as string
+    if (isEditTool(completedTool) || isWriteTool(completedTool)) {
+      emit(
+        `Tasks need attention — it's been ${callsSinceTask} tool calls since the last task update. ` +
+          `Review progress: mark completed tasks done, update in-progress tasks with current status, ` +
+          `or create new tasks for the work underway.`
+      )
+    }
+    return // For non-Edit/Write tools, PreToolUse will block
+  }
   if (staleRemaining <= 2) {
     emit(
       `Task update required in ${staleRemaining} tool call(s) — tools will be blocked until tasks are reviewed.`

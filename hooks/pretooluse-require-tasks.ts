@@ -26,7 +26,19 @@ import {
 } from "./hook-utils.ts"
 
 const STALENESS_THRESHOLD = 20
+const LARGE_CONTENT_LINE_THRESHOLD = 10
 const MEMORY_MARKDOWN_RE = /(?:^|[\\/])(?:CLAUDE|MEMORY)\.md$/i
+
+/**
+ * Detect whether an Edit/Write payload carries substantial content (10+ lines).
+ * Blocking a large payload throws away expensive work — better to let it through
+ * and rely on post-tool advisory for stale-task guidance.
+ */
+export function isLargeContentPayload(input: Record<string, unknown>): boolean {
+  const toolInput = input?.tool_input as Record<string, unknown> | undefined
+  const content = ((toolInput?.new_string ?? toolInput?.content) as string) ?? ""
+  return content.split("\n").length >= LARGE_CONTENT_LINE_THRESHOLD
+}
 
 /**
  * Auto-create a bootstrap task when the session has no tasks at all.
@@ -198,6 +210,14 @@ async function main() {
     if (lastTaskIndex >= 0) {
       const callsSinceTask = total - 1 - lastTaskIndex
       if (callsSinceTask >= STALENESS_THRESHOLD) {
+        // ── LARGE-CONTENT EXEMPTION ───────────────────────────────────────
+        // Blocking a large Edit/Write throws away costly work. Let it
+        // complete and rely on the post-tool advisor for stale-task guidance.
+        // Shell tools remain hard-blocked regardless of payload size.
+        if ((isEditTool(toolName) || isWriteTool(toolName)) && isLargeContentPayload(input)) {
+          process.exit(0)
+        }
+
         const taskList = formatTaskSubjectsForDisplay(allTasks, activeTasks)
         deny(
           `STOP. Tasks have gone stale. ${callsSinceTask} tool calls since last task update. ` +

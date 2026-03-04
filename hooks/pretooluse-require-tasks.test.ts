@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { isLargeContentPayload } from "./pretooluse-require-tasks.ts"
 
 interface HookResult {
   decision?: string
@@ -16,6 +17,8 @@ async function runHook({
   transcriptPath,
   command,
   filePath,
+  newString,
+  content,
   envOverrides = {},
 }: {
   homeDir: string
@@ -25,11 +28,15 @@ async function runHook({
   transcriptPath?: string
   command?: string
   filePath?: string
+  newString?: string
+  content?: string
   envOverrides?: Record<string, string | undefined>
 }): Promise<HookResult> {
   const toolInput: Record<string, string> = {}
   if (command !== undefined) toolInput.command = command
   if (filePath !== undefined) toolInput.file_path = filePath
+  if (newString !== undefined) toolInput.new_string = newString
+  if (content !== undefined) toolInput.content = content
   const payload = JSON.stringify({
     tool_name: toolName,
     session_id: sessionId,
@@ -563,5 +570,130 @@ describe("pretooluse-require-tasks", () => {
     // Should allow — staleness only triggers after task tools have been used
     const result = await runHook({ homeDir, toolName: "Bash", sessionId, transcriptPath })
     expect(result.decision).toBeUndefined()
+  })
+
+  describe("large-content stale-task exemption (issue #89)", () => {
+    /** Helper: build a stale transcript (1 TaskCreate + 21 Reads = 21 calls since task) */
+    async function buildStaleTranscript(homeDir: string, sessionId: string) {
+      await writeTask(homeDir, sessionId, {
+        id: "1",
+        subject: "Active task",
+        status: "in_progress",
+      })
+      const lines: string[] = []
+      const makeEntry = (toolName: string) =>
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: toolName, id: "x", input: {} }],
+          },
+        })
+      lines.push(makeEntry("TaskCreate"))
+      for (let i = 0; i < 21; i++) lines.push(makeEntry("Read"))
+      const transcriptPath = join(homeDir, `transcript-${sessionId}.jsonl`)
+      await writeFile(transcriptPath, `${lines.join("\n")}\n`)
+      return transcriptPath
+    }
+
+    const largeContent = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n")
+    const smallContent = "line 1\nline 2\nline 3"
+
+    test("allows Edit with 10+ line new_string when tasks are stale", async () => {
+      const homeDir = await createTempHome()
+      const sessionId = `session-large-edit-${Date.now()}`
+      const transcriptPath = await buildStaleTranscript(homeDir, sessionId)
+
+      const result = await runHook({
+        homeDir,
+        toolName: "Edit",
+        sessionId,
+        transcriptPath,
+        newString: largeContent,
+      })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows Write with 10+ line content when tasks are stale", async () => {
+      const homeDir = await createTempHome()
+      const sessionId = `session-large-write-${Date.now()}`
+      const transcriptPath = await buildStaleTranscript(homeDir, sessionId)
+
+      const result = await runHook({
+        homeDir,
+        toolName: "Write",
+        sessionId,
+        transcriptPath,
+        content: largeContent,
+      })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("still denies Edit with <10 line new_string when tasks are stale", async () => {
+      const homeDir = await createTempHome()
+      const sessionId = `session-small-edit-${Date.now()}`
+      const transcriptPath = await buildStaleTranscript(homeDir, sessionId)
+
+      const result = await runHook({
+        homeDir,
+        toolName: "Edit",
+        sessionId,
+        transcriptPath,
+        newString: smallContent,
+      })
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("stale")
+    })
+
+    test("still denies Bash when tasks are stale regardless of payload", async () => {
+      const homeDir = await createTempHome()
+      const sessionId = `session-stale-bash-${Date.now()}`
+      const transcriptPath = await buildStaleTranscript(homeDir, sessionId)
+
+      const result = await runHook({
+        homeDir,
+        toolName: "Bash",
+        sessionId,
+        transcriptPath,
+        command: "echo 'large output here'",
+      })
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("stale")
+    })
+  })
+})
+
+describe("isLargeContentPayload", () => {
+  test("returns true for Edit payload with 10+ line new_string", () => {
+    const input = { tool_input: { new_string: Array(10).fill("line").join("\n") } }
+    expect(isLargeContentPayload(input)).toBe(true)
+  })
+
+  test("returns true for Write payload with 10+ line content", () => {
+    const input = { tool_input: { content: Array(15).fill("line").join("\n") } }
+    expect(isLargeContentPayload(input)).toBe(true)
+  })
+
+  test("returns false for Edit payload with <10 lines", () => {
+    const input = { tool_input: { new_string: "one\ntwo\nthree" } }
+    expect(isLargeContentPayload(input)).toBe(false)
+  })
+
+  test("returns false when no content fields present", () => {
+    const input = { tool_input: { command: "ls" } }
+    expect(isLargeContentPayload(input)).toBe(false)
+  })
+
+  test("returns false for empty input", () => {
+    expect(isLargeContentPayload({})).toBe(false)
+  })
+
+  test("prefers new_string over content (Edit tool)", () => {
+    const input = {
+      tool_input: {
+        new_string: Array(12).fill("x").join("\n"),
+        content: "short",
+      },
+    }
+    expect(isLargeContentPayload(input)).toBe(true)
   })
 })
