@@ -788,10 +788,7 @@ export const dispatchCommand: Command = {
       const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
       const pluginHooks = pluginResults.flatMap((r) => r.hooks)
       for (const r of pluginResults) {
-        if (r.error) {
-          console.error(`[swiz] plugin ${r.name} failed to load`)
-          log(`   ⚠ plugin ${r.name}: ${r.error}`)
-        }
+        if (r.error) log(`   ⚠ plugin ${r.name}: ${r.error}`)
       }
       if (pluginHooks.length > 0) {
         combinedManifest = [...combinedManifest, ...pluginHooks]

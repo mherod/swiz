@@ -86,7 +86,7 @@ function resolveHookPaths(groups: HookGroup[], pluginDir: string): HookGroup[] {
 }
 
 export interface LoadPluginsOptions {
-  /** When true, log plugin errors to stderr. Use for install/status flows. */
+  /** When true, also log the full error detail to stderr. */
   verbose?: boolean
 }
 
@@ -95,10 +95,9 @@ export interface LoadPluginsOptions {
  * along with load status for each plugin.
  *
  * Error visibility policy:
- * - verbose=true  → logs full errors to stderr (install, hooks commands)
- * - verbose=false → silent; callers inspect result.error
- * Dispatch emits brief stderr warnings for failures and logs details to the
- * debug log (/tmp/swiz-dispatch.log).
+ * - A brief warning is always emitted to stderr on failure so users
+ *   notice broken integrations regardless of the calling context.
+ * - verbose=true additionally logs the full error detail to stderr.
  */
 export async function loadAllPlugins(
   plugins: string[],
@@ -109,8 +108,11 @@ export async function loadAllPlugins(
   const results: PluginResult[] = []
   for (const entry of plugins) {
     const result = await loadPlugin(entry, projectRoot)
-    if (result.error && verbose) {
-      console.error(`[swiz] Warning: plugin ${result.name}: ${result.error}`)
+    if (result.error) {
+      console.error(`[swiz] plugin ${result.name} failed to load`)
+      if (verbose) {
+        console.error(`[swiz]   ${result.error}`)
+      }
     }
     results.push(result)
   }
