@@ -8,6 +8,45 @@ export interface HookDef {
   async?: boolean
   /** Minimum seconds between successive runs of this hook (scoped per hook+cwd). */
   cooldownSeconds?: number
+  /**
+   * Optional environment-based skip condition. Evaluated before the hook process
+   * is spawned; when the condition evaluates to false the hook is skipped entirely.
+   *
+   * Supported expressions:
+   *   `env:<VAR>`           — true when VAR is set to a non-empty string
+   *   `env:<VAR>=<value>`   — true when VAR equals value (exact match)
+   *   `env:<VAR>!=<value>`  — true when VAR does not equal value
+   *
+   * Unknown syntax is treated as true (fail-open) with a console warning.
+   *
+   * Example: `"env:CI!=true"` — skip hook when running in CI
+   */
+  condition?: string
+}
+
+/**
+ * Evaluate a HookDef `condition` expression against the current environment.
+ * Returns `true` (run the hook) when the expression is satisfied or unrecognised.
+ * Returns `false` (skip the hook) when the expression is not satisfied.
+ */
+export function evalCondition(condition: string | undefined): boolean {
+  if (!condition) return true
+
+  const envMatch = condition.match(/^env:([^!=]+)(!=|=)?(.*)$/)
+  if (!envMatch) {
+    console.warn(`[swiz] Unknown hook condition syntax: "${condition}" — running hook anyway`)
+    return true
+  }
+
+  const [, varName, op, expected] = envMatch
+  const actual = process.env[varName!] ?? ""
+
+  if (!op) return actual.length > 0
+  if (op === "=") return actual === expected
+  if (op === "!=") return actual !== expected
+
+  console.warn(`[swiz] Unknown operator in hook condition: "${condition}" — running hook anyway`)
+  return true
 }
 
 export interface HookGroup {

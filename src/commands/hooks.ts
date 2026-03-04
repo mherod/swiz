@@ -13,6 +13,7 @@ interface HookEntry {
   async?: boolean
   statusMessage?: string
   matcher?: string
+  condition?: string
 }
 
 interface HookMatcher {
@@ -137,6 +138,7 @@ async function showEvent(allSettings: LoadedSettings[], eventName: string) {
         if (hook.timeout) flags.push(`${hook.timeout}s`)
         if (hook.async) flags.push("async")
         if (hook.type === "agent") flags.push(`agent:${hook.model ?? "default"}`)
+        if (hook.condition) flags.push(`if:${hook.condition}`)
         const flagStr = flags.length ? ` (${flags.join(", ")})` : ""
 
         const hookType = hook.type ?? "command"

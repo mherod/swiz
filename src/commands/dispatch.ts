@@ -9,7 +9,7 @@ import {
   isTaskTool,
   isWriteTool,
 } from "../../hooks/hook-utils.ts"
-import { type HookGroup, manifest } from "../manifest.ts"
+import { evalCondition, type HookGroup, manifest } from "../manifest.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 
@@ -243,6 +243,10 @@ function launchAsyncHooks(groups: HookGroup[], payloadStr: string): void {
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) {
+        if (!evalCondition(hook.condition)) {
+          log(`   ⏭ ${hook.file} [condition false, skipping]`)
+          continue
+        }
         log(`   → ${hook.file} [async, fire-and-forget]`)
         runHook(hook.file, payloadStr, hook.timeout).catch(() => {})
       }
@@ -259,6 +263,10 @@ async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<v
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
+      if (!evalCondition(hook.condition)) {
+        log(`   ⏭ ${hook.file} [condition false, skipping]`)
+        continue
+      }
       if (hook.cooldownSeconds && isWithinCooldown(hook.file, hook.cooldownSeconds, cwd)) {
         log(`   ⏭ ${hook.file} [cooldown active, skipping]`)
         continue
@@ -307,6 +315,10 @@ async function runBlocking(groups: HookGroup[], payloadStr: string): Promise<voi
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
+      if (!evalCondition(hook.condition)) {
+        log(`   ⏭ ${hook.file} [condition false, skipping]`)
+        continue
+      }
       if (hook.cooldownSeconds && isWithinCooldown(hook.file, hook.cooldownSeconds, cwd)) {
         log(`   ⏭ ${hook.file} [cooldown active, skipping]`)
         continue
@@ -338,6 +350,10 @@ async function runContext(
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
+      if (!evalCondition(hook.condition)) {
+        log(`   ⏭ ${hook.file} [condition false, skipping]`)
+        continue
+      }
       if (hook.cooldownSeconds && isWithinCooldown(hook.file, hook.cooldownSeconds, cwd)) {
         log(`   ⏭ ${hook.file} [cooldown active, skipping]`)
         continue
@@ -380,6 +396,10 @@ async function replayPreToolUse(groups: HookGroup[], payloadStr: string): Promis
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
+      if (!evalCondition(hook.condition)) {
+        log(`   ⏭ ${hook.file} [condition false, skipping]`)
+        continue
+      }
       const startTime = Date.now()
       const entry: TraceEntry = {
         file: hook.file,
@@ -415,6 +435,10 @@ async function replayBlocking(groups: HookGroup[], payloadStr: string): Promise<
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
+      if (!evalCondition(hook.condition)) {
+        log(`   ⏭ ${hook.file} [condition false, skipping]`)
+        continue
+      }
       const startTime = Date.now()
       const entry: TraceEntry = {
         file: hook.file,
@@ -444,6 +468,10 @@ async function replayContext(groups: HookGroup[], payloadStr: string): Promise<T
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
+      if (!evalCondition(hook.condition)) {
+        log(`   ⏭ ${hook.file} [condition false, skipping]`)
+        continue
+      }
       const startTime = Date.now()
       const entry: TraceEntry = {
         file: hook.file,
