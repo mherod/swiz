@@ -450,7 +450,8 @@ async function listAllSessionsTasks(filterCwd?: string) {
     sessionsWithTasks++
     totalTasks += tasks.length
 
-    console.log(`\n  ${BOLD}Session${RESET} ${DIM}${sessionId.slice(0, 8)}...${RESET}\n`)
+    const shortId = sessionId.slice(0, 8)
+    console.log(`\n  ${BOLD}Session${RESET} ${DIM}${shortId}...${RESET}\n`)
 
     const groups: [string, Task[]][] = [
       ["IN PROGRESS", tasks.filter((t) => t.status === "in_progress")],
@@ -465,7 +466,7 @@ async function listAllSessionsTasks(filterCwd?: string) {
       for (const task of group) {
         const { emoji, color } = STATUS_STYLE[task.status]
         console.log(
-          `  ${emoji} ${BOLD}#${task.id}${RESET} ${color}[${task.status.replace("_", " ").toUpperCase()}]${RESET} ${task.subject}`
+          `  ${emoji} ${BOLD}#${task.id}${RESET} ${DIM}[${shortId}]${RESET} ${color}[${task.status.replace("_", " ").toUpperCase()}]${RESET} ${task.subject}`
         )
         if (task.description) {
           const lines = task.description.split("\n").slice(0, 3)
