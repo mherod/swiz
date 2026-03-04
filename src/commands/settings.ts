@@ -2,6 +2,8 @@ import { dirname, join } from "node:path"
 import { spawnSpeak } from "../../hooks/hook-utils.ts"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import {
+  DEFAULT_MEMORY_LINE_THRESHOLD,
+  DEFAULT_MEMORY_WORD_THRESHOLD,
   getEffectiveSwizSettings,
   getProjectSettingsPath,
   getSwizSettingsPath,
@@ -383,7 +385,9 @@ function printSettings(
     trivialMaxFiles: number
     trivialMaxLines: number
     memoryLineThreshold: number
+    memoryLineSource: "project" | "user" | "default"
     memoryWordThreshold: number
+    memoryWordSource: "project" | "user" | "default"
     source: "project" | "default"
     disabledHooks?: string[]
   },
@@ -452,14 +456,12 @@ function printSettings(
     console.log(
       `  trivial-max-lines: ${projectPolicyInfo.trivialMaxLines} (${projectPolicyInfo.source})`
     )
-    if (projectPolicyInfo.source === "project") {
-      console.log(
-        `  memory-line-threshold: ${projectPolicyInfo.memoryLineThreshold} (${projectPolicyInfo.source})`
-      )
-      console.log(
-        `  memory-word-threshold: ${projectPolicyInfo.memoryWordThreshold} (${projectPolicyInfo.source})`
-      )
-    }
+    console.log(
+      `  memory-line-threshold: ${projectPolicyInfo.memoryLineThreshold} (${projectPolicyInfo.memoryLineSource})`
+    )
+    console.log(
+      `  memory-word-threshold: ${projectPolicyInfo.memoryWordThreshold} (${projectPolicyInfo.memoryWordSource})`
+    )
     const projectDisabled = projectPolicyInfo.disabledHooks ?? []
     if (projectDisabled.length > 0) {
       console.log(`  disabled-hooks:  ${projectDisabled.join(", ")} (project)`)
@@ -485,17 +487,26 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
 
   const projectSettings = await readProjectSettings(parsed.targetDir)
   const policy = resolvePolicy(projectSettings)
-  const memoryThresholds = resolveMemoryThresholds(projectSettings, {
-    memoryLineThreshold: effective.memoryLineThreshold,
-    memoryWordThreshold: effective.memoryWordThreshold,
-  })
+  const memoryThresholds = resolveMemoryThresholds(
+    projectSettings,
+    {
+      memoryLineThreshold: settings.memoryLineThreshold,
+      memoryWordThreshold: settings.memoryWordThreshold,
+    },
+    {
+      memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
+      memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
+    }
+  )
   const projectPolicyInfo = {
     configPath: getProjectSettingsPath(parsed.targetDir),
     profile: policy.profile,
     trivialMaxFiles: policy.trivialMaxFiles,
     trivialMaxLines: policy.trivialMaxLines,
     memoryLineThreshold: memoryThresholds.memoryLineThreshold,
+    memoryLineSource: memoryThresholds.memoryLineSource,
     memoryWordThreshold: memoryThresholds.memoryWordThreshold,
+    memoryWordSource: memoryThresholds.memoryWordSource,
     source: policy.source,
     disabledHooks: projectSettings?.disabledHooks,
   }

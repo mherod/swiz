@@ -159,32 +159,41 @@ export function resolvePolicy(project: ProjectSwizSettings | null): ResolvedPoli
   return { trivialMaxFiles, trivialMaxLines, profile: resolvedProfile, source: "project" }
 }
 
-/** Resolve effective memory thresholds from a project config (if any). */
+/** Resolve effective memory thresholds with per-value source tracking. */
 export interface ResolvedMemoryThresholds {
   memoryLineThreshold: number
+  memoryLineSource: "project" | "user" | "default"
   memoryWordThreshold: number
-  source: "project" | "default"
+  memoryWordSource: "project" | "user" | "default"
 }
 
 export function resolveMemoryThresholds(
   project: ProjectSwizSettings | null,
-  globalDefaults: { memoryLineThreshold: number; memoryWordThreshold: number }
+  user: { memoryLineThreshold?: number; memoryWordThreshold?: number },
+  defaults: { memoryLineThreshold: number; memoryWordThreshold: number }
 ): ResolvedMemoryThresholds {
-  if (
-    !project ||
-    (project.memoryLineThreshold === undefined && project.memoryWordThreshold === undefined)
-  ) {
-    return {
-      memoryLineThreshold: globalDefaults.memoryLineThreshold,
-      memoryWordThreshold: globalDefaults.memoryWordThreshold,
-      source: "default",
-    }
-  }
+  // 3-tier hierarchy: project > user > default
+  const memoryLineThreshold =
+    project?.memoryLineThreshold ?? user.memoryLineThreshold ?? defaults.memoryLineThreshold
+  const memoryLineSource = project?.memoryLineThreshold
+    ? "project"
+    : user.memoryLineThreshold
+      ? "user"
+      : "default"
+
+  const memoryWordThreshold =
+    project?.memoryWordThreshold ?? user.memoryWordThreshold ?? defaults.memoryWordThreshold
+  const memoryWordSource = project?.memoryWordThreshold
+    ? "project"
+    : user.memoryWordThreshold
+      ? "user"
+      : "default"
 
   return {
-    memoryLineThreshold: project.memoryLineThreshold ?? globalDefaults.memoryLineThreshold,
-    memoryWordThreshold: project.memoryWordThreshold ?? globalDefaults.memoryWordThreshold,
-    source: "project",
+    memoryLineThreshold,
+    memoryLineSource,
+    memoryWordThreshold,
+    memoryWordSource,
   }
 }
 
