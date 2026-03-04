@@ -123,6 +123,17 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
   },
   {
+    key: "pushCooldownMinutes",
+    aliases: [
+      "push-cooldown-minutes",
+      "pushcooldownminutes",
+      "push_cooldown_minutes",
+      "push-cooldown",
+    ],
+    kind: "numeric",
+    scopes: ["global"],
+  },
+  {
     key: "narratorSpeed",
     aliases: ["narrator-speed", "narratorspeed", "narrator_speed", "speed"],
     kind: "numeric",
@@ -348,6 +359,7 @@ function printSettings(
     narratorSpeed: number
     prAgeGateMinutes: number
     prMergeMode: boolean
+    pushCooldownMinutes: number
     pushGate: boolean
     sandboxedEdits: boolean
     speak: boolean
@@ -394,6 +406,9 @@ function printSettings(
   const ageGateLabel =
     effective.prAgeGateMinutes > 0 ? `${effective.prAgeGateMinutes} minutes` : "disabled"
   console.log(`  pr-age-gate:     ${ageGateLabel} (global)`)
+  const cooldownLabel =
+    effective.pushCooldownMinutes > 0 ? `${effective.pushCooldownMinutes} minutes` : "disabled"
+  console.log(`  push-cooldown:   ${cooldownLabel} (global)`)
   console.log(`  pr-merge-mode:   ${effective.prMergeMode ? "enabled" : "disabled"} (global)`)
   console.log(`  push-gate:       ${effective.pushGate ? "enabled" : "disabled"} (global)`)
   console.log(`  sandboxed-edits: ${effective.sandboxedEdits ? "enabled" : "disabled"} (global)`)

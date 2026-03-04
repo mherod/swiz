@@ -74,6 +74,7 @@ export interface SwizSettings {
   narratorSpeed: number
   prAgeGateMinutes: number
   prMergeMode: boolean
+  pushCooldownMinutes: number
   pushGate: boolean
   sandboxedEdits: boolean
   speak: boolean
@@ -98,6 +99,7 @@ export interface EffectiveSwizSettings {
   narratorSpeed: number
   prAgeGateMinutes: number
   prMergeMode: boolean
+  pushCooldownMinutes: number
   pushGate: boolean
   sandboxedEdits: boolean
   speak: boolean
@@ -166,6 +168,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   narratorSpeed: 0,
   prAgeGateMinutes: 10,
   prMergeMode: true,
+  pushCooldownMinutes: 0,
   pushGate: false,
   sandboxedEdits: true,
   speak: false,
@@ -250,6 +253,10 @@ function normalizeSettings(value: unknown): SwizSettings {
         : DEFAULT_SETTINGS.prAgeGateMinutes,
     prMergeMode:
       typeof obj.prMergeMode === "boolean" ? obj.prMergeMode : DEFAULT_SETTINGS.prMergeMode,
+    pushCooldownMinutes:
+      typeof obj.pushCooldownMinutes === "number" && obj.pushCooldownMinutes >= 0
+        ? obj.pushCooldownMinutes
+        : DEFAULT_SETTINGS.pushCooldownMinutes,
     pushGate: typeof obj.pushGate === "boolean" ? obj.pushGate : DEFAULT_SETTINGS.pushGate,
     sandboxedEdits:
       typeof obj.sandboxedEdits === "boolean"
@@ -506,6 +513,7 @@ export function getEffectiveSwizSettings(
         typeof sessionSettings.prMergeMode === "boolean"
           ? sessionSettings.prMergeMode
           : settings.prMergeMode,
+      pushCooldownMinutes: settings.pushCooldownMinutes,
       pushGate: settings.pushGate,
       sandboxedEdits: settings.sandboxedEdits,
       speak: settings.speak,
@@ -528,6 +536,7 @@ export function getEffectiveSwizSettings(
     narratorSpeed: settings.narratorSpeed,
     prAgeGateMinutes: settings.prAgeGateMinutes,
     prMergeMode: settings.prMergeMode,
+    pushCooldownMinutes: settings.pushCooldownMinutes,
     pushGate: settings.pushGate,
     sandboxedEdits: settings.sandboxedEdits,
     speak: settings.speak,

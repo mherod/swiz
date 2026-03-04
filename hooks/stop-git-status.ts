@@ -20,7 +20,7 @@ import {
   skillAdvice,
 } from "./hook-utils.ts"
 
-const PUSH_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
+const DEFAULT_PUSH_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
 
 /** Returns a filesystem-safe session identifier, or null if the session is invalid/missing. */
 function sanitizeSessionId(sessionId: string | undefined): string | null {
@@ -33,27 +33,47 @@ function pushSentinelPath(safeSession: string): string {
   return `/tmp/stop-git-push-prompted-${safeSession}.flag`
 }
 
+/**
+ * Returns true if a push was recently prompted and the cooldown is still active.
+ *
+ * When `configuredCooldownMinutes > 0` (user-configured), only the sentinel file
+ * is checked — the remote-updated check is skipped. This allows the hook to back
+ * off during in-flight pushes (pre-push hook running, cooldown window not yet
+ * expired) where the remote hasn't been updated yet but the push was started.
+ *
+ * When `configuredCooldownMinutes === 0` (default / not configured), the built-in
+ * 10-minute window is used and BOTH the sentinel AND the remote commit time are
+ * checked — matching the original behavior.
+ */
 async function isPushCooldownActive(
   sessionId: string | undefined,
   cwd: string,
-  branch: string
+  branch: string,
+  configuredCooldownMinutes: number
 ): Promise<boolean> {
   const safeSession = sanitizeSessionId(sessionId)
   if (!safeSession) return false
+
+  const cooldownMs =
+    configuredCooldownMinutes > 0 ? configuredCooldownMinutes * 60 * 1000 : DEFAULT_PUSH_COOLDOWN_MS
 
   // Sentinel must exist and itself be within the cooldown window. Stale files from
   // prior sessions / test runs must not trigger a false-positive cooldown.
   const sentinelFile = Bun.file(pushSentinelPath(safeSession))
   if (!(await sentinelFile.exists())) return false
   const sentinelMtime = (await sentinelFile.stat()).mtime.getTime()
-  if (Date.now() - sentinelMtime > PUSH_COOLDOWN_MS) return false
+  if (Date.now() - sentinelMtime > cooldownMs) return false
 
-  // Remote branch must also have been updated within the cooldown window
+  // With a user-configured cooldown, sentinel-within-window is sufficient.
+  // This supports in-flight pushes where the remote hasn't been updated yet.
+  if (configuredCooldownMinutes > 0) return true
+
+  // Default behavior: remote branch must also have been updated within the window.
   const rawTime = await git(["log", "-1", "--format=%ct", `origin/${branch}`], cwd)
   const remoteCommitTime = parseInt(rawTime, 10)
   if (Number.isNaN(remoteCommitTime)) return false
 
-  return Date.now() - remoteCommitTime * 1000 < PUSH_COOLDOWN_MS
+  return Date.now() - remoteCommitTime * 1000 < cooldownMs
 }
 
 async function markPushPrompted(sessionId: string | undefined): Promise<void> {
@@ -156,9 +176,10 @@ async function main(): Promise<void> {
   if (!hasUncommitted && ahead === 0 && behind === 0) return
 
   // Push-only cooldown: skip push enforcement if we already prompted this session
-  // and the remote was updated recently (≤ 10 min). Still enforce uncommitted changes.
+  // and the cooldown is still active. Still enforce uncommitted changes.
   if (!hasUncommitted && behind === 0 && ahead > 0) {
-    if (await isPushCooldownActive(input.session_id, cwd, branch)) return
+    if (await isPushCooldownActive(input.session_id, cwd, branch, effective.pushCooldownMinutes))
+      return
   }
 
   // In-flight push guard: if a background `git push` is currently running in THIS

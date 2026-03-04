@@ -684,7 +684,7 @@ describe("SETTINGS_REGISTRY", () => {
 
   test("adding a setting only requires one registry entry", () => {
     // Verify the registry drives alias resolution, type guards, and scope validation.
-    // All 17 settings must be present with no gaps between the registry and CLI behavior.
+    // All 18 settings must be present with no gaps between the registry and CLI behavior.
     const expectedKeys = [
       "autoContinue",
       "prMergeMode",
@@ -698,6 +698,7 @@ describe("SETTINGS_REGISTRY", () => {
       "changesRequestedGate",
       "personalRepoIssuesGate",
       "prAgeGateMinutes",
+      "pushCooldownMinutes",
       "narratorSpeed",
       "memoryLineThreshold",
       "memoryWordThreshold",
@@ -785,6 +786,7 @@ describe("collaborationMode settings", () => {
       narratorSpeed: 0,
       prAgeGateMinutes: 10,
       prMergeMode: true,
+      pushCooldownMinutes: 0,
       pushGate: false,
       sandboxedEdits: true,
       speak: false,
@@ -811,6 +813,7 @@ describe("collaborationMode settings", () => {
       narratorSpeed: 0,
       prAgeGateMinutes: 10,
       prMergeMode: true,
+      pushCooldownMinutes: 0,
       pushGate: false,
       sandboxedEdits: true,
       speak: false,
@@ -843,6 +846,7 @@ describe("collaborationMode settings", () => {
       narratorSpeed: 0,
       prAgeGateMinutes: 10,
       prMergeMode: true,
+      pushCooldownMinutes: 0,
       pushGate: false,
       sandboxedEdits: true,
       speak: false,
