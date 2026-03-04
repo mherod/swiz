@@ -159,6 +159,35 @@ export function resolvePolicy(project: ProjectSwizSettings | null): ResolvedPoli
   return { trivialMaxFiles, trivialMaxLines, profile: resolvedProfile, source: "project" }
 }
 
+/** Resolve effective memory thresholds from a project config (if any). */
+export interface ResolvedMemoryThresholds {
+  memoryLineThreshold: number
+  memoryWordThreshold: number
+  source: "project" | "default"
+}
+
+export function resolveMemoryThresholds(
+  project: ProjectSwizSettings | null,
+  globalDefaults: { memoryLineThreshold: number; memoryWordThreshold: number }
+): ResolvedMemoryThresholds {
+  if (
+    !project ||
+    (project.memoryLineThreshold === undefined && project.memoryWordThreshold === undefined)
+  ) {
+    return {
+      memoryLineThreshold: globalDefaults.memoryLineThreshold,
+      memoryWordThreshold: globalDefaults.memoryWordThreshold,
+      source: "default",
+    }
+  }
+
+  return {
+    memoryLineThreshold: project.memoryLineThreshold ?? globalDefaults.memoryLineThreshold,
+    memoryWordThreshold: project.memoryWordThreshold ?? globalDefaults.memoryWordThreshold,
+    source: "project",
+  }
+}
+
 export const DEFAULT_SETTINGS: SwizSettings = {
   autoContinue: true,
   critiquesEnabled: true,

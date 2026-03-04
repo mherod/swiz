@@ -7,6 +7,7 @@ import {
   getSwizSettingsPath,
   readProjectSettings,
   readSwizSettings,
+  resolveMemoryThresholds,
   resolvePolicy,
   writeProjectSettings,
   writeSwizSettings,
@@ -381,6 +382,8 @@ function printSettings(
     profile: string | null
     trivialMaxFiles: number
     trivialMaxLines: number
+    memoryLineThreshold: number
+    memoryWordThreshold: number
     source: "project" | "default"
     disabledHooks?: string[]
   },
@@ -449,6 +452,14 @@ function printSettings(
     console.log(
       `  trivial-max-lines: ${projectPolicyInfo.trivialMaxLines} (${projectPolicyInfo.source})`
     )
+    if (projectPolicyInfo.source === "project") {
+      console.log(
+        `  memory-line-threshold: ${projectPolicyInfo.memoryLineThreshold} (${projectPolicyInfo.source})`
+      )
+      console.log(
+        `  memory-word-threshold: ${projectPolicyInfo.memoryWordThreshold} (${projectPolicyInfo.source})`
+      )
+    }
     const projectDisabled = projectPolicyInfo.disabledHooks ?? []
     if (projectDisabled.length > 0) {
       console.log(`  disabled-hooks:  ${projectDisabled.join(", ")} (project)`)
@@ -474,11 +485,17 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
 
   const projectSettings = await readProjectSettings(parsed.targetDir)
   const policy = resolvePolicy(projectSettings)
+  const memoryThresholds = resolveMemoryThresholds(projectSettings, {
+    memoryLineThreshold: effective.memoryLineThreshold,
+    memoryWordThreshold: effective.memoryWordThreshold,
+  })
   const projectPolicyInfo = {
     configPath: getProjectSettingsPath(parsed.targetDir),
     profile: policy.profile,
     trivialMaxFiles: policy.trivialMaxFiles,
     trivialMaxLines: policy.trivialMaxLines,
+    memoryLineThreshold: memoryThresholds.memoryLineThreshold,
+    memoryWordThreshold: memoryThresholds.memoryWordThreshold,
     source: policy.source,
     disabledHooks: projectSettings?.disabledHooks,
   }
