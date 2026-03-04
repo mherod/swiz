@@ -10,6 +10,7 @@ import {
   isTaskTool,
   isWriteTool,
 } from "../../hooks/hook-utils.ts"
+import { tryReplayPendingMutations } from "../issue-store.ts"
 import { evalCondition, type HookGroup, manifest } from "../manifest.ts"
 import { loadAllPlugins } from "../plugins.ts"
 import {
@@ -776,8 +777,11 @@ export const dispatchCommand: Command = {
         log(`   ⚠ missing tool_name`)
     }
 
-    // ── Load plugin + project-local hooks and merge with built-in manifest ──
+    // ── Best-effort: drain any offline issue mutations before hooks run ──
     const cwd = (payload.cwd as string) ?? process.cwd()
+    await tryReplayPendingMutations(cwd)
+
+    // ── Load plugin + project-local hooks and merge with built-in manifest ──
     let combinedManifest: HookGroup[] = [...manifest]
     const projectSettings = await readProjectSettings(cwd)
     if (projectSettings?.plugins?.length) {
