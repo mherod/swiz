@@ -1,0 +1,110 @@
+#!/usr/bin/env bun
+// PreToolUse hook: Prevent CLAUDE.md files from exceeding 5000 words.
+// Blocks Edit/Write operations that would push the file over the threshold.
+
+import { denyPreToolUse, isEditTool, isWriteTool, skillAdvice } from "./hook-utils.ts"
+
+const WORD_LIMIT = 5000
+
+interface ToolInput {
+  file_path?: string
+  old_string?: string
+  new_string?: string
+  content?: string
+}
+
+async function countWords(text: string): Promise<number> {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0).length
+}
+
+async function main() {
+  const input = (await Bun.stdin.json()) as {
+    tool_name?: string
+    tool_input?: ToolInput
+  }
+
+  const toolName = input.tool_name ?? ""
+  const filePath = input.tool_input?.file_path ?? ""
+
+  // Only guard CLAUDE.md files
+  if (!filePath.endsWith("CLAUDE.md")) {
+    process.exit(0)
+  }
+
+  // Only guard Edit and Write tools
+  if (!isEditTool(toolName) && !isWriteTool(toolName)) {
+    process.exit(0)
+  }
+
+  try {
+    // Read the current file content
+    let currentContent = ""
+    try {
+      currentContent = await Bun.file(filePath).text()
+    } catch {
+      // File doesn't exist yet (Write to new file) - use empty content
+      currentContent = ""
+    }
+
+    // Calculate projected content after edit
+    let projectedContent = currentContent
+    if (isEditTool(toolName)) {
+      // Edit: replace old_string with new_string
+      const oldString = input.tool_input?.old_string ?? ""
+      const newString = input.tool_input?.new_string ?? ""
+      projectedContent = currentContent.replace(oldString, newString)
+    } else {
+      // Write: use the new content directly
+      projectedContent = input.tool_input?.content ?? ""
+    }
+
+    // Count words in projected content
+    const projectedWordCount = await countWords(projectedContent)
+
+    if (projectedWordCount > WORD_LIMIT) {
+      const currentWordCount = await countWords(currentContent)
+      const skill = skillAdvice(
+        "compact-memory",
+        "Use the /compact-memory skill to reduce the file below 5000 words, then retry this edit.",
+        "Run `bun ~/.claude/skills/compact-memory/scripts/compact.ts` to reduce the file."
+      )
+
+      denyPreToolUse(
+        `CLAUDE.md word limit exceeded.\n\n` +
+          `Current: ${currentWordCount} words\n` +
+          `After edit: ${projectedWordCount} words\n` +
+          `Limit: ${WORD_LIMIT} words\n\n` +
+          `The CLAUDE.md file cannot exceed ${WORD_LIMIT} words. ` +
+          `This limit keeps the memory file focused and performant.\n\n` +
+          `${skill}`
+      )
+    }
+
+    // Allow the edit
+    console.log(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "allow",
+        },
+      })
+    )
+  } catch (error) {
+    // On any error, allow the edit (fail open) rather than blocking
+    console.log(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "allow",
+        },
+      })
+    )
+  }
+}
+
+main().catch(() => {
+  process.exit(0)
+})
