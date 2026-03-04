@@ -42,11 +42,19 @@ async function main(): Promise<void> {
 
   // Also check prior sessions for incomplete tasks (if current session has none)
   if (currentIncomplete.length === 0) {
-    const priorTasks = await findPriorSessionTasks(cwd, sessionId)
-    if (priorTasks.length > 0) {
+    const priorResult = await findPriorSessionTasks(cwd, sessionId)
+    if (priorResult && priorResult.tasks.length > 0) {
+      const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
       const taskLines = priorTasks.map((t) => `  • #${t.id} [${t.status}]: ${t.subject}`).join("\n")
+      const completeHint = priorTasks
+        .map(
+          (t) => `  swiz tasks complete ${t.id} --session ${priorSessionId} --evidence "note:done"`
+        )
+        .join("\n")
       ctx +=
-        `\n\nPrior session had ${priorTasks.length} incomplete task(s) — continue these instead of creating new tasks:\n` +
+        `\n\nPrior session (${priorSessionId}) had ${priorTasks.length} incomplete task(s). ` +
+        `If already done, complete them:\n${completeHint}\n` +
+        `Otherwise continue these instead of creating new tasks:\n` +
         taskLines
     }
   }

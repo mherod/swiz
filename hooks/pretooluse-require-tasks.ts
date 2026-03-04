@@ -141,16 +141,24 @@ async function main() {
     // Before auto-creating a bootstrap task, check if the prior session for this
     // project had incomplete tasks. If so, direct the agent to restore them
     // rather than resetting the plan with a new generic bootstrap task.
-    const priorTasks = await findPriorSessionTasks(cwd, sessionId)
-    if (priorTasks.length > 0) {
+    const priorResult = await findPriorSessionTasks(cwd, sessionId)
+    if (priorResult && priorResult.tasks.length > 0) {
+      const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
       const taskLines = priorTasks.map((t) => `  • #${t.id} [${t.status}]: ${t.subject}`).join("\n")
+      const completeExamples = priorTasks
+        .map(
+          (t) =>
+            `  swiz tasks complete ${t.id} --session ${priorSessionId} --evidence "note:completed in prior session"`
+        )
+        .join("\n")
       deny(
-        `STOP. This session has no tasks, but the prior session had ${priorTasks.length} incomplete task(s):\n` +
+        `STOP. This session has no tasks, but a prior session (${priorSessionId}) had ${priorTasks.length} incomplete task(s):\n` +
           taskLines +
           `\n\n` +
           formatActionPlan(
             [
-              "Use TaskCreate to re-create these tasks and mark the current one in_progress.",
+              `If the work is already done, mark the prior tasks complete:\n${completeExamples}`,
+              "If the work is still needed, use TaskCreate to re-create these tasks and mark the current one in_progress.",
               `Retry this ${toolName} call — it will succeed once an in_progress task exists.`,
             ],
             { translateToolNames: true }

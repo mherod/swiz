@@ -44,22 +44,22 @@ async function writeTranscript(homeDir: string, cwd: string, sessionId: string) 
 }
 
 describe("findPriorSessionTasks", () => {
-  test("returns empty array when no project directory exists", async () => {
+  test("returns null when no project directory exists", async () => {
     const homeDir = await createTempHome()
     const result = await findPriorSessionTasks("/nonexistent/project", "current-session", homeDir)
-    expect(result).toEqual([])
+    expect(result).toBeNull()
   })
 
-  test("returns empty array when prior session has no tasks", async () => {
+  test("returns null when prior session has no tasks", async () => {
     const homeDir = await createTempHome()
     const cwd = "/Users/test/myproject"
     await writeTranscript(homeDir, cwd, "prior-session-1")
     // No task files written for prior-session-1
     const result = await findPriorSessionTasks(cwd, "current-session", homeDir)
-    expect(result).toEqual([])
+    expect(result).toBeNull()
   })
 
-  test("returns empty array when prior session tasks are all completed", async () => {
+  test("returns null when prior session tasks are all completed", async () => {
     const homeDir = await createTempHome()
     const cwd = "/Users/test/myproject"
     await writeTranscript(homeDir, cwd, "prior-session-1")
@@ -69,10 +69,10 @@ describe("findPriorSessionTasks", () => {
       status: "completed",
     })
     const result = await findPriorSessionTasks(cwd, "current-session", homeDir)
-    expect(result).toEqual([])
+    expect(result).toBeNull()
   })
 
-  test("returns incomplete tasks from prior session", async () => {
+  test("returns incomplete tasks with session ID from prior session", async () => {
     const homeDir = await createTempHome()
     const cwd = "/Users/test/myproject"
     await writeTranscript(homeDir, cwd, "prior-session-1")
@@ -93,10 +93,12 @@ describe("findPriorSessionTasks", () => {
     })
 
     const result = await findPriorSessionTasks(cwd, "current-session", homeDir)
-    expect(result).toHaveLength(2)
-    expect(result.map((t) => t.subject)).toContain("Implement feature X")
-    expect(result.map((t) => t.subject)).toContain("Write tests for X")
-    expect(result.map((t) => t.subject)).not.toContain("Already done task")
+    expect(result).not.toBeNull()
+    expect(result!.sessionId).toBe("prior-session-1")
+    expect(result!.tasks).toHaveLength(2)
+    expect(result!.tasks.map((t) => t.subject)).toContain("Implement feature X")
+    expect(result!.tasks.map((t) => t.subject)).toContain("Write tests for X")
+    expect(result!.tasks.map((t) => t.subject)).not.toContain("Already done task")
   })
 
   test("excludes the current session from results", async () => {
@@ -110,7 +112,7 @@ describe("findPriorSessionTasks", () => {
     })
 
     const result = await findPriorSessionTasks(cwd, "current-session", homeDir)
-    expect(result).toEqual([])
+    expect(result).toBeNull()
   })
 
   test("returns tasks from most recent session with incomplete work", async () => {
@@ -137,8 +139,10 @@ describe("findPriorSessionTasks", () => {
     })
 
     const result = await findPriorSessionTasks(cwd, "current-session", homeDir)
-    expect(result).toHaveLength(1)
-    expect(result[0]?.subject).toBe("Recent pending task")
+    expect(result).not.toBeNull()
+    expect(result!.sessionId).toBe("recent-session")
+    expect(result!.tasks).toHaveLength(1)
+    expect(result!.tasks[0]?.subject).toBe("Recent pending task")
   })
 
   test("handles paths with dots correctly via projectKeyFromCwd", async () => {
@@ -153,12 +157,14 @@ describe("findPriorSessionTasks", () => {
     })
 
     const result = await findPriorSessionTasks(cwd, "current-session", homeDir)
-    expect(result).toHaveLength(1)
-    expect(result[0]?.subject).toBe("Task for dotted path")
+    expect(result).not.toBeNull()
+    expect(result!.sessionId).toBe("prior-session-1")
+    expect(result!.tasks).toHaveLength(1)
+    expect(result!.tasks[0]?.subject).toBe("Task for dotted path")
   })
 
-  test("returns empty array when home is empty string", async () => {
+  test("returns null when home is empty string", async () => {
     const result = await findPriorSessionTasks("/some/project", "current-session", "")
-    expect(result).toEqual([])
+    expect(result).toBeNull()
   })
 })

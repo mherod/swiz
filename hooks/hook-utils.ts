@@ -421,6 +421,15 @@ export async function readSessionTasks(
 }
 
 /**
+ * Result of scanning prior sessions for incomplete tasks.
+ * Includes the session ID so callers can construct `swiz tasks complete --session` commands.
+ */
+export interface PriorSessionResult {
+  sessionId: string
+  tasks: SessionTask[]
+}
+
+/**
  * Find incomplete tasks from the most recent prior session for a given project.
  *
  * Scans ~/.claude/projects/<projectKey>/ for session transcript IDs, then checks
@@ -432,8 +441,8 @@ export async function findPriorSessionTasks(
   cwd: string,
   excludeSessionId: string,
   home: string = process.env.HOME ?? ""
-): Promise<SessionTask[]> {
-  if (!home || !cwd) return []
+): Promise<PriorSessionResult | null> {
+  if (!home || !cwd) return null
   const { projectKeyFromCwd } = await import("../src/transcript-utils.ts")
   const { readdir, stat } = await import("node:fs/promises")
 
@@ -445,7 +454,7 @@ export async function findPriorSessionTasks(
   try {
     transcriptFiles = await readdir(projectDir)
   } catch {
-    return []
+    return null
   }
 
   const sessions: { id: string; mtime: number }[] = []
@@ -464,9 +473,9 @@ export async function findPriorSessionTasks(
   for (const { id } of sessions) {
     const tasks = await readSessionTasks(id, home)
     const incomplete = tasks.filter((t) => isIncompleteTaskStatus(t.status))
-    if (incomplete.length > 0) return incomplete
+    if (incomplete.length > 0) return { sessionId: id, tasks: incomplete }
   }
-  return []
+  return null
 }
 
 /**
