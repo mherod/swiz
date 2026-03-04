@@ -28,12 +28,19 @@ export interface SessionSwizSettings {
   prMergeMode?: boolean
 }
 
+export interface StateHistoryEntry {
+  from: ProjectState | null
+  to: ProjectState
+  timestamp: string
+}
+
 /** Project-local policy config — lives in <repo>/.swiz/config.json */
 export interface ProjectSwizSettings {
   profile?: PolicyProfile
   trivialMaxFiles?: number
   trivialMaxLines?: number
   state?: ProjectState
+  stateHistory?: StateHistoryEntry[]
   /** Hook filenames to skip for this project (e.g. "stop-github-ci.ts") */
   disabledHooks?: string[]
 }
@@ -258,6 +265,15 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   if (typeof obj.state === "string" && obj.state in STATE_TRANSITIONS) {
     result.state = obj.state as ProjectState
   }
+  if (Array.isArray(obj.stateHistory)) {
+    result.stateHistory = (obj.stateHistory as StateHistoryEntry[]).filter(
+      (e) =>
+        typeof e === "object" &&
+        e !== null &&
+        typeof e.to === "string" &&
+        typeof e.timestamp === "string"
+    )
+  }
   if (
     Array.isArray(obj.disabledHooks) &&
     obj.disabledHooks.every((h: unknown) => typeof h === "string")
@@ -284,7 +300,14 @@ export async function writeProjectState(cwd: string, state: ProjectState): Promi
       // Ignore parse errors — overwrite with clean object
     }
   }
-  await Bun.write(path, JSON.stringify({ ...existing, state }, null, 2))
+
+  const previousState = (existing.state as ProjectState) ?? null
+  const history = Array.isArray(existing.stateHistory)
+    ? (existing.stateHistory as StateHistoryEntry[])
+    : []
+  history.push({ from: previousState, to: state, timestamp: new Date().toISOString() })
+
+  await Bun.write(path, JSON.stringify({ ...existing, state, stateHistory: history }, null, 2))
 }
 
 export async function readProjectSettings(cwd: string): Promise<ProjectSwizSettings | null> {

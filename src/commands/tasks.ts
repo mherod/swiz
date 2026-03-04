@@ -19,6 +19,10 @@ interface Task {
   blockedBy: string[]
   completionEvidence?: string
   completionTimestamp?: string
+  /** ISO timestamp of last status change (used for elapsed-time tracking) */
+  statusChangedAt?: string
+  /** Cumulative milliseconds spent in in_progress status */
+  elapsedMs?: number
 }
 
 interface AuditEntry {
@@ -55,6 +59,18 @@ function timeAgo(date: Date): string {
   const days = Math.floor(ms / 86400000)
   if (days < 7) return `${days}d ago`
   return date.toLocaleDateString()
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
+  const mins = Math.floor(ms / 60_000)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  const remainMins = mins % 60
+  if (hours < 24) return remainMins > 0 ? `${hours}h ${remainMins}m` : `${hours}h`
+  const days = Math.floor(hours / 24)
+  const remainHours = hours % 24
+  return remainHours > 0 ? `${days}d ${remainHours}h` : `${days}d`
 }
 
 // ─── Session discovery ──────────────────────────────────────────────────────
@@ -230,6 +246,13 @@ async function listTasks(sessionId: string, label: string) {
         for (const line of lines) console.log(`     ${DIM}${line}${RESET}`)
         if (task.description.split("\n").length > 3) console.log(`     ${DIM}...${RESET}`)
       }
+      // Show elapsed time for in_progress (live) and completed tasks
+      if (task.status === "in_progress" && task.statusChangedAt) {
+        const live = (task.elapsedMs ?? 0) + (Date.now() - new Date(task.statusChangedAt).getTime())
+        console.log(`     ${DIM}⏱  ${formatElapsed(Math.max(0, live))} elapsed${RESET}`)
+      } else if ((task.elapsedMs ?? 0) > 0) {
+        console.log(`     ${DIM}⏱  ${formatElapsed(task.elapsedMs!)} elapsed${RESET}`)
+      }
       if (task.completionEvidence)
         console.log(`     ${DIM}✓ Evidence: ${task.completionEvidence}${RESET}`)
       if (task.completionTimestamp)
@@ -262,6 +285,8 @@ async function createTask(sessionId: string, subject: string, description: strin
     subject,
     description,
     status: "pending",
+    statusChangedAt: new Date().toISOString(),
+    elapsedMs: 0,
     blocks: [],
     blockedBy: [],
   }
@@ -309,10 +334,19 @@ async function updateStatus(
   }
 
   const oldStatus = task.status
+  const now = new Date().toISOString()
+
+  // Accumulate elapsed time when leaving in_progress
+  if (oldStatus === "in_progress" && task.statusChangedAt) {
+    const elapsed = Date.now() - new Date(task.statusChangedAt).getTime()
+    task.elapsedMs = (task.elapsedMs ?? 0) + Math.max(0, elapsed)
+  }
+
   task.status = newStatus
+  task.statusChangedAt = now
   if (newStatus === "completed" && evidence) {
     task.completionEvidence = evidence
-    task.completionTimestamp = new Date().toISOString()
+    task.completionTimestamp = now
   }
 
   await writeTask(sessionId, task)

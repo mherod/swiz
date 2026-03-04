@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   PROJECT_STATES,
+  readProjectSettings,
   readProjectState,
   STATE_TRANSITIONS,
   TERMINAL_STATES,
@@ -179,5 +180,66 @@ describe("swiz state CLI", () => {
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("in-development")
     expect(result.stdout).toContain("awaiting-feedback")
+  })
+
+  test("state show displays current state age", async () => {
+    const dir = await createTempDir()
+    await writeProjectState(dir, "in-development")
+    const result = await runSwiz(["state", "show"], dir)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("current state age:")
+  })
+})
+
+describe("state transition history", () => {
+  test("writeProjectState appends history entries", async () => {
+    const dir = await createTempDir()
+    await writeProjectState(dir, "in-development")
+    await writeProjectState(dir, "awaiting-feedback")
+
+    const settings = await readProjectSettings(dir)
+    expect(settings?.stateHistory).toHaveLength(2)
+    expect(settings?.stateHistory?.[0]?.from).toBeNull()
+    expect(settings?.stateHistory?.[0]?.to).toBe("in-development")
+    expect(settings?.stateHistory?.[1]?.from).toBe("in-development")
+    expect(settings?.stateHistory?.[1]?.to).toBe("awaiting-feedback")
+  })
+
+  test("history survives multiple state loops", async () => {
+    const dir = await createTempDir()
+    await writeProjectState(dir, "in-development")
+    await writeProjectState(dir, "awaiting-feedback")
+    await writeProjectState(dir, "in-development")
+    await writeProjectState(dir, "awaiting-feedback")
+
+    const settings = await readProjectSettings(dir)
+    expect(settings?.stateHistory).toHaveLength(4)
+    expect(settings?.stateHistory?.[2]?.from).toBe("awaiting-feedback")
+    expect(settings?.stateHistory?.[2]?.to).toBe("in-development")
+    expect(settings?.stateHistory?.[3]?.from).toBe("in-development")
+    expect(settings?.stateHistory?.[3]?.to).toBe("awaiting-feedback")
+  })
+
+  test("all history entries have timestamps", async () => {
+    const dir = await createTempDir()
+    await writeProjectState(dir, "in-development")
+    await writeProjectState(dir, "paused")
+
+    const settings = await readProjectSettings(dir)
+    for (const entry of settings?.stateHistory ?? []) {
+      expect(entry.timestamp).toBeTruthy()
+      expect(() => new Date(entry.timestamp)).not.toThrow()
+    }
+  })
+
+  test("state show displays time per state for multi-transition history", async () => {
+    const dir = await createTempDir()
+    await writeProjectState(dir, "in-development")
+    await writeProjectState(dir, "awaiting-feedback")
+    await writeProjectState(dir, "in-development")
+
+    const result = await runSwiz(["state", "show"], dir)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("time per state:")
   })
 })
