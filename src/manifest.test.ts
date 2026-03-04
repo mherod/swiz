@@ -98,6 +98,17 @@ describe("manifest.ts", () => {
         updateMemoryGroup?.hooks.some((h) => h.file.includes("update-memory-enforcement"))
       ).toBe(true)
     })
+
+    it("update-memory enforcement hook has 5-minute cooldown", () => {
+      const updateMemoryGroup = manifest.find(
+        (g) => g.event === "preToolUse" && g.matcher === "Edit|Write|NotebookEdit|Bash"
+      )
+      const hook = updateMemoryGroup?.hooks.find((h) =>
+        h.file.includes("update-memory-enforcement")
+      )
+      expect(hook).toBeDefined()
+      expect(hook?.cooldownSeconds).toBe(300)
+    })
   })
 
   describe("postToolUse event hooks", () => {

@@ -147,7 +147,7 @@ export const manifest: HookGroup[] = [
   {
     event: "preToolUse",
     matcher: "Edit|Write|NotebookEdit|Bash",
-    hooks: [{ file: "pretooluse-update-memory-enforcement.ts", timeout: 5 }],
+    hooks: [{ file: "pretooluse-update-memory-enforcement.ts", timeout: 5, cooldownSeconds: 300 }],
   },
   {
     event: "preToolUse",
