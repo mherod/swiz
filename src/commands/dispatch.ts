@@ -11,6 +11,7 @@ import {
   isWriteTool,
 } from "../../hooks/hook-utils.ts"
 import { evalCondition, type HookGroup, manifest } from "../manifest.ts"
+import { loadAllPlugins } from "../plugins.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 
@@ -770,13 +771,26 @@ export const dispatchCommand: Command = {
         log(`   ⚠ missing tool_name`)
     }
 
-    const matchingGroups = manifest.filter(
+    // ── Load plugin hooks and merge with built-in manifest ───────────
+    const cwd = (payload.cwd as string) ?? process.cwd()
+    let combinedManifest = manifest
+    const projectSettings = await readProjectSettings(cwd)
+    if (projectSettings?.plugins?.length) {
+      const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
+      const pluginHooks = pluginResults.flatMap((r) => r.hooks)
+      if (pluginHooks.length > 0) {
+        combinedManifest = [...manifest, ...pluginHooks]
+        log(`   loaded ${pluginHooks.length} plugin hook group(s)`)
+      }
+    }
+
+    const matchingGroups = combinedManifest.filter(
       (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
     )
     const filteredGroups = await applyHookSettingFilters(matchingGroups, payload)
 
     log(
-      `   matched ${matchingGroups.length} group(s) from ${manifest.filter((g) => g.event === canonicalEvent).length} total`
+      `   matched ${matchingGroups.length} group(s) from ${combinedManifest.filter((g) => g.event === canonicalEvent).length} total`
     )
     const skippedHooks = countHooks(matchingGroups) - countHooks(filteredGroups)
     if (skippedHooks > 0) {

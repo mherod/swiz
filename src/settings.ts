@@ -43,6 +43,8 @@ export interface ProjectSwizSettings {
   stateHistory?: StateHistoryEntry[]
   /** Hook filenames to skip for this project (e.g. "stop-github-ci.ts") */
   disabledHooks?: string[]
+  /** External hook plugin bundles — package names or local paths */
+  plugins?: string[]
 }
 
 /** Resolved policy thresholds after merging global + project config */
@@ -279,6 +281,9 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
     obj.disabledHooks.every((h: unknown) => typeof h === "string")
   ) {
     result.disabledHooks = obj.disabledHooks as string[]
+  }
+  if (Array.isArray(obj.plugins) && obj.plugins.every((p: unknown) => typeof p === "string")) {
+    result.plugins = obj.plugins as string[]
   }
   return result
 }

@@ -1,5 +1,7 @@
 import { join } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
+import { manifest } from "../manifest.ts"
+import { loadAllPlugins } from "../plugins.ts"
 import { readProjectSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 
@@ -211,18 +213,80 @@ async function showScript(allSettings: LoadedSettings[], scriptQuery: string) {
   throw new Error(`No hook script matching: ${scriptQuery}`)
 }
 
+// ─── Source view ─────────────────────────────────────────────────────────────
+
+const DIM = "\x1b[2m"
+const CYAN_H = "\x1b[36m"
+const RST = "\x1b[0m"
+
+async function showSources() {
+  const cwd = process.cwd()
+
+  // Built-in hooks
+  const builtinByEvent = new Map<string, { file: string }[]>()
+  for (const group of manifest) {
+    const list = builtinByEvent.get(group.event) ?? []
+    for (const hook of group.hooks) {
+      list.push({ file: hook.file })
+    }
+    builtinByEvent.set(group.event, list)
+  }
+
+  // Plugin hooks
+  const projectSettings = await readProjectSettings(cwd)
+  const pluginResults = projectSettings?.plugins?.length
+    ? await loadAllPlugins(projectSettings.plugins, cwd)
+    : []
+
+  const pluginByEvent = new Map<string, { file: string; plugin: string }[]>()
+  for (const result of pluginResults) {
+    if (result.error) continue
+    for (const group of result.hooks) {
+      const list = pluginByEvent.get(group.event) ?? []
+      for (const hook of group.hooks) {
+        list.push({ file: hook.file, plugin: result.name })
+      }
+      pluginByEvent.set(group.event, list)
+    }
+  }
+
+  const allEvents = new Set([...builtinByEvent.keys(), ...pluginByEvent.keys()])
+
+  console.log("\n  Hook sources:\n")
+  for (const event of [...allEvents].sort()) {
+    const builtins = builtinByEvent.get(event) ?? []
+    const plugins = pluginByEvent.get(event) ?? []
+    console.log(`  ${event} (${builtins.length + plugins.length})`)
+    for (const h of builtins) {
+      const name = h.file.split("/").pop() ?? h.file
+      console.log(`    ${DIM}built-in${RST}  ${name}`)
+    }
+    for (const h of plugins) {
+      const name = h.file.split("/").pop() ?? h.file
+      console.log(`    ${CYAN_H}${h.plugin}${RST}  ${name}`)
+    }
+  }
+  console.log()
+}
+
 // ─── Command ────────────────────────────────────────────────────────────────
 
 export const hooksCommand: Command = {
   name: "hooks",
   description: "Inspect agent hooks (Claude Code, Cursor, Gemini CLI)",
-  usage: "swiz hooks [event] [script-name]",
+  usage: "swiz hooks [--source] [event] [script-name]",
   options: [
     { flags: "(no args)", description: "List all hook events and their hook counts" },
+    { flags: "--source", description: "Show origin (built-in / plugin) for every hook" },
     { flags: "<event>", description: "Show hooks registered for a specific event name" },
     { flags: "<event> <script>", description: "Print the source of a hook script by name" },
   ],
   async run(args) {
+    if (args.includes("--source")) {
+      await showSources()
+      return
+    }
+
     const allSettings = await loadAllSettings()
     const [first, second] = args
 

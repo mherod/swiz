@@ -1,6 +1,8 @@
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, getAgentByFlag, translateEvent } from "../agents.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
+import { loadAllPlugins } from "../plugins.ts"
+import { readProjectSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 
 const SWIZ_ROOT = dirname(Bun.main)
@@ -512,6 +514,24 @@ export const installCommand: Command = {
     if (!mergeTool || args.some((a) => AGENTS.some((ag) => `--${ag.id}` === a))) {
       console.log(`  Hooks: ${HOOKS_DIR}`)
       console.log(`  Agents: ${targets.map((a) => a.name).join(", ")}\n`)
+
+      // Report loaded plugins (dry-run or not)
+      const cwd = process.cwd()
+      const projectSettings = await readProjectSettings(cwd)
+      if (projectSettings?.plugins?.length) {
+        const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
+        const YELLOW = "\x1b[33m"
+        console.log(`  Plugins:`)
+        for (const result of pluginResults) {
+          if (result.error) {
+            console.log(`    ${YELLOW}⚠ ${result.name}: ${result.error}${RESET}`)
+          } else {
+            const hookCount = result.hooks.reduce((n, g) => n + g.hooks.length, 0)
+            console.log(`    ${GREEN}✓${RESET} ${result.name} (${hookCount} hook(s))`)
+          }
+        }
+        console.log()
+      }
 
       for (const agent of targets) {
         await installAgent(agent, dryRun)
