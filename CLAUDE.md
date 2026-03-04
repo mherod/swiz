@@ -217,9 +217,9 @@ Follow this order for every unit of work.
 
 This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all work — no pull request required.
 
-**DO** invoke the `/push` skill before running `git push` or `swiz push-wait`. A PreToolUse hook blocks push if the skill has not been invoked in the current session. Always call `/push` first — it enforces collaboration checks and the complete push workflow.
+**DO** invoke the `/push` skill before `git push`. A PreToolUse hook blocks push if not invoked. Call `/push` first — it enforces collaboration checks.
 
-**DON'T** proceed with a main-branch push if the collaboration guard check fails or errors. The push skill's Step 0 collaboration guard is a mandatory safety gate that verifies the repository collaboration state. If the guard errors (e.g., zsh parsing errors with `! $GH_AVAILABLE`), stop immediately, fix the check, and rerun the guard before pushing. Bypassing a failed guard leaves the push decision unsafe.
+**DON'T** push to main if the collaboration guard errors. Stop, fix the check, and rerun the guard verification before pushing (e.g., zsh parsing errors with `! $GH_AVAILABLE`).
 
 **Pre-push checklist:**
 1. `git log origin/main..HEAD --oneline` — review commits before pushing.
@@ -232,13 +232,13 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
 
 **DON'T** use `gh run view --commit <SHA>` — flag doesn't exist. Use two-step pattern: `gh run list --commit $SHA --json databaseId --jq '.[0].databaseId'` to get run ID, then `gh run view <id>`.
 
-**DO** use `swiz push-wait origin <branch>` instead of raw `git push` when a cooldown may be active. `swiz push-wait` polls and pushes when the cooldown clears.
+**DO** use `swiz push-wait origin <branch>` instead of raw `git push` when cooldown is active. It polls and waits for cooldown to clear.
 
 **Mandatory hooks — never bypass:**
-- `lefthook pre-push` runs `bun test`. DON'T use `--no-verify` or any flag that skips it. Fix test failures first.
-- CI workflow (`CI`) runs lint → typecheck → test. All three jobs must be green before the session can stop.
+- `lefthook pre-push` runs `bun test`. DON'T skip with `--no-verify`. Fix failures first.
+- CI workflow runs lint → typecheck → test. All jobs must pass before stop.
 
-**DO** verify CI with `gh run view --json conclusion,status,jobs` after every push. Never rely on `gh run watch` alone — always fetch JSON.
+**DO** verify CI with `gh run view --json` after every push. Don't rely on `gh run watch` alone.
 
 **DO** use token-based parsing (not regex) when hooks must distinguish `git push --force` from `git push -- --force`. Regex cannot handle the `--` sentinel or `-C <path>` global options. Export the parser from `hook-utils.ts` for independent unit testing.
 
