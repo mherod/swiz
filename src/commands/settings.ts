@@ -191,7 +191,7 @@ function isNumericSetting(key: SettingKey): key is NumericSettingKey {
 }
 
 function isStringSetting(key: SettingKey): key is StringSettingKey {
-  return key === "narratorVoice"
+  return key === "narratorVoice" || key === "ambitionMode"
 }
 
 function parseSettingsArgs(args: string[]): ParsedSettingsArgs {

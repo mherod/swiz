@@ -264,6 +264,44 @@ describe("swiz settings", () => {
     expect(result.stderr).toContain("not a boolean setting")
   })
 
+  test("sets ambition-mode standard and persists to config", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "set", "ambition-mode", "standard"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Set ambition-mode = standard")
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { ambitionMode?: string }
+    expect(json.ambitionMode).toBe("standard")
+  })
+
+  test("sets ambition-mode aggressive and persists to config", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "set", "ambition-mode", "aggressive"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Set ambition-mode = aggressive")
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { ambitionMode?: string }
+    expect(json.ambitionMode).toBe("aggressive")
+  })
+
+  test("rejects invalid ambition-mode value", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "set", "ambition-mode", "turbo"], home)
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("ambition-mode")
+  })
+
+  test("rejects enable/disable for ambition-mode", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "enable", "ambition-mode"], home)
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("not a boolean setting")
+  })
+
   test("existing settings files load cleanly without narrator fields", async () => {
     const home = await createTempHome()
     const configDir = join(home, ".swiz")
