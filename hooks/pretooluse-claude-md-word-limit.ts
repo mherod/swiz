@@ -14,10 +14,43 @@ interface ToolInput {
 }
 
 async function countWords(text: string): Promise<number> {
-  return text
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w.length > 0).length
+  // Strip fenced code blocks (```...```)
+  let processed = text.replace(/```[\s\S]*?```/g, "")
+
+  // Strip HTML comments (<!-- ... -->)
+  processed = processed.replace(/<!--[\s\S]*?-->/g, "")
+
+  // Remove markdown heading syntax (##, ###, etc.)
+  processed = processed.replace(/^#+\s/gm, "")
+
+  // Remove markdown emphasis markers (**, __, *, _, ``)
+  processed = processed.replace(/[*_`]/g, "")
+
+  // Remove markdown list markers (-, *, +) at line start
+  processed = processed.replace(/^[\s]*[-*+]\s+/gm, "")
+
+  // Remove blockquote markers (>) at line start
+  processed = processed.replace(/^>\s+/gm, "")
+
+  // Remove markdown link syntax [text](url) -> extract only text
+  processed = processed.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+
+  // Remove markdown image syntax ![alt](url)
+  processed = processed.replace(/!\[[^\]]*\]\([^)]+\)/g, "")
+
+  // Remove inline HTML tags
+  processed = processed.replace(/<[^>]+>/g, "")
+
+  // Remove markdown horizontal rules (---, ***, ___)
+  processed = processed.replace(/^[\s]*(?:---|===|\*\*\*|___)/gm, "")
+
+  // Normalize whitespace
+  processed = processed.trim().replace(/\s+/g, " ")
+
+  // Split on whitespace and count words (minimum 1 character per word)
+  const words = processed.split(/\s+/).filter((w) => w.length > 0)
+
+  return words.length
 }
 
 async function main() {
