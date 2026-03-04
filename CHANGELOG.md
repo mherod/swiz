@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-03-04
+
+### New Features
+
+- Added per-stack hook filtering. Hooks in the manifest can now
+  declare a `stacks` field (e.g. `["bun", "node"]`) so they only
+  run in matching projects. Projects with no indicator files run
+  all hooks unchanged — fully backwards compatible. (#67)
+- Added framework-based hook conditions. Hook definitions can use
+  `condition: "framework:nextjs"` (or any supported framework) to
+  skip the hook in projects that don't use that framework. (#66)
+- Added `swiz settings disable-hook` / `enable-hook` subcommands
+  so individual hooks can be opted out without editing config
+  files directly. Disabled hooks are shown with a `(disabled)`
+  marker in `swiz settings show`. (#63)
+- `swiz settings show` now displays detected project stacks (e.g.
+  `bun`, `go`) alongside other project-level settings, making it
+  easy to verify which stack-filtered hooks will run. (#67)
+
+### Known Issues
+
+- The narrator hook fires even when speak is disabled at the
+  session level via `swiz settings --session disable speak`. The
+  hook reads global settings before consuming stdin, so it never
+  sees the session-level override. Fix tracked in
+  [#78](https://github.com/mherod/swiz/issues/78).
+
 ## 2026-03-03
 
 ### Bug Fixes
