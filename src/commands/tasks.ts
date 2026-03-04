@@ -242,30 +242,53 @@ export async function findTaskAcrossSessions(
 }
 
 /**
- * Resolve a task by ID: first checks the primary session, then falls back
- * to scanning all project sessions. Returns the actual session ID and tasks.
+ * Centralized task-by-ID resolution. Checks the primary session first,
+ * then falls back to scanning all project sessions. Every command that
+ * operates on a task by ID must use this single entry point.
  */
-async function resolveTaskSession(
+export async function resolveTaskById(
   taskId: string,
   primarySessionId: string,
-  filterCwd?: string
-): Promise<{ sessionId: string; tasks: Task[] }> {
-  const tasks = await readTasks(primarySessionId)
+  filterCwd?: string,
+  tasksDir = TASKS_DIR,
+  projectsDir = PROJECTS_DIR
+): Promise<{ sessionId: string; task: Task }> {
+  // Fast path: check primary session first
+  const tasks = await readTasks(primarySessionId, tasksDir)
   const task = tasks.find((t) => t.id === taskId)
-  if (task) return { sessionId: primarySessionId, tasks }
+  if (task) return { sessionId: primarySessionId, task }
 
   // Fallback: search across all project sessions
-  const found = await findTaskAcrossSessions(taskId, filterCwd)
+  const found = await findTaskAcrossSessions(taskId, filterCwd, tasksDir, projectsDir)
   if (found) {
     console.error(
       `  ${DIM}Task #${taskId} found in session ${found.sessionId.slice(0, 8)}... (not current session)${RESET}`
     )
-    const allTasks = await readTasks(found.sessionId)
-    return { sessionId: found.sessionId, tasks: allTasks }
+    return found
   }
 
-  // Not found anywhere — let the caller handle the error
-  return { sessionId: primarySessionId, tasks }
+  throw new Error(`Task #${taskId} not found in any session for this project.`)
+}
+
+/**
+ * Collect all incomplete tasks across all project sessions.
+ * Used by complete-all to find tasks that may have been orphaned
+ * in other session directories after compaction.
+ */
+async function collectIncompleteTasks(
+  filterCwd?: string
+): Promise<{ sessionId: string; task: Task }[]> {
+  const sessions = await getSessions(filterCwd)
+  const results: { sessionId: string; task: Task }[] = []
+  for (const sessionId of sessions) {
+    const tasks = await readTasks(sessionId)
+    for (const task of tasks) {
+      if (task.status === "pending" || task.status === "in_progress") {
+        results.push({ sessionId, task })
+      }
+    }
+  }
+  return results
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
@@ -367,13 +390,11 @@ async function updateStatus(
   verifyText?: string,
   filterCwd?: string
 ) {
-  const resolved = await resolveTaskSession(taskId, sessionId, filterCwd)
-  const effectiveSessionId = resolved.sessionId
-  const task = resolved.tasks.find((t) => t.id === taskId)
-
-  if (!task) {
-    throw new Error(`Task #${taskId} not found in any session for this project.`)
-  }
+  const { sessionId: effectiveSessionId, task } = await resolveTaskById(
+    taskId,
+    sessionId,
+    filterCwd
+  )
 
   if (verifyText) {
     const verifyError = verifyTaskSubject(task.subject, verifyText)
@@ -423,18 +444,19 @@ async function updateStatus(
   console.log()
 }
 
-async function completeAll(sessionId: string) {
-  const tasks = await readTasks(sessionId)
-  const incomplete = tasks.filter((t) => t.status === "pending" || t.status === "in_progress")
+async function completeAll(filterCwd?: string) {
+  const incomplete = await collectIncompleteTasks(filterCwd)
 
   if (incomplete.length === 0) {
     console.log("\n  No incomplete tasks.\n")
     return
   }
 
-  console.log(`\n  Completing ${incomplete.length} task(s)...\n`)
-  for (const task of incomplete) {
-    await updateStatus(sessionId, task.id, "completed", "bulk-complete")
+  console.log(
+    `\n  Completing ${incomplete.length} task(s) across ${new Set(incomplete.map((i) => i.sessionId)).size} session(s)...\n`
+  )
+  for (const { sessionId, task } of incomplete) {
+    await updateStatus(sessionId, task.id, "completed", "bulk-complete", undefined, filterCwd)
   }
 }
 
@@ -469,13 +491,11 @@ async function submitEvidence(
   evidence: string,
   filterCwd?: string
 ) {
-  const resolved = await resolveTaskSession(taskId, sessionId, filterCwd)
-  const effectiveSessionId = resolved.sessionId
-  const task = resolved.tasks.find((t) => t.id === taskId)
-
-  if (!task) {
-    throw new Error(`Task #${taskId} not found in any session for this project.`)
-  }
+  const { sessionId: effectiveSessionId, task } = await resolveTaskById(
+    taskId,
+    sessionId,
+    filterCwd
+  )
 
   const validationError = validateEvidence(evidence)
   if (validationError) {
@@ -601,6 +621,8 @@ export const tasksCommand: Command = {
     }
 
     const rest = args.slice(1)
+    const allProjects = args.includes("--all-projects")
+    const filterCwd = allProjects ? undefined : process.cwd()
 
     switch (subcommand) {
       case "create": {
@@ -621,8 +643,6 @@ export const tasksCommand: Command = {
         }
         const evidence = extractFlag(rest, "--evidence")
         const verify = extractFlag(rest, "--verify")
-        const allProjects = rest.includes("--all-projects")
-        const filterCwd = allProjects ? undefined : process.cwd()
         const sessionId = await resolveSession(rest.slice(1))
         await updateStatus(sessionId, taskId, "completed", evidence, verify, filterCwd)
         break
@@ -637,8 +657,6 @@ export const tasksCommand: Command = {
               "Prefixes: commit:, pr:, file:, test:, note:"
           )
         }
-        const allProjects = rest.includes("--all-projects")
-        const filterCwd = allProjects ? undefined : process.cwd()
         const sessionId = await resolveSession(rest.slice(2))
         await submitEvidence(sessionId, taskId, evidenceText, filterCwd)
         break
@@ -655,16 +673,13 @@ export const tasksCommand: Command = {
         }
         const evidence = extractFlag(rest, "--evidence")
         const verify = extractFlag(rest, "--verify")
-        const allProjects = rest.includes("--all-projects")
-        const filterCwd = allProjects ? undefined : process.cwd()
         const sessionId = await resolveSession(rest.slice(2))
         await updateStatus(sessionId, taskId, newStatus, evidence, verify, filterCwd)
         break
       }
 
       case "complete-all": {
-        const sessionId = await resolveSession(rest)
-        await completeAll(sessionId)
+        await completeAll(filterCwd)
         break
       }
 

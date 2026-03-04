@@ -8,6 +8,7 @@ import {
   getSessionIdsByCwdScan,
   getSessionIdsForProject,
   getSessions,
+  resolveTaskById,
   validateEvidence,
   verifyTaskSubject,
 } from "./tasks.ts"
@@ -250,5 +251,36 @@ describe("findTaskAcrossSessions", () => {
     // SESSION_B isn't matched by filterCwd in the isolated setup, so fallback scan runs
     // But the alt-legacy-encoding dir doesn't exist in isolatedProjects
     expect(result).toBeNull()
+  })
+})
+
+// ─── resolveTaskById ─────────────────────────────────────────────────────────
+
+describe("resolveTaskById", () => {
+  it("resolves from primary session when task exists there", async () => {
+    // Task #1 exists in SESSION_A
+    const result = await resolveTaskById("1", SESSION_A, undefined, TASKS, PROJECTS)
+    expect(result.sessionId).toBe(SESSION_A)
+    expect(result.task.id).toBe("1")
+  })
+
+  it("falls back to another session when task is not in primary", async () => {
+    // Task #120 only exists in SESSION_B — pass SESSION_A as primary
+    const result = await resolveTaskById("120", SESSION_A, undefined, TASKS, PROJECTS)
+    expect(result.sessionId).toBe(SESSION_B)
+    expect(result.task.id).toBe("120")
+    expect(result.task.subject).toBe("Push and verify CI")
+  })
+
+  it("throws for nonexistent task ID", async () => {
+    await expect(resolveTaskById("999", SESSION_A, undefined, TASKS, PROJECTS)).rejects.toThrow(
+      "Task #999 not found in any session for this project."
+    )
+  })
+
+  it("prefers primary session over fallback for same task ID", async () => {
+    // Task #1 exists in all sessions — primary should win
+    const result = await resolveTaskById("1", SESSION_C, undefined, TASKS, PROJECTS)
+    expect(result.sessionId).toBe(SESSION_C)
   })
 })
