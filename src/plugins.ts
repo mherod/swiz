@@ -58,7 +58,7 @@ async function loadPlugin(entry: string, projectRoot: string): Promise<PluginRes
         name: entry,
         hooks: [],
         errorCode: "load-error",
-        error: `Failed to load ${tsPath}: ${String(err)}`,
+        error: `Failed to load ${tsPath}: ${normalizeError(err)}`,
       }
     }
   }
@@ -81,7 +81,7 @@ async function loadPlugin(entry: string, projectRoot: string): Promise<PluginRes
         name: entry,
         hooks: [],
         errorCode: "parse-error",
-        error: `Failed to load ${jsonPath}: ${String(err)}`,
+        error: `Failed to load ${jsonPath}: ${normalizeError(err)}`,
       }
     }
   }
@@ -118,6 +118,28 @@ function resolveHookPaths(groups: HookGroup[], pluginDir: string): HookGroup[] {
   }))
 }
 
+/**
+ * Coerce an unknown thrown value into a safe, bounded string.
+ * Handles non-Error throws, objects with circular refs, and
+ * excessively long stack traces.
+ */
+function normalizeError(value: unknown, maxLen = 1024): string {
+  if (value === null || value === undefined) return "unknown error"
+  if (value instanceof Error) {
+    const msg = value.stack ?? value.message
+    return msg.length > maxLen ? `${msg.slice(0, maxLen)}…` : msg
+  }
+  if (typeof value === "string") {
+    return value.length > maxLen ? `${value.slice(0, maxLen)}…` : value
+  }
+  try {
+    const json = JSON.stringify(value)
+    return json.length > maxLen ? `${json.slice(0, maxLen)}…` : json
+  } catch {
+    return String(value)
+  }
+}
+
 /** Human-readable hint for a plugin error code. */
 export function pluginErrorHint(code: PluginErrorCode): string {
   switch (code) {
@@ -148,7 +170,11 @@ export function pluginResultsToJson(results: PluginResult[]): {
     ok: !r.errorCode,
     hookCount: r.hooks.reduce((n, g) => n + g.hooks.length, 0),
     ...(r.errorCode
-      ? { errorCode: r.errorCode, hint: pluginErrorHint(r.errorCode), error: r.error }
+      ? {
+          errorCode: r.errorCode,
+          hint: pluginErrorHint(r.errorCode),
+          error: normalizeError(r.error),
+        }
       : {}),
   }))
 }
