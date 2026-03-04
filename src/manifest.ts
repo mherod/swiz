@@ -2,6 +2,8 @@
 // Single source of truth for all hook scripts and event bindings.
 // install.ts uses it to generate agent configs; dispatch.ts uses it at runtime.
 
+import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
+
 export interface HookDef {
   file: string
   timeout?: number
@@ -29,8 +31,35 @@ export interface HookDef {
  * Returns `true` (run the hook) when the expression is satisfied or unrecognised.
  * Returns `false` (skip the hook) when the expression is not satisfied.
  */
+const VALID_FRAMEWORKS = new Set<string>([
+  "nextjs",
+  "vite",
+  "express",
+  "fastify",
+  "nestjs",
+  "remix",
+  "astro",
+  "bun-cli",
+  "python",
+  "go",
+  "rust",
+  "ruby",
+  "java",
+  "php",
+])
+
 export function evalCondition(condition: string | undefined): boolean {
   if (!condition) return true
+
+  // Framework detection: framework:<name>
+  if (condition.startsWith("framework:")) {
+    const name = condition.slice("framework:".length)
+    if (!VALID_FRAMEWORKS.has(name)) {
+      console.warn(`[swiz] Unknown framework in condition: "${name}" — running hook anyway`)
+      return true
+    }
+    return detectFrameworks().has(name as Framework)
+  }
 
   const envMatch = condition.match(/^env:([^!=]+)(!=|=)?(.*)$/)
   if (!envMatch) {

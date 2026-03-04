@@ -62,6 +62,14 @@ export function getCanonicalPathHash(cwd: string): string {
 export type PackageManager = "bun" | "pnpm" | "yarn" | "npm"
 export type Runtime = "bun" | "node"
 
+// ─── Framework detection ──────────────────────────────────────────────────
+// Re-exported from src/detect-frameworks.ts so hook scripts can access it
+// via the single hook-utils.ts import, and so src/manifest.ts can import
+// directly from src/ without creating a src→hooks dependency.
+
+export type { Framework } from "../src/detect-frameworks.ts"
+export { _clearFrameworkCache, detectFrameworks } from "../src/detect-frameworks.ts"
+
 let _pmCache: PackageManager | null | undefined
 
 export function detectPackageManager(): PackageManager | null {

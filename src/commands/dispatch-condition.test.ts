@@ -1,4 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { _clearFrameworkCache } from "../detect-frameworks.ts"
 import { evalCondition } from "../manifest.ts"
 
 describe("evalCondition", () => {
@@ -105,6 +109,68 @@ describe("evalCondition", () => {
 
     it("returns true for random garbage", () => {
       expect(evalCondition("not-a-condition")).toBe(true)
+    })
+  })
+
+  describe("framework:<name> — framework detection", () => {
+    let tmpDir: string
+
+    beforeAll(async () => {
+      tmpDir = await mkdtemp(join(tmpdir(), "swiz-eval-condition-framework-"))
+    })
+
+    afterAll(async () => {
+      await rm(tmpDir, { recursive: true })
+    })
+
+    afterEach(() => {
+      _clearFrameworkCache()
+    })
+
+    it("returns false for 'framework:nextjs' when not a Next.js project", async () => {
+      const dir = await mkdir(join(tmpDir, "plain"), { recursive: true }).then(() =>
+        join(tmpDir, "plain")
+      )
+      const origCwd = process.cwd()
+      process.chdir(dir)
+      try {
+        expect(evalCondition("framework:nextjs")).toBe(false)
+      } finally {
+        process.chdir(origCwd)
+        _clearFrameworkCache()
+      }
+    })
+
+    it("returns true for 'framework:nextjs' when next.config.js exists in cwd", async () => {
+      const dir = join(tmpDir, "nextjs-project")
+      await mkdir(dir, { recursive: true })
+      await Bun.write(join(dir, "next.config.js"), "module.exports = {}")
+      const origCwd = process.cwd()
+      process.chdir(dir)
+      try {
+        expect(evalCondition("framework:nextjs")).toBe(true)
+      } finally {
+        process.chdir(origCwd)
+        _clearFrameworkCache()
+      }
+    })
+
+    it("returns true for 'framework:go' when go.mod exists in cwd", async () => {
+      const dir = join(tmpDir, "go-project")
+      await mkdir(dir, { recursive: true })
+      await Bun.write(join(dir, "go.mod"), "module example.com/app\n\ngo 1.21\n")
+      const origCwd = process.cwd()
+      process.chdir(dir)
+      try {
+        expect(evalCondition("framework:go")).toBe(true)
+      } finally {
+        process.chdir(origCwd)
+        _clearFrameworkCache()
+      }
+    })
+
+    it("returns true (fail-open) for an unknown framework name", () => {
+      expect(evalCondition("framework:not-a-real-framework")).toBe(true)
     })
   })
 })
