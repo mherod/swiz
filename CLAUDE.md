@@ -215,16 +215,18 @@ Follow this order for every unit of work.
 
 This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all work — no pull request required.
 
+**DO** invoke the `/push` skill before running `git push` or `swiz push-wait`. A PreToolUse hook blocks push if the skill has not been invoked in the current session. Always call `/push` first — it enforces collaboration checks and the complete push workflow.
+
 **Pre-push checklist:**
 1. `git log origin/main..HEAD --oneline` — review commits before pushing.
 2. Before `git push`: `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`; confirm solo personal project before pushing to `main`.
 3. `SHA=$(git rev-parse HEAD)` — capture SHA before pushing.
 4. `git push origin main` — lefthook's `pre-push` runs `bun test` (full suite). Push succeeds only when all tests pass.
-5. `gh run list --commit $SHA --json databaseId --jq '.[0].databaseId'` — get run ID for exact SHA. Do NOT use `--limit 1 --branch main` (returns stale run).
+5. `gh run list --commit $SHA --json databaseId --jq '.[0].databaseId'` — get run ID. Don't use `--limit 1 --branch main` (stale run).
 6. `gh run watch <run-id> --exit-status` — wait for completion.
 7. `gh run view <run-id> --json conclusion,status,jobs --jq '{conclusion,status,jobs:[.jobs[]|{name,conclusion,status}]}'` — confirm `conclusion: "success"` and every job green.
 
-**DON'T** use `gh run view --commit <SHA>` — that flag does not exist and fails with "unknown flag: --commit". Always use the two-step pattern: `gh run list --commit $SHA --json databaseId --jq '.[0].databaseId'` to get the run ID, then `gh run view <id>`.
+**DON'T** use `gh run view --commit <SHA>` — flag doesn't exist. Use two-step pattern: `gh run list --commit $SHA --json databaseId --jq '.[0].databaseId'` to get run ID, then `gh run view <id>`.
 
 **DO** use `swiz push-wait origin <branch>` instead of raw `git push` when a cooldown may be active. `swiz push-wait` polls and pushes when the cooldown clears.
 
@@ -232,11 +234,11 @@ This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all wo
 - `lefthook pre-push` runs `bun test`. DON'T use `--no-verify` or any flag that skips it. Fix test failures first.
 - CI workflow (`CI`) runs lint → typecheck → test. All three jobs must be green before the session can stop.
 
-**DO** verify CI with `gh run view --json conclusion,status,jobs` after every push. `gh run watch` output alone is not sufficient — always follow with the explicit JSON fetch.
+**DO** verify CI with `gh run view --json conclusion,status,jobs` after every push. Never rely on `gh run watch` alone — always fetch JSON.
 
 **DO** use token-based parsing (not regex) when hooks must distinguish `git push --force` from `git push -- --force`. Regex cannot handle the `--` sentinel or `-C <path>` global options. Export the parser from `hook-utils.ts` for independent unit testing.
 
-**DON'T** call TaskUpdate or TaskList during or after the push+CI verification sequence. Mark tasks completed *after commit but before push* so the push+CI loop is purely mechanical: push → watch → `gh run view --json` → announce. Any TaskUpdate call after `git push` is a sign the task ordering is wrong — fix it by completing tasks at step 4 of the Standard Work Sequence.
+**DON'T** call TaskUpdate or TaskList after push starts. Mark tasks completed before pushing so push+CI loop is mechanical: push → watch → `gh run view --json` → announce. TaskUpdate after `git push` indicates wrong task ordering.
 
 **DON'T** stop after committing without pushing. The stop hook blocks until `origin/main` is up to date. Push any unpushed commits immediately before starting new work in a resumed session.
 
