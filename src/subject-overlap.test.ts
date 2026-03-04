@@ -122,6 +122,41 @@ describe("stemWord", () => {
     expect(stemWord("run")).toBe("run")
     expect(stemWord("add")).toBe("add")
   })
+
+  test("stems irregular verb past tenses", () => {
+    expect(stemWord("built")).toBe("build")
+    expect(stemWord("ran")).toBe("run")
+    expect(stemWord("wrote")).toBe("write")
+    expect(stemWord("sent")).toBe("send")
+    expect(stemWord("made")).toBe("make")
+    expect(stemWord("found")).toBe("find")
+    expect(stemWord("got")).toBe("get")
+    expect(stemWord("took")).toBe("take")
+    expect(stemWord("gave")).toBe("give")
+    expect(stemWord("kept")).toBe("keep")
+  })
+
+  test("stems irregular past participles", () => {
+    expect(stemWord("written")).toBe("write")
+    expect(stemWord("gotten")).toBe("get")
+    expect(stemWord("taken")).toBe("take")
+    expect(stemWord("given")).toBe("give")
+    expect(stemWord("broken")).toBe("break")
+    expect(stemWord("known")).toBe("know")
+    expect(stemWord("chosen")).toBe("choose")
+    expect(stemWord("thrown")).toBe("throw")
+    expect(stemWord("begun")).toBe("begin")
+    expect(stemWord("done")).toBe("do")
+  })
+
+  test("stems irregular plural nouns", () => {
+    expect(stemWord("indices")).toBe("index")
+    expect(stemWord("statuses")).toBe("status")
+    expect(stemWord("branches")).toBe("branch")
+    expect(stemWord("patches")).toBe("patch")
+    expect(stemWord("caches")).toBe("cache")
+    expect(stemWord("batches")).toBe("batch")
+  })
 })
 
 describe("computeSubjectFingerprint", () => {
@@ -241,6 +276,52 @@ describe("computeSubjectFingerprint", () => {
   test("matches creating = implement via stem + synonym", () => {
     const fp1 = computeSubjectFingerprint("Creating task fingerprint")
     const fp2 = computeSubjectFingerprint("Implement task fingerprint")
+    expect(fp1).toBe(fp2)
+  })
+
+  // ── Irregular verb stems ──────────────────────────────────────────────
+
+  test("matches built/build via irregular stem", () => {
+    const fp1 = computeSubjectFingerprint("Built the new feature")
+    const fp2 = computeSubjectFingerprint("Build the new feature")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("matches wrote/write via irregular stem", () => {
+    const fp1 = computeSubjectFingerprint("Wrote migration script")
+    const fp2 = computeSubjectFingerprint("Write migration script")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("matches ran/run via irregular stem", () => {
+    const fp1 = computeSubjectFingerprint("Ran full test suite")
+    const fp2 = computeSubjectFingerprint("Run full test suite")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("matches found/find via irregular stem", () => {
+    const fp1 = computeSubjectFingerprint("Found and fix memory leak")
+    const fp2 = computeSubjectFingerprint("Find and fix memory leak")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("matches sent/send via irregular stem", () => {
+    const fp1 = computeSubjectFingerprint("Sent webhook notification")
+    const fp2 = computeSubjectFingerprint("Send webhook notification")
+    expect(fp1).toBe(fp2)
+  })
+
+  test("matches irregular + synonym (built = implement)", () => {
+    const fp1 = computeSubjectFingerprint("Built task fingerprint")
+    const fp2 = computeSubjectFingerprint("Implement task fingerprint")
+    expect(fp1).toBe(fp2)
+  })
+
+  // ── Irregular plural nouns ────────────────────────────────────────────
+
+  test("matches irregular plural (branches/branch)", () => {
+    const fp1 = computeSubjectFingerprint("Clean stale branches")
+    const fp2 = computeSubjectFingerprint("Clean stale branch")
     expect(fp1).toBe(fp2)
   })
 })

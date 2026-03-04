@@ -587,7 +587,84 @@ const SYNONYM_MAP = new Map<string, string>([
  * Reduces inflected forms to a common root so "committing" and "commit",
  * "verifying" and "verify", "formatted" and "format" match.
  */
+// Irregular verb past tenses and participles → base form.
+// Checked before suffix rules since these can't be handled by pattern stripping.
+const IRREGULAR_STEMS = new Map<string, string>([
+  // build
+  ["built", "build"],
+  // run
+  ["ran", "run"],
+  // write
+  ["wrote", "write"],
+  ["written", "write"],
+  // send
+  ["sent", "send"],
+  // make
+  ["made", "make"],
+  // find
+  ["found", "find"],
+  // get
+  ["got", "get"],
+  ["gotten", "get"],
+  // take
+  ["took", "take"],
+  ["taken", "take"],
+  // give
+  ["gave", "give"],
+  ["given", "give"],
+  // break
+  ["broke", "break"],
+  ["broken", "break"],
+  // set (past = base, but "reset" variants)
+  ["reset", "reset"],
+  // keep
+  ["kept", "keep"],
+  // know
+  ["knew", "know"],
+  ["known", "know"],
+  // show
+  ["shown", "show"],
+  // begin
+  ["began", "begin"],
+  ["begun", "begin"],
+  // choose
+  ["chose", "choose"],
+  ["chosen", "choose"],
+  // see
+  ["saw", "see"],
+  ["seen", "see"],
+  // go
+  ["went", "go"],
+  ["gone", "go"],
+  // do
+  ["did", "do"],
+  ["done", "do"],
+  // bring
+  ["brought", "bring"],
+  // catch
+  ["caught", "catch"],
+  // throw
+  ["threw", "throw"],
+  ["thrown", "throw"],
+  // hold
+  ["held", "hold"],
+  // tell
+  ["told", "tell"],
+  // split (irregular plurals / noun forms)
+  ["indices", "index"],
+  ["statuses", "status"],
+  ["patches", "patch"],
+  ["branches", "branch"],
+  ["matches", "match"],
+  ["caches", "cache"],
+  ["batches", "batch"],
+])
+
 export function stemWord(word: string): string {
+  // Check irregular forms first (can't be suffix-stripped)
+  const irregular = IRREGULAR_STEMS.get(word)
+  if (irregular) return irregular
+
   let stem = word
   // Order matters: try longest suffixes first
 
@@ -646,7 +723,7 @@ export function stemWord(word: string): string {
  * Compute a deterministic fingerprint from a task subject.
  *
  * Pipeline: lowercase → strip punctuation → tokenize → filter stop words →
- * stem each word → apply synonym mapping → sort → hash.
+ * stem each word (irregular lookup then suffix strip) → synonym map → sort → hash.
  *
  * Two subjects describing the same work produce the same fingerprint
  * regardless of word order, inflection, or synonym choice.
