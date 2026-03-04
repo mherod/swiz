@@ -43,6 +43,8 @@ export interface ProjectSwizSettings {
   trivialMaxLines?: number
   state?: ProjectState
   stateHistory?: StateHistoryEntry[]
+  memoryLineThreshold?: number
+  memoryWordThreshold?: number
   /** Hook filenames to skip for this project (e.g. "stop-github-ci.ts") */
   disabledHooks?: string[]
   /** External hook plugin bundles — package names or local paths */
@@ -75,6 +77,8 @@ export interface SwizSettings {
   githubCiGate: boolean
   changesRequestedGate: boolean
   personalRepoIssuesGate: boolean
+  memoryLineThreshold: number
+  memoryWordThreshold: number
   sessions: Record<string, SessionSwizSettings>
   /** Global hook filenames to skip (e.g. "stop-github-ci.ts") */
   disabledHooks?: string[]
@@ -96,10 +100,15 @@ export interface EffectiveSwizSettings {
   githubCiGate: boolean
   changesRequestedGate: boolean
   personalRepoIssuesGate: boolean
+  memoryLineThreshold: number
+  memoryWordThreshold: number
   source: "global" | "session"
 }
 
 /** Default trivial-change thresholds (mirrors the gate hook's original hard-coded values) */
+export const DEFAULT_MEMORY_LINE_THRESHOLD = 1400
+export const DEFAULT_MEMORY_WORD_THRESHOLD = 5000
+
 export const DEFAULT_TRIVIAL_MAX_FILES = 3
 export const DEFAULT_TRIVIAL_MAX_LINES = 20
 
@@ -158,6 +167,8 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   githubCiGate: true,
   changesRequestedGate: true,
   personalRepoIssuesGate: true,
+  memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
+  memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
   sessions: {},
 }
 
@@ -241,6 +252,14 @@ function normalizeSettings(value: unknown): SwizSettings {
       typeof obj.personalRepoIssuesGate === "boolean"
         ? obj.personalRepoIssuesGate
         : DEFAULT_SETTINGS.personalRepoIssuesGate,
+    memoryLineThreshold:
+      typeof obj.memoryLineThreshold === "number" && obj.memoryLineThreshold > 0
+        ? obj.memoryLineThreshold
+        : DEFAULT_SETTINGS.memoryLineThreshold,
+    memoryWordThreshold:
+      typeof obj.memoryWordThreshold === "number" && obj.memoryWordThreshold > 0
+        ? obj.memoryWordThreshold
+        : DEFAULT_SETTINGS.memoryWordThreshold,
     sessions,
     ...(Array.isArray(obj.disabledHooks) &&
     obj.disabledHooks.every((h: unknown) => typeof h === "string")
@@ -267,6 +286,12 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   }
   if (typeof obj.trivialMaxLines === "number" && obj.trivialMaxLines > 0) {
     result.trivialMaxLines = obj.trivialMaxLines
+  }
+  if (typeof obj.memoryLineThreshold === "number" && obj.memoryLineThreshold > 0) {
+    result.memoryLineThreshold = obj.memoryLineThreshold
+  }
+  if (typeof obj.memoryWordThreshold === "number" && obj.memoryWordThreshold > 0) {
+    result.memoryWordThreshold = obj.memoryWordThreshold
   }
   if (typeof obj.state === "string" && obj.state in STATE_TRANSITIONS) {
     result.state = obj.state as ProjectState
@@ -444,6 +469,8 @@ export function getEffectiveSwizSettings(
       githubCiGate: settings.githubCiGate,
       changesRequestedGate: settings.changesRequestedGate,
       personalRepoIssuesGate: settings.personalRepoIssuesGate,
+      memoryLineThreshold: settings.memoryLineThreshold,
+      memoryWordThreshold: settings.memoryWordThreshold,
       source: "session",
     }
   }
@@ -463,6 +490,8 @@ export function getEffectiveSwizSettings(
     githubCiGate: settings.githubCiGate,
     changesRequestedGate: settings.changesRequestedGate,
     personalRepoIssuesGate: settings.personalRepoIssuesGate,
+    memoryLineThreshold: settings.memoryLineThreshold,
+    memoryWordThreshold: settings.memoryWordThreshold,
     source: "global",
   }
 }

@@ -229,6 +229,7 @@ export const manifest: HookGroup[] = [
       { file: "posttooluse-json-validation.ts", timeout: 5 },
       { file: "posttooluse-test-pairing.ts", timeout: 5 },
       { file: "posttooluse-task-advisor.ts", timeout: 5 },
+      { file: "posttooluse-memory-size.ts", timeout: 5 },
       { file: "posttooluse-prettier-ts.ts", timeout: 5, async: true },
     ],
   },

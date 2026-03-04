@@ -24,7 +24,11 @@ type BooleanSettingKey =
   | "githubCiGate"
   | "changesRequestedGate"
   | "personalRepoIssuesGate"
-type NumericSettingKey = "prAgeGateMinutes" | "narratorSpeed"
+type NumericSettingKey =
+  | "prAgeGateMinutes"
+  | "narratorSpeed"
+  | "memoryLineThreshold"
+  | "memoryWordThreshold"
 type StringSettingKey = "narratorVoice" | "ambitionMode"
 type SettingKey = BooleanSettingKey | NumericSettingKey | StringSettingKey
 type Action = "show" | "enable" | "disable" | "set" | "disable-hook" | "enable-hook"
@@ -46,7 +50,8 @@ function usage(): string {
     "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--session [id]] [--dir <path>]\n" +
     "Supported settings: auto-continue, critiques-enabled, pr-merge-mode, push-gate, sandboxed-edits, speak,\n" +
     "  pr-age-gate (minutes, 0 to disable), narrator-voice (string, e.g. Samantha),\n" +
-    "  narrator-speed (words per minute, 0 for default), ambition-mode (standard|aggressive)\n" +
+    "  narrator-speed (words per minute, 0 for default), ambition-mode (standard|aggressive),\n" +
+    "  memory-line-threshold (lines, default 1400), memory-word-threshold (words, default 5000)\n" +
     "Hook management: disable-hook <filename> (e.g. stop-github-ci.ts), enable-hook <filename>"
   )
 }
@@ -156,11 +161,30 @@ function parseSetting(raw: string | undefined): SettingKey {
   ) {
     return "narratorSpeed"
   }
+  if (
+    value === "memory-line-threshold" ||
+    value === "memorylinethreshold" ||
+    value === "memory_line_threshold"
+  ) {
+    return "memoryLineThreshold"
+  }
+  if (
+    value === "memory-word-threshold" ||
+    value === "memorywordthreshold" ||
+    value === "memory_word_threshold"
+  ) {
+    return "memoryWordThreshold"
+  }
   throw new Error(`Unknown setting: ${raw}\n${usage()}`)
 }
 
 function isNumericSetting(key: SettingKey): key is NumericSettingKey {
-  return key === "prAgeGateMinutes" || key === "narratorSpeed"
+  return (
+    key === "prAgeGateMinutes" ||
+    key === "narratorSpeed" ||
+    key === "memoryLineThreshold" ||
+    key === "memoryWordThreshold"
+  )
 }
 
 function isStringSetting(key: SettingKey): key is StringSettingKey {
@@ -254,6 +278,8 @@ function printSettings(
     githubCiGate: boolean
     changesRequestedGate: boolean
     personalRepoIssuesGate: boolean
+    memoryLineThreshold: number
+    memoryWordThreshold: number
     source: "global" | "session"
     disabledHooks?: string[]
   },
@@ -308,6 +334,8 @@ function printSettings(
   const speedLabel =
     effective.narratorSpeed > 0 ? `${effective.narratorSpeed} wpm` : "system default"
   console.log(`  narrator-speed:  ${speedLabel} (global)`)
+  console.log(`  memory-line-threshold: ${effective.memoryLineThreshold} (global)`)
+  console.log(`  memory-word-threshold: ${effective.memoryWordThreshold} (global)`)
 
   const globalDisabled = effective.disabledHooks ?? []
   if (globalDisabled.length > 0) {
@@ -552,6 +580,14 @@ export const settingsCommand: Command = {
     {
       flags: "set narrator-speed <wpm>",
       description: "Set TTS speaking rate in words per minute (0 for system default)",
+    },
+    {
+      flags: "set memory-line-threshold <lines>",
+      description: "Max lines for CLAUDE.md/memory files before compaction advice (default: 1400)",
+    },
+    {
+      flags: "set memory-word-threshold <words>",
+      description: "Max words for CLAUDE.md/memory files before compaction advice (default: 5000)",
     },
     {
       flags: "--session, -s [id]",
