@@ -109,11 +109,11 @@ All output helpers return `never` and call `process.exit(0)` after writing JSON.
 
 **Input types** — `StopHookInput`, `ToolHookInput`, `SessionHookInput` for typed stdin parsing.
 
-**Test file detection** — `TEST_FILE_RE` from `hook-utils.ts` identifies test files (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`). Use this constant in hooks that scan source code to exclude test files from checks, allowing test fixtures to contain literal patterns without triggering the hook.
+**Test file detection** — `TEST_FILE_RE` from `hook-utils.ts` identifies test files (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`). Use in hooks scanning source code to exclude tests, allowing fixtures to match patterns without triggering hooks.
 
-**DON'T write tests for external code in this repository.** Tests must live in the repository that owns the code under test. For example, `src/tasks-list-verify.test.ts` tested `~/.claude/hooks/tasks-list.ts` from the `mherod/.claude` repository — this was incorrect. The fix: delete the test from swiz and file an issue in `mherod/.claude` instead. This ensures each repository owns the maintenance, updates, and test coverage for its own code.
+**DON'T write tests for external code.** Tests belong in the repository that owns them. Example: `src/tasks-list-verify.test.ts` tested `~/.claude/hooks/tasks-list.ts` from `mherod/.claude` (incorrect). Fix: delete test and file issue in owning repository.
 
-**Diff file tracking** — When scanning git diffs line-by-line, track the current file by reading `+++ b/<path>` headers, then apply file-level exclusions (e.g., `if (TEST_FILE_RE.test(currentFile)) continue`). This pattern is lighter than splitting the diff into file chunks and allows consistent file-based filtering across all checked lines.
+**Diff file tracking** — Track the current file by reading `+++ b/<path>` headers when scanning diffs, then apply file-level exclusions (e.g., `if (TEST_FILE_RE.test(currentFile)) continue`). Lighter than splitting diffs into chunks; enables consistent file-based filtering.
 
 **DO** extract a `sanitizeSessionId(sessionId: string | undefined): string | null` helper whenever a hook uses `/tmp` sentinel files keyed on session ID. Both the read path (cooldown check) and write path (mark prompted) need the same sanitization — extracting it eliminates duplication and prevents divergence between the two paths.
 
