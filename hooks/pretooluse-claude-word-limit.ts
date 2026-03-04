@@ -1,0 +1,48 @@
+#!/usr/bin/env bun
+// PreToolUse hook: Block git push when CLAUDE.md exceeds 5000-word limit
+
+import { join } from "node:path"
+import { countFileWords, denyPreToolUse, isShellTool, type ToolHookInput } from "./hook-utils.ts"
+
+const WORD_LIMIT = 5000
+
+async function main(): Promise<void> {
+  const input = (await Bun.stdin.json()) as ToolHookInput
+  const cwd = input.cwd
+
+  // Only check for shell commands
+  if (!isShellTool(input.tool_name ?? "")) return
+
+  // Only check if the command is git push
+  const command = typeof input.tool_input?.command === "string" ? input.tool_input.command : ""
+  if (!command.includes("git push")) return
+
+  // Check CLAUDE.md word count
+  const claudeMdPath = join(cwd, "CLAUDE.md")
+  const stats = await countFileWords(claudeMdPath)
+
+  // If CLAUDE.md doesn't exist or can't be read, allow the push
+  if (stats === null) return
+
+  // If word count exceeds limit, block the push
+  if (stats.words > WORD_LIMIT) {
+    const over = stats.words - WORD_LIMIT
+    const reduction = over + 1 // Suggest reducing at least (over + 1) words to get back under
+    const message = `CLAUDE.md exceeds 5000-word limit: ${stats.words} words (${over} over).
+
+Reduce CLAUDE.md by at least ${reduction} words before pushing.
+
+Use the /compact-memory skill to trim the file, or manually edit CLAUDE.md to remove redundancy:
+- Remove auxiliary verbs (will → Ø, to be → Ø)
+- Remove redundant qualifiers (actual → Ø, exact → Ø)
+- Condense compound phrases
+- Remove parenthetical redundancy
+- Consolidate duplicate topics
+
+Current: ${stats.words} words | Limit: ${WORD_LIMIT} words | Target: ${WORD_LIMIT - 10} words`
+
+    denyPreToolUse(message)
+  }
+}
+
+await main()

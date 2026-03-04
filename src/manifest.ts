@@ -180,6 +180,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-commit-checks-gate.ts", timeout: 5 },
       { file: "pretooluse-stale-approval-gate.ts", timeout: 10, cooldownSeconds: 300 },
       { file: "pretooluse-push-checks-gate.ts", timeout: 5 },
+      { file: "pretooluse-claude-word-limit.ts", timeout: 5 },
       { file: "pretooluse-push-cooldown.ts", timeout: 5 },
       { file: "pretooluse-main-branch-scope-gate.ts", timeout: 10 },
       { file: "pretooluse-skill-invocation-gate.ts", timeout: 5 },
