@@ -2,6 +2,13 @@ import { existsSync, readdirSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
+import {
+  DEFAULT_MEMORY_LINE_THRESHOLD,
+  DEFAULT_MEMORY_WORD_THRESHOLD,
+  readProjectSettings,
+  readSwizSettings,
+  resolveMemoryThresholds,
+} from "../settings.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
@@ -210,7 +217,11 @@ async function getFileStats(
   }
 }
 
-async function printSource(source: MemorySource, index: number): Promise<void> {
+async function printSource(
+  source: MemorySource,
+  index: number,
+  thresholds: { lines: number; words: number }
+): Promise<void> {
   const exists = existsSync(source.path)
   const marker = exists ? `${GREEN}✓${RESET}` : `${DIM}✗${RESET}`
   const pathDisplay = exists ? source.path : `${DIM}${source.path}${RESET}`
@@ -223,10 +234,23 @@ async function printSource(source: MemorySource, index: number): Promise<void> {
     const stats = await getFileStats(source.path)
 
     let statsStr = size
+    let statusIndicator = ""
     if (stats) {
       statsStr += ` · ${stats.lines} lines · ${stats.words} words · ${stats.chars} chars`
+
+      // Check against thresholds
+      const lineWarning = stats.lines > thresholds.lines * 0.9 && stats.lines <= thresholds.lines
+      const lineExceeded = stats.lines > thresholds.lines
+      const wordWarning = stats.words > thresholds.words * 0.9 && stats.words <= thresholds.words
+      const wordExceeded = stats.words > thresholds.words
+
+      if (lineExceeded || wordExceeded) {
+        statusIndicator = ` ${YELLOW}⚠${RESET}`
+      } else if (lineWarning || wordWarning) {
+        statusIndicator = ` ${DIM}→${RESET}`
+      }
     }
-    console.log(`     ${DIM}${statsStr}${RESET}`)
+    console.log(`     ${DIM}${statsStr}${RESET}${statusIndicator}`)
   }
 
   console.log()
@@ -275,12 +299,33 @@ export const memoryCommand: Command = {
 
     const existingCount = sources.filter((s) => existsSync(s.path)).length
 
+    // Read thresholds from project and user settings
+    const projectSettings = await readProjectSettings(targetDir)
+    const userSettings = await readSwizSettings({ strict: false })
+    const thresholds = resolveMemoryThresholds(
+      projectSettings,
+      {
+        memoryLineThreshold: userSettings?.memoryLineThreshold,
+        memoryWordThreshold: userSettings?.memoryWordThreshold,
+      },
+      {
+        memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
+        memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
+      }
+    )
+
     console.log(
       `  ${BOLD}Rule hierarchy${RESET} ${DIM}(${existingCount}/${sources.length} files present)${RESET}\n`
     )
+    console.log(
+      `  ${DIM}Thresholds: ${thresholds.memoryLineThreshold} lines · ${thresholds.memoryWordThreshold} words${RESET}\n`
+    )
 
     for (const [i, source] of sources.entries()) {
-      await printSource(source, i)
+      await printSource(source, i, {
+        lines: thresholds.memoryLineThreshold,
+        words: thresholds.memoryWordThreshold,
+      })
     }
   },
 }
