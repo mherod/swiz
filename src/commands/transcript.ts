@@ -1,88 +1,17 @@
-import { readdir, stat } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { promptAgent } from "../agent.ts"
-import { projectKeyFromCwd } from "../transcript-utils.ts"
+import {
+  type ContentBlock,
+  extractText,
+  findSessions,
+  projectKeyFromCwd,
+  type Session,
+  type TextBlock,
+  type ToolResultBlock,
+  type ToolUseBlock,
+  type TranscriptEntry,
+} from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-interface TextBlock {
-  type: "text"
-  text?: string
-}
-
-interface ToolUseBlock {
-  type: "tool_use"
-  id?: string
-  name?: string
-  input?: Record<string, unknown>
-}
-
-interface ToolResultBlock {
-  type: "tool_result"
-  tool_use_id?: string
-  content?: string | ContentBlock[]
-  is_error?: boolean
-}
-
-type ContentBlock =
-  | TextBlock
-  | ToolUseBlock
-  | ToolResultBlock
-  | { type: string; [key: string]: unknown }
-
-interface TranscriptEntry {
-  type: string
-  sessionId?: string
-  timestamp?: string
-  cwd?: string
-  message?: {
-    role?: string
-    content?: string | ContentBlock[]
-  }
-}
-
-interface Session {
-  id: string
-  path: string
-  mtime: number
-}
-
-// ─── Session discovery ───────────────────────────────────────────────────────
-
-async function findSessions(projectDir: string): Promise<Session[]> {
-  let entries: string[]
-  try {
-    entries = await readdir(projectDir)
-  } catch {
-    return []
-  }
-
-  const sessions: Session[] = []
-  for (const entry of entries) {
-    if (!entry.endsWith(".jsonl")) continue
-    const id = entry.slice(0, -6) // strip .jsonl
-    const filePath = join(projectDir, entry)
-    try {
-      const s = await stat(filePath)
-      sessions.push({ id, path: filePath, mtime: s.mtimeMs })
-    } catch {}
-  }
-
-  return sessions.sort((a, b) => b.mtime - a.mtime) // newest first
-}
-
-// ─── Text extraction ─────────────────────────────────────────────────────────
-
-function extractText(content: string | ContentBlock[] | undefined): string {
-  if (!content) return ""
-  if (typeof content === "string") return content
-  return content
-    .filter((b): b is TextBlock => b.type === "text" && !!(b as TextBlock).text)
-    .map((b) => b.text!)
-    .join("\n")
-    .trim()
-}
 
 // ─── Tool-use label formatting ────────────────────────────────────────────────
 
