@@ -53,6 +53,21 @@ const STATUS_STYLE: Record<Task["status"], { emoji: string; color: string }> = {
   cancelled: { emoji: "❌", color: "\x1b[31m" },
 }
 
+type DateFormat = "relative" | "absolute"
+
+function formatDate(date: Date, format: DateFormat): string {
+  if (format === "absolute") {
+    return date.toLocaleString("en-GB", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
+  return timeAgo(date)
+}
+
 function timeAgo(date: Date): string {
   const ms = Date.now() - date.getTime()
   const mins = Math.floor(ms / 60000)
@@ -380,7 +395,7 @@ async function collectIncompleteTasks(
 // ─── Rendering ──────────────────────────────────────────────────────────────
 
 /** Render a single task to stdout. `sessionTag` is an optional `[shortId]` prefix for cross-session views. */
-function renderTask(task: Task, sessionTag?: string) {
+function renderTask(task: Task, sessionTag?: string, dateFormat: DateFormat = "relative") {
   const { emoji, color } = STATUS_STYLE[task.status]
   const tag = sessionTag ? `${DIM}[${sessionTag}]${RESET} ` : ""
   console.log(
@@ -393,7 +408,7 @@ function renderTask(task: Task, sessionTag?: string) {
   }
   // Show date — statusChangedAt is always present (backfilled from file mtime)
   if (task.statusChangedAt) {
-    console.log(`     ${DIM}📅 ${timeAgo(new Date(task.statusChangedAt))}${RESET}`)
+    console.log(`     ${DIM}📅 ${formatDate(new Date(task.statusChangedAt), dateFormat)}${RESET}`)
   }
   // Show elapsed time for in_progress (live) and completed tasks
   if (task.status === "in_progress" && task.statusChangedAt) {
@@ -405,7 +420,9 @@ function renderTask(task: Task, sessionTag?: string) {
   if (task.completionEvidence)
     console.log(`     ${DIM}✓ Evidence: ${task.completionEvidence}${RESET}`)
   if (task.completionTimestamp)
-    console.log(`     ${DIM}✓ Completed: ${timeAgo(new Date(task.completionTimestamp))}${RESET}`)
+    console.log(
+      `     ${DIM}✓ Completed: ${formatDate(new Date(task.completionTimestamp), dateFormat)}${RESET}`
+    )
   if (task.blockedBy.length)
     console.log(`     ${DIM}Blocked by: #${task.blockedBy.join(", #")}${RESET}`)
   if (task.blocks.length) console.log(`     ${DIM}Blocks: #${task.blocks.join(", #")}${RESET}`)
@@ -414,7 +431,7 @@ function renderTask(task: Task, sessionTag?: string) {
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
-async function listTasks(sessionId: string, label: string) {
+async function listTasks(sessionId: string, label: string, dateFormat: DateFormat = "relative") {
   const tasks = await readTasks(sessionId)
   console.log(`\n  ${BOLD}Tasks${RESET} ${DIM}(${label}: ${sessionId.slice(0, 8)}...)${RESET}\n`)
 
@@ -433,7 +450,7 @@ async function listTasks(sessionId: string, label: string) {
   for (const [title, group] of groups) {
     if (group.length === 0) continue
     console.log(`  ${BOLD}${title}${RESET} (${group.length})\n`)
-    for (const task of group) renderTask(task)
+    for (const task of group) renderTask(task, undefined, dateFormat)
   }
 
   const incomplete = tasks.filter(
@@ -445,7 +462,7 @@ async function listTasks(sessionId: string, label: string) {
   )
 }
 
-async function listAllSessionsTasks(filterCwd?: string) {
+async function listAllSessionsTasks(filterCwd?: string, dateFormat: DateFormat = "relative") {
   const sessions = await getSessions(filterCwd)
   const label = filterCwd ? "current project" : "all projects"
 
@@ -480,7 +497,7 @@ async function listAllSessionsTasks(filterCwd?: string) {
     for (const [title, group] of groups) {
       if (group.length === 0) continue
       console.log(`  ${BOLD}${title}${RESET} (${group.length})\n`)
-      for (const task of group) renderTask(task, shortId)
+      for (const task of group) renderTask(task, shortId, dateFormat)
     }
 
     const incomplete = tasks.filter(
@@ -681,6 +698,12 @@ async function submitEvidence(
 
 // ─── Arg parsing ────────────────────────────────────────────────────────────
 
+function parseDateFormat(value: string | undefined): DateFormat {
+  if (!value) return "relative"
+  if (value === "relative" || value === "absolute") return value
+  throw new Error(`Invalid --date-format value: "${value}". Must be "relative" or "absolute".`)
+}
+
 function extractFlag(args: string[], flag: string): string | undefined {
   const i = args.indexOf(flag)
   if (i === -1) return undefined
@@ -718,7 +741,7 @@ export const tasksCommand: Command = {
   name: "tasks",
   description: "View and manage agent tasks",
   usage:
-    "swiz tasks [create|complete|evidence|status|complete-all] [--session <id>] [--all-projects] [--all-sessions] [--evidence <text>] [--verify <text>]",
+    "swiz tasks [create|complete|evidence|status|complete-all] [--session <id>] [--all-projects] [--all-sessions] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>]",
   options: [
     { flags: "create <subject> <desc>", description: "Create a new task in the current session" },
     {
@@ -741,6 +764,10 @@ export const tasksCommand: Command = {
       description: "Show tasks from all sessions (not just the most recent)",
     },
     {
+      flags: "--date-format <relative|absolute>",
+      description: "Date display format (default: relative)",
+    },
+    {
       flags: "--evidence <text>",
       description: "Completion evidence (commit:, pr:, file:, test:, note:)",
     },
@@ -756,19 +783,21 @@ export const tasksCommand: Command = {
       !subcommand ||
       subcommand === "--session" ||
       subcommand === "--all-projects" ||
-      subcommand === "--all-sessions"
+      subcommand === "--all-sessions" ||
+      subcommand === "--date-format"
     ) {
       const allProjects = args.includes("--all-projects")
       const allSessions = args.includes("--all-sessions")
       const filterCwd = allProjects ? undefined : process.cwd()
+      const dateFormat = parseDateFormat(extractFlag(args, "--date-format"))
 
       if (allSessions) {
-        await listAllSessionsTasks(filterCwd)
+        await listAllSessionsTasks(filterCwd, dateFormat)
         return
       }
 
       const sessionId = await resolveSession(args)
-      await listTasks(sessionId, allProjects ? "all projects" : "current project")
+      await listTasks(sessionId, allProjects ? "all projects" : "current project", dateFormat)
 
       if (!args.includes("--session") && !allProjects) {
         const tasks = await readTasks(sessionId)
