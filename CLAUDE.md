@@ -135,13 +135,13 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 `swiz tasks complete <id>` requires `--evidence "text"` — the completion evidence is stored on the task and checked by the stop-completion-auditor hook.
 
-**DO** create a task as the very first action when starting a new session — including after context compaction resumes. Before attempting any Edit, Write, or Bash commands, use `TaskCreate` to document what you're working on. The `pretooluse-require-tasks.ts` hook blocks all file modifications when no tasks exist in the session. Creating a task upfront unblocks the session and provides a clear record of intent. After compaction, the session restarts with zero tasks; the very next Bash/Edit call triggers the bootstrap block and auto-creates a generic task #1 — requiring manual `TaskUpdate` cleanup before work can continue. Avoid this by calling `TaskCreate` before any Bash command in a resumed session.
+**DO** create a task as the very first action when starting a new session — including after context compaction resumes. Before any Edit, Write, or Bash, use `TaskCreate`. The `pretooluse-require-tasks.ts` hook blocks file modifications when no tasks exist. After compaction, zero tasks exist — call `TaskCreate` before any Bash command to avoid the bootstrap block.
 
-**DO** re-create incomplete tasks from a prior session when the stop-hook bootstrap block fires at session start. The block message lists prior-session tasks still `in_progress` (e.g., "prior session had 1 incomplete task(s): #8 Push commits and verify CI"). The fix is to call `TaskCreate` with an equivalent subject and immediately mark it `in_progress` — then retry the blocked Bash call. DON'T investigate or debug the hook; compliance (create task → mark in_progress → retry) is the only unblock path.
+**DO** re-create incomplete tasks from a prior session when a stop-hook bootstrap block fires. The block message lists prior-session tasks still `in_progress`. Fix: `TaskCreate` an equivalent subject, mark it `in_progress`, retry the blocked call. DON'T debug the hook — compliance is the only unblock path.
 
-**DO** complete stale tasks from prior sessions immediately after context compaction. When a session resumes after compaction, prior-session tasks (e.g., "Push backward-compat error commit", "Verify CI for backward-compat commit") may still show `in_progress` or `pending` even though the work was already completed before compaction. The stop-completion-auditor blocks on these. As the very first action after compaction: call `TaskList`, identify every task with status `in_progress` or `pending`, verify its work is done (e.g., `git log --oneline -3`, `gh run view --json conclusion`), then `TaskUpdate` each to `completed`. Do this *before* creating any new tasks — creating a new task for the same work (e.g., a new "Verify CI" task) does not retire the stale original, and both must be completed to unblock the stop hook.
+**DO** complete stale tasks from prior sessions immediately after compaction. Call `TaskList`, identify `in_progress`/`pending` tasks, verify work is done (`git log --oneline -3`, `gh run view --json conclusion`), `TaskUpdate` each to `completed` before creating new tasks.
 
-**DON'T** create compound tasks that bundle multiple distinct steps (e.g., "Commit, push, and verify CI" or "Verify, commit, push, close #96"). The `pretooluse-task-subject-validation.ts` hook rejects them. Split into separate tasks: one for each verb. Even end-of-issue workflows need 4 separate tasks: "Run tests" → "Commit fix" → "Push and verify CI" → "Close issue #N".
+**DON'T** create compound tasks (e.g., "Commit, push, and verify CI"). The `pretooluse-task-subject-validation.ts` hook rejects them. One task per verb: "Run tests" → "Commit fix" → "Push and verify CI" → "Close issue #N".
 
 **DO** keep at least one task in `pending` or `in_progress` status before running `git add` or `git commit`. The `pretooluse-require-tasks.ts` hook blocks `Edit`, `Write`, and `Bash` (including `git add`/`git commit`) when no incomplete task exists. Mark the commit task `completed` only after the commit succeeds.
 
@@ -149,9 +149,9 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DO** run `git branch --show-current` early in every session before the first `git commit`. The `pretooluse-commit-skill-gate` hook requires a branch check in the transcript before allowing `git commit`. Run it during initial orientation (alongside `git status`) so it's already satisfied when committing later.
 
-**DO** call a task tool (TaskUpdate, TaskCreate, TaskList, or TaskGet) at least every 10 tool calls. The staleness gate fires after 20 consecutive tool calls with no task tool interaction — staying under 10 provides a safe buffer and accounts for the memory enforcement gate firing (which itself costs 2 tool calls to resolve). When the staleness gate fires mid-task, call `TaskUpdate` on the active task with current progress notes; if that doesn't unblock, call `TaskCreate` for the next concrete step. Read/Grep/Edit sequences during investigation or refactoring accumulate quickly — insert a `TaskUpdate` progress note after every 8 Read/Grep/Edit calls even if the task hasn't changed status. Multi-file type propagation (adding a field to an interface, then updating defaults, normalizers, getters, commands, and the consumer) is especially prone to staleness — call `TaskUpdate` between each file's edits, not just before committing. Resumed sessions (context continuations) are also high-risk — the staleness counter resets but prior tasks carry over; call `TaskUpdate` on the active task immediately after the first few tool calls to re-anchor the counter.
+**DO** call a task tool (TaskUpdate, TaskCreate, TaskList, or TaskGet) at least every 10 tool calls. The staleness gate fires after 20 consecutive tool calls with no task interaction. When the staleness gate fires, call `TaskUpdate` with progress notes; if that doesn't unblock, call `TaskCreate` for the next step. Insert `TaskUpdate` after every 8 Read/Grep/Edit calls — multi-file propagation (interface field → defaults → normalizers → getters → commands) is especially prone to staleness. In resumed sessions, call `TaskUpdate` after the first few tool calls to re-anchor the counter.
 
-**DO** call `TaskUpdate` after every 3 file creations or edits during extraction/refactoring work that touches many files (e.g., extracting shared modules, propagating import changes). Write+Edit sequences during multi-file extractions accumulate tool calls faster than investigation — a single extraction (create new module → update re-exports → fix N import sites → format → lint) easily exceeds 20 calls. Insert `TaskUpdate` with progress notes after each logical sub-step (e.g., "created src/foo.ts, updated hook-utils re-exports, 3 of 7 imports fixed").
+**DO** call `TaskUpdate` after every 3 file edits during multi-file extraction/refactoring. A single extraction (create module → update re-exports → fix N import sites → format → lint) easily exceeds 20 calls. Insert progress notes after each sub-step.
 
 **DO** create a task before any session that will involve Bash commands beyond the read-only exemptions. The hook exempts: `ls`, `rg`, `grep` (always); git read-only subcommands (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`, etc.) when no write subcommand is present; `git push/pull/fetch`; all `gh` commands; and `swiz issue close/comment`. `find` is NOT exempt — use `rg` or Glob tool for file discovery instead.
 
@@ -161,11 +161,13 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DO** complete the "Push and verify CI" task using the CLI with explicit CI evidence: `swiz tasks complete <id> --evidence "note:CI green — conclusion: success, run <run-id>"`. The stop-completion-auditor checks for CI verification evidence on completed tasks — using `TaskUpdate` alone (without `--evidence`) leaves the task without evidence and triggers a stop block.
 
-**DO** mark tasks as completed immediately when their work finishes, not postponed to later steps. Task status must reflect reality. If a task describes "migrate three callers to use shared utility", mark it completed once all three are migrated and committed—do not defer the status update until after push or CI. The `stop-completion-auditor` hook reads actual task files and blocks session end if any tasks remain incomplete, so stale task status prevents the session from concluding even when the work is done. This is especially critical for issue-creation tasks: treat `gh issue create` and `TaskUpdate → completed` as a single atomic operation. A session that creates issues but forgets to complete the tracking task will block the *next* session's stop hook — requiring manual `swiz tasks complete <id> --session <session-id> --evidence "note:..."` surgery to recover.
+**DO** mark tasks completed immediately when their work finishes. The `stop-completion-auditor` blocks session end on incomplete tasks. Treat `gh issue create` and `TaskUpdate → completed` as a single atomic operation — a session that creates issues without completing the tracking task blocks the *next* session's stop hook, requiring manual `swiz tasks complete <id> --session <session-id> --evidence "note:..."` recovery.
 
-**DO** run `git diff` before `git add` and output the result explicitly — do not skip straight to staging and rely on hooks or CI to catch logic errors. The staged-diff review is the final pre-commit sanity check and must be visible in the conversation so the agent can verify the exact changed logic before committing. After multiple edits to the same file, piecemeal edits can produce incoherent or contradictory content when combined; only the diff reveals this. Pattern: `git diff <files>` → inspect output → `git add <files>` → `git commit` → `git status` (verify clean).
+**DO** run `git diff <files>` before `git add` and inspect the output. After multiple edits, piecemeal changes can produce incoherent content when combined — only the diff reveals this. Pattern: `git diff` → inspect → `git add` → `git commit` → `git status` (verify clean).
 
-**DO** run `git status` immediately after every `git commit` to verify the working tree is clean. Files modified after the last `git add` (e.g., by a formatter, linter, or concurrent process) will be silently left uncommitted; only `git status` reveals them. The stop-git-status hook blocks session end on uncommitted changes — catching this after `git commit` rather than at stop time avoids an extra commit + push + CI cycle. A clean working tree confirms the commit captured everything intended.
+**DO** run `git status` immediately after every `git commit`. Files modified after `git add` (e.g., by a formatter) are silently left uncommitted — `git status` reveals them.
+
+**DO** check word count after every CLAUDE.md edit: `wc -w CLAUDE.md`. The `stop-memory-size.ts` hook blocks session stop when any memory file exceeds 5000 words. Run `/compact-memory` proactively before the count reaches 5000 — do not wait for the stop hook to enforce it.
 
 **DO** check for conflicts with existing nearby guidance before adding new rules to CLAUDE.md. Read the surrounding paragraphs and search for related DO/DON'T blocks before writing. Adding a rule that contradicts an existing one causes silent policy drift — both rules will be followed inconsistently.
 
@@ -173,17 +175,17 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DON'T** add, restore, or preserve inferred issue labels once the user gives explicit label instructions. The user's latest label state overrides prior assumptions: if they say an issue is `ready`, remove conflicting labels such as `backlog` instead of re-adding them for classification.
 
-**DO** refine and label issues immediately after creating them. The `stop-personal-repo-issues.ts` hook blocks session stop when issues lack a readiness label (`ready`, `triaged`, `confirmed`, `accepted`, `spec-approved`). Note: `backlog` is NOT a readiness label — it means "seen but not yet refined". After creating an issue with `/report-issue` or `gh issue create`, run `/refine-issue <number>` to add acceptance criteria and label it `ready`. Treat issue creation and refinement as a single atomic workflow.
+**DO** refine and label issues immediately after creating them. `stop-personal-repo-issues.ts` blocks stop when issues lack a readiness label (`ready`, `triaged`, `confirmed`, `accepted`, `spec-approved`). `backlog` is NOT a readiness label. After `gh issue create`, run `/refine-issue <number>` to label it `ready` — treat creation and refinement as atomic.
 
-**DO** audit open issues for missing readiness labels before attempting to stop the session. Run `gh issue list --state open --json number,title,labels --jq '.[] | select(.labels | map(.name) | any(. == "ready" or . == "backlog" or . == "blocked" or . == "wontfix" or . == "duplicate" or . == "upstream")) | .number'` to find issues that already have an exempting label. Any issue without an exempting label will trigger a stop-hook block — run `/refine-issue <number>` for each one before stopping. This is particularly easy to miss when creating multiple issues in a single session with `/report-issue` and only refining some of them.
+**DO** audit open issues for missing readiness labels before stopping: `gh issue list --state open --json number,title,labels --jq '.[] | select(.labels | map(.name) | any(. == "ready" or . == "backlog" or . == "blocked" or . == "wontfix" or . == "duplicate" or . == "upstream")) | .number'`. Any unlabelled issue triggers a stop-hook block.
 
-**DO** pick up at least one open issue per session when the stop hook lists actionable issues. The `stop-personal-repo-issues.ts` hook blocks stop when open issues exist in a personal repo. Use `/work-on-issue <number>` to resolve one issue before stopping — this satisfies the cooldown and demonstrates forward progress. Prioritize issues labelled `ready` over `backlog`.
+**DO** pick up at least one open issue per session when the stop hook lists actionable issues. Use `/work-on-issue <number>`. Prioritize `ready` over `backlog`.
 
 ## Standard Work Sequence
 
-**DO** create at least one task with `pending` or `in_progress` status before using any file modification (Edit/Write) or non-exempt Bash tools. The `pretooluse-require-tasks.ts` hook enforces this — it blocks Edit, Write, and Bash calls when no incomplete task exists. This applies to every session that involves code changes, not just large features. Create tasks as the very first action in any workflow — before running any Bash commands, even investigatory ones like `gh issue view`. While `gh` commands are technically exempt, delaying task creation risks the bootstrap hook auto-creating a generic task that then requires manual cleanup.
+**DO** create at least one `pending` or `in_progress` task before any Edit/Write or non-exempt Bash. The `pretooluse-require-tasks.ts` hook blocks all three when no incomplete task exists. Create tasks before any Bash command — even `gh issue view`.
 
-Follow this order for every unit of work. Deviating from it causes hook blocks.
+Follow this order for every unit of work.
 
 ```
 1. TaskCreate / TaskUpdate → in_progress   (required before any Edit/Bash)
@@ -198,51 +200,45 @@ Follow this order for every unit of work. Deviating from it causes hook blocks.
 10. Announce result — done.
 ```
 
-**Enforcement summary:**
-- Steps 1–3 require an in_progress task (hook blocks otherwise)
-- **DO** create a separate "Push and verify CI" task before step 4 and mark it `in_progress`. Complete the implementation task at step 4, but keep the push+CI task alive through steps 5–10. Mark the push+CI task completed only after `gh run view --json` confirms `conclusion: "success"`. Without this, the task-require hook blocks Bash at steps 5–10 because no task is in_progress.
-- Capture SHA (step 5) before push so step 8 can filter by exact commit
-- Step 7 uses `swiz push-wait` which polls for cooldown expiry then runs `git push` (no sleeps, no force bypasses)
-- Step 8 uses `swiz ci-wait` for timeout-based polling (replaces manual gh run watch/view)
-- **DO NOT** use fixed sleeps, manual polling, or `--force-with-lease` to bypass cooldown — use `swiz push-wait` instead
-- No TaskUpdate/TaskList calls at steps 7–10
-- **DON'T stop or declare work done after step 3 alone** — a commit without a push is incomplete work. The stop hook blocks every stop attempt until origin is up to date. Always complete steps 5–10 before stopping. Even when waiting for explicit push approval, do not attempt to stop — the `stop-git-status` hook will block until `git log origin/main..HEAD` is empty.
-- **DO** treat push as inseparable from commit — after any `/commit` skill or manual `git commit`, immediately continue with steps 5–10 (capture SHA → log review → push → CI wait → verify exit code). The stop hook will block every stop attempt until `origin/main` is up to date.
-- **DO** wait for background pushes to complete (`TaskOutput block:true`) before proceeding to CI verification or responding to stop hooks. A push running in background is not yet on the remote — the stop hook will fire with "unpushed commits" until `git push` exits successfully.
-- **DO** invoke `/commit` immediately after implementation is complete — do not defer committing to a later step or wait for explicit instruction. Uncommitted changes trigger the `stop-git-status` hook, which blocks every stop attempt. The commit-push-CI sequence must start as soon as edits are done and tests pass.
-- **DO** use `swiz issue resolve <number> --body "<text>"` to finalize issues instead of separate `gh issue comment` + `gh issue close` calls. `swiz issue resolve` is idempotent: it fetches state first, posts the comment, and only closes if the issue is still OPEN. When a commit message contains `Fixes #N`, GitHub auto-closes the issue on push — a subsequent raw `gh issue close` then fails noisily. `swiz issue resolve` handles this gracefully. For close-only (no comment), use `swiz issue close <number>`.
+**Enforcement:**
+- Steps 1–3 require an `in_progress` task. Create a separate "Push and verify CI" task before step 4; keep it `in_progress` through steps 5–10; mark it completed only after `gh run view --json` confirms `conclusion: "success"`. Without this, the task-require hook blocks Bash at steps 5–10.
+- Capture SHA before push; step 8 filters by exact commit.
+- Use `swiz push-wait` (polls cooldown, then pushes) — no fixed sleeps or `--force-with-lease`.
+- Use `swiz ci-wait $SHA --timeout 300` — no manual `gh run watch/view` loops.
+- No TaskUpdate/TaskList calls at steps 7–10.
+- **DON'T** stop after step 3 alone — the stop hook blocks until origin is up to date.
+- **DO** treat push as inseparable from commit — invoke the commit-push-CI sequence immediately after edits pass tests.
+- **DO** wait for background pushes to complete (`TaskOutput block:true`) before CI verification.
+- **DO** use `swiz issue resolve <number> --body "<text>"` instead of `gh issue comment` + `gh issue close`. `swiz issue resolve` is idempotent and handles GitHub auto-close (from `Fixes #N`) gracefully. For close-only: `swiz issue close <number>`.
 
 ## Push and CI
 
 This is a personal solo repo (`mherod/swiz`). Push directly to `main` for all work — no pull request required.
 
 **Pre-push checklist:**
-1. `git log origin/main..HEAD --oneline` — review exactly which commits will be pushed before running push.
-2. Branch/collaboration checks (**must run before `git push`**, not after):
-   - `git branch --show-current` — confirm you're on the expected branch.
-   - `gh pr list --state open --head $(git branch --show-current)` — check for an existing open PR; if one exists, the push updates it rather than requiring a new PR.
-   - Confirm the repo is a solo personal project (no org, no other recent contributors, no open PRs) before pushing directly to `main`.
-3. `SHA=$(git rev-parse HEAD)` — capture the commit SHA before pushing.
-4. `git push origin main` — lefthook's `pre-push` hook runs `bun test` (full suite, ~1900 tests, ~44s). Push only succeeds once all tests pass.
-5. `gh run list --commit $SHA --json databaseId --jq '.[0].databaseId'` — get the run ID for the exact pushed SHA. Do NOT use `--limit 1 --branch main` — that returns the latest run which may be stale.
-6. `gh run watch <run-id> --exit-status` — wait for completion; fix any failures before stopping.
-7. `gh run view <run-id> --json conclusion,status,jobs --jq '{conclusion,status,jobs:[.jobs[]|{name,conclusion,status}]}'` — fetch the explicit conclusion and per-job statuses; only announce success when `conclusion` is `"success"` and every job shows `"success"`.
+1. `git log origin/main..HEAD --oneline` — review commits before pushing.
+2. Before `git push`: `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`; confirm solo personal project before pushing to `main`.
+3. `SHA=$(git rev-parse HEAD)` — capture SHA before pushing.
+4. `git push origin main` — lefthook's `pre-push` runs `bun test` (full suite). Push succeeds only when all tests pass.
+5. `gh run list --commit $SHA --json databaseId --jq '.[0].databaseId'` — get run ID for exact SHA. Do NOT use `--limit 1 --branch main` (returns stale run).
+6. `gh run watch <run-id> --exit-status` — wait for completion.
+7. `gh run view <run-id> --json conclusion,status,jobs --jq '{conclusion,status,jobs:[.jobs[]|{name,conclusion,status}]}'` — confirm `conclusion: "success"` and every job green.
 
 **DON'T** use `gh run view --commit <SHA>` — that flag does not exist and fails with "unknown flag: --commit". Always use the two-step pattern: `gh run list --commit $SHA --json databaseId --jq '.[0].databaseId'` to get the run ID, then `gh run view <id>`.
 
-**DO** use `swiz push-wait origin <branch>` instead of raw `git push` when a push cooldown may be active. The `pretooluse-push-cooldown` hook blocks `git push` during the cooldown window. `swiz push-wait` polls automatically and pushes when the cooldown clears — no manual sleep or retry needed.
+**DO** use `swiz push-wait origin <branch>` instead of raw `git push` when a cooldown may be active. `swiz push-wait` polls and pushes when the cooldown clears.
 
 **Mandatory hooks — never bypass:**
 - `lefthook pre-push` runs `bun test`. DON'T use `--no-verify` or any flag that skips it. Fix test failures first.
 - CI workflow (`CI`) runs lint → typecheck → test. All three jobs must be green before the session can stop.
 
-**DO** verify CI after every push with `gh run view --json conclusion,status,jobs` and confirm `conclusion === "success"` before announcing completion. `gh run watch` output alone is not sufficient — always follow up with the explicit JSON fetch tied to the same SHA captured before push (`SHA=$(git rev-parse HEAD)`).
+**DO** verify CI with `gh run view --json conclusion,status,jobs` after every push. `gh run watch` output alone is not sufficient — always follow with the explicit JSON fetch.
 
-**DO** use token-based parsing (not regex) when writing hooks that must distinguish `git push --force` (force flag) from `git push -- --force` (refspec after end-of-flags sentinel). Regex cannot correctly handle the `--` sentinel, git global options like `-C <path>`, or flags in arbitrary operand positions. Export the parser from `hook-utils.ts` so it can be unit-tested independently without triggering stdin reads from the hook file itself.
+**DO** use token-based parsing (not regex) when hooks must distinguish `git push --force` from `git push -- --force`. Regex cannot handle the `--` sentinel or `-C <path>` global options. Export the parser from `hook-utils.ts` for independent unit testing.
 
 **DON'T** call TaskUpdate or TaskList during or after the push+CI verification sequence. Mark tasks completed *after commit but before push* so the push+CI loop is purely mechanical: push → watch → `gh run view --json` → announce. Any TaskUpdate call after `git push` is a sign the task ordering is wrong — fix it by completing tasks at step 4 of the Standard Work Sequence.
 
-**DON'T** stop the session after committing without pushing. A local commit that hasn't reached `origin/main` is incomplete work — the stop hook blocks until `git push` succeeds and CI is verified. Every commit must be followed by steps 5–11 of the Standard Work Sequence before the session ends. When resuming a session with unpushed commits from a prior session, push them immediately before starting new work.
+**DON'T** stop after committing without pushing. The stop hook blocks until `origin/main` is up to date. Push any unpushed commits immediately before starting new work in a resumed session.
 
 **DON'T** skip `git log origin/main..HEAD --oneline` before pushing — it prevents accidentally pushing incomplete or unintended commits.
 
