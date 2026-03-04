@@ -9,6 +9,7 @@ import {
   computeTranscriptSummary,
   denyPreToolUse as deny,
   getTranscriptSummary,
+  git,
 } from "./hook-utils.ts"
 
 const GIT_PUSH_RE = /\bgit\s+push\b/
@@ -51,6 +52,17 @@ for (let i = lastPushIdx + 1; i < cmds.length; i++) {
 
 // If CI is already verified after the last push, allow task tools
 if (hasPostPushCiVerification) process.exit(0)
+
+// Check whether the push has actually landed on the remote.
+// If the local branch is still ahead of origin, the push is still in-flight
+// (e.g., background push waiting on pre-push hook cooldown). In that case
+// there is no CI run to verify yet — skip the blocking phase.
+const cwd = (input?.cwd as string | undefined) ?? process.cwd()
+const unpushedCount = await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd)
+if (unpushedCount !== "" && unpushedCount !== "0" && !Number.isNaN(Number(unpushedCount))) {
+  // Commits are still ahead of remote — push hasn't landed yet
+  process.exit(0)
+}
 
 // We're in push-CI phase — block TaskUpdate/TaskList
 deny(
