@@ -4,11 +4,15 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - "**.md"
+      - "**/*.md"
       - ".claude/**"
       - "docs/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - ".claude/**"
+      - "docs/**"
 
 jobs:
   file-placement:
