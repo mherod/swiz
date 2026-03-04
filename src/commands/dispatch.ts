@@ -51,6 +51,7 @@ export {
   replayBlocking,
   replayContext,
   replayPreToolUse,
+  resolvePrMergeActive,
   runBlocking,
   runContext,
   runHook,

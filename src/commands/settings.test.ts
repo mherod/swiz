@@ -5,8 +5,10 @@ import { join } from "node:path"
 import {
   DEFAULT_TRIVIAL_MAX_FILES,
   DEFAULT_TRIVIAL_MAX_LINES,
+  getEffectiveSwizSettings,
   POLICY_PROFILES,
   readProjectSettings,
+  readSwizSettings,
   resolvePolicy,
 } from "../settings.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
@@ -467,6 +469,40 @@ describe("swiz settings", () => {
     expect(result.stdout).toContain("stop-github-ci.ts, stop-lint-staged.ts")
   })
 
+  test("sets collaboration-mode and persists to user config", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "set", "collaboration-mode", "solo"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Set collaboration-mode = solo")
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { collaborationMode?: string }
+    expect(json.collaborationMode).toBe("solo")
+  })
+
+  test("rejects invalid collaboration-mode value", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "set", "collaboration-mode", "invalid"], home)
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stderr).toContain("Invalid value")
+  })
+
+  test("shows collaboration mode in settings output", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("collaboration:   auto")
+  })
+
+  test("shows non-default collaboration mode in settings output", async () => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "set", "collaboration-mode", "team"], home)
+    const result = await runSwiz(["settings"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("collaboration:   team")
+  })
+
   test("settings show includes project-level disabled hooks", async () => {
     const home = await createTempHome()
     const projectDir = await mkdtemp(join(tmpdir(), "swiz-disabled-hooks-test-"))
@@ -667,6 +703,7 @@ describe("SETTINGS_REGISTRY", () => {
       "memoryWordThreshold",
       "narratorVoice",
       "ambitionMode",
+      "collaborationMode",
     ]
     const registryKeys = SETTINGS_REGISTRY.map((d) => d.key)
     for (const key of expectedKeys) {
@@ -688,5 +725,141 @@ describe("SETTINGS_REGISTRY", () => {
     const narratorVoice = SETTINGS_REGISTRY.find((d) => d.key === "narratorVoice")
     expect(narratorVoice).toBeDefined()
     expect(narratorVoice!.validate).toBeUndefined()
+  })
+
+  test("collaborationMode has a validator that rejects invalid values", () => {
+    const def = SETTINGS_REGISTRY.find((d) => d.key === "collaborationMode")
+    expect(def).toBeDefined()
+    expect(def!.validate).toBeDefined()
+    expect(def!.validate!("auto")).toBeNull()
+    expect(def!.validate!("solo")).toBeNull()
+    expect(def!.validate!("team")).toBeNull()
+    expect(def!.validate!("invalid")).toContain("Invalid value")
+  })
+
+  test("collaborationMode supports global and session scopes", () => {
+    const def = SETTINGS_REGISTRY.find((d) => d.key === "collaborationMode")
+    expect(def).toBeDefined()
+    expect(def!.scopes).toContain("global")
+    expect(def!.scopes).toContain("session")
+  })
+})
+
+// ─── collaborationMode normalization + effective settings ────────────────────
+
+describe("collaborationMode settings", () => {
+  test("defaults to auto when no config exists", async () => {
+    const home = await createTempHome()
+    const settings = await readSwizSettings({ home })
+    expect(settings.collaborationMode).toBe("auto")
+  })
+
+  test("normalizes valid collaborationMode values from config", async () => {
+    const home = await createTempHome()
+    const configDir = join(home, ".swiz")
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, "settings.json"), JSON.stringify({ collaborationMode: "team" }))
+    const settings = await readSwizSettings({ home })
+    expect(settings.collaborationMode).toBe("team")
+  })
+
+  test("falls back to auto for invalid collaborationMode values", async () => {
+    const home = await createTempHome()
+    const configDir = join(home, ".swiz")
+    await mkdir(configDir, { recursive: true })
+    await writeFile(
+      join(configDir, "settings.json"),
+      JSON.stringify({ collaborationMode: "invalid" })
+    )
+    const settings = await readSwizSettings({ home })
+    expect(settings.collaborationMode).toBe("auto")
+  })
+
+  test("effective settings inherit collaborationMode from global", () => {
+    const settings = {
+      autoContinue: true,
+      critiquesEnabled: true,
+      ambitionMode: "standard" as const,
+      collaborationMode: "solo" as const,
+      narratorVoice: "",
+      narratorSpeed: 0,
+      prAgeGateMinutes: 10,
+      prMergeMode: true,
+      pushGate: false,
+      sandboxedEdits: true,
+      speak: false,
+      gitStatusGate: true,
+      nonDefaultBranchGate: true,
+      githubCiGate: true,
+      changesRequestedGate: true,
+      personalRepoIssuesGate: true,
+      memoryLineThreshold: 1400,
+      memoryWordThreshold: 5000,
+      sessions: {},
+    }
+    const effective = getEffectiveSwizSettings(settings)
+    expect(effective.collaborationMode).toBe("solo")
+  })
+
+  test("session collaborationMode overrides global", () => {
+    const settings = {
+      autoContinue: true,
+      critiquesEnabled: true,
+      ambitionMode: "standard" as const,
+      collaborationMode: "auto" as const,
+      narratorVoice: "",
+      narratorSpeed: 0,
+      prAgeGateMinutes: 10,
+      prMergeMode: true,
+      pushGate: false,
+      sandboxedEdits: true,
+      speak: false,
+      gitStatusGate: true,
+      nonDefaultBranchGate: true,
+      githubCiGate: true,
+      changesRequestedGate: true,
+      personalRepoIssuesGate: true,
+      memoryLineThreshold: 1400,
+      memoryWordThreshold: 5000,
+      sessions: {
+        "test-session": {
+          autoContinue: true,
+          collaborationMode: "team" as const,
+        },
+      },
+    }
+    const effective = getEffectiveSwizSettings(settings, "test-session")
+    expect(effective.collaborationMode).toBe("team")
+    expect(effective.source).toBe("session")
+  })
+
+  test("session without collaborationMode falls back to global", () => {
+    const settings = {
+      autoContinue: true,
+      critiquesEnabled: true,
+      ambitionMode: "standard" as const,
+      collaborationMode: "solo" as const,
+      narratorVoice: "",
+      narratorSpeed: 0,
+      prAgeGateMinutes: 10,
+      prMergeMode: true,
+      pushGate: false,
+      sandboxedEdits: true,
+      speak: false,
+      gitStatusGate: true,
+      nonDefaultBranchGate: true,
+      githubCiGate: true,
+      changesRequestedGate: true,
+      personalRepoIssuesGate: true,
+      memoryLineThreshold: 1400,
+      memoryWordThreshold: 5000,
+      sessions: {
+        "test-session": {
+          autoContinue: true,
+        },
+      },
+    }
+    const effective = getEffectiveSwizSettings(settings, "test-session")
+    expect(effective.collaborationMode).toBe("solo")
   })
 })

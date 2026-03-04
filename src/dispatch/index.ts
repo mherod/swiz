@@ -50,6 +50,7 @@ export {
   hookCooldownPath,
   isWithinCooldown,
   markHookCooldown,
+  resolvePrMergeActive,
 } from "./filters.ts"
 
 export {

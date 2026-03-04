@@ -5,6 +5,9 @@ import type { HookDef, HookGroup } from "./manifest.ts"
 
 export type PolicyProfile = "solo" | "team" | "strict"
 export type AmbitionMode = "standard" | "aggressive"
+export type CollaborationMode = "auto" | "solo" | "team"
+
+export const COLLABORATION_MODES: CollaborationMode[] = ["auto", "solo", "team"]
 
 export type ProjectState = "in-development" | "awaiting-feedback" | "released" | "paused"
 
@@ -28,6 +31,7 @@ export const TERMINAL_STATES: ProjectState[] = ["released", "paused"]
 export interface SessionSwizSettings {
   autoContinue: boolean
   prMergeMode?: boolean
+  collaborationMode?: CollaborationMode
 }
 
 export interface StateHistoryEntry {
@@ -65,6 +69,7 @@ export interface SwizSettings {
   autoContinue: boolean
   critiquesEnabled: boolean
   ambitionMode: AmbitionMode
+  collaborationMode: CollaborationMode
   narratorVoice: string
   narratorSpeed: number
   prAgeGateMinutes: number
@@ -88,6 +93,7 @@ export interface EffectiveSwizSettings {
   autoContinue: boolean
   critiquesEnabled: boolean
   ambitionMode: AmbitionMode
+  collaborationMode: CollaborationMode
   narratorVoice: string
   narratorSpeed: number
   prAgeGateMinutes: number
@@ -155,6 +161,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   autoContinue: true,
   critiquesEnabled: true,
   ambitionMode: "standard",
+  collaborationMode: "auto",
   narratorVoice: "",
   narratorSpeed: 0,
   prAgeGateMinutes: 10,
@@ -191,6 +198,13 @@ function normalizeSessionSettings(value: unknown): SessionSwizSettings | null {
   if (typeof obj.autoContinue !== "boolean") return null
   const session: SessionSwizSettings = { autoContinue: obj.autoContinue }
   if (typeof obj.prMergeMode === "boolean") session.prMergeMode = obj.prMergeMode
+  if (
+    obj.collaborationMode === "auto" ||
+    obj.collaborationMode === "solo" ||
+    obj.collaborationMode === "team"
+  ) {
+    session.collaborationMode = obj.collaborationMode
+  }
   return session
 }
 
@@ -218,6 +232,12 @@ function normalizeSettings(value: unknown): SwizSettings {
       obj.ambitionMode === "standard" || obj.ambitionMode === "aggressive"
         ? obj.ambitionMode
         : DEFAULT_SETTINGS.ambitionMode,
+    collaborationMode:
+      obj.collaborationMode === "auto" ||
+      obj.collaborationMode === "solo" ||
+      obj.collaborationMode === "team"
+        ? obj.collaborationMode
+        : DEFAULT_SETTINGS.collaborationMode,
     narratorVoice:
       typeof obj.narratorVoice === "string" ? obj.narratorVoice : DEFAULT_SETTINGS.narratorVoice,
     narratorSpeed:
@@ -478,6 +498,7 @@ export function getEffectiveSwizSettings(
       autoContinue: sessionSettings.autoContinue,
       critiquesEnabled: settings.critiquesEnabled,
       ambitionMode: settings.ambitionMode,
+      collaborationMode: sessionSettings.collaborationMode ?? settings.collaborationMode,
       narratorVoice: settings.narratorVoice,
       narratorSpeed: settings.narratorSpeed,
       prAgeGateMinutes: settings.prAgeGateMinutes,
@@ -502,6 +523,7 @@ export function getEffectiveSwizSettings(
     autoContinue: settings.autoContinue,
     critiquesEnabled: settings.critiquesEnabled,
     ambitionMode: settings.ambitionMode,
+    collaborationMode: settings.collaborationMode,
     narratorVoice: settings.narratorVoice,
     narratorSpeed: settings.narratorSpeed,
     prAgeGateMinutes: settings.prAgeGateMinutes,

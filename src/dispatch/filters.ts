@@ -8,7 +8,12 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import type { HookGroup } from "../manifest.ts"
-import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../settings.ts"
+import {
+  type CollaborationMode,
+  getEffectiveSwizSettings,
+  readProjectSettings,
+  readSwizSettings,
+} from "../settings.ts"
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -66,8 +71,29 @@ export function countHooks(groups: HookGroup[]): number {
 
 // ─── Group filters ──────────────────────────────────────────────────────────
 
-export function filterPrMergeModeHooks(groups: HookGroup[], prMergeMode: boolean): HookGroup[] {
-  if (prMergeMode) return groups
+/**
+ * Resolve whether PR-merge hooks should be active based on collaborationMode
+ * and the legacy prMergeMode boolean.
+ *
+ * - `team` → always enable PR-merge hooks
+ * - `solo` → always disable PR-merge hooks
+ * - `auto` → fall back to prMergeMode boolean
+ */
+export function resolvePrMergeActive(
+  collaborationMode: CollaborationMode,
+  prMergeMode: boolean
+): boolean {
+  if (collaborationMode === "team") return true
+  if (collaborationMode === "solo") return false
+  return prMergeMode // auto: use legacy boolean
+}
+
+export function filterPrMergeModeHooks(
+  groups: HookGroup[],
+  prMergeMode: boolean,
+  collaborationMode: CollaborationMode = "auto"
+): HookGroup[] {
+  if (resolvePrMergeActive(collaborationMode, prMergeMode)) return groups
 
   return groups
     .map((group) => {
@@ -121,7 +147,11 @@ export async function applyHookSettingFilters(
   ])
 
   const detectedStacks = cwd ? detectProjectStack(cwd) : []
-  const filtered = filterPrMergeModeHooks(groups, effective.prMergeMode)
+  const filtered = filterPrMergeModeHooks(
+    groups,
+    effective.prMergeMode,
+    effective.collaborationMode
+  )
   const stackFiltered = filterStackHooks(filtered, detectedStacks)
   return filterDisabledHooks(stackFiltered, disabledSet)
 }

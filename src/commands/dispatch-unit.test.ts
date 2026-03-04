@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { manifest } from "../manifest.ts"
-import { filterPrMergeModeHooks } from "./dispatch.ts"
+import { filterPrMergeModeHooks, resolvePrMergeActive } from "./dispatch.ts"
 
 describe("dispatch.ts unit tests", () => {
   describe("cross-agent tool matching patterns", () => {
@@ -158,6 +158,68 @@ describe("dispatch.ts unit tests", () => {
       const filtered = filterPrMergeModeHooks(groups, true)
 
       expect(filtered).toEqual(groups)
+    })
+
+    it("solo collaborationMode disables PR hooks regardless of prMergeMode", () => {
+      const groups = [
+        {
+          event: "stop",
+          hooks: [{ file: "stop-github-ci.ts" }, { file: "stop-non-default-branch.ts" }],
+        },
+      ]
+
+      const filtered = filterPrMergeModeHooks(groups, true, "solo")
+
+      expect(filtered).toHaveLength(1)
+      expect(filtered[0]?.hooks.map((h) => h.file)).toEqual(["stop-non-default-branch.ts"])
+    })
+
+    it("team collaborationMode enables PR hooks regardless of prMergeMode", () => {
+      const groups = [
+        {
+          event: "stop",
+          hooks: [{ file: "stop-github-ci.ts" }, { file: "stop-non-default-branch.ts" }],
+        },
+      ]
+
+      const filtered = filterPrMergeModeHooks(groups, false, "team")
+
+      expect(filtered).toEqual(groups)
+    })
+
+    it("auto collaborationMode falls back to prMergeMode boolean", () => {
+      const groups = [
+        {
+          event: "stop",
+          hooks: [{ file: "stop-github-ci.ts" }, { file: "stop-non-default-branch.ts" }],
+        },
+      ]
+
+      // auto + prMergeMode=false → disables PR hooks
+      const filteredOff = filterPrMergeModeHooks(groups, false, "auto")
+      expect(filteredOff).toHaveLength(1)
+      expect(filteredOff[0]?.hooks.map((h) => h.file)).toEqual(["stop-non-default-branch.ts"])
+
+      // auto + prMergeMode=true → keeps all hooks
+      const filteredOn = filterPrMergeModeHooks(groups, true, "auto")
+      expect(filteredOn).toEqual(groups)
+    })
+  })
+
+  describe("resolvePrMergeActive", () => {
+    it("team always returns true", () => {
+      expect(resolvePrMergeActive("team", false)).toBe(true)
+      expect(resolvePrMergeActive("team", true)).toBe(true)
+    })
+
+    it("solo always returns false", () => {
+      expect(resolvePrMergeActive("solo", false)).toBe(false)
+      expect(resolvePrMergeActive("solo", true)).toBe(false)
+    })
+
+    it("auto returns the prMergeMode value", () => {
+      expect(resolvePrMergeActive("auto", true)).toBe(true)
+      expect(resolvePrMergeActive("auto", false)).toBe(false)
     })
   })
 

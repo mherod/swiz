@@ -157,6 +157,23 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
         ? null
         : `Invalid value "${v}" for ambition-mode. Must be: standard | aggressive`,
   },
+  {
+    key: "collaborationMode",
+    aliases: [
+      "collaboration-mode",
+      "collaborationmode",
+      "collaboration_mode",
+      "collaboration",
+      "collab-mode",
+      "collab",
+    ],
+    kind: "string",
+    scopes: ["global", "session"],
+    validate: (v) =>
+      v === "auto" || v === "solo" || v === "team"
+        ? null
+        : `Invalid value "${v}" for collaboration-mode. Must be: auto | solo | team`,
+  },
 ]
 
 // ── Derived lookups (built once from the registry) ────────────────────────
@@ -201,11 +218,12 @@ function usage(): string {
   return (
     "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--global | --project | --session [id]] [--dir <path>]\n" +
     "Scope: --global (default, ~/.swiz/settings.json), --project (.swiz/config.json), --session [id] (per-session)\n" +
-    "Settings (global): auto-continue, critiques-enabled, pr-merge-mode, push-gate, sandboxed-edits, speak,\n" +
-    "  pr-age-gate, narrator-voice, narrator-speed, ambition-mode, git-status-gate, github-ci-gate,\n" +
-    "  changes-requested-gate, personal-repo-issues-gate, non-default-branch-gate\n" +
+    "Settings (global): auto-continue, critiques-enabled, pr-merge-mode, collaboration-mode,\n" +
+    "  push-gate, sandboxed-edits, speak, pr-age-gate, narrator-voice, narrator-speed, ambition-mode,\n" +
+    "  git-status-gate, github-ci-gate, changes-requested-gate, personal-repo-issues-gate,\n" +
+    "  non-default-branch-gate\n" +
     "Settings (--project): memory-line-threshold, memory-word-threshold\n" +
-    "Settings (--session): auto-continue, pr-merge-mode\n" +
+    "Settings (--session): auto-continue, pr-merge-mode, collaboration-mode\n" +
     "Hook management: disable-hook <filename> (e.g. stop-github-ci.ts), enable-hook <filename>"
   )
 }
@@ -325,6 +343,7 @@ function printSettings(
     autoContinue: boolean
     critiquesEnabled: boolean
     ambitionMode: string
+    collaborationMode: string
     narratorVoice: string
     narratorSpeed: number
     prAgeGateMinutes: number
@@ -369,6 +388,9 @@ function printSettings(
   )
   console.log(`  critiques:       ${effective.critiquesEnabled ? "enabled" : "disabled"} (global)`)
   console.log(`  ambition-mode:   ${effective.ambitionMode} (global)`)
+  console.log(
+    `  collaboration:   ${effective.collaborationMode} (${effective.collaborationMode === "auto" ? "default" : scopeLabel})`
+  )
   const ageGateLabel =
     effective.prAgeGateMinutes > 0 ? `${effective.prAgeGateMinutes} minutes` : "disabled"
   console.log(`  pr-age-gate:     ${ageGateLabel} (global)`)
@@ -663,6 +685,11 @@ export const settingsCommand: Command = {
       flags: "set ambition-mode <standard|aggressive>",
       description:
         "Set auto-continue ambition level: standard (balanced) or aggressive (feature-gap focused)",
+    },
+    {
+      flags: "set collaboration-mode <auto|solo|team>",
+      description:
+        "Set collaboration workflow: auto (heuristic), solo (direct push), team (PR required)",
     },
     {
       flags: "set pr-age-gate <minutes>",
