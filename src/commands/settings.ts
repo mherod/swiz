@@ -44,6 +44,37 @@ interface ParsedSettingsArgs {
   sessionQuery: string | null
 }
 
+/** Maps each CLI-exposed setting to the scopes that actually persist and apply it. */
+const SETTING_SCOPES: Record<SettingKey, readonly SettingsScope[]> = {
+  autoContinue: ["global", "session"],
+  prMergeMode: ["global", "session"],
+  critiquesEnabled: ["global"],
+  ambitionMode: ["global"],
+  pushGate: ["global"],
+  sandboxedEdits: ["global"],
+  speak: ["global"],
+  gitStatusGate: ["global"],
+  nonDefaultBranchGate: ["global"],
+  githubCiGate: ["global"],
+  changesRequestedGate: ["global"],
+  personalRepoIssuesGate: ["global"],
+  prAgeGateMinutes: ["global"],
+  narratorVoice: ["global"],
+  narratorSpeed: ["global"],
+  memoryLineThreshold: ["global", "project"],
+  memoryWordThreshold: ["global", "project"],
+}
+
+function validateSettingScope(key: SettingKey, scope: SettingsScope, settingArg: string): void {
+  const allowed = SETTING_SCOPES[key]
+  if (!allowed.includes(scope)) {
+    const scopeList = allowed.join(", ")
+    throw new Error(
+      `"${settingArg}" does not support --${scope} scope. Supported: ${scopeList}\n${usage()}`
+    )
+  }
+}
+
 const HOME = process.env.HOME ?? "~"
 const PROJECTS_DIR = join(HOME, ".claude", "projects")
 
@@ -51,10 +82,11 @@ function usage(): string {
   return (
     "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--global | --project | --session [id]] [--dir <path>]\n" +
     "Scope: --global (default, ~/.swiz/settings.json), --project (.swiz/config.json), --session [id] (per-session)\n" +
-    "Supported settings: auto-continue, critiques-enabled, pr-merge-mode, push-gate, sandboxed-edits, speak,\n" +
-    "  pr-age-gate (minutes, 0 to disable), narrator-voice (string, e.g. Samantha),\n" +
-    "  narrator-speed (words per minute, 0 for default), ambition-mode (standard|aggressive),\n" +
-    "  memory-line-threshold (lines, default 1400), memory-word-threshold (words, default 5000)\n" +
+    "Settings (global): auto-continue, critiques-enabled, pr-merge-mode, push-gate, sandboxed-edits, speak,\n" +
+    "  pr-age-gate, narrator-voice, narrator-speed, ambition-mode, git-status-gate, github-ci-gate,\n" +
+    "  changes-requested-gate, personal-repo-issues-gate, non-default-branch-gate\n" +
+    "Settings (--project): memory-line-threshold, memory-word-threshold\n" +
+    "Settings (--session): auto-continue, pr-merge-mode\n" +
     "Hook management: disable-hook <filename> (e.g. stop-github-ci.ts), enable-hook <filename>"
   )
 }
@@ -425,6 +457,7 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
       `"${parsed.settingArg}" is not a boolean setting. Use: swiz settings set ${parsed.settingArg} <value>\n${usage()}`
     )
   }
+  validateSettingScope(key, parsed.scope, parsed.settingArg ?? key)
 
   const scopeLabel = parsed.scope
   let path: string
@@ -474,6 +507,7 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
       `Missing value. Usage: swiz settings set ${parsed.settingArg} <value>\n${usage()}`
     )
   }
+  validateSettingScope(key, parsed.scope, parsed.settingArg ?? key)
 
   if (isStringSetting(key)) {
     if (key === "ambitionMode") {

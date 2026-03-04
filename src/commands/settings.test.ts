@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -22,7 +22,7 @@ afterEach(async () => {
 })
 
 async function createTempHome(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-settings-test-"))
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "swiz-settings-test-")))
   tempDirs.push(dir)
   return dir
 }
@@ -300,6 +300,63 @@ describe("swiz settings", () => {
     const result = await runSwiz(["settings", "enable", "ambition-mode"], home)
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toContain("not a boolean setting")
+  })
+
+  test("rejects --session for a global-only setting", async () => {
+    const home = await createTempHome()
+    // Create a session so --session resolves
+    await createSession(home, "/tmp/fake-project", "sess-scope-test")
+    const result = await runSwiz(
+      ["settings", "enable", "speak", "--session", "sess-scope-test"],
+      home
+    )
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("does not support --session scope")
+  })
+
+  test("rejects --project for a global-only setting", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "enable", "speak", "--project", "--dir", home], home)
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("does not support --project scope")
+  })
+
+  test("rejects --session for narrator-voice (set command)", async () => {
+    const home = await createTempHome()
+    await createSession(home, "/tmp/fake-project", "sess-voice-test")
+    const result = await runSwiz(
+      ["settings", "set", "narrator-voice", "Alex", "--session", "sess-voice-test"],
+      home
+    )
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("does not support --session scope")
+  })
+
+  test("accepts --session for auto-continue", async () => {
+    const home = await createTempHome()
+    // Ensure settings.json exists so readSwizSettings({ strict: true }) succeeds
+    const swizDir = join(home, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await writeFile(join(swizDir, "settings.json"), JSON.stringify({ autoContinue: false }))
+    // Session must target the home dir (which is also cwd for the subprocess)
+    await createSession(home, home, "sess-ac-test")
+    const result = await runSwiz(
+      ["settings", "enable", "auto-continue", "--session", "sess-ac-test"],
+      home
+    )
+    expect(result.stderr).toBe("")
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Enabled")
+  })
+
+  test("accepts --project for memory-line-threshold", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(
+      ["settings", "set", "memory-line-threshold", "2000", "--project", "--dir", home],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Set memory-line-threshold = 2000")
   })
 
   test("existing settings files load cleanly without narrator fields", async () => {
