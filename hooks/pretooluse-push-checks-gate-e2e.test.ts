@@ -86,6 +86,7 @@ class SessionTranscript {
 interface HookResult {
   blocked: boolean
   reason: string
+  advisory: boolean
 }
 
 async function runGate(opts: { pushCommand: string; transcriptPath: string }): Promise<HookResult> {
@@ -107,12 +108,17 @@ async function runGate(opts: { pushCommand: string; transcriptPath: string }): P
   const out = await new Response(proc.stdout).text()
   await proc.exited
 
-  if (!out.trim()) return { blocked: false, reason: "" }
+  if (!out.trim()) {
+    return { blocked: false, reason: "", advisory: false }
+  }
   const parsed = JSON.parse(out.trim())
   const hso = parsed?.hookSpecificOutput
+  const decision = hso?.permissionDecision ?? parsed?.decision
+  const reason = hso?.permissionDecisionReason ?? parsed?.reason ?? ""
   return {
-    blocked: (hso?.permissionDecision ?? parsed?.decision) === "deny",
-    reason: hso?.permissionDecisionReason ?? parsed?.reason ?? "",
+    blocked: decision === "deny",
+    reason,
+    advisory: decision === "allow" && !!reason,
   }
 }
 
@@ -130,12 +136,13 @@ describe("E2E: push-checks-gate progressive session simulation", () => {
         pushCommand: "git push origin main",
         transcriptPath,
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
       expect(result.reason).toContain("git branch --show-current")
       expect(result.reason).toContain("gh pr list")
     }
 
-    // ── Stage 2: Unrelated work in transcript — still blocked ─────────────
+    // ── Stage 2: Unrelated work in transcript — still advisory ─────────────
     await t.appendBashCommand("git status")
     await t.appendBashCommand("bun test")
     await t.appendOtherTool("Read")
@@ -145,7 +152,8 @@ describe("E2E: push-checks-gate progressive session simulation", () => {
         pushCommand: "git push origin main",
         transcriptPath,
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
       expect(result.reason).toContain("git branch --show-current")
       expect(result.reason).toContain("gh pr list")
     }
@@ -157,14 +165,15 @@ describe("E2E: push-checks-gate progressive session simulation", () => {
         pushCommand: "git push origin main",
         transcriptPath,
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
       // Branch check done — should NOT mention it as missing
       expect(result.reason).not.toContain("Branch check (not run yet)")
       // PR check still required
       expect(result.reason).toContain("gh pr list")
     }
 
-    // ── Stage 4: More unrelated work — gate still holds ───────────────────
+    // ── Stage 4: More unrelated work — advisory still holds ───────────────────
     await t.appendBashCommand("git diff --stat")
     await t.appendOtherTool("Edit")
     await t.appendBashCommand("bun test hooks/some.test.ts")
@@ -173,7 +182,8 @@ describe("E2E: push-checks-gate progressive session simulation", () => {
         pushCommand: "git push origin main",
         transcriptPath,
       })
-      expect(result.blocked).toBe(true)
+      expect(result.blocked).toBe(false)
+      expect(result.advisory).toBe(true)
       expect(result.reason).toContain("gh pr list")
     }
 
@@ -216,7 +226,8 @@ describe("E2E: push-checks-gate progressive session simulation", () => {
       pushCommand: "git push origin main",
       transcriptPath,
     })
-    expect(result.blocked).toBe(true)
+    expect(result.blocked).toBe(false)
+    expect(result.advisory).toBe(true)
     expect(result.reason).toContain("git branch --show-current")
   })
 
@@ -234,7 +245,8 @@ describe("E2E: push-checks-gate progressive session simulation", () => {
       pushCommand: "git push origin main",
       transcriptPath,
     })
-    expect(result.blocked).toBe(true)
+    expect(result.blocked).toBe(false)
+    expect(result.advisory).toBe(true)
     expect(result.reason).toContain("gh pr list")
   })
 
@@ -247,7 +259,8 @@ describe("E2E: push-checks-gate progressive session simulation", () => {
       pushCommand: "git push --force-with-lease origin main",
       transcriptPath,
     })
-    expect(result.blocked).toBe(true)
+    expect(result.blocked).toBe(false)
+    expect(result.advisory).toBe(true)
   })
 
   test("non-push commands pass through regardless of transcript state", async () => {
@@ -314,7 +327,8 @@ describe("E2E: push-checks-gate transcript resilience", () => {
     await writeFile(transcriptPath, lines.join("\n"))
 
     const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
-    expect(result.blocked).toBe(true)
+    expect(result.blocked).toBe(false)
+    expect(result.advisory).toBe(true)
   })
 
   test("checks in tool_result entries (not tool_use) do NOT satisfy the gate", async () => {
@@ -336,7 +350,8 @@ describe("E2E: push-checks-gate transcript resilience", () => {
     await writeFile(transcriptPath, lines.join("\n"))
 
     const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
-    expect(result.blocked).toBe(true)
+    expect(result.blocked).toBe(false)
+    expect(result.advisory).toBe(true)
   })
 
   test("checks buried early in a large transcript are still found", async () => {
@@ -392,7 +407,8 @@ describe("E2E: push-checks-gate transcript resilience", () => {
 
     // Non-Bash tools must not satisfy the gate even if their input contains the strings
     const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
-    expect(result.blocked).toBe(true)
+    expect(result.blocked).toBe(false)
+    expect(result.advisory).toBe(true)
   })
 })
 
@@ -526,7 +542,8 @@ describe("E2E: push-checks-gate escaped/multiline/truncated JSON payload hardeni
     await writeFile(transcriptPath, lines.join("\n"))
 
     const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
-    expect(result.blocked).toBe(true)
+    expect(result.blocked).toBe(false)
+    expect(result.advisory).toBe(true)
     expect(result.reason).toContain("git branch --show-current")
   })
 })
