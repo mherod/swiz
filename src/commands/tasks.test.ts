@@ -4,11 +4,14 @@ import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import {
+  compareTaskIds,
   findTaskAcrossSessions,
   getSessionIdsByCwdScan,
   getSessionIdsForProject,
   getSessions,
+  parseTaskId,
   resolveTaskById,
+  sessionPrefix,
   validateEvidence,
   verifyTaskSubject,
 } from "./tasks.ts"
@@ -68,6 +71,20 @@ beforeAll(async () => {
       })
     )
   }
+
+  // Write a prefixed task in SESSION_C (simulates session-scoped ID)
+  const prefixC = SESSION_C.replace(/-/g, "").slice(0, 4).toLowerCase()
+  await writeFile(
+    join(TASKS, SESSION_C, `${prefixC}-10.json`),
+    JSON.stringify({
+      id: `${prefixC}-10`,
+      subject: "Prefixed task in session C",
+      description: "Session-scoped task ID",
+      status: "pending",
+      blocks: [],
+      blockedBy: [],
+    })
+  )
 
   // ── Project directory matching the canonical key ──
   // This directory holds transcripts for SESSION_A only (fast-path match).
@@ -314,5 +331,73 @@ describe("resolveTaskById", () => {
       expect(msg).toContain("Deploy staging")
       expect(msg).toContain("Deploy production")
     }
+  })
+
+  it("resolves prefixed task ID directly via session prefix", async () => {
+    const prefixC = sessionPrefix(SESSION_C)
+    const result = await resolveTaskById(`${prefixC}-10`, SESSION_A, undefined, TASKS, PROJECTS)
+    expect(result.sessionId).toBe(SESSION_C)
+    expect(result.task.subject).toBe("Prefixed task in session C")
+  })
+
+  it("throws for prefixed ID with no matching session", async () => {
+    await expect(resolveTaskById("zzzz-99", SESSION_A, undefined, TASKS, PROJECTS)).rejects.toThrow(
+      /prefix "zzzz" matched no session/
+    )
+  })
+})
+
+// ─── sessionPrefix ──────────────────────────────────────────────────────────
+
+describe("sessionPrefix", () => {
+  it("extracts first 4 hex chars from UUID", () => {
+    expect(sessionPrefix("aaaa-aaaa-aaaa")).toBe("aaaa")
+    expect(sessionPrefix("AbCd-1234-5678")).toBe("abcd")
+  })
+
+  it("handles short session IDs", () => {
+    expect(sessionPrefix("ab")).toBe("ab")
+    expect(sessionPrefix("")).toBe("")
+  })
+})
+
+// ─── parseTaskId ────────────────────────────────────────────────────────────
+
+describe("parseTaskId", () => {
+  it("parses plain numeric IDs", () => {
+    const { prefix, seq } = parseTaskId("42")
+    expect(prefix).toBeNull()
+    expect(seq).toBe(42)
+  })
+
+  it("parses prefixed IDs", () => {
+    const { prefix, seq } = parseTaskId("a3f2-5")
+    expect(prefix).toBe("a3f2")
+    expect(seq).toBe(5)
+  })
+
+  it("handles multi-digit sequences", () => {
+    const { prefix, seq } = parseTaskId("b7c1-123")
+    expect(prefix).toBe("b7c1")
+    expect(seq).toBe(123)
+  })
+})
+
+// ─── compareTaskIds ─────────────────────────────────────────────────────────
+
+describe("compareTaskIds", () => {
+  it("sorts numeric IDs numerically", () => {
+    const ids = ["3", "1", "10", "2"]
+    expect(ids.sort(compareTaskIds)).toEqual(["1", "2", "3", "10"])
+  })
+
+  it("places numeric IDs before prefixed IDs", () => {
+    const ids = ["a3f2-1", "1", "b7c1-2"]
+    expect(ids.sort(compareTaskIds)).toEqual(["1", "a3f2-1", "b7c1-2"])
+  })
+
+  it("sorts prefixed IDs by prefix then sequence", () => {
+    const ids = ["b7c1-2", "a3f2-3", "a3f2-1", "b7c1-1"]
+    expect(ids.sort(compareTaskIds)).toEqual(["a3f2-1", "a3f2-3", "b7c1-1", "b7c1-2"])
   })
 })

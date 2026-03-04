@@ -43,6 +43,14 @@ export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
  *   const cooldownKey = `${sessionId}-${hash}`
  *   const cooldownFile = `/tmp/myapp-${cooldownKey}.sentinel`
  */
+/**
+ * Derive a short prefix from a session UUID for namespaced task IDs.
+ * First 4 hex characters of the session ID (e.g., "a3f2").
+ */
+export function sessionPrefix(sessionId: string): string {
+  return sessionId.replace(/-/g, "").slice(0, 4).toLowerCase()
+}
+
 export function getCanonicalPathHash(cwd: string): string {
   // Canonicalize the path using realpath to dereference symlinks.
   // This ensures /path/to/repo and /symlink/to/repo generate the same hash.

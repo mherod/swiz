@@ -22,6 +22,7 @@ import {
   isTaskTrackingExemptShellCommand,
   isWriteTool,
   readSessionTasks,
+  sessionPrefix,
 } from "./hook-utils.ts"
 
 const STALENESS_THRESHOLD = 20
@@ -46,12 +47,19 @@ export async function createBootstrapTask(
     const files = await readdir(tasksDir).catch(() => [] as string[])
     const ids = files
       .filter((f) => f.endsWith(".json") && !f.startsWith("."))
-      .map((f) => parseInt(f.replace(".json", ""), 10))
+      .map((f) => {
+        const name = f.replace(".json", "")
+        // Handle both prefixed (a3f2-5) and numeric (5) IDs
+        const dashIdx = name.lastIndexOf("-")
+        return dashIdx > 0 ? parseInt(name.slice(dashIdx + 1), 10) : parseInt(name, 10)
+      })
       .filter((n) => !Number.isNaN(n))
-    const nextId = ids.length > 0 ? Math.max(...ids) + 1 : 1
+    const nextSeq = ids.length > 0 ? Math.max(...ids) + 1 : 1
+    const prefix = sessionPrefix(sessionId)
+    const nextId = `${prefix}-${nextSeq}`
     const subject = "Session bootstrap — describe current work"
     const task = {
-      id: String(nextId),
+      id: nextId,
       subject,
       description:
         "Auto-created by pretooluse-require-tasks because no tasks existed. " +
@@ -63,7 +71,7 @@ export async function createBootstrapTask(
       blockedBy: [],
     }
     await Bun.write(join(tasksDir, `${nextId}.json`), JSON.stringify(task, null, 2))
-    return String(nextId)
+    return nextId
   } catch {
     return null
   }

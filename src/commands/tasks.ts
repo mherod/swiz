@@ -76,6 +76,49 @@ function formatElapsed(ms: number): string {
   return remainHours > 0 ? `${days}d ${remainHours}h` : `${days}d`
 }
 
+// ─── Session-scoped task IDs ─────────────────────────────────────────────────
+
+/**
+ * Derive a short prefix from a session UUID for namespaced task IDs.
+ * Uses the first 4 hex characters of the session ID (e.g., "a3f2").
+ */
+export function sessionPrefix(sessionId: string): string {
+  return sessionId.replace(/-/g, "").slice(0, 4).toLowerCase()
+}
+
+/**
+ * Parse a potentially prefixed task ID into its components.
+ * - "a3f2-5" → { prefix: "a3f2", seq: 5 }
+ * - "5" → { prefix: null, seq: 5 }
+ * - "a3f2-abc" → { prefix: "a3f2", seq: NaN } (invalid)
+ */
+export function parseTaskId(taskId: string): { prefix: string | null; seq: number } {
+  const dashIdx = taskId.indexOf("-")
+  if (dashIdx > 0) {
+    const prefix = taskId.slice(0, dashIdx)
+    const seq = parseInt(taskId.slice(dashIdx + 1), 10)
+    return { prefix, seq }
+  }
+  return { prefix: null, seq: parseInt(taskId, 10) }
+}
+
+/**
+ * Sort comparator for task IDs that handles both numeric and prefixed formats.
+ * Prefixed IDs sort after numeric IDs; within the same prefix, sort by sequence.
+ */
+export function compareTaskIds(a: string, b: string): number {
+  const pa = parseTaskId(a)
+  const pb = parseTaskId(b)
+  // Both numeric — sort numerically
+  if (pa.prefix === null && pb.prefix === null) return pa.seq - pb.seq
+  // Numeric before prefixed
+  if (pa.prefix === null) return -1
+  if (pb.prefix === null) return 1
+  // Both prefixed — sort by prefix then sequence
+  if (pa.prefix !== pb.prefix) return pa.prefix.localeCompare(pb.prefix)
+  return pa.seq - pb.seq
+}
+
 // ─── Session discovery ──────────────────────────────────────────────────────
 
 /** Derive session IDs from a single project transcript directory (constant-time lookup). */
@@ -198,7 +241,7 @@ async function readTasks(sessionId: string, tasksDir = TASKS_DIR): Promise<Task[
         .filter((f) => f.endsWith(".json") && !f.startsWith("."))
         .map(async (f) => JSON.parse(await readFile(join(dir, f), "utf-8")) as Task)
     )
-    return tasks.sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10))
+    return tasks.sort((a, b) => compareTaskIds(a.id, b.id))
   } catch {
     return []
   }
@@ -253,7 +296,30 @@ export async function resolveTaskById(
   tasksDir = TASKS_DIR,
   projectsDir = PROJECTS_DIR
 ): Promise<{ sessionId: string; task: Task }> {
-  // Fast path: check primary session first
+  // Prefix-based fast resolution: if the ID has a session prefix, find the
+  // matching session directly — no ambiguity possible.
+  const { prefix } = parseTaskId(taskId)
+  if (prefix !== null) {
+    const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
+    const matchingSession = sessions.find((s) => sessionPrefix(s) === prefix)
+    if (matchingSession) {
+      const tasks = await readTasks(matchingSession, tasksDir)
+      const task = tasks.find((t) => t.id === taskId)
+      if (task) {
+        if (matchingSession !== primarySessionId) {
+          console.error(
+            `  ${DIM}Task #${taskId} resolved via prefix to session ${matchingSession.slice(0, 8)}...${RESET}`
+          )
+        }
+        return { sessionId: matchingSession, task }
+      }
+    }
+    throw new Error(
+      `Task #${taskId} not found (prefix "${prefix}" matched no session with that task).`
+    )
+  }
+
+  // Unprefixed numeric ID — check primary session first
   const tasks = await readTasks(primarySessionId, tasksDir)
   const task = tasks.find((t) => t.id === taskId)
   if (task) return { sessionId: primarySessionId, task }
@@ -363,8 +429,15 @@ async function listTasks(sessionId: string, label: string) {
 
 async function createTask(sessionId: string, subject: string, description: string) {
   const tasks = await readTasks(sessionId)
-  const maxId = tasks.reduce((m, t) => Math.max(m, parseInt(t.id, 10)), 0)
-  const id = (maxId + 1).toString()
+  const prefix = sessionPrefix(sessionId)
+  // Find max sequence number among this session's prefixed IDs
+  const maxSeq = tasks.reduce((m, t) => {
+    const parsed = parseTaskId(t.id)
+    // Count both unprefixed (legacy) and same-prefix IDs for safe sequencing
+    const seq = parsed.prefix === prefix || parsed.prefix === null ? parsed.seq : 0
+    return Math.max(m, Number.isNaN(seq) ? 0 : seq)
+  }, 0)
+  const id = `${prefix}-${maxSeq + 1}`
 
   const task: Task = {
     id,
