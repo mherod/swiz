@@ -1,16 +1,19 @@
 #!/usr/bin/env bun
+
 /**
  * Stop hook: Check for open issues and PRs needing attention
  * Blocks stop if a personal GitHub repo has open issues, or if
  * the current user has self-authored or self-assigned issues in an org repo.
  */
 
+import { getIssueStore } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
   extractOwnerFromUrl,
   getCanonicalPathHash,
   getCurrentGitHubUser,
+  getRepoSlug,
   ghJson,
   git,
   hasGhCli,
@@ -244,8 +247,36 @@ interface PR {
 
 export async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {
   const jsonFields = "number,title,labels,author,assignees"
-  let issues =
-    (await ghJson<Issue[]>(["issue", "list", "--state", "open", "--json", jsonFields], cwd)) ?? []
+  const repoSlug = await getRepoSlug(cwd)
+
+  // Try live GitHub first
+  let issues = await ghJson<Issue[]>(
+    ["issue", "list", "--state", "open", "--json", jsonFields],
+    cwd
+  )
+
+  if (issues && repoSlug) {
+    // Cache successful result
+    try {
+      const store = getIssueStore()
+      store.upsertIssues(repoSlug, issues)
+    } catch {
+      // SQLite write failure is non-fatal
+    }
+  }
+
+  if (!issues && repoSlug) {
+    // GitHub unavailable — fall back to cached data
+    try {
+      const store = getIssueStore()
+      issues = store.listIssues<Issue>(repoSlug)
+    } catch {
+      issues = []
+    }
+  }
+
+  issues = issues ?? []
+
   if (filterUser) {
     issues = issues.filter(
       (i) => i.author?.login === filterUser || i.assignees?.some((a) => a.login === filterUser)

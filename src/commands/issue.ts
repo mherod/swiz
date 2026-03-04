@@ -1,4 +1,5 @@
-import { issueState } from "../../hooks/hook-utils.ts"
+import { getRepoSlug, issueState } from "../../hooks/hook-utils.ts"
+import { getIssueStore } from "../issue-store.ts"
 import type { Command } from "../types.ts"
 
 function usage(): string {
@@ -27,7 +28,26 @@ async function closeIssue(number: string): Promise<void> {
   })
   await proc.exited
   if (proc.exitCode !== 0) {
+    // Queue mutation for offline replay
+    const slug = await getRepoSlug(cwd)
+    if (slug) {
+      try {
+        getIssueStore().queueMutation(slug, { type: "close", number: parseInt(number, 10) })
+      } catch {
+        // Non-fatal — mutation queue is best-effort
+      }
+    }
     throw new Error(`gh issue close failed with exit code ${proc.exitCode}`)
+  }
+
+  // Remove from cache on successful close
+  const slug = await getRepoSlug(cwd)
+  if (slug) {
+    try {
+      getIssueStore().removeIssue(slug, parseInt(number, 10))
+    } catch {
+      // Non-fatal — cache cleanup is best-effort
+    }
   }
 }
 
@@ -47,6 +67,19 @@ async function commentOnIssue(number: string, body: string): Promise<void> {
   })
   await proc.exited
   if (proc.exitCode !== 0) {
+    // Queue mutation for offline replay
+    const slug = await getRepoSlug(cwd)
+    if (slug) {
+      try {
+        getIssueStore().queueMutation(slug, {
+          type: "comment",
+          number: parseInt(number, 10),
+          body,
+        })
+      } catch {
+        // Non-fatal
+      }
+    }
     throw new Error(`gh issue comment failed with exit code ${proc.exitCode}`)
   }
 }
@@ -74,6 +107,8 @@ async function resolveIssue(number: string, body?: string): Promise<ResolveResul
   const state = await issueState(number, cwd)
   const alreadyClosed = state !== "OPEN"
 
+  const slug = await getRepoSlug(cwd)
+
   let commentPosted = false
   if (body) {
     const proc = Bun.spawn(["gh", "issue", "comment", number, "--body", body], {
@@ -83,6 +118,18 @@ async function resolveIssue(number: string, body?: string): Promise<ResolveResul
     })
     await proc.exited
     if (proc.exitCode !== 0) {
+      // Queue comment mutation for offline replay
+      if (slug) {
+        try {
+          getIssueStore().queueMutation(slug, {
+            type: "comment",
+            number: parseInt(number, 10),
+            body,
+          })
+        } catch {
+          // Non-fatal
+        }
+      }
       throw new Error(`gh issue comment failed with exit code ${proc.exitCode}`)
     }
     commentPosted = true
@@ -97,9 +144,26 @@ async function resolveIssue(number: string, body?: string): Promise<ResolveResul
     })
     await proc.exited
     if (proc.exitCode !== 0) {
+      // Queue close mutation for offline replay
+      if (slug) {
+        try {
+          getIssueStore().queueMutation(slug, { type: "close", number: parseInt(number, 10) })
+        } catch {
+          // Non-fatal
+        }
+      }
       throw new Error(`gh issue close failed with exit code ${proc.exitCode}`)
     }
     closedNow = true
+
+    // Remove from cache on successful close
+    if (slug) {
+      try {
+        getIssueStore().removeIssue(slug, parseInt(number, 10))
+      } catch {
+        // Non-fatal
+      }
+    }
   }
 
   const result: ResolveResult = {
@@ -118,7 +182,7 @@ async function resolveIssue(number: string, body?: string): Promise<ResolveResul
     )
   } else {
     console.log(
-      `  Issue #${number} resolved.` + (commentPosted ? " Comment posted." : "") + " Issue closed."
+      `  Issue #${number} resolved.${commentPosted ? " Comment posted." : ""} Issue closed.`
     )
   }
 

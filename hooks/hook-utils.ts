@@ -469,6 +469,19 @@ export async function isGitHubRemote(cwd: string): Promise<boolean> {
   return url.includes("github.com")
 }
 
+/** Get the owner/repo slug from the git remote URL (e.g., "mherod/swiz"). */
+export async function getRepoSlug(cwd: string): Promise<string | null> {
+  const url = await git(["remote", "get-url", "origin"], cwd)
+  if (!url) return null
+  // SSH: git@github.com:owner/repo.git
+  const sshMatch = url.match(/:([^/]+\/[^/]+?)(?:\.git)?$/)
+  if (sshMatch?.[1]) return sshMatch[1]
+  // HTTPS: https://github.com/owner/repo.git
+  const httpsMatch = url.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?$/)
+  if (httpsMatch?.[1]) return httpsMatch[1]
+  return null
+}
+
 export function hasGhCli(): boolean {
   return !!Bun.which("gh")
 }
