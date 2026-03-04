@@ -3,7 +3,8 @@
 
 import {
   findPriorSessionTasks,
-  limitItems,
+  formatTaskCompleteCommand,
+  formatTaskList,
   readSessionTasks,
   toolNameForCurrentAgent,
 } from "./hook-utils.ts"
@@ -33,16 +34,15 @@ async function main(): Promise<void> {
     let additionalContext: string
     if (priorResult && priorResult.tasks.length > 0) {
       const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
-      const { visible, remaining } = limitItems(priorTasks, TASK_PREVIEW_LIMIT)
-      const taskLines = visible.map((t) => `  • #${t.id} [${t.status}]: ${t.subject}`).join("\n")
-      const overflow = remaining > 0 ? `\n  ... ${remaining} more incomplete task(s)` : ""
-      const completeHint = `swiz tasks complete <id> --session ${priorSessionId} --evidence "note:done"`
+      const completeHint = formatTaskCompleteCommand("<id>", priorSessionId, "note:done")
       additionalContext =
         `Prior session (${priorSessionId}) has ${priorTasks.length} incomplete task(s). ` +
         `If already done, run: ${completeHint}\n` +
         `Resume using ${taskCreateName} before starting new work:\n` +
-        taskLines +
-        overflow
+        formatTaskList(priorTasks, {
+          limit: TASK_PREVIEW_LIMIT,
+          overflowLabel: "incomplete task(s)",
+        })
     } else {
       additionalContext = `No pending tasks in this session. If the upcoming work is non-trivial, use ${taskCreateName} to plan it before starting.`
     }

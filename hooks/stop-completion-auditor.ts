@@ -10,6 +10,7 @@ import {
   computeTranscriptSummary,
   extractToolNamesFromTranscript,
   formatActionPlan,
+  formatTaskCompleteCommands,
   getTranscriptSummary,
   isTaskCreateTool,
   readSessionTasks,
@@ -278,11 +279,12 @@ async function main(): Promise<void> {
     const incompleteTasks = allTasks.filter(
       (t) => t.id && t.id !== "null" && (t.status === "pending" || t.status === "in_progress")
     )
-    const completeCommands = incompleteTasks
-      .map(
-        (t) => `  swiz tasks complete ${t.id} --session ${sessionId} --evidence "note:completed"`
-      )
-      .join("\n")
+    const completeCommands = formatTaskCompleteCommands(
+      incompleteTasks,
+      sessionId,
+      "note:completed",
+      { indent: "  " }
+    )
     blockStop(
       "Incomplete tasks found:\n\n" +
         incompleteDetails.join("\n") +

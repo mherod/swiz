@@ -540,6 +540,56 @@ export function formatTaskSubjectsForDisplay(
   return displayTasks.map((t) => `  ${t}`).join("\n")
 }
 
+export interface FormatTaskListOptions {
+  limit?: number
+  overflowLabel?: string
+  indent?: string
+}
+
+/**
+ * Render tasks as a bullet list, optionally capped with an overflow line.
+ * Useful for hook messages that need bounded context.
+ */
+export function formatTaskList(
+  tasks: Array<Pick<SessionTask, "id" | "status" | "subject">>,
+  options: FormatTaskListOptions = {}
+): string {
+  if (tasks.length === 0) return ""
+  const indent = options.indent ?? "  "
+  const limit = options.limit ?? tasks.length
+  const { visible, remaining } = limitItems(tasks, limit)
+  const lines = visible.map((t) => `${indent}• #${t.id} [${t.status}]: ${t.subject}`).join("\n")
+  if (remaining === 0) return lines
+  const overflowLabel = options.overflowLabel ?? "task(s)"
+  return `${lines}\n${indent}... ${remaining} more ${overflowLabel}`
+}
+
+/**
+ * Render a single `swiz tasks complete` command.
+ * Pass `<id>` when showing a template rather than a concrete task command.
+ */
+export function formatTaskCompleteCommand(
+  taskId: string,
+  sessionId: string,
+  evidence: string,
+  options: { indent?: string } = {}
+): string {
+  const indent = options.indent ?? ""
+  return `${indent}swiz tasks complete ${taskId} --session ${sessionId} --evidence "${evidence}"`
+}
+
+/** Render one `swiz tasks complete` command per task. */
+export function formatTaskCompleteCommands(
+  tasks: Array<Pick<SessionTask, "id">>,
+  sessionId: string,
+  evidence: string,
+  options: { indent?: string } = {}
+): string {
+  return tasks
+    .map((t) => formatTaskCompleteCommand(String(t.id), sessionId, evidence, options))
+    .join("\n")
+}
+
 /** Create a session task via tasks-list.ts. Uses a sentinel file to fire only once per session. */
 export async function createSessionTask(
   sessionId: string | undefined,

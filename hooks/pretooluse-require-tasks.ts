@@ -12,6 +12,8 @@ import {
   findLastTaskToolCallIndex,
   findPriorSessionTasks,
   formatActionPlan,
+  formatTaskCompleteCommands,
+  formatTaskList,
   formatTaskSubjectsForDisplay,
   getTranscriptSummary,
   hasFileInTree,
@@ -144,13 +146,13 @@ async function main() {
     const priorResult = await findPriorSessionTasks(cwd, sessionId)
     if (priorResult && priorResult.tasks.length > 0) {
       const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
-      const taskLines = priorTasks.map((t) => `  • #${t.id} [${t.status}]: ${t.subject}`).join("\n")
-      const completeExamples = priorTasks
-        .map(
-          (t) =>
-            `  swiz tasks complete ${t.id} --session ${priorSessionId} --evidence "note:completed in prior session"`
-        )
-        .join("\n")
+      const taskLines = formatTaskList(priorTasks)
+      const completeExamples = formatTaskCompleteCommands(
+        priorTasks,
+        priorSessionId,
+        "note:completed in prior session",
+        { indent: "  " }
+      )
       deny(
         `STOP. This session has no tasks, but a prior session (${priorSessionId}) had ${priorTasks.length} incomplete task(s):\n` +
           taskLines +

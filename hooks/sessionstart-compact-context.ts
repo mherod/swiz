@@ -7,6 +7,8 @@ import { join } from "node:path"
 import {
   emitContext,
   findPriorSessionTasks,
+  formatTaskCompleteCommand,
+  formatTaskList,
   isIncompleteTaskStatus,
   limitItems,
   readSessionTasks,
@@ -110,12 +112,12 @@ async function main(): Promise<void> {
   const currentTasks = await readSessionTasks(sessionId, home)
   const currentIncomplete = currentTasks.filter((t) => isIncompleteTaskStatus(t.status))
   if (currentIncomplete.length > 0) {
-    const { visible, remaining } = limitItems(currentIncomplete, TASK_PREVIEW_LIMIT)
-    const taskLines = visible.map((t) => `  • #${t.id} [${t.status}]: ${t.subject}`).join("\n")
     ctx +=
       `\n\nThis session has ${currentIncomplete.length} incomplete task(s) that survived compaction:\n` +
-      taskLines +
-      overflowLine(remaining, "incomplete task(s)") +
+      formatTaskList(currentIncomplete, {
+        limit: TASK_PREVIEW_LIMIT,
+        overflowLabel: "incomplete task(s)",
+      }) +
       `\n\nIMPORTANT: Complete or update these tasks using TaskUpdate — do NOT create new tasks ` +
       `for the same work. The stop hook will block until every task in this session is completed. ` +
       `If the work described by a task is already done, mark it completed immediately.`
@@ -126,15 +128,15 @@ async function main(): Promise<void> {
     const priorResult = await findPriorSessionTasks(cwd, sessionId)
     if (priorResult && priorResult.tasks.length > 0) {
       const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
-      const { visible, remaining } = limitItems(priorTasks, TASK_PREVIEW_LIMIT)
-      const taskLines = visible.map((t) => `  • #${t.id} [${t.status}]: ${t.subject}`).join("\n")
-      const completeHint = `swiz tasks complete <id> --session ${priorSessionId} --evidence "note:done"`
+      const completeHint = formatTaskCompleteCommand("<id>", priorSessionId, "note:done")
       ctx +=
         `\n\nPrior session (${priorSessionId}) has ${priorTasks.length} incomplete task(s). ` +
         `If already done, run: ${completeHint}\n` +
         `Otherwise continue these before creating new tasks:\n` +
-        taskLines +
-        overflowLine(remaining, "incomplete task(s)")
+        formatTaskList(priorTasks, {
+          limit: TASK_PREVIEW_LIMIT,
+          overflowLabel: "incomplete task(s)",
+        })
     }
   }
 
