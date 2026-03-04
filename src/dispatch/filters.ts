@@ -12,8 +12,10 @@ import {
   type CollaborationMode,
   getEffectiveSwizSettings,
   readProjectSettings,
+  readProjectState,
   readSwizSettings,
 } from "../settings.ts"
+import { getWorkflowIntent } from "../state-machine.ts"
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -128,6 +130,42 @@ export function filterStackHooks(groups: HookGroup[], detectedStacks: string[]):
     .filter((group) => group.hooks.length > 0)
 }
 
+// ─── State-based filtering ──────────────────────────────────────────────────
+
+/**
+ * Hooks that should be skipped when the project is in terminal states (released, paused).
+ * These hooks are designed for active development and make no sense in terminal states.
+ */
+const ACTIVE_DEVELOPMENT_ONLY_HOOKS = new Set([
+  "posttooluse-git-task-autocomplete.ts", // Suggests task creation only during active work
+  "pretooluse-state-gate.ts", // Enforces development-related state gates
+  "posttooluse-task-advisor.ts", // Suggests follow-up tasks during active development
+])
+
+export async function filterStateHooks(groups: HookGroup[], cwd: string): Promise<HookGroup[]> {
+  try {
+    const state = await readProjectState(cwd)
+    if (!state) return groups
+
+    const intent = getWorkflowIntent(state)
+
+    // In paused/released states, skip hooks that only make sense during active development
+    if (intent === "paused-work" || intent === "released-stable") {
+      return groups
+        .map((group) => {
+          const hooks = group.hooks.filter((hook) => !ACTIVE_DEVELOPMENT_ONLY_HOOKS.has(hook.file))
+          return hooks.length === group.hooks.length ? group : { ...group, hooks }
+        })
+        .filter((group) => group.hooks.length > 0)
+    }
+
+    return groups
+  } catch {
+    // If state reading fails, proceed without state-based filtering
+    return groups
+  }
+}
+
 // ─── Composite settings filter ──────────────────────────────────────────────
 
 export async function applyHookSettingFilters(
@@ -153,5 +191,6 @@ export async function applyHookSettingFilters(
     effective.collaborationMode
   )
   const stackFiltered = filterStackHooks(filtered, detectedStacks)
-  return filterDisabledHooks(stackFiltered, disabledSet)
+  const stateFiltered = await filterStateHooks(stackFiltered, cwd)
+  return filterDisabledHooks(stateFiltered, disabledSet)
 }

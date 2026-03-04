@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
+
 // Stop hook: Warn when session ends while project is in a non-terminal state.
 
-import { readProjectState, STATE_TRANSITIONS, TERMINAL_STATES } from "../src/settings.ts"
+import { readProjectState, STATE_TRANSITIONS } from "../src/settings.ts"
+import { STATE_METADATA } from "../src/state-machine.ts"
 import { blockStop, isGitRepo, type StopHookInput } from "./hook-utils.ts"
 
 async function main(): Promise<void> {
@@ -12,7 +14,9 @@ async function main(): Promise<void> {
 
   const state = await readProjectState(cwd)
   if (!state) return
-  if (TERMINAL_STATES.includes(state)) return
+
+  const metadata = STATE_METADATA[state]
+  if (metadata.isTerminal) return
 
   const transitions = STATE_TRANSITIONS[state]
   const transitionHint =
@@ -21,7 +25,8 @@ async function main(): Promise<void> {
       : ""
 
   const reason =
-    `Project state is "${state}" (non-terminal). ` +
+    `Project state is "${state}" (${metadata.intent}, non-terminal).\n\n` +
+    `${metadata.description}\n\n` +
     `Consider transitioning to a terminal state before stopping, ` +
     `or use "swiz state set" to update the state when your workflow changes.` +
     transitionHint

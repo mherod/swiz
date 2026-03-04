@@ -41,6 +41,7 @@ export {
   filterDisabledHooks,
   filterPrMergeModeHooks,
   filterStackHooks,
+  filterStateHooks,
   formatTrace,
   groupMatches,
   hookCooldownPath,

@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: block disallowed tool categories based on current project state
 
 import { readProjectState } from "../src/settings.ts"
+import { STATE_METADATA } from "../src/state-machine.ts"
 import {
   denyPreToolUse,
   isCodeChangeTool,
@@ -32,10 +34,13 @@ async function main(): Promise<void> {
   const isBlocked = blockedChecks.some((check) => check(toolName))
   if (!isBlocked) return
 
-  denyPreToolUse(
-    `Project state is "${state}" — ${toolName} is not allowed in this state.\n\n` +
-      `Use "swiz state set <state>" to transition to a state that allows this tool.`
-  )
+  const metadata = STATE_METADATA[state]
+  const reason =
+    `Project state is "${state}" (${metadata.intent}) — ${toolName} is not allowed.\n\n` +
+    `${metadata.description}\n\n` +
+    `Use "swiz state set <state>" to transition to a different state.`
+
+  denyPreToolUse(reason)
 }
 
 await main()

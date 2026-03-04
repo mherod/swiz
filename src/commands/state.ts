@@ -5,9 +5,9 @@ import {
   readProjectState,
   STATE_TRANSITIONS,
   type StateHistoryEntry,
-  TERMINAL_STATES,
   writeProjectState,
 } from "../settings.ts"
+import { evaluateTransition, STATE_METADATA } from "../state-machine.ts"
 import type { Command } from "../types.ts"
 
 const DIM = "\x1b[2m"
@@ -42,10 +42,10 @@ function printStateList(): void {
   console.log("\n  swiz state — project state machine\n")
   for (const state of PROJECT_STATES) {
     const transitions = STATE_TRANSITIONS[state]
-    const isTerminal = TERMINAL_STATES.includes(state)
+    const metadata = STATE_METADATA[state]
     const arrow = transitions.length > 0 ? `→ ${transitions.join(", ")}` : "(terminal)"
-    const marker = isTerminal ? " [terminal]" : ""
-    console.log(`  ${state}${marker}  ${arrow}`)
+    const intentMarker = ` [${metadata.intent}]`
+    console.log(`  ${state}${intentMarker}  ${arrow}`)
   }
   console.log()
 }
@@ -70,8 +70,10 @@ export const stateCommand: Command = {
         console.log("\n  project state: not set (default: in-development)\n")
       } else {
         const transitions = STATE_TRANSITIONS[current]
-        const isTerminal = TERMINAL_STATES.includes(current)
-        console.log(`\n  project state: ${current}${isTerminal ? " [terminal]" : ""}`)
+        const metadata = STATE_METADATA[current]
+        console.log(`\n  project state: ${current}`)
+        console.log(`  workflow intent: ${metadata.intent}`)
+        console.log(`  priority: ${metadata.priority}`)
 
         // Show current state age from history
         const settings = await readProjectSettings(cwd)
@@ -115,11 +117,18 @@ export const stateCommand: Command = {
       const current = await readProjectState(cwd)
 
       if (current && current !== targetState) {
-        const allowed = STATE_TRANSITIONS[current]
-        if (!allowed.includes(targetState)) {
-          throw new Error(
-            `Invalid transition: ${current} → ${targetState}\nAllowed from ${current}: ${allowed.length > 0 ? allowed.join(", ") : "none (terminal state)"}`
-          )
+        const timestamp = new Date().toISOString()
+        const result = await evaluateTransition({
+          from: current,
+          to: targetState,
+          currentSettings: {
+            collaborationMode: "solo",
+          },
+          cwd,
+          timestamp,
+        })
+        if (!result.allowed) {
+          throw new Error(result.reason || `Invalid transition: ${current} → ${targetState}`)
         }
       }
 
