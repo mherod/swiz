@@ -336,7 +336,8 @@ function buildPrompt(
   userMessagesSection: string,
   projectStatus: string,
   context: string,
-  ambitionMode: "standard" | "aggressive" = "standard"
+  ambitionMode: "standard" | "aggressive" = "standard",
+  cwd?: string
 ): string {
   const statusSection = projectStatus
     ? `=== PROJECT STATUS ===\n${projectStatus}\n=== END OF PROJECT STATUS ===\n\n`
@@ -411,6 +412,11 @@ function buildPrompt(
     `    Hook implementations belong to the swiz project, not to the agent or the repository being worked in. ` +
     `    If a hook appears defective, the correct action is to file a GitHub issue on mherod/swiz — ` +
     `    never to implement or fix the hook locally.\n` +
+    (cwd
+      ? `  - suggesting code edits, implementations, or fixes in any repository other than the session project (${cwd}). ` +
+        `    If a bug is found in an external tool or dependency, the correct action is to file a GitHub issue on that repo — ` +
+        `    never to suggest implementing the fix outside the current session sandbox.\n`
+      : "") +
     `Start with an imperative verb that names a code action (Implement, Add, Fix, Build, Extend, Wire up, etc.). ` +
     `The step must be something the assistant can do right now by editing source files.\n\n` +
     `REFLECTIONS RULES:\n` +
@@ -506,7 +512,8 @@ async function main(): Promise<void> {
       userMessagesSection,
       projectStatus,
       context,
-      effective.ambitionMode
+      effective.ambitionMode,
+      input.cwd
     )
 
     try {
