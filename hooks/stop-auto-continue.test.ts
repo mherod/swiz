@@ -1448,3 +1448,50 @@ describe("stop-auto-continue", () => {
     expect(result.reason).not.toContain("need refinement")
   })
 })
+
+// ─── Workflow suggestion filter unit tests ─────────────────────────────────
+
+import { isWorkflowSuggestion } from "./stop-auto-continue.ts"
+
+describe("isWorkflowSuggestion", () => {
+  describe("blocks workflow/git-process suggestions", () => {
+    const blocked = [
+      "Implement a hard-fail in the push skill that blocks any direct main push",
+      "Implement bot-aware collaboration detection in the push skill by excluding bot-authored PRs",
+      "Implement hook-bot suggestion filtering so outputs exclude workflow/git-process guidance",
+      "Add a pre-push hook that validates branch naming conventions",
+      "Fix the stop hook to detect stale sessions",
+      "Implement a collaboration guard that blocks git push to main",
+      "Update the commit skill to enforce conventional commits",
+      "Wire up a pre-commit hook for lint-staged checks",
+      "Add feature branch enforcement to the push guard",
+      "Implement branch policy that requires pull requests for main",
+      "Modify the collaboration signal detection to exclude bots",
+    ]
+
+    for (const suggestion of blocked) {
+      test(`blocks: "${suggestion.slice(0, 60)}..."`, () => {
+        expect(isWorkflowSuggestion(suggestion)).toBe(true)
+      })
+    }
+  })
+
+  describe("allows product/code-focused suggestions", () => {
+    const allowed = [
+      "Implement user profile endpoint with avatar upload support",
+      "Add error handling for network timeout in the API client",
+      "Fix the date parser to handle ISO 8601 timezone offsets",
+      "Build a caching layer for frequently accessed database queries",
+      "Extend the search API to support fuzzy matching",
+      "Add pagination to the list endpoints",
+      "Implement webhook delivery retry with exponential backoff",
+      "Fix the login flow to handle expired refresh tokens",
+    ]
+
+    for (const suggestion of allowed) {
+      test(`allows: "${suggestion.slice(0, 60)}..."`, () => {
+        expect(isWorkflowSuggestion(suggestion)).toBe(false)
+      })
+    }
+  })
+})

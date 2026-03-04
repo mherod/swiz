@@ -100,6 +100,32 @@ function hasMarkup(text: string): boolean {
   return /[<〈‹⟨˂ᐸ❮❰⟪⦑⧼]\w/.test(normalized)
 }
 
+// ─── Workflow suggestion filter ──────────────────────────────────────────────
+
+/**
+ * Returns true if the suggestion is about git workflow, hook/skill modifications,
+ * or process enforcement rather than product/code concerns.
+ * These suggestions violate the ABSOLUTE PROHIBITIONS in the prompt but the AI
+ * backend doesn't always comply — this is the deterministic backstop.
+ */
+const WORKFLOW_PATTERNS = [
+  /\bgit\s+(commit|add|push|pull|fetch|rebase|merge|stash|checkout|switch)\b/i,
+  /\bgit\s+workflow\b/i,
+  /\bfeature\s+branch\b/i,
+  /\bpull\s+request\b/i,
+  /\b(push|commit|pr)\s+skill\b/i,
+  /\b(pre-?push|pre-?commit|stop)\s+hook/i,
+  /\bhook\s+(script|implementation|behaviour|behavior|filtering)\b/i,
+  /\b(implement|modify|wire|add|fix|update)\b.*\bhook\b/i,
+  /\bcollaboration\s+(signal|guard|detection|check)\b/i,
+  /\bbranch\s+(policy|protection|enforcement)\b/i,
+  /\b(push|commit)\s+guard\b/i,
+]
+
+export function isWorkflowSuggestion(text: string): boolean {
+  return WORKFLOW_PATTERNS.some((re) => re.test(text))
+}
+
 // ─── Agent response parsing ─────────────────────────────────────────────────
 
 /**
@@ -494,6 +520,14 @@ async function main(): Promise<void> {
     }
   }
 
+  // Post-generation filter: reject workflow/git-process suggestions that violate
+  // the ABSOLUTE PROHIBITIONS. The AI backend doesn't always comply with prompt
+  // instructions, so this deterministic check is the backstop. When filtered,
+  // response.next becomes "" which triggers FALLBACK_SUGGESTION downstream.
+  if (response.next && isWorkflowSuggestion(response.next)) {
+    response.next = ""
+  }
+
   // Write reflections to memory (never blocks, never throws)
   if (response.reflections.length > 0) {
     await writeReflections(input.cwd, response.reflections)
@@ -518,4 +552,5 @@ async function main(): Promise<void> {
   )
 }
 
-main()
+// Guard: only run main() when this file is the entry point, not when imported for testing.
+if (import.meta.main) main()
