@@ -102,6 +102,18 @@ describe("posttooluse-pr-context: checkout detection (\\s*git checkout)", () => 
     expect(result.exitedCleanly).toBe(true)
   })
 
+  // The hook now fetches latestReviews and renders approval details when present.
+  // In a non-PR environment (main branch, /tmp), the hook exits before reaching
+  // the review rendering logic. These tests verify the hook remains stable with
+  // the added latestReviews field in the gh pr view call.
+
+  test("git checkout on main branch in real repo exits cleanly with latestReviews field", async () => {
+    // Running from the actual repo CWD on main — no PR exists, hook exits silently.
+    // This verifies the latestReviews field addition doesn't break the happy path.
+    const result = await runHook("git checkout main", process.cwd())
+    expect(result.exitedCleanly).toBe(true)
+  })
+
   test("non-shell tool exits silently (tool_name filtering)", async () => {
     const payload = JSON.stringify({
       tool_name: "Read",

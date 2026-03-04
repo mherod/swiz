@@ -27,6 +27,13 @@ const branch = await git(["branch", "--show-current"], cwd)
 if (!branch) process.exit(0)
 
 // Fetch PR JSON for this branch (gh times out after ~5s itself)
+interface GhReview {
+  author?: { login?: string }
+  state?: string
+  submittedAt?: string
+  body?: string
+}
+
 interface GhPr {
   number: number
   title: string
@@ -36,6 +43,7 @@ interface GhPr {
   reviewDecision: string
   body: string
   comments: Array<{ author?: { login?: string }; createdAt?: string; body?: string }>
+  latestReviews: GhReview[]
 }
 
 const pr = await ghJson<GhPr>(
@@ -44,7 +52,7 @@ const pr = await ghJson<GhPr>(
     "view",
     branch,
     "--json",
-    "number,title,state,mergeable,mergeStateStatus,body,comments,reviewDecision",
+    "number,title,state,mergeable,mergeStateStatus,body,comments,reviewDecision,latestReviews",
   ],
   cwd
 )
@@ -64,6 +72,22 @@ if (pr.mergeStateStatus && pr.mergeStateStatus !== "null") {
 }
 if (pr.mergeable && pr.mergeable !== "null" && pr.mergeable !== "UNKNOWN") {
   lines.push(`Mergeable: ${pr.mergeable}`)
+}
+
+// Render individual review details (approvals, changes requested, etc.)
+const approvals = (pr.latestReviews ?? []).filter(
+  (r) => r.state === "APPROVED" || r.state === "CHANGES_REQUESTED"
+)
+if (approvals.length > 0) {
+  lines.push("", "--- Reviews ---")
+  for (const r of approvals) {
+    const who = r.author?.login ?? "unknown"
+    const when = r.submittedAt ?? ""
+    const reviewBody = r.body
+      ? `: ${r.body.length > 300 ? `${r.body.slice(0, 300)}...` : r.body}`
+      : ""
+    lines.push(`[${r.state}] @${who} (${when})${reviewBody}`)
+  }
 }
 
 if (pr.body) {
