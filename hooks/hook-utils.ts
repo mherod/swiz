@@ -526,7 +526,10 @@ export async function findPriorSessionTasks(
   // Walk sessions newest-first; return incomplete tasks from first session with tasks
   for (const { id } of sessions) {
     const tasks = await readSessionTasks(id, home)
-    const incomplete = tasks.filter((t) => isIncompleteTaskStatus(t.status))
+    const incomplete = tasks
+      .filter((t) => isIncompleteTaskStatus(t.status))
+      // Filter to only numeric IDs (user-created tasks), exclude session-scoped bootstrap IDs
+      .filter((t) => /^\d+$/.test(t.id))
     if (incomplete.length > 0) return { sessionId: id, tasks: incomplete }
   }
   return null
