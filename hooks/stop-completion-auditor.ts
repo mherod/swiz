@@ -19,6 +19,55 @@ import {
 
 const TOOL_CALL_THRESHOLD = 10
 
+// ── Subject deduplication helpers ──────────────────────────────────────────
+
+/** Lowercase, strip punctuation, collapse whitespace for fuzzy comparison. */
+export function normalizeSubject(subject: string): string {
+  return subject
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+/** Extract significant words (skip stop words and short tokens). */
+export function significantWords(normalized: string): Set<string> {
+  const STOP = new Set([
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "for",
+    "to",
+    "in",
+    "of",
+    "on",
+    "with",
+    "is",
+    "was",
+    "be",
+  ])
+  return new Set(normalized.split(" ").filter((w) => w.length > 2 && !STOP.has(w)))
+}
+
+/**
+ * Two subjects overlap if they share ≥50% of their significant words.
+ * This catches cases like "Push backward-compat error commit" vs
+ * "Push backward-compat commit" without false-positiving on unrelated tasks.
+ */
+export function subjectsOverlap(a: string, b: string): boolean {
+  const wordsA = significantWords(a)
+  const wordsB = significantWords(b)
+  if (wordsA.size === 0 || wordsB.size === 0) return false
+  let overlap = 0
+  for (const w of wordsA) {
+    if (wordsB.has(w)) overlap++
+  }
+  const minSize = Math.min(wordsA.size, wordsB.size)
+  return overlap / minSize >= 0.5
+}
+
 /**
  * Extract sibling session IDs from the same project directory.
  * The transcript path is `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`.
@@ -120,6 +169,39 @@ async function main(): Promise<void> {
 
   // Read task files
   const anyTaskFound = allTasks.length > 0
+
+  // ── Stale-task deduplication ──────────────────────────────────────────────
+  // After context compaction the agent may create a new task for work that an
+  // older task already described. When a completed task's subject substantially
+  // overlaps an incomplete task's subject, auto-complete the stale duplicate.
+  const completedTasks = allTasks.filter((t) => t.status === "completed")
+  const incompleteTasks = allTasks.filter(
+    (t) => t.id && t.id !== "null" && (t.status === "pending" || t.status === "in_progress")
+  )
+
+  if (completedTasks.length > 0 && incompleteTasks.length > 0) {
+    const completedSubjects = completedTasks.map((t) => normalizeSubject(t.subject))
+    for (const stale of incompleteTasks) {
+      const staleNorm = normalizeSubject(stale.subject)
+      const isDuplicate = completedSubjects.some((cs) => subjectsOverlap(staleNorm, cs))
+      if (isDuplicate) {
+        // Auto-complete: write the updated task file
+        try {
+          const taskPath = join(tasksDir, `${stale.id}.json`)
+          const updated = {
+            ...stale,
+            status: "completed" as const,
+            completionEvidence: "note:auto-completed — duplicate of a completed task",
+          }
+          await Bun.write(taskPath, JSON.stringify(updated, null, 2))
+          stale.status = "completed" // Update in-memory for the rest of this run
+        } catch {
+          // Write failed — leave as-is and let the normal block message fire
+        }
+      }
+    }
+  }
+
   const incompleteDetails = allTasks
     .filter((t) => t.id && t.id !== "null")
     .filter((t): t is TaskFile => t.status === "pending" || t.status === "in_progress")
