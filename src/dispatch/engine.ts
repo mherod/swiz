@@ -33,6 +33,9 @@ const DEFAULT_TIMEOUT = 10 // seconds
 export function log(msg: string): void {
   try {
     appendFileSync(LOG_PATH, `${msg}\n`)
+    if (process.env.SWIZ_DEBUG) {
+      console.error(msg)
+    }
   } catch {
     // Never let logging break dispatch
   }
@@ -45,7 +48,8 @@ export function logHeader(
   trigger?: string
 ): void {
   const ts = new Date().toISOString()
-  log(`\n── ${ts} ── ${event} (hookEventName=${hookEventName}) ──`)
+  const pid = process.pid
+  log(`\n── ${ts} ── ${event} (hookEventName=${hookEventName}, pid=${pid}) ──`)
   if (toolName) log(`   tool: ${toolName}`)
   if (trigger) log(`   trigger: ${trigger}`)
 }

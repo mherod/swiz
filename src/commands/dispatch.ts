@@ -141,9 +141,21 @@ export const dispatchCommand: Command = {
     let payload: Record<string, unknown> = {}
     let parseError = false
     try {
-      payload = JSON.parse(payloadStr) as Record<string, unknown>
+      payload = JSON.parse(payloadStr || "{}") as Record<string, unknown>
     } catch {
       parseError = true
+    }
+
+    // ── Backfill missing fields from agent environment variables ──
+    if (!payload.cwd) {
+      payload.cwd =
+        process.env.GEMINI_CWD ||
+        process.env.GEMINI_PROJECT_DIR ||
+        process.env.CLAUDE_PROJECT_DIR ||
+        process.cwd()
+    }
+    if (!payload.session_id) {
+      payload.session_id = process.env.GEMINI_SESSION_ID || "unknown-session"
     }
 
     const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
@@ -154,6 +166,10 @@ export const dispatchCommand: Command = {
 
     logHeader(canonicalEvent, hookEventName, toolName, trigger)
     log(`   payload: ${payloadStr.length} bytes${parseError ? " ⚠ INVALID JSON" : ""}`)
+
+    // Re-serialize payload if we modified it
+    const finalPayloadStr = parseError ? payloadStr : JSON.stringify(payload)
+
     if (payloadStr.length === 0) {
       log(`   ⚠ EMPTY STDIN — no payload received from agent`)
     } else {
@@ -215,7 +231,7 @@ export const dispatchCommand: Command = {
     if (filteredGroups.length === 0) return
 
     // ── Pre-compute transcript summary for hooks ──────────────────────────
-    let enrichedPayloadStr = payloadStr
+    let enrichedPayloadStr = finalPayloadStr
     const transcriptPath = payload.transcript_path as string | undefined
     if (transcriptPath && !parseError) {
       const summary = await computeTranscriptSummary(transcriptPath)
