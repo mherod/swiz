@@ -15,10 +15,12 @@
 //   Collaborative + trivial: allowed
 //   Collaborative + non-trivial: BLOCKED — must use feature branch + PR
 
+import { evaluateCollaborationPolicy, type OpenPullRequest } from "../src/collaboration-policy.ts"
 import { readProjectSettings, resolvePolicy } from "../src/settings.ts"
 import {
   classifyChangeScope,
   denyPreToolUse,
+  extractOwnerFromUrl,
   getCurrentGitHubUser,
   gh,
   git,
@@ -129,49 +131,55 @@ const { statParsingFailed, isTrivial, isDocsOnly, scopeDescription, fileCount, t
 
 // ─── Check collaborator activity ──────────────────────────────────────
 
-// Get repo owner/repo from remote URL
+interface RecentCommit {
+  author?: { login?: string | null } | null
+  commit: {
+    author: {
+      date: string
+    }
+  }
+}
+
 const remoteUrl = await git(["remote", "get-url", "origin"], cwd)
-const repoMatch = remoteUrl.match(
-  /(?:github\.com|gitlab\.com|bitbucket\.org)[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/
-)
-if (!repoMatch || !repoMatch[1] || !repoMatch[2]) process.exit(0) // Can't parse repo, allow push
+const owner = extractOwnerFromUrl(remoteUrl)
+const repoMatch = remoteUrl.match(/github\.com[:/][^/]+\/([^/]+?)(?:\.git)?$/)
+const repo = repoMatch?.[1] ?? null
+if (!owner || !repo) process.exit(0) // Can't parse GitHub repo, allow push
 
-const [owner, repo] = [repoMatch[1]!, repoMatch[2]!]
+const [openPrsRaw, commitsRaw, currentUser] = await Promise.all([
+  gh(["pr", "list", "--state", "open", "--limit", "10", "--json", "number,author"], cwd),
+  gh(["api", "repos/" + owner + "/" + repo + "/commits"], cwd),
+  getCurrentGitHubUser(cwd),
+])
 
-// Check for other contributors in last 24 hours
-const recentContributors = await gh(
-  [
-    "api",
-    "repos/" + owner + "/" + repo + "/commits",
-    "--jq",
-    '.[] | select(.commit.author.date > (now - 86400 | strftime("%Y-%m-%dT%H:%M:%SZ"))) | .author.login',
-  ],
-  cwd
-)
+const parseJson = <T>(value: string): T | null => {
+  if (!value) return null
+  try {
+    return JSON.parse(value) as T
+  } catch {
+    return null
+  }
+}
 
-// Get current user to exclude from contributor list
-const currentUser = await getCurrentGitHubUser(cwd)
+const openPrs = parseJson<OpenPullRequest[]>(openPrsRaw) ?? []
+const commits = parseJson<RecentCommit[]>(commitsRaw) ?? []
 
-const otherContributors = Array.from(
-  new Set(
-    recentContributors
-      .trim()
-      .split("\n")
-      .filter(Boolean)
-      .filter((c) => c !== "null" && c !== "" && c !== currentUser)
-  )
-)
+const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000
+const recentContributorLogins = commits
+  .filter((commit) => {
+    const timestamp = Date.parse(commit.commit.author.date)
+    return Number.isFinite(timestamp) && timestamp > twentyFourHoursAgo
+  })
+  .map((commit) => commit.author?.login ?? null)
 
-// Check for open PRs
-const openPrs = await gh(["pr", "list", "--state", "open", "--limit", "1", "--json", "number"], cwd)
-const hasOpenPrs = openPrs.trim() !== "" && openPrs.trim() !== "[]"
+const collaboration = evaluateCollaborationPolicy({
+  currentUser,
+  openPullRequests: openPrs,
+  recentContributorLogins,
+  repoOwner: owner,
+})
 
-// Determine if repo is collaborative
-const isOrg =
-  remoteUrl.includes("github.com/") &&
-  remoteUrl.match(/github\.com\/[^/]+\//) &&
-  owner !== owner.toLowerCase()
-const isCollaborative = otherContributors.length > 0 || hasOpenPrs || isOrg
+const isCollaborative = collaboration.isCollaborative
 
 // ─── Enforce policy ────────────────────────────────────────────────────
 
@@ -213,7 +221,8 @@ Non-trivial changes to main branch in a collaborative repository.
 
 Change scope: ${scopeDescription} (${fileCount} files, ${totalLinesChanged} lines)
 Repository: ${owner}/${repo}
-Other recent contributors: ${otherContributors.length > 0 ? otherContributors.join(", ") : "none in last 24h"}
+Collaboration signals:
+${collaboration.signals.map((s) => `  - ${s}`).join("\n")}
 
 For non-trivial work, use the feature branch workflow:
   1. Create a feature branch: git checkout -b feat/description

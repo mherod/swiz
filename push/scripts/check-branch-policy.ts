@@ -12,7 +12,8 @@
 // Reads: git state (branch, upstream, changed files, commit messages)
 // Exits: 0 = allow, 1 = block (prints BLOCKED message to stderr)
 
-import { gh, git, isGitRepo } from "../../hooks/hook-utils.ts"
+import { extractOwnerFromUrl, gh, git, isGitRepo } from "../../hooks/hook-utils.ts"
+import { evaluateCollaborationPolicy } from "../../src/collaboration-policy.ts"
 
 const PROTECTED_BRANCHES = new Set(["main", "master"])
 const MAX_FILES_HARD_BLOCK = 5
@@ -65,6 +66,20 @@ async function ghSafe<T>(args: string[], cwd: string): Promise<GhResult<T>> {
     return { ok: true, value: JSON.parse(raw) as T }
   } catch {
     return { ok: false }
+  }
+}
+
+interface GhOpenPr {
+  author?: { login?: string | null } | null
+  number: number
+}
+
+interface GhCommit {
+  author?: { login?: string | null } | null
+  commit: {
+    author: {
+      date: string
+    }
   }
 }
 
@@ -134,66 +149,42 @@ if (!ghAvailable) {
 
 // ── Check 2: Collaboration detection ────────────────────────────────────
 
-interface GhUser {
-  login: string
-}
-
-const currentUserResult = await ghSafe<GhUser>(["api", "user", "--jq", ".login"], cwd)
-const currentUser = currentUserResult.ok ? String(currentUserResult.value) : null
-
-// Run all collaboration checks in parallel
+const currentUser = (await gh(["api", "user", "--jq", ".login"], cwd)) || null
 const remoteUrl = await git(["remote", "get-url", "origin"], cwd)
-const isOrgRepo = (() => {
-  if (!remoteUrl || !currentUser) return false
-  // Extract owner from remote URL: git@github.com:owner/repo.git or https://github.com/owner/repo.git
-  const match = remoteUrl.match(/github\.com[:/]([^/]+)\//)
-  const owner = match?.[1]
-  return owner !== undefined && owner !== currentUser
-})()
+const repoOwner = extractOwnerFromUrl(remoteUrl)
 
-const [openPrsResult, recentContribsRaw] = await Promise.all([
-  ghSafe<Array<{ number: number; author: { login: string } }>>(
+const [openPrsResult, commitsResult] = await Promise.all([
+  ghSafe<GhOpenPr[]>(
     ["pr", "list", "--state", "open", "--json", "number,author", "--limit", "10"],
     cwd
   ),
-  gh(
-    [
-      "api",
-      "repos/{owner}/{repo}/commits",
-      "--jq",
-      `.[] | select(.commit.author.date > (now - 86400 | strftime("%Y-%m-%dT%H:%M:%SZ"))) | .author.login`,
-    ],
-    cwd
-  ),
+  ghSafe<GhCommit[]>(["api", "repos/{owner}/{repo}/commits"], cwd),
 ])
 
-const hasOpenPRs = openPrsResult.ok && openPrsResult.value.length > 0
-const recentContributors = recentContribsRaw
-  ? [...new Set(recentContribsRaw.split("\n").filter(Boolean))]
+const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000
+const recentContributorLogins = commitsResult.ok
+  ? commitsResult.value
+      .filter((commit) => {
+        const timestamp = Date.parse(commit.commit.author.date)
+        return Number.isFinite(timestamp) && timestamp > twentyFourHoursAgo
+      })
+      .map((commit) => commit.author?.login ?? null)
   : []
-const otherContributors = currentUser
-  ? recentContributors.filter((c) => c !== currentUser)
-  : recentContributors
 
-collaborationResolved = true
+const collaboration = evaluateCollaborationPolicy({
+  currentUser,
+  openPullRequests: openPrsResult.ok ? openPrsResult.value : [],
+  recentContributorLogins,
+  repoOwner,
+})
 
-const collaborationSignals: string[] = []
-if (isOrgRepo) collaborationSignals.push("Organization repository (not a personal repo)")
-if (hasOpenPRs) {
-  const count = openPrsResult.ok ? openPrsResult.value.length : 0
-  collaborationSignals.push(`${count} open pull request(s)`)
-}
-if (otherContributors.length > 0) {
-  collaborationSignals.push(
-    `Other contributors active in last 24h: ${otherContributors.join(", ")}`
-  )
-}
+collaborationResolved = currentUser !== null && openPrsResult.ok && commitsResult.ok
 
-if (collaborationSignals.length > 0) {
+if (collaboration.isCollaborative) {
   block(
     `Collaborative repository detected — direct pushes to ${branch} are not allowed.\n\n` +
       "Collaboration signals:\n" +
-      collaborationSignals.map((s) => `  - ${s}`).join("\n")
+      collaboration.signals.map((s) => `  - ${s}`).join("\n")
   )
 }
 
