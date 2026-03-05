@@ -1,7 +1,9 @@
+import { rename } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
 import { manifest } from "../manifest.ts"
 import { readSwizSettings } from "../settings.ts"
+import { findSkillConflicts, SKILL_PRECEDENCE, type SkillConflict } from "../skill-utils.ts"
 import type { Command } from "../types.ts"
 
 const SWIZ_ROOT = dirname(Bun.main)
@@ -13,6 +15,7 @@ const RED = "\x1b[31m"
 const YELLOW = "\x1b[33m"
 const DIM = "\x1b[2m"
 const RESET = "\x1b[0m"
+const HOME = process.env.HOME ?? ""
 
 const PASS = `${GREEN}✓${RESET}`
 const FAIL = `${RED}✗${RESET}`
@@ -195,6 +198,98 @@ async function checkSwizSettings(): Promise<CheckResult> {
   }
 }
 
+function displayPath(path: string): string {
+  return HOME && path.startsWith(HOME) ? `~${path.slice(HOME.length)}` : path
+}
+
+function formatSkillPrecedence(): string {
+  return SKILL_PRECEDENCE.map((dir) => displayPath(dir)).join(" > ")
+}
+
+function buildSkillConflictResults(conflicts: SkillConflict[]): CheckResult[] {
+  if (conflicts.length === 0) {
+    return [
+      {
+        name: "Skill conflicts",
+        status: "pass",
+        detail: `no duplicate skill names across ${SKILL_PRECEDENCE.length} skill directories`,
+      },
+    ]
+  }
+
+  const precedence = formatSkillPrecedence()
+  return conflicts.map((conflict) => ({
+    name: `Skill conflict: ${conflict.name}`,
+    status: "warn",
+    detail:
+      `active=${displayPath(conflict.active.path)}; overridden=` +
+      `${conflict.overridden.map((entry) => displayPath(entry.path)).join(", ")}; ` +
+      `precedence=${precedence}`,
+  }))
+}
+
+interface SkillConflictFixSuccess {
+  name: string
+  originalDir: string
+  movedDir: string
+}
+
+interface SkillConflictFixFailure {
+  name: string
+  originalDir: string
+  error: string
+}
+
+function conflictSuffixTimestamp(): string {
+  const d = new Date()
+  const yyyy = d.getFullYear().toString().padStart(4, "0")
+  const mm = (d.getMonth() + 1).toString().padStart(2, "0")
+  const dd = d.getDate().toString().padStart(2, "0")
+  const hh = d.getHours().toString().padStart(2, "0")
+  const min = d.getMinutes().toString().padStart(2, "0")
+  const ss = d.getSeconds().toString().padStart(2, "0")
+  return `${yyyy}${mm}${dd}${hh}${min}${ss}`
+}
+
+async function nextConflictBackupDir(originalDir: string, stamp: string): Promise<string> {
+  let attempt = 0
+  while (true) {
+    const suffix = attempt === 0 ? stamp : `${stamp}-${attempt}`
+    const candidate = `${originalDir}.disabled-by-swiz-${suffix}`
+    if (!(await Bun.file(candidate).exists())) {
+      return candidate
+    }
+    attempt++
+  }
+}
+
+async function fixSkillConflicts(
+  conflicts: SkillConflict[]
+): Promise<{ fixed: SkillConflictFixSuccess[]; failed: SkillConflictFixFailure[] }> {
+  const fixed: SkillConflictFixSuccess[] = []
+  const failed: SkillConflictFixFailure[] = []
+  const stamp = conflictSuffixTimestamp()
+
+  for (const conflict of conflicts) {
+    for (const entry of conflict.overridden) {
+      const originalDir = dirname(entry.path)
+      const movedDir = await nextConflictBackupDir(originalDir, stamp)
+      try {
+        await rename(originalDir, movedDir)
+        fixed.push({ name: conflict.name, originalDir, movedDir })
+      } catch (err: unknown) {
+        failed.push({
+          name: conflict.name,
+          originalDir,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
+  }
+
+  return { fixed, failed }
+}
+
 // ─── Config sync check ──────────────────────────────────────────────────────
 
 /** Extract canonical event names from `swiz dispatch <event> ...` commands in a config. */
@@ -322,6 +417,9 @@ export const doctorCommand: Command = {
       results.push(await checkAgentConfigSync(agent))
     }
 
+    const skillConflicts = await findSkillConflicts()
+    results.push(...buildSkillConflictResults(skillConflicts))
+
     // GitHub CLI
     results.push(await checkGhAuth())
 
@@ -354,20 +452,49 @@ export const doctorCommand: Command = {
         r.status === "warn" &&
         r.detail.includes("missing dispatch")
     )
-    if (staleConfigs.length > 0 && fix) {
-      console.log(`  ${BOLD}Auto-fixing stale configs...${RESET}\n`)
-      const proc = Bun.spawn(["bun", "run", join(SWIZ_ROOT, "index.ts"), "install"], {
-        stdout: "inherit",
-        stderr: "inherit",
-      })
-      await proc.exited
-      if (proc.exitCode === 0) {
-        console.log(`  ${GREEN}✓ Configs updated successfully${RESET}\n`)
-      } else {
-        console.log(`  ${RED}✗ Install failed (exit ${proc.exitCode})${RESET}\n`)
+    if (fix) {
+      if (staleConfigs.length > 0) {
+        console.log(`  ${BOLD}Auto-fixing stale configs...${RESET}\n`)
+        const proc = Bun.spawn(["bun", "run", join(SWIZ_ROOT, "index.ts"), "install"], {
+          stdout: "inherit",
+          stderr: "inherit",
+        })
+        await proc.exited
+        if (proc.exitCode === 0) {
+          console.log(`  ${GREEN}✓ Configs updated successfully${RESET}\n`)
+        } else {
+          console.log(`  ${RED}✗ Install failed (exit ${proc.exitCode})${RESET}\n`)
+        }
       }
-    } else if (staleConfigs.length > 0) {
-      console.log(`  ${YELLOW}Stale configs detected. Run: swiz doctor --fix${RESET}\n`)
+
+      if (skillConflicts.length > 0) {
+        console.log(`  ${BOLD}Auto-fixing skill conflicts...${RESET}\n`)
+        const fixedResult = await fixSkillConflicts(skillConflicts)
+        for (const item of fixedResult.fixed) {
+          console.log(
+            `  ${GREEN}✓${RESET} ${item.name}: moved ${displayPath(item.originalDir)} -> ${displayPath(item.movedDir)}`
+          )
+          console.log(
+            `    ${DIM}restore: mv "${displayPath(item.movedDir)}" "${displayPath(item.originalDir)}"${RESET}`
+          )
+        }
+        for (const item of fixedResult.failed) {
+          console.log(
+            `  ${RED}✗${RESET} ${item.name}: could not move ${displayPath(item.originalDir)} (${item.error})`
+          )
+        }
+        if (fixedResult.fixed.length > 0) {
+          console.log()
+        }
+      }
+    } else if (staleConfigs.length > 0 || skillConflicts.length > 0) {
+      const fixables = [
+        staleConfigs.length > 0 ? "stale configs" : null,
+        skillConflicts.length > 0 ? "skill conflicts" : null,
+      ]
+        .filter(Boolean)
+        .join(" and ")
+      console.log(`  ${YELLOW}${fixables} detected. Run: swiz doctor --fix${RESET}\n`)
     }
 
     if (failures.length > 0) {

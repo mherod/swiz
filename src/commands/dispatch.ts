@@ -29,6 +29,51 @@ import { readProjectSettings, resolveProjectHooks } from "../settings.ts"
 import { computeTranscriptSummary } from "../transcript-summary.ts"
 import type { Command } from "../types.ts"
 
+const STDIN_PAYLOAD_TIMEOUT_MS = 2_000
+
+async function readStdinPayloadWithTimeout(
+  timeoutMs: number = STDIN_PAYLOAD_TIMEOUT_MS
+): Promise<string> {
+  const reader = Bun.stdin.stream().getReader()
+  const decoder = new TextDecoder()
+  let timedOut = false
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      timedOut = true
+      // Cancel the active reader so Bun can terminate even if stdin remains open.
+      void reader.cancel().catch(() => {})
+      reject(
+        new Error(`Timed out waiting ${timeoutMs / 1000}s for stdin JSON payload to be received`)
+      )
+    }, timeoutMs)
+    timeoutHandle.unref?.()
+  })
+
+  const readAll = (async () => {
+    let payload = ""
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      payload += decoder.decode(value, { stream: true })
+    }
+    payload += decoder.decode()
+    return payload
+  })().catch((err) => {
+    if (timedOut) return ""
+    throw err
+  })
+
+  try {
+    return await Promise.race([readAll, timeout])
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle)
+    try {
+      reader.releaseLock()
+    } catch {}
+  }
+}
+
 // ─── Backward-compatible re-exports ─────────────────────────────────────────
 // Tests and other consumers import from this file; re-export everything.
 
@@ -95,7 +140,7 @@ export const dispatchCommand: Command = {
         throw new Error("Usage: swiz dispatch replay <event> [--json]")
       }
 
-      const payloadStr = await new Response(Bun.stdin).text()
+      const payloadStr = await readStdinPayloadWithTimeout()
       let payload: Record<string, unknown> = {}
       try {
         payload = JSON.parse(payloadStr) as Record<string, unknown>
@@ -137,7 +182,7 @@ export const dispatchCommand: Command = {
     }
     const hookEventName = args[1] ?? canonicalEvent
 
-    const payloadStr = await new Response(Bun.stdin).text()
+    const payloadStr = await readStdinPayloadWithTimeout()
     let payload: Record<string, unknown> = {}
     let parseError = false
     try {

@@ -57,6 +57,17 @@ export interface SkillInfo {
   path: string
 }
 
+export interface SkillConflictEntry {
+  dir: string
+  path: string
+}
+
+export interface SkillConflict {
+  name: string
+  active: SkillConflictEntry
+  overridden: SkillConflictEntry[]
+}
+
 export async function findSkills(): Promise<SkillInfo[]> {
   const skills: SkillInfo[] = []
   const seen = new Set<string>()
@@ -95,4 +106,44 @@ export async function findSkills(): Promise<SkillInfo[]> {
   }
 
   return skills
+}
+
+export async function findSkillConflicts(
+  skillDirs: string[] = SKILL_PRECEDENCE
+): Promise<SkillConflict[]> {
+  const byName = new Map<string, SkillConflictEntry[]>()
+
+  for (const dir of skillDirs) {
+    let entries: import("node:fs").Dirent[]
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    const directoryNames = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b))
+
+    for (const name of directoryNames) {
+      const skillPath = join(dir, name, "SKILL.md")
+      if (!(await Bun.file(skillPath).exists())) continue
+      const existing = byName.get(name) ?? []
+      existing.push({ dir, path: skillPath })
+      byName.set(name, existing)
+    }
+  }
+
+  const conflicts: SkillConflict[] = []
+  const sortedNames = [...byName.keys()].sort((a, b) => a.localeCompare(b))
+  for (const name of sortedNames) {
+    const entries = byName.get(name) ?? []
+    if (entries.length <= 1) continue
+    const [active, ...overridden] = entries
+    if (!active) continue
+    conflicts.push({ name, active, overridden })
+  }
+
+  return conflicts
 }

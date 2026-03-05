@@ -96,6 +96,23 @@ describe("dispatch routing", () => {
     const result = await dispatch("preToolUse", {})
     expect(result.exitCode).toBe(0)
   })
+
+  test("fails when stdin payload is not received within 2s", async () => {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "preToolUse", "PreToolUse"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+
+    // Intentionally do not write or close stdin.
+    const stdout = await new Response(proc.stdout).text()
+    const stderr = await new Response(proc.stderr).text()
+    await proc.exited
+
+    expect(proc.exitCode).toBe(1)
+    expect(stdout.trim()).toBe("")
+    expect(stderr).toContain("Timed out waiting 2s for stdin JSON payload to be received")
+  })
 })
 
 describe("dispatch replay", () => {
@@ -183,6 +200,23 @@ describe("dispatch replay", () => {
     await proc.exited
     expect(proc.exitCode).not.toBe(0)
     expect(stderr).toContain("replay <event>")
+  })
+
+  test("replay fails when stdin payload is not received within 2s", async () => {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "replay", "preToolUse"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+
+    // Intentionally do not write or close stdin.
+    const stdout = await new Response(proc.stdout).text()
+    const stderr = await new Response(proc.stderr).text()
+    await proc.exited
+
+    expect(proc.exitCode).toBe(1)
+    expect(stdout.trim()).toBe("")
+    expect(stderr).toContain("Timed out waiting 2s for stdin JSON payload to be received")
   })
 
   test("replay JSON output includes matched_groups and hooks array", async () => {

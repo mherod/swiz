@@ -172,6 +172,7 @@ alwaysApply: false
 - Stop-memory prompts must include `Cause to capture: <specific cause>`.
 - On `MEMORY CAPTURE ENFORCEMENT`, immediately: read `/update-memory/SKILL.md`, edit `CLAUDE.md` with the DO/DON'T rule, then resume other work.
 - Do not defer memory capture requested by stop hooks.
+- When unblocking a gated session via prior task completion: mark prior task complete first with evidence, then create an `in_progress` task in current session directory before executing tool calls; do not attempt tool calls while memory enforcement is active.
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip enforcement when not in a git repo or when no `CLAUDE.md` exists up the directory tree; guard with `isGitRepo(cwd)` then upward `CLAUDE.md` search, otherwise `process.exit(0)`.
 - Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for every directory with valid console usage (`hooks/`, `scripts/`, `push/scripts/`, etc.).
 - Bun test reporter must be `--reporter=dots` (not `dot`).

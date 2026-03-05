@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -20,9 +20,10 @@ async function createTempHome(): Promise<string> {
 }
 
 async function runDoctor(
-  home: string
+  home: string,
+  args: string[] = []
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  const proc = Bun.spawn(["bun", "run", "index.ts", "doctor"], {
+  const proc = Bun.spawn(["bun", "run", "index.ts", "doctor", ...args], {
     cwd: process.cwd(),
     stdin: "pipe",
     stdout: "pipe",
@@ -36,6 +37,12 @@ async function runDoctor(
   ])
   await proc.exited
   return { stdout, stderr, exitCode: proc.exitCode }
+}
+
+async function createSkill(home: string, relativeRoot: string, skillName: string): Promise<void> {
+  const skillDir = join(home, relativeRoot, skillName)
+  await mkdir(skillDir, { recursive: true })
+  await writeFile(join(skillDir, "SKILL.md"), "---\ndescription: test\n---\n")
 }
 
 describe("swiz doctor", () => {
@@ -234,5 +241,44 @@ describe("swiz doctor", () => {
     const result = await runDoctor(home)
     expect(result.stdout).toContain("missing dispatch")
     expect(result.stdout).toContain("swiz install")
+  })
+
+  test("reports duplicate skill-name conflicts with active and overridden paths", async () => {
+    const home = await createTempHome()
+    const skillName = `doctor-dup-${Date.now()}`
+    await createSkill(home, ".gemini/skills", skillName)
+    await createSkill(home, ".codex/skills", skillName)
+
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain(`Skill conflict: ${skillName}`)
+    expect(result.stdout).toContain(`~/.gemini/skills/${skillName}/SKILL.md`)
+    expect(result.stdout).toContain(`~/.codex/skills/${skillName}/SKILL.md`)
+    expect(result.stdout).toContain("precedence=")
+  })
+
+  test("doctor --fix moves lower-precedence duplicate skills aside safely", async () => {
+    const home = await createTempHome()
+    const skillName = `doctor-fix-dup-${Date.now()}`
+    await createSkill(home, ".gemini/skills", skillName)
+    await createSkill(home, ".codex/skills", skillName)
+
+    const fixRun = await runDoctor(home, ["--fix"])
+    expect(fixRun.stdout).toContain("Auto-fixing skill conflicts")
+    expect(await Bun.file(join(home, ".gemini", "skills", skillName, "SKILL.md")).exists()).toBe(
+      true
+    )
+    expect(await Bun.file(join(home, ".codex", "skills", skillName, "SKILL.md")).exists()).toBe(
+      false
+    )
+
+    const codexSkillsDir = join(home, ".codex", "skills")
+    const movedDirs = (await readdir(codexSkillsDir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((name) => name.startsWith(`${skillName}.disabled-by-swiz-`))
+    expect(movedDirs.length).toBe(1)
+
+    const afterFix = await runDoctor(home)
+    expect(afterFix.stdout).not.toContain(`Skill conflict: ${skillName}`)
   })
 })

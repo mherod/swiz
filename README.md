@@ -526,16 +526,18 @@ swiz push-wait --timeout 180               # custom max wait in seconds
 
 ### `swiz doctor`
 
-Check environment health and prerequisites. Reports the status of each detected agent (Claude Code, Cursor, Gemini CLI, Codex) and whether its hook configuration is up to date.
+Check environment health and prerequisites. Reports the status of each detected agent (Claude Code, Cursor, Gemini CLI, Codex), whether its hook configuration is up to date, and whether duplicate skill names exist across skill directories.
 
 ```bash
 swiz doctor                                 # show health report
-swiz doctor --fix                          # auto-fix stale agent configs (runs swiz install)
+swiz doctor --fix                          # auto-fix stale configs + move lower-priority duplicate skills aside
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--fix` | Auto-fix stale agent configs by running `swiz install` |
+| `--fix` | Auto-fix stale agent configs by running `swiz install`, and rename lower-priority duplicate skill directories to `.disabled-by-swiz-<timestamp>` (reversible) |
+
+Skill conflict warnings include both skill file paths, the currently active (winning) path, and the deterministic precedence order used to choose it.
 
 ### `swiz help`
 
