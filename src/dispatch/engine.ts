@@ -259,6 +259,8 @@ export async function runBlocking(groups: HookGroup[], payloadStr: string): Prom
     }
   }
   log(`   result: all passed`)
+  // Emitting an empty JSON object tells the CLI everything is fine.
+  process.stdout.write(`{}\n`)
 }
 
 /** SessionStart / UserPromptSubmit: run all hooks, merge additionalContext. */
