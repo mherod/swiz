@@ -1,13 +1,11 @@
 import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { getAllProviderSkillDirs } from "./provider-utils.ts"
 
-// Skills live in .skills/ (project-local) or ~/.claude/skills/ (global).
+// Skills live in .skills/ (project-local) and provider-specific global directories.
 // Each skill is a directory containing SKILL.md.
-export const SKILL_DIRS = [
-  join(process.cwd(), ".skills"),
-  join(process.env.HOME ?? "~", ".claude", "skills"),
-]
+export const SKILL_DIRS = [join(process.cwd(), ".skills"), ...getAllProviderSkillDirs()]
 
 // ─── Skill existence (sync, cached) ─────────────────────────────────────────
 

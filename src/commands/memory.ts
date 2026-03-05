@@ -3,18 +3,19 @@ import { join, resolve } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
 import {
+  getProviderHome,
+  getProviderProjectFiles,
+  getProviderProjectStateDir,
+  getProviderRuleDirs,
+} from "../provider-utils.ts"
+import {
   DEFAULT_MEMORY_LINE_THRESHOLD,
   DEFAULT_MEMORY_WORD_THRESHOLD,
   readProjectSettings,
   readSwizSettings,
   resolveMemoryThresholds,
 } from "../settings.ts"
-import { projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
-
-function home(): string {
-  return process.env.HOME ?? "~"
-}
 
 const BOLD = "\x1b[1m"
 const DIM = "\x1b[2m"
@@ -43,12 +44,11 @@ export function getMemorySources(agent: AgentDef, targetDir: string): MemorySour
       sources.push({ label: "Project rules", path: join(targetDir, "CLAUDE.md") })
 
       // 2. Project-scoped memory (via ~/.claude/projects/<key>/memory/MEMORY.md)
-      const projectKey = projectKeyFromCwd(targetDir)
-      const projectMemory = join(home(), ".claude", "projects", projectKey, "memory", "MEMORY.md")
+      const memoryDir = getProviderProjectStateDir(agent, targetDir)
+      const projectMemory = join(memoryDir, "MEMORY.md")
       sources.push({ label: "Project memory", path: projectMemory })
 
       // 3. Additional memory files in the project memory directory
-      const memoryDir = join(home(), ".claude", "projects", projectKey, "memory")
       if (existsSync(memoryDir)) {
         try {
           for (const entry of readdirSync(memoryDir)) {
@@ -65,75 +65,87 @@ export function getMemorySources(agent: AgentDef, targetDir: string): MemorySour
       }
 
       // 4. Global CLAUDE.md
-      sources.push({ label: "Global rules", path: join(home(), ".claude", "CLAUDE.md") })
+      const globalHome = getProviderHome(agent)
+      sources.push({ label: "Global rules", path: join(globalHome, "CLAUDE.md") })
       break
     }
 
     case "cursor": {
       // 1. Project .cursorrules
-      sources.push({ label: "Project rules (.cursorrules)", path: join(targetDir, ".cursorrules") })
+      const projectFiles = getProviderProjectFiles(agent, targetDir)
+      for (const file of projectFiles) {
+        sources.push({ label: "Project rules (.cursorrules)", path: file })
+      }
 
       // 2. Project .cursor/rules/ directory
-      const projectRulesDir = join(targetDir, ".cursor", "rules")
-      if (existsSync(projectRulesDir)) {
-        try {
-          for (const entry of readdirSync(projectRulesDir)) {
-            if (!entry.endsWith(".md") && !entry.endsWith(".mdc")) continue
-            sources.push({
-              label: `Project rule (${entry})`,
-              path: join(projectRulesDir, entry),
-            })
+      const ruleDirs = getProviderRuleDirs(agent, targetDir)
+      if (ruleDirs.project) {
+        if (existsSync(ruleDirs.project)) {
+          try {
+            for (const entry of readdirSync(ruleDirs.project)) {
+              if (!entry.endsWith(".md") && !entry.endsWith(".mdc")) continue
+              sources.push({
+                label: `Project rule (${entry})`,
+                path: join(ruleDirs.project, entry),
+              })
+            }
+          } catch {
+            // Ignore read errors
           }
-        } catch {
-          // Ignore read errors
+        } else {
+          sources.push({ label: "Project rules dir", path: ruleDirs.project })
         }
-      } else {
-        sources.push({ label: "Project rules dir", path: projectRulesDir })
       }
 
       // 3. Global ~/.cursor/rules/
-      const globalRulesDir = join(home(), ".cursor", "rules")
-      if (existsSync(globalRulesDir)) {
-        try {
-          for (const entry of readdirSync(globalRulesDir)) {
-            if (!entry.endsWith(".md") && !entry.endsWith(".mdc")) continue
-            sources.push({
-              label: `Global rule (${entry})`,
-              path: join(globalRulesDir, entry),
-            })
+      if (ruleDirs.global) {
+        if (existsSync(ruleDirs.global)) {
+          try {
+            for (const entry of readdirSync(ruleDirs.global)) {
+              if (!entry.endsWith(".md") && !entry.endsWith(".mdc")) continue
+              sources.push({
+                label: `Global rule (${entry})`,
+                path: join(ruleDirs.global, entry),
+              })
+            }
+          } catch {
+            // Ignore read errors
           }
-        } catch {
-          // Ignore read errors
+        } else {
+          sources.push({ label: "Global rules dir", path: ruleDirs.global })
         }
-      } else {
-        sources.push({ label: "Global rules dir", path: globalRulesDir })
       }
       break
     }
 
     case "gemini": {
       // 1. Project GEMINI.md
-      sources.push({ label: "Project rules", path: join(targetDir, "GEMINI.md") })
+      const projectFiles = getProviderProjectFiles(agent, targetDir)
+      for (const file of projectFiles) {
+        if (file.endsWith("GEMINI.md")) {
+          const label = file.includes(".gemini") ? "Project rules (.gemini/)" : "Project rules"
+          sources.push({ label, path: file })
+        }
+      }
 
-      // 2. Project .gemini/GEMINI.md
-      sources.push({
-        label: "Project rules (.gemini/)",
-        path: join(targetDir, ".gemini", "GEMINI.md"),
-      })
-
-      // 3. Global ~/.gemini/GEMINI.md
-      sources.push({ label: "Global rules", path: join(home(), ".gemini", "GEMINI.md") })
+      // 2. Global ~/.gemini/GEMINI.md
+      const globalHome = getProviderHome(agent)
+      sources.push({ label: "Global rules", path: join(globalHome, "GEMINI.md") })
       break
     }
 
     case "codex": {
       // 1. Project AGENTS.md
-      sources.push({ label: "Project rules", path: join(targetDir, "AGENTS.md") })
+      const projectFiles = getProviderProjectFiles(agent, targetDir)
+      for (const file of projectFiles) {
+        sources.push({ label: "Project rules", path: file })
+      }
 
       // 2. Global ~/.codex/instructions.md
+      const globalHome = getProviderHome(agent)
       sources.push({
         label: "Global instructions",
-        path: join(home(), ".codex", "instructions.md"),
+        path: join(globalHome, "instructions.md"),
       })
       break
     }
