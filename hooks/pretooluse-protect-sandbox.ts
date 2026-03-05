@@ -6,7 +6,7 @@
 // This hook denies that command unconditionally — the sandbox can only be
 // disabled by the user directly at the terminal (where this hook never fires).
 
-import { denyPreToolUse, isShellTool } from "./hook-utils.ts"
+import { buildIssueGuidance, denyPreToolUse, isShellTool } from "./hook-utils.ts"
 
 // All recognised aliases for the sandboxedEdits setting
 const SANDBOX_ALIASES = ["sandboxed-edits", "sandboxededits", "sandboxed_edits", "sandboxedEdits"]
@@ -38,8 +38,7 @@ if (import.meta.main) {
     denyPreToolUse(
       "Disabling sandboxed-edits is not permitted from agent Bash commands.\n\n" +
         "The sandbox can only be disabled by the user directly at the terminal.\n" +
-        "If you need to edit a file outside the project, file an issue on the target repo instead:\n" +
-        "  gh issue create --repo <owner>/<repo> --title '...' --body '...'"
+        buildIssueGuidance(null)
     )
   }
 }

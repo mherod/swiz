@@ -7,7 +7,13 @@ import { realpath } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { readSwizSettings } from "../src/settings.ts"
-import { denyPreToolUse, git, isFileEditTool, type ToolHookInput } from "./hook-utils.ts"
+import {
+  buildIssueGuidance,
+  denyPreToolUse,
+  git,
+  isFileEditTool,
+  type ToolHookInput,
+} from "./hook-utils.ts"
 
 const input = (await Bun.stdin.json()) as ToolHookInput
 
@@ -154,12 +160,10 @@ if (repoRoot && repoRoot !== cwd) {
   const remoteUrl = await git(["remote", "get-url", "origin"], repoRoot)
   const remote = parseRemoteUrl(remoteUrl)
   if (remote && (await isGitHubHost(remote.host))) {
-    const hostnameFlag = remote.host !== "github.com" ? ` --hostname ${remote.host}` : ""
     crossRepoHint = [
       "",
       `The blocked path is inside a different repository: ${remote.slug}`,
-      "If this change is needed, consider filing an issue there so the repo can triage it:",
-      `  gh issue create --repo ${remote.slug}${hostnameFlag} --title "..." --body "..."`,
+      buildIssueGuidance(remote.slug, { crossRepo: true, hostname: remote.host }),
     ].join("\n")
   }
 }
@@ -172,8 +176,7 @@ denyPreToolUse(
     `  Session cwd: ${cwd}`,
     "",
     "Only edits within the current project directory or temporary directories are allowed.",
-    "If you need to edit a file outside the project, file an issue on the target repo instead:",
-    "  gh issue create --repo <owner>/<repo> --title '...' --body '...'",
+    buildIssueGuidance(null),
     crossRepoHint,
   ]
     .filter(Boolean)
