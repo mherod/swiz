@@ -1,5 +1,7 @@
 import { resolve } from "node:path"
 import { promptAgent } from "../agent.ts"
+import { AGENTS, type AgentDef } from "../agents.ts"
+import { detectCurrentAgent } from "../detect.ts"
 import {
   type ContentBlock,
   extractText,
@@ -312,6 +314,8 @@ export interface TranscriptArgs {
   headCount: number | undefined
   tailCount: number | undefined
   autoReply: boolean
+  allAgents: boolean
+  explicitAgents: AgentDef[]
 }
 
 export function parseTranscriptArgs(args: string[]): TranscriptArgs {
@@ -321,6 +325,7 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
   let headCount: number | undefined
   let tailCount: number | undefined
   let autoReply = false
+  let allAgents = false
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -342,10 +347,35 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
       i++
     } else if (arg === "--auto-reply") {
       autoReply = true
+    } else if (arg === "--all") {
+      allAgents = true
     }
   }
 
-  return { sessionQuery, targetDir, listOnly, headCount, tailCount, autoReply }
+  const explicitAgents = AGENTS.filter((agent) => args.includes(`--${agent.id}`))
+  return {
+    sessionQuery,
+    targetDir,
+    listOnly,
+    headCount,
+    tailCount,
+    autoReply,
+    allAgents,
+    explicitAgents,
+  }
+}
+
+function transcriptProvidersForAgent(agent: AgentDef): Set<NonNullable<Session["provider"]>> {
+  switch (agent.id) {
+    case "claude":
+      return new Set(["claude"])
+    case "gemini":
+      return new Set(["gemini", "antigravity"])
+    case "codex":
+      return new Set(["codex"])
+    default:
+      return new Set()
+  }
 }
 
 // ─── Command ─────────────────────────────────────────────────────────────────
@@ -354,7 +384,7 @@ export const transcriptCommand: Command = {
   name: "transcript",
   description: "Display Agent-User chat history for the current project",
   usage:
-    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--auto-reply]",
+    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--auto-reply] [--all|--claude|--cursor|--gemini|--codex]",
   options: [
     { flags: "--session, -s <id>", description: "Show a specific session (prefix match)" },
     { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
@@ -362,15 +392,69 @@ export const transcriptCommand: Command = {
     { flags: "--head, -H <n>", description: "Show only the first N conversation turns" },
     { flags: "--tail, -T <n>", description: "Show only the last N conversation turns" },
     { flags: "--auto-reply", description: "Generate an AI-suggested follow-up message" },
+    {
+      flags: "--all",
+      description:
+        "Show sessions from all providers (default when no agent context is detected and no agent flag is provided)",
+    },
+    { flags: "--claude", description: "Show Claude sessions only" },
+    { flags: "--cursor", description: "Show Cursor sessions only (currently unsupported)" },
+    { flags: "--gemini", description: "Show Gemini/Antigravity sessions only" },
+    { flags: "--codex", description: "Show Codex sessions only" },
   ],
   async run(args) {
-    const { sessionQuery, targetDir, listOnly, headCount, tailCount, autoReply } =
-      parseTranscriptArgs(args)
+    const {
+      sessionQuery,
+      targetDir,
+      listOnly,
+      headCount,
+      tailCount,
+      autoReply,
+      allAgents,
+      explicitAgents,
+    } = parseTranscriptArgs(args)
 
-    const sessions = await findAllProviderSessions(targetDir)
+    if (allAgents && explicitAgents.length > 0) {
+      throw new Error("`--all` cannot be combined with an explicit agent flag.")
+    }
+    if (explicitAgents.length > 1) {
+      throw new Error("Specify at most one agent: --claude, --cursor, --gemini, or --codex.")
+    }
+
+    const detectedAgent = detectCurrentAgent()
+    const selectedAgents = allAgents
+      ? AGENTS
+      : explicitAgents[0]
+        ? [explicitAgents[0]]
+        : detectedAgent
+          ? [detectedAgent]
+          : AGENTS
+
+    const selectedProviders = new Set<NonNullable<Session["provider"]>>()
+    for (const agent of selectedAgents) {
+      const providers = transcriptProvidersForAgent(agent)
+      for (const provider of providers) {
+        selectedProviders.add(provider)
+      }
+    }
+
+    if (selectedProviders.size === 0) {
+      const agentLabel = selectedAgents[0]?.name ?? "selected agent"
+      throw new Error(
+        `${agentLabel} transcript discovery is not supported yet.\nUse --all or --claude/--gemini/--codex.`
+      )
+    }
+
+    const allProviderSessions = await findAllProviderSessions(targetDir)
+    const sessions = allProviderSessions.filter(
+      (session) => !!session.provider && selectedProviders.has(session.provider)
+    )
 
     if (sessions.length === 0) {
-      throw new Error(`No transcripts found for: ${targetDir}\n(checked all configured providers)`)
+      const checkedProviders = [...selectedProviders].join(", ")
+      throw new Error(
+        `No transcripts found for: ${targetDir}\n(checked providers: ${checkedProviders})`
+      )
     }
 
     if (listOnly) {

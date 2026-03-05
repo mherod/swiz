@@ -11,6 +11,8 @@ describe("parseTranscriptArgs", () => {
     expect(result.headCount).toBeUndefined()
     expect(result.tailCount).toBeUndefined()
     expect(result.autoReply).toBe(false)
+    expect(result.allAgents).toBe(false)
+    expect(result.explicitAgents).toHaveLength(0)
   })
 
   test("parses --session with value", () => {
@@ -87,6 +89,17 @@ describe("parseTranscriptArgs", () => {
   test("parses --auto-reply flag", () => {
     const result = parseTranscriptArgs(["--auto-reply"])
     expect(result.autoReply).toBe(true)
+  })
+
+  test("parses --all flag", () => {
+    const result = parseTranscriptArgs(["--all"])
+    expect(result.allAgents).toBe(true)
+  })
+
+  test("parses explicit transcript agent flags", () => {
+    const result = parseTranscriptArgs(["--gemini"])
+    expect(result.explicitAgents).toHaveLength(1)
+    expect(result.explicitAgents[0]?.id).toBe("gemini")
   })
 
   test("parses multiple flags together", () => {

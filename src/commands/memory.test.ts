@@ -89,11 +89,11 @@ describe("getMemorySources", () => {
 
   it("returns Codex sources with AGENTS.md and instructions", () => {
     const sources = getMemorySources(getAgent("codex"), "/tmp/myproject")
-    expect(sources.length).toBe(4)
+    expect(sources.length).toBe(3)
     expect(sources[0]?.path).toContain("AGENTS.md")
     expect(sources[1]?.path).toContain(".codex/AGENTS.md")
     expect(sources[2]?.path).toContain("instructions.md")
-    expect(sources[3]?.path).toContain("history.jsonl")
+    expect(sources.some((source) => source.path.includes("history.jsonl"))).toBe(false)
   })
 
   it("includes additional memory files for Claude projects", () => {
@@ -173,10 +173,28 @@ describe("swiz memory CLI", () => {
     expect(stdout).toContain("/tmp")
   })
 
-  it("errors when no agent detected and no flag given", async () => {
-    const { stderr, exitCode } = await runMemory([])
+  it("shows all agent hierarchies when no agent is detected", async () => {
+    const { stdout, exitCode } = await runMemory([])
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("Agents: ")
+    expect(stdout).toContain("Claude Code")
+    expect(stdout).toContain("Cursor")
+    expect(stdout).toContain("Gemini CLI")
+    expect(stdout).toContain("Codex CLI")
+  })
+
+  it("supports --all and overrides detected agent context", async () => {
+    const { stdout, exitCode } = await runMemory(["--all"], { CLAUDECODE: "1" })
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("Agents: ")
+    expect(stdout).toContain("Claude Code")
+    expect(stdout).toContain("Codex CLI")
+  })
+
+  it("errors when --all is combined with an explicit agent flag", async () => {
+    const { stderr, exitCode } = await runMemory(["--all", "--gemini"])
     expect(exitCode).not.toBe(0)
-    expect(stderr).toContain("No agent detected")
+    expect(stderr).toContain("cannot be combined")
   })
 
   it("explicit agent flag overrides env detection", async () => {

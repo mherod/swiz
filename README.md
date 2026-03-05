@@ -273,8 +273,9 @@ Session overrides are keyed by session ID. If no override exists, that session i
 Inspect rule and memory/context files for the detected agent (or force one with flags). Optionally validate against configured thresholds.
 
 ```bash
-swiz memory                 # auto-detect agent and show rule hierarchy
+swiz memory                 # detected agent, or all agents if no context is detected
 swiz memory --strict        # fail if any memory file exceeds its threshold
+swiz memory --all           # always show all agents
 swiz memory --codex         # inspect Codex-specific memory/context paths
 swiz memory --codex --dir /path/to/project
 ```
@@ -282,6 +283,7 @@ swiz memory --codex --dir /path/to/project
 | Flag | Description |
 |------|-------------|
 | `--strict` | Exit with error if any memory file exceeds its line/word threshold (useful in CI and pre-commit hooks) |
+| `--all` | Show memory hierarchy for all agents (default when no agent context is detected) |
 | `--claude` | Force Claude Code agent |
 | `--cursor` | Force Cursor agent |
 | `--gemini` | Force Gemini CLI agent |
@@ -292,7 +294,6 @@ For Codex, `swiz memory --codex` surfaces:
 - project rules: `<project>/AGENTS.md`
 - global rules: `~/.codex/AGENTS.md`
 - global instructions: `~/.codex/instructions.md`
-- global history/context index: `~/.codex/history.jsonl`
 
 ### `swiz hooks [event] [script]`
 
@@ -399,8 +400,9 @@ swiz dispatch <event> --replay <file> --json  # replay with machine-readable tra
 Display Agent-User chat history for the current project. Supports Claude JSONL, Gemini session JSON, and Codex session JSONL event formats, and surfaces Antigravity protobuf sessions with explicit unsupported-format diagnostics when selected.
 
 ```bash
-swiz transcript                             # show latest session transcript
+swiz transcript                             # detected agent provider, or all providers if no context
 swiz transcript --list                      # list all sessions for the project
+swiz transcript --all --list                # force listing sessions from all providers
 swiz transcript --session <id>              # show a specific session (prefix match)
 swiz transcript --tail 10                   # show last 10 turns
 swiz transcript --auto-reply                # generate an AI-suggested follow-up
@@ -414,6 +416,11 @@ swiz transcript --auto-reply                # generate an AI-suggested follow-up
 | `--head, -H <n>` | Show only the first N conversation turns |
 | `--tail, -T <n>` | Show only the last N conversation turns |
 | `--auto-reply` | Generate an AI-suggested follow-up message |
+| `--all` | Show sessions from all providers (default when no agent context is detected) |
+| `--claude` | Show Claude sessions only |
+| `--cursor` | Show Cursor sessions only (currently unsupported) |
+| `--gemini` | Show Gemini and Antigravity sessions only |
+| `--codex` | Show Codex sessions only |
 
 Session discovery paths:
 - Claude: `~/.claude/projects/<project-key>/*.jsonl`

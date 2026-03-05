@@ -21,14 +21,37 @@ async function createTempHome(): Promise<string> {
 
 async function runSwiz(
   args: string[],
-  home: string
+  home: string,
+  envOverrides: Record<string, string | undefined> = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[key] = value
+  }
+  for (const key of [
+    "CLAUDECODE",
+    "GEMINI_CLI",
+    "GEMINI_PROJECT_DIR",
+    "CODEX_MANAGED_BY_NPM",
+    "CODEX_THREAD_ID",
+  ]) {
+    delete env[key]
+  }
+  env.HOME = home
+  for (const [key, value] of Object.entries(envOverrides)) {
+    if (value === undefined) {
+      delete env[key]
+    } else {
+      env[key] = value
+    }
+  }
+
   const proc = Bun.spawn(["bun", "run", "index.ts", ...args], {
     cwd: process.cwd(),
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, HOME: home },
+    env,
   })
   proc.stdin.end()
   const [stdout, stderr] = await Promise.all([
@@ -231,6 +254,68 @@ describe("Provider transcript/session command support", () => {
     expect(result.exitCode).toBe(0)
     const out = stripAnsi(result.stdout)
     expect(out).toContain(sessionId)
+  })
+
+  test("swiz transcript defaults to all providers when no agent is detected", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-mixed")
+    const geminiSessionId = "abcdef12-aaaa-bbbb-cccc-444444444444"
+    const codexSessionId = "019cbc01-dddd-7eee-8fff-111111111111"
+    await mkdir(projectDir, { recursive: true })
+    await createGeminiSession(home, projectDir, geminiSessionId)
+    await createCodexSession(home, projectDir, codexSessionId)
+
+    const result = await runSwiz(["transcript", "--list", "--dir", projectDir], home)
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain(geminiSessionId)
+    expect(out).toContain(codexSessionId)
+  })
+
+  test("swiz transcript scopes to detected agent provider by default", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-mixed")
+    const geminiSessionId = "abcdef12-eeee-ffff-aaaa-444444444444"
+    const codexSessionId = "019cbc01-2222-7333-8444-555555555555"
+    await mkdir(projectDir, { recursive: true })
+    await createGeminiSession(home, projectDir, geminiSessionId)
+    await createCodexSession(home, projectDir, codexSessionId)
+
+    const result = await runSwiz(["transcript", "--list", "--dir", projectDir], home, {
+      CODEX_THREAD_ID: "thread-1",
+    })
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain(codexSessionId)
+    expect(out).not.toContain(geminiSessionId)
+  })
+
+  test("swiz transcript --all overrides detected agent scoping", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-mixed")
+    const geminiSessionId = "abcdef12-1111-ffff-aaaa-444444444444"
+    const codexSessionId = "019cbc01-6666-7777-8888-999999999999"
+    await mkdir(projectDir, { recursive: true })
+    await createGeminiSession(home, projectDir, geminiSessionId)
+    await createCodexSession(home, projectDir, codexSessionId)
+
+    const result = await runSwiz(["transcript", "--list", "--all", "--dir", projectDir], home, {
+      CODEX_THREAD_ID: "thread-2",
+    })
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain(geminiSessionId)
+    expect(out).toContain(codexSessionId)
+  })
+
+  test("swiz transcript rejects --all combined with explicit agent flag", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-mixed")
+    await mkdir(projectDir, { recursive: true })
+
+    const result = await runSwiz(["transcript", "--all", "--codex", "--dir", projectDir], home)
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("cannot be combined")
   })
 
   test("swiz transcript --list discovers Antigravity sessions", async () => {

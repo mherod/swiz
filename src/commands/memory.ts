@@ -53,6 +53,7 @@ interface SourceCheckResult {
 interface ParsedMemoryArgs {
   strict: boolean
   targetDir: string
+  allAgents: boolean
   explicitAgent: AgentDef | undefined
 }
 
@@ -185,9 +186,6 @@ export function getMemorySources(agent: AgentDef, targetDir: string): MemorySour
 
       // 3. Global ~/.codex/instructions.md
       pushSource(sources, "Global instructions", join(globalHome, "instructions.md"))
-
-      // 4. Global ~/.codex/history.jsonl (Codex prompt/session context index)
-      pushSource(sources, "Global history", join(globalHome, "history.jsonl"))
       break
     }
 
@@ -332,11 +330,21 @@ async function printSource(
 function parseMemoryArgs(args: string[]): ParsedMemoryArgs {
   const dirIdx = args.findIndex((arg) => arg === "--dir" || arg === "-d")
   const dirArg = dirIdx >= 0 ? args[dirIdx + 1] : undefined
+  const explicitAgents = AGENTS.filter((agent) => args.includes(`--${agent.id}`))
+  const allAgents = args.includes("--all")
+
+  if (allAgents && explicitAgents.length > 0) {
+    throw new Error("`--all` cannot be combined with an explicit agent flag.")
+  }
+  if (explicitAgents.length > 1) {
+    throw new Error("Specify at most one agent: --claude, --cursor, --gemini, or --codex.")
+  }
 
   return {
     targetDir: resolve(dirArg ?? process.cwd()),
     strict: args.includes("--strict"),
-    explicitAgent: AGENTS.find((agent) => args.includes(`--${agent.id}`)),
+    allAgents,
+    explicitAgent: explicitAgents[0],
   }
 }
 
@@ -362,38 +370,40 @@ function resolveThresholdSets(
 
 export const memoryCommand: Command = {
   name: "memory",
-  description: "Show hierarchical rule/memory files for the detected agent",
-  usage: "swiz memory [--dir <path>] [--strict] [--claude|--cursor|--gemini|--codex]",
+  description: "Show hierarchical rule/memory files for one or all agents",
+  usage: "swiz memory [--dir <path>] [--strict] [--all|--claude|--cursor|--gemini|--codex]",
   options: [
     { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
     { flags: "--strict", description: "Exit with error if any memory file exceeds its threshold" },
+    {
+      flags: "--all",
+      description:
+        "Show all agents (default when no agent context is detected and no agent flag is provided)",
+    },
     { flags: "--claude", description: "Force Claude Code agent" },
     { flags: "--cursor", description: "Force Cursor agent" },
     { flags: "--gemini", description: "Force Gemini CLI agent" },
     { flags: "--codex", description: "Force Codex CLI agent" },
   ],
   async run(args: string[]) {
-    const { targetDir, strict, explicitAgent } = parseMemoryArgs(args)
-    const agent = explicitAgent ?? detectCurrentAgent()
-
-    if (!agent) {
-      throw new Error(
-        "No agent detected. Use --claude, --cursor, --gemini, or --codex to specify one."
-      )
-    }
+    const { targetDir, strict, allAgents, explicitAgent } = parseMemoryArgs(args)
+    const detectedAgent = detectCurrentAgent()
+    const targetAgents = allAgents
+      ? AGENTS
+      : explicitAgent
+        ? [explicitAgent]
+        : detectedAgent
+          ? [detectedAgent]
+          : AGENTS
+    const showingAllAgents = targetAgents.length > 1
 
     console.log(`\n  ${BOLD}swiz memory${RESET}`)
-    console.log(`  Agent: ${CYAN}${agent.name}${RESET}`)
-    console.log(`  Target: ${targetDir}\n`)
-
-    const sources = getMemorySources(agent, targetDir)
-
-    if (sources.length === 0) {
-      console.log(`  ${YELLOW}No memory sources defined for ${agent.name}${RESET}\n`)
-      return
+    if (showingAllAgents) {
+      console.log(`  Agents: ${CYAN}all${RESET}`)
+    } else {
+      console.log(`  Agent: ${CYAN}${targetAgents[0]!.name}${RESET}`)
     }
-
-    const existingCount = sources.filter((s) => existsSync(s.path)).length
+    console.log(`  Target: ${targetDir}\n`)
 
     // Read thresholds from project and user settings
     const projectSettings = await readProjectSettings(targetDir)
@@ -402,34 +412,52 @@ export const memoryCommand: Command = {
     const projectThresholds = thresholdSets.project
     const globalThresholds = thresholdSets.global
 
-    const globalHome = getProviderHome(agent)
+    const exceededFiles: Array<SourceCheckResult & { agentName: string }> = []
 
-    console.log(
-      `  ${BOLD}Rule hierarchy${RESET} ${DIM}(${existingCount}/${sources.length} files present)${RESET}\n`
-    )
-    console.log(
-      `  ${DIM}Thresholds: ${projectThresholds.memoryLineThreshold} lines · ${projectThresholds.memoryWordThreshold} words${RESET}\n`
-    )
+    for (const [agentIndex, agent] of targetAgents.entries()) {
+      if (showingAllAgents) {
+        console.log(`  ${BOLD}${agent.name}${RESET}\n`)
+      }
 
-    const exceededFiles: SourceCheckResult[] = []
+      const sources = getMemorySources(agent, targetDir)
+      if (sources.length === 0) {
+        console.log(`  ${YELLOW}No memory sources defined for ${agent.name}${RESET}\n`)
+        continue
+      }
 
-    for (const [i, source] of sources.entries()) {
-      // Use global thresholds for sources in the global home directory
-      const isGlobal = source.path.startsWith(globalHome)
-      const thresholds = isGlobal ? globalThresholds : projectThresholds
+      const existingCount = sources.filter((s) => existsSync(s.path)).length
+      console.log(
+        `  ${BOLD}Rule hierarchy${RESET} ${DIM}(${existingCount}/${sources.length} files present)${RESET}\n`
+      )
+      console.log(
+        `  ${DIM}Thresholds: ${projectThresholds.memoryLineThreshold} lines · ${projectThresholds.memoryWordThreshold} words${RESET}\n`
+      )
 
-      const result = await printSource(source, i, {
-        lines: thresholds.memoryLineThreshold,
-        words: thresholds.memoryWordThreshold,
-      })
+      const globalHome = getProviderHome(agent)
+      for (const [sourceIndex, source] of sources.entries()) {
+        // Use global thresholds for sources in the global home directory
+        const isGlobal = source.path.startsWith(globalHome)
+        const thresholds = isGlobal ? globalThresholds : projectThresholds
 
-      if (result.exceeded) {
-        exceededFiles.push(result)
+        const result = await printSource(source, sourceIndex, {
+          lines: thresholds.memoryLineThreshold,
+          words: thresholds.memoryWordThreshold,
+        })
+
+        if (result.exceeded) {
+          exceededFiles.push({ ...result, agentName: agent.name })
+        }
+      }
+
+      if (showingAllAgents && agentIndex < targetAgents.length - 1) {
+        console.log()
       }
     }
 
     if (strict && exceededFiles.length > 0) {
-      const fileList = exceededFiles.map((f) => `  - ${f.label} (${f.path})`).join("\n")
+      const fileList = exceededFiles
+        .map((f) => `  - ${f.agentName}: ${f.label} (${f.path})`)
+        .join("\n")
 
       const compactAdvice = skillAdvice(
         "compact-memory",
