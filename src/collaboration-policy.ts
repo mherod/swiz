@@ -1,3 +1,5 @@
+import { getRepoSlug, gh, ghJson } from "./git-helpers.ts"
+
 export interface OpenPullRequest {
   author?: { login?: string | null } | null
 }
@@ -15,6 +17,33 @@ export interface CollaborationPolicyResult {
   openPullRequestCount: number
   otherContributors: string[]
   signals: string[]
+}
+
+interface GitHubCommit {
+  author?: { login?: string | null } | null
+  commit: {
+    author: {
+      date: string
+    }
+  }
+}
+
+interface CollaborationDetectionDependencies {
+  getRepoSlug?: (cwd: string) => Promise<string | null>
+  gh?: (args: string[], cwd: string) => Promise<string>
+  ghJson?: <T>(args: string[], cwd: string) => Promise<T | null>
+}
+
+export interface DetectProjectCollaborationOptions extends CollaborationDetectionDependencies {
+  nowMs?: number
+}
+
+export interface ProjectCollaborationDetectionResult extends CollaborationPolicyResult {
+  currentUser: string | null
+  repoName: string | null
+  repoOwner: string | null
+  repoSlug: string | null
+  resolved: boolean
 }
 
 const BOT_OR_AUTOMATION_LOGIN_RE = /(?:\[bot\]|dependabot|^claude$|^cursoragent$)/i
@@ -115,5 +144,64 @@ export function evaluateCollaborationPolicy(
     openPullRequestCount: humanOpenPrs.length,
     otherContributors,
     signals,
+  }
+}
+
+function splitRepoSlug(repoSlug: string | null): { owner: string | null; repoName: string | null } {
+  if (!repoSlug) return { owner: null, repoName: null }
+  const [owner, repoName] = repoSlug.split("/", 2)
+  if (!owner || !repoName) return { owner: null, repoName: null }
+  return { owner, repoName }
+}
+
+export async function detectProjectCollaborationPolicy(
+  cwd: string,
+  options: DetectProjectCollaborationOptions = {}
+): Promise<ProjectCollaborationDetectionResult> {
+  const ghRunner = options.gh ?? gh
+  const ghJsonRunner = options.ghJson ?? ghJson
+  const repoSlugResolver = options.getRepoSlug ?? getRepoSlug
+
+  const [repoSlug, currentUserRaw] = await Promise.all([
+    repoSlugResolver(cwd),
+    ghRunner(["api", "user", "--jq", ".login"], cwd),
+  ])
+
+  const currentUser = currentUserRaw || null
+  const { owner: repoOwner, repoName } = splitRepoSlug(repoSlug)
+
+  const [openPullRequestsResult, commitsResult] = await Promise.all([
+    ghJsonRunner<OpenPullRequest[]>(
+      ["pr", "list", "--state", "open", "--json", "number,author", "--limit", "10"],
+      cwd
+    ),
+    repoSlug ? ghJsonRunner<GitHubCommit[]>(["api", `repos/${repoSlug}/commits`], cwd) : null,
+  ])
+
+  const dayAgoMs = (options.nowMs ?? Date.now()) - 24 * 60 * 60 * 1000
+  const recentContributorLogins =
+    commitsResult
+      ?.filter((commit) => {
+        const timestamp = Date.parse(commit.commit.author.date)
+        return Number.isFinite(timestamp) && timestamp > dayAgoMs
+      })
+      .map((commit) => commit.author?.login ?? null) ?? []
+
+  const policy = evaluateCollaborationPolicy({
+    currentUser,
+    openPullRequests: openPullRequestsResult ?? [],
+    recentContributorLogins,
+    repoOwner,
+  })
+
+  const resolved = currentUser !== null && openPullRequestsResult !== null && commitsResult !== null
+
+  return {
+    ...policy,
+    currentUser,
+    repoName,
+    repoOwner,
+    repoSlug,
+    resolved,
   }
 }

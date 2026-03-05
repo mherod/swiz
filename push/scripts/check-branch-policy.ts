@@ -12,8 +12,8 @@
 // Reads: git state (branch, upstream, changed files, commit messages)
 // Exits: 0 = allow, 1 = block (prints BLOCKED message to stderr)
 
-import { extractOwnerFromUrl, gh, git, isGitRepo } from "../../hooks/hook-utils.ts"
-import { evaluateCollaborationPolicy } from "../../src/collaboration-policy.ts"
+import { gh, git, isGitRepo } from "../../hooks/hook-utils.ts"
+import { detectProjectCollaborationPolicy } from "../../src/collaboration-policy.ts"
 
 const PROTECTED_BRANCHES = new Set(["main", "master"])
 const MAX_FILES_HARD_BLOCK = 5
@@ -55,32 +55,6 @@ function block(reason: string): never {
       "  gh pr create"
   )
   process.exit(1)
-}
-
-type GhResult<T> = { ok: true; value: T } | { ok: false }
-
-async function ghSafe<T>(args: string[], cwd: string): Promise<GhResult<T>> {
-  try {
-    const raw = await gh(args, cwd)
-    if (!raw) return { ok: false }
-    return { ok: true, value: JSON.parse(raw) as T }
-  } catch {
-    return { ok: false }
-  }
-}
-
-interface GhOpenPr {
-  author?: { login?: string | null } | null
-  number: number
-}
-
-interface GhCommit {
-  author?: { login?: string | null } | null
-  commit: {
-    author: {
-      date: string
-    }
-  }
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
@@ -149,36 +123,8 @@ if (!ghAvailable) {
 
 // ── Check 2: Collaboration detection ────────────────────────────────────
 
-const currentUser = (await gh(["api", "user", "--jq", ".login"], cwd)) || null
-const remoteUrl = await git(["remote", "get-url", "origin"], cwd)
-const repoOwner = extractOwnerFromUrl(remoteUrl)
-
-const [openPrsResult, commitsResult] = await Promise.all([
-  ghSafe<GhOpenPr[]>(
-    ["pr", "list", "--state", "open", "--json", "number,author", "--limit", "10"],
-    cwd
-  ),
-  ghSafe<GhCommit[]>(["api", "repos/{owner}/{repo}/commits"], cwd),
-])
-
-const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000
-const recentContributorLogins = commitsResult.ok
-  ? commitsResult.value
-      .filter((commit) => {
-        const timestamp = Date.parse(commit.commit.author.date)
-        return Number.isFinite(timestamp) && timestamp > twentyFourHoursAgo
-      })
-      .map((commit) => commit.author?.login ?? null)
-  : []
-
-const collaboration = evaluateCollaborationPolicy({
-  currentUser,
-  openPullRequests: openPrsResult.ok ? openPrsResult.value : [],
-  recentContributorLogins,
-  repoOwner,
-})
-
-collaborationResolved = currentUser !== null && openPrsResult.ok && commitsResult.ok
+const collaboration = await detectProjectCollaborationPolicy(cwd)
+collaborationResolved = collaboration.resolved
 
 if (collaboration.isCollaborative) {
   block(
