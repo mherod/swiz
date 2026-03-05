@@ -14,7 +14,7 @@ import {
   writeProjectSettings,
   writeSwizSettings,
 } from "../settings.ts"
-import { findSessions, projectKeyFromCwd } from "../transcript-utils.ts"
+import { findAllProviderSessions } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
 type SettingsScope = "global" | "project" | "session"
@@ -225,9 +225,6 @@ function validateSettingScope(key: SettingKey, scope: SettingsScope, settingArg:
   }
 }
 
-const HOME = process.env.HOME ?? "~"
-const PROJECTS_DIR = join(HOME, ".claude", "projects")
-
 function usage(): string {
   return (
     "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--global | --project | --session [id]] [--dir <path>]\n" +
@@ -335,12 +332,10 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
 }
 
 async function resolveSessionId(query: string | null, targetDir: string): Promise<string> {
-  const projectKey = projectKeyFromCwd(targetDir)
-  const projectDir = join(PROJECTS_DIR, projectKey)
-  const sessions = await findSessions(projectDir)
+  const sessions = await findAllProviderSessions(targetDir)
 
   if (sessions.length === 0) {
-    throw new Error(`No sessions found for: ${targetDir}\n(looked in: ${projectDir})`)
+    throw new Error(`No sessions found for: ${targetDir}\n(checked all configured providers)`)
   }
 
   if (!query) return sessions[0]!.id

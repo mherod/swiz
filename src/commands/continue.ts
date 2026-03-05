@@ -1,10 +1,9 @@
-import { join, resolve } from "node:path"
+import { resolve } from "node:path"
 import { detectAgentCli, promptAgent } from "../agent.ts"
 import {
   extractPlainTurns,
-  findSessions,
+  findAllProviderSessions,
   formatTurnsAsContext,
-  projectKeyFromCwd,
   type Session,
 } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
@@ -70,9 +69,6 @@ export const continueCommand: Command = {
     { flags: "--print", description: "Print the suggested next step without resuming" },
   ],
   async run(args) {
-    const HOME = process.env.HOME ?? "~"
-    const PROJECTS_DIR = join(HOME, ".claude", "projects")
-
     const { targetDir, sessionQuery, printOnly } = parseContinueArgs(args)
 
     if (!detectAgentCli()) {
@@ -81,9 +77,7 @@ export const continueCommand: Command = {
       )
     }
 
-    const projectKey = projectKeyFromCwd(targetDir)
-    const projectDir = join(PROJECTS_DIR, projectKey)
-    const sessions = await findSessions(projectDir)
+    const sessions = await findAllProviderSessions(targetDir)
 
     if (sessions.length === 0) {
       throw new Error(`No transcripts found for: ${targetDir}`)

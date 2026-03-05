@@ -1,9 +1,5 @@
-import { join } from "node:path"
-import { findSessions, projectKeyFromCwd } from "../transcript-utils.ts"
+import { findAllProviderSessions } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
-
-const HOME = process.env.HOME ?? "~"
-const PROJECTS_DIR = join(HOME, ".claude", "projects")
 
 const BOLD = "\x1b[1m"
 const DIM = "\x1b[2m"
@@ -22,12 +18,10 @@ export const sessionCommand: Command = {
     const dirIdx = args.findIndex((a) => a === "--dir" || a === "-d")
     const targetDir = dirIdx !== -1 && args[dirIdx + 1] ? args[dirIdx + 1]! : process.cwd()
 
-    const projectKey = projectKeyFromCwd(targetDir)
-    const projectDir = join(PROJECTS_DIR, projectKey)
-    const sessions = await findSessions(projectDir)
+    const sessions = await findAllProviderSessions(targetDir)
 
     if (sessions.length === 0) {
-      throw new Error(`No sessions found for: ${targetDir}\n(looked in: ${projectDir})`)
+      throw new Error(`No sessions found for: ${targetDir}\n(checked all configured providers)`)
     }
 
     if (listOnly) {

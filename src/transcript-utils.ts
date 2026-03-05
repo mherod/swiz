@@ -1,5 +1,8 @@
+import { existsSync } from "node:fs"
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
+import { AGENTS } from "./agents.ts"
+import { getProviderSessionDir } from "./provider-utils.ts"
 
 // ─── Content block types ─────────────────────────────────────────────────────
 
@@ -71,6 +74,62 @@ export async function findSessions(projectDir: string): Promise<Session[]> {
   }
 
   return sessions.sort((a, b) => b.mtime - a.mtime)
+}
+
+/**
+ * Discover sessions across all configured providers (Claude, Cursor, Gemini, Codex).
+ * Aggregates sessions from all available providers, sorted by mtime (most recent first).
+ *
+ * For Claude: queries ~/.claude/projects/<projectKey>/ for .jsonl files
+ * For other providers: queries their session directories for .jsonl files
+ *
+ * @param projectDir - Project directory (used to compute Claude projectKey)
+ * @returns Aggregated sessions from all providers, sorted by mtime descending
+ */
+export async function findAllProviderSessions(projectDir: string): Promise<Session[]> {
+  const allSessions: Session[] = []
+
+  for (const agent of AGENTS) {
+    try {
+      let sessionDir = ""
+
+      if (agent.id === "claude") {
+        // Claude stores sessions under ~/.claude/projects/<projectKey>/
+        const projectKey = projectKeyFromCwd(projectDir)
+        sessionDir = join(getProviderSessionDir(agent), projectKey)
+      } else {
+        // Other providers store sessions in their root directory
+        sessionDir = getProviderSessionDir(agent)
+      }
+
+      // Skip if directory doesn't exist
+      if (!existsSync(sessionDir)) continue
+
+      // Read sessions from this provider's directory
+      let entries: string[]
+      try {
+        entries = await readdir(sessionDir)
+      } catch {
+        continue
+      }
+
+      for (const entry of entries) {
+        // For now, all providers use .jsonl format (Claude's pattern)
+        // Future: handle provider-specific formats (Cursor, Gemini, Codex)
+        if (!entry.endsWith(".jsonl")) continue
+
+        const id = entry.slice(0, -6)
+        const filePath = join(sessionDir, entry)
+
+        try {
+          const s = await stat(filePath)
+          allSessions.push({ id, path: filePath, mtime: s.mtimeMs })
+        } catch {}
+      }
+    } catch {}
+  }
+
+  return allSessions.sort((a, b) => b.mtime - a.mtime)
 }
 
 // ─── Text extraction ─────────────────────────────────────────────────────────

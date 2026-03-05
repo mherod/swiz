@@ -3,7 +3,7 @@ import { promptAgent } from "../agent.ts"
 import {
   type ContentBlock,
   extractText,
-  findSessions,
+  findAllProviderSessions,
   projectKeyFromCwd,
   type Session,
   type TextBlock,
@@ -365,19 +365,13 @@ export const transcriptCommand: Command = {
     { flags: "--auto-reply", description: "Generate an AI-suggested follow-up message" },
   ],
   async run(args) {
-    const HOME = process.env.HOME ?? "~"
-    const PROJECTS_DIR = join(HOME, ".claude", "projects")
-
     const { sessionQuery, targetDir, listOnly, headCount, tailCount, autoReply } =
       parseTranscriptArgs(args)
 
-    const projectKey = projectKeyFromCwd(targetDir)
-    const projectDir = join(PROJECTS_DIR, projectKey)
-
-    const sessions = await findSessions(projectDir)
+    const sessions = await findAllProviderSessions(targetDir)
 
     if (sessions.length === 0) {
-      throw new Error(`No transcripts found for: ${targetDir}\n(looked in: ${projectDir})`)
+      throw new Error(`No transcripts found for: ${targetDir}\n(checked all configured providers)`)
     }
 
     if (listOnly) {

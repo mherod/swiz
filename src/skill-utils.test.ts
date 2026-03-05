@@ -30,18 +30,21 @@ async function createTempDir(): Promise<string> {
 // ─── SKILL_DIRS ───────────────────────────────────────────────────────────────
 
 describe("SKILL_DIRS", () => {
-  test("is an array of exactly two directories", () => {
+  test("is an array of at least 5 directories (project + 4 providers)", () => {
     expect(Array.isArray(SKILL_DIRS)).toBe(true)
-    expect(SKILL_DIRS).toHaveLength(2)
+    expect(SKILL_DIRS.length).toBeGreaterThanOrEqual(5)
   })
 
   test("first entry is the project-local .skills directory", () => {
     expect(SKILL_DIRS[0]).toContain(".skills")
   })
 
-  test("second entry is the global ~/.claude/skills directory", () => {
-    expect(SKILL_DIRS[1]).toContain(".claude")
-    expect(SKILL_DIRS[1]).toContain("skills")
+  test("includes skill directories for all providers", () => {
+    const skillDirStr = SKILL_DIRS.join(",")
+    expect(skillDirStr).toContain(".claude")
+    expect(skillDirStr).toContain(".cursor")
+    expect(skillDirStr).toContain(".gemini")
+    expect(skillDirStr).toContain(".codex")
   })
 
   test("all entries are non-empty strings", () => {
