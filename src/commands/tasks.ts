@@ -252,19 +252,20 @@ async function readTasks(sessionId: string, tasksDir = TASKS_DIR): Promise<Task[
   const dir = join(tasksDir, sessionId)
   try {
     const files = await readdir(dir)
+    const taskFiles = files.filter(
+      (f) => f.endsWith(".json") && !f.startsWith(".") && f !== "compact-snapshot.json"
+    )
     const tasks = await Promise.all(
-      files
-        .filter((f) => f.endsWith(".json") && !f.startsWith("."))
-        .map(async (f) => {
-          const filePath = join(dir, f)
-          const task = JSON.parse(await readFile(filePath, "utf-8")) as Task
-          // Backfill statusChangedAt from file mtime for legacy tasks
-          if (!task.statusChangedAt) {
-            const st = await stat(filePath)
-            task.statusChangedAt = st.mtime.toISOString()
-          }
-          return task
-        })
+      taskFiles.map(async (f) => {
+        const filePath = join(dir, f)
+        const task = JSON.parse(await readFile(filePath, "utf-8")) as Task
+        // Backfill statusChangedAt from file mtime for legacy tasks
+        if (!task.statusChangedAt) {
+          const st = await stat(filePath)
+          task.statusChangedAt = st.mtime.toISOString()
+        }
+        return task
+      })
     )
     return tasks.sort((a, b) => compareTaskIds(a.id, b.id))
   } catch {
@@ -325,7 +326,17 @@ export async function resolveTaskById(
   // matching session directly — no ambiguity possible.
   const { prefix } = parseTaskId(taskId)
   if (prefix !== null) {
-    const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
+    // First check if the primary session itself matches the prefix
+    if (sessionPrefix(primarySessionId) === prefix) {
+      const tasks = await readTasks(primarySessionId, tasksDir)
+      const task = tasks.find((t) => t.id === taskId)
+      if (task) return { sessionId: primarySessionId, task }
+    }
+
+    // Since prefix is designed to be globally unique (first 4 hex chars of UUID),
+    // search all task sessions, ignoring filterCwd (which fails for Gemini CLI
+    // sessions that lack .claude/projects/ transcripts).
+    const sessions = await getSessions(undefined, tasksDir, projectsDir)
     const matchingSession = sessions.find((s) => sessionPrefix(s) === prefix)
     if (matchingSession) {
       const tasks = await readTasks(matchingSession, tasksDir)
@@ -716,6 +727,19 @@ function extractFlag(args: string[], flag: string): string | undefined {
 
 async function resolveSession(args: string[]): Promise<string> {
   const explicit = extractFlag(args, "--session")
+
+  if (explicit) {
+    // If a session is explicitly requested, search all sessions regardless of cwd.
+    // This allows addressing tasks for non-Claude agents (e.g. Gemini) that don't
+    // generate .claude/projects/ transcripts.
+    const allSessions = await getSessions()
+    const match = allSessions.find((s) => s.startsWith(explicit))
+    if (!match) {
+      throw new Error(`Session "${explicit}" not found.`)
+    }
+    return match
+  }
+
   const allProjects = args.includes("--all-projects")
   const filterCwd = allProjects ? undefined : process.cwd()
   const sessions = await getSessions(filterCwd)
@@ -726,14 +750,6 @@ async function resolveSession(args: string[]): Promise<string> {
     } else {
       throw new Error("No task sessions found.")
     }
-  }
-
-  if (explicit) {
-    const match = sessions.find((s) => s.startsWith(explicit))
-    if (!match) {
-      throw new Error(`Session "${explicit}" not found.`)
-    }
-    return match
   }
 
   return sessions[0]!
