@@ -8,6 +8,7 @@ import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { detectAgentCli, promptAgent } from "../src/agent.ts"
+import { detectRepoOwnership } from "../src/collaboration-policy.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   extractPlainTurns,
@@ -16,8 +17,6 @@ import {
 } from "../src/transcript-utils.ts"
 import {
   blockStopRaw,
-  extractOwnerFromUrl,
-  getCurrentGitHubUser,
   getTranscriptSummary,
   git,
   hasGhCli,
@@ -306,15 +305,15 @@ async function checkRefinementNeeds(cwd: string): Promise<string> {
   if (!hasGhCli()) return ""
   if (!(await isGitHubRemote(cwd))) return ""
 
-  const remoteUrl = await git(["remote", "get-url", "origin"], cwd)
-  const owner = extractOwnerFromUrl(remoteUrl)
-  if (!owner) return ""
-
-  const currentUser = await getCurrentGitHubUser(cwd)
+  const ownership = await detectRepoOwnership(cwd)
+  if (!ownership.repoOwner) return ""
+  const currentUser = ownership.currentUser
   if (!currentUser) return ""
 
-  const isPersonalRepo = owner === currentUser
-  const allIssues = await getActionableIssues(cwd, isPersonalRepo ? undefined : currentUser)
+  const allIssues = await getActionableIssues(
+    cwd,
+    ownership.isPersonalRepo ? undefined : currentUser
+  )
   const refinementIssues = allIssues.filter((i) => needsRefinement(i))
 
   if (refinementIssues.length === 0) return ""

@@ -6,16 +6,14 @@
  * the current user has self-authored or self-assigned issues in an org repo.
  */
 
+import { detectRepoOwnership } from "../src/collaboration-policy.ts"
 import { getIssueStore, replayPendingMutations } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
-  extractOwnerFromUrl,
   getCanonicalPathHash,
-  getCurrentGitHubUser,
   getRepoSlug,
   ghJson,
-  git,
   hasGhCli,
   isGitHubRemote,
   isGitRepo,
@@ -384,15 +382,12 @@ async function main(): Promise<void> {
     // Check if already blocked within cooldown window
     if (await isInCooldown(sessionId, cwd)) return
 
-    // Extract owner from remote URL
-    const remoteUrl = await git(["remote", "get-url", "origin"], cwd)
-    const owner = extractOwnerFromUrl(remoteUrl)
-    if (!owner) return
-
-    const currentUser = await getCurrentGitHubUser(cwd)
+    const ownership = await detectRepoOwnership(cwd)
+    if (!ownership.repoOwner) return
+    const currentUser = ownership.currentUser
     if (!currentUser) return
 
-    const isPersonalRepo = owner === currentUser
+    const isPersonalRepo = ownership.isPersonalRepo
     const prs = await getOpenPRsWithFeedback(cwd, currentUser)
     const changesRequestedPRs = prs.filter((p) => p.reviewDecision === "CHANGES_REQUESTED")
     const hasChangesRequested = changesRequestedPRs.length > 0

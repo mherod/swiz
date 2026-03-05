@@ -1,11 +1,13 @@
 import { describe, expect, it } from "bun:test"
 import {
   detectProjectCollaborationPolicy,
+  detectRepoOwnership,
   evaluateCollaborationPolicy,
   filterHumanContributorLogins,
   filterHumanOpenPullRequests,
   isAutomationLogin,
   isOrgRepo,
+  isPersonalRepo,
 } from "./collaboration-policy.ts"
 
 describe("isAutomationLogin", () => {
@@ -29,6 +31,17 @@ describe("isOrgRepo", () => {
 
   it("treats same owner (case-insensitive) as personal", () => {
     expect(isOrgRepo("MHeRod", "mherod")).toBe(false)
+  })
+})
+
+describe("isPersonalRepo", () => {
+  it("returns true for same owner and user (case-insensitive)", () => {
+    expect(isPersonalRepo("MHeRod", "mherod")).toBe(true)
+  })
+
+  it("returns false for organization or unresolved ownership", () => {
+    expect(isPersonalRepo("swiz-org", "mherod")).toBe(false)
+    expect(isPersonalRepo(null, "mherod")).toBe(false)
   })
 })
 
@@ -142,5 +155,29 @@ describe("detectProjectCollaborationPolicy", () => {
 
     expect(result.resolved).toBe(false)
     expect(result.isCollaborative).toBe(false)
+  })
+})
+
+describe("detectRepoOwnership", () => {
+  it("resolves personal ownership from repo slug and current user", async () => {
+    const result = await detectRepoOwnership("/tmp/repo", {
+      gh: async (args) => (args.join(" ") === "api user --jq .login" ? "mherod" : ""),
+      getRepoSlug: async () => "mherod/swiz",
+    })
+
+    expect(result.resolved).toBe(true)
+    expect(result.repoOwner).toBe("mherod")
+    expect(result.repoName).toBe("swiz")
+    expect(result.isPersonalRepo).toBe(true)
+  })
+
+  it("marks unresolved ownership when owner or user cannot be determined", async () => {
+    const result = await detectRepoOwnership("/tmp/repo", {
+      gh: async () => "",
+      getRepoSlug: async () => "mherod/swiz",
+    })
+
+    expect(result.resolved).toBe(false)
+    expect(result.isPersonalRepo).toBe(false)
   })
 })

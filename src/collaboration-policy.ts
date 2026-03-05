@@ -34,12 +34,27 @@ interface CollaborationDetectionDependencies {
   ghJson?: <T>(args: string[], cwd: string) => Promise<T | null>
 }
 
+export type DetectRepoOwnershipOptions = Pick<
+  CollaborationDetectionDependencies,
+  "getRepoSlug" | "gh"
+>
+
 export interface DetectProjectCollaborationOptions extends CollaborationDetectionDependencies {
   nowMs?: number
 }
 
+export interface RepoOwnershipDetectionResult {
+  currentUser: string | null
+  isPersonalRepo: boolean
+  repoName: string | null
+  repoOwner: string | null
+  repoSlug: string | null
+  resolved: boolean
+}
+
 export interface ProjectCollaborationDetectionResult extends CollaborationPolicyResult {
   currentUser: string | null
+  isPersonalRepo: boolean
   repoName: string | null
   repoOwner: string | null
   repoSlug: string | null
@@ -154,12 +169,16 @@ function splitRepoSlug(repoSlug: string | null): { owner: string | null; repoNam
   return { owner, repoName }
 }
 
-export async function detectProjectCollaborationPolicy(
+export function isPersonalRepo(repoOwner: string | null, currentUser: string | null): boolean {
+  if (!repoOwner || !currentUser) return false
+  return !isOrgRepo(repoOwner, currentUser)
+}
+
+export async function detectRepoOwnership(
   cwd: string,
-  options: DetectProjectCollaborationOptions = {}
-): Promise<ProjectCollaborationDetectionResult> {
+  options: DetectRepoOwnershipOptions = {}
+): Promise<RepoOwnershipDetectionResult> {
   const ghRunner = options.gh ?? gh
-  const ghJsonRunner = options.ghJson ?? ghJson
   const repoSlugResolver = options.getRepoSlug ?? getRepoSlug
 
   const [repoSlug, currentUserRaw] = await Promise.all([
@@ -170,12 +189,32 @@ export async function detectProjectCollaborationPolicy(
   const currentUser = currentUserRaw || null
   const { owner: repoOwner, repoName } = splitRepoSlug(repoSlug)
 
+  return {
+    currentUser,
+    isPersonalRepo: isPersonalRepo(repoOwner, currentUser),
+    repoName,
+    repoOwner,
+    repoSlug,
+    resolved: repoOwner !== null && currentUser !== null,
+  }
+}
+
+export async function detectProjectCollaborationPolicy(
+  cwd: string,
+  options: DetectProjectCollaborationOptions = {}
+): Promise<ProjectCollaborationDetectionResult> {
+  const ownership = await detectRepoOwnership(cwd, options)
+  const ghRunner = options.gh ?? gh
+  const ghJsonRunner = options.ghJson ?? ghJson
+
   const [openPullRequestsResult, commitsResult] = await Promise.all([
     ghJsonRunner<OpenPullRequest[]>(
       ["pr", "list", "--state", "open", "--json", "number,author", "--limit", "10"],
       cwd
     ),
-    repoSlug ? ghJsonRunner<GitHubCommit[]>(["api", `repos/${repoSlug}/commits`], cwd) : null,
+    ownership.repoSlug
+      ? ghJsonRunner<GitHubCommit[]>(["api", `repos/${ownership.repoSlug}/commits`], cwd)
+      : null,
   ])
 
   const dayAgoMs = (options.nowMs ?? Date.now()) - 24 * 60 * 60 * 1000
@@ -188,20 +227,21 @@ export async function detectProjectCollaborationPolicy(
       .map((commit) => commit.author?.login ?? null) ?? []
 
   const policy = evaluateCollaborationPolicy({
-    currentUser,
+    currentUser: ownership.currentUser,
     openPullRequests: openPullRequestsResult ?? [],
     recentContributorLogins,
-    repoOwner,
+    repoOwner: ownership.repoOwner,
   })
 
-  const resolved = currentUser !== null && openPullRequestsResult !== null && commitsResult !== null
+  const resolved = ownership.resolved && openPullRequestsResult !== null && commitsResult !== null
 
   return {
     ...policy,
-    currentUser,
-    repoName,
-    repoOwner,
-    repoSlug,
+    currentUser: ownership.currentUser,
+    isPersonalRepo: ownership.isPersonalRepo,
+    repoName: ownership.repoName,
+    repoOwner: ownership.repoOwner,
+    repoSlug: ownership.repoSlug,
     resolved,
   }
 }
