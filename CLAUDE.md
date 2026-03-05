@@ -147,7 +147,12 @@ Session-to-project mapping is resolved by scanning `~/.claude/projects/` transcr
 
 **DO** keep at least one `pending` or `in_progress` task before running `git add` or `git commit`. The `pretooluse-require-tasks.ts` hook blocks `Edit`, `Write`, and `Bash` when no incomplete task exists. Mark the commit task `completed` only after the commit succeeds.
 
-**DO** invoke the `/commit` skill before running `git commit`. A PreToolUse hook (`pretooluse-commit-skill-gate`) blocks `git commit` if the `/commit` skill has not been invoked in the current session. Always call `/commit` first — the skill enforces branch checks, task preflight, and message format before the commit runs.
+**DO** invoke the `/commit` skill **BEFORE** running `git commit`. This is non-negotiable. The `pretooluse-commit-skill-gate` hook blocks any `git commit` command if `/commit` has not been invoked in the current session. The skill enforces three critical checks:
+1. **Branch verification** — ensures you're on the correct branch (feature branch or main)
+2. **Task preflight** — validates at least one incomplete task exists (prevents untracked work)
+3. **Conventional Commits format** — enforces `<type>(<scope>): <summary>` message structure
+
+Attempting `git commit` directly without `/commit` will be blocked by the PreToolUse hook. Do not try to bypass this — fix the underlying issue instead. Always: **invoke `/commit` skill → review and approve → run git commands**.
 
 **DO** run `git branch --show-current` early in every session before the first `git commit`. The `pretooluse-commit-skill-gate` hook requires a branch check in the transcript before allowing `git commit`. Run it during initial orientation (alongside `git status`) so it's already satisfied when committing later.
 
