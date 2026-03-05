@@ -64,6 +64,7 @@ alwaysApply: false
 - For workflow enforcement, scan `transcript_path` for reminder and completion evidence instead of extra state files/flags.
 - Pattern: `pretooluse-update-memory-enforcement.ts` requires transcript evidence of reading `update-memory/SKILL.md` and writing a `.md` file (for example `CLAUDE.md`) before unblocking.
 - Memory-reminder text must include explicit trigger cause.
+- Cross-repo issue guidance is consolidated in `buildIssueGuidance()` in `hook-utils.ts`. All sandbox enforcement hooks (pretooluse-protect-sandbox, pretooluse-sandboxed-edits) delegate to this function rather than inlining guidance text. Supports both generic guidance (`buildIssueGuidance(null)`) and cross-repo with hostname detection (`buildIssueGuidance(repo, { crossRepo: true, hostname })`) — single source of truth prevents message duplication.
 ## Task Data
 - Task storage: `~/.claude/tasks/<session-id>/<id>.json`; audit log: `~/.claude/tasks/<session-id>/.audit-log.jsonl`.
 - Session-to-project mapping resolves from `~/.claude/projects/` transcript `cwd` fields.
