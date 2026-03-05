@@ -7,8 +7,10 @@ import { blockStop, git, isGitRepo, type StopHookInput } from "./hook-utils.ts"
 
 const LOCKFILE_MAP: Record<string, string> = {
   "pnpm-lock.yaml": "pnpm install",
+  "shrinkwrap.yaml": "pnpm install",
   "yarn.lock": "yarn install",
   "package-lock.json": "npm install",
+  "npm-shrinkwrap.json": "npm install",
 }
 
 async function main(): Promise<void> {

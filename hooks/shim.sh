@@ -29,9 +29,9 @@ _swiz_detect_pm() {
   local dir="$PWD"
   while true; do
     [[ -f "$dir/bun.lockb" || -f "$dir/bun.lock" ]] && { echo "bun"; return; }
-    [[ -f "$dir/pnpm-lock.yaml" ]] && { echo "pnpm"; return; }
-    [[ -f "$dir/yarn.lock" ]] && { echo "yarn"; return; }
-    [[ -f "$dir/package-lock.json" ]] && { echo "npm"; return; }
+    [[ -f "$dir/pnpm-lock.yaml" || -f "$dir/shrinkwrap.yaml" ]] && { echo "pnpm"; return; }
+    [[ -f "$dir/yarn.lock" || -f "$dir/.pnp.cjs" || -f "$dir/.pnp.js" ]] && { echo "yarn"; return; }
+    [[ -f "$dir/package-lock.json" || -f "$dir/npm-shrinkwrap.json" ]] && { echo "npm"; return; }
     local parent
     parent="$(command dirname "$dir")"
     [[ "$parent" == "$dir" ]] && break

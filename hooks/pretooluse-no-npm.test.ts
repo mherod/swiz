@@ -118,6 +118,11 @@ describe("pretooluse-no-npm (bun project)", () => {
       const result = await runHook("bun run dev")
       expect(result.stdout).toBe("")
     })
+
+    test("pnpm install also passes through (plausible alternative)", async () => {
+      const result = await runHook("pnpm install")
+      expect(result.stdout).toBe("")
+    })
   })
 
   describe("non-shell tools are ignored", () => {
@@ -141,6 +146,13 @@ describe("pretooluse-no-npm (bun project)", () => {
       const result = await runHook("npm install", { cwd: dir })
       expect(result.decision).toBe("deny")
       expect(result.reason).toContain("pnpm")
+    })
+
+    test("bun runtime command in pnpm project passes through", async () => {
+      const dir = await makeTempDir()
+      await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: 9.0\n")
+      const result = await runHook("bun ~/.claude/hooks/tasks-list.ts --check", { cwd: dir })
+      expect(result.stdout).toBe("")
     })
   })
 })

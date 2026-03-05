@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-// PreToolUse hook: Redirect wrong package managers to the project's preferred one.
-// Detects bun/pnpm/yarn/npm from lockfiles and blocks all others.
+// PreToolUse hook: Redirect only implausible package-manager usage.
+// Main guardrail: prevent blind npm/npx usage when project signals indicate a non-npm setup.
 
 import {
   denyPreToolUse,
@@ -84,7 +84,7 @@ const CMD: Record<PackageManager, CmdMap> = {
 function deny(from: string, to: string): void {
   const pmLabel = PM ?? "the project's package manager"
   denyPreToolUse(
-    `Use ${pmLabel} instead. This project uses ${pmLabel} (detected from lockfile).\n\n` +
+    `Use ${pmLabel} instead. Project signals suggest ${pmLabel} is the expected package manager.\n\n` +
       `  ${from}  →  ${to}`
   )
 }
@@ -109,12 +109,27 @@ function classifySubcmd(subcmd: string, args: string): keyof CmdMap | null {
   return null
 }
 
+/**
+ * Decide whether this invocation is implausible enough to redirect.
+ *
+ * We intentionally focus on npm/npx because accidental npm usage is the most
+ * common lockfile-drift source. bun/pnpm are generally acceptable choices in
+ * modern repos and should not be hard-redirected by default.
+ */
+function isImplausibleInvocation(invoked: string): boolean {
+  if (!PM) return false
+  if (invoked === "npm" || invoked === "npx") return PM !== "npm"
+  // Yarn is usually implausible in bun/pnpm projects.
+  if (invoked === "yarn") return PM === "bun" || PM === "pnpm"
+  return false
+}
+
 const input = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 
 const command: string = input?.tool_input?.command ?? ""
 
-// No lockfile found — can't enforce, allow everything
+// No PM signal found — can't enforce, allow everything
 if (!PM) process.exit(0)
 
 const target = CMD[PM]
@@ -127,10 +142,8 @@ const invoked = (m[1] ?? "").toLowerCase()
 const subcmd = m[2]?.toLowerCase() ?? ""
 const rest = m[3]?.trim() ?? ""
 
-// If they're using the project's PM, allow it
-if (invoked === PM) process.exit(0)
-if (PM === "bun" && (invoked === "bun" || invoked === "bunx")) process.exit(0)
-if (PM === "pnpm" && invoked === "pnpx") process.exit(0)
+// Only redirect when the invoked PM is actually implausible for this project.
+if (!isImplausibleInvocation(invoked)) process.exit(0)
 
 // Package runners: npx/pnpx/bunx/yarn dlx
 if (invoked === "npx" || invoked === "pnpx" || invoked === "bunx") {
@@ -145,5 +158,5 @@ if (kind) {
   deny(fromCmd, target[kind])
 }
 
-// Catch-all
+// Catch-all for implausible invocations with unknown subcommands.
 deny(`${invoked} ${subcmd}`, `${PM} ${subcmd}`)

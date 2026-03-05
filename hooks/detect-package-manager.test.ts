@@ -188,6 +188,8 @@ describe("detectPackageManager — detection priority", () => {
     await writeFile(join(dir, "bun.lock"), "")
     await writeFile(join(dir, "pnpm-lock.yaml"), "")
     await writeFile(join(dir, "package-lock.json"), "{}")
+    await writeFile(join(dir, "npm-shrinkwrap.json"), "{}")
+    await writeFile(join(dir, ".pnp.cjs"), "")
     const result = await npmDecisionInDir(dir)
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("yarn") // packageManager field is used
@@ -273,11 +275,11 @@ describe("detectPackageManager — bun lockfiles", () => {
     expect(result.reason).toContain("bun")
   })
 
-  test("bun.lock → pnpm install is blocked", async () => {
+  test("bun.lock → pnpm install remains allowed (plausible alternative)", async () => {
     const dir = await makeTempDir("-bunlock-pnpm")
     await writeFile(join(dir, "bun.lock"), "")
     const decision = await pnpmDecisionInDir(dir)
-    expect(decision).toBe("deny")
+    expect(decision).toBeUndefined()
   })
 })
 
@@ -300,12 +302,35 @@ describe("detectPackageManager — pnpm / yarn / npm", () => {
     expect(result.reason).toContain("yarn")
   })
 
+  test("shrinkwrap.yaml → pnpm detected, npm blocked", async () => {
+    const dir = await makeTempDir("-pnpm-shrinkwrap")
+    await writeFile(join(dir, "shrinkwrap.yaml"), "lockfileVersion: 6.0\n")
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm")
+  })
+
+  test(".pnp.cjs → yarn detected, npm blocked", async () => {
+    const dir = await makeTempDir("-yarn-pnp")
+    await writeFile(join(dir, ".pnp.cjs"), "module.exports = {};\n")
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("yarn")
+  })
+
   test("package-lock.json → npm detected, npm install is allowed", async () => {
     const dir = await makeTempDir("-npm")
     await writeFile(join(dir, "package-lock.json"), "{}")
     // npm is the project PM → hook should pass npm through
     const result = await npmDecisionInDir(dir)
     expect(result.decision).toBeUndefined() // allowed = no output
+  })
+
+  test("npm-shrinkwrap.json → npm detected, npm install is allowed", async () => {
+    const dir = await makeTempDir("-npm-shrinkwrap")
+    await writeFile(join(dir, "npm-shrinkwrap.json"), "{}")
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBeUndefined()
   })
 })
 
@@ -355,9 +380,9 @@ describe("detectPackageManager — conflicting lockfiles in same directory", () 
     await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: 9.0\n")
     const result = await npmDecisionInDir(dir)
     expect(result.reason).toContain("bun")
-    // pnpm install should also be blocked (bun is PM, not pnpm)
+    // pnpm install should pass through (treated as plausible alternative)
     const pnpmDecision = await pnpmDecisionInDir(dir)
-    expect(pnpmDecision).toBe("deny")
+    expect(pnpmDecision).toBeUndefined()
   })
 
   test("pnpm-lock.yaml + yarn.lock → pnpm wins", async () => {
@@ -375,6 +400,15 @@ describe("detectPackageManager — conflicting lockfiles in same directory", () 
     const result = await npmDecisionInDir(dir)
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("yarn")
+  })
+
+  test("shrinkwrap.yaml + npm-shrinkwrap.json → pnpm wins", async () => {
+    const dir = await makeTempDir("-conflict-pnpm-npm")
+    await writeFile(join(dir, "shrinkwrap.yaml"), "lockfileVersion: 6.0\n")
+    await writeFile(join(dir, "npm-shrinkwrap.json"), "{}")
+    const result = await npmDecisionInDir(dir)
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("pnpm")
   })
 
   test("bun.lockb + bun.lock → both detect bun (either file is sufficient)", async () => {

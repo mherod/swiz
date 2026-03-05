@@ -99,20 +99,27 @@ export function detectPackageManager(): PackageManager | null {
       }
     }
 
-    // Tertiary: Check for lock files (existing behavior)
+    // Tertiary: Check for lockfile signals
     if (existsSync(join(dir, "bun.lockb")) || existsSync(join(dir, "bun.lock"))) {
       _pmCache = "bun"
       return _pmCache
     }
-    if (existsSync(join(dir, "pnpm-lock.yaml"))) {
+    if (existsSync(join(dir, "pnpm-lock.yaml")) || existsSync(join(dir, "shrinkwrap.yaml"))) {
       _pmCache = "pnpm"
       return _pmCache
     }
-    if (existsSync(join(dir, "yarn.lock"))) {
+    if (
+      existsSync(join(dir, "yarn.lock")) ||
+      existsSync(join(dir, ".pnp.cjs")) ||
+      existsSync(join(dir, ".pnp.js"))
+    ) {
       _pmCache = "yarn"
       return _pmCache
     }
-    if (existsSync(join(dir, "package-lock.json"))) {
+    if (
+      existsSync(join(dir, "package-lock.json")) ||
+      existsSync(join(dir, "npm-shrinkwrap.json"))
+    ) {
       _pmCache = "npm"
       return _pmCache
     }
