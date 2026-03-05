@@ -189,6 +189,8 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
   launchAsyncHooks(groups, payloadStr)
   const cwd = extractCwd(payloadStr)
   const hints: string[] = []
+  const finalResponse = {}
+
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
@@ -205,8 +207,8 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
       if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
       if (resp && isDeny(resp)) {
         log(`   ✗ DENY from ${hook.file}`)
-        process.stdout.write(`${JSON.stringify(resp)}\n`)
-        return
+        Object.assign(finalResponse, resp)
+        break
       }
       if (resp && isAllowWithReason(resp)) {
         const reason = extractAllowReason(resp)
@@ -218,29 +220,33 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
       }
       log(`   ✓ ${hook.file} (${resp ? "allow" : "no output"})`)
     }
+    if (isDeny(finalResponse)) break
   }
-  // Forward collected hints as a single allow-with-reason response
-  if (hints.length > 0) {
-    log(`   result: passed with ${hints.length} hint(s)`)
-    process.stdout.write(
-      `${JSON.stringify({
+
+  if (!isDeny(finalResponse)) {
+    if (hints.length > 0) {
+      log(`   result: passed with ${hints.length} hint(s)`)
+      Object.assign(finalResponse, {
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
           permissionDecision: "allow",
           permissionDecisionReason: hints.join("\n\n"),
         },
-      })}\n`
-    )
-    return
+      })
+    } else {
+      log(`   result: all passed`)
+    }
   }
-  log(`   result: all passed`)
-  process.stdout.write(`{}\n`)
+
+  process.stdout.write(`${JSON.stringify(finalResponse)}\n`)
 }
 
 /** Stop / PostToolUse: short-circuit and forward the first block. */
 export async function runBlocking(groups: HookGroup[], payloadStr: string): Promise<void> {
   launchAsyncHooks(groups, payloadStr)
   const cwd = extractCwd(payloadStr)
+  const finalResponse = { continue: true }
+
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
@@ -257,15 +263,19 @@ export async function runBlocking(groups: HookGroup[], payloadStr: string): Prom
       if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
       if (resp && isBlock(resp)) {
         log(`   ✗ BLOCK from ${hook.file}`)
-        process.stdout.write(`${JSON.stringify(resp)}\n`)
-        return
+        Object.assign(finalResponse, resp, { continue: false })
+        break
       }
       log(`   ✓ ${hook.file} (${resp ? "ok" : "no output"})`)
     }
+    if (finalResponse.continue === false) break
   }
-  log(`   result: all passed`)
-  // Emitting an empty JSON object tells the CLI everything is fine.
-  process.stdout.write(`{}\n`)
+
+  if (finalResponse.continue) {
+    log(`   result: all passed`)
+  }
+
+  process.stdout.write(`${JSON.stringify(finalResponse)}\n`)
 }
 
 /** SessionStart / UserPromptSubmit: run all hooks, merge additionalContext. */
@@ -304,17 +314,20 @@ export async function runContext(
       }
     }
   }
+
+  const finalResponse = {}
+
   if (contexts.length === 0) {
     log(`   result: no contexts to merge`)
-    process.stdout.write(`{}\n`)
-    return
+  } else {
+    log(`   result: merged ${contexts.length} context(s), hookEventName=${eventName}`)
+    Object.assign(finalResponse, {
+      hookSpecificOutput: {
+        hookEventName: eventName,
+        additionalContext: contexts.join("\n\n"),
+      },
+    })
   }
-  const output = JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: eventName,
-      additionalContext: contexts.join("\n\n"),
-    },
-  })
-  log(`   result: merged ${contexts.length} context(s), hookEventName=${eventName}`)
-  process.stdout.write(`${output}\n`)
+
+  process.stdout.write(`${JSON.stringify(finalResponse)}\n`)
 }
