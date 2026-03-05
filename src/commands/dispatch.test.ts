@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 // Test dispatch end-to-end by running swiz dispatch with different payloads
 
@@ -36,6 +39,17 @@ async function dispatch(
     parsed = JSON.parse(stdout.trim())
   } catch {}
   return { stdout: stdout.trim(), stderr, exitCode: proc.exitCode, parsed }
+}
+
+function runGit(cwd: string, args: string[]): void {
+  const proc = Bun.spawnSync(["git", ...args], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  if (proc.exitCode !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${proc.stderr.toString().trim()}`)
+  }
 }
 
 describe("dispatch preToolUse", () => {
@@ -232,5 +246,44 @@ describe("dispatch replay", () => {
     expect(parsed.strategy).toBe("blocking")
     expect(typeof parsed.matched_groups).toBe("number")
     expect(Array.isArray(parsed.hooks)).toBe(true)
+  })
+
+  test("stop replay continues after first block and still runs stop-git-status", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "swiz-stop-replay-"))
+    try {
+      runGit(repoDir, ["init"])
+      runGit(repoDir, ["config", "user.email", "swiz-tests@example.com"])
+      runGit(repoDir, ["config", "user.name", "Swiz Tests"])
+
+      // Secret scanner should block on this committed token pattern.
+      await writeFile(
+        join(repoDir, "secrets.ts"),
+        'export const token = "sk_live_123456789012345678901234";\n'
+      )
+      runGit(repoDir, ["add", "secrets.ts"])
+      runGit(repoDir, ["commit", "-m", "test: add committed secret fixture"])
+
+      const result = await replay("stop", { session_id: "replay-stop-all-hooks", cwd: repoDir }, [
+        "--json",
+      ])
+      expect(result.exitCode).toBe(0)
+
+      const parsed = JSON.parse(result.stdout) as Record<string, unknown>
+      const hooks = parsed.hooks as Array<Record<string, unknown>>
+      expect(Array.isArray(hooks)).toBe(true)
+
+      const secretIndex = hooks.findIndex((h) => h.file === "stop-secret-scanner.ts")
+      const gitStatusIndex = hooks.findIndex((h) => h.file === "stop-git-status.ts")
+
+      expect(secretIndex).toBeGreaterThanOrEqual(0)
+      expect(gitStatusIndex).toBeGreaterThan(secretIndex)
+      expect(hooks[secretIndex]?.status).toBe("block")
+
+      const resultField = parsed.result as Record<string, unknown>
+      expect(resultField.blocked).toBe(true)
+      expect(resultField.by).toBe("stop-secret-scanner.ts")
+    } finally {
+      await rm(repoDir, { recursive: true, force: true })
+    }
   })
 })

@@ -241,7 +241,7 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
   process.stdout.write(`${JSON.stringify(finalResponse)}\n`)
 }
 
-/** Stop / PostToolUse: short-circuit and forward the first block. */
+/** Stop / PostToolUse: forward first block; stop runs all hooks, postToolUse short-circuits. */
 export async function runBlocking(
   groups: HookGroup[],
   payloadStr: string,
@@ -249,6 +249,7 @@ export async function runBlocking(
 ): Promise<void> {
   launchAsyncHooks(groups, payloadStr)
   const cwd = extractCwd(payloadStr)
+  const runAllHooks = canonicalEvent === "stop"
   const finalResponse: Record<string, unknown> = {}
 
   for (const group of groups) {
@@ -267,13 +268,14 @@ export async function runBlocking(
       if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
       if (resp && isBlock(resp)) {
         log(`   ✗ BLOCK from ${hook.file}`)
-        // Pass the block response exactly as the hook produced it.
-        Object.assign(finalResponse, resp)
-        break
+        // Keep the first block response exactly as produced.
+        if (!isBlock(finalResponse)) Object.assign(finalResponse, resp)
+        if (!runAllHooks) break
+        continue
       }
       log(`   ✓ ${hook.file} (${resp ? "ok" : "no output"})`)
     }
-    if (isBlock(finalResponse)) break
+    if (!runAllHooks && isBlock(finalResponse)) break
   }
 
   if (!isBlock(finalResponse)) {

@@ -74,12 +74,14 @@ export async function replayPreToolUse(
   return traces
 }
 
-/** Replay blocking (Stop/PostToolUse) with trace collection: short-circuit on first block. */
+/** Replay blocking (Stop/PostToolUse): stop runs all hooks; postToolUse short-circuits on first block. */
 export async function replayBlocking(
   groups: HookGroup[],
-  payloadStr: string
+  payloadStr: string,
+  canonicalEvent?: string
 ): Promise<TraceEntry[]> {
   const traces: TraceEntry[] = []
+  const runAllHooks = canonicalEvent === "stop"
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
@@ -101,7 +103,8 @@ export async function replayBlocking(
         entry.status = "block"
         entry.output = JSON.stringify(resp)
         traces.push(entry)
-        return traces // Short-circuit on block
+        if (!runAllHooks) return traces // Short-circuit on block for non-stop events
+        continue
       }
       entry.status = resp ? "ok" : "no-output"
       traces.push(entry)

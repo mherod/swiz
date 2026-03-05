@@ -165,7 +165,7 @@ export const dispatchCommand: Command = {
           traces = await replayPreToolUse(filteredGroups, payloadStr)
           break
         case "blocking":
-          traces = await replayBlocking(filteredGroups, payloadStr)
+          traces = await replayBlocking(filteredGroups, payloadStr, canonicalEvent)
           break
         case "context":
           traces = await replayContext(filteredGroups, payloadStr)
