@@ -326,7 +326,7 @@ export const memoryCommand: Command = {
     // Read thresholds from project and user settings
     const projectSettings = await readProjectSettings(targetDir)
     const userSettings = await readSwizSettings({ strict: false })
-    const thresholds = resolveMemoryThresholds(
+    const projectThresholds = resolveMemoryThresholds(
       projectSettings,
       {
         memoryLineThreshold: userSettings?.memoryLineThreshold,
@@ -338,14 +338,33 @@ export const memoryCommand: Command = {
       }
     )
 
+    // Global thresholds use user settings + defaults only (no project override)
+    const globalThresholds = resolveMemoryThresholds(
+      {},
+      {
+        memoryLineThreshold: userSettings?.memoryLineThreshold,
+        memoryWordThreshold: userSettings?.memoryWordThreshold,
+      },
+      {
+        memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
+        memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
+      }
+    )
+
+    const globalHome = getProviderHome(agent)
+
     console.log(
       `  ${BOLD}Rule hierarchy${RESET} ${DIM}(${existingCount}/${sources.length} files present)${RESET}\n`
     )
     console.log(
-      `  ${DIM}Thresholds: ${thresholds.memoryLineThreshold} lines · ${thresholds.memoryWordThreshold} words${RESET}\n`
+      `  ${DIM}Thresholds: ${projectThresholds.memoryLineThreshold} lines · ${projectThresholds.memoryWordThreshold} words${RESET}\n`
     )
 
     for (const [i, source] of sources.entries()) {
+      // Use global thresholds for sources in the global home directory
+      const isGlobal = source.path.startsWith(globalHome)
+      const thresholds = isGlobal ? globalThresholds : projectThresholds
+
       await printSource(source, i, {
         lines: thresholds.memoryLineThreshold,
         words: thresholds.memoryWordThreshold,
