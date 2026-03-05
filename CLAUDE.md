@@ -87,6 +87,7 @@ alwaysApply: false
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
 - For push verification task completion use evidence, for example: `swiz tasks complete <id> --evidence "note:CI green — conclusion: success, run <run-id>"`.
+- **Task completion verifier-compliant format**: The completion command requires evidence text (second positional argument) to start with the task subject for verification. Correct: `bun ~/.claude/hooks/tasks-list.ts --complete 587 "Task subject exactly as stored" --session <id> --evidence "note:actual evidence content"`. The subject ensures you're completing the correct task; always match it exactly from `TaskList` output. This requirement is enforced by the task verifier to prevent completing the wrong task with unrelated evidence.
 - Mark tasks complete immediately at work completion.
 - Treat `gh issue create` and task completion as atomic; if missed, recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.
 - Run `git diff <files>` before `git add`.
