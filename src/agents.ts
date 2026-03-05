@@ -110,7 +110,6 @@ export const AGENTS: AgentDef[] = [
       Grep: "grep_search",
       Glob: "glob",
       Task: "write_todos",
-      TaskWrite: "write_todos",
       TaskCreate: "write_todos",
       TaskUpdate: "write_todos",
       NotebookEdit: "NotebookEdit", // no equivalent
@@ -144,7 +143,6 @@ export const AGENTS: AgentDef[] = [
       Grep: "grep_files",
       Glob: "list_dir",
       Task: "update_plan",
-      TaskWrite: "update_plan",
       TaskCreate: "update_plan",
       TaskUpdate: "update_plan",
       NotebookEdit: "apply_patch",
