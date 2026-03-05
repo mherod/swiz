@@ -258,7 +258,7 @@ describe("dispatch replay", () => {
       // Secret scanner should block on this committed token pattern.
       await writeFile(
         join(repoDir, "secrets.ts"),
-        'export const token = "sk_live_123456789012345678901234";\n'
+        'export const token = "sk_live_<PLACEHOLDER_STRIPE_KEY>";\n'
       )
       runGit(repoDir, ["add", "secrets.ts"])
       runGit(repoDir, ["commit", "-m", "test: add committed secret fixture"])
