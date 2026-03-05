@@ -362,10 +362,12 @@ Session-scoped task management with audit logging.
 swiz tasks                                  # list tasks for current project
 swiz tasks --all-projects                   # list across all projects
 swiz tasks create "subject" "description"   # create a task
-swiz tasks complete <id> --evidence "text"  # complete with evidence (required)
+swiz tasks complete <id> --evidence "text"  # complete with evidence (required, auto-verifies subject)
 swiz tasks status <id> in_progress          # update status
 swiz tasks complete-all                     # bulk-complete remaining
 ```
+
+**Auto-verify**: When completing a task, the subject is automatically verified against the task's actual subject to prevent accidental completion of the wrong task. You can override this with `--verify <custom-text>` if needed.
 
 ### `swiz dispatch`
 

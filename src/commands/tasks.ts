@@ -873,8 +873,15 @@ export const tasksCommand: Command = {
           throw new Error("Usage: swiz tasks complete <task-id> --evidence TEXT [--verify TEXT]")
         }
         const evidence = extractFlag(rest, "--evidence")
-        const verify = extractFlag(rest, "--verify")
+        let verify = extractFlag(rest, "--verify")
         const sessionId = await resolveSession(rest.slice(1))
+
+        // Auto-verify: if no explicit --verify was provided, extract and use task subject
+        if (!verify) {
+          const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
+          verify = task.subject
+        }
+
         await updateStatus(sessionId, taskId, "completed", evidence, verify, filterCwd)
         break
       }
