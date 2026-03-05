@@ -33,6 +33,21 @@ describe("task formatting helpers", () => {
     )
   })
 
+  test("formatTaskList truncates long subjects when subjectMaxLength is set", () => {
+    const text = formatTaskList(
+      [
+        {
+          id: "1",
+          status: "pending",
+          subject: "This subject is intentionally very long for truncation",
+        },
+      ],
+      { subjectMaxLength: 20 }
+    )
+
+    expect(text).toBe("  • #1 [pending]: This subject is i...")
+  })
+
   test("formatTaskCompleteCommand renders a single command", () => {
     expect(formatTaskCompleteCommand("<id>", "session-123", "note:done")).toBe(
       'swiz tasks complete <id> --session session-123 --evidence "note:done"'

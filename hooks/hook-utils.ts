@@ -607,6 +607,16 @@ export interface FormatTaskListOptions {
   limit?: number
   overflowLabel?: string
   indent?: string
+  subjectMaxLength?: number
+}
+
+function truncateTaskSubject(subject: string, maxLength: number | undefined): string {
+  if (typeof maxLength !== "number" || !Number.isFinite(maxLength)) return subject
+  const safeMax = Math.max(0, Math.floor(maxLength))
+  if (safeMax === 0) return ""
+  if (subject.length <= safeMax) return subject
+  if (safeMax <= 3) return subject.slice(0, safeMax)
+  return `${subject.slice(0, safeMax - 3)}...`
 }
 
 /**
@@ -620,8 +630,14 @@ export function formatTaskList(
   if (tasks.length === 0) return ""
   const indent = options.indent ?? "  "
   const limit = options.limit ?? tasks.length
+  const subjectMaxLength = options.subjectMaxLength
   const { visible, remaining } = limitItems(tasks, limit)
-  const lines = visible.map((t) => `${indent}• #${t.id} [${t.status}]: ${t.subject}`).join("\n")
+  const lines = visible
+    .map(
+      (t) =>
+        `${indent}• #${t.id} [${t.status}]: ${truncateTaskSubject(t.subject, subjectMaxLength)}`
+    )
+    .join("\n")
   if (remaining === 0) return lines
   const overflowLabel = options.overflowLabel ?? "task(s)"
   return `${lines}\n${indent}... ${remaining} more ${overflowLabel}`

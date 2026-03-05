@@ -6,7 +6,7 @@
  * Tests create real git repos, task files, and JSONL transcripts as needed.
  */
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
@@ -566,6 +566,53 @@ describe("posttooluse-prettier-ts: positive paths", () => {
   })
 })
 
+describe("precompact-task-snapshot: positive paths", () => {
+  const HOOK = "hooks/precompact-task-snapshot.ts"
+
+  test("writes bounded summary metadata for compact resume", async () => {
+    const home = await createTempDir()
+    const sessionId = `precompact-${Date.now()}`
+    await createTaskFile(home, sessionId, {
+      id: "1",
+      subject: "Completed migration and verified rollout",
+      status: "completed",
+    })
+    await createTaskFile(home, sessionId, {
+      id: "2",
+      subject: `Implement extremely long follow-up action ${"x".repeat(220)}`,
+      status: "in_progress",
+    })
+    await createTaskFile(home, sessionId, {
+      id: "3",
+      subject: "Decision: choose storage adapter for transcript compression fallback",
+      status: "pending",
+    })
+
+    const r = await runHook(HOOK, { session_id: sessionId }, { HOME: home })
+    expect(r.exitCode).toBe(0)
+
+    const snapshotPath = join(home, ".claude", "tasks", sessionId, "compact-snapshot.json")
+    const snapshot = JSON.parse(await readFile(snapshotPath, "utf8")) as {
+      summary?: {
+        completedCount: number
+        incompleteCount: number
+        completedHighlights: string[]
+        nextActions: string[]
+        openDecisions: string[]
+      }
+    }
+
+    expect(snapshot.summary).toBeDefined()
+    expect(snapshot.summary?.completedCount).toBe(1)
+    expect(snapshot.summary?.incompleteCount).toBe(2)
+    expect(snapshot.summary?.nextActions.length).toBeGreaterThan(0)
+    for (const item of snapshot.summary?.nextActions ?? []) {
+      expect(item.length).toBeLessThanOrEqual(96)
+    }
+    expect((snapshot.summary?.openDecisions ?? []).join(" ")).toContain("Decision")
+  })
+})
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SessionStart hooks: positive paths — context injection
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -729,6 +776,44 @@ describe("sessionstart-compact-context: positive paths", () => {
     expect(ctx).not.toContain("Task four")
     expect(ctx).not.toContain("Task five")
     expect(ctx).toContain("... 2 more incomplete task(s)")
+  })
+
+  test("caps total compact context size with explicit truncation marker", async () => {
+    const home = await createTempDir()
+    const sessionId = `compact-test-${Date.now()}`
+    const tasksDir = join(home, ".claude", "tasks", sessionId)
+    await mkdir(tasksDir, { recursive: true })
+
+    await writeFile(
+      join(tasksDir, "compact-snapshot.json"),
+      JSON.stringify(
+        {
+          sessionId,
+          compactedAt: new Date().toISOString(),
+          tasks: [{ id: "1", subject: "Task", status: "pending" }],
+          summary: {
+            completedCount: 5,
+            incompleteCount: 2,
+            completedHighlights: ["A".repeat(5000)],
+            nextActions: ["B".repeat(5000)],
+            openDecisions: ["C".repeat(5000)],
+          },
+        },
+        null,
+        2
+      )
+    )
+
+    const r = await runHook(
+      HOOK,
+      { matcher: "compact", cwd: process.cwd(), session_id: sessionId },
+      { HOME: home }
+    )
+    expect(r.exitCode).toBe(0)
+    const ctx = (r.json?.hookSpecificOutput as Record<string, unknown>)?.additionalContext as string
+    expect(ctx).toContain("Post-compaction context")
+    expect(ctx).toContain("Compaction context truncated to stay within budget.")
+    expect(ctx.length).toBeLessThanOrEqual(2400)
   })
 
   test("prior-session completed tasks are excluded from context", async () => {
