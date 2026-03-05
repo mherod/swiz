@@ -123,6 +123,7 @@ alwaysApply: false
 - Repo is solo (`mherod/swiz`); push directly to `main` (no PR required).
 - Run `/push` before `git push`; PreToolUse push gate requires it.
 - If collaboration guard errors, fix and re-run guard checks before pushing.
+- CI workflow (`.github/workflows/ci.yml` lines 3-21) has `paths-ignore` for `**/*.md`, `.claude/**`, and `docs/**`; documentation-only commits skip CI intentionally. Pre-push hooks verify code quality locally before push is allowed, so no CI run is needed for markdown-only changes.
 - Pre-push checklist:
   1. `git log origin/main..HEAD --oneline`.
   2. `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`; confirm solo-repo context.
