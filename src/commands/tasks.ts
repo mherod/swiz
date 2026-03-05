@@ -1,13 +1,21 @@
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
+import { projectKeyFromCwd } from "../project-key.ts"
+import { getProviderTaskRoots } from "../provider-adapters.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
-import { projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
 const HOME = process.env.HOME ?? "~"
-const TASKS_DIR = join(HOME, ".claude", "tasks")
-const PROJECTS_DIR = join(HOME, ".claude", "projects")
+
+function defaultTaskRoots(): { tasksDir: string; projectsDir: string } {
+  const roots = getProviderTaskRoots("claude")
+  if (roots) return roots
+  return {
+    tasksDir: join(HOME, ".claude", "tasks"),
+    projectsDir: join(HOME, ".claude", "projects"),
+  }
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -140,7 +148,7 @@ export function compareTaskIds(a: string, b: string): number {
 /** Derive session IDs from a single project transcript directory (constant-time lookup). */
 export async function getSessionIdsForProject(
   projectKey: string,
-  projectsDir = PROJECTS_DIR
+  projectsDir = defaultTaskRoots().projectsDir
 ): Promise<Set<string>> {
   const projectDir = join(projectsDir, projectKey)
   const ids = new Set<string>()
@@ -157,7 +165,7 @@ export async function getSessionIdsForProject(
 export async function getSessionIdsByCwdScan(
   filterCwd: string,
   candidates: string[],
-  projectsDir = PROJECTS_DIR
+  projectsDir = defaultTaskRoots().projectsDir
 ): Promise<Set<string>> {
   const ids = new Set<string>()
   let dirs: string[]
@@ -201,8 +209,8 @@ export async function getSessionIdsByCwdScan(
 
 export async function getSessions(
   filterCwd?: string,
-  tasksDir = TASKS_DIR,
-  projectsDir = PROJECTS_DIR
+  tasksDir = defaultTaskRoots().tasksDir,
+  projectsDir = defaultTaskRoots().projectsDir
 ): Promise<string[]> {
   try {
     const entries = await readdir(tasksDir)
@@ -248,7 +256,10 @@ export async function getSessions(
 
 // ─── Task I/O ───────────────────────────────────────────────────────────────
 
-async function readTasks(sessionId: string, tasksDir = TASKS_DIR): Promise<Task[]> {
+async function readTasks(
+  sessionId: string,
+  tasksDir = defaultTaskRoots().tasksDir
+): Promise<Task[]> {
   const dir = join(tasksDir, sessionId)
   try {
     const files = await readdir(dir)
@@ -274,14 +285,14 @@ async function readTasks(sessionId: string, tasksDir = TASKS_DIR): Promise<Task[
 }
 
 async function writeTask(sessionId: string, task: Task) {
-  const dir = join(TASKS_DIR, sessionId)
+  const dir = join(defaultTaskRoots().tasksDir, sessionId)
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, `${task.id}.json`), JSON.stringify(task, null, 2))
 }
 
 async function writeAudit(sessionId: string, entry: AuditEntry) {
   try {
-    const dir = join(TASKS_DIR, sessionId)
+    const dir = join(defaultTaskRoots().tasksDir, sessionId)
     await mkdir(dir, { recursive: true })
     await appendFile(join(dir, ".audit-log.jsonl"), `${JSON.stringify(entry)}\n`)
   } catch {}
@@ -297,8 +308,8 @@ async function writeAudit(sessionId: string, entry: AuditEntry) {
 export async function findTaskAcrossSessions(
   taskId: string,
   filterCwd?: string,
-  tasksDir = TASKS_DIR,
-  projectsDir = PROJECTS_DIR
+  tasksDir = defaultTaskRoots().tasksDir,
+  projectsDir = defaultTaskRoots().projectsDir
 ): Promise<{ sessionId: string; task: Task }[]> {
   const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
   const matches: { sessionId: string; task: Task }[] = []
@@ -319,8 +330,8 @@ export async function resolveTaskById(
   taskId: string,
   primarySessionId: string,
   filterCwd?: string,
-  tasksDir = TASKS_DIR,
-  projectsDir = PROJECTS_DIR
+  tasksDir = defaultTaskRoots().tasksDir,
+  projectsDir = defaultTaskRoots().projectsDir
 ): Promise<{ sessionId: string; task: Task }> {
   // Prefix-based fast resolution: if the ID has a session prefix, find the
   // matching session directly — no ambiguity possible.

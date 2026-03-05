@@ -1,14 +1,22 @@
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
-import { projectKeyFromCwd } from "../transcript-utils.ts"
+import { projectKeyFromCwd } from "../project-key.ts"
+import { getProviderTaskRoots } from "../provider-adapters.ts"
 import type { Command } from "../types.ts"
 
 const HOME = process.env.HOME ?? "~"
-const PROJECTS_DIR = join(HOME, ".claude", "projects")
-const TASKS_DIR = join(HOME, ".claude", "tasks")
 const GEMINI_DIR = join(HOME, ".gemini")
 const GEMINI_SETTINGS_BAK = join(GEMINI_DIR, "settings.json.bak")
 const GEMINI_TMP_DIR = join(GEMINI_DIR, "tmp")
+
+function defaultTaskRoots(): { tasksDir: string; projectsDir: string } {
+  const roots = getProviderTaskRoots("claude")
+  if (roots) return roots
+  return {
+    tasksDir: join(HOME, ".claude", "tasks"),
+    projectsDir: join(HOME, ".claude", "projects"),
+  }
+}
 
 // ─── Path decoding ────────────────────────────────────────────────────────────
 
@@ -194,7 +202,7 @@ async function findGeminiBackups(): Promise<GeminiBackupInfo> {
 
 interface SessionInfo {
   sessionId: string
-  paths: string[] // All paths associated with this session in PROJECTS_DIR
+  paths: string[] // All paths associated with this session in projectsDir
   mtimeMs: number
   sizeBytes: number
   taskDirPath: string | null
@@ -203,7 +211,8 @@ interface SessionInfo {
 
 async function findSessions(
   projectDir: string,
-  cutoffMs: number
+  cutoffMs: number,
+  tasksDir = defaultTaskRoots().tasksDir
 ): Promise<{ keep: SessionInfo[]; old: SessionInfo[] }> {
   const keep: SessionInfo[] = []
   const old: SessionInfo[] = []
@@ -250,7 +259,7 @@ async function findSessions(
   }
 
   for (const [sessionId, data] of sessionMap) {
-    const taskDirPath = join(TASKS_DIR, sessionId)
+    const taskDirPath = join(tasksDir, sessionId)
     let taskDirSizeBytes = 0
     let taskDirExists = false
     try {
@@ -352,25 +361,26 @@ export const cleanupCommand: Command = {
 
   async run(args: string[]) {
     const { olderThanMs, olderThanLabel, dryRun, projectFilter } = parseCleanupArgs(args)
+    const { projectsDir, tasksDir } = defaultTaskRoots()
 
     const cutoffMs = Date.now() - olderThanMs
 
     // Discover project dirs
     let projectNames: string[]
     try {
-      const entries = await readdir(PROJECTS_DIR, { withFileTypes: true })
+      const entries = await readdir(projectsDir, { withFileTypes: true })
       projectNames = entries
         .filter((e) => e.isDirectory())
         .map((e) => e.name)
         .filter((name) => !projectFilter || name === projectFilter)
         .sort()
     } catch {
-      console.log(`No projects directory found at ${PROJECTS_DIR}`)
+      console.log(`No projects directory found at ${projectsDir}`)
       return
     }
 
     if (projectFilter && projectNames.length === 0) {
-      throw new Error(`Project "${projectFilter}" not found in ${PROJECTS_DIR}`)
+      throw new Error(`Project "${projectFilter}" not found in ${projectsDir}`)
     }
 
     // Scan each project
@@ -383,7 +393,7 @@ export const cleanupCommand: Command = {
 
     const results: ProjectResult[] = []
     for (const name of projectNames) {
-      const { keep, old } = await findSessions(join(PROJECTS_DIR, name), cutoffMs)
+      const { keep, old } = await findSessions(join(projectsDir, name), cutoffMs, tasksDir)
       if (keep.length > 0 || old.length > 0) {
         results.push({ name, keep, old, stale: false })
       }
@@ -403,7 +413,7 @@ export const cleanupCommand: Command = {
       }
     }
 
-    // Scan TASKS_DIR for orphans (task directories without matching session in projects)
+    // Scan tasksDir for orphans (task directories without matching session in projects)
     if (!projectFilter) {
       const allKnownSessionIds = new Set<string>()
       for (const r of results) {
@@ -413,7 +423,7 @@ export const cleanupCommand: Command = {
 
       let taskEntries: string[] = []
       try {
-        taskEntries = await readdir(TASKS_DIR)
+        taskEntries = await readdir(tasksDir)
       } catch {}
 
       const orphans: SessionInfo[] = []
@@ -421,7 +431,7 @@ export const cleanupCommand: Command = {
         if (!UUID_RE.test(entry)) continue
         if (allKnownSessionIds.has(entry)) continue
 
-        const taskDirPath = join(TASKS_DIR, entry)
+        const taskDirPath = join(tasksDir, entry)
         let s: Awaited<ReturnType<typeof stat>>
         try {
           s = await stat(taskDirPath)

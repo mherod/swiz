@@ -1,14 +1,8 @@
 import { existsSync, statSync } from "node:fs"
-import { basename, join, resolve } from "node:path"
+import { resolve } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
-import {
-  getProviderHome,
-  getProviderProjectFiles,
-  getProviderProjectStateDir,
-  getProviderRuleDirs,
-  scanProviderRuleDir,
-} from "../provider-utils.ts"
+import { getProviderAdapter } from "../provider-adapters.ts"
 import {
   DEFAULT_MEMORY_LINE_THRESHOLD,
   DEFAULT_MEMORY_WORD_THRESHOLD,
@@ -65,135 +59,15 @@ const BINARY_SCAN_BYTES = 512
 const WARNING_THRESHOLD_FACTOR = 0.9
 const WHITESPACE_RE = /\s/
 
-function pushSource(sources: MemorySource[], label: string, path: string): void {
-  sources.push({ label, path })
-}
-
-function appendRuleFiles(
-  sources: MemorySource[],
-  agent: AgentDef,
-  dirPath: string,
-  labelForEntry: (entryName: string) => string
-): void {
-  const files = scanProviderRuleDir(agent, dirPath)
-  for (const file of files) {
-    pushSource(sources, labelForEntry(basename(file)), file)
-  }
-}
-
-function appendCursorRuleDir(
-  sources: MemorySource[],
-  agent: AgentDef,
-  dirPath: string | null,
-  missingDirLabel: string,
-  labelForEntry: (entryName: string) => string
-): void {
-  if (!dirPath) return
-
-  if (!existsSync(dirPath)) {
-    pushSource(sources, missingDirLabel, dirPath)
-    return
-  }
-
-  appendRuleFiles(sources, agent, dirPath, labelForEntry)
-}
-
 /**
  * Returns the ordered list of rule/memory sources for an agent and target directory.
  * Sources are listed in precedence order: project-local first, then global.
  */
 export function getMemorySources(agent: AgentDef, targetDir: string): MemorySource[] {
-  const sources: MemorySource[] = []
+  const adapter = getProviderAdapter(agent)
+  if (!adapter) return []
 
-  switch (agent.id) {
-    case "claude": {
-      // 1. Project-local CLAUDE.md
-      pushSource(sources, "Project rules", join(targetDir, "CLAUDE.md"))
-
-      // 2. Project-scoped memory (via ~/.claude/projects/<key>/memory/MEMORY.md)
-      const memoryDir = getProviderProjectStateDir(agent, targetDir)
-      const projectMemory = join(memoryDir, "MEMORY.md")
-      pushSource(sources, "Project memory", projectMemory)
-
-      // 3. Additional memory files in the project memory directory
-      const memoryFiles = scanProviderRuleDir(agent, memoryDir).filter(
-        (file) => file !== projectMemory
-      )
-      for (const file of memoryFiles) {
-        pushSource(sources, `Project memory (${basename(file)})`, file)
-      }
-
-      // 4. Global CLAUDE.md
-      const globalHome = getProviderHome(agent)
-      pushSource(sources, "Global rules", join(globalHome, "CLAUDE.md"))
-      break
-    }
-
-    case "cursor": {
-      // 1. Project .cursorrules
-      const projectFiles = getProviderProjectFiles(agent, targetDir)
-      for (const file of projectFiles) {
-        pushSource(sources, "Project rules (.cursorrules)", file)
-      }
-
-      // 2. Project .cursor/rules/ directory
-      const ruleDirs = getProviderRuleDirs(agent, targetDir)
-      appendCursorRuleDir(
-        sources,
-        agent,
-        ruleDirs.project,
-        "Project rules dir",
-        (entryName) => `Project rule (${entryName})`
-      )
-
-      // 3. Global ~/.cursor/rules/
-      appendCursorRuleDir(
-        sources,
-        agent,
-        ruleDirs.global,
-        "Global rules dir",
-        (entryName) => `Global rule (${entryName})`
-      )
-      break
-    }
-
-    case "gemini": {
-      // 1. Project GEMINI.md
-      const projectFiles = getProviderProjectFiles(agent, targetDir)
-      for (const file of projectFiles) {
-        if (file.endsWith("GEMINI.md")) {
-          const label = file.includes(".gemini") ? "Project rules (.gemini/)" : "Project rules"
-          pushSource(sources, label, file)
-        }
-      }
-
-      // 2. Global ~/.gemini/GEMINI.md
-      const globalHome = getProviderHome(agent)
-      pushSource(sources, "Global rules", join(globalHome, "GEMINI.md"))
-      break
-    }
-
-    case "codex": {
-      // 1. Project AGENTS.md
-      const projectFiles = getProviderProjectFiles(agent, targetDir)
-      for (const file of projectFiles) {
-        pushSource(sources, "Project rules", file)
-      }
-
-      // 2. Global ~/.codex/AGENTS.md
-      const globalHome = getProviderHome(agent)
-      pushSource(sources, "Global rules", join(globalHome, "AGENTS.md"))
-
-      // 3. Global ~/.codex/instructions.md
-      pushSource(sources, "Global instructions", join(globalHome, "instructions.md"))
-      break
-    }
-
-    default:
-      break
-  }
-
-  return sources
+  return adapter.getMemorySources(targetDir)
 }
 
 // ─── Display helpers ─────────────────────────────────────────────────────────
@@ -433,10 +307,10 @@ export const memoryCommand: Command = {
         `  ${DIM}Thresholds: ${projectThresholds.memoryLineThreshold} lines · ${projectThresholds.memoryWordThreshold} words${RESET}\n`
       )
 
-      const globalHome = getProviderHome(agent)
+      const globalHome = getProviderAdapter(agent)?.getHomeDir() ?? ""
       for (const [sourceIndex, source] of sources.entries()) {
         // Use global thresholds for sources in the global home directory
-        const isGlobal = source.path.startsWith(globalHome)
+        const isGlobal = globalHome.length > 0 && source.path.startsWith(globalHome)
         const thresholds = isGlobal ? globalThresholds : projectThresholds
 
         const result = await printSource(source, sourceIndex, {

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs"
 import { cp, mkdir, readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { getProviderAdapter } from "../provider-adapters.ts"
 import { findSkills, parseFrontmatterField, stripFrontmatter } from "../skill-utils.ts"
 import type { Command } from "../types.ts"
 
@@ -8,8 +9,15 @@ export { parseFrontmatterField, stripFrontmatter }
 
 const INLINE_CMD_RE = /!`([^`]+)`/g
 const HOME = process.env.HOME ?? "~"
-const GEMINI_SKILLS_DIR = join(HOME, ".gemini", "skills")
-const CLAUDE_SKILLS_DIR = join(HOME, ".claude", "skills")
+
+function primarySkillDir(agentId: "claude" | "gemini"): string {
+  const adapter = getProviderAdapter(agentId)
+  const primary = adapter?.getSkillDirs()[0]
+  if (primary) return primary
+
+  const configDir = agentId === "claude" ? ".claude" : ".gemini"
+  return join(HOME, configDir, "skills")
+}
 
 async function listSkills() {
   const skills = await findSkills()
@@ -82,26 +90,28 @@ function displayPath(path: string): string {
 
 async function syncGeminiSkills(options: { dryRun: boolean; overwrite: boolean }): Promise<void> {
   const { dryRun, overwrite } = options
+  const geminiSkillsDir = primarySkillDir("gemini")
+  const claudeSkillsDir = primarySkillDir("claude")
 
   let entries: import("node:fs").Dirent[]
   try {
-    entries = await readdir(GEMINI_SKILLS_DIR, { withFileTypes: true })
+    entries = await readdir(geminiSkillsDir, { withFileTypes: true })
   } catch {
-    console.log(`No Gemini skills found at ${displayPath(GEMINI_SKILLS_DIR)}.`)
+    console.log(`No Gemini skills found at ${displayPath(geminiSkillsDir)}.`)
     return
   }
 
   const skillNames: string[] = []
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
-    const sourceSkillPath = join(GEMINI_SKILLS_DIR, entry.name, "SKILL.md")
+    const sourceSkillPath = join(geminiSkillsDir, entry.name, "SKILL.md")
     if (!(await Bun.file(sourceSkillPath).exists())) continue
     skillNames.push(entry.name)
   }
   skillNames.sort((a, b) => a.localeCompare(b))
 
   if (skillNames.length === 0) {
-    console.log(`No Gemini skills with SKILL.md found at ${displayPath(GEMINI_SKILLS_DIR)}.`)
+    console.log(`No Gemini skills with SKILL.md found at ${displayPath(geminiSkillsDir)}.`)
     return
   }
 
@@ -109,18 +119,18 @@ async function syncGeminiSkills(options: { dryRun: boolean; overwrite: boolean }
     console.log("Dry run: syncing Gemini skills to Claude skills (no files will be changed).")
   } else {
     console.log("Syncing Gemini skills to Claude skills.")
-    await mkdir(CLAUDE_SKILLS_DIR, { recursive: true })
+    await mkdir(claudeSkillsDir, { recursive: true })
   }
-  console.log(`Source: ${displayPath(GEMINI_SKILLS_DIR)}`)
-  console.log(`Target: ${displayPath(CLAUDE_SKILLS_DIR)}\n`)
+  console.log(`Source: ${displayPath(geminiSkillsDir)}`)
+  console.log(`Target: ${displayPath(claudeSkillsDir)}\n`)
 
   let copied = 0
   let overwritten = 0
   let skipped = 0
 
   for (const name of skillNames) {
-    const sourceDir = join(GEMINI_SKILLS_DIR, name)
-    const targetDir = join(CLAUDE_SKILLS_DIR, name)
+    const sourceDir = join(geminiSkillsDir, name)
+    const targetDir = join(claudeSkillsDir, name)
     const targetExists = existsSync(targetDir)
 
     if (targetExists && !overwrite) {

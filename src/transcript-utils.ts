@@ -1,5 +1,6 @@
 import { open, readdir, readFile, stat } from "node:fs/promises"
 import { basename, join, resolve } from "node:path"
+import { projectKeyFromCwd } from "./project-key.ts"
 import { getProviderSessionDir } from "./provider-utils.ts"
 
 // ─── Content block types ─────────────────────────────────────────────────────
@@ -50,6 +51,8 @@ export interface Session {
   format?: "jsonl" | "gemini-json" | "antigravity-pb" | "codex-jsonl"
 }
 
+export { projectKeyFromCwd }
+
 const SESSION_PROVIDER_PRECEDENCE = ["claude", "gemini", "antigravity", "codex"] as const
 
 function providerRank(provider: Session["provider"] | undefined): number {
@@ -65,10 +68,6 @@ function sortSessionsDeterministic(sessions: Session[]): Session[] {
       providerRank(a.provider) - providerRank(b.provider) ||
       a.id.localeCompare(b.id)
   )
-}
-
-export function projectKeyFromCwd(cwd: string): string {
-  return cwd.replace(/[/.\\:]/g, "-")
 }
 
 export async function findSessions(projectDir: string): Promise<Session[]> {

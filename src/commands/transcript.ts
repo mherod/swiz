@@ -2,6 +2,7 @@ import { resolve } from "node:path"
 import { promptAgent } from "../agent.ts"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
+import { getTranscriptProvidersForAgent, type TranscriptProviderId } from "../provider-adapters.ts"
 import {
   type ContentBlock,
   extractText,
@@ -365,19 +366,6 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
   }
 }
 
-function transcriptProvidersForAgent(agent: AgentDef): Set<NonNullable<Session["provider"]>> {
-  switch (agent.id) {
-    case "claude":
-      return new Set(["claude"])
-    case "gemini":
-      return new Set(["gemini", "antigravity"])
-    case "codex":
-      return new Set(["codex"])
-    default:
-      return new Set()
-  }
-}
-
 // ─── Command ─────────────────────────────────────────────────────────────────
 
 export const transcriptCommand: Command = {
@@ -430,9 +418,9 @@ export const transcriptCommand: Command = {
           ? [detectedAgent]
           : AGENTS
 
-    const selectedProviders = new Set<NonNullable<Session["provider"]>>()
+    const selectedProviders = new Set<TranscriptProviderId>()
     for (const agent of selectedAgents) {
-      const providers = transcriptProvidersForAgent(agent)
+      const providers = getTranscriptProvidersForAgent(agent)
       for (const provider of providers) {
         selectedProviders.add(provider)
       }
