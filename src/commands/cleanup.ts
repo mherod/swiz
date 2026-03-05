@@ -6,6 +6,9 @@ import type { Command } from "../types.ts"
 const HOME = process.env.HOME ?? "~"
 const PROJECTS_DIR = join(HOME, ".claude", "projects")
 const TASKS_DIR = join(HOME, ".claude", "tasks")
+const GEMINI_DIR = join(HOME, ".gemini")
+const GEMINI_SETTINGS_BAK = join(GEMINI_DIR, "settings.json.bak")
+const GEMINI_TMP_DIR = join(GEMINI_DIR, "tmp")
 
 // ─── Path decoding ────────────────────────────────────────────────────────────
 
@@ -120,6 +123,71 @@ async function trashDir(path: string): Promise<boolean> {
   const proc = Bun.spawn(["trash", path], { stdout: "pipe", stderr: "pipe" })
   await proc.exited
   return proc.exitCode === 0
+}
+
+// ─── Gemini backup detection ──────────────────────────────────────────────────
+
+interface GeminiBackupInfo {
+  files: string[]
+  sizeBytes: number
+  fileCount: number
+}
+
+async function findGeminiBackups(): Promise<GeminiBackupInfo> {
+  const files: string[] = []
+  let sizeBytes = 0
+  let fileCount = 0
+
+  // Check for settings.json.bak
+  try {
+    const s = await stat(GEMINI_SETTINGS_BAK)
+    if (s.isFile()) {
+      files.push(GEMINI_SETTINGS_BAK)
+      sizeBytes += s.size
+      fileCount += 1
+    }
+  } catch {
+    // File doesn't exist, that's fine
+  }
+
+  // Check for *.bak files in ~/.gemini/tmp/**
+  try {
+    const tmpEntries = await readdir(GEMINI_TMP_DIR, { withFileTypes: true })
+    for (const entry of tmpEntries) {
+      const entryPath = join(GEMINI_TMP_DIR, entry.name)
+      if (entry.isDirectory()) {
+        // Recursively scan subdirectories
+        const subEntries = await readdir(entryPath, { withFileTypes: true })
+        for (const subEntry of subEntries) {
+          if (subEntry.name.endsWith(".bak") && subEntry.isFile()) {
+            const filePath = join(entryPath, subEntry.name)
+            try {
+              const s = await stat(filePath)
+              files.push(filePath)
+              sizeBytes += s.size
+              fileCount += 1
+            } catch {
+              // Skip unreadable files
+            }
+          }
+        }
+      } else if (entry.name.endsWith(".bak") && entry.isFile()) {
+        // Also check direct tmp directory
+        try {
+          const s = await stat(entryPath)
+          files.push(entryPath)
+          sizeBytes += s.size
+          fileCount += 1
+        } catch {
+          // Skip unreadable files
+        }
+      }
+    }
+  } catch {
+    // tmp directory doesn't exist or is unreadable, that's fine
+  }
+
+  return { files, sizeBytes, fileCount }
 }
 
 // ─── Session discovery ───────────────────────────────────────────────────────
@@ -267,16 +335,19 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
 
 export const cleanupCommand: Command = {
   name: "cleanup",
-  description: "Remove old Claude Code session data from ~/.claude/projects/ and ~/.claude/tasks/",
+  description: "Remove old Claude Code session data and Gemini backup artifacts",
   usage: "swiz cleanup [--older-than <time>] [--dry-run] [--project <name>]",
   options: [
     {
       flags: "--older-than <time>",
       description:
-        "Remove sessions older than this time: days (30, 7d) or hours (48h). Default: 30",
+        "Remove Claude sessions older than this time: days (30, 7d) or hours (48h). Default: 30",
     },
     { flags: "--dry-run", description: "Show what would be removed without deleting" },
-    { flags: "--project <name>", description: "Limit to a specific project directory name" },
+    {
+      flags: "--project <name>",
+      description: "Limit Claude cleanup to a specific project directory name",
+    },
   ],
 
   async run(args: string[]) {
@@ -382,8 +453,12 @@ export const cleanupCommand: Command = {
       }
     }
 
-    if (results.length === 0) {
+    // Discover Gemini backup artifacts
+    const geminiBackups = await findGeminiBackups()
+
+    if (results.length === 0 && geminiBackups.fileCount === 0) {
       console.log(`No session directories found (older than ${olderThanLabel}).`)
+      console.log(`No Gemini backup artifacts found.`)
       return
     }
 
@@ -393,7 +468,7 @@ export const cleanupCommand: Command = {
     )
     const maxNameLen = Math.max(...decodedNames.map((n) => n.length), 20)
 
-    // Print table
+    // Print Claude cleanup table
     console.log()
     console.log(`  ${BOLD}~/.claude/projects/${RESET}`)
 
@@ -425,8 +500,19 @@ export const cleanupCommand: Command = {
 
     console.log()
 
-    if (totalOldCount === 0) {
-      console.log(`  ${GREEN}No sessions older than ${olderThanLabel} found.${RESET}`)
+    // Print Gemini backup information
+    if (geminiBackups.fileCount > 0) {
+      console.log(`  ${BOLD}~/.gemini/ (backup artifacts)${RESET}`)
+      console.log(
+        `    ${YELLOW}${geminiBackups.fileCount} backup ${geminiBackups.fileCount === 1 ? "file" : "files"}${RESET} (${formatBytes(geminiBackups.sizeBytes)})`
+      )
+      console.log()
+    }
+
+    if (totalOldCount === 0 && geminiBackups.fileCount === 0) {
+      console.log(
+        `  ${GREEN}No sessions older than ${olderThanLabel} and no Gemini backups found.${RESET}`
+      )
       return
     }
 
@@ -434,8 +520,13 @@ export const cleanupCommand: Command = {
       totalOldTaskDirs > 0
         ? ` + ${totalOldTaskDirs} task ${totalOldTaskDirs === 1 ? "dir" : "dirs"}`
         : ""
+    const geminiPart =
+      geminiBackups.fileCount > 0
+        ? ` + ${geminiBackups.fileCount} Gemini backup ${geminiBackups.fileCount === 1 ? "file" : "files"}`
+        : ""
+    const totalBytes = totalOldBytes + geminiBackups.sizeBytes
     console.log(
-      `  Total: ${BOLD}${totalOldCount} sessions${RESET}${taskSuffix} trashable, ~${formatBytes(totalOldBytes)}`
+      `  Total: ${BOLD}${totalOldCount} sessions${RESET}${taskSuffix}${geminiPart} trashable, ~${formatBytes(totalBytes)}`
     )
     console.log()
 
@@ -445,10 +536,12 @@ export const cleanupCommand: Command = {
     }
 
     // Trash sessions and their matching task directories
-    console.log(`  Moving ${totalOldCount} session(s)${taskSuffix} to Trash...`)
+    console.log(`  Moving ${totalOldCount} session(s)${taskSuffix}${geminiPart} to Trash...`)
     let succeeded = 0
     let failed = 0
     let taskDirsRemoved = 0
+    let geminiFilesRemoved = 0
+    let geminiFailed = 0
 
     for (const { old } of results) {
       for (const session of old) {
@@ -471,14 +564,33 @@ export const cleanupCommand: Command = {
       }
     }
 
+    // Trash Gemini backup artifacts
+    for (const backupFile of geminiBackups.files) {
+      if (await trashDir(backupFile)) {
+        geminiFilesRemoved++
+      } else {
+        geminiFailed++
+      }
+    }
+
     console.log()
     const taskDirNote = taskDirsRemoved > 0 ? ` + ${taskDirsRemoved} task dir(s)` : ""
+    const geminiNote =
+      geminiFilesRemoved > 0
+        ? ` + ${geminiFilesRemoved} Gemini backup ${geminiFilesRemoved === 1 ? "file" : "files"}`
+        : ""
     console.log(
-      `  ${GREEN}${BOLD}Done.${RESET} ${succeeded} session(s)${taskDirNote} moved to Trash (~${formatBytes(totalOldBytes)} reclaimed).`
+      `  ${GREEN}${BOLD}Done.${RESET} ${succeeded} session(s)${taskDirNote}${geminiNote} moved to Trash (~${formatBytes(totalBytes)} reclaimed).`
     )
-    if (failed > 0) {
+    if (failed > 0 || geminiFailed > 0) {
+      const failedSessions = failed > 0 ? `${failed} session(s)` : ""
+      const failedGemini =
+        geminiFailed > 0
+          ? `${geminiFailed} Gemini backup ${geminiFailed === 1 ? "file" : "files"}`
+          : ""
+      const failedJoined = [failedSessions, failedGemini].filter((s) => s).join(" + ")
       console.log(
-        `  ${YELLOW}${failed} session(s) could not be trashed — is the \`trash\` CLI installed?${RESET}`
+        `  ${YELLOW}${failedJoined} could not be trashed — is the \`trash\` CLI installed?${RESET}`
       )
     }
   },

@@ -377,20 +377,24 @@ swiz transcript --auto-reply                # generate an AI-suggested follow-up
 
 ### `swiz cleanup`
 
-Remove old Claude Code session data from `~/.claude/projects/`. Keeps disk usage under control for long-running projects.
+Remove old Claude Code session data from `~/.claude/projects/` and Gemini backup artifacts from `~/.gemini/`. Keeps disk usage under control for long-running projects.
 
 ```bash
-swiz cleanup                                # remove sessions older than 30 days
-swiz cleanup --older-than 7d               # remove sessions older than 7 days
+swiz cleanup                                # remove sessions older than 30 days (+ Gemini backups)
+swiz cleanup --older-than 7d               # remove sessions older than 7 days (+ Gemini backups)
 swiz cleanup --dry-run                     # preview what would be removed
-swiz cleanup --project myrepo              # limit to a specific project
+swiz cleanup --project myrepo              # limit Claude cleanup to a specific project
 ```
+
+**Claude cleanup scope:** `~/.claude/projects/` and `~/.claude/tasks/`
+
+**Gemini backup scope:** `~/.gemini/settings.json.bak` and `~/.gemini/tmp/**/*.bak` (automatically cleaned without additional flags)
 
 | Flag | Description |
 |------|-------------|
-| `--older-than <time>` | Remove sessions older than this time: days (`30`, `7d`) or hours (`48h`). Default: 30 |
+| `--older-than <time>` | Remove Claude sessions older than this time: days (`30`, `7d`) or hours (`48h`). Default: 30 (Gemini backups removed regardless of age) |
 | `--dry-run` | Show what would be removed without deleting |
-| `--project <name>` | Limit to a specific project directory name |
+| `--project <name>` | Limit Claude cleanup to a specific project directory name |
 
 ### `swiz issue`
 

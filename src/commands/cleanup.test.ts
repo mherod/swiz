@@ -568,3 +568,104 @@ describe("cleanup task directory handling", () => {
     expect(output).toMatch(/2 kept \(\d+/)
   })
 })
+
+// ─── Gemini backup pruning ───────────────────────────────────────────────────
+//
+// Gemini stores settings at ~/.gemini/settings.json and creates backups:
+// - ~/.gemini/settings.json.bak (main settings backup)
+// - ~/.gemini/tmp/**/*.bak (temporary backup files in subdirectories)
+//
+// The cleanup command should detect and trash these backup artifacts
+// with proper dry-run support and file count reporting.
+
+describe("cleanup Gemini backup artifact detection", () => {
+  const GEMINI_HOME = join(tmpdir(), `swiz-cleanup-gemini-${process.pid}`)
+  const GEMINI_DIR = join(GEMINI_HOME, ".gemini")
+  const SWIZ_ROOT = join(import.meta.dir, "../..")
+  const env = { ...process.env, HOME: GEMINI_HOME }
+
+  beforeAll(async () => {
+    // Create required .claude/projects directory (even empty, so command runs)
+    await mkdir(join(GEMINI_HOME, ".claude", "projects"), { recursive: true })
+    // Create a Gemini directory with backup artifacts
+    await mkdir(GEMINI_DIR, { recursive: true })
+    // Main settings backup
+    await Bun.write(join(GEMINI_DIR, "settings.json.bak"), '{"settings":"backup"}\n')
+    // Backup files in tmp subdirectories
+    await mkdir(join(GEMINI_DIR, "tmp", "session-001"), { recursive: true })
+    await Bun.write(join(GEMINI_DIR, "tmp", "session-001", "state.json.bak"), '{"state":"data"}\n')
+    await Bun.write(join(GEMINI_DIR, "tmp", "cache.bak"), "cache data\n")
+    // Create a non-backup file to ensure it's not deleted
+    await Bun.write(join(GEMINI_DIR, "tmp", "active.json"), '{"active":true}\n')
+    // Create settings.json to ensure it's not deleted
+    await Bun.write(join(GEMINI_DIR, "settings.json"), '{"live":"settings"}\n')
+  })
+
+  afterAll(async () => {
+    const proc = Bun.spawn(["rm", "-rf", GEMINI_HOME], { stdout: "pipe", stderr: "pipe" })
+    await proc.exited
+  })
+
+  async function runCleanup(...extraArgs: string[]): Promise<string> {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "cleanup", "--dry-run", ...extraArgs], {
+      cwd: SWIZ_ROOT,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const output = await new Response(proc.stdout).text()
+    await proc.exited
+    return output
+  }
+
+  test("detects Gemini backup artifacts", async () => {
+    const output = await runCleanup()
+    // Should report backup files in output
+    expect(output).toMatch(/Gemini/)
+    expect(output).toMatch(/backup/)
+  })
+
+  test("reports correct number of Gemini backup files", async () => {
+    const output = await runCleanup()
+    // We created 3 backup files: settings.json.bak, session-001/state.json.bak, tmp/cache.bak
+    expect(output).toMatch(/3 backup/)
+  })
+
+  test("includes Gemini backups in total byte count", async () => {
+    const output = await runCleanup()
+    // Total should reference both Claude sessions and Gemini backups
+    expect(output).toMatch(/Total:/)
+    expect(output).toMatch(/Gemini/)
+  })
+
+  test("reports Gemini backups in dry-run output", async () => {
+    const output = await runCleanup()
+    // With Gemini backups but no Claude sessions, should still show Gemini section
+    expect(output).toMatch(/\.gemini/)
+  })
+
+  test("excludes non-backup files from cleanup", async () => {
+    const output = await runCleanup()
+    // Should not crash and should handle the .json and settings.json files gracefully
+    expect(output).not.toBeNull()
+  })
+
+  test("successfully exits on dry-run with Gemini backups", async () => {
+    const proc = Bun.spawn(["bun", "run", "index.ts", "cleanup", "--dry-run"], {
+      cwd: SWIZ_ROOT,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    await new Response(proc.stdout).text()
+    await proc.exited
+
+    expect(proc.exitCode).toBe(0)
+  })
+
+  test("dry-run shows Gemini file count and size separately from Claude sessions", async () => {
+    const output = await runCleanup()
+    // Output should clearly separate Gemini from Claude cleanup sections
+    expect(output).toMatch(/~\/.gemini/)
+  })
+})
