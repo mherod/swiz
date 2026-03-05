@@ -249,7 +249,7 @@ export async function runBlocking(
 ): Promise<void> {
   launchAsyncHooks(groups, payloadStr)
   const cwd = extractCwd(payloadStr)
-  const finalResponse = { continue: true }
+  const finalResponse: Record<string, unknown> = {}
 
   for (const group of groups) {
     for (const hook of group.hooks) {
@@ -267,10 +267,8 @@ export async function runBlocking(
       if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
       if (resp && isBlock(resp)) {
         log(`   ✗ BLOCK from ${hook.file}`)
-        // If we are blocking a "stop" event, it means we want the agent to CONTINUE.
-        // For any other event (like postToolUse), a block means we want to STOP.
-        const continueOverride = canonicalEvent === "stop"
-        Object.assign(finalResponse, resp, { continue: continueOverride })
+        // Pass the block response exactly as the hook produced it.
+        Object.assign(finalResponse, resp)
         break
       }
       log(`   ✓ ${hook.file} (${resp ? "ok" : "no output"})`)
