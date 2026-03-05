@@ -257,6 +257,7 @@ describe("dispatch replay", () => {
 
       // Secret scanner should block on this committed token pattern.
       // Use array join to avoid triggering GitHub push protection in source code
+      // Need 24+ alphanumeric chars after sk_live_ for TOKEN_RE pattern match
       const fakeSecret = [
         "s",
         "k",
@@ -282,6 +283,13 @@ describe("dispatch replay", () => {
         "d",
         "e",
         "f",
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
       ].join("")
       await writeFile(join(repoDir, "secrets.ts"), `export const token = "${fakeSecret}";\n`)
       runGit(repoDir, ["add", "secrets.ts"])
