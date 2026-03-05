@@ -1,3 +1,5 @@
 {
-  "state": "paused"
+  "state": "paused",
+  "memoryLineThreshold": 700,
+  "memoryWordThreshold": 3500
 }
