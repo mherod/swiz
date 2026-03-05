@@ -4,6 +4,8 @@ import {
   type ContentBlock,
   extractText,
   findAllProviderSessions,
+  getUnsupportedTranscriptFormatMessage,
+  isUnsupportedTranscriptFormat,
   parseTranscriptEntries,
   type Session,
   type TextBlock,
@@ -229,6 +231,10 @@ function collectTurns(entries: TranscriptEntry[]): Turn[] {
 // ─── Turn loading ─────────────────────────────────────────────────────────────
 
 async function loadTurns(session: Session): Promise<Turn[]> {
+  if (isUnsupportedTranscriptFormat(session.format)) {
+    throw new Error(getUnsupportedTranscriptFormatMessage(session))
+  }
+
   const file = Bun.file(session.path)
   if (!(await file.exists())) {
     throw new Error(`Transcript not found: ${session.path}`)
@@ -391,7 +397,7 @@ export const transcriptCommand: Command = {
       }
       session = match
     } else {
-      session = sessions[0]! // newest session
+      session = sessions.find((s) => !isUnsupportedTranscriptFormat(s.format)) ?? sessions[0]!
     }
 
     let turns = await loadTurns(session)

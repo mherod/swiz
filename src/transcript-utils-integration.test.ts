@@ -302,4 +302,70 @@ describe("transcript-utils integration", () => {
       expect(match?.format).toBe("gemini-json")
     })
   })
+
+  describe("findAllProviderSessions (Antigravity support)", () => {
+    let testDir: string
+    let previousHome: string | undefined
+
+    beforeEach(async () => {
+      testDir = join(tmpdir(), `transcript-antigravity-${Date.now()}`)
+      await mkdir(testDir, { recursive: true })
+      previousHome = process.env.HOME
+      process.env.HOME = testDir
+    })
+
+    afterEach(async () => {
+      process.env.HOME = previousHome
+      try {
+        await rm(testDir, { recursive: true, force: true })
+      } catch {}
+    })
+
+    it("discovers Antigravity .pb sessions mapped to the target project", async () => {
+      const projectDir = join(testDir, "workspace", "antigravity-proj")
+      await mkdir(projectDir, { recursive: true })
+
+      const id = "9dce7305-1ba7-49aa-b52b-2e5f3a9e8c77"
+      const conversationsDir = join(testDir, ".gemini", "antigravity", "conversations")
+      const brainDir = join(testDir, ".gemini", "antigravity", "brain", id)
+      await mkdir(conversationsDir, { recursive: true })
+      await mkdir(brainDir, { recursive: true })
+
+      await writeFile(join(conversationsDir, `${id}.pb`), Buffer.from([0x0a, 0x01, 0x00]))
+      await writeFile(
+        join(brainDir, "task.md"),
+        `# Task\nWork in file://${projectDir}\nand continue migration.\n`
+      )
+
+      const { findAllProviderSessions } = await import("./transcript-utils.ts")
+      const sessions = await findAllProviderSessions(projectDir)
+      const match = sessions.find((s) => s.id === id)
+      expect(match).toBeDefined()
+      expect(match?.provider).toBe("antigravity")
+      expect(match?.format).toBe("antigravity-pb")
+    })
+
+    it("filters out Antigravity sessions whose brain metadata points to another project", async () => {
+      const projectDir = join(testDir, "workspace", "primary-project")
+      const otherProjectDir = join(testDir, "workspace", "other-project")
+      await mkdir(projectDir, { recursive: true })
+      await mkdir(otherProjectDir, { recursive: true })
+
+      const id = "4f230af4-7a7b-4f1b-a12d-6a5146434f9a"
+      const conversationsDir = join(testDir, ".gemini", "antigravity", "conversations")
+      const brainDir = join(testDir, ".gemini", "antigravity", "brain", id)
+      await mkdir(conversationsDir, { recursive: true })
+      await mkdir(brainDir, { recursive: true })
+
+      await writeFile(join(conversationsDir, `${id}.pb`), Buffer.from([0x0a, 0x01, 0x00]))
+      await writeFile(
+        join(brainDir, "task.md"),
+        `# Task\nWork in file://${otherProjectDir}\nnot the target project.\n`
+      )
+
+      const { findAllProviderSessions } = await import("./transcript-utils.ts")
+      const sessions = await findAllProviderSessions(projectDir)
+      expect(sessions.some((s) => s.id === id)).toBe(false)
+    })
+  })
 })

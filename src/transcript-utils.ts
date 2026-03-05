@@ -46,8 +46,8 @@ export interface Session {
   id: string
   path: string
   mtime: number
-  provider?: "claude" | "gemini"
-  format?: "jsonl" | "gemini-json"
+  provider?: "claude" | "gemini" | "antigravity"
+  format?: "jsonl" | "gemini-json" | "antigravity-pb"
 }
 
 export function projectKeyFromCwd(cwd: string): string {
@@ -159,12 +159,103 @@ async function findGeminiSessions(targetDir: string): Promise<Session[]> {
   return sessions
 }
 
+const ANTIGRAVITY_PROJECT_HINT_FILES = new Set([
+  "task.md",
+  "task.md.resolved",
+  "task.md.resolved.0",
+  "implementation_plan.md",
+  "implementation_plan.md.resolved",
+  "implementation_plan.md.resolved.0",
+  "walkthrough.md",
+  "walkthrough.md.resolved",
+  "walkthrough.md.resolved.0",
+])
+
+async function antigravitySessionMatchesTarget(
+  brainSessionDir: string,
+  targetDir: string
+): Promise<boolean> {
+  let entries: import("node:fs").Dirent[]
+  try {
+    entries = await readdir(brainSessionDir, { withFileTypes: true })
+  } catch {
+    // If no metadata can be read, include as fallback so users can still resolve by ID.
+    return true
+  }
+
+  const fileNames = entries.filter((entry) => entry.isFile()).map((entry) => entry.name)
+  const preferred = fileNames.filter((name) => ANTIGRAVITY_PROJECT_HINT_FILES.has(name))
+  const fallback = fileNames
+    .filter(
+      (name) => name.endsWith(".md") || name.endsWith(".resolved") || name.endsWith(".resolved.0")
+    )
+    .slice(0, 5)
+
+  const candidates = [...new Set([...preferred, ...fallback])].slice(0, 8)
+  if (candidates.length === 0) return true
+
+  const targetPath = resolve(targetDir)
+  const fileUrlNeedle = `file://${targetPath}`
+
+  for (const name of candidates) {
+    try {
+      const content = await readFile(join(brainSessionDir, name), "utf-8")
+      const sample = content.slice(0, 200_000)
+      if (sample.includes(fileUrlNeedle) || sample.includes(targetPath)) {
+        return true
+      }
+    } catch {}
+  }
+
+  return false
+}
+
+async function findAntigravitySessions(targetDir: string): Promise<Session[]> {
+  const home = process.env.HOME ?? "~"
+  const antigravityRoot = join(home, ".gemini", "antigravity")
+  const conversationsDir = join(antigravityRoot, "conversations")
+  const brainDir = join(antigravityRoot, "brain")
+  const sessions: Session[] = []
+
+  let entries: import("node:fs").Dirent[]
+  try {
+    entries = await readdir(conversationsDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    if (!entry.name.endsWith(".pb")) continue
+
+    const id = entry.name.replace(/\.pb$/, "")
+    const sessionPath = join(conversationsDir, entry.name)
+    const brainSessionDir = join(brainDir, id)
+    const matchesTarget = await antigravitySessionMatchesTarget(brainSessionDir, targetDir)
+    if (!matchesTarget) continue
+
+    try {
+      const s = await stat(sessionPath)
+      sessions.push({
+        id,
+        path: sessionPath,
+        mtime: s.mtimeMs,
+        provider: "antigravity",
+        format: "antigravity-pb",
+      })
+    } catch {}
+  }
+
+  return sessions
+}
+
 /**
- * Discover sessions across all configured providers (Claude, Cursor, Gemini, Codex).
+ * Discover sessions across supported transcript providers (Claude, Gemini, Antigravity).
  * Aggregates sessions from all available providers, sorted by mtime (most recent first).
  *
  * For Claude: queries ~/.claude/projects/<projectKey>/ for .jsonl files.
  * For Gemini: queries ~/.gemini/tmp/<bucket>/chats/session-*.json using .project_root metadata.
+ * For Antigravity: queries ~/.gemini/antigravity/conversations/*.pb and maps by brain metadata.
  *
  * @param projectDir - Project directory (used to compute Claude projectKey)
  * @returns Aggregated sessions from all providers, sorted by mtime descending
@@ -172,15 +263,29 @@ async function findGeminiSessions(targetDir: string): Promise<Session[]> {
 export async function findAllProviderSessions(projectDir: string): Promise<Session[]> {
   const targetDir = resolve(projectDir)
   const claudeProjectDir = join(getProviderSessionDir("claude"), projectKeyFromCwd(targetDir))
-  const [claudeSessions, geminiSessions] = await Promise.all([
+  const [claudeSessions, geminiSessions, antigravitySessions] = await Promise.all([
     findSessions(claudeProjectDir),
     findGeminiSessions(targetDir),
+    findAntigravitySessions(targetDir),
   ])
 
   return [
     ...claudeSessions.map((s) => ({ ...s, provider: "claude" as const, format: "jsonl" as const })),
     ...geminiSessions,
+    ...antigravitySessions,
   ].sort((a, b) => b.mtime - a.mtime)
+}
+
+export function isUnsupportedTranscriptFormat(format: Session["format"] | undefined): boolean {
+  return format === "antigravity-pb"
+}
+
+export function getUnsupportedTranscriptFormatMessage(session: Session): string {
+  if (session.format !== "antigravity-pb") return ""
+  return (
+    `Session ${session.id} is stored in Antigravity protobuf format (.pb), ` +
+    "which swiz cannot decode yet. Use --list to choose a Claude/Gemini session."
+  )
 }
 
 // ─── Text extraction ─────────────────────────────────────────────────────────
@@ -397,6 +502,7 @@ export function parseTranscriptEntries(
   text: string,
   formatHint?: Session["format"]
 ): TranscriptEntry[] {
+  if (formatHint === "antigravity-pb") return []
   if (formatHint === "gemini-json") return parseGeminiEntries(text)
   if (formatHint === "jsonl") return parseJsonlEntries(text)
 

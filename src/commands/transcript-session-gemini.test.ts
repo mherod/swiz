@@ -88,7 +88,20 @@ async function createGeminiSession(
   )
 }
 
-describe("Gemini transcript/session command support", () => {
+async function createAntigravitySession(
+  home: string,
+  projectDir: string,
+  sessionId: string
+): Promise<void> {
+  const conversationsDir = join(home, ".gemini", "antigravity", "conversations")
+  const brainDir = join(home, ".gemini", "antigravity", "brain", sessionId)
+  await mkdir(conversationsDir, { recursive: true })
+  await mkdir(brainDir, { recursive: true })
+  await writeFile(join(conversationsDir, `${sessionId}.pb`), Buffer.from([0x0a, 0x01, 0x00]))
+  await writeFile(join(brainDir, "task.md"), `# Task\nImplement update in file://${projectDir}\n`)
+}
+
+describe("Provider transcript/session command support", () => {
   test("swiz transcript --list discovers Gemini sessions", async () => {
     const home = await createTempHome()
     const projectDir = join(home, "workspace", "demo-proj")
@@ -132,5 +145,62 @@ describe("Gemini transcript/session command support", () => {
     expect(result.exitCode).toBe(0)
     const out = stripAnsi(result.stdout)
     expect(out).toContain(sessionId)
+  })
+
+  test("swiz transcript --list discovers Antigravity sessions", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-antigravity")
+    const sessionId = "4a8bc58e-a064-4eb6-9758-e4d25047164b"
+    await mkdir(projectDir, { recursive: true })
+    await createAntigravitySession(home, projectDir, sessionId)
+
+    const result = await runSwiz(["transcript", "--list", "--dir", projectDir], home)
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain(sessionId)
+  })
+
+  test("swiz session --list includes Antigravity sessions", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-antigravity")
+    const sessionId = "5e7a548f-8e78-4b72-b088-4a5db389f5fc"
+    await mkdir(projectDir, { recursive: true })
+    await createAntigravitySession(home, projectDir, sessionId)
+
+    const result = await runSwiz(["session", "--list", "--dir", projectDir], home)
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain(sessionId)
+  })
+
+  test("swiz transcript --session shows clear Antigravity unsupported-format diagnostic", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-antigravity")
+    const sessionId = "f0a88e68-b0d4-4604-98c1-ae016f73c8c4"
+    await mkdir(projectDir, { recursive: true })
+    await createAntigravitySession(home, projectDir, sessionId)
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir],
+      home
+    )
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Antigravity protobuf format (.pb)")
+  })
+
+  test("swiz continue --session resolves Antigravity IDs and reports unsupported format", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-antigravity")
+    const sessionId = "0d55a399-3e40-42e5-9d55-cb8ead43c4ce"
+    await mkdir(projectDir, { recursive: true })
+    await createAntigravitySession(home, projectDir, sessionId)
+
+    const result = await runSwiz(
+      ["continue", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--print"],
+      home
+    )
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Antigravity protobuf format (.pb)")
+    expect(result.stderr).not.toContain("No session matching")
   })
 })

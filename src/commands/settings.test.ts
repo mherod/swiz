@@ -81,6 +81,19 @@ async function createGeminiSession(
   )
 }
 
+async function createAntigravitySession(
+  home: string,
+  targetDir: string,
+  sessionId: string
+): Promise<void> {
+  const conversationsDir = join(home, ".gemini", "antigravity", "conversations")
+  const brainDir = join(home, ".gemini", "antigravity", "brain", sessionId)
+  await mkdir(conversationsDir, { recursive: true })
+  await mkdir(brainDir, { recursive: true })
+  await writeFile(join(conversationsDir, `${sessionId}.pb`), Buffer.from([0x0a, 0x01, 0x00]))
+  await writeFile(join(brainDir, "task.md"), `# Task\nThis session targets file://${targetDir}\n`)
+}
+
 describe("swiz settings", () => {
   test("shows default auto-continue state when no config exists", async () => {
     const home = await createTempHome()
@@ -226,6 +239,20 @@ describe("swiz settings", () => {
     const targetDir = join(home, "repo")
     const sessionId = "dddddddd-dddd-dddd-dddd-dddddddddddd"
     await createGeminiSession(home, targetDir, sessionId)
+
+    const result = await runSwiz(
+      ["settings", "show", "--session", sessionId.slice(0, 8), "--dir", targetDir],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain(`scope: session ${sessionId}`)
+  })
+
+  test("resolves Antigravity session IDs for --session scope", async () => {
+    const home = await createTempHome()
+    const targetDir = join(home, "repo")
+    const sessionId = "5ec0dc8b-d56f-49da-91b5-9dbdfafdd7f3"
+    await createAntigravitySession(home, targetDir, sessionId)
 
     const result = await runSwiz(
       ["settings", "show", "--session", sessionId.slice(0, 8), "--dir", targetDir],

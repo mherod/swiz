@@ -4,6 +4,8 @@ import {
   extractPlainTurns,
   findAllProviderSessions,
   formatTurnsAsContext,
+  getUnsupportedTranscriptFormatMessage,
+  isUnsupportedTranscriptFormat,
   type Session,
 } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
@@ -74,12 +76,6 @@ export const continueCommand: Command = {
   async run(args) {
     const { targetDir, sessionQuery, printOnly } = parseContinueArgs(args)
 
-    if (!detectAgentCli()) {
-      throw new Error(
-        "No AI backend found. Install one of: Cursor Agent (agent), Claude Code (claude), or Gemini CLI (gemini)."
-      )
-    }
-
     const sessions = await findAllProviderSessions(targetDir)
 
     if (sessions.length === 0) {
@@ -94,7 +90,17 @@ export const continueCommand: Command = {
       }
       session = match
     } else {
-      session = sessions[0]!
+      session = sessions.find((s) => !isUnsupportedTranscriptFormat(s.format)) ?? sessions[0]!
+    }
+
+    if (isUnsupportedTranscriptFormat(session.format)) {
+      throw new Error(getUnsupportedTranscriptFormatMessage(session))
+    }
+
+    if (!detectAgentCli()) {
+      throw new Error(
+        "No AI backend found. Install one of: Cursor Agent (agent), Claude Code (claude), or Gemini CLI (gemini)."
+      )
     }
 
     let raw: string

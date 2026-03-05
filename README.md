@@ -290,7 +290,7 @@ swiz skill --sync-gemini --dry-run           # preview sync actions only
 swiz skill --sync-gemini --overwrite         # allow replacing existing target skills
 ```
 
-Skills are discovered from `.skills/` (project-local) plus provider globals (`~/.claude/skills/`, `~/.cursor/skills/`, `~/.gemini/skills/`, `~/.codex/skills/`). Duplicate skill names use deterministic first-found precedence in that order (project-local first).
+Skills are discovered from `.skills/` (project-local) plus provider globals (`~/.claude/skills/`, `~/.cursor/skills/`, `~/.gemini/skills/`, `~/.gemini/antigravity/skills/`, `~/.gemini/antigravity/global_skills/`, `~/.codex/skills/`). Duplicate skill names use deterministic first-found precedence in that exact order (project-local first).
 
 `--sync-gemini` provides a non-destructive conversion/sync path for Gemini skills by copying them into `~/.claude/skills/`; existing targets are skipped unless `--overwrite` is set.
 
@@ -321,15 +321,17 @@ This is the primary workaround for **Cursor CLI**, where only `beforeShellExecut
 
 ### `swiz continue`
 
-Generate an AI next-step suggestion from the most recent project session, then continue in Claude. Session discovery covers Claude and Gemini history for `--session` selection.
+Generate an AI next-step suggestion from the most recent project session, then continue in Claude. Session discovery covers Claude, Gemini, and Antigravity IDs for `--session` selection.
 
 ```bash
 swiz continue             # generate suggestion and resume most recent session
 swiz continue --print     # dry run — print the suggestion without resuming
-swiz continue --session <id>  # select a specific session (Claude or Gemini) by ID prefix
+swiz continue --session <id>  # select a specific session (Claude/Gemini/Antigravity) by ID prefix
 ```
 
 Uses the same AI backend detection as `stop-auto-continue` (`agent` → `claude` → `gemini`). Exits gracefully if no backend is available.
+
+Note: Antigravity conversations are stored as protobuf (`.pb`). `swiz continue --session` can resolve these IDs, but currently prints a clear unsupported-format diagnostic instead of attempting to decode protobuf conversation content.
 
 **The autonomous loop**: `stop-auto-continue` blocks the agent from stopping, injecting an AI-generated next step suggestion → user runs `swiz continue` → session resumes with that suggestion as the opening prompt → agent works → loop repeats. The agent keeps going until the work is actually done.
 
@@ -363,7 +365,7 @@ swiz dispatch <event> --replay <file> --json  # replay with machine-readable tra
 
 ### `swiz transcript`
 
-Display Agent-User chat history for the current project. Supports Claude JSONL and Gemini session JSON formats.
+Display Agent-User chat history for the current project. Supports Claude JSONL and Gemini session JSON formats, and surfaces Antigravity protobuf sessions with explicit unsupported-format diagnostics when selected.
 
 ```bash
 swiz transcript                             # show latest session transcript
@@ -385,6 +387,7 @@ swiz transcript --auto-reply                # generate an AI-suggested follow-up
 Session discovery paths:
 - Claude: `~/.claude/projects/<project-key>/*.jsonl`
 - Gemini: `~/.gemini/tmp/*/chats/session-*.json` (mapped via `.project_root`)
+- Antigravity: `~/.gemini/antigravity/conversations/*.pb` (mapped via `~/.gemini/antigravity/brain/<id>/...`)
 
 ### `swiz cleanup`
 

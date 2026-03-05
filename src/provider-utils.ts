@@ -260,6 +260,15 @@ export function getAllProviderSkillDirs(): string[] {
     const providerHome = join(home(), agent.configDir)
     const globalSkillDir = join(providerHome, agent.skillDir)
     skillDirs.push(globalSkillDir)
+
+    // Antigravity extends Gemini with additional skill roots:
+    // ~/.gemini/antigravity/skills and ~/.gemini/antigravity/global_skills
+    // These come after ~/.gemini/skills in precedence order.
+    if (agent.agentId === "gemini") {
+      const antigravityRoot = join(providerHome, "antigravity")
+      skillDirs.push(join(antigravityRoot, "skills"))
+      skillDirs.push(join(antigravityRoot, "global_skills"))
+    }
   }
 
   return skillDirs

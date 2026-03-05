@@ -5,8 +5,11 @@ import {
   extractText,
   extractToolResultText,
   formatTurnsAsContext,
+  getUnsupportedTranscriptFormatMessage,
   isHookFeedback,
+  isUnsupportedTranscriptFormat,
   type PlainTurn,
+  parseTranscriptEntries,
   projectKeyFromCwd,
 } from "./transcript-utils.ts"
 
@@ -257,6 +260,31 @@ describe("transcript-utils.ts", () => {
       })
       const result = countToolCalls(geminiSession)
       expect(result).toBe(1)
+    })
+  })
+
+  describe("unsupported format helpers", () => {
+    it("identifies antigravity protobuf as unsupported", () => {
+      expect(isUnsupportedTranscriptFormat("antigravity-pb")).toBe(true)
+      expect(isUnsupportedTranscriptFormat("jsonl")).toBe(false)
+      expect(isUnsupportedTranscriptFormat("gemini-json")).toBe(false)
+    })
+
+    it("returns a clear diagnostic for antigravity sessions", () => {
+      const message = getUnsupportedTranscriptFormatMessage({
+        id: "abc-session",
+        path: "/tmp/abc-session.pb",
+        mtime: Date.now(),
+        provider: "antigravity",
+        format: "antigravity-pb",
+      })
+      expect(message).toContain("abc-session")
+      expect(message).toContain("Antigravity protobuf format (.pb)")
+    })
+
+    it("returns empty transcript entries when format hint is antigravity protobuf", () => {
+      const result = parseTranscriptEntries("binary-ish-content", "antigravity-pb")
+      expect(result).toEqual([])
     })
   })
 

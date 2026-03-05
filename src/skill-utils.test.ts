@@ -30,9 +30,9 @@ async function createTempDir(): Promise<string> {
 // ─── SKILL_DIRS ───────────────────────────────────────────────────────────────
 
 describe("SKILL_DIRS", () => {
-  test("is an array of at least 5 directories (project + 4 providers)", () => {
+  test("is an array of at least 7 directories (project + providers + antigravity roots)", () => {
     expect(Array.isArray(SKILL_DIRS)).toBe(true)
-    expect(SKILL_DIRS.length).toBeGreaterThanOrEqual(5)
+    expect(SKILL_DIRS.length).toBeGreaterThanOrEqual(7)
   })
 
   test("first entry is the project-local .skills directory", () => {
@@ -45,6 +45,8 @@ describe("SKILL_DIRS", () => {
     expect(skillDirStr).toContain(".cursor")
     expect(skillDirStr).toContain(".gemini")
     expect(skillDirStr).toContain(".codex")
+    expect(skillDirStr).toContain(".gemini/antigravity/skills")
+    expect(skillDirStr).toContain(".gemini/antigravity/global_skills")
   })
 
   test("all entries are non-empty strings", () => {
@@ -257,6 +259,40 @@ describe("findSkills (via swiz skill CLI)", () => {
     expect(out).toContain("Gemini only")
   })
 
+  test("discovers skills that exist only in ~/.gemini/antigravity/skills", async () => {
+    const fakeHome = await createTempDir()
+    const skillDir = join(
+      fakeHome,
+      ".gemini",
+      "antigravity",
+      "skills",
+      "antigravity-only-skill-xyz"
+    )
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "---\ndescription: Antigravity only\n---\n")
+
+    const out = await runSwizSkillList(fakeHome)
+    expect(out).toContain("antigravity-only-skill-xyz")
+    expect(out).toContain("Antigravity only")
+  })
+
+  test("discovers skills from ~/.gemini/antigravity/global_skills", async () => {
+    const fakeHome = await createTempDir()
+    const skillDir = join(
+      fakeHome,
+      ".gemini",
+      "antigravity",
+      "global_skills",
+      "antigravity-global-skill-xyz"
+    )
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "---\ndescription: Antigravity global\n---\n")
+
+    const out = await runSwizSkillList(fakeHome)
+    expect(out).toContain("antigravity-global-skill-xyz")
+    expect(out).toContain("Antigravity global")
+  })
+
   test("uses deterministic precedence for duplicate names (Claude before Gemini)", async () => {
     const fakeHome = await createTempDir()
     const duplicate = "shared-duplicate-skill-xyz"
@@ -274,5 +310,36 @@ describe("findSkills (via swiz skill CLI)", () => {
     expect(occurrences).toBe(1)
     expect(out).toContain("Claude wins")
     expect(out).not.toContain("Gemini loses")
+  })
+
+  test("uses deterministic precedence for duplicate names (Antigravity skills before global_skills)", async () => {
+    const fakeHome = await createTempDir()
+    const duplicate = "antigravity-precedence-skill-xyz"
+
+    const antigravitySkillDir = join(fakeHome, ".gemini", "antigravity", "skills", duplicate)
+    await mkdir(antigravitySkillDir, { recursive: true })
+    await writeFile(
+      join(antigravitySkillDir, "SKILL.md"),
+      "---\ndescription: Antigravity skill wins\n---\n"
+    )
+
+    const antigravityGlobalDir = join(
+      fakeHome,
+      ".gemini",
+      "antigravity",
+      "global_skills",
+      duplicate
+    )
+    await mkdir(antigravityGlobalDir, { recursive: true })
+    await writeFile(
+      join(antigravityGlobalDir, "SKILL.md"),
+      "---\ndescription: Antigravity global loses\n---\n"
+    )
+
+    const out = await runSwizSkillList(fakeHome)
+    const occurrences = (out.match(new RegExp(duplicate, "g")) ?? []).length
+    expect(occurrences).toBe(1)
+    expect(out).toContain("Antigravity skill wins")
+    expect(out).not.toContain("Antigravity global loses")
   })
 })
