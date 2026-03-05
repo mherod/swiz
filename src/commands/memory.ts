@@ -141,11 +141,23 @@ export function getMemorySources(agent: AgentDef, targetDir: string): MemorySour
         sources.push({ label: "Project rules", path: file })
       }
 
-      // 2. Global ~/.codex/instructions.md
+      // 2. Global ~/.codex/AGENTS.md
       const globalHome = getProviderHome(agent)
+      sources.push({
+        label: "Global rules",
+        path: join(globalHome, "AGENTS.md"),
+      })
+
+      // 3. Global ~/.codex/instructions.md
       sources.push({
         label: "Global instructions",
         path: join(globalHome, "instructions.md"),
+      })
+
+      // 4. Global ~/.codex/history.jsonl (Codex prompt/session context index)
+      sources.push({
+        label: "Global history",
+        path: join(globalHome, "history.jsonl"),
       })
       break
     }

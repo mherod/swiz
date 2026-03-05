@@ -94,6 +94,38 @@ async function createAntigravitySession(
   await writeFile(join(brainDir, "task.md"), `# Task\nThis session targets file://${targetDir}\n`)
 }
 
+async function createCodexSession(
+  home: string,
+  targetDir: string,
+  sessionId: string
+): Promise<void> {
+  const codexDir = join(home, ".codex", "sessions", "2026", "03", "05")
+  await mkdir(codexDir, { recursive: true })
+  await writeFile(
+    join(codexDir, `rollout-2026-03-05T10-00-00-${sessionId}.jsonl`),
+    [
+      JSON.stringify({
+        timestamp: "2026-03-05T10:00:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: sessionId,
+          timestamp: "2026-03-05T10:00:00.000Z",
+          cwd: targetDir,
+          originator: "codex_cli_rs",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-03-05T10:00:01.000Z",
+        type: "event_msg",
+        payload: {
+          type: "user_message",
+          message: "Configure session setting",
+        },
+      }),
+    ].join("\n") + "\n"
+  )
+}
+
 describe("swiz settings", () => {
   test("shows default auto-continue state when no config exists", async () => {
     const home = await createTempHome()
@@ -253,6 +285,20 @@ describe("swiz settings", () => {
     const targetDir = join(home, "repo")
     const sessionId = "5ec0dc8b-d56f-49da-91b5-9dbdfafdd7f3"
     await createAntigravitySession(home, targetDir, sessionId)
+
+    const result = await runSwiz(
+      ["settings", "show", "--session", sessionId.slice(0, 8), "--dir", targetDir],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain(`scope: session ${sessionId}`)
+  })
+
+  test("resolves Codex session IDs for --session scope", async () => {
+    const home = await createTempHome()
+    const targetDir = join(home, "repo")
+    const sessionId = "019cbc03-1111-7222-8333-444444444444"
+    await createCodexSession(home, targetDir, sessionId)
 
     const result = await runSwiz(
       ["settings", "show", "--session", sessionId.slice(0, 8), "--dir", targetDir],

@@ -267,6 +267,22 @@ swiz settings enable auto-continue --session <id> --dir <path> # set override fo
 
 Session overrides are keyed by session ID. If no override exists, that session inherits the global setting.
 
+### `swiz memory`
+
+Inspect rule and memory/context files for the detected agent (or force one with flags).
+
+```bash
+swiz memory                 # auto-detect agent and show rule hierarchy
+swiz memory --codex         # inspect Codex-specific memory/context paths
+swiz memory --codex --dir /path/to/project
+```
+
+For Codex, `swiz memory --codex` surfaces:
+- project rules: `<project>/AGENTS.md`
+- global rules: `~/.codex/AGENTS.md`
+- global instructions: `~/.codex/instructions.md`
+- global history/context index: `~/.codex/history.jsonl`
+
 ### `swiz hooks [event] [script]`
 
 Inspect hook configurations across all agents.
@@ -321,17 +337,19 @@ This is the primary workaround for **Cursor CLI**, where only `beforeShellExecut
 
 ### `swiz continue`
 
-Generate an AI next-step suggestion from the most recent project session, then continue in Claude. Session discovery covers Claude, Gemini, and Antigravity IDs for `--session` selection.
+Generate an AI next-step suggestion from the most recent project session, then continue in Claude. Session discovery covers Claude, Gemini, Antigravity, and Codex IDs for `--session` selection.
 
 ```bash
 swiz continue             # generate suggestion and resume most recent session
 swiz continue --print     # dry run — print the suggestion without resuming
-swiz continue --session <id>  # select a specific session (Claude/Gemini/Antigravity) by ID prefix
+swiz continue --session <id>  # select a specific session (Claude/Gemini/Antigravity/Codex) by ID prefix
 ```
 
 Uses the same AI backend detection as `stop-auto-continue` (`agent` → `claude` → `gemini`). Exits gracefully if no backend is available.
 
-Note: Antigravity conversations are stored as protobuf (`.pb`). `swiz continue --session` can resolve these IDs, but currently prints a clear unsupported-format diagnostic instead of attempting to decode protobuf conversation content.
+Notes:
+- Antigravity conversations are stored as protobuf (`.pb`). `swiz continue --session` can resolve these IDs, but currently prints a clear unsupported-format diagnostic instead of attempting to decode protobuf conversation content.
+- Codex sessions are readable for suggestion generation but are not resumable by Claude session ID, so `swiz continue --session <codex-id>` automatically falls back to `claude --continue`.
 
 **The autonomous loop**: `stop-auto-continue` blocks the agent from stopping, injecting an AI-generated next step suggestion → user runs `swiz continue` → session resumes with that suggestion as the opening prompt → agent works → loop repeats. The agent keeps going until the work is actually done.
 
@@ -365,7 +383,7 @@ swiz dispatch <event> --replay <file> --json  # replay with machine-readable tra
 
 ### `swiz transcript`
 
-Display Agent-User chat history for the current project. Supports Claude JSONL and Gemini session JSON formats, and surfaces Antigravity protobuf sessions with explicit unsupported-format diagnostics when selected.
+Display Agent-User chat history for the current project. Supports Claude JSONL, Gemini session JSON, and Codex session JSONL event formats, and surfaces Antigravity protobuf sessions with explicit unsupported-format diagnostics when selected.
 
 ```bash
 swiz transcript                             # show latest session transcript
@@ -388,6 +406,9 @@ Session discovery paths:
 - Claude: `~/.claude/projects/<project-key>/*.jsonl`
 - Gemini: `~/.gemini/tmp/*/chats/session-*.json` (mapped via `.project_root`)
 - Antigravity: `~/.gemini/antigravity/conversations/*.pb` (mapped via `~/.gemini/antigravity/brain/<id>/...`)
+- Codex: `~/.codex/sessions/<year>/<month>/<day>/*.jsonl` (mapped via `session_meta.payload.cwd`)
+
+Provider precedence is deterministic when timestamps tie: Claude → Gemini → Antigravity → Codex.
 
 ### `swiz cleanup`
 
@@ -457,6 +478,8 @@ swiz session --dir /path/to/project        # target a specific project directory
 |------|-------------|
 | `--list, -l` | List all sessions for the project with timestamps |
 | `--dir, -d <path>` | Target project directory (default: cwd) |
+
+Session ordering is newest-first by modification time. If timestamps tie, the same deterministic provider precedence is used: Claude → Gemini → Antigravity → Codex.
 
 ### `swiz ci-wait`
 

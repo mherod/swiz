@@ -259,6 +259,17 @@ describe("findSkills (via swiz skill CLI)", () => {
     expect(out).toContain("Gemini only")
   })
 
+  test("discovers skills that exist only in ~/.codex/skills", async () => {
+    const fakeHome = await createTempDir()
+    const skillDir = join(fakeHome, ".codex", "skills", "codex-only-skill-xyz")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "---\ndescription: Codex only\n---\n")
+
+    const out = await runSwizSkillList(fakeHome)
+    expect(out).toContain("codex-only-skill-xyz")
+    expect(out).toContain("Codex only")
+  })
+
   test("discovers skills that exist only in ~/.gemini/antigravity/skills", async () => {
     const fakeHome = await createTempDir()
     const skillDir = join(

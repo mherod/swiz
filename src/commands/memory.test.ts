@@ -89,9 +89,11 @@ describe("getMemorySources", () => {
 
   it("returns Codex sources with AGENTS.md and instructions", () => {
     const sources = getMemorySources(getAgent("codex"), "/tmp/myproject")
-    expect(sources.length).toBe(2)
+    expect(sources.length).toBe(4)
     expect(sources[0]?.path).toContain("AGENTS.md")
-    expect(sources[1]?.path).toContain("instructions.md")
+    expect(sources[1]?.path).toContain(".codex/AGENTS.md")
+    expect(sources[2]?.path).toContain("instructions.md")
+    expect(sources[3]?.path).toContain("history.jsonl")
   })
 
   it("includes additional memory files for Claude projects", () => {

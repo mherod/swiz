@@ -101,6 +101,47 @@ async function createAntigravitySession(
   await writeFile(join(brainDir, "task.md"), `# Task\nImplement update in file://${projectDir}\n`)
 }
 
+async function createCodexSession(
+  home: string,
+  projectDir: string,
+  sessionId: string
+): Promise<void> {
+  const codexDir = join(home, ".codex", "sessions", "2026", "03", "05")
+  await mkdir(codexDir, { recursive: true })
+  const sessionPath = join(codexDir, `rollout-2026-03-05T10-00-00-${sessionId}.jsonl`)
+
+  const lines = [
+    JSON.stringify({
+      timestamp: "2026-03-05T10:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        id: sessionId,
+        timestamp: "2026-03-05T10:00:00.000Z",
+        cwd: projectDir,
+        originator: "codex_cli_rs",
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-03-05T10:00:01.000Z",
+      type: "event_msg",
+      payload: {
+        type: "user_message",
+        message: "Hello from Codex session",
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-03-05T10:00:02.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Hi from Codex assistant" }],
+      },
+    }),
+  ]
+  await writeFile(sessionPath, `${lines.join("\n")}\n`)
+}
+
 describe("Provider transcript/session command support", () => {
   test("swiz transcript --list discovers Gemini sessions", async () => {
     const home = await createTempHome()
@@ -140,6 +181,51 @@ describe("Provider transcript/session command support", () => {
     const sessionId = "abcdef12-1111-2222-3333-444444444444"
     await mkdir(projectDir, { recursive: true })
     await createGeminiSession(home, projectDir, sessionId)
+
+    const result = await runSwiz(["session", "--list", "--dir", projectDir], home)
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain(sessionId)
+  })
+
+  test("swiz transcript --list discovers Codex sessions", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc01-1111-7222-8333-444444444444"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
+
+    const result = await runSwiz(["transcript", "--list", "--dir", projectDir], home)
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain(sessionId)
+  })
+
+  test("swiz transcript --session renders Codex turns", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc01-5555-7666-8777-888888888888"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain("USER")
+    expect(out).toContain("ASSISTANT")
+    expect(out).toContain("Hello from Codex session")
+    expect(out).toContain("Hi from Codex assistant")
+  })
+
+  test("swiz session --list includes Codex sessions", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc01-9999-7aaa-8bbb-cccccccccccc"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
 
     const result = await runSwiz(["session", "--list", "--dir", projectDir], home)
     expect(result.exitCode).toBe(0)
@@ -201,6 +287,22 @@ describe("Provider transcript/session command support", () => {
     )
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toContain("Antigravity protobuf format (.pb)")
+    expect(result.stderr).not.toContain("No session matching")
+  })
+
+  test("swiz continue --session resolves Codex session IDs", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc02-1ddd-7eee-8fff-000000000000"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
+
+    const result = await runSwiz(
+      ["continue", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--print"],
+      home
+    )
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toMatch(/No AI backend found|Authentication required/)
     expect(result.stderr).not.toContain("No session matching")
   })
 })

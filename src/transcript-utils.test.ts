@@ -215,6 +215,69 @@ describe("transcript-utils.ts", () => {
       expect(result[1]?.text).toContain("run_shell_command")
       expect(result[1]?.text).toContain("pnpm test")
     })
+
+    it("parses Codex JSONL session events into user and assistant turns", () => {
+      const codexJsonl = [
+        JSON.stringify({
+          timestamp: "2026-03-05T10:00:00.000Z",
+          type: "session_meta",
+          payload: {
+            id: "019cbccf-2e0f-7f22-a111-aaaaaaaaaaaa",
+            cwd: "/tmp/project",
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-03-05T10:00:01.000Z",
+          type: "event_msg",
+          payload: {
+            type: "user_message",
+            message: "Investigate test failure",
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-03-05T10:00:02.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "I will inspect the failing test." }],
+          },
+        }),
+      ].join("\n")
+      const result = extractPlainTurns(codexJsonl)
+      expect(result).toHaveLength(2)
+      expect(result[0]?.role).toBe("user")
+      expect(result[0]?.text).toContain("Investigate test failure")
+      expect(result[1]?.role).toBe("assistant")
+      expect(result[1]?.text).toContain("inspect the failing test")
+    })
+
+    it("includes Codex function_call events in assistant tool summaries", () => {
+      const codexJsonl = [
+        JSON.stringify({
+          timestamp: "2026-03-05T10:00:00.000Z",
+          type: "event_msg",
+          payload: {
+            type: "user_message",
+            message: "Run tests",
+          },
+        }),
+        JSON.stringify({
+          timestamp: "2026-03-05T10:00:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "exec_command",
+            arguments: '{"cmd":"pnpm test"}',
+          },
+        }),
+      ].join("\n")
+      const result = extractPlainTurns(codexJsonl)
+      expect(result).toHaveLength(2)
+      expect(result[1]?.role).toBe("assistant")
+      expect(result[1]?.text).toContain("exec_command")
+      expect(result[1]?.text).toContain("pnpm test")
+    })
   })
 
   describe("countToolCalls", () => {
@@ -261,6 +324,21 @@ describe("transcript-utils.ts", () => {
       const result = countToolCalls(geminiSession)
       expect(result).toBe(1)
     })
+
+    it("counts Codex function_call events after normalization", () => {
+      const codexJsonl = [
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "exec_command",
+            arguments: '{"cmd":"echo test"}',
+          },
+        }),
+      ].join("\n")
+      const result = countToolCalls(codexJsonl)
+      expect(result).toBe(1)
+    })
   })
 
   describe("unsupported format helpers", () => {
@@ -268,6 +346,7 @@ describe("transcript-utils.ts", () => {
       expect(isUnsupportedTranscriptFormat("antigravity-pb")).toBe(true)
       expect(isUnsupportedTranscriptFormat("jsonl")).toBe(false)
       expect(isUnsupportedTranscriptFormat("gemini-json")).toBe(false)
+      expect(isUnsupportedTranscriptFormat("codex-jsonl")).toBe(false)
     })
 
     it("returns a clear diagnostic for antigravity sessions", () => {

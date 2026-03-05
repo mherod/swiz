@@ -1,7 +1,48 @@
-import { mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+
+async function createCodexSession(
+  home: string,
+  targetDir: string,
+  sessionId: string
+): Promise<string> {
+  const codexDir = join(home, ".codex", "sessions", "2026", "03", "05")
+  await mkdir(codexDir, { recursive: true })
+  const filePath = join(codexDir, `rollout-2026-03-05T10-00-00-${sessionId}.jsonl`)
+  const lines = [
+    JSON.stringify({
+      timestamp: "2026-03-05T10:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        id: sessionId,
+        timestamp: "2026-03-05T10:00:00.000Z",
+        cwd: targetDir,
+        originator: "codex_cli_rs",
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-03-05T10:00:01.000Z",
+      type: "event_msg",
+      payload: {
+        type: "user_message",
+        message: "Please add Codex support",
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-03-05T10:00:02.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Implemented." }],
+      },
+    }),
+  ]
+  await writeFile(filePath, `${lines.join("\n")}\n`)
+  return filePath
+}
 
 describe("transcript-utils integration", () => {
   describe("findSessions", () => {
@@ -366,6 +407,126 @@ describe("transcript-utils integration", () => {
       const { findAllProviderSessions } = await import("./transcript-utils.ts")
       const sessions = await findAllProviderSessions(projectDir)
       expect(sessions.some((s) => s.id === id)).toBe(false)
+    })
+  })
+
+  describe("findAllProviderSessions (Codex support)", () => {
+    let testDir: string
+    let previousHome: string | undefined
+
+    beforeEach(async () => {
+      testDir = join(tmpdir(), `transcript-codex-${Date.now()}`)
+      await mkdir(testDir, { recursive: true })
+      previousHome = process.env.HOME
+      process.env.HOME = testDir
+    })
+
+    afterEach(async () => {
+      process.env.HOME = previousHome
+      try {
+        await rm(testDir, { recursive: true, force: true })
+      } catch {}
+    })
+
+    it("discovers Codex sessions mapped by session_meta cwd", async () => {
+      const projectDir = join(testDir, "workspace", "codex-proj")
+      await mkdir(projectDir, { recursive: true })
+
+      const id = "019cbccf-2e0f-7f22-a111-111111111111"
+      await createCodexSession(testDir, projectDir, id)
+
+      const { findAllProviderSessions } = await import("./transcript-utils.ts")
+      const sessions = await findAllProviderSessions(projectDir)
+      const match = sessions.find((s) => s.id === id)
+      expect(match).toBeDefined()
+      expect(match?.provider).toBe("codex")
+      expect(match?.format).toBe("codex-jsonl")
+    })
+
+    it("filters out Codex sessions from other projects", async () => {
+      const projectDir = join(testDir, "workspace", "primary-project")
+      const otherProjectDir = join(testDir, "workspace", "other-project")
+      await mkdir(projectDir, { recursive: true })
+      await mkdir(otherProjectDir, { recursive: true })
+
+      const id = "019cbccf-2e0f-7f22-a111-222222222222"
+      await createCodexSession(testDir, otherProjectDir, id)
+
+      const { findAllProviderSessions } = await import("./transcript-utils.ts")
+      const sessions = await findAllProviderSessions(projectDir)
+      expect(sessions.some((s) => s.id === id)).toBe(false)
+    })
+  })
+
+  describe("findAllProviderSessions deterministic ordering", () => {
+    let testDir: string
+    let previousHome: string | undefined
+
+    beforeEach(async () => {
+      testDir = join(tmpdir(), `transcript-provider-order-${Date.now()}`)
+      await mkdir(testDir, { recursive: true })
+      previousHome = process.env.HOME
+      process.env.HOME = testDir
+    })
+
+    afterEach(async () => {
+      process.env.HOME = previousHome
+      try {
+        await rm(testDir, { recursive: true, force: true })
+      } catch {}
+    })
+
+    it("uses provider precedence as deterministic tie-breaker when mtimes are equal", async () => {
+      const projectDir = join(testDir, "workspace", "shared-proj")
+      await mkdir(projectDir, { recursive: true })
+
+      const claudeId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+      const geminiId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+      const antigravityId = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+      const codexId = "019cbccf-2e0f-7f22-a111-333333333333"
+
+      const projectKey = projectDir.replace(/[/.\\:]/g, "-")
+      const claudeDir = join(testDir, ".claude", "projects", projectKey)
+      await mkdir(claudeDir, { recursive: true })
+      const claudePath = join(claudeDir, `${claudeId}.jsonl`)
+      await writeFile(claudePath, '{"type":"user","message":{"content":"claude"}}\n')
+
+      const geminiBucket = join(testDir, ".gemini", "tmp", "shared-proj")
+      await mkdir(join(geminiBucket, "chats"), { recursive: true })
+      await writeFile(join(geminiBucket, ".project_root"), `${projectDir}\n`)
+      const geminiPath = join(geminiBucket, "chats", "session-2026-03-05T10-00-abcdef12.json")
+      await writeFile(
+        geminiPath,
+        JSON.stringify({
+          sessionId: geminiId,
+          messages: [{ type: "user", content: [{ text: "gemini" }] }],
+        })
+      )
+
+      const antigravityConversations = join(testDir, ".gemini", "antigravity", "conversations")
+      const antigravityBrain = join(testDir, ".gemini", "antigravity", "brain", antigravityId)
+      await mkdir(antigravityConversations, { recursive: true })
+      await mkdir(antigravityBrain, { recursive: true })
+      const antigravityPath = join(antigravityConversations, `${antigravityId}.pb`)
+      await writeFile(antigravityPath, Buffer.from([0x0a, 0x01, 0x00]))
+      await writeFile(join(antigravityBrain, "task.md"), `file://${projectDir}\n`)
+
+      const codexPath = await createCodexSession(testDir, projectDir, codexId)
+
+      const sameTime = new Date("2026-03-05T12:00:00.000Z")
+      await Promise.all([
+        utimes(claudePath, sameTime, sameTime),
+        utimes(geminiPath, sameTime, sameTime),
+        utimes(antigravityPath, sameTime, sameTime),
+        utimes(codexPath, sameTime, sameTime),
+      ])
+
+      const { findAllProviderSessions } = await import("./transcript-utils.ts")
+      const sessions = await findAllProviderSessions(projectDir)
+      const tied = sessions.filter((s) =>
+        [claudeId, geminiId, antigravityId, codexId].includes(s.id)
+      )
+      expect(tied.map((s) => s.provider)).toEqual(["claude", "gemini", "antigravity", "codex"])
     })
   })
 })

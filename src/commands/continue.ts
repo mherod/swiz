@@ -128,7 +128,7 @@ export const continueCommand: Command = {
 
     // Claude session IDs can be resumed directly. For non-Claude providers,
     // continue with a new Claude session using the generated suggestion.
-    const canResumeClaudeSession = session.provider === "claude" || session.path.endsWith(".jsonl")
+    const canResumeClaudeSession = session.provider === "claude"
     const shouldResumeById = Boolean(sessionQuery) && canResumeClaudeSession
     const resumeArgs: string[] = shouldResumeById
       ? ["claude", "--resume", session.id, suggestion]

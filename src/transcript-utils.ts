@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from "node:fs/promises"
+import { open, readdir, readFile, stat } from "node:fs/promises"
 import { basename, join, resolve } from "node:path"
 import { getProviderSessionDir } from "./provider-utils.ts"
 
@@ -46,8 +46,25 @@ export interface Session {
   id: string
   path: string
   mtime: number
-  provider?: "claude" | "gemini" | "antigravity"
-  format?: "jsonl" | "gemini-json" | "antigravity-pb"
+  provider?: "claude" | "gemini" | "antigravity" | "codex"
+  format?: "jsonl" | "gemini-json" | "antigravity-pb" | "codex-jsonl"
+}
+
+const SESSION_PROVIDER_PRECEDENCE = ["claude", "gemini", "antigravity", "codex"] as const
+
+function providerRank(provider: Session["provider"] | undefined): number {
+  if (!provider) return SESSION_PROVIDER_PRECEDENCE.length
+  const idx = SESSION_PROVIDER_PRECEDENCE.indexOf(provider)
+  return idx === -1 ? SESSION_PROVIDER_PRECEDENCE.length : idx
+}
+
+function sortSessionsDeterministic(sessions: Session[]): Session[] {
+  return sessions.sort(
+    (a, b) =>
+      b.mtime - a.mtime ||
+      providerRank(a.provider) - providerRank(b.provider) ||
+      a.id.localeCompare(b.id)
+  )
 }
 
 export function projectKeyFromCwd(cwd: string): string {
@@ -73,7 +90,7 @@ export async function findSessions(projectDir: string): Promise<Session[]> {
     } catch {}
   }
 
-  return sessions.sort((a, b) => b.mtime - a.mtime)
+  return sortSessionsDeterministic(sessions)
 }
 
 async function readProjectRoot(path: string): Promise<string | null> {
@@ -151,6 +168,124 @@ async function findGeminiSessions(targetDir: string): Promise<Session[]> {
           mtime: s.mtimeMs,
           provider: "gemini",
           format: "gemini-json",
+        })
+      } catch {}
+    }
+  }
+
+  return sessions
+}
+
+const CODEX_SESSION_HEADER_BYTES = 262_144
+
+async function readFilePrefix(
+  path: string,
+  maxBytes = CODEX_SESSION_HEADER_BYTES
+): Promise<string> {
+  let handle: import("node:fs/promises").FileHandle | null = null
+  try {
+    handle = await open(path, "r")
+    const buffer = Buffer.alloc(maxBytes)
+    const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0)
+    return buffer.subarray(0, bytesRead).toString("utf-8")
+  } catch {
+    return ""
+  } finally {
+    if (handle) {
+      try {
+        await handle.close()
+      } catch {}
+    }
+  }
+}
+
+function parseCodexIdFromFilename(name: string): string {
+  const base = name.replace(/\.(jsonl|json)$/i, "")
+  const uuidMatch = base.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+  return uuidMatch?.[0] ?? base
+}
+
+async function readCodexSessionMeta(
+  sessionPath: string
+): Promise<{ id: string | null; cwd: string | null }> {
+  const prefix = await readFilePrefix(sessionPath)
+  if (!prefix) return { id: null, cwd: null }
+
+  let id: string | null = null
+  let cwd: string | null = null
+
+  for (const line of prefix.split("\n")) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      continue
+    }
+
+    if (!parsed || typeof parsed !== "object") continue
+    const record = parsed as Record<string, unknown>
+    const type = record.type
+    if (type !== "session_meta" && type !== "turn_context") continue
+
+    const payload = record.payload
+    if (!payload || typeof payload !== "object") continue
+    const payloadRecord = payload as Record<string, unknown>
+
+    const parsedId = payloadRecord.id
+    if (!id && typeof parsedId === "string" && parsedId.trim()) {
+      id = parsedId
+    }
+
+    const parsedCwd = payloadRecord.cwd
+    if (!cwd && typeof parsedCwd === "string" && parsedCwd.trim()) {
+      cwd = parsedCwd
+    }
+
+    if (id && cwd) break
+  }
+
+  return { id, cwd }
+}
+
+async function findCodexSessions(targetDir: string): Promise<Session[]> {
+  const home = process.env.HOME ?? "~"
+  const codexRoot = join(home, ".codex", "sessions")
+  const targetPath = resolve(targetDir)
+  const sessions: Session[] = []
+  const pendingDirs = [codexRoot]
+
+  while (pendingDirs.length > 0) {
+    const current = pendingDirs.pop()!
+
+    let entries: import("node:fs").Dirent[]
+    try {
+      entries = await readdir(current, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    for (const entry of entries) {
+      const entryPath = join(current, entry.name)
+      if (entry.isDirectory()) {
+        pendingDirs.push(entryPath)
+        continue
+      }
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue
+
+      const { id: parsedId, cwd } = await readCodexSessionMeta(entryPath)
+      if (!cwd || resolve(cwd) !== targetPath) continue
+
+      try {
+        const s = await stat(entryPath)
+        sessions.push({
+          id: parsedId ?? parseCodexIdFromFilename(entry.name),
+          path: entryPath,
+          mtime: s.mtimeMs,
+          provider: "codex",
+          format: "codex-jsonl",
         })
       } catch {}
     }
@@ -250,12 +385,15 @@ async function findAntigravitySessions(targetDir: string): Promise<Session[]> {
 }
 
 /**
- * Discover sessions across supported transcript providers (Claude, Gemini, Antigravity).
- * Aggregates sessions from all available providers, sorted by mtime (most recent first).
+ * Discover sessions across supported transcript providers (Claude, Gemini, Antigravity, Codex).
+ * Aggregates sessions from all available providers, sorted by mtime (most recent first) with
+ * deterministic tie-breaking by provider precedence (Claude > Gemini > Antigravity > Codex).
  *
  * For Claude: queries ~/.claude/projects/<projectKey>/ for .jsonl files.
  * For Gemini: queries ~/.gemini/tmp/<bucket>/chats/session-*.json using .project_root metadata.
  * For Antigravity: queries ~/.gemini/antigravity/conversations/*.pb and maps by brain metadata.
+ * For Codex: recursively queries ~/.codex/sessions/<year>/<month>/<day>/*.jsonl using
+ * session_meta payload cwd metadata.
  *
  * @param projectDir - Project directory (used to compute Claude projectKey)
  * @returns Aggregated sessions from all providers, sorted by mtime descending
@@ -263,17 +401,20 @@ async function findAntigravitySessions(targetDir: string): Promise<Session[]> {
 export async function findAllProviderSessions(projectDir: string): Promise<Session[]> {
   const targetDir = resolve(projectDir)
   const claudeProjectDir = join(getProviderSessionDir("claude"), projectKeyFromCwd(targetDir))
-  const [claudeSessions, geminiSessions, antigravitySessions] = await Promise.all([
+  const [claudeSessions, geminiSessions, antigravitySessions, codexSessions] = await Promise.all([
     findSessions(claudeProjectDir),
     findGeminiSessions(targetDir),
     findAntigravitySessions(targetDir),
+    findCodexSessions(targetDir),
   ])
 
-  return [
+  const merged: Session[] = [
     ...claudeSessions.map((s) => ({ ...s, provider: "claude" as const, format: "jsonl" as const })),
     ...geminiSessions,
     ...antigravitySessions,
-  ].sort((a, b) => b.mtime - a.mtime)
+    ...codexSessions,
+  ]
+  return sortSessionsDeterministic(merged)
 }
 
 export function isUnsupportedTranscriptFormat(format: Session["format"] | undefined): boolean {
@@ -379,6 +520,125 @@ function parseJsonlEntries(text: string): TranscriptEntry[] {
       if (parsed && typeof parsed === "object") entries.push(parsed)
     } catch {}
   }
+  return entries
+}
+
+function extractCodexMessageText(content: unknown, textType: "input_text" | "output_text"): string {
+  if (!Array.isArray(content)) return ""
+  const texts = content
+    .map((part) => {
+      if (!part || typeof part !== "object") return ""
+      const block = part as Record<string, unknown>
+      if (block.type !== textType) return ""
+      return typeof block.text === "string" ? block.text : ""
+    })
+    .filter(Boolean)
+  return texts.join("\n").trim()
+}
+
+function parseCodexToolInput(raw: unknown): Record<string, unknown> {
+  const normalize = (value: Record<string, unknown>): Record<string, unknown> => {
+    if (typeof value.command !== "string" && typeof value.cmd === "string") {
+      return { ...value, command: value.cmd }
+    }
+    return value
+  }
+
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return normalize(raw as Record<string, unknown>)
+  }
+  if (typeof raw !== "string") return {}
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return normalize(parsed as Record<string, unknown>)
+    }
+  } catch {}
+  return {}
+}
+
+function parseCodexJsonlEntries(text: string): TranscriptEntry[] {
+  const entries: TranscriptEntry[] = []
+  let sessionId: string | undefined
+
+  for (const line of text.split("\n").filter(Boolean)) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(line)
+    } catch {
+      continue
+    }
+    if (!parsed || typeof parsed !== "object") continue
+
+    const record = parsed as Record<string, unknown>
+    const timestamp = typeof record.timestamp === "string" ? record.timestamp : undefined
+
+    if (record.type === "session_meta" && record.payload && typeof record.payload === "object") {
+      const payload = record.payload as Record<string, unknown>
+      const parsedId = payload.id
+      if (typeof parsedId === "string" && parsedId.trim()) {
+        sessionId = parsedId
+      }
+      continue
+    }
+
+    if (record.type === "event_msg" && record.payload && typeof record.payload === "object") {
+      const payload = record.payload as Record<string, unknown>
+      if (payload.type === "user_message" && typeof payload.message === "string") {
+        const message = payload.message.trim()
+        if (!message) continue
+        entries.push({
+          type: "user",
+          sessionId,
+          timestamp,
+          message: {
+            role: "user",
+            content: message,
+          },
+        })
+      }
+      continue
+    }
+
+    if (record.type !== "response_item" || !record.payload || typeof record.payload !== "object") {
+      continue
+    }
+
+    const payload = record.payload as Record<string, unknown>
+    if (payload.type === "message" && payload.role === "assistant") {
+      const text = extractCodexMessageText(payload.content, "output_text")
+      if (!text) continue
+      entries.push({
+        type: "assistant",
+        sessionId,
+        timestamp,
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text }],
+        },
+      })
+      continue
+    }
+
+    if (payload.type === "function_call" && typeof payload.name === "string" && payload.name) {
+      entries.push({
+        type: "assistant",
+        sessionId,
+        timestamp,
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              name: payload.name,
+              input: parseCodexToolInput(payload.arguments),
+            },
+          ],
+        },
+      })
+    }
+  }
+
   return entries
 }
 
@@ -504,10 +764,13 @@ export function parseTranscriptEntries(
 ): TranscriptEntry[] {
   if (formatHint === "antigravity-pb") return []
   if (formatHint === "gemini-json") return parseGeminiEntries(text)
+  if (formatHint === "codex-jsonl") return parseCodexJsonlEntries(text)
   if (formatHint === "jsonl") return parseJsonlEntries(text)
 
   const geminiEntries = parseGeminiEntries(text)
   if (geminiEntries.length > 0) return geminiEntries
+  const codexEntries = parseCodexJsonlEntries(text)
+  if (codexEntries.length > 0) return codexEntries
   return parseJsonlEntries(text)
 }
 
