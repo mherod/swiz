@@ -7,6 +7,7 @@
 
 import { appendFileSync } from "node:fs"
 import { join } from "node:path"
+import { debugLog } from "../debug.ts"
 import { evalCondition, type HookGroup } from "../manifest.ts"
 import {
   isEditTool,
@@ -33,9 +34,7 @@ const DEFAULT_TIMEOUT = 10 // seconds
 export function log(msg: string): void {
   try {
     appendFileSync(LOG_PATH, `${msg}\n`)
-    if (process.env.SWIZ_DEBUG) {
-      console.error(msg)
-    }
+    debugLog(msg)
   } catch {
     // Never let logging break dispatch
   }

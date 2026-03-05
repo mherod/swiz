@@ -152,9 +152,20 @@ async function findSessions(
 
   for (const entry of entries) {
     let sessionId: string | undefined
-    if (UUID_RE.test(entry)) {
+    let isDirectory = false
+
+    const p = join(projectDir, entry)
+    let s: Awaited<ReturnType<typeof stat>>
+    try {
+      s = await stat(p)
+      isDirectory = s.isDirectory()
+    } catch {
+      continue
+    }
+
+    if (isDirectory && UUID_RE.test(entry)) {
       sessionId = entry
-    } else if (entry.endsWith(".jsonl")) {
+    } else if (!isDirectory && entry.endsWith(".jsonl")) {
       const id = entry.slice(0, -6)
       if (UUID_RE.test(id)) {
         sessionId = id
@@ -162,17 +173,10 @@ async function findSessions(
     }
 
     if (sessionId) {
-      const p = join(projectDir, entry)
-      let s: Awaited<ReturnType<typeof stat>>
-      try {
-        s = await stat(p)
-      } catch {
-        continue
-      }
       const existing = sessionMap.get(sessionId) ?? { paths: [], mtime: 0, size: 0 }
       existing.paths.push(p)
       existing.mtime = Math.max(existing.mtime, s.mtimeMs)
-      existing.size += s.isDirectory() ? await dirSize(p) : s.size
+      existing.size += isDirectory ? await dirSize(p) : s.size
       sessionMap.set(sessionId, existing)
     }
   }
