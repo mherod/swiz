@@ -6,12 +6,16 @@
 // Thresholds are configurable via global (~/.swiz/settings.json) and project (.swiz/config.json).
 
 import {
+  compactionChecklistSteps,
+  manualCompactionFallback,
+} from "../src/memory-compaction-guidance.ts"
+import {
   DEFAULT_MEMORY_LINE_THRESHOLD,
   DEFAULT_MEMORY_WORD_THRESHOLD,
   readProjectSettings,
   readSwizSettings,
 } from "../src/settings.ts"
-import { isFileEditTool, skillAdvice, type ToolHookInput } from "./hook-utils.ts"
+import { formatActionPlan, isFileEditTool, skillAdvice, type ToolHookInput } from "./hook-utils.ts"
 
 /** Check whether the given path is a CLAUDE.md or a memory .md file. */
 export function isMemoryFile(filePath: string): boolean {
@@ -78,15 +82,19 @@ async function main(): Promise<void> {
   const compactAdvice = skillAdvice(
     "compact-memory",
     `Use the /compact-memory skill to reduce ${basename} below thresholds.`,
-    `Compact ${basename} manually: remove redundant modifiers, simplify compound phrases, consolidate repeated topics, and convert narrative to DO/DON'T directives.`
+    manualCompactionFallback(basename)
   )
+  const compactionChecklist = formatActionPlan(
+    compactionChecklistSteps(
+      `Re-check size after edits: \`wc -l "${filePath}" && wc -w "${filePath}"\`.`
+    )
+  ).trimEnd()
 
   const context = [
     `${basename} exceeds size thresholds after edit: ${violations.join(", ")}.`,
     compactAdvice,
-    "Key strategies: remove redundant modifiers, eliminate parenthetical redundancy, condense code snippets, collapse similar lists, convert session notes to DOs/DONTs.",
-    "CLAUDE.md is a direct codebase guide, NOT a diary — all content must be prescriptive and actionable.",
-  ].join(" ")
+    compactionChecklist,
+  ].join("\n\n")
 
   console.log(
     JSON.stringify({

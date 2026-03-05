@@ -1,7 +1,12 @@
 import { existsSync, statSync } from "node:fs"
 import { resolve } from "node:path"
+import { formatActionPlan } from "../../hooks/hook-utils.ts"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
+import {
+  compactionChecklistSteps,
+  manualCompactionFallback,
+} from "../memory-compaction-guidance.ts"
 import { getProviderAdapter } from "../provider-adapters.ts"
 import {
   DEFAULT_MEMORY_LINE_THRESHOLD,
@@ -80,6 +85,15 @@ function fileSize(path: string): string {
     return `${(s.size / (1024 * 1024)).toFixed(1)}MB`
   } catch {
     return "?"
+  }
+}
+
+function isPresentMemoryFile(path: string): boolean {
+  try {
+    const stats = statSync(path)
+    return stats.isFile() && stats.size > 0
+  } catch {
+    return false
   }
 }
 
@@ -167,8 +181,30 @@ function getThresholdStatus(
 async function printSource(
   source: MemorySource,
   index: number,
-  thresholds: SourceThresholds
+  thresholds: SourceThresholds,
+  options: { compact?: boolean } = {}
 ): Promise<SourceCheckResult> {
+  if (options.compact) {
+    const size = fileSize(source.path)
+    let exceeded = false
+    let details = size
+    let statusIndicator = ""
+    const stats = await getFileStats(source.path)
+    if (stats) {
+      details += ` · ${stats.lines} lines · ${stats.words} words`
+      const status = getThresholdStatus(stats, thresholds)
+      exceeded = status.exceeded
+      statusIndicator = status.indicator
+    }
+    console.log(`    - ${source.path} ${DIM}(${details})${RESET}${statusIndicator}`)
+
+    return {
+      exceeded,
+      label: source.label,
+      path: source.path,
+    }
+  }
+
   const exists = existsSync(source.path)
   const marker = exists ? `${GREEN}✓${RESET}` : `${DIM}✗${RESET}`
   const pathDisplay = exists ? source.path : `${DIM}${source.path}${RESET}`
@@ -288,42 +324,65 @@ export const memoryCommand: Command = {
 
     const exceededFiles: Array<SourceCheckResult & { agentName: string }> = []
 
+    let renderedAgentCount = 0
     for (const [agentIndex, agent] of targetAgents.entries()) {
-      if (showingAllAgents) {
-        console.log(`  ${BOLD}${agent.name}${RESET}\n`)
-      }
-
       const sources = getMemorySources(agent, targetDir)
       if (sources.length === 0) {
+        if (showingAllAgents) continue
         console.log(`  ${YELLOW}No memory sources defined for ${agent.name}${RESET}\n`)
         continue
       }
 
-      const existingCount = sources.filter((s) => existsSync(s.path)).length
-      console.log(
-        `  ${BOLD}Rule hierarchy${RESET} ${DIM}(${existingCount}/${sources.length} files present)${RESET}\n`
-      )
-      console.log(
-        `  ${DIM}Thresholds: ${projectThresholds.memoryLineThreshold} lines · ${projectThresholds.memoryWordThreshold} words${RESET}\n`
-      )
+      const existingSources = sources.filter((source) => isPresentMemoryFile(source.path))
+      if (existingSources.length === 0) {
+        if (showingAllAgents) continue
+        console.log(`  ${YELLOW}No memory files found for ${agent.name}${RESET}\n`)
+        continue
+      }
+
+      if (showingAllAgents) {
+        if (renderedAgentCount > 0) {
+          console.log()
+        }
+        console.log(`  ${BOLD}${agent.name}${RESET}`)
+        console.log(
+          `  ${DIM}Thresholds: ${projectThresholds.memoryLineThreshold} lines · ${projectThresholds.memoryWordThreshold} words${RESET}`
+        )
+      }
+
+      if (!showingAllAgents) {
+        console.log(
+          `  ${BOLD}Rule hierarchy${RESET} ${DIM}(${existingSources.length} files present)${RESET}\n`
+        )
+        console.log(
+          `  ${DIM}Thresholds: ${projectThresholds.memoryLineThreshold} lines · ${projectThresholds.memoryWordThreshold} words${RESET}\n`
+        )
+      }
 
       const globalHome = getProviderAdapter(agent)?.getHomeDir() ?? ""
-      for (const [sourceIndex, source] of sources.entries()) {
+      for (const [sourceIndex, source] of existingSources.entries()) {
         // Use global thresholds for sources in the global home directory
         const isGlobal = globalHome.length > 0 && source.path.startsWith(globalHome)
         const thresholds = isGlobal ? globalThresholds : projectThresholds
 
-        const result = await printSource(source, sourceIndex, {
-          lines: thresholds.memoryLineThreshold,
-          words: thresholds.memoryWordThreshold,
-        })
+        const result = await printSource(
+          source,
+          sourceIndex,
+          {
+            lines: thresholds.memoryLineThreshold,
+            words: thresholds.memoryWordThreshold,
+          },
+          { compact: showingAllAgents }
+        )
 
         if (result.exceeded) {
           exceededFiles.push({ ...result, agentName: agent.name })
         }
       }
 
-      if (showingAllAgents && agentIndex < targetAgents.length - 1) {
+      renderedAgentCount++
+
+      if (!showingAllAgents && agentIndex < targetAgents.length - 1) {
         console.log()
       }
     }
@@ -336,13 +395,17 @@ export const memoryCommand: Command = {
       const compactAdvice = skillAdvice(
         "compact-memory",
         "Use the /compact-memory skill to reduce each file below thresholds.",
-        "Compact manually: remove redundant modifiers, simplify compound phrases, consolidate repeated topics, convert narrative to DO/DON'T directives."
+        manualCompactionFallback("each file")
       )
+      const compactionChecklist = formatActionPlan(
+        compactionChecklistSteps("Re-check each file after edits with `wc -l` and `wc -w`.")
+      ).trimEnd()
 
       const guidance = [
         `Memory file(s) exceed size thresholds:\n${fileList}`,
         `\nThresholds: ${projectThresholds.memoryLineThreshold} lines, ${projectThresholds.memoryWordThreshold} words`,
         `\n${compactAdvice}`,
+        `\n${compactionChecklist}`,
       ].join("\n")
 
       throw new Error(guidance)

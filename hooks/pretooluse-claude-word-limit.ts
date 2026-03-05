@@ -2,7 +2,14 @@
 // PreToolUse hook: Block git push when CLAUDE.md exceeds 5000-word limit
 
 import { join } from "node:path"
-import { countFileWords, denyPreToolUse, isShellTool, type ToolHookInput } from "./hook-utils.ts"
+import { compactionChecklistSteps } from "../src/memory-compaction-guidance.ts"
+import {
+  countFileWords,
+  denyPreToolUse,
+  formatActionPlan,
+  isShellTool,
+  type ToolHookInput,
+} from "./hook-utils.ts"
 
 const WORD_LIMIT = 5000
 
@@ -28,16 +35,16 @@ async function main(): Promise<void> {
   if (stats.words > WORD_LIMIT) {
     const over = stats.words - WORD_LIMIT
     const reduction = over + 1 // Suggest reducing at least (over + 1) words to get back under
+    const compactionChecklist = formatActionPlan(
+      compactionChecklistSteps("Re-check after edits: `wc -w CLAUDE.md`")
+    )
     const message = `CLAUDE.md exceeds 5000-word limit: ${stats.words} words (${over} over).
 
 Reduce CLAUDE.md by at least ${reduction} words before pushing.
 
-Use the /compact-memory skill to trim the file, or manually edit CLAUDE.md to remove redundancy:
-- Remove auxiliary verbs (will → Ø, to be → Ø)
-- Remove redundant qualifiers (actual → Ø, exact → Ø)
-- Condense compound phrases
-- Remove parenthetical redundancy
-- Consolidate duplicate topics
+Use the /compact-memory skill to trim the file, or manually edit CLAUDE.md to remove redundancy.
+
+${compactionChecklist}
 
 Current: ${stats.words} words | Limit: ${WORD_LIMIT} words | Target: ${WORD_LIMIT - 10} words`
 

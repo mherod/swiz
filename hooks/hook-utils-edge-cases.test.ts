@@ -524,6 +524,11 @@ describe("isDefaultBranch() with edge-case inputs", () => {
   it("returns false for 'feature/main'", () => {
     expect(isDefaultBranch("feature/main")).toBe(false)
   })
+
+  it("supports a custom configured default branch", () => {
+    expect(isDefaultBranch("trunk", "trunk")).toBe(true)
+    expect(isDefaultBranch("main", "trunk")).toBe(false)
+  })
 })
 
 // ─── Tool classification functions ──────────────────────────────────────────

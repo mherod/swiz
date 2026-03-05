@@ -151,15 +151,23 @@ describe("swiz memory CLI", () => {
   })
 
   it("shows Codex hierarchy with --codex flag", async () => {
-    const { stdout } = await runMemory(["--codex"])
+    const tmpRoot = join(tmpdir(), `swiz-memory-codex-${Date.now()}`)
+    const homeDir = join(tmpRoot, "home")
+    const codexDir = join(homeDir, ".codex")
+    mkdirSync(codexDir, { recursive: true })
+    const globalRulesPath = join(codexDir, "AGENTS.md")
+    writeFileSync(globalRulesPath, "# Codex rules\n")
+
+    const { stdout } = await runMemory(["--codex"], { HOME: homeDir })
     expect(stdout).toContain("Codex CLI")
-    expect(stdout).toContain("AGENTS.md")
+    expect(stdout).toContain(globalRulesPath)
   })
 
   it("shows Cursor hierarchy with --cursor flag", async () => {
     const { stdout } = await runMemory(["--cursor"])
     expect(stdout).toContain("Cursor")
-    expect(stdout).toContain(".cursorrules")
+    expect(stdout).toContain("Rule hierarchy")
+    expect(stdout).toContain("Project rule")
   })
 
   it("supports --dir flag to target another directory", async () => {
@@ -180,7 +188,7 @@ describe("swiz memory CLI", () => {
     expect(stdout).toContain("Claude Code")
     expect(stdout).toContain("Cursor")
     expect(stdout).toContain("Gemini CLI")
-    expect(stdout).toContain("Codex CLI")
+    expect(stdout).not.toContain("No memory files found")
   })
 
   it("supports --all and overrides detected agent context", async () => {
@@ -188,7 +196,57 @@ describe("swiz memory CLI", () => {
     expect(exitCode).toBe(0)
     expect(stdout).toContain("Agents: ")
     expect(stdout).toContain("Claude Code")
+    expect(stdout).toContain("Thresholds:")
+    expect(stdout).not.toContain("No memory files found")
+  })
+
+  it("shows only existing agent files in --all mode", async () => {
+    const tmpRoot = join(tmpdir(), `swiz-memory-all-${Date.now()}`)
+    const projectDir = join(tmpRoot, "project")
+    const homeDir = join(tmpRoot, "home")
+    mkdirSync(projectDir, { recursive: true })
+    mkdirSync(homeDir, { recursive: true })
+    writeFileSync(join(projectDir, "AGENTS.md"), "# Project Codex rules\n")
+
+    const { stdout, exitCode } = await runMemory(["--all", "--dir", projectDir], { HOME: homeDir })
+    expect(exitCode).toBe(0)
     expect(stdout).toContain("Codex CLI")
+    expect(stdout).toContain(join(projectDir, "AGENTS.md"))
+    expect(stdout).not.toContain("Claude Code")
+    expect(stdout).not.toContain("Cursor")
+    expect(stdout).not.toContain("Gemini CLI")
+    expect(stdout).not.toContain("No memory files found")
+    expect(stdout).not.toContain("Rule hierarchy")
+    expect(stdout).toContain("Thresholds:")
+  })
+
+  it("treats empty memory files as missing", async () => {
+    const tmpRoot = join(tmpdir(), `swiz-memory-empty-${Date.now()}`)
+    const projectDir = join(tmpRoot, "project")
+    const homeDir = join(tmpRoot, "home")
+    const codexDir = join(homeDir, ".codex")
+    mkdirSync(projectDir, { recursive: true })
+    mkdirSync(codexDir, { recursive: true })
+
+    const projectRulesPath = join(projectDir, "AGENTS.md")
+    const globalRulesPath = join(codexDir, "AGENTS.md")
+    const globalInstructionsPath = join(codexDir, "instructions.md")
+
+    writeFileSync(projectRulesPath, "")
+    writeFileSync(globalRulesPath, "# Global Codex rules\n")
+    writeFileSync(globalInstructionsPath, "")
+
+    const { stdout, exitCode } = await runMemory(["--codex", "--dir", projectDir], {
+      HOME: homeDir,
+    })
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("Rule hierarchy")
+    expect(stdout).toContain("(1 files present)")
+    expect(stdout).toContain(globalRulesPath)
+    expect(stdout).not.toContain(projectRulesPath)
+    expect(stdout).not.toContain(globalInstructionsPath)
+    expect(stdout).not.toContain("0B")
   })
 
   it("errors when --all is combined with an explicit agent flag", async () => {

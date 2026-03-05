@@ -23,6 +23,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { translateMatcher } from "../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
+import { readProjectSettings } from "../src/settings.ts"
 import { skillAdvice, skillExists } from "../src/skill-utils.ts"
 
 export { skillAdvice, skillExists }
@@ -735,9 +736,40 @@ export async function createSessionTask(
 
 // ─── Branch utilities ───────────────────────────────────────────────────
 
-/** True if branch is the default integration branch (main or master). */
-export function isDefaultBranch(branch: string): boolean {
-  return branch === "main" || branch === "master"
+/** True if branch matches the configured default branch. */
+export function isDefaultBranch(
+  branch: string,
+  defaultBranches: string | readonly string[] = ["main", "master"]
+): boolean {
+  const candidates = Array.isArray(defaultBranches) ? defaultBranches : [defaultBranches]
+  return candidates.includes(branch)
+}
+
+/**
+ * Resolve the effective default branch for a repository.
+ * Precedence:
+ *   1. Project setting `.swiz/config.json` → `defaultBranch`
+ *   2. Git remote HEAD (`refs/remotes/origin/HEAD`)
+ *   3. Local `main` branch
+ *   4. Local `master` branch
+ *   5. Fallback `main`
+ */
+export async function getDefaultBranch(cwd: string): Promise<string> {
+  const projectSettings = await readProjectSettings(cwd)
+  const configured = projectSettings?.defaultBranch?.trim()
+  if (configured) return configured
+
+  const remoteHeadRef = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd)
+  const remoteHead = remoteHeadRef.replace(/^refs\/remotes\/origin\//, "").trim()
+  if (remoteHead) return remoteHead
+
+  const localMain = await git(["rev-parse", "--verify", "refs/heads/main"], cwd)
+  if (localMain) return "main"
+
+  const localMaster = await git(["rev-parse", "--verify", "refs/heads/master"], cwd)
+  if (localMaster) return "master"
+
+  return "main"
 }
 
 // ─── Git status parsing ─────────────────────────────────────────────────

@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
-// Stop hook: Block stop if current branch has conflicts with origin/main
+// Stop hook: Block stop if current branch has conflicts with the default branch.
 // Checks both GitHub PR merge state (authoritative) and local merge-tree (fallback)
 
 import {
   blockStop,
+  getDefaultBranch,
   ghJson,
   git,
   hasGhCli,
@@ -22,8 +23,12 @@ async function main(): Promise<void> {
   const branch = await git(["branch", "--show-current"], cwd)
   if (!branch) return // detached HEAD
 
-  // Skip if on main or master
-  if (isDefaultBranch(branch)) return
+  const defaultBranch = await getDefaultBranch(cwd)
+
+  // Skip when currently on the default branch
+  if (isDefaultBranch(branch, defaultBranch)) return
+
+  const defaultRemoteRef = `origin/${defaultBranch}`
 
   // --- GitHub PR merge state check (authoritative) ---
   if (hasGhCli()) {
@@ -43,7 +48,7 @@ async function main(): Promise<void> {
           "Use the /rebase-onto-main skill to rebase and resolve conflicts before stopping.\n" +
             "Tip: Configure `swiz mergetool` as your Git mergetool for AI-powered conflict resolution:\n" +
             '  git config merge.tool swiz && git config mergetool.swiz.cmd \'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"\' && git config mergetool.swiz.trustExitCode true',
-          "Rebase and resolve conflicts before stopping:\n  git fetch origin main\n  git rebase origin/main\n" +
+          `Rebase and resolve conflicts before stopping:\n  git fetch origin ${defaultBranch}\n  git rebase ${defaultRemoteRef}\n` +
             "Tip: Use `swiz mergetool` for AI-powered conflict resolution:\n" +
             '  git config merge.tool swiz && git config mergetool.swiz.cmd \'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"\' && git config mergetool.swiz.trustExitCode true'
         )
@@ -56,28 +61,28 @@ async function main(): Promise<void> {
   }
 
   // --- Local merge-tree check (fallback for branches without PRs) ---
-  const originMain = await git(["rev-parse", "origin/main"], cwd)
-  if (!originMain) return
+  const originDefault = await git(["rev-parse", defaultRemoteRef], cwd)
+  if (!originDefault) return
 
-  const behindStr = await git(["rev-list", "--count", "HEAD..origin/main"], cwd)
+  const behindStr = await git(["rev-list", "--count", `HEAD..${defaultRemoteRef}`], cwd)
   const behind = parseInt(behindStr, 10)
   if (Number.isNaN(behind) || behind === 0) return
 
-  const mergeBase = await git(["merge-base", "HEAD", "origin/main"], cwd)
+  const mergeBase = await git(["merge-base", "HEAD", defaultRemoteRef], cwd)
   if (!mergeBase) return
 
-  const mergeTree = await git(["merge-tree", mergeBase, "HEAD", "origin/main"], cwd)
+  const mergeTree = await git(["merge-tree", mergeBase, "HEAD", defaultRemoteRef], cwd)
   const conflictCount = (mergeTree.match(/^<<<<<</gm) ?? []).length
 
   if (conflictCount > 0) {
-    let reason = `Branch '${branch}' has conflicts with origin/main.\n\n`
-    reason += `${conflictCount} conflict(s) detected — ${behind} commit(s) on origin/main not yet in this branch.\n\n`
+    let reason = `Branch '${branch}' has conflicts with ${defaultRemoteRef}.\n\n`
+    reason += `${conflictCount} conflict(s) detected — ${behind} commit(s) on ${defaultRemoteRef} not yet in this branch.\n\n`
     reason += skillAdvice(
       "rebase-onto-main",
       "Use the /rebase-onto-main skill to rebase and resolve conflicts before stopping.\n" +
         "Tip: Configure `swiz mergetool` as your Git mergetool for AI-powered conflict resolution:\n" +
         '  git config merge.tool swiz && git config mergetool.swiz.cmd \'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"\' && git config mergetool.swiz.trustExitCode true',
-      "Rebase and resolve conflicts before stopping:\n  git fetch origin main\n  git rebase origin/main\n" +
+      `Rebase and resolve conflicts before stopping:\n  git fetch origin ${defaultBranch}\n  git rebase ${defaultRemoteRef}\n` +
         "Tip: Use `swiz mergetool` for AI-powered conflict resolution:\n" +
         '  git config merge.tool swiz && git config mergetool.swiz.cmd \'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"\' && git config mergetool.swiz.trustExitCode true'
     )

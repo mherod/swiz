@@ -45,6 +45,8 @@ export interface ProjectSwizSettings {
   profile?: PolicyProfile
   trivialMaxFiles?: number
   trivialMaxLines?: number
+  /** Project default branch override (e.g. "main", "master", "trunk"). */
+  defaultBranch?: string
   state?: ProjectState
   stateHistory?: StateHistoryEntry[]
   memoryLineThreshold?: number
@@ -351,6 +353,10 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   }
   if (typeof obj.trivialMaxLines === "number" && obj.trivialMaxLines > 0) {
     result.trivialMaxLines = obj.trivialMaxLines
+  }
+  if (typeof obj.defaultBranch === "string") {
+    const branch = obj.defaultBranch.trim()
+    if (branch && !/\s/.test(branch)) result.defaultBranch = branch
   }
   if (typeof obj.memoryLineThreshold === "number" && obj.memoryLineThreshold > 0) {
     result.memoryLineThreshold = obj.memoryLineThreshold

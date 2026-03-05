@@ -2,7 +2,7 @@
 
 // Pre-push branch policy gate.
 //
-// Enforces rules for direct pushes to protected branches (main/master):
+// Enforces rules for direct pushes to the effective default branch:
 //   1. Collaboration detection — blocks all direct pushes in collaborative repos
 //   2. File count limits — blocks >5 non-docs/config files
 //   3. Commit type policy — blocks feat commits with >3 files
@@ -12,10 +12,9 @@
 // Reads: git state (branch, upstream, changed files, commit messages)
 // Exits: 0 = allow, 1 = block (prints BLOCKED message to stderr)
 
-import { gh, git, isGitRepo } from "../../hooks/hook-utils.ts"
+import { getDefaultBranch, gh, git, isDefaultBranch, isGitRepo } from "../../hooks/hook-utils.ts"
 import { detectProjectCollaborationPolicy } from "../../src/collaboration-policy.ts"
 
-const PROTECTED_BRANCHES = new Set(["main", "master"])
 const MAX_FILES_HARD_BLOCK = 5
 const MAX_TRIVIAL_FILES = 3
 
@@ -64,7 +63,9 @@ const cwd = process.cwd()
 if (!(await isGitRepo(cwd))) process.exit(0)
 
 const branch = await git(["branch", "--show-current"], cwd)
-if (!branch || !PROTECTED_BRANCHES.has(branch)) process.exit(0)
+if (!branch) process.exit(0)
+const defaultBranch = await getDefaultBranch(cwd)
+if (!isDefaultBranch(branch, defaultBranch)) process.exit(0)
 
 // Get changed files between upstream and HEAD
 const upstream = await git(["rev-parse", "--abbrev-ref", `${branch}@{upstream}`], cwd)

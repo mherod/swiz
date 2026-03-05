@@ -9,6 +9,7 @@ import {
   denyPreToolUse,
   formatActionPlan,
   GIT_COMMIT_RE,
+  getDefaultBranch,
   getOpenPrForBranch,
   getRepoSlug,
   ghJson,
@@ -54,7 +55,9 @@ async function main(): Promise<void> {
   if (!(await isGitHubRemote(cwd))) process.exit(0)
 
   const branch = await git(["branch", "--show-current"], cwd)
-  if (!branch || isDefaultBranch(branch)) process.exit(0)
+  if (!branch) process.exit(0)
+  const defaultBranch = await getDefaultBranch(cwd)
+  if (isDefaultBranch(branch, defaultBranch)) process.exit(0)
 
   // Check for an open approved PR on this branch
   const pr = await getOpenPrForBranch<PrWithReviews>(

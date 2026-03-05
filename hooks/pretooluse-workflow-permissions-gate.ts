@@ -10,7 +10,13 @@
 // This hook prevents accidental privilege escalation by blocking permission edits
 // on feature branches with an explanatory message.
 
-import { denyPreToolUse, git, isFileEditTool, type ToolHookInput } from "./hook-utils.ts"
+import {
+  denyPreToolUse,
+  getDefaultBranch,
+  git,
+  isFileEditTool,
+  type ToolHookInput,
+} from "./hook-utils.ts"
 
 const input = (await Bun.stdin.json()) as ToolHookInput
 
@@ -39,8 +45,7 @@ const cwd = input.cwd ?? process.cwd()
 const currentBranch = await git(["branch", "--show-current"], cwd)
 if (!currentBranch) process.exit(0) // Detached HEAD or not a git repo — allow
 
-const defaultBranchRef = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd)
-const defaultBranch = defaultBranchRef.replace(/^refs\/remotes\/origin\//, "") || "main"
+const defaultBranch = await getDefaultBranch(cwd)
 
 // On default branch — allow (direct pushes to main are gated by other hooks)
 if (currentBranch === defaultBranch) process.exit(0)
@@ -64,7 +69,7 @@ denyPreToolUse(
     "",
     "Instead of modifying workflow permissions:",
     "  - Use repository Settings → Actions → General → Workflow permissions",
-    "  - Scope GITHUB_TOKEN in individual steps with `permissions:` on main only",
-    "  - If this change is intentional, make it directly on the default branch",
+    "  - Scope GITHUB_TOKEN in individual steps with `permissions:` on the default branch only",
+    `  - If this change is intentional, make it directly on '${defaultBranch}'`,
   ].join("\n")
 )

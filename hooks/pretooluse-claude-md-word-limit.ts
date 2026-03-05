@@ -1,8 +1,19 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Prevent CLAUDE.md files from exceeding 5000 words.
 // Blocks Edit/Write operations that would push the file over the threshold.
 
-import { denyPreToolUse, isEditTool, isWriteTool, skillAdvice } from "./hook-utils.ts"
+import {
+  compactionChecklistSteps,
+  manualCompactionGuidanceFallback,
+} from "../src/memory-compaction-guidance.ts"
+import {
+  denyPreToolUse,
+  formatActionPlan,
+  isEditTool,
+  isWriteTool,
+  skillAdvice,
+} from "./hook-utils.ts"
 
 const WORD_LIMIT = 5000
 
@@ -111,7 +122,10 @@ async function main() {
       const skill = skillAdvice(
         "compact-memory",
         "Use the /compact-memory skill to reduce the file below 5000 words, then retry this edit.",
-        "Run `bun ~/.claude/skills/compact-memory/scripts/compact.ts` to reduce the file."
+        manualCompactionGuidanceFallback()
+      )
+      const inlineChecklist = formatActionPlan(
+        compactionChecklistSteps(`Re-check size: \`wc -w ${filePath}\``)
       )
 
       denyPreToolUse(
@@ -121,7 +135,8 @@ async function main() {
           `Limit: ${WORD_LIMIT} words\n\n` +
           `The CLAUDE.md file cannot exceed ${WORD_LIMIT} words. ` +
           `This limit keeps the memory file focused and performant.\n\n` +
-          `${skill}`
+          `${skill}\n\n` +
+          `${inlineChecklist}`
       )
     }
 

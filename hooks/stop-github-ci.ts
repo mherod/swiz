@@ -6,9 +6,11 @@
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
+  getDefaultBranch,
   ghJson,
   git,
   hasGhCli,
+  isDefaultBranch,
   isGitHubRemote,
   isGitRepo,
   type StopHookInput,
@@ -81,7 +83,8 @@ async function main(): Promise<void> {
 
   const branch = await git(["branch", "--show-current"], cwd)
   if (!branch) return
-  if (branch === "main" || branch === "master") return
+  const defaultBranch = await getDefaultBranch(cwd)
+  if (isDefaultBranch(branch, defaultBranch)) return
 
   let relevant = await fetchRuns(branch, cwd)
   if (!relevant.length) return

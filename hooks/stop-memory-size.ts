@@ -7,6 +7,10 @@
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import {
+  compactionChecklistSteps,
+  manualCompactionFallback,
+} from "../src/memory-compaction-guidance.ts"
+import {
   blockStop,
   formatActionPlan,
   isGitRepo,
@@ -111,10 +115,13 @@ async function main(): Promise<void> {
   const compactAdvice = skillAdvice(
     "compact-memory",
     "Use the /compact-memory skill to reduce each file below thresholds.",
-    "Compact manually: remove redundant modifiers, simplify compound phrases, consolidate repeated topics, convert narrative to DO/DON'T directives."
+    manualCompactionFallback("each file")
   )
 
-  const steps = [compactAdvice]
+  const steps = [
+    compactAdvice,
+    ...compactionChecklistSteps("Re-check each file with `wc -l <file>` and `wc -w <file>`."),
+  ]
   const actionPlan = formatActionPlan(steps)
 
   const reason =

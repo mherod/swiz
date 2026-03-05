@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -77,6 +77,17 @@ describe("stop-non-default-branch", () => {
     Bun.spawnSync(["git", "config", "user.email", "test@test.com"], { cwd: dir })
     Bun.spawnSync(["git", "config", "user.name", "Test"], { cwd: dir })
     Bun.spawnSync(["git", "commit", "--allow-empty", "-m", "init"], { cwd: dir })
+
+    const result = await runHook(dir)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("")
+  })
+
+  test("respects project default-branch override", async () => {
+    const dir = await createGitRepo("feat/my-feature")
+    await mkdir(join(dir, ".swiz"), { recursive: true })
+    await writeFile(join(dir, ".swiz", "config.json"), JSON.stringify({ defaultBranch: "trunk" }))
+    Bun.spawnSync(["git", "checkout", "-b", "trunk"], { cwd: dir })
 
     const result = await runHook(dir)
     expect(result.exitCode).toBe(0)

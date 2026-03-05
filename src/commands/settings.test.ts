@@ -471,6 +471,32 @@ describe("swiz settings", () => {
     expect(result.stdout).toContain("Set memory-line-threshold = 2000")
   })
 
+  test("accepts --project for default-branch", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(
+      ["settings", "set", "default-branch", "trunk", "--project", "--dir", home],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Set default-branch = trunk")
+
+    const configPath = join(home, ".swiz", "config.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { defaultBranch?: string }
+    expect(json.defaultBranch).toBe("trunk")
+  })
+
+  test("rejects invalid default-branch values with whitespace", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(
+      ["settings", "set", "default-branch", "release branch", "--project", "--dir", home],
+      home
+    )
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("default-branch")
+    expect(result.stderr).toContain("whitespace")
+  })
+
   test("existing settings files load cleanly without narrator fields", async () => {
     const home = await createTempHome()
     const configDir = join(home, ".swiz")
@@ -793,7 +819,7 @@ describe("SETTINGS_REGISTRY", () => {
 
   test("adding a setting only requires one registry entry", () => {
     // Verify the registry drives alias resolution, type guards, and scope validation.
-    // All 18 settings must be present with no gaps between the registry and CLI behavior.
+    // All settings must be present with no gaps between the registry and CLI behavior.
     const expectedKeys = [
       "autoContinue",
       "prMergeMode",
@@ -811,6 +837,7 @@ describe("SETTINGS_REGISTRY", () => {
       "narratorSpeed",
       "memoryLineThreshold",
       "memoryWordThreshold",
+      "defaultBranch",
       "narratorVoice",
       "ambitionMode",
       "collaborationMode",

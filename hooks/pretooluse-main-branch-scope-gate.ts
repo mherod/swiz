@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
-// PreToolUse hook: Enforce scope-based push policy for main branch.
+// PreToolUse hook: Enforce scope-based push policy for the default branch.
 // Classifies changes as trivial (typos, small fixes, docs) or non-trivial (features, refactors).
-// Blocks non-trivial work on main in collaborative repositories.
-// Trivial work is allowed directly to main in solo projects.
+// Blocks non-trivial work on the default branch in collaborative repositories.
+// Trivial work is allowed directly to the default branch in solo projects.
 //
 // Classification:
 //   Trivial: ≤ 3 files, ≤ 20 lines changed, only docs/config, or single small fix
@@ -20,7 +20,9 @@ import { readProjectSettings, resolvePolicy } from "../src/settings.ts"
 import {
   classifyChangeScope,
   denyPreToolUse,
+  getDefaultBranch,
   git,
+  isDefaultBranch,
   isShellTool,
   parseGitStatSummary,
   type ToolHookInput,
@@ -32,9 +34,17 @@ if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 const command: string = (input?.tool_input?.command as string) ?? ""
 const cwd: string = (input?.tool_input?.cwd as string) ?? process.cwd()
 
-// Only check git push commands to main/master — capture the target branch name
-const pushToMainRe = /\bgit\s+(?:-\w+\s+)*push\s+(?:-\w+\s+)*origin\s+(main|master)\b/
-const pushMatch = command.match(pushToMainRe)
+const defaultBranch = await getDefaultBranch(cwd)
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+// Only check git push commands that target the effective default branch.
+const pushToDefaultRe = new RegExp(
+  `\\bgit\\s+(?:-\\w+\\s+)*push\\s+(?:-\\w+\\s+)*origin\\s+(${escapeRegex(defaultBranch)})\\b`
+)
+const pushMatch = command.match(pushToDefaultRe)
 if (!pushMatch) process.exit(0)
 
 // Determine the effective branch: prefer current branch, fall back to push target.
@@ -44,7 +54,7 @@ const checkedOutBranch = await git(["branch", "--show-current"], cwd)
 const targetBranch = pushMatch[1]!
 const currentBranch = checkedOutBranch || targetBranch
 
-if (currentBranch !== "main" && currentBranch !== "master") process.exit(0)
+if (!isDefaultBranch(currentBranch, defaultBranch)) process.exit(0)
 
 // ─── Resolve diff range once, use everywhere ─────────────────────────
 
@@ -136,7 +146,7 @@ const isCollaborative = collaboration.isCollaborative
 // ─── Enforce policy ────────────────────────────────────────────────────
 
 if (!isCollaborative) {
-  // Solo repo: allow all changes to main
+  // Solo repo: allow all changes to the default branch
   process.exit(0)
 }
 
@@ -169,7 +179,7 @@ Remediation:
 
 // Non-trivial work in collaborative repo: BLOCK
 const reason = `
-Non-trivial changes to main branch in a collaborative repository.
+Non-trivial changes to '${defaultBranch}' in a collaborative repository.
 
 Change scope: ${scopeDescription} (${fileCount} files, ${totalLinesChanged} lines)
 Repository: ${owner}/${repo}
@@ -179,7 +189,7 @@ ${collaboration.signals.map((s) => `  - ${s}`).join("\n")}
 For non-trivial work, use the feature branch workflow:
   1. Create a feature branch: git checkout -b feat/description
   2. Push: git push origin feat/description
-  3. Open PR: gh pr create --base main
+  3. Open PR: gh pr create --base ${defaultBranch}
   4. Wait for review and approval
   5. Merge via PR (not direct push)
 

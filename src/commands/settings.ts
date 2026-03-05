@@ -156,6 +156,24 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
   },
   // ── String settings ───────────────────────────────────────────────────────
   {
+    key: "defaultBranch",
+    aliases: ["default-branch", "defaultbranch", "default_branch"],
+    kind: "string",
+    scopes: ["project"],
+    validate: (v) => {
+      if (!v.trim()) {
+        return `Invalid value "${v}" for default-branch. Must be a non-empty branch name`
+      }
+      if (v !== v.trim()) {
+        return `Invalid value "${v}" for default-branch. Do not include leading or trailing whitespace`
+      }
+      if (/\s/.test(v)) {
+        return `Invalid value "${v}" for default-branch. Branch names cannot contain whitespace`
+      }
+      return null
+    },
+  },
+  {
     key: "narratorVoice",
     aliases: ["narrator-voice", "narratorvoice", "narrator_voice", "voice"],
     kind: "string",
@@ -233,7 +251,7 @@ function usage(): string {
     "  push-gate, sandboxed-edits, speak, pr-age-gate, narrator-voice, narrator-speed, ambition-mode,\n" +
     "  git-status-gate, github-ci-gate, changes-requested-gate, personal-repo-issues-gate,\n" +
     "  non-default-branch-gate\n" +
-    "Settings (--project): memory-line-threshold, memory-word-threshold\n" +
+    "Settings (--project): memory-line-threshold, memory-word-threshold, default-branch\n" +
     "Settings (--session): auto-continue, pr-merge-mode, collaboration-mode\n" +
     "Hook management: disable-hook <filename> (e.g. stop-github-ci.ts), enable-hook <filename>"
   )
@@ -379,6 +397,8 @@ function printSettings(
     profile: string | null
     trivialMaxFiles: number
     trivialMaxLines: number
+    defaultBranch: string
+    defaultBranchSource: "project" | "auto"
     memoryLineThreshold: number
     memoryLineSource: "project" | "user" | "default"
     memoryWordThreshold: number
@@ -452,6 +472,9 @@ function printSettings(
       `  trivial-max-lines: ${projectPolicyInfo.trivialMaxLines} (${projectPolicyInfo.source})`
     )
     console.log(
+      `  default-branch: ${projectPolicyInfo.defaultBranch} (${projectPolicyInfo.defaultBranchSource})`
+    )
+    console.log(
       `  memory-line-threshold: ${projectPolicyInfo.memoryLineThreshold} (${projectPolicyInfo.memoryLineSource})`
     )
     console.log(
@@ -498,6 +521,8 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
     profile: policy.profile,
     trivialMaxFiles: policy.trivialMaxFiles,
     trivialMaxLines: policy.trivialMaxLines,
+    defaultBranch: projectSettings?.defaultBranch ?? "auto-detect",
+    defaultBranchSource: projectSettings?.defaultBranch ? ("project" as const) : ("auto" as const),
     memoryLineThreshold: memoryThresholds.memoryLineThreshold,
     memoryLineSource: memoryThresholds.memoryLineSource,
     memoryWordThreshold: memoryThresholds.memoryWordThreshold,
@@ -782,6 +807,11 @@ export const settingsCommand: Command = {
     {
       flags: "set memory-word-threshold <words>",
       description: "Max words for CLAUDE.md/memory files before compaction advice (default: 5000)",
+    },
+    {
+      flags: "set default-branch <name>",
+      description:
+        "Set the project default branch override used by branch-aware hooks (e.g. main, master, trunk)",
     },
     {
       flags: "--global, -g",

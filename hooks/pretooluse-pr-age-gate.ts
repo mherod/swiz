@@ -16,6 +16,7 @@
 import { readSwizSettings } from "../src/settings.ts"
 import {
   denyPreToolUse,
+  getDefaultBranch,
   getOpenPrForBranch,
   gh,
   git,
@@ -118,9 +119,10 @@ if (import.meta.main) {
     // Strip remote prefix (origin/) to get the branch name for PR lookup
     const branchName = branch.replace(/^origin\//, "")
 
-    // Skip merging main/master into feature branches (that's pulling upstream, not merging a PR)
+    // Skip merging default branch into feature branches (that's pulling upstream, not merging a PR)
     const currentBranch = await git(["branch", "--show-current"], cwd)
-    if (branchName === "main" || branchName === "master") process.exit(0)
+    const defaultBranch = await getDefaultBranch(cwd)
+    if (branchName === defaultBranch) process.exit(0)
     // Also skip if merging the current branch into itself (no-op)
     if (branchName === currentBranch) process.exit(0)
 

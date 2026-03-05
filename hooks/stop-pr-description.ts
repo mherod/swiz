@@ -3,6 +3,7 @@
 
 import {
   blockStop,
+  getDefaultBranch,
   getOpenPrForBranch,
   git,
   hasGhCli,
@@ -36,7 +37,9 @@ async function main(): Promise<void> {
   if (!(await isGitHubRemote(cwd))) return
 
   const branch = await git(["branch", "--show-current"], cwd)
-  if (!branch || isDefaultBranch(branch)) return
+  if (!branch) return
+  const defaultBranch = await getDefaultBranch(cwd)
+  if (isDefaultBranch(branch, defaultBranch)) return
 
   const pr = await getOpenPrForBranch<{ number: number; title: string; body: string }>(
     branch,
