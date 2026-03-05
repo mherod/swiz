@@ -133,7 +133,19 @@ describe("swiz settings", () => {
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("auto-continue:   enabled")
     expect(result.stdout).toContain("pr-merge-mode:   enabled")
+    expect(result.stdout).toContain("update-memory-footer: disabled")
     expect(result.stdout).toContain("(defaults)")
+  })
+
+  test("enables update-memory-footer and persists to user config", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "enable", "update-memory-footer"], home)
+    expect(result.exitCode).toBe(0)
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { updateMemoryFooter?: boolean }
+    expect(json.updateMemoryFooter).toBe(true)
   })
 
   test("disables auto-continue and persists to user config", async () => {
@@ -827,6 +839,7 @@ describe("SETTINGS_REGISTRY", () => {
       "pushGate",
       "sandboxedEdits",
       "speak",
+      "updateMemoryFooter",
       "gitStatusGate",
       "nonDefaultBranchGate",
       "githubCiGate",
@@ -926,6 +939,7 @@ describe("collaborationMode settings", () => {
       pushGate: false,
       sandboxedEdits: true,
       speak: false,
+      updateMemoryFooter: false,
       gitStatusGate: true,
       nonDefaultBranchGate: true,
       githubCiGate: true,
@@ -953,6 +967,7 @@ describe("collaborationMode settings", () => {
       pushGate: false,
       sandboxedEdits: true,
       speak: false,
+      updateMemoryFooter: false,
       gitStatusGate: true,
       nonDefaultBranchGate: true,
       githubCiGate: true,
@@ -986,6 +1001,7 @@ describe("collaborationMode settings", () => {
       pushGate: false,
       sandboxedEdits: true,
       speak: false,
+      updateMemoryFooter: false,
       gitStatusGate: true,
       nonDefaultBranchGate: true,
       githubCiGate: true,

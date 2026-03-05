@@ -74,6 +74,17 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
   },
   {
+    key: "updateMemoryFooter",
+    aliases: [
+      "update-memory-footer",
+      "updatememoryfooter",
+      "update_memory_footer",
+      "memory-footer",
+    ],
+    kind: "boolean",
+    scopes: ["global"],
+  },
+  {
     key: "gitStatusGate",
     aliases: ["git-status-gate", "gitstatusgate", "git_status_gate", "git-status"],
     kind: "boolean",
@@ -248,7 +259,8 @@ function usage(): string {
     "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--global | --project | --session [id]] [--dir <path>]\n" +
     "Scope: --global (default, ~/.swiz/settings.json), --project (.swiz/config.json), --session [id] (per-session)\n" +
     "Settings (global): auto-continue, critiques-enabled, pr-merge-mode, collaboration-mode,\n" +
-    "  push-gate, sandboxed-edits, speak, pr-age-gate, narrator-voice, narrator-speed, ambition-mode,\n" +
+    "  push-gate, sandboxed-edits, speak, update-memory-footer, pr-age-gate,\n" +
+    "  narrator-voice, narrator-speed, ambition-mode,\n" +
     "  git-status-gate, github-ci-gate, changes-requested-gate, personal-repo-issues-gate,\n" +
     "  non-default-branch-gate\n" +
     "Settings (--project): memory-line-threshold, memory-word-threshold, default-branch\n" +
@@ -379,6 +391,7 @@ function printSettings(
     pushGate: boolean
     sandboxedEdits: boolean
     speak: boolean
+    updateMemoryFooter: boolean
     gitStatusGate: boolean
     nonDefaultBranchGate: boolean
     githubCiGate: boolean
@@ -435,6 +448,9 @@ function printSettings(
   console.log(`  push-gate:       ${effective.pushGate ? "enabled" : "disabled"} (global)`)
   console.log(`  sandboxed-edits: ${effective.sandboxedEdits ? "enabled" : "disabled"} (global)`)
   console.log(`  speak:           ${effective.speak ? "enabled" : "disabled"} (global)`)
+  console.log(
+    `  update-memory-footer: ${effective.updateMemoryFooter ? "enabled" : "disabled"} (global)`
+  )
   console.log(
     `  git-status-gate:         ${effective.gitStatusGate ? "enabled" : "disabled"} (global)`
   )
@@ -736,6 +752,14 @@ export const settingsCommand: Command = {
     },
     { flags: "enable speak", description: "Enable TTS narrator (speaks assistant text aloud)" },
     { flags: "disable speak", description: "Disable TTS narrator (default: disabled)" },
+    {
+      flags: "enable update-memory-footer",
+      description: "Include update-memory guidance in ACTION REQUIRED footers",
+    },
+    {
+      flags: "disable update-memory-footer",
+      description: "Exclude update-memory guidance from ACTION REQUIRED footers (default)",
+    },
     {
       flags: "enable critiques-enabled",
       description: "Show Process/Product critique lines in auto-continue output (default: enabled)",

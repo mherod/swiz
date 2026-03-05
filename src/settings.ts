@@ -80,6 +80,7 @@ export interface SwizSettings {
   pushGate: boolean
   sandboxedEdits: boolean
   speak: boolean
+  updateMemoryFooter: boolean
   gitStatusGate: boolean
   nonDefaultBranchGate: boolean
   githubCiGate: boolean
@@ -105,6 +106,7 @@ export interface EffectiveSwizSettings {
   pushGate: boolean
   sandboxedEdits: boolean
   speak: boolean
+  updateMemoryFooter: boolean
   gitStatusGate: boolean
   nonDefaultBranchGate: boolean
   githubCiGate: boolean
@@ -212,6 +214,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   pushGate: false,
   sandboxedEdits: true,
   speak: false,
+  updateMemoryFooter: false,
   gitStatusGate: true,
   nonDefaultBranchGate: true,
   githubCiGate: true,
@@ -303,6 +306,10 @@ function normalizeSettings(value: unknown): SwizSettings {
         ? obj.sandboxedEdits
         : DEFAULT_SETTINGS.sandboxedEdits,
     speak: typeof obj.speak === "boolean" ? obj.speak : DEFAULT_SETTINGS.speak,
+    updateMemoryFooter:
+      typeof obj.updateMemoryFooter === "boolean"
+        ? obj.updateMemoryFooter
+        : DEFAULT_SETTINGS.updateMemoryFooter,
     gitStatusGate:
       typeof obj.gitStatusGate === "boolean" ? obj.gitStatusGate : DEFAULT_SETTINGS.gitStatusGate,
     nonDefaultBranchGate:
@@ -561,6 +568,7 @@ export function getEffectiveSwizSettings(
       pushGate: settings.pushGate,
       sandboxedEdits: settings.sandboxedEdits,
       speak: settings.speak,
+      updateMemoryFooter: settings.updateMemoryFooter,
       gitStatusGate: settings.gitStatusGate,
       nonDefaultBranchGate: settings.nonDefaultBranchGate,
       githubCiGate: settings.githubCiGate,
@@ -584,6 +592,7 @@ export function getEffectiveSwizSettings(
     pushGate: settings.pushGate,
     sandboxedEdits: settings.sandboxedEdits,
     speak: settings.speak,
+    updateMemoryFooter: settings.updateMemoryFooter,
     gitStatusGate: settings.gitStatusGate,
     nonDefaultBranchGate: settings.nonDefaultBranchGate,
     githubCiGate: settings.githubCiGate,

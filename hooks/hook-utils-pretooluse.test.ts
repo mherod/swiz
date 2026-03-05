@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 type JsonObject = Record<string, unknown>
 
@@ -11,19 +14,58 @@ async function runHelper(code: string): Promise<{
   parsed: JsonObject
   stdout: string
 }> {
+  const home = await mkdtemp(join(tmpdir(), "swiz-hook-utils-"))
   const script = `import { ${code}`
-  const proc = Bun.spawn(["bun", "-e", script], {
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: import.meta.dir,
-  })
-  const stdout = await new Response(proc.stdout).text()
-  await proc.exited
-  const trimmed = stdout.trim()
-  return {
-    exitCode: proc.exitCode,
-    parsed: trimmed ? (JSON.parse(trimmed) as JsonObject) : {},
-    stdout: trimmed,
+  try {
+    const proc = Bun.spawn(["bun", "-e", script], {
+      stdout: "pipe",
+      stderr: "pipe",
+      cwd: import.meta.dir,
+      env: { ...process.env, HOME: home },
+    })
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+    const trimmed = stdout.trim()
+    return {
+      exitCode: proc.exitCode,
+      parsed: trimmed ? (JSON.parse(trimmed) as JsonObject) : {},
+      stdout: trimmed,
+    }
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
+}
+
+async function runHelperWithUpdateMemoryFooter(
+  code: string,
+  enabled: boolean
+): Promise<{
+  exitCode: number | null
+  parsed: JsonObject
+  stdout: string
+}> {
+  const home = await mkdtemp(join(tmpdir(), "swiz-hook-utils-"))
+  try {
+    const swizDir = join(home, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await writeFile(join(swizDir, "settings.json"), JSON.stringify({ updateMemoryFooter: enabled }))
+    const script = `import { ${code}`
+    const proc = Bun.spawn(["bun", "-e", script], {
+      stdout: "pipe",
+      stderr: "pipe",
+      cwd: import.meta.dir,
+      env: { ...process.env, HOME: home },
+    })
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+    const trimmed = stdout.trim()
+    return {
+      exitCode: proc.exitCode,
+      parsed: trimmed ? (JSON.parse(trimmed) as JsonObject) : {},
+      stdout: trimmed,
+    }
+  } finally {
+    await rm(home, { recursive: true, force: true })
   }
 }
 
@@ -41,15 +83,26 @@ describe("denyPreToolUse", () => {
   })
 
   test("includes a cause summary in the update-memory reminder", async () => {
-    const { parsed } = await runHelper(
+    const { parsed } = await runHelperWithUpdateMemoryFooter(
       `denyPreToolUse } from "./hook-utils.ts"; ` +
-        `denyPreToolUse("The user asked for a changelog update before stopping.")`
+        `denyPreToolUse("The user asked for a changelog update before stopping.")`,
+      true
     )
     const hso = parsed.hookSpecificOutput as JsonObject
     const reason = hso.permissionDecisionReason as string
     expect(reason).toContain("Cause to capture:")
     expect(reason).toContain("A user instruction was missed")
     expect(reason).toContain("The user asked for a changelog update before stopping.")
+  })
+
+  test("does not include update-memory reminder by default", async () => {
+    const { parsed } = await runHelper(
+      `denyPreToolUse } from "./hook-utils.ts"; denyPreToolUse("blocked for testing")`
+    )
+    const hso = parsed.hookSpecificOutput as JsonObject
+    const reason = hso.permissionDecisionReason as string
+    expect(reason).not.toContain("Use the /update-memory skill")
+    expect(reason).not.toContain("Cause to capture:")
   })
 })
 
@@ -355,8 +408,9 @@ describe("PreToolUse helper isolation (integration)", () => {
 
 describe("blockStop", () => {
   test("includes a cause summary in the stop footer", async () => {
-    const { exitCode, parsed } = await runHelper(
-      `blockStop } from "./hook-utils.ts"; blockStop("STOP. Tasks have gone stale after 20 tool calls.")`
+    const { exitCode, parsed } = await runHelperWithUpdateMemoryFooter(
+      `blockStop } from "./hook-utils.ts"; blockStop("STOP. Tasks have gone stale after 20 tool calls.")`,
+      true
     )
     expect(exitCode).toBe(0)
     expect(parsed.decision).toBe("block")
@@ -367,9 +421,10 @@ describe("blockStop", () => {
   })
 
   test("supports opt-out of update-memory advice for triage-only blockers", async () => {
-    const { exitCode, parsed } = await runHelper(
+    const { exitCode, parsed } = await runHelperWithUpdateMemoryFooter(
       `blockStop } from "./hook-utils.ts"; ` +
-        `blockStop("Stop due to triage-only blocker.", { includeUpdateMemoryAdvice: false })`
+        `blockStop("Stop due to triage-only blocker.", { includeUpdateMemoryAdvice: false })`,
+      true
     )
     expect(exitCode).toBe(0)
     expect(parsed.decision).toBe("block")

@@ -358,6 +358,33 @@ function updateMemoryAdvice(reason: string): string {
   )
 }
 
+let _updateMemoryFooterEnabledCache: boolean | undefined
+
+function isUpdateMemoryFooterEnabled(): boolean {
+  if (_updateMemoryFooterEnabledCache !== undefined) return _updateMemoryFooterEnabledCache
+
+  const home = process.env.HOME
+  if (!home) {
+    _updateMemoryFooterEnabledCache = false
+    return _updateMemoryFooterEnabledCache
+  }
+
+  const settingsPath = join(home, ".swiz", "settings.json")
+  if (!existsSync(settingsPath)) {
+    _updateMemoryFooterEnabledCache = false
+    return _updateMemoryFooterEnabledCache
+  }
+
+  try {
+    const parsed = JSON.parse(readFileSync(settingsPath, "utf-8")) as Record<string, unknown>
+    _updateMemoryFooterEnabledCache = parsed.updateMemoryFooter === true
+  } catch {
+    _updateMemoryFooterEnabledCache = false
+  }
+
+  return _updateMemoryFooterEnabledCache
+}
+
 /** Standard ACTION REQUIRED footer for PreToolUse denials. */
 export function preToolActionRequired(reason = ""): string {
   const reassess = skillAdvice(
@@ -365,8 +392,8 @@ export function preToolActionRequired(reason = ""): string {
     "If you believe this is a false positive, use the /re-assess skill to re-evaluate your assumptions — the hook's findings take authority over your own assessment.",
     "If you believe this is a false positive, re-evaluate your assumptions carefully before retrying — the hook's findings take authority over your own assessment."
   )
-  const updateMemory = updateMemoryAdvice(reason)
-  return `\n\nACTION REQUIRED: Fix the underlying issue before retrying. This hook will deny this tool call every time this violation is present. Do not attempt to bypass or work around it — address the root cause.\n\n${reassess}\n\n${updateMemory}`
+  const updateMemory = isUpdateMemoryFooterEnabled() ? `\n\n${updateMemoryAdvice(reason)}` : ""
+  return `\n\nACTION REQUIRED: Fix the underlying issue before retrying. This hook will deny this tool call every time this violation is present. Do not attempt to bypass or work around it — address the root cause.\n\n${reassess}${updateMemory}`
 }
 
 /** Standard ACTION REQUIRED footer appended to all stop hook block reasons. */
@@ -380,7 +407,10 @@ export function actionRequired(
     "If you believe this is a false positive, use the /re-assess skill to re-evaluate your assumptions — the hook's findings take authority over your own assessment.",
     "If you believe this is a false positive, re-evaluate your assumptions carefully before retrying — the hook's findings take authority over your own assessment."
   )
-  const updateMemory = includeUpdateMemoryAdvice ? `\n\n${updateMemoryAdvice(reason)}` : ""
+  const updateMemory =
+    includeUpdateMemoryAdvice && isUpdateMemoryFooterEnabled()
+      ? `\n\n${updateMemoryAdvice(reason)}`
+      : ""
   return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action.\n\n${reassess}${updateMemory}`
 }
 
