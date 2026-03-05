@@ -3,10 +3,7 @@
 //   1. The session has at least one incomplete task (pending or in_progress)
 //   2. Tasks haven't gone stale (no task tool interaction in last STALENESS_THRESHOLD calls)
 
-import { join } from "node:path"
-
 import {
-  computeSubjectFingerprint,
   denyPreToolUse as deny,
   extractToolNamesFromTranscript,
   findLastTaskToolCallIndex,
@@ -24,7 +21,6 @@ import {
   isTaskTrackingExemptShellCommand,
   isWriteTool,
   readSessionTasks,
-  sessionPrefix,
 } from "./hook-utils.ts"
 
 const STALENESS_THRESHOLD = 20
@@ -40,55 +36,6 @@ export function isLargeContentPayload(input: Record<string, unknown>): boolean {
   const toolInput = input?.tool_input as Record<string, unknown> | undefined
   const content = ((toolInput?.new_string ?? toolInput?.content) as string) ?? ""
   return content.split("\n").length >= LARGE_CONTENT_LINE_THRESHOLD
-}
-
-/**
- * Auto-create a bootstrap task when the session has no tasks at all.
- * Returns the created task ID, or null if creation failed.
- */
-export async function createBootstrapTask(
-  sessionId: string,
-  home: string = process.env.HOME ?? ""
-): Promise<string | null> {
-  if (!home || !sessionId) return null
-  // Sanitize sessionId to prevent path traversal
-  if (/[/\\]|\.\./.test(sessionId)) return null
-  const tasksDir = join(home, ".claude", "tasks", sessionId)
-  try {
-    const { mkdir, readdir } = await import("node:fs/promises")
-    await mkdir(tasksDir, { recursive: true })
-    // Pick next available ID by scanning existing files
-    const files = await readdir(tasksDir).catch(() => [] as string[])
-    const ids = files
-      .filter((f) => f.endsWith(".json") && !f.startsWith("."))
-      .map((f) => {
-        const name = f.replace(".json", "")
-        // Handle both prefixed (a3f2-5) and numeric (5) IDs
-        const dashIdx = name.lastIndexOf("-")
-        return dashIdx > 0 ? parseInt(name.slice(dashIdx + 1), 10) : parseInt(name, 10)
-      })
-      .filter((n) => !Number.isNaN(n))
-    const nextSeq = ids.length > 0 ? Math.max(...ids) + 1 : 1
-    const prefix = sessionPrefix(sessionId)
-    const nextId = `${prefix}-${nextSeq}`
-    const subject = "Session bootstrap — describe current work"
-    const task = {
-      id: nextId,
-      subject,
-      description:
-        "Auto-created by pretooluse-require-tasks because no tasks existed. " +
-        "Update this task with a description of the current work, then create follow-up tasks.",
-      activeForm: "Bootstrapping session tasks",
-      status: "in_progress",
-      subjectFingerprint: computeSubjectFingerprint(subject),
-      blocks: [],
-      blockedBy: [],
-    }
-    await Bun.write(join(tasksDir, `${nextId}.json`), JSON.stringify(task, null, 2))
-    return nextId
-  } catch {
-    return null
-  }
 }
 
 async function main() {
@@ -140,9 +87,8 @@ async function main() {
     .map((t) => `#${t.id} (${t.status}): ${t.subject}`)
 
   if (allTasks.length === 0) {
-    // Before auto-creating a bootstrap task, check if the prior session for this
-    // project had incomplete tasks. If so, direct the agent to restore them
-    // rather than resetting the plan with a new generic bootstrap task.
+    // If the prior session for this project had incomplete tasks, direct the
+    // agent to restore them before starting new work.
     const priorResult = await findPriorSessionTasks(cwd, sessionId)
     if (priorResult && priorResult.tasks.length > 0) {
       const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
@@ -168,23 +114,6 @@ async function main() {
       )
     }
 
-    // Auto-create a bootstrap task so the agent isn't hard-blocked.
-    // The tool call is still denied this time — on retry the task exists and CHECK 1 passes.
-    const bootstrapId = await createBootstrapTask(sessionId)
-    if (bootstrapId) {
-      deny(
-        `Session had no tasks. A bootstrap task #${bootstrapId} (in_progress) was auto-created.\n\n` +
-          formatActionPlan(
-            [
-              `Update task #${bootstrapId} with a description of your current work using TaskUpdate.`,
-              "Create follow-up tasks for planned next steps using TaskCreate.",
-              `Retry this ${toolName} call — it will succeed now that an in_progress task exists.`,
-            ],
-            { translateToolNames: true }
-          )
-      )
-    }
-    // Fallback: if auto-creation failed, block with original message
     deny(
       `STOP. ${toolName} is BLOCKED because this session has no incomplete tasks.\n\n` +
         `You must keep at least one task in pending or in_progress status before using bash/shell/edit tools.\n\n` +

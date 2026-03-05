@@ -71,7 +71,7 @@ alwaysApply: false
 - Completion command requires evidence: `swiz tasks complete <id> --evidence "text"`; enforced by `stop-completion-auditor`.
 - First action in a session must be task creation/tracking (`TaskCreate`/`TaskUpdate`), including after compaction resumes.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash when no incomplete task exists.
-- When bootstrap block reports prior-session incomplete tasks, recreate equivalent task and set `in_progress` before retrying blocked work.
+- When the no-task block reports prior-session incomplete tasks, recreate equivalent task and set `in_progress` before retrying blocked work.
 - After compaction, run `TaskList`; close stale `in_progress`/`pending` tasks after verification (`git log --oneline -3`, `gh run view --json conclusion`).
 - DO NOT create compound task subjects; `pretooluse-task-subject-validation.ts` rejects multi-action subjects.
 - Keep one task per verb (`Run tests`, `Commit fix`, `Push to origin`, `Verify CI`, `Close issue #N`).

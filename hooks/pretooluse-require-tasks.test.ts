@@ -131,11 +131,11 @@ async function writeTask(
 }
 
 describe("pretooluse-require-tasks", () => {
-  test("denies Bash when session has no tasks and auto-creates bootstrap", async () => {
+  test("denies Bash when session has no tasks", async () => {
     const homeDir = await createTempHome()
     const result = await runHook({ homeDir, toolName: "Bash" })
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("bootstrap task")
+    expect(result.reason).toContain("no incomplete tasks")
   })
 
   test("denies Bash with prior-session restore message when prior session has incomplete tasks", async () => {
@@ -209,14 +209,14 @@ describe("pretooluse-require-tasks", () => {
     expect(result.decision).toBeUndefined()
   })
 
-  test("denies Edit when no tasks have ever been created and auto-creates bootstrap", async () => {
+  test("denies Edit when no tasks have ever been created", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-no-tasks"
     // No tasks written — agent is working without any plan
 
     const result = await runHook({ homeDir, toolName: "Edit", sessionId })
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("bootstrap task")
+    expect(result.reason).toContain("no incomplete tasks")
   })
 
   test("allows Shell when at least one pending task exists", async () => {
@@ -534,7 +534,7 @@ describe("pretooluse-require-tasks", () => {
       await writeFile(join(repoDir, "CLAUDE.md"), "# Guide\n")
 
       const sessionId = "session-guarded"
-      // No tasks → enforcement fires, auto-creates bootstrap
+      // No tasks → enforcement fires
       const result = await runHook({
         homeDir,
         cwd: repoDir,
@@ -542,7 +542,7 @@ describe("pretooluse-require-tasks", () => {
         sessionId,
       })
       expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("bootstrap task")
+      expect(result.reason).toContain("no incomplete tasks")
     })
   })
 

@@ -209,7 +209,7 @@ export function isSwizCommand(input: ToolHookInput): boolean {
 /**
  * Matches all auto-generated placeholder task subjects:
  *   - "Recovered task #N (lost during compaction)" — pretooluse-task-recovery / posttooluse-task-recovery
- *   - "Session bootstrap — describe current work"  — pretooluse-require-tasks
+ *   - "Session bootstrap — describe current work"  — legacy pretooluse-require-tasks placeholder
  */
 export const PLACEHOLDER_SUBJECT_RE = /^(?:recovered task|session bootstrap)\b/i
 
@@ -577,7 +577,7 @@ export async function findPriorSessionTasks(
     const tasks = await readSessionTasks(id, home)
     const incomplete = tasks
       .filter((t) => isIncompleteTaskStatus(t.status))
-      // Filter to only numeric IDs (user-created tasks), exclude session-scoped bootstrap IDs
+      // Filter to only numeric IDs (user-created tasks), excluding legacy prefixed placeholders
       .filter((t) => /^\d+$/.test(t.id))
     if (incomplete.length > 0) return { sessionId: id, tasks: incomplete }
   }
