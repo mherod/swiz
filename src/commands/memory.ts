@@ -241,11 +241,17 @@ async function getFileStats(
   }
 }
 
+interface SourceCheckResult {
+  exceeded: boolean
+  label: string
+  path: string
+}
+
 async function printSource(
   source: MemorySource,
   index: number,
   thresholds: { lines: number; words: number }
-): Promise<void> {
+): Promise<SourceCheckResult> {
   const exists = existsSync(source.path)
   const marker = exists ? `${GREEN}✓${RESET}` : `${DIM}✗${RESET}`
   const pathDisplay = exists ? source.path : `${DIM}${source.path}${RESET}`
@@ -253,6 +259,7 @@ async function printSource(
   console.log(`  ${index + 1}. ${marker} ${BOLD}${source.label}${RESET}`)
   console.log(`     ${pathDisplay}`)
 
+  let exceeded = false
   if (exists) {
     const size = fileSize(source.path)
     const stats = await getFileStats(source.path)
@@ -270,6 +277,7 @@ async function printSource(
 
       if (lineExceeded || wordExceeded) {
         statusIndicator = ` ${YELLOW}⚠${RESET}`
+        exceeded = true
       } else if (lineWarning || wordWarning) {
         statusIndicator = ` ${DIM}→${RESET}`
       }
@@ -278,6 +286,12 @@ async function printSource(
   }
 
   console.log()
+
+  return {
+    exceeded,
+    label: source.label,
+    path: source.path,
+  }
 }
 
 // ─── Command ─────────────────────────────────────────────────────────────────
@@ -285,9 +299,10 @@ async function printSource(
 export const memoryCommand: Command = {
   name: "memory",
   description: "Show hierarchical rule/memory files for the detected agent",
-  usage: "swiz memory [--dir <path>] [--claude|--cursor|--gemini|--codex]",
+  usage: "swiz memory [--dir <path>] [--strict] [--claude|--cursor|--gemini|--codex]",
   options: [
     { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
+    { flags: "--strict", description: "Exit with error if any memory file exceeds its threshold" },
     { flags: "--claude", description: "Force Claude Code agent" },
     { flags: "--cursor", description: "Force Cursor agent" },
     { flags: "--gemini", description: "Force Gemini CLI agent" },
@@ -298,6 +313,9 @@ export const memoryCommand: Command = {
     const dirIdx = args.findIndex((a) => a === "--dir" || a === "-d")
     const dirArg = dirIdx >= 0 ? args[dirIdx + 1] : undefined
     const targetDir = resolve(dirArg ?? process.cwd())
+
+    // Parse --strict flag
+    const strict = args.includes("--strict")
 
     // Parse agent override flags
     const explicitAgent = AGENTS.find((a) => args.includes(`--${a.id}`))
@@ -360,15 +378,26 @@ export const memoryCommand: Command = {
       `  ${DIM}Thresholds: ${projectThresholds.memoryLineThreshold} lines · ${projectThresholds.memoryWordThreshold} words${RESET}\n`
     )
 
+    const exceededFiles: SourceCheckResult[] = []
+
     for (const [i, source] of sources.entries()) {
       // Use global thresholds for sources in the global home directory
       const isGlobal = source.path.startsWith(globalHome)
       const thresholds = isGlobal ? globalThresholds : projectThresholds
 
-      await printSource(source, i, {
+      const result = await printSource(source, i, {
         lines: thresholds.memoryLineThreshold,
         words: thresholds.memoryWordThreshold,
       })
+
+      if (result.exceeded) {
+        exceededFiles.push(result)
+      }
+    }
+
+    if (strict && exceededFiles.length > 0) {
+      const fileList = exceededFiles.map((f) => `  - ${f.label} (${f.path})`).join("\n")
+      throw new Error(`Memory threshold exceeded in ${exceededFiles.length} file(s):\n${fileList}`)
     }
   },
 }
