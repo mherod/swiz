@@ -234,4 +234,72 @@ describe("transcript-utils integration", () => {
       expect(result[0]?.text).not.toContain("should not appear")
     })
   })
+
+  describe("findAllProviderSessions (Gemini support)", () => {
+    let testDir: string
+    let previousHome: string | undefined
+
+    beforeEach(async () => {
+      testDir = join(tmpdir(), `transcript-all-providers-${Date.now()}`)
+      await mkdir(testDir, { recursive: true })
+      previousHome = process.env.HOME
+      process.env.HOME = testDir
+    })
+
+    afterEach(async () => {
+      process.env.HOME = previousHome
+      try {
+        await rm(testDir, { recursive: true, force: true })
+      } catch {}
+    })
+
+    it("discovers Gemini sessions for project-name tmp directories", async () => {
+      const projectDir = join(testDir, "workspace", "demo-proj")
+      await mkdir(projectDir, { recursive: true })
+
+      const geminiBucket = join(testDir, ".gemini", "tmp", "demo-proj")
+      await mkdir(join(geminiBucket, "chats"), { recursive: true })
+      await writeFile(join(geminiBucket, ".project_root"), `${projectDir}\n`)
+      await writeFile(
+        join(geminiBucket, "chats", "session-2026-03-05T10-00-abc12345.json"),
+        JSON.stringify({
+          sessionId: "abc12345-1111-2222-3333-444444444444",
+          messages: [
+            { type: "user", content: [{ text: "hello" }], timestamp: "2026-03-05T10:00:00.000Z" },
+            { type: "gemini", content: "hi", timestamp: "2026-03-05T10:00:01.000Z" },
+          ],
+        })
+      )
+
+      const { findAllProviderSessions } = await import("./transcript-utils.ts")
+      const sessions = await findAllProviderSessions(projectDir)
+      expect(sessions.some((s) => s.provider === "gemini")).toBe(true)
+      expect(sessions.some((s) => s.id.startsWith("abc12345"))).toBe(true)
+    })
+
+    it("discovers Gemini sessions for hashed tmp directories via history/.project_root", async () => {
+      const projectDir = join(testDir, "workspace", "hash-proj")
+      await mkdir(projectDir, { recursive: true })
+
+      const hash = "bd68b11f6bd5d16593c34c0f3e535b78559ad33d2ce3f3f3411254616508c819"
+      const geminiBucket = join(testDir, ".gemini", "tmp", hash)
+      await mkdir(join(geminiBucket, "chats"), { recursive: true })
+      await mkdir(join(testDir, ".gemini", "history", hash), { recursive: true })
+      await writeFile(join(testDir, ".gemini", "history", hash, ".project_root"), `${projectDir}\n`)
+      await writeFile(
+        join(geminiBucket, "chats", "session-2026-03-05T10-01-def67890.json"),
+        JSON.stringify({
+          sessionId: "def67890-1111-2222-3333-444444444444",
+          messages: [{ type: "user", content: [{ text: "from hash bucket" }] }],
+        })
+      )
+
+      const { findAllProviderSessions } = await import("./transcript-utils.ts")
+      const sessions = await findAllProviderSessions(projectDir)
+      const match = sessions.find((s) => s.id.startsWith("def67890"))
+      expect(match).toBeDefined()
+      expect(match?.provider).toBe("gemini")
+      expect(match?.format).toBe("gemini-json")
+    })
+  })
 })

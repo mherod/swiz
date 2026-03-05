@@ -8,6 +8,9 @@ import {
 } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
+const DIM = "\x1b[2m"
+const RESET = "\x1b[0m"
+
 // ─── Next-step suggestion ─────────────────────────────────────────────────────
 
 async function generateNextStep(jsonlText: string): Promise<string> {
@@ -117,11 +120,19 @@ export const continueCommand: Command = {
       return
     }
 
-    // Resume the session with the suggestion as the first user message.
-    // --session flag maps to --resume <id>; default uses --continue (most recent).
-    const resumeArgs: string[] = sessionQuery
+    // Claude session IDs can be resumed directly. For non-Claude providers,
+    // continue with a new Claude session using the generated suggestion.
+    const canResumeClaudeSession = session.provider === "claude" || session.path.endsWith(".jsonl")
+    const shouldResumeById = Boolean(sessionQuery) && canResumeClaudeSession
+    const resumeArgs: string[] = shouldResumeById
       ? ["claude", "--resume", session.id, suggestion]
       : ["claude", "--continue", suggestion]
+
+    if (sessionQuery && !canResumeClaudeSession) {
+      console.log(
+        `${DIM}Session ${session.id} is from ${session.provider ?? "another provider"}; using --continue instead of --resume.${RESET}`
+      )
+    }
 
     const proc = Bun.spawn(resumeArgs, {
       stdout: "inherit",

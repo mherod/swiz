@@ -1,10 +1,10 @@
-import { join, resolve } from "node:path"
+import { resolve } from "node:path"
 import { promptAgent } from "../agent.ts"
 import {
   type ContentBlock,
   extractText,
   findAllProviderSessions,
-  projectKeyFromCwd,
+  parseTranscriptEntries,
   type Session,
   type TextBlock,
   type ToolResultBlock,
@@ -187,16 +187,9 @@ interface Turn {
   role: "user" | "assistant"
 }
 
-function collectTurns(lines: string[]): Turn[] {
+function collectTurns(entries: TranscriptEntry[]): Turn[] {
   const turns: Turn[] = []
-  for (const line of lines) {
-    let entry: TranscriptEntry
-    try {
-      entry = JSON.parse(line)
-    } catch {
-      continue
-    }
-
+  for (const entry of entries) {
     if (entry.type !== "user" && entry.type !== "assistant") continue
     const msg = entry.message
     if (!msg) continue
@@ -235,13 +228,13 @@ function collectTurns(lines: string[]): Turn[] {
 
 // ─── Turn loading ─────────────────────────────────────────────────────────────
 
-async function loadTurns(sessionPath: string): Promise<Turn[]> {
-  const file = Bun.file(sessionPath)
+async function loadTurns(session: Session): Promise<Turn[]> {
+  const file = Bun.file(session.path)
   if (!(await file.exists())) {
-    throw new Error(`Transcript not found: ${sessionPath}`)
+    throw new Error(`Transcript not found: ${session.path}`)
   }
   const text = await file.text()
-  return collectTurns(text.split("\n").filter(Boolean))
+  return collectTurns(parseTranscriptEntries(text, session.format))
 }
 
 // ─── Main rendering ──────────────────────────────────────────────────────────
@@ -401,7 +394,7 @@ export const transcriptCommand: Command = {
       session = sessions[0]! // newest session
     }
 
-    let turns = await loadTurns(session.path)
+    let turns = await loadTurns(session)
     if (tailCount !== undefined) {
       turns = turns.slice(-tailCount)
     } else if (headCount !== undefined) {

@@ -7,7 +7,7 @@ const RESET = "\x1b[0m"
 
 export const sessionCommand: Command = {
   name: "session",
-  description: "Show the current Claude Code session ID",
+  description: "Show the current session ID",
   usage: "swiz session [--list] [--dir <path>]",
   options: [
     { flags: "--list, -l", description: "List all sessions for the project with timestamps" },

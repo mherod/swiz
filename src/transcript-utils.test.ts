@@ -177,6 +177,41 @@ describe("transcript-utils.ts", () => {
       expect(result[0]?.role).toBe("user")
       expect(result[0]?.text).toBe("test message")
     })
+
+    it("parses Gemini JSON session format into user and assistant turns", () => {
+      const geminiSession = JSON.stringify({
+        sessionId: "gemini-session-1",
+        messages: [
+          { type: "info", content: "metadata only" },
+          { type: "user", content: [{ text: "Hello Gemini" }] },
+          { type: "gemini", content: "Hi there." },
+        ],
+      })
+      const result = extractPlainTurns(geminiSession)
+      expect(result).toHaveLength(2)
+      expect(result[0]?.role).toBe("user")
+      expect(result[0]?.text).toContain("Hello Gemini")
+      expect(result[1]?.role).toBe("assistant")
+      expect(result[1]?.text).toContain("Hi there.")
+    })
+
+    it("includes Gemini tool calls in assistant summaries", () => {
+      const geminiSession = JSON.stringify({
+        sessionId: "gemini-session-2",
+        messages: [
+          { type: "user", content: [{ text: "Run checks" }] },
+          {
+            type: "gemini",
+            content: "",
+            toolCalls: [{ name: "run_shell_command", args: { command: "pnpm test" } }],
+          },
+        ],
+      })
+      const result = extractPlainTurns(geminiSession)
+      expect(result).toHaveLength(2)
+      expect(result[1]?.text).toContain("run_shell_command")
+      expect(result[1]?.text).toContain("pnpm test")
+    })
   })
 
   describe("countToolCalls", () => {
@@ -207,6 +242,21 @@ describe("transcript-utils.ts", () => {
       const jsonl = `invalid json\n{"type":"assistant","message":{"content":[{"type":"tool_use"}]}}\n`
       const result = countToolCalls(jsonl)
       expect(typeof result).toBe("number")
+    })
+
+    it("counts Gemini tool calls after normalization", () => {
+      const geminiSession = JSON.stringify({
+        sessionId: "gemini-session-3",
+        messages: [
+          {
+            type: "gemini",
+            content: "",
+            toolCalls: [{ name: "run_shell_command", args: { command: "echo test" } }],
+          },
+        ],
+      })
+      const result = countToolCalls(geminiSession)
+      expect(result).toBe(1)
     })
   })
 

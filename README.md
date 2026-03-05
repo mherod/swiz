@@ -321,12 +321,12 @@ This is the primary workaround for **Cursor CLI**, where only `beforeShellExecut
 
 ### `swiz continue`
 
-Resume the most recent Claude Code session with an AI-generated next step. Reads the session transcript, asks an AI backend "what should the assistant do next?", then launches `claude --continue "<suggestion>"` so the agent picks up immediately.
+Generate an AI next-step suggestion from the most recent project session, then continue in Claude. Session discovery covers Claude and Gemini history for `--session` selection.
 
 ```bash
 swiz continue             # generate suggestion and resume most recent session
 swiz continue --print     # dry run — print the suggestion without resuming
-swiz continue --session <id>  # resume a specific session (by ID prefix)
+swiz continue --session <id>  # select a specific session (Claude or Gemini) by ID prefix
 ```
 
 Uses the same AI backend detection as `stop-auto-continue` (`agent` → `claude` → `gemini`). Exits gracefully if no backend is available.
@@ -363,7 +363,7 @@ swiz dispatch <event> --replay <file> --json  # replay with machine-readable tra
 
 ### `swiz transcript`
 
-Display Agent-User chat history for the current project. Useful for reviewing what happened in a previous session or generating a follow-up suggestion.
+Display Agent-User chat history for the current project. Supports Claude JSONL and Gemini session JSON formats.
 
 ```bash
 swiz transcript                             # show latest session transcript
@@ -381,6 +381,10 @@ swiz transcript --auto-reply                # generate an AI-suggested follow-up
 | `--head, -H <n>` | Show only the first N conversation turns |
 | `--tail, -T <n>` | Show only the last N conversation turns |
 | `--auto-reply` | Generate an AI-suggested follow-up message |
+
+Session discovery paths:
+- Claude: `~/.claude/projects/<project-key>/*.jsonl`
+- Gemini: `~/.gemini/tmp/*/chats/session-*.json` (mapped via `.project_root`)
 
 ### `swiz cleanup`
 
@@ -438,7 +442,7 @@ swiz sentiment --score-only "no thanks"    # print only the numeric score
 
 ### `swiz session`
 
-Show or list Claude Code session identifiers for the current project.
+Show or list session identifiers for the current project across supported providers.
 
 ```bash
 swiz session                                # print the current session ID

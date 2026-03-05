@@ -59,6 +59,28 @@ async function createSession(home: string, targetDir: string, sessionId: string)
   )
 }
 
+async function createGeminiSession(
+  home: string,
+  targetDir: string,
+  sessionId: string
+): Promise<void> {
+  const bucket = targetDir.split(/[\\/]/).filter(Boolean).at(-1) ?? "project"
+  const bucketDir = join(home, ".gemini", "tmp", bucket)
+  const chatsDir = join(bucketDir, "chats")
+  await mkdir(chatsDir, { recursive: true })
+  await writeFile(join(bucketDir, ".project_root"), `${targetDir}\n`)
+  await writeFile(
+    join(chatsDir, "session-2026-03-05T10-00-abcdef12.json"),
+    JSON.stringify({
+      sessionId,
+      messages: [
+        { type: "user", content: [{ text: "hello" }], timestamp: "2026-03-05T10:00:00.000Z" },
+        { type: "gemini", content: "hi", timestamp: "2026-03-05T10:00:01.000Z" },
+      ],
+    })
+  )
+}
+
 describe("swiz settings", () => {
   test("shows default auto-continue state when no config exists", async () => {
     const home = await createTempHome()
@@ -197,6 +219,20 @@ describe("swiz settings", () => {
 
     expect(json.autoContinue).toBe(true)
     expect(json.sessions?.[sessionId]?.autoContinue).toBe(false)
+  })
+
+  test("resolves Gemini session IDs for --session scope", async () => {
+    const home = await createTempHome()
+    const targetDir = join(home, "repo")
+    const sessionId = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    await createGeminiSession(home, targetDir, sessionId)
+
+    const result = await runSwiz(
+      ["settings", "show", "--session", sessionId.slice(0, 8), "--dir", targetDir],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain(`scope: session ${sessionId}`)
   })
 
   test("fails when session prefix does not match an existing session", async () => {
