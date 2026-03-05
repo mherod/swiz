@@ -182,7 +182,7 @@ alwaysApply: false
 - Do not use `awk`; use `bun -e`, `sort -u`, `cut -d' ' -f1`, or git `--format`.
 - Do not use `python`/`python3`; use `bun -e` or `jq`.
 - Do not use `rm`/`rm -rf`; use `trash <path>` and guard missing paths with `[[ -e <path> ]] && trash <path>`.
-- Do not edit files outside session sandbox. `~/.claude/hooks/` belongs to `mherod/.claude`; `~/.claude/skills/` belongs to `mherod/skills`. For cross-repo fixes, file issues with problem, solution, location, validation logic, success criteria. Example: `mherod/skills#44`.
+- Do not edit files outside session sandbox. `~/.claude/hooks/` belongs to `mherod/.claude`; `~/.claude/skills/` belongs to `mherod/skills`. For cross-repo bugs discovered (e.g., argument parser, task completion verification), file GitHub issues in the owning repo with: (1) exact error message and reproduction steps, (2) root cause analysis, (3) proposed fix with code location, (4) success criteria. Example: `gh issue create --repo mherod/.claude --title "..." --body "..."`.
 - Stop-hook footers containing `REMINDER_FRAGMENT` can re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses a 30-minute `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes so installed config updates.
 - Cross-session gap: cooldown does not carry between sessions; complete memory follow-through before session end.
 - For cache-key fixes, search all callers (`Bun.hash(cwd)`, `createHash().update(repoRoot)`) and extract shared utility (for example `getCanonicalPathHash()` in `hook-utils.ts`) using `realpathSync()` and full hashes.
