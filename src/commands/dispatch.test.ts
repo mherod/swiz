@@ -290,6 +290,7 @@ describe("dispatch replay", () => {
         "4",
         "5",
         "6",
+        "7",
       ].join("")
       await writeFile(join(repoDir, "secrets.ts"), `export const token = "${fakeSecret}";\n`)
       runGit(repoDir, ["add", "secrets.ts"])
