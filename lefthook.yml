@@ -24,6 +24,11 @@ pre-commit:
       skip:
         - merge
         - rebase
+    memory:
+      run: swiz memory --strict
+      skip:
+        - merge
+        - rebase
 
 pre-push:
   commands:
