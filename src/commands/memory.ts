@@ -15,6 +15,7 @@ import {
   readSwizSettings,
   resolveMemoryThresholds,
 } from "../settings.ts"
+import { skillAdvice } from "../skill-utils.ts"
 import type { Command } from "../types.ts"
 
 const BOLD = "\x1b[1m"
@@ -397,7 +398,20 @@ export const memoryCommand: Command = {
 
     if (strict && exceededFiles.length > 0) {
       const fileList = exceededFiles.map((f) => `  - ${f.label} (${f.path})`).join("\n")
-      throw new Error(`Memory threshold exceeded in ${exceededFiles.length} file(s):\n${fileList}`)
+
+      const compactAdvice = skillAdvice(
+        "compact-memory",
+        "Use the /compact-memory skill to reduce each file below thresholds.",
+        "Compact manually: remove redundant modifiers, simplify compound phrases, consolidate repeated topics, convert narrative to DO/DON'T directives."
+      )
+
+      const guidance = [
+        `Memory file(s) exceed size thresholds:\n${fileList}`,
+        `\nThresholds: ${projectThresholds.memoryLineThreshold} lines, ${projectThresholds.memoryWordThreshold} words`,
+        `\n${compactAdvice}`,
+      ].join("\n")
+
+      throw new Error(guidance)
     }
   },
 }
