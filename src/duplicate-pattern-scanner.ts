@@ -47,6 +47,15 @@ const DUPLICATE_PATTERNS = [
 
   // Pattern matching buildIssueGuidance-style guidance but inline
   /If\s+(?:this\s+change\s+)?(?:you\s+need\s+to\s+)?(?:you\s+)?(?:edit|need).*?file\s+an\s+issue/gi,
+
+  // "file a GitHub issue on X" variant
+  /file\s+a?\s+GitHub\s+issue\s+on\s+(?:[a-z0-9_-]+\/[a-z0-9_-]+|that\s+repo)/gi,
+
+  // "file them as GitHub issues" variant
+  /file\s+them\s+as\s+GitHub\s+issues/gi,
+
+  // Hardcoded "gh issue create --title" command (without --repo placeholder)
+  /gh\s+issue\s+create\s+--title\s+"[^"]+"\s+--body/gi,
 ]
 
 /**
@@ -59,6 +68,8 @@ const EXCEPTION_PATTERNS = [
   /scanner.*\.test\.ts$/, // Tests for this scanner itself
   /manifest\.ts/, // Documents hook structure
   /README\.md/, // Documentation may reference patterns
+  /duplicate-pattern-scanner\.ts/, // This scanner itself (contains pattern definitions)
+  /pretooluse-sandbox-guidance-consolidation\.ts/, // PreToolUse hook (contains pattern definitions)
 ]
 
 /**

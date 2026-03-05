@@ -3,6 +3,7 @@
 
 import {
   blockStop,
+  buildIssueGuidance,
   git,
   isGitRepo,
   SOURCE_EXT_RE,
@@ -64,13 +65,12 @@ async function main(): Promise<void> {
   let reason = `${todos.length} new TODO/FIXME/HACK comment(s) introduced in recent commits.\n\n`
   reason += "Items:\n"
   for (const t of todos) reason += `  ${t}\n`
-  reason +=
-    "\n" +
-    skillAdvice(
-      "farm-out-issues",
-      "Either resolve these now, or use the /farm-out-issues skill to file them as GitHub issues before stopping.",
-      'Either resolve these now, or file them as GitHub issues before stopping:\n  gh issue create --title "<title>" --body "<description>"'
-    )
+
+  const guidanceCmd = buildIssueGuidance(null)
+  const withSkill = `Either resolve these now, or use the /farm-out-issues skill to create issues for them.`
+  const withoutSkill = `Either resolve these now, or create issues for them:\n${guidanceCmd}`
+
+  reason += "\n" + skillAdvice("farm-out-issues", withSkill, withoutSkill)
 
   // TODO hygiene is a quality/process gate, not a workflow-memory miss.
   blockStop(reason, { includeUpdateMemoryAdvice: false })

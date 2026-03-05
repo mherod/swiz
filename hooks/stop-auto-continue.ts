@@ -17,6 +17,7 @@ import {
 } from "../src/transcript-utils.ts"
 import {
   blockStopRaw,
+  buildIssueGuidance,
   getTranscriptSummary,
   git,
   hasGhCli,
@@ -415,14 +416,14 @@ function buildPrompt(
     `  - asking the user a question, confirming scope, or presenting options\n` +
     `  - implementing, modifying, or wiring stop hooks, pre-push hooks, or any hook scripts. ` +
     `    Hook implementations belong to the swiz project, not to the agent or the repository being worked in. ` +
-    `    If a hook appears defective, the correct action is to file a GitHub issue on mherod/swiz — ` +
-    `    never to implement or fix the hook locally.\n` +
+    `    If a hook appears defective, the correct action is to file an issue on the swiz repo:\n` +
+    `      ${buildIssueGuidance("mherod/swiz").split("\n").join("\n      ")}\n` +
     `  - prescribing project-specific infrastructure or architecture changes in the checked project ` +
     `    in response to a policy finding (for example "implement a guard-aware push orchestration module").\n` +
     (cwd
       ? `  - suggesting code edits, implementations, or fixes in any repository other than the session project (${cwd}). ` +
-        `    If a bug is found in an external tool or dependency, the correct action is to file a GitHub issue on that repo — ` +
-        `    never to suggest implementing the fix outside the current session sandbox.\n`
+        `    If a bug is found in an external tool or dependency, the correct action is to file an issue on that repo:\n` +
+        `      ${buildIssueGuidance(null, { crossRepo: true }).split("\n").join("\n      ")}\n`
       : "") +
     `Start with an imperative verb that names a code action (Implement, Add, Fix, Build, Extend, Wire up, etc.). ` +
     `The step must be something the assistant can do right now by editing source files.\n\n` +

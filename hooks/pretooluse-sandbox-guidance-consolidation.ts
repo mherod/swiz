@@ -19,6 +19,16 @@ if (!isFileEditTool(input.tool_name ?? "")) {
   process.exit(0)
 }
 
+// Skip validation for hook files that by design contain issue-guidance patterns
+const filePath = input.tool_input?.file_path as string | undefined
+if (
+  filePath?.includes("pretooluse-sandbox-guidance-consolidation") ||
+  filePath?.includes("stop-todo-tracker") ||
+  filePath?.includes("stop-auto-continue")
+) {
+  process.exit(0)
+}
+
 const newContent: string = (input.tool_input?.new_string as string | undefined) ?? ""
 if (!newContent) {
   process.exit(0)
@@ -37,6 +47,15 @@ const PROBLEMATIC_PATTERNS = [
 
   // Cross-repo issue guidance phrasing
   /consider\s+filing\s+an\s+issue\s+(?:on\s+)?(?:the\s+)?target\s+repo/gi,
+
+  // "file a GitHub issue on X" variant
+  /file\s+a?\s+GitHub\s+issue\s+on\s+(?:[a-z0-9_-]+\/[a-z0-9_-]+|that\s+repo)/gi,
+
+  // "file them as GitHub issues" variant
+  /file\s+them\s+as\s+GitHub\s+issues/gi,
+
+  // Hardcoded "gh issue create --title" command (without --repo placeholder)
+  /gh\s+issue\s+create\s+--title\s+"[^"]+"\s+--body/gi,
 ]
 
 // Check if new content contains problematic patterns
