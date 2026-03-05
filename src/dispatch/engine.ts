@@ -242,7 +242,11 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
 }
 
 /** Stop / PostToolUse: short-circuit and forward the first block. */
-export async function runBlocking(groups: HookGroup[], payloadStr: string): Promise<void> {
+export async function runBlocking(
+  groups: HookGroup[],
+  payloadStr: string,
+  canonicalEvent?: string
+): Promise<void> {
   launchAsyncHooks(groups, payloadStr)
   const cwd = extractCwd(payloadStr)
   const finalResponse = { continue: true }
@@ -263,15 +267,18 @@ export async function runBlocking(groups: HookGroup[], payloadStr: string): Prom
       if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
       if (resp && isBlock(resp)) {
         log(`   ✗ BLOCK from ${hook.file}`)
-        Object.assign(finalResponse, resp, { continue: false })
+        // If we are blocking a "stop" event, it means we want the agent to CONTINUE.
+        // For any other event (like postToolUse), a block means we want to STOP.
+        const continueOverride = canonicalEvent === "stop"
+        Object.assign(finalResponse, resp, { continue: continueOverride })
         break
       }
       log(`   ✓ ${hook.file} (${resp ? "ok" : "no output"})`)
     }
-    if (finalResponse.continue === false) break
+    if (isBlock(finalResponse)) break
   }
 
-  if (finalResponse.continue) {
+  if (!isBlock(finalResponse)) {
     log(`   result: all passed`)
   }
 

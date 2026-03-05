@@ -250,7 +250,7 @@ export const dispatchCommand: Command = {
         await runPreToolUse(filteredGroups, enrichedPayloadStr)
         break
       case "blocking":
-        await runBlocking(filteredGroups, enrichedPayloadStr)
+        await runBlocking(filteredGroups, enrichedPayloadStr, canonicalEvent)
         break
       case "context":
         await runContext(filteredGroups, enrichedPayloadStr, hookEventName)
