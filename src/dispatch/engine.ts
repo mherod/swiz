@@ -134,9 +134,10 @@ export async function runHook(
 // ─── Response classification ────────────────────────────────────────────────
 
 export function isDeny(resp: Record<string, unknown>): boolean {
-  if (resp.decision === "deny") return true
+  if (resp.decision === "deny" || resp.decision === "block") return true
+  if (resp.continue === false) return true
   const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
-  return hso?.permissionDecision === "deny"
+  return hso?.permissionDecision === "deny" || hso?.decision === "deny" || hso?.decision === "block"
 }
 
 export function isAllowWithReason(resp: Record<string, unknown>): boolean {
@@ -153,7 +154,10 @@ export function extractAllowReason(resp: Record<string, unknown>): string | null
 }
 
 export function isBlock(resp: Record<string, unknown>): boolean {
-  return resp.decision === "block"
+  if (resp.decision === "block" || resp.decision === "deny") return true
+  if (resp.continue === false) return true
+  const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
+  return hso?.decision === "block" || hso?.decision === "deny"
 }
 
 export function extractContext(resp: Record<string, unknown>): string | null {
@@ -230,6 +234,7 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
     return
   }
   log(`   result: all passed`)
+  process.stdout.write(`{}\n`)
 }
 
 /** Stop / PostToolUse: short-circuit and forward the first block. */
@@ -301,6 +306,7 @@ export async function runContext(
   }
   if (contexts.length === 0) {
     log(`   result: no contexts to merge`)
+    process.stdout.write(`{}\n`)
     return
   }
   const output = JSON.stringify({
