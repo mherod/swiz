@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, statSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { existsSync, statSync } from "node:fs"
+import { basename, join, resolve } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
 import {
@@ -7,6 +7,7 @@ import {
   getProviderProjectFiles,
   getProviderProjectStateDir,
   getProviderRuleDirs,
+  scanProviderRuleDir,
 } from "../provider-utils.ts"
 import {
   DEFAULT_MEMORY_LINE_THRESHOLD,
@@ -32,6 +33,70 @@ export interface MemorySource {
   path: string
 }
 
+interface SourceThresholds {
+  lines: number
+  words: number
+}
+
+interface FileStats {
+  lines: number
+  words: number
+  chars: number
+}
+
+interface SourceCheckResult {
+  exceeded: boolean
+  label: string
+  path: string
+}
+
+interface ParsedMemoryArgs {
+  strict: boolean
+  targetDir: string
+  explicitAgent: AgentDef | undefined
+}
+
+const DEFAULT_THRESHOLD_INPUT = {
+  memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
+  memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
+}
+const BINARY_SCAN_BYTES = 512
+const WARNING_THRESHOLD_FACTOR = 0.9
+const WHITESPACE_RE = /\s/
+
+function pushSource(sources: MemorySource[], label: string, path: string): void {
+  sources.push({ label, path })
+}
+
+function appendRuleFiles(
+  sources: MemorySource[],
+  agent: AgentDef,
+  dirPath: string,
+  labelForEntry: (entryName: string) => string
+): void {
+  const files = scanProviderRuleDir(agent, dirPath)
+  for (const file of files) {
+    pushSource(sources, labelForEntry(basename(file)), file)
+  }
+}
+
+function appendCursorRuleDir(
+  sources: MemorySource[],
+  agent: AgentDef,
+  dirPath: string | null,
+  missingDirLabel: string,
+  labelForEntry: (entryName: string) => string
+): void {
+  if (!dirPath) return
+
+  if (!existsSync(dirPath)) {
+    pushSource(sources, missingDirLabel, dirPath)
+    return
+  }
+
+  appendRuleFiles(sources, agent, dirPath, labelForEntry)
+}
+
 /**
  * Returns the ordered list of rule/memory sources for an agent and target directory.
  * Sources are listed in precedence order: project-local first, then global.
@@ -42,32 +107,24 @@ export function getMemorySources(agent: AgentDef, targetDir: string): MemorySour
   switch (agent.id) {
     case "claude": {
       // 1. Project-local CLAUDE.md
-      sources.push({ label: "Project rules", path: join(targetDir, "CLAUDE.md") })
+      pushSource(sources, "Project rules", join(targetDir, "CLAUDE.md"))
 
       // 2. Project-scoped memory (via ~/.claude/projects/<key>/memory/MEMORY.md)
       const memoryDir = getProviderProjectStateDir(agent, targetDir)
       const projectMemory = join(memoryDir, "MEMORY.md")
-      sources.push({ label: "Project memory", path: projectMemory })
+      pushSource(sources, "Project memory", projectMemory)
 
       // 3. Additional memory files in the project memory directory
-      if (existsSync(memoryDir)) {
-        try {
-          for (const entry of readdirSync(memoryDir)) {
-            if (entry === "MEMORY.md") continue
-            if (!entry.endsWith(".md")) continue
-            sources.push({
-              label: `Project memory (${entry})`,
-              path: join(memoryDir, entry),
-            })
-          }
-        } catch {
-          // Ignore read errors
-        }
+      const memoryFiles = scanProviderRuleDir(agent, memoryDir).filter(
+        (file) => file !== projectMemory
+      )
+      for (const file of memoryFiles) {
+        pushSource(sources, `Project memory (${basename(file)})`, file)
       }
 
       // 4. Global CLAUDE.md
       const globalHome = getProviderHome(agent)
-      sources.push({ label: "Global rules", path: join(globalHome, "CLAUDE.md") })
+      pushSource(sources, "Global rules", join(globalHome, "CLAUDE.md"))
       break
     }
 
@@ -75,47 +132,27 @@ export function getMemorySources(agent: AgentDef, targetDir: string): MemorySour
       // 1. Project .cursorrules
       const projectFiles = getProviderProjectFiles(agent, targetDir)
       for (const file of projectFiles) {
-        sources.push({ label: "Project rules (.cursorrules)", path: file })
+        pushSource(sources, "Project rules (.cursorrules)", file)
       }
 
       // 2. Project .cursor/rules/ directory
       const ruleDirs = getProviderRuleDirs(agent, targetDir)
-      if (ruleDirs.project) {
-        if (existsSync(ruleDirs.project)) {
-          try {
-            for (const entry of readdirSync(ruleDirs.project)) {
-              if (!entry.endsWith(".md") && !entry.endsWith(".mdc")) continue
-              sources.push({
-                label: `Project rule (${entry})`,
-                path: join(ruleDirs.project, entry),
-              })
-            }
-          } catch {
-            // Ignore read errors
-          }
-        } else {
-          sources.push({ label: "Project rules dir", path: ruleDirs.project })
-        }
-      }
+      appendCursorRuleDir(
+        sources,
+        agent,
+        ruleDirs.project,
+        "Project rules dir",
+        (entryName) => `Project rule (${entryName})`
+      )
 
       // 3. Global ~/.cursor/rules/
-      if (ruleDirs.global) {
-        if (existsSync(ruleDirs.global)) {
-          try {
-            for (const entry of readdirSync(ruleDirs.global)) {
-              if (!entry.endsWith(".md") && !entry.endsWith(".mdc")) continue
-              sources.push({
-                label: `Global rule (${entry})`,
-                path: join(ruleDirs.global, entry),
-              })
-            }
-          } catch {
-            // Ignore read errors
-          }
-        } else {
-          sources.push({ label: "Global rules dir", path: ruleDirs.global })
-        }
-      }
+      appendCursorRuleDir(
+        sources,
+        agent,
+        ruleDirs.global,
+        "Global rules dir",
+        (entryName) => `Global rule (${entryName})`
+      )
       break
     }
 
@@ -125,13 +162,13 @@ export function getMemorySources(agent: AgentDef, targetDir: string): MemorySour
       for (const file of projectFiles) {
         if (file.endsWith("GEMINI.md")) {
           const label = file.includes(".gemini") ? "Project rules (.gemini/)" : "Project rules"
-          sources.push({ label, path: file })
+          pushSource(sources, label, file)
         }
       }
 
       // 2. Global ~/.gemini/GEMINI.md
       const globalHome = getProviderHome(agent)
-      sources.push({ label: "Global rules", path: join(globalHome, "GEMINI.md") })
+      pushSource(sources, "Global rules", join(globalHome, "GEMINI.md"))
       break
     }
 
@@ -139,27 +176,18 @@ export function getMemorySources(agent: AgentDef, targetDir: string): MemorySour
       // 1. Project AGENTS.md
       const projectFiles = getProviderProjectFiles(agent, targetDir)
       for (const file of projectFiles) {
-        sources.push({ label: "Project rules", path: file })
+        pushSource(sources, "Project rules", file)
       }
 
       // 2. Global ~/.codex/AGENTS.md
       const globalHome = getProviderHome(agent)
-      sources.push({
-        label: "Global rules",
-        path: join(globalHome, "AGENTS.md"),
-      })
+      pushSource(sources, "Global rules", join(globalHome, "AGENTS.md"))
 
       // 3. Global ~/.codex/instructions.md
-      sources.push({
-        label: "Global instructions",
-        path: join(globalHome, "instructions.md"),
-      })
+      pushSource(sources, "Global instructions", join(globalHome, "instructions.md"))
 
       // 4. Global ~/.codex/history.jsonl (Codex prompt/session context index)
-      sources.push({
-        label: "Global history",
-        path: join(globalHome, "history.jsonl"),
-      })
+      pushSource(sources, "Global history", join(globalHome, "history.jsonl"))
       break
     }
 
@@ -183,75 +211,91 @@ function fileSize(path: string): string {
   }
 }
 
-async function getFileStats(
-  path: string
-): Promise<{ lines: number; words: number; chars: number } | null> {
+function containsNullByte(buffer: Uint8Array): boolean {
+  for (const byte of buffer) {
+    if (byte === 0) return true
+  }
+  return false
+}
+
+function countTextStats(content: string): FileStats {
+  let lines = 0
+  let words = 0
+  let inWord = false
+
+  for (let i = 0; i < content.length; i++) {
+    const char = content.charAt(i)
+    if (char === "\n") {
+      lines++
+    }
+
+    if (WHITESPACE_RE.test(char)) {
+      inWord = false
+      continue
+    }
+
+    if (!inWord) {
+      words++
+      inWord = true
+    }
+  }
+
+  if (content.length > 0 && content[content.length - 1] !== "\n") {
+    lines++
+  }
+
+  return {
+    lines,
+    words,
+    chars: content.length,
+  }
+}
+
+async function getFileStats(path: string): Promise<FileStats | null> {
   try {
     const file = Bun.file(path)
-    const size = file.size
 
     // Empty file edge case
-    if (size === 0) {
+    if (file.size === 0) {
       return { lines: 0, words: 0, chars: 0 }
     }
 
     // Guard against binary files: check first 512 bytes for null bytes
-    const headerBuffer = await file.slice(0, 512).arrayBuffer()
+    const headerBuffer = await file.slice(0, BINARY_SCAN_BYTES).arrayBuffer()
     const headerView = new Uint8Array(headerBuffer)
-    for (let i = 0; i < headerView.length; i++) {
-      if (headerView[i] === 0) {
-        return null // Binary file detected
-      }
+    if (containsNullByte(headerView)) {
+      return null
     }
 
-    // Read and parse file for stats
-    const content = await file.text()
-    const chars = content.length
-
-    // Count lines (handle CRLF and LF)
-    let lines = 0
-    let words = 0
-    let inWord = false
-
-    for (let i = 0; i < content.length; i++) {
-      const char = content.charAt(i)
-
-      // Line counting: count newlines, add 1 if content doesn't end with newline
-      if (char === "\n") {
-        lines++
-      }
-
-      // Word counting: track whitespace boundaries
-      const isWhitespace = /\s/.test(char)
-      if (!isWhitespace && !inWord) {
-        words++
-        inWord = true
-      } else if (isWhitespace) {
-        inWord = false
-      }
-    }
-
-    // If file doesn't end with newline, add 1 to line count
-    if (content.length > 0 && content[content.length - 1] !== "\n") {
-      lines++
-    }
-
-    return { lines, words, chars }
+    return countTextStats(await file.text())
   } catch {
     return null
   }
 }
 
-interface SourceCheckResult {
-  exceeded: boolean
-  label: string
-  path: string
+function getThresholdStatus(
+  stats: FileStats,
+  thresholds: SourceThresholds
+): { exceeded: boolean; indicator: string } {
+  const lineExceeded = stats.lines > thresholds.lines
+  const wordExceeded = stats.words > thresholds.words
+  if (lineExceeded || wordExceeded) {
+    return { exceeded: true, indicator: ` ${YELLOW}⚠${RESET}` }
+  }
+
+  const lineWarning = stats.lines > thresholds.lines * WARNING_THRESHOLD_FACTOR
+  const wordWarning = stats.words > thresholds.words * WARNING_THRESHOLD_FACTOR
+  if (lineWarning || wordWarning) {
+    return { exceeded: false, indicator: ` ${DIM}→${RESET}` }
+  }
+
+  return { exceeded: false, indicator: "" }
 }
 
 async function printSource(
   source: MemorySource,
   index: number,
-  thresholds: { lines: number; words: number }
+  thresholds: SourceThresholds
 ): Promise<SourceCheckResult> {
   const exists = existsSync(source.path)
   const marker = exists ? `${GREEN}✓${RESET}` : `${DIM}✗${RESET}`
@@ -269,19 +313,9 @@ async function printSource(
     let statusIndicator = ""
     if (stats) {
       statsStr += ` · ${stats.lines} lines · ${stats.words} words · ${stats.chars} chars`
-
-      // Check against thresholds
-      const lineWarning = stats.lines > thresholds.lines * 0.9 && stats.lines <= thresholds.lines
-      const lineExceeded = stats.lines > thresholds.lines
-      const wordWarning = stats.words > thresholds.words * 0.9 && stats.words <= thresholds.words
-      const wordExceeded = stats.words > thresholds.words
-
-      if (lineExceeded || wordExceeded) {
-        statusIndicator = ` ${YELLOW}⚠${RESET}`
-        exceeded = true
-      } else if (lineWarning || wordWarning) {
-        statusIndicator = ` ${DIM}→${RESET}`
-      }
+      const status = getThresholdStatus(stats, thresholds)
+      exceeded = status.exceeded
+      statusIndicator = status.indicator
     }
     console.log(`     ${DIM}${statsStr}${RESET}${statusIndicator}`)
   }
@@ -292,6 +326,35 @@ async function printSource(
     exceeded,
     label: source.label,
     path: source.path,
+  }
+}
+
+function parseMemoryArgs(args: string[]): ParsedMemoryArgs {
+  const dirIdx = args.findIndex((arg) => arg === "--dir" || arg === "-d")
+  const dirArg = dirIdx >= 0 ? args[dirIdx + 1] : undefined
+
+  return {
+    targetDir: resolve(dirArg ?? process.cwd()),
+    strict: args.includes("--strict"),
+    explicitAgent: AGENTS.find((agent) => args.includes(`--${agent.id}`)),
+  }
+}
+
+function resolveThresholdSets(
+  projectSettings: Awaited<ReturnType<typeof readProjectSettings>>,
+  userSettings: Awaited<ReturnType<typeof readSwizSettings>>
+): {
+  project: ReturnType<typeof resolveMemoryThresholds>
+  global: ReturnType<typeof resolveMemoryThresholds>
+} {
+  const userThresholdInputs = {
+    memoryLineThreshold: userSettings?.memoryLineThreshold,
+    memoryWordThreshold: userSettings?.memoryWordThreshold,
+  }
+
+  return {
+    project: resolveMemoryThresholds(projectSettings, userThresholdInputs, DEFAULT_THRESHOLD_INPUT),
+    global: resolveMemoryThresholds({}, userThresholdInputs, DEFAULT_THRESHOLD_INPUT),
   }
 }
 
@@ -310,17 +373,7 @@ export const memoryCommand: Command = {
     { flags: "--codex", description: "Force Codex CLI agent" },
   ],
   async run(args: string[]) {
-    // Parse --dir / -d flag
-    const dirIdx = args.findIndex((a) => a === "--dir" || a === "-d")
-    const dirArg = dirIdx >= 0 ? args[dirIdx + 1] : undefined
-    const targetDir = resolve(dirArg ?? process.cwd())
-
-    // Parse --strict flag
-    const strict = args.includes("--strict")
-
-    // Parse agent override flags
-    const explicitAgent = AGENTS.find((a) => args.includes(`--${a.id}`))
-
+    const { targetDir, strict, explicitAgent } = parseMemoryArgs(args)
     const agent = explicitAgent ?? detectCurrentAgent()
 
     if (!agent) {
@@ -345,30 +398,9 @@ export const memoryCommand: Command = {
     // Read thresholds from project and user settings
     const projectSettings = await readProjectSettings(targetDir)
     const userSettings = await readSwizSettings({ strict: false })
-    const projectThresholds = resolveMemoryThresholds(
-      projectSettings,
-      {
-        memoryLineThreshold: userSettings?.memoryLineThreshold,
-        memoryWordThreshold: userSettings?.memoryWordThreshold,
-      },
-      {
-        memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
-        memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
-      }
-    )
-
-    // Global thresholds use user settings + defaults only (no project override)
-    const globalThresholds = resolveMemoryThresholds(
-      {},
-      {
-        memoryLineThreshold: userSettings?.memoryLineThreshold,
-        memoryWordThreshold: userSettings?.memoryWordThreshold,
-      },
-      {
-        memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
-        memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
-      }
-    )
+    const thresholdSets = resolveThresholdSets(projectSettings, userSettings)
+    const projectThresholds = thresholdSets.project
+    const globalThresholds = thresholdSets.global
 
     const globalHome = getProviderHome(agent)
 
