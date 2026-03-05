@@ -204,7 +204,6 @@ export async function detectProjectCollaborationPolicy(
   options: DetectProjectCollaborationOptions = {}
 ): Promise<ProjectCollaborationDetectionResult> {
   const ownership = await detectRepoOwnership(cwd, options)
-  const ghRunner = options.gh ?? gh
   const ghJsonRunner = options.ghJson ?? ghJson
 
   const [openPullRequestsResult, commitsResult] = await Promise.all([
