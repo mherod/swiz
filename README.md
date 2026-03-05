@@ -270,13 +270,23 @@ Session overrides are keyed by session ID. If no override exists, that session i
 
 ### `swiz memory`
 
-Inspect rule and memory/context files for the detected agent (or force one with flags).
+Inspect rule and memory/context files for the detected agent (or force one with flags). Optionally validate against configured thresholds.
 
 ```bash
 swiz memory                 # auto-detect agent and show rule hierarchy
+swiz memory --strict        # fail if any memory file exceeds its threshold
 swiz memory --codex         # inspect Codex-specific memory/context paths
 swiz memory --codex --dir /path/to/project
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--strict` | Exit with error if any memory file exceeds its line/word threshold (useful in CI and pre-commit hooks) |
+| `--claude` | Force Claude Code agent |
+| `--cursor` | Force Cursor agent |
+| `--gemini` | Force Gemini CLI agent |
+| `--codex` | Force Codex agent |
+| `--dir, -d <path>` | Target project directory (default: cwd) |
 
 For Codex, `swiz memory --codex` surfaces:
 - project rules: `<project>/AGENTS.md`
