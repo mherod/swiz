@@ -6,6 +6,8 @@ import { getAllProviderSkillDirs } from "./provider-utils.ts"
 // Skills live in .skills/ (project-local) and provider-specific global directories.
 // Each skill is a directory containing SKILL.md.
 export const SKILL_DIRS = [join(process.cwd(), ".skills"), ...getAllProviderSkillDirs()]
+// Deterministic precedence for duplicate names: first directory wins.
+export const SKILL_PRECEDENCE = [...SKILL_DIRS]
 
 // ─── Skill existence (sync, cached) ─────────────────────────────────────────
 
@@ -57,8 +59,9 @@ export interface SkillInfo {
 
 export async function findSkills(): Promise<SkillInfo[]> {
   const skills: SkillInfo[] = []
+  const seen = new Set<string>()
 
-  for (const dir of SKILL_DIRS) {
+  for (const dir of SKILL_PRECEDENCE) {
     let entries: import("node:fs").Dirent[]
     try {
       entries = await readdir(dir, { withFileTypes: true })
@@ -66,10 +69,15 @@ export async function findSkills(): Promise<SkillInfo[]> {
       continue
     }
 
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
+    const directoryNames = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b))
 
-      const skillPath = join(dir, entry.name, "SKILL.md")
+    for (const name of directoryNames) {
+      if (seen.has(name)) continue
+
+      const skillPath = join(dir, name, "SKILL.md")
       const file = Bun.file(skillPath)
       if (!(await file.exists())) continue
 
@@ -77,11 +85,12 @@ export async function findSkills(): Promise<SkillInfo[]> {
       const description = parseFrontmatterField(content, "description") ?? ""
 
       skills.push({
-        name: entry.name,
+        name,
         description,
-        source: dir === SKILL_DIRS[0] ? "local" : "global",
+        source: dir === SKILL_PRECEDENCE[0] ? "local" : "global",
         path: skillPath,
       })
+      seen.add(name)
     }
   }
 

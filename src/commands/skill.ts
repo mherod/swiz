@@ -1,9 +1,15 @@
+import { existsSync } from "node:fs"
+import { cp, mkdir, readdir } from "node:fs/promises"
+import { join } from "node:path"
 import { findSkills, parseFrontmatterField, stripFrontmatter } from "../skill-utils.ts"
 import type { Command } from "../types.ts"
 
 export { parseFrontmatterField, stripFrontmatter }
 
 const INLINE_CMD_RE = /!`([^`]+)`/g
+const HOME = process.env.HOME ?? "~"
+const GEMINI_SKILLS_DIR = join(HOME, ".gemini", "skills")
+const CLAUDE_SKILLS_DIR = join(HOME, ".claude", "skills")
 
 async function listSkills() {
   const skills = await findSkills()
@@ -70,16 +76,120 @@ async function readSkill(name: string, raw: boolean, noFrontMatter: boolean) {
   console.log(content)
 }
 
+function displayPath(path: string): string {
+  return path.startsWith(HOME) ? `~${path.slice(HOME.length)}` : path
+}
+
+async function syncGeminiSkills(options: { dryRun: boolean; overwrite: boolean }): Promise<void> {
+  const { dryRun, overwrite } = options
+
+  let entries: import("node:fs").Dirent[]
+  try {
+    entries = await readdir(GEMINI_SKILLS_DIR, { withFileTypes: true })
+  } catch {
+    console.log(`No Gemini skills found at ${displayPath(GEMINI_SKILLS_DIR)}.`)
+    return
+  }
+
+  const skillNames: string[] = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const sourceSkillPath = join(GEMINI_SKILLS_DIR, entry.name, "SKILL.md")
+    if (!(await Bun.file(sourceSkillPath).exists())) continue
+    skillNames.push(entry.name)
+  }
+  skillNames.sort((a, b) => a.localeCompare(b))
+
+  if (skillNames.length === 0) {
+    console.log(`No Gemini skills with SKILL.md found at ${displayPath(GEMINI_SKILLS_DIR)}.`)
+    return
+  }
+
+  if (dryRun) {
+    console.log("Dry run: syncing Gemini skills to Claude skills (no files will be changed).")
+  } else {
+    console.log("Syncing Gemini skills to Claude skills.")
+    await mkdir(CLAUDE_SKILLS_DIR, { recursive: true })
+  }
+  console.log(`Source: ${displayPath(GEMINI_SKILLS_DIR)}`)
+  console.log(`Target: ${displayPath(CLAUDE_SKILLS_DIR)}\n`)
+
+  let copied = 0
+  let overwritten = 0
+  let skipped = 0
+
+  for (const name of skillNames) {
+    const sourceDir = join(GEMINI_SKILLS_DIR, name)
+    const targetDir = join(CLAUDE_SKILLS_DIR, name)
+    const targetExists = existsSync(targetDir)
+
+    if (targetExists && !overwrite) {
+      skipped++
+      console.log(`  - skipped ${name} (already exists)`)
+      continue
+    }
+
+    if (dryRun) {
+      if (targetExists) {
+        overwritten++
+        console.log(`  - would overwrite ${name}`)
+      } else {
+        copied++
+        console.log(`  - would copy ${name}`)
+      }
+      continue
+    }
+
+    await cp(sourceDir, targetDir, { recursive: true, force: overwrite })
+    if (targetExists) {
+      overwritten++
+      console.log(`  - overwritten ${name}`)
+    } else {
+      copied++
+      console.log(`  - copied ${name}`)
+    }
+  }
+
+  console.log(
+    `\nSummary: ${copied} copied, ${overwritten} overwritten, ${skipped} skipped` +
+      (!overwrite && skipped > 0 ? " (use --overwrite to replace existing targets)" : "")
+  )
+}
+
 export const skillCommand: Command = {
   name: "skill",
-  description: "Read and list skills",
-  usage: "swiz skill [--raw] [--no-front-matter] [skill-name]",
+  description: "Read, list, and sync skills",
+  usage:
+    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync-gemini [--dry-run] [--overwrite]",
   options: [
     { flags: "<skill-name>", description: "Print the skill content (omit to list all skills)" },
     { flags: "--raw", description: "Skip inline command expansion (!`cmd` substitutions)" },
     { flags: "--no-front-matter", description: "Strip YAML frontmatter from output" },
+    {
+      flags: "--sync-gemini",
+      description: "Copy ~/.gemini/skills into ~/.claude/skills with non-destructive defaults",
+    },
+    { flags: "--dry-run", description: "Preview sync actions without writing files" },
+    { flags: "--overwrite", description: "Allow sync to overwrite existing target skills" },
   ],
   async run(args) {
+    const syncGemini = args.includes("--sync-gemini")
+    const dryRun = args.includes("--dry-run")
+    const overwrite = args.includes("--overwrite")
+
+    if (syncGemini) {
+      const positional = args.filter((a) => !a.startsWith("--"))
+      if (positional.length > 0) {
+        throw new Error("--sync-gemini does not accept a skill name.")
+      }
+      await syncGeminiSkills({ dryRun, overwrite })
+      return
+    }
+
+    if (dryRun || overwrite) {
+      throw new Error("--dry-run and --overwrite are only valid with --sync-gemini.")
+    }
+
     const raw = args.includes("--raw")
     const noFrontMatter = args.includes("--no-front-matter")
     const flags = new Set(["--raw", "--no-front-matter"])

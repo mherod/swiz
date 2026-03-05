@@ -285,9 +285,16 @@ Read and expand skill definitions used by Claude Code, Codex, and other AI agent
 swiz skill              # list all available skills
 swiz skill commit       # print skill with inline commands expanded
 swiz skill --raw commit # raw SKILL.md without expansion
+swiz skill --sync-gemini                     # sync ~/.gemini/skills -> ~/.claude/skills
+swiz skill --sync-gemini --dry-run           # preview sync actions only
+swiz skill --sync-gemini --overwrite         # allow replacing existing target skills
 ```
 
-Skills are discovered from `.skills/` (project-local) and `~/.claude/skills/` (global). The `` !`command` `` inline syntax is expanded by default — shell commands inside skill content are executed and their output is inlined.
+Skills are discovered from `.skills/` (project-local) plus provider globals (`~/.claude/skills/`, `~/.cursor/skills/`, `~/.gemini/skills/`, `~/.codex/skills/`). Duplicate skill names use deterministic first-found precedence in that order (project-local first).
+
+`--sync-gemini` provides a non-destructive conversion/sync path for Gemini skills by copying them into `~/.claude/skills/`; existing targets are skipped unless `--overwrite` is set.
+
+The `` !`command` `` inline syntax is expanded by default — shell commands inside skill content are executed and their output is inlined.
 
 ### `swiz shim`
 

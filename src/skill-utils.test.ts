@@ -245,4 +245,34 @@ describe("findSkills (via swiz skill CLI)", () => {
     expect(out).toContain("real-skill-xyz")
     expect(out).not.toContain("empty-dir-xyz")
   })
+
+  test("discovers skills that exist only in ~/.gemini/skills", async () => {
+    const fakeHome = await createTempDir()
+    const skillDir = join(fakeHome, ".gemini", "skills", "gemini-only-skill-xyz")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "---\ndescription: Gemini only\n---\n")
+
+    const out = await runSwizSkillList(fakeHome)
+    expect(out).toContain("gemini-only-skill-xyz")
+    expect(out).toContain("Gemini only")
+  })
+
+  test("uses deterministic precedence for duplicate names (Claude before Gemini)", async () => {
+    const fakeHome = await createTempDir()
+    const duplicate = "shared-duplicate-skill-xyz"
+
+    const claudeDir = join(fakeHome, ".claude", "skills", duplicate)
+    await mkdir(claudeDir, { recursive: true })
+    await writeFile(join(claudeDir, "SKILL.md"), "---\ndescription: Claude wins\n---\n")
+
+    const geminiDir = join(fakeHome, ".gemini", "skills", duplicate)
+    await mkdir(geminiDir, { recursive: true })
+    await writeFile(join(geminiDir, "SKILL.md"), "---\ndescription: Gemini loses\n---\n")
+
+    const out = await runSwizSkillList(fakeHome)
+    const occurrences = (out.match(new RegExp(duplicate, "g")) ?? []).length
+    expect(occurrences).toBe(1)
+    expect(out).toContain("Claude wins")
+    expect(out).not.toContain("Gemini loses")
+  })
 })

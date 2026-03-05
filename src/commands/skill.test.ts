@@ -222,6 +222,13 @@ async function runListCmd(
   return { stdout, stderr, exitCode: proc.exitCode }
 }
 
+async function runSkillCli(
+  args: string[],
+  fakeHome: string
+): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+  return runListCmd(args, fakeHome)
+}
+
 describe("swiz skill (list mode)", () => {
   test("prints 'No skills found.' when global dir is empty", async () => {
     const fakeHome = await createTempDir()
@@ -287,6 +294,74 @@ describe("swiz skill (list mode)", () => {
   })
 })
 
+describe("swiz skill Gemini discovery", () => {
+  test("reads a skill that exists only in ~/.gemini/skills", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "gemini-only-read-xyz"
+    const skillDir = join(fakeHome, ".gemini", "skills", skillName)
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\ndescription: Gemini only\n---\n# Gemini Body\n"
+    )
+
+    const { stdout, exitCode } = await runSkillCli(["--raw", skillName], fakeHome)
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("# Gemini Body")
+  })
+})
+
+describe("swiz skill --sync-gemini", () => {
+  test("supports dry-run without writing files", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "gemini-sync-dry-run-xyz"
+    const sourceDir = join(fakeHome, ".gemini", "skills", skillName)
+    const targetPath = join(fakeHome, ".claude", "skills", skillName, "SKILL.md")
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Dry run source\n---\n")
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini", "--dry-run"], fakeHome)
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("Dry run: syncing Gemini skills")
+    expect(stdout).toContain(`would copy ${skillName}`)
+    expect(await Bun.file(targetPath).exists()).toBe(false)
+  })
+
+  test("is non-destructive by default and skips existing targets", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "gemini-sync-skip-xyz"
+    const sourceDir = join(fakeHome, ".gemini", "skills", skillName)
+    const targetDir = join(fakeHome, ".claude", "skills", skillName)
+    const targetPath = join(targetDir, "SKILL.md")
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Source version\n---\n")
+    await mkdir(targetDir, { recursive: true })
+    await writeFile(targetPath, "---\ndescription: Existing target\n---\n")
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini"], fakeHome)
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`skipped ${skillName}`)
+    expect(await Bun.file(targetPath).text()).toContain("Existing target")
+  })
+
+  test("overwrites existing targets only when --overwrite is set", async () => {
+    const fakeHome = await createTempDir()
+    const skillName = "gemini-sync-overwrite-xyz"
+    const sourceDir = join(fakeHome, ".gemini", "skills", skillName)
+    const targetDir = join(fakeHome, ".claude", "skills", skillName)
+    const targetPath = join(targetDir, "SKILL.md")
+    await mkdir(sourceDir, { recursive: true })
+    await writeFile(join(sourceDir, "SKILL.md"), "---\ndescription: Source version\n---\n")
+    await mkdir(targetDir, { recursive: true })
+    await writeFile(targetPath, "---\ndescription: Existing target\n---\n")
+
+    const { stdout, exitCode } = await runSkillCli(["--sync-gemini", "--overwrite"], fakeHome)
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain(`overwritten ${skillName}`)
+    expect(await Bun.file(targetPath).text()).toContain("Source version")
+  })
+})
+
 // ─── error handling ───────────────────────────────────────────────────────────
 
 describe("swiz skill <unknown-name> (error handling)", () => {
@@ -306,6 +381,13 @@ describe("swiz skill <unknown-name> (error handling)", () => {
     const fakeHome = await createTempDir()
     const { stderr } = await runListCmd(["ghost-skill-xyz"], fakeHome)
     expect(stderr).toContain("swiz skill")
+  })
+
+  test("--dry-run requires --sync-gemini", async () => {
+    const fakeHome = await createTempDir()
+    const { stderr, exitCode } = await runListCmd(["--dry-run"], fakeHome)
+    expect(exitCode).not.toBe(0)
+    expect(stderr).toContain("--sync-gemini")
   })
 })
 
