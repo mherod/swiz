@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-03-05
+
+### New Features
+
+- Enhanced `swiz dispatch` command with improved hook tracing and event
+  replay capabilities, making it easier to diagnose and debug hook
+  behaviour across different event types.
+- Expanded `swiz doctor` command diagnostics with deeper validation
+  checks for agent configuration and hook installation status.
+- Added collaboration policy module to refine branch scope gating
+  validation, improving accuracy of push permission checks on feature
+  branches and personal repositories.
+
+### Bug Fixes
+
+- Fixed session context compaction to enforce strict size budgets,
+  preventing overly long task lists from inflating session context
+  during continuation. Truncates task subjects and enforces hard
+  context-size caps to keep resumed sessions responsive. (#118)
+
 ## 2026-03-04
 
 ### New Features
