@@ -1332,7 +1332,7 @@ describe("stop-auto-continue", () => {
     })
 
     const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("type, readiness, and priority labels")
+    expect(capturedArgs).toContain("type, readiness, priority")
     expect(capturedArgs).not.toContain("/refine-issue skill")
   })
 

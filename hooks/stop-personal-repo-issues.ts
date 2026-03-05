@@ -460,7 +460,16 @@ async function main(): Promise<void> {
         skillAdvice(
           "refine-issue",
           "Use the /refine-issue skill to refine and label issues:\n  /refine-issue — Refine the next issue needing attention",
-          "Refine issues before implementation:\n  gh issue view <number>\n  gh issue edit <number> --add-label bug --add-label ready --add-label priority-high"
+          "Refine issues before implementation. Every issue MUST have at least one label from each category:\n" +
+            "  1. Type (bug, enhancement, documentation)\n" +
+            "  2. Readiness (ready, triaged, backlog)\n" +
+            "  3. Priority (priority-high, priority-medium, priority-low)\n" +
+            "\n" +
+            "Commands:\n" +
+            "  gh label list\n" +
+            '  gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"\n' +
+            "\n" +
+            "Rule: If you created the issue, NEVER add new comments. Always edit the original issue body instead to add proposals/context."
         )
       )
     }
