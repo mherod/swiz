@@ -34,7 +34,18 @@ function writeHash(hash: string): void {
 }
 
 async function runInstall(swizRoot: string): Promise<boolean> {
-  const proc = Bun.spawn(["bun", join(swizRoot, "index.ts"), "install"], {
+  const args = ["bun", join(swizRoot, "index.ts"), "install"]
+
+  if (process.env.GEMINI_CLI) {
+    args.push("--gemini")
+  } else if (process.env.CLAUDECODE) {
+    args.push("--claude")
+  } else if (process.env.SHELL?.includes("cursor") || process.env.TERM_PROGRAM === "Cursor") {
+    // For Cursor, we usually install globally, but can target if needed.
+    // By default, if no flag is specified, swiz install installs for all detected agents.
+  }
+
+  const proc = Bun.spawn(args, {
     cwd: swizRoot,
     stdout: "pipe",
     stderr: "pipe",
@@ -69,12 +80,12 @@ async function main(): Promise<void> {
     : "swiz self-healed: manifest changed, agent configs updated."
 
   process.stdout.write(
-    JSON.stringify({
+    `${JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "SessionStart",
         additionalContext: message,
       },
-    }) + "\n"
+    })}\n`
   )
 }
 
