@@ -126,8 +126,8 @@ async function trashDir(path: string): Promise<boolean> {
 
 interface SessionInfo {
   sessionId: string
-  path: string
-  birthtimeMs: number
+  paths: string[] // All paths associated with this session in PROJECTS_DIR
+  mtimeMs: number
   sizeBytes: number
   taskDirPath: string | null
   taskDirSizeBytes: number
@@ -147,18 +147,38 @@ async function findSessions(
     return { keep, old }
   }
 
-  for (const entry of entries) {
-    if (!UUID_RE.test(entry)) continue
-    const sessionPath = join(projectDir, entry)
-    let s: Awaited<ReturnType<typeof stat>>
-    try {
-      s = await stat(sessionPath)
-    } catch {
-      continue
-    }
-    if (!s.isDirectory()) continue
+  // Group entries by sessionId (UUID)
+  const sessionMap = new Map<string, { paths: string[]; mtime: number; size: number }>()
 
-    const taskDirPath = join(TASKS_DIR, entry)
+  for (const entry of entries) {
+    let sessionId: string | undefined
+    if (UUID_RE.test(entry)) {
+      sessionId = entry
+    } else if (entry.endsWith(".jsonl")) {
+      const id = entry.slice(0, -6)
+      if (UUID_RE.test(id)) {
+        sessionId = id
+      }
+    }
+
+    if (sessionId) {
+      const p = join(projectDir, entry)
+      let s: Awaited<ReturnType<typeof stat>>
+      try {
+        s = await stat(p)
+      } catch {
+        continue
+      }
+      const existing = sessionMap.get(sessionId) ?? { paths: [], mtime: 0, size: 0 }
+      existing.paths.push(p)
+      existing.mtime = Math.max(existing.mtime, s.mtimeMs)
+      existing.size += s.isDirectory() ? await dirSize(p) : s.size
+      sessionMap.set(sessionId, existing)
+    }
+  }
+
+  for (const [sessionId, data] of sessionMap) {
+    const taskDirPath = join(TASKS_DIR, sessionId)
     let taskDirSizeBytes = 0
     let taskDirExists = false
     try {
@@ -172,15 +192,15 @@ async function findSessions(
     }
 
     const info: SessionInfo = {
-      sessionId: entry,
-      path: sessionPath,
-      birthtimeMs: s.birthtimeMs,
-      sizeBytes: await dirSize(sessionPath),
+      sessionId,
+      paths: data.paths,
+      mtimeMs: data.mtime,
+      sizeBytes: data.size,
       taskDirPath: taskDirExists ? taskDirPath : null,
       taskDirSizeBytes,
     }
 
-    if (s.birthtimeMs < cutoffMs) {
+    if (data.mtime < cutoffMs) {
       old.push(info)
     } else {
       keep.push(info)
@@ -295,10 +315,6 @@ export const cleanupCommand: Command = {
     }
 
     // Mark projects whose real filesystem path no longer exists.
-    // Uses walkDecode directly rather than the decodeProjectPath fallback so
-    // that projects with literal hyphens in their name are never false-positived.
-    // walkDecode returns null only when no plausible filesystem path exists for
-    // the encoded name — a reliable signal that the project is gone.
     const encodedHome = projectKeyFromCwd(HOME)
     for (let i = 0; i < results.length; i++) {
       const name = results[i]!.name
@@ -312,13 +328,65 @@ export const cleanupCommand: Command = {
       }
     }
 
+    // Scan TASKS_DIR for orphans (task directories without matching session in projects)
+    if (!projectFilter) {
+      const allKnownSessionIds = new Set<string>()
+      for (const r of results) {
+        for (const s of r.keep) allKnownSessionIds.add(s.sessionId)
+        for (const s of r.old) allKnownSessionIds.add(s.sessionId)
+      }
+
+      let taskEntries: string[] = []
+      try {
+        taskEntries = await readdir(TASKS_DIR)
+      } catch {}
+
+      const orphans: SessionInfo[] = []
+      for (const entry of taskEntries) {
+        if (!UUID_RE.test(entry)) continue
+        if (allKnownSessionIds.has(entry)) continue
+
+        const taskDirPath = join(TASKS_DIR, entry)
+        let s: Awaited<ReturnType<typeof stat>>
+        try {
+          s = await stat(taskDirPath)
+          if (!s.isDirectory()) continue
+        } catch {
+          continue
+        }
+
+        orphans.push({
+          sessionId: entry,
+          paths: [],
+          mtimeMs: s.mtimeMs,
+          sizeBytes: 0,
+          taskDirPath,
+          taskDirSizeBytes: await dirSize(taskDirPath),
+        })
+      }
+
+      if (orphans.length > 0) {
+        const keep: SessionInfo[] = []
+        const old: SessionInfo[] = []
+        for (const o of orphans) {
+          if (o.mtimeMs < cutoffMs) old.push(o)
+          else keep.push(o)
+        }
+        if (keep.length > 0 || old.length > 0) {
+          results.push({ name: "(orphaned tasks)", keep, old, stale: true })
+        }
+      }
+    }
+
     if (results.length === 0) {
       console.log(`No session directories found (older than ${olderThanLabel}).`)
       return
     }
 
     // Decode project paths for display
-    const decodedNames = await Promise.all(results.map((r) => decodeProjectPath(r.name)))
+    const decodedNames = await Promise.all(
+      results.map((r) => (r.name.startsWith("(") ? r.name : decodeProjectPath(r.name)))
+    )
     const maxNameLen = Math.max(...decodedNames.map((n) => n.length), 20)
 
     // Print table
@@ -380,8 +448,19 @@ export const cleanupCommand: Command = {
 
     for (const { old } of results) {
       for (const session of old) {
-        if (await trashDir(session.path)) succeeded++
-        else failed++
+        let sessionPartSucceeded = false
+        if (session.paths.length === 0) {
+          // orphan with only task data
+          sessionPartSucceeded = true
+        } else {
+          for (const p of session.paths) {
+            if (await trashDir(p)) sessionPartSucceeded = true
+            else failed++
+          }
+        }
+
+        if (sessionPartSucceeded) succeeded++
+
         if (session.taskDirPath && (await trashDir(session.taskDirPath))) {
           taskDirsRemoved++
         }
