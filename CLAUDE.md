@@ -199,3 +199,4 @@ alwaysApply: false
 - **DON'T**: Attempt to edit files outside the session sandbox; the Edit tool will block and sandbox enforcement is non-negotiable.
 - **DO**: After every commit, immediately run `git log origin/main..HEAD --oneline` to confirm no commits are unpushed before attempting to stop. Use `/push` skill to push unpushed commits.
 - **DON'T**: Rely on `git status` alone for unpush detection—it doesn't show upstream divergence. Always use `git log origin/main..HEAD --oneline` to list unpushed commits.
+- **DON'T**: Declare commit or push success before reading the actual tool output confirming it. Outcomes must be verified from evidence (git status clean, commit SHA captured, push output showing remote updated) before claiming the step complete.
