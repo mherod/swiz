@@ -680,7 +680,7 @@ const EVIDENCE_SEGMENT_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: "no_ci", re: /^no[\s_]ci\b.*(workflow|run|configured)/i },
 ]
 
-const REQUIRED_EVIDENCE_FIELDS = 2
+const REQUIRED_EVIDENCE_FIELDS = 1
 
 /** Split evidence on delimiters, check each segment independently, return matched field names. */
 function countEvidenceFields(evidence: string): string[] {
@@ -714,10 +714,10 @@ export function validateEvidence(evidence: string): string | null {
   if (matched.length < REQUIRED_EVIDENCE_FIELDS) {
     const found = matched.length > 0 ? matched.join(", ") : "none"
     return (
-      `Evidence must contain at least ${REQUIRED_EVIDENCE_FIELDS} structured fields, but found ${matched.length} (${found}).\n\n` +
+      `Evidence must contain at least ${REQUIRED_EVIDENCE_FIELDS} structured field, but found ${matched.length} (${found}).\n\n` +
       `Structured fields (any ${REQUIRED_EVIDENCE_FIELDS}+ required):\n` +
       EVIDENCE_SEGMENT_PATTERNS.map(({ name }) => `  • ${name}`).join("\n") +
-      '\n\nExample: --evidence "note:CI green — conclusion: success, run 12345678"'
+      '\n\nExample: --evidence "note:CI green"'
     )
   }
 

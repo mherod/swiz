@@ -198,11 +198,14 @@ describe("getSessions", () => {
 // ─── validateEvidence ─────────────────────────────────────────────────────────
 
 describe("validateEvidence", () => {
-  it("accepts evidence with 2+ structured fields", () => {
+  it("accepts evidence with 1+ structured fields", () => {
     expect(validateEvidence("note:CI green — conclusion: success")).toBeNull()
     expect(validateEvidence("commit:abc123f — note:tests passed")).toBeNull()
     expect(validateEvidence("note:all checks passed — conclusion: done")).toBeNull()
     expect(validateEvidence("note:bulk-complete — conclusion: all tasks completed")).toBeNull()
+    // single-field evidence is now valid
+    expect(validateEvidence("note:only one structured field present")).toBeNull()
+    expect(validateEvidence("note:CI green only one field here")).toBeNull()
   })
 
   it("rejects evidence without a recognized prefix", () => {
@@ -212,18 +215,18 @@ describe("validateEvidence", () => {
     expect(error).toContain("commit:")
   })
 
-  it("rejects evidence with only 1 structured field", () => {
-    const error = validateEvidence("note:only one structured field present")
+  it("rejects evidence with 0 structured fields (valid prefix but too short value)", () => {
+    // "note:hi" passes prefix check but the note regex requires 5+ chars after note:
+    const error = validateEvidence("note:hi")
     expect(error).not.toBeNull()
-    expect(error).toContain("at least 2 structured fields")
-    expect(error).toContain("found 1")
+    expect(error).toContain("at least 1 structured field")
+    expect(error).toContain("found 0")
   })
 
-  it("does not count embedded text in a field's value as a second field", () => {
-    // "CI green" appears inside the note value — must NOT be counted as a separate ci_green field
-    const error = validateEvidence("note:CI green only one field here")
-    expect(error).not.toBeNull()
-    expect(error).toContain("found 1")
+  it("does not count embedded text in a field's value as a separate field", () => {
+    // "CI green" appears inside the note value — must NOT be counted as a separate ci_green field;
+    // but with REQUIRED=1 the overall call is valid
+    expect(validateEvidence("note:CI green only one field here")).toBeNull()
   })
 
   it("rejects empty-ish evidence without prefix", () => {

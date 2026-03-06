@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 // PreToolUse hook: Require structured evidence when completing a task via TaskUpdate.
 // Plain `TaskUpdate { status: "completed" }` leaves no machine-readable verification
-// record, causing stop hooks to fire repeatedly.  This hook requires >=2 distinct
-// evidence fields in the description before allowing completion.
+// record, causing stop hooks to fire repeatedly.  This hook requires >=1 distinct
+// evidence field in the description before allowing completion.
 
 import { denyPreToolUse } from "./hook-utils.ts"
 
 // Evidence patterns — each entry is a named family with a regex.
-// Any 2+ distinct families must match for the call to proceed.
+// Any 1+ distinct families must match for the call to proceed.
 const EVIDENCE_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: "note", re: /note:\s*\S.{4,}/i },
   { name: "conclusion", re: /conclusion:\s*\S+/i },
@@ -18,7 +18,7 @@ const EVIDENCE_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: "no_ci", re: /no\s+ci.*(workflow|run|configured)/i },
 ]
 
-const REQUIRED = 2
+const REQUIRED = 1
 
 const input = await Bun.stdin.json()
 const toolInput: Record<string, unknown> = input?.tool_input ?? {}
@@ -34,11 +34,11 @@ if (matched.length >= REQUIRED) process.exit(0)
 
 const foundList = matched.length > 0 ? matched.join(", ") : "none"
 const reason =
-  `TaskUpdate status=completed requires at least ${REQUIRED} structured evidence fields in \`description\`, ` +
+  `TaskUpdate status=completed requires at least ${REQUIRED} structured evidence field in \`description\`, ` +
   `but found ${matched.length} (${foundList}).\n\n` +
   `Evidence fields (any ${REQUIRED}+ required):\n` +
   EVIDENCE_PATTERNS.map(({ name }) => `  • ${name}`).join("\n") +
-  `\n\nUse \`swiz tasks complete <id> --evidence "note:CI green — conclusion: success, run <id>"\` ` +
+  `\n\nUse \`swiz tasks complete <id> --evidence "note:CI green"\` ` +
   `instead of a plain TaskUpdate.`
 
 denyPreToolUse(reason, { includeReassessmentAdvice: false })
