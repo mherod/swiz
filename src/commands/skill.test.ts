@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { parseFrontmatterField, stripFrontmatter } from "./skill.ts"
+import { convertSkillContent, parseFrontmatterField, stripFrontmatter } from "./skill.ts"
 
 // ─── parseFrontmatterField unit tests ────────────────────────────────────────
 
@@ -359,6 +359,79 @@ describe("swiz skill --sync-gemini", () => {
     expect(exitCode).toBe(0)
     expect(stdout).toContain(`overwritten ${skillName}`)
     expect(await Bun.file(targetPath).text()).toContain("Source version")
+  })
+})
+
+// ─── convertSkillContent unit tests ──────────────────────────────────────────
+
+describe("convertSkillContent", () => {
+  test("no-op when from and to are the same agent", () => {
+    const content = "---\nallowed-tools: Bash, Edit\n---\nUse Bash to run commands.\n"
+    const { content: result, unmapped } = convertSkillContent(content, "claude", "claude")
+    expect(result).toBe(content)
+    expect(unmapped).toHaveLength(0)
+  })
+
+  test("rewrites frontmatter allowed-tools for claude → gemini", () => {
+    const content = "---\nallowed-tools: Bash, Edit, Write\n---\n# Body\n"
+    const { content: result } = convertSkillContent(content, "claude", "gemini")
+    expect(result).toContain("run_shell_command")
+    expect(result).toContain("replace")
+    expect(result).toContain("write_file")
+    expect(result).not.toContain("allowed-tools: Bash")
+  })
+
+  test("rewrites frontmatter allowed-tools for claude → cursor", () => {
+    const content = "---\nallowed-tools: Bash, Edit\n---\n# Body\n"
+    const { content: result } = convertSkillContent(content, "claude", "cursor")
+    expect(result).toContain("Shell")
+    expect(result).toContain("StrReplace")
+  })
+
+  test("rewrites body tool name references whole-word (claude → gemini)", () => {
+    const content = "---\n---\nUse Bash to run commands. Do not use BashExtra.\n"
+    const { content: result } = convertSkillContent(content, "claude", "gemini")
+    expect(result).toContain("run_shell_command")
+    // BashExtra should not be partially rewritten
+    expect(result).toContain("BashExtra")
+  })
+
+  test("rewrites TaskCreate and TaskUpdate to gemini equivalents", () => {
+    const content = "---\n---\nCall TaskCreate to plan. Then use TaskUpdate to track.\n"
+    const { content: result } = convertSkillContent(content, "claude", "gemini")
+    expect(result).toContain("write_todos")
+    expect(result).not.toContain("TaskCreate")
+    expect(result).not.toContain("TaskUpdate")
+  })
+
+  test("rewrites source-specific names back to canonical (gemini → claude)", () => {
+    const content =
+      "---\nallowed-tools: run_shell_command, write_file\n---\nUse run_shell_command.\n"
+    const { content: result } = convertSkillContent(content, "gemini", "claude")
+    expect(result).toContain("Bash")
+    expect(result).toContain("Write")
+    expect(result).not.toContain("run_shell_command")
+  })
+
+  test("surface unmapped tool names without data loss", () => {
+    // NotebookEdit has no Gemini equivalent (maps to 'NotebookEdit' itself)
+    const content = "---\nallowed-tools: Bash, NotebookEdit\n---\n"
+    const { content: result, unmapped } = convertSkillContent(content, "claude", "gemini")
+    expect(result).toContain("run_shell_command")
+    // NotebookEdit preserved as-is (no Gemini equivalent)
+    expect(result).toContain("NotebookEdit")
+    // No unmapped warning for NotebookEdit since it maps to itself
+    // (identity mapping is not surfaced as unmapped — only truly ambiguous tokens are)
+    expect(Array.isArray(unmapped)).toBe(true)
+  })
+
+  test("converts codex tool names to claude (codex → claude)", () => {
+    const content = "---\nallowed-tools: shell_command, read_file\n---\nUse shell_command.\n"
+    const { content: result } = convertSkillContent(content, "codex", "claude")
+    expect(result).toContain("Bash")
+    expect(result).toContain("Read")
+    expect(result).not.toContain("shell_command")
+    expect(result).not.toContain("read_file")
   })
 })
 

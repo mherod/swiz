@@ -319,14 +319,23 @@ Read and expand skill definitions used by Claude Code, Codex, and other AI agent
 swiz skill              # list all available skills
 swiz skill commit       # print skill with inline commands expanded
 swiz skill --raw commit # raw SKILL.md without expansion
+
+# Copy Gemini skills to Claude (copy-only — no tool name remapping)
 swiz skill --sync-gemini                     # sync ~/.gemini/skills -> ~/.claude/skills
 swiz skill --sync-gemini --dry-run           # preview sync actions only
 swiz skill --sync-gemini --overwrite         # allow replacing existing target skills
+
+# Convert skills between agents (copies + rewrites tool references)
+swiz skill --convert --from gemini --to claude            # convert all Gemini skills to Claude
+swiz skill --convert --from claude --to cursor --dry-run  # preview remapping without writing
+swiz skill --convert --from codex  --to claude --overwrite
 ```
 
 Skills are discovered from `.skills/` (project-local) plus provider globals (`~/.claude/skills/`, `~/.cursor/skills/`, `~/.gemini/skills/`, `~/.gemini/antigravity/skills/`, `~/.gemini/antigravity/global_skills/`, `~/.codex/skills/`). Duplicate skill names use deterministic first-found precedence in that exact order (project-local first).
 
-`--sync-gemini` provides a non-destructive conversion/sync path for Gemini skills by copying them into `~/.claude/skills/`; existing targets are skipped unless `--overwrite` is set.
+`--sync-gemini` copies Gemini skill directories into `~/.claude/skills/` without transforming content — direct tool references in SKILL.md body or frontmatter are preserved as-is. Use `--convert` for automatic tool name remapping.
+
+`--convert` performs a content-aware conversion: it builds a reverse alias map for the source agent, composes it with the target agent's alias table, and rewrites both the frontmatter `allowed-tools` list and whole-word tool references in the body. Tool names with no target-side equivalent are preserved as-is and reported as warnings — no silent data loss. Supported agent IDs: `claude`, `cursor`, `gemini`, `codex`.
 
 The `` !`command` `` inline syntax is expanded by default — shell commands inside skill content are executed and their output is inlined.
 
