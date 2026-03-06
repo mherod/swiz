@@ -59,8 +59,8 @@ export function isReadOnlyGhArgs(args: string[]): boolean {
 }
 
 /** @internal exported for testing */
-export function ghCacheKey(args: string[], cwdHash: string): string {
-  return Bun.hash(JSON.stringify([cwdHash, ...args])).toString(16)
+export function ghCacheKey(args: string[], cwdHash: string, ghBin = ""): string {
+  return Bun.hash(JSON.stringify([cwdHash, ghBin, ...args])).toString(16)
 }
 
 /** @internal exported for testing */
@@ -92,7 +92,11 @@ export function writeGhCache(key: string, output: string, cacheDir = GH_CACHE_DI
 export async function gh(args: string[], cwd: string): Promise<string> {
   const effectiveCwd = cwd.trim() || process.cwd()
   const useCache = isReadOnlyGhArgs(args)
-  const cacheKey = useCache ? ghCacheKey(args, getCanonicalPathHash(effectiveCwd)) : ""
+  // Include resolved gh binary path in key so tests with fake gh binaries
+  // (injected via PATH) get distinct cache entries from the real gh.
+  const cacheKey = useCache
+    ? ghCacheKey(args, getCanonicalPathHash(effectiveCwd), Bun.which("gh") ?? "gh")
+    : ""
 
   if (useCache) {
     const cached = readGhCache(cacheKey)
