@@ -153,11 +153,12 @@ async function checkOrphanedHookScripts(): Promise<CheckResult> {
     // Skip test files — they are not hook scripts
     if (file.endsWith(".test.ts")) continue
     if (manifestFiles.has(file)) continue
-    // Only flag hook entry points (files with the bun shebang).
+    // Only flag hook entry points (files with a bun shebang on the first line).
     // Library files imported by hooks (e.g. hook-utils.ts) have no shebang and are not hook scripts.
-    // Read only the first 18 bytes — the exact length of "#!/usr/bin/env bun".
-    const prefix = await Bun.file(join(HOOKS_DIR, file)).slice(0, 18).text()
-    if (prefix !== "#!/usr/bin/env bun") continue
+    // Read the first 256 bytes and extract the first line to avoid loading full file contents.
+    const chunk = await Bun.file(join(HOOKS_DIR, file)).slice(0, 256).text()
+    const firstLine = chunk.split("\n", 1)[0] ?? ""
+    if (!firstLine.startsWith("#!/") || !firstLine.includes("bun")) continue
     orphaned.push(file)
   }
 
