@@ -451,7 +451,14 @@ interface InvalidSkillEntry {
   reason: string
 }
 
-/** Scan all skill dirs for subdirectories with no SKILL.md or no description field. */
+/** Required frontmatter fields that every SKILL.md must declare. */
+const REQUIRED_SKILL_FIELDS = ["name", "description"] as const
+
+/**
+ * Scan all skill dirs for subdirectories with missing or invalid SKILL.md.
+ * Validates: file existence, non-empty content, frontmatter block, and all
+ * required frontmatter fields (name, description).
+ */
 async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
   const invalid: InvalidSkillEntry[] = []
   for (const skillDir of SKILL_PRECEDENCE) {
@@ -476,13 +483,22 @@ async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
         invalid.push({ name: entry.name, skillDir, entryDir, reason: "empty SKILL.md" })
         continue
       }
-      const description = parseFrontmatterField(content, "description")
-      if (!description) {
+      if (!/^---/m.test(content)) {
         invalid.push({
           name: entry.name,
           skillDir,
           entryDir,
-          reason: "missing description in frontmatter",
+          reason: "SKILL.md has no frontmatter block (expected --- delimiters)",
+        })
+        continue
+      }
+      const missing = REQUIRED_SKILL_FIELDS.filter((f) => !parseFrontmatterField(content, f))
+      if (missing.length > 0) {
+        invalid.push({
+          name: entry.name,
+          skillDir,
+          entryDir,
+          reason: `missing required frontmatter field(s): ${missing.join(", ")}`,
         })
       }
     }

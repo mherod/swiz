@@ -44,7 +44,10 @@ async function runDoctor(
 async function createSkill(home: string, relativeRoot: string, skillName: string): Promise<void> {
   const skillDir = join(home, relativeRoot, skillName)
   await mkdir(skillDir, { recursive: true })
-  await writeFile(join(skillDir, "SKILL.md"), "---\ndescription: test\n---\n")
+  await writeFile(
+    join(skillDir, "SKILL.md"),
+    `---\nname: ${skillName}\ndescription: test skill\n---\n`
+  )
 }
 
 function buildExpectedHooks() {
@@ -518,7 +521,46 @@ describe("swiz doctor", () => {
 
     const result = await runDoctor(home)
     expect(result.stdout).toContain("Invalid skill: no-desc-skill")
-    expect(result.stdout).toContain("missing description in frontmatter")
+    expect(result.stdout).toContain("missing required frontmatter field(s): description")
+  })
+
+  test("detects skill with SKILL.md missing name as invalid", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "no-name-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\ndescription: Has description but no name field\n---\n\nContent.\n"
+    )
+
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Invalid skill: no-name-skill")
+    expect(result.stdout).toContain("missing required frontmatter field(s): name")
+  })
+
+  test("detects skill with SKILL.md missing both name and description as invalid", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "empty-fm-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\n---\n\nFrontmatter exists but has no fields.\n"
+    )
+
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Invalid skill: empty-fm-skill")
+    expect(result.stdout).toContain("missing required frontmatter field(s): name, description")
+  })
+
+  test("detects skill with SKILL.md lacking frontmatter block as invalid", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "no-fm-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, "SKILL.md"), "# Just a heading\n\nNo frontmatter at all.\n")
+
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Invalid skill: no-fm-skill")
+    expect(result.stdout).toContain("no frontmatter block")
   })
 
   test("reports no invalid skill entries in a healthy install", async () => {
