@@ -503,7 +503,16 @@ async function main(): Promise<void> {
     reflections: [],
   }
 
-  if (detectAgentCli()) {
+  const agentCli = detectAgentCli()
+
+  // No backend available (e.g. CLAUDECODE=1 skips the claude CLI and Cursor/Gemini
+  // are not running) — there is no way to generate a meaningful next-step suggestion.
+  // Allow stop cleanly rather than blocking with the generic fallback message.
+  // This matches the hook's documented intent: "Only skips for trivial sessions
+  // (< MIN_TOOL_CALLS) or when agent is not installed."
+  if (!agentCli) return
+
+  {
     const context = formatTurnsAsContext(turns)
     const taskSection = taskContext
       ? `=== SESSION TASKS ===\n${taskContext}\n=== END OF SESSION TASKS ===\n\n`
@@ -531,7 +540,7 @@ async function main(): Promise<void> {
       })
       if (result) response = parseAgentResponse(result)
     } catch {
-      // Fall through to fallback
+      // promptAgent threw (backend unreachable mid-call) — fall through to fallback below
     }
   }
 

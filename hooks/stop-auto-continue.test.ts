@@ -230,8 +230,9 @@ describe("stop-auto-continue", () => {
     expect(result.reason).toContain("identify the most critical incomplete task")
   })
 
-  test("blocks with fallback guidance when no AI backend is available", async () => {
-    // binDir has no agent binary
+  test("allows stop when no AI backend is available (no fallback block)", async () => {
+    // binDir has no agent binary — hook should exit 0 rather than blocking
+    // with the generic fallback message, since no meaningful suggestion can be generated.
     const binDir = await createTempDir()
 
     const result = await runHook({
@@ -239,8 +240,8 @@ describe("stop-auto-continue", () => {
       binDir,
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput.trim()).toBe("")
   })
 
   test("passes --workspace with a temp dir when using agent backend", async () => {
