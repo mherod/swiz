@@ -224,6 +224,50 @@ describe("swiz doctor", () => {
               ],
             },
           ],
+          Notification: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch notification Notification",
+                },
+              ],
+            },
+          ],
+          SubagentStart: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch subagentStart SubagentStart",
+                },
+              ],
+            },
+          ],
+          SubagentStop: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch subagentStop SubagentStop",
+                },
+              ],
+            },
+          ],
+          SessionEnd: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch sessionEnd SessionEnd",
+                },
+              ],
+            },
+          ],
         },
       })
     )

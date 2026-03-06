@@ -85,7 +85,11 @@ describe("dispatch.ts unit tests", () => {
       const universalGroups = manifest.filter((g) => !g.matcher)
       expect(universalGroups.length).toBeGreaterThan(0)
 
-      universalGroups.forEach((group) => {
+      // Non-empty universal groups must have at least one hook.
+      // Empty universal groups (event placeholders with no bundled hooks) are allowed.
+      const nonEmptyUniversalGroups = universalGroups.filter((g) => g.hooks.length > 0)
+      expect(nonEmptyUniversalGroups.length).toBeGreaterThan(0)
+      nonEmptyUniversalGroups.forEach((group) => {
         expect(group.event).toBeDefined()
         expect(group.hooks.length).toBeGreaterThan(0)
       })
