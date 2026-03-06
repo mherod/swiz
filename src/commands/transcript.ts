@@ -278,7 +278,9 @@ async function loadDebugLog(sessionId: string): Promise<DebugLog | null> {
 }
 
 function parseDebugEvents(lines: string[]): DebugEvent[] {
-  type Tagged = DebugEvent & { _idx: number; _malformed: boolean }
+  // _seq is the insertion index into the malformed array — used as the final sort tie-breaker
+  // so the comparator is provably total-ordered even when _idx and iso both match.
+  type Tagged = DebugEvent & { _idx: number; _malformed: boolean; _seq: number }
 
   const valid: Tagged[] = []
   const malformed: Tagged[] = []
@@ -298,7 +300,14 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
       } else {
         // Leading continuation before any event — emit a synthetic malformed event (iso:"")
         // so the line is preserved. formatTimestamp("") returns "" safely (NaN guard in place).
-        const ev: Tagged = { iso: "", ts: 0, text: line, _idx: i, _malformed: true }
+        const ev: Tagged = {
+          iso: "",
+          ts: 0,
+          text: line,
+          _idx: i,
+          _malformed: true,
+          _seq: malformed.length,
+        }
         malformed.push(ev)
         all.push(ev)
       }
@@ -310,7 +319,14 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
     if (isNaN(parsed)) {
       // Regex-matched but unparseable timestamp (e.g. month 13): tag as malformed and sort
       // by file index rather than inheriting a neighbour's timestamp — avoids ambiguity.
-      const ev: Tagged = { iso, ts: 0, text: line.slice(m[0].length), _idx: i, _malformed: true }
+      const ev: Tagged = {
+        iso,
+        ts: 0,
+        text: line.slice(m[0].length),
+        _idx: i,
+        _malformed: true,
+        _seq: malformed.length,
+      }
       malformed.push(ev)
       all.push(ev)
     } else {
@@ -320,6 +336,7 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
         text: line.slice(m[0].length),
         _idx: i,
         _malformed: false,
+        _seq: 0, // unused for valid events
       }
       valid.push(ev)
       all.push(ev)
@@ -328,10 +345,11 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
 
   // Sort valid events by timestamp, breaking ties by file index
   valid.sort((a, b) => a.ts - b.ts || a._idx - b._idx)
-  // Sort malformed events by file index; iso string is the final tie-breaker so the
-  // comparator is formally total-ordered even if _idx were ever non-unique (structurally
-  // impossible — _idx = loop variable i which is always unique — but explicit is safer).
-  malformed.sort((a, b) => a._idx - b._idx || a.iso.localeCompare(b.iso))
+  // Three-key sort for malformed events:
+  // 1. _idx  — file position (structurally unique; loop variable i never repeats)
+  // 2. iso   — lexicographic fallback for hypothetical equal _idx
+  // 3. _seq  — insertion order into malformed[]; final tie-breaker, provably unique within the array
+  malformed.sort((a, b) => a._idx - b._idx || a.iso.localeCompare(b.iso) || a._seq - b._seq)
 
   // Two-pass merge: insert each malformed event immediately after the last valid event
   // whose _idx precedes it in the file. This places parse errors at their structural

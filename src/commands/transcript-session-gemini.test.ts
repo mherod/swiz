@@ -437,6 +437,36 @@ describe("Provider transcript/session command support", () => {
     expect(out).toContain("[DEBUG] first real event")
   })
 
+  test("swiz transcript --include-debug orders two malformed events with identical iso by insertion index", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc01-7777-7888-8999-333333333333"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
+    // Both malformed lines share the same (invalid) ISO string — _seq must break the tie
+    await createDebugLog(home, sessionId, [
+      "2026-99-06T04:29:06.000Z [DEBUG] same-iso first",
+      "2026-99-06T04:29:06.000Z [DEBUG] same-iso second",
+      "2026-03-06T04:29:06.500Z [DEBUG] valid after",
+    ])
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--include-debug"],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain("[DEBUG] same-iso first")
+    expect(out).toContain("[DEBUG] same-iso second")
+    expect(out).toContain("[DEBUG] valid after")
+    // Insertion order must be preserved when _idx and iso are equal
+    const firstIdx = out.indexOf("[DEBUG] same-iso first")
+    const secondIdx = out.indexOf("[DEBUG] same-iso second")
+    const validIdx = out.indexOf("[DEBUG] valid after")
+    expect(firstIdx).toBeLessThan(secondIdx)
+    expect(secondIdx).toBeLessThan(validIdx)
+  })
+
   test("swiz transcript --include-debug interleaves malformed events stably with valid events", async () => {
     const home = await createTempHome()
     const projectDir = join(home, "workspace", "demo-codex")
