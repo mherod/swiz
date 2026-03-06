@@ -278,42 +278,77 @@ async function loadDebugLog(sessionId: string): Promise<DebugLog | null> {
 }
 
 function parseDebugEvents(lines: string[]): DebugEvent[] {
-  // Track original file index so equal-timestamp events sort deterministically (file order)
-  const events: Array<DebugEvent & { _idx: number }> = []
-  // Initialize to 0 (epoch) so a leading NaN-timestamp line sorts before all real turns,
-  // matching its position at the top of the file. A trailing NaN line inherits the last
-  // real ts and therefore stays near its neighbour.
-  let lastValidTs = 0
+  type Tagged = DebugEvent & { _idx: number; _malformed: boolean }
+
+  const valid: Tagged[] = []
+  const malformed: Tagged[] = []
+
+  // Accumulates events across both buckets for continuation-line attachment
+  const all: Tagged[] = []
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (line === undefined) continue
     const m = DEBUG_TS_RE.exec(line)
     if (!m) {
-      // Continuation line (no ISO timestamp prefix): attach to the preceding event so it is
-      // rendered as part of that event rather than silently dropped.
-      const prev = events[events.length - 1]
+      // Continuation line (no ISO prefix): attach to the preceding event so no text is lost.
+      const prev = all[all.length - 1]
       if (prev) {
         prev.text += `\n${line}`
       } else {
-        // No preceding event yet — emit a synthetic event (iso:"", ts:0) so the line is
-        // preserved and sorts before all real turns. formatTimestamp("") returns "" gracefully.
-        events.push({ iso: "", ts: 0, text: line, _idx: i })
+        // Leading continuation before any event — emit a synthetic malformed event (iso:"")
+        // so the line is preserved. formatTimestamp("") returns "" safely (NaN guard in place).
+        const ev: Tagged = { iso: "", ts: 0, text: line, _idx: i, _malformed: true }
+        malformed.push(ev)
+        all.push(ev)
       }
       continue
     }
     const iso = m[1]
     if (iso === undefined) continue
     const parsed = new Date(iso).getTime()
-    // If the timestamp string matched the regex but Date parsing returns NaN (e.g. out-of-range
-    // month/hour values), fall back to the last valid ts so the event stays near its neighbours.
-    // NaN comparisons are always false in JS, so we must never let NaN enter the sort key.
-    const ts = isNaN(parsed) ? lastValidTs : parsed
-    if (!isNaN(parsed)) lastValidTs = parsed
-    events.push({ iso, ts, text: line.slice(m[0].length), _idx: i })
+    if (isNaN(parsed)) {
+      // Regex-matched but unparseable timestamp (e.g. month 13): tag as malformed and sort
+      // by file index rather than inheriting a neighbour's timestamp — avoids ambiguity.
+      const ev: Tagged = { iso, ts: 0, text: line.slice(m[0].length), _idx: i, _malformed: true }
+      malformed.push(ev)
+      all.push(ev)
+    } else {
+      const ev: Tagged = {
+        iso,
+        ts: parsed,
+        text: line.slice(m[0].length),
+        _idx: i,
+        _malformed: false,
+      }
+      valid.push(ev)
+      all.push(ev)
+    }
   }
-  // Primary sort by timestamp; secondary sort by original line index for deterministic tie-breaking
-  events.sort((a, b) => a.ts - b.ts || a._idx - b._idx)
-  return events.map(({ iso, ts, text }) => ({ iso, ts, text }))
+
+  // Sort valid events by timestamp, breaking ties by file index
+  valid.sort((a, b) => a.ts - b.ts || a._idx - b._idx)
+  // Sort malformed events by file index only — their timestamp is unreliable
+  malformed.sort((a, b) => a._idx - b._idx)
+
+  // Two-pass merge: insert each malformed event immediately after the last valid event
+  // whose _idx precedes it in the file. This places parse errors at their structural
+  // position in the output rather than at an ambiguous inherited timestamp bucket.
+  const result: Tagged[] = []
+  let vi = 0
+  for (const m of malformed) {
+    while (vi < valid.length && (valid[vi]?._idx ?? Infinity) < m._idx) {
+      result.push(valid[vi]!)
+      vi++
+    }
+    result.push(m)
+  }
+  while (vi < valid.length) {
+    result.push(valid[vi]!)
+    vi++
+  }
+
+  return result.map(({ iso, ts, text }) => ({ iso, ts, text }))
 }
 
 function renderDebugLine(event: DebugEvent): void {
