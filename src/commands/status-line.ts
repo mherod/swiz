@@ -351,6 +351,13 @@ export const statusLineCommand: Command = {
 
     const { info: gitInfo } = gitResult
 
+    // ── Segment visibility ───────────────────────────────────────────────────
+    const effective = swizSettings
+      ? getEffectiveSwizSettings(swizSettings, input.session_id ?? null)
+      : null
+    const activeSegments = new Set<string>(effective?.statusLineSegments ?? [])
+    const seg = (name: string) => activeSegments.size === 0 || activeSegments.has(name)
+
     // ── Build segments ──────────────────────────────────────────────────────
 
     const rb = (s: string, idx = 0) => rainbowStr(s, idx, timeOffset)
@@ -389,10 +396,6 @@ export const statusLineCommand: Command = {
     const timeSeg = `${DIM}${formatTime()}${R}`
 
     // ── Effective settings indicators ───────────────────────────────────────
-    const effective = swizSettings
-      ? getEffectiveSwizSettings(swizSettings, input.session_id ?? null)
-      : null
-
     const settingsParts: string[] = []
     if (effective) {
       if (effective.autoContinue) settingsParts.push(`\x1b[92m⟳ auto${R}`)
@@ -404,17 +407,20 @@ export const statusLineCommand: Command = {
     // ── Assemble ────────────────────────────────────────────────────────────
 
     const line1Groups = joinGroups([
-      `${label("repo")} ${a2}${shortCwd}${R}`,
-      gitInfo ? `${label("git")} ${gitInfo}` : "",
-      reviewStatus ? `${label("pr")} ${reviewStatus}` : "",
+      seg("repo") ? `${label("repo")} ${a2}${shortCwd}${R}` : "",
+      seg("git") && gitInfo ? `${label("git")} ${gitInfo}` : "",
+      seg("pr") && reviewStatus ? `${label("pr")} ${reviewStatus}` : "",
     ])
-    const line2Groups = joinGroups([`${label("model")} ${rb(model)}`, `${label("ctx")} ${ctxSeg}`])
+    const line2Groups = joinGroups([
+      seg("model") ? `${label("model")} ${rb(model)}` : "",
+      seg("ctx") ? `${label("ctx")} ${ctxSeg}` : "",
+    ])
     const modeSeg = [agentTag, vimTag].filter(Boolean).join(" ")
     const line3Groups = joinGroups([
-      ghCountSeg ? `${label("backlog")} ${ghCountSeg}` : "",
-      modeSeg ? `${label("mode")} ${modeSeg}` : "",
-      settingsSeg ? `${label("flags")} ${settingsSeg}` : "",
-      `${label("time")} ${timeSeg}`,
+      seg("backlog") && ghCountSeg ? `${label("backlog")} ${ghCountSeg}` : "",
+      seg("mode") && modeSeg ? `${label("mode")} ${modeSeg}` : "",
+      seg("flags") && settingsSeg ? `${label("flags")} ${settingsSeg}` : "",
+      seg("time") ? `${label("time")} ${timeSeg}` : "",
     ])
 
     const line1 = `${topLeft} ${line1Groups || `${DIM}─${R}`}`

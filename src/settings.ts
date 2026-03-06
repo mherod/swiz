@@ -67,6 +67,21 @@ export interface ResolvedPolicy {
   source: "project" | "default"
 }
 
+/** All available status-line segment names. */
+export const ALL_STATUS_LINE_SEGMENTS = [
+  "repo",
+  "git",
+  "pr",
+  "model",
+  "ctx",
+  "backlog",
+  "mode",
+  "flags",
+  "time",
+] as const
+
+export type StatusLineSegment = (typeof ALL_STATUS_LINE_SEGMENTS)[number]
+
 export interface SwizSettings {
   autoContinue: boolean
   critiquesEnabled: boolean
@@ -88,6 +103,8 @@ export interface SwizSettings {
   personalRepoIssuesGate: boolean
   memoryLineThreshold: number
   memoryWordThreshold: number
+  /** Which segments to display in the status line. Defaults to all segments. */
+  statusLineSegments: StatusLineSegment[]
   sessions: Record<string, SessionSwizSettings>
   /** Global hook filenames to skip (e.g. "stop-github-ci.ts") */
   disabledHooks?: string[]
@@ -114,6 +131,7 @@ export interface EffectiveSwizSettings {
   personalRepoIssuesGate: boolean
   memoryLineThreshold: number
   memoryWordThreshold: number
+  statusLineSegments: StatusLineSegment[]
   source: "global" | "session"
 }
 
@@ -222,6 +240,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   personalRepoIssuesGate: true,
   memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
   memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
+  statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
   sessions: {},
 }
 
@@ -334,6 +353,14 @@ function normalizeSettings(value: unknown): SwizSettings {
       typeof obj.memoryWordThreshold === "number" && obj.memoryWordThreshold > 0
         ? obj.memoryWordThreshold
         : DEFAULT_SETTINGS.memoryWordThreshold,
+    statusLineSegments:
+      Array.isArray(obj.statusLineSegments) &&
+      obj.statusLineSegments.every(
+        (s: unknown) =>
+          typeof s === "string" && (ALL_STATUS_LINE_SEGMENTS as readonly string[]).includes(s)
+      )
+        ? (obj.statusLineSegments as StatusLineSegment[])
+        : DEFAULT_SETTINGS.statusLineSegments,
     sessions,
     ...(Array.isArray(obj.disabledHooks) &&
     obj.disabledHooks.every((h: unknown) => typeof h === "string")
@@ -576,6 +603,7 @@ export function getEffectiveSwizSettings(
       personalRepoIssuesGate: settings.personalRepoIssuesGate,
       memoryLineThreshold: settings.memoryLineThreshold,
       memoryWordThreshold: settings.memoryWordThreshold,
+      statusLineSegments: settings.statusLineSegments,
       source: "session",
     }
   }
@@ -600,6 +628,7 @@ export function getEffectiveSwizSettings(
     personalRepoIssuesGate: settings.personalRepoIssuesGate,
     memoryLineThreshold: settings.memoryLineThreshold,
     memoryWordThreshold: settings.memoryWordThreshold,
+    statusLineSegments: settings.statusLineSegments,
     source: "global",
   }
 }

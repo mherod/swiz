@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  ALL_STATUS_LINE_SEGMENTS,
   DEFAULT_TRIVIAL_MAX_FILES,
   DEFAULT_TRIVIAL_MAX_LINES,
   getEffectiveSwizSettings,
@@ -947,6 +948,7 @@ describe("collaborationMode settings", () => {
       personalRepoIssuesGate: true,
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
+      statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings)
@@ -975,6 +977,7 @@ describe("collaborationMode settings", () => {
       personalRepoIssuesGate: true,
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
+      statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {
         "test-session": {
           autoContinue: true,
@@ -1009,6 +1012,7 @@ describe("collaborationMode settings", () => {
       personalRepoIssuesGate: true,
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
+      statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {
         "test-session": {
           autoContinue: true,
