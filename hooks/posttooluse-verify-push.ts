@@ -9,27 +9,43 @@
  *
  * Exit conditions:
  *   - No git push in command → exit 0 (passthrough)
- *   - Background push (tool_response contains "running in background") → exit 0 (verify via TaskOutput)
+ *   - Background push (any detection signal fires) → exit 0 (verify via TaskOutput)
  *   - No upstream tracking branch → exit 0 (untracked branch; push-cooldown handles it)
  *   - HEAD matches remote (immediate or after retry) → emits additionalContext confirming push landed
  *   - HEAD does not match remote after ~15s retry window → denyPostToolUse (blocks with error)
  *
- * Background push detection: if the Bash tool ran with run_in_background=true, tool_input
- * carries that flag. Verification is skipped — the push hasn't completed yet and must be
- * verified via TaskOutput once the background task finishes.
+ * Background push detection (multi-signal, first match wins):
+ *   1. tool_input.run_in_background === true   — Claude Code explicit background flag
+ *   2. command ends with " &" or contains " & " — shell-level backgrounding
+ *   3. tool_response string contains "running in background" or "background task"
+ *      — Claude Code's response text for async Bash tool calls
  */
 
 import { denyPostToolUse, GIT_PUSH_RE, git, isShellTool, type ToolHookInput } from "./hook-utils.ts"
 
-const input = (await Bun.stdin.json()) as ToolHookInput
+interface ExtendedToolHookInput extends ToolHookInput {
+  tool_response?: string | null
+}
+
+const input = (await Bun.stdin.json()) as ExtendedToolHookInput
 if (!input.tool_name || !isShellTool(input.tool_name)) process.exit(0)
 
 const command = String(input.tool_input?.command ?? "")
 if (!GIT_PUSH_RE.test(command)) process.exit(0)
 
-// Skip verification for background pushes — the push hasn't completed when PostToolUse fires.
-// The run_in_background Bash parameter is forwarded in tool_input; verify via TaskOutput instead.
-if (input.tool_input?.run_in_background === true) process.exit(0)
+// Multi-signal background push detection — any signal skips verification.
+// PostToolUse fires when the Bash tool *call* returns; for background pushes
+// that is before the push process has started, so there is nothing to verify yet.
+const isBackground =
+  // Signal 1: Claude Code explicit background flag in tool_input
+  input.tool_input?.run_in_background === true ||
+  // Signal 2: shell-level backgrounding (" &" suffix or " & " inline)
+  /\s+&\s*$|\s+&\s/.test(command) ||
+  // Signal 3: tool_response text indicates Claude Code spawned a background task
+  (typeof input.tool_response === "string" &&
+    /running in background|background task/i.test(input.tool_response))
+
+if (isBackground) process.exit(0)
 
 const cwd = input.cwd ?? process.cwd()
 
