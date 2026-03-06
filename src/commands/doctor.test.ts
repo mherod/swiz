@@ -98,6 +98,37 @@ describe("swiz doctor", () => {
     expect(result.stdout).toMatch(/Orphaned hook scripts/)
   })
 
+  test("reports script execute permissions check", async () => {
+    const home = await createTempHome()
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Script execute permissions")
+    // Reports either pass or a warning about missing execute bits
+    expect(result.stdout).toMatch(/Script execute permissions/)
+  })
+
+  test("doctor --fix sets execute permissions on scripts in installed config", async () => {
+    const home = await createTempHome()
+    const claudeDir = join(home, ".claude")
+    await mkdir(claudeDir, { recursive: true })
+    // Create a script file without execute permission
+    const scriptPath = join(home, "test-hook.ts")
+    await writeFile(scriptPath, "#!/usr/bin/env bun\nconsole.log('test')\n", { mode: 0o644 })
+    await writeFile(
+      join(claudeDir, "settings.json"),
+      JSON.stringify({
+        hooks: {
+          Stop: [{ hooks: [{ type: "command", command: `bun ${scriptPath}` }] }],
+        },
+      })
+    )
+    const fixRun = await runDoctor(home, ["--fix"])
+    expect(fixRun.stdout).toContain("Script execute permissions")
+    // After fix, the file should have execute permission
+    const { stat: statFn } = await import("node:fs/promises")
+    const s = await statFn(scriptPath)
+    expect(s.mode & 0o100).not.toBe(0)
+  })
+
   test("reports installed config scripts check", async () => {
     const home = await createTempHome()
     const result = await runDoctor(home)

@@ -1,4 +1,4 @@
-import { rename } from "node:fs/promises"
+import { chmod, rename, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
 import { manifest } from "../manifest.ts"
@@ -448,6 +448,103 @@ async function checkInstalledConfigScripts(): Promise<CheckResult> {
   }
 }
 
+// ─── Script execute permission check ────────────────────────────────────────
+
+/** Collect all script file paths that should have execute permission. */
+async function collectExecutableScriptPaths(): Promise<string[]> {
+  const paths: string[] = []
+  // All manifest hook scripts
+  for (const group of manifest) {
+    for (const hook of group.hooks) {
+      paths.push(join(HOOKS_DIR, hook.file))
+    }
+  }
+  // Script paths referenced in installed agent configs
+  for (const agent of CONFIGURABLE_AGENTS) {
+    const file = Bun.file(agent.settingsPath)
+    if (!(await file.exists())) continue
+    let settings: Record<string, unknown>
+    try {
+      settings = await file.json()
+    } catch {
+      continue
+    }
+    const hooksRaw = agent.wrapsHooks
+      ? ((settings.hooks as Record<string, unknown>) ?? {})
+      : ((settings[agent.hooksKey] as Record<string, unknown>) ?? {})
+    const hooks = typeof hooksRaw === "object" && !Array.isArray(hooksRaw) ? hooksRaw : {}
+    for (const cmd of collectHookCommands(hooks)) {
+      paths.push(...extractScriptPaths(cmd))
+    }
+  }
+  // Deduplicate
+  return [...new Set(paths)]
+}
+
+/** Check (and optionally fix) execute permissions on all referenced hook scripts. */
+async function checkScriptExecutePermissions(fix: boolean): Promise<CheckResult> {
+  const paths = await collectExecutableScriptPaths()
+  const notExecutable: string[] = []
+  const fixed: string[] = []
+  const fixFailed: string[] = []
+
+  for (const p of paths) {
+    let s: { mode: number }
+    try {
+      s = await stat(p)
+    } catch {
+      continue // missing files reported separately by existence checks
+    }
+    if ((s.mode & 0o100) !== 0) continue // owner execute bit set
+    if (fix) {
+      try {
+        await chmod(p, s.mode | 0o111)
+        fixed.push(p)
+      } catch {
+        fixFailed.push(p)
+      }
+    } else {
+      notExecutable.push(p)
+    }
+  }
+
+  if (fix) {
+    if (fixed.length === 0 && fixFailed.length === 0) {
+      return {
+        name: "Script execute permissions",
+        status: "pass",
+        detail: "all scripts already executable",
+      }
+    }
+    if (fixFailed.length > 0) {
+      return {
+        name: "Script execute permissions",
+        status: "fail",
+        detail: `chmod failed for ${fixFailed.length} script(s): ${fixFailed.join(", ")}`,
+      }
+    }
+    return {
+      name: "Script execute permissions",
+      status: "pass",
+      detail: `fixed execute permissions on ${fixed.length} script(s)`,
+    }
+  }
+
+  if (notExecutable.length === 0) {
+    return {
+      name: "Script execute permissions",
+      status: "pass",
+      detail: `all ${paths.length} scripts are executable`,
+    }
+  }
+
+  return {
+    name: "Script execute permissions",
+    status: "warn",
+    detail: `${notExecutable.length} script(s) missing execute permission — run: swiz doctor --fix`,
+  }
+}
+
 // ─── Config sync check ──────────────────────────────────────────────────────
 
 /** Extract canonical event names from `swiz dispatch <event> ...` commands in a config. */
@@ -572,6 +669,7 @@ export const doctorCommand: Command = {
     results.push(await checkManifestHandlerPaths())
     results.push(await checkOrphanedHookScripts())
     results.push(await checkInstalledConfigScripts())
+    results.push(await checkScriptExecutePermissions(fix))
 
     // Agent config sync (detect stale dispatch entries)
     for (const agent of CONFIGURABLE_AGENTS) {
