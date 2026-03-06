@@ -345,15 +345,25 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
 
   // Sort valid events by timestamp, breaking ties by file index
   valid.sort((a, b) => a.ts - b.ts || a._idx - b._idx)
-  // Three-key comparator for malformed events — explicit multi-statement form with ?? 0
-  // numeric fallbacks so no NaN can ever reach the sort engine's return slot:
+
+  // Normalize every malformed record before sorting: guarantee string iso and finite numeric
+  // _idx/_seq so the comparator never receives unexpected runtime types regardless of how
+  // the record was constructed (two creation paths: leading continuation and NaN timestamp).
+  for (const ev of malformed) {
+    if (typeof ev.iso !== "string") ev.iso = ""
+    if (typeof ev._idx !== "number" || !isFinite(ev._idx)) ev._idx = 0
+    if (typeof ev._seq !== "number" || !isFinite(ev._seq)) ev._seq = 0
+  }
+
+  // Three-key comparator — explicit multi-statement form; String() coercion on iso as a
+  // second defence layer in case a future path bypasses the normalization above:
   //   1. _idx — file position (loop var i, structurally unique)
-  //   2. iso  — lexicographic fallback for hypothetical equal _idx
-  //   3. _seq — insertion order into malformed[] (guaranteed set at ev creation, unique within array)
+  //   2. iso  — lexicographic fallback; String() guards against non-string runtime values
+  //   3. _seq — insertion order into malformed[] (unique within array, set at ev creation)
   malformed.sort((a, b) => {
     const byIdx = (a._idx ?? 0) - (b._idx ?? 0)
     if (byIdx !== 0) return byIdx
-    const byIso = a.iso.localeCompare(b.iso)
+    const byIso = String(a.iso ?? "").localeCompare(String(b.iso ?? ""))
     if (byIso !== 0) return byIso
     return (a._seq ?? 0) - (b._seq ?? 0)
   })
