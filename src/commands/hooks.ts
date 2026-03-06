@@ -19,9 +19,12 @@ async function buildDisabledSet(cwd: string): Promise<Set<string>> {
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface HookEntry {
-  type?: "command" | "agent" | "prompt"
+  type?: "command" | "agent" | "prompt" | "http"
   command?: string
   prompt?: string
+  url?: string
+  headers?: Record<string, string>
+  allowedEnvVars?: string[]
   model?: string
   timeout?: number
   async?: boolean

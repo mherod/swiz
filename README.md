@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**75 hooks. 6 event types. Every agent. Zero compromises.**
+**75 hooks. 10 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -82,7 +82,9 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-50 hook scripts across 6 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+75 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+
+The bundled hooks cover six events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, and UserPromptSubmit. Four additional events — **Notification**, **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system and supported by all agents. They ship with no bundled hooks; any custom hooks added for those events will be dispatched automatically.
 
 ### Stop (20)
 

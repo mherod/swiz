@@ -78,7 +78,13 @@ describe("dispatch routing validation", () => {
   })
 
   it("context-strategy events do not use blocking strategy", () => {
-    const contextEvents = ["sessionStart", "userPromptSubmit", "preCompact"]
+    const contextEvents = [
+      "sessionStart",
+      "userPromptSubmit",
+      "preCompact",
+      "notification",
+      "subagentStart",
+    ]
     for (const event of contextEvents) {
       if (event in DISPATCH_ROUTES) {
         expect(

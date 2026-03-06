@@ -278,6 +278,22 @@ export const manifest: HookGroup[] = [
       { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
     ],
   },
+  {
+    event: "notification",
+    hooks: [],
+  },
+  {
+    event: "subagentStart",
+    hooks: [],
+  },
+  {
+    event: "subagentStop",
+    hooks: [],
+  },
+  {
+    event: "sessionEnd",
+    hooks: [],
+  },
 ]
 
 // ─── Runtime routing validator ──────────────────────────────────────────────

@@ -20,6 +20,10 @@ export const DISPATCH_ROUTES: Record<string, DispatchStrategy> = {
   sessionStart: "context",
   userPromptSubmit: "context",
   preCompact: "context",
+  notification: "context",
+  subagentStart: "context",
+  subagentStop: "blocking",
+  sessionEnd: "blocking",
 }
 
 // ─── Re-exports ─────────────────────────────────────────────────────────────

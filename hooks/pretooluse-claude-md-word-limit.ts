@@ -149,7 +149,7 @@ async function main() {
         },
       })
     )
-  } catch (error) {
+  } catch {
     // On any error, allow the edit (fail open) rather than blocking
     console.log(
       JSON.stringify({
