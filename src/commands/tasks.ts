@@ -664,20 +664,41 @@ async function completeAll(filterCwd?: string, evidence?: string) {
 const EVIDENCE_PREFIXES = ["commit:", "pr:", "file:", "test:", "note:"]
 
 /**
- * Structured evidence patterns — mirror of pretooluse-require-task-evidence.ts.
- * Any 2+ must be present for completion to be accepted.
+ * Segment-anchored evidence patterns.
+ * Evidence is split on delimiters (—, --, ;, |, ", ") into segments first,
+ * then each pattern is matched against the START of each segment.
+ * This prevents free-text within one field's value (e.g. "note:CI green")
+ * from satisfying the ci_green pattern as a second distinct field.
  */
-const STRUCTURED_EVIDENCE_PATTERNS: Array<{ name: string; re: RegExp }> = [
-  { name: "note", re: /note:\s*\S.{4,}/i },
-  { name: "conclusion", re: /conclusion:\s*\S+/i },
-  { name: "run", re: /\brun\s+\d{3,}/i },
-  { name: "commit", re: /\b[0-9a-f]{7,40}\b/ },
-  { name: "ci_green", re: /\bci\s+green\b/i },
-  { name: "pr", re: /\bpr[:#]\s*\d+/i },
-  { name: "no_ci", re: /no\s+ci.*(workflow|run|configured)/i },
+const EVIDENCE_SEGMENT_PATTERNS: Array<{ name: string; re: RegExp }> = [
+  { name: "note", re: /^note\s*:\s*\S.{4,}/i },
+  { name: "conclusion", re: /^conclusion\s*:\s*\S+/i },
+  { name: "run", re: /^run\s+\d{3,}/i },
+  { name: "commit", re: /^(?:commit\s*:\s*)?[0-9a-f]{7,40}$/i },
+  { name: "ci_green", re: /^ci[\s_]green$/i },
+  { name: "pr", re: /^pr[:#]\s*\d+/i },
+  { name: "no_ci", re: /^no[\s_]ci\b.*(workflow|run|configured)/i },
 ]
 
 const REQUIRED_EVIDENCE_FIELDS = 2
+
+/** Split evidence on delimiters, check each segment independently, return matched field names. */
+function countEvidenceFields(evidence: string): string[] {
+  const segments = evidence
+    .split(/\s*(?:—|--|;|\|)\s*|\s*,\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const foundKeys = new Set<string>()
+  for (const segment of segments) {
+    for (const { name, re } of EVIDENCE_SEGMENT_PATTERNS) {
+      if (re.test(segment)) {
+        foundKeys.add(name)
+        break
+      }
+    }
+  }
+  return [...foundKeys]
+}
 
 export function validateEvidence(evidence: string): string | null {
   if (!EVIDENCE_PREFIXES.some((p) => evidence.startsWith(p))) {
@@ -689,15 +710,13 @@ export function validateEvidence(evidence: string): string | null {
     )
   }
 
-  const matched = STRUCTURED_EVIDENCE_PATTERNS.filter(({ re }) => re.test(evidence)).map(
-    ({ name }) => name
-  )
+  const matched = countEvidenceFields(evidence)
   if (matched.length < REQUIRED_EVIDENCE_FIELDS) {
     const found = matched.length > 0 ? matched.join(", ") : "none"
     return (
       `Evidence must contain at least ${REQUIRED_EVIDENCE_FIELDS} structured fields, but found ${matched.length} (${found}).\n\n` +
       `Structured fields (any ${REQUIRED_EVIDENCE_FIELDS}+ required):\n` +
-      STRUCTURED_EVIDENCE_PATTERNS.map(({ name }) => `  • ${name}`).join("\n") +
+      EVIDENCE_SEGMENT_PATTERNS.map(({ name }) => `  • ${name}`).join("\n") +
       '\n\nExample: --evidence "note:CI green — conclusion: success, run 12345678"'
     )
   }

@@ -219,6 +219,13 @@ describe("validateEvidence", () => {
     expect(error).toContain("found 1")
   })
 
+  it("does not count embedded text in a field's value as a second field", () => {
+    // "CI green" appears inside the note value — must NOT be counted as a separate ci_green field
+    const error = validateEvidence("note:CI green only one field here")
+    expect(error).not.toBeNull()
+    expect(error).toContain("found 1")
+  })
+
   it("rejects empty-ish evidence without prefix", () => {
     expect(validateEvidence("CI passed")).not.toBeNull()
   })
