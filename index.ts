@@ -2,6 +2,7 @@
 import { registerCommand, run } from "./src/cli.ts"
 import { ciWaitCommand } from "./src/commands/ci-wait.ts"
 import { cleanupCommand } from "./src/commands/cleanup.ts"
+import { compactCommand } from "./src/commands/compact.ts"
 import { continueCommand } from "./src/commands/continue.ts"
 import { dispatchCommand } from "./src/commands/dispatch.ts"
 import { doctorCommand } from "./src/commands/doctor.ts"
@@ -41,6 +42,7 @@ registerCommand(sentimentCommand)
 registerCommand(sessionCommand)
 registerCommand(ciWaitCommand)
 registerCommand(memoryCommand)
+registerCommand(compactCommand)
 registerCommand(mergetoolCommand)
 registerCommand(pushWaitCommand)
 registerCommand(pushCiCommand)
