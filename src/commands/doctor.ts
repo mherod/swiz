@@ -155,8 +155,9 @@ async function checkOrphanedHookScripts(): Promise<CheckResult> {
     if (manifestFiles.has(file)) continue
     // Only flag hook entry points (files with the bun shebang).
     // Library files imported by hooks (e.g. hook-utils.ts) have no shebang and are not hook scripts.
-    const text = await Bun.file(join(HOOKS_DIR, file)).text()
-    if (!text.startsWith("#!/usr/bin/env bun")) continue
+    // Read only the first 18 bytes — the exact length of "#!/usr/bin/env bun".
+    const prefix = await Bun.file(join(HOOKS_DIR, file)).slice(0, 18).text()
+    if (prefix !== "#!/usr/bin/env bun") continue
     orphaned.push(file)
   }
 
