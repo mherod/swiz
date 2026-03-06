@@ -165,6 +165,9 @@ alwaysApply: false
 - Gate diagnostics with `SWIZ_DEBUG` using `const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {};`.
 - Reference implementations: `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts`.
 ## Conventions
+- DO NOT embed the ESC character (0x1b) directly in regex literals — Biome's `no-control-regex` rule blocks it. Construct ANSI-matching regexes at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
+- When parsing bun test terminal output for counts, check for the completion marker `/\bRan \d+ tests? across \d+ files?\./` (note `tests?`/`files?` for singular/plural) before reporting an exact figure; absent the marker output is truncated and the count is untrustworthy — emit "unknown number of" instead. Strip ANSI before matching. Reference: `detectFailure` in `hooks/posttooluse-task-output.ts`.
+- DO: Read every file being modified in its entirety before making any change to it. Viewing a snippet of a file is insufficient; the full read is required to catch conflicts or existing patterns in other sections.
 - Use ANSI escape codes directly; do not add color libraries.
 - Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks.
 - With piped `Bun.spawn`, drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
