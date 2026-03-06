@@ -385,6 +385,11 @@ function isUpdateMemoryFooterEnabled(): boolean {
   return _updateMemoryFooterEnabledCache
 }
 
+type ActionRequiredOptions = {
+  includeReassessmentAdvice?: boolean
+  includeUpdateMemoryAdvice?: boolean
+}
+
 function reassessmentAdvice(include: boolean): string {
   if (!include) return ""
   return skillAdvice(
@@ -394,27 +399,23 @@ function reassessmentAdvice(include: boolean): string {
   )
 }
 
+function memoryAdvice(include: boolean, reason: string): string {
+  if (!include || !isUpdateMemoryFooterEnabled()) return ""
+  return `\n\n${updateMemoryAdvice(reason)}`
+}
+
 /** Standard ACTION REQUIRED footer for PreToolUse denials. */
-export function preToolActionRequired(
-  reason = "",
-  options: { includeReassessmentAdvice?: boolean } = {}
-): string {
+export function preToolActionRequired(reason = "", options: ActionRequiredOptions = {}): string {
   const reassess = reassessmentAdvice(options.includeReassessmentAdvice ?? true)
-  const updateMemory = isUpdateMemoryFooterEnabled() ? `\n\n${updateMemoryAdvice(reason)}` : ""
-  return `\n\nACTION REQUIRED: Fix the underlying issue before retrying. This hook will deny this tool call every time this violation is present. Do not attempt to bypass or work around it — address the root cause.${reassess ? `\n\n${reassess}` : ""}${updateMemory}`
+  const memory = memoryAdvice(options.includeUpdateMemoryAdvice ?? true, reason)
+  return `\n\nACTION REQUIRED: Fix the underlying issue before retrying. This hook will deny this tool call every time this violation is present. Do not attempt to bypass or work around it — address the root cause.${reassess ? `\n\n${reassess}` : ""}${memory}`
 }
 
 /** Standard ACTION REQUIRED footer appended to all stop hook block reasons. */
-export function actionRequired(
-  reason = "",
-  options: { includeUpdateMemoryAdvice?: boolean; includeReassessmentAdvice?: boolean } = {}
-): string {
+export function actionRequired(reason = "", options: ActionRequiredOptions = {}): string {
   const reassess = reassessmentAdvice(options.includeReassessmentAdvice ?? true)
-  const updateMemory =
-    (options.includeUpdateMemoryAdvice ?? true) && isUpdateMemoryFooterEnabled()
-      ? `\n\n${updateMemoryAdvice(reason)}`
-      : ""
-  return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action.${reassess ? `\n\n${reassess}` : ""}${updateMemory}`
+  const memory = memoryAdvice(options.includeUpdateMemoryAdvice ?? true, reason)
+  return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action.${reassess ? `\n\n${reassess}` : ""}${memory}`
 }
 
 /** Emit a stop block decision and exit. Appends ACTION_REQUIRED footer. */
