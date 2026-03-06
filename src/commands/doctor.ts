@@ -543,21 +543,66 @@ interface InvalidSkillFixSuccess {
   originalDir: string
   movedDir: string
 }
+interface InvalidSkillNameFixSuccess {
+  name: string
+  skillPath: string
+  oldName: string
+}
 interface InvalidSkillFixFailure {
   name: string
   originalDir: string
   error: string
 }
 
-/** Rename invalid skill entries aside using the .disabled-by-swiz-{timestamp} suffix. */
+const NAME_MISMATCH_PREFIX = 'frontmatter name "'
+
+/** For name-mismatch entries: update the name: field in SKILL.md to match the directory name. */
+async function fixSkillNameMismatch(entry: InvalidSkillEntry): Promise<{ oldName: string } | null> {
+  const skillPath = join(entry.entryDir, "SKILL.md")
+  try {
+    const content = await Bun.file(skillPath).text()
+    // Extract the current quoted/unquoted name value so we can report what changed
+    const rawName = parseFrontmatterField(content, "name") ?? ""
+    const oldName = rawName.replace(/^["']|["']$/g, "")
+    // Replace the name: line value (handles both quoted and unquoted values)
+    const updated = content.replace(/^(name:\s*)["']?[^"'\n]+["']?/m, `$1${entry.name}`)
+    await Bun.write(skillPath, updated)
+    return { oldName }
+  } catch {
+    return null
+  }
+}
+
+/** Rename invalid skill entries aside using the .disabled-by-swiz-{timestamp} suffix.
+ *  Name-mismatch entries are fixed in place; all other invalid entries are moved aside. */
 async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
   fixed: InvalidSkillFixSuccess[]
+  nameFixed: InvalidSkillNameFixSuccess[]
   failed: InvalidSkillFixFailure[]
 }> {
   const fixed: InvalidSkillFixSuccess[] = []
+  const nameFixed: InvalidSkillNameFixSuccess[] = []
   const failed: InvalidSkillFixFailure[] = []
   const stamp = conflictSuffixTimestamp()
   for (const entry of entries) {
+    if (entry.reason.startsWith(NAME_MISMATCH_PREFIX)) {
+      // In-place fix: update the name: field rather than discarding the skill
+      const result = await fixSkillNameMismatch(entry)
+      if (result !== null) {
+        nameFixed.push({
+          name: entry.name,
+          skillPath: join(entry.entryDir, "SKILL.md"),
+          oldName: result.oldName,
+        })
+      } else {
+        failed.push({
+          name: entry.name,
+          originalDir: entry.entryDir,
+          error: "could not update SKILL.md name field",
+        })
+      }
+      continue
+    }
     const movedDir = await nextConflictBackupDir(entry.entryDir, stamp)
     try {
       await rename(entry.entryDir, movedDir)
@@ -570,7 +615,7 @@ async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
       })
     }
   }
-  return { fixed, failed }
+  return { fixed, nameFixed, failed }
 }
 
 // ─── Installed config script check ──────────────────────────────────────────
@@ -1025,6 +1070,11 @@ export const doctorCommand: Command = {
       if (invalidSkillEntries.length > 0) {
         console.log(`  ${BOLD}Auto-fixing invalid skill entries...${RESET}\n`)
         const invalidResult = await fixInvalidSkillEntries(invalidSkillEntries)
+        for (const item of invalidResult.nameFixed) {
+          console.log(
+            `  ${GREEN}✓${RESET} ${item.name}: updated name "${item.oldName}" → "${item.name}" in ${displayPath(item.skillPath)}`
+          )
+        }
         for (const item of invalidResult.fixed) {
           console.log(
             `  ${GREEN}✓${RESET} ${item.name}: moved ${displayPath(item.originalDir)} -> ${displayPath(item.movedDir)}`
@@ -1035,10 +1085,10 @@ export const doctorCommand: Command = {
         }
         for (const item of invalidResult.failed) {
           console.log(
-            `  ${RED}✗${RESET} ${item.name}: could not move ${displayPath(item.originalDir)} (${item.error})`
+            `  ${RED}✗${RESET} ${item.name}: could not fix ${displayPath(item.originalDir)} (${item.error})`
           )
         }
-        if (invalidResult.fixed.length > 0) console.log()
+        if (invalidResult.nameFixed.length > 0 || invalidResult.fixed.length > 0) console.log()
       }
     } else if (
       staleConfigs.length > 0 ||

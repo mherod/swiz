@@ -589,6 +589,42 @@ describe("swiz doctor", () => {
     expect(movedDirs.length).toBe(1)
   })
 
+  test("doctor --fix updates frontmatter name to match directory name", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "my-skill")
+    await mkdir(skillDir, { recursive: true })
+    const skillMdPath = join(skillDir, "SKILL.md")
+    await writeFile(skillMdPath, "---\nname: wrong-name\ndescription: test skill\n---\n")
+
+    const fixRun = await runDoctor(home, ["--fix"])
+    expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
+    expect(fixRun.stdout).toContain('updated name "wrong-name" → "my-skill"')
+
+    // SKILL.md should still exist (not moved aside) with corrected name
+    expect(await Bun.file(skillMdPath).exists()).toBe(true)
+    const content = await Bun.file(skillMdPath).text()
+    expect(content).toContain("name: my-skill")
+    expect(content).not.toContain("wrong-name")
+
+    // After fix, doctor should report no invalid entries for this skill
+    const afterFix = await runDoctor(home)
+    expect(afterFix.stdout).not.toContain("Invalid skill: my-skill")
+  })
+
+  test("doctor --fix updates quoted frontmatter name to match directory name", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "target-skill")
+    await mkdir(skillDir, { recursive: true })
+    const skillMdPath = join(skillDir, "SKILL.md")
+    await writeFile(skillMdPath, '---\nname: "quoted-wrong"\ndescription: test skill\n---\n')
+
+    await runDoctor(home, ["--fix"])
+
+    const content = await Bun.file(skillMdPath).text()
+    expect(content).toContain("name: target-skill")
+    expect(content).not.toContain("quoted-wrong")
+  })
+
   test("detects skill where frontmatter name does not match directory name", async () => {
     const home = await createTempHome()
     const skillDir = join(home, ".claude", "skills", "my-skill")
