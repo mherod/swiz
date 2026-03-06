@@ -266,7 +266,8 @@ describe("Provider transcript/session command support", () => {
     )
     expect(result.exitCode).toBe(0)
     const out = stripAnsi(result.stdout)
-    expect(out).toContain("Debug log:")
+    // Debug lines are interleaved inline; each is prefixed with │ and a timestamp
+    expect(out).toContain("│")
     expect(out).toContain("[DEBUG] debug line one")
     expect(out).toContain("[DEBUG] debug line two")
   })

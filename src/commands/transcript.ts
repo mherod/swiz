@@ -251,6 +251,14 @@ interface DebugLog {
   lines: string[]
 }
 
+interface DebugEvent {
+  iso: string
+  ts: number
+  text: string
+}
+
+const DEBUG_TS_RE = /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+/
+
 async function loadDebugLog(sessionId: string): Promise<DebugLog | null> {
   const home = process.env.HOME
   if (!home) return null
@@ -268,6 +276,26 @@ async function loadDebugLog(sessionId: string): Promise<DebugLog | null> {
   return { path, lines }
 }
 
+function parseDebugEvents(lines: string[]): DebugEvent[] {
+  const events: DebugEvent[] = []
+  for (const line of lines) {
+    const m = DEBUG_TS_RE.exec(line)
+    if (!m) continue
+    const iso = m[1]
+    if (iso === undefined) continue
+    events.push({ iso, ts: new Date(iso).getTime(), text: line.slice(m[0].length) })
+  }
+  return events
+}
+
+function renderDebugLine(event: DebugEvent): void {
+  const cols = process.stdout.columns ?? 80
+  const wrapWidth = Math.min(cols - 8, 130)
+  const ts = formatTimestamp(event.iso)
+  const wrapped = wordWrap(event.text, wrapWidth, "  │        ")
+  console.log(`  ${DIM}│ ${ts} ${wrapped}${RESET}`)
+}
+
 function applyHeadTail<T>(
   values: T[],
   headCount: number | undefined,
@@ -278,28 +306,30 @@ function applyHeadTail<T>(
   return values
 }
 
-function renderDebugLog(debugLog: DebugLog): void {
-  console.log(`\n${DIM}Debug log: ${debugLog.path}${RESET}\n${DIM}${"─".repeat(60)}${RESET}`)
-
-  if (debugLog.lines.length === 0) {
-    console.log(`\n  ${DIM}(no debug log lines found)${RESET}\n`)
-    return
-  }
-
-  const cols = process.stdout.columns ?? 80
-  const wrapWidth = Math.min(cols - 4, 140)
-  for (const line of debugLog.lines) {
-    console.log(wordWrap(line, wrapWidth, "  "))
-  }
-  console.log(`\n${DIM}${"─".repeat(60)}${RESET}\n`)
-}
-
 // ─── Main rendering ──────────────────────────────────────────────────────────
 
-function renderTurns(turns: Turn[], sessionId: string): void {
+function renderTurns(turns: Turn[], sessionId: string, debugEvents?: DebugEvent[]): void {
   console.log(`\n${DIM}Session: ${sessionId}${RESET}\n${DIM}${"─".repeat(60)}${RESET}`)
 
+  // Build a sorted index of debug events for interleaving
+  let debugIdx = 0
+  const debug = debugEvents ?? []
+
+  const flushDebugUpTo = (untilTs: number): void => {
+    while (debugIdx < debug.length) {
+      const ev = debug[debugIdx]
+      if (!ev || ev.ts > untilTs) break
+      renderDebugLine(ev)
+      debugIdx++
+    }
+  }
+
   for (const { entry, role } of turns) {
+    const turnTs = entry.timestamp ? new Date(entry.timestamp).getTime() : null
+
+    // Flush any debug lines timestamped before this turn
+    if (turnTs !== null) flushDebugUpTo(turnTs)
+
     if (role === "assistant") {
       renderAssistantBlocks(entry)
     } else {
@@ -312,6 +342,14 @@ function renderTurns(turns: Turn[], sessionId: string): void {
         renderTurn("user", extractText(content), entry.timestamp)
       }
     }
+  }
+
+  // Flush remaining debug lines after the last turn
+  while (debugIdx < debug.length) {
+    const ev = debug[debugIdx]
+    if (!ev) break
+    renderDebugLine(ev)
+    debugIdx++
   }
 
   if (turns.length === 0) {
@@ -530,22 +568,20 @@ export const transcriptCommand: Command = {
     let turns = await loadTurns(session)
     turns = applyHeadTail(turns, headCount, tailCount)
 
-    if (autoReply) {
-      await generateAutoReply(turns)
-    } else {
-      renderTurns(turns, session.id)
-    }
-
+    let debugEvents: DebugEvent[] | undefined
     if (includeDebug) {
       const debugFile = await loadDebugLog(session.id)
       if (!debugFile) {
         console.log(`\n${DIM}Debug log not found for session: ${session.id}${RESET}`)
       } else {
-        renderDebugLog({
-          ...debugFile,
-          lines: applyHeadTail(debugFile.lines, headCount, tailCount),
-        })
+        debugEvents = applyHeadTail(parseDebugEvents(debugFile.lines), headCount, tailCount)
       }
+    }
+
+    if (autoReply) {
+      await generateAutoReply(turns)
+    } else {
+      renderTurns(turns, session.id, debugEvents)
     }
   },
 }
