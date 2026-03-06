@@ -55,10 +55,11 @@ const BUN_FAIL_RE = /\b(\d+)\s+fail\b/
 
 /**
  * Matches bun test completion marker (always the last line of output):
- *   "Ran N tests across M files. [Xs]"
+ *   "Ran N test(s) across M file(s). [Xs]"
+ * Handles both singular and plural: "1 test across 1 file." and "3 tests across 2 files."
  * Absence means the output was truncated — counts cannot be trusted.
  */
-const BUN_COMPLETE_RE = /\bRan \d+ tests across \d+ files\./
+const BUN_COMPLETE_RE = /\bRan \d+ tests? across \d+ files?\./
 
 /** Matches lefthook hook block indicators */
 const HOOK_FAIL_RE = /🥊.*hook: (pre-push|pre-commit)|error: failed to push/i

@@ -130,4 +130,28 @@ describe("posttooluse-task-output: result-validation guard", () => {
     expect(result.decision).toBeUndefined()
     expect(result.exitCode).toBe(0)
   })
+
+  test("singular '1 test across 1 file.' marker is recognised as complete", async () => {
+    const output = "bun test v1.3.10\n\n 0 pass\n 1 fail\nRan 1 test across 1 file. [0.01s]"
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("1 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
+
+  test("'N tests across 1 file.' (mixed plural/singular) is recognised as complete", async () => {
+    const output = "bun test v1.3.10\n\n 2 pass\n 1 fail\nRan 3 tests across 1 file. [0.02s]"
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("1 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
+
+  test("'1 test across N files.' (mixed singular/plural) is recognised as complete", async () => {
+    const output = "bun test v1.3.10\n\n 0 pass\n 1 fail\nRan 1 test across 3 files. [0.02s]"
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("1 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
 })
