@@ -83,6 +83,13 @@ describe("swiz doctor", () => {
     expect(result.stdout).toMatch(/Hook scripts.*manifest scripts found/)
   })
 
+  test("reports manifest handler paths as valid in a healthy install", async () => {
+    const home = await createTempHome()
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Manifest handler paths")
+    expect(result.stdout).toMatch(/Manifest handler paths.*handler paths valid/)
+  })
+
   test("reports GitHub CLI auth status", async () => {
     const home = await createTempHome()
     const result = await runDoctor(home)
