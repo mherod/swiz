@@ -279,7 +279,10 @@ async function loadDebugLog(sessionId: string): Promise<DebugLog | null> {
 function parseDebugEvents(lines: string[]): DebugEvent[] {
   // Track original file index so equal-timestamp events sort deterministically (file order)
   const events: Array<DebugEvent & { _idx: number }> = []
-  let lastValidTs = Infinity // fallback for lines whose parsed date is NaN
+  // Initialize to 0 (epoch) so a leading NaN-timestamp line sorts before all real turns,
+  // matching its position at the top of the file. A trailing NaN line inherits the last
+  // real ts and therefore stays near its neighbour.
+  let lastValidTs = 0
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (line === undefined) continue

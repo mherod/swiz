@@ -352,6 +352,37 @@ describe("Provider transcript/session command support", () => {
     expect(out).toContain("[DEBUG] valid last")
   })
 
+  test("swiz transcript --include-debug keeps leading invalid-timestamp lines sorted before valid ones", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc01-7777-7888-8999-eeeeeeeeeeee"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
+    // First two lines have out-of-range timestamps (no prior valid ts to inherit)
+    await createDebugLog(home, sessionId, [
+      "2026-99-06T04:29:06.100Z [DEBUG] leading invalid first",
+      "2026-99-06T04:29:06.200Z [DEBUG] leading invalid second",
+      "2026-03-06T04:29:06.300Z [DEBUG] valid after",
+    ])
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--include-debug"],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    // All three lines must appear
+    expect(out).toContain("[DEBUG] leading invalid first")
+    expect(out).toContain("[DEBUG] leading invalid second")
+    expect(out).toContain("[DEBUG] valid after")
+    // Leading invalid lines must sort before the valid one (ts=0 < any real epoch ms)
+    const firstInvalidIdx = out.indexOf("[DEBUG] leading invalid first")
+    const secondInvalidIdx = out.indexOf("[DEBUG] leading invalid second")
+    const validIdx = out.indexOf("[DEBUG] valid after")
+    expect(firstInvalidIdx).toBeLessThan(secondInvalidIdx)
+    expect(secondInvalidIdx).toBeLessThan(validIdx)
+  })
+
   test("swiz session --list includes Codex sessions", async () => {
     const home = await createTempHome()
     const projectDir = join(home, "workspace", "demo-codex")
