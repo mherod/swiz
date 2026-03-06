@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { AGENTS } from "../agents.ts"
+import { manifest } from "../manifest.ts"
 
 const tempDirs: string[] = []
 
@@ -43,6 +45,26 @@ async function createSkill(home: string, relativeRoot: string, skillName: string
   const skillDir = join(home, relativeRoot, skillName)
   await mkdir(skillDir, { recursive: true })
   await writeFile(join(skillDir, "SKILL.md"), "---\ndescription: test\n---\n")
+}
+
+function buildExpectedHooks() {
+  const claudeAgent = AGENTS.find((a) => a.id === "claude")!
+  const events = [...new Set(manifest.map((g) => g.event))]
+  const hooks: Record<string, Array<{ hooks: Array<{ type: string; command: string }> }>> = {}
+  for (const event of events) {
+    const agentEvent = claudeAgent.eventMap[event] ?? event
+    hooks[agentEvent] = [
+      {
+        hooks: [
+          {
+            type: "command",
+            command: `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${event} ${agentEvent}`,
+          },
+        ],
+      },
+    ]
+  }
+  return hooks
 }
 
 describe("swiz doctor", () => {
@@ -154,122 +176,10 @@ describe("swiz doctor", () => {
     const home = await createTempHome()
     const claudeDir = join(home, ".claude")
     await mkdir(claudeDir, { recursive: true })
-    // Create settings with all expected dispatch entries
+    // Create settings with all expected dispatch entries (derived dynamically from manifest + agents)
     await writeFile(
       join(claudeDir, "settings.json"),
-      JSON.stringify({
-        hooks: {
-          Stop: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command: "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch stop Stop",
-                },
-              ],
-            },
-          ],
-          PreToolUse: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command:
-                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch preToolUse PreToolUse",
-                },
-              ],
-            },
-          ],
-          PostToolUse: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command:
-                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch postToolUse PostToolUse",
-                },
-              ],
-            },
-          ],
-          SessionStart: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command:
-                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch sessionStart SessionStart",
-                },
-              ],
-            },
-          ],
-          UserPromptSubmit: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command:
-                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch userPromptSubmit UserPromptSubmit",
-                },
-              ],
-            },
-          ],
-          PreCompact: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command:
-                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch preCompact PreCompact",
-                },
-              ],
-            },
-          ],
-          Notification: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command:
-                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch notification Notification",
-                },
-              ],
-            },
-          ],
-          SubagentStart: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command:
-                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch subagentStart SubagentStart",
-                },
-              ],
-            },
-          ],
-          SubagentStop: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command:
-                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch subagentStop SubagentStop",
-                },
-              ],
-            },
-          ],
-          SessionEnd: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command:
-                    "command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch sessionEnd SessionEnd",
-                },
-              ],
-            },
-          ],
-        },
-      })
+      JSON.stringify({ hooks: buildExpectedHooks() })
     )
     const result = await runDoctor(home)
     expect(result.stdout).toContain("Claude Code config sync")
