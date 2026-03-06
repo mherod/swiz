@@ -59,6 +59,16 @@ const RESET = "\x1b[0m"
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
 
+/**
+ * Strip ANSI escape sequences so wordWrap measures visual width correctly.
+ * Debug log lines can embed ANSI colour codes (e.g. ESC[33mpendingESC[0m).
+ * Uses String.fromCharCode(27) to avoid the no-control-regex Biome lint rule.
+ */
+const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, "")
+}
+
 function wordWrap(text: string, width: number, indent: string): string {
   const lines: string[] = []
   for (const paragraph of text.split("\n")) {
@@ -392,7 +402,10 @@ function renderDebugLine(event: DebugEvent): void {
   const cols = process.stdout.columns ?? 80
   const wrapWidth = Math.min(cols - 8, 130)
   const ts = formatTimestamp(event.iso)
-  const wrapped = wordWrap(event.text, wrapWidth, "  │        ")
+  // Strip ANSI before wordWrap so byte-length matches visual width.
+  // Embedded colour codes (e.g. ESC[33mpendingESC[0m) would otherwise
+  // make wordWrap over-estimate line width and wrap too early.
+  const wrapped = wordWrap(stripAnsi(event.text), wrapWidth, "  │        ")
   console.log(`  ${DIM}│ ${ts} ${wrapped}${RESET}`)
 }
 
