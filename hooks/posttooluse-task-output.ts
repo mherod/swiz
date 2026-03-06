@@ -84,6 +84,20 @@ const HOOK_FAIL_RE = /🥊.*hook: (pre-push|pre-commit)|error: failed to push/i
 /** Matches exit status / exit code N != 0 */
 const EXIT_FAIL_RE = /exit\s+(?:status|code)\s+([1-9]\d*)/
 
+// ─── Tool error patterns ──────────────────────────────────────────────────────
+
+/**
+ * Matches Claude Code's InputValidationError when `block` is passed as a string
+ * instead of a boolean. The error arrives as the tool_response string.
+ */
+const BLOCK_TYPE_ERR_RE = /InputValidationError[\s\S]*\bblock\b[\s\S]*boolean/i
+
+/**
+ * Matches the "No task found" error returned when a task ID has been cleaned up
+ * before the agent calls TaskOutput. Captures the ID in group 1.
+ */
+const TASK_NOT_FOUND_RE = /no task found with id:?\s*(\S+)/i
+
 function detectFailure(output: string, exitCode: number | null): string | null {
   // Normalize once — all pattern matching below operates on ANSI-free text.
   const clean = stripAnsi(output)
@@ -127,6 +141,29 @@ function detectFailure(output: string, exitCode: number | null): string | null {
   }
 
   return null
+}
+
+// ─── Fallback output-file recovery ───────────────────────────────────────────
+
+/**
+ * When a task record has been cleaned up (the agent held the ID too long),
+ * Claude Code returns "No task found with ID: <id>" instead of the task output.
+ * The output file itself persists at a predictable path — try to read it directly.
+ *
+ * Path: /tmp/claude-{uid}/{cwd-encoded}/tasks/{taskId}.output
+ * where cwd-encoded uses `cwd.replace(/[/.]/g, "-")` (same encoding as Claude Code).
+ */
+async function tryReadOutputFile(taskId: string, cwd: string): Promise<string | null> {
+  try {
+    const uid = process.getuid?.() ?? 501
+    const cwdKey = cwd.replace(/[/.]/g, "-")
+    const filePath = `/tmp/claude-${uid}/${cwdKey}/tasks/${taskId}.output`
+    const file = Bun.file(filePath)
+    if (!(await file.exists())) return null
+    return await file.text()
+  } catch {
+    return null
+  }
 }
 
 // ─── Git push success detection ──────────────────────────────────────────────
@@ -188,6 +225,54 @@ if (!input) process.exit(0)
 if (input.tool_name !== "TaskOutput") process.exit(0)
 
 const response = input.tool_response ?? null
+
+// ─── Tool error handling ──────────────────────────────────────────────────────
+// Claude Code delivers InputValidationError and "No task found" as plain strings.
+// Handle them before the normal structured-response path.
+if (typeof response === "string") {
+  // Case 1: block was passed as a string — surface a clear type correction.
+  if (BLOCK_TYPE_ERR_RE.test(response)) {
+    denyPostToolUse(
+      "`TaskOutput` call failed: the `block` parameter must be a boolean (`true`/`false`), not a string.\n\n" +
+        'Fix: pass `block: true` (boolean) — never `block: "true"` (string).'
+    )
+  }
+
+  // Case 2: task record cleaned up — attempt fallback read from output file.
+  const notFoundMatch = response.match(TASK_NOT_FOUND_RE)
+  if (notFoundMatch) {
+    const taskId = String(input.tool_input?.task_id ?? notFoundMatch[1] ?? "")
+    if (taskId) {
+      const recovered = await tryReadOutputFile(taskId, input.cwd)
+      if (recovered) {
+        const failureReason = detectFailure(recovered, null)
+        if (failureReason) {
+          denyPostToolUse(
+            `Task \`${taskId}\` output (recovered from file — record had expired):\n\n${failureReason}`
+          )
+        }
+        // No failure detected — inject recovered content as context.
+        console.log(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: "PostToolUse",
+              additionalContext:
+                `Task \`${taskId}\` output recovered from file (record had expired).\n` +
+                `Output preview:\n${recovered.slice(0, 500)}`,
+            },
+          })
+        )
+        process.exit(0)
+      }
+    }
+    // Output file also unavailable — warn and pass through.
+    console.error(
+      `[posttooluse-task-output:TASK_NOT_FOUND] task ${notFoundMatch[1]} not found; output file unavailable`
+    )
+    process.exit(0)
+  }
+}
+
 const taskStatus = extractStatus(response)
 
 // Only process completed tasks — skip if still in-progress

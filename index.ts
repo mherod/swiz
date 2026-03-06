@@ -23,6 +23,7 @@ import { statusCommand } from "./src/commands/status.ts"
 import { tasksCommand } from "./src/commands/tasks.ts"
 import { transcriptCommand } from "./src/commands/transcript.ts"
 import { uninstallCommand } from "./src/commands/uninstall.ts"
+import { usageCommand } from "./src/commands/usage.ts"
 
 registerCommand(skillCommand)
 registerCommand(hooksCommand)
@@ -47,5 +48,6 @@ registerCommand(mergetoolCommand)
 registerCommand(pushWaitCommand)
 registerCommand(pushCiCommand)
 registerCommand(doctorCommand)
+registerCommand(usageCommand)
 
 await run()

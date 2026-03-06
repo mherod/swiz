@@ -5,8 +5,15 @@
  *   - Complete output (contains "Ran N tests across M files.") → exact fail count
  *   - Truncated output (marker absent) → "unknown number of" instead
  *   - Exit 0 → hook does not block
+ *
+ * Also covers tool error handling:
+ *   - InputValidationError (block as string) → block with type-correction message
+ *   - "No task found" (expired record), no file → stderr + exit 0
+ *   - "No task found" (expired record), file present → context injection
+ *   - "No task found" (expired record), file present with exit-code pattern → block
  */
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -17,6 +24,29 @@ interface HookResult {
   stderr: string
   decision?: string
   reason?: string
+}
+
+// ─── Output-file recovery helpers ────────────────────────────────────────────
+
+/** UID of the running process — matches what tryReadOutputFile uses. */
+const UID = process.getuid?.() ?? 501
+
+/**
+ * Construct the output-file path the hook will look up for a given cwd and task ID.
+ * Mirrors the logic in tryReadOutputFile: /tmp/claude-{uid}/{cwd-encoded}/tasks/{id}.output
+ */
+function outputFilePath(cwd: string, taskId: string): string {
+  const cwdKey = cwd.replace(/[/.]/g, "-")
+  return `/tmp/claude-${UID}/${cwdKey}/tasks/${taskId}.output`
+}
+
+/** Write a fake output file at the path the hook will look up, returning the path. */
+async function writeOutputFile(cwd: string, taskId: string, content: string): Promise<string> {
+  const filePath = outputFilePath(cwd, taskId)
+  const dir = filePath.substring(0, filePath.lastIndexOf("/"))
+  await mkdir(dir, { recursive: true })
+  await Bun.write(filePath, content)
+  return filePath
 }
 
 async function runHook(stdinPayload: Record<string, unknown>): Promise<HookResult> {
@@ -190,5 +220,97 @@ describe("posttooluse-task-output: result-validation guard", () => {
     expect(result.decision).toBe("block")
     expect(result.reason).toContain("3 test(s) failed")
     expect(result.reason).not.toContain("unknown")
+  })
+})
+
+// ─── Tool error handling ──────────────────────────────────────────────────────
+
+/** CWD used for output-file recovery tests; encodes to a known key under /tmp. */
+const RECOVERY_CWD = "/tmp/swiz-task-output-recovery-test"
+
+describe("posttooluse-task-output: tool error handling", () => {
+  // Track files written so we can clean up after the suite.
+  const writtenFiles: string[] = []
+
+  afterAll(async () => {
+    for (const f of writtenFiles) {
+      await rm(f, { force: true }).catch(() => {})
+    }
+    // Best-effort remove the test task directory.
+    const taskDir = outputFilePath(RECOVERY_CWD, "x").replace(/\/[^/]+$/, "")
+    await rm(taskDir, { recursive: true, force: true }).catch(() => {})
+  })
+
+  test("InputValidationError for block-as-string blocks with type-correction message", async () => {
+    const errorResponse =
+      "InputValidationError: TaskOutput failed due to the following issue:\n" +
+      "The parameter `block` type is expected as `boolean` but provided as `string`"
+    const payload = {
+      tool_name: "TaskOutput",
+      cwd: "/tmp",
+      session_id: "test-session",
+      tool_response: errorResponse,
+      tool_input: { task_id: "abc123", block: "true" },
+    }
+    const result = await runHook(payload)
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("`block` parameter must be a boolean")
+    expect(result.reason).toContain("block: true")
+  })
+
+  test("'No task found' with no output file emits stderr warning and exits 0", async () => {
+    const payload = {
+      tool_name: "TaskOutput",
+      cwd: RECOVERY_CWD,
+      session_id: "test-session",
+      tool_response: "No task found with ID: nonexistent-task-xyz",
+      tool_input: { task_id: "nonexistent-task-xyz" },
+    }
+    const result = await runHook(payload)
+    expect(result.decision).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toContain("[posttooluse-task-output:TASK_NOT_FOUND]")
+    expect(result.stderr).toContain("nonexistent-task-xyz")
+  })
+
+  test("'No task found' with clean output file injects recovered content as context", async () => {
+    const taskId = "recovered-task-clean-001"
+    const fileContent = "4 pass\n0 fail\nRan 4 tests across 2 files. [0.50s]"
+    const filePath = await writeOutputFile(RECOVERY_CWD, taskId, fileContent)
+    writtenFiles.push(filePath)
+
+    const payload = {
+      tool_name: "TaskOutput",
+      cwd: RECOVERY_CWD,
+      session_id: "test-session",
+      tool_response: `No task found with ID: ${taskId}`,
+      tool_input: { task_id: taskId },
+    }
+    const result = await runHook(payload)
+    expect(result.decision).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+    // Should emit hookSpecificOutput with additionalContext, not a block decision
+    const parsed = JSON.parse(result.stdout)
+    expect(parsed.hookSpecificOutput?.additionalContext).toContain("recovered from file")
+    expect(parsed.hookSpecificOutput?.additionalContext).toContain(taskId)
+  })
+
+  test("'No task found' with failing output file (exit status pattern) blocks", async () => {
+    const taskId = "recovered-task-fail-001"
+    const fileContent = "something went wrong\nexit status 1\n"
+    const filePath = await writeOutputFile(RECOVERY_CWD, taskId, fileContent)
+    writtenFiles.push(filePath)
+
+    const payload = {
+      tool_name: "TaskOutput",
+      cwd: RECOVERY_CWD,
+      session_id: "test-session",
+      tool_response: `No task found with ID: ${taskId}`,
+      tool_input: { task_id: taskId },
+    }
+    const result = await runHook(payload)
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain(taskId)
+    expect(result.reason).toContain("recovered from file")
   })
 })
