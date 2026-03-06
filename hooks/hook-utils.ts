@@ -761,20 +761,33 @@ export async function createSessionTask(
   if (!safeSentinel || !safeSession) return
   const sentinel = `/tmp/${safeSentinel}-${safeSession}.flag`
   if (await Bun.file(sentinel).exists()) return
+  // Defensive: fall back to defaultTaskExecutor if the injected value is not callable.
+  const safeExecutor: TaskExecutor = typeof executor === "function" ? executor : defaultTaskExecutor
+  const args = [
+    "bun",
+    join(home, ".claude", "hooks", "tasks-list.ts"),
+    "--session",
+    sessionId,
+    "--create",
+    subject,
+    description,
+  ]
+  let exitCode: number
   try {
-    const exitCode = await executor([
-      "bun",
-      join(home, ".claude", "hooks", "tasks-list.ts"),
-      "--session",
-      sessionId,
-      "--create",
-      subject,
-      description,
-    ])
-    if (exitCode === 0) {
-      await Bun.write(sentinel, "")
+    exitCode = await safeExecutor(args)
+  } catch {
+    // Injected executor threw — retry with the default to best-effort create the task.
+    try {
+      exitCode = await defaultTaskExecutor(args)
+    } catch {
+      return
     }
-  } catch {}
+  }
+  if (exitCode === 0) {
+    try {
+      await Bun.write(sentinel, "")
+    } catch {}
+  }
 }
 
 // ─── Branch utilities ───────────────────────────────────────────────────
