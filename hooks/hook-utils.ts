@@ -385,33 +385,36 @@ function isUpdateMemoryFooterEnabled(): boolean {
   return _updateMemoryFooterEnabledCache
 }
 
-/** Standard ACTION REQUIRED footer for PreToolUse denials. */
-export function preToolActionRequired(reason = ""): string {
-  const reassess = skillAdvice(
+function reassessmentAdvice(include: boolean): string {
+  if (!include) return ""
+  return skillAdvice(
     "re-assess",
     "If you believe this is a false positive, use the /re-assess skill to re-evaluate your assumptions — the hook's findings take authority over your own assessment.",
     "If you believe this is a false positive, re-evaluate your assumptions carefully before retrying — the hook's findings take authority over your own assessment."
   )
+}
+
+/** Standard ACTION REQUIRED footer for PreToolUse denials. */
+export function preToolActionRequired(
+  reason = "",
+  options: { includeReassessmentAdvice?: boolean } = {}
+): string {
+  const reassess = reassessmentAdvice(options.includeReassessmentAdvice ?? true)
   const updateMemory = isUpdateMemoryFooterEnabled() ? `\n\n${updateMemoryAdvice(reason)}` : ""
-  return `\n\nACTION REQUIRED: Fix the underlying issue before retrying. This hook will deny this tool call every time this violation is present. Do not attempt to bypass or work around it — address the root cause.\n\n${reassess}${updateMemory}`
+  return `\n\nACTION REQUIRED: Fix the underlying issue before retrying. This hook will deny this tool call every time this violation is present. Do not attempt to bypass or work around it — address the root cause.${reassess ? `\n\n${reassess}` : ""}${updateMemory}`
 }
 
 /** Standard ACTION REQUIRED footer appended to all stop hook block reasons. */
 export function actionRequired(
   reason = "",
-  options: { includeUpdateMemoryAdvice?: boolean } = {}
+  options: { includeUpdateMemoryAdvice?: boolean; includeReassessmentAdvice?: boolean } = {}
 ): string {
-  const { includeUpdateMemoryAdvice = true } = options
-  const reassess = skillAdvice(
-    "re-assess",
-    "If you believe this is a false positive, use the /re-assess skill to re-evaluate your assumptions — the hook's findings take authority over your own assessment.",
-    "If you believe this is a false positive, re-evaluate your assumptions carefully before retrying — the hook's findings take authority over your own assessment."
-  )
+  const reassess = reassessmentAdvice(options.includeReassessmentAdvice ?? true)
   const updateMemory =
-    includeUpdateMemoryAdvice && isUpdateMemoryFooterEnabled()
+    (options.includeUpdateMemoryAdvice ?? true) && isUpdateMemoryFooterEnabled()
       ? `\n\n${updateMemoryAdvice(reason)}`
       : ""
-  return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action.\n\n${reassess}${updateMemory}`
+  return `\n\nACTION REQUIRED: You must act on this now. This hook will block every stop attempt until resolved. Do not try to stop again without completing the required action.${reassess ? `\n\n${reassess}` : ""}${updateMemory}`
 }
 
 /** Emit a stop block decision and exit. Appends ACTION_REQUIRED footer. */
