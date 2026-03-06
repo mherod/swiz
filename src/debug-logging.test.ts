@@ -61,6 +61,8 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/tasks.ts",
   "src/commands/transcript.ts",
   "src/commands/uninstall.ts",
+  // Usage report — human-readable terminal output
+  "src/commands/usage.ts",
 ])
 
 /** Collect all .ts files under src/, excluding test files. */
