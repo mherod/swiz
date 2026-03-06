@@ -137,6 +137,11 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "preToolUse",
+    matcher: "TaskUpdate",
+    hooks: [{ file: "pretooluse-taskupdate-schema.ts", timeout: 5 }],
+  },
+  {
+    event: "preToolUse",
     matcher: "TaskUpdate|TaskGet",
     hooks: [{ file: "pretooluse-task-recovery.ts", timeout: 5 }],
   },
