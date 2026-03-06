@@ -135,6 +135,34 @@ describe("swiz doctor", () => {
     expect(result.stdout).toContain("Installed config scripts")
   })
 
+  test("installed config scripts check includes manifest scripts in scope", async () => {
+    const home = await createTempHome()
+    const result = await runDoctor(home)
+    // The check covers manifest + config scripts; count must be >= manifest script count
+    const manifestScriptCount = new Set(manifest.flatMap((g) => g.hooks.map((h) => h.file))).size
+    const match = result.stdout.match(/all (\d+) executable scripts are present/)
+    expect(match).not.toBeNull()
+    const count = parseInt(match![1]!, 10)
+    expect(count).toBeGreaterThanOrEqual(manifestScriptCount)
+  })
+
+  test("labels missing config script with source attribution", async () => {
+    const home = await createTempHome()
+    const claudeDir = join(home, ".claude")
+    await mkdir(claudeDir, { recursive: true })
+    await writeFile(
+      join(claudeDir, "settings.json"),
+      JSON.stringify({
+        hooks: {
+          Stop: [{ hooks: [{ type: "command", command: "bun /nonexistent/config-only-hook.ts" }] }],
+        },
+      })
+    )
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("/nonexistent/config-only-hook.ts")
+    expect(result.stdout).toContain("(config)")
+  })
+
   test("detects missing script referenced in installed hook config", async () => {
     const home = await createTempHome()
     const claudeDir = join(home, ".claude")

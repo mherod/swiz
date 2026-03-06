@@ -143,16 +143,26 @@ async function checkManifestHandlerPaths(): Promise<CheckResult> {
   }
 }
 
-/** Find .ts files in hooks/ that are not referenced by any manifest entry. */
+/** Find .ts files in hooks/ that are not referenced by the manifest or any agent config. */
 async function checkOrphanedHookScripts(): Promise<CheckResult> {
   const manifestFiles = new Set(manifest.flatMap((g) => g.hooks.map((h) => h.file)))
+
+  // Scripts referenced by agent configs that live inside hooks/ (by basename)
+  const configPaths = await collectInstalledConfigScriptPaths()
+  const configBasenames = new Set(
+    configPaths
+      .filter((p) => p.startsWith(HOOKS_DIR + "/"))
+      .map((p) => p.slice(HOOKS_DIR.length + 1))
+  )
 
   const glob = new Bun.Glob("*.ts")
   const orphaned: string[] = []
   for await (const file of glob.scan({ cwd: HOOKS_DIR })) {
     // Skip test files — they are not hook scripts
     if (file.endsWith(".test.ts")) continue
+    // Referenced by manifest or agent config → not orphaned
     if (manifestFiles.has(file)) continue
+    if (configBasenames.has(file)) continue
     // Only flag hook entry points (files with a bun shebang on the first line).
     // Library files imported by hooks (e.g. hook-utils.ts) have no shebang and are not hook scripts.
     // Read the first 256 bytes and extract the first line to avoid loading full file contents.
@@ -458,23 +468,33 @@ async function collectInstalledConfigScriptPaths(): Promise<string[]> {
 
 /** Verify that all executable script paths (manifest + config) exist and are executable. */
 async function checkInstalledConfigScripts(): Promise<CheckResult> {
-  const paths = await collectExecutableScriptPaths()
+  // Build source map so error messages can attribute each path to manifest or config
+  const pathSource = new Map<string, "manifest" | "config">()
+  for (const group of manifest) {
+    for (const hook of group.hooks) {
+      pathSource.set(join(HOOKS_DIR, hook.file), "manifest")
+    }
+  }
+  for (const p of await collectInstalledConfigScriptPaths()) {
+    if (!pathSource.has(p)) pathSource.set(p, "config")
+  }
+
   const missing: string[] = []
   const notExecutable: string[] = []
 
-  for (const scriptPath of paths) {
+  for (const [scriptPath, source] of pathSource) {
+    const label = `${scriptPath} (${source})`
     if (!(await Bun.file(scriptPath).exists())) {
-      missing.push(scriptPath)
+      missing.push(label)
       continue
     }
     try {
       const s = await stat(scriptPath)
       if ((s.mode & 0o100) === 0) {
-        notExecutable.push(scriptPath)
+        notExecutable.push(label)
       }
     } catch {
-      // stat failure treated as missing
-      missing.push(scriptPath)
+      missing.push(label)
     }
   }
 
@@ -482,7 +502,7 @@ async function checkInstalledConfigScripts(): Promise<CheckResult> {
     return {
       name: "Installed config scripts",
       status: "pass",
-      detail: `all ${paths.length} executable scripts are present and executable`,
+      detail: `all ${pathSource.size} executable scripts are present and executable`,
     }
   }
 
