@@ -14,7 +14,7 @@ async function main() {
 
   const filePath = input.tool_input?.file_path ?? ""
 
-  if (/[\\/]node_modules[\\/]/.test(filePath)) {
+  if (/(^|[\\/])node_modules[\\/]/.test(filePath)) {
     const reason = [
       "You cannot edit files inside node_modules/.",
       "",
