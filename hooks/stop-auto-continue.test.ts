@@ -233,7 +233,7 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
-    expect(result.stderr).toContain("[stop-auto-continue] backend unreachable mid-call")
+    expect(result.stderr).toContain("[stop-auto-continue:BACKEND_ERROR]")
   })
 
   test("allows stop when no AI backend is available (no fallback block)", async () => {
@@ -248,7 +248,7 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
-    expect(result.stderr).toContain("[stop-auto-continue] no AI backend available")
+    expect(result.stderr).toContain("[stop-auto-continue:NO_BACKEND]")
   })
 
   test("passes --workspace with a temp dir when using agent backend", async () => {
@@ -770,7 +770,7 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
-    expect(result.stderr).toContain("[stop-auto-continue] backend unreachable mid-call")
+    expect(result.stderr).toContain("[stop-auto-continue:BACKEND_ERROR]")
   }, 10_000)
 
   // ─── JSON response parsing tests ──────────────────────────────────────────
@@ -828,7 +828,7 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput).not.toContain("<tool_call>")
-    expect(result.stderr).toContain("[stop-auto-continue] no actionable content after agent call")
+    expect(result.stderr).toContain("[stop-auto-continue:NO_ACTIONABLE_CONTENT]")
   })
 
   test("replaces workflow implementation prescriptions with a policy finding", async () => {

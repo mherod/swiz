@@ -508,7 +508,7 @@ async function main(): Promise<void> {
   // This matches the hook's documented intent: "Only skips for trivial sessions
   // (< MIN_TOOL_CALLS) or when agent is not installed."
   if (!agentCli) {
-    console.error("[stop-auto-continue] no AI backend available — skipping block")
+    console.error("[stop-auto-continue:NO_BACKEND] no AI backend available — skipping block")
     return
   }
 
@@ -541,7 +541,9 @@ async function main(): Promise<void> {
       if (result) response = parseAgentResponse(result)
     } catch {
       // promptAgent threw (backend unreachable mid-call) — response.next stays ""
-      console.error("[stop-auto-continue] backend unreachable mid-call — response.next empty")
+      console.error(
+        "[stop-auto-continue:BACKEND_ERROR] backend unreachable mid-call — response.next empty"
+      )
     }
   }
 
@@ -563,7 +565,9 @@ async function main(): Promise<void> {
   // Never block with the generic FALLBACK_SUGGESTION — it provides no specific
   // guidance and causes interactive sessions to spin indefinitely.
   if (!response.next && !refinementStatus) {
-    console.error("[stop-auto-continue] no actionable content after agent call — skipping block")
+    console.error(
+      "[stop-auto-continue:NO_ACTIONABLE_CONTENT] no actionable content after agent call — skipping block"
+    )
     return
   }
 
