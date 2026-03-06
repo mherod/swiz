@@ -98,6 +98,38 @@ describe("swiz doctor", () => {
     expect(result.stdout).toMatch(/Orphaned hook scripts/)
   })
 
+  test("reports installed config scripts check", async () => {
+    const home = await createTempHome()
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Installed config scripts")
+  })
+
+  test("detects missing script referenced in installed hook config", async () => {
+    const home = await createTempHome()
+    const claudeDir = join(home, ".claude")
+    await mkdir(claudeDir, { recursive: true })
+    await writeFile(
+      join(claudeDir, "settings.json"),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: "bun /nonexistent/path/to/hook.ts",
+                },
+              ],
+            },
+          ],
+        },
+      })
+    )
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Installed config scripts")
+    expect(result.stdout).toContain("/nonexistent/path/to/hook.ts")
+  })
+
   test("reports GitHub CLI auth status", async () => {
     const home = await createTempHome()
     const result = await runDoctor(home)

@@ -361,6 +361,93 @@ async function fixSkillConflicts(
   return { fixed, failed }
 }
 
+// ─── Installed config script check ──────────────────────────────────────────
+
+/** Collect all command strings from a hooks config object (handles nested and flat styles). */
+function collectHookCommands(hooks: Record<string, unknown>): string[] {
+  const commands: string[] = []
+  for (const entries of Object.values(hooks)) {
+    if (!Array.isArray(entries)) continue
+    for (const entry of entries) {
+      const e = entry as Record<string, unknown>
+      if (typeof e.command === "string") commands.push(e.command)
+      if (Array.isArray(e.hooks)) {
+        for (const h of e.hooks) {
+          const hh = h as Record<string, unknown>
+          if (typeof hh.command === "string") commands.push(hh.command)
+        }
+      }
+    }
+  }
+  return commands
+}
+
+/** Extract absolute paths to script files referenced in a shell command string. */
+function extractScriptPaths(command: string): string[] {
+  const scriptExtRe = /\.(ts|js|sh|bash|mjs|cjs|py)$/
+  // Match bare absolute paths, ~/..., and $HOME/... tokens
+  const tokenRe = /(?:^|\s)(\/[^\s'";&|]+|~\/[^\s'";&|]+|\$HOME\/[^\s'";&|]+)/g
+  const paths: string[] = []
+  for (const m of command.matchAll(tokenRe)) {
+    const raw = (m[1] ?? "").trim()
+    if (!raw || !scriptExtRe.test(raw)) continue
+    const expanded = raw.startsWith("~/")
+      ? join(HOME, raw.slice(2))
+      : raw.startsWith("$HOME/")
+        ? join(HOME, raw.slice(6))
+        : raw
+    paths.push(expanded)
+  }
+  return paths
+}
+
+/** Verify that script files referenced in installed agent hook commands exist on disk. */
+async function checkInstalledConfigScripts(): Promise<CheckResult> {
+  const missing: string[] = []
+  const checked = new Set<string>()
+
+  for (const agent of CONFIGURABLE_AGENTS) {
+    const file = Bun.file(agent.settingsPath)
+    if (!(await file.exists())) continue
+
+    let settings: Record<string, unknown>
+    try {
+      settings = await file.json()
+    } catch {
+      continue // malformed settings already caught by checkAgentSettings
+    }
+
+    const hooksRaw = agent.wrapsHooks
+      ? ((settings.hooks as Record<string, unknown>) ?? {})
+      : ((settings[agent.hooksKey] as Record<string, unknown>) ?? {})
+    const hooks = typeof hooksRaw === "object" && !Array.isArray(hooksRaw) ? hooksRaw : {}
+
+    for (const cmd of collectHookCommands(hooks)) {
+      for (const scriptPath of extractScriptPaths(cmd)) {
+        if (checked.has(scriptPath)) continue
+        checked.add(scriptPath)
+        if (!(await Bun.file(scriptPath).exists())) {
+          missing.push(scriptPath)
+        }
+      }
+    }
+  }
+
+  if (missing.length === 0) {
+    return {
+      name: "Installed config scripts",
+      status: "pass",
+      detail: `all script paths in agent hook configs are present${checked.size > 0 ? ` (${checked.size} checked)` : ""}`,
+    }
+  }
+
+  return {
+    name: "Installed config scripts",
+    status: "fail",
+    detail: `${missing.length} script(s) referenced in agent hook configs are missing: ${missing.join(", ")}`,
+  }
+}
+
 // ─── Config sync check ──────────────────────────────────────────────────────
 
 /** Extract canonical event names from `swiz dispatch <event> ...` commands in a config. */
@@ -484,6 +571,7 @@ export const doctorCommand: Command = {
     results.push(await checkHookScripts())
     results.push(await checkManifestHandlerPaths())
     results.push(await checkOrphanedHookScripts())
+    results.push(await checkInstalledConfigScripts())
 
     // Agent config sync (detect stale dispatch entries)
     for (const agent of CONFIGURABLE_AGENTS) {
