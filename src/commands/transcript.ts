@@ -345,11 +345,18 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
 
   // Sort valid events by timestamp, breaking ties by file index
   valid.sort((a, b) => a.ts - b.ts || a._idx - b._idx)
-  // Three-key sort for malformed events:
-  // 1. _idx  — file position (structurally unique; loop variable i never repeats)
-  // 2. iso   — lexicographic fallback for hypothetical equal _idx
-  // 3. _seq  — insertion order into malformed[]; final tie-breaker, provably unique within the array
-  malformed.sort((a, b) => a._idx - b._idx || a.iso.localeCompare(b.iso) || a._seq - b._seq)
+  // Three-key comparator for malformed events — explicit multi-statement form with ?? 0
+  // numeric fallbacks so no NaN can ever reach the sort engine's return slot:
+  //   1. _idx — file position (loop var i, structurally unique)
+  //   2. iso  — lexicographic fallback for hypothetical equal _idx
+  //   3. _seq — insertion order into malformed[] (guaranteed set at ev creation, unique within array)
+  malformed.sort((a, b) => {
+    const byIdx = (a._idx ?? 0) - (b._idx ?? 0)
+    if (byIdx !== 0) return byIdx
+    const byIso = a.iso.localeCompare(b.iso)
+    if (byIso !== 0) return byIso
+    return (a._seq ?? 0) - (b._seq ?? 0)
+  })
 
   // Two-pass merge: insert each malformed event immediately after the last valid event
   // whose _idx precedes it in the file. This places parse errors at their structural
