@@ -5,6 +5,7 @@ import { getProviderTaskRoots } from "../provider-adapters.ts"
 import type { Command } from "../types.ts"
 
 const HOME = process.env.HOME ?? "~"
+const CLAUDE_DIR = join(HOME, ".claude")
 const GEMINI_DIR = join(HOME, ".gemini")
 const GEMINI_SETTINGS_BAK = join(GEMINI_DIR, "settings.json.bak")
 const GEMINI_TMP_DIR = join(GEMINI_DIR, "tmp")
@@ -131,6 +132,43 @@ async function trashDir(path: string): Promise<boolean> {
   const proc = Bun.spawn(["trash", path], { stdout: "pipe", stderr: "pipe" })
   await proc.exited
   return proc.exitCode === 0
+}
+
+// ─── Claude backup detection ──────────────────────────────────────────────────
+
+interface ClaudeBackupInfo {
+  files: string[]
+  sizeBytes: number
+  fileCount: number
+}
+
+async function findClaudeBackups(): Promise<ClaudeBackupInfo> {
+  const files: string[] = []
+  let sizeBytes = 0
+  let fileCount = 0
+
+  try {
+    const entries = await readdir(CLAUDE_DIR, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isFile()) continue
+      const name = entry.name
+      if (name === "settings.json.backup" || name.startsWith("settings.json.bak")) {
+        const filePath = join(CLAUDE_DIR, name)
+        try {
+          const s = await stat(filePath)
+          files.push(filePath)
+          sizeBytes += s.size
+          fileCount += 1
+        } catch {
+          // skip unreadable files
+        }
+      }
+    }
+  } catch {
+    // ~/.claude doesn't exist or is unreadable
+  }
+
+  return { files, sizeBytes, fileCount }
 }
 
 // ─── Gemini backup detection ──────────────────────────────────────────────────
@@ -463,12 +501,15 @@ export const cleanupCommand: Command = {
       }
     }
 
-    // Discover Gemini backup artifacts
-    const geminiBackups = await findGeminiBackups()
+    // Discover Claude and Gemini backup artifacts
+    const [claudeBackups, geminiBackups] = await Promise.all([
+      findClaudeBackups(),
+      findGeminiBackups(),
+    ])
 
-    if (results.length === 0 && geminiBackups.fileCount === 0) {
+    if (results.length === 0 && claudeBackups.fileCount === 0 && geminiBackups.fileCount === 0) {
       console.log(`No session directories found (older than ${olderThanLabel}).`)
-      console.log(`No Gemini backup artifacts found.`)
+      console.log(`No Claude or Gemini backup artifacts found.`)
       return
     }
 
@@ -510,6 +551,15 @@ export const cleanupCommand: Command = {
 
     console.log()
 
+    // Print Claude backup information
+    if (claudeBackups.fileCount > 0) {
+      console.log(`  ${BOLD}~/.claude/ (backup artifacts)${RESET}`)
+      console.log(
+        `    ${YELLOW}${claudeBackups.fileCount} backup ${claudeBackups.fileCount === 1 ? "file" : "files"}${RESET} (${formatBytes(claudeBackups.sizeBytes)})`
+      )
+      console.log()
+    }
+
     // Print Gemini backup information
     if (geminiBackups.fileCount > 0) {
       console.log(`  ${BOLD}~/.gemini/ (backup artifacts)${RESET}`)
@@ -519,9 +569,9 @@ export const cleanupCommand: Command = {
       console.log()
     }
 
-    if (totalOldCount === 0 && geminiBackups.fileCount === 0) {
+    if (totalOldCount === 0 && claudeBackups.fileCount === 0 && geminiBackups.fileCount === 0) {
       console.log(
-        `  ${GREEN}No sessions older than ${olderThanLabel} and no Gemini backups found.${RESET}`
+        `  ${GREEN}No sessions older than ${olderThanLabel} and no Claude or Gemini backups found.${RESET}`
       )
       return
     }
@@ -530,13 +580,17 @@ export const cleanupCommand: Command = {
       totalOldTaskDirs > 0
         ? ` + ${totalOldTaskDirs} task ${totalOldTaskDirs === 1 ? "dir" : "dirs"}`
         : ""
+    const claudePart =
+      claudeBackups.fileCount > 0
+        ? ` + ${claudeBackups.fileCount} Claude backup ${claudeBackups.fileCount === 1 ? "file" : "files"}`
+        : ""
     const geminiPart =
       geminiBackups.fileCount > 0
         ? ` + ${geminiBackups.fileCount} Gemini backup ${geminiBackups.fileCount === 1 ? "file" : "files"}`
         : ""
-    const totalBytes = totalOldBytes + geminiBackups.sizeBytes
+    const totalBytes = totalOldBytes + claudeBackups.sizeBytes + geminiBackups.sizeBytes
     console.log(
-      `  Total: ${BOLD}${totalOldCount} sessions${RESET}${taskSuffix}${geminiPart} trashable, ~${formatBytes(totalBytes)}`
+      `  Total: ${BOLD}${totalOldCount} sessions${RESET}${taskSuffix}${claudePart}${geminiPart} trashable, ~${formatBytes(totalBytes)}`
     )
     console.log()
 
@@ -546,10 +600,14 @@ export const cleanupCommand: Command = {
     }
 
     // Trash sessions and their matching task directories
-    console.log(`  Moving ${totalOldCount} session(s)${taskSuffix}${geminiPart} to Trash...`)
+    console.log(
+      `  Moving ${totalOldCount} session(s)${taskSuffix}${claudePart}${geminiPart} to Trash...`
+    )
     let succeeded = 0
     let failed = 0
     let taskDirsRemoved = 0
+    let claudeFilesRemoved = 0
+    let claudeFailed = 0
     let geminiFilesRemoved = 0
     let geminiFailed = 0
 
@@ -574,6 +632,15 @@ export const cleanupCommand: Command = {
       }
     }
 
+    // Trash Claude backup artifacts
+    for (const backupFile of claudeBackups.files) {
+      if (await trashDir(backupFile)) {
+        claudeFilesRemoved++
+      } else {
+        claudeFailed++
+      }
+    }
+
     // Trash Gemini backup artifacts
     for (const backupFile of geminiBackups.files) {
       if (await trashDir(backupFile)) {
@@ -585,20 +652,28 @@ export const cleanupCommand: Command = {
 
     console.log()
     const taskDirNote = taskDirsRemoved > 0 ? ` + ${taskDirsRemoved} task dir(s)` : ""
+    const claudeNote =
+      claudeFilesRemoved > 0
+        ? ` + ${claudeFilesRemoved} Claude backup ${claudeFilesRemoved === 1 ? "file" : "files"}`
+        : ""
     const geminiNote =
       geminiFilesRemoved > 0
         ? ` + ${geminiFilesRemoved} Gemini backup ${geminiFilesRemoved === 1 ? "file" : "files"}`
         : ""
     console.log(
-      `  ${GREEN}${BOLD}Done.${RESET} ${succeeded} session(s)${taskDirNote}${geminiNote} moved to Trash (~${formatBytes(totalBytes)} reclaimed).`
+      `  ${GREEN}${BOLD}Done.${RESET} ${succeeded} session(s)${taskDirNote}${claudeNote}${geminiNote} moved to Trash (~${formatBytes(totalBytes)} reclaimed).`
     )
-    if (failed > 0 || geminiFailed > 0) {
+    if (failed > 0 || claudeFailed > 0 || geminiFailed > 0) {
       const failedSessions = failed > 0 ? `${failed} session(s)` : ""
+      const failedClaude =
+        claudeFailed > 0
+          ? `${claudeFailed} Claude backup ${claudeFailed === 1 ? "file" : "files"}`
+          : ""
       const failedGemini =
         geminiFailed > 0
           ? `${geminiFailed} Gemini backup ${geminiFailed === 1 ? "file" : "files"}`
           : ""
-      const failedJoined = [failedSessions, failedGemini].filter((s) => s).join(" + ")
+      const failedJoined = [failedSessions, failedClaude, failedGemini].filter((s) => s).join(" + ")
       console.log(
         `  ${YELLOW}${failedJoined} could not be trashed — is the \`trash\` CLI installed?${RESET}`
       )
