@@ -514,6 +514,17 @@ async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
           entryDir,
           reason: `frontmatter name "${unquotedName}" does not match directory name "${entry.name}"`,
         })
+        continue
+      }
+      // Warn when description is still the auto-generated placeholder
+      const description = parseFrontmatterField(content, "description")
+      if (description?.trim() === SKILL_PLACEHOLDER_DESCRIPTION) {
+        invalid.push({
+          name: entry.name,
+          skillDir,
+          entryDir,
+          reason: `description is the generated placeholder — update SKILL.md with a real description`,
+        })
       }
     }
   }
@@ -560,6 +571,8 @@ interface InvalidSkillFixFailure {
 
 const NAME_MISMATCH_PREFIX = 'frontmatter name "'
 const MISSING_SKILL_MD_REASON = "missing SKILL.md"
+/** Default description injected by swiz doctor --fix into generated SKILL.md stubs. */
+const SKILL_PLACEHOLDER_DESCRIPTION = "Add a description for this skill."
 
 /** For name-mismatch entries: update the name: field in SKILL.md to match the directory name. */
 async function fixSkillNameMismatch(entry: InvalidSkillEntry): Promise<{ oldName: string } | null> {
@@ -582,7 +595,7 @@ async function fixSkillNameMismatch(entry: InvalidSkillEntry): Promise<{ oldName
 async function generateSkillMd(entry: InvalidSkillEntry): Promise<boolean> {
   const skillPath = join(entry.entryDir, "SKILL.md")
   try {
-    const stub = `---\nname: ${entry.name}\ndescription: Add a description for this skill.\n---\n`
+    const stub = `---\nname: ${entry.name}\ndescription: ${SKILL_PLACEHOLDER_DESCRIPTION}\n---\n`
     await Bun.write(skillPath, stub)
     return true
   } catch {

@@ -616,9 +616,10 @@ describe("swiz doctor", () => {
     expect(content).toContain("description:")
     expect(content).toMatch(/^---/m)
 
-    // After fix, doctor should no longer flag this skill as invalid
+    // After fix, the skill is no longer flagged for missing SKILL.md
+    // (it will now warn about the placeholder description — covered by a separate test)
     const afterFix = await runDoctor(home)
-    expect(afterFix.stdout).not.toContain(`Invalid skill: ${skillName}`)
+    expect(afterFix.stdout).not.toContain("missing SKILL.md")
   })
 
   test("doctor --fix updates frontmatter name to match directory name", async () => {
@@ -655,6 +656,47 @@ describe("swiz doctor", () => {
     const content = await Bun.file(skillMdPath).text()
     expect(content).toContain("name: target-skill")
     expect(content).not.toContain("quoted-wrong")
+  })
+
+  test("warns when skill description uses the generated placeholder text", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "placeholder-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: placeholder-skill\ndescription: Add a description for this skill.\n---\n"
+    )
+
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Invalid skill: placeholder-skill")
+    expect(result.stdout).toContain("description is the generated placeholder")
+  })
+
+  test("does not warn when skill has a real description", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "real-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: real-skill\ndescription: Does something useful.\n---\n"
+    )
+
+    const result = await runDoctor(home)
+    expect(result.stdout).not.toContain("Invalid skill: real-skill")
+  })
+
+  test("doctor --fix generated stub then warns placeholder on re-run", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "stub-skill")
+    await mkdir(skillDir, { recursive: true })
+    // No SKILL.md — fix generates stub
+
+    await runDoctor(home, ["--fix"])
+
+    // Stub was generated with placeholder description — subsequent check warns about it
+    const afterFix = await runDoctor(home)
+    expect(afterFix.stdout).toContain("Invalid skill: stub-skill")
+    expect(afterFix.stdout).toContain("description is the generated placeholder")
   })
 
   test("detects skill where frontmatter name does not match directory name", async () => {
