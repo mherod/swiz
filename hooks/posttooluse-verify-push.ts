@@ -44,17 +44,17 @@ if (!remoteHead) {
   process.exit(0)
 }
 
-if (localHead === remoteHead) {
-  // Push confirmed on first check
+const emitVerified = (msg: string): never => {
   console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext: `Push verified: HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`,
-      },
-    })
+    JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: msg } })
   )
   process.exit(0)
+}
+
+if (localHead === remoteHead) {
+  emitVerified(
+    `Push verified: HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
+  )
 }
 
 // First check failed — could be an in-flight background push.
@@ -64,15 +64,9 @@ for (const delayMs of RETRY_DELAYS_MS) {
   await Bun.sleep(delayMs)
   const refreshed = await getRemoteHead()
   if (refreshed === localHead) {
-    console.log(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PostToolUse",
-          additionalContext: `Push verified (after ${delayMs}ms retry): HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`,
-        },
-      })
+    emitVerified(
+      `Push verified (after ${delayMs}ms retry): HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
     )
-    process.exit(0)
   }
 }
 
