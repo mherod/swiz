@@ -131,6 +131,12 @@ describe("posttooluse-task-output: result-validation guard", () => {
     expect(result.exitCode).toBe(0)
   })
 
+  test("running task is skipped (not yet complete)", async () => {
+    const result = await runHook(makePayload(TRUNCATED_OUTPUT, 1, "running"))
+    expect(result.decision).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+  })
+
   test("singular '1 test across 1 file.' marker is recognised as complete", async () => {
     const output = "bun test v1.3.10\n\n 0 pass\n 1 fail\nRan 1 test across 1 file. [0.01s]"
     const result = await runHook(makePayload(output, 1))
