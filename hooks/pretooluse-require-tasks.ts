@@ -25,6 +25,7 @@ import {
 
 const STALENESS_THRESHOLD = 20
 const LARGE_CONTENT_LINE_THRESHOLD = 10
+const IN_PROGRESS_CAP = 4
 const MEMORY_MARKDOWN_RE = /(?:^|[\\/])(?:CLAUDE|MEMORY)\.md$/i
 
 /**
@@ -134,6 +135,29 @@ async function main() {
   // (CI checks, closing issues, pushing, etc.). Staleness enforcement is
   // meaningless at this point — skip CHECK 2 entirely.
   if (activeTasks.length === 0) process.exit(0)
+
+  // ── CHECK 3: In-progress task cap ────────────────────────────────────────────
+  // More than IN_PROGRESS_CAP simultaneous in_progress tasks weakens focus.
+  // Require the agent to triage active tasks before continuing new work.
+  const inProgressTasks = allTasks.filter((t) => t.status === "in_progress")
+  if (inProgressTasks.length > IN_PROGRESS_CAP) {
+    const taskList = inProgressTasks.map((t) => `  • #${t.id}: ${t.subject}`).join("\n")
+    deny(
+      `STOP. Too many in-progress tasks (${inProgressTasks.length}/${IN_PROGRESS_CAP} max). ${toolName} is BLOCKED.\n\n` +
+        `Currently in progress:\n${taskList}\n\n` +
+        `Having more than ${IN_PROGRESS_CAP} simultaneous in_progress tasks weakens focus and planning quality.\n\n` +
+        formatActionPlan(
+          [
+            "Use TaskUpdate to mark completed tasks done (status: completed).",
+            "Use TaskUpdate to move non-active tasks back to pending.",
+            `Reduce in_progress count to ${IN_PROGRESS_CAP} or fewer, then retry.`,
+          ],
+          { translateToolNames: true }
+        ) +
+        `\n` +
+        `After reducing active tasks, ${toolName} will be unblocked automatically.`
+    )
+  }
 
   // ── CHECK 2: Task staleness (transcript scan) ─────────────────────────────────
   // Only enforced when a transcript is available and task tools have been used

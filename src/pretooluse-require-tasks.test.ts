@@ -98,6 +98,87 @@ describe("pretooluse-require-tasks hook", () => {
     }
   })
 
+  test("blocks Bash when 5 tasks are in_progress (exceeds cap of 4)", async () => {
+    const tmpHome = await mkdtemp(join(tmpdir(), "swiz-hook-cap-"))
+    const sessionId = `test-cap-${Date.now()}`
+    const tasksDir = join(tmpHome, ".claude", "tasks", sessionId)
+    const { mkdir } = await import("node:fs/promises")
+    await mkdir(tasksDir, { recursive: true })
+    // Create 5 in_progress tasks — exceeds the cap of 4
+    for (let i = 1; i <= 5; i++) {
+      await Bun.write(
+        join(tasksDir, `${i}.json`),
+        JSON.stringify({
+          id: String(i),
+          subject: `Task ${i}`,
+          description: "Active work",
+          status: "in_progress",
+          blocks: [],
+          blockedBy: [],
+        })
+      )
+    }
+    try {
+      const result = await runHook(
+        {
+          tool_name: "Bash",
+          tool_input: { command: "echo hello" },
+          session_id: sessionId,
+        },
+        { HOME: tmpHome }
+      )
+      expect(result.exitCode).toBe(0)
+      expect(result.parsed).not.toBeNull()
+      const hookOutput = (result.parsed as Record<string, unknown>)?.hookSpecificOutput as
+        | Record<string, unknown>
+        | undefined
+      expect(hookOutput?.permissionDecision).toBe("deny")
+      expect(String(hookOutput?.permissionDecisionReason ?? "")).toContain(
+        "Too many in-progress tasks"
+      )
+      expect(String(hookOutput?.permissionDecisionReason ?? "")).toContain("5/4 max")
+    } finally {
+      await rm(tmpHome, { recursive: true, force: true })
+    }
+  })
+
+  test("allows Bash when exactly 4 tasks are in_progress (at cap boundary)", async () => {
+    const tmpHome = await mkdtemp(join(tmpdir(), "swiz-hook-cap4-"))
+    const sessionId = `test-cap4-${Date.now()}`
+    const tasksDir = join(tmpHome, ".claude", "tasks", sessionId)
+    const { mkdir } = await import("node:fs/promises")
+    await mkdir(tasksDir, { recursive: true })
+    // Create exactly 4 in_progress tasks — at the cap, not over it
+    for (let i = 1; i <= 4; i++) {
+      await Bun.write(
+        join(tasksDir, `${i}.json`),
+        JSON.stringify({
+          id: String(i),
+          subject: `Task ${i}`,
+          description: "Active work",
+          status: "in_progress",
+          blocks: [],
+          blockedBy: [],
+        })
+      )
+    }
+    try {
+      const result = await runHook(
+        {
+          tool_name: "Bash",
+          tool_input: { command: "echo hello" },
+          session_id: sessionId,
+        },
+        { HOME: tmpHome }
+      )
+      // Should be allowed — 4 is within the cap
+      expect(result.exitCode).toBe(0)
+      expect(result.parsed).toBeNull()
+    } finally {
+      await rm(tmpHome, { recursive: true, force: true })
+    }
+  })
+
   test("allows Bash when all tasks are completed (wrap-up exemption)", async () => {
     const tmpHome = await mkdtemp(join(tmpdir(), "swiz-hook-wrapup-"))
     const sessionId = `test-wrapup-${Date.now()}`
