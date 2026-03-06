@@ -762,7 +762,15 @@ export async function createSessionTask(
   const sentinel = `/tmp/${safeSentinel}-${safeSession}.flag`
   if (await Bun.file(sentinel).exists()) return
   // Defensive: fall back to defaultTaskExecutor if the injected value is not callable.
-  const safeExecutor: TaskExecutor = typeof executor === "function" ? executor : defaultTaskExecutor
+  const safeExecutor: TaskExecutor =
+    typeof executor === "function"
+      ? executor
+      : (() => {
+          console.error(
+            `[swiz] createSessionTask: invalid executor (got ${typeof executor}), falling back to default`
+          )
+          return defaultTaskExecutor
+        })()
   const args = [
     "bun",
     join(home, ".claude", "hooks", "tasks-list.ts"),
@@ -775,11 +783,17 @@ export async function createSessionTask(
   let exitCode: number
   try {
     exitCode = await safeExecutor(args)
-  } catch {
-    // Injected executor threw — retry with the default to best-effort create the task.
+  } catch (err) {
+    // Injected executor threw — report and retry with the default.
+    console.error(
+      `[swiz] createSessionTask: executor threw (${err instanceof Error ? err.message : String(err)}), falling back to default`
+    )
     try {
       exitCode = await defaultTaskExecutor(args)
-    } catch {
+    } catch (defaultErr) {
+      console.error(
+        `[swiz] createSessionTask: default executor also threw (${defaultErr instanceof Error ? defaultErr.message : String(defaultErr)}), giving up`
+      )
       return
     }
   }
