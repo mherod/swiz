@@ -537,13 +537,13 @@ export const transcriptCommand: Command = {
     }
 
     if (includeDebug) {
-      const debugLog = await loadDebugLog(session.id)
-      if (!debugLog) {
+      const debugFile = await loadDebugLog(session.id)
+      if (!debugFile) {
         console.log(`\n${DIM}Debug log not found for session: ${session.id}${RESET}`)
       } else {
         renderDebugLog({
-          ...debugLog,
-          lines: applyHeadTail(debugLog.lines, headCount, tailCount),
+          ...debugFile,
+          lines: applyHeadTail(debugFile.lines, headCount, tailCount),
         })
       }
     }
