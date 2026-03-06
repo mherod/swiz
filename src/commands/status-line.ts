@@ -3,7 +3,7 @@
 // Uses time-based rainbow cycling so colors shift on each render.
 
 import { existsSync, readFileSync, statSync } from "node:fs"
-import { dirname } from "node:path"
+import { basename, dirname } from "node:path"
 import { getEffectiveSwizSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 
@@ -86,8 +86,7 @@ function progressBar(pct: number, width = 10): string {
 }
 
 function shortenPath(dir: string): string {
-  const home = process.env.HOME ?? ""
-  return home && dir.startsWith(home) ? "~" + dir.slice(home.length) : dir
+  return basename(dir)
 }
 
 // Resolve git metadata by walking up from cwd.
@@ -314,6 +313,25 @@ function formatTime(): string {
   return `${hours}:${mins}:${secs}`
 }
 
+function colorForCount(count: number, medium: number, high: number): string {
+  if (count >= high) return "\x1b[91m"
+  if (count >= medium) return "\x1b[93m"
+  if (count > 0) return "\x1b[92m"
+  return DIM
+}
+
+function formatCountSegment(
+  count: number,
+  singular: string,
+  plural: string,
+  medium: number,
+  high: number
+): string {
+  const color = colorForCount(count, medium, high)
+  const label = count === 1 ? singular : plural
+  return `${color}${count} ${label}${R}`
+}
+
 export const statusLineCommand: Command = {
   name: "status-line",
   description: "Output a rich ANSI status bar for Claude Code's statusLine hook",
@@ -388,21 +406,13 @@ export const statusLineCommand: Command = {
     const tokenStr = ctxTokens > 0 ? ` ${DIM}${formatTokens(ctxTokens)}${R}` : ""
     const ctxSeg = `ctx ${ctxBar}${ctxColor}${ctxPct.toFixed(0)}%${R}${tokenStr}`
 
-    const sessionSeg = input.session_id ? `${DIM}session ${input.session_id.slice(0, 8)}${R}` : ""
-
     const issueCount = Array.isArray(issueData) ? issueData.length : null
     const prCount = Array.isArray(prListData) ? prListData.length : null
+    const issueSeg =
+      issueCount !== null ? formatCountSegment(issueCount, "issue", "issues", 10, 25) : ""
+    const prSeg = prCount !== null ? formatCountSegment(prCount, "PR", "PRs", 5, 12) : ""
     const ghCountSeg =
-      issueCount !== null || prCount !== null
-        ? [
-            issueCount !== null
-              ? `${DIM}${issueCount} issue${issueCount !== 1 ? "s" : ""}${R}`
-              : "",
-            prCount !== null ? `${DIM}${prCount} PR${prCount !== 1 ? "s" : ""}${R}` : "",
-          ]
-            .filter(Boolean)
-            .join("  ")
-        : ""
+      issueCount !== null || prCount !== null ? [issueSeg, prSeg].filter(Boolean).join("  ") : ""
 
     const reviewDecision = prViewData?.reviewDecision ?? ""
     const commentCount = Array.isArray(prViewData?.comments) ? prViewData.comments.length : 0
@@ -434,13 +444,11 @@ export const statusLineCommand: Command = {
 
     // ── Assemble ────────────────────────────────────────────────────────────
 
-    const line3Parts = [sessionSeg, ghCountSeg, settingsSeg, agentTag, vimTag, timeSeg].filter(
-      Boolean
-    )
+    const line3Parts = [ghCountSeg, settingsSeg, agentTag, vimTag, timeSeg].filter(Boolean)
 
     const line1 = `${topLeft}${br("[")}${a1}${firstName}${R}${br("]")}${midJoin}${br("[")}${a2}${shortCwd}${R}${br("]")}${gitInfo}${reviewSeg}`
     const line2 = `${midLeft} ${rb(model)}  ${ctxSeg}`
-    const line3 = `${bottomLeft} ${line3Parts.length ? line3Parts.join("  ") : DIM + "─" + R}`
+    const line3 = `${bottomLeft} ${line3Parts.length ? line3Parts.join("  ") : `${DIM}─${R}`}`
 
     console.log(`${line1}\n${line2}\n${line3}`)
   },
