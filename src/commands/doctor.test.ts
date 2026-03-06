@@ -573,20 +573,52 @@ describe("swiz doctor", () => {
   test("doctor --fix moves invalid skill entry aside", async () => {
     const home = await createTempHome()
     const skillsDir = join(home, ".claude", "skills")
+    // Use a skill with empty SKILL.md — cannot be auto-fixed, must be moved aside
     const skillName = `invalid-skill-${Date.now()}`
     const skillDir = join(skillsDir, skillName)
     await mkdir(skillDir, { recursive: true })
-    // No SKILL.md — this is an invalid entry
+    await writeFile(join(skillDir, "SKILL.md"), "")
 
     const fixRun = await runDoctor(home, ["--fix"])
     expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
-    expect(await Bun.file(skillDir).exists()).toBe(false)
+    expect(await Bun.file(join(skillDir, "SKILL.md")).exists()).toBe(false)
 
     const movedDirs = (await readdir(skillsDir, { withFileTypes: true }))
       .filter((e) => e.isDirectory())
       .map((e) => e.name)
       .filter((n) => n.startsWith(`${skillName}.disabled-by-swiz-`))
     expect(movedDirs.length).toBe(1)
+  })
+
+  test("doctor --fix generates default SKILL.md for skill directory missing one", async () => {
+    const home = await createTempHome()
+    const skillsDir = join(home, ".claude", "skills")
+    const skillName = `new-skill-${Date.now()}`
+    const skillDir = join(skillsDir, skillName)
+    await mkdir(skillDir, { recursive: true })
+    // No SKILL.md created
+
+    const fixRun = await runDoctor(home, ["--fix"])
+    expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
+    expect(fixRun.stdout).toContain("generated default")
+    expect(fixRun.stdout).toContain(skillName)
+
+    // Directory must NOT be moved aside — it stays in place (stat confirms it's a directory)
+    const { stat: statFn } = await import("node:fs/promises")
+    const dirStat = await statFn(skillDir)
+    expect(dirStat.isDirectory()).toBe(true)
+
+    // SKILL.md must now exist with correct frontmatter
+    const skillMdPath = join(skillDir, "SKILL.md")
+    expect(await Bun.file(skillMdPath).exists()).toBe(true)
+    const content = await Bun.file(skillMdPath).text()
+    expect(content).toContain(`name: ${skillName}`)
+    expect(content).toContain("description:")
+    expect(content).toMatch(/^---/m)
+
+    // After fix, doctor should no longer flag this skill as invalid
+    const afterFix = await runDoctor(home)
+    expect(afterFix.stdout).not.toContain(`Invalid skill: ${skillName}`)
   })
 
   test("doctor --fix updates frontmatter name to match directory name", async () => {

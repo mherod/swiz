@@ -548,6 +548,10 @@ interface InvalidSkillNameFixSuccess {
   skillPath: string
   oldName: string
 }
+interface InvalidSkillGenerateSuccess {
+  name: string
+  skillPath: string
+}
 interface InvalidSkillFixFailure {
   name: string
   originalDir: string
@@ -555,6 +559,7 @@ interface InvalidSkillFixFailure {
 }
 
 const NAME_MISMATCH_PREFIX = 'frontmatter name "'
+const MISSING_SKILL_MD_REASON = "missing SKILL.md"
 
 /** For name-mismatch entries: update the name: field in SKILL.md to match the directory name. */
 async function fixSkillNameMismatch(entry: InvalidSkillEntry): Promise<{ oldName: string } | null> {
@@ -573,18 +578,48 @@ async function fixSkillNameMismatch(entry: InvalidSkillEntry): Promise<{ oldName
   }
 }
 
-/** Rename invalid skill entries aside using the .disabled-by-swiz-{timestamp} suffix.
- *  Name-mismatch entries are fixed in place; all other invalid entries are moved aside. */
+/** For missing-SKILL.md entries: generate a default stub so the directory is a valid skill. */
+async function generateSkillMd(entry: InvalidSkillEntry): Promise<boolean> {
+  const skillPath = join(entry.entryDir, "SKILL.md")
+  try {
+    const stub = `---\nname: ${entry.name}\ndescription: Add a description for this skill.\n---\n`
+    await Bun.write(skillPath, stub)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Rename / repair invalid skill entries.
+ *  - missing SKILL.md → generate a default stub
+ *  - name mismatch    → update name: field in place
+ *  - everything else  → move aside with .disabled-by-swiz-{timestamp} suffix */
 async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
   fixed: InvalidSkillFixSuccess[]
   nameFixed: InvalidSkillNameFixSuccess[]
+  generated: InvalidSkillGenerateSuccess[]
   failed: InvalidSkillFixFailure[]
 }> {
   const fixed: InvalidSkillFixSuccess[] = []
   const nameFixed: InvalidSkillNameFixSuccess[] = []
+  const generated: InvalidSkillGenerateSuccess[] = []
   const failed: InvalidSkillFixFailure[] = []
   const stamp = conflictSuffixTimestamp()
   for (const entry of entries) {
+    if (entry.reason === MISSING_SKILL_MD_REASON) {
+      // Generate a stub SKILL.md so the directory becomes a valid skill entry
+      const skillPath = join(entry.entryDir, "SKILL.md")
+      if (await generateSkillMd(entry)) {
+        generated.push({ name: entry.name, skillPath })
+      } else {
+        failed.push({
+          name: entry.name,
+          originalDir: entry.entryDir,
+          error: "could not create SKILL.md",
+        })
+      }
+      continue
+    }
     if (entry.reason.startsWith(NAME_MISMATCH_PREFIX)) {
       // In-place fix: update the name: field rather than discarding the skill
       const result = await fixSkillNameMismatch(entry)
@@ -615,7 +650,7 @@ async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
       })
     }
   }
-  return { fixed, nameFixed, failed }
+  return { fixed, nameFixed, generated, failed }
 }
 
 // ─── Installed config script check ──────────────────────────────────────────
@@ -1070,6 +1105,11 @@ export const doctorCommand: Command = {
       if (invalidSkillEntries.length > 0) {
         console.log(`  ${BOLD}Auto-fixing invalid skill entries...${RESET}\n`)
         const invalidResult = await fixInvalidSkillEntries(invalidSkillEntries)
+        for (const item of invalidResult.generated) {
+          console.log(
+            `  ${GREEN}✓${RESET} ${item.name}: generated default ${displayPath(item.skillPath)}`
+          )
+        }
         for (const item of invalidResult.nameFixed) {
           console.log(
             `  ${GREEN}✓${RESET} ${item.name}: updated name "${item.oldName}" → "${item.name}" in ${displayPath(item.skillPath)}`
@@ -1088,7 +1128,12 @@ export const doctorCommand: Command = {
             `  ${RED}✗${RESET} ${item.name}: could not fix ${displayPath(item.originalDir)} (${item.error})`
           )
         }
-        if (invalidResult.nameFixed.length > 0 || invalidResult.fixed.length > 0) console.log()
+        if (
+          invalidResult.generated.length > 0 ||
+          invalidResult.nameFixed.length > 0 ||
+          invalidResult.fixed.length > 0
+        )
+          console.log()
       }
     } else if (
       staleConfigs.length > 0 ||
