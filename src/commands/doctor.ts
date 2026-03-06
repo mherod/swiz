@@ -143,6 +143,37 @@ async function checkManifestHandlerPaths(): Promise<CheckResult> {
   }
 }
 
+/** Find .ts files in hooks/ that are not referenced by any manifest entry. */
+async function checkOrphanedHookScripts(): Promise<CheckResult> {
+  const manifestFiles = new Set(manifest.flatMap((g) => g.hooks.map((h) => h.file)))
+
+  const glob = new Bun.Glob("*.ts")
+  const orphaned: string[] = []
+  for await (const file of glob.scan({ cwd: HOOKS_DIR })) {
+    // Skip test files — they are not hook scripts
+    if (file.endsWith(".test.ts")) continue
+    if (!manifestFiles.has(file)) {
+      orphaned.push(file)
+    }
+  }
+
+  orphaned.sort()
+
+  if (orphaned.length === 0) {
+    return {
+      name: "Orphaned hook scripts",
+      status: "pass",
+      detail: `no orphaned scripts found in hooks/`,
+    }
+  }
+
+  return {
+    name: "Orphaned hook scripts",
+    status: "warn",
+    detail: `${orphaned.length} script(s) in hooks/ not referenced by manifest: ${orphaned.join(", ")}`,
+  }
+}
+
 async function checkGhAuth(): Promise<CheckResult> {
   const whichProc = Bun.spawnSync(["which", "gh"])
   if (whichProc.exitCode !== 0) {
@@ -447,6 +478,7 @@ export const doctorCommand: Command = {
     // Hook scripts
     results.push(await checkHookScripts())
     results.push(await checkManifestHandlerPaths())
+    results.push(await checkOrphanedHookScripts())
 
     // Agent config sync (detect stale dispatch entries)
     for (const agent of CONFIGURABLE_AGENTS) {

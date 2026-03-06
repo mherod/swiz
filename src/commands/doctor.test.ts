@@ -90,6 +90,14 @@ describe("swiz doctor", () => {
     expect(result.stdout).toMatch(/Manifest handler paths.*handler paths valid/)
   })
 
+  test("reports orphaned hook scripts check", async () => {
+    const home = await createTempHome()
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Orphaned hook scripts")
+    // The check runs and reports either pass or the list of orphaned scripts
+    expect(result.stdout).toMatch(/Orphaned hook scripts/)
+  })
+
   test("reports GitHub CLI auth status", async () => {
     const home = await createTempHome()
     const result = await runDoctor(home)
