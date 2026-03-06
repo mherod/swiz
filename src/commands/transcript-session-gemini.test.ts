@@ -165,6 +165,12 @@ async function createCodexSession(
   await writeFile(sessionPath, `${lines.join("\n")}\n`)
 }
 
+async function createDebugLog(home: string, sessionId: string, lines: string[]): Promise<void> {
+  const debugDir = join(home, ".claude", "debug")
+  await mkdir(debugDir, { recursive: true })
+  await writeFile(join(debugDir, `${sessionId}.txt`), `${lines.join("\n")}\n`)
+}
+
 describe("Provider transcript/session command support", () => {
   test("swiz transcript --list discovers Gemini sessions", async () => {
     const home = await createTempHome()
@@ -241,6 +247,28 @@ describe("Provider transcript/session command support", () => {
     expect(out).toContain("ASSISTANT")
     expect(out).toContain("Hello from Codex session")
     expect(out).toContain("Hi from Codex assistant")
+  })
+
+  test("swiz transcript --include-debug renders matching debug log lines", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc01-7777-7888-8999-aaaaaaaaaaaa"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
+    await createDebugLog(home, sessionId, [
+      "2026-03-06T04:29:06.552Z [DEBUG] debug line one",
+      "2026-03-06T04:29:06.553Z [DEBUG] debug line two",
+    ])
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--include-debug"],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain("Debug log:")
+    expect(out).toContain("[DEBUG] debug line one")
+    expect(out).toContain("[DEBUG] debug line two")
   })
 
   test("swiz session --list includes Codex sessions", async () => {

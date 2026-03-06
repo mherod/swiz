@@ -1,4 +1,4 @@
-import { resolve } from "node:path"
+import { join, resolve } from "node:path"
 import { promptAgent } from "../agent.ts"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
@@ -246,6 +246,54 @@ async function loadTurns(session: Session): Promise<Turn[]> {
   return collectTurns(parseTranscriptEntries(text, session.format))
 }
 
+interface DebugLog {
+  path: string
+  lines: string[]
+}
+
+async function loadDebugLog(sessionId: string): Promise<DebugLog | null> {
+  const home = process.env.HOME
+  if (!home) return null
+
+  const path = join(home, ".claude", "debug", `${sessionId}.txt`)
+  const file = Bun.file(path)
+  if (!(await file.exists())) return null
+
+  const text = await file.text()
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+
+  return { path, lines }
+}
+
+function applyHeadTail<T>(
+  values: T[],
+  headCount: number | undefined,
+  tailCount: number | undefined
+): T[] {
+  if (tailCount !== undefined) return values.slice(-tailCount)
+  if (headCount !== undefined) return values.slice(0, headCount)
+  return values
+}
+
+function renderDebugLog(debugLog: DebugLog): void {
+  console.log(`\n${DIM}Debug log: ${debugLog.path}${RESET}\n${DIM}${"─".repeat(60)}${RESET}`)
+
+  if (debugLog.lines.length === 0) {
+    console.log(`\n  ${DIM}(no debug log lines found)${RESET}\n`)
+    return
+  }
+
+  const cols = process.stdout.columns ?? 80
+  const wrapWidth = Math.min(cols - 4, 140)
+  for (const line of debugLog.lines) {
+    console.log(wordWrap(line, wrapWidth, "  "))
+  }
+  console.log(`\n${DIM}${"─".repeat(60)}${RESET}\n`)
+}
+
 // ─── Main rendering ──────────────────────────────────────────────────────────
 
 function renderTurns(turns: Turn[], sessionId: string): void {
@@ -315,6 +363,7 @@ export interface TranscriptArgs {
   headCount: number | undefined
   tailCount: number | undefined
   autoReply: boolean
+  includeDebug: boolean
   allAgents: boolean
   explicitAgents: AgentDef[]
 }
@@ -326,6 +375,7 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
   let headCount: number | undefined
   let tailCount: number | undefined
   let autoReply = false
+  let includeDebug = false
   let allAgents = false
 
   for (let i = 0; i < args.length; i++) {
@@ -348,6 +398,8 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
       i++
     } else if (arg === "--auto-reply") {
       autoReply = true
+    } else if (arg === "--include-debug") {
+      includeDebug = true
     } else if (arg === "--all") {
       allAgents = true
     }
@@ -361,6 +413,7 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
     headCount,
     tailCount,
     autoReply,
+    includeDebug,
     allAgents,
     explicitAgents,
   }
@@ -372,7 +425,7 @@ export const transcriptCommand: Command = {
   name: "transcript",
   description: "Display Agent-User chat history for the current project",
   usage:
-    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--auto-reply] [--all|--claude|--cursor|--gemini|--codex]",
+    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--auto-reply] [--include-debug] [--all|--claude|--cursor|--gemini|--codex]",
   options: [
     { flags: "--session, -s <id>", description: "Show a specific session (prefix match)" },
     { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
@@ -380,6 +433,7 @@ export const transcriptCommand: Command = {
     { flags: "--head, -H <n>", description: "Show only the first N conversation turns" },
     { flags: "--tail, -T <n>", description: "Show only the last N conversation turns" },
     { flags: "--auto-reply", description: "Generate an AI-suggested follow-up message" },
+    { flags: "--include-debug", description: "Include ~/.claude/debug/<sessionId>.txt output" },
     {
       flags: "--all",
       description:
@@ -398,6 +452,7 @@ export const transcriptCommand: Command = {
       headCount,
       tailCount,
       autoReply,
+      includeDebug,
       allAgents,
       explicitAgents,
     } = parseTranscriptArgs(args)
@@ -473,16 +528,24 @@ export const transcriptCommand: Command = {
     }
 
     let turns = await loadTurns(session)
-    if (tailCount !== undefined) {
-      turns = turns.slice(-tailCount)
-    } else if (headCount !== undefined) {
-      turns = turns.slice(0, headCount)
-    }
+    turns = applyHeadTail(turns, headCount, tailCount)
 
     if (autoReply) {
       await generateAutoReply(turns)
     } else {
       renderTurns(turns, session.id)
+    }
+
+    if (includeDebug) {
+      const debugLog = await loadDebugLog(session.id)
+      if (!debugLog) {
+        console.log(`\n${DIM}Debug log not found for session: ${session.id}${RESET}`)
+      } else {
+        renderDebugLog({
+          ...debugLog,
+          lines: applyHeadTail(debugLog.lines, headCount, tailCount),
+        })
+      }
     }
   },
 }

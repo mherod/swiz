@@ -11,6 +11,7 @@ describe("parseTranscriptArgs", () => {
     expect(result.headCount).toBeUndefined()
     expect(result.tailCount).toBeUndefined()
     expect(result.autoReply).toBe(false)
+    expect(result.includeDebug).toBe(false)
     expect(result.allAgents).toBe(false)
     expect(result.explicitAgents).toHaveLength(0)
   })
@@ -91,6 +92,11 @@ describe("parseTranscriptArgs", () => {
     expect(result.autoReply).toBe(true)
   })
 
+  test("parses --include-debug flag", () => {
+    const result = parseTranscriptArgs(["--include-debug"])
+    expect(result.includeDebug).toBe(true)
+  })
+
   test("parses --all flag", () => {
     const result = parseTranscriptArgs(["--all"])
     expect(result.allAgents).toBe(true)
@@ -103,11 +109,20 @@ describe("parseTranscriptArgs", () => {
   })
 
   test("parses multiple flags together", () => {
-    const result = parseTranscriptArgs(["-s", "sess1", "--list", "--head", "5", "--auto-reply"])
+    const result = parseTranscriptArgs([
+      "-s",
+      "sess1",
+      "--list",
+      "--head",
+      "5",
+      "--auto-reply",
+      "--include-debug",
+    ])
     expect(result.sessionQuery).toBe("sess1")
     expect(result.listOnly).toBe(true)
     expect(result.headCount).toBe(5)
     expect(result.autoReply).toBe(true)
+    expect(result.includeDebug).toBe(true)
   })
 
   test("does not consume flag as value for previous option", () => {
