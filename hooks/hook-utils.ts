@@ -762,22 +762,19 @@ export async function createSessionTask(
   const sentinel = `/tmp/${safeSentinel}-${safeSession}.flag`
   if (await Bun.file(sentinel).exists()) return
   // Defensive: fall back to defaultTaskExecutor if the injected value is not callable.
-  const safeExecutor: TaskExecutor =
-    typeof executor === "function"
-      ? executor
-      : (() => {
-          console.error(
-            `[swiz] createSessionTask: invalid executor (got ${typeof executor}), falling back to default`
-          )
-          return defaultTaskExecutor
-        })()
+  if (typeof executor !== "function") {
+    console.error(
+      `[swiz] createSessionTask: invalid executor (got ${typeof executor}), falling back to default`
+    )
+    executor = defaultTaskExecutor
+  }
   const swiz = Bun.which("swiz") ?? join(home, ".bun", "bin", "swiz")
   const args = ["swiz", "tasks", "create", subject, description, "--session", sessionId]
   // Replace argv[0] with the resolved binary path so Bun.spawn can locate it.
   args[0] = swiz
   let exitCode: number
   try {
-    exitCode = await safeExecutor(args)
+    exitCode = await executor(args)
   } catch (err) {
     // Injected executor threw — report and retry with the default.
     console.error(
@@ -889,14 +886,7 @@ export function parseGitStatSummary(statOutput: string): GitStatSummary {
   const lines = statOutput.trim().split("\n")
 
   // Find the summary line — last line matching "N file(s) changed"
-  let summaryLine = ""
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (/\d+\s+files?\s+changed/.test(lines[i]!)) {
-      summaryLine = lines[i]!
-      break
-    }
-  }
-
+  const summaryLine = lines.findLast((l) => /\d+\s+files?\s+changed/.test(l)) ?? ""
   if (!summaryLine) return { filesChanged: 0, insertions: 0, deletions: 0 }
 
   const filesMatch = summaryLine.match(/(\d+)\s+files?\s+changed/)
@@ -1015,26 +1005,8 @@ export const TEST_FILE_RE = /\.test\.|\.spec\.|__tests__|\/test\//
  * the assistant, in order. Returns [] if the file is missing or unreadable.
  */
 export async function extractToolNamesFromTranscript(transcriptPath: string): Promise<string[]> {
-  try {
-    const text = await Bun.file(transcriptPath).text()
-    const toolNames: string[] = []
-    for (const line of text.split("\n").filter((l) => l.trim())) {
-      try {
-        const entry = JSON.parse(line)
-        if (entry?.type !== "assistant") continue
-        const content = entry?.message?.content
-        if (!Array.isArray(content)) continue
-        for (const block of content) {
-          if (block?.type === "tool_use" && block?.name) {
-            toolNames.push(block.name)
-          }
-        }
-      } catch {}
-    }
-    return toolNames
-  } catch {
-    return []
-  }
+  const blocks = await readTranscriptToolBlocks(transcriptPath)
+  return blocks.flatMap((b) => (b.name ? [String(b.name)] : []))
 }
 
 // ─── Command normalisation (re-exported from src/) ──────────────────────
@@ -1050,14 +1022,13 @@ export {
 import { normalizeCommand } from "../src/command-utils.ts"
 
 /**
- * Extract all shell commands from assistant Bash tool_use blocks in a transcript.
- * Each command is normalised (backslash-newline continuations collapsed) before
- * being returned.
+ * Read all `tool_use` blocks from assistant messages in a JSONL transcript.
+ * Shared by the extract* helpers below to avoid duplicating the JSONL-parsing loop.
  */
-export async function extractBashCommands(path: string): Promise<string[]> {
-  const commands: string[] = []
+async function readTranscriptToolBlocks(path: string): Promise<Array<Record<string, unknown>>> {
   try {
     const text = await Bun.file(path).text()
+    const blocks: Array<Record<string, unknown>> = []
     for (const line of text.split("\n")) {
       if (!line.trim()) continue
       try {
@@ -1066,14 +1037,29 @@ export async function extractBashCommands(path: string): Promise<string[]> {
         const content = entry?.message?.content
         if (!Array.isArray(content)) continue
         for (const block of content) {
-          if (block?.type !== "tool_use") continue
-          if (!isShellTool(block?.name ?? "")) continue
-          const cmd: string = block?.input?.command ?? ""
-          if (cmd) commands.push(normalizeCommand(cmd))
+          if (block?.type === "tool_use") blocks.push(block)
         }
       } catch {}
     }
-  } catch {}
+    return blocks
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Extract all shell commands from assistant Bash tool_use blocks in a transcript.
+ * Each command is normalised (backslash-newline continuations collapsed) before
+ * being returned.
+ */
+export async function extractBashCommands(path: string): Promise<string[]> {
+  const blocks = await readTranscriptToolBlocks(path)
+  const commands: string[] = []
+  for (const block of blocks) {
+    if (!isShellTool(String(block.name ?? ""))) continue
+    const cmd = String((block.input as Record<string, unknown>)?.command ?? "")
+    if (cmd) commands.push(normalizeCommand(cmd))
+  }
   return commands
 }
 
@@ -1082,25 +1068,13 @@ export async function extractBashCommands(path: string): Promise<string[]> {
  * Returns an array of skill name strings (e.g. ["commit", "push"]).
  */
 export async function extractSkillInvocations(path: string): Promise<string[]> {
+  const blocks = await readTranscriptToolBlocks(path)
   const skills: string[] = []
-  try {
-    const text = await Bun.file(path).text()
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue
-      try {
-        const entry = JSON.parse(line)
-        if (entry?.type !== "assistant") continue
-        const content = entry?.message?.content
-        if (!Array.isArray(content)) continue
-        for (const block of content) {
-          if (block?.type !== "tool_use") continue
-          if (block?.name !== "Skill") continue
-          const skill: string = block?.input?.skill ?? ""
-          if (skill) skills.push(skill)
-        }
-      } catch {}
-    }
-  } catch {}
+  for (const block of blocks) {
+    if (block.name !== "Skill") continue
+    const skill = String((block.input as Record<string, unknown>)?.skill ?? "")
+    if (skill) skills.push(skill)
+  }
   return skills
 }
 
@@ -1138,6 +1112,9 @@ export const FORCE_PUSH_RE =
 
 /** Long force flags for git push (without = suffix). */
 const FORCE_LONG_FLAG_NAMES = new Set(["--force", "--force-with-lease", "--force-if-includes"])
+
+/** Git global options that consume the following token as their value. */
+const GIT_VALUE_OPTS = new Set(["-C", "-c", "--work-tree", "--git-dir", "--namespace"])
 
 /** Returns true if a single parsed flag token is a force-push flag. */
 function isGitPushForceToken(token: string): boolean {
@@ -1210,8 +1187,7 @@ export function hasGitPushForceFlag(command: string): boolean {
       i++ // skip "git"
 
       // Skip git's own global options before the subcommand (e.g. -C <dir>, -c key=val).
-      // Options that consume the next token as a value are listed explicitly.
-      const GIT_VALUE_OPTS = new Set(["-C", "-c", "--work-tree", "--git-dir", "--namespace"])
+      // Options that consume the next token as a value are listed in GIT_VALUE_OPTS.
       while (i < tokens.length && tokens[i]!.startsWith("-")) {
         if (GIT_VALUE_OPTS.has(tokens[i]!)) i++ // skip the value token
         i++
@@ -1396,11 +1372,7 @@ export async function countFileWords(
     // Guard against binary files: check first 512 bytes for null bytes
     const headerBuffer = await file.slice(0, 512).arrayBuffer()
     const headerView = new Uint8Array(headerBuffer)
-    for (let i = 0; i < headerView.length; i++) {
-      if (headerView[i] === 0) {
-        return null // Binary file detected
-      }
-    }
+    if (headerView.includes(0)) return null // Binary file detected
 
     // Read and parse file for stats
     const content = await file.text()
