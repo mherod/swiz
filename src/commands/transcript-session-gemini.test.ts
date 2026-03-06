@@ -412,6 +412,31 @@ describe("Provider transcript/session command support", () => {
     expect(contIdx).toBeLessThan(nextIdx)
   })
 
+  test("swiz transcript --include-debug preserves leading continuation-only lines before any timestamped event", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc01-7777-7888-8999-111111111111"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
+    // File starts with continuation lines before any ISO-prefixed line
+    await createDebugLog(home, sessionId, [
+      "no-timestamp header line",
+      "another headerless line",
+      "2026-03-06T04:29:06.500Z [DEBUG] first real event",
+    ])
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--include-debug"],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    // Leading continuation lines must appear in output — not silently discarded
+    expect(out).toContain("no-timestamp header line")
+    expect(out).toContain("another headerless line")
+    expect(out).toContain("[DEBUG] first real event")
+  })
+
   test("swiz session --list includes Codex sessions", async () => {
     const home = await createTempHome()
     const projectDir = join(home, "workspace", "demo-codex")

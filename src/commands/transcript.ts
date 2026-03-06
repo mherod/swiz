@@ -85,6 +85,7 @@ function wordWrap(text: string, width: number, indent: string): string {
 function formatTimestamp(iso: string): string {
   try {
     const d = new Date(iso)
+    if (isNaN(d.getTime())) return ""
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   } catch {
     return ""
@@ -291,7 +292,13 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
       // Continuation line (no ISO timestamp prefix): attach to the preceding event so it is
       // rendered as part of that event rather than silently dropped.
       const prev = events[events.length - 1]
-      if (prev) prev.text += `\n${line}`
+      if (prev) {
+        prev.text += `\n${line}`
+      } else {
+        // No preceding event yet — emit a synthetic event (iso:"", ts:0) so the line is
+        // preserved and sorts before all real turns. formatTimestamp("") returns "" gracefully.
+        events.push({ iso: "", ts: 0, text: line, _idx: i })
+      }
       continue
     }
     const iso = m[1]
