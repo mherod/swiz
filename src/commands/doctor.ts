@@ -152,9 +152,12 @@ async function checkOrphanedHookScripts(): Promise<CheckResult> {
   for await (const file of glob.scan({ cwd: HOOKS_DIR })) {
     // Skip test files — they are not hook scripts
     if (file.endsWith(".test.ts")) continue
-    if (!manifestFiles.has(file)) {
-      orphaned.push(file)
-    }
+    if (manifestFiles.has(file)) continue
+    // Only flag hook entry points (files with the bun shebang).
+    // Library files imported by hooks (e.g. hook-utils.ts) have no shebang and are not hook scripts.
+    const text = await Bun.file(join(HOOKS_DIR, file)).text()
+    if (!text.startsWith("#!/usr/bin/env bun")) continue
+    orphaned.push(file)
   }
 
   orphaned.sort()
