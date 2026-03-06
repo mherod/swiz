@@ -7,8 +7,9 @@
 import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { z } from "zod"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
-import { hasGeminiApiKey, promptGemini } from "../src/gemini.ts"
+import { hasGeminiApiKey, promptGeminiObject } from "../src/gemini.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   extractPlainTurns,
@@ -38,12 +39,14 @@ const WORKFLOW_FINDING =
 const HOME = process.env.HOME ?? "~"
 const PROJECTS_DIR = join(HOME, ".claude", "projects")
 
-interface AgentResponse {
-  processCritique: string
-  productCritique: string
-  next: string
-  reflections: string[]
-}
+const agentResponseSchema = z.object({
+  processCritique: z.string(),
+  productCritique: z.string(),
+  next: z.string(),
+  reflections: z.array(z.string()),
+})
+
+type AgentResponse = z.infer<typeof agentResponseSchema>
 
 /**
  * Reads in_progress and completed tasks for the session.
@@ -128,45 +131,19 @@ export function isWorkflowSuggestion(text: string): boolean {
   return WORKFLOW_PATTERNS.some((re) => re.test(text))
 }
 
-// ─── Agent response parsing ─────────────────────────────────────────────────
-
 /**
- * Parse the agent's response as JSON {next, reflections}. Falls back to
- * treating the entire response as a plain-text next-step suggestion when
- * JSON parsing fails (backward compatible with older agent responses).
+ * Apply markup and length filtering to a structured AgentResponse returned by the
+ * AI SDK. sanitizeResponse() strips XML/tool-call injection from string fields;
+ * reflections are also length-capped and de-duplication-ready.
  */
-function parseAgentResponse(raw: string): AgentResponse {
-  const trimmed = raw.trim()
-  // Strip markdown code fences the agent might wrap around JSON
-  const jsonStr = trimmed
-    .replace(/^```json?\s*/i, "")
-    .replace(/\s*```\s*$/, "")
-    .trim()
-
-  try {
-    const parsed = JSON.parse(jsonStr)
-    const processCritique =
-      typeof parsed.processCritique === "string" ? sanitizeResponse(parsed.processCritique) : ""
-    const productCritique =
-      typeof parsed.productCritique === "string" ? sanitizeResponse(parsed.productCritique) : ""
-    const next = typeof parsed.next === "string" ? sanitizeResponse(parsed.next) : ""
-    const reflections = Array.isArray(parsed.reflections)
-      ? parsed.reflections
-          .filter(
-            (r: unknown): r is string =>
-              typeof r === "string" && r.length >= 10 && r.length <= 300 && !hasMarkup(r)
-          )
-          .slice(0, 10)
-      : []
-    return { processCritique, productCritique, next, reflections }
-  } catch {
-    // Fallback: treat as plain text (backward compatible)
-    return {
-      processCritique: "",
-      productCritique: "",
-      next: sanitizeResponse(raw),
-      reflections: [],
-    }
+function filterAgentResponse(parsed: AgentResponse): AgentResponse {
+  return {
+    processCritique: sanitizeResponse(parsed.processCritique),
+    productCritique: sanitizeResponse(parsed.productCritique),
+    next: sanitizeResponse(parsed.next),
+    reflections: parsed.reflections
+      .filter((r) => r.length >= 10 && r.length <= 300 && !hasMarkup(r))
+      .slice(0, 10),
   }
 }
 
@@ -594,12 +571,12 @@ async function main(): Promise<void> {
     )
 
     try {
-      const result = await promptGemini(prompt, {
+      const parsed = await promptGeminiObject(prompt, agentResponseSchema, {
         timeout: ATTEMPT_TIMEOUT_MS,
       })
-      if (result) response = parseAgentResponse(result)
+      response = filterAgentResponse(parsed)
     } catch {
-      // promptGemini threw (backend unreachable mid-call).
+      // promptGeminiObject threw (backend unreachable or schema validation failed).
       // If there is no runtime refinement finding, there is nothing actionable to
       // deliver — exit cleanly as a distinct BACKEND_ERROR path rather than falling
       // through to NO_ACTIONABLE_CONTENT (which would emit a second, redundant code).
