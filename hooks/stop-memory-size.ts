@@ -112,10 +112,12 @@ async function main(): Promise<void> {
 
   const summary = violations.map((v) => `  ${v.filePath}: ${v.violations.join(", ")}`).join("\n")
 
+  const perFileCommands = violations.map((v) => `  swiz compact-memory ${v.filePath}`).join("\n")
+
   const compactAdvice = skillAdvice(
     "compact-memory",
-    "Use the /compact-memory skill to reduce each file below thresholds.",
-    manualCompactionFallback("each file")
+    `Use the /compact-memory skill or run these commands directly:\n${perFileCommands}`,
+    `${manualCompactionFallback("each file")}\n\nOr run:\n${perFileCommands}`
   )
 
   const steps = [
