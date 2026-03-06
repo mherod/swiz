@@ -39,8 +39,8 @@ export interface MutationPayload {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-/** Default TTL for cached issues: 10 minutes */
-const DEFAULT_TTL_MS = 10 * 60 * 1000
+/** Default TTL for cached issues: 5 minutes (max GitHub cache TTL rule — no GitHub cache may exceed 300_000 ms) */
+export const DEFAULT_TTL_MS = 5 * 60 * 1000
 
 // ─── Store ──────────────────────────────────────────────────────────────────
 

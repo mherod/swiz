@@ -2,7 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { IssueStore, replayPendingMutations, resetIssueStore } from "./issue-store.ts"
+import {
+  DEFAULT_TTL_MS,
+  IssueStore,
+  replayPendingMutations,
+  resetIssueStore,
+} from "./issue-store.ts"
 
 function tempDbPath(): string {
   const dir = join(
@@ -32,6 +37,12 @@ function createStore(): IssueStore {
   stores.push(store)
   return store
 }
+
+describe("DEFAULT_TTL_MS", () => {
+  test("does not exceed 5 minutes (GitHub cache TTL cap)", () => {
+    expect(DEFAULT_TTL_MS).toBeLessThanOrEqual(5 * 60 * 1000)
+  })
+})
 
 describe("IssueStore", () => {
   test("upserts and lists issues within TTL", () => {
