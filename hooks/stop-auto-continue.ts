@@ -1,14 +1,14 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop with an AI-generated next-step suggestion and
 // extract confirmed patterns (reflections) to auto-memory.
-// Uses the Cursor Agent CLI (agent --print --mode ask --trust).
-// Only skips for trivial sessions (< MIN_TOOL_CALLS) or when agent is not installed.
+// Uses the Gemini API (promptGemini) for transcript analysis.
+// Only skips for trivial sessions (< MIN_TOOL_CALLS) or when no API key is available.
 
 import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
-import { detectAgentCli, promptAgent } from "../src/agent.ts"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
+import { hasGeminiApiKey, promptGemini } from "../src/gemini.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   extractPlainTurns,
@@ -564,15 +564,12 @@ async function main(): Promise<void> {
     reflections: [],
   }
 
-  const agentCli = detectAgentCli()
-
-  // No backend available (e.g. CLAUDECODE=1 skips the claude CLI and Cursor/Gemini
-  // are not running) — there is no way to generate a meaningful next-step suggestion.
+  // No backend available — there is no way to generate a meaningful next-step suggestion.
   // Allow stop cleanly rather than blocking with the generic fallback message.
   // This matches the hook's documented intent: "Only skips for trivial sessions
   // (< MIN_TOOL_CALLS) or when agent is not installed."
-  if (!agentCli) {
-    terminate("skip", "NO_BACKEND", "no AI backend available — skipping block")
+  if (!hasGeminiApiKey()) {
+    terminate("skip", "NO_BACKEND", "no Gemini API key available — skipping block")
   }
 
   {
@@ -597,13 +594,12 @@ async function main(): Promise<void> {
     )
 
     try {
-      const result = await promptAgent(prompt, {
-        promptOnly: true,
+      const result = await promptGemini(prompt, {
         timeout: ATTEMPT_TIMEOUT_MS,
       })
       if (result) response = parseAgentResponse(result)
     } catch {
-      // promptAgent threw (backend unreachable mid-call).
+      // promptGemini threw (backend unreachable mid-call).
       // If there is no runtime refinement finding, there is nothing actionable to
       // deliver — exit cleanly as a distinct BACKEND_ERROR path rather than falling
       // through to NO_ACTIONABLE_CONTENT (which would emit a second, redundant code).
