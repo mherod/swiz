@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-03-06
+
+### New Features
+
+- Added `--include-debug` flag to `swiz transcript`. When enabled,
+  the command reads `~/.claude/debug/<sessionId>.txt` and interleaves
+  debug log events inline with conversation turns, ordered by ISO
+  timestamp. Debug lines render with a `│ HH:MM` prefix. The flag is
+  a no-op when no debug file exists for the resolved session. (#121)
+
+### Bug Fixes
+
+- Hardened `parseDebugEvents` in the transcript command through eight
+  successive fixes: NaN-timestamp events are preserved rather than
+  dropped; leading continuation lines (no ISO prefix) are attached to
+  a synthetic event so no input text is lost; a two-pass merge
+  algorithm places malformed events at their original file position
+  relative to sorted valid events; a three-key sort comparator
+  (`_idx` → `iso` → `_seq`) guarantees a total order across all
+  malformed records; a pre-sort normalisation pass guards against
+  non-string `iso` and non-finite `_idx`/`_seq` values.
+- Added a result-validation layer to `posttooluse-task-output` that
+  prevents fabricated test-count claims. The hook now checks for
+  Bun's completion marker (`Ran N test(s) across M file(s).`) before
+  reporting an exact failure count; absent the marker (truncated
+  output), the message uses "unknown number of" instead. Handles
+  singular/plural variants (`1 test`, `1 file`) and strips ANSI
+  escape sequences before matching so bold/dim-coloured summary lines
+  are recognised correctly.
+
 ## 2026-03-05
 
 ### New Features
