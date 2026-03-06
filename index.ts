@@ -21,6 +21,7 @@ import { shimCommand } from "./src/commands/shim.ts"
 import { skillCommand } from "./src/commands/skill.ts"
 import { stateCommand } from "./src/commands/state.ts"
 import { statusCommand } from "./src/commands/status.ts"
+import { statusLineCommand } from "./src/commands/status-line.ts"
 import { tasksCommand } from "./src/commands/tasks.ts"
 import { transcriptCommand } from "./src/commands/transcript.ts"
 import { uninstallCommand } from "./src/commands/uninstall.ts"
@@ -31,6 +32,7 @@ registerCommand(hooksCommand)
 registerCommand(installCommand)
 registerCommand(uninstallCommand)
 registerCommand(statusCommand)
+registerCommand(statusLineCommand)
 registerCommand(settingsCommand)
 registerCommand(stateCommand)
 registerCommand(tasksCommand)

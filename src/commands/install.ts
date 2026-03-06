@@ -449,6 +449,44 @@ function checkBunAvailable(): boolean {
   }
 }
 
+// ─── Status line configuration ───────────────────────────────────────────────
+
+const STATUS_LINE_CMD = "command -v swiz >/dev/null 2>&1 || exit 0; swiz status-line"
+
+async function installStatusLine(dryRun: boolean): Promise<void> {
+  const claudeAgent = AGENTS.find((a) => a.id === "claude")
+  if (!claudeAgent) return
+
+  const settingsPath = claudeAgent.settingsPath
+  const existing = await readJsonFile(settingsPath)
+  const oldText = (await readFileText(settingsPath)).trimEnd()
+
+  const current = existing.statusLine as Record<string, unknown> | undefined
+  const alreadySet = current?.command === STATUS_LINE_CMD
+
+  if (dryRun) {
+    if (alreadySet) {
+      console.log(`  ${DIM}statusLine: already configured${RESET}\n`)
+    } else {
+      console.log(`  ${GREEN}+ statusLine: swiz status-line${RESET}\n`)
+      const proposed = { ...existing, statusLine: { type: "command", command: STATUS_LINE_CMD } }
+      const newText = JSON.stringify(proposed, null, 2)
+      console.log(formatUnifiedDiff(settingsPath, oldText, newText))
+    }
+    return
+  }
+
+  if (alreadySet) {
+    console.log(`  ${DIM}statusLine: already configured${RESET}\n`)
+    return
+  }
+
+  await backup(settingsPath)
+  const proposed = { ...existing, statusLine: { type: "command", command: STATUS_LINE_CMD } }
+  await Bun.write(settingsPath, `${JSON.stringify(proposed, null, 2)}\n`)
+  console.log(`  ${GREEN}✓${RESET} statusLine configured in ${settingsPath}\n`)
+}
+
 // ─── Git mergetool configuration ─────────────────────────────────────────────
 
 async function installMergeTool(dryRun: boolean): Promise<void> {
@@ -491,6 +529,7 @@ export const installCommand: Command = {
     ...AGENTS.map((a) => ({ flags: `--${a.id}`, description: `Install for ${a.name} only` })),
     { flags: "--dry-run", description: "Preview changes without writing to disk" },
     { flags: "--merge-tool", description: "Configure swiz as the global Git mergetool" },
+    { flags: "--status-line", description: "Install swiz status-line into Claude Code settings" },
     { flags: "--json", description: "Output plugin status as JSON (implies --dry-run)" },
     { flags: "(no flags)", description: "Install for all detected agents" },
   ],
@@ -498,6 +537,7 @@ export const installCommand: Command = {
     const jsonOutput = args.includes("--json")
     const dryRun = jsonOutput || args.includes("--dry-run")
     const mergeTool = args.includes("--merge-tool")
+    const statusLine = args.includes("--status-line")
     const targets = getAgentByFlag(args)
 
     if (!checkBunAvailable()) {
@@ -512,6 +552,10 @@ export const installCommand: Command = {
 
     if (mergeTool) {
       await installMergeTool(dryRun)
+    }
+
+    if (statusLine) {
+      await installStatusLine(dryRun)
     }
 
     // Skip hook installation if only --merge-tool was requested
