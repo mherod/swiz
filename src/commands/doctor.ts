@@ -1,9 +1,14 @@
-import { chmod, mkdir, rename, stat } from "node:fs/promises"
+import { chmod, mkdir, readdir, rename, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
 import { manifest } from "../manifest.ts"
 import { readSwizSettings } from "../settings.ts"
-import { findSkillConflicts, SKILL_PRECEDENCE, type SkillConflict } from "../skill-utils.ts"
+import {
+  findSkillConflicts,
+  parseFrontmatterField,
+  SKILL_PRECEDENCE,
+  type SkillConflict,
+} from "../skill-utils.ts"
 import type { Command } from "../types.ts"
 
 const SWIZ_ROOT = dirname(Bun.main)
@@ -437,6 +442,107 @@ async function fixSkillConflicts(
   return { fixed, failed }
 }
 
+// ─── Invalid skill entries check ────────────────────────────────────────────
+
+interface InvalidSkillEntry {
+  name: string
+  skillDir: string
+  entryDir: string
+  reason: string
+}
+
+/** Scan all skill dirs for subdirectories with no SKILL.md or no description field. */
+async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
+  const invalid: InvalidSkillEntry[] = []
+  for (const skillDir of SKILL_PRECEDENCE) {
+    let entries: import("node:fs").Dirent[]
+    try {
+      entries = await readdir(skillDir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      if (entry.name.includes(".disabled-by-swiz-")) continue
+      const entryDir = join(skillDir, entry.name)
+      const skillPath = join(entryDir, "SKILL.md")
+      const file = Bun.file(skillPath)
+      if (!(await file.exists())) {
+        invalid.push({ name: entry.name, skillDir, entryDir, reason: "missing SKILL.md" })
+        continue
+      }
+      const content = await file.text()
+      if (!content.trim()) {
+        invalid.push({ name: entry.name, skillDir, entryDir, reason: "empty SKILL.md" })
+        continue
+      }
+      const description = parseFrontmatterField(content, "description")
+      if (!description) {
+        invalid.push({
+          name: entry.name,
+          skillDir,
+          entryDir,
+          reason: "missing description in frontmatter",
+        })
+      }
+    }
+  }
+  invalid.sort((a, b) => a.name.localeCompare(b.name))
+  return invalid
+}
+
+function buildInvalidSkillResults(entries: InvalidSkillEntry[]): CheckResult[] {
+  if (entries.length === 0) {
+    return [
+      {
+        name: "Invalid skill entries",
+        status: "pass",
+        detail: `no invalid skill entries found across ${SKILL_PRECEDENCE.length} skill directories`,
+      },
+    ]
+  }
+  return entries.map((entry) => ({
+    name: `Invalid skill: ${entry.name}`,
+    status: "warn" as const,
+    detail: `${displayPath(entry.entryDir)}: ${entry.reason} — run: swiz doctor --fix`,
+  }))
+}
+
+interface InvalidSkillFixSuccess {
+  name: string
+  originalDir: string
+  movedDir: string
+}
+interface InvalidSkillFixFailure {
+  name: string
+  originalDir: string
+  error: string
+}
+
+/** Rename invalid skill entries aside using the .disabled-by-swiz-{timestamp} suffix. */
+async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
+  fixed: InvalidSkillFixSuccess[]
+  failed: InvalidSkillFixFailure[]
+}> {
+  const fixed: InvalidSkillFixSuccess[] = []
+  const failed: InvalidSkillFixFailure[] = []
+  const stamp = conflictSuffixTimestamp()
+  for (const entry of entries) {
+    const movedDir = await nextConflictBackupDir(entry.entryDir, stamp)
+    try {
+      await rename(entry.entryDir, movedDir)
+      fixed.push({ name: entry.name, originalDir: entry.entryDir, movedDir })
+    } catch (err: unknown) {
+      failed.push({
+        name: entry.name,
+        originalDir: entry.entryDir,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+  return { fixed, failed }
+}
+
 // ─── Installed config script check ──────────────────────────────────────────
 
 /** Config keys whose values are shell-executable strings (or arrays of args/commands). */
@@ -785,6 +891,8 @@ export const doctorCommand: Command = {
 
     const skillConflicts = await findSkillConflicts()
     results.push(...buildSkillConflictResults(skillConflicts))
+    const invalidSkillEntries = await findInvalidSkillEntries()
+    results.push(...buildInvalidSkillResults(invalidSkillEntries))
 
     // GitHub CLI
     results.push(await checkGhAuth())
@@ -883,11 +991,36 @@ export const doctorCommand: Command = {
           console.log()
         }
       }
-    } else if (staleConfigs.length > 0 || skillConflicts.length > 0 || orphanedScripts.length > 0) {
+
+      if (invalidSkillEntries.length > 0) {
+        console.log(`  ${BOLD}Auto-fixing invalid skill entries...${RESET}\n`)
+        const invalidResult = await fixInvalidSkillEntries(invalidSkillEntries)
+        for (const item of invalidResult.fixed) {
+          console.log(
+            `  ${GREEN}✓${RESET} ${item.name}: moved ${displayPath(item.originalDir)} -> ${displayPath(item.movedDir)}`
+          )
+          console.log(
+            `    ${DIM}restore: mv "${displayPath(item.movedDir)}" "${displayPath(item.originalDir)}"${RESET}`
+          )
+        }
+        for (const item of invalidResult.failed) {
+          console.log(
+            `  ${RED}✗${RESET} ${item.name}: could not move ${displayPath(item.originalDir)} (${item.error})`
+          )
+        }
+        if (invalidResult.fixed.length > 0) console.log()
+      }
+    } else if (
+      staleConfigs.length > 0 ||
+      skillConflicts.length > 0 ||
+      orphanedScripts.length > 0 ||
+      invalidSkillEntries.length > 0
+    ) {
       const fixables = [
         staleConfigs.length > 0 ? "stale configs" : null,
         orphanedScripts.length > 0 ? "orphaned scripts" : null,
         skillConflicts.length > 0 ? "skill conflicts" : null,
+        invalidSkillEntries.length > 0 ? "invalid skill entries" : null,
       ]
         .filter(Boolean)
         .join(" and ")

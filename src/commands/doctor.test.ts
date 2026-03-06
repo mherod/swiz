@@ -495,4 +495,55 @@ describe("swiz doctor", () => {
     const content = await Bun.file(missingPath).text()
     expect(content).toContain("#!/usr/bin/env bun")
   })
+
+  test("detects skill directory missing SKILL.md as invalid", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "broken-skill")
+    await mkdir(skillDir, { recursive: true })
+    // No SKILL.md created inside
+
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Invalid skill: broken-skill")
+    expect(result.stdout).toContain("missing SKILL.md")
+  })
+
+  test("detects skill with SKILL.md missing description as invalid", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "no-desc-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: no-desc-skill\n---\n\nNo description field.\n"
+    )
+
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Invalid skill: no-desc-skill")
+    expect(result.stdout).toContain("missing description in frontmatter")
+  })
+
+  test("reports no invalid skill entries in a healthy install", async () => {
+    const home = await createTempHome()
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Invalid skill entries")
+    expect(result.stdout).toContain("no invalid skill entries found")
+  })
+
+  test("doctor --fix moves invalid skill entry aside", async () => {
+    const home = await createTempHome()
+    const skillsDir = join(home, ".claude", "skills")
+    const skillName = `invalid-skill-${Date.now()}`
+    const skillDir = join(skillsDir, skillName)
+    await mkdir(skillDir, { recursive: true })
+    // No SKILL.md — this is an invalid entry
+
+    const fixRun = await runDoctor(home, ["--fix"])
+    expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
+    expect(await Bun.file(skillDir).exists()).toBe(false)
+
+    const movedDirs = (await readdir(skillsDir, { withFileTypes: true }))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .filter((n) => n.startsWith(`${skillName}.disabled-by-swiz-`))
+    expect(movedDirs.length).toBe(1)
+  })
 })
