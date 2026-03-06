@@ -699,6 +699,24 @@ describe("swiz doctor", () => {
     expect(afterFix.stdout).toContain("description is the generated placeholder")
   })
 
+  test("reports both name mismatch and placeholder description in a single run", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "my-skill")
+    await mkdir(skillDir, { recursive: true })
+    // Wrong name AND placeholder description — both should be reported
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: wrong-name\ndescription: Add a description for this skill.\n---\n"
+    )
+
+    const result = await runDoctor(home)
+    // Both errors must appear — not just the first one encountered
+    expect(result.stdout).toContain(
+      'frontmatter name "wrong-name" does not match directory name "my-skill"'
+    )
+    expect(result.stdout).toContain("description is the generated placeholder")
+  })
+
   test("detects skill where frontmatter name does not match directory name", async () => {
     const home = await createTempHome()
     const skillDir = join(home, ".claude", "skills", "my-skill")

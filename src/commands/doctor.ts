@@ -493,6 +493,7 @@ async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
         })
         continue
       }
+      // Collect all field-level errors in a single pass (no early exit after this point)
       const missing = REQUIRED_SKILL_FIELDS.filter((f) => !parseFrontmatterField(content, f))
       if (missing.length > 0) {
         invalid.push({
@@ -501,22 +502,23 @@ async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
           entryDir,
           reason: `missing required frontmatter field(s): ${missing.join(", ")}`,
         })
-        continue
+        // Continue checking fields that do exist — do NOT early-exit here
       }
-      // Verify frontmatter name matches the directory name (runtime indexes by directory name)
+      // Name-match check (only when name field is present)
       const rawName = parseFrontmatterField(content, "name") ?? ""
-      // Strip surrounding quotes authors sometimes include: name: "my-skill"
-      const unquotedName = rawName.replace(/^["']|["']$/g, "")
-      if (unquotedName !== entry.name) {
-        invalid.push({
-          name: entry.name,
-          skillDir,
-          entryDir,
-          reason: `frontmatter name "${unquotedName}" does not match directory name "${entry.name}"`,
-        })
-        continue
+      if (rawName) {
+        // Strip surrounding quotes authors sometimes include: name: "my-skill"
+        const unquotedName = rawName.replace(/^["']|["']$/g, "")
+        if (unquotedName !== entry.name) {
+          invalid.push({
+            name: entry.name,
+            skillDir,
+            entryDir,
+            reason: `frontmatter name "${unquotedName}" does not match directory name "${entry.name}"`,
+          })
+        }
       }
-      // Warn when description is still the auto-generated placeholder
+      // Placeholder description check (only when description field is present)
       const description = parseFrontmatterField(content, "description")
       if (description?.trim() === SKILL_PLACEHOLDER_DESCRIPTION) {
         invalid.push({
