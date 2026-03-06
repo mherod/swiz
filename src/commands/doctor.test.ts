@@ -219,6 +219,57 @@ describe("swiz doctor", () => {
     expect(result.stdout).toContain("/path with spaces/my hook.ts")
   })
 
+  test("detects missing script referenced in scripts key", async () => {
+    const home = await createTempHome()
+    const claudeDir = join(home, ".claude")
+    await mkdir(claudeDir, { recursive: true })
+    await writeFile(
+      join(claudeDir, "settings.json"),
+      JSON.stringify({
+        hooks: {
+          Stop: [{ scripts: "bun /from/scripts/key/hook.ts" }],
+        },
+      })
+    )
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Installed config scripts")
+    expect(result.stdout).toContain("/from/scripts/key/hook.ts")
+  })
+
+  test("detects missing script referenced in run key", async () => {
+    const home = await createTempHome()
+    const claudeDir = join(home, ".claude")
+    await mkdir(claudeDir, { recursive: true })
+    await writeFile(
+      join(claudeDir, "settings.json"),
+      JSON.stringify({
+        hooks: {
+          Stop: [{ run: "bun /from/run/key/hook.ts" }],
+        },
+      })
+    )
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Installed config scripts")
+    expect(result.stdout).toContain("/from/run/key/hook.ts")
+  })
+
+  test("detects missing script referenced in args array", async () => {
+    const home = await createTempHome()
+    const claudeDir = join(home, ".claude")
+    await mkdir(claudeDir, { recursive: true })
+    await writeFile(
+      join(claudeDir, "settings.json"),
+      JSON.stringify({
+        hooks: {
+          Stop: [{ args: ["bun", "/from/args/array/hook.ts"] }],
+        },
+      })
+    )
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Installed config scripts")
+    expect(result.stdout).toContain("/from/args/array/hook.ts")
+  })
+
   test("reports GitHub CLI auth status", async () => {
     const home = await createTempHome()
     const result = await runDoctor(home)

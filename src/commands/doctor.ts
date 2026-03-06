@@ -363,7 +363,13 @@ async function fixSkillConflicts(
 
 // ─── Installed config script check ──────────────────────────────────────────
 
-/** Recursively walk any JSON value and collect every "command" string at any depth. */
+/** Config keys whose values are shell-executable strings (or arrays of args/commands). */
+const SHELL_STRING_KEYS = new Set(["command", "scripts", "run", "args"])
+
+/**
+ * Recursively walk any JSON value and collect every shell-executable string at any depth.
+ * Collects string values (and strings within arrays) for the keys: command, scripts, run, args.
+ */
 function collectCommandStrings(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.flatMap(collectCommandStrings)
@@ -371,8 +377,12 @@ function collectCommandStrings(value: unknown): string[] {
   if (value !== null && typeof value === "object") {
     const results: string[] = []
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (k === "command" && typeof v === "string") {
-        results.push(v)
+      if (SHELL_STRING_KEYS.has(k)) {
+        if (typeof v === "string") {
+          results.push(v)
+        } else if (Array.isArray(v)) {
+          results.push(...v.filter((item): item is string => typeof item === "string"))
+        }
       } else {
         results.push(...collectCommandStrings(v))
       }
