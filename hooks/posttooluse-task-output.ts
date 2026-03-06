@@ -48,6 +48,23 @@ function extractStatus(response: TaskOutputResponse | string | null | undefined)
   return response.status ?? ""
 }
 
+// ─── ANSI normalization ──────────────────────────────────────────────────────
+
+/**
+ * Strip ANSI escape sequences so pattern matching works on real terminal output.
+ * Bun can embed bold/dim codes around numbers in summary lines, e.g.:
+ *   "Ran ESC[1m4306ESC[0m tests across ESC[1m117ESC[0m files."
+ * Without stripping, word-anchored regexes miss the digits.
+ *
+ * Uses String.fromCharCode(27) to avoid the no-control-regex lint rule,
+ * which forbids embedding ESC (0x1b) literals directly in regex patterns.
+ */
+const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
+
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, "")
+}
+
 // ─── Failure detection ───────────────────────────────────────────────────────
 
 /** Matches bun test failure summary line: "N fail" */
@@ -68,17 +85,20 @@ const HOOK_FAIL_RE = /🥊.*hook: (pre-push|pre-commit)|error: failed to push/i
 const EXIT_FAIL_RE = /exit\s+(?:status|code)\s+([1-9]\d*)/
 
 function detectFailure(output: string, exitCode: number | null): string | null {
+  // Normalize once — all pattern matching below operates on ANSI-free text.
+  const clean = stripAnsi(output)
+
   // Non-zero exit code is the primary signal
   if (exitCode !== null && exitCode !== 0) {
     // Try to surface the most actionable line from the output
-    const lines = output.split("\n").filter((l) => l.trim())
+    const lines = clean.split("\n").filter((l) => l.trim())
 
     // Bun test failures
-    const failMatch = output.match(BUN_FAIL_RE)
+    const failMatch = clean.match(BUN_FAIL_RE)
     if (failMatch) {
       // Only claim an exact count when the bun completion marker is present.
       // Its absence means output was truncated — report "unknown" instead.
-      const isComplete = BUN_COMPLETE_RE.test(output)
+      const isComplete = BUN_COMPLETE_RE.test(clean)
       const countLabel = isComplete ? `${failMatch[1]}` : "unknown number of"
       // Find first ✗ failure line for context
       const failLine = lines.find((l) => l.includes("✗") || l.includes("error:"))
@@ -87,8 +107,8 @@ function detectFailure(output: string, exitCode: number | null): string | null {
     }
 
     // Push / hook failures
-    if (HOOK_FAIL_RE.test(output)) {
-      const hookName = output.match(/hook: (\S+)/)?.[1] ?? "pre-push"
+    if (HOOK_FAIL_RE.test(clean)) {
+      const hookName = clean.match(/hook: (\S+)/)?.[1] ?? "pre-push"
       const errorLine = lines.find((l) => l.includes("error:") || l.includes("✗"))
       const detail = errorLine ? `\n\nFailing check: ${errorLine.trim()}` : ""
       return `${hookName} hook blocked the operation (exit code ${exitCode}).${detail}\n\nFix the underlying issue — do not bypass hooks.`
@@ -101,8 +121,8 @@ function detectFailure(output: string, exitCode: number | null): string | null {
   }
 
   // Even with exit 0, some tools print error patterns (rare but happens with gh CLI)
-  if (exitCode === null && EXIT_FAIL_RE.test(output)) {
-    const code = output.match(EXIT_FAIL_RE)?.[1]
+  if (exitCode === null && EXIT_FAIL_RE.test(clean)) {
+    const code = clean.match(EXIT_FAIL_RE)?.[1]
     return `Output contains exit status ${code}. Verify the task actually succeeded before continuing.`
   }
 

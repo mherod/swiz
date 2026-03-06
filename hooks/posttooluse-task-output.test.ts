@@ -154,4 +154,35 @@ describe("posttooluse-task-output: result-validation guard", () => {
     expect(result.reason).toContain("1 test(s) failed")
     expect(result.reason).not.toContain("unknown")
   })
+
+  test("ANSI-decorated completion line is recognised as complete", async () => {
+    // Simulate bun embedding bold around numbers: "Ran ESC[1m4306ESC[0m tests across ESC[1m117ESC[0m files."
+    const ESC = String.fromCharCode(27)
+    const boldNum = (n: number) => `${ESC}[1m${n}${ESC}[0m`
+    const output = [
+      `bun test v1.3.10`,
+      ``,
+      `${ESC}[2m 0 pass${ESC}[0m`,
+      `${ESC}[2m 2 fail${ESC}[0m`,
+      `Ran ${boldNum(2)} tests across ${boldNum(1)} files. ${ESC}[2m[${ESC}[1m0.05s${ESC}[0m${ESC}[2m]${ESC}[0m`,
+    ].join("\n")
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("2 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
+
+  test("ANSI-decorated fail count is parsed correctly", async () => {
+    // Bun dim-colours the '0 fail' line: ESC[2m 0 fail ESC[0m
+    const ESC = String.fromCharCode(27)
+    const output = [
+      `bun test v1.3.10`,
+      `${ESC}[2m 3 fail${ESC}[0m`,
+      `Ran 3 tests across 2 files. [0.10s]`,
+    ].join("\n")
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("3 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
 })
