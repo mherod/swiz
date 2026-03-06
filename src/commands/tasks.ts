@@ -640,7 +640,7 @@ async function updateStatus(
 }
 
 async function completeAll(filterCwd?: string, evidence?: string) {
-  const resolvedEvidence = evidence ?? "note:bulk-complete"
+  const resolvedEvidence = evidence ?? "note:bulk-complete — conclusion: all tasks completed"
   const evidenceError = validateEvidence(resolvedEvidence)
   if (evidenceError) throw new Error(evidenceError)
 
@@ -663,14 +663,46 @@ async function completeAll(filterCwd?: string, evidence?: string) {
 
 const EVIDENCE_PREFIXES = ["commit:", "pr:", "file:", "test:", "note:"]
 
+/**
+ * Structured evidence patterns — mirror of pretooluse-require-task-evidence.ts.
+ * Any 2+ must be present for completion to be accepted.
+ */
+const STRUCTURED_EVIDENCE_PATTERNS: Array<{ name: string; re: RegExp }> = [
+  { name: "note", re: /note:\s*\S.{4,}/i },
+  { name: "conclusion", re: /conclusion:\s*\S+/i },
+  { name: "run", re: /\brun\s+\d{3,}/i },
+  { name: "commit", re: /\b[0-9a-f]{7,40}\b/ },
+  { name: "ci_green", re: /\bci\s+green\b/i },
+  { name: "pr", re: /\bpr[:#]\s*\d+/i },
+  { name: "no_ci", re: /no\s+ci.*(workflow|run|configured)/i },
+]
+
+const REQUIRED_EVIDENCE_FIELDS = 2
+
 export function validateEvidence(evidence: string): string | null {
-  if (EVIDENCE_PREFIXES.some((p) => evidence.startsWith(p))) return null
-  return (
-    `Invalid evidence format: "${evidence}"\n` +
-    "Evidence must start with a recognized prefix:\n" +
-    EVIDENCE_PREFIXES.map((p) => `  ${p}<value>`).join("\n") +
-    '\n\nExample: --evidence "commit:abc123f" or --evidence "note:CI green"'
+  if (!EVIDENCE_PREFIXES.some((p) => evidence.startsWith(p))) {
+    return (
+      `Invalid evidence format: "${evidence}"\n` +
+      "Evidence must start with a recognized prefix:\n" +
+      EVIDENCE_PREFIXES.map((p) => `  ${p}<value>`).join("\n") +
+      '\n\nExample: --evidence "commit:abc123f" or --evidence "note:CI green"'
+    )
+  }
+
+  const matched = STRUCTURED_EVIDENCE_PATTERNS.filter(({ re }) => re.test(evidence)).map(
+    ({ name }) => name
   )
+  if (matched.length < REQUIRED_EVIDENCE_FIELDS) {
+    const found = matched.length > 0 ? matched.join(", ") : "none"
+    return (
+      `Evidence must contain at least ${REQUIRED_EVIDENCE_FIELDS} structured fields, but found ${matched.length} (${found}).\n\n` +
+      `Structured fields (any ${REQUIRED_EVIDENCE_FIELDS}+ required):\n` +
+      STRUCTURED_EVIDENCE_PATTERNS.map(({ name }) => `  • ${name}`).join("\n") +
+      '\n\nExample: --evidence "note:CI green — conclusion: success, run 12345678"'
+    )
+  }
+
+  return null
 }
 
 export function verifyTaskSubject(taskSubject: string, verifyText: string): string | null {

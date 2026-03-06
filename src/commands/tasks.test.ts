@@ -198,12 +198,11 @@ describe("getSessions", () => {
 // ─── validateEvidence ─────────────────────────────────────────────────────────
 
 describe("validateEvidence", () => {
-  it("accepts valid evidence prefixes", () => {
-    expect(validateEvidence("commit:abc123f")).toBeNull()
-    expect(validateEvidence("pr:42")).toBeNull()
-    expect(validateEvidence("file:src/feature.ts")).toBeNull()
-    expect(validateEvidence("test:all-passed")).toBeNull()
+  it("accepts evidence with 2+ structured fields", () => {
     expect(validateEvidence("note:CI green — conclusion: success")).toBeNull()
+    expect(validateEvidence("commit:abc123f — note:tests passed")).toBeNull()
+    expect(validateEvidence("note:all checks passed — conclusion: done")).toBeNull()
+    expect(validateEvidence("note:bulk-complete — conclusion: all tasks completed")).toBeNull()
   })
 
   it("rejects evidence without a recognized prefix", () => {
@@ -211,6 +210,13 @@ describe("validateEvidence", () => {
     expect(error).not.toBeNull()
     expect(error).toContain("Invalid evidence format")
     expect(error).toContain("commit:")
+  })
+
+  it("rejects evidence with only 1 structured field", () => {
+    const error = validateEvidence("note:only one structured field present")
+    expect(error).not.toBeNull()
+    expect(error).toContain("at least 2 structured fields")
+    expect(error).toContain("found 1")
   })
 
   it("rejects empty-ish evidence without prefix", () => {
