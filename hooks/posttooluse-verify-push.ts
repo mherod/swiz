@@ -14,27 +14,22 @@
  *   - HEAD matches remote (immediate or after retry) → emits additionalContext confirming push landed
  *   - HEAD does not match remote after ~15s retry window → denyPostToolUse (blocks with error)
  *
- * Background push detection: if the Bash tool ran with run_in_background, the tool_response
- * contains "running in background". In that case verification is skipped — the push hasn't
- * completed yet and must be verified via TaskOutput once the background task finishes.
+ * Background push detection: if the Bash tool ran with run_in_background=true, tool_input
+ * carries that flag. Verification is skipped — the push hasn't completed yet and must be
+ * verified via TaskOutput once the background task finishes.
  */
 
 import { denyPostToolUse, GIT_PUSH_RE, git, isShellTool, type ToolHookInput } from "./hook-utils.ts"
 
-interface ExtendedToolHookInput extends ToolHookInput {
-  tool_response?: string | null
-}
-
-const input = (await Bun.stdin.json()) as ExtendedToolHookInput
+const input = (await Bun.stdin.json()) as ToolHookInput
 if (!input.tool_name || !isShellTool(input.tool_name)) process.exit(0)
 
 const command = String(input.tool_input?.command ?? "")
 if (!GIT_PUSH_RE.test(command)) process.exit(0)
 
 // Skip verification for background pushes — the push hasn't completed when PostToolUse fires.
-// Background task output must be read via TaskOutput to verify the push succeeded.
-const toolResponse = String(input.tool_response ?? "")
-if (toolResponse.includes("running in background")) process.exit(0)
+// The run_in_background Bash parameter is forwarded in tool_input; verify via TaskOutput instead.
+if (input.tool_input?.run_in_background === true) process.exit(0)
 
 const cwd = input.cwd ?? process.cwd()
 
