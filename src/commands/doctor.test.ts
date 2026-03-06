@@ -470,4 +470,29 @@ describe("swiz doctor", () => {
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).not.toContain(`Skill conflict: ${skillName}`)
   })
+
+  test("reports no orphaned hook scripts in a healthy install", async () => {
+    const home = await createTempHome()
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Orphaned hook scripts")
+    expect(result.stdout).toContain("no orphaned scripts found")
+  })
+
+  test("doctor --fix creates stub for missing config script", async () => {
+    const home = await createTempHome()
+    const claudeDir = join(home, ".claude")
+    await mkdir(claudeDir, { recursive: true })
+    const missingPath = join(home, "my-hook.ts")
+    await writeFile(
+      join(claudeDir, "settings.json"),
+      JSON.stringify({
+        hooks: { Stop: [{ hooks: [{ type: "command", command: `bun ${missingPath}` }] }] },
+      })
+    )
+    const fixRun = await runDoctor(home, ["--fix"])
+    expect(fixRun.stdout).toContain("Registering missing config scripts")
+    expect(await Bun.file(missingPath).exists()).toBe(true)
+    const content = await Bun.file(missingPath).text()
+    expect(content).toContain("#!/usr/bin/env bun")
+  })
 })

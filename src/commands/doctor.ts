@@ -1,4 +1,4 @@
-import { chmod, rename, stat } from "node:fs/promises"
+import { chmod, mkdir, rename, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
 import { manifest } from "../manifest.ts"
@@ -143,8 +143,8 @@ async function checkManifestHandlerPaths(): Promise<CheckResult> {
   }
 }
 
-/** Find .ts files in hooks/ that are not referenced by the manifest or any agent config. */
-async function checkOrphanedHookScripts(): Promise<CheckResult> {
+/** Return basenames of .ts entry points in hooks/ not referenced by the manifest or any agent config. */
+async function findOrphanedHookScripts(): Promise<string[]> {
   const manifestFiles = new Set(manifest.flatMap((g) => g.hooks.map((h) => h.file)))
 
   // Scripts referenced by agent configs that live inside hooks/ (by basename)
@@ -158,22 +158,20 @@ async function checkOrphanedHookScripts(): Promise<CheckResult> {
   const glob = new Bun.Glob("*.ts")
   const orphaned: string[] = []
   for await (const file of glob.scan({ cwd: HOOKS_DIR })) {
-    // Skip test files — they are not hook scripts
     if (file.endsWith(".test.ts")) continue
-    // Referenced by manifest or agent config → not orphaned
     if (manifestFiles.has(file)) continue
     if (configBasenames.has(file)) continue
-    // Only flag hook entry points (files with a bun shebang on the first line).
-    // Library files imported by hooks (e.g. hook-utils.ts) have no shebang and are not hook scripts.
-    // Read the first 256 bytes and extract the first line to avoid loading full file contents.
+    // Only flag hook entry points — library files lack a bun shebang
     const chunk = await Bun.file(join(HOOKS_DIR, file)).slice(0, 256).text()
     const firstLine = chunk.split("\n", 1)[0] ?? ""
     if (!firstLine.startsWith("#!/") || !firstLine.includes("bun")) continue
     orphaned.push(file)
   }
-
   orphaned.sort()
+  return orphaned
+}
 
+function buildOrphanedResult(orphaned: string[]): CheckResult {
   if (orphaned.length === 0) {
     return {
       name: "Orphaned hook scripts",
@@ -181,12 +179,80 @@ async function checkOrphanedHookScripts(): Promise<CheckResult> {
       detail: `no orphaned scripts found in hooks/`,
     }
   }
-
   return {
     name: "Orphaned hook scripts",
     status: "warn",
-    detail: `${orphaned.length} script(s) in hooks/ not referenced by manifest: ${orphaned.join(", ")}`,
+    detail: `${orphaned.length} script(s) in hooks/ not referenced by manifest or config: ${orphaned.join(", ")} — run: swiz doctor --fix`,
   }
+}
+
+interface OrphanFixSuccess {
+  file: string
+  movedPath: string
+}
+interface OrphanFixFailure {
+  file: string
+  error: string
+}
+
+/** Move orphaned hook scripts aside using the .disabled-by-swiz-{timestamp} suffix. */
+async function fixOrphanedHookScripts(
+  orphaned: string[]
+): Promise<{ fixed: OrphanFixSuccess[]; failed: OrphanFixFailure[] }> {
+  const fixed: OrphanFixSuccess[] = []
+  const failed: OrphanFixFailure[] = []
+  const stamp = conflictSuffixTimestamp()
+  for (const file of orphaned) {
+    const src = join(HOOKS_DIR, file)
+    const dst = `${src}.disabled-by-swiz-${stamp}`
+    try {
+      await rename(src, dst)
+      fixed.push({ file, movedPath: dst })
+    } catch (err: unknown) {
+      failed.push({ file, error: err instanceof Error ? err.message : String(err) })
+    }
+  }
+  return { fixed, failed }
+}
+
+/** Return config-referenced script paths that do not exist on disk. */
+async function findMissingConfigScriptPaths(): Promise<string[]> {
+  const configPaths = await collectInstalledConfigScriptPaths()
+  const missing: string[] = []
+  for (const p of configPaths) {
+    if (!(await Bun.file(p).exists())) missing.push(p)
+  }
+  return missing
+}
+
+interface MissingScriptFixSuccess {
+  path: string
+}
+interface MissingScriptFixFailure {
+  path: string
+  error: string
+}
+
+/** Create minimal executable stub scripts for config-referenced paths that are missing. */
+async function fixMissingConfigScripts(paths: string[]): Promise<{
+  registered: MissingScriptFixSuccess[]
+  failed: MissingScriptFixFailure[]
+}> {
+  const registered: MissingScriptFixSuccess[] = []
+  const failed: MissingScriptFixFailure[] = []
+  const stub =
+    "#!/usr/bin/env bun\n// Registered by swiz doctor --fix. Implement this hook script.\n"
+  for (const p of paths) {
+    try {
+      await mkdir(dirname(p), { recursive: true })
+      await Bun.write(p, stub)
+      await chmod(p, 0o755)
+      registered.push({ path: p })
+    } catch (err: unknown) {
+      failed.push({ path: p, error: err instanceof Error ? err.message : String(err) })
+    }
+  }
+  return { registered, failed }
 }
 
 async function checkGhAuth(): Promise<CheckResult> {
@@ -707,7 +773,8 @@ export const doctorCommand: Command = {
     // Hook scripts
     results.push(await checkHookScripts())
     results.push(await checkManifestHandlerPaths())
-    results.push(await checkOrphanedHookScripts())
+    const orphanedScripts = await findOrphanedHookScripts()
+    results.push(buildOrphanedResult(orphanedScripts))
     results.push(await checkInstalledConfigScripts())
     results.push(await checkScriptExecutePermissions(fix))
 
@@ -766,6 +833,36 @@ export const doctorCommand: Command = {
         }
       }
 
+      if (orphanedScripts.length > 0) {
+        console.log(`  ${BOLD}Auto-fixing orphaned hook scripts...${RESET}\n`)
+        const orphanResult = await fixOrphanedHookScripts(orphanedScripts)
+        for (const item of orphanResult.fixed) {
+          console.log(`  ${GREEN}✓${RESET} ${item.file}: moved aside`)
+          console.log(
+            `    ${DIM}restore: mv "${displayPath(item.movedPath)}" "${join(HOOKS_DIR, item.file)}"${RESET}`
+          )
+        }
+        for (const item of orphanResult.failed) {
+          console.log(`  ${RED}✗${RESET} ${item.file}: could not move (${item.error})`)
+        }
+        if (orphanResult.fixed.length > 0) console.log()
+      }
+
+      const missingConfigPaths = await findMissingConfigScriptPaths()
+      if (missingConfigPaths.length > 0) {
+        console.log(`  ${BOLD}Registering missing config scripts...${RESET}\n`)
+        const regResult = await fixMissingConfigScripts(missingConfigPaths)
+        for (const item of regResult.registered) {
+          console.log(`  ${GREEN}✓${RESET} Registered stub: ${displayPath(item.path)}`)
+        }
+        for (const item of regResult.failed) {
+          console.log(
+            `  ${RED}✗${RESET} Failed to register ${displayPath(item.path)}: ${item.error}`
+          )
+        }
+        if (regResult.registered.length > 0) console.log()
+      }
+
       if (skillConflicts.length > 0) {
         console.log(`  ${BOLD}Auto-fixing skill conflicts...${RESET}\n`)
         const fixedResult = await fixSkillConflicts(skillConflicts)
@@ -786,9 +883,10 @@ export const doctorCommand: Command = {
           console.log()
         }
       }
-    } else if (staleConfigs.length > 0 || skillConflicts.length > 0) {
+    } else if (staleConfigs.length > 0 || skillConflicts.length > 0 || orphanedScripts.length > 0) {
       const fixables = [
         staleConfigs.length > 0 ? "stale configs" : null,
+        orphanedScripts.length > 0 ? "orphaned scripts" : null,
         skillConflicts.length > 0 ? "skill conflicts" : null,
       ]
         .filter(Boolean)
