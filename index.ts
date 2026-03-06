@@ -4,6 +4,7 @@ import { ciWaitCommand } from "./src/commands/ci-wait.ts"
 import { cleanupCommand } from "./src/commands/cleanup.ts"
 import { compactCommand } from "./src/commands/compact.ts"
 import { continueCommand } from "./src/commands/continue.ts"
+import { crossRepoIssueCommand } from "./src/commands/cross-repo-issue.ts"
 import { dispatchCommand } from "./src/commands/dispatch.ts"
 import { doctorCommand } from "./src/commands/doctor.ts"
 import { hooksCommand } from "./src/commands/hooks.ts"
@@ -39,6 +40,7 @@ registerCommand(transcriptCommand)
 registerCommand(continueCommand)
 registerCommand(cleanupCommand)
 registerCommand(issueCommand)
+registerCommand(crossRepoIssueCommand)
 registerCommand(sentimentCommand)
 registerCommand(sessionCommand)
 registerCommand(ciWaitCommand)
