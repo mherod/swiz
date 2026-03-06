@@ -470,6 +470,7 @@ async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
     }
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
+      if (entry.name.startsWith(".")) continue // skip hidden/temp dirs (e.g. .unison.*)
       if (entry.name.includes(".disabled-by-swiz-")) continue
       const entryDir = join(skillDir, entry.name)
       const skillPath = join(entryDir, "SKILL.md")
@@ -499,6 +500,19 @@ async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
           skillDir,
           entryDir,
           reason: `missing required frontmatter field(s): ${missing.join(", ")}`,
+        })
+        continue
+      }
+      // Verify frontmatter name matches the directory name (runtime indexes by directory name)
+      const rawName = parseFrontmatterField(content, "name") ?? ""
+      // Strip surrounding quotes authors sometimes include: name: "my-skill"
+      const unquotedName = rawName.replace(/^["']|["']$/g, "")
+      if (unquotedName !== entry.name) {
+        invalid.push({
+          name: entry.name,
+          skillDir,
+          entryDir,
+          reason: `frontmatter name "${unquotedName}" does not match directory name "${entry.name}"`,
         })
       }
     }

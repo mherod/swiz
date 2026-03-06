@@ -588,4 +588,47 @@ describe("swiz doctor", () => {
       .filter((n) => n.startsWith(`${skillName}.disabled-by-swiz-`))
     expect(movedDirs.length).toBe(1)
   })
+
+  test("detects skill where frontmatter name does not match directory name", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "my-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: different-name\ndescription: test skill\n---\n"
+    )
+
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Invalid skill: my-skill")
+    expect(result.stdout).toContain(
+      'frontmatter name "different-name" does not match directory name "my-skill"'
+    )
+  })
+
+  test("does not flag skill with quoted frontmatter name matching directory name", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "quoted-skill")
+    await mkdir(skillDir, { recursive: true })
+    // Quoted name that matches dir name after stripping quotes
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      '---\nname: "quoted-skill"\ndescription: test skill\n---\n'
+    )
+
+    const result = await runDoctor(home)
+    expect(result.stdout).not.toContain("Invalid skill: quoted-skill")
+  })
+
+  test("ignores dotdirectories inside skill paths", async () => {
+    const home = await createTempHome()
+    const skillsDir = join(home, ".claude", "skills")
+    // Simulate a .unison temp directory — no SKILL.md inside
+    const dotDir = join(skillsDir, ".unison.solid-analysis.abc123.unison.tmp")
+    await mkdir(dotDir, { recursive: true })
+
+    const result = await runDoctor(home)
+    // The dotdir must not appear as an invalid skill entry
+    expect(result.stdout).not.toContain("Invalid skill: .unison")
+    expect(result.stdout).toContain("no invalid skill entries found")
+  })
 })
