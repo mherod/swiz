@@ -277,8 +277,11 @@ async function loadDebugLog(sessionId: string): Promise<DebugLog | null> {
 }
 
 function parseDebugEvents(lines: string[]): DebugEvent[] {
-  const events: DebugEvent[] = []
-  for (const line of lines) {
+  // Track original file index so equal-timestamp events sort deterministically (file order)
+  const events: Array<DebugEvent & { _idx: number }> = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (line === undefined) continue
     const m = DEBUG_TS_RE.exec(line)
     // Lines without a leading ISO timestamp (e.g. continuation lines) are intentionally skipped
     if (!m) continue
@@ -288,11 +291,11 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
     // Guard against malformed timestamps that produce NaN — NaN comparisons are always false,
     // which would cause the event to be flushed before every turn (wrong interleaving position)
     if (isNaN(ts)) continue
-    events.push({ iso, ts, text: line.slice(m[0].length) })
+    events.push({ iso, ts, text: line.slice(m[0].length), _idx: i })
   }
-  // Sort by timestamp to handle any out-of-order lines in the debug file
-  events.sort((a, b) => a.ts - b.ts)
-  return events
+  // Primary sort by timestamp; secondary sort by original line index for deterministic tie-breaking
+  events.sort((a, b) => a.ts - b.ts || a._idx - b._idx)
+  return events.map(({ iso, ts, text }) => ({ iso, ts, text }))
 }
 
 function renderDebugLine(event: DebugEvent): void {

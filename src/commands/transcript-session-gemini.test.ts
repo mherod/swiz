@@ -301,6 +301,32 @@ describe("Provider transcript/session command support", () => {
     expect(earlyIdx).toBeLessThan(lateIdx)
   })
 
+  test("swiz transcript --include-debug renders equal-timestamp debug lines in file order", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc01-7777-7888-8999-cccccccccccc"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
+    // Three lines share an identical timestamp — tie-breaker must preserve file order
+    await createDebugLog(home, sessionId, [
+      "2026-03-06T04:29:06.500Z [DEBUG] first concurrent",
+      "2026-03-06T04:29:06.500Z [DEBUG] second concurrent",
+      "2026-03-06T04:29:06.500Z [DEBUG] third concurrent",
+    ])
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--include-debug"],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    const firstIdx = out.indexOf("[DEBUG] first concurrent")
+    const secondIdx = out.indexOf("[DEBUG] second concurrent")
+    const thirdIdx = out.indexOf("[DEBUG] third concurrent")
+    expect(firstIdx).toBeLessThan(secondIdx)
+    expect(secondIdx).toBeLessThan(thirdIdx)
+  })
+
   test("swiz session --list includes Codex sessions", async () => {
     const home = await createTempHome()
     const projectDir = join(home, "workspace", "demo-codex")
