@@ -33,9 +33,6 @@ const MIN_TOOL_CALLS = 5 // Don't engage for trivial sessions
 const CONTEXT_TURNS = 20 // Recent turns to send as context
 const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 90_000
 
-const FALLBACK_SUGGESTION =
-  "Review the session transcript, identify the most critical incomplete task, and complete it autonomously without asking for confirmation."
-
 const WORKFLOW_FINDING =
   "Collaboration/workflow policy finding detected. Report the violation and enforce the gate; do not prescribe project-specific implementation details."
 
@@ -540,7 +537,7 @@ async function main(): Promise<void> {
       })
       if (result) response = parseAgentResponse(result)
     } catch {
-      // promptAgent threw (backend unreachable mid-call) — fall through to fallback below
+      // promptAgent threw (backend unreachable mid-call) — response.next stays ""
     }
   }
 
@@ -555,6 +552,13 @@ async function main(): Promise<void> {
   if (response.reflections.length > 0) {
     await writeReflections(input.cwd, response.reflections)
   }
+
+  // Only block when we have something actionable to deliver:
+  //   - a real AI-generated next step (response.next), OR
+  //   - an explicit runtime finding (refinementStatus: open issues needing triage)
+  // Never block with the generic FALLBACK_SUGGESTION — it provides no specific
+  // guidance and causes interactive sessions to spin indefinitely.
+  if (!response.next && !refinementStatus) return
 
   const critiqueLines = effective.critiquesEnabled
     ? [
@@ -571,7 +575,7 @@ async function main(): Promise<void> {
   // is never lost to AI interpretation.
   const refinementDirective = refinementStatus ? `\n\nNote: ${refinementStatus}` : ""
   blockStopRaw(
-    `${critiqueLine}Stop blocked — unresolved finding: ${response.next || FALLBACK_SUGGESTION}${refinementDirective}`
+    `${critiqueLine}Stop blocked — unresolved finding: ${response.next || refinementStatus}${refinementDirective}`
   )
 }
 

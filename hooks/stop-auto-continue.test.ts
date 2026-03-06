@@ -216,9 +216,9 @@ describe("stop-auto-continue", () => {
     expect(result.reason).toContain("Run the linter")
   })
 
-  test("falls back to generic message when agent fails", async () => {
+  test("allows stop when agent fails (no fallback block)", async () => {
     const binDir = await createTempDir()
-    // Agent always fails
+    // Agent always fails — no useful suggestion can be generated, so stop is allowed.
     await createFakeAgent(binDir, "", 1)
 
     const result = await runHook({
@@ -226,8 +226,8 @@ describe("stop-auto-continue", () => {
       binDir,
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput.trim()).toBe("")
   })
 
   test("allows stop when no AI backend is available (no fallback block)", async () => {
@@ -325,9 +325,9 @@ describe("stop-auto-continue", () => {
     expect(result.reason).not.toContain("Run the full test suite.")
   })
 
-  test("falls back to generic message when agent response contains tool-call markup", async () => {
+  test("allows stop and suppresses markup when agent response contains tool-call markup", async () => {
     const binDir = await createTempDir()
-    // Agent returns what looks like XML/tool-call markup on the first line
+    // Agent returns XML/tool-call markup — rejected by sanitizeResponse, stop is allowed.
     await createFakeAgent(binDir, "<tool_call>read_file</tool_call>")
 
     const result = await runHook({
@@ -335,9 +335,8 @@ describe("stop-auto-continue", () => {
       binDir,
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
-    expect(result.reason).not.toContain("<tool_call>")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput).not.toContain("<tool_call>")
   })
 
   test("rejects response with unicode fullwidth < lookalike", async () => {
@@ -350,9 +349,8 @@ describe("stop-auto-continue", () => {
       binDir,
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
-    expect(result.reason).not.toContain("\uFF1Ctool_call")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput).not.toContain("\uFF1Ctool_call")
   })
 
   test("rejects response with zero-width joiner injected between < and tag name", async () => {
@@ -365,9 +363,8 @@ describe("stop-auto-continue", () => {
       binDir,
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
-    expect(result.reason).not.toContain("<\u200Dtool_call>")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput).not.toContain("<\u200Dtool_call>")
   })
 
   test("rejects response with RTL override character before markup", async () => {
@@ -380,8 +377,8 @@ describe("stop-auto-continue", () => {
       binDir,
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput.trim()).toBe("")
   })
 
   test("rejects response with CJK left angle bracket homoglyph 〈 (U+3008)", async () => {
@@ -393,9 +390,8 @@ describe("stop-auto-continue", () => {
       binDir,
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
-    expect(result.reason).not.toContain("\u3008tool_call")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput).not.toContain("\u3008tool_call")
   })
 
   test("rejects response with single left-pointing angle quotation ‹ (U+2039)", async () => {
@@ -407,9 +403,8 @@ describe("stop-auto-continue", () => {
       binDir,
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
-    expect(result.reason).not.toContain("\u2039tool_call")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput).not.toContain("\u2039tool_call")
   })
 
   test("rejects response with mathematical left angle bracket ⟨ (U+27E8)", async () => {
@@ -421,9 +416,8 @@ describe("stop-auto-continue", () => {
       binDir,
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
-    expect(result.reason).not.toContain("\u27E8tool_call")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput).not.toContain("\u27E8tool_call")
   })
 
   test("rejects response with modifier letter left arrowhead ˂ (U+02C2)", async () => {
@@ -432,9 +426,8 @@ describe("stop-auto-continue", () => {
 
     const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
-    expect(result.reason).not.toContain("\u02C2tool_call")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput).not.toContain("\u02C2tool_call")
   })
 
   test("rejects response with Canadian Syllabics PA ᐸ (U+1438)", async () => {
@@ -443,9 +436,8 @@ describe("stop-auto-continue", () => {
 
     const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
-    expect(result.reason).not.toContain("\u1438tool_call")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput).not.toContain("\u1438tool_call")
   })
 
   test("rejects response with heavy left-pointing angle quotation ❮ (U+276E)", async () => {
@@ -454,9 +446,8 @@ describe("stop-auto-continue", () => {
 
     const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
-    expect(result.reason).not.toContain("\u276Etool_call")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput).not.toContain("\u276Etool_call")
   })
 
   test("rejects response with small less-than sign ﹤ (U+FE64, NFKC→<)", async () => {
@@ -465,8 +456,8 @@ describe("stop-auto-continue", () => {
 
     const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput.trim()).toBe("")
   })
 
   test("rejects response with heavy left-pointing angle bracket ❰ (U+2770)", async () => {
@@ -475,8 +466,8 @@ describe("stop-auto-continue", () => {
 
     const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput.trim()).toBe("")
   })
 
   test("rejects response with mathematical left double angle bracket ⟪ (U+27EA)", async () => {
@@ -485,8 +476,8 @@ describe("stop-auto-continue", () => {
 
     const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput.trim()).toBe("")
   })
 
   test("rejects response with left angle bracket with dot ⦑ (U+2991)", async () => {
@@ -495,8 +486,8 @@ describe("stop-auto-continue", () => {
 
     const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput.trim()).toBe("")
   })
 
   test("rejects response with left-pointing curved angle bracket ⧼ (U+29FC)", async () => {
@@ -505,8 +496,8 @@ describe("stop-auto-continue", () => {
 
     const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput.trim()).toBe("")
   })
 
   test("rejects response with leading-whitespace XML tag", async () => {
@@ -518,9 +509,8 @@ describe("stop-auto-continue", () => {
       binDir,
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
-    expect(result.reason).not.toContain("<tool_call>")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput).not.toContain("<tool_call>")
   })
 
   test("rejects response with XML markup embedded after normal text", async () => {
@@ -532,9 +522,8 @@ describe("stop-auto-continue", () => {
       binDir,
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
-    expect(result.reason).not.toContain("<tool_call>")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput).not.toContain("<tool_call>")
   })
 
   test("skips empty lines and returns first non-empty clean line", async () => {
@@ -760,7 +749,7 @@ describe("stop-auto-continue", () => {
     expect(capturedArgs).not.toContain("Should be ignored")
   })
 
-  test("times out slow backend and falls back to generic message", async () => {
+  test("allows stop when backend times out (no fallback block)", async () => {
     const binDir = await createTempDir()
     await createSlowFakeAgent(binDir, "This should never appear", 30)
 
@@ -772,9 +761,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
-    expect(result.reason).not.toContain("This should never appear")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput.trim()).toBe("")
   }, 10_000)
 
   // ─── JSON response parsing tests ──────────────────────────────────────────
@@ -820,7 +808,7 @@ describe("stop-auto-continue", () => {
     expect(result.reason).toContain("Fix the type errors")
   })
 
-  test("rejects markup in JSON next field and falls back", async () => {
+  test("allows stop and suppresses markup in JSON next field (no fallback block)", async () => {
     const binDir = await createTempDir()
     const json = JSON.stringify({ next: "<tool_call>bash</tool_call>", reflections: [] })
     await createFakeAgent(binDir, json)
@@ -830,9 +818,8 @@ describe("stop-auto-continue", () => {
       binDir,
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("identify the most critical incomplete task")
-    expect(result.reason).not.toContain("<tool_call>")
+    expect(result.decision).toBeUndefined()
+    expect(result.rawOutput).not.toContain("<tool_call>")
   })
 
   test("replaces workflow implementation prescriptions with a policy finding", async () => {
