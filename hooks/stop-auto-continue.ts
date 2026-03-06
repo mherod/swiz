@@ -455,14 +455,39 @@ function buildPrompt(
  *
  * Returning `never` is a compiler-enforced guarantee: no code after any
  * terminate() call can execute, making dual-emission structurally impossible.
+ *
+ * The runtime implementation is defensively hardened: unknown actions default
+ * to "block" (safe — prevents accidental stop), and empty/missing payloads
+ * are normalised to stable fallback values so output is always well-formed.
  */
+/**
+ * Pure normalization step — exported for unit testing.
+ * Maps raw (possibly invalid) inputs into guaranteed well-formed output args.
+ * `terminate()` calls this before emitting anything.
+ */
+export function normalizeTerminateArgs(
+  action: string,
+  args: string[]
+): { safeAction: "skip" | "block"; normalizedArgs: [string] | [string, string] } {
+  const safeAction = action === "skip" || action === "block" ? action : "block"
+  if (safeAction === "skip") {
+    const code = args[0]?.trim() || "UNKNOWN"
+    const message = args[1]?.trim() || "unspecified exit reason"
+    return { safeAction, normalizedArgs: [code, message] }
+  }
+  const reason =
+    args[0]?.trim() || "Stop blocked — unexpected termination (malformed reason payload)"
+  return { safeAction, normalizedArgs: [reason] }
+}
+
 function terminate(action: "skip", code: string, message: string): never
 function terminate(action: "block", reason: string): never
 function terminate(action: "skip" | "block", ...args: string[]): never {
-  if (action === "skip") {
-    console.error(`[stop-auto-continue:${args[0]}] ${args[1]}`)
+  const { safeAction, normalizedArgs } = normalizeTerminateArgs(action, args)
+  if (safeAction === "skip") {
+    console.error(`[stop-auto-continue:${normalizedArgs[0]}] ${normalizedArgs[1]}`)
   } else {
-    console.log(JSON.stringify({ decision: "block", reason: args[0] }))
+    console.log(JSON.stringify({ decision: "block", reason: normalizedArgs[0] }))
   }
   process.exit(0)
 }

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { normalizeTerminateArgs } from "./stop-auto-continue.ts"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1519,5 +1520,75 @@ describe("isWorkflowSuggestion", () => {
         expect(isWorkflowSuggestion(suggestion)).toBe(false)
       })
     }
+  })
+})
+
+// ─── normalizeTerminateArgs unit tests ────────────────────────────────────────
+
+describe("normalizeTerminateArgs", () => {
+  test("skip with valid code and message passes through unchanged", () => {
+    const { safeAction, normalizedArgs } = normalizeTerminateArgs("skip", ["MY_CODE", "my message"])
+    expect(safeAction).toBe("skip")
+    expect(normalizedArgs[0]).toBe("MY_CODE")
+    expect(normalizedArgs[1]).toBe("my message")
+  })
+
+  test("block with valid reason passes through unchanged", () => {
+    const { safeAction, normalizedArgs } = normalizeTerminateArgs("block", ["Stop for reason X"])
+    expect(safeAction).toBe("block")
+    expect(normalizedArgs[0]).toBe("Stop for reason X")
+  })
+
+  test("unknown action defaults to block (safe fallback)", () => {
+    const { safeAction } = normalizeTerminateArgs("unknown-action", ["some reason"])
+    expect(safeAction).toBe("block")
+  })
+
+  test("empty action string defaults to block", () => {
+    const { safeAction } = normalizeTerminateArgs("", [])
+    expect(safeAction).toBe("block")
+  })
+
+  test("skip with empty code normalizes to UNKNOWN", () => {
+    const { normalizedArgs } = normalizeTerminateArgs("skip", ["", "msg"])
+    expect(normalizedArgs[0]).toBe("UNKNOWN")
+  })
+
+  test("skip with whitespace-only code normalizes to UNKNOWN", () => {
+    const { normalizedArgs } = normalizeTerminateArgs("skip", ["   ", "msg"])
+    expect(normalizedArgs[0]).toBe("UNKNOWN")
+  })
+
+  test("skip with empty message normalizes to fallback text", () => {
+    const { normalizedArgs } = normalizeTerminateArgs("skip", ["CODE", ""])
+    expect(normalizedArgs[1]).toBe("unspecified exit reason")
+  })
+
+  test("skip with no args normalizes both code and message", () => {
+    const { safeAction, normalizedArgs } = normalizeTerminateArgs("skip", [])
+    expect(safeAction).toBe("skip")
+    expect(normalizedArgs[0]).toBe("UNKNOWN")
+    expect(normalizedArgs[1]).toBe("unspecified exit reason")
+  })
+
+  test("block with empty reason normalizes to malformed-payload fallback", () => {
+    const { normalizedArgs } = normalizeTerminateArgs("block", [""])
+    expect(normalizedArgs[0]).toContain("unexpected termination")
+  })
+
+  test("block with whitespace-only reason normalizes to malformed-payload fallback", () => {
+    const { normalizedArgs } = normalizeTerminateArgs("block", ["   "])
+    expect(normalizedArgs[0]).toContain("unexpected termination")
+  })
+
+  test("block with no args normalizes to malformed-payload fallback", () => {
+    const { normalizedArgs } = normalizeTerminateArgs("block", [])
+    expect(normalizedArgs[0]).toContain("unexpected termination")
+  })
+
+  test("unknown action with non-empty payload produces block with that payload", () => {
+    const { safeAction, normalizedArgs } = normalizeTerminateArgs("invalid", ["some reason"])
+    expect(safeAction).toBe("block")
+    expect(normalizedArgs[0]).toBe("some reason")
   })
 })
