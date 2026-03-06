@@ -407,6 +407,8 @@ swiz transcript --all --list                # force listing sessions from all pr
 swiz transcript --session <id>              # show a specific session (prefix match)
 swiz transcript --tail 10                   # show last 10 turns
 swiz transcript --auto-reply                # generate an AI-suggested follow-up
+swiz transcript --include-debug             # interleave debug log events inline with turns
+swiz transcript --session <id> --include-debug --tail 20  # last 20 turns + debug events
 ```
 
 | Flag | Description |
@@ -417,6 +419,7 @@ swiz transcript --auto-reply                # generate an AI-suggested follow-up
 | `--head, -H <n>` | Show only the first N conversation turns |
 | `--tail, -T <n>` | Show only the last N conversation turns |
 | `--auto-reply` | Generate an AI-suggested follow-up message |
+| `--include-debug` | Read `~/.claude/debug/<sessionId>.txt` and interleave debug events inline with turns, ordered by ISO timestamp. Each line renders as a dimmed `│ HH:MM` entry between the turns it falls between. `--head`/`--tail` apply to debug events too. |
 | `--all` | Show sessions from all providers (default when no agent context is detected) |
 | `--claude` | Show Claude sessions only |
 | `--cursor` | Show Cursor sessions only (currently unsupported) |

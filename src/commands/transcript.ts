@@ -471,7 +471,11 @@ export const transcriptCommand: Command = {
     { flags: "--head, -H <n>", description: "Show only the first N conversation turns" },
     { flags: "--tail, -T <n>", description: "Show only the last N conversation turns" },
     { flags: "--auto-reply", description: "Generate an AI-suggested follow-up message" },
-    { flags: "--include-debug", description: "Include ~/.claude/debug/<sessionId>.txt output" },
+    {
+      flags: "--include-debug",
+      description:
+        "Read ~/.claude/debug/<sessionId>.txt and interleave debug events inline with conversation turns, ordered by ISO timestamp. Each debug line is rendered as a dimmed │ HH:MM prefixed entry between the turns it falls between.",
+    },
     {
       flags: "--all",
       description:
