@@ -29,6 +29,13 @@
   singular/plural variants (`1 test`, `1 file`) and strips ANSI
   escape sequences before matching so bold/dim-coloured summary lines
   are recognised correctly.
+- Fixed `renderDebugLine` in `swiz transcript --include-debug` to strip
+  ANSI escape sequences from debug log content before word-wrapping.
+  Real Claude debug files embed colour codes inside log entries
+  (e.g. `ESC[33mpendingESC[0m`); without stripping, `wordWrap`
+  over-counted visual width (byte count vs. display columns), causing
+  lines to wrap earlier than necessary and embedded resets to
+  prematurely cancel the enclosing `DIM` style.
 
 ## 2026-03-05
 
