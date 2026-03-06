@@ -169,6 +169,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-sandbox-guidance-consolidation.ts", timeout: 5 },
       { file: "pretooluse-json-validation.ts", timeout: 5 },
       { file: "pretooluse-no-direct-deps.ts", timeout: 5 },
+      { file: "pretooluse-no-node-modules-edit.ts", timeout: 5 },
       { file: "pretooluse-no-eslint-disable.ts", timeout: 5 },
       { file: "pretooluse-no-ts-ignore.ts", timeout: 5 },
       { file: "pretooluse-eslint-config-strength.ts", timeout: 5 },
