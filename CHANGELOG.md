@@ -4,6 +4,72 @@
 
 ### New Features
 
+- Expanded `swiz dispatch` event coverage to include `notification`,
+  `subagentStart`, `subagentStop`, and `sessionEnd` canonical events.
+  Dispatch routing table, agent `eventMap` entries, and test fixtures
+  updated in sync. (#137 test fixtures fixed in e4057fc.)
+- Added slow-hook performance logging to `swiz dispatch`: when a hook
+  takes longer than a configurable threshold, a warning is emitted with
+  the hook name and elapsed time for easier diagnosis of sluggish hooks.
+- Extended `swiz doctor` with an installed-config-scripts check that
+  walks all configured agent settings files and verifies every script
+  path referenced in hook command strings exists on disk and has execute
+  permission. Uses a recursive command extractor (`collectCommandStrings`)
+  that handles arbitrary JSON nesting depth and recognises `command`,
+  `scripts`, `run`, and `args` keys. Quoted paths (double- and
+  single-quoted) and `~/`/`$HOME/` expansions are handled correctly.
+- Added source attribution to `swiz doctor` installed-config-scripts
+  errors: each missing or non-executable path is labelled `(manifest)`
+  or `(config)` so users can locate the definition without guessing.
+- Implemented `swiz doctor --fix` repair mode for orphaned hook scripts
+  (renames to `.disabled-by-swiz-{timestamp}`) and for missing
+  config-referenced scripts (creates a minimal `#!/usr/bin/env bun`
+  stub with `chmod 0o755`). The runner pre-computes the orphaned list
+  and passes it to both the check and the fix to avoid redundant scans.
+- Added `swiz doctor` manifest handler path validation check: verifies
+  that every `file` field in the manifest resolves to an existing path
+  under `hooks/`, catching regressions when hook files are renamed or
+  deleted without updating the manifest.
+- Added cross-agent skill conversion to `swiz skill` with tool
+  remapping: translates agent-specific tool names (e.g. `Shell` ↔
+  `Bash`) when converting skills between Claude Code and Cursor formats.
+- Added cap of 4 in-progress tasks to `pretooluse-require-tasks` hook,
+  preventing task-list bloat that could mask completed work.
+
+### Refactors
+
+- Replaced the two-level hardcoded hook-command walker in `swiz doctor`
+  with a fully recursive `collectCommandStrings` function. The new
+  implementation handles JSON values at any nesting depth and is shared
+  between the existence/permission check and the dispatch-event extractor.
+- Extracted `collectInstalledConfigScriptPaths` as a shared helper used
+  by both `checkInstalledConfigScripts` and `collectExecutableScriptPaths`,
+  eliminating duplicated config-walking logic.
+- Refactored `checkOrphanedHookScripts` into `findOrphanedHookScripts`
+  (returns raw `string[]`) + `buildOrphanedResult` (formats `CheckResult`),
+  following the existing skill-conflicts `find/build/fix` pattern.
+- Derived the doctor test fixture for dispatch entries dynamically from
+  `manifest` and the Claude agent `eventMap` instead of a hardcoded JSON
+  blob, so adding new events to the manifest automatically updates the
+  expected fixture. (#137)
+
+### Bug Fixes
+
+- Fixed orphaned hook script detection to exclude library files (e.g.
+  `hook-utils.ts`) that lack a `#!/usr/bin/env bun` shebang on their
+  first line. Previously, any `.ts` file in `hooks/` not referenced by
+  the manifest was flagged; now only entry-point scripts are considered.
+- Fixed bun shebang detection to split on newlines and check the first
+  line explicitly, rather than checking a fixed-byte prefix that could
+  span the boundary between the shebang and the first import line.
+- Fixed `checkInstalledConfigScripts` validation scope: the check now
+  uses `collectExecutableScriptPaths` (manifest scripts + config scripts)
+  instead of only config scripts, so manifest-referenced scripts are also
+  covered by the existence and permission checks.
+- Fixed orphaned script detection to exclude scripts referenced by agent
+  config files (in addition to manifest-referenced scripts), preventing
+  valid dispatcher scripts from being incorrectly flagged as orphaned.
+
 - Added `--include-debug` flag to `swiz transcript`. When enabled,
   the command reads `~/.claude/debug/<sessionId>.txt` and interleaves
   debug log events inline with conversation turns, ordered by ISO
