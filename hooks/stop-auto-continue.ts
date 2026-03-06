@@ -16,7 +16,6 @@ import {
   projectKeyFromCwd,
 } from "../src/transcript-utils.ts"
 import {
-  blockStopRaw,
   buildIssueGuidance,
   getTranscriptSummary,
   git,
@@ -446,15 +445,25 @@ function buildPrompt(
   )
 }
 
-// ─── Exit helper ────────────────────────────────────────────────────────────
+// ─── Termination helper ─────────────────────────────────────────────────────
 
 /**
- * Log one structured reason code to stderr and exit the hook cleanly.
- * Returning `never` makes it structurally impossible to emit two codes from
- * a single exit path — the compiler proves no code after this call can run.
+ * Single termination point for all exits in this hook.
+ *
+ * "skip"  → log one structured reason code to stderr, exit 0 (allow stop).
+ * "block" → emit one JSON decision object to stdout, exit 0 (block stop).
+ *
+ * Returning `never` is a compiler-enforced guarantee: no code after any
+ * terminate() call can execute, making dual-emission structurally impossible.
  */
-function skipBlock(code: string, message: string): never {
-  console.error(`[stop-auto-continue:${code}] ${message}`)
+function terminate(action: "skip", code: string, message: string): never
+function terminate(action: "block", reason: string): never
+function terminate(action: "skip" | "block", ...args: string[]): never {
+  if (action === "skip") {
+    console.error(`[stop-auto-continue:${args[0]}] ${args[1]}`)
+  } else {
+    console.log(JSON.stringify({ decision: "block", reason: args[0] }))
+  }
   process.exit(0)
 }
 
@@ -466,18 +475,19 @@ async function main(): Promise<void> {
   const settings = await readSwizSettings()
   const effective = getEffectiveSwizSettings(settings, input.session_id)
   if (!effective.autoContinue) {
-    skipBlock("AUTO_CONTINUE_DISABLED", "auto-continue is disabled — skipping block")
+    terminate("skip", "AUTO_CONTINUE_DISABLED", "auto-continue is disabled — skipping block")
   }
 
   if (!input.transcript_path) {
-    skipBlock("MISSING_TRANSCRIPT", "no transcript_path in hook input — skipping block")
+    terminate("skip", "MISSING_TRANSCRIPT", "no transcript_path in hook input — skipping block")
   }
 
   // Use pre-computed summary for the tool-call threshold check when available.
   // This avoids reading the transcript file at all for trivial sessions.
   const summary = getTranscriptSummary(input)
   if (summary && summary.toolCallCount < MIN_TOOL_CALLS) {
-    skipBlock(
+    terminate(
+      "skip",
       "TRIVIAL_SESSION",
       `only ${summary.toolCallCount} tool calls (min ${MIN_TOOL_CALLS}) — skipping block`
     )
@@ -487,7 +497,7 @@ async function main(): Promise<void> {
   try {
     raw = await Bun.file(input.transcript_path).text()
   } catch {
-    skipBlock("TRANSCRIPT_READ_ERROR", "could not read transcript file — skipping block")
+    terminate("skip", "TRANSCRIPT_READ_ERROR", "could not read transcript file — skipping block")
   }
 
   // Fallback: count tool calls from raw text if no summary was available
@@ -503,7 +513,8 @@ async function main(): Promise<void> {
       } catch {}
     }
     if (count < MIN_TOOL_CALLS) {
-      skipBlock(
+      terminate(
+        "skip",
         "TRIVIAL_SESSION",
         `only ${count} tool calls (min ${MIN_TOOL_CALLS}) — skipping block`
       )
@@ -512,7 +523,7 @@ async function main(): Promise<void> {
 
   const turns = extractPlainTurns(raw).slice(-CONTEXT_TURNS)
   if (turns.length === 0) {
-    skipBlock("NO_TURNS", "no parseable conversation turns — skipping block")
+    terminate("skip", "NO_TURNS", "no parseable conversation turns — skipping block")
   }
 
   const taskContext = await loadTaskContext(input.session_id ?? "")
@@ -536,7 +547,7 @@ async function main(): Promise<void> {
   // This matches the hook's documented intent: "Only skips for trivial sessions
   // (< MIN_TOOL_CALLS) or when agent is not installed."
   if (!agentCli) {
-    skipBlock("NO_BACKEND", "no AI backend available — skipping block")
+    terminate("skip", "NO_BACKEND", "no AI backend available — skipping block")
   }
 
   {
@@ -572,9 +583,9 @@ async function main(): Promise<void> {
       // deliver — exit cleanly as a distinct BACKEND_ERROR path rather than falling
       // through to NO_ACTIONABLE_CONTENT (which would emit a second, redundant code).
       if (!refinementStatus) {
-        skipBlock("BACKEND_ERROR", "backend unreachable mid-call — skipping block")
+        terminate("skip", "BACKEND_ERROR", "backend unreachable mid-call — skipping block")
       }
-      // refinementStatus is non-empty → continue to blockStopRaw below so the
+      // refinementStatus is non-empty → continue to terminate("block", ...) below so the
       // refinement finding is still delivered even without an AI-generated next step.
     }
   }
@@ -597,7 +608,11 @@ async function main(): Promise<void> {
   // Never block with the generic FALLBACK_SUGGESTION — it provides no specific
   // guidance and causes interactive sessions to spin indefinitely.
   if (!response.next && !refinementStatus) {
-    skipBlock("NO_ACTIONABLE_CONTENT", "no actionable content after agent call — skipping block")
+    terminate(
+      "skip",
+      "NO_ACTIONABLE_CONTENT",
+      "no actionable content after agent call — skipping block"
+    )
   }
 
   const critiqueLines = effective.critiquesEnabled
@@ -614,7 +629,8 @@ async function main(): Promise<void> {
   // regardless of what the AI suggested. This ensures refinement guidance
   // is never lost to AI interpretation.
   const refinementDirective = refinementStatus ? `\n\nNote: ${refinementStatus}` : ""
-  blockStopRaw(
+  terminate(
+    "block",
     `${critiqueLine}Stop blocked — unresolved finding: ${response.next || refinementStatus}${refinementDirective}`
   )
 }
