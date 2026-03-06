@@ -4,7 +4,8 @@
 // layer (src/) and the hook layer (hooks/). Extracted from hooks/hook-utils.ts
 // to remove the src-to-hooks coupling (issue #85).
 
-import { realpathSync } from "node:fs"
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 
 /** Run a git command and return trimmed stdout. Returns "" on failure. */
 export async function git(args: string[], cwd: string): Promise<string> {
@@ -22,10 +23,83 @@ export async function git(args: string[], cwd: string): Promise<string> {
   }
 }
 
-/** Run a gh CLI command and return trimmed stdout. Returns "" on failure or timeout (3s). */
-export async function gh(args: string[], cwd: string): Promise<string> {
+// ─── gh disk cache ────────────────────────────────────────────────────────────
+
+const GH_CACHE_TTL_MS = Number(process.env.GH_CACHE_TTL_MS) || 20_000
+const GH_CACHE_DIR = join(process.env.HOME ?? "~", ".swiz", "cache", "gh")
+
+interface GhCacheEntry {
+  output: string
+  timestamp: number
+}
+
+/**
+ * Returns true when the gh arg list represents a read-only (safe-to-cache) command.
+ * Mutating commands (create, comment, close, merge, edit, review, delete, …) return false.
+ * Fail-closed: unknown shapes are NOT cached.
+ */
+export function isReadOnlyGhArgs(args: string[]): boolean {
+  const group = args[0]
+  const verb = args[1]
+  if (!group || !verb) return false
+
+  // gh api defaults to GET; only cache if no explicit mutating method flag
+  if (group === "api") {
+    const methodIdx = args.findIndex((a) => a === "--method" || a === "-X")
+    if (methodIdx >= 0) {
+      const method = args[methodIdx + 1]?.toUpperCase()
+      return method === "GET"
+    }
+    return true
+  }
+
+  // For all other groups (pr, issue, run, repo, …) only cache read verbs
+  const READ_VERBS = new Set(["list", "view", "checks", "status", "diff"])
+  return READ_VERBS.has(verb)
+}
+
+/** @internal exported for testing */
+export function ghCacheKey(args: string[], cwdHash: string): string {
+  return Bun.hash(JSON.stringify([cwdHash, ...args])).toString(16)
+}
+
+/** @internal exported for testing */
+export function readGhCache(key: string, cacheDir = GH_CACHE_DIR): string | null {
   try {
-    const effectiveCwd = cwd.trim() || process.cwd()
+    const file = join(cacheDir, `${key}.json`)
+    const raw = readFileSync(file, "utf8")
+    const entry = JSON.parse(raw) as GhCacheEntry
+    if (Date.now() - entry.timestamp < GH_CACHE_TTL_MS) return entry.output
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** @internal exported for testing */
+export function writeGhCache(key: string, output: string, cacheDir = GH_CACHE_DIR): void {
+  try {
+    mkdirSync(cacheDir, { recursive: true })
+    const entry: GhCacheEntry = { output, timestamp: Date.now() }
+    writeFileSync(join(cacheDir, `${key}.json`), JSON.stringify(entry))
+  } catch {
+    // Cache writes never throw — fail-open
+  }
+}
+
+/** Run a gh CLI command and return trimmed stdout. Returns "" on failure or timeout (3s).
+ *  Read-only commands are served from a short TTL disk cache when available. */
+export async function gh(args: string[], cwd: string): Promise<string> {
+  const effectiveCwd = cwd.trim() || process.cwd()
+  const useCache = isReadOnlyGhArgs(args)
+  const cacheKey = useCache ? ghCacheKey(args, getCanonicalPathHash(effectiveCwd)) : ""
+
+  if (useCache) {
+    const cached = readGhCache(cacheKey)
+    if (cached !== null) return cached
+  }
+
+  try {
     const proc = Bun.spawn(["gh", ...args], { cwd: effectiveCwd, stdout: "pipe", stderr: "pipe" })
     let killed = false
     const killTimer = setTimeout(() => {
@@ -38,7 +112,12 @@ export async function gh(args: string[], cwd: string): Promise<string> {
     ])
     await proc.exited
     clearTimeout(killTimer)
-    return !killed && proc.exitCode === 0 ? output.trim() : ""
+    if (!killed && proc.exitCode === 0) {
+      const trimmed = output.trim()
+      if (useCache && trimmed) writeGhCache(cacheKey, trimmed)
+      return trimmed
+    }
+    return ""
   } catch {
     return ""
   }
