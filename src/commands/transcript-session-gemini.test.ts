@@ -506,6 +506,32 @@ describe("Provider transcript/session command support", () => {
     expect(idxD).toBeLessThan(idxE)
   })
 
+  test("swiz transcript --include-debug strips ANSI from debug log content before rendering", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc01-7777-7888-8999-444444444444"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
+    // Real Claude debug files embed ANSI colour codes in log content after the timestamp.
+    // e.g. "ESC[33mpendingESC[0m" for task state labels. These must be stripped before
+    // wordWrap measures line width, otherwise byte-length != visual width.
+    const ESC = String.fromCharCode(27)
+    await createDebugLog(home, sessionId, [
+      `2026-03-06T04:29:06.552Z [DEBUG] Created task #5: ${ESC}[33mpending${ESC}[0m`,
+    ])
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--include-debug"],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    // Content text must appear without ANSI codes
+    expect(out).toContain("[DEBUG] Created task #5: pending")
+    // Raw ESC byte must not appear in output
+    expect(out).not.toContain(ESC)
+  })
+
   test("swiz session --list includes Codex sessions", async () => {
     const home = await createTempHome()
     const projectDir = join(home, "workspace", "demo-codex")
