@@ -112,25 +112,6 @@ function resolveGitPaths(cwd: string): { gitDir: string; workTree: string } | nu
   }
 }
 
-async function readGitConfigValue(filePath: string, section: string, key: string): Promise<string> {
-  try {
-    const text = await Bun.file(filePath).text()
-    const header = new RegExp(`^\\[${section}\\]`, "im")
-    const nextSec = /^\[/m
-    const match = header.exec(text)
-    if (!match) return ""
-
-    const body = text.slice(match.index + match[0].length)
-    const nextMatch = nextSec.exec(body)
-    const sectionBody = nextMatch ? body.slice(0, nextMatch.index) : body
-
-    const kvMatch = new RegExp(`^\\s*${key}\\s*=\\s*(.+)$`, "im").exec(sectionBody)
-    return kvMatch ? kvMatch[1]!.trim() : ""
-  } catch {
-    return ""
-  }
-}
-
 async function getGitBranchAndInfo(cwd: string): Promise<{ branch: string; info: string }> {
   const git = resolveGitPaths(cwd)
   if (!git) return { branch: "", info: "" }
@@ -243,19 +224,7 @@ async function getGitBranchAndInfo(cwd: string): Promise<{ branch: string; info:
   if (details.length === 0 && changedFallback > 0) details.push(`${DIM}${changedFallback}~${R}`)
   const detailsStr = details.length ? ` ${details.join(" ")}` : ""
 
-  return { branch, info: ` ${DIM}on${R} ${branchColor}${icon} ${branch}${R}${detailsStr}` }
-}
-
-async function readGitUserName(cwd: string): Promise<string> {
-  const git = resolveGitPaths(cwd)
-  const home = process.env.HOME ?? "~"
-  const [local, global_] = await Promise.all([
-    git ? readGitConfigValue(`${git.gitDir}/config`, "user", "name") : Promise.resolve(""),
-    readGitConfigValue(`${home}/.gitconfig`, "user", "name"),
-  ])
-  const full = local || global_
-  if (full) return full.split(" ")[0]!
-  return process.env.USER ?? "me"
+  return { branch, info: `${branchColor}${icon} ${branch}${R}${detailsStr}` }
 }
 
 async function ghJson<T>(args: string[]): Promise<T | null> {
@@ -332,6 +301,10 @@ function formatCountSegment(
   return `${color}${count} ${label}${R}`
 }
 
+function joinGroups(groups: Array<string | null | undefined>): string {
+  return groups.filter(Boolean).join(` ${DIM}│${R} `)
+}
+
 export const statusLineCommand: Command = {
   name: "status-line",
   description: "Output a rich ANSI status bar for Claude Code's statusLine hook",
@@ -350,9 +323,7 @@ export const statusLineCommand: Command = {
     const timeOffset = Math.floor(Date.now() / 1667) % RL
 
     // Accent colors at fixed phase offsets
-    const a1 = fg256(RAINBOW[timeOffset]!)
     const a2 = fg256(RAINBOW[(timeOffset + 6) % RL]!)
-    const a3 = fg256(RAINBOW[(timeOffset + 12) % RL]!)
     const a4 = fg256(RAINBOW[(timeOffset + 18) % RL]!)
 
     const shortCwd = shortenPath(cwd)
@@ -370,41 +341,29 @@ export const statusLineCommand: Command = {
         : null
     )
 
-    const [gitResult, issueData, prListData, firstName, prViewData, swizSettings] =
-      await Promise.all([
-        gitPromise,
-        ghJson<unknown[]>([
-          "issue",
-          "list",
-          "--state",
-          "open",
-          "--json",
-          "number",
-          "--limit",
-          "100",
-        ]),
-        ghJson<unknown[]>(["pr", "list", "--state", "open", "--json", "number", "--limit", "100"]),
-        readGitUserName(cwd),
-        prViewPromise,
-        readSwizSettings().catch(() => null),
-      ])
+    const [gitResult, issueData, prListData, prViewData, swizSettings] = await Promise.all([
+      gitPromise,
+      ghJson<unknown[]>(["issue", "list", "--state", "open", "--json", "number", "--limit", "100"]),
+      ghJson<unknown[]>(["pr", "list", "--state", "open", "--json", "number", "--limit", "100"]),
+      prViewPromise,
+      readSwizSettings().catch(() => null),
+    ])
 
     const { info: gitInfo } = gitResult
 
     // ── Build segments ──────────────────────────────────────────────────────
 
-    const br = (s: string) => `${a3}${s}${R}`
     const rb = (s: string, idx = 0) => rainbowStr(s, idx, timeOffset)
+    const label = (s: string) => `${DIM}${s}${R}`
 
     const topLeft = rb("┌──")
     const midLeft = rb("├──")
-    const midJoin = rb("─", 3)
     const bottomLeft = rb("└──")
 
     const ctxBar = progressBar(ctxPct)
     const ctxColor = colorForPct(ctxPct)
     const tokenStr = ctxTokens > 0 ? ` ${DIM}${formatTokens(ctxTokens)}${R}` : ""
-    const ctxSeg = `ctx ${ctxBar}${ctxColor}${ctxPct.toFixed(0)}%${R}${tokenStr}`
+    const ctxSeg = `${ctxBar}${ctxColor}${ctxPct.toFixed(0)}%${R}${tokenStr}`
 
     const issueCount = Array.isArray(issueData) ? issueData.length : null
     const prCount = Array.isArray(prListData) ? prListData.length : null
@@ -416,13 +375,13 @@ export const statusLineCommand: Command = {
 
     const reviewDecision = prViewData?.reviewDecision ?? ""
     const commentCount = Array.isArray(prViewData?.comments) ? prViewData.comments.length : 0
-    const reviewSeg =
+    const reviewStatus =
       reviewDecision === "CHANGES_REQUESTED"
-        ? ` \x1b[91m⚠ changes requested${R}`
+        ? `\x1b[91m⚠ changes requested${R}`
         : reviewDecision === "APPROVED"
-          ? ` \x1b[92m✓ approved${R}`
+          ? `\x1b[92m✓ approved${R}`
           : commentCount > 0
-            ? ` ${DIM}💬 ${commentCount}${R}`
+            ? `${DIM}💬 ${commentCount}${R}`
             : ""
 
     const agentTag = agentName ? `${a4}[${agentName}]${R}` : ""
@@ -444,11 +403,23 @@ export const statusLineCommand: Command = {
 
     // ── Assemble ────────────────────────────────────────────────────────────
 
-    const line3Parts = [ghCountSeg, settingsSeg, agentTag, vimTag, timeSeg].filter(Boolean)
+    const line1Groups = joinGroups([
+      `${label("repo")} ${a2}${shortCwd}${R}`,
+      gitInfo ? `${label("git")} ${gitInfo}` : "",
+      reviewStatus ? `${label("pr")} ${reviewStatus}` : "",
+    ])
+    const line2Groups = joinGroups([`${label("model")} ${rb(model)}`, `${label("ctx")} ${ctxSeg}`])
+    const modeSeg = [agentTag, vimTag].filter(Boolean).join(" ")
+    const line3Groups = joinGroups([
+      ghCountSeg ? `${label("backlog")} ${ghCountSeg}` : "",
+      modeSeg ? `${label("mode")} ${modeSeg}` : "",
+      settingsSeg ? `${label("flags")} ${settingsSeg}` : "",
+      `${label("time")} ${timeSeg}`,
+    ])
 
-    const line1 = `${topLeft}${br("[")}${a1}${firstName}${R}${br("]")}${midJoin}${br("[")}${a2}${shortCwd}${R}${br("]")}${gitInfo}${reviewSeg}`
-    const line2 = `${midLeft} ${rb(model)}  ${ctxSeg}`
-    const line3 = `${bottomLeft} ${line3Parts.length ? line3Parts.join("  ") : `${DIM}─${R}`}`
+    const line1 = `${topLeft} ${line1Groups || `${DIM}─${R}`}`
+    const line2 = `${midLeft} ${line2Groups || `${DIM}─${R}`}`
+    const line3 = `${bottomLeft} ${line3Groups || `${DIM}─${R}`}`
 
     console.log(`${line1}\n${line2}\n${line3}`)
   },
