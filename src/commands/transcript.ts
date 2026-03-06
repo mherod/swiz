@@ -287,8 +287,13 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
     const line = lines[i]
     if (line === undefined) continue
     const m = DEBUG_TS_RE.exec(line)
-    // Lines without a leading ISO timestamp (e.g. continuation lines) are intentionally skipped
-    if (!m) continue
+    if (!m) {
+      // Continuation line (no ISO timestamp prefix): attach to the preceding event so it is
+      // rendered as part of that event rather than silently dropped.
+      const prev = events[events.length - 1]
+      if (prev) prev.text += `\n${line}`
+      continue
+    }
     const iso = m[1]
     if (iso === undefined) continue
     const parsed = new Date(iso).getTime()

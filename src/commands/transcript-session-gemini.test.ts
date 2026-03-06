@@ -291,10 +291,10 @@ describe("Provider transcript/session command support", () => {
     )
     expect(result.exitCode).toBe(0)
     const out = stripAnsi(result.stdout)
-    // Both timestamped lines must appear; no-timestamp line is skipped
+    // Both timestamped lines must appear; no-timestamp continuation is attached to the preceding event
     expect(out).toContain("[DEBUG] earlier line")
     expect(out).toContain("[DEBUG] later line")
-    expect(out).not.toContain("no-timestamp-line")
+    expect(out).toContain("no-timestamp-line should be skipped")
     // Earlier line must appear before later line in output
     const earlyIdx = out.indexOf("[DEBUG] earlier line")
     const lateIdx = out.indexOf("[DEBUG] later line")
@@ -381,6 +381,35 @@ describe("Provider transcript/session command support", () => {
     const validIdx = out.indexOf("[DEBUG] valid after")
     expect(firstInvalidIdx).toBeLessThan(secondInvalidIdx)
     expect(secondInvalidIdx).toBeLessThan(validIdx)
+  })
+
+  test("swiz transcript --include-debug attaches continuation lines to the preceding event", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc01-7777-7888-8999-ffffffffffff"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
+    // Second line has no timestamp — it is a continuation of the first event
+    await createDebugLog(home, sessionId, [
+      "2026-03-06T04:29:06.100Z [DEBUG] main line",
+      "  continuation detail here",
+      "2026-03-06T04:29:06.200Z [DEBUG] next event",
+    ])
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--include-debug"],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    // Continuation line must appear in output (not silently dropped)
+    expect(out).toContain("continuation detail here")
+    expect(out).toContain("[DEBUG] main line")
+    expect(out).toContain("[DEBUG] next event")
+    // Continuation must appear before the next timestamped event
+    const contIdx = out.indexOf("continuation detail here")
+    const nextIdx = out.indexOf("[DEBUG] next event")
+    expect(contIdx).toBeLessThan(nextIdx)
   })
 
   test("swiz session --list includes Codex sessions", async () => {
