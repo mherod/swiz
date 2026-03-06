@@ -93,13 +93,21 @@ export function resolvePrMergeActive(
 export function filterPrMergeModeHooks(
   groups: HookGroup[],
   prMergeMode: boolean,
-  collaborationMode: CollaborationMode = "auto"
+  collaborationMode: CollaborationMode = "auto",
+  prAgeGateMinutes = 0
 ): HookGroup[] {
   if (resolvePrMergeActive(collaborationMode, prMergeMode)) return groups
 
+  // When a grace period is configured, keep the age-gate hook active even if
+  // PR-merge mode is disabled — the setting takes precedence over mode filtering.
+  const settingsPreserved = new Set<string>()
+  if (prAgeGateMinutes > 0) settingsPreserved.add("pretooluse-pr-age-gate.ts")
+
   return groups
     .map((group) => {
-      const hooks = group.hooks.filter((hook) => !PR_MERGE_MODE_DISABLED_HOOKS.has(hook.file))
+      const hooks = group.hooks.filter(
+        (hook) => !PR_MERGE_MODE_DISABLED_HOOKS.has(hook.file) || settingsPreserved.has(hook.file)
+      )
       return hooks.length === group.hooks.length ? group : { ...group, hooks }
     })
     .filter((group) => group.hooks.length > 0)
@@ -188,7 +196,8 @@ export async function applyHookSettingFilters(
   const filtered = filterPrMergeModeHooks(
     groups,
     effective.prMergeMode,
-    effective.collaborationMode
+    effective.collaborationMode,
+    effective.prAgeGateMinutes
   )
   const stackFiltered = filterStackHooks(filtered, detectedStacks)
   const stateFiltered = await filterStateHooks(stackFiltered, cwd)

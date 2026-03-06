@@ -204,6 +204,50 @@ describe("dispatch.ts unit tests", () => {
       const filteredOn = filterPrMergeModeHooks(groups, true, "auto")
       expect(filteredOn).toEqual(groups)
     })
+
+    it("preserves pr-age-gate hook when prAgeGateMinutes > 0, even if PR mode disabled", () => {
+      const groups = [
+        {
+          event: "preToolUse",
+          hooks: [{ file: "pretooluse-pr-age-gate.ts" }, { file: "pretooluse-banned-commands.ts" }],
+        },
+      ]
+
+      // prMergeMode=false + prAgeGateMinutes=10 → age-gate kept
+      const filtered = filterPrMergeModeHooks(groups, false, "auto", 10)
+      expect(filtered).toHaveLength(1)
+      expect(filtered[0]?.hooks.map((h) => h.file)).toEqual([
+        "pretooluse-pr-age-gate.ts",
+        "pretooluse-banned-commands.ts",
+      ])
+    })
+
+    it("filters pr-age-gate hook when prAgeGateMinutes is 0 and PR mode disabled", () => {
+      const groups = [
+        {
+          event: "preToolUse",
+          hooks: [{ file: "pretooluse-pr-age-gate.ts" }, { file: "pretooluse-banned-commands.ts" }],
+        },
+      ]
+
+      // prMergeMode=false + prAgeGateMinutes=0 → age-gate filtered
+      const filtered = filterPrMergeModeHooks(groups, false, "auto", 0)
+      expect(filtered).toHaveLength(1)
+      expect(filtered[0]?.hooks.map((h) => h.file)).toEqual(["pretooluse-banned-commands.ts"])
+    })
+
+    it("preserves pr-age-gate when solo mode but prAgeGateMinutes > 0", () => {
+      const groups = [
+        {
+          event: "preToolUse",
+          hooks: [{ file: "pretooluse-pr-age-gate.ts" }],
+        },
+      ]
+
+      const filtered = filterPrMergeModeHooks(groups, false, "solo", 10)
+      expect(filtered).toHaveLength(1)
+      expect(filtered[0]?.hooks.map((h) => h.file)).toEqual(["pretooluse-pr-age-gate.ts"])
+    })
   })
 
   describe("resolvePrMergeActive", () => {
