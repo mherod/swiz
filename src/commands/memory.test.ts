@@ -163,11 +163,24 @@ describe("swiz memory CLI", () => {
     expect(stdout).toContain(globalRulesPath)
   })
 
-  it("shows Cursor hierarchy with --cursor flag", async () => {
-    const { stdout } = await runMemory(["--cursor"])
+  it("shows Cursor hierarchy with --cursor flag and .cursor/rules/*.mdc files", async () => {
+    // Create a controlled fixture with the canonical Cursor rules structure:
+    //   <project>/.cursorrules         — top-level entry file
+    //   <project>/.cursor/rules/*.mdc  — topic-based rule files
+    const tmpRoot = join(tmpdir(), `swiz-memory-cursor-${Date.now()}`)
+    const projectDir = join(tmpRoot, "project")
+    const rulesDir = join(projectDir, ".cursor", "rules")
+    mkdirSync(rulesDir, { recursive: true })
+    writeFileSync(join(projectDir, ".cursorrules"), "# Root cursor rules\n")
+    writeFileSync(join(rulesDir, "coding-standards.mdc"), "# Coding standards\n")
+    writeFileSync(join(rulesDir, "architecture.mdc"), "# Architecture\n")
+
+    const { stdout } = await runMemory(["--cursor", "--dir", projectDir])
     expect(stdout).toContain("Cursor")
     expect(stdout).toContain("Rule hierarchy")
-    expect(stdout).toContain("Project rule")
+    expect(stdout).toContain(".cursorrules")
+    expect(stdout).toContain("coding-standards.mdc")
+    expect(stdout).toContain("architecture.mdc")
   })
 
   it("supports --dir flag to target another directory", async () => {
