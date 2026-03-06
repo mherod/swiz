@@ -280,11 +280,18 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
   const events: DebugEvent[] = []
   for (const line of lines) {
     const m = DEBUG_TS_RE.exec(line)
+    // Lines without a leading ISO timestamp (e.g. continuation lines) are intentionally skipped
     if (!m) continue
     const iso = m[1]
     if (iso === undefined) continue
-    events.push({ iso, ts: new Date(iso).getTime(), text: line.slice(m[0].length) })
+    const ts = new Date(iso).getTime()
+    // Guard against malformed timestamps that produce NaN — NaN comparisons are always false,
+    // which would cause the event to be flushed before every turn (wrong interleaving position)
+    if (isNaN(ts)) continue
+    events.push({ iso, ts, text: line.slice(m[0].length) })
   }
+  // Sort by timestamp to handle any out-of-order lines in the debug file
+  events.sort((a, b) => a.ts - b.ts)
   return events
 }
 

@@ -272,6 +272,35 @@ describe("Provider transcript/session command support", () => {
     expect(out).toContain("[DEBUG] debug line two")
   })
 
+  test("swiz transcript --include-debug sorts out-of-order debug lines by timestamp", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc01-7777-7888-8999-bbbbbbbbbbbb"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
+    // Intentionally write lines out of chronological order
+    await createDebugLog(home, sessionId, [
+      "2026-03-06T04:29:06.900Z [DEBUG] later line",
+      "2026-03-06T04:29:06.100Z [DEBUG] earlier line",
+      "no-timestamp-line should be skipped",
+    ])
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--include-debug"],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    // Both timestamped lines must appear; no-timestamp line is skipped
+    expect(out).toContain("[DEBUG] earlier line")
+    expect(out).toContain("[DEBUG] later line")
+    expect(out).not.toContain("no-timestamp-line")
+    // Earlier line must appear before later line in output
+    const earlyIdx = out.indexOf("[DEBUG] earlier line")
+    const lateIdx = out.indexOf("[DEBUG] later line")
+    expect(earlyIdx).toBeLessThan(lateIdx)
+  })
+
   test("swiz session --list includes Codex sessions", async () => {
     const home = await createTempHome()
     const projectDir = join(home, "workspace", "demo-codex")
