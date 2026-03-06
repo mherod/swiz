@@ -433,65 +433,9 @@ function extractScriptPaths(command: string): string[] {
   return paths
 }
 
-/** Verify that script files referenced in installed agent hook commands exist on disk. */
-async function checkInstalledConfigScripts(): Promise<CheckResult> {
-  const missing: string[] = []
-  const checked = new Set<string>()
-
-  for (const agent of CONFIGURABLE_AGENTS) {
-    const file = Bun.file(agent.settingsPath)
-    if (!(await file.exists())) continue
-
-    let settings: Record<string, unknown>
-    try {
-      settings = await file.json()
-    } catch {
-      continue // malformed settings already caught by checkAgentSettings
-    }
-
-    const hooksRaw = agent.wrapsHooks
-      ? ((settings.hooks as Record<string, unknown>) ?? {})
-      : ((settings[agent.hooksKey] as Record<string, unknown>) ?? {})
-    const hooks = typeof hooksRaw === "object" && !Array.isArray(hooksRaw) ? hooksRaw : {}
-
-    for (const cmd of collectHookCommands(hooks)) {
-      for (const scriptPath of extractScriptPaths(cmd)) {
-        if (checked.has(scriptPath)) continue
-        checked.add(scriptPath)
-        if (!(await Bun.file(scriptPath).exists())) {
-          missing.push(scriptPath)
-        }
-      }
-    }
-  }
-
-  if (missing.length === 0) {
-    return {
-      name: "Installed config scripts",
-      status: "pass",
-      detail: `all script paths in agent hook configs are present${checked.size > 0 ? ` (${checked.size} checked)` : ""}`,
-    }
-  }
-
-  return {
-    name: "Installed config scripts",
-    status: "fail",
-    detail: `${missing.length} script(s) referenced in agent hook configs are missing: ${missing.join(", ")}`,
-  }
-}
-
-// ─── Script execute permission check ────────────────────────────────────────
-
-/** Collect all script file paths that should have execute permission. */
-async function collectExecutableScriptPaths(): Promise<string[]> {
+/** Collect deduplicated script file paths referenced in installed agent hook configs. */
+async function collectInstalledConfigScriptPaths(): Promise<string[]> {
   const paths: string[] = []
-  // All manifest hook scripts
-  for (const group of manifest) {
-    for (const hook of group.hooks) {
-      paths.push(join(HOOKS_DIR, hook.file))
-    }
-  }
-  // Script paths referenced in installed agent configs
   for (const agent of CONFIGURABLE_AGENTS) {
     const file = Bun.file(agent.settingsPath)
     if (!(await file.exists())) continue
@@ -509,7 +453,66 @@ async function collectExecutableScriptPaths(): Promise<string[]> {
       paths.push(...extractScriptPaths(cmd))
     }
   }
-  // Deduplicate
+  return [...new Set(paths)]
+}
+
+/** Verify that script files referenced in installed agent hook commands exist and are executable. */
+async function checkInstalledConfigScripts(): Promise<CheckResult> {
+  const paths = await collectInstalledConfigScriptPaths()
+  const missing: string[] = []
+  const notExecutable: string[] = []
+
+  for (const scriptPath of paths) {
+    if (!(await Bun.file(scriptPath).exists())) {
+      missing.push(scriptPath)
+      continue
+    }
+    try {
+      const s = await stat(scriptPath)
+      if ((s.mode & 0o100) === 0) {
+        notExecutable.push(scriptPath)
+      }
+    } catch {
+      // stat failure treated as missing
+      missing.push(scriptPath)
+    }
+  }
+
+  if (missing.length === 0 && notExecutable.length === 0) {
+    return {
+      name: "Installed config scripts",
+      status: "pass",
+      detail: `all script paths in agent hook configs are present and executable${paths.length > 0 ? ` (${paths.length} checked)` : ""}`,
+    }
+  }
+
+  const details: string[] = []
+  if (missing.length > 0) {
+    details.push(`${missing.length} missing: ${missing.join(", ")}`)
+  }
+  if (notExecutable.length > 0) {
+    details.push(`${notExecutable.length} not executable: ${notExecutable.join(", ")}`)
+  }
+  return {
+    name: "Installed config scripts",
+    status: "fail",
+    detail: details.join("; "),
+  }
+}
+
+// ─── Script execute permission check ────────────────────────────────────────
+
+/** Collect all script file paths that should have execute permission. */
+async function collectExecutableScriptPaths(): Promise<string[]> {
+  const paths: string[] = []
+  // All manifest hook scripts
+  for (const group of manifest) {
+    for (const hook of group.hooks) {
+      paths.push(join(HOOKS_DIR, hook.file))
+    }
+  }
+  // Script paths referenced in installed agent configs (via shared helper)
+  paths.push(...(await collectInstalledConfigScriptPaths()))
   return [...new Set(paths)]
 }
 

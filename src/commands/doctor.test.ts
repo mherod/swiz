@@ -219,6 +219,26 @@ describe("swiz doctor", () => {
     expect(result.stdout).toContain("/path with spaces/my hook.ts")
   })
 
+  test("detects non-executable script referenced in installed hook config", async () => {
+    const home = await createTempHome()
+    const claudeDir = join(home, ".claude")
+    await mkdir(claudeDir, { recursive: true })
+    const scriptPath = join(home, "non-exec-hook.ts")
+    await writeFile(scriptPath, "#!/usr/bin/env bun\n", { mode: 0o644 })
+    await writeFile(
+      join(claudeDir, "settings.json"),
+      JSON.stringify({
+        hooks: {
+          Stop: [{ hooks: [{ type: "command", command: `bun ${scriptPath}` }] }],
+        },
+      })
+    )
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Installed config scripts")
+    expect(result.stdout).toContain("not executable")
+    expect(result.stdout).toContain(scriptPath)
+  })
+
   test("detects missing script referenced in scripts key", async () => {
     const home = await createTempHome()
     const claudeDir = join(home, ".claude")
