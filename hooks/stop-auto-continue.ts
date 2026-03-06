@@ -507,7 +507,10 @@ async function main(): Promise<void> {
   // Allow stop cleanly rather than blocking with the generic fallback message.
   // This matches the hook's documented intent: "Only skips for trivial sessions
   // (< MIN_TOOL_CALLS) or when agent is not installed."
-  if (!agentCli) return
+  if (!agentCli) {
+    console.error("[stop-auto-continue] no AI backend available — skipping block")
+    return
+  }
 
   {
     const context = formatTurnsAsContext(turns)
@@ -538,6 +541,7 @@ async function main(): Promise<void> {
       if (result) response = parseAgentResponse(result)
     } catch {
       // promptAgent threw (backend unreachable mid-call) — response.next stays ""
+      console.error("[stop-auto-continue] backend unreachable mid-call — response.next empty")
     }
   }
 
@@ -558,7 +562,10 @@ async function main(): Promise<void> {
   //   - an explicit runtime finding (refinementStatus: open issues needing triage)
   // Never block with the generic FALLBACK_SUGGESTION — it provides no specific
   // guidance and causes interactive sessions to spin indefinitely.
-  if (!response.next && !refinementStatus) return
+  if (!response.next && !refinementStatus) {
+    console.error("[stop-auto-continue] no actionable content after agent call — skipping block")
+    return
+  }
 
   const critiqueLines = effective.critiquesEnabled
     ? [

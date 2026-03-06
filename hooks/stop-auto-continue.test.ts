@@ -9,6 +9,7 @@ interface HookResult {
   decision?: string
   reason?: string
   rawOutput: string
+  stderr: string
 }
 
 const BUN_EXE = Bun.which("bun") ?? "bun"
@@ -119,10 +120,13 @@ async function runHook({
   proc.stdin.write(payload)
   proc.stdin.end()
 
-  const rawOutput = await new Response(proc.stdout).text()
+  const [rawOutput, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
 
-  if (!rawOutput.trim()) return { rawOutput }
+  if (!rawOutput.trim()) return { rawOutput, stderr }
 
   try {
     const parsed = JSON.parse(rawOutput.trim())
@@ -130,9 +134,10 @@ async function runHook({
       decision: parsed.decision,
       reason: parsed.reason,
       rawOutput,
+      stderr,
     }
   } catch {
-    return { rawOutput }
+    return { rawOutput, stderr }
   }
 }
 
@@ -228,6 +233,7 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
+    expect(result.stderr).toContain("[stop-auto-continue] backend unreachable mid-call")
   })
 
   test("allows stop when no AI backend is available (no fallback block)", async () => {
@@ -242,6 +248,7 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
+    expect(result.stderr).toContain("[stop-auto-continue] no AI backend available")
   })
 
   test("passes --workspace with a temp dir when using agent backend", async () => {
@@ -763,6 +770,7 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
+    expect(result.stderr).toContain("[stop-auto-continue] backend unreachable mid-call")
   }, 10_000)
 
   // ─── JSON response parsing tests ──────────────────────────────────────────
@@ -820,6 +828,7 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput).not.toContain("<tool_call>")
+    expect(result.stderr).toContain("[stop-auto-continue] no actionable content after agent call")
   })
 
   test("replaces workflow implementation prescriptions with a policy finding", async () => {
