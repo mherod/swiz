@@ -437,6 +437,45 @@ describe("Provider transcript/session command support", () => {
     expect(out).toContain("[DEBUG] first real event")
   })
 
+  test("swiz transcript --include-debug interleaves malformed events stably with valid events", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc01-7777-7888-8999-222222222222"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
+    // Alternating valid/malformed lines — merge must preserve file order for malformed events
+    await createDebugLog(home, sessionId, [
+      "2026-03-06T04:29:06.100Z [DEBUG] valid-A",
+      "2026-99-06T04:29:06.150Z [DEBUG] malformed-B",
+      "2026-03-06T04:29:06.200Z [DEBUG] valid-C",
+      "2026-99-06T04:29:06.250Z [DEBUG] malformed-D",
+      "2026-03-06T04:29:06.300Z [DEBUG] valid-E",
+    ])
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--include-debug"],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    // All five events must appear
+    expect(out).toContain("[DEBUG] valid-A")
+    expect(out).toContain("[DEBUG] malformed-B")
+    expect(out).toContain("[DEBUG] valid-C")
+    expect(out).toContain("[DEBUG] malformed-D")
+    expect(out).toContain("[DEBUG] valid-E")
+    // Malformed events must appear between their surrounding valid neighbours (file order)
+    const idxA = out.indexOf("[DEBUG] valid-A")
+    const idxB = out.indexOf("[DEBUG] malformed-B")
+    const idxC = out.indexOf("[DEBUG] valid-C")
+    const idxD = out.indexOf("[DEBUG] malformed-D")
+    const idxE = out.indexOf("[DEBUG] valid-E")
+    expect(idxA).toBeLessThan(idxB)
+    expect(idxB).toBeLessThan(idxC)
+    expect(idxC).toBeLessThan(idxD)
+    expect(idxD).toBeLessThan(idxE)
+  })
+
   test("swiz session --list includes Codex sessions", async () => {
     const home = await createTempHome()
     const projectDir = join(home, "workspace", "demo-codex")

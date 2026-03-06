@@ -328,8 +328,10 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
 
   // Sort valid events by timestamp, breaking ties by file index
   valid.sort((a, b) => a.ts - b.ts || a._idx - b._idx)
-  // Sort malformed events by file index only — their timestamp is unreliable
-  malformed.sort((a, b) => a._idx - b._idx)
+  // Sort malformed events by file index; iso string is the final tie-breaker so the
+  // comparator is formally total-ordered even if _idx were ever non-unique (structurally
+  // impossible — _idx = loop variable i which is always unique — but explicit is safer).
+  malformed.sort((a, b) => a._idx - b._idx || a.iso.localeCompare(b.iso))
 
   // Two-pass merge: insert each malformed event immediately after the last valid event
   // whose _idx precedes it in the file. This places parse errors at their structural
