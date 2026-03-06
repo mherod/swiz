@@ -363,41 +363,63 @@ async function fixSkillConflicts(
 
 // ─── Installed config script check ──────────────────────────────────────────
 
-/** Collect all command strings from a hooks config object (handles nested and flat styles). */
-function collectHookCommands(hooks: Record<string, unknown>): string[] {
-  const commands: string[] = []
-  for (const entries of Object.values(hooks)) {
-    if (!Array.isArray(entries)) continue
-    for (const entry of entries) {
-      const e = entry as Record<string, unknown>
-      if (typeof e.command === "string") commands.push(e.command)
-      if (Array.isArray(e.hooks)) {
-        for (const h of e.hooks) {
-          const hh = h as Record<string, unknown>
-          if (typeof hh.command === "string") commands.push(hh.command)
-        }
+/** Recursively walk any JSON value and collect every "command" string at any depth. */
+function collectCommandStrings(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(collectCommandStrings)
+  }
+  if (value !== null && typeof value === "object") {
+    const results: string[] = []
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (k === "command" && typeof v === "string") {
+        results.push(v)
+      } else {
+        results.push(...collectCommandStrings(v))
       }
     }
+    return results
   }
-  return commands
+  return []
+}
+
+/** Collect all command strings from a hooks config object at any nesting depth. */
+function collectHookCommands(hooks: Record<string, unknown>): string[] {
+  return collectCommandStrings(hooks)
 }
 
 /** Extract absolute paths to script files referenced in a shell command string. */
 function extractScriptPaths(command: string): string[] {
   const scriptExtRe = /\.(ts|js|sh|bash|mjs|cjs|py)$/
-  // Match bare absolute paths, ~/..., and $HOME/... tokens
-  const tokenRe = /(?:^|\s)(\/[^\s'";&|]+|~\/[^\s'";&|]+|\$HOME\/[^\s'";&|]+)/g
+  const seen = new Set<string>()
   const paths: string[] = []
-  for (const m of command.matchAll(tokenRe)) {
-    const raw = (m[1] ?? "").trim()
-    if (!raw || !scriptExtRe.test(raw)) continue
+
+  function addRaw(raw: string): void {
+    raw = raw.trim()
+    if (!raw || !scriptExtRe.test(raw)) return
     const expanded = raw.startsWith("~/")
       ? join(HOME, raw.slice(2))
       : raw.startsWith("$HOME/")
         ? join(HOME, raw.slice(6))
         : raw
-    paths.push(expanded)
+    if (!seen.has(expanded)) {
+      seen.add(expanded)
+      paths.push(expanded)
+    }
   }
+
+  // 1. Double-quoted paths (may contain spaces): bun "/path with spaces/hook.ts"
+  for (const m of command.matchAll(/"((?:\/|~\/|\$HOME\/)[^"]+)"/g)) {
+    addRaw(m[1] ?? "")
+  }
+  // 2. Single-quoted paths (may contain spaces): bun '/path with spaces/hook.ts'
+  for (const m of command.matchAll(/'((?:\/|~\/|\$HOME\/)[^']+)'/g)) {
+    addRaw(m[1] ?? "")
+  }
+  // 3. Unquoted tokens delimited by whitespace/special chars
+  for (const m of command.matchAll(/(?:^|\s)(\/[^\s'";&|]+|~\/[^\s'";&|]+|\$HOME\/[^\s'";&|]+)/g)) {
+    addRaw(m[1] ?? "")
+  }
+
   return paths
 }
 
@@ -551,24 +573,9 @@ async function checkScriptExecutePermissions(fix: boolean): Promise<CheckResult>
 function extractDispatchEvents(hooks: Record<string, unknown>): Set<string> {
   const events = new Set<string>()
   const dispatchRe = /swiz dispatch (\S+)/
-  for (const entries of Object.values(hooks)) {
-    if (!Array.isArray(entries)) continue
-    for (const entry of entries) {
-      const e = entry as Record<string, unknown>
-      if (typeof e.command === "string") {
-        const m = dispatchRe.exec(e.command)
-        if (m?.[1]) events.add(m[1])
-      }
-      if (Array.isArray(e.hooks)) {
-        for (const h of e.hooks) {
-          const hh = h as Record<string, unknown>
-          if (typeof hh.command === "string") {
-            const m = dispatchRe.exec(hh.command)
-            if (m?.[1]) events.add(m[1])
-          }
-        }
-      }
-    }
+  for (const cmd of collectCommandStrings(hooks)) {
+    const m = dispatchRe.exec(cmd)
+    if (m?.[1]) events.add(m[1])
   }
   return events
 }

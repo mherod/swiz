@@ -161,6 +161,64 @@ describe("swiz doctor", () => {
     expect(result.stdout).toContain("/nonexistent/path/to/hook.ts")
   })
 
+  test("detects missing script at arbitrary nesting depth in hook config", async () => {
+    const home = await createTempHome()
+    const claudeDir = join(home, ".claude")
+    await mkdir(claudeDir, { recursive: true })
+    // Three levels of nesting: hooks -> matchers -> hooks -> command
+    await writeFile(
+      join(claudeDir, "settings.json"),
+      JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: "Bash",
+              hooks: [
+                {
+                  hooks: [
+                    {
+                      type: "command",
+                      command: "bun /deeply/nested/hook.ts",
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      })
+    )
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Installed config scripts")
+    expect(result.stdout).toContain("/deeply/nested/hook.ts")
+  })
+
+  test("detects missing script with quoted path containing spaces", async () => {
+    const home = await createTempHome()
+    const claudeDir = join(home, ".claude")
+    await mkdir(claudeDir, { recursive: true })
+    await writeFile(
+      join(claudeDir, "settings.json"),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: 'bun "/path with spaces/my hook.ts"',
+                },
+              ],
+            },
+          ],
+        },
+      })
+    )
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Installed config scripts")
+    expect(result.stdout).toContain("/path with spaces/my hook.ts")
+  })
+
   test("reports GitHub CLI auth status", async () => {
     const home = await createTempHome()
     const result = await runDoctor(home)
