@@ -222,13 +222,13 @@ export function isPlaceholderSubject(subject: string): boolean {
 // Outputs polyglot JSON understood by Claude Code, Cursor, Gemini CLI, and Codex CLI.
 
 /** Emit a PreToolUse denial and exit. Appends ACTION REQUIRED footer. Works across all agents. */
-export function denyPreToolUse(reason: string): never {
+export function denyPreToolUse(reason: string, options: ActionRequiredOptions = {}): never {
   console.log(
     JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
-        permissionDecisionReason: reason + preToolActionRequired(reason),
+        permissionDecisionReason: reason + preToolActionRequired(reason, options),
       },
     })
   )

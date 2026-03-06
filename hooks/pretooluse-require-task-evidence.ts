@@ -4,7 +4,7 @@
 // record, causing stop hooks to fire repeatedly.  This hook requires >=2 distinct
 // evidence fields in the description before allowing completion.
 
-import { denyPreToolUse, preToolActionRequired } from "./hook-utils.ts"
+import { denyPreToolUse } from "./hook-utils.ts"
 
 // Evidence patterns — each entry is a named family with a regex.
 // Any 2+ distinct families must match for the call to proceed.
@@ -41,4 +41,4 @@ const reason =
   `\n\nUse \`swiz tasks complete <id> --evidence "note:CI green — conclusion: success, run <id>"\` ` +
   `instead of a plain TaskUpdate.`
 
-denyPreToolUse(reason + preToolActionRequired(reason, { includeReassessmentAdvice: false }))
+denyPreToolUse(reason, { includeReassessmentAdvice: false })

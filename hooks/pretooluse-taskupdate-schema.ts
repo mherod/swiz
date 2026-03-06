@@ -3,7 +3,7 @@
 // The TaskUpdate tool accepts a fixed schema; unknown fields (e.g. `notes`)
 // cause an InputValidationError at the API boundary before any work is done.
 
-import { denyPreToolUse, preToolActionRequired } from "./hook-utils.ts"
+import { denyPreToolUse } from "./hook-utils.ts"
 
 const ALLOWED_FIELDS = new Set([
   "taskId",
@@ -29,5 +29,5 @@ if (unsupported.length > 0) {
     `Allowed fields: ${allowed}.\n\n` +
     `To complete a task with evidence, use:\n` +
     `  swiz tasks complete <id> --evidence "note:..."`
-  denyPreToolUse(reason + preToolActionRequired(reason, { includeReassessmentAdvice: false }))
+  denyPreToolUse(reason, { includeReassessmentAdvice: false })
 }
