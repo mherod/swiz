@@ -9,7 +9,7 @@ import { generateText, Output } from "ai"
 import { createGeminiProvider } from "ai-sdk-provider-gemini-cli"
 import type { ZodType } from "zod"
 
-const DEFAULT_MODEL = "gemini-2.5-flash"
+const DEFAULT_MODEL = "gemini-flash-latest"
 
 /**
  * Synchronous check: returns true when GEMINI_API_KEY is set in the environment.
@@ -28,7 +28,7 @@ export interface PromptGeminiOptions {
   timeout?: number
   /** External AbortSignal — takes precedence over timeout. */
   signal?: AbortSignal
-  /** Gemini model to use. Defaults to gemini-2.5-flash. */
+  /** Gemini model to use. Defaults to gemini-flash-latest. */
   model?: string
 }
 
