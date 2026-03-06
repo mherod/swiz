@@ -59,6 +59,7 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/shim.ts",
   "src/commands/skill.ts",
   "src/commands/state.ts",
+  "src/commands/status-line.ts",
   "src/commands/status.ts",
   "src/commands/tasks.ts",
   "src/commands/transcript.ts",
