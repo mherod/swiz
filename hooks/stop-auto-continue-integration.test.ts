@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
@@ -54,24 +54,14 @@ function buildTranscript(toolCallCount: number): string {
   return `${lines.join("\n")}\n`
 }
 
-/** Creates a fake `agent` binary that writes its args to a file then prints a suggestion. */
-async function createArgCapturingAgent(binDir: string): Promise<string> {
-  const argsFile = join(binDir, "captured-args.txt")
-  const script =
-    `#!/bin/sh\n` +
-    `printf '%s\\n' "$@" > '${argsFile}'\n` +
-    `printf '%s' 'Run the linter'\n` +
-    `exit 0\n`
-  await writeFile(join(binDir, "agent"), script)
-  await chmod(join(binDir, "agent"), 0o755)
-  return argsFile
-}
-
-/** Creates a fake `agent` that simply outputs a suggestion (no arg capture). */
-async function createFakeAgent(binDir: string, output: string, exitCode = 0): Promise<void> {
-  const script = `#!/bin/sh\nprintf '%s' '${output.replace(/'/g, "'\\''")}'\nexit ${exitCode}\n`
-  await writeFile(join(binDir, "agent"), script)
-  await chmod(join(binDir, "agent"), 0o755)
+/** Build a minimal structured AgentResponse JSON for GEMINI_TEST_RESPONSE. */
+function agentResponse(next: string): string {
+  return JSON.stringify({
+    next,
+    reflections: [],
+    processCritique: "",
+    productCritique: "",
+  })
 }
 
 interface RunResult {
@@ -83,7 +73,6 @@ interface RunResult {
 /** Run the hook with a raw JSON payload (caller controls every field). */
 async function runHookRaw(
   payload: Record<string, unknown>,
-  binDir: string,
   extraEnv: Record<string, string> = {}
 ): Promise<RunResult> {
   // Ensure an isolated HOME with autoContinue:true so the hook doesn't
@@ -93,14 +82,14 @@ async function runHookRaw(
     home = await createTempDir()
     await seedSettings(home)
   }
-  const { CLAUDECODE: _cc, ...cleanEnv } = process.env
+  // Strip CLAUDECODE (agent detection) and GEMINI_API_KEY (tests control it).
+  const { CLAUDECODE: _cc, GEMINI_API_KEY: _gk, ...cleanEnv } = process.env
   const proc = Bun.spawn([BUN_EXE, HOOK_PATH], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
     env: {
       ...cleanEnv,
-      PATH: `${binDir}:/bin:/usr/bin`,
       HOME: home,
       ...extraEnv,
     },
@@ -124,49 +113,36 @@ async function runHookRaw(
 
 describe("stop-auto-continue: input validation", () => {
   test("exits silently when transcript_path is missing from input", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "Should never run")
-
     // No transcript_path key at all
-    const result = await runHookRaw({ session_id: "test", cwd: "/tmp" }, binDir)
+    const result = await runHookRaw({ session_id: "test", cwd: "/tmp" })
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
   })
 
   test("exits silently when transcript_path is null", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "Should never run")
-
-    const result = await runHookRaw(
-      { transcript_path: null, session_id: "test", cwd: "/tmp" },
-      binDir
-    )
+    const result = await runHookRaw({
+      transcript_path: null,
+      session_id: "test",
+      cwd: "/tmp",
+    })
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
   })
 
   test("exits silently when transcript file does not exist on disk", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "Should never run")
-
-    const result = await runHookRaw(
-      {
-        transcript_path: "/nonexistent/path/transcript.jsonl",
-        session_id: "test",
-        cwd: "/tmp",
-      },
-      binDir
-    )
+    const result = await runHookRaw({
+      transcript_path: "/nonexistent/path/transcript.jsonl",
+      session_id: "test",
+      cwd: "/tmp",
+    })
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
   })
 
   test("exits silently when transcript contains no tool calls (all text turns)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "Should never run")
     const workDir = await createTempDir()
 
     // Transcript with only user+assistant text turns, no tool_use blocks
@@ -181,10 +157,11 @@ describe("stop-auto-continue: input validation", () => {
     const transcriptPath = join(workDir, "transcript.jsonl")
     await writeFile(transcriptPath, transcript)
 
-    const result = await runHookRaw(
-      { transcript_path: transcriptPath, session_id: "test", cwd: workDir },
-      binDir
-    )
+    const result = await runHookRaw({
+      transcript_path: transcriptPath,
+      session_id: "test",
+      cwd: workDir,
+    })
 
     // Zero tool calls → below MIN_TOOL_CALLS (5) → silent
     expect(result.decision).toBeUndefined()
@@ -195,30 +172,34 @@ describe("stop-auto-continue: input validation", () => {
 
 describe("stop-auto-continue: MIN_TOOL_CALLS boundary", () => {
   test("4 tool calls → exits silently (below threshold)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "Should not appear")
     const workDir = await createTempDir()
     const transcriptPath = join(workDir, "transcript.jsonl")
     await writeFile(transcriptPath, buildTranscript(4))
 
-    const result = await runHookRaw(
-      { transcript_path: transcriptPath, session_id: "test", cwd: workDir },
-      binDir
-    )
+    const result = await runHookRaw({
+      transcript_path: transcriptPath,
+      session_id: "test",
+      cwd: workDir,
+    })
 
     expect(result.decision).toBeUndefined()
   })
 
   test("5 tool calls → blocks (at threshold)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "Fix the failing test")
     const workDir = await createTempDir()
     const transcriptPath = join(workDir, "transcript.jsonl")
     await writeFile(transcriptPath, buildTranscript(5))
 
     const result = await runHookRaw(
-      { transcript_path: transcriptPath, session_id: "test", cwd: workDir },
-      binDir
+      {
+        transcript_path: transcriptPath,
+        session_id: "test",
+        cwd: workDir,
+      },
+      {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Fix the failing test"),
+      }
     )
 
     expect(result.decision).toBe("block")
@@ -248,21 +229,25 @@ describe("stop-auto-continue: prompt ordering with session tasks", () => {
     await writeTask(fakeHome, "1", "completed", "Write tests")
     await writeTask(fakeHome, "2", "in_progress", "Fix types")
 
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
     const workDir = await createTempDir()
     const transcriptPath = join(workDir, "transcript.jsonl")
     await writeFile(transcriptPath, buildTranscript(10))
 
     await runHookRaw(
       { transcript_path: transcriptPath, session_id: "test-session", cwd: workDir },
-      binDir,
-      { HOME: fakeHome }
+      {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      }
     )
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    const tasksIdx = capturedArgs.indexOf("SESSION TASKS")
-    const transcriptIdx = capturedArgs.indexOf("CONVERSATION TRANSCRIPT")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    const tasksIdx = capturedPrompt.indexOf("SESSION TASKS")
+    const transcriptIdx = capturedPrompt.indexOf("CONVERSATION TRANSCRIPT")
     expect(tasksIdx).toBeGreaterThan(-1)
     expect(transcriptIdx).toBeGreaterThan(-1)
     expect(tasksIdx).toBeLessThan(transcriptIdx)
@@ -274,46 +259,54 @@ describe("stop-auto-continue: prompt ordering with session tasks", () => {
     await writeTask(fakeHome, "1", "completed", "Done thing")
     await writeTask(fakeHome, "2", "in_progress", "Active thing")
 
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
     const workDir = await createTempDir()
     const transcriptPath = join(workDir, "transcript.jsonl")
     await writeFile(transcriptPath, buildTranscript(10))
 
     await runHookRaw(
       { transcript_path: transcriptPath, session_id: "test-session", cwd: workDir },
-      binDir,
-      { HOME: fakeHome }
+      {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      }
     )
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    const inProgressIdx = capturedArgs.indexOf("IN PROGRESS:")
-    const completedIdx = capturedArgs.indexOf("COMPLETED:")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    const inProgressIdx = capturedPrompt.indexOf("IN PROGRESS:")
+    const completedIdx = capturedPrompt.indexOf("COMPLETED:")
     expect(completedIdx).toBeGreaterThan(-1)
     expect(inProgressIdx).toBeGreaterThan(-1)
     expect(completedIdx).toBeLessThan(inProgressIdx)
   })
 
   test("empty session_id produces no SESSION TASKS block but still blocks", async () => {
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
     const workDir = await createTempDir()
     const transcriptPath = join(workDir, "transcript.jsonl")
     await writeFile(transcriptPath, buildTranscript(10))
 
     const result = await runHookRaw(
       { transcript_path: transcriptPath, session_id: "", cwd: workDir },
-      binDir
+      {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      }
     )
 
     expect(result.decision).toBe("block")
 
     // Check prompt had no task section
-    let capturedArgs = ""
+    let capturedPrompt = ""
     try {
-      capturedArgs = await Bun.file(argsFile).text()
+      capturedPrompt = await Bun.file(captureFile).text()
     } catch {}
-    expect(capturedArgs).not.toContain("=== SESSION TASKS ===")
+    expect(capturedPrompt).not.toContain("=== SESSION TASKS ===")
   })
 
   test("combined tasks + transcript: suggestion incorporates both sources", async () => {
@@ -321,23 +314,26 @@ describe("stop-auto-continue: prompt ordering with session tasks", () => {
     await seedSettings(fakeHome)
     await writeTask(fakeHome, "1", "in_progress", "Implement auth flow")
 
-    const binDir = await createTempDir()
-    // The fake agent echoes back the full prompt — let's check it contains both pieces
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
     const workDir = await createTempDir()
     const transcriptPath = join(workDir, "transcript.jsonl")
     await writeFile(transcriptPath, buildTranscript(10))
 
     const result = await runHookRaw(
       { transcript_path: transcriptPath, session_id: "test-session", cwd: workDir },
-      binDir,
-      { HOME: fakeHome }
+      {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      }
     )
 
     expect(result.decision).toBe("block")
-    const capturedArgs = await Bun.file(argsFile).text()
+    const capturedPrompt = await Bun.file(captureFile).text()
     // Both data sources present in the prompt
-    expect(capturedArgs).toContain("Implement auth flow (#1)")
-    expect(capturedArgs).toContain("CONVERSATION TRANSCRIPT")
+    expect(capturedPrompt).toContain("Implement auth flow (#1)")
+    expect(capturedPrompt).toContain("CONVERSATION TRANSCRIPT")
   })
 })

@@ -85,6 +85,37 @@ export async function promptGeminiObject<T>(
   schema: ZodType<T>,
   options?: PromptGeminiOptions
 ): Promise<T> {
+  // ── Test seams ──────────────────────────────────────────────────────────
+  // These env vars are checked before creating the real provider so that
+  // subprocess-based integration tests can inject fixture responses without
+  // hitting the network.  They are never set in production.
+  if (process.env.GEMINI_TEST_THROW === "1") {
+    throw new Error("Simulated Gemini API error (GEMINI_TEST_THROW=1)")
+  }
+  if (process.env.GEMINI_TEST_RESPONSE !== undefined) {
+    if (process.env.GEMINI_TEST_CAPTURE_FILE) {
+      await Bun.write(process.env.GEMINI_TEST_CAPTURE_FILE, prompt)
+    }
+    if (process.env.GEMINI_TEST_DELAY_MS) {
+      const { signal: delaySignal } = resolveSignal(options)
+      const delay = Number.parseInt(process.env.GEMINI_TEST_DELAY_MS, 10)
+      await new Promise<void>((resolve, reject) => {
+        // Do NOT .unref() this timer — it must keep the event loop alive so the
+        // abort signal (which fires when the hook's own timeout expires) can land.
+        const id = setTimeout(resolve, delay)
+        delaySignal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(id)
+            reject(new Error("Aborted"))
+          },
+          { once: true }
+        )
+      })
+    }
+    return JSON.parse(process.env.GEMINI_TEST_RESPONSE) as T
+  }
+  // ── Real implementation ──────────────────────────────────────────────────
   const gemini = createProvider()
   const { signal, cleanup } = resolveSignal(options)
   try {

@@ -31,29 +31,6 @@ async function createTempDir(): Promise<string> {
   return dir
 }
 
-/** Creates a fake `agent` binary that prints `output` and exits with `exitCode`. */
-async function createFakeAgent(binDir: string, output: string, exitCode = 0): Promise<void> {
-  const script = `#!/bin/sh\nprintf '%s' '${output.replace(/'/g, "'\\''")}'\nexit ${exitCode}\n`
-  const path = join(binDir, "agent")
-  await writeFile(path, script)
-  await chmod(path, 0o755)
-}
-
-/** Creates a fake `agent` binary that sleeps for `delaySecs` then prints output.
- * Uses `exec` so that sleep becomes the main process — SIGTERM/SIGKILL hit it
- * directly and close the pipe immediately instead of waiting for sleep to finish. */
-async function createSlowFakeAgent(
-  binDir: string,
-  _output: string,
-  delaySecs: number
-): Promise<void> {
-  // exec replaces the shell with sleep, so kill signals hit sleep directly
-  const script = `#!/bin/sh\nexec sleep ${delaySecs}\n`
-  const path = join(binDir, "agent")
-  await writeFile(path, script)
-  await chmod(path, 0o755)
-}
-
 /** Builds a minimal JSONL transcript with the given number of tool calls and a user turn. */
 function buildTranscript(toolCallCount: number, userMessage = "What is the status?"): string {
   const lines: string[] = []
@@ -73,15 +50,26 @@ function buildTranscript(toolCallCount: number, userMessage = "What is the statu
   return `${lines.join("\n")}\n`
 }
 
+/** Build a minimal structured AgentResponse JSON for GEMINI_TEST_RESPONSE. */
+function agentResponse(
+  next: string,
+  opts: { reflections?: string[]; processCritique?: string; productCritique?: string } = {}
+): string {
+  return JSON.stringify({
+    next,
+    reflections: opts.reflections ?? [],
+    processCritique: opts.processCritique ?? "",
+    productCritique: opts.productCritique ?? "",
+  })
+}
+
 async function runHook({
   transcriptContent,
-  binDir,
   stopHookActive = false,
   extraEnv = {},
   cwd,
 }: {
   transcriptContent: string
-  binDir: string
   stopHookActive?: boolean
   extraEnv?: Record<string, string>
   cwd?: string
@@ -106,7 +94,8 @@ async function runHook({
   await mkdir(fakeSwizDir, { recursive: true })
   await writeFile(join(fakeSwizDir, "settings.json"), JSON.stringify({ autoContinue: true }))
 
-  const { CLAUDECODE: _cc, ...cleanEnv } = process.env
+  // Strip CLAUDECODE (would alter agent detection) and GEMINI_API_KEY (tests control it).
+  const { CLAUDECODE: _cc, GEMINI_API_KEY: _gk, ...cleanEnv } = process.env
   const proc = Bun.spawn([BUN_EXE, "hooks/stop-auto-continue.ts"], {
     stdin: "pipe",
     stdout: "pipe",
@@ -114,7 +103,6 @@ async function runHook({
     env: {
       ...cleanEnv,
       HOME: fakeHome,
-      PATH: `${binDir}:/bin:/usr/bin`,
       ...extraEnv,
     },
   })
@@ -146,12 +134,12 @@ async function runHook({
 
 describe("stop-auto-continue", () => {
   test("blocks with AI suggestion for a substantive session", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "Commit the changes to main")
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Commit the changes to main"),
+      },
     })
 
     expect(result.decision).toBe("block")
@@ -159,13 +147,13 @@ describe("stop-auto-continue", () => {
   })
 
   test("blocks even when stop_hook_active is true (unconditional)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "Run the test suite")
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       stopHookActive: true,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the test suite"),
+      },
     })
 
     expect(result.decision).toBe("block")
@@ -173,12 +161,8 @@ describe("stop-auto-continue", () => {
   })
 
   test("allows stop for trivial sessions (< 5 tool calls)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "Should not appear")
-
     const result = await runHook({
       transcriptContent: buildTranscript(3),
-      binDir,
     })
 
     expect(result.decision).toBeUndefined()
@@ -186,16 +170,12 @@ describe("stop-auto-continue", () => {
   })
 
   test("allows stop when auto-continue is disabled in global swiz settings", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "Should not appear")
-
     const homeDir = await createTempDir()
     await mkdir(join(homeDir, ".swiz"), { recursive: true })
     await writeFile(join(homeDir, ".swiz", "settings.json"), '{\n  "autoContinue": false\n}\n')
 
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       extraEnv: { HOME: homeDir },
     })
 
@@ -204,9 +184,6 @@ describe("stop-auto-continue", () => {
   })
 
   test("session override takes precedence over global setting", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "Run the linter")
-
     const homeDir = await createTempDir()
     await mkdir(join(homeDir, ".swiz"), { recursive: true })
     await writeFile(
@@ -216,8 +193,11 @@ describe("stop-auto-continue", () => {
 
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: homeDir },
+      extraEnv: {
+        HOME: homeDir,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      },
     })
 
     expect(result.decision).toBe("block")
@@ -225,13 +205,12 @@ describe("stop-auto-continue", () => {
   })
 
   test("allows stop when agent fails (no fallback block)", async () => {
-    const binDir = await createTempDir()
-    // Agent always fails — no useful suggestion can be generated, so stop is allowed.
-    await createFakeAgent(binDir, "", 1)
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_THROW: "1",
+      },
     })
 
     expect(result.decision).toBeUndefined()
@@ -240,13 +219,9 @@ describe("stop-auto-continue", () => {
   })
 
   test("allows stop when no AI backend is available (no fallback block)", async () => {
-    // binDir has no agent binary — hook should exit 0 rather than blocking
-    // with the generic fallback message, since no meaningful suggestion can be generated.
-    const binDir = await createTempDir()
-
+    // No GEMINI_API_KEY → hook exits NO_BACKEND rather than blocking.
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
     })
 
     expect(result.decision).toBeUndefined()
@@ -254,79 +229,45 @@ describe("stop-auto-continue", () => {
     expect(result.stderr).toContain("[stop-auto-continue:NO_BACKEND]")
   })
 
-  test("passes --workspace with a temp dir when using agent backend", async () => {
-    const binDir = await createTempDir()
-    const argsFile = join(binDir, "captured-args.txt")
+  test("prompt contains all three read-only enforcement layers", async () => {
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
-    // Fake `agent` binary that dumps its arguments to a file, then outputs a suggestion
-    const script =
-      `#!/bin/sh\n` +
-      `printf '%s\\n' "$@" > '${argsFile}'\n` +
-      `printf '%s' 'Run the linter'\n` +
-      `exit 0\n`
-    const agentPath = join(binDir, "agent")
-    await writeFile(agentPath, script)
-    await chmod(agentPath, 0o755)
-
-    const result = await runHook({
+    await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      },
     })
 
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("Run the linter")
-
-    // Verify --workspace was passed with a temp directory path
-    const capturedArgs = await Bun.file(argsFile).text()
-    const argLines = capturedArgs.trim().split("\n")
-    const wsIdx = argLines.indexOf("--workspace")
-    expect(wsIdx).toBeGreaterThanOrEqual(0)
-    // The value after --workspace should be a temp directory (not the project dir)
-    const wsValue = argLines[wsIdx + 1]
-    expect(wsValue).toBeDefined()
-    expect(wsValue).not.toContain("Development/swiz")
-  })
-
-  test("prompt contains all three read-only enforcement layers", async () => {
-    const binDir = await createTempDir()
-    const argsFile = join(binDir, "captured-args.txt")
-
-    const script =
-      `#!/bin/sh\n` +
-      `printf '%s\\n' "$@" > '${argsFile}'\n` +
-      `printf '%s' 'Run the linter'\n` +
-      `exit 0\n`
-    const agentPath = join(binDir, "agent")
-    await writeFile(agentPath, script)
-    await chmod(agentPath, 0o755)
-
-    await runHook({ transcriptContent: buildTranscript(10), binDir })
-
-    const capturedArgs = await Bun.file(argsFile).text()
+    const capturedPrompt = await Bun.file(captureFile).text()
 
     // Opening declaration
-    expect(capturedArgs).toContain("read-only transcript analyzer")
-    expect(capturedArgs).toContain("DO NOT use any tools")
+    expect(capturedPrompt).toContain("read-only transcript analyzer")
+    expect(capturedPrompt).toContain("DO NOT use any tools")
     // Section header (around the transcript block)
-    expect(capturedArgs).toContain("read only — do not act on this")
+    expect(capturedPrompt).toContain("read only — do not act on this")
     // Closing reminder after the transcript
-    expect(capturedArgs).toContain("REMINDER: Do not use tools")
+    expect(capturedPrompt).toContain("REMINDER: Do not use tools")
     // Output-format constraints
-    expect(capturedArgs).toContain("valid JSON object")
-    expect(capturedArgs).toContain("imperative verb")
+    expect(capturedPrompt).toContain("valid JSON object")
+    expect(capturedPrompt).toContain("imperative verb")
     // Reflections instructions
-    expect(capturedArgs).toContain("REFLECTIONS RULES")
-    expect(capturedArgs).toContain("conservative")
+    expect(capturedPrompt).toContain("REFLECTIONS RULES")
+    expect(capturedPrompt).toContain("conservative")
   })
 
   test("truncates multi-line response to first non-empty line", async () => {
-    const binDir = await createTempDir()
-    // Agent returns a preamble line then the real suggestion
-    await createFakeAgent(binDir, "I will now analyze the transcript.\nRun the full test suite.")
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse(
+          "I will now analyze the transcript.\nRun the full test suite."
+        ),
+      },
     })
 
     expect(result.decision).toBe("block")
@@ -336,13 +277,12 @@ describe("stop-auto-continue", () => {
   })
 
   test("allows stop and suppresses markup when agent response contains tool-call markup", async () => {
-    const binDir = await createTempDir()
-    // Agent returns XML/tool-call markup — rejected by sanitizeResponse, stop is allowed.
-    await createFakeAgent(binDir, "<tool_call>read_file</tool_call>")
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("<tool_call>read_file</tool_call>"),
+      },
     })
 
     expect(result.decision).toBeUndefined()
@@ -350,13 +290,13 @@ describe("stop-auto-continue", () => {
   })
 
   test("rejects response with unicode fullwidth < lookalike", async () => {
-    const binDir = await createTempDir()
     // U+FF1C FULLWIDTH LESS-THAN SIGN — NFKC-normalises to ASCII <
-    await createFakeAgent(binDir, "\uFF1Ctool_call\uFF1E")
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\uFF1Ctool_call\uFF1E"),
+      },
     })
 
     expect(result.decision).toBeUndefined()
@@ -364,13 +304,13 @@ describe("stop-auto-continue", () => {
   })
 
   test("rejects response with zero-width joiner injected between < and tag name", async () => {
-    const binDir = await createTempDir()
     // U+200D ZWJ between < and tag name would break /<\w/ without stripping
-    await createFakeAgent(binDir, "<\u200Dtool_call>")
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("<\u200Dtool_call>"),
+      },
     })
 
     expect(result.decision).toBeUndefined()
@@ -378,13 +318,13 @@ describe("stop-auto-continue", () => {
   })
 
   test("rejects response with RTL override character before markup", async () => {
-    const binDir = await createTempDir()
     // U+202E RIGHT-TO-LEFT OVERRIDE — ASCII < is still present, already caught
-    await createFakeAgent(binDir, "\u202E<tool_call>")
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\u202E<tool_call>"),
+      },
     })
 
     expect(result.decision).toBeUndefined()
@@ -392,12 +332,12 @@ describe("stop-auto-continue", () => {
   })
 
   test("rejects response with CJK left angle bracket homoglyph 〈 (U+3008)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "\u3008tool_call\u3009")
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\u3008tool_call\u3009"),
+      },
     })
 
     expect(result.decision).toBeUndefined()
@@ -405,12 +345,12 @@ describe("stop-auto-continue", () => {
   })
 
   test("rejects response with single left-pointing angle quotation ‹ (U+2039)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "\u2039tool_call\u203A")
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\u2039tool_call\u203A"),
+      },
     })
 
     expect(result.decision).toBeUndefined()
@@ -418,12 +358,12 @@ describe("stop-auto-continue", () => {
   })
 
   test("rejects response with mathematical left angle bracket ⟨ (U+27E8)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "\u27E8tool_call\u27E9")
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\u27E8tool_call\u27E9"),
+      },
     })
 
     expect(result.decision).toBeUndefined()
@@ -431,92 +371,116 @@ describe("stop-auto-continue", () => {
   })
 
   test("rejects response with modifier letter left arrowhead ˂ (U+02C2)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "\u02C2tool_call\u02C3")
-
-    const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\u02C2tool_call\u02C3"),
+      },
+    })
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput).not.toContain("\u02C2tool_call")
   })
 
   test("rejects response with Canadian Syllabics PA ᐸ (U+1438)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "\u1438tool_call\u1433")
-
-    const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\u1438tool_call\u1433"),
+      },
+    })
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput).not.toContain("\u1438tool_call")
   })
 
   test("rejects response with heavy left-pointing angle quotation ❮ (U+276E)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "\u276Etool_call\u276F")
-
-    const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\u276Etool_call\u276F"),
+      },
+    })
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput).not.toContain("\u276Etool_call")
   })
 
   test("rejects response with small less-than sign ﹤ (U+FE64, NFKC→<)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "\uFE64tool_call\uFE65")
-
-    const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\uFE64tool_call\uFE65"),
+      },
+    })
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
   })
 
   test("rejects response with heavy left-pointing angle bracket ❰ (U+2770)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "\u2770tool_call\u2771")
-
-    const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\u2770tool_call\u2771"),
+      },
+    })
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
   })
 
   test("rejects response with mathematical left double angle bracket ⟪ (U+27EA)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "\u27EAtool_call\u27EB")
-
-    const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\u27EAtool_call\u27EB"),
+      },
+    })
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
   })
 
   test("rejects response with left angle bracket with dot ⦑ (U+2991)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "\u2991tool_call\u2992")
-
-    const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\u2991tool_call\u2992"),
+      },
+    })
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
   })
 
   test("rejects response with left-pointing curved angle bracket ⧼ (U+29FC)", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "\u29FCtool_call\u29FD")
-
-    const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\u29FCtool_call\u29FD"),
+      },
+    })
 
     expect(result.decision).toBeUndefined()
     expect(result.rawOutput.trim()).toBe("")
   })
 
   test("rejects response with leading-whitespace XML tag", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "  <tool_call>read_file</tool_call>")
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("  <tool_call>read_file</tool_call>"),
+      },
     })
 
     expect(result.decision).toBeUndefined()
@@ -524,12 +488,12 @@ describe("stop-auto-continue", () => {
   })
 
   test("rejects response with XML markup embedded after normal text", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "Run the tests <tool_call>bash</tool_call>")
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests <tool_call>bash</tool_call>"),
+      },
     })
 
     expect(result.decision).toBeUndefined()
@@ -537,12 +501,12 @@ describe("stop-auto-continue", () => {
   })
 
   test("skips empty lines and returns first non-empty clean line", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "\n\nRun the full test suite.")
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("\n\nRun the full test suite."),
+      },
     })
 
     expect(result.decision).toBe("block")
@@ -570,104 +534,110 @@ describe("stop-auto-continue", () => {
     await writeFile(join(tasksDir, `${id}.json`), JSON.stringify({ id, status, subject }))
   }
 
-  /** Returns a fake agent binDir that dumps args to a file and outputs a safe suggestion. */
-  async function createArgCapturingAgent(binDir: string): Promise<string> {
-    const argsFile = join(binDir, "captured-args.txt")
-    const script =
-      `#!/bin/sh\n` +
-      `printf '%s\\n' "$@" > '${argsFile}'\n` +
-      `printf '%s' 'Run the tests'\n` +
-      `exit 0\n`
-    const agentPath = join(binDir, "agent")
-    await writeFile(agentPath, script)
-    await chmod(agentPath, 0o755)
-    return argsFile
-  }
-
   test("omits SESSION TASKS section when tasks directory does not exist", async () => {
     const fakeHome = await createTempDir() // no .claude/tasks created
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).not.toContain("=== SESSION TASKS ===")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).not.toContain("=== SESSION TASKS ===")
   })
 
   test("omits SESSION TASKS section when tasks directory is empty", async () => {
     const fakeHome = await setupTasksDir()
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).not.toContain("=== SESSION TASKS ===")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).not.toContain("=== SESSION TASKS ===")
   })
 
   test("includes COMPLETED tasks in SESSION TASKS section", async () => {
     const fakeHome = await setupTasksDir()
     await writeTask(fakeHome, "1", "completed", "Fix the auth bug")
     await writeTask(fakeHome, "2", "completed", "Add unit tests")
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("SESSION TASKS")
-    expect(capturedArgs).toContain("COMPLETED:")
-    expect(capturedArgs).toContain("Fix the auth bug (#1)")
-    expect(capturedArgs).toContain("Add unit tests (#2)")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("SESSION TASKS")
+    expect(capturedPrompt).toContain("COMPLETED:")
+    expect(capturedPrompt).toContain("Fix the auth bug (#1)")
+    expect(capturedPrompt).toContain("Add unit tests (#2)")
   })
 
   test("includes IN PROGRESS tasks in SESSION TASKS section", async () => {
     const fakeHome = await setupTasksDir()
     await writeTask(fakeHome, "3", "in_progress", "Refactor CLI entry")
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("SESSION TASKS")
-    expect(capturedArgs).toContain("IN PROGRESS:")
-    expect(capturedArgs).toContain("Refactor CLI entry (#3)")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("SESSION TASKS")
+    expect(capturedPrompt).toContain("IN PROGRESS:")
+    expect(capturedPrompt).toContain("Refactor CLI entry (#3)")
   })
 
   test("excludes pending tasks from SESSION TASKS section", async () => {
     const fakeHome = await setupTasksDir()
     await writeTask(fakeHome, "1", "completed", "Done task")
     await writeTask(fakeHome, "2", "pending", "Not started yet")
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("Done task (#1)")
-    expect(capturedArgs).not.toContain("Not started yet")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("Done task (#1)")
+    expect(capturedPrompt).not.toContain("Not started yet")
   })
 
   test("shows both IN PROGRESS and COMPLETED in mixed-status session", async () => {
@@ -675,21 +645,25 @@ describe("stop-auto-continue", () => {
     await writeTask(fakeHome, "1", "completed", "Write tests")
     await writeTask(fakeHome, "2", "in_progress", "Fix type errors")
     await writeTask(fakeHome, "3", "pending", "Deploy to prod")
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("IN PROGRESS:")
-    expect(capturedArgs).toContain("Fix type errors (#2)")
-    expect(capturedArgs).toContain("COMPLETED:")
-    expect(capturedArgs).toContain("Write tests (#1)")
-    expect(capturedArgs).not.toContain("Deploy to prod")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("IN PROGRESS:")
+    expect(capturedPrompt).toContain("Fix type errors (#2)")
+    expect(capturedPrompt).toContain("COMPLETED:")
+    expect(capturedPrompt).toContain("Write tests (#1)")
+    expect(capturedPrompt).not.toContain("Deploy to prod")
   })
 
   test("silently skips malformed JSON task files and shows valid tasks", async () => {
@@ -700,19 +674,23 @@ describe("stop-auto-continue", () => {
       join(fakeHome, ".claude", "tasks", "test-session", "bad.json"),
       "{ this is not valid json }"
     )
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("Valid task (#1)")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("Valid task (#1)")
     // Malformed file should not cause an error message or crash
-    expect(capturedArgs).not.toContain("not valid json")
+    expect(capturedPrompt).not.toContain("not valid json")
   })
 
   test("silently skips task file with null id", async () => {
@@ -723,18 +701,22 @@ describe("stop-auto-continue", () => {
       join(fakeHome, ".claude", "tasks", "test-session", "nullid.json"),
       JSON.stringify({ id: "null", status: "completed", subject: "Ghost task" })
     )
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("Real task (#1)")
-    expect(capturedArgs).not.toContain("Ghost task")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("Real task (#1)")
+    expect(capturedPrompt).not.toContain("Ghost task")
   })
 
   test("ignores non-.json files in tasks directory", async () => {
@@ -745,28 +727,31 @@ describe("stop-auto-continue", () => {
       join(fakeHome, ".claude", "tasks", "test-session", ".audit-log.jsonl"),
       JSON.stringify({ action: "create", taskId: "99", subject: "Should be ignored" })
     )
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("Real task (#1)")
-    expect(capturedArgs).not.toContain("Should be ignored")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("Real task (#1)")
+    expect(capturedPrompt).not.toContain("Should be ignored")
   })
 
   test("allows stop when backend times out (no fallback block)", async () => {
-    const binDir = await createTempDir()
-    await createSlowFakeAgent(binDir, "This should never appear", 30)
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("This should never appear"),
+        GEMINI_TEST_DELAY_MS: "30000",
         ATTEMPT_TIMEOUT_MS: "500",
       },
     })
@@ -779,54 +764,25 @@ describe("stop-auto-continue", () => {
   // ─── JSON response parsing tests ──────────────────────────────────────────
 
   test("parses JSON response with next step", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({ next: "Run the full test suite", reflections: [] })
-    await createFakeAgent(binDir, json)
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the full test suite"),
+      },
     })
 
     expect(result.decision).toBe("block")
     expect(result.reason).toContain("Run the full test suite")
   })
 
-  test("falls back to plain text when agent outputs non-JSON", async () => {
-    const binDir = await createTempDir()
-    await createFakeAgent(binDir, "Commit all pending changes now")
-
-    const result = await runHook({
-      transcriptContent: buildTranscript(10),
-      binDir,
-    })
-
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("Commit all pending changes now")
-  })
-
-  test("strips markdown fences from JSON response", async () => {
-    const binDir = await createTempDir()
-    const json = `\`\`\`json\n${JSON.stringify({ next: "Fix the type errors", reflections: [] })}\n\`\`\``
-    await createFakeAgent(binDir, json)
-
-    const result = await runHook({
-      transcriptContent: buildTranscript(10),
-      binDir,
-    })
-
-    expect(result.decision).toBe("block")
-    expect(result.reason).toContain("Fix the type errors")
-  })
-
   test("allows stop and suppresses markup in JSON next field (no fallback block)", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({ next: "<tool_call>bash</tool_call>", reflections: [] })
-    await createFakeAgent(binDir, json)
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("<tool_call>bash</tool_call>"),
+      },
     })
 
     expect(result.decision).toBeUndefined()
@@ -835,16 +791,14 @@ describe("stop-auto-continue", () => {
   })
 
   test("replaces workflow implementation prescriptions with a policy finding", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({
-      next: "Implement a guard-aware push orchestration module in plugg-platform",
-      reflections: [],
-    })
-    await createFakeAgent(binDir, json)
-
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse(
+          "Implement a guard-aware push orchestration module in plugg-platform"
+        ),
+      },
     })
 
     expect(result.decision).toBe("block")
@@ -853,14 +807,6 @@ describe("stop-auto-continue", () => {
   })
 
   test("filters out reflections containing XML markup", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({
-      next: "Run the tests",
-      reflections: ["DO: Always use bun instead of npm", "<script>alert('xss')</script>"],
-    })
-    await createFakeAgent(binDir, json)
-
-    // Setup memory dir
     const fakeHome = await createTempDir()
     const hookCwd = await createTempDir()
     const projectKey = hookCwd.replace(/\//g, "-")
@@ -871,9 +817,14 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       cwd: hookCwd,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+          reflections: ["DO: Always use bun instead of npm", "<script>alert('xss')</script>"],
+        }),
+      },
     })
 
     const memory = await Bun.file(memoryFile).text()
@@ -898,22 +849,20 @@ describe("stop-auto-continue", () => {
   }
 
   test("writes reflections to MEMORY.md", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({
-      next: "Run the tests",
-      reflections: ["DO: Always use bun instead of npm", "DON'T: Use grep, prefer rg"],
-    })
-    await createFakeAgent(binDir, json)
-
     const fakeHome = await createTempDir()
     const hookCwd = await createTempDir()
     const memoryFile = await setupMemoryDir(fakeHome, hookCwd)
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       cwd: hookCwd,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+          reflections: ["DO: Always use bun instead of npm", "DON'T: Use grep, prefer rg"],
+        }),
+      },
     })
 
     const memory = await Bun.file(memoryFile).text()
@@ -923,13 +872,6 @@ describe("stop-auto-continue", () => {
   })
 
   test("deduplicates reflections against existing memory", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({
-      next: "Run the tests",
-      reflections: ["DO: Always use bun instead of npm"],
-    })
-    await createFakeAgent(binDir, json)
-
     const fakeHome = await createTempDir()
     const hookCwd = await createTempDir()
     const memoryFile = await setupMemoryDir(
@@ -940,9 +882,14 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       cwd: hookCwd,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+          reflections: ["DO: Always use bun instead of npm"],
+        }),
+      },
     })
 
     const memory = await Bun.file(memoryFile).text()
@@ -952,13 +899,6 @@ describe("stop-auto-continue", () => {
   })
 
   test("appends to existing Confirmed Patterns section without duplicate header", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({
-      next: "Run the tests",
-      reflections: ["DO: Prefer Bun.file over fs.readFile"],
-    })
-    await createFakeAgent(binDir, json)
-
     const fakeHome = await createTempDir()
     const hookCwd = await createTempDir()
     const memoryFile = await setupMemoryDir(
@@ -969,9 +909,14 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       cwd: hookCwd,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+          reflections: ["DO: Prefer Bun.file over fs.readFile"],
+        }),
+      },
     })
 
     const memory = await Bun.file(memoryFile).text()
@@ -983,21 +928,19 @@ describe("stop-auto-continue", () => {
   })
 
   test("skips memory writing when no project dir exists", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({
-      next: "Run the tests",
-      reflections: ["DO: Use bun exclusively"],
-    })
-    await createFakeAgent(binDir, json)
-
     const fakeHome = await createTempDir()
     // No project dir created — hook should not crash
 
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       cwd: "/nonexistent/project/path",
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+          reflections: ["DO: Use bun exclusively"],
+        }),
+      },
     })
 
     expect(result.decision).toBe("block")
@@ -1005,22 +948,20 @@ describe("stop-auto-continue", () => {
   })
 
   test("skips reflections that are too short", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({
-      next: "Run the tests",
-      reflections: ["short", "DO: Always use bun for running TypeScript files"],
-    })
-    await createFakeAgent(binDir, json)
-
     const fakeHome = await createTempDir()
     const hookCwd = await createTempDir()
     const memoryFile = await setupMemoryDir(fakeHome, hookCwd)
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       cwd: hookCwd,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+          reflections: ["short", "DO: Always use bun for running TypeScript files"],
+        }),
+      },
     })
 
     const memory = await Bun.file(memoryFile).text()
@@ -1029,13 +970,6 @@ describe("stop-auto-continue", () => {
   })
 
   test("does not write reflections when memory file would exceed 200 lines", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({
-      next: "Run the tests",
-      reflections: ["DO: This should not be written to memory"],
-    })
-    await createFakeAgent(binDir, json)
-
     const fakeHome = await createTempDir()
     const hookCwd = await createTempDir()
     // Create a memory file that's already at ~199 lines
@@ -1044,9 +978,14 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       cwd: hookCwd,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+          reflections: ["DO: This should not be written to memory"],
+        }),
+      },
     })
 
     const memory = await Bun.file(memoryFile).text()
@@ -1054,19 +993,18 @@ describe("stop-auto-continue", () => {
   })
 
   test("does not write reflections when agent returns no reflections", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({ next: "Run the tests", reflections: [] })
-    await createFakeAgent(binDir, json)
-
     const fakeHome = await createTempDir()
     const hookCwd = await createTempDir()
     const memoryFile = await setupMemoryDir(fakeHome, hookCwd)
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       cwd: hookCwd,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", { reflections: [] }),
+      },
     })
 
     const memory = await Bun.file(memoryFile).text()
@@ -1074,22 +1012,20 @@ describe("stop-auto-continue", () => {
   })
 
   test("formats reflections without prefix as DO directives", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({
-      next: "Run the tests",
-      reflections: ["Always use Bun.spawn instead of child_process"],
-    })
-    await createFakeAgent(binDir, json)
-
     const fakeHome = await createTempDir()
     const hookCwd = await createTempDir()
     const memoryFile = await setupMemoryDir(fakeHome, hookCwd)
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       cwd: hookCwd,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+          reflections: ["Always use Bun.spawn instead of child_process"],
+        }),
+      },
     })
 
     const memory = await Bun.file(memoryFile).text()
@@ -1099,16 +1035,16 @@ describe("stop-auto-continue", () => {
   // ─── Critique field tests ────────────────────────────────────────────────
 
   test("includes process and product critiques with labels before the finding line", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({
-      processCritique: "You skipped reading the existing implementation before modifying it.",
-      productCritique: "The fix handles the happy path but leaves the error case broken.",
-      next: "Run the full test suite",
-      reflections: [],
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the full test suite", {
+          processCritique: "You skipped reading the existing implementation before modifying it.",
+          productCritique: "The fix handles the happy path but leaves the error case broken.",
+        }),
+      },
     })
-    await createFakeAgent(binDir, json)
-
-    const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
     expect(result.decision).toBe("block")
     expect(result.reason).toContain("Process:")
@@ -1127,11 +1063,13 @@ describe("stop-auto-continue", () => {
   })
 
   test("omits critique when JSON response has no critique field", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({ next: "Run the full test suite", reflections: [] })
-    await createFakeAgent(binDir, json)
-
-    const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the full test suite"),
+      },
+    })
 
     expect(result.decision).toBe("block")
     expect(result.reason).not.toContain("Session critique:")
@@ -1140,16 +1078,16 @@ describe("stop-auto-continue", () => {
   })
 
   test("omits critique labels when both critique fields are empty strings", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({
-      processCritique: "",
-      productCritique: "",
-      next: "Run the linter",
-      reflections: [],
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter", {
+          processCritique: "",
+          productCritique: "",
+        }),
+      },
     })
-    await createFakeAgent(binDir, json)
-
-    const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
     expect(result.decision).toBe("block")
     expect(result.reason).not.toContain("Process:")
@@ -1159,16 +1097,16 @@ describe("stop-auto-continue", () => {
   })
 
   test("rejects markup in critique fields and omits those critiques", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({
-      processCritique: "<tool_call>bash</tool_call>",
-      productCritique: "<tool_call>bash</tool_call>",
-      next: "Run the tests",
-      reflections: [],
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+          processCritique: "<tool_call>bash</tool_call>",
+          productCritique: "<tool_call>bash</tool_call>",
+        }),
+      },
     })
-    await createFakeAgent(binDir, json)
-
-    const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
     expect(result.decision).toBe("block")
     expect(result.reason).not.toContain("<tool_call>")
@@ -1177,16 +1115,16 @@ describe("stop-auto-continue", () => {
   })
 
   test("truncates multi-line processCritique to first non-empty line", async () => {
-    const binDir = await createTempDir()
-    const json = JSON.stringify({
-      processCritique: "You retried the same command repeatedly.\nThis was the second line.",
-      productCritique: "",
-      next: "Fix the root cause of the failure",
-      reflections: [],
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Fix the root cause of the failure", {
+          processCritique: "You retried the same command repeatedly.\nThis was the second line.",
+          productCritique: "",
+        }),
+      },
     })
-    await createFakeAgent(binDir, json)
-
-    const result = await runHook({ transcriptContent: buildTranscript(10), binDir })
 
     expect(result.decision).toBe("block")
     expect(result.reason).toContain("You retried the same command repeatedly.")
@@ -1194,37 +1132,53 @@ describe("stop-auto-continue", () => {
   })
 
   test("prompt contains CRITIQUE RULES section with process and product axes", async () => {
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
     const fakeHome = await createTempDir()
 
-    await runHook({ transcriptContent: buildTranscript(10), binDir, extraEnv: { HOME: fakeHome } })
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      },
+    })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("CRITIQUE RULES")
-    expect(capturedArgs).toContain("PROCESS CRITIQUE")
-    expect(capturedArgs).toContain("PRODUCT CRITIQUE")
-    expect(capturedArgs).toContain("HOW the work was executed")
-    expect(capturedArgs).toContain("WHAT was built")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("CRITIQUE RULES")
+    expect(capturedPrompt).toContain("PROCESS CRITIQUE")
+    expect(capturedPrompt).toContain("PRODUCT CRITIQUE")
+    expect(capturedPrompt).toContain("HOW the work was executed")
+    expect(capturedPrompt).toContain("WHAT was built")
   })
 
   test("prompt OUTPUT FORMAT includes processCritique and productCritique fields", async () => {
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
     const fakeHome = await createTempDir()
 
-    await runHook({ transcriptContent: buildTranscript(10), binDir, extraEnv: { HOME: fakeHome } })
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      },
+    })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain('"processCritique"')
-    expect(capturedArgs).toContain('"productCritique"')
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain('"processCritique"')
+    expect(capturedPrompt).toContain('"productCritique"')
   })
 
   // ─── skillAdvice prompt guard tests ──────────────────────────────────────
 
   test("prompt references /changelog skill when skill is installed", async () => {
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     // Create a fake skill directory so skillExists("changelog") returns true
     const fakeHome = await createTempDir()
@@ -1234,35 +1188,43 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("/changelog skill")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("/changelog skill")
   })
 
   test("prompt uses generic changelog fallback when skill is not installed", async () => {
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     // No skills installed — use an empty fake HOME
     const fakeHome = await createTempDir()
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("update them")
-    expect(capturedArgs).not.toContain("/changelog skill")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("update them")
+    expect(capturedPrompt).not.toContain("/changelog skill")
   })
 
   test("prompt references /update-memory skill when skill is installed", async () => {
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     const fakeHome = await createTempDir()
     const skillDir = join(fakeHome, ".claude", "skills", "update-memory")
@@ -1271,37 +1233,45 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("/update-memory skill")
-    expect(capturedArgs).toContain("Cause to capture: <specific cause>")
-    expect(capturedArgs).toContain("ignored instruction, blocked workflow gap, or failure mode")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("/update-memory skill")
+    expect(capturedPrompt).toContain("Cause to capture: <specific cause>")
+    expect(capturedPrompt).toContain("ignored instruction, blocked workflow gap, or failure mode")
   })
 
   test("prompt uses generic memory fallback when skill is not installed", async () => {
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     const fakeHome = await createTempDir()
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("CLAUDE.md or MEMORY.md")
-    expect(capturedArgs).not.toContain("/update-memory skill")
-    expect(capturedArgs).toContain("Cause to capture: <specific cause>")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("CLAUDE.md or MEMORY.md")
+    expect(capturedPrompt).not.toContain("/update-memory skill")
+    expect(capturedPrompt).toContain("Cause to capture: <specific cause>")
   })
 
   test("prompt references /refine-issue skill in priority order when skill is installed", async () => {
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     const fakeHome = await createTempDir()
     const skillDir = join(fakeHome, ".claude", "skills", "refine-issue")
@@ -1310,30 +1280,38 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("/refine-issue skill")
-    expect(capturedArgs).toContain("issues needing refinement")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("/refine-issue skill")
+    expect(capturedPrompt).toContain("issues needing refinement")
   })
 
   test("prompt uses generic refinement fallback when refine-issue skill is not installed", async () => {
-    const binDir = await createTempDir()
-    const argsFile = await createArgCapturingAgent(binDir)
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
 
     const fakeHome = await createTempDir()
 
     await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
-      extraEnv: { HOME: fakeHome },
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+      },
     })
 
-    const capturedArgs = await Bun.file(argsFile).text()
-    expect(capturedArgs).toContain("type, readiness, priority")
-    expect(capturedArgs).not.toContain("/refine-issue skill")
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("type, readiness, priority")
+    expect(capturedPrompt).not.toContain("/refine-issue skill")
   })
 
   // ─── Runtime refinement gate tests ───────────────────────────────────────────
@@ -1354,13 +1332,11 @@ describe("stop-auto-continue", () => {
 
   /**
    * Creates a fake `gh` binary that responds to specific subcommands.
-   * - `gh api user`: returns {"login":"testuser"}
+   * - `gh api user`: returns the current user login
    * - `gh issue list`: returns the provided issues JSON
    * - `gh pr list`: returns []
-   * Also places a fake `agent` binary for the AI response.
    */
-  async function createFakeGhAndAgent(binDir: string, issuesJson: string): Promise<void> {
-    // Fake gh binary — handles --jq for api user (returns plain login)
+  async function createFakeGh(binDir: string, issuesJson: string): Promise<void> {
     const ghScript =
       `#!/bin/sh\n` +
       `case "$*" in\n` +
@@ -1379,17 +1355,6 @@ describe("stop-auto-continue", () => {
       `esac\n`
     await writeFile(join(binDir, "gh"), ghScript)
     await chmod(join(binDir, "gh"), 0o755)
-
-    // Fake agent binary (returns minimal JSON response)
-    await createFakeAgent(
-      binDir,
-      JSON.stringify({
-        processCritique: "",
-        productCritique: "",
-        next: "Implement the next feature",
-        reflections: [],
-      })
-    )
   }
 
   test("appends refinement directive when issues need refinement", async () => {
@@ -1407,15 +1372,18 @@ describe("stop-auto-continue", () => {
         assignees: [],
       },
     ])
-    await createFakeGhAndAgent(binDir, issues)
+    await createFakeGh(binDir, issues)
 
-    // binDir must come first so fake gh/agent win, but real git must be reachable
+    // binDir must come first so fake gh wins, but real git must be reachable
     const gitDir = (Bun.which("git") ?? "/usr/bin/git").replace(/\/git$/, "")
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       cwd: repoDir,
-      extraEnv: { PATH: `${binDir}:${gitDir}:/bin:/usr/bin` },
+      extraEnv: {
+        PATH: `${binDir}:${gitDir}:/bin:/usr/bin`,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Implement the next feature"),
+      },
     })
 
     expect(result.decision).toBe("block")
@@ -1439,14 +1407,17 @@ describe("stop-auto-continue", () => {
         assignees: [],
       },
     ])
-    await createFakeGhAndAgent(binDir, issues)
+    await createFakeGh(binDir, issues)
 
     const gitDir = (Bun.which("git") ?? "/usr/bin/git").replace(/\/git$/, "")
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       cwd: repoDir,
-      extraEnv: { PATH: `${binDir}:${gitDir}:/bin:/usr/bin` },
+      extraEnv: {
+        PATH: `${binDir}:${gitDir}:/bin:/usr/bin`,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Implement the next feature"),
+      },
     })
 
     expect(result.decision).toBe("block")
@@ -1459,14 +1430,17 @@ describe("stop-auto-continue", () => {
     await initFakeGitRepo(repoDir, "https://github.com/testuser/testrepo.git")
 
     const binDir = await createTempDir()
-    await createFakeGhAndAgent(binDir, "[]")
+    await createFakeGh(binDir, "[]")
 
     const gitDir = (Bun.which("git") ?? "/usr/bin/git").replace(/\/git$/, "")
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      binDir,
       cwd: repoDir,
-      extraEnv: { PATH: `${binDir}:${gitDir}:/bin:/usr/bin` },
+      extraEnv: {
+        PATH: `${binDir}:${gitDir}:/bin:/usr/bin`,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Implement the next feature"),
+      },
     })
 
     expect(result.decision).toBe("block")
