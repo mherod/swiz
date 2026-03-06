@@ -10,8 +10,11 @@
  * Exit conditions:
  *   - No git push in command → exit 0 (passthrough)
  *   - No upstream tracking branch → exit 0 (untracked branch; push-cooldown handles it)
- *   - HEAD matches remote → emits additionalContext confirming push landed
- *   - HEAD does not match remote → denyPostToolUse (blocks with error)
+ *   - HEAD matches remote (immediate or after retry) → emits additionalContext confirming push landed
+ *   - HEAD does not match remote after ~15s retry window → denyPostToolUse (blocks with error)
+ *
+ * Retry logic: background pushes may not have updated @{upstream} when PostToolUse fires.
+ * The hook retries with exponential backoff (1s, 2s, 4s, 8s) before concluding failure.
  */
 
 import { denyPostToolUse, GIT_PUSH_RE, git, isShellTool, type ToolHookInput } from "./hook-utils.ts"
@@ -29,6 +32,12 @@ const localHead = await git(["rev-parse", "HEAD"], cwd)
 if (!localHead) process.exit(0) // not a git repo
 
 // Get remote tracking SHA (@{upstream} resolves the tracked remote branch)
+const getRemoteHead = async (): Promise<string> => {
+  // Fetch latest remote refs before comparing (silent, no stdout spam)
+  await git(["fetch", "--quiet"], cwd)
+  return (await git(["rev-parse", "@{upstream}"], cwd)) ?? ""
+}
+
 const remoteHead = await git(["rev-parse", "@{upstream}"], cwd)
 if (!remoteHead) {
   // No upstream configured — nothing to verify against
@@ -36,7 +45,7 @@ if (!remoteHead) {
 }
 
 if (localHead === remoteHead) {
-  // Push confirmed: HEAD is on the remote tracking branch
+  // Push confirmed on first check
   console.log(
     JSON.stringify({
       hookSpecificOutput: {
@@ -48,12 +57,31 @@ if (localHead === remoteHead) {
   process.exit(0)
 }
 
-// HEAD is not on remote — push did not land
+// First check failed — could be an in-flight background push.
+// Retry with exponential backoff for up to ~15 seconds before blocking.
+const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000] // 1s, 2s, 4s, 8s → 15s total
+for (const delayMs of RETRY_DELAYS_MS) {
+  await Bun.sleep(delayMs)
+  const refreshed = await getRemoteHead()
+  if (refreshed === localHead) {
+    console.log(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PostToolUse",
+          additionalContext: `Push verified (after ${delayMs}ms retry): HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`,
+        },
+      })
+    )
+    process.exit(0)
+  }
+}
+
+// Exhausted retries — HEAD is not on remote
+const finalRemote = await getRemoteHead()
 denyPostToolUse(
-  `Push verification failed: local HEAD (${localHead.slice(0, 8)}) does not match remote tracking branch (${remoteHead.slice(0, 8)}).\n\n` +
-    `The push command ran but the commit is not confirmed on the remote. Possible causes:\n` +
+  `Push verification failed: local HEAD (${localHead.slice(0, 8)}) does not match remote tracking branch (${finalRemote.slice(0, 8) || "unknown"}).\n\n` +
+    `Checked after retrying for ~15 seconds. Possible causes:\n` +
     `  • The push was rejected (non-fast-forward, branch protection, hook failure)\n` +
-    `  • A different branch/ref was pushed than HEAD\n` +
-    `  • The push is still in-flight (background task not yet complete)\n\n` +
+    `  • A different branch/ref was pushed than HEAD\n\n` +
     `Run \`git log origin/$(git branch --show-current)..HEAD --oneline\` to see unpushed commits, then push again.`
 )
