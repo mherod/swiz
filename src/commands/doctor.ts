@@ -456,9 +456,9 @@ async function collectInstalledConfigScriptPaths(): Promise<string[]> {
   return [...new Set(paths)]
 }
 
-/** Verify that script files referenced in installed agent hook commands exist and are executable. */
+/** Verify that all executable script paths (manifest + config) exist and are executable. */
 async function checkInstalledConfigScripts(): Promise<CheckResult> {
-  const paths = await collectInstalledConfigScriptPaths()
+  const paths = await collectExecutableScriptPaths()
   const missing: string[] = []
   const notExecutable: string[] = []
 
@@ -482,7 +482,7 @@ async function checkInstalledConfigScripts(): Promise<CheckResult> {
     return {
       name: "Installed config scripts",
       status: "pass",
-      detail: `all script paths in agent hook configs are present and executable${paths.length > 0 ? ` (${paths.length} checked)` : ""}`,
+      detail: `all ${paths.length} executable scripts are present and executable`,
     }
   }
 
