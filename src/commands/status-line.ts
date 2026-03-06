@@ -4,6 +4,7 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs"
 import { dirname } from "node:path"
+import { getEffectiveSwizSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 
 interface StatusLineInput {
@@ -270,13 +271,24 @@ export const statusLineCommand: Command = {
         : null
     )
 
-    const [gitResult, issueData, prListData, firstName, prViewData] = await Promise.all([
-      gitPromise,
-      ghJson<unknown[]>(["issue", "list", "--state", "open", "--json", "number", "--limit", "100"]),
-      ghJson<unknown[]>(["pr", "list", "--state", "open", "--json", "number", "--limit", "100"]),
-      readGitUserName(cwd),
-      prViewPromise,
-    ])
+    const [gitResult, issueData, prListData, firstName, prViewData, swizSettings] =
+      await Promise.all([
+        gitPromise,
+        ghJson<unknown[]>([
+          "issue",
+          "list",
+          "--state",
+          "open",
+          "--json",
+          "number",
+          "--limit",
+          "100",
+        ]),
+        ghJson<unknown[]>(["pr", "list", "--state", "open", "--json", "number", "--limit", "100"]),
+        readGitUserName(cwd),
+        prViewPromise,
+        readSwizSettings().catch(() => null),
+      ])
 
     const { info: gitInfo } = gitResult
 
@@ -326,9 +338,24 @@ export const statusLineCommand: Command = {
     const vimTag = vimMode ? formatVimMode(vimMode) : ""
     const timeSeg = `${DIM}${formatTime()}${R}`
 
+    // ── Effective settings indicators ───────────────────────────────────────
+    const effective = swizSettings
+      ? getEffectiveSwizSettings(swizSettings, input.session_id ?? null)
+      : null
+
+    const settingsParts: string[] = []
+    if (effective) {
+      if (effective.autoContinue) settingsParts.push(`\x1b[92m⟳ auto${R}`)
+      if (effective.ambitionMode === "aggressive") settingsParts.push(`\x1b[93m⚡ aggressive${R}`)
+      if (effective.speak) settingsParts.push(`\x1b[96m🔊 narrator${R}`)
+    }
+    const settingsSeg = settingsParts.join(" ")
+
     // ── Assemble ────────────────────────────────────────────────────────────
 
-    const line3Parts = [sessionSeg, ghCountSeg, agentTag, vimTag, timeSeg].filter(Boolean)
+    const line3Parts = [sessionSeg, ghCountSeg, settingsSeg, agentTag, vimTag, timeSeg].filter(
+      Boolean
+    )
 
     const line1 = `${topLeft}${br("[")}${a1}${firstName}${R}${br("]")}${midJoin}${br("[")}${a2}${shortCwd}${R}${br("]")}${gitInfo}${reviewSeg}`
     const line2 = `${midLeft} ${rb(model)}  ${ctxSeg}`
