@@ -139,31 +139,112 @@ async function getGitBranchAndInfo(cwd: string): Promise<{ branch: string; info:
   let branch = ""
   try {
     const head = (await Bun.file(`${git.gitDir}/HEAD`).text()).trim()
-    if (head.startsWith("ref: refs/heads/")) branch = head.slice("ref: refs/heads/".length)
+    if (head.startsWith("ref: refs/heads/")) {
+      branch = head.slice("ref: refs/heads/".length)
+    } else if (/^[a-f0-9]{7,40}$/i.test(head)) {
+      branch = `detached@${head.slice(0, 7)}`
+    }
   } catch {
     /* no branch */
   }
   if (!branch) return { branch: "", info: "" }
 
-  let changed = 0
+  let ahead = 0
+  let behind = 0
+  let staged = 0
+  let unstaged = 0
+  let untracked = 0
+  let conflicts = 0
+  let stash = 0
+  let parsedStatus = false
+  let changedFallback = 0
+
   try {
-    const proc = Bun.spawnSync(["git", "status", "--porcelain"], {
+    const proc = Bun.spawnSync(["git", "status", "--porcelain=2", "--branch"], {
       cwd: git.workTree,
       stdout: "pipe",
       stderr: "ignore",
     })
-    const out = new TextDecoder().decode(proc.stdout).trim()
-    changed = out ? out.split("\n").length : 0
+    if (proc.exitCode === 0) {
+      const out = new TextDecoder().decode(proc.stdout).trim()
+      const lines = out ? out.split("\n") : []
+
+      for (const line of lines) {
+        if (line.startsWith("# branch.ab ")) {
+          const match = line.match(/\+(\d+)\s+-(\d+)/)
+          if (match) {
+            ahead = Number(match[1] ?? "0")
+            behind = Number(match[2] ?? "0")
+          }
+          continue
+        }
+
+        if (line.startsWith("1 ") || line.startsWith("2 ")) {
+          const xy = line.split(" ")[1] ?? ".."
+          if (xy[0] && xy[0] !== ".") staged++
+          if (xy[1] && xy[1] !== ".") unstaged++
+          continue
+        }
+
+        if (line.startsWith("u ")) {
+          conflicts++
+          continue
+        }
+
+        if (line.startsWith("? ")) {
+          untracked++
+        }
+      }
+      parsedStatus = true
+    }
   } catch {
-    /* assume clean */
+    /* parse fallback below */
   }
 
-  const dirty = changed > 0
-  const branchColor = dirty ? "\x1b[93m" : "\x1b[92m"
-  const icon = dirty ? "±" : "✦"
-  const changedStr = dirty ? ` ${DIM}${changed}~${R}` : ""
+  if (!parsedStatus) {
+    try {
+      const proc = Bun.spawnSync(["git", "status", "--porcelain"], {
+        cwd: git.workTree,
+        stdout: "pipe",
+        stderr: "ignore",
+      })
+      const out = new TextDecoder().decode(proc.stdout).trim()
+      changedFallback = out ? out.split("\n").length : 0
+    } catch {
+      /* assume clean */
+    }
+  }
 
-  return { branch, info: ` ${DIM}on${R} ${branchColor}${icon} ${branch}${R}${changedStr}` }
+  try {
+    const proc = Bun.spawnSync(["git", "stash", "list", "--format=%gd"], {
+      cwd: git.workTree,
+      stdout: "pipe",
+      stderr: "ignore",
+    })
+    if (proc.exitCode === 0) {
+      const out = new TextDecoder().decode(proc.stdout).trim()
+      stash = out ? out.split("\n").length : 0
+    }
+  } catch {
+    /* no stash info */
+  }
+
+  const dirty = staged > 0 || unstaged > 0 || untracked > 0 || conflicts > 0 || changedFallback > 0
+  const branchColor = conflicts > 0 ? "\x1b[91m" : dirty ? "\x1b[93m" : "\x1b[92m"
+  const icon = conflicts > 0 ? "!" : dirty ? "±" : "✦"
+
+  const details: string[] = []
+  if (ahead > 0) details.push(`\x1b[94m↑${ahead}${R}`)
+  if (behind > 0) details.push(`\x1b[95m↓${behind}${R}`)
+  if (staged > 0) details.push(`\x1b[92m+${staged}${R}`)
+  if (unstaged > 0) details.push(`\x1b[93m~${unstaged}${R}`)
+  if (untracked > 0) details.push(`\x1b[96m?${untracked}${R}`)
+  if (conflicts > 0) details.push(`\x1b[91m!${conflicts}${R}`)
+  if (stash > 0) details.push(`\x1b[35m$${stash}${R}`)
+  if (details.length === 0 && changedFallback > 0) details.push(`${DIM}${changedFallback}~${R}`)
+  const detailsStr = details.length ? ` ${details.join(" ")}` : ""
+
+  return { branch, info: ` ${DIM}on${R} ${branchColor}${icon} ${branch}${R}${detailsStr}` }
 }
 
 async function readGitUserName(cwd: string): Promise<string> {
