@@ -835,27 +835,15 @@ describe("createSessionTask() with malformed inputs", () => {
   })
 
   it("sanitizes path-separator characters in sentinelKey", async () => {
-    // Should not throw even with path separators.
-    // Point HOME to a non-existent dir so Bun.spawn fails fast (file not found → caught).
-    const origHome = process.env.HOME
-    process.env.HOME = "/nonexistent-test-home"
-    try {
-      await createSessionTask("valid-id", "key/../../etc/passwd", "subject", "desc")
-    } finally {
-      process.env.HOME = origHome
-    }
+    // Should not throw even with path separators. No-op executor avoids spawning a real process.
+    const noopExecutor = async (_args: string[]) => 0
+    await createSessionTask("valid-id", "key/../../etc/passwd", "subject", "desc", noopExecutor)
   })
 
   it("sanitizes shell metacharacters in sessionId", async () => {
-    // Should not throw even with metacharacters.
-    // Point HOME to a non-existent dir so Bun.spawn fails fast (file not found → caught).
-    const origHome = process.env.HOME
-    process.env.HOME = "/nonexistent-test-home"
-    try {
-      await createSessionTask("id;rm -rf /", "safe-key", "subject", "desc")
-    } finally {
-      process.env.HOME = origHome
-    }
+    // Should not throw even with metacharacters. No-op executor avoids spawning a real process.
+    const noopExecutor = async (_args: string[]) => 0
+    await createSessionTask("id;rm -rf /", "safe-key", "subject", "desc", noopExecutor)
   })
 
   it("handles sessionId that becomes empty after sanitization", async () => {

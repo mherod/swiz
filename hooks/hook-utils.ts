@@ -731,12 +731,25 @@ export function formatTaskCompleteCommands(
     .join("\n")
 }
 
+/**
+ * Executor type for createSessionTask — injectable for testing.
+ * Receives the full argv array and returns the process exit code.
+ */
+export type TaskExecutor = (args: string[]) => Promise<number>
+
+const defaultTaskExecutor: TaskExecutor = async (args) => {
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" })
+  await proc.exited
+  return proc.exitCode ?? 1
+}
+
 /** Create a session task via tasks-list.ts. Uses a sentinel file to fire only once per session. */
 export async function createSessionTask(
   sessionId: string | undefined,
   sentinelKey: string,
   subject: string,
-  description: string
+  description: string,
+  executor: TaskExecutor = defaultTaskExecutor
 ): Promise<void> {
   if (!sessionId || sessionId === "null" || !sessionId.trim()) return
   if (!sentinelKey.trim()) return
@@ -749,20 +762,16 @@ export async function createSessionTask(
   const sentinel = `/tmp/${safeSentinel}-${safeSession}.flag`
   if (await Bun.file(sentinel).exists()) return
   try {
-    const proc = Bun.spawn(
-      [
-        "bun",
-        join(home, ".claude", "hooks", "tasks-list.ts"),
-        "--session",
-        sessionId,
-        "--create",
-        subject,
-        description,
-      ],
-      { stdout: "pipe", stderr: "pipe" }
-    )
-    await proc.exited
-    if (proc.exitCode === 0) {
+    const exitCode = await executor([
+      "bun",
+      join(home, ".claude", "hooks", "tasks-list.ts"),
+      "--session",
+      sessionId,
+      "--create",
+      subject,
+      description,
+    ])
+    if (exitCode === 0) {
       await Bun.write(sentinel, "")
     }
   } catch {}
