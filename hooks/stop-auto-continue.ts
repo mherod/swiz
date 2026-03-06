@@ -566,10 +566,18 @@ async function main(): Promise<void> {
       })
       if (result) response = parseAgentResponse(result)
     } catch {
-      // promptAgent threw (backend unreachable mid-call) — response.next stays ""
-      console.error(
-        "[stop-auto-continue:BACKEND_ERROR] backend unreachable mid-call — response.next empty"
-      )
+      // promptAgent threw (backend unreachable mid-call).
+      // If there is no runtime refinement finding, there is nothing actionable to
+      // deliver — exit cleanly as a distinct BACKEND_ERROR path rather than falling
+      // through to NO_ACTIONABLE_CONTENT (which would emit a second, redundant code).
+      if (!refinementStatus) {
+        console.error(
+          "[stop-auto-continue:BACKEND_ERROR] backend unreachable mid-call — skipping block"
+        )
+        return
+      }
+      // refinementStatus is non-empty → continue to blockStopRaw below so the
+      // refinement finding is still delivered even without an AI-generated next step.
     }
   }
 
