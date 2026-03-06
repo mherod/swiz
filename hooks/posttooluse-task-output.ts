@@ -53,6 +53,13 @@ function extractStatus(response: TaskOutputResponse | string | null | undefined)
 /** Matches bun test failure summary line: "N fail" */
 const BUN_FAIL_RE = /\b(\d+)\s+fail\b/
 
+/**
+ * Matches bun test completion marker (always the last line of output):
+ *   "Ran N tests across M files. [Xs]"
+ * Absence means the output was truncated — counts cannot be trusted.
+ */
+const BUN_COMPLETE_RE = /\bRan \d+ tests across \d+ files\./
+
 /** Matches lefthook hook block indicators */
 const HOOK_FAIL_RE = /🥊.*hook: (pre-push|pre-commit)|error: failed to push/i
 
@@ -68,11 +75,14 @@ function detectFailure(output: string, exitCode: number | null): string | null {
     // Bun test failures
     const failMatch = output.match(BUN_FAIL_RE)
     if (failMatch) {
-      const count = failMatch[1]
+      // Only claim an exact count when the bun completion marker is present.
+      // Its absence means output was truncated — report "unknown" instead.
+      const isComplete = BUN_COMPLETE_RE.test(output)
+      const countLabel = isComplete ? `${failMatch[1]}` : "unknown number of"
       // Find first ✗ failure line for context
       const failLine = lines.find((l) => l.includes("✗") || l.includes("error:"))
       const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
-      return `${count} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
     }
 
     // Push / hook failures
