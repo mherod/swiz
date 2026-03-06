@@ -181,6 +181,7 @@ describe("stop-auto-continue", () => {
     })
 
     expect(result.decision).toBeUndefined()
+    expect(result.stderr).toContain("[stop-auto-continue:TRIVIAL_SESSION]")
   })
 
   test("allows stop when auto-continue is disabled in global swiz settings", async () => {
@@ -198,6 +199,7 @@ describe("stop-auto-continue", () => {
     })
 
     expect(result.decision).toBeUndefined()
+    expect(result.stderr).toContain("[stop-auto-continue:AUTO_CONTINUE_DISABLED]")
   })
 
   test("session override takes precedence over global setting", async () => {

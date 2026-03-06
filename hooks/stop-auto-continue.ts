@@ -453,19 +453,37 @@ async function main(): Promise<void> {
 
   const settings = await readSwizSettings()
   const effective = getEffectiveSwizSettings(settings, input.session_id)
-  if (!effective.autoContinue) return
+  if (!effective.autoContinue) {
+    console.error(
+      "[stop-auto-continue:AUTO_CONTINUE_DISABLED] auto-continue is disabled — skipping block"
+    )
+    return
+  }
 
-  if (!input.transcript_path) return
+  if (!input.transcript_path) {
+    console.error(
+      "[stop-auto-continue:MISSING_TRANSCRIPT] no transcript_path in hook input — skipping block"
+    )
+    return
+  }
 
   // Use pre-computed summary for the tool-call threshold check when available.
   // This avoids reading the transcript file at all for trivial sessions.
   const summary = getTranscriptSummary(input)
-  if (summary && summary.toolCallCount < MIN_TOOL_CALLS) return
+  if (summary && summary.toolCallCount < MIN_TOOL_CALLS) {
+    console.error(
+      `[stop-auto-continue:TRIVIAL_SESSION] only ${summary.toolCallCount} tool calls (min ${MIN_TOOL_CALLS}) — skipping block`
+    )
+    return
+  }
 
   let raw: string
   try {
     raw = await Bun.file(input.transcript_path).text()
   } catch {
+    console.error(
+      "[stop-auto-continue:TRANSCRIPT_READ_ERROR] could not read transcript file — skipping block"
+    )
     return
   }
 
@@ -481,11 +499,19 @@ async function main(): Promise<void> {
         count += content.filter((b: { type?: string }) => b?.type === "tool_use").length
       } catch {}
     }
-    if (count < MIN_TOOL_CALLS) return
+    if (count < MIN_TOOL_CALLS) {
+      console.error(
+        `[stop-auto-continue:TRIVIAL_SESSION] only ${count} tool calls (min ${MIN_TOOL_CALLS}) — skipping block`
+      )
+      return
+    }
   }
 
   const turns = extractPlainTurns(raw).slice(-CONTEXT_TURNS)
-  if (turns.length === 0) return
+  if (turns.length === 0) {
+    console.error("[stop-auto-continue:NO_TURNS] no parseable conversation turns — skipping block")
+    return
+  }
 
   const taskContext = await loadTaskContext(input.session_id ?? "")
 
