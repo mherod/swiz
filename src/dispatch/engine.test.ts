@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { toolMatchesToken } from "./engine.ts"
+import { logSlowHook, toolMatchesToken } from "./engine.ts"
 
 describe("toolMatchesToken", () => {
   describe("exact match", () => {
@@ -101,5 +101,19 @@ describe("toolMatchesToken", () => {
       expect(toolMatchesToken("TaskOutput", "TaskUpdate")).toBe(false)
       expect(toolMatchesToken("TaskOutput", "TaskOutput")).toBe(true)
     })
+  })
+})
+
+describe("logSlowHook", () => {
+  it("returns true when duration strictly exceeds threshold", () => {
+    expect(logSlowHook("test-hook.ts", 5000, 3000)).toBe(true)
+  })
+
+  it("returns false when duration is below threshold", () => {
+    expect(logSlowHook("test-hook.ts", 1000, 3000)).toBe(false)
+  })
+
+  it("returns false when duration equals threshold (not strictly over)", () => {
+    expect(logSlowHook("test-hook.ts", 3000, 3000)).toBe(false)
   })
 })

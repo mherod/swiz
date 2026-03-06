@@ -29,6 +29,10 @@ const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
 const LOG_PATH = "/tmp/swiz-dispatch.log"
 const DEFAULT_TIMEOUT = 10 // seconds
 
+/** Slow-hook threshold: hooks taking longer than this are flagged in the log.
+ *  Configurable via SWIZ_SLOW_HOOK_THRESHOLD_MS env var. Default: 3 seconds. */
+const SLOW_HOOK_THRESHOLD_MS = Number(process.env.SWIZ_SLOW_HOOK_THRESHOLD_MS) || 3_000
+
 // ─── Debug logger ───────────────────────────────────────────────────────────
 
 export function log(msg: string): void {
@@ -51,6 +55,23 @@ export function logHeader(
   log(`\n── ${ts} ── ${event} (hookEventName=${hookEventName}, pid=${pid}) ──`)
   if (toolName) log(`   tool: ${toolName}`)
   if (trigger) log(`   trigger: ${trigger}`)
+}
+
+// ─── Performance logging ─────────────────────────────────────────────────────
+
+/**
+ * Log a slow-hook warning when durationMs exceeds thresholdMs.
+ * Returns true when the hook is considered slow, false otherwise.
+ * Exported for unit testing.
+ */
+export function logSlowHook(
+  file: string,
+  durationMs: number,
+  thresholdMs: number = SLOW_HOOK_THRESHOLD_MS
+): boolean {
+  if (durationMs <= thresholdMs) return false
+  log(`   ⚠ SLOW HOOK: ${file} took ${durationMs}ms (threshold: ${thresholdMs}ms)`)
+  return true
 }
 
 // ─── Cross-agent matcher ────────────────────────────────────────────────────
@@ -190,6 +211,7 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
   const cwd = extractCwd(payloadStr)
   const hints: string[] = []
   const finalResponse = {}
+  const slowHooks: string[] = []
 
   for (const group of groups) {
     for (const hook of group.hooks) {
@@ -203,7 +225,10 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
         continue
       }
       log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`)
+      const t0 = Date.now()
       const resp = await runHook(hook.file, payloadStr, hook.timeout)
+      const durationMs = Date.now() - t0
+      if (logSlowHook(hook.file, durationMs)) slowHooks.push(hook.file)
       if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
       if (resp && isDeny(resp)) {
         log(`   ✗ DENY from ${hook.file}`)
@@ -237,6 +262,9 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
       log(`   result: all passed`)
     }
   }
+  if (slowHooks.length > 0) {
+    log(`   ⚠ slow-hook summary (${slowHooks.length}): ${slowHooks.join(", ")}`)
+  }
 
   process.stdout.write(`${JSON.stringify(finalResponse)}\n`)
 }
@@ -251,6 +279,7 @@ export async function runBlocking(
   const cwd = extractCwd(payloadStr)
   const runAllHooks = canonicalEvent === "stop"
   const finalResponse: Record<string, unknown> = {}
+  const slowHooks: string[] = []
 
   for (const group of groups) {
     for (const hook of group.hooks) {
@@ -264,7 +293,10 @@ export async function runBlocking(
         continue
       }
       log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`)
+      const t0 = Date.now()
       const resp = await runHook(hook.file, payloadStr, hook.timeout)
+      const durationMs = Date.now() - t0
+      if (logSlowHook(hook.file, durationMs)) slowHooks.push(hook.file)
       if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
       if (resp && isBlock(resp)) {
         log(`   ✗ BLOCK from ${hook.file}`)
@@ -281,6 +313,9 @@ export async function runBlocking(
   if (!isBlock(finalResponse)) {
     log(`   result: all passed`)
   }
+  if (slowHooks.length > 0) {
+    log(`   ⚠ slow-hook summary (${slowHooks.length}): ${slowHooks.join(", ")}`)
+  }
 
   process.stdout.write(`${JSON.stringify(finalResponse)}\n`)
 }
@@ -294,6 +329,7 @@ export async function runContext(
   launchAsyncHooks(groups, payloadStr)
   const cwd = extractCwd(payloadStr)
   const contexts: string[] = []
+  const slowHooks: string[] = []
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
@@ -306,7 +342,10 @@ export async function runContext(
         continue
       }
       log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`)
+      const t0 = Date.now()
       const resp = await runHook(hook.file, payloadStr, hook.timeout)
+      const durationMs = Date.now() - t0
+      if (logSlowHook(hook.file, durationMs)) slowHooks.push(hook.file)
       if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
       if (!resp) {
         log(`   ✓ ${hook.file} (no output)`)
@@ -334,6 +373,9 @@ export async function runContext(
         additionalContext: contexts.join("\n\n"),
       },
     })
+  }
+  if (slowHooks.length > 0) {
+    log(`   ⚠ slow-hook summary (${slowHooks.length}): ${slowHooks.join(", ")}`)
   }
 
   process.stdout.write(`${JSON.stringify(finalResponse)}\n`)
