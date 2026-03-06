@@ -327,6 +327,31 @@ describe("Provider transcript/session command support", () => {
     expect(secondIdx).toBeLessThan(thirdIdx)
   })
 
+  test("swiz transcript --include-debug keeps lines with invalid timestamps using fallback ordering", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-codex")
+    const sessionId = "019cbc01-7777-7888-8999-dddddddddddd"
+    await mkdir(projectDir, { recursive: true })
+    await createCodexSession(home, projectDir, sessionId)
+    // Third line has an out-of-range month (13) which matches the regex but Date parsing returns NaN
+    await createDebugLog(home, sessionId, [
+      "2026-03-06T04:29:06.100Z [DEBUG] valid first",
+      "2026-13-06T04:29:06.200Z [DEBUG] invalid timestamp but kept",
+      "2026-03-06T04:29:06.300Z [DEBUG] valid last",
+    ])
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--include-debug"],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    // All three lines must appear — the invalid-timestamp line must not be silently dropped
+    expect(out).toContain("[DEBUG] valid first")
+    expect(out).toContain("[DEBUG] invalid timestamp but kept")
+    expect(out).toContain("[DEBUG] valid last")
+  })
+
   test("swiz session --list includes Codex sessions", async () => {
     const home = await createTempHome()
     const projectDir = join(home, "workspace", "demo-codex")

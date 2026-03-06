@@ -279,6 +279,7 @@ async function loadDebugLog(sessionId: string): Promise<DebugLog | null> {
 function parseDebugEvents(lines: string[]): DebugEvent[] {
   // Track original file index so equal-timestamp events sort deterministically (file order)
   const events: Array<DebugEvent & { _idx: number }> = []
+  let lastValidTs = Infinity // fallback for lines whose parsed date is NaN
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (line === undefined) continue
@@ -287,10 +288,12 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
     if (!m) continue
     const iso = m[1]
     if (iso === undefined) continue
-    const ts = new Date(iso).getTime()
-    // Guard against malformed timestamps that produce NaN — NaN comparisons are always false,
-    // which would cause the event to be flushed before every turn (wrong interleaving position)
-    if (isNaN(ts)) continue
+    const parsed = new Date(iso).getTime()
+    // If the timestamp string matched the regex but Date parsing returns NaN (e.g. out-of-range
+    // month/hour values), fall back to the last valid ts so the event stays near its neighbours.
+    // NaN comparisons are always false in JS, so we must never let NaN enter the sort key.
+    const ts = isNaN(parsed) ? lastValidTs : parsed
+    if (!isNaN(parsed)) lastValidTs = parsed
     events.push({ iso, ts, text: line.slice(m[0].length), _idx: i })
   }
   // Primary sort by timestamp; secondary sort by original line index for deterministic tie-breaking
