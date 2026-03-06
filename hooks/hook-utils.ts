@@ -202,7 +202,7 @@ export function isSwizCommand(input: ToolHookInput): boolean {
 
 // ─── Placeholder subject detection ──────────────────────────────────────────
 // Shared by task-subject-validation (rejects placeholders for new tasks) and
-// tasks-list verifyTaskMatch (exempts placeholders from subject verification).
+// swiz tasks verifyTaskMatch (exempts placeholders from subject verification).
 // All auto-generated placeholder subjects must be captured here so both
 // validators stay in sync.
 
@@ -743,7 +743,7 @@ const defaultTaskExecutor: TaskExecutor = async (args) => {
   return proc.exitCode ?? 1
 }
 
-/** Create a session task via tasks-list.ts. Uses a sentinel file to fire only once per session. */
+/** Create a session task via `swiz tasks create`. Uses a sentinel file to fire only once per session. */
 export async function createSessionTask(
   sessionId: string | undefined,
   sentinelKey: string,
@@ -771,15 +771,10 @@ export async function createSessionTask(
           )
           return defaultTaskExecutor
         })()
-  const args = [
-    "bun",
-    join(home, ".claude", "hooks", "tasks-list.ts"),
-    "--session",
-    sessionId,
-    "--create",
-    subject,
-    description,
-  ]
+  const swiz = Bun.which("swiz") ?? join(home, ".bun", "bin", "swiz")
+  const args = ["swiz", "tasks", "create", subject, description, "--session", sessionId]
+  // Replace argv[0] with the resolved binary path so Bun.spawn can locate it.
+  args[0] = swiz
   let exitCode: number
   try {
     exitCode = await safeExecutor(args)

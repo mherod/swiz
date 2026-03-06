@@ -56,7 +56,7 @@ function isTestTask(bare: string): boolean {
 export function detect(s: string): DetectionResult {
   // Reject auto-generated placeholder subjects — these have no real work content
   // and pollute task history with meaningless entries.
-  // Uses shared matcher from hook-utils.ts to stay in sync with tasks-list.ts
+  // Uses shared matcher from hook-utils.ts to stay in sync with swiz tasks
   // verifyTaskMatch() which exempts the same subjects from verification.
   if (isPlaceholderSubject(s)) {
     return {

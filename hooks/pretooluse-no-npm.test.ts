@@ -151,7 +151,7 @@ describe("pretooluse-no-npm (bun project)", () => {
     test("bun runtime command in pnpm project passes through", async () => {
       const dir = await makeTempDir()
       await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: 9.0\n")
-      const result = await runHook("bun ~/.claude/hooks/tasks-list.ts --check", { cwd: dir })
+      const result = await runHook("swiz tasks list", { cwd: dir })
       expect(result.stdout).toBe("")
     })
   })
