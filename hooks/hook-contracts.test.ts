@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { manifest } from "../src/manifest.ts"
+import { hookOutputSchema } from "./schemas.ts"
 import { useTempDir } from "./test-utils.ts"
 
 type JsonObject = Record<string, unknown>
@@ -12,34 +13,8 @@ async function createTempDir(prefix: string): Promise<string> {
 }
 
 function assertHookOutputShape(output: JsonObject): void {
-  // All hooks in this repo should return one of the known control envelopes.
-  const hasKnownShape =
-    "decision" in output ||
-    "hookSpecificOutput" in output ||
-    "ok" in output ||
-    "continue" in output ||
-    "systemMessage" in output
-
-  expect(hasKnownShape).toBe(true)
-
-  if ("decision" in output) {
-    expect(typeof output.decision).toBe("string")
-    // Claude Code only accepts "approve" or "block" for the top-level decision
-    // field. "deny" is invalid and causes schema validation failure, which
-    // silently ignores the hook response. Use hookSpecificOutput.permissionDecision
-    // for PreToolUse denials instead.
-    expect(["approve", "block"]).toContain(output.decision as string)
-  }
-
-  if ("hookSpecificOutput" in output) {
-    const hso = output.hookSpecificOutput as JsonObject
-    expect(typeof hso).toBe("object")
-    expect(typeof hso.hookEventName).toBe("string")
-  }
-
-  if ("ok" in output) {
-    expect(typeof output.ok).toBe("boolean")
-  }
+  const result = hookOutputSchema.safeParse(output)
+  expect(result.success).toBe(true)
 }
 
 async function runHookScript(

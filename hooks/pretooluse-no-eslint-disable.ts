@@ -1,18 +1,10 @@
 #!/usr/bin/env bun
 
 import { denyPreToolUse, formatActionPlan } from "./hook-utils.ts"
-
-interface HookInput {
-  tool_name: string
-  tool_input?: {
-    file_path?: string
-    new_string?: string
-    content?: string
-  }
-}
+import { fileEditHookInputSchema } from "./schemas.ts"
 
 async function main() {
-  const input: HookInput = await Bun.stdin.json()
+  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
   const filePath = input.tool_input?.file_path ?? ""
   const isTypeScriptFile = /\.(ts|tsx)$/.test(filePath)

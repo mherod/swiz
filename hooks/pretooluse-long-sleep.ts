@@ -1,16 +1,10 @@
 #!/usr/bin/env bun
 
 import { denyPreToolUse } from "./hook-utils.ts"
-
-interface HookInput {
-  tool_name: string
-  tool_input?: {
-    command?: string
-  }
-}
+import { shellHookInputSchema } from "./schemas.ts"
 
 async function main() {
-  const input: HookInput = await Bun.stdin.json()
+  const input = shellHookInputSchema.parse(await Bun.stdin.json())
 
   const command = input.tool_input?.command || ""
 

@@ -1,16 +1,10 @@
 #!/usr/bin/env bun
 
 import { denyPreToolUse } from "./hook-utils.ts"
-
-interface HookInput {
-  tool_name: string
-  tool_input?: {
-    file_path?: string
-  }
-}
+import { fileEditHookInputSchema } from "./schemas.ts"
 
 async function main() {
-  const input: HookInput = await Bun.stdin.json()
+  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
   const filePath = input.tool_input?.file_path ?? ""
 

@@ -1,20 +1,14 @@
 #!/usr/bin/env bun
 
 import { denyPreToolUse } from "./hook-utils.ts"
-
-interface HookInput {
-  tool_name: string
-  tool_input?: {
-    file_path?: string
-  }
-}
+import { fileEditHookInputSchema } from "./schemas.ts"
 
 // Matches any lockfile at path boundaries (handles / and \ separators, case-insensitive)
 const LOCKFILE_RE =
   /(^|[\\/])(pnpm-lock\.yaml|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|bun\.lockb?|shrinkwrap\.yaml)$/i
 
 async function main() {
-  const input: HookInput = await Bun.stdin.json()
+  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
   const filePath = input.tool_input?.file_path ?? ""
 

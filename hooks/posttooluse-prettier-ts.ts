@@ -3,14 +3,7 @@
 import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { isFileEditTool } from "./hook-utils.ts"
-
-interface HookInput {
-  cwd: string
-  tool_name: string
-  tool_input?: {
-    file_path?: string
-  }
-}
+import { fileEditHookInputSchema } from "./schemas.ts"
 
 /** Walk up from filePath to find node_modules/.bin/prettier */
 function findPrettier(filePath: string, cwd: string): string | null {
@@ -31,7 +24,7 @@ function findPrettier(filePath: string, cwd: string): string | null {
 }
 
 async function main() {
-  const input: HookInput = await Bun.stdin.json()
+  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
   const toolName = input.tool_name ?? ""
   if (!isFileEditTool(toolName)) process.exit(0)

@@ -4,18 +4,7 @@
 // cause an InputValidationError at the API boundary before any work is done.
 
 import { denyPreToolUse } from "./hook-utils.ts"
-
-const ALLOWED_FIELDS = new Set([
-  "taskId",
-  "status",
-  "subject",
-  "description",
-  "activeForm",
-  "owner",
-  "metadata",
-  "addBlocks",
-  "addBlockedBy",
-])
+import { TASK_UPDATE_ALLOWED_FIELDS as ALLOWED_FIELDS } from "./schemas.ts"
 
 const input = await Bun.stdin.json()
 const toolInput: Record<string, unknown> = input?.tool_input ?? {}

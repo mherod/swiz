@@ -1,16 +1,7 @@
 #!/usr/bin/env bun
 
 import { denyPreToolUse } from "./hook-utils.ts"
-
-interface HookInput {
-  tool_name: string
-  tool_input?: {
-    file_path?: string
-    old_string?: string
-    new_string?: string
-    content?: string
-  }
-}
+import { fileEditHookInputSchema } from "./schemas.ts"
 
 // Check if file is an ESLint config file
 // Legacy: .eslintrc, .eslintrc.json, .eslintrc.js, .eslintrc.cjs, .eslintrc.yml, .eslintrc.yaml
@@ -29,7 +20,7 @@ export function countEnforcements(content: string): { warnings: number; errors: 
 }
 
 async function main() {
-  const input: HookInput = await Bun.stdin.json()
+  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
   const filePath = input.tool_input?.file_path ?? ""
   if (!isEslintConfigFile(filePath)) {
