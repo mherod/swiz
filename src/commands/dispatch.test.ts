@@ -246,11 +246,9 @@ describe("dispatch replay", () => {
     expect(parsed.strategy).toBe("blocking")
     expect(typeof parsed.matched_groups).toBe("number")
     expect(Array.isArray(parsed.hooks)).toBe(true)
-    // 15s timeout: this test spawns 19 stop hook subprocesses sequentially.
-    // Each hook takes 37-200ms locally; under parallel CI load they can take
-    // significantly longer. The overall timeout is the regression guard — if
-    // hooks become pathologically slow (e.g. blocking I/O), the suite exceeds 15s.
-  }, 15_000)
+    // 6s timeout: hooks now run in parallel instead of sequentially.
+    // 19 hooks × ~37ms/hook = ~37ms critical path (plus 200ms buffer for CI variation).
+  }, 6_000)
 
   test("stop replay continues after first block and still runs stop-git-status", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "swiz-stop-replay-"))

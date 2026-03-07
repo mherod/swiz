@@ -83,6 +83,56 @@ export async function replayBlocking(
 ): Promise<TraceEntry[]> {
   const traces: TraceEntry[] = []
   const runAllHooks = canonicalEvent === "stop"
+
+  // For stop events (runAllHooks = true), parallelize hook execution.
+  // For postToolUse events, keep sequential with short-circuit on block.
+  if (runAllHooks) {
+    // Collect eligible hooks across all groups while preserving order.
+    interface QueuedHook {
+      group: HookGroup
+      hook: (typeof groups)[0]["hooks"][0]
+      index: number
+    }
+    const queuedHooks: QueuedHook[] = []
+    let index = 0
+    for (const group of groups) {
+      for (const hook of group.hooks) {
+        if (hook.async) continue
+        if (!evalCondition(hook.condition)) {
+          log(`   ⏭ ${hook.file} [condition false, skipping]`)
+          continue
+        }
+        queuedHooks.push({ group, hook, index })
+        index++
+      }
+    }
+
+    // Run all eligible hooks in parallel.
+    const results = await Promise.all(
+      queuedHooks.map(async ({ group, hook }) => {
+        const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
+        const entry: TraceEntry = {
+          file: hook.file,
+          ...(group.matcher && { matcher: group.matcher }),
+          async: false,
+          startTime: execution.startTime,
+          endTime: execution.endTime,
+          status: execution.status,
+          ...(execution.stderrSnippet && { stderr: execution.stderrSnippet }),
+        }
+        if (resp && isBlock(resp)) {
+          entry.status = "block"
+          entry.output = JSON.stringify(resp)
+        }
+        return entry
+      })
+    )
+
+    traces.push(...results)
+    return traces
+  }
+
+  // Sequential execution with short-circuit for postToolUse events.
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
@@ -104,8 +154,7 @@ export async function replayBlocking(
         entry.status = "block"
         entry.output = JSON.stringify(resp)
         traces.push(entry)
-        if (!runAllHooks) return traces // Short-circuit on block for non-stop events
-        continue
+        return traces // Short-circuit on block for non-stop events
       }
       traces.push(entry)
     }
@@ -119,6 +168,13 @@ export async function replayContext(
   payloadStr: string
 ): Promise<TraceEntry[]> {
   const traces: TraceEntry[] = []
+
+  // Collect eligible hooks across all groups while preserving order.
+  interface QueuedHook {
+    group: HookGroup
+    hook: (typeof groups)[0]["hooks"][0]
+  }
+  const queuedHooks: QueuedHook[] = []
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
@@ -126,6 +182,13 @@ export async function replayContext(
         log(`   ⏭ ${hook.file} [condition false, skipping]`)
         continue
       }
+      queuedHooks.push({ group, hook })
+    }
+  }
+
+  // Run all eligible hooks in parallel.
+  const results = await Promise.all(
+    queuedHooks.map(async ({ group, hook }) => {
       const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
       const entry: TraceEntry = {
         file: hook.file,
@@ -137,17 +200,18 @@ export async function replayContext(
         ...(execution.stderrSnippet && { stderr: execution.stderrSnippet }),
       }
       if (!resp) {
-        traces.push(entry)
-        continue
+        return entry
       }
       const ctx = extractContext(resp)
       if (ctx) {
         entry.status = "allow-with-reason"
         entry.reason = ctx.slice(0, 200)
       }
-      traces.push(entry)
-    }
-  }
+      return entry
+    })
+  )
+
+  traces.push(...results)
   return traces
 }
 
