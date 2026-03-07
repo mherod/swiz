@@ -938,12 +938,17 @@ export const tasksCommand: Command = {
         const subject = rest[0]
         const description = rest[1]
         if (!subject || !description) {
-          throw new Error('Usage: swiz tasks create "<subject>" "<description>"')
+          throw new Error('Usage: swiz tasks create "<subject>" "<description>" --state <state>')
         }
         const stateFlag = extractFlag(rest, "--state")
+        if (!stateFlag) {
+          throw new Error(
+            '--state <state> is required for: swiz tasks create "<subject>" "<description>" --state <state>'
+          )
+        }
         const sessionId = await resolveSession(rest.slice(2))
         await createTask(sessionId, subject, description)
-        if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
+        await applyStateUpdate(stateFlag, process.cwd())
         break
       }
 
@@ -951,11 +956,16 @@ export const tasksCommand: Command = {
         const taskId = rest[0]
         if (!taskId) {
           throw new Error(
-            "Usage: swiz tasks complete <task-id> --evidence TEXT [--verify TEXT] [--state <state>]"
+            "Usage: swiz tasks complete <task-id> --evidence TEXT --state <state> [--verify TEXT]"
           )
         }
         const evidence = extractFlag(rest, "--evidence")
         const stateFlag = extractFlag(rest, "--state")
+        if (!stateFlag) {
+          throw new Error(
+            "--state <state> is required for: swiz tasks complete <task-id> --evidence TEXT --state <state>"
+          )
+        }
         let verify = extractFlag(rest, "--verify")
         const sessionId = await resolveSession(rest.slice(1))
 
@@ -966,7 +976,7 @@ export const tasksCommand: Command = {
         }
 
         await updateStatus(sessionId, taskId, "completed", evidence, verify, filterCwd)
-        if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
+        await applyStateUpdate(stateFlag, process.cwd())
         break
       }
 
@@ -990,15 +1000,20 @@ export const tasksCommand: Command = {
         const valid: Task["status"][] = ["pending", "in_progress", "completed", "cancelled"]
         if (!taskId || !newStatus || !valid.includes(newStatus)) {
           throw new Error(
-            `Usage: swiz tasks status <task-id> <${valid.join("|")}> [--evidence TEXT] [--verify TEXT] [--state <state>]`
+            `Usage: swiz tasks status <task-id> <${valid.join("|")}> --state <state> [--evidence TEXT] [--verify TEXT]`
           )
         }
         const evidence = extractFlag(rest, "--evidence")
         const verify = extractFlag(rest, "--verify")
         const stateFlag = extractFlag(rest, "--state")
+        if (!stateFlag) {
+          throw new Error(
+            `--state <state> is required for: swiz tasks status <task-id> <${valid.join("|")}> --state <state>`
+          )
+        }
         const sessionId = await resolveSession(rest.slice(2))
         await updateStatus(sessionId, taskId, newStatus, evidence, verify, filterCwd)
-        if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
+        await applyStateUpdate(stateFlag, process.cwd())
         break
       }
 
