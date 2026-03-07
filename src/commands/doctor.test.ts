@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, readdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "../../hooks/test-utils.ts"
@@ -9,11 +9,13 @@ const { create: createTempHome } = useTempDir("swiz-doctor-test-")
 
 const INDEX_PATH = join(process.cwd(), "index.ts")
 
+type DoctorResult = { stdout: string; stderr: string; exitCode: number | null }
+
 async function runDoctor(
   home: string,
   args: string[] = [],
   cwd: string = process.cwd()
-): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+): Promise<DoctorResult> {
   const proc = Bun.spawn(["bun", "run", INDEX_PATH, "doctor", ...args], {
     cwd,
     stdin: "pipe",
@@ -60,49 +62,102 @@ function buildExpectedHooks() {
 }
 
 describe("swiz doctor", () => {
-  test("reports Bun runtime as passing", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Bun runtime")
-    expect(result.stdout).toMatch(/Bun runtime.*v\d+/)
+  // ── Clean-home tests: share a single subprocess call ──────────────────
+  describe("clean home checks", () => {
+    let result: DoctorResult
+
+    beforeAll(async () => {
+      const home = await createTempHome()
+      result = await runDoctor(home)
+    })
+
+    test("reports Bun runtime as passing", () => {
+      expect(result.stdout).toContain("Bun runtime")
+      expect(result.stdout).toMatch(/Bun runtime.*v\d+/)
+    })
+
+    test("reports hook scripts check", () => {
+      expect(result.stdout).toContain("Hook scripts")
+      expect(result.stdout).toMatch(/Hook scripts.*manifest scripts found/)
+    })
+
+    test("reports manifest handler paths as valid in a healthy install", () => {
+      expect(result.stdout).toContain("Manifest handler paths")
+      expect(result.stdout).toMatch(/Manifest handler paths.*handler paths valid/)
+    })
+
+    test("reports orphaned hook scripts check", () => {
+      expect(result.stdout).toContain("Orphaned hook scripts")
+      expect(result.stdout).toMatch(/Orphaned hook scripts/)
+    })
+
+    test("reports script execute permissions check", () => {
+      expect(result.stdout).toContain("Script execute permissions")
+      expect(result.stdout).toMatch(/Script execute permissions/)
+    })
+
+    test("reports installed config scripts check", () => {
+      expect(result.stdout).toContain("Installed config scripts")
+    })
+
+    test("installed config scripts check includes manifest scripts in scope", () => {
+      const manifestScriptCount = new Set(manifest.flatMap((g) => g.hooks.map((h) => h.file))).size
+      const match = result.stdout.match(/all (\d+) executable scripts are present/)
+      expect(match).not.toBeNull()
+      const count = parseInt(match![1]!, 10)
+      expect(count).toBeGreaterThanOrEqual(manifestScriptCount)
+    })
+
+    test("reports GitHub CLI auth status", () => {
+      expect(result.stdout).toContain("GitHub CLI auth")
+    })
+
+    test("reports TTS backend status", () => {
+      expect(result.stdout).toContain("TTS backend")
+    })
+
+    test("reports swiz settings status", () => {
+      expect(result.stdout).toContain("Swiz settings")
+    })
+
+    test("shows summary counts", () => {
+      expect(result.stdout).toMatch(/\d+ passed/)
+    })
+
+    test("exits zero when no hard failures", () => {
+      if (!result.stdout.includes("failed")) {
+        expect(result.exitCode).toBe(0)
+      }
+    })
+
+    test("reports agent binary checks for all agents", () => {
+      expect(result.stdout).toContain("Claude Code binary")
+      expect(result.stdout).toContain("Cursor binary")
+      expect(result.stdout).toContain("Gemini CLI binary")
+      expect(result.stdout).toContain("Codex CLI binary")
+    })
+
+    test("reports config sync check for configurable agents", () => {
+      expect(result.stdout).toContain("config sync")
+    })
+
+    test("reports no orphaned hook scripts in a healthy install", () => {
+      expect(result.stdout).toContain("Orphaned hook scripts")
+      expect(result.stdout).toContain("no orphaned scripts found")
+    })
+
+    test("reports no invalid skill entries in a healthy install", () => {
+      expect(result.stdout).toContain("Invalid skill entries")
+      expect(result.stdout).toContain("no invalid skill entries found")
+    })
   })
 
-  test("reports hook scripts check", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Hook scripts")
-    // All manifest scripts should exist in the repo
-    expect(result.stdout).toMatch(/Hook scripts.*manifest scripts found/)
-  })
-
-  test("reports manifest handler paths as valid in a healthy install", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Manifest handler paths")
-    expect(result.stdout).toMatch(/Manifest handler paths.*handler paths valid/)
-  })
-
-  test("reports orphaned hook scripts check", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Orphaned hook scripts")
-    // The check runs and reports either pass or the list of orphaned scripts
-    expect(result.stdout).toMatch(/Orphaned hook scripts/)
-  })
-
-  test("reports script execute permissions check", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Script execute permissions")
-    // Reports either pass or a warning about missing execute bits
-    expect(result.stdout).toMatch(/Script execute permissions/)
-  })
+  // ── Tests requiring custom settings.json ──────────────────────────────
 
   test("doctor --fix sets execute permissions on scripts in installed config", async () => {
     const home = await createTempHome()
     const claudeDir = join(home, ".claude")
     await mkdir(claudeDir, { recursive: true })
-    // Create a script file without execute permission
     const scriptPath = join(home, "test-hook.ts")
     await writeFile(scriptPath, "#!/usr/bin/env bun\nconsole.log('test')\n", { mode: 0o644 })
     await writeFile(
@@ -115,135 +170,109 @@ describe("swiz doctor", () => {
     )
     const fixRun = await runDoctor(home, ["--fix"])
     expect(fixRun.stdout).toContain("Script execute permissions")
-    // After fix, the file should have execute permission
     const { stat: statFn } = await import("node:fs/promises")
     const s = await statFn(scriptPath)
     expect(s.mode & 0o100).not.toBe(0)
-  })
+  }, 15000)
 
-  test("reports installed config scripts check", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Installed config scripts")
-  })
+  // ── Missing/invalid config script detection: share one home ───────────
+  // ── Config script detection + malformed settings + config sync ──────
+  // These tests each need custom settings.json but are independent,
+  // so run them concurrently via Promise.all within batched tests.
 
-  test("installed config scripts check includes manifest scripts in scope", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    // The check covers manifest + config scripts; count must be >= manifest script count
-    const manifestScriptCount = new Set(manifest.flatMap((g) => g.hooks.map((h) => h.file))).size
-    const match = result.stdout.match(/all (\d+) executable scripts are present/)
-    expect(match).not.toBeNull()
-    const count = parseInt(match![1]!, 10)
-    expect(count).toBeGreaterThanOrEqual(manifestScriptCount)
-  })
-
-  test("labels missing config script with source attribution", async () => {
-    const home = await createTempHome()
-    const claudeDir = join(home, ".claude")
-    await mkdir(claudeDir, { recursive: true })
-    await writeFile(
-      join(claudeDir, "settings.json"),
-      JSON.stringify({
-        hooks: {
-          Stop: [{ hooks: [{ type: "command", command: "bun /nonexistent/config-only-hook.ts" }] }],
+  test("detects missing/invalid config scripts in various formats", async () => {
+    type Case = {
+      label: string
+      settings: unknown
+      expectContains: string[]
+      expectNotContains?: string[]
+      setupExtra?: (home: string) => Promise<void>
+    }
+    const cases: Case[] = [
+      {
+        label: "source attribution",
+        settings: {
+          hooks: {
+            Stop: [
+              { hooks: [{ type: "command", command: "bun /nonexistent/config-only-hook.ts" }] },
+            ],
+          },
         },
+        expectContains: ["/nonexistent/config-only-hook.ts", "(config)"],
+      },
+      {
+        label: "missing script in hook config",
+        settings: {
+          hooks: {
+            Stop: [{ hooks: [{ type: "command", command: "bun /nonexistent/path/to/hook.ts" }] }],
+          },
+        },
+        expectContains: ["Installed config scripts", "/nonexistent/path/to/hook.ts"],
+      },
+      {
+        label: "nested hook config",
+        settings: {
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: "Bash",
+                hooks: [{ hooks: [{ type: "command", command: "bun /deeply/nested/hook.ts" }] }],
+              },
+            ],
+          },
+        },
+        expectContains: ["Installed config scripts", "/deeply/nested/hook.ts"],
+      },
+      {
+        label: "quoted path with spaces",
+        settings: {
+          hooks: {
+            Stop: [{ hooks: [{ type: "command", command: 'bun "/path with spaces/my hook.ts"' }] }],
+          },
+        },
+        expectContains: ["Installed config scripts", "/path with spaces/my hook.ts"],
+      },
+      {
+        label: "scripts key",
+        settings: {
+          hooks: { Stop: [{ scripts: "bun /from/scripts/key/hook.ts" }] },
+        },
+        expectContains: ["Installed config scripts", "/from/scripts/key/hook.ts"],
+      },
+      {
+        label: "run key",
+        settings: {
+          hooks: { Stop: [{ run: "bun /from/run/key/hook.ts" }] },
+        },
+        expectContains: ["Installed config scripts", "/from/run/key/hook.ts"],
+      },
+      {
+        label: "args array",
+        settings: {
+          hooks: { Stop: [{ args: ["bun", "/from/args/array/hook.ts"] }] },
+        },
+        expectContains: ["Installed config scripts", "/from/args/array/hook.ts"],
+      },
+    ]
+    await Promise.all(
+      cases.map(async ({ settings, expectContains }) => {
+        const h = await createTempHome()
+        const claudeDir = join(h, ".claude")
+        await mkdir(claudeDir, { recursive: true })
+        await writeFile(join(claudeDir, "settings.json"), JSON.stringify(settings))
+        const result = await runDoctor(h)
+        for (const text of expectContains) {
+          expect(result.stdout).toContain(text)
+        }
       })
     )
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("/nonexistent/config-only-hook.ts")
-    expect(result.stdout).toContain("(config)")
-  })
-
-  test("detects missing script referenced in installed hook config", async () => {
-    const home = await createTempHome()
-    const claudeDir = join(home, ".claude")
-    await mkdir(claudeDir, { recursive: true })
-    await writeFile(
-      join(claudeDir, "settings.json"),
-      JSON.stringify({
-        hooks: {
-          Stop: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command: "bun /nonexistent/path/to/hook.ts",
-                },
-              ],
-            },
-          ],
-        },
-      })
-    )
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Installed config scripts")
-    expect(result.stdout).toContain("/nonexistent/path/to/hook.ts")
-  })
-
-  test("detects missing script at arbitrary nesting depth in hook config", async () => {
-    const home = await createTempHome()
-    const claudeDir = join(home, ".claude")
-    await mkdir(claudeDir, { recursive: true })
-    // Three levels of nesting: hooks -> matchers -> hooks -> command
-    await writeFile(
-      join(claudeDir, "settings.json"),
-      JSON.stringify({
-        hooks: {
-          PreToolUse: [
-            {
-              matcher: "Bash",
-              hooks: [
-                {
-                  hooks: [
-                    {
-                      type: "command",
-                      command: "bun /deeply/nested/hook.ts",
-                    },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-      })
-    )
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Installed config scripts")
-    expect(result.stdout).toContain("/deeply/nested/hook.ts")
-  })
-
-  test("detects missing script with quoted path containing spaces", async () => {
-    const home = await createTempHome()
-    const claudeDir = join(home, ".claude")
-    await mkdir(claudeDir, { recursive: true })
-    await writeFile(
-      join(claudeDir, "settings.json"),
-      JSON.stringify({
-        hooks: {
-          Stop: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command: 'bun "/path with spaces/my hook.ts"',
-                },
-              ],
-            },
-          ],
-        },
-      })
-    )
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Installed config scripts")
-    expect(result.stdout).toContain("/path with spaces/my hook.ts")
   })
 
   test("detects non-executable script referenced in installed hook config", async () => {
-    const home = await createTempHome()
-    const claudeDir = join(home, ".claude")
+    const h = await createTempHome()
+    const claudeDir = join(h, ".claude")
     await mkdir(claudeDir, { recursive: true })
-    const scriptPath = join(home, "non-exec-hook.ts")
+    const scriptPath = join(h, "non-exec-hook.ts")
     await writeFile(scriptPath, "#!/usr/bin/env bun\n", { mode: 0o644 })
     await writeFile(
       join(claudeDir, "settings.json"),
@@ -253,176 +282,89 @@ describe("swiz doctor", () => {
         },
       })
     )
-    const result = await runDoctor(home)
+    const result = await runDoctor(h)
     expect(result.stdout).toContain("Installed config scripts")
     expect(result.stdout).toContain("not executable")
     expect(result.stdout).toContain(scriptPath)
   })
 
-  test("detects missing script referenced in scripts key", async () => {
-    const home = await createTempHome()
-    const claudeDir = join(home, ".claude")
-    await mkdir(claudeDir, { recursive: true })
-    await writeFile(
-      join(claudeDir, "settings.json"),
-      JSON.stringify({
-        hooks: {
-          Stop: [{ scripts: "bun /from/scripts/key/hook.ts" }],
-        },
-      })
-    )
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Installed config scripts")
-    expect(result.stdout).toContain("/from/scripts/key/hook.ts")
+  // ── Malformed settings + config sync: run concurrently ────────────────
+
+  test("malformed settings and config sync checks", async () => {
+    const [malformedHome, failureHome, missingDispatchHome, syncHome, staleHome] =
+      await Promise.all([
+        createTempHome(),
+        createTempHome(),
+        createTempHome(),
+        createTempHome(),
+        createTempHome(),
+      ])
+
+    // Setup all homes concurrently
+    await Promise.all([
+      (async () => {
+        await mkdir(join(malformedHome, ".claude"), { recursive: true })
+        await writeFile(join(malformedHome, ".claude", "settings.json"), "{ invalid json !!!")
+      })(),
+      (async () => {
+        await mkdir(join(failureHome, ".claude"), { recursive: true })
+        await writeFile(join(failureHome, ".claude", "settings.json"), "not json at all")
+      })(),
+      (async () => {
+        await mkdir(join(missingDispatchHome, ".claude"), { recursive: true })
+        await writeFile(
+          join(missingDispatchHome, ".claude", "settings.json"),
+          JSON.stringify({
+            hooks: {
+              Stop: [{ hooks: [{ type: "command", command: "echo hello" }] }],
+            },
+          })
+        )
+      })(),
+      (async () => {
+        await mkdir(join(syncHome, ".claude"), { recursive: true })
+        await writeFile(
+          join(syncHome, ".claude", "settings.json"),
+          JSON.stringify({ hooks: buildExpectedHooks() })
+        )
+      })(),
+      (async () => {
+        await mkdir(join(staleHome, ".claude"), { recursive: true })
+        await writeFile(join(staleHome, ".claude", "settings.json"), JSON.stringify({ hooks: {} }))
+      })(),
+    ])
+
+    // Run all doctors concurrently
+    const [malformed, failure, missingDispatch, sync, stale] = await Promise.all([
+      runDoctor(malformedHome),
+      runDoctor(failureHome),
+      runDoctor(missingDispatchHome),
+      runDoctor(syncHome),
+      runDoctor(staleHome),
+    ])
+
+    // Malformed JSON detection
+    expect(malformed.stdout).toContain("Claude Code settings")
+    expect(malformed.stdout).toContain("malformed JSON")
+
+    // Non-zero exit on failure
+    expect(failure.exitCode).not.toBe(0)
+    expect(failure.stderr).toContain("check(s) failed")
+
+    // Missing dispatch entries
+    expect(missingDispatch.stdout).toContain("Claude Code config sync")
+    expect(missingDispatch.stdout).toContain("missing dispatch")
+
+    // Dispatch entries in sync
+    expect(sync.stdout).toContain("Claude Code config sync")
+    expect(sync.stdout).toContain("dispatch entries in sync")
+
+    // Stale config with fix hint
+    expect(stale.stdout).toContain("missing dispatch")
+    expect(stale.stdout).toContain("swiz install")
   })
 
-  test("detects missing script referenced in run key", async () => {
-    const home = await createTempHome()
-    const claudeDir = join(home, ".claude")
-    await mkdir(claudeDir, { recursive: true })
-    await writeFile(
-      join(claudeDir, "settings.json"),
-      JSON.stringify({
-        hooks: {
-          Stop: [{ run: "bun /from/run/key/hook.ts" }],
-        },
-      })
-    )
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Installed config scripts")
-    expect(result.stdout).toContain("/from/run/key/hook.ts")
-  })
-
-  test("detects missing script referenced in args array", async () => {
-    const home = await createTempHome()
-    const claudeDir = join(home, ".claude")
-    await mkdir(claudeDir, { recursive: true })
-    await writeFile(
-      join(claudeDir, "settings.json"),
-      JSON.stringify({
-        hooks: {
-          Stop: [{ args: ["bun", "/from/args/array/hook.ts"] }],
-        },
-      })
-    )
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Installed config scripts")
-    expect(result.stdout).toContain("/from/args/array/hook.ts")
-  })
-
-  test("reports GitHub CLI auth status", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("GitHub CLI auth")
-  })
-
-  test("reports TTS backend status", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("TTS backend")
-  })
-
-  test("reports swiz settings status", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Swiz settings")
-  })
-
-  test("detects malformed agent settings as failure", async () => {
-    const home = await createTempHome()
-    const claudeDir = join(home, ".claude")
-    await mkdir(claudeDir, { recursive: true })
-    await writeFile(join(claudeDir, "settings.json"), "{ invalid json !!!")
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Claude Code settings")
-    expect(result.stdout).toContain("malformed JSON")
-  })
-
-  test("shows summary counts", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    expect(result.stdout).toMatch(/\d+ passed/)
-  })
-
-  test("exits zero when no hard failures", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    // Missing agent binaries and settings are warnings, not failures
-    // In a clean repo, hook scripts should all exist
-    if (!result.stdout.includes("failed")) {
-      expect(result.exitCode).toBe(0)
-    }
-  })
-
-  test("exits non-zero when hard failures exist", async () => {
-    const home = await createTempHome()
-    const claudeDir = join(home, ".claude")
-    await mkdir(claudeDir, { recursive: true })
-    // Write malformed JSON to trigger a failure
-    await writeFile(join(claudeDir, "settings.json"), "not json at all")
-    const result = await runDoctor(home)
-    expect(result.exitCode).not.toBe(0)
-    expect(result.stderr).toContain("check(s) failed")
-  })
-
-  test("reports agent binary checks for all agents", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Claude Code binary")
-    expect(result.stdout).toContain("Cursor binary")
-    expect(result.stdout).toContain("Gemini CLI binary")
-    expect(result.stdout).toContain("Codex CLI binary")
-  })
-
-  test("reports config sync check for configurable agents", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    // All configurable agents should have a config sync check
-    expect(result.stdout).toContain("config sync")
-  })
-
-  test("warns when agent config is missing dispatch entries", async () => {
-    const home = await createTempHome()
-    // Create a Claude Code settings file with hooks but no dispatch entries
-    const claudeDir = join(home, ".claude")
-    await mkdir(claudeDir, { recursive: true })
-    await writeFile(
-      join(claudeDir, "settings.json"),
-      JSON.stringify({
-        hooks: {
-          Stop: [{ hooks: [{ type: "command", command: "echo hello" }] }],
-        },
-      })
-    )
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Claude Code config sync")
-    expect(result.stdout).toContain("missing dispatch")
-  })
-
-  test("passes config sync when all dispatch entries present", async () => {
-    const home = await createTempHome()
-    const claudeDir = join(home, ".claude")
-    await mkdir(claudeDir, { recursive: true })
-    // Create settings with all expected dispatch entries (derived dynamically from manifest + agents)
-    await writeFile(
-      join(claudeDir, "settings.json"),
-      JSON.stringify({ hooks: buildExpectedHooks() })
-    )
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Claude Code config sync")
-    expect(result.stdout).toContain("dispatch entries in sync")
-  })
-
-  test("warns about stale configs with fix hint", async () => {
-    const home = await createTempHome()
-    // Empty settings file = no dispatch entries
-    const claudeDir = join(home, ".claude")
-    await mkdir(claudeDir, { recursive: true })
-    await writeFile(join(claudeDir, "settings.json"), JSON.stringify({ hooks: {} }))
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("missing dispatch")
-    expect(result.stdout).toContain("swiz install")
-  })
+  // ── Skill conflict tests ──────────────────────────────────────────────
 
   test("reports duplicate skill-name conflicts with active and overridden paths", async () => {
     const home = await createTempHome()
@@ -463,12 +405,222 @@ describe("swiz doctor", () => {
     expect(afterFix.stdout).not.toContain(`Skill conflict: ${skillName}`)
   })
 
-  test("reports no orphaned hook scripts in a healthy install", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Orphaned hook scripts")
-    expect(result.stdout).toContain("no orphaned scripts found")
+  // ── Skill validation: concurrent batch of read-only checks ──────────
+  test("detects invalid skill entries (frontmatter/category issues)", async () => {
+    type SkillCase = {
+      skillName: string
+      skillPath: string
+      content?: string
+      expectContains: string[]
+      expectNotContains?: string[]
+    }
+    const cases: SkillCase[] = [
+      {
+        skillName: "broken-skill",
+        skillPath: ".claude/skills/broken-skill",
+        // No SKILL.md created — just the directory
+        expectContains: ["Invalid skill: broken-skill", "missing SKILL.md"],
+      },
+      {
+        skillName: "no-desc-skill",
+        skillPath: ".claude/skills/no-desc-skill",
+        content: "---\nname: no-desc-skill\n---\n\nNo description field.\n",
+        expectContains: [
+          "Invalid skill: no-desc-skill",
+          "missing required frontmatter field(s): description",
+        ],
+      },
+      {
+        skillName: "no-name-skill",
+        skillPath: ".claude/skills/no-name-skill",
+        content: "---\ndescription: Has description but no name field\n---\n\nContent.\n",
+        expectContains: [
+          "Invalid skill: no-name-skill",
+          "missing required frontmatter field(s): name",
+        ],
+      },
+      {
+        skillName: "empty-fm-skill",
+        skillPath: ".claude/skills/empty-fm-skill",
+        content: "---\n---\n\nFrontmatter exists but has no fields.\n",
+        expectContains: [
+          "Invalid skill: empty-fm-skill",
+          "missing required frontmatter field(s): name, description",
+        ],
+      },
+      {
+        skillName: "no-fm-skill",
+        skillPath: ".claude/skills/no-fm-skill",
+        content: "# Just a heading\n\nNo frontmatter at all.\n",
+        expectContains: ["Invalid skill: no-fm-skill", "no frontmatter block"],
+      },
+      {
+        skillName: "placeholder-skill",
+        skillPath: ".claude/skills/placeholder-skill",
+        content:
+          "---\nname: placeholder-skill\ndescription: Add a description for this skill.\n---\n",
+        expectContains: [
+          "Invalid skill: placeholder-skill",
+          "description is the generated placeholder",
+        ],
+      },
+      {
+        skillName: "no-category-skill",
+        skillPath: ".claude/skills/no-category-skill",
+        content: "---\nname: no-category-skill\ndescription: Does something useful.\n---\n",
+        expectContains: ["Invalid skill: no-category-skill", "missing category field"],
+      },
+      {
+        skillName: "bad-cat-skill",
+        skillPath: ".claude/skills/bad-cat-skill",
+        content:
+          "---\nname: bad-cat-skill\ndescription: Does something useful.\ncategory: not-a-real-category\n---\n",
+        expectContains: ["Invalid skill: bad-cat-skill", 'unknown category "not-a-real-category"'],
+      },
+      {
+        skillName: "typo-cat-skill",
+        skillPath: ".claude/skills/typo-cat-skill",
+        content:
+          "---\nname: typo-cat-skill\ndescription: Does something useful.\ncategory: tesing\n---\n",
+        expectContains: [
+          "Invalid skill: typo-cat-skill",
+          'unknown category "tesing"',
+          'did you mean: "testing"',
+        ],
+      },
+      {
+        skillName: "far-cat-skill",
+        skillPath: ".claude/skills/far-cat-skill",
+        content:
+          "---\nname: far-cat-skill\ndescription: Does something useful.\ncategory: zzzzzzzzzzzz\n---\n",
+        expectContains: ["Invalid skill: far-cat-skill"],
+        expectNotContains: ["did you mean"],
+      },
+    ]
+
+    await Promise.all(
+      cases.map(async ({ skillPath, content, expectContains, expectNotContains }) => {
+        const home = await createTempHome()
+        const skillDir = join(home, skillPath)
+        await mkdir(skillDir, { recursive: true })
+        if (content) {
+          await writeFile(join(skillDir, "SKILL.md"), content)
+        }
+        const result = await runDoctor(home)
+        for (const text of expectContains) {
+          expect(result.stdout).toContain(text)
+        }
+        for (const text of expectNotContains ?? []) {
+          expect(result.stdout).not.toContain(text)
+        }
+      })
+    )
   })
+
+  test("skill validation edge cases", async () => {
+    // Run concurrently: real description OK, name mismatch + placeholder, name mismatch,
+    // quoted name match, dotdir ignore
+    const homes = await Promise.all(Array.from({ length: 5 }, () => createTempHome()))
+    const [realHome, bothHome, mismatchHome, quotedHome, dotdirHome] = homes as [
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+
+    // Setup all concurrently
+    await Promise.all([
+      (async () => {
+        const d = join(realHome, ".claude", "skills", "real-skill")
+        await mkdir(d, { recursive: true })
+        await writeFile(
+          join(d, "SKILL.md"),
+          "---\nname: real-skill\ndescription: Does something useful.\ncategory: productivity\n---\n"
+        )
+      })(),
+      (async () => {
+        const d = join(bothHome, ".claude", "skills", "my-skill")
+        await mkdir(d, { recursive: true })
+        await writeFile(
+          join(d, "SKILL.md"),
+          "---\nname: wrong-name\ndescription: Add a description for this skill.\n---\n"
+        )
+      })(),
+      (async () => {
+        const d = join(mismatchHome, ".claude", "skills", "my-skill")
+        await mkdir(d, { recursive: true })
+        await writeFile(
+          join(d, "SKILL.md"),
+          "---\nname: different-name\ndescription: test skill\n---\n"
+        )
+      })(),
+      (async () => {
+        const d = join(quotedHome, ".claude", "skills", "quoted-skill")
+        await mkdir(d, { recursive: true })
+        await writeFile(
+          join(d, "SKILL.md"),
+          '---\nname: "quoted-skill"\ndescription: test skill\ncategory: testing\n---\n'
+        )
+      })(),
+      (async () => {
+        const d = join(dotdirHome, ".claude", "skills", ".unison.solid-analysis.abc123.unison.tmp")
+        await mkdir(d, { recursive: true })
+      })(),
+    ])
+
+    // Run all doctors concurrently
+    const [real, both, mismatch, quoted, dotdir] = await Promise.all([
+      runDoctor(realHome),
+      runDoctor(bothHome),
+      runDoctor(mismatchHome),
+      runDoctor(quotedHome),
+      runDoctor(dotdirHome),
+    ])
+
+    // Real description should not be flagged
+    expect(real.stdout).not.toContain("Invalid skill: real-skill")
+
+    // Both errors reported together
+    expect(both.stdout).toContain(
+      'frontmatter name "wrong-name" does not match directory name "my-skill"'
+    )
+    expect(both.stdout).toContain("description is the generated placeholder")
+
+    // Name mismatch detected
+    expect(mismatch.stdout).toContain("Invalid skill: my-skill")
+    expect(mismatch.stdout).toContain(
+      'frontmatter name "different-name" does not match directory name "my-skill"'
+    )
+
+    // Quoted name matching directory name is OK
+    expect(quoted.stdout).not.toContain("Invalid skill: quoted-skill")
+
+    // Dotdirectory ignored
+    expect(dotdir.stdout).not.toContain("Invalid skill: .unison")
+    expect(dotdir.stdout).toContain("no invalid skill entries found")
+  })
+
+  test("project allowedSkillCategories overrides default allowed list", async () => {
+    const home = await createTempHome()
+    const projectRoot = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "custom-cat-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: custom-cat-skill\ndescription: Does something useful.\ncategory: my-custom-category\n---\n"
+    )
+    const swizDir = join(projectRoot, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await writeFile(
+      join(swizDir, "config.json"),
+      JSON.stringify({ allowedSkillCategories: ["my-custom-category"] })
+    )
+    const result = await runDoctor(home, [], projectRoot)
+    expect(result.stdout).not.toContain("Invalid skill: custom-cat-skill")
+  })
+
+  // ── Skill --fix tests ─────────────────────────────────────────────────
 
   test("doctor --fix creates stub for missing config script", async () => {
     const home = await createTempHome()
@@ -486,83 +638,11 @@ describe("swiz doctor", () => {
     expect(await Bun.file(missingPath).exists()).toBe(true)
     const content = await Bun.file(missingPath).text()
     expect(content).toContain("#!/usr/bin/env bun")
-  }, 15000) // spawns `swiz install` subprocess — allow extra headroom under full-suite load
-
-  test("detects skill directory missing SKILL.md as invalid", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "broken-skill")
-    await mkdir(skillDir, { recursive: true })
-    // No SKILL.md created inside
-
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Invalid skill: broken-skill")
-    expect(result.stdout).toContain("missing SKILL.md")
-  })
-
-  test("detects skill with SKILL.md missing description as invalid", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "no-desc-skill")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\nname: no-desc-skill\n---\n\nNo description field.\n"
-    )
-
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Invalid skill: no-desc-skill")
-    expect(result.stdout).toContain("missing required frontmatter field(s): description")
-  })
-
-  test("detects skill with SKILL.md missing name as invalid", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "no-name-skill")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\ndescription: Has description but no name field\n---\n\nContent.\n"
-    )
-
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Invalid skill: no-name-skill")
-    expect(result.stdout).toContain("missing required frontmatter field(s): name")
-  })
-
-  test("detects skill with SKILL.md missing both name and description as invalid", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "empty-fm-skill")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\n---\n\nFrontmatter exists but has no fields.\n"
-    )
-
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Invalid skill: empty-fm-skill")
-    expect(result.stdout).toContain("missing required frontmatter field(s): name, description")
-  })
-
-  test("detects skill with SKILL.md lacking frontmatter block as invalid", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "no-fm-skill")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(join(skillDir, "SKILL.md"), "# Just a heading\n\nNo frontmatter at all.\n")
-
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Invalid skill: no-fm-skill")
-    expect(result.stdout).toContain("no frontmatter block")
-  })
-
-  test("reports no invalid skill entries in a healthy install", async () => {
-    const home = await createTempHome()
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Invalid skill entries")
-    expect(result.stdout).toContain("no invalid skill entries found")
-  })
+  }, 15000)
 
   test("doctor --fix moves invalid skill entry aside", async () => {
     const home = await createTempHome()
     const skillsDir = join(home, ".claude", "skills")
-    // Use a skill with empty SKILL.md — cannot be auto-fixed, must be moved aside
     const skillName = `invalid-skill-${Date.now()}`
     const skillDir = join(skillsDir, skillName)
     await mkdir(skillDir, { recursive: true })
@@ -585,19 +665,16 @@ describe("swiz doctor", () => {
     const skillName = `new-skill-${Date.now()}`
     const skillDir = join(skillsDir, skillName)
     await mkdir(skillDir, { recursive: true })
-    // No SKILL.md created
 
     const fixRun = await runDoctor(home, ["--fix"])
     expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
     expect(fixRun.stdout).toContain("generated default")
     expect(fixRun.stdout).toContain(skillName)
 
-    // Directory must NOT be moved aside — it stays in place (stat confirms it's a directory)
     const { stat: statFn } = await import("node:fs/promises")
     const dirStat = await statFn(skillDir)
     expect(dirStat.isDirectory()).toBe(true)
 
-    // SKILL.md must now exist with correct frontmatter
     const skillMdPath = join(skillDir, "SKILL.md")
     expect(await Bun.file(skillMdPath).exists()).toBe(true)
     const content = await Bun.file(skillMdPath).text()
@@ -605,8 +682,6 @@ describe("swiz doctor", () => {
     expect(content).toContain("description:")
     expect(content).toMatch(/^---/m)
 
-    // After fix, the skill is no longer flagged for missing SKILL.md
-    // (it will now warn about the placeholder description — covered by a separate test)
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).not.toContain("missing SKILL.md")
   })
@@ -625,13 +700,11 @@ describe("swiz doctor", () => {
     expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
     expect(fixRun.stdout).toContain('updated name "wrong-name" → "my-skill"')
 
-    // SKILL.md should still exist (not moved aside) with corrected name
     expect(await Bun.file(skillMdPath).exists()).toBe(true)
     const content = await Bun.file(skillMdPath).text()
     expect(content).toContain("name: my-skill")
     expect(content).not.toContain("wrong-name")
 
-    // After fix, doctor should report no invalid entries for this skill
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).not.toContain("Invalid skill: my-skill")
   })
@@ -650,163 +723,16 @@ describe("swiz doctor", () => {
     expect(content).not.toContain("quoted-wrong")
   })
 
-  test("warns when skill description uses the generated placeholder text", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "placeholder-skill")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\nname: placeholder-skill\ndescription: Add a description for this skill.\n---\n"
-    )
-
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Invalid skill: placeholder-skill")
-    expect(result.stdout).toContain("description is the generated placeholder")
-  })
-
-  test("does not warn when skill has a real description", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "real-skill")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\nname: real-skill\ndescription: Does something useful.\ncategory: productivity\n---\n"
-    )
-
-    const result = await runDoctor(home)
-    expect(result.stdout).not.toContain("Invalid skill: real-skill")
-  })
-
   test("doctor --fix generated stub then warns placeholder on re-run", async () => {
     const home = await createTempHome()
     const skillDir = join(home, ".claude", "skills", "stub-skill")
     await mkdir(skillDir, { recursive: true })
-    // No SKILL.md — fix generates stub
 
     await runDoctor(home, ["--fix"])
 
-    // Stub was generated with placeholder description — subsequent check warns about it
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).toContain("Invalid skill: stub-skill")
     expect(afterFix.stdout).toContain("description is the generated placeholder")
-  })
-
-  test("reports both name mismatch and placeholder description in a single run", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "my-skill")
-    await mkdir(skillDir, { recursive: true })
-    // Wrong name AND placeholder description — both should be reported
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\nname: wrong-name\ndescription: Add a description for this skill.\n---\n"
-    )
-
-    const result = await runDoctor(home)
-    // Both errors must appear — not just the first one encountered
-    expect(result.stdout).toContain(
-      'frontmatter name "wrong-name" does not match directory name "my-skill"'
-    )
-    expect(result.stdout).toContain("description is the generated placeholder")
-  })
-
-  test("detects skill where frontmatter name does not match directory name", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "my-skill")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\nname: different-name\ndescription: test skill\n---\n"
-    )
-
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Invalid skill: my-skill")
-    expect(result.stdout).toContain(
-      'frontmatter name "different-name" does not match directory name "my-skill"'
-    )
-  })
-
-  test("does not flag skill with quoted frontmatter name matching directory name", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "quoted-skill")
-    await mkdir(skillDir, { recursive: true })
-    // Quoted name that matches dir name after stripping quotes
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      '---\nname: "quoted-skill"\ndescription: test skill\ncategory: testing\n---\n'
-    )
-
-    const result = await runDoctor(home)
-    expect(result.stdout).not.toContain("Invalid skill: quoted-skill")
-  })
-
-  test("ignores dotdirectories inside skill paths", async () => {
-    const home = await createTempHome()
-    const skillsDir = join(home, ".claude", "skills")
-    // Simulate a .unison temp directory — no SKILL.md inside
-    const dotDir = join(skillsDir, ".unison.solid-analysis.abc123.unison.tmp")
-    await mkdir(dotDir, { recursive: true })
-
-    const result = await runDoctor(home)
-    // The dotdir must not appear as an invalid skill entry
-    expect(result.stdout).not.toContain("Invalid skill: .unison")
-    expect(result.stdout).toContain("no invalid skill entries found")
-  })
-
-  test("detects skill missing category field as invalid", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "no-category-skill")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\nname: no-category-skill\ndescription: Does something useful.\n---\n"
-    )
-
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Invalid skill: no-category-skill")
-    expect(result.stdout).toContain("missing category field")
-  })
-
-  test("detects skill with unknown category as invalid", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "bad-cat-skill")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\nname: bad-cat-skill\ndescription: Does something useful.\ncategory: not-a-real-category\n---\n"
-    )
-
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Invalid skill: bad-cat-skill")
-    expect(result.stdout).toContain('unknown category "not-a-real-category"')
-  })
-
-  test("suggests closest valid category when invalid category is close to an allowed one", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "typo-cat-skill")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\nname: typo-cat-skill\ndescription: Does something useful.\ncategory: tesing\n---\n"
-    )
-
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Invalid skill: typo-cat-skill")
-    expect(result.stdout).toContain('unknown category "tesing"')
-    expect(result.stdout).toContain('did you mean: "testing"')
-  })
-
-  test("does not suggest a category when invalid value is not close to any allowed one", async () => {
-    const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "far-cat-skill")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\nname: far-cat-skill\ndescription: Does something useful.\ncategory: zzzzzzzzzzzz\n---\n"
-    )
-
-    const result = await runDoctor(home)
-    expect(result.stdout).toContain("Invalid skill: far-cat-skill")
-    expect(result.stdout).not.toContain("did you mean")
   })
 
   test("doctor --fix replaces unknown category value with default", async () => {
@@ -825,42 +751,16 @@ describe("swiz doctor", () => {
     expect(fixRun.stdout).toContain("bad-cat-fix-skill")
     expect(fixRun.stdout).toContain('added category "uncategorized"')
 
-    // Directory stays in place
     const { stat: statFn } = await import("node:fs/promises")
     const dirStat = await statFn(skillDir)
     expect(dirStat.isDirectory()).toBe(true)
 
-    // Category replaced with "uncategorized"
     const content = await Bun.file(skillMdPath).text()
     expect(content).toContain("category: uncategorized")
     expect(content).not.toContain("totally-invalid")
 
-    // After fix, no warning
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).not.toContain("Invalid skill: bad-cat-fix-skill")
-  })
-
-  test("project allowedSkillCategories overrides default allowed list", async () => {
-    const home = await createTempHome()
-    // Use a separate temp dir as the project root so we don't touch the real .swiz/config.json
-    const projectRoot = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "custom-cat-skill")
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(
-      join(skillDir, "SKILL.md"),
-      "---\nname: custom-cat-skill\ndescription: Does something useful.\ncategory: my-custom-category\n---\n"
-    )
-    // Write project config with custom allowed list in the temp project root
-    const swizDir = join(projectRoot, ".swiz")
-    await mkdir(swizDir, { recursive: true })
-    await writeFile(
-      join(swizDir, "config.json"),
-      JSON.stringify({ allowedSkillCategories: ["my-custom-category"] })
-    )
-    // Run doctor with the temp project as cwd — it reads .swiz/config.json from there
-    const result = await runDoctor(home, [], projectRoot)
-    // With custom allowed list, "my-custom-category" is valid → no warning
-    expect(result.stdout).not.toContain("Invalid skill: custom-cat-skill")
   })
 
   test("doctor --fix adds default category to skill missing one", async () => {
@@ -879,16 +779,13 @@ describe("swiz doctor", () => {
     expect(fixRun.stdout).toContain("no-cat-skill")
     expect(fixRun.stdout).toContain('added category "uncategorized"')
 
-    // Directory must stay in place (not moved aside)
     const { stat: statFn } = await import("node:fs/promises")
     const dirStat = await statFn(skillDir)
     expect(dirStat.isDirectory()).toBe(true)
 
-    // SKILL.md now contains a category field
     const content = await Bun.file(skillMdPath).text()
     expect(content).toContain("category: uncategorized")
 
-    // After fix, "uncategorized" is in the allowed list — no category warning
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).not.toContain("Invalid skill: no-cat-skill")
   })

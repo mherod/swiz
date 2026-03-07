@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "../../hooks/test-utils.ts"
@@ -117,36 +117,69 @@ async function createCodexSession(
 }
 
 describe("swiz settings", () => {
-  test("shows default auto-continue state when no config exists", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings"], home)
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("auto-continue:   enabled")
-    expect(result.stdout).toContain("pr-merge-mode:   enabled")
-    expect(result.stdout).toContain("update-memory-footer: disabled")
-    expect(result.stdout).toContain("(defaults)")
+  // ── Default output: share one subprocess ──────────────────────────────
+  describe("default settings output", () => {
+    let result: Awaited<ReturnType<typeof runSwiz>>
+
+    beforeAll(async () => {
+      const home = await createTempHome()
+      result = await runSwiz(["settings"], home)
+    })
+
+    test("shows default auto-continue state", () => {
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toContain("auto-continue:   enabled")
+      expect(result.stdout).toContain("pr-merge-mode:   enabled")
+      expect(result.stdout).toContain("update-memory-footer: disabled")
+      expect(result.stdout).toContain("(defaults)")
+    })
+
+    test("shows default narrator-voice and narrator-speed", () => {
+      expect(result.stdout).toContain("narrator-voice:  system default")
+      expect(result.stdout).toContain("narrator-speed:  system default")
+    })
+
+    test("shows default project policy", () => {
+      expect(result.stdout).toContain("project policy")
+      expect(result.stdout).toContain(`trivial-max-files: ${DEFAULT_TRIVIAL_MAX_FILES}`)
+      expect(result.stdout).toContain(`trivial-max-lines: ${DEFAULT_TRIVIAL_MAX_LINES}`)
+      expect(result.stdout).toContain("(default)")
+    })
+
+    test("shows default collaboration mode", () => {
+      expect(result.stdout).toContain("collaboration:   auto")
+    })
   })
 
-  test("enables update-memory-footer and persists to user config", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "enable", "update-memory-footer"], home)
-    expect(result.exitCode).toBe(0)
-
-    const configPath = join(home, ".swiz", "settings.json")
-    const text = await readFile(configPath, "utf-8")
-    const json = JSON.parse(text) as { updateMemoryFooter?: boolean }
-    expect(json.updateMemoryFooter).toBe(true)
-  })
-
-  test("disables auto-continue and persists to user config", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "disable", "auto-continue"], home)
-    expect(result.exitCode).toBe(0)
-
-    const configPath = join(home, ".swiz", "settings.json")
-    const text = await readFile(configPath, "utf-8")
-    const json = JSON.parse(text) as { autoContinue?: boolean }
-    expect(json.autoContinue).toBe(false)
+  // ── Boolean toggle persistence: run concurrently ──────────────────────
+  test("boolean settings persist correctly via enable/disable", async () => {
+    const cases: Array<{
+      args: string[]
+      key: string
+      expected: boolean
+    }> = [
+      { args: ["enable", "update-memory-footer"], key: "updateMemoryFooter", expected: true },
+      { args: ["disable", "auto-continue"], key: "autoContinue", expected: false },
+      { args: ["disable", "pr-merge-mode"], key: "prMergeMode", expected: false },
+      { args: ["disable", "changes-requested-gate"], key: "changesRequestedGate", expected: false },
+      { args: ["disable", "pr-review-gate"], key: "changesRequestedGate", expected: false },
+      {
+        args: ["disable", "personal-repo-issues-gate"],
+        key: "personalRepoIssuesGate",
+        expected: false,
+      },
+      { args: ["disable", "issue-gate"], key: "personalRepoIssuesGate", expected: false },
+    ]
+    await Promise.all(
+      cases.map(async ({ args, key, expected }) => {
+        const home = await createTempHome()
+        const result = await runSwiz(["settings", ...args], home)
+        expect(result.exitCode).toBe(0)
+        const text = await readFile(join(home, ".swiz", "settings.json"), "utf-8")
+        const json = JSON.parse(text) as Record<string, unknown>
+        expect(json[key]).toBe(expected)
+      })
+    )
   })
 
   test("enables auto-continue after being disabled", async () => {
@@ -161,61 +194,6 @@ describe("swiz settings", () => {
     const text = await readFile(configPath, "utf-8")
     const json = JSON.parse(text) as { autoContinue?: boolean }
     expect(json.autoContinue).toBe(true)
-  })
-
-  test("disables pr-merge-mode and persists to user config", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "disable", "pr-merge-mode"], home)
-    expect(result.exitCode).toBe(0)
-
-    const configPath = join(home, ".swiz", "settings.json")
-    const text = await readFile(configPath, "utf-8")
-    const json = JSON.parse(text) as { prMergeMode?: boolean }
-    expect(json.prMergeMode).toBe(false)
-  })
-
-  test("disables changes-requested-gate and persists to user config", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "disable", "changes-requested-gate"], home)
-    expect(result.exitCode).toBe(0)
-
-    const configPath = join(home, ".swiz", "settings.json")
-    const text = await readFile(configPath, "utf-8")
-    const json = JSON.parse(text) as { changesRequestedGate?: boolean }
-    expect(json.changesRequestedGate).toBe(false)
-  })
-
-  test("accepts pr-review-gate as alias for changes-requested-gate", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "disable", "pr-review-gate"], home)
-    expect(result.exitCode).toBe(0)
-
-    const configPath = join(home, ".swiz", "settings.json")
-    const text = await readFile(configPath, "utf-8")
-    const json = JSON.parse(text) as { changesRequestedGate?: boolean }
-    expect(json.changesRequestedGate).toBe(false)
-  })
-
-  test("disables personal-repo-issues-gate and persists to user config", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "disable", "personal-repo-issues-gate"], home)
-    expect(result.exitCode).toBe(0)
-
-    const configPath = join(home, ".swiz", "settings.json")
-    const text = await readFile(configPath, "utf-8")
-    const json = JSON.parse(text) as { personalRepoIssuesGate?: boolean }
-    expect(json.personalRepoIssuesGate).toBe(false)
-  })
-
-  test("accepts issue-gate as alias for personalRepoIssuesGate", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "disable", "issue-gate"], home)
-    expect(result.exitCode).toBe(0)
-
-    const configPath = join(home, ".swiz", "settings.json")
-    const text = await readFile(configPath, "utf-8")
-    const json = JSON.parse(text) as { personalRepoIssuesGate?: boolean }
-    expect(json.personalRepoIssuesGate).toBe(false)
   })
 
   test("fails for unknown setting key", async () => {
@@ -323,139 +301,125 @@ describe("swiz settings", () => {
     expect(result.stderr).toContain("No session matching")
   })
 
-  test("shows default narrator-voice and narrator-speed as system default", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings"], home)
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("narrator-voice:  system default")
-    expect(result.stdout).toContain("narrator-speed:  system default")
-  })
-
-  test("sets narrator-voice and persists to config", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "set", "narrator-voice", "Samantha"], home)
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Set narrator-voice = Samantha")
-
-    const configPath = join(home, ".swiz", "settings.json")
-    const text = await readFile(configPath, "utf-8")
-    const json = JSON.parse(text) as { narratorVoice?: string }
-    expect(json.narratorVoice).toBe("Samantha")
-  })
-
-  test("sets narrator-speed and persists to config", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "set", "narrator-speed", "250"], home)
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Set narrator-speed = 250")
-
-    const configPath = join(home, ".swiz", "settings.json")
-    const text = await readFile(configPath, "utf-8")
-    const json = JSON.parse(text) as { narratorSpeed?: number }
-    expect(json.narratorSpeed).toBe(250)
-  })
-
-  test("shows configured narrator-voice in settings output", async () => {
-    const home = await createTempHome()
-    await runSwiz(["settings", "set", "narrator-voice", "Alex"], home)
-    const result = await runSwiz(["settings"], home)
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("narrator-voice:  Alex")
-  })
-
-  test("shows configured narrator-speed in settings output", async () => {
-    const home = await createTempHome()
-    await runSwiz(["settings", "set", "narrator-speed", "180"], home)
-    const result = await runSwiz(["settings"], home)
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("narrator-speed:  180 wpm")
-  })
-
-  test("rejects enable/disable for narrator-voice", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "enable", "narrator-voice"], home)
-    expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("not a boolean setting")
-  })
-
-  test("sets ambition-mode standard and persists to config", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "set", "ambition-mode", "standard"], home)
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Set ambition-mode = standard")
-
-    const configPath = join(home, ".swiz", "settings.json")
-    const text = await readFile(configPath, "utf-8")
-    const json = JSON.parse(text) as { ambitionMode?: string }
-    expect(json.ambitionMode).toBe("standard")
-  })
-
-  test("sets ambition-mode aggressive and persists to config", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "set", "ambition-mode", "aggressive"], home)
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Set ambition-mode = aggressive")
-
-    const configPath = join(home, ".swiz", "settings.json")
-    const text = await readFile(configPath, "utf-8")
-    const json = JSON.parse(text) as { ambitionMode?: string }
-    expect(json.ambitionMode).toBe("aggressive")
-  })
-
-  test("sets ambition-mode creative and persists to config", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "set", "ambition-mode", "creative"], home)
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Set ambition-mode = creative")
-
-    const configPath = join(home, ".swiz", "settings.json")
-    const text = await readFile(configPath, "utf-8")
-    const json = JSON.parse(text) as { ambitionMode?: string }
-    expect(json.ambitionMode).toBe("creative")
-  })
-
-  test("rejects invalid ambition-mode value", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "set", "ambition-mode", "turbo"], home)
-    expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("ambition-mode")
-  })
-
-  test("rejects enable/disable for ambition-mode", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "enable", "ambition-mode"], home)
-    expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("not a boolean setting")
-  })
-
-  test("rejects --session for a global-only setting", async () => {
-    const home = await createTempHome()
-    // Create a session so --session resolves
-    await createSession(home, "/tmp/fake-project", "sess-scope-test")
-    const result = await runSwiz(
-      ["settings", "enable", "speak", "--session", "sess-scope-test"],
-      home
+  // ── Set-value tests: run concurrently ───────────────────────────────
+  test("set-value settings persist correctly", async () => {
+    const cases: Array<{
+      args: string[]
+      key: string
+      expected: unknown
+      stdout?: string
+    }> = [
+      {
+        args: ["set", "narrator-voice", "Samantha"],
+        key: "narratorVoice",
+        expected: "Samantha",
+        stdout: "Set narrator-voice = Samantha",
+      },
+      {
+        args: ["set", "narrator-speed", "250"],
+        key: "narratorSpeed",
+        expected: 250,
+        stdout: "Set narrator-speed = 250",
+      },
+      {
+        args: ["set", "ambition-mode", "standard"],
+        key: "ambitionMode",
+        expected: "standard",
+        stdout: "Set ambition-mode = standard",
+      },
+      {
+        args: ["set", "ambition-mode", "aggressive"],
+        key: "ambitionMode",
+        expected: "aggressive",
+        stdout: "Set ambition-mode = aggressive",
+      },
+      {
+        args: ["set", "ambition-mode", "creative"],
+        key: "ambitionMode",
+        expected: "creative",
+        stdout: "Set ambition-mode = creative",
+      },
+    ]
+    await Promise.all(
+      cases.map(async ({ args, key, expected, stdout }) => {
+        const home = await createTempHome()
+        const result = await runSwiz(["settings", ...args], home)
+        expect(result.exitCode).toBe(0)
+        if (stdout) expect(result.stdout).toContain(stdout)
+        const text = await readFile(join(home, ".swiz", "settings.json"), "utf-8")
+        const json = JSON.parse(text) as Record<string, unknown>
+        expect(json[key]).toBe(expected)
+      })
     )
-    expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("does not support --session scope")
   })
 
-  test("rejects --project for a global-only setting", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "enable", "speak", "--project", "--dir", home], home)
-    expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("does not support --project scope")
+  test("configured values appear in settings output", async () => {
+    const [voiceHome, speedHome] = await Promise.all([createTempHome(), createTempHome()])
+    await Promise.all([
+      runSwiz(["settings", "set", "narrator-voice", "Alex"], voiceHome),
+      runSwiz(["settings", "set", "narrator-speed", "180"], speedHome),
+    ])
+    const [voiceResult, speedResult] = await Promise.all([
+      runSwiz(["settings"], voiceHome),
+      runSwiz(["settings"], speedHome),
+    ])
+    expect(voiceResult.stdout).toContain("narrator-voice:  Alex")
+    expect(speedResult.stdout).toContain("narrator-speed:  180 wpm")
   })
 
-  test("rejects --session for narrator-voice (set command)", async () => {
-    const home = await createTempHome()
-    await createSession(home, "/tmp/fake-project", "sess-voice-test")
-    const result = await runSwiz(
-      ["settings", "set", "narrator-voice", "Alex", "--session", "sess-voice-test"],
-      home
+  // ── Rejection tests: run concurrently ─────────────────────────────────
+  test("rejects invalid setting operations", async () => {
+    const cases: Array<{
+      args: string[]
+      exitCode: number
+      stderr: string
+    }> = [
+      { args: ["enable", "narrator-voice"], exitCode: 1, stderr: "not a boolean setting" },
+      { args: ["enable", "ambition-mode"], exitCode: 1, stderr: "not a boolean setting" },
+      { args: ["set", "ambition-mode", "turbo"], exitCode: 1, stderr: "ambition-mode" },
+    ]
+    await Promise.all(
+      cases.map(async ({ args, exitCode, stderr }) => {
+        const home = await createTempHome()
+        const result = await runSwiz(["settings", ...args], home)
+        expect(result.exitCode).toBe(exitCode)
+        expect(result.stderr).toContain(stderr)
+      })
     )
-    expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("does not support --session scope")
+  })
+
+  test("rejects scope mismatches", async () => {
+    const cases = [
+      {
+        setup: async (home: string) => {
+          await createSession(home, "/tmp/fake-project", "sess-scope-test")
+        },
+        args: ["enable", "speak", "--session", "sess-scope-test"],
+        stderr: "does not support --session scope",
+      },
+      {
+        setup: async (_home: string) => {},
+        args: ["enable", "speak", "--project", "--dir", "HOME_PLACEHOLDER"],
+        stderr: "does not support --project scope",
+      },
+      {
+        setup: async (home: string) => {
+          await createSession(home, "/tmp/fake-project", "sess-voice-test")
+        },
+        args: ["set", "narrator-voice", "Alex", "--session", "sess-voice-test"],
+        stderr: "does not support --session scope",
+      },
+    ]
+    await Promise.all(
+      cases.map(async ({ setup, args, stderr }) => {
+        const home = await createTempHome()
+        await setup(home)
+        const resolvedArgs = args.map((a) => (a === "HOME_PLACEHOLDER" ? home : a))
+        const result = await runSwiz(["settings", ...resolvedArgs], home)
+        expect(result.exitCode).toBe(1)
+        expect(result.stderr).toContain(stderr)
+      })
+    )
   })
 
   test("accepts --session for auto-continue", async () => {
@@ -581,16 +545,6 @@ describe("swiz settings", () => {
     expect(result.stdout).toContain("trivial-max-lines: 10")
   })
 
-  test("shows default project policy when no config.json present", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings"], home)
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("project policy")
-    expect(result.stdout).toContain(`trivial-max-files: ${DEFAULT_TRIVIAL_MAX_FILES}`)
-    expect(result.stdout).toContain(`trivial-max-lines: ${DEFAULT_TRIVIAL_MAX_LINES}`)
-    expect(result.stdout).toContain("(default)")
-  })
-
   test("disable-hook adds filename to user-level disabledHooks", async () => {
     const home = await createTempHome()
     const result = await runSwiz(["settings", "disable-hook", "stop-github-ci.ts"], home)
@@ -654,38 +608,32 @@ describe("swiz settings", () => {
     expect(result.stdout).toContain("stop-github-ci.ts, stop-lint-staged.ts")
   })
 
-  test("sets collaboration-mode and persists to user config", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "set", "collaboration-mode", "solo"], home)
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Set collaboration-mode = solo")
+  test("collaboration-mode set/reject/show", async () => {
+    const [setHome, rejectHome, showHome] = await Promise.all([
+      createTempHome(),
+      createTempHome(),
+      createTempHome(),
+    ])
 
-    const configPath = join(home, ".swiz", "settings.json")
-    const text = await readFile(configPath, "utf-8")
-    const json = JSON.parse(text) as { collaborationMode?: string }
-    expect(json.collaborationMode).toBe("solo")
-  })
+    const [setResult, rejectResult] = await Promise.all([
+      runSwiz(["settings", "set", "collaboration-mode", "solo"], setHome),
+      runSwiz(["settings", "set", "collaboration-mode", "invalid"], rejectHome),
+      runSwiz(["settings", "set", "collaboration-mode", "team"], showHome),
+    ])
 
-  test("rejects invalid collaboration-mode value", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings", "set", "collaboration-mode", "invalid"], home)
-    expect(result.exitCode).not.toBe(0)
-    expect(result.stderr).toContain("Invalid value")
-  })
+    // Set persists
+    expect(setResult.exitCode).toBe(0)
+    expect(setResult.stdout).toContain("Set collaboration-mode = solo")
+    const text = await readFile(join(setHome, ".swiz", "settings.json"), "utf-8")
+    expect((JSON.parse(text) as { collaborationMode?: string }).collaborationMode).toBe("solo")
 
-  test("shows collaboration mode in settings output", async () => {
-    const home = await createTempHome()
-    const result = await runSwiz(["settings"], home)
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("collaboration:   auto")
-  })
+    // Invalid value rejected
+    expect(rejectResult.exitCode).not.toBe(0)
+    expect(rejectResult.stderr).toContain("Invalid value")
 
-  test("shows non-default collaboration mode in settings output", async () => {
-    const home = await createTempHome()
-    await runSwiz(["settings", "set", "collaboration-mode", "team"], home)
-    const result = await runSwiz(["settings"], home)
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("collaboration:   team")
+    // Non-default value shows in output
+    const showResult = await runSwiz(["settings"], showHome)
+    expect(showResult.stdout).toContain("collaboration:   team")
   })
 
   test("settings show includes project-level disabled hooks", async () => {
