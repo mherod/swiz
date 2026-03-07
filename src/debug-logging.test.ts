@@ -48,6 +48,8 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/doctor.ts",
   "src/commands/help.ts",
   "src/commands/hooks.ts",
+  // idea — generates and prints creative issue proposal from Gemini
+  "src/commands/idea.ts",
   "src/commands/install.ts",
   "src/commands/issue.ts",
   "src/commands/memory.ts",
