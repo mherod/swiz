@@ -18,7 +18,7 @@ import { z } from "zod"
  * Covers Edit, Write, StrReplace and equivalent cross-agent tools.
  */
 export const fileEditHookInputSchema = z.looseObject({
-  cwd: z.string(),
+  cwd: z.string().optional(),
   session_id: z.string().optional(),
   tool_name: z.string().optional(),
   tool_input: z
@@ -39,7 +39,7 @@ export type FileEditHookInput = z.infer<typeof fileEditHookInputSchema>
  * Covers Bash, Shell, run_shell_command and equivalent cross-agent tools.
  */
 export const shellHookInputSchema = z.looseObject({
-  cwd: z.string(),
+  cwd: z.string().optional(),
   session_id: z.string().optional(),
   tool_name: z.string().optional(),
   tool_input: z
@@ -57,7 +57,7 @@ export type ShellHookInput = z.infer<typeof shellHookInputSchema>
  * Mirrors the `ToolHookInput` interface in hook-utils.ts with runtime validation.
  */
 export const toolHookInputSchema = z.looseObject({
-  cwd: z.string(),
+  cwd: z.string().optional(),
   session_id: z.string().optional(),
   tool_name: z.string().optional(),
   tool_input: z.record(z.string(), z.unknown()).optional(),
@@ -71,7 +71,7 @@ export type ToolHookInput = z.infer<typeof toolHookInputSchema>
  * Mirrors the `StopHookInput` interface in hook-utils.ts with runtime validation.
  */
 export const stopHookInputSchema = z.looseObject({
-  cwd: z.string(),
+  cwd: z.string().optional(),
   session_id: z.string().optional(),
   stop_hook_active: z.boolean().optional(),
   transcript_path: z.string().optional(),
@@ -84,7 +84,7 @@ export type StopHookInput = z.infer<typeof stopHookInputSchema>
  * Mirrors the `SessionHookInput` interface in hook-utils.ts with runtime validation.
  */
 export const sessionHookInputSchema = z.looseObject({
-  cwd: z.string(),
+  cwd: z.string().optional(),
   session_id: z.string().optional(),
   trigger: z.string().optional(),
   matcher: z.string().optional(),
