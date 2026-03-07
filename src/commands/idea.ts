@@ -5,7 +5,7 @@ import { detectFrameworks, detectProjectStack } from "../detect-frameworks.ts"
 import { hasGeminiApiKey, promptGeminiObject } from "../gemini.ts"
 import type { Command } from "../types.ts"
 
-const DEFAULT_TIMEOUT_MS = 25_000
+const DEFAULT_TIMEOUT_MS = 90_000
 const README_CHAR_LIMIT = 24_000
 const COMMIT_COUNT = 8
 

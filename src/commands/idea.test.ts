@@ -107,7 +107,7 @@ describe("parseIdeaArgs", () => {
     const parsed = parseIdeaArgs([])
     expect(parsed.targetDir).toBe(process.cwd())
     expect(parsed.model).toBeUndefined()
-    expect(parsed.timeoutMs).toBe(25_000)
+    expect(parsed.timeoutMs).toBe(90_000)
   })
 
   it("parses dir, model, and timeout", () => {
