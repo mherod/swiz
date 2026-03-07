@@ -2,6 +2,8 @@ import { dirname, join } from "node:path"
 import { spawnSpeak } from "../../hooks/hook-utils.ts"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import {
+  ambitionModeSchema,
+  collaborationModeSchema,
   DEFAULT_MEMORY_LINE_THRESHOLD,
   DEFAULT_MEMORY_WORD_THRESHOLD,
   getEffectiveSwizSettings,
@@ -196,9 +198,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "string",
     scopes: ["global", "project", "session"],
     validate: (v) =>
-      v === "standard" || v === "aggressive" || v === "creative" || v === "reflective"
+      ambitionModeSchema.safeParse(v).success
         ? null
-        : `Invalid value "${v}" for ambition-mode. Must be: standard | aggressive | creative | reflective`,
+        : `Invalid value "${v}" for ambition-mode. Must be: ${ambitionModeSchema.options.join(" | ")}`,
   },
   {
     key: "collaborationMode",
@@ -213,9 +215,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "string",
     scopes: ["global", "session"],
     validate: (v) =>
-      v === "auto" || v === "solo" || v === "team"
+      collaborationModeSchema.safeParse(v).success
         ? null
-        : `Invalid value "${v}" for collaboration-mode. Must be: auto | solo | team`,
+        : `Invalid value "${v}" for collaboration-mode. Must be: ${collaborationModeSchema.options.join(" | ")}`,
   },
 ]
 

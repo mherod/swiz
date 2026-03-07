@@ -1,15 +1,30 @@
 import { existsSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { dirname, isAbsolute, join } from "node:path"
+import { z } from "zod"
 import type { HookDef, HookGroup } from "./manifest.ts"
 
-export type PolicyProfile = "solo" | "team" | "strict"
-export type AmbitionMode = "standard" | "aggressive" | "creative" | "reflective"
-export type CollaborationMode = "auto" | "solo" | "team"
+// ─── Central Zod enums — single source of truth for all domain types ─────────
 
-export const COLLABORATION_MODES: CollaborationMode[] = ["auto", "solo", "team"]
+export const policyProfileSchema = z.enum(["solo", "team", "strict"])
+export type PolicyProfile = z.infer<typeof policyProfileSchema>
 
-export type ProjectState = "in-development" | "awaiting-feedback" | "released" | "paused"
+export const ambitionModeSchema = z.enum(["standard", "aggressive", "creative", "reflective"])
+export type AmbitionMode = z.infer<typeof ambitionModeSchema>
+
+export const collaborationModeSchema = z.enum(["auto", "solo", "team"])
+export type CollaborationMode = z.infer<typeof collaborationModeSchema>
+
+export const projectStateSchema = z.enum([
+  "in-development",
+  "awaiting-feedback",
+  "released",
+  "paused",
+])
+export type ProjectState = z.infer<typeof projectStateSchema>
+
+/** Collaboration modes as an array — derived from the schema. */
+export const COLLABORATION_MODES: CollaborationMode[] = collaborationModeSchema.options
 
 /** Valid transitions from each project state. Empty array = terminal state. */
 export const STATE_TRANSITIONS: Record<ProjectState, ProjectState[]> = {
@@ -19,12 +34,8 @@ export const STATE_TRANSITIONS: Record<ProjectState, ProjectState[]> = {
   paused: ["in-development"],
 }
 
-export const PROJECT_STATES: ProjectState[] = [
-  "in-development",
-  "awaiting-feedback",
-  "released",
-  "paused",
-]
+/** All valid project states — derived from the schema. */
+export const PROJECT_STATES: ProjectState[] = projectStateSchema.options
 
 export const TERMINAL_STATES: ProjectState[] = ["released", "paused"]
 
@@ -421,8 +432,9 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   const result: ProjectSwizSettings = {}
   const profile = obj.profile
   if (profile !== undefined) {
-    if (profile !== "solo" && profile !== "team" && profile !== "strict") return null
-    result.profile = profile as PolicyProfile
+    const parsed = policyProfileSchema.safeParse(profile)
+    if (!parsed.success) return null
+    result.profile = parsed.data
   }
   if (typeof obj.trivialMaxFiles === "number" && obj.trivialMaxFiles > 0) {
     result.trivialMaxFiles = obj.trivialMaxFiles
@@ -440,13 +452,9 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   if (typeof obj.memoryWordThreshold === "number" && obj.memoryWordThreshold > 0) {
     result.memoryWordThreshold = obj.memoryWordThreshold
   }
-  if (
-    obj.ambitionMode === "standard" ||
-    obj.ambitionMode === "aggressive" ||
-    obj.ambitionMode === "creative" ||
-    obj.ambitionMode === "reflective"
-  ) {
-    result.ambitionMode = obj.ambitionMode
+  const ambitionMode = ambitionModeSchema.safeParse(obj.ambitionMode)
+  if (ambitionMode.success) {
+    result.ambitionMode = ambitionMode.data
   }
   if (
     Array.isArray(obj.disabledHooks) &&
@@ -555,7 +563,8 @@ export async function readStateData(cwd: string): Promise<StateData | null> {
   if (!(await file.exists())) return null
   try {
     const obj = (await file.json()) as Record<string, unknown>
-    if (typeof obj.state !== "string" || !(obj.state in STATE_TRANSITIONS)) return null
+    const state = projectStateSchema.safeParse(obj.state)
+    if (!state.success) return null
     const history = Array.isArray(obj.stateHistory)
       ? (obj.stateHistory as StateHistoryEntry[]).filter(
           (e) =>
@@ -565,7 +574,7 @@ export async function readStateData(cwd: string): Promise<StateData | null> {
             typeof e.timestamp === "string"
         )
       : []
-    return { state: obj.state as ProjectState, stateHistory: history }
+    return { state: state.data, stateHistory: history }
   } catch {
     return null
   }
