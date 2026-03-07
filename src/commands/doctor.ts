@@ -90,6 +90,31 @@ async function checkAgentSettings(agent: AgentDef): Promise<CheckResult> {
     }
   }
 
+  // Non-JSON config formats (e.g. TOML): verify readable and non-empty
+  if (!agent.settingsPath.endsWith(".json")) {
+    try {
+      const content = await file.text()
+      if (!content.trim()) {
+        return {
+          name: `${agent.name} settings`,
+          status: "warn",
+          detail: `${agent.settingsPath} is empty`,
+        }
+      }
+      return {
+        name: `${agent.name} settings`,
+        status: "pass",
+        detail: agent.settingsPath,
+      }
+    } catch {
+      return {
+        name: `${agent.name} settings`,
+        status: "fail",
+        detail: `${agent.settingsPath} exists but is not readable`,
+      }
+    }
+  }
+
   try {
     await file.json()
     return {
