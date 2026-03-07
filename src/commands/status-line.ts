@@ -2,8 +2,8 @@
 // Receives a JSON object via stdin with model, workspace, context window, and cost info.
 // Uses time-based rainbow cycling so colors shift on each render.
 
-import { existsSync, readFileSync, statSync } from "node:fs"
-import { basename, dirname } from "node:path"
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { basename, dirname, join } from "node:path"
 import {
   getEffectiveSwizSettings,
   type ProjectState,
@@ -324,6 +324,51 @@ function joinGroups(groups: Array<string | null | undefined>): string {
   return groups.filter(Boolean).join(` ${DIM}│${R} `)
 }
 
+// ── Per-project context usage extremes ─────────────────────────────────────
+
+export interface ContextStats {
+  minPct: number
+  maxPct: number
+}
+
+export function getContextStatsPath(cwd: string): string {
+  return join(cwd, ".swiz", "context-stats.json")
+}
+
+export function readContextStats(cwd: string): ContextStats | null {
+  try {
+    const raw = readFileSync(getContextStatsPath(cwd), "utf8")
+    const obj = JSON.parse(raw)
+    if (
+      typeof obj?.minPct === "number" &&
+      typeof obj?.maxPct === "number" &&
+      obj.minPct > 0 &&
+      obj.maxPct > 0
+    ) {
+      return { minPct: obj.minPct, maxPct: obj.maxPct }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+export function updateContextStats(cwd: string, pct: number): ContextStats | null {
+  if (pct <= 0) return readContextStats(cwd)
+  const existing = readContextStats(cwd)
+  const stats: ContextStats = existing
+    ? { minPct: Math.min(existing.minPct, pct), maxPct: Math.max(existing.maxPct, pct) }
+    : { minPct: pct, maxPct: pct }
+  try {
+    const dir = join(cwd, ".swiz")
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(getContextStatsPath(cwd), `${JSON.stringify(stats, null, 2)}\n`)
+  } catch {
+    // Non-fatal — status line continues without persisted stats
+  }
+  return stats
+}
+
 export const statusLineCommand: Command = {
   name: "status-line",
   description: "Output a rich ANSI status bar for Claude Code's statusLine hook",
@@ -400,7 +445,12 @@ export const statusLineCommand: Command = {
     const ctxBar = progressBar(ctxPct)
     const ctxColor = colorForPct(ctxPct)
     const tokenStr = ctxTokens > 0 ? ` ${DIM}${formatTokens(ctxTokens)}${R}` : ""
-    const ctxSeg = `${ctxBar}${ctxColor}${ctxPct.toFixed(0)}%${R}${tokenStr}`
+    const ctxStats = updateContextStats(cwd, ctxPct)
+    const rangeSeg =
+      ctxStats && ctxStats.minPct !== ctxStats.maxPct
+        ? ` ${DIM}(${ctxStats.minPct.toFixed(0)}–${ctxStats.maxPct.toFixed(0)}%)${R}`
+        : ""
+    const ctxSeg = `${ctxBar}${ctxColor}${ctxPct.toFixed(0)}%${R}${tokenStr}${rangeSeg}`
 
     const issueCount = Array.isArray(issueData) ? issueData.length : null
     const prCount = Array.isArray(prListData) ? prListData.length : null
