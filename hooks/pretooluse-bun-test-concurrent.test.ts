@@ -95,4 +95,20 @@ describe("pretooluse-bun-test-concurrent", () => {
       "bun test src/foo.test.ts --concurrent 2>&1 > /tmp/combined.log"
     )
   })
+
+  test("handles bun test piped to tee (pipe splits segment)", async () => {
+    const result = await runHook("bun test src/foo.test.ts | tee /tmp/out.log")
+    expect(result.decision).toBe("deny")
+    // Pipe splits the segment — only the bun test part is captured
+    expect(result.reason).toContain("bun test src/foo.test.ts --concurrent")
+    expect(result.reason).not.toContain("tee")
+  })
+
+  test("handles multiple redirections (stdout + stderr)", async () => {
+    const result = await runHook("bun test src/foo.test.ts > /tmp/out.log 2> /tmp/err.log")
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain(
+      "bun test src/foo.test.ts --concurrent > /tmp/out.log 2> /tmp/err.log"
+    )
+  })
 })
