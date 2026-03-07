@@ -10,15 +10,10 @@
 // This hook prevents accidental privilege escalation by blocking permission edits
 // on feature branches with an explanatory message.
 
-import {
-  denyPreToolUse,
-  getDefaultBranch,
-  git,
-  isFileEditTool,
-  type ToolHookInput,
-} from "./hook-utils.ts"
+import { denyPreToolUse, getDefaultBranch, git, isFileEditTool } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
-const input = (await Bun.stdin.json()) as ToolHookInput
+const input = toolHookInputSchema.parse(await Bun.stdin.json())
 
 if (!isFileEditTool(input.tool_name ?? "")) process.exit(0)
 

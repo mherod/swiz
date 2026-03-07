@@ -7,15 +7,10 @@ import { realpath } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { readSwizSettings } from "../src/settings.ts"
-import {
-  buildIssueGuidance,
-  denyPreToolUse,
-  git,
-  isFileEditTool,
-  type ToolHookInput,
-} from "./hook-utils.ts"
+import { buildIssueGuidance, denyPreToolUse, git, isFileEditTool } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
-const input = (await Bun.stdin.json()) as ToolHookInput
+const input = toolHookInputSchema.parse(await Bun.stdin.json())
 
 if (!isFileEditTool(input.tool_name ?? "")) process.exit(0)
 

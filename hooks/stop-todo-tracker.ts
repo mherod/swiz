@@ -7,9 +7,9 @@ import {
   git,
   isGitRepo,
   SOURCE_EXT_RE,
-  type StopHookInput,
   skillAdvice,
 } from "./hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 export const EXCLUDE_PATH_RE = /node_modules|\.claude\/hooks\/|^hooks\/|__tests__|\.test\.|\.spec\./
 export const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/
@@ -18,8 +18,8 @@ const COMMENT_RE = /(\/[/*]|#\s)/
 const REGEX_LITERAL_RE = /^\s*\/[^/]/ // line content starts with regex literal
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput
-  const cwd = input.cwd
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
 
   if (!(await isGitRepo(cwd))) return
 

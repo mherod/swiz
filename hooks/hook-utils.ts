@@ -1290,14 +1290,14 @@ export { issueState } from "../src/git-helpers.ts"
 // ─── Common input types ─────────────────────────────────────────────────
 
 export interface StopHookInput {
-  cwd: string
+  cwd?: string
   session_id?: string
   stop_hook_active?: boolean
   transcript_path?: string
 }
 
 export interface ToolHookInput {
-  cwd: string
+  cwd?: string
   session_id?: string
   tool_name?: string
   tool_input?: Record<string, unknown>
@@ -1305,7 +1305,7 @@ export interface ToolHookInput {
 }
 
 export interface SessionHookInput {
-  cwd: string
+  cwd?: string
   session_id?: string
   trigger?: string
   matcher?: string

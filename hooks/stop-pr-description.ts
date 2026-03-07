@@ -10,9 +10,9 @@ import {
   isDefaultBranch,
   isGitHubRemote,
   isGitRepo,
-  type StopHookInput,
   skillAdvice,
 } from "./hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 const PLACEHOLDER_PATTERNS = [
   "Describe your changes",
@@ -29,8 +29,8 @@ function blockPrDescription(reason: string): never {
 }
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput
-  const cwd = input.cwd
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
 
   if (!(await isGitRepo(cwd))) return
   if (!hasGhCli()) return

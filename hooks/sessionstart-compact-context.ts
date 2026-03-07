@@ -11,7 +11,6 @@ import {
   formatTaskList,
   isIncompleteTaskStatus,
   readSessionTasks,
-  type SessionHookInput,
   type SessionTask,
 } from "./hook-utils.ts"
 import {
@@ -19,6 +18,7 @@ import {
   type CompactSnapshot,
   type CompactSnapshotSummary,
 } from "./precompact-task-snapshot.ts"
+import { sessionHookInputSchema } from "./schemas.ts"
 
 const TASK_PREVIEW_LIMIT = 3
 const TASK_SUBJECT_MAX_CHARS = 120
@@ -118,7 +118,7 @@ async function recreateTaskFile(
 }
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as SessionHookInput
+  const input = sessionHookInputSchema.parse(await Bun.stdin.json())
   const matcher = input.matcher ?? input.trigger ?? ""
 
   // Only fire on compact/resume events, not fresh sessions

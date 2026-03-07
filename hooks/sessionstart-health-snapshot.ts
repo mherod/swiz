@@ -4,14 +4,8 @@
 
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import {
-  ghJson,
-  git,
-  hasGhCli,
-  isGitHubRemote,
-  isGitRepo,
-  type SessionHookInput,
-} from "./hook-utils.ts"
+import { ghJson, git, hasGhCli, isGitHubRemote, isGitRepo } from "./hook-utils.ts"
+import { sessionHookInputSchema } from "./schemas.ts"
 
 interface PluginEnvRequirement {
   plugin: string
@@ -51,7 +45,7 @@ function checkPluginEnv(): string[] {
 }
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as SessionHookInput
+  const input = sessionHookInputSchema.parse(await Bun.stdin.json())
   const cwd = input.cwd
   if (!cwd) return
 

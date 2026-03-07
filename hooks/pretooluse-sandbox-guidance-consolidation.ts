@@ -10,9 +10,10 @@
  * patterns from being duplicated across multiple hooks.
  */
 
-import { denyPreToolUse, isFileEditTool, type ToolHookInput } from "./hook-utils.ts"
+import { denyPreToolUse, isFileEditTool } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
-const input = (await Bun.stdin.json()) as ToolHookInput
+const input = toolHookInputSchema.parse(await Bun.stdin.json())
 
 // Only check Edit and Write tools
 if (!isFileEditTool(input.tool_name ?? "")) {

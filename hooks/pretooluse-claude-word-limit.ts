@@ -3,19 +3,14 @@
 
 import { join } from "node:path"
 import { compactionChecklistSteps } from "../src/memory-compaction-guidance.ts"
-import {
-  countFileWords,
-  denyPreToolUse,
-  formatActionPlan,
-  isShellTool,
-  type ToolHookInput,
-} from "./hook-utils.ts"
+import { countFileWords, denyPreToolUse, formatActionPlan, isShellTool } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 const WORD_LIMIT = 5000
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ToolHookInput
-  const cwd = input.cwd
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
 
   // Only check for shell commands
   if (!isShellTool(input.tool_name ?? "")) return

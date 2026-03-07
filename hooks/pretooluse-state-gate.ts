@@ -4,13 +4,8 @@
 
 import { readProjectState } from "../src/settings.ts"
 import { STATE_METADATA } from "../src/state-machine.ts"
-import {
-  denyPreToolUse,
-  isCodeChangeTool,
-  isShellTool,
-  isSwizCommand,
-  type ToolHookInput,
-} from "./hook-utils.ts"
+import { denyPreToolUse, isCodeChangeTool, isShellTool, isSwizCommand } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 /** Tool categories blocked in each state */
 const STATE_BLOCKED_CATEGORIES: Record<string, ((name: string) => boolean)[]> = {
@@ -18,7 +13,7 @@ const STATE_BLOCKED_CATEGORIES: Record<string, ((name: string) => boolean)[]> = 
 }
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ToolHookInput
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
   const cwd = input.cwd ?? process.cwd()
   const toolName = input.tool_name ?? ""
 

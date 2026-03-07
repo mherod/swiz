@@ -3,10 +3,11 @@
 
 import { existsSync } from "node:fs"
 import { basename, dirname } from "node:path"
-import { isFileEditTool, type ToolHookInput } from "./hook-utils.ts"
+import { isFileEditTool } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ToolHookInput
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
   const tool = input.tool_name ?? ""
   const file = (input.tool_input?.file_path as string) ?? ""
 

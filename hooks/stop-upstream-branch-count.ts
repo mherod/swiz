@@ -3,13 +3,14 @@
 // Fires when `origin` has more than BRANCH_LIMIT remote-tracking branches.
 // Cooldown (cooldownSeconds: 7200 in manifest) is enforced by the dispatcher.
 
-import { blockStop, git, isGitRepo, type StopHookInput, skillAdvice } from "./hook-utils.ts"
+import { blockStop, git, isGitRepo, skillAdvice } from "./hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 const BRANCH_LIMIT = 40
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput
-  const cwd = input.cwd
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
 
   if (!(await isGitRepo(cwd))) return
 

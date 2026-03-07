@@ -243,7 +243,7 @@ if (typeof response === "string") {
   if (notFoundMatch) {
     const taskId = String(input.tool_input?.task_id ?? notFoundMatch[1] ?? "")
     if (taskId) {
-      const recovered = await tryReadOutputFile(taskId, input.cwd)
+      const recovered = await tryReadOutputFile(taskId, input.cwd ?? process.cwd())
       if (recovered) {
         const failureReason = detectFailure(recovered, null)
         if (failureReason) {
@@ -290,7 +290,7 @@ if (failureReason) {
 // ── Success path: detect git push and inject CI context ──────────────────────
 if (!output.includes("To https://") && !PUSH_SHA_RE.test(output)) process.exit(0)
 
-const ciContext = await buildCiContext(output, input.cwd)
+const ciContext = await buildCiContext(output, input.cwd ?? process.cwd())
 if (!ciContext) process.exit(0)
 
 console.log(

@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 // PostToolUse hook: Validate JSON files after writing
 
-import type { ToolHookInput } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ToolHookInput
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
   const filePath = input.tool_input?.file_path as string | undefined
 
   if (!filePath || !filePath.endsWith(".json")) return

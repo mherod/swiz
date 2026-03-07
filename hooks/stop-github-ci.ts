@@ -13,9 +13,9 @@ import {
   isDefaultBranch,
   isGitHubRemote,
   isGitRepo,
-  type StopHookInput,
   skillAdvice,
 } from "./hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 const POLL_INTERVAL_MS = 5_000
 const MAX_POLL_MS = 30_000
@@ -69,8 +69,8 @@ export function findFailing(runs: CIRun[]): CIRun[] {
 }
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput
-  const cwd = input.cwd
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
 
   if (!(await isGitRepo(cwd))) return
 

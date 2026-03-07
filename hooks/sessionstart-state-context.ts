@@ -4,10 +4,11 @@
 
 import { readProjectState, STATE_TRANSITIONS } from "../src/settings.ts"
 import { getStatePriority, getWorkflowIntent, STATE_METADATA } from "../src/state-machine.ts"
-import { emitContext, isGitRepo, type SessionHookInput } from "./hook-utils.ts"
+import { emitContext, isGitRepo } from "./hook-utils.ts"
+import { sessionHookInputSchema } from "./schemas.ts"
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as SessionHookInput
+  const input = sessionHookInputSchema.parse(await Bun.stdin.json())
   const cwd = input.cwd
   if (!cwd) return
 

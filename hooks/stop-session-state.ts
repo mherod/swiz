@@ -4,10 +4,11 @@
 
 import { readProjectState, STATE_TRANSITIONS } from "../src/settings.ts"
 import { STATE_METADATA } from "../src/state-machine.ts"
-import { blockStop, isGitRepo, type StopHookInput } from "./hook-utils.ts"
+import { blockStop, isGitRepo } from "./hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
   const cwd = input.cwd
   if (!cwd) return
   if (!(await isGitRepo(cwd))) return

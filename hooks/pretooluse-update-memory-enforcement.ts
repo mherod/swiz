@@ -17,8 +17,8 @@ import {
   isNotebookTool,
   isShellTool,
   isWriteTool,
-  type ToolHookInput,
 } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 const REMINDER_FRAGMENT =
   "record a DO or DON'T rule that proactively builds the required steps into your standard development workflow."
@@ -175,7 +175,7 @@ function scanTranscript(lines: string[], startIndex: number): EnforcementState {
 }
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ToolHookInput
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
   const transcriptPath = input.transcript_path ?? ""
   const toolName = input.tool_name ?? ""
   const toolInput = input.tool_input ?? {}

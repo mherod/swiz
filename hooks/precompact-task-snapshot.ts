@@ -9,12 +9,8 @@
 // discovery or the agent's in-context memory.
 
 import { join } from "node:path"
-import {
-  limitItems,
-  readSessionTasks,
-  type SessionHookInput,
-  type SessionTask,
-} from "./hook-utils.ts"
+import { limitItems, readSessionTasks, type SessionTask } from "./hook-utils.ts"
+import { sessionHookInputSchema } from "./schemas.ts"
 
 export interface CompactSnapshot {
   sessionId: string
@@ -75,7 +71,8 @@ export function buildCompactSnapshotSummary(
 }
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json().catch(() => null)) as SessionHookInput | null
+  const raw = (await Bun.stdin.json().catch(() => null)) as Record<string, unknown> | null
+  const input = raw !== null ? sessionHookInputSchema.parse(raw) : null
   const sessionId = input?.session_id ?? ""
   if (!sessionId) return
 

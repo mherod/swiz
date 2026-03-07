@@ -3,7 +3,8 @@
 
 import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { blockStop, git, isGitRepo, type StopHookInput } from "./hook-utils.ts"
+import { blockStop, git, isGitRepo } from "./hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 const LOCKFILE_MAP: Record<string, string> = {
   "pnpm-lock.yaml": "pnpm install",
@@ -14,8 +15,8 @@ const LOCKFILE_MAP: Record<string, string> = {
 }
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput
-  const cwd = input.cwd
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
   const sessionId = input.session_id
 
   // Only block once per session

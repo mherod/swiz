@@ -21,14 +21,14 @@ import {
   isShellTool,
   readSessionTasks,
   stripHeredocs,
-  type ToolHookInput,
   toolNameForCurrentAgent,
 } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 const SUBJECT_RE = /\b(commit|push)\b/i
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ToolHookInput
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
   if (!input.session_id) return
   if (!input.tool_name || !isShellTool(input.tool_name)) return
 

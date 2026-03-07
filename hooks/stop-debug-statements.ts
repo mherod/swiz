@@ -1,14 +1,8 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if debug statements found in recently committed files
 
-import {
-  blockStop,
-  git,
-  isGitRepo,
-  SOURCE_EXT_RE,
-  type StopHookInput,
-  TEST_FILE_RE,
-} from "./hook-utils.ts"
+import { blockStop, git, isGitRepo, SOURCE_EXT_RE, TEST_FILE_RE } from "./hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 // CLI and hook infrastructure uses console.log as its output channel — not debugging
 export const INFRA_FILE_RE =
@@ -31,8 +25,8 @@ export const PY_EXCLUDE_RE = /# noqa|# debug ok/i
 export const RUBY_DEBUG_RE = /\b(?:binding\.pry|byebug)\b/
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput
-  const cwd = input.cwd
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
 
   if (!(await isGitRepo(cwd))) return
 

@@ -15,7 +15,8 @@ import {
   readProjectSettings,
   readSwizSettings,
 } from "../src/settings.ts"
-import { formatActionPlan, isFileEditTool, skillAdvice, type ToolHookInput } from "./hook-utils.ts"
+import { formatActionPlan, isFileEditTool, skillAdvice } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 /** Check whether the given path is a CLAUDE.md or a memory .md file. */
 export function isMemoryFile(filePath: string): boolean {
@@ -52,7 +53,7 @@ export async function resolveThresholds(
 }
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ToolHookInput
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
   const tool = input.tool_name ?? ""
   const filePath = (input.tool_input?.file_path as string) ?? ""
 

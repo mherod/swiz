@@ -1,13 +1,14 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if large files (>500KB) were committed without LFS
 
-import { blockStop, git, isGitRepo, type StopHookInput } from "./hook-utils.ts"
+import { blockStop, git, isGitRepo } from "./hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 const SIZE_LIMIT_KB = 500
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput
-  const cwd = input.cwd
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
 
   if (!(await isGitRepo(cwd))) return
 

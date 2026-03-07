@@ -24,9 +24,9 @@ import {
   isGitHubRemote,
   isGitRepo,
   readSessionTasks,
-  type StopHookInput,
   skillAdvice,
 } from "./hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 import { getActionableIssues, needsRefinement } from "./stop-personal-repo-issues.ts"
 
 const MIN_TOOL_CALLS = 5 // Don't engage for trivial sessions
@@ -472,7 +472,8 @@ function terminate(action: "skip" | "block", ...args: string[]): never {
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput & Record<string, unknown>
+  const hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
+  const input = stopHookInputSchema.parse(hookRaw)
 
   const settings = await readSwizSettings()
   const effective = getEffectiveSwizSettings(settings, input.session_id)
@@ -486,7 +487,7 @@ async function main(): Promise<void> {
 
   // Use pre-computed summary for the tool-call threshold check when available.
   // This avoids reading the transcript file at all for trivial sessions.
-  const summary = getTranscriptSummary(input)
+  const summary = getTranscriptSummary(hookRaw)
   if (summary && summary.toolCallCount < MIN_TOOL_CALLS) {
     terminate(
       "skip",
@@ -532,7 +533,7 @@ async function main(): Promise<void> {
 
   // Detect refinement-needed issues early — this drives both the AI prompt
   // and a direct runtime gate in the block message.
-  const refinementStatus = await checkRefinementNeeds(input.cwd)
+  const refinementStatus = await checkRefinementNeeds(input.cwd ?? process.cwd())
 
   let response: AgentResponse = {
     processCritique: "",
@@ -559,7 +560,10 @@ async function main(): Promise<void> {
       userTurns.length > 0
         ? `=== USER'S MESSAGES ===\n${userTurns.map((t) => `- ${t.text}`).join("\n\n")}\n=== END OF USER'S MESSAGES ===\n\n`
         : ""
-    const statusParts = [await checkChangelogStaleness(input.cwd), refinementStatus].filter(Boolean)
+    const statusParts = [
+      await checkChangelogStaleness(input.cwd ?? process.cwd()),
+      refinementStatus,
+    ].filter(Boolean)
     const projectStatus = statusParts.join("\n")
     const prompt = buildPrompt(
       taskSection,
@@ -597,7 +601,7 @@ async function main(): Promise<void> {
 
   // Write reflections to memory (never blocks, never throws)
   if (response.reflections.length > 0) {
-    await writeReflections(input.cwd, response.reflections)
+    await writeReflections(input.cwd ?? process.cwd(), response.reflections)
   }
 
   // Only block when we have something actionable to deliver:

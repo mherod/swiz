@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if secrets/credentials detected in recent commits
 
-import { blockStop, git, isGitRepo, type StopHookInput, TEST_FILE_RE } from "./hook-utils.ts"
+import { blockStop, git, isGitRepo, TEST_FILE_RE } from "./hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 const PRIVATE_KEY_RE = /-----BEGIN (RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY/i
 const TOKEN_RE =
@@ -11,8 +12,8 @@ const GENERIC_SECRET_RE =
 const GENERIC_EXCLUDE_RE = /example|placeholder|your[_-]|<.*>|xxxx|test|fake|dummy|replace|env\./i
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput
-  const cwd = input.cwd
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
 
   if (!(await isGitRepo(cwd))) return
 

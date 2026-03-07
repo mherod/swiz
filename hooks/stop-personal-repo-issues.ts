@@ -18,9 +18,9 @@ import {
   hasGhCli,
   isGitHubRemote,
   isGitRepo,
-  type StopHookInput,
   skillAdvice,
 } from "./hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 /** Labels that indicate an issue is not actionable right now. */
 const SKIP_LABELS = new Set([
@@ -367,8 +367,8 @@ async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise
 
 async function main(): Promise<void> {
   try {
-    const input = (await Bun.stdin.json()) as StopHookInput
-    const cwd = input.cwd
+    const input = stopHookInputSchema.parse(await Bun.stdin.json())
+    const cwd = input.cwd ?? process.cwd()
     const sessionId = sanitizeSessionId(input.session_id)
 
     if (!(await isGitRepo(cwd))) return

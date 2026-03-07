@@ -10,14 +10,9 @@ import {
   compactionChecklistSteps,
   manualCompactionFallback,
 } from "../src/memory-compaction-guidance.ts"
-import {
-  blockStop,
-  formatActionPlan,
-  isGitRepo,
-  type StopHookInput,
-  skillAdvice,
-} from "./hook-utils.ts"
+import { blockStop, formatActionPlan, isGitRepo, skillAdvice } from "./hook-utils.ts"
 import { countStats, isMemoryFile, resolveThresholds } from "./posttooluse-memory-size.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 interface MemoryViolation {
   filePath: string
@@ -57,8 +52,8 @@ async function findMemoryFiles(dir: string, maxDepth = 4): Promise<string[]> {
 }
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput
-  const cwd = input.cwd
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
 
   // Only enforce inside git repos with a CLAUDE.md or .swiz config
   if (!(await isGitRepo(cwd))) return

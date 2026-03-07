@@ -15,9 +15,9 @@ import {
   isTaskCreateTool,
   readSessionTasks,
   type SessionTask,
-  type StopHookInput,
   type TranscriptSummary,
 } from "./hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 const TOOL_CALL_THRESHOLD = 10
 
@@ -121,7 +121,8 @@ async function countToolCalls(
 }
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput & Record<string, unknown>
+  const raw = (await Bun.stdin.json()) as Record<string, unknown>
+  const input = stopHookInputSchema.parse(raw)
   const sessionId = input.session_id ?? ""
   const transcript = input.transcript_path ?? ""
   const home = process.env.HOME
@@ -129,7 +130,7 @@ async function main(): Promise<void> {
   const tasksDir = join(home, ".claude", "tasks", sessionId)
 
   // Prefer pre-computed summary from dispatch; fall back to reading transcript
-  const summary = getTranscriptSummary(input)
+  const summary = getTranscriptSummary(raw)
   const { total: toolCallCount, taskToolUsed } = summary
     ? deriveToolCallStats(summary)
     : transcript

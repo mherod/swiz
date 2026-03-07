@@ -9,16 +9,17 @@ import {
   isEditTool,
   isTaskTool,
   isWriteTool,
-  type ToolHookInput,
   toolNameForCurrentAgent,
 } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ToolHookInput & Record<string, unknown>
+  const hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
+  const input = toolHookInputSchema.parse(hookRaw)
   const transcript = input.transcript_path
   if (!transcript) return
 
-  const summary = getTranscriptSummary(input)
+  const summary = getTranscriptSummary(hookRaw)
   const toolNames = summary?.toolNames ?? (await extractToolNamesFromTranscript(transcript))
   const total = toolNames.length
   const taskCreateName = toolNameForCurrentAgent("TaskCreate")

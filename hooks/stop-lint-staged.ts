@@ -3,11 +3,12 @@
 
 import { existsSync } from "node:fs"
 import { join } from "node:path"
-import { blockStop, detectPackageManager, type StopHookInput } from "./hook-utils.ts"
+import { blockStop, detectPackageManager } from "./hook-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as StopHookInput
-  const cwd = input.cwd
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
   const pkgPath = join(cwd, "package.json")
 
   if (!existsSync(pkgPath)) return

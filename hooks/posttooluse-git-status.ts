@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 // PostToolUse hook: Inject git status context after every tool call
 
-import { getGitAheadBehind, git, parseGitStatus, type ToolHookInput } from "./hook-utils.ts"
+import { getGitAheadBehind, git, parseGitStatus } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ToolHookInput
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
   const cwd = input.cwd
   if (!cwd) return
 
