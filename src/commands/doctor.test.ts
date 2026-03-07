@@ -46,7 +46,7 @@ async function createSkill(home: string, relativeRoot: string, skillName: string
   await mkdir(skillDir, { recursive: true })
   await writeFile(
     join(skillDir, "SKILL.md"),
-    `---\nname: ${skillName}\ndescription: test skill\n---\n`
+    `---\nname: ${skillName}\ndescription: test skill\ncategory: testing\n---\n`
   )
 }
 
@@ -627,7 +627,10 @@ describe("swiz doctor", () => {
     const skillDir = join(home, ".claude", "skills", "my-skill")
     await mkdir(skillDir, { recursive: true })
     const skillMdPath = join(skillDir, "SKILL.md")
-    await writeFile(skillMdPath, "---\nname: wrong-name\ndescription: test skill\n---\n")
+    await writeFile(
+      skillMdPath,
+      "---\nname: wrong-name\ndescription: test skill\ncategory: testing\n---\n"
+    )
 
     const fixRun = await runDoctor(home, ["--fix"])
     expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
@@ -678,7 +681,7 @@ describe("swiz doctor", () => {
     await mkdir(skillDir, { recursive: true })
     await writeFile(
       join(skillDir, "SKILL.md"),
-      "---\nname: real-skill\ndescription: Does something useful.\n---\n"
+      "---\nname: real-skill\ndescription: Does something useful.\ncategory: productivity\n---\n"
     )
 
     const result = await runDoctor(home)
@@ -740,7 +743,7 @@ describe("swiz doctor", () => {
     // Quoted name that matches dir name after stripping quotes
     await writeFile(
       join(skillDir, "SKILL.md"),
-      '---\nname: "quoted-skill"\ndescription: test skill\n---\n'
+      '---\nname: "quoted-skill"\ndescription: test skill\ncategory: testing\n---\n'
     )
 
     const result = await runDoctor(home)
@@ -758,5 +761,63 @@ describe("swiz doctor", () => {
     // The dotdir must not appear as an invalid skill entry
     expect(result.stdout).not.toContain("Invalid skill: .unison")
     expect(result.stdout).toContain("no invalid skill entries found")
+  })
+
+  test("detects skill missing category field as invalid", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "no-category-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: no-category-skill\ndescription: Does something useful.\n---\n"
+    )
+
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Invalid skill: no-category-skill")
+    expect(result.stdout).toContain("missing category field")
+  })
+
+  test("detects skill with placeholder category as invalid", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "placeholder-cat-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: placeholder-cat-skill\ndescription: Does something useful.\ncategory: uncategorized\n---\n"
+    )
+
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Invalid skill: placeholder-cat-skill")
+    expect(result.stdout).toContain('category is the placeholder "uncategorized"')
+  })
+
+  test("doctor --fix adds default category to skill missing one", async () => {
+    const home = await createTempHome()
+    const skillsDir = join(home, ".claude", "skills")
+    const skillDir = join(skillsDir, "no-cat-skill")
+    const skillMdPath = join(skillDir, "SKILL.md")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      skillMdPath,
+      "---\nname: no-cat-skill\ndescription: Does something useful.\n---\n"
+    )
+
+    const fixRun = await runDoctor(home, ["--fix"])
+    expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
+    expect(fixRun.stdout).toContain("no-cat-skill")
+    expect(fixRun.stdout).toContain('added category "uncategorized"')
+
+    // Directory must stay in place (not moved aside)
+    const { stat: statFn } = await import("node:fs/promises")
+    const dirStat = await statFn(skillDir)
+    expect(dirStat.isDirectory()).toBe(true)
+
+    // SKILL.md now contains a category field
+    const content = await Bun.file(skillMdPath).text()
+    expect(content).toContain("category: uncategorized")
+
+    // After fix, no longer warned for missing category
+    const afterFix = await runDoctor(home)
+    expect(afterFix.stdout).not.toContain("missing category field")
   })
 })

@@ -494,6 +494,7 @@ async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
         continue
       }
       // Collect all field-level errors in a single pass (no early exit after this point)
+      let hasContentIssues = false
       const missing = REQUIRED_SKILL_FIELDS.filter((f) => !parseFrontmatterField(content, f))
       if (missing.length > 0) {
         invalid.push({
@@ -502,6 +503,7 @@ async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
           entryDir,
           reason: `missing required frontmatter field(s): ${missing.join(", ")}`,
         })
+        hasContentIssues = true
         // Continue checking fields that do exist — do NOT early-exit here
       }
       // Name-match check (only when name field is present)
@@ -516,6 +518,7 @@ async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
             entryDir,
             reason: `frontmatter name "${unquotedName}" does not match directory name "${entry.name}"`,
           })
+          hasContentIssues = true
         }
       }
       // Placeholder description check (only when description field is present)
@@ -527,6 +530,21 @@ async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
           entryDir,
           reason: `description is the generated placeholder — update SKILL.md with a real description`,
         })
+        hasContentIssues = true
+      }
+      // Category check — only run when no other field-level issues found
+      if (!hasContentIssues) {
+        const category = parseFrontmatterField(content, "category")
+        if (!category) {
+          invalid.push({ name: entry.name, skillDir, entryDir, reason: MISSING_CATEGORY_REASON })
+        } else if (category.trim() === SKILL_PLACEHOLDER_CATEGORY) {
+          invalid.push({
+            name: entry.name,
+            skillDir,
+            entryDir,
+            reason: `category is the placeholder "${SKILL_PLACEHOLDER_CATEGORY}" — update SKILL.md with a real category`,
+          })
+        }
       }
     }
   }
@@ -565,6 +583,10 @@ interface InvalidSkillGenerateSuccess {
   name: string
   skillPath: string
 }
+interface InvalidSkillCategoryFixSuccess {
+  name: string
+  skillPath: string
+}
 interface InvalidSkillFixFailure {
   name: string
   originalDir: string
@@ -573,8 +595,11 @@ interface InvalidSkillFixFailure {
 
 const NAME_MISMATCH_PREFIX = 'frontmatter name "'
 const MISSING_SKILL_MD_REASON = "missing SKILL.md"
+const MISSING_CATEGORY_REASON = "missing category field"
 /** Default description injected by swiz doctor --fix into generated SKILL.md stubs. */
 const SKILL_PLACEHOLDER_DESCRIPTION = "Add a description for this skill."
+/** Default category injected by swiz doctor --fix when no category field is present. */
+const SKILL_PLACEHOLDER_CATEGORY = "uncategorized"
 
 /** For name-mismatch entries: update the name: field in SKILL.md to match the directory name. */
 async function fixSkillNameMismatch(entry: InvalidSkillEntry): Promise<{ oldName: string } | null> {
@@ -597,7 +622,7 @@ async function fixSkillNameMismatch(entry: InvalidSkillEntry): Promise<{ oldName
 async function generateSkillMd(entry: InvalidSkillEntry): Promise<boolean> {
   const skillPath = join(entry.entryDir, "SKILL.md")
   try {
-    const stub = `---\nname: ${entry.name}\ndescription: ${SKILL_PLACEHOLDER_DESCRIPTION}\n---\n`
+    const stub = `---\nname: ${entry.name}\ndescription: ${SKILL_PLACEHOLDER_DESCRIPTION}\ncategory: ${SKILL_PLACEHOLDER_CATEGORY}\n---\n`
     await Bun.write(skillPath, stub)
     return true
   } catch {
@@ -605,19 +630,39 @@ async function generateSkillMd(entry: InvalidSkillEntry): Promise<boolean> {
   }
 }
 
+/** For missing-category entries: insert a default category field after the description line. */
+async function fixMissingCategory(entry: InvalidSkillEntry): Promise<boolean> {
+  const skillPath = join(entry.entryDir, "SKILL.md")
+  try {
+    const content = await Bun.file(skillPath).text()
+    const updated = content.replace(
+      /^(description:\s*.+)$/m,
+      `$1\ncategory: ${SKILL_PLACEHOLDER_CATEGORY}`
+    )
+    if (updated === content) return false
+    await Bun.write(skillPath, updated)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** Rename / repair invalid skill entries.
- *  - missing SKILL.md → generate a default stub
- *  - name mismatch    → update name: field in place
- *  - everything else  → move aside with .disabled-by-swiz-{timestamp} suffix */
+ *  - missing SKILL.md    → generate a default stub
+ *  - name mismatch       → update name: field in place
+ *  - missing category    → insert category: uncategorized after description line
+ *  - everything else     → move aside with .disabled-by-swiz-{timestamp} suffix */
 async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
   fixed: InvalidSkillFixSuccess[]
   nameFixed: InvalidSkillNameFixSuccess[]
   generated: InvalidSkillGenerateSuccess[]
+  categoryFixed: InvalidSkillCategoryFixSuccess[]
   failed: InvalidSkillFixFailure[]
 }> {
   const fixed: InvalidSkillFixSuccess[] = []
   const nameFixed: InvalidSkillNameFixSuccess[] = []
   const generated: InvalidSkillGenerateSuccess[] = []
+  const categoryFixed: InvalidSkillCategoryFixSuccess[] = []
   const failed: InvalidSkillFixFailure[] = []
   const stamp = conflictSuffixTimestamp()
   for (const entry of entries) {
@@ -653,6 +698,20 @@ async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
       }
       continue
     }
+    if (entry.reason === MISSING_CATEGORY_REASON) {
+      // In-place fix: insert category field after description line
+      const skillPath = join(entry.entryDir, "SKILL.md")
+      if (await fixMissingCategory(entry)) {
+        categoryFixed.push({ name: entry.name, skillPath })
+      } else {
+        failed.push({
+          name: entry.name,
+          originalDir: entry.entryDir,
+          error: "could not insert category field into SKILL.md",
+        })
+      }
+      continue
+    }
     const movedDir = await nextConflictBackupDir(entry.entryDir, stamp)
     try {
       await rename(entry.entryDir, movedDir)
@@ -665,7 +724,7 @@ async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
       })
     }
   }
-  return { fixed, nameFixed, generated, failed }
+  return { fixed, nameFixed, generated, categoryFixed, failed }
 }
 
 // ─── Installed config script check ──────────────────────────────────────────
@@ -1130,6 +1189,11 @@ export const doctorCommand: Command = {
             `  ${GREEN}✓${RESET} ${item.name}: updated name "${item.oldName}" → "${item.name}" in ${displayPath(item.skillPath)}`
           )
         }
+        for (const item of invalidResult.categoryFixed) {
+          console.log(
+            `  ${GREEN}✓${RESET} ${item.name}: added category "${SKILL_PLACEHOLDER_CATEGORY}" to ${displayPath(item.skillPath)}`
+          )
+        }
         for (const item of invalidResult.fixed) {
           console.log(
             `  ${GREEN}✓${RESET} ${item.name}: moved ${displayPath(item.originalDir)} -> ${displayPath(item.movedDir)}`
@@ -1146,6 +1210,7 @@ export const doctorCommand: Command = {
         if (
           invalidResult.generated.length > 0 ||
           invalidResult.nameFixed.length > 0 ||
+          invalidResult.categoryFixed.length > 0 ||
           invalidResult.fixed.length > 0
         )
           console.log()
