@@ -163,6 +163,32 @@ describe("swiz memory CLI", () => {
     expect(stdout).toContain(globalRulesPath)
   })
 
+  it("prints full included file contents with --view", async () => {
+    const tmpRoot = join(tmpdir(), `swiz-memory-view-${Date.now()}`)
+    const projectDir = join(tmpRoot, "project")
+    const homeDir = join(tmpRoot, "home")
+    const codexDir = join(homeDir, ".codex")
+    mkdirSync(projectDir, { recursive: true })
+    mkdirSync(codexDir, { recursive: true })
+
+    const projectRulesPath = join(projectDir, "AGENTS.md")
+    const globalRulesPath = join(codexDir, "AGENTS.md")
+    const globalInstructionsPath = join(codexDir, "instructions.md")
+
+    writeFileSync(projectRulesPath, "PROJECT_RULES_LINE\n")
+    writeFileSync(globalRulesPath, "GLOBAL_RULES_LINE\n")
+    writeFileSync(globalInstructionsPath, "GLOBAL_INSTRUCTIONS_LINE\n")
+
+    const { stdout, exitCode } = await runMemory(["--codex", "--dir", projectDir, "--view"], {
+      HOME: homeDir,
+    })
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("PROJECT_RULES_LINE")
+    expect(stdout).toContain("GLOBAL_RULES_LINE")
+    expect(stdout).toContain("GLOBAL_INSTRUCTIONS_LINE")
+  })
+
   it("shows Cursor hierarchy with --cursor flag and .cursor/rules/*.mdc files", async () => {
     // Create a controlled fixture with the canonical Cursor rules structure:
     //   <project>/.cursorrules         — top-level entry file
@@ -260,6 +286,32 @@ describe("swiz memory CLI", () => {
     expect(stdout).not.toContain(projectRulesPath)
     expect(stdout).not.toContain(globalInstructionsPath)
     expect(stdout).not.toContain("0B")
+  })
+
+  it("prints only included file contents in --view mode", async () => {
+    const tmpRoot = join(tmpdir(), `swiz-memory-view-empty-${Date.now()}`)
+    const projectDir = join(tmpRoot, "project")
+    const homeDir = join(tmpRoot, "home")
+    const codexDir = join(homeDir, ".codex")
+    mkdirSync(projectDir, { recursive: true })
+    mkdirSync(codexDir, { recursive: true })
+
+    const projectRulesPath = join(projectDir, "AGENTS.md")
+    const globalRulesPath = join(codexDir, "AGENTS.md")
+    const globalInstructionsPath = join(codexDir, "instructions.md")
+
+    writeFileSync(projectRulesPath, "")
+    writeFileSync(globalRulesPath, "ONLY_INCLUDED_CONTENT\n")
+    writeFileSync(globalInstructionsPath, "")
+
+    const { stdout, exitCode } = await runMemory(["--codex", "--dir", projectDir, "--view"], {
+      HOME: homeDir,
+    })
+
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("ONLY_INCLUDED_CONTENT")
+    expect(stdout).not.toContain(projectRulesPath)
+    expect(stdout).not.toContain(globalInstructionsPath)
   })
 
   it("errors when --all is combined with an explicit agent flag", async () => {

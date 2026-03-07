@@ -4,7 +4,12 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs"
 import { basename, dirname } from "node:path"
-import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../settings.ts"
+import {
+  getEffectiveSwizSettings,
+  type ProjectState,
+  readProjectSettings,
+  readSwizSettings,
+} from "../settings.ts"
 import type { Command } from "../types.ts"
 
 interface StatusLineInput {
@@ -301,6 +306,20 @@ function formatCountSegment(
   return `${color}${count} ${label}${R}`
 }
 
+function formatProjectState(state: ProjectState | null | undefined): string {
+  const resolvedState: ProjectState = state ?? "in-development"
+  switch (resolvedState) {
+    case "in-development":
+      return `\x1b[92m${resolvedState}${R}`
+    case "awaiting-feedback":
+      return `\x1b[93m${resolvedState}${R}`
+    case "released":
+      return `\x1b[96m${resolvedState}${R}`
+    case "paused":
+      return `${DIM}${resolvedState}${R}`
+  }
+}
+
 function joinGroups(groups: Array<string | null | undefined>): string {
   return groups.filter(Boolean).join(` ${DIM}│${R} `)
 }
@@ -393,6 +412,7 @@ export const statusLineCommand: Command = {
 
     const reviewDecision = prViewData?.reviewDecision ?? ""
     const commentCount = Array.isArray(prViewData?.comments) ? prViewData.comments.length : 0
+    const stateSeg = formatProjectState(projectSettings?.state)
     const reviewStatus =
       reviewDecision === "CHANGES_REQUESTED"
         ? `\x1b[91m⚠ changes requested${R}`
@@ -430,6 +450,7 @@ export const statusLineCommand: Command = {
     ])
     const modeSeg = [agentTag, vimTag].filter(Boolean).join(" ")
     const line3Groups = joinGroups([
+      seg("state") ? `${label("state")} ${stateSeg}` : "",
       seg("backlog") && ghCountSeg ? `${label("backlog")} ${ghCountSeg}` : "",
       seg("mode") && modeSeg ? `${label("mode")} ${modeSeg}` : "",
       seg("flags") && settingsSeg ? `${label("flags")} ${settingsSeg}` : "",

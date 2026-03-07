@@ -919,6 +919,46 @@ describe("collaborationMode settings", () => {
     expect(settings.collaborationMode).toBe("auto")
   })
 
+  test("upgrades legacy default statusLineSegments to include state", async () => {
+    const home = await createTempHome()
+    const configDir = join(home, ".swiz")
+    await mkdir(configDir, { recursive: true })
+    await writeFile(
+      join(configDir, "settings.json"),
+      JSON.stringify({
+        statusLineSegments: [
+          "repo",
+          "git",
+          "pr",
+          "model",
+          "ctx",
+          "backlog",
+          "mode",
+          "flags",
+          "time",
+        ],
+      })
+    )
+
+    const settings = await readSwizSettings({ home })
+    expect(settings.statusLineSegments).toEqual([...ALL_STATUS_LINE_SEGMENTS])
+  })
+
+  test("preserves custom statusLineSegments without forced state", async () => {
+    const home = await createTempHome()
+    const configDir = join(home, ".swiz")
+    await mkdir(configDir, { recursive: true })
+    await writeFile(
+      join(configDir, "settings.json"),
+      JSON.stringify({
+        statusLineSegments: ["repo", "git", "time"],
+      })
+    )
+
+    const settings = await readSwizSettings({ home })
+    expect(settings.statusLineSegments).toEqual(["repo", "git", "time"])
+  })
+
   test("effective settings inherit collaborationMode from global", () => {
     const settings = {
       autoContinue: true,

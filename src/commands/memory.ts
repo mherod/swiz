@@ -51,6 +51,7 @@ interface SourceCheckResult {
 
 interface ParsedMemoryArgs {
   strict: boolean
+  view: boolean
   targetDir: string
   allAgents: boolean
   explicitAgent: AgentDef | undefined
@@ -237,6 +238,20 @@ async function printSource(
   }
 }
 
+async function printSourceContent(source: MemorySource): Promise<void> {
+  console.log(`     ${DIM}----- contents: ${source.path} -----${RESET}`)
+  try {
+    const content = await Bun.file(source.path).text()
+    process.stdout.write(content)
+    if (!content.endsWith("\n")) {
+      process.stdout.write("\n")
+    }
+  } catch {
+    console.log(`     ${YELLOW}(unable to read file content)${RESET}`)
+  }
+  console.log(`     ${DIM}----- end contents -----${RESET}`)
+}
+
 function parseMemoryArgs(args: string[]): ParsedMemoryArgs {
   const dirIdx = args.findIndex((arg) => arg === "--dir" || arg === "-d")
   const dirArg = dirIdx >= 0 ? args[dirIdx + 1] : undefined
@@ -253,6 +268,7 @@ function parseMemoryArgs(args: string[]): ParsedMemoryArgs {
   return {
     targetDir: resolve(dirArg ?? process.cwd()),
     strict: args.includes("--strict"),
+    view: args.includes("--view"),
     allAgents,
     explicitAgent: explicitAgents[0],
   }
@@ -281,10 +297,12 @@ function resolveThresholdSets(
 export const memoryCommand: Command = {
   name: "memory",
   description: "Show hierarchical rule/memory files for one or all agents",
-  usage: "swiz memory [--dir <path>] [--strict] [--all|--claude|--cursor|--gemini|--codex]",
+  usage:
+    "swiz memory [--dir <path>] [--strict] [--view] [--all|--claude|--cursor|--gemini|--codex]",
   options: [
     { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
     { flags: "--strict", description: "Exit with error if any memory file exceeds its threshold" },
+    { flags: "--view", description: "Print full content for each included memory file" },
     {
       flags: "--all",
       description:
@@ -296,7 +314,7 @@ export const memoryCommand: Command = {
     { flags: "--codex", description: "Force Codex CLI agent" },
   ],
   async run(args: string[]) {
-    const { targetDir, strict, allAgents, explicitAgent } = parseMemoryArgs(args)
+    const { targetDir, strict, view, allAgents, explicitAgent } = parseMemoryArgs(args)
     const detectedAgent = detectCurrentAgent()
     const targetAgents = allAgents
       ? AGENTS
@@ -374,6 +392,10 @@ export const memoryCommand: Command = {
           },
           { compact: showingAllAgents }
         )
+
+        if (view) {
+          await printSourceContent(source)
+        }
 
         if (result.exceeded) {
           exceededFiles.push({ ...result, agentName: agent.name })

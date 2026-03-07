@@ -82,6 +82,7 @@ export const ALL_STATUS_LINE_SEGMENTS = [
   "pr",
   "model",
   "ctx",
+  "state",
   "backlog",
   "mode",
   "flags",
@@ -89,6 +90,18 @@ export const ALL_STATUS_LINE_SEGMENTS = [
 ] as const
 
 export type StatusLineSegment = (typeof ALL_STATUS_LINE_SEGMENTS)[number]
+
+const LEGACY_DEFAULT_STATUS_LINE_SEGMENTS: readonly StatusLineSegment[] = [
+  "repo",
+  "git",
+  "pr",
+  "model",
+  "ctx",
+  "backlog",
+  "mode",
+  "flags",
+  "time",
+]
 
 export interface SwizSettings {
   autoContinue: boolean
@@ -265,6 +278,25 @@ function cloneDefaults(): SwizSettings {
   return { ...DEFAULT_SETTINGS, sessions: { ...DEFAULT_SETTINGS.sessions } }
 }
 
+function normalizeStatusLineSegments(value: unknown): StatusLineSegment[] {
+  if (!Array.isArray(value)) return DEFAULT_SETTINGS.statusLineSegments
+
+  const valid = value.every(
+    (s: unknown) =>
+      typeof s === "string" && (ALL_STATUS_LINE_SEGMENTS as readonly string[]).includes(s)
+  )
+  if (!valid) return DEFAULT_SETTINGS.statusLineSegments
+
+  const segments = value as StatusLineSegment[]
+  if (segments.includes("state")) return segments
+
+  const isLegacyDefault =
+    segments.length === LEGACY_DEFAULT_STATUS_LINE_SEGMENTS.length &&
+    LEGACY_DEFAULT_STATUS_LINE_SEGMENTS.every((segment) => segments.includes(segment))
+
+  return isLegacyDefault ? [...ALL_STATUS_LINE_SEGMENTS] : segments
+}
+
 function normalizeSessionSettings(value: unknown): SessionSwizSettings | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const obj = value as Record<string, unknown>
@@ -372,14 +404,7 @@ function normalizeSettings(value: unknown): SwizSettings {
       typeof obj.memoryWordThreshold === "number" && obj.memoryWordThreshold > 0
         ? obj.memoryWordThreshold
         : DEFAULT_SETTINGS.memoryWordThreshold,
-    statusLineSegments:
-      Array.isArray(obj.statusLineSegments) &&
-      obj.statusLineSegments.every(
-        (s: unknown) =>
-          typeof s === "string" && (ALL_STATUS_LINE_SEGMENTS as readonly string[]).includes(s)
-      )
-        ? (obj.statusLineSegments as StatusLineSegment[])
-        : DEFAULT_SETTINGS.statusLineSegments,
+    statusLineSegments: normalizeStatusLineSegments(obj.statusLineSegments),
     sessions,
     ...(Array.isArray(obj.disabledHooks) &&
     obj.disabledHooks.every((h: unknown) => typeof h === "string")
