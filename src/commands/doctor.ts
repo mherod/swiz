@@ -1,4 +1,4 @@
-import { chmod, mkdir, readdir, rename, stat } from "node:fs/promises"
+import { chmod, cp, mkdir, readdir, rename, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
 import { suggest } from "../fuzzy.ts"
@@ -1093,6 +1093,152 @@ export async function checkAgentConfigSync(agent: AgentDef): Promise<CheckResult
   }
 }
 
+// ─── Plugin cache staleness check ────────────────────────────────────────────
+
+interface PluginCacheInfo {
+  pluginName: string
+  sourcePath: string
+  cachePath: string
+  missingSkills: string[]
+  extraSkills: string[]
+}
+
+/**
+ * Compare skills in the working-tree plugin source against the installed cache.
+ * Returns info about each local plugin whose cached copy is out of sync.
+ */
+async function checkPluginCacheStaleness(): Promise<PluginCacheInfo[]> {
+  const results: PluginCacheInfo[] = []
+
+  // Read installed_plugins.json to find cache paths
+  const installedPath = join(HOME, ".claude", "plugins", "installed_plugins.json")
+  const installedFile = Bun.file(installedPath)
+  if (!(await installedFile.exists())) return results
+
+  let installed: { version?: number; plugins?: Record<string, { installPath: string }[]> }
+  try {
+    installed = await installedFile.json()
+  } catch {
+    return results
+  }
+
+  if (!installed.plugins) return results
+
+  // Read marketplace.json to find local plugin sources
+  const marketplacePath = join(SWIZ_ROOT, ".claude-plugin", "marketplace.json")
+  const marketplaceFile = Bun.file(marketplacePath)
+  if (!(await marketplaceFile.exists())) return results
+
+  let marketplace: { name?: string; plugins?: { name: string; source: string }[] }
+  try {
+    marketplace = await marketplaceFile.json()
+  } catch {
+    return results
+  }
+
+  if (!marketplace.plugins || !marketplace.name) return results
+
+  for (const plugin of marketplace.plugins) {
+    const key = `${plugin.name}@${marketplace.name}`
+    const entries = installed.plugins[key]
+    if (!entries || entries.length === 0) continue
+
+    const cachePath = entries[0]!.installPath
+    const sourcePath = join(SWIZ_ROOT, plugin.source)
+
+    // Compare skills directories
+    const sourceSkillsDir = join(sourcePath, "skills")
+    const cacheSkillsDir = join(cachePath, "skills")
+
+    let sourceSkills: string[]
+    let cacheSkills: string[]
+    try {
+      const sourceEntries = await readdir(sourceSkillsDir, { withFileTypes: true })
+      sourceSkills = sourceEntries
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .sort()
+    } catch {
+      continue
+    }
+    try {
+      const cacheEntries = await readdir(cacheSkillsDir, { withFileTypes: true })
+      cacheSkills = cacheEntries
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .sort()
+    } catch {
+      cacheSkills = []
+    }
+
+    const cacheSet = new Set(cacheSkills)
+    const sourceSet = new Set(sourceSkills)
+    const missing = sourceSkills.filter((s) => !cacheSet.has(s))
+    const extra = cacheSkills.filter((s) => !sourceSet.has(s))
+
+    if (missing.length > 0 || extra.length > 0) {
+      results.push({
+        pluginName: plugin.name,
+        sourcePath: sourceSkillsDir,
+        cachePath: cacheSkillsDir,
+        missingSkills: missing,
+        extraSkills: extra,
+      })
+    }
+  }
+
+  return results
+}
+
+function buildPluginCacheResults(infos: PluginCacheInfo[]): CheckResult[] {
+  if (infos.length === 0) {
+    return [
+      {
+        name: "Plugin cache sync",
+        status: "pass",
+        detail: "installed plugin skills match source",
+      },
+    ]
+  }
+  return infos.map((info) => {
+    const parts: string[] = []
+    if (info.missingSkills.length > 0) {
+      parts.push(`missing from cache: ${info.missingSkills.join(", ")}`)
+    }
+    if (info.extraSkills.length > 0) {
+      parts.push(`extra in cache: ${info.extraSkills.join(", ")}`)
+    }
+    return {
+      name: `Plugin cache: ${info.pluginName}`,
+      status: "warn" as const,
+      detail: `${parts.join("; ")} — run: swiz doctor --fix`,
+    }
+  })
+}
+
+/** Copy missing skills from plugin source into the cache directory. */
+async function fixPluginCache(
+  infos: PluginCacheInfo[]
+): Promise<{ synced: string[]; failed: { skill: string; error: string }[] }> {
+  const synced: string[] = []
+  const failed: { skill: string; error: string }[] = []
+
+  for (const info of infos) {
+    for (const skill of info.missingSkills) {
+      const src = join(info.sourcePath, skill)
+      const dst = join(info.cachePath, skill)
+      try {
+        await cp(src, dst, { recursive: true })
+        synced.push(skill)
+      } catch (err: unknown) {
+        failed.push({ skill, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+  }
+
+  return { synced, failed }
+}
+
 // ─── Runner ─────────────────────────────────────────────────────────────────
 
 function printResult(result: CheckResult): void {
@@ -1144,6 +1290,10 @@ export const doctorCommand: Command = {
     )
     const invalidSkillEntries = await findInvalidSkillEntries(allowedCategories)
     results.push(...buildInvalidSkillResults(invalidSkillEntries))
+
+    // Plugin cache sync
+    const pluginCacheInfos = await checkPluginCacheStaleness()
+    results.push(...buildPluginCacheResults(pluginCacheInfos))
 
     // GitHub CLI
     results.push(await checkGhAuth())
@@ -1282,17 +1432,34 @@ export const doctorCommand: Command = {
         )
           console.log()
       }
+
+      if (pluginCacheInfos.length > 0) {
+        console.log(`  ${BOLD}Syncing plugin cache...${RESET}\n`)
+        const cacheResult = await fixPluginCache(pluginCacheInfos)
+        for (const skill of cacheResult.synced) {
+          console.log(`  ${GREEN}✓${RESET} ${skill}: copied to plugin cache`)
+        }
+        for (const item of cacheResult.failed) {
+          console.log(`  ${RED}✗${RESET} ${item.skill}: ${item.error}`)
+        }
+        if (cacheResult.synced.length > 0) {
+          console.log(`\n  ${DIM}Restart Claude Code to pick up the new skills.${RESET}`)
+          console.log()
+        }
+      }
     } else if (
       staleConfigs.length > 0 ||
       skillConflicts.length > 0 ||
       orphanedScripts.length > 0 ||
-      invalidSkillEntries.length > 0
+      invalidSkillEntries.length > 0 ||
+      pluginCacheInfos.length > 0
     ) {
       const fixables = [
         staleConfigs.length > 0 ? "stale configs" : null,
         orphanedScripts.length > 0 ? "orphaned scripts" : null,
         skillConflicts.length > 0 ? "skill conflicts" : null,
         invalidSkillEntries.length > 0 ? "invalid skill entries" : null,
+        pluginCacheInfos.length > 0 ? "stale plugin cache" : null,
       ]
         .filter(Boolean)
         .join(" and ")
