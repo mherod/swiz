@@ -39,17 +39,28 @@ export const PROJECT_STATES: ProjectState[] = projectStateSchema.options
 
 export const TERMINAL_STATES: ProjectState[] = ["released", "paused"]
 
+// ─── State transition schemas ─────────────────────────────────────────────────
+
+export const stateHistoryEntrySchema = z.object({
+  from: projectStateSchema.nullable(),
+  to: projectStateSchema,
+  timestamp: z.string(),
+})
+export type StateHistoryEntry = z.infer<typeof stateHistoryEntrySchema>
+
+export const stateDataSchema = z.object({
+  state: projectStateSchema,
+  stateHistory: z.array(stateHistoryEntrySchema).catch([]),
+})
+export type StateData = z.infer<typeof stateDataSchema>
+
+// ─── Settings schemas ─────────────────────────────────────────────────────────
+
 export interface SessionSwizSettings {
   autoContinue: boolean
   prMergeMode?: boolean
   ambitionMode?: AmbitionMode
   collaborationMode?: CollaborationMode
-}
-
-export interface StateHistoryEntry {
-  from: ProjectState | null
-  to: ProjectState
-  timestamp: string
 }
 
 /** Project-local policy config — lives in <repo>/.swiz/config.json */
@@ -547,12 +558,6 @@ export function resolveProjectHooks(
   return { resolved, warnings }
 }
 
-/** Runtime state data — lives in <repo>/.swiz/state.json (separate from user config) */
-export interface StateData {
-  state: ProjectState
-  stateHistory: StateHistoryEntry[]
-}
-
 export function getStatePath(cwd: string): string {
   return join(cwd, ".swiz", "state.json")
 }
@@ -562,19 +567,8 @@ export async function readStateData(cwd: string): Promise<StateData | null> {
   const file = Bun.file(path)
   if (!(await file.exists())) return null
   try {
-    const obj = (await file.json()) as Record<string, unknown>
-    const state = projectStateSchema.safeParse(obj.state)
-    if (!state.success) return null
-    const history = Array.isArray(obj.stateHistory)
-      ? (obj.stateHistory as StateHistoryEntry[]).filter(
-          (e) =>
-            typeof e === "object" &&
-            e !== null &&
-            typeof e.to === "string" &&
-            typeof e.timestamp === "string"
-        )
-      : []
-    return { state: state.data, stateHistory: history }
+    const result = stateDataSchema.safeParse(await file.json())
+    return result.success ? result.data : null
   } catch {
     return null
   }
