@@ -1,5 +1,6 @@
 import { CONFIGURABLE_AGENTS } from "./agents.ts"
 import { createHelpCommand } from "./commands/help.ts"
+import { suggest } from "./fuzzy.ts"
 import { tryReplayPendingMutations } from "./issue-store.ts"
 import { validateDispatchRoutes } from "./manifest.ts"
 import type { Command } from "./types.ts"
@@ -28,7 +29,8 @@ async function run() {
   const command = commands.get(commandName)
 
   if (!command) {
-    console.error(`Unknown command: ${commandName}`)
+    const hint = suggest(commandName, commands.keys())
+    console.error(`Unknown command: ${commandName}${hint ? ` (did you mean: "${hint}"?)` : ""}`)
     console.error(`Run "swiz help" to see available commands.`)
     process.exitCode = 1
     return

@@ -1,6 +1,7 @@
 import { chmod, mkdir, readdir, rename, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
+import { suggest } from "../fuzzy.ts"
 import { manifest } from "../manifest.ts"
 import { readProjectSettings, readSwizSettings } from "../settings.ts"
 import {
@@ -465,44 +466,6 @@ async function fixSkillConflicts(
   return { fixed, failed }
 }
 
-// ─── Fuzzy category suggestion ──────────────────────────────────────────────
-
-/** Compute Levenshtein edit distance between two strings. */
-function editDistance(a: string, b: string): number {
-  const m = a.length
-  const n = b.length
-  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
-    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
-  )
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i]![j] =
-        a[i - 1] === b[j - 1]
-          ? dp[i - 1]![j - 1]!
-          : 1 + Math.min(dp[i - 1]![j]!, dp[i]![j - 1]!, dp[i - 1]![j - 1]!)
-    }
-  }
-  return dp[m]![n]!
-}
-
-/**
- * Return the allowed category most similar to `cat`, or null if no good match exists.
- * Only suggests when the edit distance is ≤ half the input length (min threshold: 3).
- */
-function suggestCategory(cat: string, allowed: ReadonlySet<string>): string | null {
-  let best: string | null = null
-  let bestDist = Infinity
-  for (const a of allowed) {
-    const dist = editDistance(cat.toLowerCase(), a.toLowerCase())
-    if (dist < bestDist) {
-      bestDist = dist
-      best = a
-    }
-  }
-  const threshold = Math.max(3, Math.floor(cat.length / 2))
-  return best !== null && bestDist <= threshold ? best : null
-}
-
 // ─── Invalid skill entries check ────────────────────────────────────────────
 
 interface InvalidSkillEntry {
@@ -603,7 +566,7 @@ async function findInvalidSkillEntries(
         } else {
           const cat = rawCategory.trim()
           if (!allowedCategories.has(cat)) {
-            const suggestion = suggestCategory(cat, allowedCategories)
+            const suggestion = suggest(cat, allowedCategories)
             const hint = suggestion ? ` (did you mean: "${suggestion}"?)` : ""
             invalid.push({
               name: entry.name,

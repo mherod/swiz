@@ -10,6 +10,7 @@
     "test": "bun test",
     "test:vitest": "vitest",
     "test:bun": "bun test",
+    "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome format --write .",
     "lint:fix": "biome check --write .",
