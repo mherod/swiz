@@ -323,16 +323,16 @@ function formatCountSegment(
 }
 
 function formatProjectState(state: ProjectState | null | undefined): string {
-  const resolvedState: ProjectState = state ?? "in-development"
-  switch (resolvedState) {
-    case "in-development":
-      return `\x1b[92m${resolvedState}${R}`
-    case "awaiting-feedback":
-      return `\x1b[93m${resolvedState}${R}`
-    case "released":
-      return `\x1b[96m${resolvedState}${R}`
-    case "paused":
-      return `${DIM}${resolvedState}${R}`
+  if (!state) return `${DIM}no state${R}`
+  switch (state) {
+    case "planning":
+      return `\x1b[96m${state}${R}`
+    case "developing":
+      return `\x1b[92m${state}${R}`
+    case "reviewing":
+      return `\x1b[93m${state}${R}`
+    case "addressing-feedback":
+      return `\x1b[95m${state}${R}`
   }
 }
 

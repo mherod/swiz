@@ -2,7 +2,7 @@
 
 // SessionStart hook: inject current project state into session context
 
-import { readProjectState, STATE_TRANSITIONS, writeProjectState } from "../src/settings.ts"
+import { readProjectState, STATE_TRANSITIONS } from "../src/settings.ts"
 import { getStatePriority, getWorkflowIntent, STATE_METADATA } from "../src/state-machine.ts"
 import { emitContext, isGitRepo } from "./hook-utils.ts"
 import { sessionHookInputSchema } from "./schemas.ts"
@@ -14,14 +14,8 @@ async function main(): Promise<void> {
 
   if (!(await isGitRepo(cwd))) return
 
-  let state = await readProjectState(cwd)
+  const state = await readProjectState(cwd)
   if (!state) return
-
-  // Auto-transition paused → in-development on session start
-  if (state === "paused") {
-    await writeProjectState(cwd, "in-development")
-    state = "in-development"
-  }
 
   const metadata = STATE_METADATA[state]
   const intent = getWorkflowIntent(state)
@@ -29,7 +23,7 @@ async function main(): Promise<void> {
   const transitions = STATE_TRANSITIONS[state]
 
   const parts: string[] = [
-    `Project state: ${state}${metadata.isTerminal ? " (terminal)" : ""}.`,
+    `Project state: ${state}.`,
     `Workflow intent: ${intent} (priority: ${priority}/4).`,
   ]
 

@@ -157,8 +157,8 @@ export async function filterStateHooks(groups: HookGroup[], cwd: string): Promis
 
     const intent = getWorkflowIntent(state)
 
-    // In paused/released states, skip hooks that only make sense during active development
-    if (intent === "paused-work" || intent === "released-stable") {
+    // In planning/reviewing states, skip hooks that only make sense during active development
+    if (intent === "planning-work" || intent === "awaiting-review") {
       return groups
         .map((group) => {
           const hooks = group.hooks.filter((hook) => !ACTIVE_DEVELOPMENT_ONLY_HOOKS.has(hook.file))

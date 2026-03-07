@@ -3,25 +3,30 @@
  * Supports state metadata (priority, workflow intent) and transition-specific guards/effects.
  */
 
+import { z } from "zod"
 import type { EffectiveSwizSettings, ProjectState } from "./settings.ts"
 
 /** Workflow intent that influences hook behavior and guidance */
-export type WorkflowIntent =
-  | "active-development"
-  | "awaiting-input"
-  | "released-stable"
-  | "paused-work"
+export const workflowIntentSchema = z.enum([
+  "planning-work",
+  "active-development",
+  "awaiting-review",
+  "responding-to-feedback",
+])
+export type WorkflowIntent = z.infer<typeof workflowIntentSchema>
 
 /** Priority level that can influence task ordering and reminders */
-export type StatePriority = "immediate" | "high" | "normal" | "low"
+export const statePrioritySchema = z.enum(["immediate", "high", "normal", "low"])
+export type StatePriority = z.infer<typeof statePrioritySchema>
 
 /** Metadata attached to each state */
-export interface StateMetadata {
-  intent: WorkflowIntent
-  priority: StatePriority
-  isTerminal: boolean
-  description: string
-}
+export const stateMetadataSchema = z.object({
+  intent: workflowIntentSchema,
+  priority: statePrioritySchema,
+  isTerminal: z.boolean(),
+  description: z.string(),
+})
+export type StateMetadata = z.infer<typeof stateMetadataSchema>
 
 /** Guard function that evaluates whether a transition is allowed */
 export type TransitionGuard = (
@@ -56,29 +61,29 @@ export interface EnrichedStateDefinition {
 
 /** Map of state metadata for all project states */
 export const STATE_METADATA: Record<ProjectState, StateMetadata> = {
-  "in-development": {
+  planning: {
+    intent: "planning-work",
+    priority: "normal",
+    isTerminal: false,
+    description: "Deciding what to work on; issue triage and design",
+  },
+  developing: {
     intent: "active-development",
     priority: "high",
     isTerminal: false,
-    description: "Active work on code and features",
+    description: "Actively writing and committing code",
   },
-  "awaiting-feedback": {
-    intent: "awaiting-input",
+  reviewing: {
+    intent: "awaiting-review",
     priority: "normal",
     isTerminal: false,
-    description: "Waiting for review comments or other input",
+    description: "PR is open; waiting for or conducting code review",
   },
-  released: {
-    intent: "released-stable",
-    priority: "low",
-    isTerminal: true,
-    description: "Work is released and stable; only bug fixes permitted",
-  },
-  paused: {
-    intent: "paused-work",
-    priority: "low",
-    isTerminal: true,
-    description: "Work is paused; blocked or suspended",
+  "addressing-feedback": {
+    intent: "responding-to-feedback",
+    priority: "high",
+    isTerminal: false,
+    description: "Implementing changes requested during code review",
   },
 }
 
@@ -90,7 +95,7 @@ export async function requireCleanBranchInTeamMode(
   context: TransitionContext
 ): Promise<{ allowed: boolean; reason?: string }> {
   const isTeamMode = context.currentSettings.collaborationMode === "team"
-  const enteringActiveWork = context.to === "in-development"
+  const enteringActiveWork = context.to === "developing"
 
   if (!isTeamMode || !enteringActiveWork) {
     return { allowed: true }
@@ -116,51 +121,45 @@ export async function logStateTransition(_context: TransitionContext): Promise<v
  * This replaces the simple STATE_TRANSITIONS map with a richer model.
  */
 export const ENRICHED_STATE_MACHINE: Record<ProjectState, EnrichedStateDefinition> = {
-  "in-development": {
-    metadata: STATE_METADATA["in-development"],
+  planning: {
+    metadata: STATE_METADATA.planning,
     transitions: [
       {
-        to: "awaiting-feedback",
-      },
-      {
-        to: "paused",
-      },
-      {
-        to: "released",
+        to: "developing",
       },
     ],
   },
-  "awaiting-feedback": {
-    metadata: STATE_METADATA["awaiting-feedback"],
+  developing: {
+    metadata: STATE_METADATA.developing,
     transitions: [
       {
-        to: "in-development",
+        to: "reviewing",
       },
       {
-        to: "released",
-      },
-      {
-        to: "paused",
+        to: "planning",
       },
     ],
   },
-  released: {
-    metadata: STATE_METADATA.released,
+  reviewing: {
+    metadata: STATE_METADATA.reviewing,
     transitions: [
       {
-        to: "in-development",
+        to: "addressing-feedback",
       },
       {
-        to: "paused",
-      },
-    ],
-  },
-  paused: {
-    metadata: STATE_METADATA.paused,
-    transitions: [
-      {
-        to: "in-development",
+        to: "developing",
         guards: [requireCleanBranchInTeamMode],
+      },
+    ],
+  },
+  "addressing-feedback": {
+    metadata: STATE_METADATA["addressing-feedback"],
+    transitions: [
+      {
+        to: "reviewing",
+      },
+      {
+        to: "developing",
       },
     ],
   },

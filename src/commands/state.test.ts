@@ -39,10 +39,10 @@ describe("PROJECT_STATES constant", () => {
   })
 
   test("includes all expected lifecycle states", () => {
-    expect(PROJECT_STATES).toContain("in-development")
-    expect(PROJECT_STATES).toContain("awaiting-feedback")
-    expect(PROJECT_STATES).toContain("released")
-    expect(PROJECT_STATES).toContain("paused")
+    expect(PROJECT_STATES).toContain("planning")
+    expect(PROJECT_STATES).toContain("developing")
+    expect(PROJECT_STATES).toContain("reviewing")
+    expect(PROJECT_STATES).toContain("addressing-feedback")
   })
 })
 
@@ -62,22 +62,21 @@ describe("STATE_TRANSITIONS", () => {
     }
   })
 
-  test("in-development can transition to awaiting-feedback", () => {
-    expect(STATE_TRANSITIONS["in-development"]).toContain("awaiting-feedback")
+  test("developing can transition to reviewing", () => {
+    expect(STATE_TRANSITIONS["developing"]).toContain("reviewing")
   })
 
-  test("awaiting-feedback can transition back to in-development", () => {
-    expect(STATE_TRANSITIONS["awaiting-feedback"]).toContain("in-development")
+  test("reviewing can transition back to developing", () => {
+    expect(STATE_TRANSITIONS["reviewing"]).toContain("developing")
   })
 
-  test("released and paused are terminal states", () => {
-    expect(TERMINAL_STATES).toContain("released")
-    expect(TERMINAL_STATES).toContain("paused")
-    expect(TERMINAL_STATES).toHaveLength(2)
+  test("no terminal states exist — all states are active work phases", () => {
+    expect(TERMINAL_STATES).toHaveLength(0)
   })
 
-  test("paused can return to in-development", () => {
-    expect(STATE_TRANSITIONS.paused).toContain("in-development")
+  test("addressing-feedback can return to reviewing or developing", () => {
+    expect(STATE_TRANSITIONS["addressing-feedback"]).toContain("reviewing")
+    expect(STATE_TRANSITIONS["addressing-feedback"]).toContain("developing")
   })
 })
 
@@ -90,17 +89,17 @@ describe("readProjectState / writeProjectState", () => {
 
   test("round-trips a valid state", async () => {
     const dir = await createTempDir()
-    await writeProjectState(dir, "in-development")
+    await writeProjectState(dir, "developing")
     const state = await readProjectState(dir)
-    expect(state).toBe("in-development")
+    expect(state).toBe("developing")
   })
 
   test("overwrites an existing state", async () => {
     const dir = await createTempDir()
-    await writeProjectState(dir, "in-development")
-    await writeProjectState(dir, "awaiting-feedback")
+    await writeProjectState(dir, "developing")
+    await writeProjectState(dir, "reviewing")
     const state = await readProjectState(dir)
-    expect(state).toBe("awaiting-feedback")
+    expect(state).toBe("reviewing")
   })
 
   test("writes state to state.json, not config.json", async () => {
@@ -109,14 +108,14 @@ describe("readProjectState / writeProjectState", () => {
     const statePath = join(dir, ".swiz", "state.json")
     // Pre-populate config with a profile field
     await Bun.write(configPath, JSON.stringify({ profile: "solo" }))
-    await writeProjectState(dir, "paused")
+    await writeProjectState(dir, "planning")
     // Config should be untouched
     const config = await Bun.file(configPath).json()
     expect(config.profile).toBe("solo")
     expect(config.state).toBeUndefined()
     // State should be in separate file
     const stateData = await Bun.file(statePath).json()
-    expect(stateData.state).toBe("paused")
+    expect(stateData.state).toBe("planning")
   })
 })
 
@@ -139,12 +138,12 @@ describe("swiz state CLI", () => {
 
   test("state set transitions to a valid state", async () => {
     const dir = await createTempDir()
-    const result = await runSwiz(["state", "set", "in-development"], dir)
+    const result = await runSwiz(["state", "set", "developing"], dir)
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("in-development")
+    expect(result.stdout).toContain("developing")
 
     const state = await readProjectState(dir)
-    expect(state).toBe("in-development")
+    expect(state).toBe("developing")
   })
 
   test("state set rejects an unknown state", async () => {
@@ -156,25 +155,25 @@ describe("swiz state CLI", () => {
 
   test("state set rejects an invalid transition", async () => {
     const dir = await createTempDir()
-    // First set to paused, then try to transition directly to released (not allowed)
-    await writeProjectState(dir, "paused")
-    const result = await runSwiz(["state", "set", "released"], dir)
+    // planning can only go to developing — addressing-feedback is not allowed
+    await writeProjectState(dir, "planning")
+    const result = await runSwiz(["state", "set", "addressing-feedback"], dir)
     expect(result.exitCode).not.toBe(0)
     expect(result.stderr).toContain("Invalid transition")
   })
 
   test("state show displays current state and allowed transitions", async () => {
     const dir = await createTempDir()
-    await writeProjectState(dir, "in-development")
+    await writeProjectState(dir, "developing")
     const result = await runSwiz(["state", "show"], dir)
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("in-development")
-    expect(result.stdout).toContain("awaiting-feedback")
+    expect(result.stdout).toContain("developing")
+    expect(result.stdout).toContain("reviewing")
   })
 
   test("state show displays current state age", async () => {
     const dir = await createTempDir()
-    await writeProjectState(dir, "in-development")
+    await writeProjectState(dir, "developing")
     const result = await runSwiz(["state", "show"], dir)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("current state age:")
@@ -184,36 +183,36 @@ describe("swiz state CLI", () => {
 describe("state transition history", () => {
   test("writeProjectState appends history entries", async () => {
     const dir = await createTempDir()
-    await writeProjectState(dir, "in-development")
-    await writeProjectState(dir, "awaiting-feedback")
+    await writeProjectState(dir, "developing")
+    await writeProjectState(dir, "reviewing")
 
     const settings = await readStateData(dir)
     expect(settings?.stateHistory).toHaveLength(2)
     expect(settings?.stateHistory?.[0]?.from).toBeNull()
-    expect(settings?.stateHistory?.[0]?.to).toBe("in-development")
-    expect(settings?.stateHistory?.[1]?.from).toBe("in-development")
-    expect(settings?.stateHistory?.[1]?.to).toBe("awaiting-feedback")
+    expect(settings?.stateHistory?.[0]?.to).toBe("developing")
+    expect(settings?.stateHistory?.[1]?.from).toBe("developing")
+    expect(settings?.stateHistory?.[1]?.to).toBe("reviewing")
   })
 
   test("history survives multiple state loops", async () => {
     const dir = await createTempDir()
-    await writeProjectState(dir, "in-development")
-    await writeProjectState(dir, "awaiting-feedback")
-    await writeProjectState(dir, "in-development")
-    await writeProjectState(dir, "awaiting-feedback")
+    await writeProjectState(dir, "developing")
+    await writeProjectState(dir, "reviewing")
+    await writeProjectState(dir, "developing")
+    await writeProjectState(dir, "reviewing")
 
     const settings = await readStateData(dir)
     expect(settings?.stateHistory).toHaveLength(4)
-    expect(settings?.stateHistory?.[2]?.from).toBe("awaiting-feedback")
-    expect(settings?.stateHistory?.[2]?.to).toBe("in-development")
-    expect(settings?.stateHistory?.[3]?.from).toBe("in-development")
-    expect(settings?.stateHistory?.[3]?.to).toBe("awaiting-feedback")
+    expect(settings?.stateHistory?.[2]?.from).toBe("reviewing")
+    expect(settings?.stateHistory?.[2]?.to).toBe("developing")
+    expect(settings?.stateHistory?.[3]?.from).toBe("developing")
+    expect(settings?.stateHistory?.[3]?.to).toBe("reviewing")
   })
 
   test("all history entries have timestamps", async () => {
     const dir = await createTempDir()
-    await writeProjectState(dir, "in-development")
-    await writeProjectState(dir, "paused")
+    await writeProjectState(dir, "developing")
+    await writeProjectState(dir, "reviewing")
 
     const settings = await readStateData(dir)
     for (const entry of settings?.stateHistory ?? []) {
@@ -224,9 +223,9 @@ describe("state transition history", () => {
 
   test("state show displays time per state for multi-transition history", async () => {
     const dir = await createTempDir()
-    await writeProjectState(dir, "in-development")
-    await writeProjectState(dir, "awaiting-feedback")
-    await writeProjectState(dir, "in-development")
+    await writeProjectState(dir, "developing")
+    await writeProjectState(dir, "reviewing")
+    await writeProjectState(dir, "developing")
 
     const result = await runSwiz(["state", "show"], dir)
     expect(result.exitCode).toBe(0)

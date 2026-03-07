@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**78 hooks. 10 event types. Every agent. Zero compromises.**
+**76 hooks. 10 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -86,7 +86,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 The bundled hooks cover six events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, and UserPromptSubmit. Four additional events — **Notification**, **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system and supported by all agents. They ship with no bundled hooks; any custom hooks added for those events will be dispatched automatically.
 
-### Stop (21)
+### Stop (19)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -105,8 +105,6 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-github-ci.ts` | Blocks stop if GitHub Actions CI has failed on the current branch. If CI is still running, polls up to 30 s before blocking — eliminating false-positive blocks for short CI runs that finish within seconds. No shipping broken code. |
 | `stop-todo-tracker.ts` | Scans git diffs for newly introduced `TODO`, `FIXME`, or `HACK` comments. Technical debt accumulates fast — this keeps the bar high. |
 | `stop-non-default-branch.ts` | Blocks stop when the session is on a non-default branch (not `main` or `master`). Even a clean feature branch signals unfinished workflow — this keeps the agent from declaring done while still on it. |
-| `stop-release-gate.ts` | Quality gate for the `released` state. When the project is marked released, blocks stop if there are uncommitted changes, unpushed commits, or open tasks — with a numbered list of fix actions. |
-| `stop-session-state.ts` | Warns when the session ends while the project is in a non-terminal state (not `released`). Prompts the agent to transition state or acknowledge the unfinished lifecycle stage. |
 | `stop-completion-auditor.ts` | Reads task files and verifies that every task has actual completion evidence before the session ends. Agents can't just mark things done — they have to prove it. |
 | `stop-personal-repo-issues.ts` | Checks for actionable open GitHub issues, skipping those labelled `blocked`, `upstream`, `wontfix`, `duplicate`, `on-hold`, or `waiting`. Surfaces real work that's been left on the table. |
 | `stop-upstream-branch-count.ts` | Blocks stop when the remote has more than 40 branches. Stale branches accumulate silently — this surfaces the cleanup work before it becomes unmanageable. Runs with a 2-hour cooldown so it doesn't interrupt every session. |

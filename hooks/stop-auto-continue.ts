@@ -539,11 +539,8 @@ async function main(): Promise<void> {
     terminate("skip", "AUTO_CONTINUE_DISABLED", "auto-continue is disabled — skipping block")
   }
 
-  // Respect terminal project state — paused means session work is intentionally complete
   const projectState = await readProjectState(input.cwd ?? process.cwd())
-  if (projectState === "paused") {
-    terminate("skip", "PROJECT_PAUSED", "project state is paused — skipping block")
-  }
+  void projectState // All states are active work phases; no state skips auto-continue
 
   if (!input.transcript_path) {
     terminate("skip", "MISSING_TRANSCRIPT", "no transcript_path in hook input — skipping block")

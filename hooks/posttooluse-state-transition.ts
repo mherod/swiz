@@ -3,8 +3,8 @@
 // PostToolUse hook: Auto-transition project state based on PR lifecycle events.
 //
 // Transitions:
-//   gh pr create  : in-development → awaiting-feedback
-//   gh pr merge   : awaiting-feedback → in-development
+//   gh pr create  : developing → reviewing
+//   gh pr merge   : reviewing → developing
 //
 // Only transitions if current state matches the expected source state,
 // so this is safe to run regardless of workflow or whether PRs are used.
@@ -29,8 +29,8 @@ if (!isPrCreate && !isPrMerge) process.exit(0)
 const state = await readProjectState(cwd)
 if (!state) process.exit(0)
 
-if (isPrCreate && state === "in-development") {
-  await writeProjectState(cwd, "awaiting-feedback")
-} else if (isPrMerge && state === "awaiting-feedback") {
-  await writeProjectState(cwd, "in-development")
+if (isPrCreate && state === "developing") {
+  await writeProjectState(cwd, "reviewing")
+} else if (isPrMerge && state === "reviewing") {
+  await writeProjectState(cwd, "developing")
 }

@@ -16,28 +16,29 @@ export const collaborationModeSchema = z.enum(["auto", "solo", "team"])
 export type CollaborationMode = z.infer<typeof collaborationModeSchema>
 
 export const projectStateSchema = z.enum([
-  "in-development",
-  "awaiting-feedback",
-  "released",
-  "paused",
+  "planning",
+  "developing",
+  "reviewing",
+  "addressing-feedback",
 ])
 export type ProjectState = z.infer<typeof projectStateSchema>
 
 /** Collaboration modes as an array — derived from the schema. */
 export const COLLABORATION_MODES: CollaborationMode[] = collaborationModeSchema.options
 
-/** Valid transitions from each project state. Empty array = terminal state. */
+/** Valid transitions from each project state. All states are active work phases. */
 export const STATE_TRANSITIONS: Record<ProjectState, ProjectState[]> = {
-  "in-development": ["awaiting-feedback", "paused", "released"],
-  "awaiting-feedback": ["in-development", "released", "paused"],
-  released: ["in-development", "paused"],
-  paused: ["in-development"],
+  planning: ["developing"],
+  developing: ["reviewing", "planning"],
+  reviewing: ["addressing-feedback", "developing"],
+  "addressing-feedback": ["reviewing", "developing"],
 }
 
 /** All valid project states — derived from the schema. */
 export const PROJECT_STATES: ProjectState[] = projectStateSchema.options
 
-export const TERMINAL_STATES: ProjectState[] = ["released", "paused"]
+/** No terminal states — every state is an active work phase. */
+export const TERMINAL_STATES: ProjectState[] = []
 
 // ─── State transition schemas ─────────────────────────────────────────────────
 

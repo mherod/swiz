@@ -3,6 +3,7 @@
 //   1. The session has at least one incomplete task (pending or in_progress)
 //   2. Tasks haven't gone stale (no task tool interaction in last STALENESS_THRESHOLD calls)
 
+import { readProjectState } from "../src/settings.ts"
 import {
   denyPreToolUse as deny,
   extractToolNamesFromTranscript,
@@ -182,6 +183,10 @@ async function main() {
         }
 
         const taskList = formatTaskSubjectsForDisplay(allTasks, activeTasks)
+        const projectState = await readProjectState(cwd).catch(() => null)
+        const stateAction = projectState
+          ? `Verify the project state is accurate: currently \`${projectState}\`. If your work phase has changed, update it: \`swiz state set <new-state>\` (valid: planning, developing, reviewing, addressing-feedback).`
+          : `Consider setting a project state to reflect the current work phase: \`swiz state set developing\` (or: planning, reviewing, addressing-feedback).`
         deny(
           `STOP. Tasks have gone stale. ${callsSinceTask} tool calls since last task update. ` +
             `${toolName} is BLOCKED.\n\n` +
@@ -194,6 +199,7 @@ async function main() {
                 "Use TaskUpdate to update in-progress tasks with the latest progress and mark completed work done.",
                 "Ensure the current work has an in_progress task with a clear description.",
                 "Use TaskCreate to create at least one further task for the next concrete step based on the work underway.",
+                stateAction,
               ],
               { translateToolNames: true }
             ) +
