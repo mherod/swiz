@@ -87,7 +87,7 @@ alwaysApply: false
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
 - For push verification task completion use evidence, for example: `swiz tasks complete <id> --evidence "note:CI green — conclusion: success, run <run-id>"`.
-- **Task completion format**: Use `swiz tasks complete <id> --evidence "note:..."`. The canonical CLI is `swiz tasks complete`; do not invoke `bun ~/.claude/hooks/tasks-list.ts` directly.
+- **Task completion format**: Use `swiz tasks complete <id> --evidence "note:..."`. The canonical CLI is `swiz tasks complete`; do not invoke `bun ~/.claude/hooks/tasks-list.ts` directly. The only reliably accepted evidence key is `note:`; do NOT attempt compound keys like `commit:SHA ci_green:run ...` in a single evidence string — the parser rejects them. Use `note:CI green` for CI verification evidence.
 - **Evidence field format**: The `--evidence` flag requires exactly one recognized prefix: `note:`, `commit:`, `run:`, `conclusion:`, `ci_green:`, `pr:`, `no_ci:`. Multiple fields in a single string (e.g. `"commit:abc run:123"`) are NOT supported — the parser finds 0 structured fields and rejects the call with "found 0". DO NOT construct multi-field evidence strings without first running `swiz tasks complete --help` to verify the accepted schema. Safe default: use a single `note:` field containing all context inline.
 - Mark tasks complete immediately at work completion.
 - Treat `gh issue create` and task completion as atomic; if missed, recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.

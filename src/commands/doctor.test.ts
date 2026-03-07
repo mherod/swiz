@@ -794,6 +794,35 @@ describe("swiz doctor", () => {
     expect(result.stdout).toContain('unknown category "not-a-real-category"')
   })
 
+  test("suggests closest valid category when invalid category is close to an allowed one", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "typo-cat-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: typo-cat-skill\ndescription: Does something useful.\ncategory: tesing\n---\n"
+    )
+
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Invalid skill: typo-cat-skill")
+    expect(result.stdout).toContain('unknown category "tesing"')
+    expect(result.stdout).toContain('did you mean: "testing"')
+  })
+
+  test("does not suggest a category when invalid value is not close to any allowed one", async () => {
+    const home = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "far-cat-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: far-cat-skill\ndescription: Does something useful.\ncategory: zzzzzzzzzzzz\n---\n"
+    )
+
+    const result = await runDoctor(home)
+    expect(result.stdout).toContain("Invalid skill: far-cat-skill")
+    expect(result.stdout).not.toContain("did you mean")
+  })
+
   test("doctor --fix replaces unknown category value with default", async () => {
     const home = await createTempHome()
     const skillsDir = join(home, ".claude", "skills")
