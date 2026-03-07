@@ -121,3 +121,27 @@ describe("pretooluse-no-eslint-disable: comment spacing variants", () => {
     expect(result.decision).toBe("deny")
   })
 })
+
+// ─── NFKC homoglyph bypass prevention ──────────────────────────────────────
+
+describe("pretooluse-no-eslint-disable: NFKC homoglyph bypass", () => {
+  // U+FF0F FULLWIDTH SOLIDUS → NFKC normalizes to /
+  const FW_SLASH = String.fromCodePoint(0xff0f)
+
+  test("blocks fullwidth // comment prefix (NFKC → //)", async () => {
+    const result = await runHook({
+      newString: `${FW_SLASH}${FW_SLASH} ${KW} no-console`,
+    })
+    expect(result.decision).toBe("deny")
+  })
+
+  // U+FF0A FULLWIDTH ASTERISK → NFKC normalizes to *
+  const FW_STAR = String.fromCodePoint(0xff0a)
+
+  test("blocks fullwidth /* comment prefix (NFKC → /*)", async () => {
+    const result = await runHook({
+      newString: `/${FW_STAR} ${KW} no-console ${FW_STAR}/`,
+    })
+    expect(result.decision).toBe("deny")
+  })
+})

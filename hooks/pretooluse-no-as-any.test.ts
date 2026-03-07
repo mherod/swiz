@@ -590,3 +590,37 @@ describe("Promise.all drain enforcement — cross-runtime portability guard", ()
     }
   )
 })
+
+// ─── NFKC homoglyph bypass prevention ──────────────────────────────────────
+
+describe("pretooluse-no-as-any — NFKC homoglyph bypass", () => {
+  const HOOK_PATH = join(import.meta.dir, "pretooluse-no-as-any.ts")
+
+  async function runHookPayload(payload: object): Promise<{ stdout: string; exitCode: number }> {
+    const proc = Bun.spawn(["bun", HOOK_PATH], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    proc.stdin.write(JSON.stringify(payload))
+    proc.stdin.end()
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+    return { stdout, exitCode: proc.exitCode ?? -1 }
+  }
+
+  it("blocks fullwidth 'as any' bypass (NFKC → 'as any')", async () => {
+    // U+FF41 FULLWIDTH LATIN SMALL LETTER A, U+FF53 FULLWIDTH LATIN SMALL LETTER S
+    const fwAs = String.fromCodePoint(0xff41) + String.fromCodePoint(0xff53)
+    const { stdout } = await runHookPayload({
+      tool_name: "Edit",
+      tool_input: {
+        file_path: "src/x.ts",
+        old_string: "const x = 1",
+        new_string: `const x = getValue() ${fwAs} any`,
+      },
+    })
+    const parsed = JSON.parse(stdout)
+    expect(parsed.hookSpecificOutput.permissionDecision).toBe("deny")
+  })
+})
