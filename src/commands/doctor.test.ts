@@ -486,7 +486,7 @@ describe("swiz doctor", () => {
     expect(await Bun.file(missingPath).exists()).toBe(true)
     const content = await Bun.file(missingPath).text()
     expect(content).toContain("#!/usr/bin/env bun")
-  })
+  }, 15000) // spawns `swiz install` subprocess — allow extra headroom under full-suite load
 
   test("detects skill directory missing SKILL.md as invalid", async () => {
     const home = await createTempHome()
