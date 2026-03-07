@@ -13,7 +13,10 @@ async function main() {
     process.exit(0)
   }
 
-  const content = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
+  // NFKC-normalize to catch homoglyph bypasses (e.g., fullwidth ／／ → //)
+  const content = (input.tool_input?.new_string ?? input.tool_input?.content ?? "").normalize(
+    "NFKC"
+  )
 
   // Scope the check to actual comment-level linter directives, not filenames or strings.
   // Keyword split across array to avoid self-triggering when editing this hook.
