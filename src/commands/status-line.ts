@@ -85,10 +85,25 @@ function colorForPct(pct: number): string {
   return "\x1b[92m" // brightGreen
 }
 
-function progressBar(pct: number, width = 10): string {
-  const filled = Math.round((pct / 100) * width)
+function progressBar(pct: number, width = 20, stats?: ContextStats | null): string {
+  const cur = Math.round((pct / 100) * width)
   const color = colorForPct(pct)
-  return `${color}${"█".repeat(filled)}${DIM}${"░".repeat(width - filled)}${R}`
+  if (stats && stats.minPct !== stats.maxPct) {
+    const minPos = Math.round((stats.minPct / 100) * width)
+    const maxPos = Math.round((stats.maxPct / 100) * width)
+    let out = ""
+    for (let i = 0; i < width; i++) {
+      if (i < cur) {
+        out += `${color}█${R}`
+      } else if (i >= minPos && i <= maxPos) {
+        out += `${DIM}▒${R}`
+      } else {
+        out += `${DIM}░${R}`
+      }
+    }
+    return out
+  }
+  return `${color}${"█".repeat(cur)}${DIM}${"░".repeat(width - cur)}${R}`
 }
 
 function shortenPath(dir: string): string {
@@ -443,10 +458,10 @@ export const statusLineCommand: Command = {
     const midLeft = rb("├──")
     const bottomLeft = rb("└──")
 
-    const ctxBar = progressBar(ctxPct)
+    const ctxStats = updateContextStats(cwd, ctxPct)
+    const ctxBar = progressBar(ctxPct, 20, ctxStats)
     const ctxColor = colorForPct(ctxPct)
     const tokenStr = ctxTokens > 0 ? ` ${DIM}${formatTokens(ctxTokens)}${R}` : ""
-    const ctxStats = updateContextStats(cwd, ctxPct)
     const rangeSpread = ctxStats ? ctxStats.maxPct - ctxStats.minPct : 0
     const rangeWarn = rangeSpread > 0 && rangeSpread < 40 ? "⚠️ " : ""
     const rangeSeg =
