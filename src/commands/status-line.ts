@@ -498,7 +498,7 @@ export const statusLineCommand: Command = {
     ])
     const line2Groups = joinGroups([
       seg("model") ? `${label("model")} ${rb(model)}` : "",
-      seg("ctx") ? `${label("ctx")} ${ctxSeg}` : "",
+      seg("ctx") && ctxPct > 0 ? `${label("ctx")} ${ctxSeg}` : "",
     ])
     const modeSeg = [agentTag, vimTag].filter(Boolean).join(" ")
     const line3Groups = joinGroups([
