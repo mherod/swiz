@@ -57,6 +57,12 @@ export interface ProjectSwizSettings {
   plugins?: string[]
   /** Project-local hook groups — merged after built-in and plugin hooks */
   hooks?: HookGroup[]
+  /**
+   * Allowed values for the `category:` frontmatter field in SKILL.md files.
+   * When set, `swiz doctor` flags any skill whose category is not in this list.
+   * When absent, the built-in default list in `DEFAULT_ALLOWED_SKILL_CATEGORIES` applies.
+   */
+  allowedSkillCategories?: string[]
 }
 
 /** Resolved policy thresholds after merging global + project config */
@@ -422,6 +428,13 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   if (Array.isArray(obj.hooks)) {
     const validated = normalizeProjectHooks(obj.hooks as unknown[])
     if (validated.length > 0) result.hooks = validated
+  }
+  if (
+    Array.isArray(obj.allowedSkillCategories) &&
+    obj.allowedSkillCategories.length > 0 &&
+    obj.allowedSkillCategories.every((c: unknown) => typeof c === "string" && c.trim().length > 0)
+  ) {
+    result.allowedSkillCategories = (obj.allowedSkillCategories as string[]).map((c) => c.trim())
   }
   return result
 }

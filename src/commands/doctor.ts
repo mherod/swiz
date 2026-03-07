@@ -2,7 +2,7 @@ import { chmod, mkdir, readdir, rename, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
 import { manifest } from "../manifest.ts"
-import { readSwizSettings } from "../settings.ts"
+import { readProjectSettings, readSwizSettings } from "../settings.ts"
 import {
   findSkillConflicts,
   parseFrontmatterField,
@@ -10,6 +10,29 @@ import {
   type SkillConflict,
 } from "../skill-utils.ts"
 import type { Command } from "../types.ts"
+
+/**
+ * Built-in allowed values for the `category:` frontmatter field in SKILL.md files.
+ * Projects can override this list via `allowedSkillCategories` in `.swiz/config.json`.
+ */
+export const DEFAULT_ALLOWED_SKILL_CATEGORIES: readonly string[] = [
+  "automation",
+  "code-review",
+  "communication",
+  "data",
+  "deployment",
+  "design",
+  "development",
+  "git",
+  "learning",
+  "productivity",
+  "research",
+  "security",
+  "testing",
+  "uncategorized",
+  "workflow",
+  "writing",
+]
 
 const SWIZ_ROOT = dirname(Bun.main)
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
@@ -456,10 +479,12 @@ const REQUIRED_SKILL_FIELDS = ["name", "description"] as const
 
 /**
  * Scan all skill dirs for subdirectories with missing or invalid SKILL.md.
- * Validates: file existence, non-empty content, frontmatter block, and all
- * required frontmatter fields (name, description).
+ * Validates: file existence, non-empty content, frontmatter block, required
+ * frontmatter fields (name, description), and category against allowedCategories.
  */
-async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
+async function findInvalidSkillEntries(
+  allowedCategories: ReadonlySet<string>
+): Promise<InvalidSkillEntry[]> {
   const invalid: InvalidSkillEntry[] = []
   for (const skillDir of SKILL_PRECEDENCE) {
     let entries: import("node:fs").Dirent[]
@@ -534,16 +559,19 @@ async function findInvalidSkillEntries(): Promise<InvalidSkillEntry[]> {
       }
       // Category check — only run when no other field-level issues found
       if (!hasContentIssues) {
-        const category = parseFrontmatterField(content, "category")
-        if (!category) {
+        const rawCategory = parseFrontmatterField(content, "category")
+        if (!rawCategory) {
           invalid.push({ name: entry.name, skillDir, entryDir, reason: MISSING_CATEGORY_REASON })
-        } else if (category.trim() === SKILL_PLACEHOLDER_CATEGORY) {
-          invalid.push({
-            name: entry.name,
-            skillDir,
-            entryDir,
-            reason: `category is the placeholder "${SKILL_PLACEHOLDER_CATEGORY}" — update SKILL.md with a real category`,
-          })
+        } else {
+          const cat = rawCategory.trim()
+          if (!allowedCategories.has(cat)) {
+            invalid.push({
+              name: entry.name,
+              skillDir,
+              entryDir,
+              reason: `${INVALID_CATEGORY_REASON_PREFIX}${cat}" — allowed: ${[...allowedCategories].sort().join(", ")}`,
+            })
+          }
         }
       }
     }
@@ -596,9 +624,10 @@ interface InvalidSkillFixFailure {
 const NAME_MISMATCH_PREFIX = 'frontmatter name "'
 const MISSING_SKILL_MD_REASON = "missing SKILL.md"
 const MISSING_CATEGORY_REASON = "missing category field"
+const INVALID_CATEGORY_REASON_PREFIX = 'unknown category "'
 /** Default description injected by swiz doctor --fix into generated SKILL.md stubs. */
 const SKILL_PLACEHOLDER_DESCRIPTION = "Add a description for this skill."
-/** Default category injected by swiz doctor --fix when no category field is present. */
+/** Default category used by swiz doctor --fix when no category field is present or it is invalid. */
 const SKILL_PLACEHOLDER_CATEGORY = "uncategorized"
 
 /** For name-mismatch entries: update the name: field in SKILL.md to match the directory name. */
@@ -638,6 +667,23 @@ async function fixMissingCategory(entry: InvalidSkillEntry): Promise<boolean> {
     const updated = content.replace(
       /^(description:\s*.+)$/m,
       `$1\ncategory: ${SKILL_PLACEHOLDER_CATEGORY}`
+    )
+    if (updated === content) return false
+    await Bun.write(skillPath, updated)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** For invalid-category entries: replace the existing category value with the default. */
+async function fixCategoryValue(entry: InvalidSkillEntry): Promise<boolean> {
+  const skillPath = join(entry.entryDir, "SKILL.md")
+  try {
+    const content = await Bun.file(skillPath).text()
+    const updated = content.replace(
+      /^(category:\s*)["']?[^"'\n]+["']?/m,
+      `$1${SKILL_PLACEHOLDER_CATEGORY}`
     )
     if (updated === content) return false
     await Bun.write(skillPath, updated)
@@ -708,6 +754,20 @@ async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
           name: entry.name,
           originalDir: entry.entryDir,
           error: "could not insert category field into SKILL.md",
+        })
+      }
+      continue
+    }
+    if (entry.reason.startsWith(INVALID_CATEGORY_REASON_PREFIX)) {
+      // In-place fix: replace invalid category value with the default
+      const skillPath = join(entry.entryDir, "SKILL.md")
+      if (await fixCategoryValue(entry)) {
+        categoryFixed.push({ name: entry.name, skillPath })
+      } else {
+        failed.push({
+          name: entry.name,
+          originalDir: entry.entryDir,
+          error: "could not update category field in SKILL.md",
         })
       }
       continue
@@ -1075,7 +1135,11 @@ export const doctorCommand: Command = {
 
     const skillConflicts = await findSkillConflicts()
     results.push(...buildSkillConflictResults(skillConflicts))
-    const invalidSkillEntries = await findInvalidSkillEntries()
+    const projectSettings = await readProjectSettings(process.cwd())
+    const allowedCategories = new Set(
+      projectSettings?.allowedSkillCategories ?? DEFAULT_ALLOWED_SKILL_CATEGORIES
+    )
+    const invalidSkillEntries = await findInvalidSkillEntries(allowedCategories)
     results.push(...buildInvalidSkillResults(invalidSkillEntries))
 
     // GitHub CLI

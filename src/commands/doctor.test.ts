@@ -21,12 +21,15 @@ async function createTempHome(): Promise<string> {
   return dir
 }
 
+const INDEX_PATH = join(process.cwd(), "index.ts")
+
 async function runDoctor(
   home: string,
-  args: string[] = []
+  args: string[] = [],
+  cwd: string = process.cwd()
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  const proc = Bun.spawn(["bun", "run", "index.ts", "doctor", ...args], {
-    cwd: process.cwd(),
+  const proc = Bun.spawn(["bun", "run", INDEX_PATH, "doctor", ...args], {
+    cwd,
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
@@ -777,18 +780,72 @@ describe("swiz doctor", () => {
     expect(result.stdout).toContain("missing category field")
   })
 
-  test("detects skill with placeholder category as invalid", async () => {
+  test("detects skill with unknown category as invalid", async () => {
     const home = await createTempHome()
-    const skillDir = join(home, ".claude", "skills", "placeholder-cat-skill")
+    const skillDir = join(home, ".claude", "skills", "bad-cat-skill")
     await mkdir(skillDir, { recursive: true })
     await writeFile(
       join(skillDir, "SKILL.md"),
-      "---\nname: placeholder-cat-skill\ndescription: Does something useful.\ncategory: uncategorized\n---\n"
+      "---\nname: bad-cat-skill\ndescription: Does something useful.\ncategory: not-a-real-category\n---\n"
     )
 
     const result = await runDoctor(home)
-    expect(result.stdout).toContain("Invalid skill: placeholder-cat-skill")
-    expect(result.stdout).toContain('category is the placeholder "uncategorized"')
+    expect(result.stdout).toContain("Invalid skill: bad-cat-skill")
+    expect(result.stdout).toContain('unknown category "not-a-real-category"')
+  })
+
+  test("doctor --fix replaces unknown category value with default", async () => {
+    const home = await createTempHome()
+    const skillsDir = join(home, ".claude", "skills")
+    const skillDir = join(skillsDir, "bad-cat-fix-skill")
+    const skillMdPath = join(skillDir, "SKILL.md")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      skillMdPath,
+      "---\nname: bad-cat-fix-skill\ndescription: Does something useful.\ncategory: totally-invalid\n---\n"
+    )
+
+    const fixRun = await runDoctor(home, ["--fix"])
+    expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
+    expect(fixRun.stdout).toContain("bad-cat-fix-skill")
+    expect(fixRun.stdout).toContain('added category "uncategorized"')
+
+    // Directory stays in place
+    const { stat: statFn } = await import("node:fs/promises")
+    const dirStat = await statFn(skillDir)
+    expect(dirStat.isDirectory()).toBe(true)
+
+    // Category replaced with "uncategorized"
+    const content = await Bun.file(skillMdPath).text()
+    expect(content).toContain("category: uncategorized")
+    expect(content).not.toContain("totally-invalid")
+
+    // After fix, no warning
+    const afterFix = await runDoctor(home)
+    expect(afterFix.stdout).not.toContain("Invalid skill: bad-cat-fix-skill")
+  })
+
+  test("project allowedSkillCategories overrides default allowed list", async () => {
+    const home = await createTempHome()
+    // Use a separate temp dir as the project root so we don't touch the real .swiz/config.json
+    const projectRoot = await createTempHome()
+    const skillDir = join(home, ".claude", "skills", "custom-cat-skill")
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: custom-cat-skill\ndescription: Does something useful.\ncategory: my-custom-category\n---\n"
+    )
+    // Write project config with custom allowed list in the temp project root
+    const swizDir = join(projectRoot, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await writeFile(
+      join(swizDir, "config.json"),
+      JSON.stringify({ allowedSkillCategories: ["my-custom-category"] })
+    )
+    // Run doctor with the temp project as cwd — it reads .swiz/config.json from there
+    const result = await runDoctor(home, [], projectRoot)
+    // With custom allowed list, "my-custom-category" is valid → no warning
+    expect(result.stdout).not.toContain("Invalid skill: custom-cat-skill")
   })
 
   test("doctor --fix adds default category to skill missing one", async () => {
@@ -816,8 +873,8 @@ describe("swiz doctor", () => {
     const content = await Bun.file(skillMdPath).text()
     expect(content).toContain("category: uncategorized")
 
-    // After fix, no longer warned for missing category
+    // After fix, "uncategorized" is in the allowed list — no category warning
     const afterFix = await runDoctor(home)
-    expect(afterFix.stdout).not.toContain("missing category field")
+    expect(afterFix.stdout).not.toContain("Invalid skill: no-cat-skill")
   })
 })
