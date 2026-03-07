@@ -25,10 +25,12 @@ const workflowPathRe = /\.github\/workflows\/[^/]+\.ya?ml$/
 if (!workflowPathRe.test(filePath)) process.exit(0)
 
 // Get the new content being written — Edit uses new_string, Write uses content
-const newContent: string =
+// NFKC-normalize to catch homoglyph bypasses (e.g., fullwidth ｐｅｒｍｉｓｓｉｏｎｓ → permissions)
+const newContent: string = (
   (input.tool_input?.new_string as string | undefined) ??
   (input.tool_input?.content as string | undefined) ??
   ""
+).normalize("NFKC")
 
 // Check if the new content contains a permissions: keyword
 // Match both top-level `permissions:` and job-level `permissions:` in YAML
