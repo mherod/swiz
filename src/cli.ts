@@ -41,16 +41,20 @@ async function run() {
     return
   }
 
-  // Fuzzy flag suggestions — warn on unknown --flags before delegating to command
-  if (command.options && command.options.length > 0) {
-    // Extract canonical flag tokens (entries that start with --), stripping trailing <arg> suffixes
-    const knownFlags = new Set(
-      command.options
-        .map((o) => (o.flags.split(/\s+/)[0] ?? "").replace(/[^a-zA-Z0-9-]+$/, ""))
-        .filter((f) => f.startsWith("--"))
+  // Fuzzy flag suggestions — warn on unknown flags before delegating to command
+  {
+    // Global flags recognised at the CLI level (--help/-h handled above)
+    const GLOBAL_FLAGS = new Set(["--help", "-h"])
+    // Extract every -/-- token from each option's flags string.
+    // Pattern: "--long, -s <arg>" → split on whitespace+commas, keep tokens starting with "-"
+    const commandFlags = new Set(
+      (command.options ?? []).flatMap((o) =>
+        o.flags.split(/[\s,]+/).filter((t) => t.startsWith("-"))
+      )
     )
+    const knownFlags = new Set([...GLOBAL_FLAGS, ...commandFlags])
     for (const arg of rest) {
-      if (!arg.startsWith("--") || knownFlags.has(arg)) continue
+      if (!arg.startsWith("-") || knownFlags.has(arg)) continue
       const hint = suggest(arg, knownFlags)
       console.error(
         `Unknown option: ${arg}${hint ? ` (did you mean: "${hint}"?)` : ""}` +

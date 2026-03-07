@@ -61,4 +61,27 @@ describe("CLI flag suggestions", () => {
     const result = await runSwiz(["doctor", "--fix"])
     expect(result.stderr).not.toContain("Unknown option")
   })
+
+  test("no warning for valid short alias -s on session command", async () => {
+    // session --list/-l is a valid short alias — should not warn
+    const result = await runSwiz(["session", "-l"])
+    expect(result.stderr).not.toContain("Unknown option: -l")
+  })
+
+  test("suggests short alias -l for -ll on session command", async () => {
+    const result = await runSwiz(["session", "-ll"])
+    expect(result.stderr).toContain("Unknown option: -ll")
+    expect(result.stderr).toContain('did you mean: "-l"')
+  })
+
+  test("no warning for global --help flag on any command", async () => {
+    // --help is a global flag; cli.ts routes it before the flag-check block
+    const result = await runSwiz(["doctor", "--help"])
+    expect(result.stderr).not.toContain("Unknown option: --help")
+  })
+
+  test("no warning for global -h flag on any command", async () => {
+    const result = await runSwiz(["doctor", "-h"])
+    expect(result.stderr).not.toContain("Unknown option: -h")
+  })
 })
