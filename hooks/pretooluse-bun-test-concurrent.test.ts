@@ -87,4 +87,12 @@ describe("pretooluse-bun-test-concurrent", () => {
     expect(result.decision).toBe("deny")
     expect(result.reason).toContain("bun test src/foo.test.ts --concurrent >> /tmp/combined.log")
   })
+
+  test("inserts --concurrent before 2>&1 redirection", async () => {
+    const result = await runHook("bun test src/foo.test.ts 2>&1 > /tmp/combined.log")
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain(
+      "bun test src/foo.test.ts --concurrent 2>&1 > /tmp/combined.log"
+    )
+  })
 })
