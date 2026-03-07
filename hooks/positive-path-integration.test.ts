@@ -5,7 +5,7 @@
  *
  * Tests create real git repos, task files, and JSONL transcripts as needed.
  */
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -15,7 +15,7 @@ import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 
 const tempDirs: string[] = []
 
-afterEach(async () => {
+afterAll(async () => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()
     if (!dir) continue

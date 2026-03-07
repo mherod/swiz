@@ -11,7 +11,7 @@
  * lefthook guarantees that priority-N commands complete before priority-N+1 and
  * unprioritized commands start — the timestamp log exploits this determinism.
  */
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -21,7 +21,7 @@ const LEFTHOOK_BIN = join(process.cwd(), "node_modules", ".bin", "lefthook")
 
 const tempDirs: string[] = []
 
-afterEach(async () => {
+afterAll(async () => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()!
     await rm(dir, { recursive: true, force: true })

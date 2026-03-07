@@ -6,7 +6,7 @@
  * and `gh issue comment` so we can assert what happened without hitting GitHub.
  */
 
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -19,7 +19,7 @@ interface RunResult {
 
 const tempDirs: string[] = []
 
-afterEach(async () => {
+afterAll(async () => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()
     if (!dir) continue

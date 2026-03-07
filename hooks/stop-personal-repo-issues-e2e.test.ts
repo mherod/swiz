@@ -9,7 +9,7 @@
  * Each fixture set is modelled on the ramp3-spike label taxonomy we surveyed,
  * but kept self-contained so the tests never hit the network.
  */
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -20,7 +20,7 @@ const HOOK_PATH = resolve(process.cwd(), "hooks/stop-personal-repo-issues.ts")
 
 const tempDirs: string[] = []
 
-afterEach(async () => {
+afterAll(async () => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()!
     await rm(dir, { recursive: true, force: true })

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test"
+import { afterAll, describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -97,7 +97,7 @@ const SESSION_ID = "test-auditor-session-abc123"
 
 const tempDirs: string[] = []
 
-afterEach(async () => {
+afterAll(async () => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()!
     await rm(dir, { recursive: true, force: true })

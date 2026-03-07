@@ -7,7 +7,7 @@
  * These complement the existing 22 hardening-regression tests which focus on
  * HOME env, path traversal, and whitespace filtering.
  */
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -16,7 +16,7 @@ import { join } from "node:path"
 
 const tempDirs: string[] = []
 
-afterEach(async () => {
+afterAll(async () => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()
     if (!dir) continue

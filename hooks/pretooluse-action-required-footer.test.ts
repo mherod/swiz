@@ -4,7 +4,7 @@
  * the footer is present. If any hook bypasses denyPreToolUse with raw JSON, this catches it.
  */
 
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -19,7 +19,7 @@ const TS_NOCHECK_KW = ["ts", "nocheck"].join("-")
 
 const tempDirs: string[] = []
 
-afterEach(async () => {
+afterAll(async () => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()!
     await rm(dir, { recursive: true, force: true })
