@@ -4,6 +4,7 @@
 // Uses transcript scan (no external state) to determine position
 
 import {
+  emitContext,
   extractToolNamesFromTranscript,
   getTranscriptSummary,
   isEditTool,
@@ -73,15 +74,8 @@ async function main(): Promise<void> {
   }
 }
 
-function emit(context: string): void {
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext: context,
-      },
-    })
-  )
+function emit(context: string): never {
+  return emitContext("PostToolUse", context)
 }
 
 main()

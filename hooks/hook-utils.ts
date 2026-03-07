@@ -23,7 +23,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { translateMatcher } from "../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
-import { readProjectSettings } from "../src/settings.ts"
+import { readProjectSettings, STATE_TRANSITIONS, stateDataSchema } from "../src/settings.ts"
 import { skillAdvice, skillExists } from "../src/skill-utils.ts"
 
 export { skillAdvice, skillExists }
@@ -282,14 +282,31 @@ export function denyPostToolUse(reason: string): never {
   process.exit(0)
 }
 
-/** Emit additional context for a hook event. Works across all agents. */
-export function emitContext(eventName: string, context: string): never {
+/** Read current project state line synchronously, e.g. "State: developing → [reviewing, planning]". */
+function readStateLineSyncMaybe(cwd: string): string | null {
+  try {
+    const raw = readFileSync(join(cwd, ".swiz", "state.json"), "utf-8")
+    const result = stateDataSchema.safeParse(JSON.parse(raw))
+    if (!result.success) return null
+    const allowed = STATE_TRANSITIONS[result.data.state]
+    return `State: ${result.data.state} → [${allowed.join(", ")}]`
+  } catch {
+    return null
+  }
+}
+
+/** Emit additional context for a hook event. Works across all agents.
+ *  For PostToolUse events, appends current project state + allowed transitions when a state is set. */
+export function emitContext(eventName: string, context: string, cwd?: string): never {
+  const stateLine =
+    eventName === "PostToolUse" ? readStateLineSyncMaybe(cwd ?? process.cwd()) : null
+  const fullContext = stateLine ? `${context} ${stateLine}` : context
   console.log(
     JSON.stringify({
-      systemMessage: context,
+      systemMessage: fullContext,
       hookSpecificOutput: {
         hookEventName: eventName,
-        additionalContext: context,
+        additionalContext: fullContext,
       },
     })
   )

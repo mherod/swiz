@@ -3,7 +3,7 @@
 // Detects branch switches via Bash tool, looks up the associated PR,
 // and injects PR body, merge status, and last comment as additionalContext.
 
-import { ghJson, git, isShellTool } from "./hook-utils.ts"
+import { emitContext, ghJson, git, isShellTool } from "./hook-utils.ts"
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)
@@ -108,11 +108,4 @@ if (pr.comments?.length) {
 
 const context = lines.join("\n")
 
-console.log(
-  JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PostToolUse",
-      additionalContext: context,
-    },
-  })
-)
+emitContext("PostToolUse", context, cwd)

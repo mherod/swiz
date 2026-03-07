@@ -45,7 +45,7 @@ export const TERMINAL_STATES: ProjectState[] = []
 export const stateHistoryEntrySchema = z.object({
   from: projectStateSchema.nullable(),
   to: projectStateSchema,
-  timestamp: z.string(),
+  timestamp: z.string().min(1),
 })
 export type StateHistoryEntry = z.infer<typeof stateHistoryEntrySchema>
 
@@ -285,6 +285,61 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
   sessions: {},
 }
+
+// ─── Zod schemas for settings objects ────────────────────────────────────────
+// Each numeric field uses .catch(default) for soft fallback — invalid values
+// revert to the configured default rather than rejecting the whole object.
+
+export const sessionSwizSettingsSchema = z.object({
+  autoContinue: z.boolean(),
+  prMergeMode: z.boolean().optional(),
+  ambitionMode: ambitionModeSchema.optional(),
+  collaborationMode: collaborationModeSchema.optional(),
+})
+
+export const projectSettingsSchema = z.object({
+  profile: policyProfileSchema.optional(),
+  trivialMaxFiles: z.number().int().min(1).optional(),
+  trivialMaxLines: z.number().int().min(1).optional(),
+  defaultBranch: z.string().min(1).regex(/^\S+$/).optional(),
+  memoryLineThreshold: z.number().int().min(1).optional(),
+  memoryWordThreshold: z.number().int().min(1).optional(),
+  ambitionMode: ambitionModeSchema.optional(),
+  disabledHooks: z.array(z.string().min(1)).optional(),
+  plugins: z.array(z.string().min(1)).optional(),
+  allowedSkillCategories: z.array(z.string().min(1)).optional(),
+})
+
+const statusLineSegmentSchema = z.enum(ALL_STATUS_LINE_SEGMENTS)
+
+export const swizSettingsSchema = z.object({
+  autoContinue: z.boolean().catch(DEFAULT_SETTINGS.autoContinue),
+  critiquesEnabled: z.boolean().catch(DEFAULT_SETTINGS.critiquesEnabled),
+  ambitionMode: ambitionModeSchema.catch(DEFAULT_SETTINGS.ambitionMode),
+  collaborationMode: collaborationModeSchema.catch(DEFAULT_SETTINGS.collaborationMode),
+  narratorVoice: z.string().max(200).catch(DEFAULT_SETTINGS.narratorVoice),
+  narratorSpeed: z.number().min(0).max(600).catch(DEFAULT_SETTINGS.narratorSpeed),
+  prAgeGateMinutes: z.number().int().min(0).catch(DEFAULT_SETTINGS.prAgeGateMinutes),
+  prMergeMode: z.boolean().catch(DEFAULT_SETTINGS.prMergeMode),
+  pushCooldownMinutes: z.number().int().min(0).catch(DEFAULT_SETTINGS.pushCooldownMinutes),
+  pushGate: z.boolean().catch(DEFAULT_SETTINGS.pushGate),
+  sandboxedEdits: z.boolean().catch(DEFAULT_SETTINGS.sandboxedEdits),
+  speak: z.boolean().catch(DEFAULT_SETTINGS.speak),
+  updateMemoryFooter: z.boolean().catch(DEFAULT_SETTINGS.updateMemoryFooter),
+  gitStatusGate: z.boolean().catch(DEFAULT_SETTINGS.gitStatusGate),
+  nonDefaultBranchGate: z.boolean().catch(DEFAULT_SETTINGS.nonDefaultBranchGate),
+  githubCiGate: z.boolean().catch(DEFAULT_SETTINGS.githubCiGate),
+  changesRequestedGate: z.boolean().catch(DEFAULT_SETTINGS.changesRequestedGate),
+  personalRepoIssuesGate: z.boolean().catch(DEFAULT_SETTINGS.personalRepoIssuesGate),
+  memoryLineThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.memoryLineThreshold),
+  memoryWordThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.memoryWordThreshold),
+  statusLineSegments: z
+    .array(statusLineSegmentSchema)
+    .catch([...ALL_STATUS_LINE_SEGMENTS])
+    .transform(normalizeStatusLineSegments),
+  sessions: z.record(z.string(), sessionSwizSettingsSchema).catch({}),
+  disabledHooks: z.array(z.string().min(1)).optional(),
+})
 
 interface ReadOptions {
   home?: string | undefined

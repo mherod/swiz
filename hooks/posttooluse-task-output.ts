@@ -7,7 +7,7 @@
 //   → injects the CI run ID as additionalContext so the agent can watch CI
 //     without re-running the git log / gh run list dance.
 
-import { denyPostToolUse, ghJson, type ToolHookInput } from "./hook-utils.ts"
+import { denyPostToolUse, emitContext, ghJson, type ToolHookInput } from "./hook-utils.ts"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -252,17 +252,12 @@ if (typeof response === "string") {
           )
         }
         // No failure detected — inject recovered content as context.
-        console.log(
-          JSON.stringify({
-            hookSpecificOutput: {
-              hookEventName: "PostToolUse",
-              additionalContext:
-                `Task \`${taskId}\` output recovered from file (record had expired).\n` +
-                `Output preview:\n${recovered.slice(0, 500)}`,
-            },
-          })
+        emitContext(
+          "PostToolUse",
+          `Task \`${taskId}\` output recovered from file (record had expired).\n` +
+            `Output preview:\n${recovered.slice(0, 500)}`,
+          input.cwd ?? process.cwd()
         )
-        process.exit(0)
       }
     }
     // Output file also unavailable — warn and pass through.
@@ -293,11 +288,4 @@ if (!output.includes("To https://") && !PUSH_SHA_RE.test(output)) process.exit(0
 const ciContext = await buildCiContext(output, input.cwd ?? process.cwd())
 if (!ciContext) process.exit(0)
 
-console.log(
-  JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PostToolUse",
-      additionalContext: ciContext,
-    },
-  })
-)
+emitContext("PostToolUse", ciContext, input.cwd ?? process.cwd())

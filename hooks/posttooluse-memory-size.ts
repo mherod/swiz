@@ -15,7 +15,7 @@ import {
   readProjectSettings,
   readSwizSettings,
 } from "../src/settings.ts"
-import { formatActionPlan, isFileEditTool, skillAdvice } from "./hook-utils.ts"
+import { emitContext, formatActionPlan, isFileEditTool, skillAdvice } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
 /** Check whether the given path is a CLAUDE.md or a memory .md file. */
@@ -97,14 +97,7 @@ async function main(): Promise<void> {
     compactionChecklist,
   ].join("\n\n")
 
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext: context,
-      },
-    })
-  )
+  emitContext("PostToolUse", context, cwd)
 }
 
 if (import.meta.main) main()

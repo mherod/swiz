@@ -3,7 +3,7 @@
 
 import { existsSync } from "node:fs"
 import { basename, dirname } from "node:path"
-import { isFileEditTool } from "./hook-utils.ts"
+import { emitContext, isFileEditTool } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
 async function main(): Promise<void> {
@@ -36,13 +36,10 @@ async function main(): Promise<void> {
   const foundTest = candidates.find((c) => existsSync(c))
   if (!foundTest) return
 
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext: `Test file exists for this source file: ${foundTest} — check if it needs updating to reflect your changes.`,
-      },
-    })
+  emitContext(
+    "PostToolUse",
+    `Test file exists for this source file: ${foundTest} — check if it needs updating to reflect your changes.`,
+    input.cwd
   )
 }
 

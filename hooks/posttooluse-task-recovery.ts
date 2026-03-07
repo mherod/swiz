@@ -12,7 +12,12 @@
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { isTaskTool, type ToolHookInput, toolNameForCurrentAgent } from "./hook-utils.ts"
+import {
+  emitContext,
+  isTaskTool,
+  type ToolHookInput,
+  toolNameForCurrentAgent,
+} from "./hook-utils.ts"
 
 interface TaskFile {
   id: string
@@ -102,31 +107,16 @@ async function main(): Promise<void> {
       "Do NOT ignore this — untracked work causes stop hook failures.",
     ].join(" ")
 
-    console.log(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PostToolUse",
-          additionalContext: context,
-        },
-      })
-    )
-    return
+    emitContext("PostToolUse", context, input.cwd)
   }
 
   // Confirm success to the agent — no further action needed
-  const context =
+  const successContext =
     `Task #${taskId} was missing (lost during context compaction) — automatically recovered. ` +
     `A replacement task file has been written with status '${status}' and subject: "${requestedSubject}". ` +
     `No further recovery action is needed. Continue with the next step.`
 
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext: context,
-      },
-    })
-  )
+  emitContext("PostToolUse", successContext, input.cwd)
 }
 
 main()

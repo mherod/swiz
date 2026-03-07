@@ -2,7 +2,7 @@
 
 import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { isFileEditTool } from "./hook-utils.ts"
+import { emitContext, isFileEditTool } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
 
 /** Walk up from filePath to find node_modules/.bin/prettier */
@@ -49,14 +49,7 @@ async function main() {
     await proc.exited
 
     if (proc.exitCode === 0) {
-      console.log(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: "PostToolUse",
-            additionalContext: `Prettier formatted: ${filePath}`,
-          },
-        })
-      )
+      emitContext("PostToolUse", `Prettier formatted: ${filePath}`, cwd)
     }
     // Non-zero exit: skip silently (config issue, parse error, etc.)
   } catch {

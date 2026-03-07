@@ -21,7 +21,14 @@
  *      — Claude Code's response text for async Bash tool calls
  */
 
-import { denyPostToolUse, GIT_PUSH_RE, git, isShellTool, type ToolHookInput } from "./hook-utils.ts"
+import {
+  denyPostToolUse,
+  emitContext,
+  GIT_PUSH_RE,
+  git,
+  isShellTool,
+  type ToolHookInput,
+} from "./hook-utils.ts"
 
 interface ExtendedToolHookInput extends ToolHookInput {
   tool_response?: string | null
@@ -66,16 +73,11 @@ if (!remoteHead) {
   process.exit(0)
 }
 
-const emitVerified = (msg: string): never => {
-  console.log(
-    JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: msg } })
-  )
-  process.exit(0)
-}
-
 if (localHead === remoteHead) {
-  emitVerified(
-    `Push verified: HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
+  emitContext(
+    "PostToolUse",
+    `Push verified: HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`,
+    cwd
   )
 }
 
@@ -86,8 +88,10 @@ for (const delayMs of RETRY_DELAYS_MS) {
   await Bun.sleep(delayMs)
   const refreshed = await getRemoteHead()
   if (refreshed === localHead) {
-    emitVerified(
-      `Push verified (after ${delayMs}ms retry): HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`
+    emitContext(
+      "PostToolUse",
+      `Push verified (after ${delayMs}ms retry): HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`,
+      cwd
     )
   }
 }

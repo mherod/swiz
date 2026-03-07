@@ -16,6 +16,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
+  emitContext,
   GIT_COMMIT_RE,
   GIT_PUSH_RE,
   isShellTool,
@@ -64,17 +65,10 @@ async function main(): Promise<void> {
     const taskCreateName = toolNameForCurrentAgent("TaskCreate")
     const settings = await readSwizSettings()
     const effective = getEffectiveSwizSettings(settings, input.session_id)
-    const additionalContext = effective.prMergeMode
+    const pushContext = effective.prMergeMode
       ? `git push succeeded. Use ${taskCreateName} to create a "Wait for CI and verify pass" task, then mark it in_progress and monitor CI before stopping.`
       : `git push succeeded. Use ${taskCreateName} to create an "Open PR for this branch" task, then mark it in_progress and open the pull request before stopping.`
-    console.log(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PostToolUse",
-          additionalContext,
-        },
-      })
-    )
+    emitContext("PostToolUse", pushContext, input.cwd ?? process.cwd())
   }
 }
 

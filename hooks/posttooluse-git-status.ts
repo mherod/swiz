@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // PostToolUse hook: Inject git status context after every tool call
 
-import { getGitAheadBehind, git, parseGitStatus } from "./hook-utils.ts"
+import { emitContext, getGitAheadBehind, git, parseGitStatus } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
 async function main(): Promise<void> {
@@ -32,14 +32,7 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext: status,
-      },
-    })
-  )
+  emitContext("PostToolUse", status, cwd)
 }
 
 main()
