@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-03-07
+
+### New Features
+
+- `emitContext` in `hook-utils.ts` now automatically appends the current
+  project state and allowed transitions (`State: <state> → [<next>, ...]`)
+  to every PostToolUse `additionalContext`. The state line is injected only
+  for PostToolUse events; SessionStart hooks manage their own state context
+  to avoid breaking size budgets.
+- `sessionstart-health-snapshot.ts` now injects the current project state
+  and allowed transitions into the session context at startup, giving the
+  agent immediate awareness of the current work phase.
+- All 10 PostToolUse hooks now use the shared `emitContext` helper for
+  their `additionalContext` output instead of inline `console.log(JSON.stringify(…))`.
+  This consolidates state injection into a single code path.
+- Added `sessionSwizSettingsSchema`, `projectSettingsSchema`, and
+  `swizSettingsSchema` Zod schemas to `src/settings.ts` with explicit
+  min/max constraints on all numeric fields (e.g. `narratorSpeed: min(0)/max(600)`,
+  `memoryLineThreshold: int().min(1)`, `prAgeGateMinutes: int().min(0)`).
+  `stateHistoryEntrySchema.timestamp` now enforces `.min(1)`.
+- Added `--state <state>` as a required flag for `swiz tasks create`,
+  `swiz tasks complete`, and `swiz tasks status` subcommands, ensuring
+  every task operation records the current project work phase.
+
 ## 2026-03-06
 
 ### New Features
