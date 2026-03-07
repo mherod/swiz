@@ -10,7 +10,12 @@ import { join } from "node:path"
 import { z } from "zod"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
 import { hasGeminiApiKey, promptGeminiObject } from "../src/gemini.ts"
-import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
+import {
+  type AmbitionMode,
+  getEffectiveSwizSettings,
+  readProjectSettings,
+  readSwizSettings,
+} from "../src/settings.ts"
 import {
   extractPlainTurns,
   formatTurnsAsContext,
@@ -145,6 +150,25 @@ function filterAgentResponse(parsed: AgentResponse): AgentResponse {
       .filter((r) => r.length >= 10 && r.length <= 300 && !hasMarkup(r))
       .slice(0, 10),
   }
+}
+
+function normalizeCreativeIssueDescription(next: string): string {
+  const compact = next.replace(/\s+/g, " ").trim()
+  const body = compact.replace(/^Create issue:\s*/i, "").trim()
+  const seed = body || "Deliver a roadmap-level user-facing capability gap closure"
+  const parts = [`Create issue: ${seed}`]
+
+  if (!/user-facing gap:/i.test(seed)) {
+    parts.push("user-facing gap: state the concrete capability users cannot currently access")
+  }
+  if (!/\bscope:/i.test(seed)) {
+    parts.push("scope: list concrete code changes across affected modules")
+  }
+  if (!/\bacceptance:/i.test(seed) && !/\bverification:/i.test(seed)) {
+    parts.push("acceptance: define observable pass/fail behavior checks")
+  }
+
+  return parts.join("; ")
 }
 
 // ─── Memory file resolution ─────────────────────────────────────────────────
@@ -315,7 +339,7 @@ function buildPrompt(
   userMessagesSection: string,
   projectStatus: string,
   context: string,
-  ambitionMode: "standard" | "aggressive" = "standard",
+  ambitionMode: AmbitionMode = "standard",
   cwd?: string
 ): string {
   const statusSection = projectStatus
@@ -380,7 +404,17 @@ function buildPrompt(
         `Treat any partially-built system as incomplete; name the completion target. ` +
         `Do not suggest fixes or improvements to existing functionality. ` +
         `Only suggest implementing something that does not exist yet. `
-      : "") +
+      : ambitionMode === "creative"
+        ? `CREATIVE MODE: Treat this as product-roadmap drafting grounded in the session context. ` +
+          `Suggest an immediately actionable issue description that closes a concrete user-facing functionality gap. ` +
+          `Prioritize what users will newly be able to do after implementation, not internal maintenance tasks. ` +
+          `Output one imperative sentence starting with "Create issue:". ` +
+          `In that sentence include, separated by semicolons: ` +
+          `(a) a clear issue title, ` +
+          `(b) the user-facing gap to close, ` +
+          `(c) concrete implementation scope, and ` +
+          `(d) a verification/acceptance check. `
+        : "") +
     `ABSOLUTE PROHIBITIONS — never suggest any of these regardless of session content:\n` +
     `  - git commit, git add, git push, or any git workflow step\n` +
     `  - writing, adding, or improving tests (unless the transcript explicitly shows a specific behavioral bug ` +
@@ -476,7 +510,8 @@ async function main(): Promise<void> {
   const input = stopHookInputSchema.parse(hookRaw)
 
   const settings = await readSwizSettings()
-  const effective = getEffectiveSwizSettings(settings, input.session_id)
+  const projectSettings = await readProjectSettings(input.cwd ?? process.cwd())
+  const effective = getEffectiveSwizSettings(settings, input.session_id, projectSettings)
   if (!effective.autoContinue) {
     terminate("skip", "AUTO_CONTINUE_DISABLED", "auto-continue is disabled — skipping block")
   }
@@ -597,6 +632,10 @@ async function main(): Promise<void> {
   // instructions, so this deterministic check is the backstop.
   if (response.next && isWorkflowSuggestion(response.next)) {
     response.next = WORKFLOW_FINDING
+  }
+
+  if (effective.ambitionMode === "creative" && response.next) {
+    response.next = normalizeCreativeIssueDescription(response.next)
   }
 
   // Write reflections to memory (never blocks, never throws)

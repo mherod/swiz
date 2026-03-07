@@ -60,6 +60,19 @@ function resolveSignal(options?: PromptGeminiOptions): {
  * Throws if the API key is unavailable or the request fails.
  */
 export async function promptGemini(prompt: string, options?: PromptGeminiOptions): Promise<string> {
+  // ── Test seams ──────────────────────────────────────────────────────────
+  // These env vars are checked before creating the real provider so tests can
+  // inject fixture responses without network calls.
+  if (process.env.GEMINI_TEST_THROW === "1") {
+    throw new Error("Simulated Gemini API error (GEMINI_TEST_THROW=1)")
+  }
+  if (process.env.GEMINI_TEST_TEXT_RESPONSE !== undefined) {
+    if (process.env.GEMINI_TEST_CAPTURE_FILE) {
+      await Bun.write(process.env.GEMINI_TEST_CAPTURE_FILE, prompt)
+    }
+    return process.env.GEMINI_TEST_TEXT_RESPONSE.trim()
+  }
+
   const gemini = createProvider()
   const { signal, cleanup } = resolveSignal(options)
   try {

@@ -4,7 +4,7 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs"
 import { basename, dirname } from "node:path"
-import { getEffectiveSwizSettings, readSwizSettings } from "../settings.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 
 interface StatusLineInput {
@@ -341,19 +341,30 @@ export const statusLineCommand: Command = {
         : null
     )
 
-    const [gitResult, issueData, prListData, prViewData, swizSettings] = await Promise.all([
-      gitPromise,
-      ghJson<unknown[]>(["issue", "list", "--state", "open", "--json", "number", "--limit", "100"]),
-      ghJson<unknown[]>(["pr", "list", "--state", "open", "--json", "number", "--limit", "100"]),
-      prViewPromise,
-      readSwizSettings().catch(() => null),
-    ])
+    const [gitResult, issueData, prListData, prViewData, swizSettings, projectSettings] =
+      await Promise.all([
+        gitPromise,
+        ghJson<unknown[]>([
+          "issue",
+          "list",
+          "--state",
+          "open",
+          "--json",
+          "number",
+          "--limit",
+          "100",
+        ]),
+        ghJson<unknown[]>(["pr", "list", "--state", "open", "--json", "number", "--limit", "100"]),
+        prViewPromise,
+        readSwizSettings().catch(() => null),
+        readProjectSettings(cwd).catch(() => null),
+      ])
 
     const { info: gitInfo } = gitResult
 
     // ── Segment visibility ───────────────────────────────────────────────────
     const effective = swizSettings
-      ? getEffectiveSwizSettings(swizSettings, input.session_id ?? null)
+      ? getEffectiveSwizSettings(swizSettings, input.session_id ?? null, projectSettings)
       : null
     const activeSegments = new Set<string>(effective?.statusLineSegments ?? [])
     const seg = (name: string) => activeSegments.size === 0 || activeSegments.has(name)
@@ -400,6 +411,7 @@ export const statusLineCommand: Command = {
     if (effective) {
       if (effective.autoContinue) settingsParts.push(`\x1b[92m⟳ auto${R}`)
       if (effective.ambitionMode === "aggressive") settingsParts.push(`\x1b[93m⚡ aggressive${R}`)
+      if (effective.ambitionMode === "creative") settingsParts.push(`\x1b[95m✦ creative${R}`)
       if (effective.speak) settingsParts.push(`\x1b[96m🔊 narrator${R}`)
     }
     const settingsSeg = settingsParts.join(" ")

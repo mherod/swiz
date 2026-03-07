@@ -1160,6 +1160,125 @@ describe("stop-auto-continue", () => {
     expect(capturedPrompt).toContain('"productCritique"')
   })
 
+  test("creative ambition mode injects roadmap issue-drafting instructions", async () => {
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
+    const fakeHome = await createTempDir()
+    await mkdir(join(fakeHome, ".swiz"), { recursive: true })
+    await writeFile(
+      join(fakeHome, ".swiz", "settings.json"),
+      JSON.stringify({ autoContinue: true, ambitionMode: "creative" })
+    )
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Create issue: Add personalized onboarding checklist"),
+      },
+    })
+
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("CREATIVE MODE")
+    expect(capturedPrompt).toContain("product-roadmap drafting")
+    expect(capturedPrompt).toContain("user-facing functionality gap")
+    expect(capturedPrompt).toContain('starting with "Create issue:"')
+    expect(capturedPrompt).not.toContain("AGGRESSIVE MODE")
+  })
+
+  test("creative ambition mode normalizes next step into an actionable issue description", async () => {
+    const fakeHome = await createTempDir()
+    await mkdir(join(fakeHome, ".swiz"), { recursive: true })
+    await writeFile(
+      join(fakeHome, ".swiz", "settings.json"),
+      JSON.stringify({ autoContinue: true, ambitionMode: "creative" })
+    )
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Add onboarding checklist wizard"),
+      },
+    })
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("Create issue: Add onboarding checklist wizard")
+    expect(result.reason).toContain("user-facing gap:")
+    expect(result.reason).toContain("scope:")
+    expect(result.reason).toContain("acceptance:")
+  })
+
+  test("project-level ambitionMode=creative drives creative prompt branch", async () => {
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
+    const fakeHome = await createTempDir()
+    const projectDir = await createTempDir()
+    await mkdir(join(fakeHome, ".swiz"), { recursive: true })
+    await writeFile(
+      join(fakeHome, ".swiz", "settings.json"),
+      JSON.stringify({ autoContinue: true })
+    )
+    await mkdir(join(projectDir, ".swiz"), { recursive: true })
+    await writeFile(
+      join(projectDir, ".swiz", "config.json"),
+      JSON.stringify({ ambitionMode: "creative" })
+    )
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      cwd: projectDir,
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Create issue: Add onboarding checklist"),
+      },
+    })
+
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("CREATIVE MODE")
+  })
+
+  test("session-level ambitionMode overrides project-level ambitionMode", async () => {
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
+    const fakeHome = await createTempDir()
+    const projectDir = await createTempDir()
+    await mkdir(join(fakeHome, ".swiz"), { recursive: true })
+    await writeFile(
+      join(fakeHome, ".swiz", "settings.json"),
+      JSON.stringify({
+        autoContinue: true,
+        ambitionMode: "standard",
+        sessions: { "test-session": { autoContinue: true, ambitionMode: "creative" } },
+      })
+    )
+    await mkdir(join(projectDir, ".swiz"), { recursive: true })
+    await writeFile(
+      join(projectDir, ".swiz", "config.json"),
+      JSON.stringify({ ambitionMode: "aggressive" })
+    )
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      cwd: projectDir,
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Create issue: Add onboarding checklist"),
+      },
+    })
+
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("CREATIVE MODE")
+    expect(capturedPrompt).not.toContain("AGGRESSIVE MODE")
+  })
+
   // ─── skillAdvice prompt guard tests ──────────────────────────────────────
 
   test("prompt references /changelog skill when skill is installed", async () => {

@@ -194,11 +194,11 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     key: "ambitionMode",
     aliases: ["ambition-mode", "ambitionmode", "ambition_mode", "ambition"],
     kind: "string",
-    scopes: ["global"],
+    scopes: ["global", "project", "session"],
     validate: (v) =>
-      v === "standard" || v === "aggressive"
+      v === "standard" || v === "aggressive" || v === "creative"
         ? null
-        : `Invalid value "${v}" for ambition-mode. Must be: standard | aggressive`,
+        : `Invalid value "${v}" for ambition-mode. Must be: standard | aggressive | creative`,
   },
   {
     key: "collaborationMode",
@@ -263,8 +263,8 @@ function usage(): string {
     "  narrator-voice, narrator-speed, ambition-mode,\n" +
     "  git-status-gate, github-ci-gate, changes-requested-gate, personal-repo-issues-gate,\n" +
     "  non-default-branch-gate\n" +
-    "Settings (--project): memory-line-threshold, memory-word-threshold, default-branch\n" +
-    "Settings (--session): auto-continue, pr-merge-mode, collaboration-mode\n" +
+    "Settings (--project): memory-line-threshold, memory-word-threshold, default-branch, ambition-mode\n" +
+    "Settings (--session): auto-continue, pr-merge-mode, collaboration-mode, ambition-mode\n" +
     "Hook management: disable-hook <filename> (e.g. stop-github-ci.ts), enable-hook <filename>"
   )
 }
@@ -405,6 +405,7 @@ function printSettings(
   path: string | null,
   fileExists: boolean,
   sessionId: string | null,
+  ambitionSource?: "global" | "project" | "session",
   projectPolicyInfo?: {
     configPath: string
     profile: string | null
@@ -430,11 +431,17 @@ function printSettings(
   }
   if (sessionId) console.log(`  scope: session ${sessionId}`)
   const scopeLabel = effective.source === "session" ? "session override" : "global/default"
+  const ambitionScopeLabel =
+    ambitionSource === "session"
+      ? "session override"
+      : ambitionSource === "project"
+        ? "project override"
+        : "global/default"
   console.log(
     `  auto-continue:   ${effective.autoContinue ? "enabled" : "disabled"} (${scopeLabel})`
   )
   console.log(`  critiques:       ${effective.critiquesEnabled ? "enabled" : "disabled"} (global)`)
-  console.log(`  ambition-mode:   ${effective.ambitionMode} (global)`)
+  console.log(`  ambition-mode:   ${effective.ambitionMode} (${ambitionScopeLabel})`)
   console.log(
     `  collaboration:   ${effective.collaborationMode} (${effective.collaborationMode === "auto" ? "default" : scopeLabel})`
   )
@@ -515,11 +522,21 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
       ? await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
       : null
   const settings = await readSwizSettings({ strict: true })
-  const effective = getEffectiveSwizSettings(settings, sessionId)
+  const projectSettings = await readProjectSettings(parsed.targetDir)
+  const effective = getEffectiveSwizSettings(settings, sessionId, projectSettings)
   const path = getSwizSettingsPath()
   const fileExists = path ? await Bun.file(path).exists() : false
 
-  const projectSettings = await readProjectSettings(parsed.targetDir)
+  const sessionAmbition =
+    sessionId && settings.sessions[sessionId]
+      ? settings.sessions[sessionId]?.ambitionMode
+      : undefined
+  const ambitionSource: "global" | "project" | "session" = sessionAmbition
+    ? "session"
+    : projectSettings?.ambitionMode
+      ? "project"
+      : "global"
+
   const policy = resolvePolicy(projectSettings)
   const memoryThresholds = resolveMemoryThresholds(
     projectSettings,
@@ -552,6 +569,7 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
     path,
     fileExists,
     sessionId,
+    ambitionSource,
     projectPolicyInfo,
     detectProjectStack(parsed.targetDir)
   )
@@ -769,9 +787,9 @@ export const settingsCommand: Command = {
       description: "Suppress critique lines — only emit the next-step directive",
     },
     {
-      flags: "set ambition-mode <standard|aggressive>",
+      flags: "set ambition-mode <standard|aggressive|creative>",
       description:
-        "Set auto-continue ambition level: standard (balanced) or aggressive (feature-gap focused)",
+        "Set auto-continue ambition level: standard (balanced), aggressive (feature-gap focused), or creative (roadmap-oriented issue drafting)",
     },
     {
       flags: "set collaboration-mode <auto|solo|team>",

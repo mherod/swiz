@@ -402,6 +402,18 @@ describe("swiz settings", () => {
     expect(json.ambitionMode).toBe("aggressive")
   })
 
+  test("sets ambition-mode creative and persists to config", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "set", "ambition-mode", "creative"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Set ambition-mode = creative")
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { ambitionMode?: string }
+    expect(json.ambitionMode).toBe("creative")
+  })
+
   test("rejects invalid ambition-mode value", async () => {
     const home = await createTempHome()
     const result = await runSwiz(["settings", "set", "ambition-mode", "turbo"], home)
@@ -463,6 +475,28 @@ describe("swiz settings", () => {
     expect(result.stdout).toContain("Enabled")
   })
 
+  test("accepts --session for ambition-mode", async () => {
+    const home = await createTempHome()
+    const swizDir = join(home, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await writeFile(join(swizDir, "settings.json"), JSON.stringify({ autoContinue: true }))
+    await createSession(home, home, "sess-ambition-test")
+
+    const result = await runSwiz(
+      ["settings", "set", "ambition-mode", "creative", "--session", "sess-ambition-test"],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Set ambition-mode = creative")
+
+    const configPath = join(home, ".swiz", "settings.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as {
+      sessions?: Record<string, { ambitionMode?: string }>
+    }
+    expect(json.sessions?.["sess-ambition-test"]?.ambitionMode).toBe("creative")
+  })
+
   test("accepts --project for memory-line-threshold", async () => {
     const home = await createTempHome()
     const result = await runSwiz(
@@ -471,6 +505,21 @@ describe("swiz settings", () => {
     )
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("Set memory-line-threshold = 2000")
+  })
+
+  test("accepts --project for ambition-mode", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(
+      ["settings", "set", "ambition-mode", "creative", "--project", "--dir", home],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Set ambition-mode = creative")
+
+    const configPath = join(home, ".swiz", "config.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { ambitionMode?: string }
+    expect(json.ambitionMode).toBe("creative")
   })
 
   test("accepts --project for default-branch", async () => {
@@ -724,6 +773,14 @@ describe("readProjectSettings", () => {
     expect(settings?.profile).toBe("strict")
   })
 
+  test("reads ambitionMode from project config", async () => {
+    const dir = await _tmp.create("swiz-proj-")
+    await mkdir(join(dir, ".swiz"), { recursive: true })
+    await writeFile(join(dir, ".swiz", "config.json"), JSON.stringify({ ambitionMode: "creative" }))
+    const settings = await readProjectSettings(dir)
+    expect(settings?.ambitionMode).toBe("creative")
+  })
+
   test("reads trivialMaxFiles and trivialMaxLines overrides", async () => {
     const dir = await _tmp.create("swiz-proj-")
     await mkdir(join(dir, ".swiz"), { recursive: true })
@@ -849,6 +906,7 @@ describe("SETTINGS_REGISTRY", () => {
     expect(def!.validate).toBeDefined()
     expect(def!.validate!("standard")).toBeNull()
     expect(def!.validate!("aggressive")).toBeNull()
+    expect(def!.validate!("creative")).toBeNull()
     expect(def!.validate!("turbo")).toContain("Invalid value")
   })
 
@@ -1001,5 +1059,72 @@ describe("collaborationMode settings", () => {
     }
     const effective = getEffectiveSwizSettings(settings, "test-session")
     expect(effective.collaborationMode).toBe("solo")
+  })
+
+  test("project ambitionMode overrides global when no session override", () => {
+    const settings = {
+      autoContinue: true,
+      critiquesEnabled: true,
+      ambitionMode: "standard" as const,
+      collaborationMode: "solo" as const,
+      narratorVoice: "",
+      narratorSpeed: 0,
+      prAgeGateMinutes: 10,
+      prMergeMode: true,
+      pushCooldownMinutes: 0,
+      pushGate: false,
+      sandboxedEdits: true,
+      speak: false,
+      updateMemoryFooter: false,
+      gitStatusGate: true,
+      nonDefaultBranchGate: true,
+      githubCiGate: true,
+      changesRequestedGate: true,
+      personalRepoIssuesGate: true,
+      memoryLineThreshold: 1400,
+      memoryWordThreshold: 5000,
+      statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      sessions: {},
+    }
+    const effective = getEffectiveSwizSettings(settings, null, { ambitionMode: "creative" })
+    expect(effective.ambitionMode).toBe("creative")
+  })
+
+  test("session ambitionMode overrides project and global", () => {
+    const settings = {
+      autoContinue: true,
+      critiquesEnabled: true,
+      ambitionMode: "standard" as const,
+      collaborationMode: "auto" as const,
+      narratorVoice: "",
+      narratorSpeed: 0,
+      prAgeGateMinutes: 10,
+      prMergeMode: true,
+      pushCooldownMinutes: 0,
+      pushGate: false,
+      sandboxedEdits: true,
+      speak: false,
+      updateMemoryFooter: false,
+      gitStatusGate: true,
+      nonDefaultBranchGate: true,
+      githubCiGate: true,
+      changesRequestedGate: true,
+      personalRepoIssuesGate: true,
+      memoryLineThreshold: 1400,
+      memoryWordThreshold: 5000,
+      statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      sessions: {
+        "test-session": {
+          autoContinue: true,
+          ambitionMode: "aggressive" as const,
+        },
+      },
+    }
+    const effective = getEffectiveSwizSettings(
+      settings,
+      "test-session",
+      { ambitionMode: "creative" } // project-level should lose to session override
+    )
+    expect(effective.ambitionMode).toBe("aggressive")
   })
 })

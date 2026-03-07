@@ -8,6 +8,7 @@ import { crossRepoIssueCommand } from "./src/commands/cross-repo-issue.ts"
 import { dispatchCommand } from "./src/commands/dispatch.ts"
 import { doctorCommand } from "./src/commands/doctor.ts"
 import { hooksCommand } from "./src/commands/hooks.ts"
+import { ideaCommand } from "./src/commands/idea.ts"
 import { installCommand } from "./src/commands/install.ts"
 import { issueCommand } from "./src/commands/issue.ts"
 import { memoryCommand } from "./src/commands/memory.ts"
@@ -43,6 +44,7 @@ registerCommand(continueCommand)
 registerCommand(cleanupCommand)
 registerCommand(issueCommand)
 registerCommand(crossRepoIssueCommand)
+registerCommand(ideaCommand)
 registerCommand(sentimentCommand)
 registerCommand(sessionCommand)
 registerCommand(ciWaitCommand)

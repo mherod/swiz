@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from "node:path"
 import type { HookDef, HookGroup } from "./manifest.ts"
 
 export type PolicyProfile = "solo" | "team" | "strict"
-export type AmbitionMode = "standard" | "aggressive"
+export type AmbitionMode = "standard" | "aggressive" | "creative"
 export type CollaborationMode = "auto" | "solo" | "team"
 
 export const COLLABORATION_MODES: CollaborationMode[] = ["auto", "solo", "team"]
@@ -31,6 +31,7 @@ export const TERMINAL_STATES: ProjectState[] = ["released", "paused"]
 export interface SessionSwizSettings {
   autoContinue: boolean
   prMergeMode?: boolean
+  ambitionMode?: AmbitionMode
   collaborationMode?: CollaborationMode
 }
 
@@ -51,6 +52,7 @@ export interface ProjectSwizSettings {
   stateHistory?: StateHistoryEntry[]
   memoryLineThreshold?: number
   memoryWordThreshold?: number
+  ambitionMode?: AmbitionMode
   /** Hook filenames to skip for this project (e.g. "stop-github-ci.ts") */
   disabledHooks?: string[]
   /** External hook plugin bundles — package names or local paths */
@@ -270,6 +272,13 @@ function normalizeSessionSettings(value: unknown): SessionSwizSettings | null {
   const session: SessionSwizSettings = { autoContinue: obj.autoContinue }
   if (typeof obj.prMergeMode === "boolean") session.prMergeMode = obj.prMergeMode
   if (
+    obj.ambitionMode === "standard" ||
+    obj.ambitionMode === "aggressive" ||
+    obj.ambitionMode === "creative"
+  ) {
+    session.ambitionMode = obj.ambitionMode
+  }
+  if (
     obj.collaborationMode === "auto" ||
     obj.collaborationMode === "solo" ||
     obj.collaborationMode === "team"
@@ -300,7 +309,9 @@ function normalizeSettings(value: unknown): SwizSettings {
         ? obj.critiquesEnabled
         : DEFAULT_SETTINGS.critiquesEnabled,
     ambitionMode:
-      obj.ambitionMode === "standard" || obj.ambitionMode === "aggressive"
+      obj.ambitionMode === "standard" ||
+      obj.ambitionMode === "aggressive" ||
+      obj.ambitionMode === "creative"
         ? obj.ambitionMode
         : DEFAULT_SETTINGS.ambitionMode,
     collaborationMode:
@@ -403,6 +414,13 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   }
   if (typeof obj.memoryWordThreshold === "number" && obj.memoryWordThreshold > 0) {
     result.memoryWordThreshold = obj.memoryWordThreshold
+  }
+  if (
+    obj.ambitionMode === "standard" ||
+    obj.ambitionMode === "aggressive" ||
+    obj.ambitionMode === "creative"
+  ) {
+    result.ambitionMode = obj.ambitionMode
   }
   if (typeof obj.state === "string" && obj.state in STATE_TRANSITIONS) {
     result.state = obj.state as ProjectState
@@ -588,14 +606,17 @@ export async function readSwizSettings(options: ReadOptions = {}): Promise<SwizS
 
 export function getEffectiveSwizSettings(
   settings: SwizSettings,
-  sessionId?: string | null
+  sessionId?: string | null,
+  projectSettings?: ProjectSwizSettings | null
 ): EffectiveSwizSettings {
+  const projectAmbitionMode = projectSettings?.ambitionMode ?? settings.ambitionMode
+
   if (sessionId && settings.sessions[sessionId]) {
     const sessionSettings = settings.sessions[sessionId]!
     return {
       autoContinue: sessionSettings.autoContinue,
       critiquesEnabled: settings.critiquesEnabled,
-      ambitionMode: settings.ambitionMode,
+      ambitionMode: sessionSettings.ambitionMode ?? projectAmbitionMode,
       collaborationMode: sessionSettings.collaborationMode ?? settings.collaborationMode,
       narratorVoice: settings.narratorVoice,
       narratorSpeed: settings.narratorSpeed,
@@ -623,7 +644,7 @@ export function getEffectiveSwizSettings(
   return {
     autoContinue: settings.autoContinue,
     critiquesEnabled: settings.critiquesEnabled,
-    ambitionMode: settings.ambitionMode,
+    ambitionMode: projectAmbitionMode,
     collaborationMode: settings.collaborationMode,
     narratorVoice: settings.narratorVoice,
     narratorSpeed: settings.narratorSpeed,
