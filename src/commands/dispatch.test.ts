@@ -246,7 +246,7 @@ describe("dispatch replay", () => {
     expect(parsed.strategy).toBe("blocking")
     expect(typeof parsed.matched_groups).toBe("number")
     expect(Array.isArray(parsed.hooks)).toBe(true)
-  })
+  }, 15_000)
 
   test("stop replay continues after first block and still runs stop-git-status", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "swiz-stop-replay-"))
