@@ -15,6 +15,7 @@ import { memoryCommand } from "./src/commands/memory.ts"
 import { mergetoolCommand } from "./src/commands/mergetool.ts"
 import { pushCiCommand } from "./src/commands/push-ci.ts"
 import { pushWaitCommand } from "./src/commands/push-wait.ts"
+import { reflectCommand } from "./src/commands/reflect.ts"
 import { sentimentCommand } from "./src/commands/sentiment.ts"
 import { sessionCommand } from "./src/commands/session.ts"
 import { settingsCommand } from "./src/commands/settings.ts"
@@ -45,6 +46,7 @@ registerCommand(cleanupCommand)
 registerCommand(issueCommand)
 registerCommand(crossRepoIssueCommand)
 registerCommand(ideaCommand)
+registerCommand(reflectCommand)
 registerCommand(sentimentCommand)
 registerCommand(sessionCommand)
 registerCommand(ciWaitCommand)
