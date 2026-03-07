@@ -53,9 +53,17 @@ function printStateList(): void {
   console.log()
 }
 
+/** Run a git command and return trimmed stdout, or "" on failure. */
+async function gitOutput(args: string[], cwd: string): Promise<string> {
+  const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" })
+  const out = await new Response(proc.stdout).text()
+  await proc.exited
+  return proc.exitCode === 0 ? out.trim() : ""
+}
+
 /**
  * Append a brief session summary to the project's MEMORY.md when pausing.
- * Gathers recent git commits and writes a timestamped entry.
+ * Includes recent commits and any uncommitted working tree changes.
  * Never throws — failures are silently ignored.
  */
 async function appendSessionSummary(cwd: string): Promise<void> {
@@ -70,32 +78,49 @@ async function appendSessionSummary(cwd: string): Promise<void> {
     const existing = existsSync(memoryFile) ? await Bun.file(memoryFile).text() : ""
 
     // Gather recent commits (last 10)
-    const proc = Bun.spawn(["git", "log", "--oneline", "-10"], {
-      cwd,
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    const commitLog = await new Response(proc.stdout).text()
-    await proc.exited
-    if (proc.exitCode !== 0 || !commitLog.trim()) return
+    const commitLog = await gitOutput(["log", "--oneline", "-10"], cwd)
+    if (!commitLog) return
+
+    // Don't duplicate if already appended this session
+    const firstCommitLine = commitLog.split("\n")[0]?.trim() ?? ""
+    if (firstCommitLine && existing.includes(firstCommitLine)) return
 
     const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ")
     const commits = commitLog
-      .trim()
       .split("\n")
       .map((line) => `  - ${line.trim()}`)
       .join("\n")
 
-    const summary = `\n### Session paused (${timestamp})\nRecent commits:\n${commits}\n`
+    const parts = [`\n### Session paused (${timestamp})`, `Recent commits:\n${commits}`]
 
-    // Don't duplicate if already appended this session
-    const firstCommitLine = commitLog.trim().split("\n")[0]?.trim() ?? ""
-    if (firstCommitLine && existing.includes(firstCommitLine)) return
+    // Include uncommitted changes (staged + unstaged)
+    const statusOutput = await gitOutput(["status", "--porcelain"], cwd)
+    if (statusOutput) {
+      const lines = statusOutput.split("\n").filter(Boolean)
+      const staged = lines.filter((l) => l[0] !== " " && l[0] !== "?").map((l) => `  - ${l.trim()}`)
+      const unstaged = lines
+        .filter((l) => l[0] === " " || l[0] === "?")
+        .map((l) => `  - ${l.trim()}`)
 
-    // Respect line cap
-    if (existing.split("\n").length + summary.split("\n").length > 200) return
+      if (staged.length > 0) {
+        parts.push(`Staged changes:\n${staged.join("\n")}`)
+      }
+      if (unstaged.length > 0) {
+        parts.push(`Uncommitted changes:\n${unstaged.join("\n")}`)
+      }
+    }
 
-    await Bun.write(memoryFile, existing + summary)
+    const summary = `${parts.join("\n")}\n`
+
+    // Replace any previous session summary to avoid accumulation
+    const SESSION_HEADER_RE = /\n### Session paused \([^)]+\)\n[\s\S]*$/
+    const base = existing.replace(SESSION_HEADER_RE, "")
+
+    // Respect line cap — session summaries are ephemeral (replaced each pause),
+    // so allow up to 220 lines total (base content + summary appendix)
+    if (base.split("\n").length + summary.split("\n").length > 220) return
+
+    await Bun.write(memoryFile, base + summary)
     console.log("  session summary appended to MEMORY.md")
   } catch {
     // Never block state transition on summary failure
