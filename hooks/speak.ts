@@ -119,7 +119,7 @@ if (diagnose) {
     }
   }
 
-  process.stdout.write(JSON.stringify(diag, null, 2) + "\n")
+  process.stdout.write(`${JSON.stringify(diag, null, 2)}\n`)
   process.exit(0)
 }
 

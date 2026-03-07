@@ -95,7 +95,7 @@ function wordWrap(text: string, width: number, indent: string): string {
 function formatTimestamp(iso: string): string {
   try {
     const d = new Date(iso)
-    if (isNaN(d.getTime())) return ""
+    if (Number.isNaN(d.getTime())) return ""
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   } catch {
     return ""
@@ -326,7 +326,7 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
     const iso = m[1]
     if (iso === undefined) continue
     const parsed = new Date(iso).getTime()
-    if (isNaN(parsed)) {
+    if (Number.isNaN(parsed)) {
       // Regex-matched but unparseable timestamp (e.g. month 13): tag as malformed and sort
       // by file index rather than inheriting a neighbour's timestamp — avoids ambiguity.
       const ev: Tagged = {
@@ -361,8 +361,8 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
   // the record was constructed (two creation paths: leading continuation and NaN timestamp).
   for (const ev of malformed) {
     if (typeof ev.iso !== "string") ev.iso = ""
-    if (typeof ev._idx !== "number" || !isFinite(ev._idx)) ev._idx = 0
-    if (typeof ev._seq !== "number" || !isFinite(ev._seq)) ev._seq = 0
+    if (typeof ev._idx !== "number" || !Number.isFinite(ev._idx)) ev._idx = 0
+    if (typeof ev._seq !== "number" || !Number.isFinite(ev._seq)) ev._seq = 0
   }
 
   // Three-key comparator — explicit multi-statement form; String() coercion on iso as a

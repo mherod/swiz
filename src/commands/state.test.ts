@@ -92,7 +92,7 @@ describe("STATE_TRANSITIONS", () => {
   })
 
   test("paused can return to in-development", () => {
-    expect(STATE_TRANSITIONS["paused"]).toContain("in-development")
+    expect(STATE_TRANSITIONS.paused).toContain("in-development")
   })
 })
 

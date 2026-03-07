@@ -43,7 +43,7 @@ function clearStaleLock(): void {
     const ownerPid = parseInt(content, 10)
     const stat = statSync(lockFile)
     const age = Date.now() - stat.mtimeMs
-    if (!isNaN(ownerPid) && pidAlive(ownerPid) && age < LOCK_STALE_MS) return
+    if (!Number.isNaN(ownerPid) && pidAlive(ownerPid) && age < LOCK_STALE_MS) return
     unlinkSync(lockFile)
   } catch {
     // Lock doesn't exist or can't be read — nothing to clear

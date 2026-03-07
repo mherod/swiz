@@ -26,7 +26,7 @@ export function getRemainingCooldownMs(sentinelPath: string): number {
     const raw = readFileSync(sentinelPath, "utf8").trim()
     if (raw === "") return 0
     const lastPush = parseInt(raw, 10)
-    if (isNaN(lastPush)) return 0
+    if (Number.isNaN(lastPush)) return 0
     const remaining = COOLDOWN_MS - (Date.now() - lastPush)
     return remaining > 0 ? remaining : 0
   } catch {

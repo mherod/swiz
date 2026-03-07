@@ -48,7 +48,7 @@ const now = Date.now()
 if (existsSync(sentinelPath)) {
   const raw = readFileSync(sentinelPath, "utf8").trim()
   const lastPush = parseInt(raw, 10)
-  if (!isNaN(lastPush)) {
+  if (!Number.isNaN(lastPush)) {
     const elapsed = now - lastPush
     if (elapsed < COOLDOWN_MS) {
       const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 1000)

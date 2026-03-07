@@ -104,7 +104,7 @@ async function createCodexSession(
   await mkdir(codexDir, { recursive: true })
   await writeFile(
     join(codexDir, `rollout-2026-03-05T10-00-00-${sessionId}.jsonl`),
-    [
+    `${[
       JSON.stringify({
         timestamp: "2026-03-05T10:00:00.000Z",
         type: "session_meta",
@@ -123,7 +123,7 @@ async function createCodexSession(
           message: "Configure session setting",
         },
       }),
-    ].join("\n") + "\n"
+    ].join("\n")}\n`
   )
 }
 

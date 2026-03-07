@@ -232,18 +232,18 @@ export function stemWord(word: string): string {
   // Order matters: try longest suffixes first
 
   // -ing forms: strip suffix, reconstruct final consonant
-  if (word.endsWith("ting") && word.length > 5) stem = word.slice(0, -4) + "t"
-  else if (word.endsWith("ning") && word.length > 5) stem = word.slice(0, -4) + "n"
-  else if (word.endsWith("ring") && word.length > 5) stem = word.slice(0, -4) + "r"
-  else if (word.endsWith("ling") && word.length > 5) stem = word.slice(0, -4) + "l"
-  else if (word.endsWith("ying") && word.length > 5) stem = word.slice(0, -4) + "y"
-  else if (word.endsWith("ding") && word.length > 5) stem = word.slice(0, -4) + "d"
-  else if (word.endsWith("ping") && word.length > 5) stem = word.slice(0, -4) + "p"
-  else if (word.endsWith("sing") && word.length > 5) stem = word.slice(0, -4) + "s"
-  else if (word.endsWith("zing") && word.length > 5) stem = word.slice(0, -4) + "z"
-  else if (word.endsWith("bing") && word.length > 5) stem = word.slice(0, -4) + "b"
-  else if (word.endsWith("ming") && word.length > 5) stem = word.slice(0, -4) + "m"
-  else if (word.endsWith("king") && word.length > 5) stem = word.slice(0, -4) + "k"
+  if (word.endsWith("ting") && word.length > 5) stem = `${word.slice(0, -4)}t`
+  else if (word.endsWith("ning") && word.length > 5) stem = `${word.slice(0, -4)}n`
+  else if (word.endsWith("ring") && word.length > 5) stem = `${word.slice(0, -4)}r`
+  else if (word.endsWith("ling") && word.length > 5) stem = `${word.slice(0, -4)}l`
+  else if (word.endsWith("ying") && word.length > 5) stem = `${word.slice(0, -4)}y`
+  else if (word.endsWith("ding") && word.length > 5) stem = `${word.slice(0, -4)}d`
+  else if (word.endsWith("ping") && word.length > 5) stem = `${word.slice(0, -4)}p`
+  else if (word.endsWith("sing") && word.length > 5) stem = `${word.slice(0, -4)}s`
+  else if (word.endsWith("zing") && word.length > 5) stem = `${word.slice(0, -4)}z`
+  else if (word.endsWith("bing") && word.length > 5) stem = `${word.slice(0, -4)}b`
+  else if (word.endsWith("ming") && word.length > 5) stem = `${word.slice(0, -4)}m`
+  else if (word.endsWith("king") && word.length > 5) stem = `${word.slice(0, -4)}k`
   else if (word.endsWith("ing") && word.length > 5) stem = word.slice(0, -3)
   // -ation before -tion (implementation → implement)
   else if (word.endsWith("ation") && word.length > 7) stem = word.slice(0, -5)
@@ -253,18 +253,18 @@ export function stemWord(word: string): string {
   else if (word.endsWith("ated") && word.length > 5) stem = word.slice(0, -2)
   else if (word.endsWith("ized") && word.length > 5) stem = word.slice(0, -2)
   // -ed forms: strip suffix, reconstruct final consonant
-  else if (word.endsWith("ted") && word.length > 5) stem = word.slice(0, -3) + "t"
-  else if (word.endsWith("ned") && word.length > 5) stem = word.slice(0, -3) + "n"
-  else if (word.endsWith("red") && word.length > 5) stem = word.slice(0, -3) + "r"
-  else if (word.endsWith("led") && word.length > 5) stem = word.slice(0, -3) + "l"
-  else if (word.endsWith("sed") && word.length > 5) stem = word.slice(0, -3) + "s"
-  else if (word.endsWith("ped") && word.length > 5) stem = word.slice(0, -3) + "p"
-  else if (word.endsWith("zed") && word.length > 5) stem = word.slice(0, -3) + "z"
-  else if (word.endsWith("bed") && word.length > 5) stem = word.slice(0, -3) + "b"
-  else if (word.endsWith("med") && word.length > 5) stem = word.slice(0, -3) + "m"
-  else if (word.endsWith("ked") && word.length > 5) stem = word.slice(0, -3) + "k"
+  else if (word.endsWith("ted") && word.length > 5) stem = `${word.slice(0, -3)}t`
+  else if (word.endsWith("ned") && word.length > 5) stem = `${word.slice(0, -3)}n`
+  else if (word.endsWith("red") && word.length > 5) stem = `${word.slice(0, -3)}r`
+  else if (word.endsWith("led") && word.length > 5) stem = `${word.slice(0, -3)}l`
+  else if (word.endsWith("sed") && word.length > 5) stem = `${word.slice(0, -3)}s`
+  else if (word.endsWith("ped") && word.length > 5) stem = `${word.slice(0, -3)}p`
+  else if (word.endsWith("zed") && word.length > 5) stem = `${word.slice(0, -3)}z`
+  else if (word.endsWith("bed") && word.length > 5) stem = `${word.slice(0, -3)}b`
+  else if (word.endsWith("med") && word.length > 5) stem = `${word.slice(0, -3)}m`
+  else if (word.endsWith("ked") && word.length > 5) stem = `${word.slice(0, -3)}k`
   // -ied → -y (verified → verify, modified → modify)
-  else if (word.endsWith("ied") && word.length > 5) stem = word.slice(0, -3) + "y"
+  else if (word.endsWith("ied") && word.length > 5) stem = `${word.slice(0, -3)}y`
   else if (word.endsWith("ed") && word.length > 4) stem = word.slice(0, -2)
   else if (word.endsWith("ly") && word.length > 4) stem = word.slice(0, -2)
   else if (word.endsWith("er") && word.length > 4) stem = word.slice(0, -2)
@@ -305,7 +305,7 @@ export function computeSubjectFingerprint(subject: string): string {
     .map((w) => {
       const stemmed = stemWord(w)
       // Try stem directly, then with silent-e restored (creat→create)
-      return SYNONYM_MAP.get(stemmed) ?? SYNONYM_MAP.get(stemmed + "e") ?? stemmed
+      return SYNONYM_MAP.get(stemmed) ?? SYNONYM_MAP.get(`${stemmed}e`) ?? stemmed
     })
     .sort()
   const canonical = words.join(" ")

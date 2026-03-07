@@ -93,7 +93,7 @@ beforeAll(async () => {
   await mkdir(canonicalDir, { recursive: true })
   await writeFile(
     join(canonicalDir, `${SESSION_A}.jsonl`),
-    JSON.stringify({ type: "user", cwd: FILTER_CWD }) + "\n"
+    `${JSON.stringify({ type: "user", cwd: FILTER_CWD })}\n`
   )
 
   // ── Alternate project directory (different encoding) ──
@@ -103,11 +103,11 @@ beforeAll(async () => {
   await mkdir(altDir, { recursive: true })
   await writeFile(
     join(altDir, `${SESSION_B}.jsonl`),
-    JSON.stringify({ type: "user", cwd: FILTER_CWD }) + "\n"
+    `${JSON.stringify({ type: "user", cwd: FILTER_CWD })}\n`
   )
   await writeFile(
     join(altDir, `${SESSION_C}.jsonl`),
-    JSON.stringify({ type: "user", cwd: FILTER_CWD }) + "\n"
+    `${JSON.stringify({ type: "user", cwd: FILTER_CWD })}\n`
   )
 })
 
@@ -171,7 +171,7 @@ describe("getSessions", () => {
     await mkdir(join(isolatedProjects, key), { recursive: true })
     await writeFile(
       join(isolatedProjects, key, `${SESSION_A}.jsonl`),
-      JSON.stringify({ type: "user", cwd: FILTER_CWD }) + "\n"
+      `${JSON.stringify({ type: "user", cwd: FILTER_CWD })}\n`
     )
 
     const sessions = await getSessions(FILTER_CWD, TASKS, isolatedProjects)
@@ -291,7 +291,7 @@ describe("findTaskAcrossSessions", () => {
     await mkdir(join(isolatedProjects, key), { recursive: true })
     await writeFile(
       join(isolatedProjects, key, `${SESSION_A}.jsonl`),
-      JSON.stringify({ type: "user", cwd: FILTER_CWD }) + "\n"
+      `${JSON.stringify({ type: "user", cwd: FILTER_CWD })}\n`
     )
 
     // Task #120 is in SESSION_B which is NOT in this isolated project dir

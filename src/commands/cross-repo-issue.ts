@@ -144,10 +144,10 @@ export const crossRepoIssueCommand: Command = {
     const opts = parseArgs(args)
 
     if (!opts.filePath) {
-      throw new Error("--file is required.\n" + this.usage)
+      throw new Error(`--file is required.\n${this.usage}`)
     }
     if (!opts.title) {
-      throw new Error("--title is required.\n" + this.usage)
+      throw new Error(`--title is required.\n${this.usage}`)
     }
 
     // Auto-infer repo from file path if not provided

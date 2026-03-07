@@ -72,10 +72,10 @@ describe("validatePaths", () => {
     })
     expect(() =>
       validatePaths({
-        base: paths["base"]!,
-        local: paths["local"]!,
-        remote: paths["remote"]!,
-        merged: paths["merged"]!,
+        base: paths.base!,
+        local: paths.local!,
+        remote: paths.remote!,
+        merged: paths.merged!,
       })
     ).not.toThrow()
   })
@@ -86,9 +86,9 @@ describe("validatePaths", () => {
     expect(() =>
       validatePaths({
         base: join(dir, "nonexistent"),
-        local: paths["local"]!,
-        remote: paths["remote"]!,
-        merged: paths["merged"]!,
+        local: paths.local!,
+        remote: paths.remote!,
+        merged: paths.merged!,
       })
     ).toThrow("BASE file does not exist")
   })
@@ -98,10 +98,10 @@ describe("validatePaths", () => {
     const paths = writeFiles(dir, { base: "b", remote: "r", merged: "m" })
     expect(() =>
       validatePaths({
-        base: paths["base"]!,
+        base: paths.base!,
         local: join(dir, "nonexistent"),
-        remote: paths["remote"]!,
-        merged: paths["merged"]!,
+        remote: paths.remote!,
+        merged: paths.merged!,
       })
     ).toThrow("LOCAL file does not exist")
   })
@@ -111,10 +111,10 @@ describe("validatePaths", () => {
     const paths = writeFiles(dir, { base: "b", local: "l", merged: "m" })
     expect(() =>
       validatePaths({
-        base: paths["base"]!,
-        local: paths["local"]!,
+        base: paths.base!,
+        local: paths.local!,
         remote: join(dir, "nonexistent"),
-        merged: paths["merged"]!,
+        merged: paths.merged!,
       })
     ).toThrow("REMOTE file does not exist")
   })
@@ -124,9 +124,9 @@ describe("validatePaths", () => {
     const paths = writeFiles(dir, { base: "b", local: "l", remote: "r" })
     expect(() =>
       validatePaths({
-        base: paths["base"]!,
-        local: paths["local"]!,
-        remote: paths["remote"]!,
+        base: paths.base!,
+        local: paths.local!,
+        remote: paths.remote!,
         merged: join(dir, "nonexistent"),
       })
     ).toThrow("MERGED file does not exist")

@@ -163,7 +163,7 @@ describe("resolveProjectHooks", () => {
   test("resolves relative paths to absolute", () => {
     const hooks: HookGroup[] = [{ event: "stop", hooks: [{ file: "scripts/check.ts" }] }]
     // Create the file so it passes validation
-    const dir = "/tmp/swiz-resolve-test-" + Date.now()
+    const dir = `/tmp/swiz-resolve-test-${Date.now()}`
     const { resolved } = resolveProjectHooks(hooks, dir)
     // Files don't exist, so they'll be filtered out with warnings
     expect(resolved).toHaveLength(0)

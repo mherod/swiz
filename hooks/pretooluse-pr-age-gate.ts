@@ -72,7 +72,7 @@ async function checkPrAge(
   graceMinutes: number
 ): Promise<void> {
   const createdAt = new Date(createdAtStr).getTime()
-  if (isNaN(createdAt)) return
+  if (Number.isNaN(createdAt)) return
 
   const elapsed = Date.now() - createdAt
 

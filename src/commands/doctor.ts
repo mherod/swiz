@@ -180,7 +180,7 @@ async function findOrphanedHookScripts(): Promise<string[]> {
   const configPaths = await collectInstalledConfigScriptPaths()
   const configBasenames = new Set(
     configPaths
-      .filter((p) => p.startsWith(HOOKS_DIR + "/"))
+      .filter((p) => p.startsWith(`${HOOKS_DIR}/`))
       .map((p) => p.slice(HOOKS_DIR.length + 1))
   )
 

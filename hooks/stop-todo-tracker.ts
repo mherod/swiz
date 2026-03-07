@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   const withSkill = `Either resolve these now, or use the /farm-out-issues skill to create issues for them.`
   const withoutSkill = `Either resolve these now, or create issues for them:\n${guidanceCmd}`
 
-  reason += "\n" + skillAdvice("farm-out-issues", withSkill, withoutSkill)
+  reason += `\n${skillAdvice("farm-out-issues", withSkill, withoutSkill)}`
 
   // TODO hygiene is a quality/process gate, not a workflow-memory miss.
   blockStop(reason, { includeUpdateMemoryAdvice: false })
