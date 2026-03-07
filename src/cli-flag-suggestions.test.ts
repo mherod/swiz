@@ -84,4 +84,30 @@ describe("CLI flag suggestions", () => {
     const result = await runSwiz(["doctor", "-h"])
     expect(result.stderr).not.toContain("Unknown option: -h")
   })
+
+  test("placeholder token <seconds> is not treated as a known flag", async () => {
+    // ci-wait declares: flags: "--timeout, -t <seconds>"
+    // The "<seconds>" placeholder must be filtered — not added to known flags
+    // Verification: a typo of --timeout must suggest --timeout, not <seconds>
+    const result = await runSwiz(["ci-wait", "--timout"])
+    expect(result.stderr).toContain("Unknown option: --timout")
+    expect(result.stderr).toContain('did you mean: "--timeout"')
+    expect(result.stderr).not.toContain('"<seconds>"')
+  })
+
+  test("placeholder token [id] is not treated as a known flag", async () => {
+    // settings declares: flags: "--session, -s [id]"
+    // The "[id]" placeholder must be filtered — not added to known flags
+    const result = await runSwiz(["settings", "--sesion"])
+    expect(result.stderr).toContain("Unknown option: --sesion")
+    expect(result.stderr).toContain('did you mean: "--session"')
+    expect(result.stderr).not.toContain('"[id]"')
+  })
+
+  test("positional-only option entries do not produce flag warnings", async () => {
+    // dispatch has flags: "<event>", "[agentEventName]", "replay <event>"
+    // Passing a positional arg (no leading -) must not trigger Unknown option
+    const result = await runSwiz(["dispatch", "PreToolUse"])
+    expect(result.stderr).not.toContain("Unknown option: PreToolUse")
+  })
 })
