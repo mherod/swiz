@@ -1499,7 +1499,7 @@ describe("stop-auto-continue", () => {
     const ghScript =
       `#!/bin/sh\n` +
       `case "$*" in\n` +
-      `  *"api user"*)\n` +
+      `  *api*user*)\n` +
       `    printf '%s' 'testuser'\n` +
       `    ;;\n` +
       `  *"issue list"*)\n` +

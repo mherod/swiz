@@ -55,6 +55,8 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/memory.ts",
   "src/commands/push-ci.ts",
   "src/commands/push-wait.ts",
+  // reflect — prints prompt (--print-prompt) and reflection output to user
+  "src/commands/reflect.ts",
   "src/commands/sentiment.ts",
   "src/commands/session.ts",
   "src/commands/settings.ts",
