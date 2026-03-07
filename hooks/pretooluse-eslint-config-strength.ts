@@ -27,11 +27,9 @@ async function main() {
     process.exit(0)
   }
 
-  // Get old and new content — NFKC-normalize to catch homoglyph bypasses
-  const oldString = (input.tool_input?.old_string ?? "").normalize("NFKC")
-  const newString = (input.tool_input?.new_string ?? input.tool_input?.content ?? "").normalize(
-    "NFKC"
-  )
+  // NFKC normalization handled by fileEditHookInputSchema.transform()
+  const oldString = input.tool_input?.old_string ?? ""
+  const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
 
   // If no old_string (new file), allow it
   if (!oldString) {

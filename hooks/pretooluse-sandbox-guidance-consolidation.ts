@@ -11,9 +11,9 @@
  */
 
 import { denyPreToolUse, isFileEditTool } from "./hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+import { fileEditHookInputSchema } from "./schemas.ts"
 
-const input = toolHookInputSchema.parse(await Bun.stdin.json())
+const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
 // Only check Edit and Write tools
 if (!isFileEditTool(input.tool_name ?? "")) {
@@ -21,7 +21,7 @@ if (!isFileEditTool(input.tool_name ?? "")) {
 }
 
 // Skip validation for hook files that by design contain issue-guidance patterns
-const filePath = input.tool_input?.file_path as string | undefined
+const filePath = input.tool_input?.file_path
 if (
   filePath?.includes("pretooluse-sandbox-guidance-consolidation") ||
   filePath?.includes("stop-todo-tracker") ||
@@ -30,10 +30,8 @@ if (
   process.exit(0)
 }
 
-// NFKC-normalize to catch homoglyph bypasses
-const newContent: string = ((input.tool_input?.new_string as string | undefined) ?? "").normalize(
-  "NFKC"
-)
+// NFKC normalization handled by fileEditHookInputSchema.transform()
+const newContent: string = input.tool_input?.new_string ?? ""
 if (!newContent) {
   process.exit(0)
 }

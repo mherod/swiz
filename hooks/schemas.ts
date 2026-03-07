@@ -17,20 +17,34 @@ import { z } from "zod"
  * File-edit tool_input payload — used by hooks that inspect file content.
  * Covers Edit, Write, StrReplace and equivalent cross-agent tools.
  */
-export const fileEditHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  tool_name: z.string().optional(),
-  tool_input: z
-    .looseObject({
-      file_path: z.string().optional(),
-      old_string: z.string().optional(),
-      new_string: z.string().optional(),
-      content: z.string().optional(),
-    })
-    .optional(),
-  transcript_path: z.string().optional(),
-})
+/** NFKC-normalize a string field if present, preventing homoglyph bypasses. */
+function nfkc(s: string | undefined): string | undefined {
+  return s?.normalize("NFKC")
+}
+
+export const fileEditHookInputSchema = z
+  .looseObject({
+    cwd: z.string().optional(),
+    session_id: z.string().optional(),
+    tool_name: z.string().optional(),
+    tool_input: z
+      .looseObject({
+        file_path: z.string().optional(),
+        old_string: z.string().optional(),
+        new_string: z.string().optional(),
+        content: z.string().optional(),
+      })
+      .optional(),
+    transcript_path: z.string().optional(),
+  })
+  .transform((val) => {
+    if (val.tool_input) {
+      val.tool_input.old_string = nfkc(val.tool_input.old_string)
+      val.tool_input.new_string = nfkc(val.tool_input.new_string)
+      val.tool_input.content = nfkc(val.tool_input.content)
+    }
+    return val
+  })
 
 export type FileEditHookInput = z.infer<typeof fileEditHookInputSchema>
 

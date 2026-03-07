@@ -55,9 +55,8 @@ async function main() {
     process.exit(0)
   }
 
-  const raw = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
-  // NFKC-normalize to catch homoglyph bypasses (e.g., fullwidth ＠ → @)
-  const content = raw.normalize("NFKC")
+  // NFKC normalization handled by fileEditHookInputSchema.transform()
+  const content = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
 
   // Keywords split across arrays to avoid self-triggering when editing this hook.
   const kwIgnore = ["ts", "ignore"].join("-")

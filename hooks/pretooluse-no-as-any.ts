@@ -130,11 +130,9 @@ async function main() {
     process.exit(0)
   }
 
-  // NFKC-normalize to catch homoglyph bypasses (e.g., fullwidth ａｓ → as)
-  const oldString = (input.tool_input?.old_string ?? "").normalize("NFKC")
-  const newString = (input.tool_input?.new_string ?? input.tool_input?.content ?? "").normalize(
-    "NFKC"
-  )
+  // NFKC normalization handled by fileEditHookInputSchema.transform()
+  const oldString = input.tool_input?.old_string ?? ""
+  const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
 
   // If no old_string (new file), check if it has as any but don't block for new files
   // (they might be generated or have necessary escapes)

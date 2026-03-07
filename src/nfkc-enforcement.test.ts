@@ -1,7 +1,8 @@
 /**
  * Static analysis test: ensures all pretooluse hooks that read
- * `new_string`, `content`, or `old_string` from tool_input also
- * call `.normalize("NFKC")` on those values.
+ * `new_string`, `content`, or `old_string` from tool_input use
+ * `fileEditHookInputSchema` (which auto-normalizes with NFKC via
+ * its `.transform()`) or explicitly call `.normalize("NFKC")`.
  *
  * Hooks that only do word-counting or JSON.parse (where homoglyphs
  * break the format itself) can be explicitly exempted below.
@@ -24,7 +25,7 @@ const EXEMPT_HOOKS = new Set([
 const CONTENT_ACCESS_RE = /tool_input\?\.(new_string|content|old_string)/
 
 describe("NFKC normalization enforcement", () => {
-  test("all content-inspecting pretooluse hooks normalize with NFKC", async () => {
+  test("all content-inspecting pretooluse hooks use fileEditHookInputSchema or explicit NFKC", async () => {
     const files = await readdir(HOOKS_DIR)
     const hooks = files.filter(
       (f) => f.startsWith("pretooluse-") && f.endsWith(".ts") && !f.includes(".test.")
@@ -38,8 +39,12 @@ describe("NFKC normalization enforcement", () => {
       const src = await Bun.file(join(HOOKS_DIR, hook)).text()
       if (!CONTENT_ACCESS_RE.test(src)) continue
 
-      // Must have .normalize("NFKC") somewhere (Biome may split across lines)
-      if (!/\.normalize\(\s*["']NFKC["']\s*\)/.test(src)) {
+      // Option 1: Uses fileEditHookInputSchema (has NFKC transform built in)
+      const usesSchema = src.includes("fileEditHookInputSchema")
+      // Option 2: Explicit .normalize("NFKC") call (Biome may split across lines)
+      const usesExplicit = /\.normalize\(\s*["']NFKC["']\s*\)/.test(src)
+
+      if (!usesSchema && !usesExplicit) {
         violations.push(hook)
       }
     }
