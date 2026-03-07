@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "bun:test"
+import { describe, expect, it } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -312,11 +312,9 @@ describe("parseGitStatus() with malformed inputs", () => {
 // ─── extractToolNamesFromTranscript() edge cases ────────────────────────────
 
 describe("extractToolNamesFromTranscript() with malformed inputs", () => {
-  let tmpDir: string
-
-  beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "swiz-transcript-"))
-  })
+  async function makeTmpDir(): Promise<string> {
+    return mkdtemp(join(tmpdir(), "swiz-transcript-"))
+  }
 
   it("returns empty array for nonexistent file", async () => {
     const result = await extractToolNamesFromTranscript("/nonexistent/path/transcript.jsonl")
@@ -324,31 +322,35 @@ describe("extractToolNamesFromTranscript() with malformed inputs", () => {
   })
 
   it("returns empty array for empty file", async () => {
-    const filePath = join(tmpDir, "empty.jsonl")
+    const d = await makeTmpDir()
+    const filePath = join(d, "empty.jsonl")
     await writeFile(filePath, "")
     const result = await extractToolNamesFromTranscript(filePath)
     expect(result).toEqual([])
-    await rm(tmpDir, { recursive: true, force: true })
+    await rm(d, { recursive: true, force: true })
   })
 
   it("returns empty array for file with only whitespace", async () => {
-    const filePath = join(tmpDir, "whitespace.jsonl")
+    const d = await makeTmpDir()
+    const filePath = join(d, "whitespace.jsonl")
     await writeFile(filePath, "   \n\n   \n")
     const result = await extractToolNamesFromTranscript(filePath)
     expect(result).toEqual([])
-    await rm(tmpDir, { recursive: true, force: true })
+    await rm(d, { recursive: true, force: true })
   })
 
   it("returns empty array for file with invalid JSON lines", async () => {
-    const filePath = join(tmpDir, "bad.jsonl")
+    const d = await makeTmpDir()
+    const filePath = join(d, "bad.jsonl")
     await writeFile(filePath, "not json\nalso not json\n{broken")
     const result = await extractToolNamesFromTranscript(filePath)
     expect(result).toEqual([])
-    await rm(tmpDir, { recursive: true, force: true })
+    await rm(d, { recursive: true, force: true })
   })
 
   it("skips non-assistant entries", async () => {
-    const filePath = join(tmpDir, "user-only.jsonl")
+    const d = await makeTmpDir()
+    const filePath = join(d, "user-only.jsonl")
     const lines = [
       JSON.stringify({ type: "user", message: { content: "hello" } }),
       JSON.stringify({ type: "system", message: { content: "world" } }),
@@ -356,11 +358,12 @@ describe("extractToolNamesFromTranscript() with malformed inputs", () => {
     await writeFile(filePath, lines.join("\n"))
     const result = await extractToolNamesFromTranscript(filePath)
     expect(result).toEqual([])
-    await rm(tmpDir, { recursive: true, force: true })
+    await rm(d, { recursive: true, force: true })
   })
 
   it("extracts tool names from valid assistant entries", async () => {
-    const filePath = join(tmpDir, "valid.jsonl")
+    const d = await makeTmpDir()
+    const filePath = join(d, "valid.jsonl")
     const lines = [
       JSON.stringify({
         type: "assistant",
@@ -376,11 +379,12 @@ describe("extractToolNamesFromTranscript() with malformed inputs", () => {
     await writeFile(filePath, lines.join("\n"))
     const result = await extractToolNamesFromTranscript(filePath)
     expect(result).toEqual(["Read", "Edit"])
-    await rm(tmpDir, { recursive: true, force: true })
+    await rm(d, { recursive: true, force: true })
   })
 
   it("handles mixed valid and invalid lines", async () => {
-    const filePath = join(tmpDir, "mixed.jsonl")
+    const d = await makeTmpDir()
+    const filePath = join(d, "mixed.jsonl")
     const lines = [
       "not json",
       JSON.stringify({
@@ -400,11 +404,12 @@ describe("extractToolNamesFromTranscript() with malformed inputs", () => {
     await writeFile(filePath, lines.join("\n"))
     const result = await extractToolNamesFromTranscript(filePath)
     expect(result).toEqual(["Bash", "Grep"])
-    await rm(tmpDir, { recursive: true, force: true })
+    await rm(d, { recursive: true, force: true })
   })
 
   it("handles assistant entries with non-array content", async () => {
-    const filePath = join(tmpDir, "non-array.jsonl")
+    const d = await makeTmpDir()
+    const filePath = join(d, "non-array.jsonl")
     const lines = [
       JSON.stringify({ type: "assistant", message: { content: "just a string" } }),
       JSON.stringify({ type: "assistant", message: { content: 42 } }),
@@ -413,11 +418,12 @@ describe("extractToolNamesFromTranscript() with malformed inputs", () => {
     await writeFile(filePath, lines.join("\n"))
     const result = await extractToolNamesFromTranscript(filePath)
     expect(result).toEqual([])
-    await rm(tmpDir, { recursive: true, force: true })
+    await rm(d, { recursive: true, force: true })
   })
 
   it("handles tool_use blocks without a name field", async () => {
-    const filePath = join(tmpDir, "no-name.jsonl")
+    const d = await makeTmpDir()
+    const filePath = join(d, "no-name.jsonl")
     const lines = [
       JSON.stringify({
         type: "assistant",
@@ -434,7 +440,7 @@ describe("extractToolNamesFromTranscript() with malformed inputs", () => {
     const result = await extractToolNamesFromTranscript(filePath)
     // Empty string is falsy, so only "Valid" is collected
     expect(result).toEqual(["Valid"])
-    await rm(tmpDir, { recursive: true, force: true })
+    await rm(d, { recursive: true, force: true })
   })
 
   it("returns empty array for path with shell metacharacters", async () => {
@@ -443,9 +449,10 @@ describe("extractToolNamesFromTranscript() with malformed inputs", () => {
   })
 
   it("returns empty array for directory path instead of file", async () => {
-    const result = await extractToolNamesFromTranscript(tmpDir)
+    const d = await makeTmpDir()
+    const result = await extractToolNamesFromTranscript(d)
     expect(result).toEqual([])
-    await rm(tmpDir, { recursive: true, force: true })
+    await rm(d, { recursive: true, force: true })
   })
 })
 
@@ -1001,14 +1008,9 @@ describe("TEST_FILE_RE", () => {
 // ─── extractToolNamesFromTranscript() whitespace hardening ──────────────────
 
 describe("extractToolNamesFromTranscript() whitespace-only line filtering", () => {
-  let tmpDir: string
-
-  beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "swiz-whitespace-"))
-  })
-
   it("filters whitespace-only lines between valid JSONL entries", async () => {
-    const filePath = join(tmpDir, "whitespace-lines.jsonl")
+    const d = await mkdtemp(join(tmpdir(), "swiz-whitespace-"))
+    const filePath = join(d, "whitespace-lines.jsonl")
     const validEntry = JSON.stringify({
       type: "assistant",
       message: { content: [{ type: "tool_use", name: "Read" }] },
@@ -1017,7 +1019,7 @@ describe("extractToolNamesFromTranscript() whitespace-only line filtering", () =
     await writeFile(filePath, `${validEntry}\n   \t  \n${validEntry}\n`)
     const result = await extractToolNamesFromTranscript(filePath)
     expect(result).toEqual(["Read", "Read"])
-    await rm(tmpDir, { recursive: true, force: true })
+    await rm(d, { recursive: true, force: true })
   })
 })
 

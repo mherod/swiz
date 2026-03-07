@@ -1,10 +1,9 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { describe, expect, it } from "bun:test"
+import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { ideaCommand, parseIdeaArgs } from "./idea.ts"
+import { parseIdeaArgs } from "./idea.ts"
 
-const tempDirs: string[] = []
 const STRUCTURED_IDEA_FIXTURE = {
   title: "feat(project): add guided project kickoff",
   summary:
@@ -51,36 +50,27 @@ const STRUCTURED_IDEA_FIXTURE = {
   ],
 }
 
-const ENV_KEYS = [
-  "GEMINI_API_KEY",
-  "GEMINI_TEST_RESPONSE",
-  "GEMINI_TEST_CAPTURE_FILE",
-  "GEMINI_TEST_THROW",
-] as const
-
-type EnvKey = (typeof ENV_KEYS)[number]
-type EnvSnapshot = Partial<Record<EnvKey, string | undefined>>
-
-function snapshotEnv(): EnvSnapshot {
-  const snap: EnvSnapshot = {}
-  for (const key of ENV_KEYS) {
-    snap[key] = process.env[key]
-  }
-  return snap
-}
-
-function restoreEnv(snap: EnvSnapshot): void {
-  for (const key of ENV_KEYS) {
-    const value = snap[key]
-    if (value === undefined) delete process.env[key]
-    else process.env[key] = value
-  }
-}
+const INDEX_PATH = join(import.meta.dir, "..", "..", "index.ts")
 
 async function makeTempDir(prefix = "swiz-idea-test-"): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), prefix))
-  tempDirs.push(dir)
-  return dir
+  return mkdtemp(join(tmpdir(), prefix))
+}
+
+async function runIdea(
+  args: string[],
+  env: Record<string, string>
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const proc = Bun.spawn(["bun", INDEX_PATH, "idea", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, ...env },
+  })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  return { stdout, stderr, exitCode: proc.exitCode ?? 1 }
 }
 
 function runGit(dir: string, args: string[]): void {
@@ -130,27 +120,6 @@ describe("parseIdeaArgs", () => {
 })
 
 describe("ideaCommand", () => {
-  let envBefore: EnvSnapshot
-  let logOutput: string[]
-
-  beforeEach(() => {
-    envBefore = snapshotEnv()
-    logOutput = []
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logOutput.push(args.join(" "))
-    })
-  })
-
-  afterEach(async () => {
-    restoreEnv(envBefore)
-    vi.restoreAllMocks()
-    while (tempDirs.length > 0) {
-      const dir = tempDirs.pop()
-      if (!dir) continue
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
   it("uses README plus last 8 commit messages in the Gemini prompt", async () => {
     const dir = await makeTempDir()
     await initRepoWithCommits(dir)
@@ -160,18 +129,17 @@ describe("ideaCommand", () => {
     )
 
     const promptCapture = join(dir, "captured-prompt.txt")
-    process.env.GEMINI_API_KEY = "test-key"
-    process.env.GEMINI_TEST_RESPONSE = JSON.stringify(STRUCTURED_IDEA_FIXTURE)
-    process.env.GEMINI_TEST_CAPTURE_FILE = promptCapture
+    const result = await runIdea(["--dir", dir], {
+      GEMINI_API_KEY: "test-key",
+      GEMINI_TEST_RESPONSE: JSON.stringify(STRUCTURED_IDEA_FIXTURE),
+      GEMINI_TEST_CAPTURE_FILE: promptCapture,
+    })
 
-    await ideaCommand.run(["--dir", dir])
-
-    const output = logOutput.join("\n")
-    expect(output).toContain("Issue: feat(project): add guided project kickoff")
-    expect(output).toContain("## Implementation Tasks")
-    expect(output).toContain("## Acceptance Criteria")
-    expect(output).toContain("## Labels")
-    expect(output).toContain(
+    expect(result.stdout).toContain("Issue: feat(project): add guided project kickoff")
+    expect(result.stdout).toContain("## Implementation Tasks")
+    expect(result.stdout).toContain("## Acceptance Criteria")
+    expect(result.stdout).toContain("## Labels")
+    expect(result.stdout).toContain(
       "- [ ] Add a new kickoff command entry point in the CLI help and command registry."
     )
 
@@ -193,10 +161,13 @@ describe("ideaCommand", () => {
     const dir = await makeTempDir()
     await writeFile(join(dir, "README.md"), "# Demo\n")
 
-    delete process.env.GEMINI_API_KEY
-    delete process.env.GEMINI_TEST_RESPONSE
-    delete process.env.GEMINI_TEST_CAPTURE_FILE
+    const result = await runIdea(["--dir", dir], {
+      GEMINI_API_KEY: "",
+      GEMINI_TEST_RESPONSE: "",
+      GEMINI_TEST_CAPTURE_FILE: "",
+    })
 
-    await expect(ideaCommand.run(["--dir", dir])).rejects.toThrow("GEMINI_API_KEY")
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stderr).toContain("GEMINI_API_KEY")
   })
 })

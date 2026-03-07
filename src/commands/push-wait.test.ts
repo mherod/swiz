@@ -1,7 +1,8 @@
+import { describe, expect, it } from "bun:test"
+import { randomBytes } from "node:crypto"
 import { writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
 import {
   COOLDOWN_MS,
   getRemainingCooldownMs,
@@ -11,31 +12,13 @@ import {
 
 // ─── Helper ──────────────────────────────────────────────────────────────
 
-function tmpSentinel(suffix = ""): string {
-  return join(tmpdir(), `swiz-push-wait-test-${Date.now()}${suffix}.timestamp`)
+function uniqueSentinel(label = ""): string {
+  const id = randomBytes(8).toString("hex")
+  return join(tmpdir(), `swiz-push-wait-test-${id}${label}.timestamp`)
 }
 
 function writeSentinel(path: string, timestamp: number): void {
   writeFileSync(path, String(timestamp))
-}
-
-const sentinels: string[] = []
-afterEach(async () => {
-  for (const s of sentinels) {
-    try {
-      const f = Bun.file(s)
-      if (await f.exists()) await Bun.write(s, "")
-    } catch {
-      /* ignore */
-    }
-  }
-  sentinels.length = 0
-})
-
-function trackSentinel(suffix = ""): string {
-  const p = tmpSentinel(suffix)
-  sentinels.push(p)
-  return p
 }
 
 // ─── parsePushWaitArgs ───────────────────────────────────────────────────
@@ -116,37 +99,37 @@ describe("getRemainingCooldownMs", () => {
   })
 
   it("returns 0 when sentinel is empty", () => {
-    const p = trackSentinel("-empty")
+    const p = uniqueSentinel("-empty")
     writeFileSync(p, "")
     expect(getRemainingCooldownMs(p)).toBe(0)
   })
 
   it("returns 0 when sentinel contains non-numeric text", () => {
-    const p = trackSentinel("-garbage")
+    const p = uniqueSentinel("-garbage")
     writeFileSync(p, "not-a-number")
     expect(getRemainingCooldownMs(p)).toBe(0)
   })
 
   it("returns 0 when sentinel contains whitespace only", () => {
-    const p = trackSentinel("-ws")
+    const p = uniqueSentinel("-ws")
     writeFileSync(p, "   \n  ")
     expect(getRemainingCooldownMs(p)).toBe(0)
   })
 
   it("returns 0 when cooldown has fully expired", () => {
-    const p = trackSentinel("-expired")
+    const p = uniqueSentinel("-expired")
     writeSentinel(p, Date.now() - COOLDOWN_MS - 1000)
     expect(getRemainingCooldownMs(p)).toBe(0)
   })
 
   it("returns 0 when cooldown expired exactly", () => {
-    const p = trackSentinel("-exact")
+    const p = uniqueSentinel("-exact")
     writeSentinel(p, Date.now() - COOLDOWN_MS)
     expect(getRemainingCooldownMs(p)).toBe(0)
   })
 
   it("returns positive ms when cooldown is active", () => {
-    const p = trackSentinel("-active")
+    const p = uniqueSentinel("-active")
     writeSentinel(p, Date.now() - 10_000) // 10s ago, 50s remaining
     const remaining = getRemainingCooldownMs(p)
     expect(remaining).toBeGreaterThan(0)
@@ -154,20 +137,20 @@ describe("getRemainingCooldownMs", () => {
   })
 
   it("returns near-full cooldown for very recent push", () => {
-    const p = trackSentinel("-recent")
+    const p = uniqueSentinel("-recent")
     writeSentinel(p, Date.now() - 100) // 100ms ago
     const remaining = getRemainingCooldownMs(p)
     expect(remaining).toBeGreaterThan(COOLDOWN_MS - 1000) // at least 59s
   })
 
   it("returns 0 for timestamp far in the past", () => {
-    const p = trackSentinel("-ancient")
+    const p = uniqueSentinel("-ancient")
     writeSentinel(p, 0) // epoch
     expect(getRemainingCooldownMs(p)).toBe(0)
   })
 
   it("returns 0 for future timestamp (clock skew)", () => {
-    const p = trackSentinel("-future")
+    const p = uniqueSentinel("-future")
     // A future timestamp means elapsed is negative, so remaining > COOLDOWN_MS.
     // But since the push "hasn't happened yet" from our perspective, remaining
     // will exceed COOLDOWN_MS. This is the correct safe behaviour — it decays.
@@ -189,7 +172,7 @@ describe("waitForCooldown", () => {
   })
 
   it("resolves immediately when cooldown already expired", async () => {
-    const p = trackSentinel("-already-expired")
+    const p = uniqueSentinel("-already-expired")
     writeSentinel(p, Date.now() - COOLDOWN_MS - 5000)
     const result = await waitForCooldown({
       sentinelPath: p,
@@ -200,7 +183,7 @@ describe("waitForCooldown", () => {
   })
 
   it("resolves immediately for corrupt sentinel", async () => {
-    const p = trackSentinel("-corrupt")
+    const p = uniqueSentinel("-corrupt")
     writeFileSync(p, "garbage-data")
     const result = await waitForCooldown({
       sentinelPath: p,
@@ -211,7 +194,7 @@ describe("waitForCooldown", () => {
   })
 
   it("waits and resolves when cooldown expires during polling", async () => {
-    const p = trackSentinel("-wait-expire")
+    const p = uniqueSentinel("-wait-expire")
     // Set cooldown to expire in ~150ms (simulate short remaining cooldown)
     writeSentinel(p, Date.now() - COOLDOWN_MS + 150)
 
@@ -234,7 +217,7 @@ describe("waitForCooldown", () => {
   })
 
   it("reports remaining time on each poll", async () => {
-    const p = trackSentinel("-progress")
+    const p = uniqueSentinel("-progress")
     // ~300ms remaining
     writeSentinel(p, Date.now() - COOLDOWN_MS + 300)
 
@@ -254,7 +237,7 @@ describe("waitForCooldown", () => {
   })
 
   it("rejects when timeout expires before cooldown clears", async () => {
-    const p = trackSentinel("-timeout")
+    const p = uniqueSentinel("-timeout")
     // Cooldown has 50s remaining — timeout is only 0.1s
     writeSentinel(p, Date.now() - 10_000)
 
@@ -269,7 +252,7 @@ describe("waitForCooldown", () => {
   })
 
   it("timeout error includes remaining cooldown time", async () => {
-    const p = trackSentinel("-timeout-remaining")
+    const p = uniqueSentinel("-timeout-remaining")
     writeSentinel(p, Date.now() - 5_000) // 55s remaining
 
     try {
@@ -288,7 +271,7 @@ describe("waitForCooldown", () => {
   })
 
   it("handles sentinel deleted mid-wait", async () => {
-    const p = trackSentinel("-deleted-mid-wait")
+    const p = uniqueSentinel("-deleted-mid-wait")
     writeSentinel(p, Date.now() - 10_000) // 50s remaining
 
     // Delete the sentinel after 100ms to simulate external cleanup

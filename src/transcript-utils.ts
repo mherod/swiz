@@ -1,7 +1,6 @@
 import { open, readdir, readFile, stat } from "node:fs/promises"
 import { basename, join, resolve } from "node:path"
 import { projectKeyFromCwd } from "./project-key.ts"
-import { getProviderSessionDir } from "./provider-utils.ts"
 
 // ─── Content block types ─────────────────────────────────────────────────────
 
@@ -113,8 +112,8 @@ async function readGeminiSessionId(sessionPath: string): Promise<string | null> 
   return null
 }
 
-async function findGeminiSessions(targetDir: string): Promise<Session[]> {
-  const home = process.env.HOME ?? "~"
+async function findGeminiSessions(targetDir: string, home?: string): Promise<Session[]> {
+  home = home ?? process.env.HOME ?? "~"
   const geminiTmp = join(home, ".gemini", "tmp")
   const geminiHistory = join(home, ".gemini", "history")
   const target = resolve(targetDir)
@@ -249,8 +248,8 @@ async function readCodexSessionMeta(
   return { id, cwd }
 }
 
-async function findCodexSessions(targetDir: string): Promise<Session[]> {
-  const home = process.env.HOME ?? "~"
+async function findCodexSessions(targetDir: string, home?: string): Promise<Session[]> {
+  home = home ?? process.env.HOME ?? "~"
   const codexRoot = join(home, ".codex", "sessions")
   const targetPath = resolve(targetDir)
   const sessions: Session[] = []
@@ -344,8 +343,8 @@ async function antigravitySessionMatchesTarget(
   return false
 }
 
-async function findAntigravitySessions(targetDir: string): Promise<Session[]> {
-  const home = process.env.HOME ?? "~"
+async function findAntigravitySessions(targetDir: string, home?: string): Promise<Session[]> {
+  home = home ?? process.env.HOME ?? "~"
   const antigravityRoot = join(home, ".gemini", "antigravity")
   const conversationsDir = join(antigravityRoot, "conversations")
   const brainDir = join(antigravityRoot, "brain")
@@ -397,14 +396,18 @@ async function findAntigravitySessions(targetDir: string): Promise<Session[]> {
  * @param projectDir - Project directory (used to compute Claude projectKey)
  * @returns Aggregated sessions from all providers, sorted by mtime descending
  */
-export async function findAllProviderSessions(projectDir: string): Promise<Session[]> {
+export async function findAllProviderSessions(
+  projectDir: string,
+  home?: string
+): Promise<Session[]> {
   const targetDir = resolve(projectDir)
-  const claudeProjectDir = join(getProviderSessionDir("claude"), projectKeyFromCwd(targetDir))
+  const effectiveHome = home ?? process.env.HOME ?? "~"
+  const claudeProjectDir = join(effectiveHome, ".claude", "projects", projectKeyFromCwd(targetDir))
   const [claudeSessions, geminiSessions, antigravitySessions, codexSessions] = await Promise.all([
     findSessions(claudeProjectDir),
-    findGeminiSessions(targetDir),
-    findAntigravitySessions(targetDir),
-    findCodexSessions(targetDir),
+    findGeminiSessions(targetDir, effectiveHome),
+    findAntigravitySessions(targetDir, effectiveHome),
+    findCodexSessions(targetDir, effectiveHome),
   ])
 
   const merged: Session[] = [

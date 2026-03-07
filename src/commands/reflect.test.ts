@@ -1,11 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { describe, expect, it } from "bun:test"
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
-import { parseReflectArgs, reflectCommand } from "./reflect.ts"
+import { parseReflectArgs } from "./reflect.ts"
 
-const tempDirs: string[] = []
 const STRUCTURED_REFLECTION_FIXTURE = {
   mistakes: [
     {
@@ -37,37 +36,10 @@ const STRUCTURED_REFLECTION_FIXTURE = {
   ],
 }
 
-const ENV_KEYS = [
-  "GEMINI_API_KEY",
-  "GEMINI_TEST_RESPONSE",
-  "GEMINI_TEST_CAPTURE_FILE",
-  "GEMINI_TEST_THROW",
-  "HOME",
-] as const
-
-type EnvKey = (typeof ENV_KEYS)[number]
-type EnvSnapshot = Partial<Record<EnvKey, string | undefined>>
-
-function snapshotEnv(): EnvSnapshot {
-  const snap: EnvSnapshot = {}
-  for (const key of ENV_KEYS) {
-    snap[key] = process.env[key]
-  }
-  return snap
-}
-
-function restoreEnv(snap: EnvSnapshot): void {
-  for (const key of ENV_KEYS) {
-    const value = snap[key]
-    if (value === undefined) delete process.env[key]
-    else process.env[key] = value
-  }
-}
+const INDEX_PATH = join(import.meta.dir, "..", "..", "index.ts")
 
 async function makeTempDir(prefix = "swiz-reflect-test-"): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), prefix))
-  tempDirs.push(dir)
-  return dir
+  return mkdtemp(join(tmpdir(), prefix))
 }
 
 async function createClaudeTranscript(
@@ -110,6 +82,23 @@ async function createClaudeTranscript(
   ]
 
   await writeFile(join(transcriptDir, `${sessionId}.jsonl`), `${lines.join("\n")}\n`)
+}
+
+async function runReflect(
+  args: string[],
+  env: Record<string, string>
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const proc = Bun.spawn(["bun", INDEX_PATH, "reflect", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, ...env },
+  })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  return { stdout, stderr, exitCode: proc.exitCode ?? 1 }
 }
 
 describe("parseReflectArgs", () => {
@@ -156,51 +145,6 @@ describe("parseReflectArgs", () => {
 })
 
 describe("reflectCommand", () => {
-  let envBefore: EnvSnapshot
-  let logOutput: string[]
-  let stdoutOutput: string[]
-  let stderrOutput: string[]
-
-  beforeEach(() => {
-    envBefore = snapshotEnv()
-    logOutput = []
-    stdoutOutput = []
-    stderrOutput = []
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logOutput.push(args.join(" "))
-    })
-    vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
-      if (typeof chunk === "string") {
-        stdoutOutput.push(chunk)
-      } else if (chunk instanceof Uint8Array) {
-        stdoutOutput.push(new TextDecoder().decode(chunk))
-      } else if (chunk !== undefined && chunk !== null) {
-        stdoutOutput.push(String(chunk))
-      }
-      return true
-    }) as any)
-    vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
-      if (typeof chunk === "string") {
-        stderrOutput.push(chunk)
-      } else if (chunk instanceof Uint8Array) {
-        stderrOutput.push(new TextDecoder().decode(chunk))
-      } else if (chunk !== undefined && chunk !== null) {
-        stderrOutput.push(String(chunk))
-      }
-      return true
-    }) as any)
-  })
-
-  afterEach(async () => {
-    restoreEnv(envBefore)
-    vi.restoreAllMocks()
-    while (tempDirs.length > 0) {
-      const dir = tempDirs.pop()
-      if (!dir) continue
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
   it("uses the selected session transcript in the Gemini prompt", async () => {
     const home = await makeTempDir("swiz-reflect-home-")
     const projectDir = join(home, "workspace", "demo-proj")
@@ -209,18 +153,17 @@ describe("reflectCommand", () => {
     await createClaudeTranscript(home, projectDir, sessionId)
 
     const promptCapture = join(home, "captured-reflect-prompt.txt")
-    process.env.HOME = home
-    process.env.GEMINI_API_KEY = "test-key"
-    process.env.GEMINI_TEST_RESPONSE = JSON.stringify(STRUCTURED_REFLECTION_FIXTURE)
-    process.env.GEMINI_TEST_CAPTURE_FILE = promptCapture
+    const result = await runReflect(["3", "--dir", projectDir], {
+      HOME: home,
+      GEMINI_API_KEY: "test-key",
+      GEMINI_TEST_RESPONSE: JSON.stringify(STRUCTURED_REFLECTION_FIXTURE),
+      GEMINI_TEST_CAPTURE_FILE: promptCapture,
+    })
 
-    await reflectCommand.run(["3", "--dir", projectDir])
-
-    const output = logOutput.join("\n")
-    expect(output).toContain("1. **Skipped verification**:")
-    expect(output).toContain("2. **Wrong file target**:")
-    expect(output).toContain("3. **Ignored user correction**:")
-    expect(output).toContain(
+    expect(result.stdout).toContain("1. **Skipped verification**:")
+    expect(result.stdout).toContain("2. **Wrong file target**:")
+    expect(result.stdout).toContain("3. **Ignored user correction**:")
+    expect(result.stdout).toContain(
       "Run the failing tests and inspect the error output before editing code."
     )
 
@@ -232,8 +175,8 @@ describe("reflectCommand", () => {
     expect(prompt).toContain("Please run the failing tests before editing src/auth.ts.")
     expect(prompt).toContain("That skipped verification and targeted the wrong file.")
     expect(prompt).toContain("I can fix it faster by editing src/session.ts right now.")
-    expect(stderrOutput.join("")).toContain("Submitting prompt to model...")
-    expect(stderrOutput.join("")).toContain("Buffering streamed response:")
+    expect(result.stderr).toContain("Submitting prompt to model...")
+    expect(result.stderr).toContain("Buffering streamed response:")
   })
 
   it("prints the generated prompt and skips Gemini calls", async () => {
@@ -243,16 +186,14 @@ describe("reflectCommand", () => {
     await mkdir(projectDir, { recursive: true })
     await createClaudeTranscript(home, projectDir, sessionId)
 
-    process.env.HOME = home
-    delete process.env.GEMINI_API_KEY
-    process.env.GEMINI_TEST_THROW = "1"
+    const result = await runReflect(["2", "--dir", projectDir, "--print-prompt"], {
+      HOME: home,
+      GEMINI_TEST_THROW: "1",
+    })
 
-    await reflectCommand.run(["2", "--dir", projectDir, "--print-prompt"])
-
-    const output = logOutput.join("\n")
-    expect(output).toContain("Identify exactly 2 distinct mistakes")
-    expect(output).toContain("<conversation_transcript>")
-    expect(output).toContain("Please run the failing tests before editing src/auth.ts.")
+    expect(result.stdout).toContain("Identify exactly 2 distinct mistakes")
+    expect(result.stdout).toContain("<conversation_transcript>")
+    expect(result.stdout).toContain("Please run the failing tests before editing src/auth.ts.")
   })
 
   it("prints structured JSON with --json", async () => {
@@ -262,17 +203,16 @@ describe("reflectCommand", () => {
     await mkdir(projectDir, { recursive: true })
     await createClaudeTranscript(home, projectDir, sessionId)
 
-    process.env.HOME = home
-    process.env.GEMINI_API_KEY = "test-key"
-    process.env.GEMINI_TEST_RESPONSE = JSON.stringify(STRUCTURED_REFLECTION_FIXTURE)
+    const result = await runReflect(["3", "--dir", projectDir, "--json"], {
+      HOME: home,
+      GEMINI_API_KEY: "test-key",
+      GEMINI_TEST_RESPONSE: JSON.stringify(STRUCTURED_REFLECTION_FIXTURE),
+    })
 
-    await reflectCommand.run(["3", "--dir", projectDir, "--json"])
-
-    expect(logOutput.length).toBe(0)
-    const parsed = JSON.parse(stdoutOutput.join("")) as { mistakes?: Array<{ label?: string }> }
+    const parsed = JSON.parse(result.stdout) as { mistakes?: Array<{ label?: string }> }
     expect(parsed.mistakes?.length).toBe(3)
     expect(parsed.mistakes?.[0]?.label).toBe("Skipped verification")
-    expect(stderrOutput.join("")).toBe("")
+    expect(result.stderr).toBe("")
   })
 
   it("errors when no transcripts exist for the project", async () => {
@@ -280,11 +220,12 @@ describe("reflectCommand", () => {
     const projectDir = join(home, "workspace", "empty-proj")
     await mkdir(projectDir, { recursive: true })
 
-    process.env.HOME = home
-    process.env.GEMINI_API_KEY = "test-key"
+    const result = await runReflect(["--dir", projectDir], {
+      HOME: home,
+      GEMINI_API_KEY: "test-key",
+    })
 
-    await expect(reflectCommand.run(["--dir", projectDir])).rejects.toThrow(
-      `No transcripts found for: ${projectDir}`
-    )
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stderr).toContain(`No transcripts found for: ${projectDir}`)
   })
 })

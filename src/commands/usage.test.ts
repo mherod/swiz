@@ -1,10 +1,10 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { describe, expect, it } from "bun:test"
+import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { buildUsageReport, parseUsageArgs, usageCommand } from "./usage.ts"
+import { buildUsageReport, parseUsageArgs } from "./usage.ts"
 
-const tempDirs: string[] = []
+const INDEX_PATH = join(import.meta.dir, "..", "..", "index.ts")
 
 const FIXTURE = {
   numStartups: 12,
@@ -56,18 +56,24 @@ const FIXTURE = {
 }
 
 async function makeTempDir(prefix = "swiz-usage-test-"): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), prefix))
-  tempDirs.push(dir)
-  return dir
+  return mkdtemp(join(tmpdir(), prefix))
 }
 
-afterEach(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
+async function runUsage(
+  args: string[]
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const proc = Bun.spawn(["bun", INDEX_PATH, "usage", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: process.env,
+  })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  return { stdout, stderr, exitCode: proc.exitCode ?? 1 }
+}
 
 describe("parseUsageArgs", () => {
   it("uses defaults", () => {
@@ -112,31 +118,17 @@ describe("buildUsageReport", () => {
 })
 
 describe("usageCommand", () => {
-  let logOutput: string[]
-
-  beforeEach(() => {
-    logOutput = []
-    vi.spyOn(console, "log").mockImplementation((...args) => {
-      logOutput.push(args.join(" "))
-    })
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
   it("prints a human-readable summary", async () => {
     const dir = await makeTempDir()
     const filePath = join(dir, ".claude.json")
     await writeFile(filePath, JSON.stringify(FIXTURE))
 
-    await usageCommand.run(["--file", filePath, "--top", "2"])
+    const result = await runUsage(["--file", filePath, "--top", "2"])
 
-    const output = logOutput.join("\n")
-    expect(output).toContain("swiz usage")
-    expect(output).toContain("Top Skills")
-    expect(output).toContain("Model Usage")
-    expect(output).toContain("Totals")
+    expect(result.stdout).toContain("swiz usage")
+    expect(result.stdout).toContain("Top Skills")
+    expect(result.stdout).toContain("Model Usage")
+    expect(result.stdout).toContain("Totals")
   })
 
   it("prints JSON when --json is passed", async () => {
@@ -144,10 +136,9 @@ describe("usageCommand", () => {
     const filePath = join(dir, ".claude.json")
     await writeFile(filePath, JSON.stringify(FIXTURE))
 
-    await usageCommand.run(["--file", filePath, "--json"])
+    const result = await runUsage(["--file", filePath, "--json"])
 
-    expect(logOutput.length).toBe(1)
-    const parsed = JSON.parse(logOutput[0] ?? "{}") as {
+    const parsed = JSON.parse(result.stdout) as {
       projectCount?: number
       topSkills?: unknown[]
     }
@@ -155,10 +146,13 @@ describe("usageCommand", () => {
     expect(Array.isArray(parsed.topSkills)).toBe(true)
   })
 
-  it("throws when file does not exist", async () => {
+  it("errors when file does not exist", async () => {
     const dir = await makeTempDir()
     const filePath = join(dir, "missing.json")
 
-    await expect(usageCommand.run(["--file", filePath])).rejects.toThrow("not found")
+    const result = await runUsage(["--file", filePath])
+
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stderr).toContain("not found")
   })
 })
