@@ -151,6 +151,7 @@ alwaysApply: false
 - DO NOT add `Co-Authored-By: Claude` or other AI attribution in commits/PR descriptions.
 - DO NOT use destructive git commands: `git revert`, `git restore`, `git stash`, `git reset --hard`, `git checkout -- <file>`; use `git reflog` for recovery.
 ## Settings Configuration
+- **DO**: Use separate state files for mutable runtime data (e.g., `.swiz/context-stats.json`) to avoid polluting user-authored configuration files (e.g., `.swiz/config.json`). Runtime observations change frequently and should never mix with intentional user settings.
 - Use 3-tier setting resolution: `project > user > default`.
 - Track source per value, not per group (`memoryLineSource`, `memoryWordSource`).
 - Always show effective values, regardless of source tier.
