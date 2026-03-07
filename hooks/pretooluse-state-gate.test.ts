@@ -59,116 +59,33 @@ describe("pretooluse-state-gate", () => {
     })
   })
 
-  describe("in-development state (no blocks)", () => {
+  describe("developing state (no blocks)", () => {
     test("allows Bash", async () => {
       const dir = await makeTempDir()
-      await writeState(dir, "in-development")
+      await writeState(dir, "developing")
       const result = await runHook("Bash", { command: "echo hello", cwd: dir })
       expect(result.stdout).toBe("")
     })
 
     test("allows Edit", async () => {
       const dir = await makeTempDir()
-      await writeState(dir, "in-development")
+      await writeState(dir, "developing")
       const result = await runHook("Edit", { cwd: dir })
       expect(result.stdout).toBe("")
     })
   })
 
-  describe("released state (blocks code changes and shell)", () => {
-    test("blocks Bash", async () => {
+  describe("reviewing state (no blocks)", () => {
+    test("allows Bash", async () => {
       const dir = await makeTempDir()
-      await writeState(dir, "released")
-      const result = await runHook("Bash", { command: "echo hello", cwd: dir })
-      expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("released")
-    })
-
-    test("blocks Edit", async () => {
-      const dir = await makeTempDir()
-      await writeState(dir, "released")
-      const result = await runHook("Edit", { cwd: dir })
-      expect(result.decision).toBe("deny")
-      expect(result.reason).toContain("released")
-    })
-
-    test("blocks Write", async () => {
-      const dir = await makeTempDir()
-      await writeState(dir, "released")
-      const result = await runHook("Write", { cwd: dir })
-      expect(result.decision).toBe("deny")
-    })
-
-    test("allows Read (not a blocked category)", async () => {
-      const dir = await makeTempDir()
-      await writeState(dir, "released")
-      const result = await runHook("Read", { cwd: dir })
-      expect(result.stdout).toBe("")
-    })
-
-    test("allows Grep (not a blocked category)", async () => {
-      const dir = await makeTempDir()
-      await writeState(dir, "released")
-      const result = await runHook("Grep", { cwd: dir })
-      expect(result.stdout).toBe("")
-    })
-
-    test("allows TaskCreate (not a blocked category)", async () => {
-      const dir = await makeTempDir()
-      await writeState(dir, "released")
-      const result = await runHook("TaskCreate", { cwd: dir })
-      expect(result.stdout).toBe("")
-    })
-  })
-
-  describe("swiz command exemption (deadlock prevention)", () => {
-    test("allows swiz state set in released state", async () => {
-      const dir = await makeTempDir()
-      await writeState(dir, "released")
-      const result = await runHook("Bash", { command: "swiz state set in-development", cwd: dir })
-      expect(result.stdout).toBe("")
-    })
-
-    test("allows swiz tasks in released state", async () => {
-      const dir = await makeTempDir()
-      await writeState(dir, "released")
-      const result = await runHook("Bash", { command: "swiz tasks complete-all", cwd: dir })
-      expect(result.stdout).toBe("")
-    })
-
-    test("allows swiz status in released state", async () => {
-      const dir = await makeTempDir()
-      await writeState(dir, "released")
-      const result = await runHook("Bash", { command: "swiz status", cwd: dir })
-      expect(result.stdout).toBe("")
-    })
-
-    test("still blocks non-swiz Bash in released state", async () => {
-      const dir = await makeTempDir()
-      await writeState(dir, "released")
-      const result = await runHook("Bash", { command: "git push origin main", cwd: dir })
-      expect(result.decision).toBe("deny")
-    })
-
-    test("still blocks Edit in released state (not a shell tool)", async () => {
-      const dir = await makeTempDir()
-      await writeState(dir, "released")
-      const result = await runHook("Edit", { cwd: dir })
-      expect(result.decision).toBe("deny")
-    })
-  })
-
-  describe("paused state (no blocks defined)", () => {
-    test("allows Bash in paused state", async () => {
-      const dir = await makeTempDir()
-      await writeState(dir, "paused")
+      await writeState(dir, "reviewing")
       const result = await runHook("Bash", { command: "echo hello", cwd: dir })
       expect(result.stdout).toBe("")
     })
 
-    test("allows Edit in paused state", async () => {
+    test("allows Edit", async () => {
       const dir = await makeTempDir()
-      await writeState(dir, "paused")
+      await writeState(dir, "reviewing")
       const result = await runHook("Edit", { cwd: dir })
       expect(result.stdout).toBe("")
     })
