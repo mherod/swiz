@@ -83,6 +83,7 @@ alwaysApply: false
 - Call task tools (`TaskUpdate`, `TaskCreate`, `TaskList`, `TaskGet`) regularly: at least every 10 calls; staleness gate triggers at 20.
 - During multi-file work, call `TaskUpdate` after each file; add updates at least every 3 edits.
 - Create tasks before non-exempt Bash.
+- **DON'T**: Complete your last in-progress task if you still need to run shell commands (e.g., push verification). Either create the next task before completing the current one, or defer completion until all shell work is finished. `pretooluse-require-tasks` blocks Bash when zero incomplete tasks exist.
 - Exempt Bash categories: `ls`, `rg`, `grep`; read-only `git` subcommands (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`, etc.); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - `find` is not exempt; use `rg` or Glob for discovery.
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
