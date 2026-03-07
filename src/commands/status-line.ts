@@ -447,9 +447,11 @@ export const statusLineCommand: Command = {
     const ctxColor = colorForPct(ctxPct)
     const tokenStr = ctxTokens > 0 ? ` ${DIM}${formatTokens(ctxTokens)}${R}` : ""
     const ctxStats = updateContextStats(cwd, ctxPct)
+    const rangeSpread = ctxStats ? ctxStats.maxPct - ctxStats.minPct : 0
+    const rangeWarn = rangeSpread > 0 && rangeSpread < 40 ? "⚠️ " : ""
     const rangeSeg =
       ctxStats && ctxStats.minPct !== ctxStats.maxPct
-        ? ` ${DIM}(${ctxStats.minPct.toFixed(0)}–${ctxStats.maxPct.toFixed(0)}%)${R}`
+        ? ` ${DIM}${rangeWarn}(${ctxStats.minPct.toFixed(0)}–${ctxStats.maxPct.toFixed(0)}%)${R}`
         : ""
     const ctxSeg = `${ctxBar}${ctxColor}${ctxPct.toFixed(0)}%${R}${tokenStr}${rangeSeg}`
 
