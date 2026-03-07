@@ -54,9 +54,11 @@ describe("manifest.ts", () => {
     it("stop event hooks appear in correct order", () => {
       const stopGroup = manifest.find((g) => g.event === "stop")
       const files = stopGroup?.hooks.map((h) => h.file) || []
-      // First hooks should be security/validation related
-      expect(files[0]).toBe("stop-secret-scanner.ts")
-      expect(files[1]).toBe("stop-debug-statements.ts")
+      // Task completion auditor runs first so incomplete tasks block before git checks
+      expect(files[0]).toBe("stop-completion-auditor.ts")
+      // Security hooks follow immediately after
+      expect(files[1]).toBe("stop-secret-scanner.ts")
+      expect(files[2]).toBe("stop-debug-statements.ts")
     })
   })
 

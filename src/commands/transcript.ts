@@ -1,6 +1,7 @@
 import { join, resolve } from "node:path"
 import { promptAgent } from "../agent.ts"
 import { AGENTS, type AgentDef } from "../agents.ts"
+import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
 import { getTranscriptProvidersForAgent, type TranscriptProviderId } from "../provider-adapters.ts"
 import {
@@ -46,16 +47,6 @@ function formatToolUse(name: string, input: Record<string, unknown>): string {
   if (firstStr) return `${name}(${String(firstStr).slice(0, 70)})`
   return name
 }
-
-// ─── ANSI helpers ────────────────────────────────────────────────────────────
-
-const BOLD = "\x1b[1m"
-const DIM = "\x1b[2m"
-const CYAN = "\x1b[36m"
-const YELLOW = "\x1b[33m"
-const GREEN = "\x1b[32m"
-const RED = "\x1b[31m"
-const RESET = "\x1b[0m"
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
 

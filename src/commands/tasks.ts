@@ -1,8 +1,17 @@
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { BOLD, DIM, RESET } from "../ansi.ts"
 import { debugLog } from "../debug.ts"
+import { formatDuration } from "../format-duration.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { getProviderTaskRoots } from "../provider-adapters.ts"
+import {
+  PROJECT_STATES,
+  type ProjectState,
+  readProjectState,
+  STATE_TRANSITIONS,
+  writeProjectState,
+} from "../settings.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 import type { Command } from "../types.ts"
 
@@ -48,12 +57,6 @@ interface AuditEntry {
   subject?: string
 }
 
-// ─── ANSI ───────────────────────────────────────────────────────────────────
-
-const RESET = "\x1b[0m"
-const BOLD = "\x1b[1m"
-const DIM = "\x1b[2m"
-
 const STATUS_STYLE: Record<Task["status"], { emoji: string; color: string }> = {
   pending: { emoji: "⏳", color: "\x1b[33m" },
   in_progress: { emoji: "🔄", color: "\x1b[36m" },
@@ -86,18 +89,6 @@ function timeAgo(date: Date): string {
   const days = Math.floor(ms / 86400000)
   if (days < 7) return `${days}d ago`
   return date.toLocaleDateString()
-}
-
-function formatElapsed(ms: number): string {
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
-  const mins = Math.floor(ms / 60_000)
-  if (mins < 60) return `${mins}m`
-  const hours = Math.floor(mins / 60)
-  const remainMins = mins % 60
-  if (hours < 24) return remainMins > 0 ? `${hours}h ${remainMins}m` : `${hours}h`
-  const days = Math.floor(hours / 24)
-  const remainHours = hours % 24
-  return remainHours > 0 ? `${days}d ${remainHours}h` : `${days}d`
 }
 
 // ─── Session-scoped task IDs ─────────────────────────────────────────────────
@@ -435,9 +426,9 @@ function renderTask(task: Task, sessionTag?: string, dateFormat: DateFormat = "r
   // Show elapsed time for in_progress (live) and completed tasks
   if (task.status === "in_progress" && task.statusChangedAt) {
     const live = (task.elapsedMs ?? 0) + (Date.now() - new Date(task.statusChangedAt).getTime())
-    console.log(`     ${DIM}⏱  ${formatElapsed(Math.max(0, live))} elapsed${RESET}`)
+    console.log(`     ${DIM}⏱  ${formatDuration(Math.max(0, live))} elapsed${RESET}`)
   } else if ((task.elapsedMs ?? 0) > 0) {
-    console.log(`     ${DIM}⏱  ${formatElapsed(task.elapsedMs!)} elapsed${RESET}`)
+    console.log(`     ${DIM}⏱  ${formatDuration(task.elapsedMs!)} elapsed${RESET}`)
   }
   if (task.completionEvidence)
     console.log(`     ${DIM}✓ Evidence: ${task.completionEvidence}${RESET}`)
@@ -659,6 +650,27 @@ async function completeAll(filterCwd?: string, evidence?: string) {
   }
 }
 
+// ─── State update ────────────────────────────────────────────────────────────
+
+async function applyStateUpdate(targetState: string, cwd: string): Promise<void> {
+  if (!PROJECT_STATES.includes(targetState as ProjectState)) {
+    throw new Error(`Invalid state: "${targetState}"\nValid states: ${PROJECT_STATES.join(", ")}`)
+  }
+  const state = targetState as ProjectState
+  const current = await readProjectState(cwd)
+  if (current) {
+    const allowed = STATE_TRANSITIONS[current]
+    if (!allowed.includes(state) && current !== state) {
+      throw new Error(
+        `Invalid transition: ${current} → ${state}\nAllowed from ${current}: ${allowed.join(", ")}`
+      )
+    }
+  }
+  await writeProjectState(cwd, state)
+  const from = current && current !== state ? `${current} → ` : ""
+  console.log(`  project state: ${from}${state}`)
+}
+
 // ─── Verification & Evidence ─────────────────────────────────────────────────
 
 const EVIDENCE_PREFIXES = ["commit:", "pr:", "file:", "test:", "note:"]
@@ -823,7 +835,7 @@ export const tasksCommand: Command = {
   name: "tasks",
   description: "View and manage agent tasks",
   usage:
-    "swiz tasks [create|complete|evidence|status|complete-all] [--session <id>] [--all-projects] [--all-sessions] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>]",
+    "swiz tasks [create|complete|evidence|status|complete-all] [--session <id>] [--all-projects] [--all-sessions] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
   options: [
     { flags: "create <subject> <desc>", description: "Create a new task in the current session" },
     {
@@ -856,6 +868,10 @@ export const tasksCommand: Command = {
     {
       flags: "--verify <text>",
       description: "Verify task subject starts with this text (safety check)",
+    },
+    {
+      flags: "--state <state>",
+      description: `Also update project state (${PROJECT_STATES.join("|")})`,
     },
   ],
   async run(args) {
@@ -924,17 +940,22 @@ export const tasksCommand: Command = {
         if (!subject || !description) {
           throw new Error('Usage: swiz tasks create "<subject>" "<description>"')
         }
+        const stateFlag = extractFlag(rest, "--state")
         const sessionId = await resolveSession(rest.slice(2))
         await createTask(sessionId, subject, description)
+        if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
         break
       }
 
       case "complete": {
         const taskId = rest[0]
         if (!taskId) {
-          throw new Error("Usage: swiz tasks complete <task-id> --evidence TEXT [--verify TEXT]")
+          throw new Error(
+            "Usage: swiz tasks complete <task-id> --evidence TEXT [--verify TEXT] [--state <state>]"
+          )
         }
         const evidence = extractFlag(rest, "--evidence")
+        const stateFlag = extractFlag(rest, "--state")
         let verify = extractFlag(rest, "--verify")
         const sessionId = await resolveSession(rest.slice(1))
 
@@ -945,6 +966,7 @@ export const tasksCommand: Command = {
         }
 
         await updateStatus(sessionId, taskId, "completed", evidence, verify, filterCwd)
+        if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
         break
       }
 
@@ -968,13 +990,15 @@ export const tasksCommand: Command = {
         const valid: Task["status"][] = ["pending", "in_progress", "completed", "cancelled"]
         if (!taskId || !newStatus || !valid.includes(newStatus)) {
           throw new Error(
-            `Usage: swiz tasks status <task-id> <${valid.join("|")}> [--evidence TEXT] [--verify TEXT]`
+            `Usage: swiz tasks status <task-id> <${valid.join("|")}> [--evidence TEXT] [--verify TEXT] [--state <state>]`
           )
         }
         const evidence = extractFlag(rest, "--evidence")
         const verify = extractFlag(rest, "--verify")
+        const stateFlag = extractFlag(rest, "--state")
         const sessionId = await resolveSession(rest.slice(2))
         await updateStatus(sessionId, taskId, newStatus, evidence, verify, filterCwd)
+        if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
         break
       }
 

@@ -1,4 +1,5 @@
 import { resolve } from "node:path"
+import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import {
   DEFAULT_MEMORY_WORD_THRESHOLD,
   readProjectSettings,
@@ -6,14 +7,6 @@ import {
   resolveMemoryThresholds,
 } from "../settings.ts"
 import type { Command } from "../types.ts"
-
-const BOLD = "\x1b[1m"
-const DIM = "\x1b[2m"
-const GREEN = "\x1b[32m"
-const YELLOW = "\x1b[33m"
-const RED = "\x1b[31m"
-const CYAN = "\x1b[36m"
-const RESET = "\x1b[0m"
 
 // ─── Line classification ─────────────────────────────────────────────────────
 

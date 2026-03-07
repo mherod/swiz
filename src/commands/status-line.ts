@@ -23,10 +23,7 @@ interface StatusLineInput {
   vim?: { mode?: string }
 }
 
-// ANSI helpers
-const R = "\x1b[0m"
-const DIM = "\x1b[2m"
-const BOLD = "\x1b[1m"
+import { BOLD, DIM, RESET as R } from "../ansi.ts"
 
 // 256-color foreground: \x1b[38;5;Nm
 const fg256 = (n: number) => `\x1b[38;5;${n}m`

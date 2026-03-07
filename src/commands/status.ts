@@ -8,13 +8,7 @@ import type { Command } from "../types.ts"
 const SWIZ_ROOT = dirname(Bun.main)
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
 
-const BOLD = "\x1b[1m"
-const DIM = "\x1b[2m"
-const GREEN = "\x1b[32m"
-const RED = "\x1b[31m"
-const YELLOW = "\x1b[33m"
-const CYAN = "\x1b[36m"
-const RESET = "\x1b[0m"
+import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 
 function isSwizManaged(cmd: string): boolean {
   return (

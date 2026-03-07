@@ -4,6 +4,7 @@
  * Extracted from src/commands/dispatch.ts (issue #84).
  */
 
+import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { evalCondition, type HookGroup } from "../manifest.ts"
 import {
   extractAllowReason,
@@ -216,13 +217,6 @@ export async function replayContext(
 }
 
 // ─── Trace formatting ───────────────────────────────────────────────────────
-
-const BOLD = "\x1b[1m"
-const DIM = "\x1b[2m"
-const GREEN = "\x1b[32m"
-const RED = "\x1b[31m"
-const YELLOW = "\x1b[33m"
-const RESET = "\x1b[0m"
 
 export function formatTrace(
   event: string,

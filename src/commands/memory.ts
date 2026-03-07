@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs"
 import { resolve } from "node:path"
 import { formatActionPlan } from "../../hooks/hook-utils.ts"
 import { AGENTS, type AgentDef } from "../agents.ts"
+import { BOLD, CYAN, DIM, GREEN, RESET, YELLOW } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
 import {
   compactionChecklistSteps,
@@ -17,13 +18,6 @@ import {
 } from "../settings.ts"
 import { skillAdvice } from "../skill-utils.ts"
 import type { Command } from "../types.ts"
-
-const BOLD = "\x1b[1m"
-const DIM = "\x1b[2m"
-const GREEN = "\x1b[32m"
-const YELLOW = "\x1b[33m"
-const CYAN = "\x1b[36m"
-const RESET = "\x1b[0m"
 
 // ─── Agent memory hierarchy definitions ─────────────────────────────────────
 

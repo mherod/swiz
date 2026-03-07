@@ -8,14 +8,7 @@ import type { Command } from "../types.ts"
 const SWIZ_ROOT = dirname(Bun.main)
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
 
-// ─── ANSI ────────────────────────────────────────────────────────────────────
-
-const RED = "\x1b[31m"
-const GREEN = "\x1b[32m"
-const DIM = "\x1b[2m"
-const CYAN = "\x1b[36m"
-const RESET = "\x1b[0m"
-const BOLD = "\x1b[1m"
+import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 
 // ─── Config generators ──────────────────────────────────────────────────────
 // manifest and DISPATCH_TIMEOUTS imported from ../manifest.ts
@@ -345,7 +338,6 @@ function collectCommands(hooks: Record<string, unknown>): Set<string> {
 
 async function installAgent(agent: AgentDef, dryRun: boolean) {
   if (!agent.hooksConfigurable) {
-    const YELLOW = "\x1b[33m"
     console.log(`  ${BOLD}${agent.name}${RESET} → ${YELLOW}hooks not yet user-configurable${RESET}`)
     console.log(`  ${DIM}${agent.name} has hooks infrastructure (AfterAgent, AfterToolUse) but no`)
     console.log(
@@ -400,7 +392,6 @@ async function installAgent(agent: AgentDef, dryRun: boolean) {
       console.log()
     }
     if (legacyCmds.length) {
-      const YELLOW = "\x1b[33m"
       console.log(`    ${YELLOW}↻ ${legacyCmds.length} legacy hook(s) replaced by swiz:${RESET}`)
       for (const c of legacyCmds) console.log(`      ${YELLOW}↻ ${c}${RESET}`)
       console.log()
@@ -430,7 +421,6 @@ async function installAgent(agent: AgentDef, dryRun: boolean) {
   if (persisted) {
     console.log(`    ✓ written (backup at ${agent.settingsPath}.bak)\n`)
   } else {
-    const YELLOW = "\x1b[33m"
     console.log(`    ✓ written, but ${YELLOW}reverted by running ${agent.name} process${RESET}`)
     console.log(
       `    ${DIM}Close all ${agent.name} sessions first, then re-run swiz install.${RESET}\n`
@@ -574,7 +564,6 @@ export const installCommand: Command = {
           return
         }
 
-        const YELLOW = "\x1b[33m"
         console.log(`  Plugins:`)
         for (const result of pluginResults) {
           if (result.errorCode) {

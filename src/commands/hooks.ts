@@ -1,5 +1,6 @@
 import { join } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
+import { CYAN as CYAN_H, DIM, RESET as RST } from "../ansi.ts"
 import { manifest } from "../manifest.ts"
 import { loadAllPlugins, pluginResultsToJson } from "../plugins.ts"
 import { readProjectSettings, readSwizSettings, resolveProjectHooks } from "../settings.ts"
@@ -217,10 +218,6 @@ async function showScript(allSettings: LoadedSettings[], scriptQuery: string) {
 }
 
 // ─── Source view ─────────────────────────────────────────────────────────────
-
-const DIM = "\x1b[2m"
-const CYAN_H = "\x1b[36m"
-const RST = "\x1b[0m"
 
 async function showSources(jsonOutput = false) {
   const cwd = process.cwd()

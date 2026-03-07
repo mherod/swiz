@@ -1,9 +1,6 @@
+import { BOLD, DIM, RESET } from "../ansi.ts"
 import { findAllProviderSessions } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
-
-const BOLD = "\x1b[1m"
-const DIM = "\x1b[2m"
-const RESET = "\x1b[0m"
 
 export const sessionCommand: Command = {
   name: "session",

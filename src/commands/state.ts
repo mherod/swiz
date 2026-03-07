@@ -1,3 +1,5 @@
+import { DIM, RESET } from "../ansi.ts"
+import { formatDuration } from "../format-duration.ts"
 import {
   PROJECT_STATES,
   type ProjectState,
@@ -9,21 +11,6 @@ import {
 } from "../settings.ts"
 import { evaluateTransition, STATE_METADATA } from "../state-machine.ts"
 import type { Command } from "../types.ts"
-
-const DIM = "\x1b[2m"
-const RESET = "\x1b[0m"
-
-function formatDuration(ms: number): string {
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
-  const mins = Math.floor(ms / 60_000)
-  if (mins < 60) return `${mins}m`
-  const hours = Math.floor(mins / 60)
-  const remainMins = mins % 60
-  if (hours < 24) return remainMins > 0 ? `${hours}h ${remainMins}m` : `${hours}h`
-  const days = Math.floor(hours / 24)
-  const remainHours = hours % 24
-  return remainHours > 0 ? `${days}d ${remainHours}h` : `${days}d`
-}
 
 function computeStateTotals(history: StateHistoryEntry[]): Map<string, number> {
   const totals = new Map<string, number>()

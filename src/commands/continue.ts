@@ -1,5 +1,6 @@
 import { resolve } from "node:path"
 import { detectAgentCli, promptAgent } from "../agent.ts"
+import { DIM, RESET } from "../ansi.ts"
 import {
   extractPlainTurns,
   findAllProviderSessions,
@@ -9,9 +10,6 @@ import {
   type Session,
 } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
-
-const DIM = "\x1b[2m"
-const RESET = "\x1b[0m"
 
 // ─── Next-step suggestion ─────────────────────────────────────────────────────
 

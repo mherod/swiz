@@ -5,11 +5,7 @@ import type { Command } from "../types.ts"
 const SWIZ_ROOT = dirname(Bun.main)
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
 
-const BOLD = "\x1b[1m"
-const DIM = "\x1b[2m"
-const RED = "\x1b[31m"
-const GREEN = "\x1b[32m"
-const RESET = "\x1b[0m"
+import { BOLD, DIM, GREEN, RED, RESET } from "../ansi.ts"
 
 function removeSwizHooks(obj: unknown): unknown {
   if (Array.isArray(obj)) {

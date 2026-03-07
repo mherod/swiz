@@ -89,13 +89,7 @@ export async function decodeProjectPath(encodedName: string, homeDir = HOME): Pr
 // Matches standard UUID v4 — session dirs only; named dirs (memory/, etc.) never match
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// ─── ANSI ────────────────────────────────────────────────────────────────────
-
-const RESET = "\x1b[0m"
-const BOLD = "\x1b[1m"
-const DIM = "\x1b[2m"
-const GREEN = "\x1b[32m"
-const YELLOW = "\x1b[33m"
+import { BOLD, DIM, GREEN, RESET, YELLOW } from "../ansi.ts"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
