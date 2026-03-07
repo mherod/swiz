@@ -11,8 +11,8 @@ import {
   skillAdvice,
 } from "./hook-utils.ts"
 
-const EXCLUDE_PATH_RE = /node_modules|\.claude\/hooks\/|^hooks\/|__tests__|\.test\.|\.spec\./
-const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/
+export const EXCLUDE_PATH_RE = /node_modules|\.claude\/hooks\/|^hooks\/|__tests__|\.test\.|\.spec\./
+export const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/
 const TODO_RE = /\b(TODO|FIXME|HACK|XXX|WORKAROUND)\b/i
 const COMMENT_RE = /(\/[/*]|#\s)/
 const REGEX_LITERAL_RE = /^\s*\/[^/]/ // line content starts with regex literal
@@ -76,4 +76,4 @@ async function main(): Promise<void> {
   blockStop(reason, { includeUpdateMemoryAdvice: false })
 }
 
-main()
+if (import.meta.main) main()

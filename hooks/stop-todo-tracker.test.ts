@@ -1,11 +1,9 @@
 import { describe, expect, test } from "bun:test"
+import { SOURCE_EXT_RE } from "./hook-utils.ts"
+import { EXCLUDE_PATH_RE, GENERATED_FILE_RE } from "./stop-todo-tracker.ts"
 
 // Test the GENERATED_FILE_RE and EXCLUDE_PATH_RE exclusion logic in isolation,
-// mirroring the filter applied in stop-todo-tracker.ts.
-
-const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs|py|rb|go|java|kt|swift)$/
-const EXCLUDE_PATH_RE = /node_modules|\.claude\/hooks\/|^hooks\/|__tests__|\.test\.|\.spec\./
-const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/
+// using the canonical exports from stop-todo-tracker.ts and hook-utils.ts.
 
 function isScanned(filePath: string): boolean {
   return (
