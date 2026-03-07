@@ -7,9 +7,9 @@
   },
   "scripts": {
     "start": "bun run index.ts",
-    "test": "bun test",
+    "test": "bun test --concurrent --timeout=10000",
     "test:vitest": "vitest",
-    "test:bun": "bun test",
+    "test:bun": "bun test --concurrent --timeout=10000",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome format --write .",

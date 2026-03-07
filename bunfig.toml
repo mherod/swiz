@@ -1,0 +1,6 @@
+# Bun test configuration
+# Note: Global test timeout must be passed via CLI flag: bun test --timeout=10000
+# The doctor --fix test takes ~5.25 seconds (file I/O + spawning bun process)
+# bunfig.toml test section does not support timeout configuration
+[packages]
+# Dependencies configuration if needed
