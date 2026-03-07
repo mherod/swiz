@@ -1,6 +1,8 @@
+import { readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
+import { readStateData, STATE_TRANSITIONS, TERMINAL_STATES } from "../settings.ts"
 import type { Command } from "../types.ts"
 
 const SWIZ_ROOT = dirname(Bun.main)
@@ -139,11 +141,216 @@ async function checkAgent(agent: AgentDef) {
   console.log()
 }
 
+// ─── Project Health Panel ─────────────────────────────────────────────────────
+
+interface ProjectHealth {
+  state: string | null
+  isTerminal: boolean
+  allowedTransitions: string[]
+  branch: string | null
+  uncommittedFiles: number
+  aheadBehind: { ahead: number; behind: number } | null
+  openTasks: number | null
+  ciStatus: string | null
+  ciConclusion: string | null
+}
+
+async function spawnLine(cmd: string[]): Promise<string> {
+  const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" })
+  const out = await new Response(proc.stdout).text()
+  await proc.exited
+  return out.trim()
+}
+
+async function getOpenTaskCount(cwd: string): Promise<number | null> {
+  try {
+    const home = process.env.HOME ?? "~"
+    const tasksRoot = join(home, ".claude", "tasks")
+    const projectsRoot = join(home, ".claude", "projects")
+    const { projectKeyFromCwd } = await import("../project-key.ts")
+    const key = projectKeyFromCwd(cwd)
+    const sessionIdsPath = join(projectsRoot, key)
+    let sessionIds: string[] = []
+    try {
+      sessionIds = await readdir(sessionIdsPath)
+    } catch {
+      return null
+    }
+    let open = 0
+    for (const sessionId of sessionIds) {
+      const sessionDir = join(tasksRoot, sessionId)
+      let files: string[]
+      try {
+        files = await readdir(sessionDir)
+      } catch {
+        continue
+      }
+      for (const file of files) {
+        if (!file.endsWith(".json") || file.startsWith(".")) continue
+        try {
+          const task = (await Bun.file(join(sessionDir, file)).json()) as {
+            status?: string
+          }
+          if (task.status === "pending" || task.status === "in_progress") open++
+        } catch {}
+      }
+    }
+    return open
+  } catch {
+    return null
+  }
+}
+
+async function getProjectHealth(cwd: string): Promise<ProjectHealth> {
+  const [stateData, branch, statusOut, aheadBehind] = await Promise.all([
+    readStateData(cwd).catch(() => null),
+    spawnLine(["git", "-C", cwd, "branch", "--show-current"]).catch(() => null),
+    spawnLine(["git", "-C", cwd, "status", "--porcelain"]).catch(() => null),
+    spawnLine([
+      "git",
+      "-C",
+      cwd,
+      "rev-list",
+      "--left-right",
+      "--count",
+      "@{upstream}...HEAD",
+    ]).catch(() => null),
+  ])
+
+  const uncommittedFiles = statusOut ? statusOut.split("\n").filter(Boolean).length : 0
+  let ahead = 0
+  let behind = 0
+  let aheadBehindResult: { ahead: number; behind: number } | null = null
+  if (aheadBehind) {
+    const parts = aheadBehind.split(/\s+/)
+    behind = parseInt(parts[0] ?? "0", 10) || 0
+    ahead = parseInt(parts[1] ?? "0", 10) || 0
+    aheadBehindResult = { ahead, behind }
+  }
+
+  const openTasks = await getOpenTaskCount(cwd)
+
+  // CI: get latest run on this branch (best-effort, no block on failure)
+  let ciStatus: string | null = null
+  let ciConclusion: string | null = null
+  if (branch) {
+    try {
+      const ciOut = await spawnLine([
+        "gh",
+        "run",
+        "list",
+        "--branch",
+        branch,
+        "--limit",
+        "1",
+        "--json",
+        "status,conclusion",
+        "--jq",
+        '.[0] | .status + "|" + .conclusion',
+      ])
+      if (ciOut && ciOut !== "null|null") {
+        const [s, c] = ciOut.split("|")
+        ciStatus = s ?? null
+        ciConclusion = c ?? null
+      }
+    } catch {}
+  }
+
+  const state = stateData?.state ?? null
+  const isTerminal = state ? TERMINAL_STATES.includes(state as never) : false
+  const allowedTransitions = state ? (STATE_TRANSITIONS[state as never] ?? []) : []
+
+  return {
+    state,
+    isTerminal,
+    allowedTransitions,
+    branch,
+    uncommittedFiles,
+    aheadBehind: aheadBehindResult,
+    openTasks,
+    ciStatus,
+    ciConclusion,
+  }
+}
+
+function renderHealthPanel(health: ProjectHealth): void {
+  console.log(`  ${BOLD}Project Health${RESET}\n`)
+
+  // State
+  if (health.state) {
+    const termTag = health.isTerminal ? ` ${DIM}(terminal)${RESET}` : ""
+    console.log(`    State:     ${CYAN}${health.state}${RESET}${termTag}`)
+    if (health.allowedTransitions.length > 0) {
+      console.log(`    Nexts:     ${DIM}${health.allowedTransitions.join(", ")}${RESET}`)
+    }
+  } else {
+    console.log(`    State:     ${DIM}not set${RESET}`)
+  }
+
+  // Git
+  const branchStr = health.branch ?? `${DIM}unknown${RESET}`
+  console.log(`    Branch:    ${GREEN}${branchStr}${RESET}`)
+  if (health.uncommittedFiles > 0) {
+    console.log(`    Changes:   ${YELLOW}${health.uncommittedFiles} uncommitted file(s)${RESET}`)
+  } else {
+    console.log(`    Changes:   ${GREEN}clean${RESET}`)
+  }
+  if (health.aheadBehind) {
+    const { ahead, behind } = health.aheadBehind
+    if (ahead === 0 && behind === 0) {
+      console.log(`    Remote:    ${GREEN}in sync${RESET}`)
+    } else {
+      const parts: string[] = []
+      if (ahead > 0) parts.push(`${YELLOW}${ahead} ahead${RESET}`)
+      if (behind > 0) parts.push(`${RED}${behind} behind${RESET}`)
+      console.log(`    Remote:    ${parts.join(", ")}`)
+    }
+  }
+
+  // Tasks
+  if (health.openTasks !== null) {
+    if (health.openTasks === 0) {
+      console.log(`    Tasks:     ${GREEN}none open${RESET}`)
+    } else {
+      console.log(`    Tasks:     ${YELLOW}${health.openTasks} open${RESET}`)
+    }
+  }
+
+  // CI
+  if (health.ciStatus) {
+    const conclusion = health.ciConclusion
+    let ciLine: string
+    if (health.ciStatus === "completed" && conclusion === "success") {
+      ciLine = `${GREEN}✓ success${RESET}`
+    } else if (health.ciStatus === "in_progress" || health.ciStatus === "queued") {
+      ciLine = `${YELLOW}⏳ ${health.ciStatus}${RESET}`
+    } else if (conclusion === "failure" || conclusion === "cancelled") {
+      ciLine = `${RED}✗ ${conclusion}${RESET}`
+    } else {
+      ciLine = `${DIM}${health.ciStatus}${conclusion ? ` / ${conclusion}` : ""}${RESET}`
+    }
+    console.log(`    CI:        ${ciLine}`)
+  } else {
+    console.log(`    CI:        ${DIM}no recent run${RESET}`)
+  }
+
+  console.log()
+}
+
 export const statusCommand: Command = {
   name: "status",
   description: "Show swiz installation status across agents",
-  usage: "swiz status",
-  async run() {
+  usage: "swiz status [--json]",
+  async run(args) {
+    const cwd = process.cwd()
+    const jsonMode = args.includes("--json")
+
+    if (jsonMode) {
+      const health = await getProjectHealth(cwd)
+      console.log(JSON.stringify(health, null, 2))
+      return
+    }
+
     console.log(`\n  ${BOLD}swiz status${RESET}\n`)
 
     const current = detectCurrentAgent()
@@ -156,5 +363,7 @@ export const statusCommand: Command = {
     for (const agent of AGENTS) {
       await checkAgent(agent)
     }
+
+    renderHealthPanel(await getProjectHealth(cwd))
   },
 }
