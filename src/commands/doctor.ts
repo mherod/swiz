@@ -1126,6 +1126,7 @@ interface PluginCacheInfo {
   cachePath: string
   missingSkills: string[]
   extraSkills: string[]
+  staleSkills: string[]
 }
 
 /**
@@ -1201,13 +1202,28 @@ async function checkPluginCacheStaleness(): Promise<PluginCacheInfo[]> {
     const missing = sourceSkills.filter((s) => !cacheSet.has(s))
     const extra = cacheSkills.filter((s) => !sourceSet.has(s))
 
-    if (missing.length > 0 || extra.length > 0) {
+    // Check content staleness for skills that exist in both
+    const shared = sourceSkills.filter((s) => cacheSet.has(s))
+    const stale: string[] = []
+    for (const skill of shared) {
+      const srcFile = Bun.file(join(sourceSkillsDir, skill, "SKILL.md"))
+      const cacheFile = Bun.file(join(cacheSkillsDir, skill, "SKILL.md"))
+      try {
+        const [srcText, cacheText] = await Promise.all([srcFile.text(), cacheFile.text()])
+        if (srcText !== cacheText) stale.push(skill)
+      } catch {
+        // If either file is unreadable, skip content comparison
+      }
+    }
+
+    if (missing.length > 0 || extra.length > 0 || stale.length > 0) {
       results.push({
         pluginName: plugin.name,
         sourcePath: sourceSkillsDir,
         cachePath: cacheSkillsDir,
         missingSkills: missing,
         extraSkills: extra,
+        staleSkills: stale,
       })
     }
   }
@@ -1230,6 +1246,9 @@ function buildPluginCacheResults(infos: PluginCacheInfo[]): CheckResult[] {
     if (info.missingSkills.length > 0) {
       parts.push(`missing from cache: ${info.missingSkills.join(", ")}`)
     }
+    if (info.staleSkills.length > 0) {
+      parts.push(`outdated in cache: ${info.staleSkills.join(", ")}`)
+    }
     if (info.extraSkills.length > 0) {
       parts.push(`extra in cache: ${info.extraSkills.join(", ")}`)
     }
@@ -1241,11 +1260,12 @@ function buildPluginCacheResults(infos: PluginCacheInfo[]): CheckResult[] {
   })
 }
 
-/** Copy missing skills from plugin source into the cache directory. */
+/** Copy missing and stale skills from plugin source into the cache directory. */
 async function fixPluginCache(
   infos: PluginCacheInfo[]
-): Promise<{ synced: string[]; failed: { skill: string; error: string }[] }> {
+): Promise<{ synced: string[]; updated: string[]; failed: { skill: string; error: string }[] }> {
   const synced: string[] = []
+  const updated: string[] = []
   const failed: { skill: string; error: string }[] = []
 
   for (const info of infos) {
@@ -1259,9 +1279,19 @@ async function fixPluginCache(
         failed.push({ skill, error: err instanceof Error ? err.message : String(err) })
       }
     }
+    for (const skill of info.staleSkills) {
+      const src = join(info.sourcePath, skill)
+      const dst = join(info.cachePath, skill)
+      try {
+        await cp(src, dst, { recursive: true, force: true })
+        updated.push(skill)
+      } catch (err: unknown) {
+        failed.push({ skill, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
   }
 
-  return { synced, failed }
+  return { synced, updated, failed }
 }
 
 // ─── Runner ─────────────────────────────────────────────────────────────────
@@ -1464,11 +1494,14 @@ export const doctorCommand: Command = {
         for (const skill of cacheResult.synced) {
           console.log(`  ${GREEN}✓${RESET} ${skill}: copied to plugin cache`)
         }
+        for (const skill of cacheResult.updated) {
+          console.log(`  ${GREEN}✓${RESET} ${skill}: updated in plugin cache`)
+        }
         for (const item of cacheResult.failed) {
           console.log(`  ${RED}✗${RESET} ${item.skill}: ${item.error}`)
         }
-        if (cacheResult.synced.length > 0) {
-          console.log(`\n  ${DIM}Restart Claude Code to pick up the new skills.${RESET}`)
+        if (cacheResult.synced.length > 0 || cacheResult.updated.length > 0) {
+          console.log(`\n  ${DIM}Restart Claude Code to pick up the changes.${RESET}`)
           console.log()
         }
       }
