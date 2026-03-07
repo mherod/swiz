@@ -246,6 +246,14 @@ describe("dispatch replay", () => {
     expect(parsed.strategy).toBe("blocking")
     expect(typeof parsed.matched_groups).toBe("number")
     expect(Array.isArray(parsed.hooks)).toBe(true)
+    // Per-hook performance guard: each hook must complete within 2s.
+    // Catches genuine regressions in individual hook startup/execution time.
+    // (The 15s overall timeout accommodates sequential fan-out across all hooks.)
+    for (const hook of parsed.hooks as Array<{ file: string; duration_ms?: number }>) {
+      if (typeof hook.duration_ms === "number") {
+        expect(hook.duration_ms).toBeLessThan(2000)
+      }
+    }
   }, 15_000)
 
   test("stop replay continues after first block and still runs stop-git-status", async () => {
