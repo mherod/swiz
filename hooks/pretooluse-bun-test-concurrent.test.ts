@@ -67,4 +67,24 @@ describe("pretooluse-bun-test-concurrent", () => {
     const result = await runHook("git status")
     expect(result.decision).toBeUndefined()
   })
+
+  test("inserts --concurrent before stderr redirection", async () => {
+    const result = await runHook("bun test src/commands/state.test.ts 2> /tmp/out.log")
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain(
+      "bun test src/commands/state.test.ts --concurrent 2> /tmp/out.log"
+    )
+  })
+
+  test("inserts --concurrent before stdout redirection", async () => {
+    const result = await runHook("bun test src/foo.test.ts > /tmp/out.log")
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("bun test src/foo.test.ts --concurrent > /tmp/out.log")
+  })
+
+  test("inserts --concurrent before append redirection", async () => {
+    const result = await runHook("bun test src/foo.test.ts >> /tmp/combined.log")
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("bun test src/foo.test.ts --concurrent >> /tmp/combined.log")
+  })
 })

@@ -16,7 +16,12 @@ for (const segMatch of command.matchAll(BUN_TEST_SEGMENT_RE)) {
   if (hasConcurrentFlag) continue
 
   const originalInvocation = `bun test${segment}`.trim()
-  const correctedInvocation = `${originalInvocation} --concurrent`.trim()
+  // Insert --concurrent before any trailing shell redirections
+  const redirectRe = /(\s+(?:[12]?>>?|2>&1|>&)\s*\S+(?:\s+(?:[12]?>>?|2>&1|>&)\s*\S+)*)$/
+  const redirectMatch = originalInvocation.match(redirectRe)
+  const correctedInvocation = redirectMatch
+    ? `${originalInvocation.slice(0, redirectMatch.index)} --concurrent${redirectMatch[0]}`
+    : `${originalInvocation} --concurrent`
   denyPreToolUse(
     "Use `bun test` with `--concurrent`.\n\n" +
       `Blocked command:\n  ${originalInvocation}\n\n` +
