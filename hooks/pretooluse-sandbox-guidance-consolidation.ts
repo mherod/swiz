@@ -30,7 +30,10 @@ if (
   process.exit(0)
 }
 
-const newContent: string = (input.tool_input?.new_string as string | undefined) ?? ""
+// NFKC-normalize to catch homoglyph bypasses
+const newContent: string = ((input.tool_input?.new_string as string | undefined) ?? "").normalize(
+  "NFKC"
+)
 if (!newContent) {
   process.exit(0)
 }
