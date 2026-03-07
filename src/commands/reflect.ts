@@ -1,6 +1,7 @@
 import { basename, resolve } from "node:path"
 import { z } from "zod"
-import { hasGeminiApiKey, promptGeminiObject } from "../gemini.ts"
+import { hasGeminiApiKey, promptGeminiObject, promptGeminiStreamText } from "../gemini.ts"
+import { createStreamBufferReporter } from "../stream-buffer-reporter.ts"
 import {
   extractPlainTurns,
   findAllProviderSessions,
@@ -35,6 +36,8 @@ export interface ReflectArgs {
   sessionQuery: string | null
   model?: string
   timeoutMs: number
+  json: boolean
+  printPrompt: boolean
 }
 
 function parsePositiveInt(value: string, flag: string): number {
@@ -51,6 +54,8 @@ export function parseReflectArgs(args: string[]): ReflectArgs {
   let sessionQuery: string | null = null
   let model: string | undefined
   let timeoutMs = DEFAULT_TIMEOUT_MS
+  let json = false
+  let printPrompt = false
   let countSpecified = false
 
   for (let i = 0; i < args.length; i++) {
@@ -90,6 +95,14 @@ export function parseReflectArgs(args: string[]): ReflectArgs {
       i++
       continue
     }
+    if (arg === "--json" || arg === "-j") {
+      json = true
+      continue
+    }
+    if (arg === "--print-prompt" || arg === "-p") {
+      printPrompt = true
+      continue
+    }
     if (!arg.startsWith("-")) {
       if (countSpecified) throw new Error("Count already specified")
       count = parsePositiveInt(arg, "count")
@@ -99,7 +112,7 @@ export function parseReflectArgs(args: string[]): ReflectArgs {
     throw new Error(`Unknown argument: ${arg}`)
   }
 
-  return { count, targetDir, sessionQuery, model, timeoutMs }
+  return { count, targetDir, sessionQuery, model, timeoutMs, json, printPrompt }
 }
 
 function truncateTranscript(text: string, maxChars: number): { text: string; truncated: boolean } {
@@ -251,10 +264,30 @@ function renderReflection(reflection: SessionReflection): string {
     .join("\n\n")
 }
 
+function extractJsonCandidate(text: string): string {
+  const trimmed = text.trim()
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+  if (fenced?.[1]) return fenced[1].trim()
+
+  const firstBrace = trimmed.indexOf("{")
+  const lastBrace = trimmed.lastIndexOf("}")
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return trimmed.slice(firstBrace, lastBrace + 1)
+  }
+  return trimmed
+}
+
+function parseReflectionFromJsonText(text: string, count: number): SessionReflection {
+  const candidate = extractJsonCandidate(text)
+  const parsed = JSON.parse(candidate)
+  return SessionReflectionSchema(count).parse(parsed)
+}
+
 export const reflectCommand: Command = {
   name: "reflect",
   description: "Use Gemini to reflect on mistakes in a session transcript",
-  usage: "swiz reflect [count] [--dir <path>] [--session <id>] [--model <name>] [--timeout <ms>]",
+  usage:
+    "swiz reflect [count] [--dir <path>] [--session <id>] [--model <name>] [--timeout <ms>] [--json] [--print-prompt]",
   options: [
     {
       flags: "[count]",
@@ -271,13 +304,15 @@ export const reflectCommand: Command = {
       flags: "--timeout, -t <ms>",
       description: `Gemini request timeout in ms (default: ${DEFAULT_TIMEOUT_MS})`,
     },
+    {
+      flags: "--json, -j",
+      description: "Print structured reflection JSON instead of formatted markdown",
+    },
+    { flags: "--print-prompt, -p", description: "Print the generated Gemini prompt and exit" },
   ],
   async run(args: string[]) {
-    if (!hasGeminiApiKey()) {
-      throw new Error("No Gemini API key found. Set GEMINI_API_KEY env var.")
-    }
-
-    const { count, targetDir, sessionQuery, model, timeoutMs } = parseReflectArgs(args)
+    const { count, targetDir, sessionQuery, model, timeoutMs, json, printPrompt } =
+      parseReflectArgs(args)
     const transcript = await loadTranscriptContext(targetDir, sessionQuery)
     const prompt = buildPrompt({
       count,
@@ -290,10 +325,52 @@ export const reflectCommand: Command = {
       truncated: transcript.truncated,
     })
 
-    const reflection = await promptGeminiObject(prompt, SessionReflectionSchema(count), {
-      model,
-      timeout: timeoutMs,
-    })
+    if (printPrompt) {
+      console.log(prompt)
+      return
+    }
+
+    if (!hasGeminiApiKey()) {
+      throw new Error("No Gemini API key found. Set GEMINI_API_KEY env var.")
+    }
+
+    let reflection: SessionReflection
+    const bufferReporter = createStreamBufferReporter({ enabled: !json })
+    try {
+      bufferReporter.startSubmitting()
+      const streamed = await promptGeminiStreamText(prompt, {
+        model,
+        timeout: timeoutMs,
+        onTextPart: (textPart) => {
+          if (json) {
+            process.stdout.write(textPart)
+            return
+          }
+          bufferReporter.onChunk(textPart)
+        },
+      })
+      bufferReporter.finish()
+      reflection = parseReflectionFromJsonText(streamed, count)
+      if (json) {
+        if (process.stdout.isTTY) process.stdout.write("\n")
+        return
+      }
+    } catch (error) {
+      bufferReporter.finish()
+      // If raw JSON has already been streamed to stdout, avoid fallback output
+      // that would produce mixed/duplicated content.
+      if (json) throw error
+
+      reflection = await promptGeminiObject(prompt, SessionReflectionSchema(count), {
+        model,
+        timeout: timeoutMs,
+      })
+    }
+
+    if (json) {
+      console.log(JSON.stringify(reflection, null, 2))
+      return
+    }
     console.log(renderReflection(reflection))
   },
 }

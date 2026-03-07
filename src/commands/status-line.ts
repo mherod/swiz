@@ -412,6 +412,7 @@ export const statusLineCommand: Command = {
       if (effective.autoContinue) settingsParts.push(`\x1b[92m⟳ auto${R}`)
       if (effective.ambitionMode === "aggressive") settingsParts.push(`\x1b[93m⚡ aggressive${R}`)
       if (effective.ambitionMode === "creative") settingsParts.push(`\x1b[95m✦ creative${R}`)
+      if (effective.ambitionMode === "reflective") settingsParts.push(`\x1b[96m🪞 reflective${R}`)
       if (effective.speak) settingsParts.push(`\x1b[96m🔊 narrator${R}`)
     }
     const settingsSeg = settingsParts.join(" ")

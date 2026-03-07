@@ -120,6 +120,8 @@ describe("parseReflectArgs", () => {
     expect(parsed.sessionQuery).toBeNull()
     expect(parsed.model).toBeUndefined()
     expect(parsed.timeoutMs).toBe(90_000)
+    expect(parsed.json).toBe(false)
+    expect(parsed.printPrompt).toBe(false)
   })
 
   it("parses positional count plus flags", () => {
@@ -145,18 +147,48 @@ describe("parseReflectArgs", () => {
   it("throws on unknown args", () => {
     expect(() => parseReflectArgs(["--wat"])).toThrow("Unknown argument")
   })
+
+  it("parses json and print-prompt flags", () => {
+    const parsed = parseReflectArgs(["--json", "--print-prompt"])
+    expect(parsed.json).toBe(true)
+    expect(parsed.printPrompt).toBe(true)
+  })
 })
 
 describe("reflectCommand", () => {
   let envBefore: EnvSnapshot
   let logOutput: string[]
+  let stdoutOutput: string[]
+  let stderrOutput: string[]
 
   beforeEach(() => {
     envBefore = snapshotEnv()
     logOutput = []
+    stdoutOutput = []
+    stderrOutput = []
     vi.spyOn(console, "log").mockImplementation((...args) => {
       logOutput.push(args.join(" "))
     })
+    vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
+      if (typeof chunk === "string") {
+        stdoutOutput.push(chunk)
+      } else if (chunk instanceof Uint8Array) {
+        stdoutOutput.push(new TextDecoder().decode(chunk))
+      } else if (chunk !== undefined && chunk !== null) {
+        stdoutOutput.push(String(chunk))
+      }
+      return true
+    }) as any)
+    vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      if (typeof chunk === "string") {
+        stderrOutput.push(chunk)
+      } else if (chunk instanceof Uint8Array) {
+        stderrOutput.push(new TextDecoder().decode(chunk))
+      } else if (chunk !== undefined && chunk !== null) {
+        stderrOutput.push(String(chunk))
+      }
+      return true
+    }) as any)
   })
 
   afterEach(async () => {
@@ -200,6 +232,47 @@ describe("reflectCommand", () => {
     expect(prompt).toContain("Please run the failing tests before editing src/auth.ts.")
     expect(prompt).toContain("That skipped verification and targeted the wrong file.")
     expect(prompt).toContain("I can fix it faster by editing src/session.ts right now.")
+    expect(stderrOutput.join("")).toContain("Submitting prompt to model...")
+    expect(stderrOutput.join("")).toContain("Buffering streamed response:")
+  })
+
+  it("prints the generated prompt and skips Gemini calls", async () => {
+    const home = await makeTempDir("swiz-reflect-prompt-home-")
+    const projectDir = join(home, "workspace", "prompt-proj")
+    const sessionId = "8a54a655-1111-2222-3333-444444444444"
+    await mkdir(projectDir, { recursive: true })
+    await createClaudeTranscript(home, projectDir, sessionId)
+
+    process.env.HOME = home
+    delete process.env.GEMINI_API_KEY
+    process.env.GEMINI_TEST_THROW = "1"
+
+    await reflectCommand.run(["2", "--dir", projectDir, "--print-prompt"])
+
+    const output = logOutput.join("\n")
+    expect(output).toContain("Identify exactly 2 distinct mistakes")
+    expect(output).toContain("<conversation_transcript>")
+    expect(output).toContain("Please run the failing tests before editing src/auth.ts.")
+  })
+
+  it("prints structured JSON with --json", async () => {
+    const home = await makeTempDir("swiz-reflect-json-home-")
+    const projectDir = join(home, "workspace", "json-proj")
+    const sessionId = "2d2dbedf-1111-2222-3333-444444444444"
+    await mkdir(projectDir, { recursive: true })
+    await createClaudeTranscript(home, projectDir, sessionId)
+
+    process.env.HOME = home
+    process.env.GEMINI_API_KEY = "test-key"
+    process.env.GEMINI_TEST_RESPONSE = JSON.stringify(STRUCTURED_REFLECTION_FIXTURE)
+
+    await reflectCommand.run(["3", "--dir", projectDir, "--json"])
+
+    expect(logOutput.length).toBe(0)
+    const parsed = JSON.parse(stdoutOutput.join("")) as { mistakes?: Array<{ label?: string }> }
+    expect(parsed.mistakes?.length).toBe(3)
+    expect(parsed.mistakes?.[0]?.label).toBe("Skipped verification")
+    expect(stderrOutput.join("")).toBe("")
   })
 
   it("errors when no transcripts exist for the project", async () => {

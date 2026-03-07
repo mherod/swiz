@@ -3,9 +3,10 @@
 //
 // promptGemini(prompt, options)           — plain text generation.
 // promptGeminiObject(prompt, schema, ...) — structured object generation via Output.object().
+// promptGeminiStreamText(prompt, ...)     — streamed text generation via streamText().
 // hasGeminiApiKey()                       — synchronous check (env var only) for early-exit gates.
 
-import { generateText, Output } from "ai"
+import { generateText, Output, streamText } from "ai"
 import { createGeminiProvider } from "ai-sdk-provider-gemini-cli"
 import type { ZodType } from "zod"
 
@@ -32,6 +33,13 @@ export interface PromptGeminiOptions {
   model?: string
 }
 
+export interface PromptGeminiStreamOptions extends PromptGeminiOptions {
+  /**
+   * Called for each streamed text delta.
+   */
+  onTextPart?: (textPart: string) => void
+}
+
 function createProvider() {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("No Gemini API key found. Set GEMINI_API_KEY env var.")
@@ -55,6 +63,20 @@ function resolveSignal(options?: PromptGeminiOptions): {
   return { signal: undefined, cleanup: () => {} }
 }
 
+function getGeminiTestResponseForText(): string | undefined {
+  return (
+    process.env.GEMINI_TEST_STREAM_RESPONSE ??
+    process.env.GEMINI_TEST_TEXT_RESPONSE ??
+    process.env.GEMINI_TEST_RESPONSE
+  )
+}
+
+async function maybeCapturePrompt(prompt: string): Promise<void> {
+  if (process.env.GEMINI_TEST_CAPTURE_FILE) {
+    await Bun.write(process.env.GEMINI_TEST_CAPTURE_FILE, prompt)
+  }
+}
+
 /**
  * Send a single-turn prompt to the Gemini API and return the trimmed text response.
  * Throws if the API key is unavailable or the request fails.
@@ -67,9 +89,7 @@ export async function promptGemini(prompt: string, options?: PromptGeminiOptions
     throw new Error("Simulated Gemini API error (GEMINI_TEST_THROW=1)")
   }
   if (process.env.GEMINI_TEST_TEXT_RESPONSE !== undefined) {
-    if (process.env.GEMINI_TEST_CAPTURE_FILE) {
-      await Bun.write(process.env.GEMINI_TEST_CAPTURE_FILE, prompt)
-    }
+    await maybeCapturePrompt(prompt)
     return process.env.GEMINI_TEST_TEXT_RESPONSE.trim()
   }
 
@@ -81,6 +101,45 @@ export async function promptGemini(prompt: string, options?: PromptGeminiOptions
       prompt,
       abortSignal: signal,
     })
+    return text.trim()
+  } finally {
+    cleanup()
+  }
+}
+
+/**
+ * Send a single-turn prompt to Gemini and return the final text while exposing
+ * streamed deltas through `onTextPart`.
+ */
+export async function promptGeminiStreamText(
+  prompt: string,
+  options?: PromptGeminiStreamOptions
+): Promise<string> {
+  if (process.env.GEMINI_TEST_THROW === "1") {
+    throw new Error("Simulated Gemini API error (GEMINI_TEST_THROW=1)")
+  }
+
+  const testResponse = getGeminiTestResponseForText()
+  if (testResponse !== undefined) {
+    await maybeCapturePrompt(prompt)
+    options?.onTextPart?.(testResponse)
+    return testResponse.trim()
+  }
+
+  const gemini = createProvider()
+  const { signal, cleanup } = resolveSignal(options)
+  try {
+    const result = streamText({
+      model: gemini(options?.model ?? DEFAULT_MODEL),
+      prompt,
+      abortSignal: signal,
+    })
+
+    let text = ""
+    for await (const textPart of result.textStream) {
+      text += textPart
+      options?.onTextPart?.(textPart)
+    }
     return text.trim()
   } finally {
     cleanup()
@@ -106,9 +165,7 @@ export async function promptGeminiObject<T>(
     throw new Error("Simulated Gemini API error (GEMINI_TEST_THROW=1)")
   }
   if (process.env.GEMINI_TEST_RESPONSE !== undefined) {
-    if (process.env.GEMINI_TEST_CAPTURE_FILE) {
-      await Bun.write(process.env.GEMINI_TEST_CAPTURE_FILE, prompt)
-    }
+    await maybeCapturePrompt(prompt)
     if (process.env.GEMINI_TEST_DELAY_MS) {
       const { signal: delaySignal } = resolveSignal(options)
       const delay = Number.parseInt(process.env.GEMINI_TEST_DELAY_MS, 10)

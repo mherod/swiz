@@ -196,9 +196,9 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "string",
     scopes: ["global", "project", "session"],
     validate: (v) =>
-      v === "standard" || v === "aggressive" || v === "creative"
+      v === "standard" || v === "aggressive" || v === "creative" || v === "reflective"
         ? null
-        : `Invalid value "${v}" for ambition-mode. Must be: standard | aggressive | creative`,
+        : `Invalid value "${v}" for ambition-mode. Must be: standard | aggressive | creative | reflective`,
   },
   {
     key: "collaborationMode",
@@ -787,9 +787,9 @@ export const settingsCommand: Command = {
       description: "Suppress critique lines — only emit the next-step directive",
     },
     {
-      flags: "set ambition-mode <standard|aggressive|creative>",
+      flags: "set ambition-mode <standard|aggressive|creative|reflective>",
       description:
-        "Set auto-continue ambition level: standard (balanced), aggressive (feature-gap focused), or creative (roadmap-oriented issue drafting)",
+        "Set auto-continue ambition level: standard (balanced), aggressive (feature-gap focused), creative (roadmap-oriented issue drafting), or reflective (reflection-driven next step)",
     },
     {
       flags: "set collaboration-mode <auto|solo|team>",

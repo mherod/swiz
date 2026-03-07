@@ -1212,6 +1212,60 @@ describe("stop-auto-continue", () => {
     expect(result.reason).toContain("acceptance:")
   })
 
+  test("reflective ambition mode injects reflection-driven instructions", async () => {
+    const captureDir = await createTempDir()
+    const captureFile = join(captureDir, "prompt.txt")
+    const fakeHome = await createTempDir()
+    await mkdir(join(fakeHome, ".swiz"), { recursive: true })
+    await writeFile(
+      join(fakeHome, ".swiz", "settings.json"),
+      JSON.stringify({ autoContinue: true, ambitionMode: "reflective" })
+    )
+
+    await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_CAPTURE_FILE: captureFile,
+        GEMINI_TEST_RESPONSE: agentResponse("Implement the next endpoint", {
+          reflections: ["DO: Reproduce the bug before applying a fix"],
+        }),
+      },
+    })
+
+    const capturedPrompt = await Bun.file(captureFile).text()
+    expect(capturedPrompt).toContain("REFLECTIVE MODE")
+    expect(capturedPrompt).toContain(`derive "next" from them`)
+    expect(capturedPrompt).not.toContain("CREATIVE MODE")
+    expect(capturedPrompt).not.toContain("AGGRESSIVE MODE")
+  })
+
+  test("reflective ambition mode derives next step from reflections output", async () => {
+    const fakeHome = await createTempDir()
+    await mkdir(join(fakeHome, ".swiz"), { recursive: true })
+    await writeFile(
+      join(fakeHome, ".swiz", "settings.json"),
+      JSON.stringify({ autoContinue: true, ambitionMode: "reflective" })
+    )
+
+    const result = await runHook({
+      transcriptContent: buildTranscript(10),
+      extraEnv: {
+        HOME: fakeHome,
+        GEMINI_API_KEY: "test-key",
+        GEMINI_TEST_RESPONSE: agentResponse("Implement placeholder next step", {
+          reflections: ["DO: Reproduce the failing behavior before editing source files"],
+        }),
+      },
+    })
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("Apply this confirmed reflection immediately in code:")
+    expect(result.reason).toContain("Reproduce the failing behavior before editing source files")
+    expect(result.reason).not.toContain("Implement placeholder next step")
+  })
+
   test("project-level ambitionMode=creative drives creative prompt branch", async () => {
     const captureDir = await createTempDir()
     const captureFile = join(captureDir, "prompt.txt")

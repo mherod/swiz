@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from "node:path"
 import type { HookDef, HookGroup } from "./manifest.ts"
 
 export type PolicyProfile = "solo" | "team" | "strict"
-export type AmbitionMode = "standard" | "aggressive" | "creative"
+export type AmbitionMode = "standard" | "aggressive" | "creative" | "reflective"
 export type CollaborationMode = "auto" | "solo" | "team"
 
 export const COLLABORATION_MODES: CollaborationMode[] = ["auto", "solo", "team"]
@@ -274,7 +274,8 @@ function normalizeSessionSettings(value: unknown): SessionSwizSettings | null {
   if (
     obj.ambitionMode === "standard" ||
     obj.ambitionMode === "aggressive" ||
-    obj.ambitionMode === "creative"
+    obj.ambitionMode === "creative" ||
+    obj.ambitionMode === "reflective"
   ) {
     session.ambitionMode = obj.ambitionMode
   }
@@ -311,7 +312,8 @@ function normalizeSettings(value: unknown): SwizSettings {
     ambitionMode:
       obj.ambitionMode === "standard" ||
       obj.ambitionMode === "aggressive" ||
-      obj.ambitionMode === "creative"
+      obj.ambitionMode === "creative" ||
+      obj.ambitionMode === "reflective"
         ? obj.ambitionMode
         : DEFAULT_SETTINGS.ambitionMode,
     collaborationMode:
@@ -418,7 +420,8 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   if (
     obj.ambitionMode === "standard" ||
     obj.ambitionMode === "aggressive" ||
-    obj.ambitionMode === "creative"
+    obj.ambitionMode === "creative" ||
+    obj.ambitionMode === "reflective"
   ) {
     result.ambitionMode = obj.ambitionMode
   }

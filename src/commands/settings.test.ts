@@ -339,6 +339,12 @@ describe("swiz settings", () => {
         expected: "creative",
         stdout: "Set ambition-mode = creative",
       },
+      {
+        args: ["set", "ambition-mode", "reflective"],
+        key: "ambitionMode",
+        expected: "reflective",
+        stdout: "Set ambition-mode = reflective",
+      },
     ]
     await Promise.all(
       cases.map(async ({ args, key, expected, stdout }) => {
@@ -855,6 +861,7 @@ describe("SETTINGS_REGISTRY", () => {
     expect(def!.validate!("standard")).toBeNull()
     expect(def!.validate!("aggressive")).toBeNull()
     expect(def!.validate!("creative")).toBeNull()
+    expect(def!.validate!("reflective")).toBeNull()
     expect(def!.validate!("turbo")).toContain("Invalid value")
   })
 

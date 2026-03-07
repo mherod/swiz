@@ -171,6 +171,23 @@ function normalizeCreativeIssueDescription(next: string): string {
   return parts.join("; ")
 }
 
+function normalizeReflectiveNextStep(reflections: string[]): string {
+  const top = reflections[0]?.trim()
+  if (!top) return ""
+
+  const doMatch = top.match(/^DO:\s*(.+)$/i)
+  if (doMatch?.[1]) {
+    return `Apply this confirmed reflection immediately in code: ${doMatch[1].trim()}`
+  }
+
+  const dontMatch = top.match(/^DON['’]T:\s*(.+)$/i)
+  if (dontMatch?.[1]) {
+    return `Avoid this confirmed anti-pattern in the next code change: ${dontMatch[1].trim()}`
+  }
+
+  return `Apply this confirmed reflection immediately in code: ${top}`
+}
+
 // ─── Memory file resolution ─────────────────────────────────────────────────
 
 async function findProjectDir(cwd: string): Promise<string | null> {
@@ -414,7 +431,12 @@ function buildPrompt(
           `(b) the user-facing gap to close, ` +
           `(c) concrete implementation scope, and ` +
           `(d) a verification/acceptance check. `
-        : "") +
+        : ambitionMode === "reflective"
+          ? `REFLECTIVE MODE: Treat "reflections" as first-class output and derive "next" from them. ` +
+            `Extract concrete, high-signal directives from the transcript into "reflections". ` +
+            `Then make "next" an imperative code action that directly applies the strongest reflection immediately. ` +
+            `If there is tension between a generic plan and a reflection, prefer the reflection-driven action. `
+          : "") +
     `ABSOLUTE PROHIBITIONS — never suggest any of these regardless of session content:\n` +
     `  - git commit, git add, git push, or any git workflow step\n` +
     `  - writing, adding, or improving tests (unless the transcript explicitly shows a specific behavioral bug ` +
@@ -630,6 +652,11 @@ async function main(): Promise<void> {
   // Post-generation filter: reject workflow/git-process suggestions that violate
   // the ABSOLUTE PROHIBITIONS. The AI backend doesn't always comply with prompt
   // instructions, so this deterministic check is the backstop.
+  if (effective.ambitionMode === "reflective") {
+    const reflectiveNext = normalizeReflectiveNextStep(response.reflections)
+    if (reflectiveNext) response.next = reflectiveNext
+  }
+
   if (response.next && isWorkflowSuggestion(response.next)) {
     response.next = WORKFLOW_FINDING
   }
