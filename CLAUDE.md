@@ -128,8 +128,9 @@ alwaysApply: false
 - If collaboration guard errors, fix and re-run guard checks before pushing.
 - CI workflow (`.github/workflows/ci.yml` lines 3-21) has `paths-ignore` for `**/*.md`, `.claude/**`, and `docs/**`; documentation-only commits skip CI intentionally. Pre-push hooks verify code quality locally before push is allowed, so no CI run is needed for markdown-only changes.
 - Pre-push checklist:
+  0. **Run Step 0 collaboration guard** from the `/push` skill before every push to `main`/`master` — no exceptions. Assumed repo type is not sufficient; the signal checks must be executed and their output evaluated.
   1. `git log origin/main..HEAD --oneline`.
-  2. `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`; confirm solo-repo context.
+  2. `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`.
   3. `SHA=$(git rev-parse HEAD)`.
   4. `git push origin main` (lefthook pre-push runs full `bun test`).
   5. `gh run list --commit $SHA --json databaseId --jq '.[0].databaseId'`.
@@ -144,6 +145,7 @@ alwaysApply: false
 - For push-command parsing in hooks, use token parsing to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
 - DO NOT call `TaskUpdate` or `TaskList` after push starts.
 - DO NOT stop with unpushed commits.
+- DO NOT push to `main`/`master` without running the Step 0 collaboration guard script first and reading its output — two pushes in a prior session (`dbe3440`, `2339489`) skipped Step 0 and violated the mandatory gate.
 - DO NOT skip `git log origin/main..HEAD --oneline` pre-push review.
 - DO NOT run branch/collaboration/open-PR checks after push.
 - DO NOT add `Co-Authored-By: Claude` or other AI attribution in commits/PR descriptions.
