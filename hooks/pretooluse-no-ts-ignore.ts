@@ -12,7 +12,7 @@ function stripLineCommentTails(content: string): string {
     .split(/\r?\n/)
     .map((line) => {
       const m = line.match(/(?<!:)\/\//)
-      return m !== null ? line.slice(0, m.index!) : line
+      return m !== null && m.index !== undefined ? line.slice(0, m.index) : line
     })
     .join("\n")
 }
@@ -55,7 +55,9 @@ async function main() {
     process.exit(0)
   }
 
-  const content = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
+  const raw = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
+  // NFKC-normalize to catch homoglyph bypasses (e.g., fullwidth ＠ → @)
+  const content = raw.normalize("NFKC")
 
   // Keywords split across arrays to avoid self-triggering when editing this hook.
   const kwIgnore = ["ts", "ignore"].join("-")

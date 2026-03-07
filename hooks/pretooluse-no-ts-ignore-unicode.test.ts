@@ -16,8 +16,8 @@
  *             between `//` and `@directive`.  Not in `\s`; hook correctly allows.
  *
  *   GROUP D — `@` homoglyphs replacing the literal `@` in the directive.
- *             The hook pattern uses a literal `@`; Unicode lookalikes are not caught.
- *             TypeScript also ignores these.
+ *             NFKC-normalizable homoglyphs (＠, ﹫) are now blocked.
+ *             Non-NFKC homoglyphs (🅐) remain allowed.
  *
  *   GROUP E — Unicode Zs characters in the JSDoc line prefix (before `*`)
  *             `^\s*\*\s*@directive` — `\s*` before `*` must still match, blocking.
@@ -204,23 +204,37 @@ describe(`pretooluse-no-ts-ignore: GROUP C — ASCII control characters are not 
   }
 })
 
-// ─── GROUP D: @ homoglyphs — hook correctly allows ────────────────────────────
+// ─── GROUP D: @ homoglyphs — NFKC-normalizable ones are now blocked ──────────
 //
-// The hook's regex uses a literal `@` character (U+0040).  Unicode lookalikes
-// are completely different code points; neither the hook nor TypeScript treats
-// them as directive characters.
+// The hook NFKC-normalizes input before checking.  Homoglyphs that normalize
+// to U+0040 `@` (e.g., fullwidth ＠, small ﹫) are now caught and blocked.
+// Homoglyphs that do NOT normalize to `@` remain allowed.
 
-const AT_HOMOGLYPHS: [number, string][] = [
-  [0xff20, "FULLWIDTH COMMERCIAL AT \uFF20"],
-  [0xfe6b, "SMALL COMMERCIAL AT \uFE6B"],
-  [0x1f150, "NEGATIVE CIRCLED LATIN CAPITAL LETTER A"], // just a visual lookalike
+const NFKC_AT_HOMOGLYPHS: [number, string][] = [
+  [0xff20, "FULLWIDTH COMMERCIAL AT"],
+  [0xfe6b, "SMALL COMMERCIAL AT"],
 ]
 
-describe(`pretooluse-no-ts-ignore: GROUP D — @ homoglyphs are not false positives`, () => {
-  for (const [cp, name] of AT_HOMOGLYPHS) {
+const NON_NFKC_AT_HOMOGLYPHS: [number, string][] = [
+  [0x1f150, "NEGATIVE CIRCLED LATIN CAPITAL LETTER A"], // visual lookalike, no NFKC mapping to @
+]
+
+describe(`pretooluse-no-ts-ignore: GROUP D — NFKC @ homoglyphs are blocked`, () => {
+  for (const [cp, name] of NFKC_AT_HOMOGLYPHS) {
+    const homoglyph = String.fromCodePoint(cp)
+    test(`${uStr(cp)} ${name} as @ substitute is blocked (NFKC → @)`, async () => {
+      const result = await runHook({
+        newString: `// ${homoglyph}${KW_IGNORE} this is not a real directive`,
+      })
+      expect(result.decision).toBe("deny")
+    })
+  }
+})
+
+describe(`pretooluse-no-ts-ignore: GROUP D — non-NFKC @ homoglyphs are allowed`, () => {
+  for (const [cp, name] of NON_NFKC_AT_HOMOGLYPHS) {
     const homoglyph = String.fromCodePoint(cp)
     test(`${uStr(cp)} ${name} as @ substitute is allowed`, async () => {
-      // Use homoglyph instead of real @ — the hook should not trigger
       const result = await runHook({
         newString: `// ${homoglyph}${KW_IGNORE} this is not a real directive`,
       })
