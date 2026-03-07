@@ -14,6 +14,7 @@ import {
   type AmbitionMode,
   getEffectiveSwizSettings,
   readProjectSettings,
+  readProjectState,
   readSwizSettings,
 } from "../src/settings.ts"
 import {
@@ -536,6 +537,12 @@ async function main(): Promise<void> {
   const effective = getEffectiveSwizSettings(settings, input.session_id, projectSettings)
   if (!effective.autoContinue) {
     terminate("skip", "AUTO_CONTINUE_DISABLED", "auto-continue is disabled — skipping block")
+  }
+
+  // Respect terminal project state — paused means session work is intentionally complete
+  const projectState = await readProjectState(input.cwd ?? process.cwd())
+  if (projectState === "paused") {
+    terminate("skip", "PROJECT_PAUSED", "project state is paused — skipping block")
   }
 
   if (!input.transcript_path) {
