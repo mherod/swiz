@@ -1,8 +1,8 @@
 import {
   PROJECT_STATES,
   type ProjectState,
-  readProjectSettings,
   readProjectState,
+  readStateData,
   STATE_TRANSITIONS,
   type StateHistoryEntry,
   writeProjectState,
@@ -76,8 +76,8 @@ export const stateCommand: Command = {
         console.log(`  priority: ${metadata.priority}`)
 
         // Show current state age from history
-        const settings = await readProjectSettings(cwd)
-        const history = settings?.stateHistory ?? []
+        const stateData = await readStateData(cwd)
+        const history = stateData?.stateHistory ?? []
         if (history.length > 0) {
           const lastEntry = history[history.length - 1]!
           const age = Date.now() - new Date(lastEntry.timestamp).getTime()

@@ -8,6 +8,7 @@ import {
   getEffectiveSwizSettings,
   type ProjectState,
   readProjectSettings,
+  readProjectState,
   readSwizSettings,
 } from "../settings.ts"
 import type { Command } from "../types.ts"
@@ -462,7 +463,8 @@ export const statusLineCommand: Command = {
 
     const reviewDecision = prViewData?.reviewDecision ?? ""
     const commentCount = Array.isArray(prViewData?.comments) ? prViewData.comments.length : 0
-    const stateSeg = formatProjectState(projectSettings?.state)
+    const currentState = await readProjectState(cwd)
+    const stateSeg = formatProjectState(currentState)
     const reviewStatus =
       reviewDecision === "CHANGES_REQUESTED"
         ? `\x1b[91m⚠ changes requested${R}`

@@ -48,8 +48,6 @@ export interface ProjectSwizSettings {
   trivialMaxLines?: number
   /** Project default branch override (e.g. "main", "master", "trunk"). */
   defaultBranch?: string
-  state?: ProjectState
-  stateHistory?: StateHistoryEntry[]
   memoryLineThreshold?: number
   memoryWordThreshold?: number
   ambitionMode?: AmbitionMode
@@ -450,18 +448,6 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   ) {
     result.ambitionMode = obj.ambitionMode
   }
-  if (typeof obj.state === "string" && obj.state in STATE_TRANSITIONS) {
-    result.state = obj.state as ProjectState
-  }
-  if (Array.isArray(obj.stateHistory)) {
-    result.stateHistory = (obj.stateHistory as StateHistoryEntry[]).filter(
-      (e) =>
-        typeof e === "object" &&
-        e !== null &&
-        typeof e.to === "string" &&
-        typeof e.timestamp === "string"
-    )
-  }
   if (
     Array.isArray(obj.disabledHooks) &&
     obj.disabledHooks.every((h: unknown) => typeof h === "string")
@@ -553,31 +539,53 @@ export function resolveProjectHooks(
   return { resolved, warnings }
 }
 
+/** Runtime state data — lives in <repo>/.swiz/state.json (separate from user config) */
+export interface StateData {
+  state: ProjectState
+  stateHistory: StateHistoryEntry[]
+}
+
+export function getStatePath(cwd: string): string {
+  return join(cwd, ".swiz", "state.json")
+}
+
+export async function readStateData(cwd: string): Promise<StateData | null> {
+  const path = getStatePath(cwd)
+  const file = Bun.file(path)
+  if (!(await file.exists())) return null
+  try {
+    const obj = (await file.json()) as Record<string, unknown>
+    if (typeof obj.state !== "string" || !(obj.state in STATE_TRANSITIONS)) return null
+    const history = Array.isArray(obj.stateHistory)
+      ? (obj.stateHistory as StateHistoryEntry[]).filter(
+          (e) =>
+            typeof e === "object" &&
+            e !== null &&
+            typeof e.to === "string" &&
+            typeof e.timestamp === "string"
+        )
+      : []
+    return { state: obj.state as ProjectState, stateHistory: history }
+  } catch {
+    return null
+  }
+}
+
 export async function readProjectState(cwd: string): Promise<ProjectState | null> {
-  const settings = await readProjectSettings(cwd)
-  return settings?.state ?? null
+  const data = await readStateData(cwd)
+  return data?.state ?? null
 }
 
 export async function writeProjectState(cwd: string, state: ProjectState): Promise<void> {
-  const path = getProjectSettingsPath(cwd)
+  const path = getStatePath(cwd)
   await mkdir(dirname(path), { recursive: true })
-  let existing: Record<string, unknown> = {}
-  const file = Bun.file(path)
-  if (await file.exists()) {
-    try {
-      existing = (await file.json()) as Record<string, unknown>
-    } catch {
-      // Ignore parse errors — overwrite with clean object
-    }
-  }
+  const existing = await readStateData(cwd)
 
-  const previousState = (existing.state as ProjectState) ?? null
-  const history = Array.isArray(existing.stateHistory)
-    ? (existing.stateHistory as StateHistoryEntry[])
-    : []
+  const previousState = existing?.state ?? null
+  const history = existing?.stateHistory ?? []
   history.push({ from: previousState, to: state, timestamp: new Date().toISOString() })
 
-  await Bun.write(path, JSON.stringify({ ...existing, state, stateHistory: history }, null, 2))
+  await Bun.write(path, `${JSON.stringify({ state, stateHistory: history }, null, 2)}\n`)
 }
 
 export async function writeProjectSettings(

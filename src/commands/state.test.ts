@@ -3,8 +3,8 @@ import { join } from "node:path"
 import { useTempDir } from "../../hooks/test-utils.ts"
 import {
   PROJECT_STATES,
-  readProjectSettings,
   readProjectState,
+  readStateData,
   STATE_TRANSITIONS,
   TERMINAL_STATES,
   writeProjectState,
@@ -82,7 +82,7 @@ describe("STATE_TRANSITIONS", () => {
 })
 
 describe("readProjectState / writeProjectState", () => {
-  test("returns null when no .swiz/config.json exists", async () => {
+  test("returns null when no .swiz/state.json exists", async () => {
     const dir = await createTempDir()
     const state = await readProjectState(dir)
     expect(state).toBeNull()
@@ -103,15 +103,20 @@ describe("readProjectState / writeProjectState", () => {
     expect(state).toBe("awaiting-feedback")
   })
 
-  test("preserves other config fields when writing state", async () => {
+  test("writes state to state.json, not config.json", async () => {
     const dir = await createTempDir()
     const configPath = join(dir, ".swiz", "config.json")
-    // Pre-populate with a profile field
+    const statePath = join(dir, ".swiz", "state.json")
+    // Pre-populate config with a profile field
     await Bun.write(configPath, JSON.stringify({ profile: "solo" }))
     await writeProjectState(dir, "paused")
+    // Config should be untouched
     const config = await Bun.file(configPath).json()
     expect(config.profile).toBe("solo")
-    expect(config.state).toBe("paused")
+    expect(config.state).toBeUndefined()
+    // State should be in separate file
+    const stateData = await Bun.file(statePath).json()
+    expect(stateData.state).toBe("paused")
   })
 })
 
@@ -182,7 +187,7 @@ describe("state transition history", () => {
     await writeProjectState(dir, "in-development")
     await writeProjectState(dir, "awaiting-feedback")
 
-    const settings = await readProjectSettings(dir)
+    const settings = await readStateData(dir)
     expect(settings?.stateHistory).toHaveLength(2)
     expect(settings?.stateHistory?.[0]?.from).toBeNull()
     expect(settings?.stateHistory?.[0]?.to).toBe("in-development")
@@ -197,7 +202,7 @@ describe("state transition history", () => {
     await writeProjectState(dir, "in-development")
     await writeProjectState(dir, "awaiting-feedback")
 
-    const settings = await readProjectSettings(dir)
+    const settings = await readStateData(dir)
     expect(settings?.stateHistory).toHaveLength(4)
     expect(settings?.stateHistory?.[2]?.from).toBe("awaiting-feedback")
     expect(settings?.stateHistory?.[2]?.to).toBe("in-development")
@@ -210,7 +215,7 @@ describe("state transition history", () => {
     await writeProjectState(dir, "in-development")
     await writeProjectState(dir, "paused")
 
-    const settings = await readProjectSettings(dir)
+    const settings = await readStateData(dir)
     for (const entry of settings?.stateHistory ?? []) {
       expect(entry.timestamp).toBeTruthy()
       expect(() => new Date(entry.timestamp)).not.toThrow()
