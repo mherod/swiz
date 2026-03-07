@@ -1,8 +1,8 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { normalizeTerminateArgs } from "./stop-auto-continue.ts"
+import { useTempDir } from "./test-utils.ts"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -15,21 +15,7 @@ interface HookResult {
 
 const BUN_EXE = Bun.which("bun") ?? "bun"
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-auto-continue-"))
-  tempDirs.push(dir)
-  return dir
-}
+const { create: createTempDir } = useTempDir("swiz-auto-continue-")
 
 /** Builds a minimal JSONL transcript with the given number of tool calls and a user turn. */
 function buildTranscript(toolCallCount: number, userMessage = "What is the status?"): string {

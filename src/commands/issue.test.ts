@@ -6,10 +6,10 @@
  * and `gh issue comment` so we can assert what happened without hitting GitHub.
  */
 
-import { afterAll, describe, expect, test } from "bun:test"
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { chmod, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { useTempDir } from "../../hooks/test-utils.ts"
 
 interface RunResult {
   exitCode: number | null
@@ -17,21 +17,7 @@ interface RunResult {
   stderr: string
 }
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-issue-"))
-  tempDirs.push(dir)
-  return dir
-}
+const { create: createTempDir } = useTempDir("swiz-issue-")
 
 /**
  * Write a fake `gh` binary to `binDir` that:

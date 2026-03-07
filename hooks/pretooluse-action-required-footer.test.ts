@@ -4,10 +4,10 @@
  * the footer is present. If any hook bypasses denyPreToolUse with raw JSON, this catches it.
  */
 
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, utimes, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { useTempDir } from "./test-utils.ts"
 
 const HOOKS_DIR = resolve(process.cwd(), "hooks")
 const FOOTER_MARKER = "ACTION REQUIRED"
@@ -17,20 +17,7 @@ const ESLINT_DISABLE_KW = ["eslint", "disable"].join("-")
 const TS_IGNORE_KW = ["ts", "ignore"].join("-")
 const TS_NOCHECK_KW = ["ts", "nocheck"].join("-")
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function makeTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-footer-"))
-  tempDirs.push(dir)
-  return dir
-}
+const { create: makeTempDir } = useTempDir("swiz-footer-")
 
 /** Create a git repo with an old-mtime CLAUDE.md so enforcement hooks fire without cooldown bypass. */
 async function makeProjectDir(): Promise<string> {

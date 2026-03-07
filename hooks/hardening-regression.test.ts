@@ -4,29 +4,16 @@
  * 2. Path-traversal sessionId payloads are neutralized by join()
  * 3. Whitespace-only git output lines are filtered correctly
  */
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { parse as parseYaml } from "yaml"
+import { useTempDir } from "./test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempHome(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-hardening-"))
-  tempDirs.push(dir)
-  return dir
-}
+const tmp = useTempDir("swiz-hardening-")
+const createTempHome = () => tmp.create()
 
 async function writeTask(
   homeDir: string,
@@ -292,8 +279,7 @@ describe("whitespace-only line filtering", () => {
   test("extractToolNamesFromTranscript: whitespace-only JSONL lines don't cause parse errors", async () => {
     const { extractToolNamesFromTranscript } = await import("./hook-utils.ts")
 
-    const tmpDir = await mkdtemp(join(tmpdir(), "swiz-filter-"))
-    tempDirs.push(tmpDir)
+    const tmpDir = await tmp.create("swiz-filter-")
 
     const entry = JSON.stringify({
       type: "assistant",
@@ -310,8 +296,7 @@ describe("whitespace-only line filtering", () => {
   test("extractToolNamesFromTranscript: only-whitespace file returns empty array", async () => {
     const { extractToolNamesFromTranscript } = await import("./hook-utils.ts")
 
-    const tmpDir = await mkdtemp(join(tmpdir(), "swiz-filter-"))
-    tempDirs.push(tmpDir)
+    const tmpDir = await tmp.create("swiz-filter-")
 
     await writeFile(join(tmpDir, "whitespace.jsonl"), "   \n\t\n  \t  \n")
 

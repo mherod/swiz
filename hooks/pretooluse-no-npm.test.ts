@@ -1,24 +1,11 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { useTempDir } from "./test-utils.ts"
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-no-npm.ts")
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function makeTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-no-npm-"))
-  tempDirs.push(dir)
-  return dir
-}
+const { create: makeTempDir } = useTempDir("swiz-no-npm-")
 
 async function runHook(
   command: string,

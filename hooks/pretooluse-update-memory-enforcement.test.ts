@@ -1,28 +1,14 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { useTempDir } from "./test-utils.ts"
 
 const HOOK = "hooks/pretooluse-update-memory-enforcement.ts"
 const REMINDER_FRAGMENT =
   "record a DO or DON'T rule that proactively builds the required steps into your standard development workflow."
 const SELF_SENTINEL = "MEMORY CAPTURE ENFORCEMENT"
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-update-memory-"))
-  tempDirs.push(dir)
-  return dir
-}
+const { create: createTempDir } = useTempDir("swiz-update-memory-")
 
 /**
  * Create a temp dir that looks like a real project: git repo + CLAUDE.md with

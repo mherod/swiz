@@ -1,18 +1,11 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { useTempDir } from "./test-utils.ts"
 
 // ─── Git repo helpers ─────────────────────────────────────────────────────────
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
-    await rm(dir, { recursive: true, force: true })
-  }
-})
+const tmp = useTempDir("swiz-secret-scanner-")
 
 async function runGit(dir: string, args: string[]): Promise<string> {
   const p = Bun.spawn(["git", ...args], { cwd: dir, stdout: "pipe", stderr: "pipe" })
@@ -22,8 +15,7 @@ async function runGit(dir: string, args: string[]): Promise<string> {
 }
 
 async function makeTempGitRepo(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-secret-scanner-"))
-  tempDirs.push(dir)
+  const dir = await tmp.create()
   await runGit(dir, ["init"])
   await runGit(dir, ["config", "user.email", "test@example.com"])
   await runGit(dir, ["config", "user.name", "Test"])
@@ -359,8 +351,7 @@ describe("stop-secret-scanner: robustness against edge cases", () => {
 
 describe("stop-secret-scanner: non-git directory", () => {
   test("exits silently in a non-git directory", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "swiz-scanner-nogit-"))
-    tempDirs.push(dir)
+    const dir = await tmp.create("swiz-scanner-nogit-")
     const result = await runHook(dir)
     expect(result.blocked).toBe(false)
     expect(result.raw).toBe("")

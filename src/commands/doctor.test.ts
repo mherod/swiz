@@ -1,25 +1,11 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, readdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { useTempDir } from "../../hooks/test-utils.ts"
 import { AGENTS } from "../agents.ts"
 import { manifest } from "../manifest.ts"
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempHome(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-doctor-test-"))
-  tempDirs.push(dir)
-  return dir
-}
+const { create: createTempHome } = useTempDir("swiz-doctor-test-")
 
 const INDEX_PATH = join(process.cwd(), "index.ts")
 

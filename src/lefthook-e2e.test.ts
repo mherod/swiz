@@ -11,29 +11,21 @@
  * lefthook guarantees that priority-N commands complete before priority-N+1 and
  * unprioritized commands start — the timestamp log exploits this determinism.
  */
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { useTempDir } from "../hooks/test-utils.ts"
 
 // Resolved once at module load — avoids repeated lookups per test
 const LEFTHOOK_BIN = join(process.cwd(), "node_modules", ".bin", "lefthook")
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
-    await rm(dir, { recursive: true, force: true })
-  }
-})
+const tmp = useTempDir("swiz-lefthook-e2e-")
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Spin up a bare git repo with a HEAD commit so lefthook is happy. */
 async function createTempGitRepo(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-lefthook-e2e-"))
-  tempDirs.push(dir)
+  const dir = await tmp.create()
 
   const run = (args: string[]) => Bun.spawnSync(args, { cwd: dir, stdout: "pipe", stderr: "pipe" })
 

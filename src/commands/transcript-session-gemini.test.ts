@@ -1,23 +1,9 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
+import { useTempDir } from "../../hooks/test-utils.ts"
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempHome(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-transcript-gemini-test-"))
-  tempDirs.push(dir)
-  return dir
-}
+const { create: createTempHome } = useTempDir("swiz-transcript-gemini-test-")
 
 async function runSwiz(
   args: string[],

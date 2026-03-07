@@ -1,7 +1,7 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { useTempDir } from "../../hooks/test-utils.ts"
 
 interface DispatchResult {
   stdout: string
@@ -10,20 +10,9 @@ interface DispatchResult {
   parsed: Record<string, unknown> | null
 }
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
+const _tmp = useTempDir()
 async function createTempDir(prefix: string): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), prefix))
-  tempDirs.push(dir)
-  return dir
+  return _tmp.create(prefix)
 }
 
 /** Create a git repo + old-mtime CLAUDE.md so enforcement hooks fire without cooldown bypass. */

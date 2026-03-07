@@ -8,28 +8,18 @@
  * This proves the gate works against real transcript parsing, not just the
  * unit-level regex helpers.
  */
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { useTempDir } from "./test-utils.ts"
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-push-checks-gate.ts")
 
 // ─── Temp dir lifecycle ──────────────────────────────────────────────────────
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
+const _tmp = useTempDir()
 async function makeTempDir(suffix = ""): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), `push-gate-e2e${suffix}-`))
-  tempDirs.push(dir)
-  return dir
+  return _tmp.create(`push-gate-e2e${suffix}-`)
 }
 
 // ─── Transcript builder ──────────────────────────────────────────────────────

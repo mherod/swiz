@@ -1,25 +1,14 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { manifest } from "../src/manifest.ts"
+import { useTempDir } from "./test-utils.ts"
 
 type JsonObject = Record<string, unknown>
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
+const _tmp = useTempDir()
 async function createTempDir(prefix: string): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), prefix))
-  tempDirs.push(dir)
-  return dir
+  return _tmp.create(prefix)
 }
 
 function assertHookOutputShape(output: JsonObject): void {

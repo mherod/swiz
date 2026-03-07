@@ -2,25 +2,22 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { useTempDir } from "./test-utils.ts"
 
 const HOOK = "hooks/pretooluse-sandboxed-edits.ts"
 
-const tempDirs: string[] = []
+const tmp = useTempDir("swiz-sandboxed-")
+const createTempDir = () => tmp.create()
 
+/** HOME-based dirs cannot use useTempDir (it always uses tmpdir()). */
+const outsideDirs: string[] = []
 afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
+  while (outsideDirs.length > 0) {
+    const dir = outsideDirs.pop()
     if (!dir) continue
     await rm(dir, { recursive: true, force: true })
   }
 })
-
-/** Create a temp dir under tmpdir() — used for cwd and fakeHome fixtures. */
-async function createTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-sandboxed-"))
-  tempDirs.push(dir)
-  return dir
-}
 
 /**
  * Create a temp dir under the real HOME — used for "outside" repo fixtures.
@@ -32,7 +29,7 @@ async function createTempDir(): Promise<string> {
 async function createOutsideDir(): Promise<string> {
   const realHome = process.env.HOME ?? tmpdir()
   const dir = await mkdtemp(join(realHome, ".swiz-sandboxed-outside-"))
-  tempDirs.push(dir)
+  outsideDirs.push(dir)
   return dir
 }
 
@@ -67,8 +64,7 @@ async function runHook(
 ): Promise<HookResult> {
   // Build an env with a fake HOME so we can control whether sandboxedEdits is on/off.
   // readSwizSettings() reads from HOME/.swiz/settings.json.
-  const fakeHome = fakeHomeOverride ?? (await mkdtemp(join(tmpdir(), "swiz-sandboxed-home-")))
-  if (!fakeHomeOverride) tempDirs.push(fakeHome)
+  const fakeHome = fakeHomeOverride ?? (await tmp.create("swiz-sandboxed-home-"))
 
   if (!sandboxedEdits) {
     await mkdir(join(fakeHome, ".swiz"), { recursive: true })

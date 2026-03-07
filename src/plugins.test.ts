@@ -1,26 +1,11 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
+import { useTempDir } from "../hooks/test-utils.ts"
 import type { HookGroup } from "./manifest.ts"
 import { loadAllPlugins } from "./plugins.ts"
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempDir(prefix = "swiz-plugin-test-"): Promise<string> {
-  const dir = join(tmpdir(), `${prefix}${Date.now()}-${Math.random().toString(36).slice(2)}`)
-  await mkdir(dir, { recursive: true })
-  tempDirs.push(dir)
-  return dir
-}
+const { create: createTempDir } = useTempDir("swiz-plugin-test-")
 
 describe("loadAllPlugins", () => {
   test("loads a local path plugin with swiz-hooks.json", async () => {

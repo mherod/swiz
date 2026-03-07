@@ -1,7 +1,7 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { useTempDir } from "../../hooks/test-utils.ts"
 import { convertSkillContent, parseFrontmatterField, stripFrontmatter } from "./skill.ts"
 
 // ─── parseFrontmatterField unit tests ────────────────────────────────────────
@@ -116,20 +116,7 @@ describe("stripFrontmatter", () => {
 
 // ─── CLI --no-front-matter flag integration tests ────────────────────────────
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-skill-test-"))
-  tempDirs.push(dir)
-  return dir
-}
+const { create: createTempDir } = useTempDir("swiz-skill-test-")
 
 /** Write a skill with frontmatter to a temp .skills dir and run swiz skill against it. */
 async function runSkillCmd(

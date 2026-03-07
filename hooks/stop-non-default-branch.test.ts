@@ -1,23 +1,14 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { useTempDir } from "./test-utils.ts"
 
 const HOOK = "hooks/stop-non-default-branch.ts"
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
+const tmp = useTempDir("swiz-non-default-branch-")
 
 async function createGitRepo(branchName = "main"): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-non-default-branch-"))
-  tempDirs.push(dir)
+  const dir = await tmp.create()
   Bun.spawnSync(["git", "init"], { cwd: dir })
   Bun.spawnSync(["git", "config", "user.email", "test@test.com"], { cwd: dir })
   Bun.spawnSync(["git", "config", "user.name", "Test"], { cwd: dir })
@@ -71,8 +62,7 @@ describe("stop-non-default-branch", () => {
 
   test("allows stop on master branch", async () => {
     // Create a repo on master
-    const dir = await mkdtemp(join(tmpdir(), "swiz-non-default-branch-"))
-    tempDirs.push(dir)
+    const dir = await tmp.create()
     Bun.spawnSync(["git", "init", "-b", "master"], { cwd: dir })
     Bun.spawnSync(["git", "config", "user.email", "test@test.com"], { cwd: dir })
     Bun.spawnSync(["git", "config", "user.name", "Test"], { cwd: dir })
@@ -120,8 +110,7 @@ describe("stop-non-default-branch", () => {
   })
 
   test("allows stop when not in a git repo", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "swiz-not-a-repo-"))
-    tempDirs.push(dir)
+    const dir = await tmp.create("swiz-not-a-repo-")
     const result = await runHook(dir)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toBe("")

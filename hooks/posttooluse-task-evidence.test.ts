@@ -1,23 +1,15 @@
-import { afterAll, describe, expect, it } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, it } from "bun:test"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { useTempDir } from "./test-utils.ts"
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/posttooluse-task-evidence.ts")
 const SESSION_ID = "test-evidence-session-abc123"
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
-    await rm(dir, { recursive: true, force: true })
-  }
-})
+const { create: createHome } = useTempDir("swiz-evidence-test-")
 
 async function createFixture(): Promise<{ home: string; tasksDir: string }> {
-  const home = await mkdtemp(join(tmpdir(), "swiz-evidence-test-"))
-  tempDirs.push(home)
+  const home = await createHome()
   const tasksDir = join(home, ".claude", "tasks", SESSION_ID)
   await mkdir(tasksDir, { recursive: true })
   return { home, tasksDir }

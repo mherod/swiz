@@ -1,26 +1,11 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
+import { useTempDir } from "../hooks/test-utils.ts"
 import type { HookGroup } from "./manifest.ts"
 import { readProjectSettings, resolveProjectHooks } from "./settings.ts"
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempDir(prefix = "swiz-project-hooks-"): Promise<string> {
-  const dir = join(tmpdir(), `${prefix}${Date.now()}-${Math.random().toString(36).slice(2)}`)
-  await mkdir(dir, { recursive: true })
-  tempDirs.push(dir)
-  return dir
-}
+const { create: createTempDir } = useTempDir("swiz-project-hooks-")
 
 describe("ProjectSwizSettings hooks normalization", () => {
   test("reads hooks from .swiz/config.json", async () => {

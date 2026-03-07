@@ -1,7 +1,7 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { useTempDir } from "../../hooks/test-utils.ts"
 import {
   ALL_STATUS_LINE_SEGMENTS,
   DEFAULT_TRIVIAL_MAX_FILES,
@@ -15,20 +15,9 @@ import {
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import { SETTINGS_REGISTRY } from "./settings.ts"
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
+const _tmp = useTempDir("swiz-settings-test-")
 async function createTempHome(): Promise<string> {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "swiz-settings-test-")))
-  tempDirs.push(dir)
-  return dir
+  return realpath(await _tmp.create())
 }
 
 async function runSwiz(
@@ -530,8 +519,7 @@ describe("swiz settings", () => {
 
   test("shows project policy section in settings output", async () => {
     const home = await createTempHome()
-    const projectDir = await mkdtemp(join(tmpdir(), "swiz-policy-test-"))
-    tempDirs.push(projectDir)
+    const projectDir = await _tmp.create("swiz-policy-test-")
     const swizDir = join(projectDir, ".swiz")
     await mkdir(swizDir, { recursive: true })
     await writeFile(join(swizDir, "config.json"), JSON.stringify({ profile: "strict" }))
@@ -653,8 +641,7 @@ describe("swiz settings", () => {
 
   test("settings show includes project-level disabled hooks", async () => {
     const home = await createTempHome()
-    const projectDir = await mkdtemp(join(tmpdir(), "swiz-disabled-hooks-test-"))
-    tempDirs.push(projectDir)
+    const projectDir = await _tmp.create("swiz-disabled-hooks-test-")
     const swizDir = join(projectDir, ".swiz")
     await mkdir(swizDir, { recursive: true })
     await writeFile(
@@ -725,14 +712,12 @@ describe("resolvePolicy", () => {
 
 describe("readProjectSettings", () => {
   test("returns null when config.json does not exist", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
-    tempDirs.push(dir)
+    const dir = await _tmp.create("swiz-proj-")
     expect(await readProjectSettings(dir)).toBeNull()
   })
 
   test("reads valid profile from config.json", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
-    tempDirs.push(dir)
+    const dir = await _tmp.create("swiz-proj-")
     await mkdir(join(dir, ".swiz"), { recursive: true })
     await writeFile(join(dir, ".swiz", "config.json"), JSON.stringify({ profile: "strict" }))
     const settings = await readProjectSettings(dir)
@@ -740,8 +725,7 @@ describe("readProjectSettings", () => {
   })
 
   test("reads trivialMaxFiles and trivialMaxLines overrides", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
-    tempDirs.push(dir)
+    const dir = await _tmp.create("swiz-proj-")
     await mkdir(join(dir, ".swiz"), { recursive: true })
     await writeFile(
       join(dir, ".swiz", "config.json"),
@@ -754,24 +738,21 @@ describe("readProjectSettings", () => {
   })
 
   test("returns null for invalid profile value", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
-    tempDirs.push(dir)
+    const dir = await _tmp.create("swiz-proj-")
     await mkdir(join(dir, ".swiz"), { recursive: true })
     await writeFile(join(dir, ".swiz", "config.json"), JSON.stringify({ profile: "invalid" }))
     expect(await readProjectSettings(dir)).toBeNull()
   })
 
   test("returns null for malformed JSON", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
-    tempDirs.push(dir)
+    const dir = await _tmp.create("swiz-proj-")
     await mkdir(join(dir, ".swiz"), { recursive: true })
     await writeFile(join(dir, ".swiz", "config.json"), "not-json{{{")
     expect(await readProjectSettings(dir)).toBeNull()
   })
 
   test("reads disabledHooks array from config.json", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
-    tempDirs.push(dir)
+    const dir = await _tmp.create("swiz-proj-")
     await mkdir(join(dir, ".swiz"), { recursive: true })
     await writeFile(
       join(dir, ".swiz", "config.json"),
@@ -782,8 +763,7 @@ describe("readProjectSettings", () => {
   })
 
   test("ignores disabledHooks when entries contain non-string values", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "swiz-proj-"))
-    tempDirs.push(dir)
+    const dir = await _tmp.create("swiz-proj-")
     await mkdir(join(dir, ".swiz"), { recursive: true })
     await writeFile(
       join(dir, ".swiz", "config.json"),

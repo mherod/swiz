@@ -7,28 +7,13 @@
  * These complement the existing 22 hardening-regression tests which focus on
  * HOME env, path traversal, and whitespace filtering.
  */
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
+import { useTempDir } from "./test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-negpath-"))
-  tempDirs.push(dir)
-  return dir
-}
+const { create: createTempDir } = useTempDir("swiz-negpath-")
 
 interface HookResult {
   exitCode: number | null

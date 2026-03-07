@@ -9,28 +9,19 @@
  * Each fixture set is modelled on the ramp3-spike label taxonomy we surveyed,
  * but kept self-contained so the tests never hit the network.
  */
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { useTempDir } from "./test-utils.ts"
 
 // ─── Infrastructure ───────────────────────────────────────────────────────────
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/stop-personal-repo-issues.ts")
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
-    await rm(dir, { recursive: true, force: true })
-  }
-})
+const tmp = useTempDir()
 
 async function createTempDir(suffix = ""): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), `swiz-issues-e2e${suffix}-`))
-  tempDirs.push(dir)
-  return dir
+  return tmp.create(`swiz-issues-e2e${suffix}-`)
 }
 
 /**

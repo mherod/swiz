@@ -1,8 +1,8 @@
-import { afterAll, describe, expect, it } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, it } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { formatActionPlan } from "./hook-utils.ts"
+import { useTempDir } from "./test-utils.ts"
 
 // ─── formatActionPlan unit tests ─────────────────────────────────────────────
 
@@ -95,14 +95,7 @@ describe("formatActionPlan", () => {
 const HOOK_PATH = resolve(process.cwd(), "hooks/stop-completion-auditor.ts")
 const SESSION_ID = "test-auditor-session-abc123"
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
-    await rm(dir, { recursive: true, force: true })
-  }
-})
+const tmp = useTempDir()
 
 /** Set up an isolated HOME with a tasks dir and a transcript above threshold. */
 async function createFixture(): Promise<{
@@ -118,8 +111,7 @@ async function createFixtureWithTools(toolNames: string[]): Promise<{
   tasksDir: string
   transcriptPath: string
 }> {
-  const home = await mkdtemp(join(tmpdir(), "swiz-auditor-test-"))
-  tempDirs.push(home)
+  const home = await tmp.create("swiz-auditor-test-")
   const tasksDir = join(home, ".claude", "tasks", SESSION_ID)
   await mkdir(tasksDir, { recursive: true })
 
@@ -312,8 +304,7 @@ async function createFixtureWithPush(): Promise<{
   tasksDir: string
   transcriptPath: string
 }> {
-  const home = await mkdtemp(join(tmpdir(), "swiz-auditor-ci-test-"))
-  tempDirs.push(home)
+  const home = await tmp.create("swiz-auditor-ci-test-")
   const tasksDir = join(home, ".claude", "tasks", SESSION_ID)
   await mkdir(tasksDir, { recursive: true })
 
@@ -446,8 +437,7 @@ describe("stop-completion-auditor — CI verification enforcement", () => {
   })
 
   it("finds CI evidence from sibling session in same project", async () => {
-    const home = await mkdtemp(join(tmpdir(), "swiz-auditor-cross-session-"))
-    tempDirs.push(home)
+    const home = await tmp.create("swiz-auditor-cross-session-")
 
     const CURRENT_SESSION = "current-session-aaa"
     const SIBLING_SESSION = "sibling-session-bbb"

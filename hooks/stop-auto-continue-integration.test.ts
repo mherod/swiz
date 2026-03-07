@@ -1,7 +1,7 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { useTempDir } from "./test-utils.ts"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -10,20 +10,7 @@ const BUN_EXE = Bun.which("bun") ?? "bun"
 
 // ─── Temp dir cleanup ─────────────────────────────────────────────────────────
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-auto-continue-integ-"))
-  tempDirs.push(dir)
-  return dir
-}
+const { create: createTempDir } = useTempDir("swiz-auto-continue-integ-")
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

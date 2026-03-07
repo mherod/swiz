@@ -5,29 +5,15 @@
  *
  * Tests create real git repos, task files, and JSONL transcripts as needed.
  */
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
+import { useTempDir } from "./test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-pospath-"))
-  tempDirs.push(dir)
-  return dir
-}
+const { create: createTempDir } = useTempDir("swiz-pospath-")
 
 interface HookResult {
   exitCode: number | null

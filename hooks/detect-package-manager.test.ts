@@ -1,24 +1,14 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { useTempDir } from "./test-utils.ts"
 
 // Use absolute path so the script is found regardless of spawn CWD.
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-no-npm.ts")
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
+const _tmp = useTempDir()
 async function makeTempDir(suffix = ""): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), `swiz-detect-pm${suffix}-`))
-  tempDirs.push(dir)
-  return dir
+  return _tmp.create(`swiz-detect-pm${suffix}-`)
 }
 
 /**

@@ -1,25 +1,11 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { useTempDir } from "./test-utils.ts"
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-state-gate.ts")
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function makeTempDir(): Promise<string> {
-  const dir = join(tmpdir(), `swiz-state-gate-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-  await mkdir(dir, { recursive: true })
-  tempDirs.push(dir)
-  return dir
-}
+const { create: makeTempDir } = useTempDir("swiz-state-gate-")
 
 async function writeState(dir: string, state: string): Promise<void> {
   const configDir = join(dir, ".swiz")

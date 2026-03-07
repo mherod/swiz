@@ -1,7 +1,6 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
+import { useTempDir } from "../../hooks/test-utils.ts"
 import {
   PROJECT_STATES,
   readProjectSettings,
@@ -11,21 +10,7 @@ import {
   writeProjectState,
 } from "../settings.ts"
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-state-test-"))
-  tempDirs.push(dir)
-  return dir
-}
+const { create: createTempDir } = useTempDir("swiz-state-test-")
 
 async function runSwiz(
   args: string[],

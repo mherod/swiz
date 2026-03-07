@@ -1,8 +1,8 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { isLargeContentPayload } from "./pretooluse-require-tasks.ts"
+import { useTempDir } from "./test-utils.ts"
 
 interface HookResult {
   decision?: string
@@ -73,21 +73,7 @@ async function runHook({
   }
 }
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (!dir) continue
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function createTempHome(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "swiz-require-tasks-"))
-  tempDirs.push(dir)
-  return dir
-}
+const { create: createTempHome } = useTempDir("swiz-require-tasks-")
 
 /** Write a stub transcript file for project discovery */
 async function writeTranscript(homeDir: string, cwd: string, sessionId: string) {
