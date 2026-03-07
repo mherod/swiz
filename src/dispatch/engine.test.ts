@@ -1,5 +1,104 @@
 import { describe, expect, it } from "vitest"
-import { logSlowHook, toolMatchesToken } from "./engine.ts"
+import { classifyHookOutput, type HookStatus, logSlowHook, toolMatchesToken } from "./engine.ts"
+
+// ─── classifyHookOutput: pure status classification ─────────────────────────
+
+describe("classifyHookOutput", () => {
+  describe("timeout", () => {
+    it("returns status=timeout when timedOut=true regardless of output", () => {
+      expect(
+        classifyHookOutput({ timedOut: true, trimmed: "", exitCode: null }).status
+      ).toBe<HookStatus>("timeout")
+      expect(
+        classifyHookOutput({ timedOut: true, trimmed: "{}", exitCode: 0 }).status
+      ).toBe<HookStatus>("timeout")
+    })
+
+    it("returns parsed=null on timeout", () => {
+      expect(classifyHookOutput({ timedOut: true, trimmed: "{}", exitCode: 0 }).parsed).toBeNull()
+    })
+  })
+
+  describe("no-output", () => {
+    it("returns status=no-output for empty trimmed with exit 0", () => {
+      expect(
+        classifyHookOutput({ timedOut: false, trimmed: "", exitCode: 0 }).status
+      ).toBe<HookStatus>("no-output")
+    })
+  })
+
+  describe("error", () => {
+    it("returns status=error for empty trimmed with non-zero exit", () => {
+      expect(
+        classifyHookOutput({ timedOut: false, trimmed: "", exitCode: 1 }).status
+      ).toBe<HookStatus>("error")
+      expect(
+        classifyHookOutput({ timedOut: false, trimmed: "", exitCode: 127 }).status
+      ).toBe<HookStatus>("error")
+    })
+
+    it("does NOT return error when there is output (even with non-zero exit)", () => {
+      const result = classifyHookOutput({ timedOut: false, trimmed: '{"ok":true}', exitCode: 1 })
+      expect(result.status).not.toBe<HookStatus>("error")
+    })
+  })
+
+  describe("invalid-json", () => {
+    it("returns status=invalid-json for non-JSON output", () => {
+      expect(
+        classifyHookOutput({ timedOut: false, trimmed: "not json", exitCode: 0 }).status
+      ).toBe<HookStatus>("invalid-json")
+    })
+
+    it("returns parsed=null for invalid JSON", () => {
+      expect(
+        classifyHookOutput({ timedOut: false, trimmed: "oops", exitCode: 0 }).parsed
+      ).toBeNull()
+    })
+  })
+
+  describe("ok", () => {
+    it("returns status=ok and parsed object for valid JSON", () => {
+      const result = classifyHookOutput({
+        timedOut: false,
+        trimmed: '{"decision":"block","reason":"x"}',
+        exitCode: 0,
+      })
+      expect(result.status).toBe<HookStatus>("ok")
+      expect(result.parsed).toEqual({ decision: "block", reason: "x" })
+    })
+
+    it("returns status=ok for valid JSON with non-zero exit (exit code captured separately)", () => {
+      const result = classifyHookOutput({ timedOut: false, trimmed: '{"ok":true}', exitCode: 1 })
+      expect(result.status).toBe<HookStatus>("ok")
+      expect(result.parsed).toEqual({ ok: true })
+    })
+  })
+
+  describe("status taxonomy completeness", () => {
+    const allClassifiable: HookStatus[] = ["ok", "no-output", "timeout", "invalid-json", "error"]
+    it("classifyHookOutput can produce all raw statuses", () => {
+      // timeout
+      expect(classifyHookOutput({ timedOut: true, trimmed: "", exitCode: null }).status).toBe(
+        "timeout"
+      )
+      // no-output
+      expect(classifyHookOutput({ timedOut: false, trimmed: "", exitCode: 0 }).status).toBe(
+        "no-output"
+      )
+      // error
+      expect(classifyHookOutput({ timedOut: false, trimmed: "", exitCode: 1 }).status).toBe("error")
+      // invalid-json
+      expect(classifyHookOutput({ timedOut: false, trimmed: "not-json", exitCode: 0 }).status).toBe(
+        "invalid-json"
+      )
+      // ok
+      expect(classifyHookOutput({ timedOut: false, trimmed: "{}", exitCode: 0 }).status).toBe("ok")
+      // All 5 raw statuses are covered
+      expect(allClassifiable).toHaveLength(5)
+    })
+  })
+})
 
 describe("toolMatchesToken", () => {
   describe("exact match", () => {

@@ -8,6 +8,7 @@ import { evalCondition, type HookGroup } from "../manifest.ts"
 import {
   extractAllowReason,
   extractContext,
+  type HookStatus,
   isAllowWithReason,
   isBlock,
   isDeny,
@@ -24,7 +25,7 @@ export interface TraceEntry {
   async: boolean
   startTime: number
   endTime?: number
-  status: "pending" | "allow" | "allow-with-reason" | "deny" | "block" | "ok" | "no-output"
+  status: HookStatus
   reason?: string
   output?: string
   stderr?: string
@@ -45,16 +46,16 @@ export async function replayPreToolUse(
         log(`   ⏭ ${hook.file} [condition false, skipping]`)
         continue
       }
-      const startTime = Date.now()
+      const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
       const entry: TraceEntry = {
         file: hook.file,
         ...(group.matcher && { matcher: group.matcher }),
         async: false,
-        startTime,
-        status: "pending",
+        startTime: execution.startTime,
+        endTime: execution.endTime,
+        status: execution.status,
+        ...(execution.stderrSnippet && { stderr: execution.stderrSnippet }),
       }
-      const resp = await runHook(hook.file, payloadStr, hook.timeout)
-      entry.endTime = Date.now()
       if (resp && isDeny(resp)) {
         entry.status = "deny"
         entry.output = JSON.stringify(resp)
@@ -67,7 +68,7 @@ export async function replayPreToolUse(
         traces.push(entry)
         continue
       }
-      entry.status = resp ? "allow" : "no-output"
+      if (resp) entry.status = "ok"
       traces.push(entry)
     }
   }
@@ -89,16 +90,16 @@ export async function replayBlocking(
         log(`   ⏭ ${hook.file} [condition false, skipping]`)
         continue
       }
-      const startTime = Date.now()
+      const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
       const entry: TraceEntry = {
         file: hook.file,
         ...(group.matcher && { matcher: group.matcher }),
         async: false,
-        startTime,
-        status: "pending",
+        startTime: execution.startTime,
+        endTime: execution.endTime,
+        status: execution.status,
+        ...(execution.stderrSnippet && { stderr: execution.stderrSnippet }),
       }
-      const resp = await runHook(hook.file, payloadStr, hook.timeout)
-      entry.endTime = Date.now()
       if (resp && isBlock(resp)) {
         entry.status = "block"
         entry.output = JSON.stringify(resp)
@@ -106,7 +107,6 @@ export async function replayBlocking(
         if (!runAllHooks) return traces // Short-circuit on block for non-stop events
         continue
       }
-      entry.status = resp ? "ok" : "no-output"
       traces.push(entry)
     }
   }
@@ -126,24 +126,25 @@ export async function replayContext(
         log(`   ⏭ ${hook.file} [condition false, skipping]`)
         continue
       }
-      const startTime = Date.now()
+      const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
       const entry: TraceEntry = {
         file: hook.file,
         ...(group.matcher && { matcher: group.matcher }),
         async: false,
-        startTime,
-        status: "pending",
+        startTime: execution.startTime,
+        endTime: execution.endTime,
+        status: execution.status,
+        ...(execution.stderrSnippet && { stderr: execution.stderrSnippet }),
       }
-      const resp = await runHook(hook.file, payloadStr, hook.timeout)
-      entry.endTime = Date.now()
       if (!resp) {
-        entry.status = "no-output"
         traces.push(entry)
         continue
       }
       const ctx = extractContext(resp)
-      entry.status = ctx ? "allow-with-reason" : "ok"
-      if (ctx) entry.reason = ctx.slice(0, 200)
+      if (ctx) {
+        entry.status = "allow-with-reason"
+        entry.reason = ctx.slice(0, 200)
+      }
       traces.push(entry)
     }
   }

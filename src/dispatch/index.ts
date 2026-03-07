@@ -29,9 +29,14 @@ export const DISPATCH_ROUTES: Record<string, DispatchStrategy> = {
 // ─── Re-exports ─────────────────────────────────────────────────────────────
 
 export {
+  classifyHookOutput,
+  DEFAULT_TIMEOUT,
   extractAllowReason,
   extractContext,
   groupMatches,
+  type HookExecution,
+  type HookRunResult,
+  type HookStatus,
   isAllowWithReason,
   isBlock,
   isDeny,
@@ -42,6 +47,7 @@ export {
   runContext,
   runHook,
   runPreToolUse,
+  type SkipReason,
   toolMatchesToken,
 } from "./engine.ts"
 export {
