@@ -41,6 +41,22 @@ async function run() {
     return
   }
 
+  // Fuzzy flag suggestions — warn on unknown --flags before delegating to command
+  if (command.options && command.options.length > 0) {
+    // Extract canonical flag tokens (entries that start with --), stripping trailing <arg> suffixes
+    const knownFlags = new Set(
+      command.options.map((o) => o.flags.split(/\s+/)[0] ?? "").filter((f) => f.startsWith("--"))
+    )
+    for (const arg of rest) {
+      if (!arg.startsWith("--") || knownFlags.has(arg)) continue
+      const hint = suggest(arg, knownFlags)
+      console.error(
+        `Unknown option: ${arg}${hint ? ` (did you mean: "${hint}"?)` : ""}` +
+          ` — run: swiz help ${commandName}`
+      )
+    }
+  }
+
   // Best-effort: drain any offline issue mutations before running commands
   await tryReplayPendingMutations()
 
