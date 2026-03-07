@@ -10,7 +10,7 @@ const { create: makeTempDir } = useTempDir("swiz-state-gate-")
 async function writeState(dir: string, state: string): Promise<void> {
   const configDir = join(dir, ".swiz")
   await mkdir(configDir, { recursive: true })
-  await Bun.write(join(configDir, "config.json"), JSON.stringify({ state }))
+  await Bun.write(join(configDir, "state.json"), JSON.stringify({ state }))
 }
 
 async function runHook(
