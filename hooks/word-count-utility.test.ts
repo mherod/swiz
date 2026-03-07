@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { randomBytes } from "node:crypto"
 import { unlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -8,7 +9,9 @@ describe("countFileWords", () => {
   let tempFile: string
 
   beforeEach(() => {
-    tempFile = join(tmpdir(), `test-file-${Date.now()}.txt`)
+    // Use random bytes to ensure unique filenames even in concurrent tests
+    const randomSuffix = randomBytes(8).toString("hex")
+    tempFile = join(tmpdir(), `test-file-${randomSuffix}.txt`)
   })
 
   afterEach(() => {
