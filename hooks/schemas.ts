@@ -52,17 +52,24 @@ export type FileEditHookInput = z.infer<typeof fileEditHookInputSchema>
  * Shell tool_input payload — used by hooks that inspect shell commands.
  * Covers Bash, Shell, run_shell_command and equivalent cross-agent tools.
  */
-export const shellHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  tool_name: z.string().optional(),
-  tool_input: z
-    .looseObject({
-      command: z.string().optional(),
-    })
-    .optional(),
-  transcript_path: z.string().optional(),
-})
+export const shellHookInputSchema = z
+  .looseObject({
+    cwd: z.string().optional(),
+    session_id: z.string().optional(),
+    tool_name: z.string().optional(),
+    tool_input: z
+      .looseObject({
+        command: z.string().optional(),
+      })
+      .optional(),
+    transcript_path: z.string().optional(),
+  })
+  .transform((val) => {
+    if (val.tool_input) {
+      val.tool_input.command = nfkc(val.tool_input.command)
+    }
+    return val
+  })
 
 export type ShellHookInput = z.infer<typeof shellHookInputSchema>
 
@@ -70,13 +77,24 @@ export type ShellHookInput = z.infer<typeof shellHookInputSchema>
  * Base PreToolUse / PostToolUse hook input envelope.
  * Mirrors the `ToolHookInput` interface in hook-utils.ts with runtime validation.
  */
-export const toolHookInputSchema = z.looseObject({
-  cwd: z.string().optional(),
-  session_id: z.string().optional(),
-  tool_name: z.string().optional(),
-  tool_input: z.record(z.string(), z.unknown()).optional(),
-  transcript_path: z.string().optional(),
-})
+export const toolHookInputSchema = z
+  .looseObject({
+    cwd: z.string().optional(),
+    session_id: z.string().optional(),
+    tool_name: z.string().optional(),
+    tool_input: z.record(z.string(), z.unknown()).optional(),
+    transcript_path: z.string().optional(),
+  })
+  .transform((val) => {
+    if (val.tool_input) {
+      for (const key of Object.keys(val.tool_input)) {
+        if (typeof val.tool_input[key] === "string") {
+          val.tool_input[key] = (val.tool_input[key] as string).normalize("NFKC")
+        }
+      }
+    }
+    return val
+  })
 
 export type ToolHookInput = z.infer<typeof toolHookInputSchema>
 
