@@ -22,6 +22,20 @@ function nfkc(s: string | undefined): string | undefined {
   return s?.normalize("NFKC")
 }
 
+/** Recursively NFKC-normalize all string values in a JSON-like structure. */
+function nfkcDeep(val: unknown): unknown {
+  if (typeof val === "string") return val.normalize("NFKC")
+  if (Array.isArray(val)) return val.map(nfkcDeep)
+  if (val !== null && typeof val === "object") {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(val)) {
+      out[k] = nfkcDeep(v)
+    }
+    return out
+  }
+  return val
+}
+
 export const fileEditHookInputSchema = z
   .looseObject({
     cwd: z.string().optional(),
@@ -87,11 +101,7 @@ export const toolHookInputSchema = z
   })
   .transform((val) => {
     if (val.tool_input) {
-      for (const key of Object.keys(val.tool_input)) {
-        if (typeof val.tool_input[key] === "string") {
-          val.tool_input[key] = (val.tool_input[key] as string).normalize("NFKC")
-        }
-      }
+      val.tool_input = nfkcDeep(val.tool_input) as Record<string, unknown>
     }
     return val
   })
