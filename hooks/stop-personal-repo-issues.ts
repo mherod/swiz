@@ -11,6 +11,7 @@ import { getIssueStore, replayPendingMutations } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
+  formatActionPlan,
   getCanonicalPathHash,
   getRepoSlug,
   ghJson,
@@ -422,10 +423,15 @@ async function main(): Promise<void> {
         reasonLines.push(`    ${pr.url}`)
       }
       reasonLines.push(
-        skillAdvice(
-          "work-on-prs",
-          "Use the /work-on-prs skill to address all feedback and resolve reviews:\n  /work-on-prs — Start working on the next PR",
-          "Address all PR feedback before stopping:\n  gh pr list --state open\n  gh pr view <number> --comments"
+        formatActionPlan(
+          [
+            skillAdvice(
+              "work-on-prs",
+              "Use the /work-on-prs skill to address all feedback and resolve reviews:\n  /work-on-prs — Start working on the next PR",
+              "Address all PR feedback before stopping:\n  gh pr list --state open\n  gh pr view <number> --comments"
+            ),
+          ],
+          { translateToolNames: true }
         )
       )
     }
@@ -452,19 +458,24 @@ async function main(): Promise<void> {
         reasonLines.push(`  …and ${hiddenRefinement} more issue(s) needing refinement`)
       }
       reasonLines.push(
-        skillAdvice(
-          "refine-issue",
-          "Use the /refine-issue skill to refine and label issues:\n  /refine-issue — Refine the next issue needing attention",
-          "Refine issues before implementation. Every issue MUST have at least one label from each category:\n" +
-            "  1. Type (bug, enhancement, documentation)\n" +
-            "  2. Readiness (ready, triaged, backlog)\n" +
-            "  3. Priority (priority-high, priority-medium, priority-low)\n" +
-            "\n" +
-            "Commands:\n" +
-            "  gh label list\n" +
-            '  gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"\n' +
-            "\n" +
-            "Rule: If you created the issue, NEVER add new comments. Always edit the original issue body instead to add proposals/context."
+        formatActionPlan(
+          [
+            skillAdvice(
+              "refine-issue",
+              "Use the /refine-issue skill to refine and label issues:\n  /refine-issue — Refine the next issue needing attention",
+              "Refine issues before implementation. Every issue MUST have at least one label from each category:\n" +
+                "  1. Type (bug, enhancement, documentation)\n" +
+                "  2. Readiness (ready, triaged, backlog)\n" +
+                "  3. Priority (priority-high, priority-medium, priority-low)\n" +
+                "\n" +
+                "Commands:\n" +
+                "  gh label list\n" +
+                '  gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"\n' +
+                "\n" +
+                "Rule: If you created the issue, NEVER add new comments. Always edit the original issue body instead to add proposals/context."
+            ),
+          ],
+          { translateToolNames: true }
         )
       )
     }
@@ -485,10 +496,15 @@ async function main(): Promise<void> {
         reasonLines.push(`  …and ${hiddenCount} more lower-priority issue(s)`)
       }
       reasonLines.push(
-        skillAdvice(
-          "work-on-issue",
-          "Use the /work-on-issue skill to pick up and resolve issues:\n  /work-on-issue — Start working on the next issue",
-          "Pick up and resolve open issues before stopping:\n  gh issue list --state open\n  gh issue view <number>"
+        formatActionPlan(
+          [
+            skillAdvice(
+              "work-on-issue",
+              "Use the /work-on-issue skill to pick up and resolve issues:\n  /work-on-issue — Start working on the next issue",
+              "Pick up and resolve open issues before stopping:\n  gh issue list --state open\n  gh issue view <number>"
+            ),
+          ],
+          { translateToolNames: true }
         )
       )
     }

@@ -264,6 +264,16 @@ describe("E2E stop-personal-repo-issues: personal repo issue blocking", () => {
     expect(result.reason).not.toContain("Use the /update-memory skill")
   })
 
+  test("open-issue block reason contains formatted action plan", async () => {
+    const dir = await createGitRepoWithGitHubRemote("-actionplan", "testuser", "myrepo")
+    const result = await runHook(dir, {
+      user: "testuser",
+      issues: [makeIssue(42, "Fix login redirect bug", ["bug", "priority:high"])],
+    })
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("Action plan:")
+  })
+
   test("skip-only issues allow stop (no actionable issues)", async () => {
     const dir = await createGitRepoWithGitHubRemote("-skiponly", "testuser", "myrepo")
     const result = await runHook(dir, {
