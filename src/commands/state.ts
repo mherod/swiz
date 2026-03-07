@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs"
+import { join } from "node:path"
 import {
   PROJECT_STATES,
   type ProjectState,
@@ -8,6 +10,7 @@ import {
   writeProjectState,
 } from "../settings.ts"
 import { evaluateTransition, STATE_METADATA } from "../state-machine.ts"
+import { projectKeyFromCwd } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
 const DIM = "\x1b[2m"
@@ -48,6 +51,55 @@ function printStateList(): void {
     console.log(`  ${state}${intentMarker}  ${arrow}`)
   }
   console.log()
+}
+
+/**
+ * Append a brief session summary to the project's MEMORY.md when pausing.
+ * Gathers recent git commits and writes a timestamped entry.
+ * Never throws — failures are silently ignored.
+ */
+async function appendSessionSummary(cwd: string): Promise<void> {
+  try {
+    const home = process.env.HOME
+    if (!home) return
+
+    const memoryDir = join(home, ".claude", "projects", projectKeyFromCwd(cwd), "memory")
+    if (!existsSync(memoryDir)) return
+
+    const memoryFile = join(memoryDir, "MEMORY.md")
+    const existing = existsSync(memoryFile) ? await Bun.file(memoryFile).text() : ""
+
+    // Gather recent commits (last 10)
+    const proc = Bun.spawn(["git", "log", "--oneline", "-10"], {
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const commitLog = await new Response(proc.stdout).text()
+    await proc.exited
+    if (proc.exitCode !== 0 || !commitLog.trim()) return
+
+    const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ")
+    const commits = commitLog
+      .trim()
+      .split("\n")
+      .map((line) => `  - ${line.trim()}`)
+      .join("\n")
+
+    const summary = `\n### Session paused (${timestamp})\nRecent commits:\n${commits}\n`
+
+    // Don't duplicate if already appended this session
+    const firstCommitLine = commitLog.trim().split("\n")[0]?.trim() ?? ""
+    if (firstCommitLine && existing.includes(firstCommitLine)) return
+
+    // Respect line cap
+    if (existing.split("\n").length + summary.split("\n").length > 200) return
+
+    await Bun.write(memoryFile, existing + summary)
+    console.log("  session summary appended to MEMORY.md")
+  } catch {
+    // Never block state transition on summary failure
+  }
 }
 
 export const stateCommand: Command = {
@@ -135,6 +187,10 @@ export const stateCommand: Command = {
       await writeProjectState(cwd, targetState)
       const from = current ? `${current} → ` : ""
       console.log(`  project state: ${from}${targetState}`)
+
+      if (targetState === "paused") {
+        await appendSessionSummary(cwd)
+      }
       return
     }
 
