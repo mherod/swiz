@@ -292,6 +292,10 @@ export const manifest: HookGroup[] = [
     hooks: [],
   },
   {
+    event: "subagentError",
+    hooks: [],
+  },
+  {
     event: "sessionEnd",
     hooks: [],
   },

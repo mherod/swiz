@@ -23,6 +23,7 @@ export const DISPATCH_ROUTES: Record<string, DispatchStrategy> = {
   notification: "context",
   subagentStart: "context",
   subagentStop: "blocking",
+  subagentError: "blocking",
   sessionEnd: "blocking",
 }
 

@@ -23,6 +23,24 @@
 - Added `--state <state>` as a required flag for `swiz tasks create`,
   `swiz tasks complete`, and `swiz tasks status` subcommands, ensuring
   every task operation records the current project work phase.
+- Added `subagentError` as a canonical event in the dispatch engine
+  (`DISPATCH_ROUTES`, agent `eventMap` entries for Claude Code, Cursor,
+  and Gemini, and manifest). Uses `"blocking"` strategy so host agents
+  can react before execution continues. Maps to `SubagentStop` on agents
+  that do not yet expose a distinct error event.
+
+  To hook into subagent errors, add a hook entry in `.swiz/config.json`:
+  ```json
+  {
+    "hooks": [
+      {
+        "event": "subagentError",
+        "hooks": [{ "file": "hooks/my-subagent-error-handler.ts" }]
+      }
+    ]
+  }
+  ```
+  Or in `swiz dispatch subagentError` via `~/.claude/settings.json`.
 
 ## 2026-03-06
 
@@ -32,6 +50,23 @@
   `subagentStart`, `subagentStop`, and `sessionEnd` canonical events.
   Dispatch routing table, agent `eventMap` entries, and test fixtures
   updated in sync. (#137 test fixtures fixed in e4057fc.)
+
+  Example: inject context on subagent start via `.swiz/config.json`:
+  ```json
+  {
+    "hooks": [
+      {
+        "event": "subagentStart",
+        "hooks": [{ "file": "hooks/my-subagent-init.ts" }]
+      },
+      {
+        "event": "sessionEnd",
+        "hooks": [{ "file": "hooks/my-session-cleanup.ts", "async": true }]
+      }
+    ]
+  }
+  ```
+  Invoke manually: `swiz dispatch subagentStart < payload.json`
 - Added slow-hook performance logging to `swiz dispatch`: when a hook
   takes longer than a configurable threshold, a warning is emitted with
   the hook name and elapsed time for easier diagnosis of sluggish hooks.
