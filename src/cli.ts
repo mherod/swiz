@@ -45,7 +45,9 @@ async function run() {
   if (command.options && command.options.length > 0) {
     // Extract canonical flag tokens (entries that start with --), stripping trailing <arg> suffixes
     const knownFlags = new Set(
-      command.options.map((o) => o.flags.split(/\s+/)[0] ?? "").filter((f) => f.startsWith("--"))
+      command.options
+        .map((o) => (o.flags.split(/\s+/)[0] ?? "").replace(/[^a-zA-Z0-9-]+$/, ""))
+        .filter((f) => f.startsWith("--"))
     )
     for (const arg of rest) {
       if (!arg.startsWith("--") || knownFlags.has(arg)) continue
