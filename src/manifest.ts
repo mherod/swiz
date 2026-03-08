@@ -94,6 +94,12 @@ export interface HookGroup {
   event: string
   matcher?: string
   hooks: HookDef[]
+  /**
+   * When true, this group is dispatched on a schedule (e.g. via a LaunchAgent),
+   * not triggered by an agent's hook system. `swiz install` skips scheduled groups
+   * when generating agent configs, and agent eventMap validation ignores them.
+   */
+  scheduled?: boolean
 }
 
 export const manifest: HookGroup[] = [
@@ -302,6 +308,11 @@ export const manifest: HookGroup[] = [
     event: "sessionEnd",
     hooks: [],
   },
+  {
+    event: "prPoll",
+    scheduled: true,
+    hooks: [{ file: "prpoll-notify.ts", timeout: 30 }],
+  },
 ]
 
 // ─── Runtime routing validator ──────────────────────────────────────────────
@@ -313,6 +324,8 @@ export function validateDispatchRoutes(
   agents: { id: string; hooksConfigurable: boolean; eventMap: Record<string, string> }[]
 ): void {
   const manifestEvents = [...new Set(manifest.map((g) => g.event))]
+  // Scheduled events are dispatched externally (e.g. LaunchAgent) — not by agent hook systems.
+  const agentEvents = [...new Set(manifest.filter((g) => !g.scheduled).map((g) => g.event))]
   const routeEvents = Object.keys(dispatchRoutes)
   const errors: string[] = []
 
@@ -336,9 +349,9 @@ export function validateDispatchRoutes(
     }
   }
 
-  // 3. Configurable agents must map all manifest events
+  // 3. Configurable agents must map all non-scheduled manifest events
   for (const agent of agents.filter((a) => a.hooksConfigurable)) {
-    for (const event of manifestEvents) {
+    for (const event of agentEvents) {
       if (!(event in agent.eventMap)) {
         errors.push(
           `Agent "${agent.id}" is missing eventMap entry for manifest event "${event}". ` +

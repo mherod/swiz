@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**80 hooks. 10 event types. Every agent. Zero compromises.**
+**81 hooks. 11 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -212,6 +212,14 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `userpromptsubmit-git-context.ts` | Injects current git branch and status into every prompt. The agent always knows where it is in the repo. |
 | `userpromptsubmit-task-advisor.ts` | Surfaces active tasks before each prompt so the agent stays focused on what it was supposed to be doing. |
 | `posttooluse-speak-narrator.ts` | Catches up on any unspoken assistant text when the user submits a prompt. Ensures narration stays current even during idle periods. Runs async. |
+
+### PrPoll (1)
+
+Dispatched by a macOS LaunchAgent every 5 minutes — not triggered by agent hook systems. Install with `swiz install --pr-poll`.
+
+| Hook | What it does |
+|------|-------------|
+| `prpoll-notify.ts` | Fetches new GitHub PR notifications since the last poll and delivers a native macOS notification per item via swiz-notify. Tracks state in `~/.swiz/pr-poll-state.json`. |
 
 ## Plugin Marketplace
 

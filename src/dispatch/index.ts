@@ -24,6 +24,7 @@ export const DISPATCH_ROUTES: Record<string, DispatchStrategy> = {
   subagentStart: "context",
   subagentStop: "blocking",
   sessionEnd: "blocking",
+  prPoll: "blocking",
 }
 
 // ─── Re-exports ─────────────────────────────────────────────────────────────

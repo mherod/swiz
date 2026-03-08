@@ -77,9 +77,10 @@ function mergeNestedConfig(
     if (userGroups.length > 0) merged[event] = userGroups
   }
 
-  // Add one dispatch entry per unique canonical event
+  // Add one dispatch entry per unique canonical event (skip scheduled events — not agent events)
   const seenEvents = new Set<string>()
   for (const group of manifest) {
+    if (group.scheduled) continue
     if (seenEvents.has(group.event)) continue
     seenEvents.add(group.event)
 
@@ -110,9 +111,10 @@ function mergeFlatConfig(
     if (userEntries.length > 0) merged[event] = userEntries
   }
 
-  // Add one dispatch entry per unique canonical event
+  // Add one dispatch entry per unique canonical event (skip scheduled events — not agent events)
   const seenEvents = new Set<string>()
   for (const group of manifest) {
+    if (group.scheduled) continue
     if (seenEvents.has(group.event)) continue
     seenEvents.add(group.event)
 
@@ -482,6 +484,81 @@ async function installStatusLine(dryRun: boolean): Promise<void> {
   console.log(`  ${GREEN}✓${RESET} statusLine configured in ${settingsPath}\n`)
 }
 
+// ─── PR poll LaunchAgent ─────────────────────────────────────────────────────
+
+const PR_POLL_LABEL = "com.swiz.prpoll"
+const PR_POLL_PLIST = join(
+  getHomeDirOrNull() ?? "",
+  "Library",
+  "LaunchAgents",
+  `${PR_POLL_LABEL}.plist`
+)
+
+function buildPrPollPlist(bunBin: string, indexPath: string): string {
+  const cmd = `echo '{}' | '${bunBin}' '${indexPath}' dispatch prPoll 2>>/tmp/swiz-prpoll.log`
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+\t<key>Label</key>
+\t<string>${PR_POLL_LABEL}</string>
+\t<key>ProgramArguments</key>
+\t<array>
+\t\t<string>/bin/sh</string>
+\t\t<string>-c</string>
+\t\t<string>${cmd}</string>
+\t</array>
+\t<key>StartInterval</key>
+\t<integer>300</integer>
+\t<key>RunAtLoad</key>
+\t<false/>
+\t<key>StandardOutPath</key>
+\t<string>/tmp/swiz-prpoll.log</string>
+\t<key>StandardErrorPath</key>
+\t<string>/tmp/swiz-prpoll-error.log</string>
+</dict>
+</plist>
+`
+}
+
+async function installPrPoll(dryRun: boolean): Promise<void> {
+  const bunBin = Bun.which("bun") ?? "bun"
+  const indexPath = Bun.main
+  const plistContent = buildPrPollPlist(bunBin, indexPath)
+
+  const existingContent = await readFileText(PR_POLL_PLIST)
+  const alreadyCurrent = existingContent.trim() === plistContent.trim()
+
+  if (dryRun) {
+    if (alreadyCurrent) {
+      console.log(`  ${DIM}prPoll LaunchAgent: already installed${RESET}\n`)
+    } else {
+      console.log(`  ${GREEN}+ prPoll LaunchAgent: ${PR_POLL_PLIST}${RESET}\n`)
+      console.log(formatUnifiedDiff(PR_POLL_PLIST, existingContent, plistContent))
+    }
+    return
+  }
+
+  if (alreadyCurrent) {
+    console.log(`  ${DIM}prPoll LaunchAgent: already installed${RESET}\n`)
+    return
+  }
+
+  await Bun.write(PR_POLL_PLIST, plistContent)
+  Bun.spawnSync(["launchctl", "unload", PR_POLL_PLIST])
+  const load = Bun.spawnSync(["launchctl", "load", PR_POLL_PLIST])
+  if (load.exitCode !== 0) {
+    console.log(
+      `  ${YELLOW}⚠${RESET} prPoll LaunchAgent written but launchctl load failed — reload manually:\n` +
+        `    launchctl load ${PR_POLL_PLIST}\n`
+    )
+  } else {
+    console.log(`  ${GREEN}✓${RESET} prPoll LaunchAgent installed and loaded:\n`)
+    console.log(`    ${DIM}${PR_POLL_PLIST}${RESET}`)
+    console.log(`    Polls every 5 minutes for new PR review/comment notifications.\n`)
+  }
+}
+
 // ─── Git mergetool configuration ─────────────────────────────────────────────
 
 async function installMergeTool(dryRun: boolean): Promise<void> {
@@ -525,6 +602,10 @@ export const installCommand: Command = {
     { flags: "--dry-run", description: "Preview changes without writing to disk" },
     { flags: "--merge-tool", description: "Configure swiz as the global Git mergetool" },
     { flags: "--status-line", description: "Install swiz status-line into Claude Code settings" },
+    {
+      flags: "--pr-poll",
+      description: "Install LaunchAgent that polls PR reviews/comments every 5min",
+    },
     { flags: "--json", description: "Output plugin status as JSON (implies --dry-run)" },
     { flags: "(no flags)", description: "Install for all detected agents" },
   ],
@@ -533,6 +614,7 @@ export const installCommand: Command = {
     const dryRun = jsonOutput || args.includes("--dry-run")
     const mergeTool = args.includes("--merge-tool")
     const statusLine = args.includes("--status-line")
+    const prPoll = args.includes("--pr-poll")
     const targets = getAgentByFlag(args)
 
     if (!checkBunAvailable()) {
@@ -551,6 +633,10 @@ export const installCommand: Command = {
 
     if (statusLine) {
       await installStatusLine(dryRun)
+    }
+
+    if (prPoll) {
+      await installPrPoll(dryRun)
     }
 
     // Skip hook installation if only --merge-tool was requested

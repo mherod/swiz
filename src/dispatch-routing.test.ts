@@ -11,6 +11,8 @@ import { manifest, validateDispatchRoutes } from "./manifest.ts"
 
 describe("dispatch routing validation", () => {
   const manifestEvents = [...new Set(manifest.map((g) => g.event))]
+  // Scheduled events are dispatched externally (LaunchAgent) — not by agent hook systems.
+  const agentEvents = [...new Set(manifest.filter((g) => !g.scheduled).map((g) => g.event))]
   const dispatchEvents = Object.keys(DISPATCH_ROUTES)
 
   it("runtime validator passes with current configuration", () => {
@@ -58,9 +60,9 @@ describe("dispatch routing validation", () => {
     ).toEqual([])
   })
 
-  it("every configurable agent maps all manifest events", () => {
+  it("every configurable agent maps all non-scheduled manifest events", () => {
     for (const agent of CONFIGURABLE_AGENTS) {
-      const unmapped = manifestEvents.filter((e) => !(e in agent.eventMap))
+      const unmapped = agentEvents.filter((e) => !(e in agent.eventMap))
       expect(
         unmapped,
         `Agent "${agent.id}" missing eventMap entries for: ${unmapped.join(", ")}`
