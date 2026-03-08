@@ -3,7 +3,6 @@
 // Prevents wasting agent turns on git operations that will fail because
 // another git process is running or a stale lock was left behind.
 
-import { existsSync } from "node:fs"
 import { join } from "node:path"
 import {
   denyPreToolUse,
@@ -29,7 +28,7 @@ const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
 if (!repoRoot) process.exit(0) // Not in a git repo; let git itself report the error.
 
 const lockPath = join(repoRoot, ".git", "index.lock")
-if (!existsSync(lockPath)) process.exit(0)
+if (!(await Bun.file(lockPath).exists())) process.exit(0)
 
 denyPreToolUse(
   [

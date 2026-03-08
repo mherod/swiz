@@ -1,21 +1,20 @@
 #!/usr/bin/env bun
 
-import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { emitContext, isFileEditTool } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
 
 /** Walk up from filePath to find node_modules/.bin/prettier */
-function findPrettier(filePath: string, cwd: string): string | null {
+async function findPrettier(filePath: string, cwd: string): Promise<string | null> {
   // Check project cwd first
   const cwdBin = join(cwd, "node_modules", ".bin", "prettier")
-  if (existsSync(cwdBin)) return cwdBin
+  if (await Bun.file(cwdBin).exists()) return cwdBin
 
   // Walk up from file location
   let dir = dirname(filePath)
   for (let i = 0; i < 10; i++) {
     const candidate = join(dir, "node_modules", ".bin", "prettier")
-    if (existsSync(candidate)) return candidate
+    if (await Bun.file(candidate).exists()) return candidate
     const parent = dirname(dir)
     if (parent === dir) break
     dir = parent
@@ -35,7 +34,7 @@ async function main() {
   if (!/\.(ts|tsx)$/.test(filePath)) process.exit(0)
 
   const cwd = input.cwd ?? process.cwd()
-  const prettierBin = findPrettier(filePath, cwd)
+  const prettierBin = await findPrettier(filePath, cwd)
 
   // No prettier available — exit silently, no stderr noise
   if (!prettierBin) process.exit(0)

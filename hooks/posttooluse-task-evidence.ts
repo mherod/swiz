@@ -13,7 +13,6 @@
  * Writes are idempotent — identical evidence is not re-written.
  */
 
-import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import type { ToolHookInput } from "./hook-utils.ts"
@@ -109,7 +108,7 @@ async function loadConfig(): Promise<EvidenceConfig> {
 
   let parsed: Record<string, unknown>
   try {
-    const raw = await readFile(configPath, "utf-8")
+    const raw = await Bun.file(configPath).text()
     parsed = JSON.parse(raw) as Record<string, unknown>
   } catch {
     // Config missing or unreadable — silent fallback to defaults
@@ -208,7 +207,7 @@ async function main(): Promise<void> {
   const taskPath = join(tasksDir, `${taskId}.json`)
 
   try {
-    const raw = await readFile(taskPath, "utf-8")
+    const raw = await Bun.file(taskPath).text()
     const task = JSON.parse(raw)
 
     // Idempotent — skip if evidence is already identical

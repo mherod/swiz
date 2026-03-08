@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 // PostToolUse hook: Remind about sibling test file when editing source files
 
-import { existsSync } from "node:fs"
 import { basename, dirname } from "node:path"
 import { emitContext, isFileEditTool } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
@@ -33,7 +32,13 @@ async function main(): Promise<void> {
     `${dir}/__tests__/${name}.spec.${ext}`,
   ]
 
-  const foundTest = candidates.find((c) => existsSync(c))
+  let foundTest: string | undefined
+  for (const candidate of candidates) {
+    if (await Bun.file(candidate).exists()) {
+      foundTest = candidate
+      break
+    }
+  }
   if (!foundTest) return
 
   emitContext(

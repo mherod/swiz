@@ -55,15 +55,7 @@ async function main(): Promise<void> {
   if (toolName === "TaskCreate") return
 
   const tasksDir = join(homedir(), ".claude", "tasks", input.session_id)
-  let existingFiles: string[]
-  try {
-    const { readdir } = await import("node:fs/promises")
-    existingFiles = await readdir(tasksDir)
-  } catch {
-    existingFiles = []
-  }
-
-  const taskExists = existingFiles.some((f) => f === `${taskId}.json`)
+  const taskExists = await Bun.file(join(tasksDir, `${taskId}.json`)).exists()
   if (taskExists) return
 
   // ── Auto-recovery ──────────────────────────────────────────────────────────

@@ -6,7 +6,6 @@
  * Uses PID-aware file locking with heartbeats to prevent stale locks.
  */
 
-import { existsSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import { spawnSpeak } from "./hook-utils.ts"
 
@@ -21,7 +20,7 @@ const rawSettings = await readSwizSettings()
 const settings = getEffectiveSwizSettings(rawSettings, sessionId || null)
 if (!settings.speak) process.exit(0)
 
-if (!transcriptPath || !sessionId || !existsSync(transcriptPath)) process.exit(0)
+if (!transcriptPath || !sessionId || !(await Bun.file(transcriptPath).exists())) process.exit(0)
 
 // ── Lock infrastructure (defined early so stale scavenging runs on every invocation) ──
 const lockFile = `/tmp/speak-lock-${sessionId}.lock`
@@ -37,35 +36,35 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-function clearStaleLock(): void {
+async function clearStaleLock(): Promise<void> {
   try {
-    const content = readFileSync(lockFile, "utf-8").trim()
+    const content = (await Bun.file(lockFile).text()).trim()
     const ownerPid = parseInt(content, 10)
-    const stat = statSync(lockFile)
-    const age = Date.now() - stat.mtimeMs
+    const stats = await Bun.file(lockFile).stat()
+    const age = Date.now() - stats.mtime.getTime()
     if (!Number.isNaN(ownerPid) && pidAlive(ownerPid) && age < LOCK_STALE_MS) return
-    unlinkSync(lockFile)
+    await Bun.file(lockFile).delete()
   } catch {
     // Lock doesn't exist or can't be read — nothing to clear
   }
 }
 
 // Scavenge stale locks on every invocation, even when exiting early
-clearStaleLock()
+await clearStaleLock()
 
 // Track last spoken line position
 const posFile = `/tmp/speak-pos-${sessionId}.txt`
 let lastPos = 0
-if (existsSync(posFile)) {
-  try {
-    lastPos = parseInt(readFileSync(posFile, "utf-8").trim(), 10) || 0
-  } catch {
-    // Corrupted pos file — start from 0
+try {
+  if (await Bun.file(posFile).exists()) {
+    lastPos = parseInt((await Bun.file(posFile).text()).trim(), 10) || 0
   }
+} catch {
+  // Corrupted pos file — start from 0
 }
 
 // Read transcript lines
-const lines = readFileSync(transcriptPath, "utf-8").split("\n").filter(Boolean)
+const lines = (await Bun.file(transcriptPath).text()).split("\n").filter(Boolean)
 const totalLines = lines.length
 
 if (totalLines <= lastPos) process.exit(0)
@@ -89,7 +88,7 @@ for (const line of newLines) {
 }
 
 // Update position regardless of whether we speak
-writeFileSync(posFile, String(totalLines))
+await Bun.write(posFile, String(totalLines))
 
 const newText = texts.join(" ").replace(/\s+/g, " ").trim()
 
@@ -99,28 +98,28 @@ if (newText.length < 5) process.exit(0)
 const truncated = newText.slice(0, 500)
 
 async function acquireLock(timeoutMs = 10_000): Promise<boolean> {
-  clearStaleLock()
+  await clearStaleLock()
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
-    if (!existsSync(lockFile)) {
+    if (!(await Bun.file(lockFile).exists())) {
       try {
-        writeFileSync(lockFile, String(process.pid), { flag: "wx" })
-        return true
+        await Bun.write(lockFile, String(process.pid))
+        const owner = (await Bun.file(lockFile).text()).trim()
+        if (owner === String(process.pid)) return true
       } catch {
         // Another process grabbed it — retry
       }
     }
-    clearStaleLock()
+    await clearStaleLock()
     await Bun.sleep(200)
   }
   return false
 }
 
 /** Touch the lock file mtime to signal the process is still active. */
-function heartbeat(): void {
+async function heartbeat(): Promise<void> {
   try {
-    const now = new Date()
-    utimesSync(lockFile, now, now)
+    await Bun.write(lockFile, String(process.pid))
   } catch {
     // Lock was removed — heartbeat no longer needed
   }
@@ -129,7 +128,9 @@ function heartbeat(): void {
 if (!(await acquireLock())) process.exit(0)
 
 // Start heartbeat interval to keep lock alive during long say invocations
-const heartbeatInterval = setInterval(heartbeat, HEARTBEAT_MS)
+const heartbeatInterval = setInterval(() => {
+  void heartbeat()
+}, HEARTBEAT_MS)
 
 // Speak, then release lock — delegate to shared spawnSpeak helper
 try {
@@ -137,7 +138,7 @@ try {
 } finally {
   clearInterval(heartbeatInterval)
   try {
-    unlinkSync(lockFile)
+    await Bun.file(lockFile).delete()
   } catch {
     // Lock already cleared
   }

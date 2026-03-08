@@ -2,7 +2,6 @@
 
 // SessionStart hook: Inject project health snapshot as additionalContext
 
-import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { readProjectState, STATE_TRANSITIONS } from "../src/settings.ts"
 import { emitContext, ghJson, git, hasGhCli, isGitHubRemote, isGitRepo } from "./hook-utils.ts"
@@ -24,13 +23,15 @@ const KNOWN_PLUGIN_ENV: PluginEnvRequirement[] = [
   },
 ]
 
-function checkPluginEnv(): string[] {
+async function checkPluginEnv(): Promise<string[]> {
   const warnings: string[] = []
   const settingsPath = join(process.env.HOME ?? "~", ".claude", "settings.json")
 
   let enabledPlugins: Record<string, boolean> = {}
   try {
-    const settings = JSON.parse(readFileSync(settingsPath, "utf-8"))
+    const settings = (await Bun.file(settingsPath).json()) as {
+      enabledPlugins?: Record<string, boolean>
+    }
     enabledPlugins = settings.enabledPlugins ?? {}
   } catch {
     return warnings
@@ -53,7 +54,7 @@ async function main(): Promise<void> {
   const parts: string[] = []
 
   // Plugin environment health — runs regardless of git context
-  const pluginWarnings = checkPluginEnv()
+  const pluginWarnings = await checkPluginEnv()
   if (pluginWarnings.length > 0) {
     parts.push(`[ENV] ${pluginWarnings.join(" | ")}`)
   }

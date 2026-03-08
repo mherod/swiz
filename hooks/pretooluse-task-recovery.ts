@@ -56,13 +56,7 @@ async function main(): Promise<void> {
   const taskFile = join(tasksDir, `${taskId}.json`)
 
   // Check if the task already exists — if so, nothing to do
-  try {
-    const { access } = await import("node:fs/promises")
-    await access(taskFile)
-    return // Task exists, allow the tool call to proceed normally
-  } catch {
-    // Task file not found — create a stub so the tool call succeeds
-  }
+  if (await Bun.file(taskFile).exists()) return
 
   // Build a stub task. Use "in_progress" as the initial status so TaskUpdate
   // can transition it to whatever the agent requested (typically "completed").

@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 // Stop hook: Run project lint and typecheck scripts before allowing stop
 
-import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { blockStop, detectPackageManager } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
@@ -40,7 +39,7 @@ async function main(): Promise<void> {
   const cwd = input.cwd ?? process.cwd()
   const pkgPath = join(cwd, "package.json")
 
-  if (!existsSync(pkgPath)) return
+  if (!(await Bun.file(pkgPath).exists())) return
 
   let pkg: Record<string, unknown>
   try {

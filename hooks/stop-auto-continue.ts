@@ -4,7 +4,6 @@
 // Uses the Gemini API (promptGemini) for transcript analysis.
 // Only skips for trivial sessions (< MIN_TOOL_CALLS) or when no API key is available.
 
-import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
@@ -193,7 +192,10 @@ function normalizeReflectiveNextStep(reflections: string[]): string {
 
 async function findProjectDir(cwd: string): Promise<string | null> {
   const derived = join(PROJECTS_DIR, projectKeyFromCwd(cwd))
-  if (existsSync(derived)) return derived
+  try {
+    await readdir(derived)
+    return derived
+  } catch {}
 
   // Fallback: scan project dirs for one that matches this CWD
   try {
@@ -219,12 +221,16 @@ async function writeReflections(cwd: string, reflections: string[]): Promise<voi
     if (!projectDir) return
 
     const memoryDir = join(projectDir, "memory")
-    if (!existsSync(memoryDir)) return
+    try {
+      await readdir(memoryDir)
+    } catch {
+      return
+    }
 
     const memoryFile = join(memoryDir, "MEMORY.md")
 
     let existing = ""
-    if (existsSync(memoryFile)) {
+    if (await Bun.file(memoryFile).exists()) {
       existing = await Bun.file(memoryFile).text()
     }
 

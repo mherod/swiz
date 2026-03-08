@@ -11,7 +11,6 @@
 // Rationale: prevents accidental rapid-fire pushes that could trigger CI
 // loops, burn through rate limits, or push partially-prepared commits.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import {
   denyPreToolUse,
   GIT_PUSH_RE,
@@ -45,8 +44,8 @@ const sentinelPath = `/tmp/swiz-push-cooldown-${repoKey}.timestamp`
 
 // Read last push time
 const now = Date.now()
-if (existsSync(sentinelPath)) {
-  const raw = readFileSync(sentinelPath, "utf8").trim()
+if (await Bun.file(sentinelPath).exists()) {
+  const raw = (await Bun.file(sentinelPath).text()).trim()
   const lastPush = parseInt(raw, 10)
   if (!Number.isNaN(lastPush)) {
     const elapsed = now - lastPush
@@ -64,7 +63,7 @@ if (existsSync(sentinelPath)) {
 
 // Record this push attempt timestamp
 try {
-  writeFileSync(sentinelPath, String(now))
+  await Bun.write(sentinelPath, String(now))
 } catch {
   // Non-fatal: if we can't write the sentinel, allow the push
 }

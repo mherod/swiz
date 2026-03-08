@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if package.json was modified but lockfile was not
 
-import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { blockStop, git, isGitRepo } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
@@ -55,7 +54,7 @@ async function main(): Promise<void> {
     let installCmd = ""
     for (const [lf, cmd] of Object.entries(LOCKFILE_MAP)) {
       const lfPath = pkgDir === "." ? lf : join(pkgDir, lf)
-      if (existsSync(join(cwd, lfPath))) {
+      if (await Bun.file(join(cwd, lfPath)).exists()) {
         lockfile = lfPath
         installCmd = cmd
         break
@@ -70,7 +69,7 @@ async function main(): Promise<void> {
     if (pkgDir !== ".") {
       let rootCovers = false
       for (const rootLf of Object.keys(LOCKFILE_MAP)) {
-        if (existsSync(join(cwd, rootLf)) && changedFiles.has(rootLf)) {
+        if ((await Bun.file(join(cwd, rootLf)).exists()) && changedFiles.has(rootLf)) {
           rootCovers = true
           break
         }

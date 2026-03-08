@@ -4,34 +4,34 @@
 // Runs at startup so agents always get up-to-date hook configurations.
 
 import { createHash } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { emitContext } from "./hook-utils.ts"
 
 const HASH_FILE = join(process.env.HOME ?? "~", ".local", "share", "swiz", "manifest-hash")
 
-function computeManifestHash(swizRoot: string): string | null {
+async function computeManifestHash(swizRoot: string): Promise<string | null> {
   const manifestPath = join(swizRoot, "src", "manifest.ts")
   try {
-    const content = readFileSync(manifestPath, "utf-8")
+    const content = await Bun.file(manifestPath).text()
     return createHash("sha256").update(content).digest("hex")
   } catch {
     return null
   }
 }
 
-function readStoredHash(): string | null {
+async function readStoredHash(): Promise<string | null> {
   try {
-    return readFileSync(HASH_FILE, "utf-8").trim()
+    return (await Bun.file(HASH_FILE).text()).trim()
   } catch {
     return null
   }
 }
 
-function writeHash(hash: string): void {
+async function writeHash(hash: string): Promise<void> {
   const dir = dirname(HASH_FILE)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  writeFileSync(HASH_FILE, hash, "utf-8")
+  if (!(await Bun.file(dir).exists())) await mkdir(dir, { recursive: true })
+  await Bun.write(HASH_FILE, hash)
 }
 
 async function runInstall(swizRoot: string): Promise<boolean> {
@@ -61,10 +61,10 @@ async function main(): Promise<void> {
 
   // Resolve swiz root from the hook file location
   const swizRoot = dirname(dirname(import.meta.path))
-  const currentHash = computeManifestHash(swizRoot)
+  const currentHash = await computeManifestHash(swizRoot)
   if (!currentHash) return
 
-  const storedHash = readStoredHash()
+  const storedHash = await readStoredHash()
 
   if (storedHash === currentHash) return
 
@@ -73,7 +73,7 @@ async function main(): Promise<void> {
   if (!installed) return
 
   // Update stored hash so we don't reinstall again next session
-  writeHash(currentHash)
+  await writeHash(currentHash)
 
   const isFirstInstall = storedHash === null
   const message = isFirstInstall
