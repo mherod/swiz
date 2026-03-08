@@ -77,6 +77,8 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
     })
     expect(result.denied).toBe(true)
     expect(result.reason).toContain(FOOTER_MARKER)
+    expect(result.reason).not.toContain("/re-assess")
+    expect(result.reason).not.toContain("re-assess skill")
   })
 
   test("pretooluse-banned-commands: cd denial includes footer", async () => {

@@ -41,4 +41,4 @@ const reason =
   `\n\nUse \`swiz tasks complete <id> --evidence "note:CI green"\` ` +
   `instead of a plain TaskUpdate.`
 
-denyPreToolUse(reason, { includeReassessmentAdvice: false })
+denyPreToolUse(reason)

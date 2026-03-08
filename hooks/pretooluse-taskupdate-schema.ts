@@ -18,5 +18,5 @@ if (unsupported.length > 0) {
     `Allowed fields: ${allowed}.\n\n` +
     `To complete a task with evidence, use:\n` +
     `  swiz tasks complete <id> --evidence "note:..."`
-  denyPreToolUse(reason, { includeReassessmentAdvice: false })
+  denyPreToolUse(reason)
 }

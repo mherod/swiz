@@ -104,6 +104,8 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
     const result = await runStopHook("stop-git-status.ts", { cwd: dir }, { cwd: dir })
     expect(result.blocked).toBe(true)
     expect(result.reason).toContain(FOOTER_MARKER)
+    expect(result.reason).not.toContain("/re-assess")
+    expect(result.reason).not.toContain("re-assess skill")
   })
 
   test("stop-debug-statements: console.log in source block includes footer", async () => {
