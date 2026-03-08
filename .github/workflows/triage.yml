@@ -1,0 +1,128 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened, reopened]
+
+jobs:
+  claude-triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Issue Triage
+        id: claude-triage
+        uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          use_sticky_comment: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            ISSUE NUMBER: ${{ env.ISSUE_NUMBER }}
+
+            You are triaging issue #${{ env.ISSUE_NUMBER }} in ${{ github.repository }}.
+            Use the repository's CLAUDE.md for guidance on conventions and architecture.
+
+            CRITICAL: Never execute `gh` commands without JSON output or piping.
+            The default pager truncates output, producing incomplete data.
+            Always use one of:
+            - `gh <cmd> --json <fields> --jq '...'`
+            - `gh <cmd> --json <fields> | jq ...`
+            - `gh <cmd> | cat`
+
+            Follow these steps in order:
+
+            ## Step 1: Read the Issue
+
+            Fetch the full issue details:
+            ```
+            gh issue view ${{ env.ISSUE_NUMBER }} --json title,body,labels,author,assignees | jq
+            ```
+
+            ## Step 2: Check for Duplicates
+
+            Extract 2-3 key terms from the issue title and body, then search
+            for existing issues that may cover the same topic:
+            ```
+            gh issue list --search "<key terms>" --state all --json number,title,state --jq '.[] | {number, title, state}' | head -20
+            ```
+
+            If you find likely duplicates, note them in your comment. Do NOT
+            close the issue — just flag them for the author to review.
+
+            ## Step 3: Search the Codebase
+
+            Use Grep, Glob, and Read to find files, functions, types, and tests
+            related to what the issue describes. Look for:
+            - File paths, function names, or type names mentioned in the issue
+            - Code that implements the feature or exhibits the bug described
+            - Related test files that cover the affected area
+            - Configuration or schema files relevant to the issue
+
+            Be thorough — search across both `src/` (CLI source) and
+            `hooks/` (hook scripts). The issue may span both.
+
+            ## Step 4: Assess and Comment
+
+            Post a single triage comment using `gh issue comment`. Structure it as:
+
+            **Relevant Code**
+            List the files, functions, and line numbers most related to this issue.
+            Use `file_path:line_number` format so the author can navigate directly.
+
+            **Duplicates / Related Issues**
+            Link any existing issues that overlap. State whether they are exact
+            duplicates or just related.
+
+            **Missing Information** (if applicable)
+            Note anything the author should clarify — reproduction steps, expected
+            behavior, affected roles, specific endpoints, etc.
+
+            **Suggested Refinements** (if applicable)
+            Suggest concrete improvements to the issue body: specific file paths
+            instead of vague references, exact error messages, acceptance criteria.
+
+            Keep the comment concise and constructive. Do NOT rewrite the entire
+            issue body — just point out what would help.
+
+            ## Step 5: Apply Labels
+
+            Based on your analysis, apply appropriate labels using:
+            ```
+            gh issue edit ${{ env.ISSUE_NUMBER }} --add-label "label1,label2" | cat
+            ```
+
+            Choose from the repository's existing labels. To see what's available:
+            ```
+            gh label list --json name,description --jq '.[] | {name, description}' | cat
+            ```
+
+            Typical label categories:
+            - **Type**: `bug`, `enhancement`, `question`, `documentation`
+            - **Area**: `hooks`, `cli`, `ci`, `infrastructure`
+            - **Priority**: `priority: high`, `priority: low` (only if clearly warranted)
+
+            Only apply labels you are confident about. When in doubt, skip labelling
+            rather than mislabel.
+
+          show_full_output: true
+          claude_args: '--allowedTools "Bash(gh api:*),Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh issue list:*),Bash(gh search:*),Bash(gh label list:*),Grep,Glob,Read"'
+
+      - name: Note Claude triage was skipped/failed (non-blocking)
+        if: steps.claude-triage.outcome != 'success'
+        run: |
+          echo "Claude Issue Triage step did not succeed (often due to CLI rate limiting)."
+          echo "This is treated as non-blocking so it does not affect issue processing."
