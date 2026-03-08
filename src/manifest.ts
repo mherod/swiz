@@ -184,6 +184,7 @@ export const manifest: HookGroup[] = [
     matcher: "Bash",
     hooks: [
       { file: "pretooluse-banned-commands.ts", timeout: 5 },
+      { file: "pretooluse-no-cp.ts", timeout: 5 },
       { file: "pretooluse-git-index-lock.ts", timeout: 5 },
       { file: "pretooluse-no-npm.ts", timeout: 5 },
       { file: "pretooluse-bun-test-concurrent.ts", timeout: 5 },
