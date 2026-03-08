@@ -4,7 +4,7 @@
  * and update the global ambition-mode setting when the user taps a button.
  *
  * Called as a detached process from stop-auto-continue.ts:
- *   bun hooks/ambition-notify.ts <binary> <currentMode> <nextStep> [cwd]
+ *   bun src/ambition-notify.ts <binary> <currentMode> <nextStep> [cwd]
  *
  * The process outlives the stop hook and exits after the user taps a button
  * (or after the timeout elapses).

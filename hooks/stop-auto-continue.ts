@@ -570,7 +570,7 @@ function resolveNotifyBinary(): string | null {
 }
 
 /**
- * Spawn `hooks/ambition-notify.ts` as a detached background process.
+ * Spawn `src/ambition-notify.ts` as a detached background process.
  * The process will show a mode-steering notification and update the
  * ambition-mode setting if the user taps a button. Never awaited —
  * fire-and-forget so it never delays the stop hook decision.
@@ -579,7 +579,7 @@ function spawnAmbitionNotification(currentMode: AmbitionMode, nextStep: string, 
   const binary = resolveNotifyBinary()
   if (!binary) return
 
-  const helperScript = join(import.meta.dir, "ambition-notify.ts")
+  const helperScript = join(import.meta.dir, "..", "src", "ambition-notify.ts")
   if (!existsSync(helperScript)) return
 
   Bun.spawn(["bun", helperScript, binary, currentMode, nextStep, cwd], {
