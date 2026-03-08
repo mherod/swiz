@@ -13,11 +13,34 @@ import type { ZodType } from "zod"
 const DEFAULT_MODEL = "gemini-flash-latest"
 
 /**
- * Synchronous check: returns true when GEMINI_API_KEY is set in the environment.
- * Use this for early-exit gates before the async prompt call.
+ * Attempts to resolve a GEMINI_API_KEY and inject it into process.env if not
+ * already present. Tries the macOS Keychain (via Bun.secrets) as a fallback.
+ *
+ * Keychain lookup: `security add-generic-password -s GEMINI_API_KEY -a default -w <key>`
+ *
+ * Call this once at startup before hasGeminiApiKey().
+ * Safe to call multiple times — no-ops when the key is already in the environment.
+ */
+export async function ensureGeminiApiKey(): Promise<void> {
+  if (process.env.GEMINI_API_KEY) return
+  try {
+    // Bun.secrets reads from the system keychain (macOS Keychain, Linux libsecret, etc.)
+    const secret = await Bun.secrets.get({ service: "GEMINI_API_KEY", name: "default" })
+    if (secret) {
+      process.env.GEMINI_API_KEY = secret
+    }
+  } catch {
+    // Keychain unavailable or entry missing — env var path remains the only option
+  }
+}
+
+/**
+ * Synchronous check: returns true when Gemini access is available —
+ * either via GEMINI_API_KEY env var or the gemini CLI (OAuth credentials).
+ * Call ensureGeminiApiKey() first to populate the env var from Keychain if needed.
  */
 export function hasGeminiApiKey(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY)
+  return Boolean(process.env.GEMINI_API_KEY) || Boolean(Bun.which("gemini"))
 }
 
 export interface PromptGeminiOptions {
@@ -41,13 +64,14 @@ export interface PromptGeminiStreamOptions extends PromptGeminiOptions {
 }
 
 function createProvider() {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new Error("No Gemini API key found. Set GEMINI_API_KEY env var.")
+  if (process.env.GEMINI_API_KEY) {
+    return createGeminiProvider({
+      authType: "api-key",
+      apiKey: process.env.GEMINI_API_KEY,
+    })
   }
-  return createGeminiProvider({
-    authType: "api-key",
-    apiKey: process.env.GEMINI_API_KEY,
-  })
+  // Fall back to OAuth (cached ~/.gemini/ credentials from the gemini CLI)
+  return createGeminiProvider({ authType: "oauth-personal" })
 }
 
 function resolveSignal(options?: PromptGeminiOptions): {

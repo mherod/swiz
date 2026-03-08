@@ -9,7 +9,7 @@ import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
-import { hasGeminiApiKey, promptGeminiObject } from "../src/gemini.ts"
+import { ensureGeminiApiKey, hasGeminiApiKey, promptGeminiObject } from "../src/gemini.ts"
 import { getHomeDir, getHomeDirOrNull } from "../src/home.ts"
 import {
   type AmbitionMode,
@@ -599,6 +599,10 @@ async function main(): Promise<void> {
   const hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
   const input = stopHookInputSchema.parse(hookRaw)
   const cwd = resolveCwd(input.cwd)
+
+  // Populate GEMINI_API_KEY from Keychain if not already in env.
+  // Must run before hasGeminiApiKey() so the Keychain fallback is visible.
+  await ensureGeminiApiKey()
 
   const settings = await readSwizSettings()
   const projectSettings = await readProjectSettings(cwd)
