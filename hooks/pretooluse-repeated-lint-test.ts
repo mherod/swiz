@@ -82,6 +82,22 @@ function bashMutatesWorkspace(cmd: string): boolean {
   if (/\b(?:g?awk)\b[^|;]*-i\s+inplace/.test(cmd)) return true
   // patch: always mutates workspace files (applies unified diffs to source files)
   if (/\bpatch\b\s+/.test(cmd)) return true
+  // Python -c inline script with write-mode open(): open(..., 'w'/'a'/'x'/variants)
+  //   Covers: open('f','w'), open('f','wb'), open('f','ab'), open('f','xb'), etc.
+  if (/\bpython\d*\b[^|;]*-c\b.*\bopen\s*\([^)]*['"][wax][bt]?['"]/.test(cmd)) return true
+  // Python -c inline script with pathlib write methods (.write_text / .write_bytes)
+  if (/\bpython\d*\b[^|;]*-c\b.*\.write(?:_text|_bytes)?\s*\(/.test(cmd)) return true
+  // Python -c inline script with os filesystem mutations (remove, unlink, rename, mkdir…)
+  if (
+    /\bpython\d*\b[^|;]*-c\b.*\bos\.(?:remove|unlink|rename|replace|makedirs?|rmdir)\s*\(/.test(cmd)
+  )
+    return true
+  // Python -c inline script with shutil mutations (copy, move, rmtree)
+  if (/\bpython\d*\b[^|;]*-c\b.*\bshutil\.(?:copy2?|move|rmtree)\s*\(/.test(cmd)) return true
+  // Python -m with in-place formatters that always mutate files (no flag required)
+  if (/\bpython\d*\b[^|;]*-m\s+(?:black|isort|autopep8)\b/.test(cmd)) return true
+  // Python -m 2to3 -w: explicit write-in-place flag
+  if (/\bpython\d*\b[^|;]*-m\s+2to3\b[^|;]*-w\b/.test(cmd)) return true
   // Common CLI output flags — space-separated: -o path, --output path, --outfile path
   if (/(?:^|\s)(?:-o|--(?:out(?:put|file|dir)?|report|log-?file))\s+\S/.test(cmd)) return true
   // Common CLI output flags — equals-separated: --output=path, --outfile=path
