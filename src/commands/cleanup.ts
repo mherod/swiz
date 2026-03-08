@@ -128,10 +128,23 @@ interface ClaudeBackupInfo {
   fileCount: number
 }
 
+async function addBackupFile(
+  filePath: string,
+  target: { files: string[]; sizeBytes: number; fileCount: number }
+): Promise<void> {
+  try {
+    const s = await stat(filePath)
+    if (!s.isFile()) return
+    target.files.push(filePath)
+    target.sizeBytes += s.size
+    target.fileCount += 1
+  } catch {
+    // Skip unreadable files.
+  }
+}
+
 async function findClaudeBackups(): Promise<ClaudeBackupInfo> {
-  const files: string[] = []
-  let sizeBytes = 0
-  let fileCount = 0
+  const backup: ClaudeBackupInfo = { files: [], sizeBytes: 0, fileCount: 0 }
 
   try {
     const entries = await readdir(CLAUDE_DIR, { withFileTypes: true })
@@ -139,22 +152,14 @@ async function findClaudeBackups(): Promise<ClaudeBackupInfo> {
       if (!entry.isFile()) continue
       const name = entry.name
       if (name === "settings.json.backup" || name.startsWith("settings.json.bak")) {
-        const filePath = join(CLAUDE_DIR, name)
-        try {
-          const s = await stat(filePath)
-          files.push(filePath)
-          sizeBytes += s.size
-          fileCount += 1
-        } catch {
-          // skip unreadable files
-        }
+        await addBackupFile(join(CLAUDE_DIR, name), backup)
       }
     }
   } catch {
     // ~/.claude doesn't exist or is unreadable
   }
 
-  return { files, sizeBytes, fileCount }
+  return backup
 }
 
 // ─── Gemini backup detection ──────────────────────────────────────────────────
@@ -165,61 +170,39 @@ interface GeminiBackupInfo {
   fileCount: number
 }
 
+async function collectBakFiles(
+  dirPath: string,
+  target: GeminiBackupInfo,
+  recurseIntoSubdirs: boolean
+): Promise<void> {
+  const entries = await readdir(dirPath, { withFileTypes: true }).catch(() => null)
+  if (!entries) return
+
+  for (const entry of entries) {
+    const entryPath = join(dirPath, entry.name)
+    if (entry.isDirectory()) {
+      if (recurseIntoSubdirs) {
+        await collectBakFiles(entryPath, target, false)
+      }
+      continue
+    }
+
+    if (entry.isFile() && entry.name.endsWith(".bak")) {
+      await addBackupFile(entryPath, target)
+    }
+  }
+}
+
 async function findGeminiBackups(): Promise<GeminiBackupInfo> {
-  const files: string[] = []
-  let sizeBytes = 0
-  let fileCount = 0
+  const backup: GeminiBackupInfo = { files: [], sizeBytes: 0, fileCount: 0 }
 
   // Check for settings.json.bak
-  try {
-    const s = await stat(GEMINI_SETTINGS_BAK)
-    if (s.isFile()) {
-      files.push(GEMINI_SETTINGS_BAK)
-      sizeBytes += s.size
-      fileCount += 1
-    }
-  } catch {
-    // File doesn't exist, that's fine
-  }
+  await addBackupFile(GEMINI_SETTINGS_BAK, backup)
 
   // Check for *.bak files in ~/.gemini/tmp/**
-  try {
-    const tmpEntries = await readdir(GEMINI_TMP_DIR, { withFileTypes: true })
-    for (const entry of tmpEntries) {
-      const entryPath = join(GEMINI_TMP_DIR, entry.name)
-      if (entry.isDirectory()) {
-        // Recursively scan subdirectories
-        const subEntries = await readdir(entryPath, { withFileTypes: true })
-        for (const subEntry of subEntries) {
-          if (subEntry.name.endsWith(".bak") && subEntry.isFile()) {
-            const filePath = join(entryPath, subEntry.name)
-            try {
-              const s = await stat(filePath)
-              files.push(filePath)
-              sizeBytes += s.size
-              fileCount += 1
-            } catch {
-              // Skip unreadable files
-            }
-          }
-        }
-      } else if (entry.name.endsWith(".bak") && entry.isFile()) {
-        // Also check direct tmp directory
-        try {
-          const s = await stat(entryPath)
-          files.push(entryPath)
-          sizeBytes += s.size
-          fileCount += 1
-        } catch {
-          // Skip unreadable files
-        }
-      }
-    }
-  } catch {
-    // tmp directory doesn't exist or is unreadable, that's fine
-  }
+  await collectBakFiles(GEMINI_TMP_DIR, backup, true)
 
-  return { files, sizeBytes, fileCount }
+  return backup
 }
 
 // ─── Session discovery ───────────────────────────────────────────────────────
@@ -231,6 +214,31 @@ interface SessionInfo {
   sizeBytes: number
   taskDirPath: string | null
   taskDirSizeBytes: number
+}
+
+function sessionBytes(sessions: SessionInfo[]): number {
+  return sessions.reduce((sum, session) => sum + session.sizeBytes + session.taskDirSizeBytes, 0)
+}
+
+function sessionTaskDirCount(sessions: SessionInfo[]): number {
+  return sessions.filter((session) => session.taskDirPath !== null).length
+}
+
+function partitionByCutoff(
+  sessions: SessionInfo[],
+  cutoffMs: number
+): { keep: SessionInfo[]; old: SessionInfo[] } {
+  const keep: SessionInfo[] = []
+  const old: SessionInfo[] = []
+  for (const session of sessions) {
+    if (session.mtimeMs < cutoffMs) old.push(session)
+    else keep.push(session)
+  }
+  return { keep, old }
+}
+
+function backupLabel(scope: "Claude" | "Gemini", count: number): string {
+  return `${scope} backup ${count === 1 ? "file" : "files"}`
 }
 
 async function findSessions(
@@ -475,12 +483,7 @@ export const cleanupCommand: Command = {
       }
 
       if (orphans.length > 0) {
-        const keep: SessionInfo[] = []
-        const old: SessionInfo[] = []
-        for (const o of orphans) {
-          if (o.mtimeMs < cutoffMs) old.push(o)
-          else keep.push(o)
-        }
+        const { keep, old } = partitionByCutoff(orphans, cutoffMs)
         if (keep.length > 0 || old.length > 0) {
           results.push({ name: "(orphaned tasks)", keep, old, stale: true })
         }
@@ -517,9 +520,9 @@ export const cleanupCommand: Command = {
       const { keep, old, stale } = results[i]!
       const displayName = decodedNames[i]!
       const total = keep.length + old.length
-      const keepBytes = keep.reduce((sum, s) => sum + s.sizeBytes + s.taskDirSizeBytes, 0)
-      const oldBytes = old.reduce((sum, s) => sum + s.sizeBytes + s.taskDirSizeBytes, 0)
-      const oldTaskDirCount = old.filter((s) => s.taskDirPath !== null).length
+      const keepBytes = sessionBytes(keep)
+      const oldBytes = sessionBytes(old)
+      const oldTaskDirCount = sessionTaskDirCount(old)
       totalOldCount += old.length
       totalOldBytes += oldBytes
       totalOldTaskDirs += oldTaskDirCount
@@ -568,11 +571,11 @@ export const cleanupCommand: Command = {
         : ""
     const claudePart =
       claudeBackups.fileCount > 0
-        ? ` + ${claudeBackups.fileCount} Claude backup ${claudeBackups.fileCount === 1 ? "file" : "files"}`
+        ? ` + ${claudeBackups.fileCount} ${backupLabel("Claude", claudeBackups.fileCount)}`
         : ""
     const geminiPart =
       geminiBackups.fileCount > 0
-        ? ` + ${geminiBackups.fileCount} Gemini backup ${geminiBackups.fileCount === 1 ? "file" : "files"}`
+        ? ` + ${geminiBackups.fileCount} ${backupLabel("Gemini", geminiBackups.fileCount)}`
         : ""
     const totalBytes = totalOldBytes + claudeBackups.sizeBytes + geminiBackups.sizeBytes
     console.log(
@@ -640,11 +643,11 @@ export const cleanupCommand: Command = {
     const taskDirNote = taskDirsRemoved > 0 ? ` + ${taskDirsRemoved} task dir(s)` : ""
     const claudeNote =
       claudeFilesRemoved > 0
-        ? ` + ${claudeFilesRemoved} Claude backup ${claudeFilesRemoved === 1 ? "file" : "files"}`
+        ? ` + ${claudeFilesRemoved} ${backupLabel("Claude", claudeFilesRemoved)}`
         : ""
     const geminiNote =
       geminiFilesRemoved > 0
-        ? ` + ${geminiFilesRemoved} Gemini backup ${geminiFilesRemoved === 1 ? "file" : "files"}`
+        ? ` + ${geminiFilesRemoved} ${backupLabel("Gemini", geminiFilesRemoved)}`
         : ""
     console.log(
       `  ${GREEN}${BOLD}Done.${RESET} ${succeeded} session(s)${taskDirNote}${claudeNote}${geminiNote} moved to Trash (~${formatBytes(totalBytes)} reclaimed).`
@@ -652,13 +655,9 @@ export const cleanupCommand: Command = {
     if (failed > 0 || claudeFailed > 0 || geminiFailed > 0) {
       const failedSessions = failed > 0 ? `${failed} session(s)` : ""
       const failedClaude =
-        claudeFailed > 0
-          ? `${claudeFailed} Claude backup ${claudeFailed === 1 ? "file" : "files"}`
-          : ""
+        claudeFailed > 0 ? `${claudeFailed} ${backupLabel("Claude", claudeFailed)}` : ""
       const failedGemini =
-        geminiFailed > 0
-          ? `${geminiFailed} Gemini backup ${geminiFailed === 1 ? "file" : "files"}`
-          : ""
+        geminiFailed > 0 ? `${geminiFailed} ${backupLabel("Gemini", geminiFailed)}` : ""
       const failedJoined = [failedSessions, failedClaude, failedGemini].filter((s) => s).join(" + ")
       console.log(
         `  ${YELLOW}${failedJoined} could not be trashed — is the \`trash\` CLI installed?${RESET}`
