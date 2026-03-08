@@ -21,10 +21,19 @@ describe("classifyCommand", () => {
     expect(classifyCommand("cd src && bun test")).toBe("test")
   })
 
-  test("detects bun run lint / typecheck / check", () => {
+  test("detects bun run lint as lint", () => {
     expect(classifyCommand("bun run lint")).toBe("lint")
-    expect(classifyCommand("bun run typecheck")).toBe("lint")
-    expect(classifyCommand("bun run check")).toBe("lint")
+    expect(classifyCommand("bun run lint 2>&1")).toBe("lint")
+  })
+
+  test("detects bun run typecheck as typecheck (distinct from lint)", () => {
+    expect(classifyCommand("bun run typecheck")).toBe("typecheck")
+    expect(classifyCommand("bun run typecheck 2>&1")).toBe("typecheck")
+  })
+
+  test("detects bun run check as check (distinct from lint)", () => {
+    expect(classifyCommand("bun run check")).toBe("check")
+    expect(classifyCommand("bun run check --write")).toBe("check")
   })
 
   test("detects bun run build", () => {

@@ -28,22 +28,28 @@ import { toolHookInputSchema } from "./schemas.ts"
 
 // ── Command kind classification ───────────────────────────────────────────────
 
-type CommandKind = "test" | "lint" | "build"
+type CommandKind = "test" | "lint" | "typecheck" | "check" | "build"
 
 const TEST_RE = /(?:^|[|;&]|\|\|)\s*bun\s+test\b/
-const LINT_RE = /(?:^|[|;&]|\|\|)\s*bun\s+run\s+(?:lint|typecheck|check)\b/
+const LINT_RE = /(?:^|[|;&]|\|\|)\s*bun\s+run\s+lint\b/
+const TYPECHECK_RE = /(?:^|[|;&]|\|\|)\s*bun\s+run\s+typecheck\b/
+const CHECK_RE = /(?:^|[|;&]|\|\|)\s*bun\s+run\s+check\b/
 const BUILD_RE = /(?:^|[|;&]|\|\|)\s*bun\s+run\s+build\b/
 
 export function classifyCommand(cmd: string): CommandKind | null {
   if (TEST_RE.test(cmd)) return "test"
   if (LINT_RE.test(cmd)) return "lint"
+  if (TYPECHECK_RE.test(cmd)) return "typecheck"
+  if (CHECK_RE.test(cmd)) return "check"
   if (BUILD_RE.test(cmd)) return "build"
   return null
 }
 
 const COMMAND_LABEL: Record<CommandKind, string> = {
   test: "bun test",
-  lint: "bun run lint / typecheck / check",
+  lint: "bun run lint",
+  typecheck: "bun run typecheck",
+  check: "bun run check",
   build: "bun run build",
 }
 
