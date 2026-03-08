@@ -757,7 +757,10 @@ async function main(): Promise<void> {
   // Spawn ambition-notify as a detached background process so the user can
   // tap a button to change ambitionMode while the agent continues working.
   // This never blocks or delays the stop hook decision.
-  void spawnAmbitionNotification(effective.ambitionMode, response.next, cwd)
+  // Honor the global swiz-notify hooks toggle as a true notification kill switch.
+  if (effective.swizNotifyHooks) {
+    void spawnAmbitionNotification(effective.ambitionMode, response.next, cwd)
+  }
 
   // Runtime gate: if issues need refinement, inject a direct directive
   // regardless of what the AI suggested. This ensures refinement guidance
