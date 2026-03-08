@@ -324,6 +324,18 @@ describe("resolveTaskById", () => {
     )
   })
 
+  it("includes recent task IDs in not-found error message", async () => {
+    let errorMessage = ""
+    try {
+      await resolveTaskById("999", SESSION_A, undefined, TASKS, PROJECTS)
+    } catch (e) {
+      errorMessage = (e as Error).message
+    }
+    expect(errorMessage).toContain("Recent tasks in this session:")
+    // Should list tasks from SESSION_A with their IDs and subjects
+    expect(errorMessage).toMatch(/#\d+ \[(pending|in_progress|completed|cancelled)\]:/)
+  })
+
   it("prefers primary session over fallback for same task ID", async () => {
     // Task #1 exists in all sessions — primary should win
     const result = await resolveTaskById("1", SESSION_C, undefined, TASKS, PROJECTS)

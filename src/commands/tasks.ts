@@ -289,6 +289,27 @@ async function writeAudit(sessionId: string, entry: AuditEntry) {
   } catch {}
 }
 
+// ─── Recent task hint (for not-found errors) ─────────────────────────────────
+
+/**
+ * Build a hint string listing the 5 most recently created tasks in a session.
+ * Appended to "task not found" errors so agents can quickly identify the right ID.
+ */
+async function buildRecentTasksHint(
+  sessionId: string,
+  tasksDir = defaultTaskRoots().tasksDir
+): Promise<string> {
+  try {
+    const tasks = await readTasks(sessionId, tasksDir)
+    if (tasks.length === 0) return ""
+    const recent = tasks.slice(-5)
+    const lines = recent.map((t) => `  #${t.id} [${t.status}]: ${t.subject}`).join("\n")
+    return `\nRecent tasks in this session:\n${lines}`
+  } catch {
+    return ""
+  }
+}
+
 // ─── Cross-session task lookup ───────────────────────────────────────────────
 
 /**
@@ -352,8 +373,9 @@ export async function resolveTaskById(
         return { sessionId: matchingSession, task }
       }
     }
+    const recentHint = await buildRecentTasksHint(primarySessionId, tasksDir)
     throw new Error(
-      `Task #${taskId} not found (prefix "${prefix}" matched no session with that task).`
+      `Task #${taskId} not found (prefix "${prefix}" matched no session with that task).${recentHint}`
     )
   }
 
@@ -381,7 +403,9 @@ export async function resolveTaskById(
     )
   }
 
-  throw new Error(`Task #${taskId} not found in any session for this project.`)
+  // Append recent task IDs from the primary session to help agents find the right ID.
+  const recentHint = await buildRecentTasksHint(primarySessionId, tasksDir)
+  throw new Error(`Task #${taskId} not found in any session for this project.${recentHint}`)
 }
 
 /**
