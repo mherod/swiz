@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { readProjectState, STATE_TRANSITIONS } from "../src/settings.ts"
-import { ghJson, git, hasGhCli, isGitHubRemote, isGitRepo } from "./hook-utils.ts"
+import { emitContext, ghJson, git, hasGhCli, isGitHubRemote, isGitRepo } from "./hook-utils.ts"
 import { sessionHookInputSchema } from "./schemas.ts"
 
 interface PluginEnvRequirement {
@@ -67,14 +67,7 @@ async function main(): Promise<void> {
 
   if (!(await isGitRepo(cwd)) || !(await isGitHubRemote(cwd))) {
     if (parts.length > 0) {
-      console.log(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: "SessionStart",
-            additionalContext: parts.join(" "),
-          },
-        })
-      )
+      emitContext("SessionStart", parts.join(" "), cwd)
     }
     return
   }
@@ -134,14 +127,7 @@ async function main(): Promise<void> {
 
   if (parts.length === 0) return
 
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "SessionStart",
-        additionalContext: parts.join(" "),
-      },
-    })
-  )
+  emitContext("SessionStart", parts.join(" "), cwd)
 }
 
 main()

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { denyPreToolUse } from "./hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse } from "./hook-utils.ts"
 import { shellHookInputSchema } from "./schemas.ts"
 
 async function main() {
@@ -31,15 +31,7 @@ async function main() {
     }
   }
 
-  // Allow the command (denyPreToolUse exits, so this only runs if no deny)
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "allow",
-      },
-    })
-  )
+  allowPreToolUse("")
 }
 
 main().catch((e) => {

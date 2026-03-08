@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { denyPreToolUse } from "./hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
 
 // Matches any lockfile at path boundaries (handles / and \ separators, case-insensitive)
@@ -33,15 +33,7 @@ async function main() {
     denyPreToolUse(reason)
   }
 
-  // Allow the edit
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "allow",
-      },
-    })
-  )
+  allowPreToolUse("")
 }
 
 main().catch((e) => {

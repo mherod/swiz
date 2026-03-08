@@ -6,6 +6,7 @@
 import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { emitContext } from "./hook-utils.ts"
 
 const HASH_FILE = join(process.env.HOME ?? "~", ".local", "share", "swiz", "manifest-hash")
 
@@ -79,14 +80,7 @@ async function main(): Promise<void> {
     ? "swiz install: initial agent config written."
     : "swiz self-healed: manifest changed, agent configs updated."
 
-  process.stdout.write(
-    `${JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "SessionStart",
-        additionalContext: message,
-      },
-    })}\n`
-  )
+  emitContext("SessionStart", message)
 }
 
 main()

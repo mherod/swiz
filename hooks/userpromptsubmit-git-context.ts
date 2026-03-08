@@ -1,23 +1,17 @@
 #!/usr/bin/env bun
 // UserPromptSubmit hook: Inject git branch and uncommitted file count
 
-import { git } from "./hook-utils.ts"
+import { emitContext, git } from "./hook-utils.ts"
 
 async function main(): Promise<void> {
-  const branch = await git(["branch", "--show-current"], process.cwd())
+  const cwd = process.cwd()
+  const branch = await git(["branch", "--show-current"], cwd)
   if (!branch) return
 
-  const porcelain = await git(["status", "--porcelain"], process.cwd())
+  const porcelain = await git(["status", "--porcelain"], cwd)
   const dirty = porcelain ? porcelain.split("\n").length : 0
 
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "UserPromptSubmit",
-        additionalContext: `[git] branch: ${branch} | uncommitted files: ${dirty}`,
-      },
-    })
-  )
+  emitContext("UserPromptSubmit", `[git] branch: ${branch} | uncommitted files: ${dirty}`, cwd)
 }
 
 main()

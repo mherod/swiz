@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { denyPreToolUse, formatActionPlan } from "./hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse, formatActionPlan } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
 
 async function main() {
@@ -41,15 +41,7 @@ async function main() {
     denyPreToolUse(reason)
   }
 
-  // Allow the edit
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "allow",
-      },
-    })
-  )
+  allowPreToolUse("")
 }
 
 main().catch((e) => {

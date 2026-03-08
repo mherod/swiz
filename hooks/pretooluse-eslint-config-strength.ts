@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { denyPreToolUse } from "./hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
 
 // Check if file is an ESLint config file
@@ -79,15 +79,7 @@ async function main() {
     denyPreToolUse(reason)
   }
 
-  // Allow the edit
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "allow",
-      },
-    })
-  )
+  allowPreToolUse("")
 }
 
 if (import.meta.main) {

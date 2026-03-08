@@ -4,6 +4,7 @@
 // Rules with severity "deny" (default) block the command entirely.
 
 import {
+  allowPreToolUse,
   denyPreToolUse,
   detectPackageManager,
   detectRuntime,
@@ -285,13 +286,5 @@ for (const segMatch of command.matchAll(BUN_TEST_SEGMENT_RE)) {
 
 // Emit collected warnings as allow-with-hint (doesn't block the command)
 if (warnings.length > 0) {
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "allow",
-        permissionDecisionReason: warnings.join("\n\n"),
-      },
-    })
-  )
+  allowPreToolUse(warnings.join("\n\n"))
 }

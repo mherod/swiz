@@ -8,6 +8,7 @@ import {
   manualCompactionGuidanceFallback,
 } from "../src/memory-compaction-guidance.ts"
 import {
+  allowPreToolUse,
   denyPreToolUse,
   formatActionPlan,
   isEditTool,
@@ -140,25 +141,10 @@ async function main() {
       )
     }
 
-    // Allow the edit
-    console.log(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "allow",
-        },
-      })
-    )
+    allowPreToolUse("")
   } catch {
     // On any error, allow the edit (fail open) rather than blocking
-    console.log(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "allow",
-        },
-      })
-    )
+    allowPreToolUse("")
   }
 }
 
