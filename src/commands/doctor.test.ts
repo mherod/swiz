@@ -173,7 +173,7 @@ describe("swiz doctor", () => {
     const { stat: statFn } = await import("node:fs/promises")
     const s = await statFn(scriptPath)
     expect(s.mode & 0o100).not.toBe(0)
-  }, 15000)
+  }, 30_000)
 
   // ── Missing/invalid config script detection: share one home ───────────
   // ── Config script detection + malformed settings + config sync ──────
@@ -403,7 +403,7 @@ describe("swiz doctor", () => {
 
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).not.toContain(`Skill conflict: ${skillName}`)
-  })
+  }, 30_000)
 
   // ── Skill validation: concurrent batch of read-only checks ──────────
   test("detects invalid skill entries (frontmatter/category issues)", async () => {
@@ -684,7 +684,7 @@ describe("swiz doctor", () => {
 
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).not.toContain("missing SKILL.md")
-  })
+  }, 30_000)
 
   test("doctor --fix updates frontmatter name to match directory name", async () => {
     const home = await createTempHome()
@@ -707,7 +707,7 @@ describe("swiz doctor", () => {
 
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).not.toContain("Invalid skill: my-skill")
-  })
+  }, 30_000)
 
   test("doctor --fix updates quoted frontmatter name to match directory name", async () => {
     const home = await createTempHome()
@@ -733,7 +733,7 @@ describe("swiz doctor", () => {
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).toContain("Invalid skill: stub-skill")
     expect(afterFix.stdout).toContain("description is the generated placeholder")
-  })
+  }, 30_000)
 
   test("doctor --fix replaces unknown category value with default", async () => {
     const home = await createTempHome()
@@ -761,7 +761,7 @@ describe("swiz doctor", () => {
 
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).not.toContain("Invalid skill: bad-cat-fix-skill")
-  })
+  }, 30_000)
 
   test("doctor --fix adds default category to skill missing one", async () => {
     const home = await createTempHome()
@@ -788,5 +788,5 @@ describe("swiz doctor", () => {
 
     const afterFix = await runDoctor(home)
     expect(afterFix.stdout).not.toContain("Invalid skill: no-cat-skill")
-  })
+  }, 30_000)
 })

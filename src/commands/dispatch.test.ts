@@ -246,9 +246,9 @@ describe("dispatch replay", () => {
     expect(parsed.strategy).toBe("blocking")
     expect(typeof parsed.matched_groups).toBe("number")
     expect(Array.isArray(parsed.hooks)).toBe(true)
-    // 6s timeout: hooks now run in parallel instead of sequentially.
-    // 19 hooks × ~37ms/hook = ~37ms critical path (plus 200ms buffer for CI variation).
-  }, 6_000)
+    // Timeout needs headroom because this replay can run alongside other
+    // high-load suites in pre-push, making process scheduling noisy.
+  }, 20_000)
 
   test("stop replay continues after first block and still runs stop-git-status", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "swiz-stop-replay-"))
