@@ -81,6 +81,7 @@ alwaysApply: false
 ## Task Data
 - Task storage: `~/.claude/tasks/<session-id>/<id>.json`; audit log: `~/.claude/tasks/<session-id>/.audit-log.jsonl`.
 - Session-to-project mapping resolves from `~/.claude/projects/` transcript `cwd` fields.
+- For cross-session task/evidence checks in `hooks/stop-completion-auditor.ts`, add fallback scan of `~/.claude/tasks/` and load JSON via `readSessionTasks()`.
 - Completion command requires evidence: `swiz tasks complete <id> --evidence "text"`; enforced by `stop-completion-auditor`.
 - First action in a session must be task creation/tracking (`TaskCreate`/`TaskUpdate`), including after compaction resumes.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash when no incomplete task exists.
@@ -126,7 +127,7 @@ alwaysApply: false
   8. `swiz ci-wait $SHA --timeout 300`.
   9. Confirm CI success; if failed, fix and re-push.
   10. Announce result.
-- Keep separate `Push and verify CI` task `in_progress` through steps 5-10; complete only after `gh run view --json` confirms success.
+- Keep `Push and verify CI` task `in_progress` for 5-10; complete after `gh run view --json` confirms success.
 - Capture SHA before push; CI checks must reference that SHA.
 - Use `swiz push-wait`; no fixed sleeps and no `--force-with-lease`.
 - Use `swiz ci-wait`; no manual `gh run watch/view` loops.
@@ -140,7 +141,7 @@ alwaysApply: false
 - Repo is solo (`mherod/swiz`); push directly to `main` (no PR required).
 - Run `/push` before `git push`; PreToolUse push gate requires it.
 - If collaboration guard errors, fix and re-run guard checks before pushing.
-- CI workflow (`.github/workflows/ci.yml` lines 3-21) has `paths-ignore` for `**/*.md`, `.claude/**`, and `docs/**`; documentation-only commits skip CI intentionally. Pre-push hooks verify code quality locally before push is allowed, so no CI run is needed for markdown-only changes.
+- CI workflow (`.github/workflows/ci.yml` lines 3-21) has `paths-ignore` for `**/*.md`, `.claude/**`, and `docs/**`; documentation-only commits skip CI. Pre-push hooks verify code quality locally before push is allowed, so no CI run is needed for markdown-only changes.
 - Pre-push checklist:
   0. **Run Step 0 collaboration guard** from the `/push` skill before every push to `main`/`master` — no exceptions. Assumed repo type is not sufficient; the signal checks must be executed and their output evaluated.
   1. `git log origin/main..HEAD --oneline`.
@@ -219,6 +220,6 @@ alwaysApply: false
 - When creating test fixtures containing secret-like patterns (e.g., `sk_live_...` for testing `stop-secret-scanner.ts`), use array join or string concatenation to construct the pattern in source code: `const fakeSecret = ['s', 'k', '_', 'l', 'i', 'v', 'e', '_', ...].join('')`. This avoids GitHub push protection (which scans source code for patterns like `sk_live_`) while allowing git diffs to show the expanded pattern for hook detection. The secret scanner hook scans git diffs, not source code, so the expanded pattern in the diff will still trigger detection.
 - **DO**: When stop hooks detect memory thresholds exceeded in files outside the session sandbox (e.g., global `~/.claude/CLAUDE.md` or ramp-frontend `MEMORY.md` while in swiz session), file GitHub issues on the owning repos (`mherod/.claude`, `mherod/ramp-frontend`) with word count, target threshold, and compaction guidance. Edit tool sandboxing prevents direct edits—issue filing is the correct workflow.
 - **DON'T**: Attempt to edit files outside the session sandbox; the Edit tool will block and sandbox enforcement is non-negotiable.
-- **DO**: After every commit, immediately run `git log origin/main..HEAD --oneline` to confirm no commits are unpushed before attempting to stop. Use `/push` skill to push unpushed commits.
+- **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop. Use `/push` for unpushed commits.
 - **DON'T**: Rely on `git status` alone for unpush detection—it doesn't show upstream divergence. Always use `git log origin/main..HEAD --oneline` to list unpushed commits.
 - **DON'T**: Declare commit or push success before reading the actual tool output confirming it. Outcomes must be verified from evidence (git status clean, commit SHA captured, push output showing remote updated) before claiming the step complete.
