@@ -126,6 +126,7 @@ alwaysApply: false
 - Treat push as inseparable from commit.
 - Wait for background pushes (`TaskOutput block:true`) before CI verification.
 - Use `swiz issue resolve <number> --body "<text>"` instead of `gh issue comment` + `gh issue close`; for close-only use `swiz issue close <number>`.
+- **DO** check issue state before resolving: `gh issue view <number> --json state -q .state`. A `Fixes #N` commit message auto-closes issues when pushed to main — `swiz issue resolve` is redundant on already-closed issues (it will still post a comment, not fail, but wastes an API call).
 ## Push and CI
 - Repo is solo (`mherod/swiz`); push directly to `main` (no PR required).
 - Run `/push` before `git push`; PreToolUse push gate requires it.

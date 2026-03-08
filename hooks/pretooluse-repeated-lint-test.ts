@@ -1,22 +1,22 @@
 #!/usr/bin/env bun
 // PreToolUse hook: Block consecutive repeated lint/test/build commands of the
-// same type (test, lint, or build) when no Edit/Write work occurred between
-// them. Prevents the wasteful pattern of re-running the same command with
-// different output filters instead of reading the full output.
+// same type (test, lint, or build) when no file-modifying tool call occurred
+// between them. Prevents the wasteful pattern of re-running the same command
+// with different output filters instead of reading the full output.
 //
-// "Uninterrupted" means: no Edit, Write, or NotebookEdit tool call between
-// the previous same-type run and the current one. If the agent edited any
-// file in between, they were acting on the output — that's normal and is
-// allowed.
+// "Uninterrupted" means: no isCodeChangeTool call between the previous
+// same-type run and the current one. isCodeChangeTool covers all agents:
+//   Edit / Write / NotebookEdit  (Claude Code)
+//   StrReplace / EditNotebook    (Cursor)
+//   replace / write_file / apply_patch  (Codex)
+// and any future tool types added to the canonical EDIT/WRITE/NOTEBOOK sets.
 
 import {
   denyPreToolUse,
   formatActionPlan,
-  isEditTool,
+  isCodeChangeTool,
   isGitRepo,
-  isNotebookTool,
   isShellTool,
-  isWriteTool,
 } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
@@ -80,9 +80,10 @@ async function parseTranscriptEvents(transcriptPath: string): Promise<Transcript
           const cmd = String(inp?.command ?? "").normalize("NFKC")
           const kind = classifyCommand(cmd)
           if (kind) events.push({ kind, sourceLineIdx: lineIdx })
-        } else if (isEditTool(name) || isWriteTool(name) || isNotebookTool(name)) {
-          // Any file edit counts as "intervening work" — even to non-memory files.
-          // Includes NotebookEdit (Claude Code), EditNotebook (Cursor), apply_patch (Codex).
+        } else if (isCodeChangeTool(name)) {
+          // Any file-modifying tool counts as "intervening work" — covers all agents:
+          // Edit/Write/NotebookEdit (Claude Code), StrReplace/EditNotebook (Cursor),
+          // replace/write_file/apply_patch (Codex), and future tool types.
           events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
         }
       }
