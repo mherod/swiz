@@ -582,11 +582,15 @@ function spawnAmbitionNotification(currentMode: AmbitionMode, nextStep: string, 
   const helperScript = join(import.meta.dir, "..", "src", "ambition-notify.ts")
   if (!existsSync(helperScript)) return
 
-  Bun.spawn(["bun", helperScript, binary, currentMode, nextStep, cwd], {
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: "ignore",
-  })
+  try {
+    Bun.spawn(["bun", helperScript, binary, currentMode, nextStep, cwd], {
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+    })
+  } catch {
+    // Ignore: bun may not be in PATH (e.g. restricted test environments)
+  }
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
