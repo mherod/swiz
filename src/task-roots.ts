@@ -7,10 +7,18 @@ export interface TaskRoots {
   projectsDir: string
 }
 
-/** Resolve task/projects roots for the Claude-compatible task store. */
+/**
+ * Resolve task/projects roots for the Claude-compatible task store.
+ *
+ * Usage:
+ * `const { projectsDir } = getDefaultTaskRoots();`
+ */
 export function getDefaultTaskRoots(homeDir = getHomeDir()): TaskRoots {
-  const roots = getProviderTaskRoots("claude")
-  if (roots) return roots
+  const defaultHome = getHomeDir()
+  if (homeDir === defaultHome) {
+    const roots = getProviderTaskRoots("claude")
+    if (roots) return roots
+  }
   return {
     tasksDir: join(homeDir, ".claude", "tasks"),
     projectsDir: join(homeDir, ".claude", "projects"),

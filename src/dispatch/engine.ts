@@ -63,6 +63,8 @@ export interface HookExecution {
   stderrSnippet: string // bounded at 500 chars
 }
 
+type HookDef = HookGroup["hooks"][number]
+
 // ─── Debug logger ───────────────────────────────────────────────────────────
 
 export function log(msg: string): void {
@@ -87,6 +89,10 @@ export function logHeader(
   if (trigger) log(`   trigger: ${trigger}`)
 }
 
+function formatHookTarget(file: string, matcher?: string): string {
+  return `${file}${matcher ? ` [${matcher}]` : ""}`
+}
+
 // ─── Performance logging ─────────────────────────────────────────────────────
 
 /**
@@ -102,6 +108,13 @@ export function logSlowHook(
   if (durationMs <= thresholdMs) return false
   log(`   ⚠ SLOW HOOK: ${file} took ${durationMs}ms (threshold: ${thresholdMs}ms)`)
   return true
+}
+
+function logSlowHookSummary(executions: HookExecution[]): void {
+  const slowHooks = executions.filter((e) => e.status === "slow").map((e) => e.file)
+  if (slowHooks.length > 0) {
+    log(`   ⚠ slow-hook summary (${slowHooks.length}): ${slowHooks.join(", ")}`)
+  }
 }
 
 // ─── Hook output classification ──────────────────────────────────────────────
@@ -224,6 +237,64 @@ export async function runHook(
   return { parsed, execution }
 }
 
+function createSkippedExecution(
+  hook: HookDef,
+  matcher: string | undefined,
+  skipReason: SkipReason
+): HookExecution {
+  const now = Date.now()
+  return {
+    file: hook.file,
+    ...(matcher && { matcher }),
+    startTime: now,
+    endTime: now,
+    durationMs: 0,
+    configuredTimeoutSec: hook.timeout ?? DEFAULT_TIMEOUT,
+    status: "skipped",
+    skipReason,
+    exitCode: null,
+    stdoutSnippet: "",
+    stderrSnippet: "",
+  }
+}
+
+function tryRecordSkippedHook(
+  hook: HookDef,
+  matcher: string | undefined,
+  cwd: string,
+  executions: HookExecution[]
+): boolean {
+  if (!evalCondition(hook.condition)) {
+    log(`   ⏭ ${hook.file} [condition false, skipping]`)
+    executions.push(createSkippedExecution(hook, matcher, "condition-false"))
+    return true
+  }
+  if (hook.cooldownSeconds && isWithinCooldown(hook.file, hook.cooldownSeconds, cwd)) {
+    log(`   ⏭ ${hook.file} [cooldown active, skipping]`)
+    executions.push(createSkippedExecution(hook, matcher, "cooldown-active"))
+    return true
+  }
+  return false
+}
+
+function finalizeExecution(
+  execution: HookExecution,
+  matcher: string | undefined,
+  hook: HookDef,
+  cwd: string
+): HookExecution {
+  if (matcher) execution.matcher = matcher
+  if (execution.status === "ok" && logSlowHook(execution.file, execution.durationMs)) {
+    execution.status = "slow"
+  }
+  if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
+  return execution
+}
+
+function writeResponse(response: Record<string, unknown>): void {
+  process.stdout.write(`${JSON.stringify(response)}\n`)
+}
+
 // ─── Response classification ────────────────────────────────────────────────
 
 export function isDeny(resp: Record<string, unknown>): boolean {
@@ -290,47 +361,12 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
-      if (!evalCondition(hook.condition)) {
-        log(`   ⏭ ${hook.file} [condition false, skipping]`)
-        executions.push({
-          file: hook.file,
-          ...(group.matcher && { matcher: group.matcher }),
-          startTime: Date.now(),
-          endTime: Date.now(),
-          durationMs: 0,
-          configuredTimeoutSec: hook.timeout ?? DEFAULT_TIMEOUT,
-          status: "skipped",
-          skipReason: "condition-false",
-          exitCode: null,
-          stdoutSnippet: "",
-          stderrSnippet: "",
-        })
+      if (tryRecordSkippedHook(hook, group.matcher, cwd, executions)) {
         continue
       }
-      if (hook.cooldownSeconds && isWithinCooldown(hook.file, hook.cooldownSeconds, cwd)) {
-        log(`   ⏭ ${hook.file} [cooldown active, skipping]`)
-        executions.push({
-          file: hook.file,
-          ...(group.matcher && { matcher: group.matcher }),
-          startTime: Date.now(),
-          endTime: Date.now(),
-          durationMs: 0,
-          configuredTimeoutSec: hook.timeout ?? DEFAULT_TIMEOUT,
-          status: "skipped",
-          skipReason: "cooldown-active",
-          exitCode: null,
-          stdoutSnippet: "",
-          stderrSnippet: "",
-        })
-        continue
-      }
-      log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`)
+      log(`   → ${formatHookTarget(hook.file, group.matcher)}`)
       const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
-      if (group.matcher) execution.matcher = group.matcher
-      if (execution.status === "ok" && logSlowHook(execution.file, execution.durationMs)) {
-        execution.status = "slow"
-      }
-      if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
+      finalizeExecution(execution, group.matcher, hook, cwd)
       if (resp && isDeny(resp)) {
         log(`   ✗ DENY from ${hook.file}`)
         execution.status = "deny"
@@ -368,13 +404,10 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
       log(`   result: all passed`)
     }
   }
-  const slowHooks = executions.filter((e) => e.status === "slow").map((e) => e.file)
-  if (slowHooks.length > 0) {
-    log(`   ⚠ slow-hook summary (${slowHooks.length}): ${slowHooks.join(", ")}`)
-  }
+  logSlowHookSummary(executions)
   if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
 
-  process.stdout.write(`${JSON.stringify(finalResponse)}\n`)
+  writeResponse(finalResponse)
 }
 
 /** Stop / PostToolUse: forward first block; stop runs all hooks, postToolUse short-circuits. */
@@ -392,47 +425,12 @@ export async function runBlocking(
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
-      if (!evalCondition(hook.condition)) {
-        log(`   ⏭ ${hook.file} [condition false, skipping]`)
-        executions.push({
-          file: hook.file,
-          ...(group.matcher && { matcher: group.matcher }),
-          startTime: Date.now(),
-          endTime: Date.now(),
-          durationMs: 0,
-          configuredTimeoutSec: hook.timeout ?? DEFAULT_TIMEOUT,
-          status: "skipped",
-          skipReason: "condition-false",
-          exitCode: null,
-          stdoutSnippet: "",
-          stderrSnippet: "",
-        })
+      if (tryRecordSkippedHook(hook, group.matcher, cwd, executions)) {
         continue
       }
-      if (hook.cooldownSeconds && isWithinCooldown(hook.file, hook.cooldownSeconds, cwd)) {
-        log(`   ⏭ ${hook.file} [cooldown active, skipping]`)
-        executions.push({
-          file: hook.file,
-          ...(group.matcher && { matcher: group.matcher }),
-          startTime: Date.now(),
-          endTime: Date.now(),
-          durationMs: 0,
-          configuredTimeoutSec: hook.timeout ?? DEFAULT_TIMEOUT,
-          status: "skipped",
-          skipReason: "cooldown-active",
-          exitCode: null,
-          stdoutSnippet: "",
-          stderrSnippet: "",
-        })
-        continue
-      }
-      log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`)
+      log(`   → ${formatHookTarget(hook.file, group.matcher)}`)
       const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
-      if (group.matcher) execution.matcher = group.matcher
-      if (execution.status === "ok" && logSlowHook(execution.file, execution.durationMs)) {
-        execution.status = "slow"
-      }
-      if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
+      finalizeExecution(execution, group.matcher, hook, cwd)
       if (resp && isBlock(resp)) {
         log(`   ✗ BLOCK from ${hook.file}`)
         execution.status = "block"
@@ -451,13 +449,10 @@ export async function runBlocking(
   if (!isBlock(finalResponse)) {
     log(`   result: all passed`)
   }
-  const slowHooks = executions.filter((e) => e.status === "slow").map((e) => e.file)
-  if (slowHooks.length > 0) {
-    log(`   ⚠ slow-hook summary (${slowHooks.length}): ${slowHooks.join(", ")}`)
-  }
+  logSlowHookSummary(executions)
   if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
 
-  process.stdout.write(`${JSON.stringify(finalResponse)}\n`)
+  writeResponse(finalResponse)
 }
 
 /** SessionStart / UserPromptSubmit: run all hooks, merge additionalContext. */
@@ -473,47 +468,12 @@ export async function runContext(
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
-      if (!evalCondition(hook.condition)) {
-        log(`   ⏭ ${hook.file} [condition false, skipping]`)
-        executions.push({
-          file: hook.file,
-          ...(group.matcher && { matcher: group.matcher }),
-          startTime: Date.now(),
-          endTime: Date.now(),
-          durationMs: 0,
-          configuredTimeoutSec: hook.timeout ?? DEFAULT_TIMEOUT,
-          status: "skipped",
-          skipReason: "condition-false",
-          exitCode: null,
-          stdoutSnippet: "",
-          stderrSnippet: "",
-        })
+      if (tryRecordSkippedHook(hook, group.matcher, cwd, executions)) {
         continue
       }
-      if (hook.cooldownSeconds && isWithinCooldown(hook.file, hook.cooldownSeconds, cwd)) {
-        log(`   ⏭ ${hook.file} [cooldown active, skipping]`)
-        executions.push({
-          file: hook.file,
-          ...(group.matcher && { matcher: group.matcher }),
-          startTime: Date.now(),
-          endTime: Date.now(),
-          durationMs: 0,
-          configuredTimeoutSec: hook.timeout ?? DEFAULT_TIMEOUT,
-          status: "skipped",
-          skipReason: "cooldown-active",
-          exitCode: null,
-          stdoutSnippet: "",
-          stderrSnippet: "",
-        })
-        continue
-      }
-      log(`   → ${hook.file}${group.matcher ? ` [${group.matcher}]` : ""}`)
+      log(`   → ${formatHookTarget(hook.file, group.matcher)}`)
       const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
-      if (group.matcher) execution.matcher = group.matcher
-      if (execution.status === "ok" && logSlowHook(execution.file, execution.durationMs)) {
-        execution.status = "slow"
-      }
-      if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
+      finalizeExecution(execution, group.matcher, hook, cwd)
       if (!resp) {
         log(`   ✓ ${hook.file} (no output)`)
         executions.push(execution)
@@ -544,11 +504,8 @@ export async function runContext(
       },
     })
   }
-  const slowHooks = executions.filter((e) => e.status === "slow").map((e) => e.file)
-  if (slowHooks.length > 0) {
-    log(`   ⚠ slow-hook summary (${slowHooks.length}): ${slowHooks.join(", ")}`)
-  }
+  logSlowHookSummary(executions)
   if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
 
-  process.stdout.write(`${JSON.stringify(finalResponse)}\n`)
+  writeResponse(finalResponse)
 }

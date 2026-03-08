@@ -12,6 +12,7 @@
 
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { resolveCwd } from "./cwd.ts"
 
 /**
  * High-level stack names used in HookDef.stacks for per-stack hook filtering.
@@ -24,7 +25,7 @@ import { join } from "node:path"
  */
 export type ProjectStack = "bun" | "node" | "go" | "python" | "ruby" | "rust" | "java" | "php"
 
-const _stackCache = new Map<string, string[]>()
+const _stackCache = new Map<string, ProjectStack[]>()
 
 export type Framework =
   // JS/TS frameworks
@@ -45,6 +46,22 @@ export type Framework =
   | "php"
 
 const _frameworkCache = new Map<string, Set<Framework>>()
+
+const JS_TS_EXTENSIONS = ["js", "ts", "mjs", "cjs"] as const
+const PYTHON_INDICATOR_FILES = ["pyproject.toml", "setup.py", "requirements.txt"] as const
+const JAVA_INDICATOR_FILES = ["pom.xml", "build.gradle"] as const
+
+function hasAnyFile(dir: string, files: readonly string[]): boolean {
+  return files.some((file) => existsSync(join(dir, file)))
+}
+
+function hasConfigFile(dir: string, baseName: string, extensions: readonly string[]): boolean {
+  return extensions.some((ext) => existsSync(join(dir, `${baseName}.${ext}`)))
+}
+
+function hasDependency(deps: Record<string, string>, name: string): boolean {
+  return name in deps
+}
 
 function readPackageDeps(dir: string): Record<string, string> {
   const pkgPath = join(dir, "package.json")
@@ -67,54 +84,45 @@ function readPackageDeps(dir: string): Record<string, string> {
  * Results are cached per resolved `cwd` for the lifetime of the process.
  */
 export function detectFrameworks(cwd?: string): Set<Framework> {
-  const dir = cwd ?? process.cwd()
+  const dir = resolveCwd(cwd)
   const cached = _frameworkCache.get(dir)
   if (cached !== undefined) return cached
 
   const frameworks = new Set<Framework>()
   const deps = readPackageDeps(dir)
-  const allExts = ["js", "ts", "mjs", "cjs"] as const
 
   // ── JS/TS frameworks (config file or package.json dep) ──────────────────
 
-  if (allExts.some((ext) => existsSync(join(dir, `next.config.${ext}`))) || "next" in deps) {
+  if (hasConfigFile(dir, "next.config", JS_TS_EXTENSIONS) || hasDependency(deps, "next")) {
     frameworks.add("nextjs")
   }
 
-  if (allExts.some((ext) => existsSync(join(dir, `vite.config.${ext}`))) || "vite" in deps) {
+  if (hasConfigFile(dir, "vite.config", JS_TS_EXTENSIONS) || hasDependency(deps, "vite")) {
     frameworks.add("vite")
   }
 
   if (
-    ["js", "ts"].some((ext) => existsSync(join(dir, `remix.config.${ext}`))) ||
-    "@remix-run/node" in deps
+    hasConfigFile(dir, "remix.config", ["js", "ts"] as const) ||
+    hasDependency(deps, "@remix-run/node")
   ) {
     frameworks.add("remix")
   }
 
-  if (allExts.some((ext) => existsSync(join(dir, `astro.config.${ext}`))) || "astro" in deps) {
+  if (hasConfigFile(dir, "astro.config", JS_TS_EXTENSIONS) || hasDependency(deps, "astro")) {
     frameworks.add("astro")
   }
 
-  if ("express" in deps) frameworks.add("express")
-  if ("fastify" in deps) frameworks.add("fastify")
-  if ("@nestjs/core" in deps) frameworks.add("nestjs")
+  if (hasDependency(deps, "express")) frameworks.add("express")
+  if (hasDependency(deps, "fastify")) frameworks.add("fastify")
+  if (hasDependency(deps, "@nestjs/core")) frameworks.add("nestjs")
 
   // ── Language ecosystems (indicator files) ────────────────────────────────
 
-  if (
-    existsSync(join(dir, "pyproject.toml")) ||
-    existsSync(join(dir, "setup.py")) ||
-    existsSync(join(dir, "requirements.txt"))
-  ) {
-    frameworks.add("python")
-  }
-
+  if (hasAnyFile(dir, PYTHON_INDICATOR_FILES)) frameworks.add("python")
   if (existsSync(join(dir, "go.mod"))) frameworks.add("go")
   if (existsSync(join(dir, "Cargo.toml"))) frameworks.add("rust")
   if (existsSync(join(dir, "Gemfile"))) frameworks.add("ruby")
-  if (existsSync(join(dir, "pom.xml")) || existsSync(join(dir, "build.gradle")))
-    frameworks.add("java")
+  if (hasAnyFile(dir, JAVA_INDICATOR_FILES)) frameworks.add("java")
   if (existsSync(join(dir, "composer.json"))) frameworks.add("php")
 
   _frameworkCache.set(dir, frameworks)
@@ -146,7 +154,7 @@ export function _clearFrameworkCache(): void {
  * Results are cached per resolved `cwd` for the lifetime of the process.
  */
 export function detectProjectStack(cwd?: string): string[] {
-  const dir = cwd ?? process.cwd()
+  const dir = resolveCwd(cwd)
   const cached = _stackCache.get(dir)
   if (cached !== undefined) return cached
 
@@ -163,17 +171,13 @@ export function detectProjectStack(cwd?: string): string[] {
 
   if (existsSync(join(dir, "go.mod"))) stacks.push("go")
 
-  if (
-    existsSync(join(dir, "pyproject.toml")) ||
-    existsSync(join(dir, "setup.py")) ||
-    existsSync(join(dir, "requirements.txt"))
-  ) {
+  if (hasAnyFile(dir, PYTHON_INDICATOR_FILES)) {
     stacks.push("python")
   }
 
   if (existsSync(join(dir, "Gemfile"))) stacks.push("ruby")
   if (existsSync(join(dir, "Cargo.toml"))) stacks.push("rust")
-  if (existsSync(join(dir, "pom.xml")) || existsSync(join(dir, "build.gradle"))) stacks.push("java")
+  if (hasAnyFile(dir, JAVA_INDICATOR_FILES)) stacks.push("java")
   if (existsSync(join(dir, "composer.json"))) stacks.push("php")
 
   const result = stacks.sort()

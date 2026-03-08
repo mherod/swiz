@@ -6,6 +6,7 @@
 
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { resolveSpawnCwd } from "./cwd.ts"
 
 export const GIT_DIR_NAME = ".git"
 export const GIT_INDEX_LOCK = "index.lock"
@@ -18,7 +19,7 @@ export function joinGitPath(repoRoot: string, ...segments: string[]): string {
 /** Run a git command and return trimmed stdout. Returns "" on failure. */
 export async function git(args: string[], cwd: string): Promise<string> {
   try {
-    const effectiveCwd = cwd.trim() || process.cwd()
+    const effectiveCwd = resolveSpawnCwd(cwd)
     const proc = Bun.spawn(["git", ...args], { cwd: effectiveCwd, stdout: "pipe", stderr: "pipe" })
     const [output] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -63,7 +64,7 @@ export function withApiCache(args: string[]): string[] {
 /** Run a gh CLI command and return trimmed stdout. Returns "" on failure or timeout (3s).
  *  Read-only `gh api` calls automatically use `--cache` for built-in HTTP caching. */
 export async function gh(args: string[], cwd: string): Promise<string> {
-  const effectiveCwd = cwd.trim() || process.cwd()
+  const effectiveCwd = resolveSpawnCwd(cwd)
   const effectiveArgs = args[0] === "api" ? withApiCache(args) : args
 
   try {

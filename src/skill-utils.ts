@@ -1,11 +1,12 @@
 import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { resolveCwd } from "./cwd.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
 
 // Skills live in .skills/ (project-local) and provider-specific global directories.
 // Each skill is a directory containing SKILL.md.
-export const SKILL_DIRS = [join(process.cwd(), ".skills"), ...getAllProviderSkillDirs()]
+export const SKILL_DIRS = [join(resolveCwd(), ".skills"), ...getAllProviderSkillDirs()]
 // Deterministic precedence for duplicate names: first directory wins.
 export const SKILL_PRECEDENCE = [...SKILL_DIRS]
 

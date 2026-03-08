@@ -11,6 +11,7 @@ import { Database } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 
+import { resolveCwd } from "./cwd.ts"
 import { debugLog } from "./debug.ts"
 import { getHomeDirWithFallback } from "./home.ts"
 
@@ -300,7 +301,7 @@ function logReplayExecFailed(
  */
 export async function tryReplayPendingMutations(cwd?: string): Promise<void> {
   try {
-    const dir = cwd ?? process.cwd()
+    const dir = resolveCwd(cwd)
     const { getRepoSlug, isGitRepo, hasGhCli } = await import("./git-helpers.ts")
     if (!hasGhCli()) return
     if (!(await isGitRepo(dir))) return
