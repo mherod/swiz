@@ -1,6 +1,7 @@
 import { join } from "node:path"
+import { getHomeDir } from "./home.ts"
 
-const HOME = process.env.HOME ?? "~"
+const HOME = getHomeDir()
 
 // ─── Agent definition ───────────────────────────────────────────────────────
 

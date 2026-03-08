@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { getHomeDir } from "./home.ts"
 import { getProviderTaskRoots } from "./provider-adapters.ts"
 
 export interface TaskRoots {
@@ -7,7 +8,7 @@ export interface TaskRoots {
 }
 
 /** Resolve task/projects roots for the Claude-compatible task store. */
-export function getDefaultTaskRoots(homeDir = process.env.HOME ?? "~"): TaskRoots {
+export function getDefaultTaskRoots(homeDir = getHomeDir()): TaskRoots {
   const roots = getProviderTaskRoots("claude")
   if (roots) return roots
   return {

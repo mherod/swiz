@@ -1,10 +1,11 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { getHomeDir } from "../home.ts"
 import type { Command } from "../types.ts"
 
 const SWIZ_ROOT = dirname(Bun.main)
 const SHIM_PATH = join(SWIZ_ROOT, "hooks", "shim.sh")
-const HOME = process.env.HOME ?? "~"
+const HOME = getHomeDir()
 
 const MARKER_START = "# >>> swiz shim >>>"
 const MARKER_END = "# <<< swiz shim <<<"

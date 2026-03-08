@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { detectCurrentAgent } from "../detect.ts"
+import { getHomeDir } from "../home.ts"
 import { readStateData, STATE_TRANSITIONS, TERMINAL_STATES } from "../settings.ts"
 import type { Command } from "../types.ts"
 
@@ -158,7 +159,7 @@ async function spawnLine(cmd: string[]): Promise<string> {
 
 async function getOpenTaskCount(cwd: string): Promise<number | null> {
   try {
-    const home = process.env.HOME ?? "~"
+    const home = getHomeDir()
     const tasksRoot = join(home, ".claude", "tasks")
     const projectsRoot = join(home, ".claude", "projects")
     const { projectKeyFromCwd } = await import("../project-key.ts")

@@ -1,10 +1,11 @@
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
+import { getHomeDir } from "../home.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { getDefaultTaskRoots } from "../task-roots.ts"
 import type { Command } from "../types.ts"
 
-const HOME = process.env.HOME ?? "~"
+const HOME = getHomeDir()
 const CLAUDE_DIR = join(HOME, ".claude")
 const GEMINI_DIR = join(HOME, ".gemini")
 const GEMINI_SETTINGS_BAK = join(GEMINI_DIR, "settings.json.bak")

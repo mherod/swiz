@@ -1,5 +1,6 @@
 import { open, readdir, readFile, stat } from "node:fs/promises"
 import { basename, join, resolve } from "node:path"
+import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 
 // ─── Content block types ─────────────────────────────────────────────────────
@@ -113,7 +114,7 @@ async function readGeminiSessionId(sessionPath: string): Promise<string | null> 
 }
 
 async function findGeminiSessions(targetDir: string, home?: string): Promise<Session[]> {
-  home = home ?? process.env.HOME ?? "~"
+  home = home ?? getHomeDir()
   const geminiTmp = join(home, ".gemini", "tmp")
   const geminiHistory = join(home, ".gemini", "history")
   const target = resolve(targetDir)
@@ -249,7 +250,7 @@ async function readCodexSessionMeta(
 }
 
 async function findCodexSessions(targetDir: string, home?: string): Promise<Session[]> {
-  home = home ?? process.env.HOME ?? "~"
+  home = home ?? getHomeDir()
   const codexRoot = join(home, ".codex", "sessions")
   const targetPath = resolve(targetDir)
   const sessions: Session[] = []
@@ -344,7 +345,7 @@ async function antigravitySessionMatchesTarget(
 }
 
 async function findAntigravitySessions(targetDir: string, home?: string): Promise<Session[]> {
-  home = home ?? process.env.HOME ?? "~"
+  home = home ?? getHomeDir()
   const antigravityRoot = join(home, ".gemini", "antigravity")
   const conversationsDir = join(antigravityRoot, "conversations")
   const brainDir = join(antigravityRoot, "brain")
@@ -401,7 +402,7 @@ export async function findAllProviderSessions(
   home?: string
 ): Promise<Session[]> {
   const targetDir = resolve(projectDir)
-  const effectiveHome = home ?? process.env.HOME ?? "~"
+  const effectiveHome = home ?? getHomeDir()
   const claudeProjectDir = join(effectiveHome, ".claude", "projects", projectKeyFromCwd(targetDir))
   const [claudeSessions, geminiSessions, antigravitySessions, codexSessions] = await Promise.all([
     findSessions(claudeProjectDir),

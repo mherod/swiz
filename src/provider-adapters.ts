@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs"
 import { basename, join } from "node:path"
 import type { AgentDef } from "./agents.ts"
+import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 
 export type ProviderAgentId = "claude" | "cursor" | "gemini" | "codex"
@@ -41,10 +42,6 @@ export interface ProviderAdapter {
   getSessionDir(): string
   getSkillDirs(): string[]
   getTaskRoots(): ProviderTaskRoots | null
-}
-
-function home(): string {
-  return process.env.HOME ?? "~"
 }
 
 function projectPath(projectDir: string, ...parts: string[]): string {
@@ -122,10 +119,10 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
     id: "claude",
     config: CLAUDE_CONFIG,
     getHomeDir() {
-      return join(home(), CLAUDE_CONFIG.configDir)
+      return join(getHomeDir(), CLAUDE_CONFIG.configDir)
     },
     getProjectStateDir(projectDir: string) {
-      return join(home(), ".claude", "projects", projectKeyFromCwd(projectDir), "memory")
+      return join(getHomeDir(), ".claude", "projects", projectKeyFromCwd(projectDir), "memory")
     },
     getProjectFiles(projectDir: string) {
       return CLAUDE_CONFIG.projectFiles.map((file) => projectPath(projectDir, file))
@@ -154,7 +151,7 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
       return new Set<TranscriptProviderId>(["claude"])
     },
     getSessionDir() {
-      return join(home(), ".claude", "projects")
+      return join(getHomeDir(), ".claude", "projects")
     },
     getSkillDirs() {
       return [join(this.getHomeDir(), "skills")]
@@ -171,7 +168,7 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
     id: "cursor",
     config: CURSOR_CONFIG,
     getHomeDir() {
-      return join(home(), CURSOR_CONFIG.configDir)
+      return join(getHomeDir(), CURSOR_CONFIG.configDir)
     },
     getProjectStateDir(projectDir: string) {
       return projectDir
@@ -219,7 +216,7 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
       return new Set<TranscriptProviderId>()
     },
     getSessionDir() {
-      return join(home(), ".cursor", "sessions")
+      return join(getHomeDir(), ".cursor", "sessions")
     },
     getSkillDirs() {
       return [join(this.getHomeDir(), "skills")]
@@ -233,7 +230,7 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
     id: "gemini",
     config: GEMINI_CONFIG,
     getHomeDir() {
-      return join(home(), GEMINI_CONFIG.configDir)
+      return join(getHomeDir(), GEMINI_CONFIG.configDir)
     },
     getProjectStateDir(projectDir: string) {
       return projectDir
@@ -282,7 +279,7 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
     id: "codex",
     config: CODEX_CONFIG,
     getHomeDir() {
-      return join(home(), CODEX_CONFIG.configDir)
+      return join(getHomeDir(), CODEX_CONFIG.configDir)
     },
     getProjectStateDir(projectDir: string) {
       return projectDir

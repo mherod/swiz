@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import { cp, mkdir, readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { AGENTS, getAgent } from "../agents.ts"
+import { getHomeDir } from "../home.ts"
 import { getProviderAdapter } from "../provider-adapters.ts"
 import { findSkills, parseFrontmatterField, stripFrontmatter } from "../skill-utils.ts"
 import type { Command } from "../types.ts"
@@ -9,7 +10,7 @@ import type { Command } from "../types.ts"
 export { parseFrontmatterField, stripFrontmatter }
 
 const INLINE_CMD_RE = /!`([^`]+)`/g
-const HOME = process.env.HOME ?? "~"
+const HOME = getHomeDir()
 
 function primarySkillDir(agentId: "claude" | "gemini"): string {
   const adapter = getProviderAdapter(agentId)

@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { CYAN as CYAN_H, DIM, RESET as RST } from "../ansi.ts"
+import { expandHomeVars, getHomeDir } from "../home.ts"
 import { manifest } from "../manifest.ts"
 import { loadAllPlugins, pluginResultsToJson } from "../plugins.ts"
 import { readProjectSettings, readSwizSettings, resolveProjectHooks } from "../settings.ts"
@@ -71,7 +72,7 @@ function normalizeFlatHooks(raw: Record<string, HookEntry[]>): HooksConfig {
 function settingsPaths(agent: AgentDef): string[] {
   const paths = [agent.settingsPath]
   if (agent.id === "claude") {
-    const HOME = process.env.HOME ?? "~"
+    const HOME = getHomeDir()
     paths.push(join(HOME, ".claude", "settings.local.json"))
     paths.push(".claude/settings.json")
     paths.push(".claude/settings.local.json")
@@ -109,7 +110,7 @@ async function loadAllSettings(): Promise<LoadedSettings[]> {
 // ─── Display helpers ────────────────────────────────────────────────────────
 
 function resolveScriptPath(command: string): string | null {
-  const expanded = command.replace(/\$HOME/g, process.env.HOME ?? "~")
+  const expanded = expandHomeVars(command)
   const parts = expanded.split(/\s+/)
   const script = parts.find((p) => /\.(sh|ts|js)$/.test(p))
   return script ?? null
