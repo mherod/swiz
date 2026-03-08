@@ -25,6 +25,7 @@ import { translateMatcher } from "../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
 import { readProjectSettings, STATE_TRANSITIONS, stateDataSchema } from "../src/settings.ts"
 import { skillAdvice, skillExists } from "../src/skill-utils.ts"
+import { getDefaultTaskRoots } from "../src/task-roots.ts"
 
 export { skillAdvice, skillExists }
 export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
@@ -521,13 +522,13 @@ export interface SessionTask {
 /** Resolve ~/.claude/tasks for the active home directory. */
 export function getTasksRoot(home: string = process.env.HOME ?? ""): string | null {
   if (!home) return null
-  return join(home, ".claude", "tasks")
+  return getDefaultTaskRoots(home).tasksDir
 }
 
 /** Resolve ~/.claude/projects for the active home directory. */
 export function getProjectsRoot(home: string = process.env.HOME ?? ""): string | null {
   if (!home) return null
-  return join(home, ".claude", "projects")
+  return getDefaultTaskRoots(home).projectsDir
 }
 
 /** Resolve ~/.claude/tasks/<sessionId> for the active home directory. */
@@ -661,7 +662,9 @@ export async function findPriorSessionTasks(
   const { readdir, stat } = await import("node:fs/promises")
 
   const projectKey = projectKeyFromCwd(cwd)
-  const projectDir = join(home, ".claude", "projects", projectKey)
+  const projectsRoot = getProjectsRoot(home)
+  if (!projectsRoot) return null
+  const projectDir = join(projectsRoot, projectKey)
 
   // Collect session IDs from transcript files (sorted by mtime, newest first)
   let transcriptFiles: string[]

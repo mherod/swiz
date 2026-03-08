@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { getSessionTasksDir } from "./hook-utils.ts"
 import { useTempDir } from "./test-utils.ts"
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/posttooluse-task-evidence.ts")
@@ -10,7 +11,8 @@ const { create: createHome } = useTempDir("swiz-evidence-test-")
 
 async function createFixture(): Promise<{ home: string; tasksDir: string }> {
   const home = await createHome()
-  const tasksDir = join(home, ".claude", "tasks", SESSION_ID)
+  const tasksDir = getSessionTasksDir(SESSION_ID, home)
+  if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
   await mkdir(tasksDir, { recursive: true })
   return { home, tasksDir }
 }

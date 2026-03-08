@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { getSessionTasksDir } from "../../hooks/hook-utils.ts"
 import { useTempDir } from "../../hooks/test-utils.ts"
 
 interface DispatchResult {
@@ -79,7 +80,8 @@ async function writeTask(
   sessionId: string,
   status: "pending" | "in_progress" | "completed" | "cancelled"
 ): Promise<void> {
-  const tasksDir = join(homeDir, ".claude", "tasks", sessionId)
+  const tasksDir = getSessionTasksDir(sessionId, homeDir)
+  if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
   await mkdir(tasksDir, { recursive: true })
   await writeFile(
     join(tasksDir, "1.json"),

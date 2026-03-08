@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { formatActionPlan } from "./hook-utils.ts"
+import { formatActionPlan, getSessionTasksDir } from "./hook-utils.ts"
 import { useTempDir } from "./test-utils.ts"
 
 // ─── formatActionPlan unit tests ─────────────────────────────────────────────
@@ -122,7 +122,8 @@ async function createFixtureWithTools(toolNames: string[]): Promise<{
   transcriptPath: string
 }> {
   const home = await tmp.create("swiz-auditor-test-")
-  const tasksDir = join(home, ".claude", "tasks", SESSION_ID)
+  const tasksDir = getSessionTasksDir(SESSION_ID, home)
+  if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
   await mkdir(tasksDir, { recursive: true })
 
   const lines: string[] = []
@@ -315,7 +316,8 @@ async function createFixtureWithPush(): Promise<{
   transcriptPath: string
 }> {
   const home = await tmp.create("swiz-auditor-ci-test-")
-  const tasksDir = join(home, ".claude", "tasks", SESSION_ID)
+  const tasksDir = getSessionTasksDir(SESSION_ID, home)
+  if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
   await mkdir(tasksDir, { recursive: true })
 
   const lines: string[] = []
@@ -495,7 +497,8 @@ describe("stop-completion-auditor — CI verification enforcement", () => {
     await writeFile(siblingTranscript, `${lines.join("\n")}\n`)
 
     // Current session: completed task WITHOUT CI evidence
-    const currentTasksDir = join(home, ".claude", "tasks", CURRENT_SESSION)
+    const currentTasksDir = getSessionTasksDir(CURRENT_SESSION, home)
+    if (!currentTasksDir) throw new Error("Failed to resolve current session tasks directory")
     await mkdir(currentTasksDir, { recursive: true })
     await writeFile(
       join(currentTasksDir, "1.json"),
@@ -510,7 +513,8 @@ describe("stop-completion-auditor — CI verification enforcement", () => {
     )
 
     // Sibling session: completed task WITH CI evidence
-    const siblingTasksDir = join(home, ".claude", "tasks", SIBLING_SESSION)
+    const siblingTasksDir = getSessionTasksDir(SIBLING_SESSION, home)
+    if (!siblingTasksDir) throw new Error("Failed to resolve sibling session tasks directory")
     await mkdir(siblingTasksDir, { recursive: true })
     await writeFile(
       join(siblingTasksDir, "1.json"),

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { getDefaultTaskRoots } from "../task-roots.ts"
 import { decodeProjectPath, walkDecode } from "./cleanup.ts"
 
 // ─── Fixture setup ────────────────────────────────────────────────────────────
@@ -421,9 +422,9 @@ describe("cleanup stale-project detection", () => {
     await Bun.write(join(GONE_SESSION, "session.jsonl"), '{"type":"system"}\n')
     // Create a matching task directory for the gone session
     const goneSessionId = "00000000-0000-0000-0000-000000000006"
-    await mkdir(join(STALE_HOME, ".claude", "tasks", goneSessionId), { recursive: true })
+    await mkdir(join(getDefaultTaskRoots(STALE_HOME).tasksDir, goneSessionId), { recursive: true })
     await writeFile(
-      join(STALE_HOME, ".claude", "tasks", goneSessionId, "1.json"),
+      join(getDefaultTaskRoots(STALE_HOME).tasksDir, goneSessionId, "1.json"),
       JSON.stringify({ id: "1", subject: "Stale task", status: "pending" })
     )
   })
@@ -516,7 +517,7 @@ describe("cleanup task directory handling", () => {
     await Bun.write(join(projectDir, SESSION_WITHOUT_TASKS, "session.jsonl"), '{"type":"system"}\n')
 
     // Create matching task directory for SESSION_WITH_TASKS only
-    const taskDir = join(TASK_HOME, ".claude", "tasks", SESSION_WITH_TASKS)
+    const taskDir = join(getDefaultTaskRoots(TASK_HOME).tasksDir, SESSION_WITH_TASKS)
     await mkdir(taskDir, { recursive: true })
     await writeFile(
       join(taskDir, "1.json"),

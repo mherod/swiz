@@ -7,6 +7,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, utimes, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { getSessionTasksDir } from "./hook-utils.ts"
 import { useTempDir } from "./test-utils.ts"
 
 const HOOKS_DIR = resolve(process.cwd(), "hooks")
@@ -235,7 +236,9 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
     // Fake HOME with an empty tasks dir → activeTasks.length === 0 → denial
     const fakeHome = await makeTempDir()
     const sessionId = "test-footer-regression-session"
-    await mkdir(join(fakeHome, ".claude", "tasks", sessionId), { recursive: true })
+    const tasksDir = getSessionTasksDir(sessionId, fakeHome)
+    if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
+    await mkdir(tasksDir, { recursive: true })
     const result = await runHook(
       "pretooluse-require-tasks.ts",
       {

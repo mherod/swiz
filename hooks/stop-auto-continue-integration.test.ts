@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { getSessionTasksDir } from "./hook-utils.ts"
 import { useTempDir } from "./test-utils.ts"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -205,7 +206,8 @@ describe("stop-auto-continue: prompt ordering with session tasks", () => {
     subject: string,
     sessionId = "test-session"
   ): Promise<void> {
-    const tasksDir = join(fakeHome, ".claude", "tasks", sessionId)
+    const tasksDir = getSessionTasksDir(sessionId, fakeHome)
+    if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
     await mkdir(tasksDir, { recursive: true })
     await writeFile(join(tasksDir, `${id}.json`), JSON.stringify({ id, status, subject }))
   }

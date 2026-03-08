@@ -13,6 +13,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { getSessionTasksDir } from "./hook-utils.ts"
 
 const HOOKS_DIR = resolve(process.cwd(), "hooks")
 const FOOTER_MARKER = "ACTION REQUIRED"
@@ -151,7 +152,8 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
   test("stop-completion-auditor: in_progress task block includes footer", async () => {
     const fakeHome = await makeTempDir("-home")
     const sessionId = "test-footer-auditor-session"
-    const tasksDir = join(fakeHome, ".claude", "tasks", sessionId)
+    const tasksDir = getSessionTasksDir(sessionId, fakeHome)
+    if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
     await mkdir(tasksDir, { recursive: true })
     await writeFile(
       join(tasksDir, "task-1.json"),
