@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-// UserPromptSubmit hook: Gently suggest TaskCreate when no pending tasks exist
+// UserPromptSubmit hook: Inject task-creation context on every prompt.
+// When no pending tasks exist: also surfaces incomplete prior-session tasks.
 
 import {
   findPriorSessionTasks,
@@ -24,14 +25,14 @@ async function main(): Promise<void> {
     (t) => t.status === "pending" || t.status === "in_progress"
   ).length
 
-  if (pendingCount === 0) {
-    const taskCreateName = toolNameForCurrentAgent("TaskCreate")
+  const taskCreateName = toolNameForCurrentAgent("TaskCreate")
+  let additionalContext: string
 
+  if (pendingCount === 0) {
     // Check if the prior session had incomplete tasks the agent should resume
     const cwd = input.cwd ?? process.cwd()
     const priorResult = await findPriorSessionTasks(cwd, sessionId, home)
 
-    let additionalContext: string
     if (priorResult && priorResult.tasks.length > 0) {
       const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
       const completeHint = formatTaskCompleteCommand("<id>", priorSessionId, "note:done")
@@ -44,18 +45,21 @@ async function main(): Promise<void> {
           overflowLabel: "incomplete task(s)",
         })
     } else {
-      additionalContext = `No pending tasks in this session. If the upcoming work is non-trivial, use ${taskCreateName} to plan it before starting.`
+      additionalContext = `No pending tasks in this session. Use ${taskCreateName} to create a task for this prompt before starting work.`
     }
-
-    console.log(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "UserPromptSubmit",
-          additionalContext,
-        },
-      })
-    )
+  } else {
+    // Tasks exist — still remind the agent to create one for the new message.
+    additionalContext = `Use ${taskCreateName} to create a task for this prompt before starting work on it.`
   }
+
+  console.log(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "UserPromptSubmit",
+        additionalContext,
+      },
+    })
+  )
 }
 
 main()
