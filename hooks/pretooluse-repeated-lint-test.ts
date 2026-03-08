@@ -70,8 +70,9 @@ function bashMutatesWorkspace(cmd: string): boolean {
   if (/\d>>?\s*(?![&>])(?!\/dev\/)/.test(cmd)) return true
   // tee to a named destination (not /dev/null or /dev/stderr)
   if (/\btee\s+(?!\/dev\/)/.test(cmd)) return true
-  // In-place sed: sed -i (modifies files in place)
-  if (/\bsed\b[^;|]*-[a-z]*i\b/.test(cmd)) return true
+  // In-place sed: -i (any position in combined flags, e.g. -i, -iE, -Ei, -ni),
+  //   -i.bak (backup suffix), and GNU long form --in-place / --in-place=.bak
+  if (/\bsed\b(?:[^|;]*\s+-[a-zA-Z]*i[a-zA-Z.]*|[^|;]*--in-place)/.test(cmd)) return true
   // Common CLI output flags — space-separated: -o path, --output path, --outfile path
   if (/(?:^|\s)(?:-o|--(?:out(?:put|file|dir)?|report|log-?file))\s+\S/.test(cmd)) return true
   // Common CLI output flags — equals-separated: --output=path, --outfile=path
