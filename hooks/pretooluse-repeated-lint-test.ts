@@ -4,12 +4,14 @@
 // between them. Prevents the wasteful pattern of re-running the same command
 // with different output filters instead of reading the full output.
 //
-// "Uninterrupted" means: no isCodeChangeTool call between the previous
-// same-type run and the current one. isCodeChangeTool covers all agents:
-//   Edit / Write / NotebookEdit  (Claude Code)
-//   StrReplace / EditNotebook    (Cursor)
-//   replace / write_file / apply_patch  (Codex)
-// and any future tool types added to the canonical EDIT/WRITE/NOTEBOOK sets.
+// "Uninterrupted" means: no file-modifying operation between the previous
+// same-type run and the current one. Two complementary checks detect edits:
+//   1. isCodeChangeTool — agent edit tools across all runtimes:
+//        Edit / Write / NotebookEdit  (Claude Code)
+//        StrReplace / EditNotebook    (Cursor)
+//        replace / write_file / apply_patch  (Codex)
+//   2. bashWritesToWorkspace — filesystem integrity monitor for out-of-band
+//      writes made via raw shell commands (redirects, tee, in-place sed).
 
 import {
   denyPreToolUse,
@@ -39,6 +41,22 @@ const COMMAND_LABEL: Record<CommandKind, string> = {
   test: "bun test",
   lint: "bun run lint / typecheck / check",
   build: "bun run build",
+}
+
+// ── Filesystem integrity monitor ─────────────────────────────────────────────
+// Detects bash commands that write to workspace files as a complement to
+// isCodeChangeTool(). Catches out-of-band edits that don't go through an agent
+// edit tool: shell redirects (> / >>), tee, and in-place sed.
+// Conservative: excludes /dev/ special devices and FD redirects (2>&1).
+
+function bashWritesToWorkspace(cmd: string): boolean {
+  // Output redirect: "> file" or ">> file" — not FD redirect (2>&1) or /dev/
+  if (/(?<![0-9&])>>?\s*(?![&])(?!\/dev\/)/.test(cmd)) return true
+  // tee to a named destination (not /dev/null or /dev/stderr)
+  if (/\btee\s+(?!\/dev\/)/.test(cmd)) return true
+  // In-place sed: sed -i (modifies files in place)
+  if (/\bsed\b[^;|]*-[a-z]*i\b/.test(cmd)) return true
+  return false
 }
 
 // ── Transcript event types ───────────────────────────────────────────────────
@@ -80,6 +98,8 @@ async function parseTranscriptEvents(transcriptPath: string): Promise<Transcript
           const cmd = String(inp?.command ?? "").normalize("NFKC")
           const kind = classifyCommand(cmd)
           if (kind) events.push({ kind, sourceLineIdx: lineIdx })
+          else if (bashWritesToWorkspace(cmd))
+            events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
         } else if (isCodeChangeTool(name)) {
           // Any file-modifying tool counts as "intervening work" — covers all agents:
           // Edit/Write/NotebookEdit (Claude Code), StrReplace/EditNotebook (Cursor),
