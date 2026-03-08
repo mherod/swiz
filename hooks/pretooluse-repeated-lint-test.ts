@@ -52,6 +52,8 @@ const COMMAND_LABEL: Record<CommandKind, string> = {
 //   Deletions:  rm, trash, unlink
 //   Moves/copies: mv, cp (structural changes)
 //   Directories: mkdir, rmdir
+//   Env-driven: KEY=./path prefix — command writes to a workspace-local path
+//               controlled by an inline env var (e.g. OUTPUT_FILE=./r.json bun test)
 // Conservative: excludes /dev/ special devices and FD redirects (2>&1).
 
 function bashMutatesWorkspace(cmd: string): boolean {
@@ -67,6 +69,11 @@ function bashMutatesWorkspace(cmd: string): boolean {
   if (/\b(?:mv|cp)\s+/.test(cmd)) return true
   // Directory creation/deletion
   if (/\b(?:mkdir|rmdir)\b/.test(cmd)) return true
+  // Environment variable-driven workspace mutations:
+  // Inline KEY=./relative-path assignments mean the command writes output to a
+  // workspace-local location specified by the env var.
+  // ./prefix distinguishes workspace-relative paths from system/absolute paths.
+  if (/\b[A-Z_]+=\.\//i.test(cmd)) return true
   return false
 }
 
