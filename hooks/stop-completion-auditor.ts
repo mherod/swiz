@@ -218,6 +218,13 @@ async function main(): Promise<void> {
   const incompleteDetails = allTasks
     .filter((t) => t.id && t.id !== "null")
     .filter((t): t is TaskFile => t.status === "pending" || t.status === "in_progress")
+    .sort((a, b) => {
+      // Show actively worked tasks first, then remaining pending tasks.
+      if (a.status === b.status) return 0
+      if (a.status === "in_progress") return -1
+      if (b.status === "in_progress") return 1
+      return 0
+    })
     .map((t) => `#${t.id} [${t.status}]: ${t.subject}`)
 
   // If no live task files found, check audit log
@@ -276,6 +283,7 @@ async function main(): Promise<void> {
     const incompleteTasks = allTasks.filter(
       (t) => t.id && t.id !== "null" && (t.status === "pending" || t.status === "in_progress")
     )
+    const currentTaskList = formatActionPlan(incompleteDetails, { header: "Current task list:" })
     const completeCommands = formatTaskCompleteCommands(
       incompleteTasks,
       sessionId,
@@ -284,7 +292,7 @@ async function main(): Promise<void> {
     )
     blockStop(
       "Incomplete tasks found:\n\n" +
-        incompleteDetails.join("\n") +
+        currentTaskList +
         "\n\n" +
         formatActionPlan(
           [
