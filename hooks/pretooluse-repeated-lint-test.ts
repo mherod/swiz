@@ -76,6 +76,12 @@ function bashMutatesWorkspace(cmd: string): boolean {
   // In-place perl: -i (any position in combined flags, e.g. -i, -pi, -pie, -i.bak)
   //   perl has no --in-place long form; -i is the only spelling
   if (/\bperl\b[^|;]*\s+-[a-zA-Z]*i[a-zA-Z.]*/.test(cmd)) return true
+  // In-place ruby: -i (same semantics as perl/sed, e.g. -i, -ri, -i.bak)
+  if (/\bruby\b[^|;]*\s+-[a-zA-Z]*i[a-zA-Z.]*/.test(cmd)) return true
+  // GNU awk in-place: awk/gawk -i inplace (two-token form — inplace is a library name)
+  if (/\b(?:g?awk)\b[^|;]*-i\s+inplace/.test(cmd)) return true
+  // patch: always mutates workspace files (applies unified diffs to source files)
+  if (/\bpatch\b\s+/.test(cmd)) return true
   // Common CLI output flags — space-separated: -o path, --output path, --outfile path
   if (/(?:^|\s)(?:-o|--(?:out(?:put|file|dir)?|report|log-?file))\s+\S/.test(cmd)) return true
   // Common CLI output flags — equals-separated: --output=path, --outfile=path
