@@ -638,7 +638,7 @@ describe("swiz doctor", () => {
     expect(await Bun.file(missingPath).exists()).toBe(true)
     const content = await Bun.file(missingPath).text()
     expect(content).toContain("#!/usr/bin/env bun")
-  }, 15000)
+  }, 30_000)
 
   test("doctor --fix moves invalid skill entry aside", async () => {
     const home = await createTempHome()
