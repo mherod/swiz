@@ -53,6 +53,39 @@ const COMMAND_LABEL: Record<CommandKind, string> = {
   build: "bun run build",
 }
 
+// ── Command fingerprint ───────────────────────────────────────────────────────
+// Returns a stable key that captures both the command kind AND the file/scope
+// target. Two commands of the same kind but different targets (e.g.
+// `bun test src/a.test.ts` vs `bun test src/b.test.ts`) produce different
+// fingerprints and should NOT trigger the consecutive-run gate.
+//
+// For test commands, the scope is the set of path arguments (non-flag tokens
+// that look like file paths or globs). For lint/typecheck/build commands the
+// scope is always empty — their targets are project-wide and not path-scoped
+// in our typical invocations.
+//
+// Returns null when the command does not match any known kind.
+
+export function commandFingerprint(cmd: string): string | null {
+  const kind = classifyCommand(cmd)
+  if (!kind) return null
+
+  if (kind !== "test") return kind
+
+  // For test commands, extract non-flag tokens after `bun test` as scope,
+  // stopping at the first pipe/redirect boundary so piped commands (tee, grep)
+  // are not captured as scope targets.
+  const afterBunTest = cmd.replace(/^.*bun\s+test\s*/, "")
+  // Truncate at the first shell operator (pipe, redirect, logical AND/OR, semi)
+  const beforePipe = afterBunTest.split(/\s*[|&;>]\s*/)[0] ?? ""
+  const scopeTokens = beforePipe
+    .split(/\s+/)
+    .filter((t) => t && !t.startsWith("-") && !/^\d+$/.test(t))
+    .sort()
+
+  return scopeTokens.length > 0 ? `${kind}:${scopeTokens.join(",")}` : kind
+}
+
 // ── Filesystem integrity monitor ─────────────────────────────────────────────
 // Detects bash commands that mutate workspace files or directories as a
 // complement to isCodeChangeTool(). Covers all out-of-band mutations:
@@ -134,6 +167,15 @@ export function bashMutatesWorkspace(cmd: string): boolean {
   // workspace-local location specified by the env var.
   // ./prefix distinguishes workspace-relative paths from system/absolute paths.
   if (/\b[A-Z_]+=\.\//i.test(cmd)) return true
+  // Script-wrapper formatters and fixers that always mutate files:
+  //   bun run format / bun run lint:fix / bun run fix
+  //   biome format --write / biome check --write / biome format (implicit write in some configs)
+  //   eslint --fix / eslint --fix-dry-run (latter is not actually a mutation but conservative)
+  //   prettier --write / prettier -w
+  if (/\bbun\s+run\s+(?:format|lint[:-]fix|fix)\b/.test(cmd)) return true
+  if (/\bbiome\s+(?:format|check)\b[^|;]*--write\b/.test(cmd)) return true
+  if (/\beslint\b[^|;]*--fix\b/.test(cmd)) return true
+  if (/\bprettier\b[^|;]*(?:--write|-w)\b/.test(cmd)) return true
   return false
 }
 
@@ -143,6 +185,10 @@ export type EventKind = CommandKind | "any_edit"
 
 export interface TranscriptEvent {
   kind: EventKind
+  /** Scope-aware fingerprint for shell commands (kind + target paths).
+   *  Used to distinguish `bun test src/a.test.ts` from `bun test src/b.test.ts`.
+   *  Undefined for any_edit events and non-shell events. */
+  fingerprint?: string
   /** JSONL source line index. Two events with the same index are from the
    *  same assistant message (parallel dispatch) and neither has been executed
    *  yet — they cannot be treated as a prior/current pair. */
@@ -184,7 +230,8 @@ export async function parseTranscriptEvents(transcriptPath: string): Promise<Tra
           const cmd = String(inp?.command ?? "").normalize("NFKC")
           const kind = classifyCommand(cmd)
           if (kind) {
-            events.push({ kind, sourceLineIdx: lineIdx })
+            const fingerprint = commandFingerprint(cmd) ?? kind
+            events.push({ kind, fingerprint, sourceLineIdx: lineIdx })
             // A classified command (lint/test/build) may ALSO mutate the workspace
             // via a pipe or redirect in the same invocation — e.g.
             //   `bun run lint 2>&1 | tee output.txt`  (tee detected)
@@ -404,6 +451,12 @@ async function main(): Promise<void> {
   // Parallel dispatch guard: if both are from the same JSONL line, neither has
   // been executed yet — skip enforcement.
   if (priorEvent.sourceLineIdx === currentEvent.sourceLineIdx) return
+
+  // Scope-fingerprint guard: if the commands target different paths/scopes,
+  // they are semantically different commands — skip enforcement.
+  // Example: `bun test src/a.test.ts` → `bun test src/b.test.ts` should be allowed.
+  const currentFp = commandFingerprint(command) ?? currentKind
+  if (priorEvent.fingerprint && priorEvent.fingerprint !== currentFp) return
 
   const lastPriorRunIdx = events.indexOf(priorEvent)
 

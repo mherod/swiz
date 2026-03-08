@@ -138,6 +138,7 @@ export interface SwizSettings {
   pushGate: boolean
   sandboxedEdits: boolean
   speak: boolean
+  swizNotifyHooks: boolean
   updateMemoryFooter: boolean
   gitStatusGate: boolean
   nonDefaultBranchGate: boolean
@@ -166,6 +167,7 @@ export interface EffectiveSwizSettings {
   pushGate: boolean
   sandboxedEdits: boolean
   speak: boolean
+  swizNotifyHooks: boolean
   updateMemoryFooter: boolean
   gitStatusGate: boolean
   nonDefaultBranchGate: boolean
@@ -275,6 +277,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   pushGate: false,
   sandboxedEdits: true,
   speak: false,
+  swizNotifyHooks: false,
   updateMemoryFooter: false,
   gitStatusGate: true,
   nonDefaultBranchGate: true,
@@ -326,6 +329,7 @@ export const swizSettingsSchema = z.object({
   pushGate: z.boolean().catch(DEFAULT_SETTINGS.pushGate),
   sandboxedEdits: z.boolean().catch(DEFAULT_SETTINGS.sandboxedEdits),
   speak: z.boolean().catch(DEFAULT_SETTINGS.speak),
+  swizNotifyHooks: z.boolean().catch(DEFAULT_SETTINGS.swizNotifyHooks),
   updateMemoryFooter: z.boolean().catch(DEFAULT_SETTINGS.updateMemoryFooter),
   gitStatusGate: z.boolean().catch(DEFAULT_SETTINGS.gitStatusGate),
   nonDefaultBranchGate: z.boolean().catch(DEFAULT_SETTINGS.nonDefaultBranchGate),
@@ -453,6 +457,10 @@ function normalizeSettings(value: unknown): SwizSettings {
         ? obj.sandboxedEdits
         : DEFAULT_SETTINGS.sandboxedEdits,
     speak: typeof obj.speak === "boolean" ? obj.speak : DEFAULT_SETTINGS.speak,
+    swizNotifyHooks:
+      typeof obj.swizNotifyHooks === "boolean"
+        ? obj.swizNotifyHooks
+        : DEFAULT_SETTINGS.swizNotifyHooks,
     updateMemoryFooter:
       typeof obj.updateMemoryFooter === "boolean"
         ? obj.updateMemoryFooter
@@ -725,6 +733,7 @@ export function getEffectiveSwizSettings(
       pushGate: settings.pushGate,
       sandboxedEdits: settings.sandboxedEdits,
       speak: settings.speak,
+      swizNotifyHooks: settings.swizNotifyHooks,
       updateMemoryFooter: settings.updateMemoryFooter,
       gitStatusGate: settings.gitStatusGate,
       nonDefaultBranchGate: settings.nonDefaultBranchGate,
@@ -750,6 +759,7 @@ export function getEffectiveSwizSettings(
     pushGate: settings.pushGate,
     sandboxedEdits: settings.sandboxedEdits,
     speak: settings.speak,
+    swizNotifyHooks: settings.swizNotifyHooks,
     updateMemoryFooter: settings.updateMemoryFooter,
     gitStatusGate: settings.gitStatusGate,
     nonDefaultBranchGate: settings.nonDefaultBranchGate,

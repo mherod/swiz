@@ -76,6 +76,18 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
   },
   {
+    key: "swizNotifyHooks",
+    aliases: [
+      "swiz-notify-hooks",
+      "swiznotifyhooks",
+      "swiz_notify_hooks",
+      "swiz-notify",
+      "notify-hooks",
+    ],
+    kind: "boolean",
+    scopes: ["global"],
+  },
+  {
     key: "updateMemoryFooter",
     aliases: [
       "update-memory-footer",
@@ -261,7 +273,7 @@ function usage(): string {
     "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--global | --project | --session [id]] [--dir <path>]\n" +
     "Scope: --global (default, ~/.swiz/settings.json), --project (.swiz/config.json), --session [id] (per-session)\n" +
     "Settings (global): auto-continue, critiques-enabled, pr-merge-mode, collaboration-mode,\n" +
-    "  push-gate, sandboxed-edits, speak, update-memory-footer, pr-age-gate,\n" +
+    "  push-gate, sandboxed-edits, speak, swiz-notify-hooks, update-memory-footer, pr-age-gate,\n" +
     "  narrator-voice, narrator-speed, ambition-mode,\n" +
     "  git-status-gate, github-ci-gate, changes-requested-gate, personal-repo-issues-gate,\n" +
     "  non-default-branch-gate\n" +
@@ -393,6 +405,7 @@ function printSettings(
     pushGate: boolean
     sandboxedEdits: boolean
     speak: boolean
+    swizNotifyHooks: boolean
     updateMemoryFooter: boolean
     gitStatusGate: boolean
     nonDefaultBranchGate: boolean
@@ -457,6 +470,7 @@ function printSettings(
   console.log(`  push-gate:       ${effective.pushGate ? "enabled" : "disabled"} (global)`)
   console.log(`  sandboxed-edits: ${effective.sandboxedEdits ? "enabled" : "disabled"} (global)`)
   console.log(`  speak:           ${effective.speak ? "enabled" : "disabled"} (global)`)
+  console.log(`  swiz-notify-hooks: ${effective.swizNotifyHooks ? "enabled" : "disabled"} (global)`)
   console.log(
     `  update-memory-footer: ${effective.updateMemoryFooter ? "enabled" : "disabled"} (global)`
   )
@@ -772,6 +786,14 @@ export const settingsCommand: Command = {
     },
     { flags: "enable speak", description: "Enable TTS narrator (speaks assistant text aloud)" },
     { flags: "disable speak", description: "Disable TTS narrator (default: disabled)" },
+    {
+      flags: "enable swiz-notify-hooks",
+      description: "Enable swiz-notify backed notification hooks",
+    },
+    {
+      flags: "disable swiz-notify-hooks",
+      description: "Disable swiz-notify backed notification hooks (default)",
+    },
     {
       flags: "enable update-memory-footer",
       description: "Include update-memory guidance in ACTION REQUIRED footers",

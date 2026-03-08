@@ -8,6 +8,7 @@ import {
   buildReadOutputStep,
   buildRemediationHints,
   classifyCommand,
+  commandFingerprint,
   extractPreviousOutput,
   extractToolUseIdFromLine,
   parseTranscriptEvents,
@@ -46,6 +47,61 @@ describe("classifyCommand", () => {
     expect(classifyCommand("git status")).toBeNull()
     expect(classifyCommand("ls -la")).toBeNull()
     expect(classifyCommand("echo hello")).toBeNull()
+  })
+})
+
+// ── commandFingerprint ────────────────────────────────────────────────────────
+
+describe("commandFingerprint", () => {
+  test("returns null for unrecognised commands", () => {
+    expect(commandFingerprint("git status")).toBeNull()
+    expect(commandFingerprint("ls -la")).toBeNull()
+  })
+
+  test("non-test kinds return kind string only (project-wide scope)", () => {
+    expect(commandFingerprint("bun run lint")).toBe("lint")
+    expect(commandFingerprint("bun run typecheck")).toBe("typecheck")
+    expect(commandFingerprint("bun run build")).toBe("build")
+  })
+
+  test("bun test with no arguments returns 'test' (no scope suffix)", () => {
+    expect(commandFingerprint("bun test")).toBe("test")
+    expect(commandFingerprint("bun test --concurrent")).toBe("test")
+  })
+
+  test("bun test with a single file path returns scoped fingerprint", () => {
+    expect(commandFingerprint("bun test src/a.test.ts")).toBe("test:src/a.test.ts")
+    expect(commandFingerprint("bun test src/b.test.ts")).toBe("test:src/b.test.ts")
+  })
+
+  test("bun test with multiple files returns sorted, comma-joined scope", () => {
+    // Tokens are sorted so order in command doesn't matter
+    expect(commandFingerprint("bun test src/b.test.ts src/a.test.ts")).toBe(
+      "test:src/a.test.ts,src/b.test.ts"
+    )
+  })
+
+  test("flags (starting with -) are excluded from scope tokens", () => {
+    expect(commandFingerprint("bun test --concurrent src/foo.test.ts --timeout 5000")).toBe(
+      "test:src/foo.test.ts"
+    )
+  })
+
+  test("tokens after pipe boundary are not included in scope", () => {
+    // 'bun test src/a.test.ts | tee out.txt' — 'tee' and 'out.txt' must not appear
+    expect(commandFingerprint("bun test src/a.test.ts | tee out.txt")).toBe("test:src/a.test.ts")
+  })
+
+  test("different file targets produce different fingerprints", () => {
+    const fp1 = commandFingerprint("bun test src/a.test.ts")
+    const fp2 = commandFingerprint("bun test src/b.test.ts")
+    expect(fp1).not.toBe(fp2)
+  })
+
+  test("same file target produces identical fingerprints (gate should fire)", () => {
+    const fp1 = commandFingerprint("bun test src/a.test.ts")
+    const fp2 = commandFingerprint("bun test src/a.test.ts")
+    expect(fp1).toBe(fp2)
   })
 })
 
@@ -396,6 +452,51 @@ describe("bashMutatesWorkspace — non-mutations (false-positive guard)", () => 
   })
 })
 
+describe("bashMutatesWorkspace — script-wrapper formatters", () => {
+  test("bun run format is a mutation", () => {
+    expect(bashMutatesWorkspace("bun run format")).toBe(true)
+  })
+
+  test("bun run lint:fix is a mutation", () => {
+    expect(bashMutatesWorkspace("bun run lint:fix")).toBe(true)
+  })
+
+  test("bun run lint-fix is a mutation (hyphen variant)", () => {
+    expect(bashMutatesWorkspace("bun run lint-fix")).toBe(true)
+  })
+
+  test("bun run fix is a mutation", () => {
+    expect(bashMutatesWorkspace("bun run fix")).toBe(true)
+  })
+
+  test("biome format --write is a mutation", () => {
+    expect(bashMutatesWorkspace("biome format --write .")).toBe(true)
+    expect(bashMutatesWorkspace("biome check --write .")).toBe(true)
+  })
+
+  test("biome format without --write is not a mutation", () => {
+    expect(bashMutatesWorkspace("biome format .")).toBe(false)
+    expect(bashMutatesWorkspace("biome check .")).toBe(false)
+  })
+
+  test("eslint --fix is a mutation", () => {
+    expect(bashMutatesWorkspace("eslint --fix src/")).toBe(true)
+    expect(bashMutatesWorkspace("npx eslint --fix .")).toBe(true)
+  })
+
+  test("prettier --write is a mutation", () => {
+    expect(bashMutatesWorkspace("prettier --write src/")).toBe(true)
+  })
+
+  test("prettier -w is a mutation", () => {
+    expect(bashMutatesWorkspace("prettier -w src/")).toBe(true)
+  })
+
+  test("bun run lint (read-only) is NOT a mutation", () => {
+    expect(bashMutatesWorkspace("bun run lint")).toBe(false)
+  })
+})
+
 // ── parseTranscriptEvents ─────────────────────────────────────────────────────
 
 /** Build a single JSONL assistant line containing one tool_use block. */
@@ -478,21 +579,21 @@ describe("parseTranscriptEvents", () => {
       const path = await writeTranscript(dir, [assistantLine("Bash", "bun test")])
       const events = await parseTranscriptEvents(path)
       expect(events).toHaveLength(1)
-      expect(events[0]).toEqual({ kind: "test", sourceLineIdx: 0 })
+      expect(events[0]).toEqual({ kind: "test", fingerprint: "test", sourceLineIdx: 0 })
     }))
 
   test("bun run lint → lint event", () =>
     withDir(async (dir) => {
       const path = await writeTranscript(dir, [assistantLine("Bash", "bun run lint")])
       const events = await parseTranscriptEvents(path)
-      expect(events[0]).toEqual({ kind: "lint", sourceLineIdx: 0 })
+      expect(events[0]).toEqual({ kind: "lint", fingerprint: "lint", sourceLineIdx: 0 })
     }))
 
   test("bun run build → build event", () =>
     withDir(async (dir) => {
       const path = await writeTranscript(dir, [assistantLine("Bash", "bun run build")])
       const events = await parseTranscriptEvents(path)
-      expect(events[0]).toEqual({ kind: "build", sourceLineIdx: 0 })
+      expect(events[0]).toEqual({ kind: "build", fingerprint: "build", sourceLineIdx: 0 })
     }))
 
   test("unrelated bash command → no event", () =>
@@ -524,7 +625,7 @@ describe("parseTranscriptEvents", () => {
       const path = await writeTranscript(dir, [assistantLine("Bash", "bun test | tee out.txt")])
       const events = await parseTranscriptEvents(path)
       expect(events).toHaveLength(2)
-      expect(events[0]).toEqual({ kind: "test", sourceLineIdx: 0 })
+      expect(events[0]).toEqual({ kind: "test", fingerprint: "test", sourceLineIdx: 0 })
       expect(events[1]).toEqual({ kind: "any_edit", sourceLineIdx: 0 })
     }))
 
@@ -536,8 +637,8 @@ describe("parseTranscriptEvents", () => {
         assistantLine("Bash", "bun run lint"), // lineIdx 1
       ])
       const events = await parseTranscriptEvents(path)
-      expect(events[0]).toEqual({ kind: "test", sourceLineIdx: 0 })
-      expect(events[1]).toEqual({ kind: "lint", sourceLineIdx: 1 })
+      expect(events[0]).toEqual({ kind: "test", fingerprint: "test", sourceLineIdx: 0 })
+      expect(events[1]).toEqual({ kind: "lint", fingerprint: "lint", sourceLineIdx: 1 })
     }))
 
   test("two same-kind events on different source lines (no intervening edit)", () =>
@@ -591,6 +692,57 @@ describe("parseTranscriptEvents", () => {
       expect(testEvents).toHaveLength(2)
       // Both from the same line — parallel dispatch guard applies
       expect(testEvents[0]?.sourceLineIdx).toBe(testEvents[1]?.sourceLineIdx)
+    }))
+
+  test("bun test fileA then bun test fileB produce different fingerprints", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [
+        assistantLine("Bash", "bun test src/a.test.ts"),
+        assistantLine("Bash", "bun test src/b.test.ts"),
+      ])
+      const events = await parseTranscriptEvents(path)
+      const testEvents = events.filter((e) => e.kind === "test")
+      expect(testEvents).toHaveLength(2)
+      expect(testEvents[0]?.fingerprint).toBe("test:src/a.test.ts")
+      expect(testEvents[1]?.fingerprint).toBe("test:src/b.test.ts")
+      // Different fingerprints — gate must NOT fire for this pair
+      expect(testEvents[0]?.fingerprint).not.toBe(testEvents[1]?.fingerprint)
+    }))
+
+  test("bun test fileA then bun test fileA produce identical fingerprints (gate fires)", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [
+        assistantLine("Bash", "bun test src/a.test.ts"),
+        assistantLine("Bash", "bun test src/a.test.ts"),
+      ])
+      const events = await parseTranscriptEvents(path)
+      const testEvents = events.filter((e) => e.kind === "test")
+      expect(testEvents).toHaveLength(2)
+      expect(testEvents[0]?.fingerprint).toBe("test:src/a.test.ts")
+      expect(testEvents[1]?.fingerprint).toBe("test:src/a.test.ts")
+      // Same fingerprint — gate should fire for this pair
+      expect(testEvents[0]?.fingerprint).toBe(testEvents[1]?.fingerprint)
+    }))
+
+  test("bun run format between lint runs emits any_edit event", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [
+        assistantLine("Bash", "bun run lint"),
+        assistantLine("Bash", "bun run format"),
+        assistantLine("Bash", "bun run lint"),
+      ])
+      const events = await parseTranscriptEvents(path)
+      const lintEvents = events.filter((e) => e.kind === "lint")
+      const editEvents = events.filter((e) => e.kind === "any_edit")
+      expect(lintEvents).toHaveLength(2)
+      // bun run format is a workspace mutation → any_edit event between the lints
+      expect(editEvents).toHaveLength(1)
+      // The any_edit must appear between the two lint events
+      const firstLintIdx = events.indexOf(lintEvents[0]!)
+      const editIdx = events.indexOf(editEvents[0]!)
+      const secondLintIdx = events.indexOf(lintEvents[1]!)
+      expect(firstLintIdx).toBeLessThan(editIdx)
+      expect(editIdx).toBeLessThan(secondLintIdx)
     }))
 
   test("blocked first run is excluded: only one test event produced", () =>
