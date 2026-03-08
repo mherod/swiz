@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**78 hooks. 10 event types. Every agent. Zero compromises.**
+**79 hooks. 10 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -82,9 +82,17 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-78 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+79 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
-The bundled hooks cover six events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, and UserPromptSubmit. Four additional events — **Notification**, **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system and supported by all agents. They ship with no bundled hooks; any custom hooks added for those events will be dispatched automatically.
+The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Three additional events — **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system and supported by all agents. They ship with no bundled hooks; any custom hooks added for those events will be dispatched automatically.
+
+### Notification (1)
+
+Notification hooks fire when Claude Code would deliver a system notification — permission prompts, idle alerts, and similar events. Unlike blocking hooks, notification hooks are read-only observers; they can react but cannot veto.
+
+| Hook | What it does |
+|------|-------------|
+| `notification-swiz-notify.ts` | Delivers Claude Code notification events as rich native macOS system notifications via `swiz-notify`. Maps `permission_prompt` to an alert sound, `idle_prompt` to a ping, and falls back gracefully when the binary is not installed. |
 
 ### Stop (19)
 
