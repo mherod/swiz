@@ -2,8 +2,9 @@
 // Receives a JSON object via stdin with model, workspace, context window, and cost info.
 // Uses time-based rainbow cycling so colors shift on each render.
 
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
-import { basename, dirname, join } from "node:path"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { basename, join } from "node:path"
+import { type GitBranchStatus, getGitBranchStatus, ghJson } from "../git-helpers.ts"
 import {
   getEffectiveSwizSettings,
   type ProjectState,
@@ -107,126 +108,10 @@ function shortenPath(dir: string): string {
   return basename(dir)
 }
 
-// Resolve git metadata by walking up from cwd.
-function resolveGitPaths(cwd: string): { gitDir: string; workTree: string } | null {
-  let dir = cwd
-  while (true) {
-    const candidate = `${dir}/.git`
-    if (existsSync(candidate)) {
-      try {
-        const st = statSync(candidate)
-        if (st.isDirectory()) return { gitDir: candidate, workTree: dir }
-        const content = readFileSync(candidate, "utf8").trim()
-        if (content.startsWith("gitdir: ")) {
-          return { gitDir: content.slice("gitdir: ".length).trim(), workTree: dir }
-        }
-      } catch {
-        /* fall through */
-      }
-    }
-    const parent = dirname(dir)
-    if (parent === dir) return null
-    dir = parent
-  }
-}
-
-async function getGitBranchAndInfo(cwd: string): Promise<{ branch: string; info: string }> {
-  const git = resolveGitPaths(cwd)
-  if (!git) return { branch: "", info: "" }
-
-  let branch = ""
-  try {
-    const head = (await Bun.file(`${git.gitDir}/HEAD`).text()).trim()
-    if (head.startsWith("ref: refs/heads/")) {
-      branch = head.slice("ref: refs/heads/".length)
-    } else if (/^[a-f0-9]{7,40}$/i.test(head)) {
-      branch = `detached@${head.slice(0, 7)}`
-    }
-  } catch {
-    /* no branch */
-  }
-  if (!branch) return { branch: "", info: "" }
-
-  let ahead = 0
-  let behind = 0
-  let staged = 0
-  let unstaged = 0
-  let untracked = 0
-  let conflicts = 0
-  let stash = 0
-  let parsedStatus = false
-  let changedFallback = 0
-
-  try {
-    const proc = Bun.spawnSync(["git", "status", "--porcelain=2", "--branch"], {
-      cwd: git.workTree,
-      stdout: "pipe",
-      stderr: "ignore",
-    })
-    if (proc.exitCode === 0) {
-      const out = new TextDecoder().decode(proc.stdout).trim()
-      const lines = out ? out.split("\n") : []
-
-      for (const line of lines) {
-        if (line.startsWith("# branch.ab ")) {
-          const match = line.match(/\+(\d+)\s+-(\d+)/)
-          if (match) {
-            ahead = Number(match[1] ?? "0")
-            behind = Number(match[2] ?? "0")
-          }
-          continue
-        }
-
-        if (line.startsWith("1 ") || line.startsWith("2 ")) {
-          const xy = line.split(" ")[1] ?? ".."
-          if (xy[0] && xy[0] !== ".") staged++
-          if (xy[1] && xy[1] !== ".") unstaged++
-          continue
-        }
-
-        if (line.startsWith("u ")) {
-          conflicts++
-          continue
-        }
-
-        if (line.startsWith("? ")) {
-          untracked++
-        }
-      }
-      parsedStatus = true
-    }
-  } catch {
-    /* parse fallback below */
-  }
-
-  if (!parsedStatus) {
-    try {
-      const proc = Bun.spawnSync(["git", "status", "--porcelain"], {
-        cwd: git.workTree,
-        stdout: "pipe",
-        stderr: "ignore",
-      })
-      const out = new TextDecoder().decode(proc.stdout).trim()
-      changedFallback = out ? out.split("\n").length : 0
-    } catch {
-      /* assume clean */
-    }
-  }
-
-  try {
-    const proc = Bun.spawnSync(["git", "stash", "list", "--format=%gd"], {
-      cwd: git.workTree,
-      stdout: "pipe",
-      stderr: "ignore",
-    })
-    if (proc.exitCode === 0) {
-      const out = new TextDecoder().decode(proc.stdout).trim()
-      stash = out ? out.split("\n").length : 0
-    }
-  } catch {
-    /* no stash info */
-  }
-
+/** Format raw git branch status into ANSI-colored info string for the status line. */
+function formatGitBranchInfo(status: GitBranchStatus): { branch: string; info: string } {
+  const { branch, ahead, behind, staged, unstaged, untracked, conflicts, stash, changedFallback } =
+    status
   const dirty = staged > 0 || unstaged > 0 || untracked > 0 || conflicts > 0 || changedFallback > 0
   const branchColor = conflicts > 0 ? "\x1b[91m" : dirty ? "\x1b[93m" : "\x1b[92m"
   const icon = conflicts > 0 ? "!" : dirty ? "±" : "✦"
@@ -245,28 +130,10 @@ async function getGitBranchAndInfo(cwd: string): Promise<{ branch: string; info:
   return { branch, info: `${branchColor}${icon} ${branch}${R}${detailsStr}` }
 }
 
-async function ghJson<T>(args: string[]): Promise<T | null> {
-  return new Promise((resolve) => {
-    const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "ignore" })
-    const timeout = setTimeout(() => {
-      proc.kill()
-      resolve(null)
-    }, 2000)
-    new Response(proc.stdout)
-      .text()
-      .then((out: string) => {
-        clearTimeout(timeout)
-        try {
-          resolve(JSON.parse(out))
-        } catch {
-          resolve(null)
-        }
-      })
-      .catch(() => {
-        clearTimeout(timeout)
-        resolve(null)
-      })
-  })
+async function getGitBranchAndInfo(cwd: string): Promise<{ branch: string; info: string }> {
+  const status = await getGitBranchStatus(cwd)
+  if (!status) return { branch: "", info: "" }
+  return formatGitBranchInfo(status)
 }
 
 function formatTokens(tokens: number): string {
@@ -408,30 +275,24 @@ export const statusLineCommand: Command = {
     const gitPromise = getGitBranchAndInfo(cwd)
     const prViewPromise = gitPromise.then(({ branch }) =>
       branch
-        ? ghJson<{ reviewDecision?: string; comments?: unknown[] }>([
-            "pr",
-            "view",
-            branch,
-            "--json",
-            "reviewDecision,comments",
-          ])
+        ? ghJson<{ reviewDecision?: string; comments?: unknown[] }>(
+            ["pr", "view", branch, "--json", "reviewDecision,comments"],
+            cwd
+          )
         : null
     )
 
     const [gitResult, issueData, prListData, prViewData, swizSettings, projectSettings] =
       await Promise.all([
         gitPromise,
-        ghJson<unknown[]>([
-          "issue",
-          "list",
-          "--state",
-          "open",
-          "--json",
-          "number",
-          "--limit",
-          "100",
-        ]),
-        ghJson<unknown[]>(["pr", "list", "--state", "open", "--json", "number", "--limit", "100"]),
+        ghJson<unknown[]>(
+          ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
+          cwd
+        ),
+        ghJson<unknown[]>(
+          ["pr", "list", "--state", "open", "--json", "number", "--limit", "100"],
+          cwd
+        ),
         prViewPromise,
         readSwizSettings().catch(() => null),
         readProjectSettings(cwd).catch(() => null),

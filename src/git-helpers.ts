@@ -4,7 +4,8 @@
 // layer (src/) and the hook layer (hooks/). Extracted from hooks/hook-utils.ts
 // to remove the src-to-hooks coupling (issue #85).
 
-import { realpathSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
+import { dirname } from "node:path"
 
 /** Run a git command and return trimmed stdout. Returns "" on failure. */
 export async function git(args: string[], cwd: string): Promise<string> {
@@ -150,6 +151,147 @@ export function getCanonicalPathHash(cwd: string): string {
     realPath = cwd
   }
   return Bun.hash(realPath).toString(16)
+}
+
+// ─── Git worktree / path resolution ─────────────────────────────────────────
+
+/**
+ * Walk up from `cwd` to find the `.git` directory (or file for worktrees).
+ * Returns `{ gitDir, workTree }` or `null` if not inside a git repo.
+ */
+export function resolveGitPaths(cwd: string): { gitDir: string; workTree: string } | null {
+  let dir = cwd
+  while (true) {
+    const candidate = `${dir}/.git`
+    if (existsSync(candidate)) {
+      try {
+        const st = statSync(candidate)
+        if (st.isDirectory()) return { gitDir: candidate, workTree: dir }
+        const content = readFileSync(candidate, "utf8").trim()
+        if (content.startsWith("gitdir: ")) {
+          return { gitDir: content.slice("gitdir: ".length).trim(), workTree: dir }
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    const parent = dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
+}
+
+// ─── Git status data layer ────────────────────────────────────────────────────
+
+/** Raw git branch + working-tree counts, without any ANSI formatting. */
+export interface GitBranchStatus {
+  branch: string
+  ahead: number
+  behind: number
+  staged: number
+  unstaged: number
+  untracked: number
+  conflicts: number
+  stash: number
+  /** Non-zero only when `git status --porcelain=2` is unavailable (fallback). */
+  changedFallback: number
+}
+
+/**
+ * Return branch name and working-tree counts for `cwd`, or `null` if `cwd`
+ * is not inside a git repository or no branch can be determined.
+ */
+export async function getGitBranchStatus(cwd: string): Promise<GitBranchStatus | null> {
+  const gitPaths = resolveGitPaths(cwd)
+  if (!gitPaths) return null
+
+  let branch = ""
+  try {
+    const head = (await Bun.file(`${gitPaths.gitDir}/HEAD`).text()).trim()
+    if (head.startsWith("ref: refs/heads/")) {
+      branch = head.slice("ref: refs/heads/".length)
+    } else if (/^[a-f0-9]{7,40}$/i.test(head)) {
+      branch = `detached@${head.slice(0, 7)}`
+    }
+  } catch {
+    /* no branch */
+  }
+  if (!branch) return null
+
+  let ahead = 0
+  let behind = 0
+  let staged = 0
+  let unstaged = 0
+  let untracked = 0
+  let conflicts = 0
+  let stash = 0
+  let parsedStatus = false
+  let changedFallback = 0
+
+  try {
+    const proc = Bun.spawnSync(["git", "status", "--porcelain=2", "--branch"], {
+      cwd: gitPaths.workTree,
+      stdout: "pipe",
+      stderr: "ignore",
+    })
+    if (proc.exitCode === 0) {
+      const out = new TextDecoder().decode(proc.stdout).trim()
+      for (const line of out ? out.split("\n") : []) {
+        if (line.startsWith("# branch.ab ")) {
+          const match = line.match(/\+(\d+)\s+-(\d+)/)
+          if (match) {
+            ahead = Number(match[1] ?? "0")
+            behind = Number(match[2] ?? "0")
+          }
+          continue
+        }
+        if (line.startsWith("1 ") || line.startsWith("2 ")) {
+          const xy = line.split(" ")[1] ?? ".."
+          if (xy[0] && xy[0] !== ".") staged++
+          if (xy[1] && xy[1] !== ".") unstaged++
+          continue
+        }
+        if (line.startsWith("u ")) {
+          conflicts++
+          continue
+        }
+        if (line.startsWith("? ")) untracked++
+      }
+      parsedStatus = true
+    }
+  } catch {
+    /* parse fallback below */
+  }
+
+  if (!parsedStatus) {
+    try {
+      const proc = Bun.spawnSync(["git", "status", "--porcelain"], {
+        cwd: gitPaths.workTree,
+        stdout: "pipe",
+        stderr: "ignore",
+      })
+      const out = new TextDecoder().decode(proc.stdout).trim()
+      changedFallback = out ? out.split("\n").length : 0
+    } catch {
+      /* assume clean */
+    }
+  }
+
+  try {
+    const proc = Bun.spawnSync(["git", "stash", "list", "--format=%gd"], {
+      cwd: gitPaths.workTree,
+      stdout: "pipe",
+      stderr: "ignore",
+    })
+    if (proc.exitCode === 0) {
+      const out = new TextDecoder().decode(proc.stdout).trim()
+      stash = out ? out.split("\n").length : 0
+    }
+  } catch {
+    /* no stash info */
+  }
+
+  return { branch, ahead, behind, staged, unstaged, untracked, conflicts, stash, changedFallback }
 }
 
 // ─── Issue helpers ───────────────────────────────────────────────────────────
