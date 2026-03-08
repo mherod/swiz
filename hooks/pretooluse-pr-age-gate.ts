@@ -16,6 +16,10 @@
 import { readSwizSettings } from "../src/settings.ts"
 import {
   denyPreToolUse,
+  extractMergeBranch,
+  extractPrNumber,
+  GH_PR_MERGE_RE,
+  GIT_MERGE_RE,
   getDefaultBranch,
   getOpenPrForBranch,
   gh,
@@ -23,29 +27,6 @@ import {
   isShellTool,
   type ToolHookInput,
 } from "./hook-utils.ts"
-
-/** Regex to match `gh pr merge` commands, accounting for pipes/chains. */
-export const GH_PR_MERGE_RE = /(?:^|\|\||&&|;)\s*gh\s+pr\s+merge\b/
-
-/** Regex to match `git merge <branch>` commands, accounting for pipes/chains. */
-export const GIT_MERGE_RE = /(?:^|\|\||&&|;)\s*git\s+merge\b/
-
-/** Extract the PR number from a `gh pr merge <number>` command. */
-export function extractPrNumber(command: string): string | null {
-  const match = command.match(/gh\s+pr\s+merge\s+(\d+)/)
-  return match?.[1] ?? null
-}
-
-/** Extract the branch name from a `git merge <branch>` command. */
-export function extractMergeBranch(command: string): string | null {
-  // Match `git merge <branch>`, skipping flags (--no-ff, --squash, etc.)
-  const match = command.match(/git\s+merge\s+(?:--\S+\s+)*([^\s;|&]+)/)
-  if (!match?.[1]) return null
-  const branch = match[1]
-  // Filter out flags that look like branches
-  if (branch.startsWith("-")) return null
-  return branch
-}
 
 /** Format milliseconds as "Xm Ys". */
 export function formatRemaining(ms: number): string {

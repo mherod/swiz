@@ -1170,6 +1170,38 @@ export const GIT_WRITE_RE =
 /** Matches `git push`, `git pull`, or `git fetch` — mechanical sync ops. */
 export const GIT_SYNC_RE = /(?:^|\|\||&&|;)\s*git\s+(push|pull|fetch)\b/
 
+/** Matches `git merge` anywhere in a shell command string (chain-boundary anchored). */
+export const GIT_MERGE_RE = /(?:^|\|\||&&|;)\s*git\s+merge\b/
+
+/** Matches `gh pr merge` anywhere in a shell command string (chain-boundary anchored). */
+export const GH_PR_MERGE_RE = /(?:^|\|\||&&|;)\s*gh\s+pr\s+merge\b/
+
+/**
+ * Matches any `git` invocation in a shell command string.
+ * Uses a broader boundary set (whitespace, pipe, semicolon, `&`) so it catches
+ * git inside subshells and pipelines, not just shell chain operators.
+ * Use for presence detection (e.g. lock-file checks); prefer the stricter
+ * GIT_MERGE_RE / GIT_PUSH_RE etc. for command-type gating.
+ */
+export const GIT_ANY_CMD_RE = /(?:^|\s|[|;&])git\s/
+
+/** Extract the PR number from a `gh pr merge <number>` command. */
+export function extractPrNumber(command: string): string | null {
+  const match = command.match(/gh\s+pr\s+merge\s+(\d+)/)
+  return match?.[1] ?? null
+}
+
+/** Extract the branch name from a `git merge <branch>` command. */
+export function extractMergeBranch(command: string): string | null {
+  // Match `git merge <branch>`, skipping flags (--no-ff, --squash, etc.)
+  const match = command.match(/git\s+merge\s+(?:--\S+\s+)*([^\s;|&]+)/)
+  if (!match?.[1]) return null
+  const branch = match[1]
+  // Filter out flags that look like branches
+  if (branch.startsWith("-")) return null
+  return branch
+}
+
 /**
  * Matches any force-push flag on a `git push` command:
  *   --force, --force-with-lease, --force-with-lease=<ref>,

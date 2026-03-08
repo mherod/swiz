@@ -5,9 +5,13 @@
 
 import { existsSync } from "node:fs"
 import { join } from "node:path"
-import { denyPreToolUse, git, isShellTool, type ToolHookInput } from "./hook-utils.ts"
-
-const GIT_CMD_RE = /(?:^|\s|[|;&])git\s/
+import {
+  denyPreToolUse,
+  GIT_ANY_CMD_RE,
+  git,
+  isShellTool,
+  type ToolHookInput,
+} from "./hook-utils.ts"
 
 const input: ToolHookInput = await Bun.stdin.json()
 
@@ -15,7 +19,7 @@ const input: ToolHookInput = await Bun.stdin.json()
 if (!isShellTool(input.tool_name ?? "")) process.exit(0)
 
 const command: string = (input.tool_input?.command as string) ?? ""
-if (!GIT_CMD_RE.test(command)) process.exit(0)
+if (!GIT_ANY_CMD_RE.test(command)) process.exit(0)
 
 const cwd = input.cwd || process.cwd()
 
