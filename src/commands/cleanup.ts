@@ -1,7 +1,7 @@
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../project-key.ts"
-import { getProviderTaskRoots } from "../provider-adapters.ts"
+import { getDefaultTaskRoots } from "../task-roots.ts"
 import type { Command } from "../types.ts"
 
 const HOME = process.env.HOME ?? "~"
@@ -9,15 +9,6 @@ const CLAUDE_DIR = join(HOME, ".claude")
 const GEMINI_DIR = join(HOME, ".gemini")
 const GEMINI_SETTINGS_BAK = join(GEMINI_DIR, "settings.json.bak")
 const GEMINI_TMP_DIR = join(GEMINI_DIR, "tmp")
-
-function defaultTaskRoots(): { tasksDir: string; projectsDir: string } {
-  const roots = getProviderTaskRoots("claude")
-  if (roots) return roots
-  return {
-    tasksDir: join(HOME, ".claude", "tasks"),
-    projectsDir: join(HOME, ".claude", "projects"),
-  }
-}
 
 // ─── Path decoding ────────────────────────────────────────────────────────────
 
@@ -244,7 +235,7 @@ interface SessionInfo {
 async function findSessions(
   projectDir: string,
   cutoffMs: number,
-  tasksDir = defaultTaskRoots().tasksDir
+  tasksDir = getDefaultTaskRoots().tasksDir
 ): Promise<{ keep: SessionInfo[]; old: SessionInfo[] }> {
   const keep: SessionInfo[] = []
   const old: SessionInfo[] = []
@@ -393,7 +384,7 @@ export const cleanupCommand: Command = {
 
   async run(args: string[]) {
     const { olderThanMs, olderThanLabel, dryRun, projectFilter } = parseCleanupArgs(args)
-    const { projectsDir, tasksDir } = defaultTaskRoots()
+    const { projectsDir, tasksDir } = getDefaultTaskRoots()
 
     const cutoffMs = Date.now() - olderThanMs
 

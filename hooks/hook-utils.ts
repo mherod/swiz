@@ -518,6 +518,42 @@ export interface SessionTask {
   subjectFingerprint?: string
 }
 
+/** Resolve ~/.claude/tasks/<sessionId> for the active home directory. */
+export function getSessionTasksDir(
+  sessionId: string,
+  home: string = process.env.HOME ?? ""
+): string | null {
+  if (!home || !sessionId) return null
+  return join(home, ".claude", "tasks", sessionId)
+}
+
+/** Resolve ~/.claude/tasks/<sessionId>/<taskId>.json for task file access. */
+export function getSessionTaskPath(
+  sessionId: string,
+  taskId: string,
+  home: string = process.env.HOME ?? ""
+): string | null {
+  const tasksDir = getSessionTasksDir(sessionId, home)
+  if (!tasksDir || !taskId) return null
+  return join(tasksDir, `${taskId}.json`)
+}
+
+/** True when a session task directory exists and can be listed. */
+export async function hasSessionTasksDir(
+  sessionId: string,
+  home: string = process.env.HOME ?? ""
+): Promise<boolean> {
+  const tasksDir = getSessionTasksDir(sessionId, home)
+  if (!tasksDir) return false
+  try {
+    const { readdir } = await import("node:fs/promises")
+    await readdir(tasksDir)
+    return true
+  } catch {
+    return false
+  }
+}
+
 // ─── Subject fingerprinting (re-exported from src/) ─────────────────────
 export { computeSubjectFingerprint, stemWord } from "../src/subject-fingerprint.ts"
 
@@ -532,8 +568,8 @@ export async function readSessionTasks(
   sessionId: string,
   home: string = process.env.HOME ?? ""
 ): Promise<SessionTask[]> {
-  if (!home || !sessionId) return []
-  const tasksDir = join(home, ".claude", "tasks", sessionId)
+  const tasksDir = getSessionTasksDir(sessionId, home)
+  if (!tasksDir) return []
   let files: string[]
   try {
     const { readdir } = await import("node:fs/promises")

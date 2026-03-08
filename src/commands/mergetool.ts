@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, unlinkSync } from "node:fs"
 import { basename, dirname, resolve } from "node:path"
 import { detectAgentCli, promptAgent } from "../agent.ts"
 import type { Command } from "../types.ts"
@@ -6,6 +6,7 @@ import type { Command } from "../types.ts"
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const CONFLICT_MARKER_RE = /^<{7}\s|^={7}$|^>{7}\s/m
+const CODE_EXTENSIONS = new Set(["ts", "tsx", "js", "jsx", "mjs", "mts"])
 
 // ─── Arg parsing ──────────────────────────────────────────────────────────────
 
@@ -71,6 +72,44 @@ async function getRepoRoot(cwd: string): Promise<string | null> {
   return output.trim()
 }
 
+function getRepoRelativePath(repoRoot: string, path: string): string {
+  const absolutePath = resolve(path)
+  return absolutePath.startsWith(repoRoot) ? absolutePath.slice(repoRoot.length + 1) : absolutePath
+}
+
+async function listSiblingTrackedFiles(repoRoot: string, relativePath: string): Promise<string[]> {
+  const dirProc = Bun.spawn(["git", "ls-files", "--", dirname(relativePath)], {
+    cwd: repoRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const dirOutput = await new Response(dirProc.stdout).text()
+  await dirProc.exited
+  if (dirProc.exitCode !== 0) return []
+
+  return dirOutput
+    .trim()
+    .split("\n")
+    .filter((path) => path && path !== relativePath)
+    .slice(0, 20)
+}
+
+function maybeCollectImports(filePath: string): string[] {
+  const ext = basename(filePath).split(".").pop()?.toLowerCase()
+  if (!ext || !CODE_EXTENSIONS.has(ext)) return []
+
+  // This is best-effort context; failures are intentionally ignored.
+  try {
+    return readFileSync(filePath, "utf8")
+      .split("\n")
+      .filter((line) => /^\s*import\s/.test(line))
+      .slice(0, 15)
+      .map((line) => line.trim())
+  } catch {
+    return []
+  }
+}
+
 async function gatherRepoContext(mergedPath: string): Promise<string> {
   const dir = dirname(resolve(mergedPath))
   const repoRoot = await getRepoRoot(dir)
@@ -83,49 +122,20 @@ async function gatherRepoContext(mergedPath: string): Promise<string> {
   const lines: string[] = []
   lines.push(`Repository root: ${repoRoot}`)
 
-  // Get the relative path of the merged file within the repo
-  const absPath = resolve(mergedPath)
-  const relPath = absPath.startsWith(repoRoot) ? absPath.slice(repoRoot.length + 1) : absPath
+  // Get the relative path of the merged file within the repo.
+  const relPath = getRepoRelativePath(repoRoot, mergedPath)
   lines.push(`File being merged: ${relPath}`)
 
-  // Gather nearby file names for context
-  const dirProc = Bun.spawn(["git", "ls-files", "--", dirname(relPath)], {
-    cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const dirOutput = await new Response(dirProc.stdout).text()
-  await dirProc.exited
-  if (dirProc.exitCode === 0) {
-    const siblings = dirOutput
-      .trim()
-      .split("\n")
-      .filter((f) => f && f !== relPath)
-      .slice(0, 20)
-    if (siblings.length > 0) {
-      lines.push(`\nNearby files in the same directory:`)
-      for (const s of siblings) lines.push(`  ${s}`)
-    }
+  const siblings = await listSiblingTrackedFiles(repoRoot, relPath)
+  if (siblings.length > 0) {
+    lines.push(`\nNearby files in the same directory:`)
+    for (const sibling of siblings) lines.push(`  ${sibling}`)
   }
 
-  // Try to gather import/dependency context from the merged file's current content
-  const ext = basename(mergedPath).split(".").pop()?.toLowerCase()
-  if (ext && ["ts", "tsx", "js", "jsx", "mjs", "mts"].includes(ext)) {
-    // Read the LOCAL version for import analysis (it's the "ours" version)
-    // This is a best-effort analysis; failures are non-fatal
-    try {
-      const localContent = readFileSync(mergedPath, "utf8")
-      const imports = localContent
-        .split("\n")
-        .filter((l) => /^\s*import\s/.test(l))
-        .slice(0, 15)
-      if (imports.length > 0) {
-        lines.push(`\nImports in the file:`)
-        for (const imp of imports) lines.push(`  ${imp.trim()}`)
-      }
-    } catch {
-      // non-fatal
-    }
+  const imports = maybeCollectImports(mergedPath)
+  if (imports.length > 0) {
+    lines.push(`\nImports in the file:`)
+    for (const importLine of imports) lines.push(`  ${importLine}`)
   }
 
   return lines.join("\n")
@@ -220,6 +230,36 @@ export function hasConflictMarkers(content: string): boolean {
   return CONFLICT_MARKER_RE.test(content)
 }
 
+function validateResolvedContent(content: string): void {
+  if (hasConflictMarkers(content)) {
+    throw new Error("AI resolution still contains conflict markers. Manual resolution required.")
+  }
+  if (content.trim().length === 0) {
+    throw new Error("AI produced an empty result. Manual resolution required.")
+  }
+}
+
+async function writeResolvedContent(mergedPath: string, content: string): Promise<void> {
+  const tmpPath = `${mergedPath}.swiz-tmp`
+
+  try {
+    await Bun.write(tmpPath, content)
+
+    const writtenContent = readFileSync(tmpPath, "utf8")
+    if (writtenContent !== content) {
+      throw new Error("Temp file verification failed — content mismatch")
+    }
+
+    await Bun.write(mergedPath, writtenContent)
+  } finally {
+    try {
+      if (existsSync(tmpPath)) unlinkSync(tmpPath)
+    } catch {
+      // non-fatal cleanup
+    }
+  }
+}
+
 // ─── Command ──────────────────────────────────────────────────────────────────
 
 export const mergetoolCommand: Command = {
@@ -249,40 +289,8 @@ export const mergetoolCommand: Command = {
     // Post-process: strip code fences if present
     const result = stripCodeFences(rawResult)
 
-    // Safety: check for conflict markers in the result
-    if (hasConflictMarkers(result)) {
-      throw new Error("AI resolution still contains conflict markers. Manual resolution required.")
-    }
-
-    // Safety: check the result is not empty
-    if (result.trim().length === 0) {
-      throw new Error("AI produced an empty result. Manual resolution required.")
-    }
-
-    // Atomic write: temp file then replace
-    const tmpPath = `${parsed.merged}.swiz-tmp`
-    try {
-      await Bun.write(tmpPath, result)
-
-      // Verify the temp file was written correctly
-      const written = readFileSync(tmpPath, "utf8")
-      if (written !== result) {
-        throw new Error("Temp file verification failed — content mismatch")
-      }
-
-      // Replace MERGED with the resolved content
-      await Bun.write(parsed.merged, written)
-    } finally {
-      // Clean up temp file
-      try {
-        if (existsSync(tmpPath)) {
-          const { unlinkSync } = await import("node:fs")
-          unlinkSync(tmpPath)
-        }
-      } catch {
-        // non-fatal cleanup
-      }
-    }
+    validateResolvedContent(result)
+    await writeResolvedContent(parsed.merged, result)
 
     console.error("✓ Conflict resolved successfully")
   },

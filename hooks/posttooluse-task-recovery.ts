@@ -11,9 +11,10 @@
 
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join } from "node:path"
 import {
   emitContext,
+  getSessionTaskPath,
+  getSessionTasksDir,
   isTaskTool,
   type ToolHookInput,
   toolNameForCurrentAgent,
@@ -54,8 +55,11 @@ async function main(): Promise<void> {
   // TaskCreate doesn't reference existing IDs — skip it
   if (toolName === "TaskCreate") return
 
-  const tasksDir = join(homedir(), ".claude", "tasks", input.session_id)
-  const taskExists = await Bun.file(join(tasksDir, `${taskId}.json`)).exists()
+  const home = homedir()
+  const tasksDir = getSessionTasksDir(input.session_id, home)
+  const taskPath = getSessionTaskPath(input.session_id, taskId, home)
+  if (!tasksDir || !taskPath) return
+  const taskExists = await Bun.file(taskPath).exists()
   if (taskExists) return
 
   // ── Auto-recovery ──────────────────────────────────────────────────────────
@@ -86,7 +90,7 @@ async function main(): Promise<void> {
 
   try {
     await mkdir(tasksDir, { recursive: true })
-    await Bun.write(join(tasksDir, `${taskId}.json`), JSON.stringify(task, null, 2))
+    await Bun.write(taskPath, JSON.stringify(task, null, 2))
   } catch {
     const taskCreateName = toolNameForCurrentAgent("TaskCreate")
     const taskUpdateName = toolNameForCurrentAgent("TaskUpdate")

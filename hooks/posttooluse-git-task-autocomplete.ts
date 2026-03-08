@@ -19,6 +19,7 @@ import {
   emitContext,
   GIT_COMMIT_RE,
   GIT_PUSH_RE,
+  getSessionTasksDir,
   isShellTool,
   readSessionTasks,
   stripHeredocs,
@@ -39,7 +40,8 @@ async function main(): Promise<void> {
   if (!isCommit && !isPush) return
 
   const home = homedir()
-  const tasksDir = join(home, ".claude", "tasks", input.session_id)
+  const tasksDir = getSessionTasksDir(input.session_id, home)
+  if (!tasksDir) return
   const tasks = await readSessionTasks(input.session_id, home)
 
   // Auto-complete matching commit/push tasks

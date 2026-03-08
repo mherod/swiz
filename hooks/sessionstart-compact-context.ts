@@ -9,6 +9,8 @@ import {
   findPriorSessionTasks,
   formatTaskCompleteCommand,
   formatTaskList,
+  getSessionTaskPath,
+  getSessionTasksDir,
   isIncompleteTaskStatus,
   readSessionTasks,
   type SessionTask,
@@ -84,7 +86,9 @@ async function readCompactSnapshot(
   sessionId: string,
   home: string
 ): Promise<CompactSnapshot | null> {
-  const snapshotPath = join(home, ".claude", "tasks", sessionId, "compact-snapshot.json")
+  const tasksDir = getSessionTasksDir(sessionId, home)
+  if (!tasksDir) return null
+  const snapshotPath = join(tasksDir, "compact-snapshot.json")
   try {
     const file = Bun.file(snapshotPath)
     if (!(await file.exists())) return null
@@ -103,8 +107,8 @@ async function recreateTaskFile(
   home: string,
   snap: CompactSnapshot["tasks"][number]
 ): Promise<void> {
-  const tasksDir = join(home, ".claude", "tasks", sessionId)
-  const taskPath = join(tasksDir, `${snap.id}.json`)
+  const taskPath = getSessionTaskPath(sessionId, snap.id, home)
+  if (!taskPath) return
   const task: Partial<SessionTask> & { id: string; subject: string; status: string } = {
     id: snap.id,
     subject: snap.subject,

@@ -15,7 +15,7 @@
 
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import type { ToolHookInput } from "./hook-utils.ts"
+import { getSessionTaskPath, type ToolHookInput } from "./hook-utils.ts"
 
 // ─── Built-in defaults (used when config is missing or malformed) ───────────
 
@@ -203,8 +203,8 @@ async function main(): Promise<void> {
   const evidence = extractEvidence(ti, config.evidenceKeys)
   if (!evidence) return
 
-  const tasksDir = join(homedir(), ".claude", "tasks", input.session_id)
-  const taskPath = join(tasksDir, `${taskId}.json`)
+  const taskPath = getSessionTaskPath(input.session_id, taskId, homedir())
+  if (!taskPath) return
 
   try {
     const raw = await Bun.file(taskPath).text()

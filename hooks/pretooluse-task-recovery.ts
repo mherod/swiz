@@ -14,8 +14,12 @@
 
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join } from "node:path"
-import { isTaskTool, type ToolHookInput } from "./hook-utils.ts"
+import {
+  getSessionTaskPath,
+  getSessionTasksDir,
+  isTaskTool,
+  type ToolHookInput,
+} from "./hook-utils.ts"
 
 interface ExtendedToolInput extends ToolHookInput {
   tool_input?: {
@@ -52,8 +56,10 @@ async function main(): Promise<void> {
   // TaskCreate doesn't reference existing IDs — skip it
   if (toolName === "TaskCreate") return
 
-  const tasksDir = join(homedir(), ".claude", "tasks", input.session_id)
-  const taskFile = join(tasksDir, `${taskId}.json`)
+  const home = homedir()
+  const tasksDir = getSessionTasksDir(input.session_id, home)
+  const taskFile = getSessionTaskPath(input.session_id, taskId, home)
+  if (!tasksDir || !taskFile) return
 
   // Check if the task already exists — if so, nothing to do
   if (await Bun.file(taskFile).exists()) return

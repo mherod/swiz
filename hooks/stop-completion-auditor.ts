@@ -12,6 +12,7 @@ import {
   formatActionPlan,
   formatTaskCompleteCommands,
   getTranscriptSummary,
+  hasSessionTasksDir,
   isTaskCreateTool,
   readSessionTasks,
   type SessionTask,
@@ -138,16 +139,7 @@ async function main(): Promise<void> {
       : { total: 0, taskToolUsed: false }
 
   const allTasks = await readSessionTasks(sessionId, home)
-  const tasksDirExists =
-    allTasks.length > 0 ||
-    (await (async () => {
-      try {
-        await readdir(tasksDir)
-        return true
-      } catch {
-        return false
-      }
-    })())
+  const tasksDirExists = allTasks.length > 0 || (await hasSessionTasksDir(sessionId, home))
 
   if (!tasksDirExists) {
     // If task tools were used, tasks existed and were completed
@@ -332,6 +324,29 @@ async function main(): Promise<void> {
                 (t.completionEvidence && CI_EVIDENCE_RE.test(t.completionEvidence)) ||
                 (t.subject && CI_EVIDENCE_RE.test(t.subject))
             )
+        }
+      }
+
+      // Fallback: if sibling transcript discovery misses a session for any
+      // reason (older project-key layout, missing transcript file, etc.),
+      // scan other task-session directories directly.
+      if (!hasCiEvidence) {
+        try {
+          const taskSessionIds = await readdir(join(home, ".claude", "tasks"))
+          for (const sibId of taskSessionIds) {
+            if (hasCiEvidence) break
+            if (sibId === sessionId) continue
+            const sibTasks = await readSessionTasks(sibId, home)
+            hasCiEvidence = sibTasks
+              .filter((t) => t.status === "completed")
+              .some(
+                (t) =>
+                  (t.completionEvidence && CI_EVIDENCE_RE.test(t.completionEvidence)) ||
+                  (t.subject && CI_EVIDENCE_RE.test(t.subject))
+              )
+          }
+        } catch {
+          // Ignore unreadable task roots; CI evidence check will fail closed.
         }
       }
 

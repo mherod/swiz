@@ -4,7 +4,6 @@ import { BOLD, DIM, RESET } from "../ansi.ts"
 import { debugLog } from "../debug.ts"
 import { formatDuration } from "../format-duration.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
-import { getProviderTaskRoots } from "../provider-adapters.ts"
 import {
   PROJECT_STATES,
   type ProjectState,
@@ -13,18 +12,8 @@ import {
   writeProjectState,
 } from "../settings.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
+import { getDefaultTaskRoots } from "../task-roots.ts"
 import type { Command } from "../types.ts"
-
-const HOME = process.env.HOME ?? "~"
-
-function defaultTaskRoots(): { tasksDir: string; projectsDir: string } {
-  const roots = getProviderTaskRoots("claude")
-  if (roots) return roots
-  return {
-    tasksDir: join(HOME, ".claude", "tasks"),
-    projectsDir: join(HOME, ".claude", "projects"),
-  }
-}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -139,7 +128,7 @@ export function compareTaskIds(a: string, b: string): number {
 /** Derive session IDs from a single project transcript directory (constant-time lookup). */
 export async function getSessionIdsForProject(
   projectKey: string,
-  projectsDir = defaultTaskRoots().projectsDir
+  projectsDir = getDefaultTaskRoots().projectsDir
 ): Promise<Set<string>> {
   const projectDir = join(projectsDir, projectKey)
   const ids = new Set<string>()
@@ -156,7 +145,7 @@ export async function getSessionIdsForProject(
 export async function getSessionIdsByCwdScan(
   filterCwd: string,
   candidates: string[],
-  projectsDir = defaultTaskRoots().projectsDir
+  projectsDir = getDefaultTaskRoots().projectsDir
 ): Promise<Set<string>> {
   const ids = new Set<string>()
   let dirs: string[]
@@ -200,8 +189,8 @@ export async function getSessionIdsByCwdScan(
 
 export async function getSessions(
   filterCwd?: string,
-  tasksDir = defaultTaskRoots().tasksDir,
-  projectsDir = defaultTaskRoots().projectsDir
+  tasksDir = getDefaultTaskRoots().tasksDir,
+  projectsDir = getDefaultTaskRoots().projectsDir
 ): Promise<string[]> {
   try {
     const entries = await readdir(tasksDir)
@@ -249,7 +238,7 @@ export async function getSessions(
 
 async function readTasks(
   sessionId: string,
-  tasksDir = defaultTaskRoots().tasksDir
+  tasksDir = getDefaultTaskRoots().tasksDir
 ): Promise<Task[]> {
   const dir = join(tasksDir, sessionId)
   try {
@@ -276,14 +265,14 @@ async function readTasks(
 }
 
 async function writeTask(sessionId: string, task: Task) {
-  const dir = join(defaultTaskRoots().tasksDir, sessionId)
+  const dir = join(getDefaultTaskRoots().tasksDir, sessionId)
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, `${task.id}.json`), JSON.stringify(task, null, 2))
 }
 
 async function writeAudit(sessionId: string, entry: AuditEntry) {
   try {
-    const dir = join(defaultTaskRoots().tasksDir, sessionId)
+    const dir = join(getDefaultTaskRoots().tasksDir, sessionId)
     await mkdir(dir, { recursive: true })
     await appendFile(join(dir, ".audit-log.jsonl"), `${JSON.stringify(entry)}\n`)
   } catch {}
@@ -297,7 +286,7 @@ async function writeAudit(sessionId: string, entry: AuditEntry) {
  */
 async function buildRecentTasksHint(
   sessionId: string,
-  tasksDir = defaultTaskRoots().tasksDir
+  tasksDir = getDefaultTaskRoots().tasksDir
 ): Promise<string> {
   try {
     const tasks = await readTasks(sessionId, tasksDir)
@@ -320,8 +309,8 @@ async function buildRecentTasksHint(
 export async function findTaskAcrossSessions(
   taskId: string,
   filterCwd?: string,
-  tasksDir = defaultTaskRoots().tasksDir,
-  projectsDir = defaultTaskRoots().projectsDir
+  tasksDir = getDefaultTaskRoots().tasksDir,
+  projectsDir = getDefaultTaskRoots().projectsDir
 ): Promise<{ sessionId: string; task: Task }[]> {
   const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
   const matches: { sessionId: string; task: Task }[] = []
@@ -342,8 +331,8 @@ export async function resolveTaskById(
   taskId: string,
   primarySessionId: string,
   filterCwd?: string,
-  tasksDir = defaultTaskRoots().tasksDir,
-  projectsDir = defaultTaskRoots().projectsDir
+  tasksDir = getDefaultTaskRoots().tasksDir,
+  projectsDir = getDefaultTaskRoots().projectsDir
 ): Promise<{ sessionId: string; task: Task }> {
   // Prefix-based fast resolution: if the ID has a session prefix, find the
   // matching session directly — no ambiguity possible.

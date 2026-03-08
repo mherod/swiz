@@ -6,7 +6,7 @@
 // Cooldown: if any CLAUDE.md (or MEMORY.md) in the project tree was modified
 // within COOLDOWN_MS, skip enforcement — the agent is actively maintaining memory.
 
-import { readdir, stat } from "node:fs/promises"
+import { stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import {
@@ -17,6 +17,7 @@ import {
   isNotebookTool,
   isShellTool,
   isWriteTool,
+  readSessionTasks,
 } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
@@ -120,17 +121,8 @@ async function hasActiveTask(sessionId: string | undefined): Promise<boolean> {
   if (!sessionId) return false
   const home = process.env.HOME
   if (!home) return false
-  const tasksDir = join(home, ".claude", "tasks", sessionId)
-  const files = await readdir(tasksDir).catch(() => [] as string[])
-  const jsonFiles = files.filter((f) => f.endsWith(".json"))
-  if (jsonFiles.length === 0) return false
-  return Promise.any(
-    jsonFiles.map(async (f) => {
-      const data = await Bun.file(join(tasksDir, f)).json()
-      if (data?.status === "in_progress") return true
-      throw new Error("not active")
-    })
-  ).catch(() => false)
+  const tasks = await readSessionTasks(sessionId, home)
+  return tasks.some((task) => task.status === "in_progress")
 }
 
 function scanTranscript(lines: string[], startIndex: number): EnforcementState {
