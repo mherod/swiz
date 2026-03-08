@@ -12,6 +12,8 @@
 //        replace / write_file / apply_patch  (Codex)
 //   2. bashMutatesWorkspace — filesystem integrity monitor for out-of-band
 //      mutations via raw shell commands (writes, deletions, moves, directories).
+//      Checked independently from classifyCommand so that a classified command
+//      that ALSO mutates (e.g. lint piped to tee) emits both events.
 
 import {
   denyPreToolUse,
@@ -106,8 +108,15 @@ async function parseTranscriptEvents(transcriptPath: string): Promise<Transcript
         if (isShellTool(name)) {
           const cmd = String(inp?.command ?? "").normalize("NFKC")
           const kind = classifyCommand(cmd)
-          if (kind) events.push({ kind, sourceLineIdx: lineIdx })
-          else if (bashMutatesWorkspace(cmd))
+          if (kind) {
+            events.push({ kind, sourceLineIdx: lineIdx })
+            // A classified command (lint/test/build) may ALSO mutate the workspace
+            // via a pipe or redirect in the same invocation — e.g.
+            //   `bun run lint 2>&1 | tee output.txt`  (tee detected)
+            //   `bun run build > dist-manifest.json`   (redirect detected)
+            // Emit an any_edit event too so the gate does not block the next run.
+            if (bashMutatesWorkspace(cmd)) events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
+          } else if (bashMutatesWorkspace(cmd))
             events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
         } else if (isCodeChangeTool(name)) {
           // Any file-modifying tool counts as "intervening work" — covers all agents:

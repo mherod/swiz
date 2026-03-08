@@ -9,7 +9,7 @@ const HOME = process.env.HOME ?? "~"
 const MARKER_START = "# >>> swiz shim >>>"
 const MARKER_END = "# <<< swiz shim <<<"
 
-import { CYAN as _CYAN, BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
+import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 
 interface ShellProfile {
   name: string
