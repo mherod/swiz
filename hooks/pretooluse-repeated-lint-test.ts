@@ -48,21 +48,34 @@ const COMMAND_LABEL: Record<CommandKind, string> = {
 // ── Filesystem integrity monitor ─────────────────────────────────────────────
 // Detects bash commands that mutate workspace files or directories as a
 // complement to isCodeChangeTool(). Covers all out-of-band mutations:
-//   Writes:     shell redirects (> / >>), tee, in-place sed
+//   Writes:     shell redirects (> / >>), &> / &>>, N> / N>> numbered FD-to-file,
+//               tee, in-place sed
+//   CLI flags:  -o / --output / --outfile / --outdir and common variants
 //   Deletions:  rm, trash, unlink
 //   Moves/copies: mv, cp (structural changes)
 //   Directories: mkdir, rmdir
 //   Env-driven: KEY=./path prefix — command writes to a workspace-local path
 //               controlled by an inline env var (e.g. OUTPUT_FILE=./r.json bun test)
-// Conservative: excludes /dev/ special devices and FD redirects (2>&1).
+// Conservative: excludes /dev/ special devices and pure FD-to-FD redirects (2>&1).
 
 function bashMutatesWorkspace(cmd: string): boolean {
-  // Output redirect: "> file" or ">> file" — not FD redirect (2>&1) or /dev/
+  // Plain output redirect: "> file" or ">> file"
+  // (?<![0-9&]) excludes 2>&1-style FD redirects but also misses &> and N>.
+  // Those are handled by the two checks below.
   if (/(?<![0-9&])>>?\s*(?![&])(?!\/dev\/)/.test(cmd)) return true
+  // &> and &>> — bash shorthand for redirecting both stdout and stderr to a file
+  if (/&>>?\s*(?![&>])(?!\/dev\/)/.test(cmd)) return true
+  // N> and N>> numbered FD-to-file redirects (e.g. 1> file, 2> file)
+  // Excludes FD-to-FD (2>&1) via (?![&>])
+  if (/\d>>?\s*(?![&>])(?!\/dev\/)/.test(cmd)) return true
   // tee to a named destination (not /dev/null or /dev/stderr)
   if (/\btee\s+(?!\/dev\/)/.test(cmd)) return true
   // In-place sed: sed -i (modifies files in place)
   if (/\bsed\b[^;|]*-[a-z]*i\b/.test(cmd)) return true
+  // Common CLI output flags — space-separated: -o path, --output path, --outfile path
+  if (/(?:^|\s)(?:-o|--(?:out(?:put|file|dir)?|report|log-?file))\s+\S/.test(cmd)) return true
+  // Common CLI output flags — equals-separated: --output=path, --outfile=path
+  if (/--(?:out(?:put|file|dir)?|report|log-?file)=\S/.test(cmd)) return true
   // File deletions: rm, trash, unlink
   if (/\b(?:rm|trash|unlink)\s+/.test(cmd)) return true
   // File moves and copies (structural workspace changes)
