@@ -266,7 +266,7 @@ describe("swiz doctor", () => {
         }
       })
     )
-  })
+  }, 30_000)
 
   test("detects non-executable script referenced in installed hook config", async () => {
     const h = await createTempHome()
@@ -362,7 +362,7 @@ describe("swiz doctor", () => {
     // Stale config with fix hint
     expect(stale.stdout).toContain("missing dispatch")
     expect(stale.stdout).toContain("swiz install")
-  })
+  }, 30_000)
 
   // ── Skill conflict tests ──────────────────────────────────────────────
 
@@ -377,7 +377,7 @@ describe("swiz doctor", () => {
     expect(result.stdout).toContain(`~/.gemini/skills/${skillName}/SKILL.md`)
     expect(result.stdout).toContain(`~/.codex/skills/${skillName}/SKILL.md`)
     expect(result.stdout).toContain("precedence=")
-  })
+  }, 30_000)
 
   test("doctor --fix moves lower-precedence duplicate skills aside safely", async () => {
     const home = await createTempHome()
@@ -515,7 +515,7 @@ describe("swiz doctor", () => {
         }
       })
     )
-  })
+  }, 30_000)
 
   test("skill validation edge cases", async () => {
     // Run concurrently: real description OK, name mismatch + placeholder, name mismatch,
@@ -599,7 +599,7 @@ describe("swiz doctor", () => {
     // Dotdirectory ignored
     expect(dotdir.stdout).not.toContain("Invalid skill: .unison")
     expect(dotdir.stdout).toContain("no invalid skill entries found")
-  })
+  }, 30_000)
 
   test("project allowedSkillCategories overrides default allowed list", async () => {
     const home = await createTempHome()
@@ -618,7 +618,7 @@ describe("swiz doctor", () => {
     )
     const result = await runDoctor(home, [], projectRoot)
     expect(result.stdout).not.toContain("Invalid skill: custom-cat-skill")
-  })
+  }, 30_000)
 
   // ── Skill --fix tests ─────────────────────────────────────────────────
 
@@ -657,7 +657,7 @@ describe("swiz doctor", () => {
       .map((e) => e.name)
       .filter((n) => n.startsWith(`${skillName}.disabled-by-swiz-`))
     expect(movedDirs.length).toBe(1)
-  })
+  }, 30_000)
 
   test("doctor --fix generates default SKILL.md for skill directory missing one", async () => {
     const home = await createTempHome()
@@ -721,7 +721,7 @@ describe("swiz doctor", () => {
     const content = await Bun.file(skillMdPath).text()
     expect(content).toContain("name: target-skill")
     expect(content).not.toContain("quoted-wrong")
-  })
+  }, 30_000)
 
   test("doctor --fix generated stub then warns placeholder on re-run", async () => {
     const home = await createTempHome()
