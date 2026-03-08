@@ -8,8 +8,12 @@
 // files, providing a definitive fallback that does not depend on transcript
 // discovery or the agent's in-context memory.
 
-import { join } from "node:path"
-import { limitItems, readSessionTasks, type SessionTask } from "./hook-utils.ts"
+import {
+  getSessionCompactSnapshotPath,
+  limitItems,
+  readSessionTasks,
+  type SessionTask,
+} from "./hook-utils.ts"
 import { sessionHookInputSchema } from "./schemas.ts"
 
 export interface CompactSnapshot {
@@ -97,7 +101,8 @@ async function main(): Promise<void> {
     summary: buildCompactSnapshotSummary(snapshotTasks),
   }
 
-  const snapshotPath = join(home, ".claude", "tasks", sessionId, "compact-snapshot.json")
+  const snapshotPath = getSessionCompactSnapshotPath(sessionId, home)
+  if (!snapshotPath) return
   await Bun.write(snapshotPath, JSON.stringify(snapshot, null, 2))
 }
 

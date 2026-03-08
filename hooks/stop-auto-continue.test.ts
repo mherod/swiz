@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { getSessionTasksDir } from "./hook-utils.ts"
 import { normalizeTerminateArgs } from "./stop-auto-continue.ts"
 import { useTempDir } from "./test-utils.ts"
 
@@ -504,7 +505,9 @@ describe("stop-auto-continue", () => {
   /** Creates a fake HOME tree with a tasks dir for "test-session" and returns the home path. */
   async function setupTasksDir(sessionId = "test-session"): Promise<string> {
     const fakeHome = await createTempDir()
-    await mkdir(join(fakeHome, ".claude", "tasks", sessionId), { recursive: true })
+    const tasksDir = getSessionTasksDir(sessionId, fakeHome)
+    if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
+    await mkdir(tasksDir, { recursive: true })
     return fakeHome
   }
 
@@ -516,7 +519,8 @@ describe("stop-auto-continue", () => {
     subject: string,
     sessionId = "test-session"
   ): Promise<void> {
-    const tasksDir = join(fakeHome, ".claude", "tasks", sessionId)
+    const tasksDir = getSessionTasksDir(sessionId, fakeHome)
+    if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
     await writeFile(join(tasksDir, `${id}.json`), JSON.stringify({ id, status, subject }))
   }
 
@@ -657,7 +661,7 @@ describe("stop-auto-continue", () => {
     await writeTask(fakeHome, "1", "completed", "Valid task")
     // Write a malformed JSON file alongside the valid one
     await writeFile(
-      join(fakeHome, ".claude", "tasks", "test-session", "bad.json"),
+      join(getSessionTasksDir("test-session", fakeHome)!, "bad.json"),
       "{ this is not valid json }"
     )
     const captureDir = await createTempDir()
@@ -684,7 +688,7 @@ describe("stop-auto-continue", () => {
     await writeTask(fakeHome, "1", "completed", "Real task")
     // Task with literal null id (as produced by some serialization paths)
     await writeFile(
-      join(fakeHome, ".claude", "tasks", "test-session", "nullid.json"),
+      join(getSessionTasksDir("test-session", fakeHome)!, "nullid.json"),
       JSON.stringify({ id: "null", status: "completed", subject: "Ghost task" })
     )
     const captureDir = await createTempDir()
@@ -710,7 +714,7 @@ describe("stop-auto-continue", () => {
     await writeTask(fakeHome, "1", "completed", "Real task")
     // Audit log and other non-json files should not be read as tasks
     await writeFile(
-      join(fakeHome, ".claude", "tasks", "test-session", ".audit-log.jsonl"),
+      join(getSessionTasksDir("test-session", fakeHome)!, ".audit-log.jsonl"),
       JSON.stringify({ action: "create", taskId: "99", subject: "Should be ignored" })
     )
     const captureDir = await createTempDir()

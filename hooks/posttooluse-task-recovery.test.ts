@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { getSessionTasksDir } from "./hook-utils.ts"
 
 const HOOK = join(import.meta.dir, "posttooluse-task-recovery.ts")
 
@@ -21,7 +22,11 @@ async function runHook(
 
 const TMP_HOME = join(tmpdir(), `task-recovery-test-${process.pid}`)
 const SESSION_ID = "test-session-abc123"
-const TASKS_DIR = join(TMP_HOME, ".claude", "tasks", SESSION_ID)
+const TASKS_DIR =
+  getSessionTasksDir(SESSION_ID, TMP_HOME) ??
+  (() => {
+    throw new Error("Failed to resolve session tasks directory")
+  })()
 
 beforeAll(() => {
   mkdirSync(TASKS_DIR, { recursive: true })

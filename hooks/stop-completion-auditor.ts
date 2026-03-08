@@ -11,6 +11,8 @@ import {
   extractToolNamesFromTranscript,
   formatActionPlan,
   formatTaskCompleteCommands,
+  getSessionTasksDir,
+  getTasksRoot,
   getTranscriptSummary,
   hasSessionTasksDir,
   isTaskCreateTool,
@@ -128,7 +130,8 @@ async function main(): Promise<void> {
   const transcript = input.transcript_path ?? ""
   const home = process.env.HOME
   if (!home) return
-  const tasksDir = join(home, ".claude", "tasks", sessionId)
+  const tasksDir = getSessionTasksDir(sessionId, home)
+  if (!tasksDir) return
 
   // Prefer pre-computed summary from dispatch; fall back to reading transcript
   const summary = getTranscriptSummary(raw)
@@ -331,8 +334,10 @@ async function main(): Promise<void> {
       // reason (older project-key layout, missing transcript file, etc.),
       // scan other task-session directories directly.
       if (!hasCiEvidence) {
+        const tasksRoot = getTasksRoot(home)
+        if (!tasksRoot) return
         try {
-          const taskSessionIds = await readdir(join(home, ".claude", "tasks"))
+          const taskSessionIds = await readdir(tasksRoot)
           for (const sibId of taskSessionIds) {
             if (hasCiEvidence) break
             if (sibId === sessionId) continue

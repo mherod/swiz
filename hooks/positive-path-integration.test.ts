@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
+import { getSessionCompactSnapshotPath, getSessionTasksDir } from "./hook-utils.ts"
 import { useTempDir } from "./test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
@@ -86,7 +87,8 @@ async function createTaskFile(
   sessionId: string,
   task: { id: string; subject: string; status: string }
 ): Promise<void> {
-  const dir = join(homeDir, ".claude", "tasks", sessionId)
+  const dir = getSessionTasksDir(sessionId, homeDir)
+  if (!dir) throw new Error("Failed to resolve session tasks directory")
   await mkdir(dir, { recursive: true })
   await writeFile(
     join(dir, `${task.id}.json`),
@@ -577,7 +579,8 @@ describe("precompact-task-snapshot: positive paths", () => {
     const r = await runHook(HOOK, { session_id: sessionId }, { HOME: home })
     expect(r.exitCode).toBe(0)
 
-    const snapshotPath = join(home, ".claude", "tasks", sessionId, "compact-snapshot.json")
+    const snapshotPath = getSessionCompactSnapshotPath(sessionId, home)
+    if (!snapshotPath) throw new Error("Failed to resolve compact snapshot path")
     const snapshot = JSON.parse(await readFile(snapshotPath, "utf8")) as {
       summary?: {
         completedCount: number
@@ -767,7 +770,8 @@ describe("sessionstart-compact-context: positive paths", () => {
   test("caps total compact context size with explicit truncation marker", async () => {
     const home = await createTempDir()
     const sessionId = `compact-test-${Date.now()}`
-    const tasksDir = join(home, ".claude", "tasks", sessionId)
+    const tasksDir = getSessionTasksDir(sessionId, home)
+    if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
     await mkdir(tasksDir, { recursive: true })
 
     await writeFile(

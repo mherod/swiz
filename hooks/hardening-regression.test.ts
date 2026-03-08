@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { parse as parseYaml } from "yaml"
+import { getSessionTasksDir } from "./hook-utils.ts"
 import { useTempDir } from "./test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
@@ -20,7 +21,8 @@ async function writeTask(
   sessionId: string,
   task: { id: string; subject: string; status: string }
 ) {
-  const dir = join(homeDir, ".claude", "tasks", sessionId)
+  const dir = getSessionTasksDir(sessionId, homeDir)
+  if (!dir) throw new Error("Failed to resolve session tasks directory")
   await mkdir(dir, { recursive: true })
   await writeFile(
     join(dir, `${task.id}.json`),

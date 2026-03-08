@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { getSessionTasksDir } from "./hook-utils.ts"
 
 const HOOK = join(import.meta.dir, "pretooluse-task-recovery.ts")
 
@@ -21,7 +22,11 @@ async function runHook(
 
 const TMP_HOME = join(tmpdir(), `pretooluse-task-recovery-test-${process.pid}`)
 const SESSION_ID = "test-session-pre-abc123"
-const TASKS_DIR = join(TMP_HOME, ".claude", "tasks", SESSION_ID)
+const TASKS_DIR =
+  getSessionTasksDir(SESSION_ID, TMP_HOME) ??
+  (() => {
+    throw new Error("Failed to resolve session tasks directory")
+  })()
 
 beforeAll(() => {
   mkdirSync(TASKS_DIR, { recursive: true })
@@ -127,7 +132,11 @@ describe("pretooluse-task-recovery", () => {
 
   test("creates directory and stub when tasks dir does not exist", async () => {
     const newSessionId = "pretooluse-new-session-xyz"
-    const newTasksDir = join(TMP_HOME, ".claude", "tasks", newSessionId)
+    const newTasksDir =
+      getSessionTasksDir(newSessionId, TMP_HOME) ??
+      (() => {
+        throw new Error("Failed to resolve session tasks directory")
+      })()
     const stubPath = join(newTasksDir, "1.json")
 
     const { stdout, exitCode } = await runHook({

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { getSessionTasksDir } from "./hook-utils.ts"
 import { isLargeContentPayload } from "./pretooluse-require-tasks.ts"
 import { useTempDir } from "./test-utils.ts"
 
@@ -97,7 +98,8 @@ async function writeTask(
     status: "pending" | "in_progress" | "completed" | "cancelled"
   }
 ) {
-  const dir = join(homeDir, ".claude", "tasks", sessionId)
+  const dir = getSessionTasksDir(sessionId, homeDir)
+  if (!dir) throw new Error("Failed to resolve session tasks directory")
   await mkdir(dir, { recursive: true })
   await writeFile(
     join(dir, `${id}.json`),

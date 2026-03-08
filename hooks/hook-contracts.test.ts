@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { manifest } from "../src/manifest.ts"
+import { getSessionTasksDir } from "./hook-utils.ts"
 import { hookOutputSchema } from "./schemas.ts"
 import { useTempDir } from "./test-utils.ts"
 
@@ -33,7 +34,8 @@ async function runHookScript(
 
   // Ensure require-tasks can pass when needed.
   const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`
-  const tasksDir = join(homeDir, ".claude", "tasks", sessionId)
+  const tasksDir = getSessionTasksDir(sessionId, homeDir)
+  if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
   await mkdir(tasksDir, { recursive: true })
   await writeFile(
     join(tasksDir, "1.json"),

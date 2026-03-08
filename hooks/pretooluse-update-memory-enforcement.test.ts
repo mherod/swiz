@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { getSessionTasksDir } from "./hook-utils.ts"
 import { useTempDir } from "./test-utils.ts"
 
 const HOOK = "hooks/pretooluse-update-memory-enforcement.ts"
@@ -280,7 +281,8 @@ describe("pretooluse-update-memory-enforcement", () => {
       const dir = await createProjectDir()
       const fakeHome = await createTempDir()
       const sessionId = `test-session-${Date.now()}`
-      const tasksDir = join(fakeHome, ".claude", "tasks", sessionId)
+      const tasksDir = getSessionTasksDir(sessionId, fakeHome)
+      if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
       await Bun.write(
         join(tasksDir, "task-1.json"),
         JSON.stringify({ id: "1", status: "in_progress", subject: "Implement fix" })
@@ -310,7 +312,8 @@ describe("pretooluse-update-memory-enforcement", () => {
       const dir = await createProjectDir()
       const fakeHome = await createTempDir()
       const sessionId = `test-session-${Date.now()}`
-      const tasksDir = join(fakeHome, ".claude", "tasks", sessionId)
+      const tasksDir = getSessionTasksDir(sessionId, fakeHome)
+      if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
       await Bun.write(
         join(tasksDir, "task-1.json"),
         JSON.stringify({ id: "1", status: "completed", subject: "Done task" })
@@ -366,7 +369,8 @@ describe("pretooluse-update-memory-enforcement", () => {
       const dir = await createProjectDir()
       const fakeHome = await createTempDir()
       const sessionId = `test-session-${Date.now()}`
-      const tasksDir = join(fakeHome, ".claude", "tasks", sessionId)
+      const tasksDir = getSessionTasksDir(sessionId, fakeHome)
+      if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
       await Bun.write(
         join(tasksDir, "task-1.json"),
         JSON.stringify({ id: "1", status: "completed", subject: "Done task" })

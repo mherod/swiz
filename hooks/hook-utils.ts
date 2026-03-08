@@ -518,13 +518,26 @@ export interface SessionTask {
   subjectFingerprint?: string
 }
 
+/** Resolve ~/.claude/tasks for the active home directory. */
+export function getTasksRoot(home: string = process.env.HOME ?? ""): string | null {
+  if (!home) return null
+  return join(home, ".claude", "tasks")
+}
+
+/** Resolve ~/.claude/projects for the active home directory. */
+export function getProjectsRoot(home: string = process.env.HOME ?? ""): string | null {
+  if (!home) return null
+  return join(home, ".claude", "projects")
+}
+
 /** Resolve ~/.claude/tasks/<sessionId> for the active home directory. */
 export function getSessionTasksDir(
   sessionId: string,
   home: string = process.env.HOME ?? ""
 ): string | null {
-  if (!home || !sessionId) return null
-  return join(home, ".claude", "tasks", sessionId)
+  const tasksRoot = getTasksRoot(home)
+  if (!tasksRoot || !sessionId) return null
+  return join(tasksRoot, sessionId)
 }
 
 /** Resolve ~/.claude/tasks/<sessionId>/<taskId>.json for task file access. */
@@ -536,6 +549,16 @@ export function getSessionTaskPath(
   const tasksDir = getSessionTasksDir(sessionId, home)
   if (!tasksDir || !taskId) return null
   return join(tasksDir, `${taskId}.json`)
+}
+
+/** Resolve ~/.claude/tasks/<sessionId>/compact-snapshot.json. */
+export function getSessionCompactSnapshotPath(
+  sessionId: string,
+  home: string = process.env.HOME ?? ""
+): string | null {
+  const tasksDir = getSessionTasksDir(sessionId, home)
+  if (!tasksDir) return null
+  return join(tasksDir, "compact-snapshot.json")
 }
 
 /** True when a session task directory exists and can be listed. */
