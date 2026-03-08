@@ -1068,6 +1068,20 @@ export async function getGitAheadBehind(
   return { ahead, behind, upstream }
 }
 
+/** Canonical empty-tree hash used when repos have fewer than N commits. */
+export const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+/**
+ * Resolve a recent-commit diff range ending at HEAD.
+ * Uses `HEAD~<commitsBack>` when available, otherwise falls back to the empty tree.
+ */
+export async function recentHeadRange(cwd: string, commitsBack = 10): Promise<string> {
+  const base =
+    (await git(["rev-parse", "--verify", `HEAD~${Math.max(1, Math.floor(commitsBack))}`], cwd)) ||
+    GIT_EMPTY_TREE
+  return `${base}..HEAD`
+}
+
 // ─── Source file classification ─────────────────────────────────────────
 
 /** Source file extensions worth scanning for code issues. */

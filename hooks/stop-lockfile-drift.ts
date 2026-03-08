@@ -2,7 +2,7 @@
 // Stop hook: Block stop if package.json was modified but lockfile was not
 
 import { dirname, join } from "node:path"
-import { blockStop, git, isGitRepo } from "./hook-utils.ts"
+import { blockStop, git, isGitRepo, recentHeadRange } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 
 const LOCKFILE_MAP: Record<string, string> = {
@@ -26,11 +26,7 @@ async function main(): Promise<void> {
 
   if (!(await isGitRepo(cwd))) return
 
-  // Use HEAD~10 as the diff base when available; fall back to the git empty-tree
-  // SHA so the range resolves correctly in repos with fewer than 11 commits.
-  const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-  const base = (await git(["rev-parse", "--verify", "HEAD~10"], cwd)) || GIT_EMPTY_TREE
-  const range = `${base}..HEAD`
+  const range = await recentHeadRange(cwd, 10)
 
   const changedRaw = await git(["diff", "--name-only", range], cwd)
   if (!changedRaw) return

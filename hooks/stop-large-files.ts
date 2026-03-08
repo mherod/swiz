@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if large files (>500KB) were committed without LFS
 
-import { blockStop, git, isGitRepo } from "./hook-utils.ts"
+import { blockStop, git, isGitRepo, recentHeadRange } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 
 const SIZE_LIMIT_KB = 500
@@ -12,11 +12,7 @@ async function main(): Promise<void> {
 
   if (!(await isGitRepo(cwd))) return
 
-  // Use HEAD~10 as the range base when available; fall back to the git empty-tree
-  // SHA so the range resolves correctly in repos with fewer than 11 commits.
-  const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-  const base = (await git(["rev-parse", "--verify", "HEAD~10"], cwd)) || GIT_EMPTY_TREE
-  const range = `${base}..HEAD`
+  const range = await recentHeadRange(cwd, 10)
 
   // List files added in the last 10 commits (or all commits in shallow repos)
   const addedRaw = await git(["log", "--diff-filter=A", "--name-only", "--format=", range], cwd)

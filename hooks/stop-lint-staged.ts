@@ -2,8 +2,33 @@
 // Stop hook: Run lint-staged if configured in project
 
 import { join } from "node:path"
-import { blockStop, detectPackageManager } from "./hook-utils.ts"
+import { blockStop } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
+
+type PackageManager = "bun" | "pnpm" | "yarn" | "npm"
+
+async function detectPackageManagerForProject(cwd: string): Promise<PackageManager> {
+  if (
+    (await Bun.file(join(cwd, "bun.lockb")).exists()) ||
+    (await Bun.file(join(cwd, "bun.lock")).exists())
+  ) {
+    return "bun"
+  }
+  if (
+    (await Bun.file(join(cwd, "pnpm-lock.yaml")).exists()) ||
+    (await Bun.file(join(cwd, "shrinkwrap.yaml")).exists())
+  ) {
+    return "pnpm"
+  }
+  if (
+    (await Bun.file(join(cwd, "yarn.lock")).exists()) ||
+    (await Bun.file(join(cwd, ".pnp.cjs")).exists()) ||
+    (await Bun.file(join(cwd, ".pnp.js")).exists())
+  ) {
+    return "yarn"
+  }
+  return "npm"
+}
 
 async function main(): Promise<void> {
   const input = stopHookInputSchema.parse(await Bun.stdin.json())
@@ -27,9 +52,7 @@ async function main(): Promise<void> {
 
   if (!hasScript && !hasDep) return
 
-  // Detect package manager — override cwd-based detection to use this project
-  process.chdir(cwd)
-  const pm = detectPackageManager() ?? "npm"
+  const pm = await detectPackageManagerForProject(cwd)
 
   // Run lint-staged
   const cmd = hasScript ? [pm, "run", "lint-staged"] : ["npx", "--yes", "lint-staged"]
