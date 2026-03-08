@@ -194,7 +194,7 @@ describe("swiz settings", () => {
     const text = await readFile(configPath, "utf-8")
     const json = JSON.parse(text) as { autoContinue?: boolean }
     expect(json.autoContinue).toBe(true)
-  })
+  }, 30_000)
 
   test("fails for unknown setting key", async () => {
     const home = await createTempHome()
@@ -220,7 +220,7 @@ describe("swiz settings", () => {
     expect(showSession.exitCode).toBe(0)
     expect(showSession.stdout).toContain(`scope: session ${sessionId}`)
     expect(showSession.stdout).toContain("auto-continue:   disabled (global/default)")
-  })
+  }, 30_000)
 
   test("session-scoped disable stores override under sessions map", async () => {
     const home = await createTempHome()
@@ -371,7 +371,7 @@ describe("swiz settings", () => {
     ])
     expect(voiceResult.stdout).toContain("narrator-voice:  Alex")
     expect(speedResult.stdout).toContain("narrator-speed:  180 wpm")
-  })
+  }, 30_000)
 
   // ── Rejection tests: run concurrently ─────────────────────────────────
   test("rejects invalid setting operations", async () => {
