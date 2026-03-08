@@ -7,6 +7,7 @@ import { hookOutputSchema } from "./schemas.ts"
 import { useTempDir } from "./test-utils.ts"
 
 type JsonObject = Record<string, unknown>
+const HOOK_CONTRACT_TIMEOUT_MS = 30_000
 
 const _tmp = useTempDir()
 async function createTempDir(prefix: string): Promise<string> {
@@ -103,19 +104,23 @@ describe("hook scripts contracts", () => {
   ].sort()
 
   for (const file of hookFiles) {
-    test(`${file} exits successfully and emits valid JSON when output is present`, async () => {
-      const result = await runHookScript(file)
-      expect(result.exitCode).toBe(0)
+    test(
+      `${file} exits successfully and emits valid JSON when output is present`,
+      async () => {
+        const result = await runHookScript(file)
+        expect(result.exitCode).toBe(0)
 
-      if (!result.stdout) return
+        if (!result.stdout) return
 
-      let parsed: JsonObject
-      expect(() => {
+        let parsed: JsonObject
+        expect(() => {
+          parsed = JSON.parse(result.stdout) as JsonObject
+        }).not.toThrow()
+
         parsed = JSON.parse(result.stdout) as JsonObject
-      }).not.toThrow()
-
-      parsed = JSON.parse(result.stdout) as JsonObject
-      assertHookOutputShape(parsed)
-    })
+        assertHookOutputShape(parsed)
+      },
+      HOOK_CONTRACT_TIMEOUT_MS
+    )
   }
 })
