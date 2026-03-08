@@ -888,7 +888,7 @@ export const tasksCommand: Command = {
     },
   ],
   async run(args) {
-    const subcommand = args[0]
+    const [subcommand] = args
 
     if (
       !subcommand ||
@@ -948,8 +948,7 @@ export const tasksCommand: Command = {
 
     switch (subcommand) {
       case "create": {
-        const subject = rest[0]
-        const description = rest[1]
+        const [subject, description, ...sessionArgs] = rest
         if (!subject || !description) {
           throw new Error('Usage: swiz tasks create "<subject>" "<description>" --state <state>')
         }
@@ -962,14 +961,14 @@ export const tasksCommand: Command = {
               `Example: swiz tasks create "<subject>" "<description>" --state developing`
           )
         }
-        const sessionId = await resolveSession(rest.slice(2))
+        const sessionId = await resolveSession(sessionArgs)
         await createTask(sessionId, subject, description)
         await applyStateUpdate(stateFlag, process.cwd())
         break
       }
 
       case "complete": {
-        const taskId = rest[0]
+        const [taskId, ...sessionArgs] = rest
         if (!taskId) {
           throw new Error(
             "Usage: swiz tasks complete <task-id> --evidence TEXT --state <state> [--verify TEXT]"
@@ -986,7 +985,7 @@ export const tasksCommand: Command = {
           )
         }
         let verify = extractFlag(rest, "--verify")
-        const sessionId = await resolveSession(rest.slice(1))
+        const sessionId = await resolveSession(sessionArgs)
 
         // Auto-verify: if no explicit --verify was provided, extract and use task subject
         if (!verify) {
@@ -1000,22 +999,21 @@ export const tasksCommand: Command = {
       }
 
       case "evidence": {
-        const taskId = rest[0]
-        const evidenceText = rest[1]
+        const [taskId, evidenceText, ...sessionArgs] = rest
         if (!taskId || !evidenceText) {
           throw new Error(
             'Usage: swiz tasks evidence <task-id> "<evidence>"\n' +
               "Prefixes: commit:, pr:, file:, test:, note:"
           )
         }
-        const sessionId = await resolveSession(rest.slice(2))
+        const sessionId = await resolveSession(sessionArgs)
         await submitEvidence(sessionId, taskId, evidenceText, filterCwd)
         break
       }
 
       case "status": {
-        const taskId = rest[0]
-        const newStatus = rest[1] as Task["status"] | undefined
+        const [taskId, nextStatus, ...sessionArgs] = rest
+        const newStatus = nextStatus as Task["status"] | undefined
         const valid: Task["status"][] = ["pending", "in_progress", "completed", "cancelled"]
         if (!taskId || !newStatus || !valid.includes(newStatus)) {
           throw new Error(
@@ -1033,7 +1031,7 @@ export const tasksCommand: Command = {
               `Example: swiz tasks status ${taskId} ${newStatus} --state developing`
           )
         }
-        const sessionId = await resolveSession(rest.slice(2))
+        const sessionId = await resolveSession(sessionArgs)
         await updateStatus(sessionId, taskId, newStatus, evidence, verify, filterCwd)
         await applyStateUpdate(stateFlag, process.cwd())
         break
