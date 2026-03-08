@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**76 hooks. 10 event types. Every agent. Zero compromises.**
+**77 hooks. 10 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -112,7 +112,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (36)
+### PreToolUse (37)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -148,6 +148,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-require-task-evidence.ts` | Blocks `TaskUpdate status=completed` unless the description contains at least 1 structured evidence field (note, conclusion, run ID, commit SHA, ci_green, pr, no_ci). Prevents hollow task completion that leaves no machine-readable verification record. |
 | `pretooluse-task-recovery.ts` | Before TaskUpdate or TaskGet, checks whether the referenced task ID exists on disk. If it's missing (lost during context compaction), creates a stub file so the tool call succeeds transparently — the agent never sees "Task not found". |
 | `pretooluse-pr-age-gate.ts` | Blocks `gh pr merge` if the PR has been open for less than the configured grace period (default: 10 minutes; configurable via `swiz settings set pr-age-gate <minutes>`; set to 0 to disable). Enforces a minimum visibility period so team members have time to review. Redirects the agent to other work instead of waiting. |
+| `pretooluse-repeated-lint-test.ts` | Blocks repeated `bun test` / `bun run lint` / `bun run build` calls unless a memory update (edit to CLAUDE.md or MEMORY.md) has occurred since the previous run. Prevents the wasteful pattern of re-running the same command with different output filters instead of reading the full output and capturing lessons. |
 | `pretooluse-workflow-permissions-gate.ts` | Blocks changes to `permissions:` blocks in `.github/workflows/*.yml` files on non-default branches. GitHub Actions permission changes don't take effect until merged — this prevents accidental privilege escalation that silently activates upon merge. |
 | `pretooluse-sandboxed-edits.ts` | Blocks Edit, Write, and NotebookEdit calls targeting paths outside the session's working directory and temporary directories. Enabled by default; disable with `swiz settings disable sandboxed-edits`. |
 | `pretooluse-sandbox-guidance-consolidation.ts` | Blocks edits that introduce inline issue-guidance patterns. Enforces the use of `buildIssueGuidance()` from hook-utils.ts instead, keeping issue-guidance messages consistent and preventing duplicate patterns across hooks. |

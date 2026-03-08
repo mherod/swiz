@@ -28,7 +28,9 @@ export function isMemoryFile(filePath: string): boolean {
 }
 
 export function countStats(content: string): { lines: number; words: number } {
-  const lines = content.split("\n").length
+  if (content.length === 0) return { lines: 0, words: 0 }
+  const parts = content.split("\n")
+  const lines = content.endsWith("\n") ? parts.length - 1 : parts.length
   const words = content.split(/\s+/).filter(Boolean).length
   return { lines, words }
 }

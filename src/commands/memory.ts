@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs"
 import { resolve } from "node:path"
-import { formatActionPlan } from "../../hooks/hook-utils.ts"
+import { countFileWords, formatActionPlan } from "../../hooks/hook-utils.ts"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { BOLD, CYAN, DIM, GREEN, RESET, YELLOW } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
@@ -55,9 +55,7 @@ const DEFAULT_THRESHOLD_INPUT = {
   memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
   memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
 }
-const BINARY_SCAN_BYTES = 512
 const WARNING_THRESHOLD_FACTOR = 0.9
-const WHITESPACE_RE = /\s/
 
 /**
  * Returns the ordered list of rule/memory sources for an agent and target directory.
@@ -92,68 +90,6 @@ function isPresentMemoryFile(path: string): boolean {
   }
 }
 
-function containsNullByte(buffer: Uint8Array): boolean {
-  for (const byte of buffer) {
-    if (byte === 0) return true
-  }
-  return false
-}
-
-function countTextStats(content: string): FileStats {
-  let lines = 0
-  let words = 0
-  let inWord = false
-
-  for (let i = 0; i < content.length; i++) {
-    const char = content.charAt(i)
-    if (char === "\n") {
-      lines++
-    }
-
-    if (WHITESPACE_RE.test(char)) {
-      inWord = false
-      continue
-    }
-
-    if (!inWord) {
-      words++
-      inWord = true
-    }
-  }
-
-  if (content.length > 0 && content[content.length - 1] !== "\n") {
-    lines++
-  }
-
-  return {
-    lines,
-    words,
-    chars: content.length,
-  }
-}
-
-async function getFileStats(path: string): Promise<FileStats | null> {
-  try {
-    const file = Bun.file(path)
-
-    // Empty file edge case
-    if (file.size === 0) {
-      return { lines: 0, words: 0, chars: 0 }
-    }
-
-    // Guard against binary files: check first 512 bytes for null bytes
-    const headerBuffer = await file.slice(0, BINARY_SCAN_BYTES).arrayBuffer()
-    const headerView = new Uint8Array(headerBuffer)
-    if (containsNullByte(headerView)) {
-      return null
-    }
-
-    return countTextStats(await file.text())
-  } catch {
-    return null
-  }
-}
-
 function getThresholdStatus(
   stats: FileStats,
   thresholds: SourceThresholds
@@ -184,7 +120,7 @@ async function printSource(
     let exceeded = false
     let details = size
     let statusIndicator = ""
-    const stats = await getFileStats(source.path)
+    const stats = await countFileWords(source.path)
     if (stats) {
       details += ` · ${stats.lines} lines · ${stats.words} words`
       const status = getThresholdStatus(stats, thresholds)
@@ -210,7 +146,7 @@ async function printSource(
   let exceeded = false
   if (exists) {
     const size = fileSize(source.path)
-    const stats = await getFileStats(source.path)
+    const stats = await countFileWords(source.path)
 
     let statsStr = size
     let statusIndicator = ""
