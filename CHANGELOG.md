@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-03-09
+
+### New Features
+
+- Added `posttooluse-task-notify.ts`: async PostToolUse hook that delivers native
+  macOS notifications for task lifecycle events — a `+` bell on `TaskCreate` and
+  a status glyph (`▶`/`✓`/`✗`) on status-changing `TaskUpdate` calls. Resolves
+  the task subject via `getSessionTaskPath()` for update events. Registered in
+  the manifest with matcher `TaskUpdate|TaskCreate` and `async: true`.
+- Added PR poll LaunchAgent (`swiz install --pr-poll`): polls GitHub notifications
+  every 5 minutes for new PR activity (reviews, comments, mentions) and delivers
+  a native macOS notification per item via `swiz-notify`.
+  - `src/pr-notify.ts`: fetches `gh api /notifications` filtered to
+    `subject.type === "PullRequest"` since `lastPolledAt`; persists state to
+    `~/.swiz/pr-poll-state.json`.
+  - `hooks/prpoll-notify.ts`: resolves the `swiz-notify` binary, maps notification
+    reasons (`review_requested` → "Review requested", `comment` → "New comment",
+    etc.) and delivers one notification per item.
+  - `src/commands/install.ts` `installPrPoll()`: writes
+    `~/Library/LaunchAgents/com.swiz.prpoll.plist` with `StartInterval: 300`
+    and loads it with `launchctl load`.
+- Added `HookGroup.scheduled?: boolean` to `src/manifest.ts`: marks events
+  dispatched by external schedulers (LaunchAgent). `swiz install` skips scheduled
+  groups when writing agent configs; `validateDispatchRoutes` skips them in the
+  agent `eventMap` completeness check. `DISPATCH_ROUTES` in
+  `src/dispatch/index.ts` includes `prPoll: "blocking"` so
+  `swiz dispatch prPoll` routes correctly.
+- README: 80 → 81 hooks, 10 → 11 event types; added `### PrPoll (1)` section
+  documenting the scheduled dispatch model and `swiz install --pr-poll` usage.
+
+### Fixes
+
+- Committed file-mode change on `hooks/prpoll-notify.ts` (100644 → 100755)
+  applied by the Biome formatter during the pre-push linting pass.
+
 ## 2026-03-08
 
 ### Fixes
