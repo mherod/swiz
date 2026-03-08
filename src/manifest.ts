@@ -184,6 +184,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-eslint-config-strength.ts", timeout: 5 },
       { file: "pretooluse-no-as-any.ts", timeout: 5 },
       { file: "pretooluse-no-secrets.ts", timeout: 5 },
+      { file: "pretooluse-debug-statements.ts", timeout: 5 },
       { file: "pretooluse-workflow-permissions-gate.ts", timeout: 5 },
       { file: "pretooluse-claude-md-word-limit.ts", timeout: 5 },
     ],
