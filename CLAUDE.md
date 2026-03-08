@@ -8,6 +8,8 @@ alwaysApply: false
 ## Runtime
 - Use Bun only. DO NOT use Node.js, npm, pnpm, vite, dotenv, or Node-specific tooling.
 - Use `bun <file>`, `bun test`, `bun install`, `bun run index.ts`, `bun --hot index.ts`, `bun link`.
+- Prefer `swiz <command>` for normal CLI usage.
+- Use `bun run index.ts <command>` when you must guarantee execution against the current checkout (avoid PATH/global `swiz` version drift).
 - Use `Bun.file()` and `Bun.write()` for file I/O.
 - Use `node:fs/promises` only for directory operations (`readdir`, `mkdir`, `stat`).
 ## CLI Architecture
@@ -195,14 +197,14 @@ alwaysApply: false
 ## Conventions
 - DO NOT embed the ESC character (0x1b) directly in regex literals — Biome's `no-control-regex` rule blocks it. Construct ANSI-matching regexes at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
 - When parsing bun test terminal output for counts, check for the completion marker `/\bRan \d+ tests? across \d+ files?\./` (note `tests?`/`files?` for singular/plural) before reporting an exact figure; absent the marker output is truncated and the count is untrustworthy — emit "unknown number of" instead. Strip ANSI before matching. Reference: `detectFailure` in `hooks/posttooluse-task-output.ts`.
-- DO: Read every file being modified in its entirety before making any change to it. Viewing a snippet of a file is insufficient; the full read is required to catch conflicts or existing patterns in other sections.
+- DO: Read every file being modified in its entirety before making any change. A snippet is insufficient; full read catches conflicts and patterns in other sections.
 - Use ANSI escape codes directly; do not add color libraries.
 - Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks.
 - With piped `Bun.spawn`, drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
 - Hooks are `.ts` and run as `bun hooks/<file>.ts`.
 - Settings writes must create `.bak` backups first.
 - For multiline frontmatter regex, do not use `\s*` after closing delimiter if blank lines must remain; use `[ \t]*\n?`. Avoid `/^---[\s\S]*?^---\s*\n?/m`; use `[ \t]*` instead.
-- Stop hooks can inject session tasks from `~/.claude/tasks/<session_id>/`; format `IN PROGRESS` before `COMPLETED`, then inject before transcript.
+- Stop hooks can inject session tasks from `~/.claude/tasks/<session_id>/`; format `IN PROGRESS` before `COMPLETED`, injected before transcript.
 - Stop-memory prompts must include `Cause to capture: <specific cause>`.
 - On `MEMORY CAPTURE ENFORCEMENT`, immediately: read `/update-memory/SKILL.md`, edit `CLAUDE.md` with the DO/DON'T rule, then resume other work.
 - Do not defer memory capture requested by stop hooks.
@@ -210,7 +212,7 @@ alwaysApply: false
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip enforcement when not in a git repo or when no `CLAUDE.md` exists up the directory tree; guard with `isGitRepo(cwd)` then upward `CLAUDE.md` search, otherwise `process.exit(0)`.
 - Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for every directory with valid console usage (`hooks/`, `scripts/`, `push/scripts/`, etc.).
 - Bun test reporter: `--reporter=dots` (not `dot`). Run without `| tail` — `pretooluse-repeated-lint-test` treats piped re-runs as consecutive and blocks. Read output once; dots with no `fail` lines is sufficient evidence.
-- **DO**: Make an Edit tool change between `bun run format` and `bun run lint` — `pretooluse-repeated-lint-test` doesn't detect format-via-wrapper as a workspace mutation (wrapper command string lacks `--write`), so two consecutive lint runs without an intervening edit triggers a block.
+- **DO**: Make an Edit tool change between `bun run format` and `bun run lint` — `pretooluse-repeated-lint-test` doesn't detect format-via-wrapper as a mutation (no `--write` in wrapper string), so consecutive lint runs without an intervening edit trigger a block.
 - Do not run `cd` in Bash commands; use absolute paths, `git -C <dir>`, `pnpm --prefix <dir>`, or `cwd` in `Bun.spawn()`.
 - Do not edit files with `sed -i`; use Edit tool for file writes; use `sed` only for non-writing stream transforms.
 - Do not use `awk`; use `bun -e`, `sort -u`, `cut -d' ' -f1`, or git `--format`.
@@ -226,9 +228,9 @@ alwaysApply: false
 - Do not leave duplicated cache-key generation logic.
 - In CLI subprocess tests (for example `runSwiz`), do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp-directory `cwd`, and `env: { ...process.env, HOME: tempDir }`.
 - Do not use Agent tool `isolation: "worktree"`; rejected/partial setup can corrupt `.git/config` (`core.bare = true`, bogus `[branch "worktree-..."]`/`[user]`) and break git with "this operation must be run in a work tree".
-- For secret-like test fixtures (e.g., `sk_live_...` in `stop-secret-scanner.ts` tests), build the string via array join: `const fakeSecret = ['s','k','_','l','i','v','e','_',...].join('')`. GitHub push protection scans source; git diffs trigger the scanner — both goals achieved.
+- For secret-like test fixtures (e.g., `sk_live_...` in `stop-secret-scanner.ts`), build via array join: `const fakeSecret = ['s','k','_','l','i','v','e','_',...].join('')`. GitHub push protection and git-diff secret scanning both require this.
 - **DO**: When stop hooks detect memory threshold violations outside the session sandbox, file a GitHub issue on the owning repo with word count, threshold, and compaction guidance. Sandbox prevents direct edits—issue filing is the workflow.
 - **DON'T**: Attempt to edit files outside the session sandbox; the Edit tool will block and sandbox enforcement is non-negotiable.
 - **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop. Use `/push` for unpushed commits.
 - **DON'T**: Rely on `git status` alone for unpush detection—it doesn't show upstream divergence. Always use `git log origin/main..HEAD --oneline` to list unpushed commits.
-- **DON'T**: Declare commit or push success before reading the actual tool output confirming it. Outcomes must be verified from evidence (git status clean, commit SHA captured, push output showing remote updated) before claiming the step complete.
+- **DON'T**: Declare commit or push success before reading tool output confirming it. Verify from evidence (git status clean, commit SHA captured, push output showing remote updated) before claiming complete.

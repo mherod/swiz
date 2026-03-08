@@ -22,8 +22,8 @@ const PRIVATE_KEY_RE = /-----BEGIN (RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY/i
 const TOKEN_RE =
   /AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36}|ghs_[a-zA-Z0-9]{36}|xox[baprs]-[0-9A-Za-z]{10,}|sk-[a-zA-Z0-9]{32,}|sk_live_[a-zA-Z0-9]{24,}|rk_live_[a-zA-Z0-9]{24,}/i
 
-// Generic credential assignments: `api_key = "actual-value"` etc.
-// Requires a quoted value of 8+ chars to avoid matching config keys without values.
+// Generic credential assignments: key/password fields with a quoted value (8+ chars).
+// Requires a quoted value to avoid matching config keys without values.
 const GENERIC_SECRET_RE =
   /(api_?key|api_?secret|auth_?token|access_?token|secret_?key|private_?key|password|passwd|client_?secret)\s*[:=]\s*["'][^"']{8,}["']/i
 
