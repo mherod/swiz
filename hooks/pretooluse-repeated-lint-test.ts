@@ -73,6 +73,9 @@ function bashMutatesWorkspace(cmd: string): boolean {
   // In-place sed: -i (any position in combined flags, e.g. -i, -iE, -Ei, -ni),
   //   -i.bak (backup suffix), and GNU long form --in-place / --in-place=.bak
   if (/\bsed\b(?:[^|;]*\s+-[a-zA-Z]*i[a-zA-Z.]*|[^|;]*--in-place)/.test(cmd)) return true
+  // In-place perl: -i (any position in combined flags, e.g. -i, -pi, -pie, -i.bak)
+  //   perl has no --in-place long form; -i is the only spelling
+  if (/\bperl\b[^|;]*\s+-[a-zA-Z]*i[a-zA-Z.]*/.test(cmd)) return true
   // Common CLI output flags — space-separated: -o path, --output path, --outfile path
   if (/(?:^|\s)(?:-o|--(?:out(?:put|file|dir)?|report|log-?file))\s+\S/.test(cmd)) return true
   // Common CLI output flags — equals-separated: --output=path, --outfile=path
