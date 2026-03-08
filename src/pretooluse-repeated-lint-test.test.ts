@@ -4,7 +4,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   bashMutatesWorkspace,
+  buildRemediationHints,
   classifyCommand,
+  extractPreviousOutput,
+  extractToolUseIdFromLine,
   parseTranscriptEvents,
 } from "../hooks/pretooluse-repeated-lint-test.ts"
 
@@ -577,5 +580,236 @@ describe("parseTranscriptEvents", () => {
       expect(testEvents).toHaveLength(2)
       // Both from the same line — parallel dispatch guard applies
       expect(testEvents[0]?.sourceLineIdx).toBe(testEvents[1]?.sourceLineIdx)
+    }))
+})
+
+// ── extractToolUseIdFromLine ──────────────────────────────────────────────────
+
+describe("extractToolUseIdFromLine", () => {
+  test("returns tool_use_id for matching bash command", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", id: "tu_abc", name: "Bash", input: { command: "bun test" } }],
+      },
+    })
+    expect(extractToolUseIdFromLine(line, "test")).toBe("tu_abc")
+  })
+
+  test("returns null when command is wrong kind", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "tool_use", id: "tu_abc", name: "Bash", input: { command: "bun run lint" } },
+        ],
+      },
+    })
+    expect(extractToolUseIdFromLine(line, "test")).toBeNull()
+  })
+
+  test("returns null for non-assistant entry", () => {
+    const line = JSON.stringify({ type: "user", message: {} })
+    expect(extractToolUseIdFromLine(line, "test")).toBeNull()
+  })
+
+  test("returns null for malformed JSON", () => {
+    expect(extractToolUseIdFromLine("{ not valid json", "test")).toBeNull()
+  })
+
+  test("returns first matching id when multiple tool_use blocks", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "tool_use", id: "tu_first", name: "Bash", input: { command: "bun test" } },
+          { type: "tool_use", id: "tu_second", name: "Bash", input: { command: "bun test" } },
+        ],
+      },
+    })
+    expect(extractToolUseIdFromLine(line, "test")).toBe("tu_first")
+  })
+})
+
+// ── buildRemediationHints ─────────────────────────────────────────────────────
+
+describe("buildRemediationHints", () => {
+  test("returns empty string for empty output", () => {
+    expect(buildRemediationHints("", "lint")).toBe("")
+    expect(buildRemediationHints("   \n  ", "test")).toBe("")
+  })
+
+  test("extracts file:line lint errors", () => {
+    const output = [
+      "src/commands/foo.ts:34:5 lint/style/useTemplate FIXABLE",
+      "src/commands/foo.ts:67:1 lint/suspicious/noExplicitAny",
+      "Checked 10 files in 12ms. Found 2 errors.",
+    ].join("\n")
+    const hints = buildRemediationHints(output, "lint")
+    expect(hints).toContain("src/commands/foo.ts:34")
+    expect(hints).toContain("src/commands/foo.ts:67")
+  })
+
+  test("extracts TypeScript TS-error lines for build kind", () => {
+    const output = [
+      "src/utils.ts:10:5 - error TS2345: Argument of type 'string' is not assignable.",
+      "Found 1 error.",
+    ].join("\n")
+    const hints = buildRemediationHints(output, "build")
+    expect(hints).toContain("TS2345")
+  })
+
+  test("extracts failing test lines for test kind", () => {
+    const output = [
+      "(fail) parseTranscriptEvents > bun test → test event [5ms]",
+      "error: expect(received).toEqual(expected)",
+    ].join("\n")
+    const hints = buildRemediationHints(output, "test")
+    expect(hints).toContain("(fail)")
+  })
+
+  test("returns empty string when no matching error lines", () => {
+    const output = "All checks passed. 0 errors.\n4 pass\n0 fail"
+    expect(buildRemediationHints(output, "lint")).toBe("")
+  })
+
+  test("caps output at 6 hits", () => {
+    const lintLines = Array.from(
+      { length: 10 },
+      (_, i) => `src/file${i}.ts:${i + 1}:1 lint/style/useTemplate`
+    )
+    const hints = buildRemediationHints(lintLines.join("\n"), "lint")
+    // Should contain at most 6 bullet points
+    const bullets = (hints.match(/•/g) ?? []).length
+    expect(bullets).toBeLessThanOrEqual(6)
+  })
+})
+
+// ── extractPreviousOutput ─────────────────────────────────────────────────────
+
+describe("extractPreviousOutput", () => {
+  async function withDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-remediation-test-"))
+    try {
+      return await fn(dir)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  /** Build a JSONL transcript with assistant tool_use + user tool_result pair. */
+  function transcriptWithResult(command: string, toolOutput: string): string[] {
+    const toolUseId = "tu_test_123"
+    const assistant = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", id: toolUseId, name: "Bash", input: { command } }],
+      },
+    })
+    const user = JSON.stringify({
+      type: "user",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: toolUseId,
+            content: [{ type: "text", text: toolOutput }],
+          },
+        ],
+      },
+    })
+    return [assistant, user]
+  }
+
+  test("extracts text from array-form tool_result content", () =>
+    withDir(async (dir) => {
+      const path = join(dir, "t.jsonl")
+      const lines = transcriptWithResult("bun test", "2 pass\n1 fail")
+      await writeFile(path, `${lines.join("\n")}\n`, "utf-8")
+      const out = await extractPreviousOutput(path, 0, "test")
+      expect(out).toContain("2 pass")
+      expect(out).toContain("1 fail")
+    }))
+
+  test("extracts text from string-form tool_result content", () =>
+    withDir(async (dir) => {
+      const toolUseId = "tu_str"
+      const assistant = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", id: toolUseId, name: "Bash", input: { command: "bun run lint" } },
+          ],
+        },
+      })
+      const user = JSON.stringify({
+        type: "user",
+        message: {
+          content: [{ type: "tool_result", tool_use_id: toolUseId, content: "lint errors found" }],
+        },
+      })
+      const path = join(dir, "t.jsonl")
+      await writeFile(path, `${[assistant, user].join("\n")}\n`, "utf-8")
+      const out = await extractPreviousOutput(path, 0, "lint")
+      expect(out).toBe("lint errors found")
+    }))
+
+  test("returns empty string when tool_use_id not found", () =>
+    withDir(async (dir) => {
+      const assistant = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", id: "tu_x", name: "Bash", input: { command: "bun test" } }],
+        },
+      })
+      // Tool result references a different id
+      const user = JSON.stringify({
+        type: "user",
+        message: {
+          content: [{ type: "tool_result", tool_use_id: "tu_other", content: "output" }],
+        },
+      })
+      const path = join(dir, "t.jsonl")
+      await writeFile(path, `${[assistant, user].join("\n")}\n`, "utf-8")
+      const out = await extractPreviousOutput(path, 0, "test")
+      expect(out).toBe("")
+    }))
+
+  test("returns empty string for missing file", async () => {
+    const out = await extractPreviousOutput("/nonexistent/path.jsonl", 0, "test")
+    expect(out).toBe("")
+  })
+
+  test("returns empty string when priorSourceLineIdx out of range", () =>
+    withDir(async (dir) => {
+      const lines = transcriptWithResult("bun test", "output")
+      const path = join(dir, "t.jsonl")
+      await writeFile(path, `${lines.join("\n")}\n`, "utf-8")
+      const out = await extractPreviousOutput(path, 99, "test")
+      expect(out).toBe("")
+    }))
+
+  test("skips wrong-kind commands when extracting id", () =>
+    withDir(async (dir) => {
+      const toolUseId = "tu_lint"
+      const assistant = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", id: toolUseId, name: "Bash", input: { command: "bun run lint" } },
+          ],
+        },
+      })
+      const user = JSON.stringify({
+        type: "user",
+        message: {
+          content: [{ type: "tool_result", tool_use_id: toolUseId, content: "lint output" }],
+        },
+      })
+      const path = join(dir, "t.jsonl")
+      await writeFile(path, `${[assistant, user].join("\n")}\n`, "utf-8")
+      // Ask for "test" kind — line has "lint" command — should return ""
+      const out = await extractPreviousOutput(path, 0, "test")
+      expect(out).toBe("")
     }))
 })

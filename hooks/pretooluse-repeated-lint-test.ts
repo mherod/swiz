@@ -193,6 +193,108 @@ export async function parseTranscriptEvents(transcriptPath: string): Promise<Tra
   return events
 }
 
+// ── Remediation: surface errors from the previous same-kind run ───────────────
+// Correlates the priorEvent.sourceLineIdx → tool_use_id in the assistant message
+// → tool_result text in the subsequent user message. Parsed errors are appended
+// to the block message so the agent knows exactly what to edit.
+
+const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
+
+/** Extract the tool_use id for the first matching-kind bash call in a JSONL line. */
+export function extractToolUseIdFromLine(line: string, kind: CommandKind): string | null {
+  try {
+    const entry = JSON.parse(line)
+    if (entry?.type !== "assistant") return null
+    const content = entry?.message?.content
+    if (!Array.isArray(content)) return null
+    for (const block of content) {
+      if (block?.type !== "tool_use") continue
+      if (!isShellTool(String(block.name ?? ""))) continue
+      const cmd = String((block.input as Record<string, unknown>)?.command ?? "").normalize("NFKC")
+      if (classifyCommand(cmd) === kind) return String(block.id ?? "") || null
+    }
+  } catch {
+    // ignore malformed lines
+  }
+  return null
+}
+
+/** Read the tool_result text for a given tool_use_id from subsequent transcript lines. */
+export async function extractPreviousOutput(
+  transcriptPath: string,
+  priorSourceLineIdx: number,
+  kind: CommandKind
+): Promise<string> {
+  let text = ""
+  try {
+    text = await Bun.file(transcriptPath).text()
+  } catch {
+    return ""
+  }
+
+  const lines = text.split("\n").filter((l) => l.trim())
+  const priorLine = lines[priorSourceLineIdx]
+  if (!priorLine) return ""
+
+  const toolUseId = extractToolUseIdFromLine(priorLine, kind)
+  if (!toolUseId) return ""
+
+  // Scan lines after the prior assistant message for the matching tool_result.
+  for (let i = priorSourceLineIdx + 1; i < lines.length; i++) {
+    try {
+      const entry = JSON.parse(lines[i]!)
+      if (entry?.type !== "user") continue
+      const content = entry?.message?.content
+      if (!Array.isArray(content)) continue
+      for (const block of content) {
+        if (block?.tool_use_id !== toolUseId) continue
+        const inner: unknown = block.content
+        if (typeof inner === "string") return inner
+        if (Array.isArray(inner)) {
+          return (inner as Array<{ type?: string; text?: string }>)
+            .filter((b) => b?.type === "text")
+            .map((b) => b.text ?? "")
+            .join("\n")
+        }
+      }
+    } catch {
+      // ignore malformed lines
+    }
+  }
+  return ""
+}
+
+/** Parse command output and return specific file/line error hints for the block message. */
+export function buildRemediationHints(output: string, kind: CommandKind): string {
+  if (!output.trim()) return ""
+
+  const clean = output.replace(ANSI_RE, "")
+  const lines = clean.split("\n")
+  const hits: string[] = []
+
+  for (const line of lines) {
+    const t = line.trim()
+    if (!t || t.length > 200) continue
+
+    const isError =
+      kind === "test"
+        ? /\(fail\)|✗|error:.*expect|expect.*received|\.test\.\w+:\d+/i.test(t)
+        : /\.(ts|tsx|js|jsx|json):\d+|\berror\b.*TS\d+|lint\/\w+/i.test(t)
+
+    if (isError) {
+      hits.push(t)
+      if (hits.length >= 6) break
+    }
+  }
+
+  if (hits.length === 0) return ""
+
+  return (
+    "\n\n**Specific issues from the previous run — edit these to clear the gate:**\n" +
+    hits.map((h) => `  • ${h}`).join("\n")
+  )
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -249,6 +351,14 @@ async function main(): Promise<void> {
   const label = COMMAND_LABEL[currentKind]
   const firstLine = command.split("\n")[0]?.trim().slice(0, 80) ?? command.trim()
 
+  // Extract specific errors from the previous run to guide remediation.
+  const prevOutput = await extractPreviousOutput(
+    transcriptPath,
+    priorEvent.sourceLineIdx,
+    currentKind
+  )
+  const remediationHints = buildRemediationHints(prevOutput, currentKind)
+
   denyPreToolUse(
     `**Consecutive ${label} blocked.**\n\n` +
       `You ran \`${label}\` and immediately tried to run it again without editing any files in between. ` +
@@ -258,6 +368,7 @@ async function main(): Promise<void> {
         "Edit any file to signal you acted on the output, or update CLAUDE.md with a DO/DON'T rule.",
         `Then re-run without filters: \`${firstLine.replace(/\s*\|.*$/, "").trim()}\``,
       ]) +
+      remediationHints +
       `\nThis gate clears once you edit any file — signalling you acted on the output rather than blindly retrying.`
   )
 }
