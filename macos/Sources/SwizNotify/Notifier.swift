@@ -13,29 +13,32 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func deliver(args: NotifyArgs) async -> ExitCode {
-        // Register action categories if requested (button actions and/or text-input actions)
+        // Always register a category so macOS can route banner clicks back to this process.
+        // Without a registered category the process exits before the user can interact,
+        // causing an "app is not open" error when the notification is clicked.
         let hasActions = !args.actions.isEmpty || !args.textActions.isEmpty
-        if hasActions {
-            var allActions: [UNNotificationAction] = args.actions.map {
-                UNNotificationAction(identifier: $0.identifier, title: $0.title, options: [.foreground])
-            }
-            for ta in args.textActions {
-                allActions.append(UNTextInputNotificationAction(
-                    identifier: ta.identifier,
-                    title: ta.title,
-                    options: [.foreground],
-                    textInputButtonTitle: ta.title,
-                    textInputPlaceholder: ta.placeholder
-                ))
-            }
-            let category = UNNotificationCategory(
-                identifier: args.categoryIdentifier.isEmpty ? "swiz-actions" : args.categoryIdentifier,
-                actions: allActions,
-                intentIdentifiers: [],
-                options: [.customDismissAction]
-            )
-            UNUserNotificationCenter.current().setNotificationCategories([category])
+        var allActions: [UNNotificationAction] = args.actions.map {
+            UNNotificationAction(identifier: $0.identifier, title: $0.title, options: [.foreground])
         }
+        for ta in args.textActions {
+            allActions.append(UNTextInputNotificationAction(
+                identifier: ta.identifier,
+                title: ta.title,
+                options: [.foreground],
+                textInputButtonTitle: ta.title,
+                textInputPlaceholder: ta.placeholder
+            ))
+        }
+        let categoryId = args.categoryIdentifier.isEmpty
+            ? (hasActions ? "swiz-actions" : "swiz-default")
+            : args.categoryIdentifier
+        let category = UNNotificationCategory(
+            identifier: categoryId,
+            actions: allActions,
+            intentIdentifiers: [],
+            options: hasActions ? [.customDismissAction] : []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
 
         // Request authorization
         let granted = await requestAuthorization()
@@ -54,9 +57,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 ? .default
                 : UNNotificationSound(named: UNNotificationSoundName(args.sound))
         }
-        if hasActions {
-            content.categoryIdentifier = args.categoryIdentifier.isEmpty ? "swiz-actions" : args.categoryIdentifier
-        }
+        content.categoryIdentifier = categoryId
 
         // Attach image if provided
         if !args.imageURL.isEmpty {
@@ -79,17 +80,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             return .deliveryFailed
         }
 
-        // Wait for user response (if actions registered) or timeout
-        if hasActions {
-            let result = await withTimeout(seconds: args.timeout) {
-                await self.waitForResponse()
-            }
-            if let output = result {
-                fputs("\(output)\n", stdout)  // stdout: "id" or "id:userText"
-            }
-        } else {
-            // Brief wait to ensure delivery before exit
-            try? await Task.sleep(nanoseconds: 500_000_000)
+        // Wait for user response or timeout — keeping the process alive until the banner
+        // is dismissed or clicked ensures macOS can route interactions back here.
+        let result = await withTimeout(seconds: args.timeout) {
+            await self.waitForResponse()
+        }
+        if hasActions, let output = result {
+            fputs("\(output)\n", stdout)  // stdout: "id" or "id:userText"
         }
 
         return .success
