@@ -8,6 +8,7 @@ import {
   compactionChecklistSteps,
   manualCompactionFallback,
 } from "../memory-compaction-guidance.ts"
+import { exceedsMemoryThresholds } from "../memory-thresholds.ts"
 import { getProviderAdapter } from "../provider-adapters.ts"
 import {
   DEFAULT_MEMORY_LINE_THRESHOLD,
@@ -94,9 +95,11 @@ function getThresholdStatus(
   stats: FileStats,
   thresholds: SourceThresholds
 ): { exceeded: boolean; indicator: string } {
-  const lineExceeded = stats.lines > thresholds.lines
-  const wordExceeded = stats.words > thresholds.words
-  if (lineExceeded || wordExceeded) {
+  const exceeded = exceedsMemoryThresholds(stats, {
+    lineThreshold: thresholds.lines,
+    wordThreshold: thresholds.words,
+  })
+  if (exceeded) {
     return { exceeded: true, indicator: ` ${YELLOW}⚠${RESET}` }
   }
 

@@ -9,6 +9,7 @@ import {
   compactionChecklistSteps,
   manualCompactionFallback,
 } from "../src/memory-compaction-guidance.ts"
+import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
 import {
   DEFAULT_MEMORY_LINE_THRESHOLD,
   DEFAULT_MEMORY_WORD_THRESHOLD,
@@ -71,13 +72,10 @@ async function main(): Promise<void> {
   const content = await file.text()
   const { lines, words } = countStats(content)
 
-  const violations: string[] = []
-  if (lines > lineThreshold) {
-    violations.push(`${lines} lines (threshold: ${lineThreshold})`)
-  }
-  if (words > wordThreshold) {
-    violations.push(`${words} words (threshold: ${wordThreshold})`)
-  }
+  const violations = getMemoryThresholdViolations(
+    { lines, words },
+    { lineThreshold, wordThreshold }
+  )
 
   if (violations.length === 0) return
 

@@ -10,6 +10,7 @@ import {
   compactionChecklistSteps,
   manualCompactionFallback,
 } from "../src/memory-compaction-guidance.ts"
+import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
 import { blockStop, formatActionPlan, isGitRepo, skillAdvice } from "./hook-utils.ts"
 import { countStats, isMemoryFile, resolveThresholds } from "./posttooluse-memory-size.ts"
 import { stopHookInputSchema } from "./schemas.ts"
@@ -84,13 +85,10 @@ async function main(): Promise<void> {
     const content = await file.text()
     const { lines, words } = countStats(content)
 
-    const fileViolations: string[] = []
-    if (lines > lineThreshold) {
-      fileViolations.push(`${lines} lines (threshold: ${lineThreshold})`)
-    }
-    if (words > wordThreshold) {
-      fileViolations.push(`${words} words (threshold: ${wordThreshold})`)
-    }
+    const fileViolations = getMemoryThresholdViolations(
+      { lines, words },
+      { lineThreshold, wordThreshold }
+    )
 
     if (fileViolations.length > 0) {
       violations.push({
