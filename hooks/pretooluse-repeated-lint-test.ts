@@ -326,6 +326,41 @@ export function buildRemediationHints(output: string, kind: CommandKind): string
   )
 }
 
+// ── Read-output step builder ─────────────────────────────────────────────────
+
+/**
+ * Build the action-plan step that directs the agent to read previous output.
+ *
+ * When a transcript path and source line index are available, the step includes
+ * a concrete file reference so the agent can locate the output directly.
+ * When the previous output could not be resolved (extractPreviousOutput returned
+ * ""), the language is softened to acknowledge the output may not be available.
+ */
+export function buildReadOutputStep(
+  label: string,
+  transcriptPath: string,
+  priorSourceLineIdx: number,
+  prevOutput: string
+): string {
+  if (prevOutput) {
+    // Output was successfully extracted — point to the exact transcript location.
+    return (
+      `Read the full output from the previous ${label} run ` +
+      `(transcript: \`${transcriptPath}\`, source line index: ${priorSourceLineIdx}).`
+    )
+  }
+  if (transcriptPath) {
+    // Transcript exists but output extraction failed — provide the path with softer guidance.
+    return (
+      `Review the previous ${label} output. The transcript is at \`${transcriptPath}\` ` +
+      `(source line index: ${priorSourceLineIdx}), but the prior output could not be extracted automatically — ` +
+      `check the transcript manually or review the errors shown below.`
+    )
+  }
+  // No transcript path at all — generic fallback.
+  return `Read the full output from the previous ${label} run.`
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -390,12 +425,15 @@ async function main(): Promise<void> {
   )
   const remediationHints = buildRemediationHints(prevOutput, currentKind)
 
+  // Build the "read previous output" step with a concrete file reference when available.
+  const readStep = buildReadOutputStep(label, transcriptPath, priorEvent.sourceLineIdx, prevOutput)
+
   denyPreToolUse(
     `**Consecutive ${label} blocked.**\n\n` +
       `You ran \`${label}\` and immediately tried to run it again without editing any files in between. ` +
       `This is the over-filtering pattern — re-running with different grep/tail flags instead of reading the full output.\n\n` +
       formatActionPlan([
-        `Read the full output from the previous ${label} run.`,
+        readStep,
         "Edit any file to signal you acted on the output, or update CLAUDE.md with a DO/DON'T rule.",
         `Then re-run without filters: \`${firstLine.replace(/\s*\|.*$/, "").trim()}\``,
       ]) +

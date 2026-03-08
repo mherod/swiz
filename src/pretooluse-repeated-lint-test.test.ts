@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { collectBlockedToolUseIds } from "../hooks/hook-utils.ts"
 import {
   bashMutatesWorkspace,
+  buildReadOutputStep,
   buildRemediationHints,
   classifyCommand,
   extractPreviousOutput,
@@ -1024,4 +1025,39 @@ describe("extractPreviousOutput", () => {
       const out = await extractPreviousOutput(path, 0, "test")
       expect(out).toBe("")
     }))
+})
+
+// ── buildReadOutputStep ─────────────────────────────────────────────────────
+
+describe("buildReadOutputStep", () => {
+  test("includes transcript path and source line index when output was extracted", () => {
+    const step = buildReadOutputStep("bun test", "/tmp/transcript.jsonl", 5, "2 pass\n1 fail")
+    expect(step).toContain("/tmp/transcript.jsonl")
+    expect(step).toContain("source line index: 5")
+    expect(step).toContain("Read the full output")
+  })
+
+  test("uses softer language when output could not be extracted", () => {
+    const step = buildReadOutputStep("bun run lint", "/tmp/transcript.jsonl", 3, "")
+    expect(step).toContain("/tmp/transcript.jsonl")
+    expect(step).toContain("source line index: 3")
+    expect(step).toContain("could not be extracted automatically")
+    expect(step).toContain("Review the previous")
+  })
+
+  test("falls back to generic message when no transcript path", () => {
+    const step = buildReadOutputStep("bun test", "", 0, "")
+    expect(step).toBe("Read the full output from the previous bun test run.")
+    expect(step).not.toContain("transcript")
+  })
+
+  test("uses label in all three branches", () => {
+    const withOutput = buildReadOutputStep("bun run build", "/t.jsonl", 1, "output")
+    const withoutOutput = buildReadOutputStep("bun run build", "/t.jsonl", 1, "")
+    const noTranscript = buildReadOutputStep("bun run build", "", 0, "")
+
+    expect(withOutput).toContain("bun run build")
+    expect(withoutOutput).toContain("bun run build")
+    expect(noTranscript).toContain("bun run build")
+  })
 })
