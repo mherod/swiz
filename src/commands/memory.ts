@@ -350,7 +350,8 @@ export const memoryCommand: Command = {
         manualCompactionFallback("each file")
       )
       const compactionChecklist = formatActionPlan(
-        compactionChecklistSteps("Re-check each file after edits with `wc -l` and `wc -w`.")
+        compactionChecklistSteps("Re-check each file after edits with `wc -l` and `wc -w`."),
+        { header: "Compaction checklist:" }
       ).trimEnd()
 
       const guidance = [

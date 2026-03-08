@@ -90,7 +90,8 @@ async function main(): Promise<void> {
   const compactionChecklist = formatActionPlan(
     compactionChecklistSteps(
       `Re-check size after edits: \`wc -l "${filePath}" && wc -w "${filePath}"\`.`
-    )
+    ),
+    { header: "Compaction checklist:" }
   ).trimEnd()
 
   const context = [

@@ -132,7 +132,8 @@ async function main() {
         manualCompactionGuidanceFallback()
       )
       const inlineChecklist = formatActionPlan(
-        compactionChecklistSteps(`Re-check size: \`wc -w ${filePath}\``)
+        compactionChecklistSteps(`Re-check size: \`wc -w ${filePath}\``),
+        { header: "Compaction checklist:" }
       )
 
       denyPreToolUse(

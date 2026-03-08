@@ -61,8 +61,10 @@ if (!hasPRCheck) {
 }
 
 allowPreToolUse(
-  `Advisory: the following checks have not been run in this session:\n\n` +
-    formatActionPlan(missing) +
+  `Advisory: some pre-push checks are missing.\n\n` +
+    formatActionPlan(missing, {
+      header: "The following checks have not been run in this session:",
+    }) +
     `\n\nConsider running these checks to avoid pushing large work directly\n` +
     `to main in a collaborative repo, or creating duplicate PRs.`
 )

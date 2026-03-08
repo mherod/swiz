@@ -153,14 +153,16 @@ async function main() {
       "The `as any` escape hatch destroys type safety and creates technical debt. It's a",
       "silent agreement to abandon the type system at that point in the code.",
       "",
-      "Your only options:",
-      formatActionPlan([
-        "Type the value correctly using proper TypeScript types",
-        "Use `unknown` temporarily with proper type guards to narrow it down",
-        "If the library is untyped, add or use @types definitions",
-        "Use `as const` if you need to constrain a literal value",
-        "Use generic types to accept the value's actual type",
-      ]).trimEnd(),
+      formatActionPlan(
+        [
+          "Type the value correctly using proper TypeScript types",
+          "Use `unknown` temporarily with proper type guards to narrow it down",
+          "If the library is untyped, add or use @types definitions",
+          "Use `as const` if you need to constrain a literal value",
+          "Use generic types to accept the value's actual type",
+        ],
+        { header: "Your only options:" }
+      ).trimEnd(),
       "",
       "Never `as any`. Fix the type instead. The type system exists to prevent bugs.",
       "Every `as any` is a future bug waiting to happen.",

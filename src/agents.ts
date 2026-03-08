@@ -89,7 +89,8 @@ export const AGENTS: AgentDef[] = [
       sessionEnd: "sessionEnd",
       userPromptSubmit: "beforeSubmitPrompt",
       preCompact: "preCompact",
-      notification: "notification",
+      // Cursor has no "notification" hook type; map to a valid post-agent event.
+      notification: "afterAgentResponse",
       subagentStart: "subagentStart",
       subagentStop: "subagentStop",
     },

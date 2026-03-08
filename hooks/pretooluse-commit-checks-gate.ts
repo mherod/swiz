@@ -44,8 +44,9 @@ if (hasBranchCheck) process.exit(0)
 
 denyPreToolUse(
   `BLOCKED: git commit requires a branch check to run first.\n\n` +
-    `The following mandatory check has not been run in this session.\n\n` +
-    formatActionPlan(["Branch check (not run yet): `git branch --show-current`"]) +
+    formatActionPlan(["Branch check (not run yet): `git branch --show-current`"], {
+      header: "The following mandatory check has not been run in this session:",
+    }) +
     `\n\nRun the branch check, review the output, then retry git commit.\n\n` +
     `Why this matters: committing without verifying the branch risks landing\n` +
     `work directly on a protected or shared main branch without a feature branch.`

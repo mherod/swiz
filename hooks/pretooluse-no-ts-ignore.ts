@@ -71,13 +71,15 @@ async function main() {
       `You cannot add \`@${kwNoCheck}\` directives. This disables ALL type checking`,
       "for the entire file, hiding every type error simultaneously.",
       "",
-      "Your only path forward:",
-      formatActionPlan([
-        "Run tsc to see every type error in the file",
-        "Fix each error to satisfy the type system",
-        "Remove the directive once all errors are resolved",
-        "Never suppress type errors-fix the underlying issues",
-      ]).trimEnd(),
+      formatActionPlan(
+        [
+          "Run tsc to see every type error in the file",
+          "Fix each error to satisfy the type system",
+          "Remove the directive once all errors are resolved",
+          "Never suppress type errors-fix the underlying issues",
+        ],
+        { header: "Your only path forward:" }
+      ).trimEnd(),
       "",
       "The type checker is not negotiable, not postponeable, not arguable with. It is the source",
       "of truth for type safety. Rules exist because they prevent bugs, enforce correctness,",
@@ -94,13 +96,15 @@ async function main() {
       "",
       `You cannot add \`@${kwIgnore}\` comments. The compiler has identified a type error in your code.`,
       "",
-      "Your only path forward:",
-      formatActionPlan([
-        "Read the exact TypeScript error message and understand what type constraint is violated",
-        "Fix your code to satisfy the type system",
-        "Re-run tsc to confirm the error is gone",
-        "Never suppress the type error-fix the underlying issue",
-      ]).trimEnd(),
+      formatActionPlan(
+        [
+          "Read the exact TypeScript error message and understand what type constraint is violated",
+          "Fix your code to satisfy the type system",
+          "Re-run tsc to confirm the error is gone",
+          "Never suppress the type error-fix the underlying issue",
+        ],
+        { header: "Your only path forward:" }
+      ).trimEnd(),
       "",
       `If fixing is genuinely impossible (third-party types, impossible narrowing), use \`@${kwExpect}\``,
       `instead. Unlike \`@${kwIgnore}\`, \`@${kwExpect}\` fails compilation when the error goes away,`,

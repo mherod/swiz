@@ -51,8 +51,9 @@ const verb = requiredSkill === "commit" ? "commit" : "push"
 
 denyPreToolUse(
   `BLOCKED: git ${verb} requires the /${requiredSkill} skill to be used first.\n\n` +
-    `The /${requiredSkill} skill has not been invoked in this session.\n\n` +
-    formatActionPlan([`Invoke the /${requiredSkill} skill before running git ${verb}.`]) +
+    formatActionPlan([`Invoke the /${requiredSkill} skill before running git ${verb}.`], {
+      header: `The /${requiredSkill} skill has not been invoked in this session:`,
+    }) +
     `\nWhy this matters: the /${requiredSkill} skill enforces the complete ` +
     `${verb} workflow (branch checks, task preflight, message format). ` +
     `Running git ${verb} directly skips these safeguards.`

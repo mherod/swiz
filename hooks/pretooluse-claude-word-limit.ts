@@ -31,7 +31,8 @@ async function main(): Promise<void> {
     const over = stats.words - WORD_LIMIT
     const reduction = over + 1 // Suggest reducing at least (over + 1) words to get back under
     const compactionChecklist = formatActionPlan(
-      compactionChecklistSteps("Re-check after edits: `wc -w CLAUDE.md`")
+      compactionChecklistSteps("Re-check after edits: `wc -w CLAUDE.md`"),
+      { header: "Compaction checklist:" }
     )
     const message = `CLAUDE.md exceeds 5000-word limit: ${stats.words} words (${over} over).
 

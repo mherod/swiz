@@ -317,19 +317,20 @@ export function emitContext(eventName: string, context: string, cwd?: string): n
 
 /**
  * Format a numbered action plan for inclusion in stop hook block reasons.
- * Returns an "Action plan:\n  1. ...\n  2. ..." block ready to append to a reason string.
+ * Returns a "<header>\n  1. ...\n  2. ..." block ready to append to a reason string.
  * When requested, canonical tool names (for example "TaskCreate") are
  * translated to the current agent's tool alias before rendering.
  */
 export function formatActionPlan(
   steps: string[],
-  options?: { translateToolNames?: boolean }
+  options?: { translateToolNames?: boolean; header?: string }
 ): string {
   if (steps.length === 0) return ""
   const agent = options?.translateToolNames ? detectCurrentAgent() : null
   const renderedSteps = agent ? steps.map((step) => translateMatcher(step, agent) ?? step) : steps
   const numbered = renderedSteps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")
-  return `Action plan:\n${numbered}\n`
+  const header = options?.header ?? "Action plan:"
+  return `${header}\n${numbered}\n`
 }
 
 /** Return the current agent's tool name for a canonical tool identifier. */

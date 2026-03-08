@@ -252,6 +252,12 @@ describe("agents.ts", () => {
       expect(result).toBe("beforeSubmitPrompt")
     })
 
+    it("translates notification for Cursor to supported event", () => {
+      const cursor = getAgent("cursor")!
+      const result = translateEvent("notification", cursor)
+      expect(result).toBe("afterAgentResponse")
+    })
+
     it("translates stop event for Gemini", () => {
       const gemini = getAgent("gemini")!
       const result = translateEvent("stop", gemini)

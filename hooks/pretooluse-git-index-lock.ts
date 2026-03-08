@@ -7,6 +7,7 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 import {
   denyPreToolUse,
+  formatActionPlan,
   GIT_ANY_CMD_RE,
   git,
   isShellTool,
@@ -37,9 +38,13 @@ denyPreToolUse(
     "This lock will cause your git command to fail with:",
     "  \"fatal: Unable to create '.../.git/index.lock': File exists.\"",
     "",
-    "To resolve:",
-    "  1. Check if another git process is still running: `ps aux | grep git`",
-    `  2. If no git process is active, remove the stale lock: \`trash ${lockPath}\``,
-    "  3. Retry your git command after the lock is cleared.",
+    formatActionPlan(
+      [
+        "Check if another git process is still running: `ps aux | grep git`",
+        `If no git process is active, remove the stale lock: \`trash ${lockPath}\``,
+        "Retry your git command after the lock is cleared.",
+      ],
+      { header: "To resolve:" }
+    ).trimEnd(),
   ].join("\n")
 )

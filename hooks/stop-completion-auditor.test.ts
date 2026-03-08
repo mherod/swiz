@@ -29,6 +29,16 @@ describe("formatActionPlan", () => {
     expect(formatActionPlan(["a"]).startsWith("Action plan:\n")).toBe(true)
   })
 
+  it("supports custom header text", () => {
+    expect(formatActionPlan(["Do the thing"], { header: "To resolve:" })).toBe(
+      "To resolve:\n  1. Do the thing\n"
+    )
+  })
+
+  it("still returns empty string for empty steps with custom header", () => {
+    expect(formatActionPlan([], { header: "To resolve:" })).toBe("")
+  })
+
   it("ends with a newline when non-empty", () => {
     expect(formatActionPlan(["any step"]).endsWith("\n")).toBe(true)
   })

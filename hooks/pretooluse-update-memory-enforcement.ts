@@ -251,16 +251,22 @@ async function main(): Promise<void> {
   const missingSkill = !state.skillReadComplete
   const reason = missingSkill
     ? `${SELF_SENTINEL}: ${toolName} is BLOCKED until you finish the required memory follow-through from an earlier hook response.\n\n` +
-      formatActionPlan([
-        "Read the /update-memory skill by opening its SKILL.md.",
-        "Write the resulting DO or DON'T rule into a project markdown file such as CLAUDE.md.",
-      ]) +
+      formatActionPlan(
+        [
+          "Read the /update-memory skill by opening its SKILL.md.",
+          "Write the resulting DO or DON'T rule into a project markdown file such as CLAUDE.md.",
+        ],
+        { header: "To resolve:" }
+      ) +
       `\n` +
       `This gate clears automatically once the transcript shows both steps after the original reminder.`
     : `${SELF_SENTINEL}: ${toolName} is BLOCKED until you record the required workflow rule in a markdown file.\n\n` +
-      formatActionPlan([
-        "Write the DO or DON'T rule into a project markdown file such as CLAUDE.md.",
-      ]) +
+      formatActionPlan(
+        ["Write the DO or DON'T rule into a project markdown file such as CLAUDE.md."],
+        {
+          header: "To resolve:",
+        }
+      ) +
       `\n` +
       `This gate clears automatically once the transcript shows that markdown write after the original reminder.`
 
