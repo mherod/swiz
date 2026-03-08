@@ -804,6 +804,64 @@ describe("buildRemediationHints", () => {
     expect(hints).toContain("useAuth.test.ts")
   })
 
+  test("extracts Playwright ✘ (U+2718) heavy ballot X failure line", () => {
+    const output = "  ✘ 1 [chromium] › tests/login.spec.ts:23:5 › Login › should redirect (3.2s)"
+    const hints = buildRemediationHints(output, "test")
+    expect(hints).toContain("✘")
+  })
+
+  test("extracts Playwright numbered browser context line", () => {
+    const output = [
+      "  1) [chromium] › tests/auth.spec.ts:10:5 › Auth › login redirects",
+      "     Error: expect(received).toBe(expected)",
+    ].join("\n")
+    const hints = buildRemediationHints(output, "test")
+    expect(hints).toContain("[chromium]")
+  })
+
+  test("extracts Playwright .spec.ts file reference with line number", () => {
+    const output = "    at tests/auth.spec.ts:42:5"
+    const hints = buildRemediationHints(output, "test")
+    expect(hints).toContain("auth.spec.ts:42")
+  })
+
+  test("extracts Playwright N failed summary line", () => {
+    const output = ["  2 passed", "  1 failed"].join("\n")
+    const hints = buildRemediationHints(output, "test")
+    expect(hints).toContain("1 failed")
+  })
+
+  test("extracts Cypress N failing summary line", () => {
+    const output = ["  2 passing (3s)", "  1 failing"].join("\n")
+    const hints = buildRemediationHints(output, "test")
+    expect(hints).toContain("1 failing")
+  })
+
+  test("extracts Cypress CypressError: line", () => {
+    const output = "    CypressError: Timed out retrying after 4000ms"
+    const hints = buildRemediationHints(output, "test")
+    expect(hints).toContain("CypressError:")
+  })
+
+  test("extracts Cypress .cy.ts file reference with line number", () => {
+    const output = "    at Context.<anonymous> (cypress/e2e/login.cy.ts:15:5)"
+    const hints = buildRemediationHints(output, "test")
+    expect(hints).toContain("login.cy.ts:15")
+  })
+
+  test("does not flag Playwright/Cypress patterns for lint kind", () => {
+    const output = [
+      "  1) [chromium] › tests/auth.spec.ts:10:5",
+      "  1 failed",
+      "  CypressError: timeout",
+    ].join("\n")
+    const hints = buildRemediationHints(output, "lint")
+    // lint kind only matches file:line patterns — auth.spec.ts:10 will match .(ts):\d+
+    // but CypressError and "1 failed" must NOT appear as lint errors
+    expect(hints).not.toContain("CypressError")
+    expect(hints).not.toContain("1 failed")
+  })
+
   test("does not flag FAIL lines for lint kind (not a test runner)", () => {
     // "FAIL" appears in some lint output (e.g. summary lines) but should not
     // be treated as a test-runner pattern when kind is lint.

@@ -276,9 +276,11 @@ export async function extractPreviousOutput(
  * Parse command output and return specific file/line error hints for the block message.
  *
  * Supported runners and patterns:
- *  - bun test:  `(fail)`, `✗`
+ *  - bun test:  `(fail)`, `✗` (U+2717)
  *  - Vitest:    `×` (U+00D7), `FAIL src/path.test.ts`, `AssertionError:`
  *  - Jest:      `●` (U+25CF) before test name, `✕` (U+2715), `FAIL src/path.test.ts`
+ *  - Playwright: `✘` (U+2718), `N) [chromium/firefox/webkit] › …`, `.spec.ts:N`, `N failed`
+ *  - Cypress:   `N failing`, `CypressError:`, `.cy.ts:N`
  *  - lint/build: `file.ts:N`, TypeScript `TS\d+` codes, `lint/ruleName`
  */
 export function buildRemediationHints(output: string, kind: CommandKind): string {
@@ -294,10 +296,12 @@ export function buildRemediationHints(output: string, kind: CommandKind): string
 
     const isError =
       kind === "test"
-        ? // bun: (fail), ✗
+        ? // bun: (fail), ✗ (U+2717)
           // Vitest: × (U+00D7 multiplication sign), FAIL src/path.test.ts, AssertionError:
           // Jest:  ● before test name (U+25CF), ✕ (U+2715 cross mark), FAIL src/path.test.ts
-          /\(fail\)|[✗×✕]|●\s|AssertionError:|error:.*expect|expect.*received|\.test\.\w+:\d+|\bFAIL\s+\S+\.(?:test|spec)\./i.test(
+          // Playwright: ✘ (U+2718 heavy ballot X), N) [chromium] › …, .spec.ts:N, N failed
+          // Cypress:    N failing, CypressError:, .cy.ts:N
+          /\(fail\)|[✗×✕✘]|●\s|AssertionError:|CypressError:|error:.*expect|expect.*received|\.(?:test|spec|cy)\.\w+:\d+|\bFAIL\s+\S+\.(?:test|spec)\.\w|\d+\)\s+\[(?:chromium|firefox|webkit)\]|\d+\s+fail(?:ed|ing)\b/i.test(
             t
           )
         : /\.(ts|tsx|js|jsx|json):\d+|\berror\b.*TS\d+|lint\/\w+/i.test(t)
