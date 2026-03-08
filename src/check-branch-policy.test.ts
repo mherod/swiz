@@ -1,18 +1,5 @@
 import { describe, expect, it } from "bun:test"
-
-// Test the pure utility functions extracted from check-branch-policy.ts
-
-const DOCS_CONFIG_RE =
-  /\.(md|txt|json|ya?ml|toml)$|\.config\.[jt]s$|\.env\.example$|LICENSE|^\.github\/|^\.husky\//
-
-function isDocsOrConfig(filePath: string): boolean {
-  return DOCS_CONFIG_RE.test(filePath)
-}
-
-function parseCommitType(message: string): string | null {
-  const match = message.match(/^(\w+)(\(.+?\))?[!]?:/)
-  return match?.[1] ?? null
-}
+import { isDocsOrConfig, parseCommitType } from "./git-helpers.ts"
 
 describe("isDocsOrConfig", () => {
   it("matches markdown files", () => {

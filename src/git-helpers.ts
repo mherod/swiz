@@ -294,6 +294,30 @@ export async function getGitBranchStatus(cwd: string): Promise<GitBranchStatus |
   return { branch, ahead, behind, staged, unstaged, untracked, conflicts, stash, changedFallback }
 }
 
+// ─── Branch-policy classification helpers ────────────────────────────────────
+
+/**
+ * Matches files that are docs, config, or tooling — not production source code.
+ * Used by push-gate scripts to distinguish docs-only commits from code changes.
+ */
+export const DOCS_CONFIG_RE =
+  /\.(md|txt|json|ya?ml|toml)$|\.config\.[jt]s$|\.env\.example$|LICENSE|^\.github\/|^\.husky\//
+
+/** Returns true when a file path matches the docs/config classification. */
+export function isDocsOrConfig(filePath: string): boolean {
+  return DOCS_CONFIG_RE.test(filePath)
+}
+
+/**
+ * Extracts the conventional-commit type prefix from a commit message.
+ * Returns the type string (e.g. "feat", "fix") or null if the message
+ * does not follow the conventional-commit format.
+ */
+export function parseCommitType(message: string): string | null {
+  const match = message.match(/^(\w+)(\(.+?\))?[!]?:/)
+  return match?.[1] ?? null
+}
+
 // ─── Issue helpers ───────────────────────────────────────────────────────────
 
 /**

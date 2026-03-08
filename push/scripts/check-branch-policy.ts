@@ -14,6 +14,7 @@
 
 import { getDefaultBranch, gh, git, isDefaultBranch, isGitRepo } from "../../hooks/hook-utils.ts"
 import { detectProjectCollaborationPolicy } from "../../src/collaboration-policy.ts"
+import { isDocsOrConfig, parseCommitType } from "../../src/git-helpers.ts"
 
 const MAX_FILES_HARD_BLOCK = 5
 const MAX_TRIVIAL_FILES = 3
@@ -31,19 +32,7 @@ const TRIVIAL_TYPES = new Set([
   "revert",
 ])
 
-const DOCS_CONFIG_RE =
-  /\.(md|txt|json|ya?ml|toml)$|\.config\.[jt]s$|\.env\.example$|LICENSE|^\.github\/|^\.husky\//
-
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-function isDocsOrConfig(filePath: string): boolean {
-  return DOCS_CONFIG_RE.test(filePath)
-}
-
-function parseCommitType(message: string): string | null {
-  const match = message.match(/^(\w+)(\(.+?\))?[!]?:/)
-  return match?.[1] ?? null
-}
 
 function block(reason: string): never {
   console.error(`BLOCKED: ${reason}`)
