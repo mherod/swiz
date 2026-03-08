@@ -25,7 +25,6 @@ import { translateMatcher } from "../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
 import { readProjectSettings, STATE_TRANSITIONS, stateDataSchema } from "../src/settings.ts"
 import { skillAdvice, skillExists } from "../src/skill-utils.ts"
-import { getDefaultTaskRoots } from "../src/task-roots.ts"
 
 export { skillAdvice, skillExists }
 export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
@@ -522,13 +521,13 @@ export interface SessionTask {
 /** Resolve ~/.claude/tasks for the active home directory. */
 export function getTasksRoot(home: string = process.env.HOME ?? ""): string | null {
   if (!home) return null
-  return getDefaultTaskRoots(home).tasksDir
+  return join(home, ".claude", "tasks")
 }
 
 /** Resolve ~/.claude/projects for the active home directory. */
 export function getProjectsRoot(home: string = process.env.HOME ?? ""): string | null {
   if (!home) return null
-  return getDefaultTaskRoots(home).projectsDir
+  return join(home, ".claude", "projects")
 }
 
 /** Resolve ~/.claude/tasks/<sessionId> for the active home directory. */
