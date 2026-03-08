@@ -27,16 +27,10 @@ const providedTitle = (input.title as string | undefined)?.trim() ?? ""
 if (!message) process.exit(0)
 
 // ── Resolve binary ────────────────────────────────────────────────────────────
-// Preference order:
-//   1. SWIZ_NOTIFY_BIN env var (user override)
-//   2. SwizNotify.app co-located with this repo (dev path)
-//   3. /usr/local/bin/swiz-notify (installed via make install)
-
 function resolveBinary(): string | null {
   const envOverride = process.env.SWIZ_NOTIFY_BIN
   if (envOverride && existsSync(envOverride)) return envOverride
 
-  // Dev path: find the repo root from this hook file's location
   const repoRoot = join(import.meta.dir, "..")
   const devPath = join(repoRoot, "macos", "SwizNotify.app", "Contents", "MacOS", "swiz-notify")
   if (existsSync(devPath)) return devPath
@@ -48,12 +42,9 @@ function resolveBinary(): string | null {
 }
 
 const binary = resolveBinary()
-if (!binary) {
-  // Binary not available — exit silently rather than noisily failing
-  process.exit(0)
-}
+if (!binary) process.exit(0)
 
-// ── Map notification type to title + sound ────────────────────────────────────
+// ── Title and sound per notification type ─────────────────────────────────────
 function titleForType(type: string): string {
   if (providedTitle) return providedTitle
   switch (type) {
@@ -69,7 +60,7 @@ function titleForType(type: string): string {
 function soundForType(type: string): string {
   switch (type) {
     case "permission_prompt":
-      return "Glass" // attention-grabbing for permission prompts
+      return "Glass"
     case "idle_prompt":
       return "Ping"
     default:
@@ -77,12 +68,18 @@ function soundForType(type: string): string {
   }
 }
 
-const title = titleForType(notificationType)
-const sound = soundForType(notificationType)
-
-// ── Spawn swiz-notify (fire-and-forget, async hook) ───────────────────────────
 const proc = Bun.spawn(
-  [binary, "--title", title, "--body", message, "--sound", sound, "--timeout", "3"],
+  [
+    binary,
+    "--title",
+    titleForType(notificationType),
+    "--body",
+    message,
+    "--sound",
+    soundForType(notificationType),
+    "--timeout",
+    "3",
+  ],
   { stdout: "inherit", stderr: "inherit" }
 )
 

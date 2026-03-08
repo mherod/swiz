@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test"
 
 async function runHook(
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  env: Record<string, string> = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const proc = Bun.spawn(["bun", "hooks/notification-swiz-notify.ts"], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, SWIZ_NOTIFY_BIN: "/nonexistent/swiz-notify" },
+    env: { ...process.env, SWIZ_NOTIFY_BIN: "/nonexistent/swiz-notify", ...env },
   })
   proc.stdin.write(JSON.stringify(payload))
   proc.stdin.end()
@@ -27,7 +28,6 @@ describe("notification-swiz-notify", () => {
   })
 
   test("exits silently when binary not found", async () => {
-    // SWIZ_NOTIFY_BIN points to nonexistent path — hook should exit 0 silently
     const result = await runHook({
       session_id: "test",
       message: "Claude needs your permission",
@@ -41,10 +41,29 @@ describe("notification-swiz-notify", () => {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      env: { ...process.env, SWIZ_NOTIFY_BIN: "/nonexistent/swiz-notify" },
     })
     proc.stdin.write("not json")
     proc.stdin.end()
     await proc.exited
     expect(proc.exitCode).toBe(0)
+  })
+
+  test("exits silently when binary not found for idle_prompt", async () => {
+    const result = await runHook({
+      session_id: "test",
+      message: "Waiting for your input",
+      notification_type: "idle_prompt",
+    })
+    expect(result.exitCode).toBe(0)
+  })
+
+  test("exits silently for unknown notification type", async () => {
+    const result = await runHook({
+      session_id: "test",
+      message: "Something happened",
+      notification_type: "unknown_type",
+    })
+    expect(result.exitCode).toBe(0)
   })
 })
