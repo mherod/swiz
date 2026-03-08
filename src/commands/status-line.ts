@@ -174,20 +174,21 @@ function colorForCount(count: number, medium: number, high: number): string {
   return DIM
 }
 
-function formatCountSegment(
+export function formatCountSegment(
   count: number,
   singular: string,
   plural: string,
   medium: number,
   high: number
-): string {
+): string | null {
+  if (count === 0) return null
   const color = colorForCount(count, medium, high)
   const label = count === 1 ? singular : plural
   return `${color}${count} ${label}${R}`
 }
 
-function formatProjectState(state: ProjectState | null | undefined): string {
-  if (!state) return `${DIM}no state${R}`
+export function formatProjectState(state: ProjectState | null | undefined): string | null {
+  if (!state) return null
   switch (state) {
     case "planning":
       return `\x1b[96m${state}${R}`
@@ -377,7 +378,7 @@ export const statusLineCommand: Command = {
     ])
     const modeSeg = [agentTag, vimTag].filter(Boolean).join(" ")
     const line3Groups = joinGroups([
-      seg("state") ? `${label("state")} ${stateSeg}` : "",
+      seg("state") && stateSeg ? `${label("state")} ${stateSeg}` : "",
       seg("backlog") && ghCountSeg ? `${label("backlog")} ${ghCountSeg}` : "",
       seg("mode") && modeSeg ? `${label("mode")} ${modeSeg}` : "",
       seg("flags") && settingsSeg ? `${label("flags")} ${settingsSeg}` : "",

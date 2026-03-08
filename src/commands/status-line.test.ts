@@ -2,7 +2,13 @@ import { describe, expect, it } from "bun:test"
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { getContextStatsPath, readContextStats, updateContextStats } from "./status-line.ts"
+import {
+  formatCountSegment,
+  formatProjectState,
+  getContextStatsPath,
+  readContextStats,
+  updateContextStats,
+} from "./status-line.ts"
 
 function makeTempProject(): string {
   return mkdtempSync(join(tmpdir(), "swiz-ctx-stats-test-"))
@@ -96,5 +102,50 @@ describe("updateContextStats", () => {
     updateContextStats(dir, 33)
     const stats = readContextStats(dir)
     expect(stats).toEqual({ minPct: 33, maxPct: 33 })
+  })
+})
+
+describe("formatCountSegment", () => {
+  it("returns null for zero count", () => {
+    expect(formatCountSegment(0, "issue", "issues", 10, 25)).toBeNull()
+  })
+
+  it("returns null for zero PR count", () => {
+    expect(formatCountSegment(0, "PR", "PRs", 5, 12)).toBeNull()
+  })
+
+  it("renders singular label for count of 1", () => {
+    const result = formatCountSegment(1, "issue", "issues", 10, 25)
+    expect(result).not.toBeNull()
+    expect(result).toContain("1 issue")
+    expect(result).not.toContain("issues")
+  })
+
+  it("renders plural label for count > 1", () => {
+    const result = formatCountSegment(3, "PR", "PRs", 5, 12)
+    expect(result).not.toBeNull()
+    expect(result).toContain("3 PRs")
+  })
+})
+
+describe("formatProjectState", () => {
+  it("returns null for null state", () => {
+    expect(formatProjectState(null)).toBeNull()
+  })
+
+  it("returns null for undefined state", () => {
+    expect(formatProjectState(undefined)).toBeNull()
+  })
+
+  it("renders 'developing' state", () => {
+    const result = formatProjectState("developing")
+    expect(result).not.toBeNull()
+    expect(result).toContain("developing")
+  })
+
+  it("renders 'planning' state", () => {
+    const result = formatProjectState("planning")
+    expect(result).not.toBeNull()
+    expect(result).toContain("planning")
   })
 })
