@@ -10,8 +10,8 @@
 //        Edit / Write / NotebookEdit  (Claude Code)
 //        StrReplace / EditNotebook    (Cursor)
 //        replace / write_file / apply_patch  (Codex)
-//   2. bashWritesToWorkspace — filesystem integrity monitor for out-of-band
-//      writes made via raw shell commands (redirects, tee, in-place sed).
+//   2. bashMutatesWorkspace — filesystem integrity monitor for out-of-band
+//      mutations via raw shell commands (writes, deletions, moves, directories).
 
 import {
   denyPreToolUse,
@@ -44,18 +44,27 @@ const COMMAND_LABEL: Record<CommandKind, string> = {
 }
 
 // ── Filesystem integrity monitor ─────────────────────────────────────────────
-// Detects bash commands that write to workspace files as a complement to
-// isCodeChangeTool(). Catches out-of-band edits that don't go through an agent
-// edit tool: shell redirects (> / >>), tee, and in-place sed.
+// Detects bash commands that mutate workspace files or directories as a
+// complement to isCodeChangeTool(). Covers all out-of-band mutations:
+//   Writes:     shell redirects (> / >>), tee, in-place sed
+//   Deletions:  rm, trash, unlink
+//   Moves/copies: mv, cp (structural changes)
+//   Directories: mkdir, rmdir
 // Conservative: excludes /dev/ special devices and FD redirects (2>&1).
 
-function bashWritesToWorkspace(cmd: string): boolean {
+function bashMutatesWorkspace(cmd: string): boolean {
   // Output redirect: "> file" or ">> file" — not FD redirect (2>&1) or /dev/
   if (/(?<![0-9&])>>?\s*(?![&])(?!\/dev\/)/.test(cmd)) return true
   // tee to a named destination (not /dev/null or /dev/stderr)
   if (/\btee\s+(?!\/dev\/)/.test(cmd)) return true
   // In-place sed: sed -i (modifies files in place)
   if (/\bsed\b[^;|]*-[a-z]*i\b/.test(cmd)) return true
+  // File deletions: rm, trash, unlink
+  if (/\b(?:rm|trash|unlink)\s+/.test(cmd)) return true
+  // File moves and copies (structural workspace changes)
+  if (/\b(?:mv|cp)\s+/.test(cmd)) return true
+  // Directory creation/deletion
+  if (/\b(?:mkdir|rmdir)\b/.test(cmd)) return true
   return false
 }
 
@@ -98,7 +107,7 @@ async function parseTranscriptEvents(transcriptPath: string): Promise<Transcript
           const cmd = String(inp?.command ?? "").normalize("NFKC")
           const kind = classifyCommand(cmd)
           if (kind) events.push({ kind, sourceLineIdx: lineIdx })
-          else if (bashWritesToWorkspace(cmd))
+          else if (bashMutatesWorkspace(cmd))
             events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
         } else if (isCodeChangeTool(name)) {
           // Any file-modifying tool counts as "intervening work" — covers all agents:

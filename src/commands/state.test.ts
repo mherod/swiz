@@ -63,11 +63,11 @@ describe("STATE_TRANSITIONS", () => {
   })
 
   test("developing can transition to reviewing", () => {
-    expect(STATE_TRANSITIONS["developing"]).toContain("reviewing")
+    expect(STATE_TRANSITIONS.developing).toContain("reviewing")
   })
 
   test("reviewing can transition back to developing", () => {
-    expect(STATE_TRANSITIONS["reviewing"]).toContain("developing")
+    expect(STATE_TRANSITIONS.reviewing).toContain("developing")
   })
 
   test("no terminal states exist — all states are active work phases", () => {
