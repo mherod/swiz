@@ -16,11 +16,13 @@
 //      that ALSO mutates (e.g. lint piped to tee) emits both events.
 
 import {
+  collectBlockedToolUseIds,
   denyPreToolUse,
   formatActionPlan,
   isCodeChangeTool,
   isGitRepo,
   isShellTool,
+  stripAnsi,
 } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
@@ -150,8 +152,13 @@ export async function parseTranscriptEvents(transcriptPath: string): Promise<Tra
     return events
   }
 
+  const lines = text.split("\n")
+  // Pre-pass: identify tool_use IDs whose executions were denied by a PreToolUse
+  // hook. These never actually ran, so they must not count as prior runs.
+  const blockedIds = collectBlockedToolUseIds(lines)
+
   let lineIdx = 0
-  for (const line of text.split("\n")) {
+  for (const line of lines) {
     if (!line.trim()) continue
     try {
       const entry = JSON.parse(line)
@@ -161,6 +168,9 @@ export async function parseTranscriptEvents(transcriptPath: string): Promise<Tra
 
       for (const block of content) {
         if (block?.type !== "tool_use") continue
+        // Skip tool_use entries that were denied by a PreToolUse hook — they
+        // never executed and should not trigger the consecutive-run gate.
+        if (blockedIds.has(String(block.id ?? ""))) continue
         const name = String(block.name ?? "")
         const inp = block.input as Record<string, unknown> | undefined
 
@@ -197,8 +207,6 @@ export async function parseTranscriptEvents(transcriptPath: string): Promise<Tra
 // Correlates the priorEvent.sourceLineIdx → tool_use_id in the assistant message
 // → tool_result text in the subsequent user message. Parsed errors are appended
 // to the block message so the agent knows exactly what to edit.
-
-const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
 
 /** Extract the tool_use id for the first matching-kind bash call in a JSONL line. */
 export function extractToolUseIdFromLine(line: string, kind: CommandKind): string | null {
@@ -264,11 +272,19 @@ export async function extractPreviousOutput(
   return ""
 }
 
-/** Parse command output and return specific file/line error hints for the block message. */
+/**
+ * Parse command output and return specific file/line error hints for the block message.
+ *
+ * Supported runners and patterns:
+ *  - bun test:  `(fail)`, `✗`
+ *  - Vitest:    `×` (U+00D7), `FAIL src/path.test.ts`, `AssertionError:`
+ *  - Jest:      `●` (U+25CF) before test name, `✕` (U+2715), `FAIL src/path.test.ts`
+ *  - lint/build: `file.ts:N`, TypeScript `TS\d+` codes, `lint/ruleName`
+ */
 export function buildRemediationHints(output: string, kind: CommandKind): string {
   if (!output.trim()) return ""
 
-  const clean = output.replace(ANSI_RE, "")
+  const clean = stripAnsi(output)
   const lines = clean.split("\n")
   const hits: string[] = []
 
@@ -278,7 +294,12 @@ export function buildRemediationHints(output: string, kind: CommandKind): string
 
     const isError =
       kind === "test"
-        ? /\(fail\)|✗|error:.*expect|expect.*received|\.test\.\w+:\d+/i.test(t)
+        ? // bun: (fail), ✗
+          // Vitest: × (U+00D7 multiplication sign), FAIL src/path.test.ts, AssertionError:
+          // Jest:  ● before test name (U+25CF), ✕ (U+2715 cross mark), FAIL src/path.test.ts
+          /\(fail\)|[✗×✕]|●\s|AssertionError:|error:.*expect|expect.*received|\.test\.\w+:\d+|\bFAIL\s+\S+\.(?:test|spec)\./i.test(
+            t
+          )
         : /\.(ts|tsx|js|jsx|json):\d+|\berror\b.*TS\d+|lint\/\w+/i.test(t)
 
     if (isError) {

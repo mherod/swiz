@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { collectBlockedToolUseIds } from "../hooks/hook-utils.ts"
 import {
   bashMutatesWorkspace,
   buildRemediationHints,
@@ -581,6 +582,108 @@ describe("parseTranscriptEvents", () => {
       // Both from the same line — parallel dispatch guard applies
       expect(testEvents[0]?.sourceLineIdx).toBe(testEvents[1]?.sourceLineIdx)
     }))
+
+  test("blocked first run is excluded: only one test event produced", () =>
+    withDir(async (dir) => {
+      // Simulate: first bun test was denied by a PreToolUse hook (tool_result
+      // contains "ACTION REQUIRED:"), then a second bun test actually ran.
+      const blockedId = "tu_blocked_001"
+      const succeededId = "tu_ok_002"
+      const assistant1 = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", id: blockedId, name: "Bash", input: { command: "bun test" } },
+          ],
+        },
+      })
+      // Denial tool_result — contains "ACTION REQUIRED:" marker
+      const denial = JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: blockedId,
+              content:
+                "Use `bun test` with `--concurrent`.\n\nACTION REQUIRED: Fix the underlying issue.",
+            },
+          ],
+        },
+      })
+      const assistant2 = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: succeededId,
+              name: "Bash",
+              input: { command: "bun test --concurrent" },
+            },
+          ],
+        },
+      })
+      const path = await writeTranscript(dir, [assistant1, denial, assistant2])
+      const events = await parseTranscriptEvents(path)
+      const testEvents = events.filter((e) => e.kind === "test")
+      // The blocked run must not count — only the successful run should appear
+      expect(testEvents).toHaveLength(1)
+    }))
+})
+
+// ── collectBlockedToolUseIds ──────────────────────────────────────────────────
+
+describe("collectBlockedToolUseIds", () => {
+  function toolResultLine(toolUseId: string, content: string): string {
+    return JSON.stringify({
+      type: "user",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: toolUseId, content }],
+      },
+    })
+  }
+
+  test("returns empty set for transcript with no user messages", () => {
+    const lines = [JSON.stringify({ type: "assistant", message: {} })]
+    expect(collectBlockedToolUseIds(lines).size).toBe(0)
+  })
+
+  test("detects tool_use_id with ACTION REQUIRED: in string content", () => {
+    const lines = [toolResultLine("tu_abc", "Blocked.\n\nACTION REQUIRED: Fix this.")]
+    const blocked = collectBlockedToolUseIds(lines)
+    expect(blocked.has("tu_abc")).toBe(true)
+  })
+
+  test("detects tool_use_id with ACTION REQUIRED: in array content", () => {
+    const line = JSON.stringify({
+      type: "user",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tu_arr",
+            content: [{ type: "text", text: "Denied.\n\nACTION REQUIRED: Do the thing." }],
+          },
+        ],
+      },
+    })
+    const blocked = collectBlockedToolUseIds([line])
+    expect(blocked.has("tu_arr")).toBe(true)
+  })
+
+  test("does not flag tool_result without ACTION REQUIRED:", () => {
+    const lines = [toolResultLine("tu_ok", "4 pass\n0 fail\nRan 4 tests across 1 file.")]
+    const blocked = collectBlockedToolUseIds(lines)
+    expect(blocked.has("tu_ok")).toBe(false)
+  })
+
+  test("ignores malformed JSON lines", () => {
+    const lines = ["{ not valid json", toolResultLine("tu_good", "ACTION REQUIRED: Fix.")]
+    const blocked = collectBlockedToolUseIds(lines)
+    expect(blocked.has("tu_good")).toBe(true)
+    expect(blocked.size).toBe(1)
+  })
 })
 
 // ── extractToolUseIdFromLine ──────────────────────────────────────────────────
@@ -666,6 +769,48 @@ describe("buildRemediationHints", () => {
     ].join("\n")
     const hints = buildRemediationHints(output, "test")
     expect(hints).toContain("(fail)")
+  })
+
+  test("extracts Vitest × failure marker lines", () => {
+    const output = [
+      " FAIL  src/components/Button.test.ts [ 123ms ]",
+      "  × renders without crashing [ 5ms ]",
+      "  ✓ passes accessibility check",
+      "AssertionError: expected 1 to equal 2",
+    ].join("\n")
+    const hints = buildRemediationHints(output, "test")
+    expect(hints).toContain("FAIL  src/components/Button.test.ts")
+    expect(hints).toContain("× renders without crashing")
+    expect(hints).toContain("AssertionError:")
+  })
+
+  test("extracts Jest ● and ✕ failure lines", () => {
+    const output = [
+      " FAIL src/utils/format.test.js",
+      "  ● formatDate › returns ISO string",
+      "    Expected: '2024-01-01'",
+      "    Received: '01/01/2024'",
+      "  ✕ formatDate returns ISO string (12 ms)",
+    ].join("\n")
+    const hints = buildRemediationHints(output, "test")
+    expect(hints).toContain("FAIL src/utils/format.test.js")
+    expect(hints).toContain("● formatDate")
+    expect(hints).toContain("✕ formatDate")
+  })
+
+  test("extracts Vitest FAIL file path for test kind", () => {
+    const output = [" FAIL  src/hooks/useAuth.test.ts", "  × login redirects on success"].join("\n")
+    const hints = buildRemediationHints(output, "test")
+    expect(hints).toContain("useAuth.test.ts")
+  })
+
+  test("does not flag FAIL lines for lint kind (not a test runner)", () => {
+    // "FAIL" appears in some lint output (e.g. summary lines) but should not
+    // be treated as a test-runner pattern when kind is lint.
+    const output = "src/utils.ts:5:1 lint/style FAIL"
+    const hints = buildRemediationHints(output, "lint")
+    // Lint kind only matches file:line patterns
+    expect(hints).toContain("src/utils.ts:5")
   })
 
   test("returns empty string when no matching error lines", () => {

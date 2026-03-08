@@ -7,7 +7,13 @@
 //   → injects the CI run ID as additionalContext so the agent can watch CI
 //     without re-running the git log / gh run list dance.
 
-import { denyPostToolUse, emitContext, ghJson, type ToolHookInput } from "./hook-utils.ts"
+import {
+  denyPostToolUse,
+  emitContext,
+  ghJson,
+  stripAnsi,
+  type ToolHookInput,
+} from "./hook-utils.ts"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -46,23 +52,6 @@ function extractExitCode(response: TaskOutputResponse | string | null | undefine
 function extractStatus(response: TaskOutputResponse | string | null | undefined): string {
   if (!response || typeof response === "string") return ""
   return response.status ?? ""
-}
-
-// ─── ANSI normalization ──────────────────────────────────────────────────────
-
-/**
- * Strip ANSI escape sequences so pattern matching works on real terminal output.
- * Bun can embed bold/dim codes around numbers in summary lines, e.g.:
- *   "Ran ESC[1m4306ESC[0m tests across ESC[1m117ESC[0m files."
- * Without stripping, word-anchored regexes miss the digits.
- *
- * Uses String.fromCharCode(27) to avoid the no-control-regex lint rule,
- * which forbids embedding ESC (0x1b) literals directly in regex patterns.
- */
-const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
-
-function stripAnsi(s: string): string {
-  return s.replace(ANSI_RE, "")
 }
 
 // ─── Failure detection ───────────────────────────────────────────────────────

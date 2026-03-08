@@ -1095,6 +1095,60 @@ export async function extractSkillInvocations(path: string): Promise<string[]> {
   return skills
 }
 
+// ── ANSI stripping ──────────────────────────────────────────────────────────
+
+/**
+ * Strip ANSI escape sequences from a string so regex pattern matching works on
+ * real terminal output (bun test, biome, tsc, etc. embed colour codes).
+ * Uses String.fromCharCode(27) to satisfy the no-control-regex lint rule.
+ */
+const _ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
+export function stripAnsi(s: string): string {
+  return s.replace(_ANSI_RE, "")
+}
+
+// ── Blocked tool_use detection ──────────────────────────────────────────────
+
+/**
+ * Collect the tool_use IDs of calls denied by a PreToolUse hook.
+ *
+ * When a PreToolUse hook blocks a tool call, Claude Code writes the assistant
+ * message to the transcript before running the hook, but the corresponding
+ * tool_result in the next user message contains the denial reason rather than
+ * actual output. All hook denial messages end with the mandatory
+ * `ACTION REQUIRED:` footer, which is the reliable detection signal.
+ *
+ * Pass the result to parseTranscriptEvents (or similar) to skip blocked entries
+ * so they are not counted as actual executions.
+ */
+export function collectBlockedToolUseIds(lines: string[]): Set<string> {
+  const blocked = new Set<string>()
+  for (const line of lines) {
+    if (!line.trim()) continue
+    try {
+      const entry = JSON.parse(line)
+      if (entry?.type !== "user") continue
+      const content = entry?.message?.content
+      if (!Array.isArray(content)) continue
+      for (const block of content) {
+        if (block?.type !== "tool_result") continue
+        const inner: unknown = block.content
+        let text = ""
+        if (typeof inner === "string") text = inner
+        else if (Array.isArray(inner))
+          text = (inner as Array<{ type?: string; text?: string }>)
+            .filter((b) => b?.type === "text")
+            .map((b) => b.text ?? "")
+            .join("\n")
+        if (text.includes("ACTION REQUIRED:")) blocked.add(String(block.tool_use_id ?? ""))
+      }
+    } catch {
+      // Ignore malformed lines
+    }
+  }
+  return blocked
+}
+
 // ── Git command regexes ───────────────────────────────────────────────────
 
 /** Matches `git push` anywhere in a shell command string. */
