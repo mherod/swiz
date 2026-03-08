@@ -13,18 +13,24 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func deliver(args: NotifyArgs) async -> ExitCode {
-        // Register action categories if requested
-        if !args.actions.isEmpty {
-            let actions = args.actions.map {
-                UNNotificationAction(
-                    identifier: $0.identifier,
-                    title: $0.title,
-                    options: [.foreground]
-                )
+        // Register action categories if requested (button actions and/or text-input actions)
+        let hasActions = !args.actions.isEmpty || !args.textActions.isEmpty
+        if hasActions {
+            var allActions: [UNNotificationAction] = args.actions.map {
+                UNNotificationAction(identifier: $0.identifier, title: $0.title, options: [.foreground])
+            }
+            for ta in args.textActions {
+                allActions.append(UNTextInputNotificationAction(
+                    identifier: ta.identifier,
+                    title: ta.title,
+                    options: [.foreground],
+                    textInputButtonTitle: ta.title,
+                    textInputPlaceholder: ta.placeholder
+                ))
             }
             let category = UNNotificationCategory(
                 identifier: args.categoryIdentifier.isEmpty ? "swiz-actions" : args.categoryIdentifier,
-                actions: actions,
+                actions: allActions,
                 intentIdentifiers: [],
                 options: [.customDismissAction]
             )
@@ -48,7 +54,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 ? .default
                 : UNNotificationSound(named: UNNotificationSoundName(args.sound))
         }
-        if !args.actions.isEmpty {
+        if hasActions {
             content.categoryIdentifier = args.categoryIdentifier.isEmpty ? "swiz-actions" : args.categoryIdentifier
         }
 
@@ -74,12 +80,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
 
         // Wait for user response (if actions registered) or timeout
-        if !args.actions.isEmpty {
-            let actionId = await withTimeout(seconds: args.timeout) {
+        if hasActions {
+            let result = await withTimeout(seconds: args.timeout) {
                 await self.waitForResponse()
             }
-            if let id = actionId {
-                fputs("\(id)\n", stdout)  // stdout: the chosen action identifier
+            if let output = result {
+                fputs("\(output)\n", stdout)  // stdout: "id" or "id:userText"
             }
         } else {
             // Brief wait to ensure delivery before exit
@@ -115,8 +121,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let actionIdentifier = response.actionIdentifier
+        // For text-input actions, append ":userText" so callers can parse the reply
+        let output: String?
+        if actionIdentifier == UNNotificationDefaultActionIdentifier || actionIdentifier == UNNotificationDismissActionIdentifier {
+            output = nil
+        } else if let textResponse = response as? UNTextInputNotificationResponse {
+            let text = textResponse.userText.trimmingCharacters(in: .whitespacesAndNewlines)
+            output = text.isEmpty ? actionIdentifier : "\(actionIdentifier):\(text)"
+        } else {
+            output = actionIdentifier
+        }
         Task { @MainActor in
-            self.continuation?.resume(returning: actionIdentifier == UNNotificationDefaultActionIdentifier ? nil : actionIdentifier)
+            self.continuation?.resume(returning: output)
             self.continuation = nil
         }
         completionHandler()

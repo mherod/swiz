@@ -11,7 +11,6 @@ import {
   computeTranscriptSummary,
   extractToolNamesFromTranscript,
   formatActionPlan,
-  formatTaskCompleteCommands,
   getSessionTasksDir,
   getTasksRoot,
   getTranscriptSummary,
@@ -280,23 +279,14 @@ async function main(): Promise<void> {
 
   // Block if incomplete tasks exist
   if (incompleteDetails.length > 0) {
-    const incompleteTasks = allTasks.filter(
-      (t) => t.id && t.id !== "null" && (t.status === "pending" || t.status === "in_progress")
-    )
     const currentTaskList = formatActionPlan(incompleteDetails, { header: "Current task list:" })
-    const completeCommands = formatTaskCompleteCommands(
-      incompleteTasks,
-      sessionId,
-      "note:completed",
-      { indent: "  " }
-    )
     blockStop(
       "Incomplete tasks found:\n\n" +
         currentTaskList +
         "\n\n" +
         formatActionPlan(
           [
-            `If the work is already done, mark the tasks complete:\n${completeCommands}`,
+            "If the work is already done, use TaskUpdate to mark each current-session task as completed.",
             "If the work is still needed, complete it before stopping.",
           ],
           { translateToolNames: true }

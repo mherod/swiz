@@ -62,7 +62,7 @@ alwaysApply: false
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — use typed schema parse (`stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, `sessionHookInputSchema`) or direct type annotation; **DO NOT** use `as { ... }` casts for stdin.
 - Hook schemas (`hooks/schemas.ts`, all `z.looseObject`): `fileEditHookInputSchema` (Edit/Write, NFKC `old_string`/`new_string`/`content`), `shellHookInputSchema` (Bash, NFKC `command`), `toolHookInputSchema` (generic, recursive NFKC), `stopHookInputSchema` (Stop; `cwd`, `session_id`, `stop_hook_active`, `transcript_path`), `sessionHookInputSchema` (SessionStart/UserPromptSubmit; `cwd`, `session_id`, `trigger`, `hook_event_name`), `hookOutputSchema` (contract tests), `taskUpdateInputSchema` (drives `TASK_UPDATE_ALLOWED_FIELDS`). Settings schemas (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`, `stateHistoryEntrySchema`, `stateDataSchema`. State schemas (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
-- **DO**: All three memory-threshold checkpoints — `pretooluse-claude-md-word-limit.ts` (edit guard), `posttooluse-memory-size.ts` (PostToolUse advisor), and `swiz memory --strict` (pre-commit) — must share the same configured value via `resolveThresholds(cwd)` (project > global > default 5000). Never hardcode the limit in a hook; mismatched thresholds create a window where edits succeed but commits fail.
+- **DO**: All three memory-threshold checkpoints — `pretooluse-claude-md-word-limit.ts`, `posttooluse-memory-size.ts`, `swiz memory --strict` — must share the same value via `resolveThresholds(cwd)` (project > global > default 5000). Never hardcode — mismatched thresholds cause commits to fail after edits succeed.
 - NFKC-normalize `new_string`/`content`/`old_string` before pattern matching in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be listed in `EXEMPT_HOOKS`.
 - Use `TEST_FILE_RE` (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`) for test-file exclusions.
 - DO NOT test external repo code in this repo. Example: remove `src/tasks-list-verify.test.ts` that targeted `~/.claude/hooks/tasks-list.ts`; file issue in owning repo instead.
@@ -78,15 +78,24 @@ alwaysApply: false
 - Pattern: `pretooluse-update-memory-enforcement.ts` requires transcript evidence of reading `update-memory/SKILL.md` and writing a `.md` file (for example `CLAUDE.md`) before unblocking.
 - Memory-reminder text must include explicit trigger cause.
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Sandbox enforcement hooks (`pretooluse-protect-sandbox`, `pretooluse-sandboxed-edits`) delegate to it. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, { crossRepo: true, hostname })`.
+## macOS Notifications (SwizNotify)
+- Binary lives at `macos/Sources/SwizNotify/` (Swift); builds to `macos/SwizNotify.app/Contents/MacOS/swiz-notify`.
+- Build: `swift build --package-path macos` (dev) or `make -C macos` (release + .app assembly).
+- Hooks resolve binary via `resolveBinary()` in `hooks/notification-swiz-notify.ts`: env override → dev path → `/usr/local/bin/swiz-notify`.
+- Invoke from TypeScript via `src/ambition-notify.ts` (or similar helper in `src/`). DO NOT put notification helpers in `hooks/` — swiz manifest enforcement auto-disables unregistered files there.
+- CLI: `swiz-notify --title "…" [--body "…"] [--sound <name>] [--action <id> <title>] [--text-action <id> <title> <placeholder>] [--timeout <sec>]`.
+- Stdout: `<id>` on button tap, `<id>:<userText>` on text-input reply, empty on dismiss/timeout.
+- **Notification feedback queue**: write results to `~/.swiz/notification-feedback.jsonl` with `{ ts, actionId, userText?, targetCwd }`. Inject at next `userPromptSubmit` via `emitContext`. Always include `targetCwd` — notifications are system-global and may arrive in a session running a different project. Filter by `targetCwd` in the hook.
+- **Scheduled polling**: use `swiz dispatch <event>` + LaunchAgent plist; `swiz install` generates `~/Library/LaunchAgents/com.swiz.<event>.plist`. Use full paths in plist — launchd has a minimal PATH.
 ## Task Data
 - Task storage: `~/.claude/tasks/<session-id>/<id>.json`; audit log: `~/.claude/tasks/<session-id>/.audit-log.jsonl`.
 - Session-to-project mapping resolves from `~/.claude/projects/` transcript `cwd` fields.
 - For cross-session task/evidence checks in `hooks/stop-completion-auditor.ts`, add fallback scan of `~/.claude/tasks/` and load JSON via `readSessionTasks()`.
 - Completion command requires evidence: `swiz tasks complete <id> --evidence "text"`; enforced by `stop-completion-auditor`.
-- First action in a session must be task creation/tracking (`TaskCreate`/`TaskUpdate`), including after compaction resumes.
+- First action must be `TaskCreate`/`TaskUpdate`; required again after compaction resumes.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash when no incomplete task exists.
-- When the no-task block reports prior-session incomplete tasks, recreate equivalent task and set `in_progress` before retrying blocked work.
-- After compaction, run `TaskList`; close stale `in_progress`/`pending` tasks after verification (`git log --oneline -3`, `gh run view --json conclusion`).
+- When the no-task block reports prior-session tasks, recreate and set `in_progress` before retrying blocked work.
+- After compaction, run `TaskList`; close stale tasks after verification (`git log --oneline -3`, `gh run view --json conclusion`).
 - DO NOT create compound task subjects; `pretooluse-task-subject-validation.ts` rejects multi-action subjects.
 - Keep one task per verb (`Run tests`, `Commit fix`, `Push to origin`, `Verify CI`, `Close issue #N`).
 - Keep at least one `pending`/`in_progress` task before `git add` or `git commit`; mark commit task complete only after commit success.
@@ -96,16 +105,16 @@ alwaysApply: false
 - Call task tools (`TaskUpdate`, `TaskCreate`, `TaskList`, `TaskGet`) regularly: at least every 10 calls; staleness gate triggers at 20.
 - During multi-file work, call `TaskUpdate` after each file; add updates at least every 3 edits.
 - Create tasks before non-exempt Bash.
-- **DON'T**: Complete your last in-progress task if you still need to run shell commands (e.g., push verification). Either create the next task before completing the current one, or defer completion until all shell work is finished. `pretooluse-require-tasks` blocks Bash when zero incomplete tasks exist.
+- **DON'T**: Complete your last in-progress task while shell commands remain (e.g., push verification). Keep ≥1 task `in_progress` until all shell work finishes. `pretooluse-require-tasks` blocks Bash when zero incomplete tasks exist.
 - Exempt Bash categories: `ls`, `rg`, `grep`; read-only `git` subcommands (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`, etc.); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - `find` is not exempt; use `rg` or Glob for discovery.
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
 - For push verification task completion use evidence, for example: `swiz tasks complete <id> --evidence "note:CI green — conclusion: success, run <run-id>"`.
-- **Task completion**: `swiz tasks complete <id> --evidence "note:..."`. Use only the `note:` prefix; compound evidence strings (e.g. `commit:abc run:123`) are rejected with "found 0". Plain `TaskUpdate status=completed` is rejected by stop hooks — always use `swiz tasks complete`. Do not invoke `tasks-list.ts` directly.
+- **Task completion**: `swiz tasks complete <id> --evidence "note:..."`. Use only `note:` prefix — compound strings (e.g. `commit:abc run:123`) are rejected. Plain `TaskUpdate status=completed` rejected by stop hooks. Do not invoke `tasks-list.ts` directly.
 - **DON'T**: Assume CI success from partial output (e.g., `gh run watch` alone). Always verify terminal job states with `gh run view <run-id> --json conclusion,status,jobs` and confirm every job reached `conclusion: "success"` before claiming CI green.
 - Mark tasks complete immediately at work completion.
-- Treat `gh issue create` and task completion as atomic; if missed, recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.
+- Treat `gh issue create` and task completion as atomic; recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.
 - Run `git diff <files>` before `git add`.
 - Run `git status` immediately after each `git commit`.
 - After each `CLAUDE.md` edit, run `wc -w CLAUDE.md` to verify it stays below the configured threshold; run `/compact-memory` when approaching (default 5000, project-configurable via `.swiz/config.json` `memoryWordThreshold`).
@@ -136,7 +145,7 @@ alwaysApply: false
 - Treat push as inseparable from commit.
 - Wait for background pushes (`TaskOutput block:true`) before CI verification.
 - Use `swiz issue resolve <number> --body "<text>"` instead of `gh issue comment` + `gh issue close`; for close-only use `swiz issue close <number>`.
-- **DO** check issue state before resolving: `gh issue view <number> --json state -q .state`. A `Fixes #N` commit message auto-closes issues when pushed to main — `swiz issue resolve` is redundant on already-closed issues (it will still post a comment, not fail, but wastes an API call).
+- **DO** check issue state before resolving: `gh issue view <number> --json state -q .state`. `Fixes #N` in a commit message auto-closes on push — `swiz issue resolve` on a closed issue posts a comment (doesn't fail, but wastes an API call).
 ## Push and CI
 - Repo is solo (`mherod/swiz`); push directly to `main` (no PR required).
 - Run `/push` before `git push`; PreToolUse push gate requires it.
@@ -207,8 +216,8 @@ alwaysApply: false
 - Do not use `awk`; use `bun -e`, `sort -u`, `cut -d' ' -f1`, or git `--format`.
 - Do not use `python`/`python3`; use `bun -e` or `jq`.
 - Do not use `rm`/`rm -rf`; use `trash <path>` and guard missing paths with `[[ -e <path> ]] && trash <path>`.
-- Do not edit files outside session sandbox. `~/.claude/hooks/` belongs to `mherod/.claude`; `~/.claude/skills/` belongs to `mherod/skills`. For cross-repo bugs discovered (e.g., argument parser, task completion verification), file GitHub issues in the owning repo with: (1) exact error message and reproduction steps, (2) root cause analysis, (3) proposed fix with code location, (4) success criteria. Example: `gh issue create --repo mherod/.claude --title "..." --body "..."`.
-- **DO NOT mark tasks complete without shipping actual code changes.** Testing a concept inline (e.g., running a bash script to validate logic) does not count as implementation. Always: (1) modify actual source files, (2) verify `git diff` shows the code change, (3) commit the change, then (4) mark task complete. For cross-repo fixes where Edit tool is blocked by the session sandbox (e.g., `/push` skill in `mherod/skills`), file a GitHub issue on the owning repo with: file path, line number, exact fix needed (code snippet or regex replacement), and success criteria. Do not claim completion until the code is shipped in the actual repository.
+- Do not edit files outside session sandbox. `~/.claude/hooks/` and `~/.claude/skills/` are owned by external repos. For cross-repo bugs, file GitHub issues in the owning repo with: (1) exact error message and reproduction steps, (2) root cause analysis, (3) proposed fix with code location, (4) success criteria.
+- **DO NOT mark tasks complete without shipped code.** Inline bash testing does not count. Always: (1) modify source files, (2) verify `git diff`, (3) commit, then (4) mark complete. For cross-repo fixes blocked by sandbox, file a GitHub issue with file path, line number, exact fix, and success criteria.
 - Use `swiz tasks complete <id> --evidence "note:..."` for task completion; `tasks-list.ts` is deprecated and must not be invoked directly.
 - Stop-hook footers containing `REMINDER_FRAGMENT` can re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses a 30-minute `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes so installed config updates.
 - Cross-session gap: cooldown does not carry between sessions; complete memory follow-through before session end.
@@ -217,8 +226,8 @@ alwaysApply: false
 - Do not leave duplicated cache-key generation logic.
 - In CLI subprocess tests (for example `runSwiz`), do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp-directory `cwd`, and `env: { ...process.env, HOME: tempDir }`.
 - Do not use Agent tool `isolation: "worktree"`; rejected/partial setup can corrupt `.git/config` (`core.bare = true`, bogus `[branch "worktree-..."]`/`[user]`) and break git with "this operation must be run in a work tree".
-- When creating test fixtures containing secret-like patterns (e.g., `sk_live_...` for testing `stop-secret-scanner.ts`), use array join or string concatenation to construct the pattern in source code: `const fakeSecret = ['s', 'k', '_', 'l', 'i', 'v', 'e', '_', ...].join('')`. This avoids GitHub push protection (which scans source code for patterns like `sk_live_`) while allowing git diffs to show the expanded pattern for hook detection. The secret scanner hook scans git diffs, not source code, so the expanded pattern in the diff will still trigger detection.
-- **DO**: When stop hooks detect memory thresholds exceeded in files outside the session sandbox (e.g., global `~/.claude/CLAUDE.md` or ramp-frontend `MEMORY.md` while in swiz session), file GitHub issues on the owning repos (`mherod/.claude`, `mherod/ramp-frontend`) with word count, target threshold, and compaction guidance. Edit tool sandboxing prevents direct edits—issue filing is the correct workflow.
+- For secret-like test fixtures (e.g., `sk_live_...` in `stop-secret-scanner.ts` tests), build the string via array join: `const fakeSecret = ['s','k','_','l','i','v','e','_',...].join('')`. GitHub push protection scans source; git diffs trigger the scanner — both goals achieved.
+- **DO**: When stop hooks detect memory threshold violations outside the session sandbox, file a GitHub issue on the owning repo with word count, threshold, and compaction guidance. Sandbox prevents direct edits—issue filing is the workflow.
 - **DON'T**: Attempt to edit files outside the session sandbox; the Edit tool will block and sandbox enforcement is non-negotiable.
 - **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop. Use `/push` for unpushed commits.
 - **DON'T**: Rely on `git status` alone for unpush detection—it doesn't show upstream divergence. Always use `git log origin/main..HEAD --oneline` to list unpushed commits.

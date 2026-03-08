@@ -15,6 +15,16 @@ struct NotifyArgs {
         let identifier: String
         let title: String
     }
+
+    /// A text-input action: user types a reply directly inside the notification.
+    /// The binary outputs "\(identifier):\(userText)" to stdout when submitted.
+    struct TextAction {
+        let identifier: String
+        let title: String
+        let placeholder: String
+    }
+
+    var textActions: [TextAction] = []
 }
 
 enum ArgError: Error, CustomStringConvertible {
@@ -79,6 +89,18 @@ func parseArgs(_ args: [String]) throws -> NotifyArgs {
             guard i < args.endIndex else { throw ArgError.missingValue("--action title") }
             let actionTitle = args[i]
             result.actions.append(.init(identifier: actionId, title: actionTitle))
+        case "--text-action":
+            // --text-action <id> <title> <placeholder>
+            i = args.index(after: i)
+            guard i < args.endIndex else { throw ArgError.missingValue("--text-action id") }
+            let taId = args[i]
+            i = args.index(after: i)
+            guard i < args.endIndex else { throw ArgError.missingValue("--text-action title") }
+            let taTitle = args[i]
+            i = args.index(after: i)
+            guard i < args.endIndex else { throw ArgError.missingValue("--text-action placeholder") }
+            let taPlaceholder = args[i]
+            result.textActions.append(.init(identifier: taId, title: taTitle, placeholder: taPlaceholder))
         default:
             if arg.hasPrefix("-") {
                 throw ArgError.unknownFlag(arg)
