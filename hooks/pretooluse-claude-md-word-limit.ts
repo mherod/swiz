@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 
-// PreToolUse hook: Prevent CLAUDE.md files from exceeding 5000 words.
+// PreToolUse hook: Prevent CLAUDE.md files from exceeding the configured word limit.
 // Blocks Edit/Write operations that would push the file over the threshold.
+// Threshold is read from project > global > default (5000) settings, matching
+// posttooluse-memory-size.ts and `swiz memory --strict` pre-commit enforcement.
 
 import {
   compactionChecklistSteps,
@@ -15,8 +17,7 @@ import {
   isWriteTool,
   skillAdvice,
 } from "./hook-utils.ts"
-
-const WORD_LIMIT = 5000
+import { resolveThresholds } from "./posttooluse-memory-size.ts"
 
 interface ToolInput {
   file_path?: string
@@ -78,6 +79,7 @@ async function main() {
   const input = (await Bun.stdin.json()) as {
     tool_name?: string
     tool_input?: ToolInput
+    cwd?: string
   }
 
   const toolName = input.tool_name ?? ""
@@ -94,6 +96,10 @@ async function main() {
   }
 
   try {
+    // Resolve threshold from settings: project > global > default (5000)
+    const cwd = input.cwd ?? process.cwd()
+    const { wordThreshold } = await resolveThresholds(cwd)
+
     // Read the current file content
     let currentContent = ""
     try {
@@ -118,11 +124,11 @@ async function main() {
     // Count words in projected content
     const projectedWordCount = await countWords(projectedContent)
 
-    if (projectedWordCount > WORD_LIMIT) {
+    if (projectedWordCount > wordThreshold) {
       const currentWordCount = await countWords(currentContent)
       const skill = skillAdvice(
         "compact-memory",
-        "Use the /compact-memory skill to reduce the file below 5000 words, then retry this edit.",
+        `Use the /compact-memory skill to reduce the file below ${wordThreshold} words, then retry this edit.`,
         manualCompactionGuidanceFallback()
       )
       const inlineChecklist = formatActionPlan(
@@ -133,8 +139,8 @@ async function main() {
         `CLAUDE.md word limit exceeded.\n\n` +
           `Current: ${currentWordCount} words\n` +
           `After edit: ${projectedWordCount} words\n` +
-          `Limit: ${WORD_LIMIT} words\n\n` +
-          `The CLAUDE.md file cannot exceed ${WORD_LIMIT} words. ` +
+          `Limit: ${wordThreshold} words\n\n` +
+          `The CLAUDE.md file cannot exceed ${wordThreshold} words. ` +
           `This limit keeps the memory file focused and performant.\n\n` +
           `${skill}\n\n` +
           `${inlineChecklist}`

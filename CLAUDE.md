@@ -56,6 +56,8 @@ alwaysApply: false
 - Cross-agent tool checks: `isShellTool`, `isEditTool`, `isFileEditTool`, `isCodeChangeTool`, `isTaskTool`, `isTaskCreateTool`.
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — use typed schema parse (`stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, `sessionHookInputSchema`) or direct type annotation; **DO NOT** use `as { ... }` casts for stdin.
+- Hook schemas (`hooks/schemas.ts`, all `z.looseObject`): `fileEditHookInputSchema` (Edit/Write, NFKC `old_string`/`new_string`/`content`), `shellHookInputSchema` (Bash, NFKC `command`), `toolHookInputSchema` (generic, recursive NFKC), `stopHookInputSchema` (Stop; `cwd`, `session_id`, `stop_hook_active`, `transcript_path`), `sessionHookInputSchema` (SessionStart/UserPromptSubmit; `cwd`, `session_id`, `trigger`, `hook_event_name`), `hookOutputSchema` (contract tests), `taskUpdateInputSchema` (drives `TASK_UPDATE_ALLOWED_FIELDS`). Settings schemas (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`, `stateHistoryEntrySchema`, `stateDataSchema`. State schemas (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
+- **DO**: All three memory-threshold checkpoints — `pretooluse-claude-md-word-limit.ts` (edit guard), `posttooluse-memory-size.ts` (PostToolUse advisor), and `swiz memory --strict` (pre-commit) — must share the same configured value via `resolveThresholds(cwd)` (project > global > default 5000). Never hardcode the limit in a hook; mismatched thresholds create a window where edits succeed but commits fail.
 - NFKC-normalize `new_string`/`content`/`old_string` before pattern matching in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be listed in `EXEMPT_HOOKS`.
 - Use `TEST_FILE_RE` (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`) for test-file exclusions.
 - DO NOT test external repo code in this repo. Example: remove `src/tasks-list-verify.test.ts` that targeted `~/.claude/hooks/tasks-list.ts`; file issue in owning repo instead.
@@ -94,16 +96,13 @@ alwaysApply: false
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
 - For push verification task completion use evidence, for example: `swiz tasks complete <id> --evidence "note:CI green — conclusion: success, run <run-id>"`.
-- **Task completion format**: Use `swiz tasks complete <id> --evidence "note:..."`. The canonical CLI is `swiz tasks complete`; do not invoke `bun ~/.claude/hooks/tasks-list.ts` directly. The only reliably accepted evidence key is `note:`; do NOT attempt compound keys like `commit:SHA ci_green:run ...` in a single evidence string — the parser rejects them. Use `note:CI green` for CI verification evidence.
-- **Evidence field format**: The `--evidence` flag requires exactly one recognized prefix: `note:`, `commit:`, `run:`, `conclusion:`, `ci_green:`, `pr:`, `no_ci:`. Multiple fields in a single string (e.g. `"commit:abc run:123"`) are NOT supported — the parser finds 0 structured fields and rejects the call with "found 0". DO NOT construct multi-field evidence strings without first running `swiz tasks complete --help` to verify the accepted schema. Safe default: use a single `note:` field containing all context inline.
-- **DON'T**: Use plain `TaskUpdate` with `status: "completed"` to mark tasks done — stop hooks reject completions without structured evidence. Always use `swiz tasks complete <id> --evidence "note:..."` instead.
+- **Task completion**: `swiz tasks complete <id> --evidence "note:..."`. Use only the `note:` prefix; compound evidence strings (e.g. `commit:abc run:123`) are rejected with "found 0". Plain `TaskUpdate status=completed` is rejected by stop hooks — always use `swiz tasks complete`. Do not invoke `tasks-list.ts` directly.
 - **DON'T**: Assume CI success from partial output (e.g., `gh run watch` alone). Always verify terminal job states with `gh run view <run-id> --json conclusion,status,jobs` and confirm every job reached `conclusion: "success"` before claiming CI green.
 - Mark tasks complete immediately at work completion.
 - Treat `gh issue create` and task completion as atomic; if missed, recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.
 - Run `git diff <files>` before `git add`.
 - Run `git status` immediately after each `git commit`.
-- After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; `stop-memory-size.ts` blocks stop above 5000 words.
-- Run `/compact-memory` before reaching 5000 words.
+- After each `CLAUDE.md` edit, run `wc -w CLAUDE.md` to verify it stays below the configured threshold; run `/compact-memory` when approaching (default 5000, project-configurable via `.swiz/config.json` `memoryWordThreshold`).
 - Before adding a new rule to `CLAUDE.md`, scan nearby rules for conflicts.
 - Before issue labeling, run `gh label list`; use requested literal labels when present, otherwise ask before substituting.
 - When user provides explicit labels, remove conflicting inferred labels; do not restore inferred labels.
@@ -151,7 +150,7 @@ alwaysApply: false
 - Never bypass mandatory hooks: no `--no-verify`; pre-push runs `bun test`; CI jobs `lint -> typecheck -> test` must pass.
 - Always verify CI with `gh run view --json`; `gh run watch` alone is insufficient.
 - For workflow jobs using `github.base_ref`, run only on `pull_request`/`pull_request_target`, never `push`; `github.base_ref` is empty on push and breaks `git diff origin/BASE_REF...HEAD`.
-- Example: `.github/workflows/ci.yml` line 45 workflow-permissions job must be PR-only.
+
 - For push-command parsing in hooks, use token parsing to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
 - DO NOT call `TaskUpdate` or `TaskList` after push starts.
 - DO NOT stop with unpushed commits.
@@ -196,7 +195,7 @@ alwaysApply: false
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip enforcement when not in a git repo or when no `CLAUDE.md` exists up the directory tree; guard with `isGitRepo(cwd)` then upward `CLAUDE.md` search, otherwise `process.exit(0)`.
 - Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for every directory with valid console usage (`hooks/`, `scripts/`, `push/scripts/`, etc.).
 - Bun test reporter must be `--reporter=dots` (not `dot`).
-- **DO**: After `bun run format`, make at least one Edit tool change before running `bun run lint`. The `pretooluse-repeated-lint-test` hook's `bashMutatesWorkspace` does not detect `biome format --write .` run via the `bun run format` wrapper (the wrapper command string lacks `--write`), so the hook sees two consecutive lint events with no intervening edit and blocks the second run.
+- **DO**: Make an Edit tool change between `bun run format` and `bun run lint` — `pretooluse-repeated-lint-test` doesn't detect format-via-wrapper as a workspace mutation (wrapper command string lacks `--write`), so two consecutive lint runs without an intervening edit triggers a block.
 - Do not run `cd` in Bash commands; use absolute paths, `git -C <dir>`, `pnpm --prefix <dir>`, or `cwd` in `Bun.spawn()`.
 - Do not edit files with `sed -i`; use Edit tool for file writes; use `sed` only for non-writing stream transforms.
 - Do not use `awk`; use `bun -e`, `sort -u`, `cut -d' ' -f1`, or git `--format`.
