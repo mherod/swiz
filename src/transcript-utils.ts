@@ -457,6 +457,17 @@ export interface PlainTurn {
   text: string
 }
 
+export function buildTaskSection(taskContext: string): string {
+  if (!taskContext) return ""
+  return `=== SESSION TASKS ===\n${taskContext}\n=== END OF SESSION TASKS ===\n\n`
+}
+
+export function buildUserMessagesSection(turns: PlainTurn[]): string {
+  const userTurns = turns.filter((t) => t.role === "user")
+  if (userTurns.length === 0) return ""
+  return `=== USER'S MESSAGES ===\n${userTurns.map((t) => `- ${t.text}`).join("\n\n")}\n=== END OF USER'S MESSAGES ===\n\n`
+}
+
 function toolCallLabel(block: { name?: string; input?: Record<string, unknown> }): string {
   const name = block.name ?? "unknown"
   const input = block.input

@@ -17,6 +17,9 @@ import {
   readSwizSettings,
 } from "../src/settings.ts"
 import {
+  buildTaskSection,
+  buildUserMessagesSection,
+  countToolCalls,
   extractPlainTurns,
   formatTurnsAsContext,
   projectKeyFromCwd,
@@ -52,6 +55,10 @@ const agentResponseSchema = z.object({
 })
 
 type AgentResponse = z.infer<typeof agentResponseSchema>
+
+function resolveCwd(cwd?: string): string {
+  return cwd ?? process.cwd()
+}
 
 /**
  * Reads in_progress and completed tasks for the session.
@@ -191,7 +198,8 @@ function normalizeReflectiveNextStep(reflections: string[]): string {
 // ─── Memory file resolution ─────────────────────────────────────────────────
 
 async function findProjectDir(cwd: string): Promise<string | null> {
-  const derived = join(PROJECTS_DIR, projectKeyFromCwd(cwd))
+  const projectKey = projectKeyFromCwd(cwd)
+  const derived = join(PROJECTS_DIR, projectKey)
   try {
     await readdir(derived)
     return derived
@@ -201,7 +209,7 @@ async function findProjectDir(cwd: string): Promise<string | null> {
   try {
     const dirs = await readdir(PROJECTS_DIR)
     for (const dir of dirs) {
-      if (projectKeyFromCwd(cwd) === dir) return join(PROJECTS_DIR, dir)
+      if (projectKey === dir) return join(PROJECTS_DIR, dir)
     }
   } catch {}
 
@@ -537,15 +545,16 @@ function terminate(action: "skip" | "block", ...args: string[]): never {
 async function main(): Promise<void> {
   const hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
   const input = stopHookInputSchema.parse(hookRaw)
+  const cwd = resolveCwd(input.cwd)
 
   const settings = await readSwizSettings()
-  const projectSettings = await readProjectSettings(input.cwd ?? process.cwd())
+  const projectSettings = await readProjectSettings(cwd)
   const effective = getEffectiveSwizSettings(settings, input.session_id, projectSettings)
   if (!effective.autoContinue) {
     terminate("skip", "AUTO_CONTINUE_DISABLED", "auto-continue is disabled — skipping block")
   }
 
-  const projectState = await readProjectState(input.cwd ?? process.cwd())
+  const projectState = await readProjectState(cwd)
   void projectState // All states are active work phases; no state skips auto-continue
 
   if (!input.transcript_path) {
@@ -572,16 +581,7 @@ async function main(): Promise<void> {
 
   // Fallback: count tool calls from raw text if no summary was available
   if (!summary) {
-    let count = 0
-    for (const line of raw.split("\n").filter(Boolean)) {
-      try {
-        const entry = JSON.parse(line)
-        if (entry?.type !== "assistant") continue
-        const content = entry?.message?.content
-        if (!Array.isArray(content)) continue
-        count += content.filter((b: { type?: string }) => b?.type === "tool_use").length
-      } catch {}
-    }
+    const count = countToolCalls(raw)
     if (count < MIN_TOOL_CALLS) {
       terminate(
         "skip",
@@ -600,7 +600,7 @@ async function main(): Promise<void> {
 
   // Detect refinement-needed issues early — this drives both the AI prompt
   // and a direct runtime gate in the block message.
-  const refinementStatus = await checkRefinementNeeds(input.cwd ?? process.cwd())
+  const refinementStatus = await checkRefinementNeeds(cwd)
 
   let response: AgentResponse = {
     processCritique: "",
@@ -619,18 +619,9 @@ async function main(): Promise<void> {
 
   {
     const context = formatTurnsAsContext(turns)
-    const taskSection = taskContext
-      ? `=== SESSION TASKS ===\n${taskContext}\n=== END OF SESSION TASKS ===\n\n`
-      : ""
-    const userTurns = turns.filter((t) => t.role === "user")
-    const userMessagesSection =
-      userTurns.length > 0
-        ? `=== USER'S MESSAGES ===\n${userTurns.map((t) => `- ${t.text}`).join("\n\n")}\n=== END OF USER'S MESSAGES ===\n\n`
-        : ""
-    const statusParts = [
-      await checkChangelogStaleness(input.cwd ?? process.cwd()),
-      refinementStatus,
-    ].filter(Boolean)
+    const taskSection = buildTaskSection(taskContext)
+    const userMessagesSection = buildUserMessagesSection(turns)
+    const statusParts = [await checkChangelogStaleness(cwd), refinementStatus].filter(Boolean)
     const projectStatus = statusParts.join("\n")
     const prompt = buildPrompt(
       taskSection,
@@ -677,7 +668,7 @@ async function main(): Promise<void> {
 
   // Write reflections to memory (never blocks, never throws)
   if (response.reflections.length > 0) {
-    await writeReflections(input.cwd ?? process.cwd(), response.reflections)
+    await writeReflections(cwd, response.reflections)
   }
 
   // Only block when we have something actionable to deliver:
