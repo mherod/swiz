@@ -88,6 +88,30 @@ describe("pretooluse-banned-commands", () => {
       expect(result.decision).toBe("deny")
     })
 
+    test("git checkout -- file is blocked", async () => {
+      const result = await runHook("git checkout -- src/file.ts")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("git checkout -- <file-or-glob>")
+    })
+
+    test("git checkout HEAD -- file is blocked", async () => {
+      const result = await runHook("git checkout HEAD -- src/file.ts")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("git checkout <ref-or-hash> -- <file-or-glob>")
+    })
+
+    test("git checkout commit hash -- file is blocked", async () => {
+      const result = await runHook("git checkout a1b2c3d -- src/file.ts")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("git checkout <ref-or-hash> -- <file-or-glob>")
+    })
+
+    test("git checkout tag -- glob is blocked", async () => {
+      const result = await runHook("git checkout v1.2.3 -- '*.ts'")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("git checkout <ref-or-hash> -- <file-or-glob>")
+    })
+
     test("bun test --reporter=verbose is blocked with corrected command", async () => {
       const result = await runHook("bun test hooks/foo.test.ts --reporter=verbose")
       expect(result.decision).toBe("deny")
@@ -191,6 +215,11 @@ describe("pretooluse-banned-commands", () => {
   describe("allowed commands (no output)", () => {
     test("git status passes through", async () => {
       const result = await runHook("git status")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("git checkout branch switch passes through", async () => {
+      const result = await runHook("git checkout feature/my-branch")
       expect(result.decision).toBeUndefined()
     })
 

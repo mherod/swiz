@@ -144,9 +144,9 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /git\s+checkout\s+--/.test(c),
+    match: (c) => /git\s+checkout\s+(?:\S+\s+)?--\s+\S+/.test(c),
     message: [
-      "Do not use `git checkout -- <file>`. It silently discards file changes.",
+      "Do not use `git checkout -- <file-or-glob>` or `git checkout <ref-or-hash> -- <file-or-glob>`. They silently discard file changes.",
       "",
       "Instead:",
       "  • Use the Edit tool to undo specific changes in a file",
