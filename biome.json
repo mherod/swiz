@@ -1,4 +1,7 @@
 {
+  "files": {
+    "includes": ["**", "!macos/.build"]
+  },
   "linter": {
     "enabled": true,
     "rules": {
