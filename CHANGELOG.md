@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-03-08
+
+### Fixes
+
+- Reverted `subagentError` canonical event (`DISPATCH_ROUTES`, agent `eventMap`
+  entries, manifest, CHANGELOG). `SubagentError` is not a real Claude Code hook
+  event — the official list includes `SubagentStart` and `SubagentStop` but not
+  `SubagentError`. The incorrect addition caused `~/.claude/settings.json` to
+  emit an "Invalid key in record" validation error that silently skipped all hook
+  configuration. Fixed the trailing comma in `settings.json` that prevented
+  `swiz install` from parsing the file.
+
 ## 2026-03-07
 
 ### New Features
@@ -23,6 +35,7 @@
 - Added `--state <state>` as a required flag for `swiz tasks create`,
   `swiz tasks complete`, and `swiz tasks status` subcommands, ensuring
   every task operation records the current project work phase.
+
 ## 2026-03-06
 
 ### New Features
