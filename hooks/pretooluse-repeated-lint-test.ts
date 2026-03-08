@@ -85,11 +85,20 @@ function bashMutatesWorkspace(cmd: string): boolean {
   // Python -c inline script with write-mode open(): open(..., 'w'/'a'/'x'/variants)
   //   Covers: open('f','w'), open('f','wb'), open('f','ab'), open('f','xb'), etc.
   if (/\bpython\d*\b[^|;]*-c\b.*\bopen\s*\([^)]*['"][wax][bt]?['"]/.test(cmd)) return true
-  // Python -c inline script with pathlib write methods (.write_text / .write_bytes)
-  if (/\bpython\d*\b[^|;]*-c\b.*\.write(?:_text|_bytes)?\s*\(/.test(cmd)) return true
+  // Python -c inline script with pathlib filesystem methods:
+  //   write_text/write_bytes (content writes), unlink/rename/replace (deletions/moves),
+  //   rmdir/mkdir/touch (directory and metadata mutations)
+  if (
+    /\bpython\d*\b[^|;]*-c\b.*\.(?:write(?:_text|_bytes)?|unlink|rename|replace|rmdir|mkdir|touch)\s*\(/.test(
+      cmd
+    )
+  )
+    return true
   // Python -c inline script with os filesystem mutations (remove, unlink, rename, mkdir…)
   if (
-    /\bpython\d*\b[^|;]*-c\b.*\bos\.(?:remove|unlink|rename|replace|makedirs?|rmdir)\s*\(/.test(cmd)
+    /\bpython\d*\b[^|;]*-c\b.*\bos\.(?:remove|unlink|rename|replace|makedirs|mkdir|rmdir)\s*\(/.test(
+      cmd
+    )
   )
     return true
   // Python -c inline script with shutil mutations (copy, move, rmtree)
