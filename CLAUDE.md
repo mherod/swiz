@@ -191,6 +191,7 @@ alwaysApply: false
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip enforcement when not in a git repo or when no `CLAUDE.md` exists up the directory tree; guard with `isGitRepo(cwd)` then upward `CLAUDE.md` search, otherwise `process.exit(0)`.
 - Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for every directory with valid console usage (`hooks/`, `scripts/`, `push/scripts/`, etc.).
 - Bun test reporter must be `--reporter=dots` (not `dot`).
+- **DO**: After `bun run format`, make at least one Edit tool change before running `bun run lint`. The `pretooluse-repeated-lint-test` hook's `bashMutatesWorkspace` does not detect `biome format --write .` run via the `bun run format` wrapper (the wrapper command string lacks `--write`), so the hook sees two consecutive lint events with no intervening edit and blocks the second run.
 - Do not run `cd` in Bash commands; use absolute paths, `git -C <dir>`, `pnpm --prefix <dir>`, or `cwd` in `Bun.spawn()`.
 - Do not edit files with `sed -i`; use Edit tool for file writes; use `sed` only for non-writing stream transforms.
 - Do not use `awk`; use `bun -e`, `sort -u`, `cut -d' ' -f1`, or git `--format`.
