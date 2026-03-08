@@ -224,77 +224,59 @@ async function executeMutation(
 
   switch (mutation.type) {
     case "close": {
-      const proc = Bun.spawn(["gh", "issue", "close", num], {
-        cwd,
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      const [, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      await proc.exited
-      if (proc.exitCode !== 0) {
-        logReplayExecFailed(repo, mutation, proc.exitCode ?? 1, stderr)
-        return false
-      }
-      return true
+      return runGhIssueCommand(["gh", "issue", "close", num], cwd, repo, mutation)
     }
     case "comment": {
       if (!mutation.body) return true // nothing to post
-      const proc = Bun.spawn(["gh", "issue", "comment", num, "--body", mutation.body], {
+      return runGhIssueCommand(
+        ["gh", "issue", "comment", num, "--body", mutation.body],
         cwd,
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      const [, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ])
-      await proc.exited
-      if (proc.exitCode !== 0) {
-        logReplayExecFailed(repo, mutation, proc.exitCode ?? 1, stderr)
-        return false
-      }
-      return true
+        repo,
+        mutation
+      )
     }
     case "resolve": {
       // Resolve = comment (if body) + close
       if (mutation.body) {
-        const cp = Bun.spawn(["gh", "issue", "comment", num, "--body", mutation.body], {
+        const ok = await runGhIssueCommand(
+          ["gh", "issue", "comment", num, "--body", mutation.body],
           cwd,
-          stdout: "pipe",
-          stderr: "pipe",
-        })
-        const [, cpStderr] = await Promise.all([
-          new Response(cp.stdout).text(),
-          new Response(cp.stderr).text(),
-        ])
-        await cp.exited
-        if (cp.exitCode !== 0) {
-          logReplayExecFailed(repo, { ...mutation, type: "comment" }, cp.exitCode ?? 1, cpStderr)
-          return false
-        }
+          repo,
+          { ...mutation, type: "comment" }
+        )
+        if (!ok) return false
       }
-      const cl = Bun.spawn(["gh", "issue", "close", num], {
-        cwd,
-        stdout: "pipe",
-        stderr: "pipe",
+      return runGhIssueCommand(["gh", "issue", "close", num], cwd, repo, {
+        ...mutation,
+        type: "close",
       })
-      const [, clStderr] = await Promise.all([
-        new Response(cl.stdout).text(),
-        new Response(cl.stderr).text(),
-      ])
-      await cl.exited
-      if (cl.exitCode !== 0) {
-        logReplayExecFailed(repo, { ...mutation, type: "close" }, cl.exitCode ?? 1, clStderr)
-        return false
-      }
-      return true
     }
     default:
       return false
   }
+}
+
+async function runGhIssueCommand(
+  args: string[],
+  cwd: string,
+  repo: string,
+  mutationForLog: MutationPayload
+): Promise<boolean> {
+  const proc = Bun.spawn(args, {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+
+  if (proc.exitCode === 0) return true
+
+  logReplayExecFailed(repo, mutationForLog, proc.exitCode ?? 1, stderr)
+  return false
 }
 
 /** Log a structured execution failure for a single mutation replay. */
