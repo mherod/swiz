@@ -2,10 +2,9 @@
 
 // SessionStart hook: inject current project state into session context
 
-import { readProjectState, STATE_TRANSITIONS } from "../src/settings.ts"
-import { getStatePriority, getWorkflowIntent, STATE_METADATA } from "../src/state-machine.ts"
 import { emitContext, isGitRepo } from "./hook-utils.ts"
 import { sessionHookInputSchema } from "./schemas.ts"
+import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"
 
 async function main(): Promise<void> {
   const input = sessionHookInputSchema.parse(await Bun.stdin.json())
@@ -14,25 +13,20 @@ async function main(): Promise<void> {
 
   if (!(await isGitRepo(cwd))) return
 
-  const state = await readProjectState(cwd)
-  if (!state) return
-
-  const metadata = STATE_METADATA[state]
-  const intent = getWorkflowIntent(state)
-  const priority = getStatePriority(state)
-  const transitions = STATE_TRANSITIONS[state]
+  const stateInfo = await readSessionStartStateInfo(cwd)
+  if (!stateInfo) return
 
   const parts: string[] = [
-    `Project state: ${state}.`,
-    `Workflow intent: ${intent} (priority: ${priority}/4).`,
+    `Project state: ${stateInfo.state}.`,
+    `Workflow intent: ${stateInfo.intent} (priority: ${stateInfo.priority}/4).`,
   ]
 
-  if (transitions.length > 0) {
-    parts.push(`Allowed transitions: ${transitions.join(", ")}.`)
+  if (stateInfo.transitions.length > 0) {
+    parts.push(`Allowed transitions: ${stateInfo.transitions.join(", ")}.`)
   }
 
-  if (metadata.description) {
-    parts.push(`State description: ${metadata.description}`)
+  if (stateInfo.description) {
+    parts.push(`State description: ${stateInfo.description}`)
   }
 
   emitContext("SessionStart", parts.join(" "))

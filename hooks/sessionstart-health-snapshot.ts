@@ -3,9 +3,9 @@
 // SessionStart hook: Inject project health snapshot as additionalContext
 
 import { join } from "node:path"
-import { readProjectState, STATE_TRANSITIONS } from "../src/settings.ts"
 import { emitContext, ghJson, git, hasGhCli, isGitHubRemote, isGitRepo } from "./hook-utils.ts"
 import { sessionHookInputSchema } from "./schemas.ts"
+import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"
 
 interface PluginEnvRequirement {
   plugin: string
@@ -60,10 +60,9 @@ async function main(): Promise<void> {
   }
 
   // Project state machine — always included when a state is set
-  const projectState = await readProjectState(cwd)
-  if (projectState) {
-    const allowed = STATE_TRANSITIONS[projectState]
-    parts.push(`State: ${projectState} → [${allowed.join(", ")}]`)
+  const stateInfo = await readSessionStartStateInfo(cwd)
+  if (stateInfo) {
+    parts.push(`State: ${stateInfo.state} → [${stateInfo.transitions.join(", ")}]`)
   }
 
   if (!(await isGitRepo(cwd)) || !(await isGitHubRemote(cwd))) {
