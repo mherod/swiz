@@ -2,10 +2,32 @@ import type { Command } from "../types.ts"
 
 // ─── Polling utilities ─────────────────────────────────────────────────────
 
+/**
+ * Expand a short or full SHA to its full 40-character form using `git rev-parse`.
+ * Falls back to the original string if rev-parse fails (e.g. not in a git repo).
+ * This is necessary because `gh run list --commit` only matches full SHAs.
+ */
+export async function expandSha(sha: string): Promise<string> {
+  if (sha.length === 40) return sha // already full SHA
+  try {
+    const proc = Bun.spawn(["git", "rev-parse", sha], { stdout: "pipe", stderr: "pipe" })
+    const [output] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    const full = output.trim()
+    return full.length === 40 ? full : sha
+  } catch {
+    return sha
+  }
+}
+
 async function getCiRunConclusion(commitSha: string): Promise<string | null> {
   try {
+    const fullSha = await expandSha(commitSha)
     const proc = Bun.spawn(
-      ["gh", "run", "list", "--commit", commitSha, "--json", "databaseId,conclusion,status"],
+      ["gh", "run", "list", "--commit", fullSha, "--json", "databaseId,conclusion,status"],
       { stdout: "pipe", stderr: "pipe" }
     )
     const [output] = await Promise.all([

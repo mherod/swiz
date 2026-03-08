@@ -1,5 +1,36 @@
 import { describe, expect, it } from "vitest"
-import { parseCiWaitArgs } from "./ci-wait.ts"
+import { expandSha, parseCiWaitArgs } from "./ci-wait.ts"
+
+// ─── expandSha ────────────────────────────────────────────────────────────
+
+describe("expandSha", () => {
+  it("returns full SHA unchanged without calling git", async () => {
+    const fullSha = "a".repeat(40)
+    const result = await expandSha(fullSha)
+    expect(result).toBe(fullSha)
+  })
+
+  it("returns original SHA when git rev-parse fails (not a git SHA)", async () => {
+    const notASha = "notarealsha"
+    const result = await expandSha(notASha)
+    // Falls back to original when rev-parse returns non-40-char or errors
+    expect(result).toBe(notASha)
+  })
+
+  it("expands a valid short SHA to 40 characters", async () => {
+    // Use HEAD which is always resolvable in the repo
+    const proc = Bun.spawn(["git", "rev-parse", "--short", "HEAD"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const shortSha = (await new Response(proc.stdout).text()).trim()
+    await proc.exited
+    if (!shortSha) return // skip if not in a git repo
+
+    const result = await expandSha(shortSha)
+    expect(result).toHaveLength(40)
+  })
+})
 
 // ─── parseCiWaitArgs ──────────────────────────────────────────────────────
 

@@ -50,7 +50,7 @@ export function readPrPollState(home: string): PrPollState {
 export function writePrPollState(home: string, state: PrPollState): void {
   const path = statePath(home)
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, JSON.stringify(state, null, 2) + "\n", "utf8")
+  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, "utf8")
 }
 
 // ─── Fetch notifications ─────────────────────────────────────────────────────
