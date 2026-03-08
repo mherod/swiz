@@ -52,6 +52,11 @@ alwaysApply: false
 - **DO NOT** write `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: ..., additionalContext: ... } }))` — use `emitContext(eventName, context, cwd)` instead.
 - **DO NOT** write `console.log(JSON.stringify({ decision: "block", reason: ... }))` in Stop hooks — use `blockStop(reason)` or `blockStopRaw(reason)` instead.
 - Git/GitHub helpers: `git`, `gh`, `ghJson`, `getOpenPrForBranch`, `isGitRepo`, `isGitHubRemote`, `hasGhCli`.
+- **Git Utilities Policy** — canonical locations and no-duplication rule:
+  - `hooks/hook-utils.ts` — hook Git helpers: command-matching regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`, `GH_PR_MERGE_RE`, `GIT_ANY_CMD_RE`, …), extractors (`extractPrNumber`, `extractMergeBranch`), runtime helpers (`git`, `gh`, `ghJson`, …).
+  - `src/git-helpers.ts` — command Git helpers: branch-policy classifiers (`isDocsOrConfig`, `parseCommitType`, `DOCS_CONFIG_RE`), Git status types, query functions.
+  - **DO NOT** define Git utilities locally in hooks or commands when an equivalent exists here or the logic is generic. Import from the canonical source.
+  - When a duplicate is found: (1) add the export to `hook-utils.ts` or `git-helpers.ts`, (2) update consumers to import from there, (3) delete the local definition.
 - Skill helpers: `skillExists` (checks `.skills/` and `~/.claude/skills/` for `SKILL.md`), `skillAdvice`.
 - Cross-agent tool checks: `isShellTool`, `isEditTool`, `isFileEditTool`, `isCodeChangeTool`, `isTaskTool`, `isTaskCreateTool`.
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
@@ -72,7 +77,7 @@ alwaysApply: false
 - For workflow enforcement, scan `transcript_path` for reminder and completion evidence instead of extra state files/flags.
 - Pattern: `pretooluse-update-memory-enforcement.ts` requires transcript evidence of reading `update-memory/SKILL.md` and writing a `.md` file (for example `CLAUDE.md`) before unblocking.
 - Memory-reminder text must include explicit trigger cause.
-- Cross-repo issue guidance is consolidated in `buildIssueGuidance()` in `hook-utils.ts`. All sandbox enforcement hooks (pretooluse-protect-sandbox, pretooluse-sandboxed-edits) delegate to this function rather than inlining guidance text. Supports both generic guidance (`buildIssueGuidance(null)`) and cross-repo with hostname detection (`buildIssueGuidance(repo, { crossRepo: true, hostname })`) — single source of truth prevents message duplication.
+- Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Sandbox enforcement hooks (`pretooluse-protect-sandbox`, `pretooluse-sandboxed-edits`) delegate to it. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, { crossRepo: true, hostname })`.
 ## Task Data
 - Task storage: `~/.claude/tasks/<session-id>/<id>.json`; audit log: `~/.claude/tasks/<session-id>/.audit-log.jsonl`.
 - Session-to-project mapping resolves from `~/.claude/projects/` transcript `cwd` fields.
