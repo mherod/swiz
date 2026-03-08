@@ -131,9 +131,9 @@ export function bashMutatesWorkspace(cmd: string): boolean {
 
 // ── Transcript event types ───────────────────────────────────────────────────
 
-type EventKind = CommandKind | "any_edit"
+export type EventKind = CommandKind | "any_edit"
 
-interface TranscriptEvent {
+export interface TranscriptEvent {
   kind: EventKind
   /** JSONL source line index. Two events with the same index are from the
    *  same assistant message (parallel dispatch) and neither has been executed
@@ -141,7 +141,7 @@ interface TranscriptEvent {
   sourceLineIdx: number
 }
 
-async function parseTranscriptEvents(transcriptPath: string): Promise<TranscriptEvent[]> {
+export async function parseTranscriptEvents(transcriptPath: string): Promise<TranscriptEvent[]> {
   const events: TranscriptEvent[] = []
   let text = ""
   try {

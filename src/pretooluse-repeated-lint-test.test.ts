@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { bashMutatesWorkspace, classifyCommand } from "../hooks/pretooluse-repeated-lint-test.ts"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import {
+  bashMutatesWorkspace,
+  classifyCommand,
+  parseTranscriptEvents,
+} from "../hooks/pretooluse-repeated-lint-test.ts"
 
 // ── classifyCommand ───────────────────────────────────────────────────────────
 
@@ -373,4 +380,202 @@ describe("bashMutatesWorkspace — non-mutations (false-positive guard)", () => 
     expect(bashMutatesWorkspace("bun run lint")).toBe(false)
     expect(bashMutatesWorkspace("bun test")).toBe(false)
   })
+})
+
+// ── parseTranscriptEvents ─────────────────────────────────────────────────────
+
+/** Build a single JSONL assistant line containing one tool_use block. */
+function assistantLine(name: string, command: string): string {
+  const entry = {
+    type: "assistant",
+    message: {
+      content: [{ type: "tool_use", name, input: { command } }],
+    },
+  }
+  return JSON.stringify(entry)
+}
+
+/** Build a JSONL assistant line with an Edit tool call (no command field). */
+function editLine(): string {
+  return JSON.stringify({
+    type: "assistant",
+    message: {
+      content: [{ type: "tool_use", name: "Edit", input: { file_path: "a.ts", new_string: "x" } }],
+    },
+  })
+}
+
+/** Write JSONL lines to a temp file and return the path. */
+async function writeTranscript(dir: string, lines: string[]): Promise<string> {
+  const path = join(dir, "transcript.jsonl")
+  await writeFile(path, `${lines.join("\n")}\n`, "utf-8")
+  return path
+}
+
+describe("parseTranscriptEvents", () => {
+  async function withDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-transcript-test-"))
+    try {
+      return await fn(dir)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  test("empty transcript returns no events", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [])
+      const events = await parseTranscriptEvents(path)
+      expect(events).toHaveLength(0)
+    }))
+
+  test("missing transcript file returns no events", () =>
+    withDir(async (dir) => {
+      const events = await parseTranscriptEvents(join(dir, "nonexistent.jsonl"))
+      expect(events).toHaveLength(0)
+    }))
+
+  test("malformed JSON lines are ignored", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [
+        "not json at all",
+        "{ broken json",
+        assistantLine("Bash", "bun test"),
+      ])
+      const events = await parseTranscriptEvents(path)
+      expect(events).toHaveLength(1)
+      expect(events[0]?.kind).toBe("test")
+    }))
+
+  test("non-assistant entries are ignored", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [
+        JSON.stringify({ type: "user", message: "hello" }),
+        JSON.stringify({ type: "tool_result", content: "done" }),
+        assistantLine("Bash", "bun test"),
+      ])
+      const events = await parseTranscriptEvents(path)
+      // Only the assistant line produces an event
+      expect(events).toHaveLength(1)
+    }))
+
+  test("bun test → test event", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [assistantLine("Bash", "bun test")])
+      const events = await parseTranscriptEvents(path)
+      expect(events).toHaveLength(1)
+      expect(events[0]).toEqual({ kind: "test", sourceLineIdx: 0 })
+    }))
+
+  test("bun run lint → lint event", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [assistantLine("Bash", "bun run lint")])
+      const events = await parseTranscriptEvents(path)
+      expect(events[0]).toEqual({ kind: "lint", sourceLineIdx: 0 })
+    }))
+
+  test("bun run build → build event", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [assistantLine("Bash", "bun run build")])
+      const events = await parseTranscriptEvents(path)
+      expect(events[0]).toEqual({ kind: "build", sourceLineIdx: 0 })
+    }))
+
+  test("unrelated bash command → no event", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [assistantLine("Bash", "git status")])
+      const events = await parseTranscriptEvents(path)
+      expect(events).toHaveLength(0)
+    }))
+
+  test("Edit tool call → any_edit event", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [editLine()])
+      const events = await parseTranscriptEvents(path)
+      expect(events).toHaveLength(1)
+      expect(events[0]).toEqual({ kind: "any_edit", sourceLineIdx: 0 })
+    }))
+
+  test("bash mutation (rm) → any_edit event", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [assistantLine("Bash", "rm file.txt")])
+      const events = await parseTranscriptEvents(path)
+      expect(events).toHaveLength(1)
+      expect(events[0]).toEqual({ kind: "any_edit", sourceLineIdx: 0 })
+    }))
+
+  test("classified command + mutation emits both test and any_edit", () =>
+    withDir(async (dir) => {
+      // bun test | tee out.txt — classified as test AND mutates workspace
+      const path = await writeTranscript(dir, [assistantLine("Bash", "bun test | tee out.txt")])
+      const events = await parseTranscriptEvents(path)
+      expect(events).toHaveLength(2)
+      expect(events[0]).toEqual({ kind: "test", sourceLineIdx: 0 })
+      expect(events[1]).toEqual({ kind: "any_edit", sourceLineIdx: 0 })
+    }))
+
+  test("sourceLineIdx increments per non-empty line", () =>
+    withDir(async (dir) => {
+      // Empty lines are skipped (no increment); blank lines do not get own lineIdx
+      const path = await writeTranscript(dir, [
+        assistantLine("Bash", "bun test"), // lineIdx 0
+        assistantLine("Bash", "bun run lint"), // lineIdx 1
+      ])
+      const events = await parseTranscriptEvents(path)
+      expect(events[0]).toEqual({ kind: "test", sourceLineIdx: 0 })
+      expect(events[1]).toEqual({ kind: "lint", sourceLineIdx: 1 })
+    }))
+
+  test("two same-kind events on different source lines (no intervening edit)", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [
+        assistantLine("Bash", "bun test"), // prior
+        assistantLine("Bash", "bun test"), // current
+      ])
+      const events = await parseTranscriptEvents(path)
+      const testEvents = events.filter((e) => e.kind === "test")
+      expect(testEvents).toHaveLength(2)
+      expect(testEvents[0]?.sourceLineIdx).toBe(0)
+      expect(testEvents[1]?.sourceLineIdx).toBe(1)
+      // No any_edit between them — gate should block
+      const hasIntervening = events
+        .slice(events.indexOf(testEvents[0]!) + 1)
+        .some((e) => e.kind === "any_edit")
+      expect(hasIntervening).toBe(false)
+    }))
+
+  test("two same-kind events with intervening Edit → hasInterveningWork is true", () =>
+    withDir(async (dir) => {
+      const path = await writeTranscript(dir, [
+        assistantLine("Bash", "bun test"), // prior run
+        editLine(), // intervening edit
+        assistantLine("Bash", "bun test"), // repeat run
+      ])
+      const events = await parseTranscriptEvents(path)
+      const testEvents = events.filter((e) => e.kind === "test")
+      const priorIdx = events.indexOf(testEvents[0]!)
+      const hasIntervening = events.slice(priorIdx + 1).some((e) => e.kind === "any_edit")
+      expect(hasIntervening).toBe(true)
+    }))
+
+  test("parallel dispatch: two test events on same sourceLineIdx", () =>
+    withDir(async (dir) => {
+      // When the model emits two Bash tool_use blocks in a single assistant message,
+      // they land in the transcript on the same JSONL line (same sourceLineIdx).
+      const entry = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", name: "Bash", input: { command: "bun test" } },
+            { type: "tool_use", name: "Bash", input: { command: "bun test" } },
+          ],
+        },
+      })
+      const path = await writeTranscript(dir, [entry])
+      const events = await parseTranscriptEvents(path)
+      const testEvents = events.filter((e) => e.kind === "test")
+      expect(testEvents).toHaveLength(2)
+      // Both from the same line — parallel dispatch guard applies
+      expect(testEvents[0]?.sourceLineIdx).toBe(testEvents[1]?.sourceLineIdx)
+    }))
 })
