@@ -3,6 +3,7 @@ import { mkdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  GIT_DIR_NAME,
   type GitBranchStatus,
   getGitBranchStatus,
   isReadOnlyGhApiArgs,
@@ -84,7 +85,7 @@ describe("resolveGitPaths", () => {
     expect(result).not.toBeNull()
     expect(result?.gitDir).toBeString()
     expect(result?.workTree).toBeString()
-    expect(result?.gitDir).toContain(".git")
+    expect(result?.gitDir).toContain(GIT_DIR_NAME)
   })
 
   test("workTree is an ancestor of cwd", () => {

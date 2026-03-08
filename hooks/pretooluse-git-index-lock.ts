@@ -4,7 +4,7 @@
 // Prevents wasting agent turns on git operations that will fail because
 // another git process is running or a stale lock was left behind.
 
-import { GIT_INDEX_LOCK, joinGitPath } from "../src/git-helpers.ts"
+import { GIT_DIR_NAME, GIT_INDEX_LOCK, joinGitPath } from "../src/git-helpers.ts"
 import {
   denyPreToolUse,
   formatActionPlan,
@@ -23,6 +23,7 @@ const command: string = (input.tool_input?.command as string) ?? ""
 if (!GIT_ANY_CMD_RE.test(command)) process.exit(0)
 
 const cwd = input.cwd || process.cwd()
+const LOCK_RELATIVE_PATH = `${GIT_DIR_NAME}/${GIT_INDEX_LOCK}`
 
 // Find the repo root — handles subdirectories and worktrees.
 const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
@@ -33,10 +34,10 @@ if (!(await Bun.file(lockPath).exists())) process.exit(0)
 
 denyPreToolUse(
   [
-    "`.git/index.lock` exists — another git process may be running, or a previous one crashed.",
+    `\`${LOCK_RELATIVE_PATH}\` exists — another git process may be running, or a previous one crashed.`,
     "",
     "This lock will cause your git command to fail with:",
-    "  \"fatal: Unable to create '.../.git/index.lock': File exists.\"",
+    `  "fatal: Unable to create '.../${LOCK_RELATIVE_PATH}': File exists."`,
     "",
     formatActionPlan(
       [
