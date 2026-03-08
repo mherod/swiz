@@ -206,12 +206,11 @@ describe("stop-auto-continue", () => {
   })
 
   test("allows stop when no AI backend is available (no fallback block)", async () => {
-    // No GEMINI_API_KEY and no gemini CLI in PATH → hook exits NO_BACKEND rather than blocking.
-    // Use a minimal system PATH so Bun.which("gemini") returns null regardless of install location.
-    // Bun is invoked via BUN_EXE (full path), so it does not need to be on PATH.
+    // Mock: GEMINI_TEST_NO_BACKEND=1 forces hasGeminiApiKey() to return false,
+    // simulating an environment with no API key and no gemini CLI installed.
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      extraEnv: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+      extraEnv: { GEMINI_TEST_NO_BACKEND: "1" },
     })
 
     expect(result.decision).toBeUndefined()

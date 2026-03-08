@@ -163,8 +163,8 @@ describe("ideaCommand", () => {
 
     const result = await runIdea(["--dir", dir], {
       GEMINI_API_KEY: "",
-      GEMINI_TEST_RESPONSE: "",
-      GEMINI_TEST_CAPTURE_FILE: "",
+      // Mock: force hasGeminiApiKey() to return false regardless of installed CLIs.
+      GEMINI_TEST_NO_BACKEND: "1",
     })
 
     expect(result.exitCode).not.toBe(0)

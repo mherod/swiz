@@ -38,8 +38,11 @@ export async function ensureGeminiApiKey(): Promise<void> {
  * Synchronous check: returns true when Gemini access is available —
  * either via GEMINI_API_KEY env var or the gemini CLI (OAuth credentials).
  * Call ensureGeminiApiKey() first to populate the env var from Keychain if needed.
+ *
+ * Set GEMINI_TEST_NO_BACKEND=1 in tests to simulate "no backend available".
  */
 export function hasGeminiApiKey(): boolean {
+  if (process.env.GEMINI_TEST_NO_BACKEND === "1") return false
   return Boolean(process.env.GEMINI_API_KEY) || Boolean(Bun.which("gemini"))
 }
 
