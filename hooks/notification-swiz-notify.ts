@@ -29,7 +29,10 @@ if (!message) process.exit(0)
 // ── Resolve binary ────────────────────────────────────────────────────────────
 function resolveBinary(): string | null {
   const envOverride = process.env.SWIZ_NOTIFY_BIN
-  if (envOverride && existsSync(envOverride)) return envOverride
+  if (envOverride !== undefined) {
+    // When set explicitly (e.g. in tests), treat as authoritative — no fallthrough
+    return existsSync(envOverride) ? envOverride : null
+  }
 
   const repoRoot = join(import.meta.dir, "..")
   const devPath = join(repoRoot, "macos", "SwizNotify.app", "Contents", "MacOS", "swiz-notify")
