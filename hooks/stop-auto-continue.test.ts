@@ -191,7 +191,7 @@ describe("stop-auto-continue", () => {
     expect(result.reason).toContain("Run the linter")
   })
 
-  test("allows stop when agent fails (no fallback block)", async () => {
+  test("blocks stop when agent fails (fail-closed)", async () => {
     const result = await runHook({
       transcriptContent: buildTranscript(10),
       extraEnv: {
@@ -200,12 +200,11 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput.trim()).toBe("")
-    expect(result.stderr).toContain("[stop-auto-continue:BACKEND_ERROR]")
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("AI backend failed")
   })
 
-  test("allows stop when no AI backend is available (no fallback block)", async () => {
+  test("blocks stop when no AI backend is available (fail-closed)", async () => {
     // Mock: GEMINI_TEST_NO_BACKEND=1 forces hasGeminiApiKey() to return false,
     // simulating an environment with no API key and no gemini CLI installed.
     const result = await runHook({
@@ -213,9 +212,8 @@ describe("stop-auto-continue", () => {
       extraEnv: { GEMINI_TEST_NO_BACKEND: "1" },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput.trim()).toBe("")
-    expect(result.stderr).toContain("[stop-auto-continue:NO_BACKEND]")
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("no AI backend available")
   })
 
   test("prompt contains all three read-only enforcement layers", async () => {
@@ -265,7 +263,7 @@ describe("stop-auto-continue", () => {
     expect(result.reason).not.toContain("Run the full test suite.")
   })
 
-  test("allows stop and suppresses markup when agent response contains tool-call markup", async () => {
+  test("blocks stop and suppresses markup when agent response contains tool-call markup (fail-closed)", async () => {
     const result = await runHook({
       transcriptContent: buildTranscript(10),
       extraEnv: {
@@ -274,8 +272,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput).not.toContain("<tool_call>")
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("<tool_call>")
   })
 
   test("rejects response with unicode fullwidth < lookalike", async () => {
@@ -288,8 +286,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput).not.toContain("\uFF1Ctool_call")
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("\uFF1Ctool_call")
   })
 
   test("rejects response with zero-width joiner injected between < and tag name", async () => {
@@ -302,8 +300,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput).not.toContain("<\u200Dtool_call>")
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("<\u200Dtool_call>")
   })
 
   test("rejects response with RTL override character before markup", async () => {
@@ -316,8 +314,7 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput.trim()).toBe("")
+    expect(result.decision).toBe("block")
   })
 
   test("rejects response with CJK left angle bracket homoglyph 〈 (U+3008)", async () => {
@@ -329,8 +326,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput).not.toContain("\u3008tool_call")
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("\u3008tool_call")
   })
 
   test("rejects response with single left-pointing angle quotation ‹ (U+2039)", async () => {
@@ -342,8 +339,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput).not.toContain("\u2039tool_call")
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("\u2039tool_call")
   })
 
   test("rejects response with mathematical left angle bracket ⟨ (U+27E8)", async () => {
@@ -355,8 +352,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput).not.toContain("\u27E8tool_call")
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("\u27E8tool_call")
   })
 
   test("rejects response with modifier letter left arrowhead ˂ (U+02C2)", async () => {
@@ -368,8 +365,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput).not.toContain("\u02C2tool_call")
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("\u02C2tool_call")
   })
 
   test("rejects response with Canadian Syllabics PA ᐸ (U+1438)", async () => {
@@ -381,8 +378,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput).not.toContain("\u1438tool_call")
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("\u1438tool_call")
   })
 
   test("rejects response with heavy left-pointing angle quotation ❮ (U+276E)", async () => {
@@ -394,8 +391,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput).not.toContain("\u276Etool_call")
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("\u276Etool_call")
   })
 
   test("rejects response with small less-than sign ﹤ (U+FE64, NFKC→<)", async () => {
@@ -407,8 +404,7 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput.trim()).toBe("")
+    expect(result.decision).toBe("block")
   })
 
   test("rejects response with heavy left-pointing angle bracket ❰ (U+2770)", async () => {
@@ -420,8 +416,7 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput.trim()).toBe("")
+    expect(result.decision).toBe("block")
   })
 
   test("rejects response with mathematical left double angle bracket ⟪ (U+27EA)", async () => {
@@ -433,8 +428,7 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput.trim()).toBe("")
+    expect(result.decision).toBe("block")
   })
 
   test("rejects response with left angle bracket with dot ⦑ (U+2991)", async () => {
@@ -446,8 +440,7 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput.trim()).toBe("")
+    expect(result.decision).toBe("block")
   })
 
   test("rejects response with left-pointing curved angle bracket ⧼ (U+29FC)", async () => {
@@ -459,8 +452,7 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput.trim()).toBe("")
+    expect(result.decision).toBe("block")
   })
 
   test("rejects response with leading-whitespace XML tag", async () => {
@@ -472,8 +464,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput).not.toContain("<tool_call>")
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("<tool_call>")
   })
 
   test("rejects response with XML markup embedded after normal text", async () => {
@@ -485,8 +477,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput).not.toContain("<tool_call>")
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("<tool_call>")
   })
 
   test("skips empty lines and returns first non-empty clean line", async () => {
@@ -737,7 +729,7 @@ describe("stop-auto-continue", () => {
     expect(capturedPrompt).not.toContain("Should be ignored")
   })
 
-  test("allows stop when backend times out (no fallback block)", async () => {
+  test("blocks stop when backend times out (fail-closed)", async () => {
     const result = await runHook({
       transcriptContent: buildTranscript(10),
       extraEnv: {
@@ -748,9 +740,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput.trim()).toBe("")
-    expect(result.stderr).toContain("[stop-auto-continue:BACKEND_ERROR]")
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("AI backend failed")
   }, 10_000)
 
   // ─── JSON response parsing tests ──────────────────────────────────────────
@@ -768,7 +759,7 @@ describe("stop-auto-continue", () => {
     expect(result.reason).toContain("Run the full test suite")
   })
 
-  test("allows stop and suppresses markup in JSON next field (no fallback block)", async () => {
+  test("blocks stop and suppresses markup in JSON next field (fail-closed)", async () => {
     const result = await runHook({
       transcriptContent: buildTranscript(10),
       extraEnv: {
@@ -777,9 +768,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput).not.toContain("<tool_call>")
-    expect(result.stderr).toContain("[stop-auto-continue:NO_ACTIONABLE_CONTENT]")
+    expect(result.decision).toBe("block")
+    expect(result.reason).not.toContain("<tool_call>")
   })
 
   test("replaces workflow implementation prescriptions with a policy finding", async () => {

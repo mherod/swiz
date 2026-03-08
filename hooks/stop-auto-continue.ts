@@ -666,12 +666,13 @@ async function main(): Promise<void> {
     reflections: [],
   }
 
-  // No backend available — there is no way to generate a meaningful next-step suggestion.
-  // Allow stop cleanly rather than blocking with the generic fallback message.
-  // This matches the hook's documented intent: "Only skips for trivial sessions
-  // (< MIN_TOOL_CALLS) or when agent is not installed."
+  // No backend available — fail closed: block stop so the session cannot end silently
+  // without a suggestion. The user should configure GEMINI_API_KEY or install the gemini CLI.
   if (!hasGeminiApiKey()) {
-    terminate("skip", "NO_BACKEND", "no Gemini API key available — skipping block")
+    terminate(
+      "block",
+      "Auto-continue could not generate a next-step suggestion: no AI backend available.\nSet GEMINI_API_KEY or install the gemini CLI, then continue working."
+    )
   }
 
   {
@@ -696,11 +697,13 @@ async function main(): Promise<void> {
       response = filterAgentResponse(parsed)
     } catch {
       // promptGeminiObject threw (backend unreachable or schema validation failed).
-      // If there is no runtime refinement finding, there is nothing actionable to
-      // deliver — exit cleanly as a distinct BACKEND_ERROR path rather than falling
-      // through to NO_ACTIONABLE_CONTENT (which would emit a second, redundant code).
+      // Fail closed: block stop so the session cannot end silently without a suggestion.
+      // If there is also a runtime refinement finding, fall through so it can be delivered.
       if (!refinementStatus) {
-        terminate("skip", "BACKEND_ERROR", "backend unreachable mid-call — skipping block")
+        terminate(
+          "block",
+          "Auto-continue could not generate a next-step suggestion: AI backend failed during call.\nReview your recent changes and continue working if there is more to do."
+        )
       }
       // refinementStatus is non-empty → continue to terminate("block", ...) below so the
       // refinement finding is still delivered even without an AI-generated next step.
@@ -735,9 +738,8 @@ async function main(): Promise<void> {
   // guidance and causes interactive sessions to spin indefinitely.
   if (!response.next && !refinementStatus) {
     terminate(
-      "skip",
-      "NO_ACTIONABLE_CONTENT",
-      "no actionable content after agent call — skipping block"
+      "block",
+      "Auto-continue could not identify a specific next step. Review your recent changes and ensure all tasks are complete before stopping."
     )
   }
 
