@@ -32,7 +32,7 @@ const TEST_RE = /(?:^|[|;&]|\|\|)\s*bun\s+test\b/
 const LINT_RE = /(?:^|[|;&]|\|\|)\s*bun\s+run\s+(?:lint|typecheck|check)\b/
 const BUILD_RE = /(?:^|[|;&]|\|\|)\s*bun\s+run\s+build\b/
 
-function classifyCommand(cmd: string): CommandKind | null {
+export function classifyCommand(cmd: string): CommandKind | null {
   if (TEST_RE.test(cmd)) return "test"
   if (LINT_RE.test(cmd)) return "lint"
   if (BUILD_RE.test(cmd)) return "build"
@@ -58,16 +58,20 @@ const COMMAND_LABEL: Record<CommandKind, string> = {
 //               controlled by an inline env var (e.g. OUTPUT_FILE=./r.json bun test)
 // Conservative: excludes /dev/ special devices and pure FD-to-FD redirects (2>&1).
 
-function bashMutatesWorkspace(cmd: string): boolean {
+export function bashMutatesWorkspace(cmd: string): boolean {
   // Plain output redirect: "> file" or ">> file"
   // (?<![0-9&]) excludes 2>&1-style FD redirects but also misses &> and N>.
   // Those are handled by the two checks below.
-  if (/(?<![0-9&])>>?\s*(?![&])(?!\/dev\/)/.test(cmd)) return true
+  // IMPORTANT: exclusion lookaheads embed \s* internally so the engine cannot
+  // backtrack the outer \s* to 0 and bypass the /dev/ exclusion. Without this,
+  // "> /dev/null" falsely matches because \s* retracts to 0, leaving the engine
+  // at the space character where (?!\/dev\/) incorrectly passes.
+  if (/(?<![0-9&])>>?(?!\s*\/dev\/)(?!\s*[&])/.test(cmd)) return true
   // &> and &>> — bash shorthand for redirecting both stdout and stderr to a file
-  if (/&>>?\s*(?![&>])(?!\/dev\/)/.test(cmd)) return true
+  if (/&>>?(?!\s*\/dev\/)(?!\s*[&>])/.test(cmd)) return true
   // N> and N>> numbered FD-to-file redirects (e.g. 1> file, 2> file)
-  // Excludes FD-to-FD (2>&1) via (?![&>])
-  if (/\d>>?\s*(?![&>])(?!\/dev\/)/.test(cmd)) return true
+  // Excludes FD-to-FD (2>&1) via (?!\s*[&>])
+  if (/\d>>?(?!\s*\/dev\/)(?!\s*[&>])/.test(cmd)) return true
   // tee to a named destination (not /dev/null or /dev/stderr)
   if (/\btee\s+(?!\/dev\/)/.test(cmd)) return true
   // In-place sed: -i (any position in combined flags, e.g. -i, -iE, -Ei, -ni),
@@ -258,4 +262,4 @@ async function main(): Promise<void> {
   )
 }
 
-await main()
+if (import.meta.main) await main()
