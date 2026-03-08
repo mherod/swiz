@@ -109,6 +109,7 @@ export const manifest: HookGroup[] = [
       { file: "stop-completion-auditor.ts", timeout: 10 },
       { file: "stop-secret-scanner.ts", timeout: 10 },
       { file: "stop-debug-statements.ts", timeout: 10 },
+      { file: "stop-workflow-permissions.ts", timeout: 10 },
       { file: "stop-large-files.ts", timeout: 10 },
       { file: "stop-git-status.ts", timeout: 10 },
       { file: "stop-lockfile-drift.ts", timeout: 10 },
