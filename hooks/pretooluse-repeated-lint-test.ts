@@ -4,18 +4,17 @@
 // them. Prevents the wasteful pattern of re-running the same command with
 // different output filters instead of reading the full output.
 //
-// "Uninterrupted" means: no Edit or Write tool call between the previous
-// same-type run and the current one. If the agent edited files in between,
-// they were acting on the output — that's normal and is allowed.
-//
-// When blocked, the agent must update memory (CLAUDE.md or MEMORY.md) with
-// what the previous run showed, then re-run without filters.
+// "Uninterrupted" means: no Edit, Write, or NotebookEdit tool call between
+// the previous same-type run and the current one. If the agent edited any
+// file in between, they were acting on the output — that's normal and is
+// allowed.
 
 import {
   denyPreToolUse,
   formatActionPlan,
   isEditTool,
   isGitRepo,
+  isNotebookTool,
   isShellTool,
   isWriteTool,
 } from "./hook-utils.ts"
@@ -48,6 +47,10 @@ type EventKind = CommandKind | "any_edit"
 
 interface TranscriptEvent {
   kind: EventKind
+  /** JSONL source line index. Two events with the same index are from the
+   *  same assistant message (parallel dispatch) and neither has been executed
+   *  yet — they cannot be treated as a prior/current pair. */
+  sourceLineIdx: number
 }
 
 async function parseTranscriptEvents(transcriptPath: string): Promise<TranscriptEvent[]> {
@@ -59,6 +62,7 @@ async function parseTranscriptEvents(transcriptPath: string): Promise<Transcript
     return events
   }
 
+  let lineIdx = 0
   for (const line of text.split("\n")) {
     if (!line.trim()) continue
     try {
@@ -75,17 +79,17 @@ async function parseTranscriptEvents(transcriptPath: string): Promise<Transcript
         if (isShellTool(name)) {
           const cmd = String(inp?.command ?? "").normalize("NFKC")
           const kind = classifyCommand(cmd)
-          if (kind) events.push({ kind })
-        } else if (isEditTool(name) || isWriteTool(name)) {
+          if (kind) events.push({ kind, sourceLineIdx: lineIdx })
+        } else if (isEditTool(name) || isWriteTool(name) || isNotebookTool(name)) {
           // Any file edit counts as "intervening work" — even to non-memory files.
-          // If the agent wrote code between two test runs, that's a real re-run.
-          // Capture even when extractFilePath is empty (Write with content= field).
-          events.push({ kind: "any_edit" })
+          // Includes NotebookEdit (Claude Code), EditNotebook (Cursor), apply_patch (Codex).
+          events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
         }
       }
     } catch {
       // Ignore malformed lines
     }
+    lineIdx++
   }
 
   return events
@@ -117,17 +121,27 @@ async function main(): Promise<void> {
   // the transcript BEFORE running PreToolUse hooks. So the current call is always
   // the LAST occurrence of its kind in the transcript. To find the prior call,
   // we need the second-to-last occurrence.
-  const sameKindIndices: number[] = []
-  for (let i = 0; i < events.length; i++) {
-    if (events[i]!.kind === currentKind) sameKindIndices.push(i)
-  }
+  //
+  // Additionally, when the model emits two same-kind commands in a single
+  // assistant message (parallel dispatch), both land in the transcript on the
+  // same JSONL line simultaneously — neither has been executed yet. We require
+  // the "prior" event to come from a different source line so that parallel
+  // dispatches are never misidentified as a prior+current pair.
+  const sameKindEvents = events.filter((e) => e.kind === currentKind)
 
   // Need at least 2 occurrences: one prior call + the current call (last in transcript)
-  if (sameKindIndices.length < 2) return
+  if (sameKindEvents.length < 2) return
 
-  const lastPriorRunIdx = sameKindIndices[sameKindIndices.length - 2]!
+  const currentEvent = sameKindEvents[sameKindEvents.length - 1]!
+  const priorEvent = sameKindEvents[sameKindEvents.length - 2]!
 
-  // Check if any Edit/Write happened between the prior run and the current call.
+  // Parallel dispatch guard: if both are from the same JSONL line, neither has
+  // been executed yet — skip enforcement.
+  if (priorEvent.sourceLineIdx === currentEvent.sourceLineIdx) return
+
+  const lastPriorRunIdx = events.indexOf(priorEvent)
+
+  // Check if any Edit/Write/Notebook happened between the prior run and current.
   // If so, the agent was acting on the output (real work) — allow the repeat.
   const hasInterveningWork = events.slice(lastPriorRunIdx + 1).some((e) => e.kind === "any_edit")
 
@@ -143,7 +157,7 @@ async function main(): Promise<void> {
       `This is the over-filtering pattern — re-running with different grep/tail flags instead of reading the full output.\n\n` +
       formatActionPlan([
         `Read the full output from the previous ${label} run.`,
-        "Edit CLAUDE.md or memory/MEMORY.md with a DO/DON'T rule about what you found.",
+        "Edit any file to signal you acted on the output, or update CLAUDE.md with a DO/DON'T rule.",
         `Then re-run without filters: \`${firstLine.replace(/\s*\|.*$/, "").trim()}\``,
       ]) +
       `\nThis gate clears once you edit any file — signalling you acted on the output rather than blindly retrying.`

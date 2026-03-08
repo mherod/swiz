@@ -82,7 +82,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-76 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+77 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
 The bundled hooks cover six events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, and UserPromptSubmit. Four additional events — **Notification**, **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system and supported by all agents. They ship with no bundled hooks; any custom hooks added for those events will be dispatched automatically.
 
@@ -148,7 +148,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-require-task-evidence.ts` | Blocks `TaskUpdate status=completed` unless the description contains at least 1 structured evidence field (note, conclusion, run ID, commit SHA, ci_green, pr, no_ci). Prevents hollow task completion that leaves no machine-readable verification record. |
 | `pretooluse-task-recovery.ts` | Before TaskUpdate or TaskGet, checks whether the referenced task ID exists on disk. If it's missing (lost during context compaction), creates a stub file so the tool call succeeds transparently — the agent never sees "Task not found". |
 | `pretooluse-pr-age-gate.ts` | Blocks `gh pr merge` if the PR has been open for less than the configured grace period (default: 10 minutes; configurable via `swiz settings set pr-age-gate <minutes>`; set to 0 to disable). Enforces a minimum visibility period so team members have time to review. Redirects the agent to other work instead of waiting. |
-| `pretooluse-repeated-lint-test.ts` | Blocks repeated `bun test` / `bun run lint` / `bun run build` calls unless a memory update (edit to CLAUDE.md or MEMORY.md) has occurred since the previous run. Prevents the wasteful pattern of re-running the same command with different output filters instead of reading the full output and capturing lessons. |
+| `pretooluse-repeated-lint-test.ts` | Blocks consecutive same-kind `bun test` / `bun run lint` / `bun run build` calls when no file edit (Edit, Write, or NotebookEdit) occurred between them. Also handles parallel tool-call dispatch correctly by tracking the JSONL source line. Prevents the wasteful pattern of re-running the same command with different output filters instead of reading the full output. |
 | `pretooluse-workflow-permissions-gate.ts` | Blocks changes to `permissions:` blocks in `.github/workflows/*.yml` files on non-default branches. GitHub Actions permission changes don't take effect until merged — this prevents accidental privilege escalation that silently activates upon merge. |
 | `pretooluse-sandboxed-edits.ts` | Blocks Edit, Write, and NotebookEdit calls targeting paths outside the session's working directory and temporary directories. Enabled by default; disable with `swiz settings disable sandboxed-edits`. |
 | `pretooluse-sandbox-guidance-consolidation.ts` | Blocks edits that introduce inline issue-guidance patterns. Enforces the use of `buildIssueGuidance()` from hook-utils.ts instead, keeping issue-guidance messages consistent and preventing duplicate patterns across hooks. |
@@ -227,7 +227,7 @@ The `swiz-core` plugin provides:
 
 ### `swiz install`
 
-Deploy all 54 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 77 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks
@@ -616,7 +616,7 @@ swiz/
     ├── hook-utils.ts         # Shared utilities: tool equivalence, polyglot output, git/gh, skill checking
     ├── shim.sh               # Shell wrapper functions (sourced from profile)
     ├── task-subject-validation.ts  # Shared validation logic
-    └── *.ts                  # 46 hook scripts (all TypeScript)
+    └── *.ts                  # 77 hook scripts (all TypeScript)
 ```
 
 The canonical hook manifest lives in `src/manifest.ts`. Each hook group specifies an event, an optional tool matcher, and a list of scripts. At install time, `agents.ts` translates matchers (`Bash` → `Shell` for Cursor, `Bash` → `run_shell_command` for Gemini) and events (`Stop` → `stop` for Cursor, `Stop` → `AfterAgent` for Gemini), then generates the correct config structure per agent.
