@@ -4,6 +4,7 @@ import { BOLD, DIM, RESET } from "../ansi.ts"
 import { debugLog } from "../debug.ts"
 import { formatDuration } from "../format-duration.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
+import { sessionPrefix } from "../session-id.ts"
 import {
   PROJECT_STATES,
   type ProjectState,
@@ -82,13 +83,7 @@ function timeAgo(date: Date): string {
 
 // ─── Session-scoped task IDs ─────────────────────────────────────────────────
 
-/**
- * Derive a short prefix from a session UUID for namespaced task IDs.
- * Uses the first 4 hex characters of the session ID (e.g., "a3f2").
- */
-export function sessionPrefix(sessionId: string): string {
-  return sessionId.replace(/-/g, "").slice(0, 4).toLowerCase()
-}
+export { sessionPrefix }
 
 /**
  * Parse a potentially prefixed task ID into its components.

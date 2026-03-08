@@ -18,6 +18,7 @@ import {
   hasGhCli,
   isGitHubRemote,
   isGitRepo,
+  sanitizeSessionId,
   skillAdvice,
 } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
@@ -140,16 +141,6 @@ const NEEDS_REFINEMENT_LABEL = "needs-refinement"
 
 const MAX_SHOWN_ISSUES = 5
 const COOLDOWN_SECONDS = 30
-
-/**
- * Sanitize session ID for use in /tmp sentinel filename.
- * Only allows alphanumeric, hyphens, underscores to prevent path traversal.
- */
-function sanitizeSessionId(sessionId: string | undefined): string | null {
-  if (!sessionId || typeof sessionId !== "string") return null
-  if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) return null
-  return sessionId
-}
 
 /**
  * Generate a canonical cooldown key for a session + cwd.

@@ -16,18 +16,12 @@ import {
   git,
   isGitRepo,
   parseGitStatus,
+  sanitizeSessionId,
   skillAdvice,
 } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 
 const DEFAULT_PUSH_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
-
-/** Returns a filesystem-safe session identifier, or null if the session is invalid/missing. */
-function sanitizeSessionId(sessionId: string | undefined): string | null {
-  if (!sessionId || sessionId === "null") return null
-  const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
-  return safe || null
-}
 
 function pushSentinelPath(safeSession: string): string {
   return `/tmp/stop-git-push-prompted-${safeSession}.flag`

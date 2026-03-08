@@ -31,14 +31,7 @@ export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
 
 // ─── Canonical path hashing — re-exported from src/git-helpers.ts ────────────
 export { getCanonicalPathHash } from "../src/git-helpers.ts"
-
-/**
- * Derive a short prefix from a session UUID for namespaced task IDs.
- * First 4 hex characters of the session ID (e.g., "a3f2").
- */
-export function sessionPrefix(sessionId: string): string {
-  return sessionId.replace(/-/g, "").slice(0, 4).toLowerCase()
-}
+export { sanitizeSessionId, sessionPrefix } from "../src/session-id.ts"
 
 export type PackageManager = "bun" | "pnpm" | "yarn" | "npm"
 export type Runtime = "bun" | "node"
