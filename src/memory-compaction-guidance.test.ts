@@ -25,6 +25,8 @@ describe("memory-compaction-guidance", () => {
       "Remove parenthetical restatements and duplicate bullets, sections, and topic lists.",
       "Convert narrative/session language into direct DO/DON'T/Reference guidance.",
       "Keep all technical specifics: names, IDs, URLs, commands, and numeric constraints.",
+      "Scan for narrative language ('we learned', 'this session', 'when we tried') — convert to directives or remove.",
+      "Apply surgical strategies: consolidate repeated topics, cross-reference instead of repeating, collapse similar lists.",
       "Re-check with `wc -w CLAUDE.md`.",
     ])
   })
