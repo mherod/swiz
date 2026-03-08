@@ -943,7 +943,10 @@ export const tasksCommand: Command = {
         const stateFlag = extractFlag(rest, "--state")
         if (!stateFlag) {
           throw new Error(
-            '--state <state> is required for: swiz tasks create "<subject>" "<description>" --state <state>'
+            `--state <state> is required.\n` +
+              `It sets the session's active working phase (not the task's todo status).\n` +
+              `Valid phases: ${PROJECT_STATES.join(" | ")}\n` +
+              `Example: swiz tasks create "<subject>" "<description>" --state developing`
           )
         }
         const sessionId = await resolveSession(rest.slice(2))
@@ -963,7 +966,10 @@ export const tasksCommand: Command = {
         const stateFlag = extractFlag(rest, "--state")
         if (!stateFlag) {
           throw new Error(
-            "--state <state> is required for: swiz tasks complete <task-id> --evidence TEXT --state <state>"
+            `--state <state> is required.\n` +
+              `It sets the session's active working phase (not the task's todo status).\n` +
+              `Valid phases: ${PROJECT_STATES.join(" | ")}\n` +
+              `Example: swiz tasks complete ${taskId} --evidence "note:done" --state developing`
           )
         }
         let verify = extractFlag(rest, "--verify")
@@ -1008,7 +1014,10 @@ export const tasksCommand: Command = {
         const stateFlag = extractFlag(rest, "--state")
         if (!stateFlag) {
           throw new Error(
-            `--state <state> is required for: swiz tasks status <task-id> <${valid.join("|")}> --state <state>`
+            `--state <state> is required.\n` +
+              `It sets the session's active working phase (not the task's todo status).\n` +
+              `Valid phases: ${PROJECT_STATES.join(" | ")}\n` +
+              `Example: swiz tasks status ${taskId} ${newStatus} --state developing`
           )
         }
         const sessionId = await resolveSession(rest.slice(2))
