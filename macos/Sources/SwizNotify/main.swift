@@ -7,7 +7,7 @@ NSApplication.shared.setActivationPolicy(.prohibited)
 let cliArgs = Array(CommandLine.arguments.dropFirst())
 
 if cliArgs.isEmpty || cliArgs.contains("--help") || cliArgs.contains("-h") {
-    print("""
+    let usageText = """
     swiz-notify — send rich native macOS notifications
 
     USAGE
@@ -32,7 +32,8 @@ if cliArgs.isEmpty || cliArgs.contains("--help") || cliArgs.contains("-h") {
 
     OUTPUT
       If action buttons are provided, the chosen action identifier is printed to stdout.
-    """)
+    """
+    fputs("\(usageText)\n", stdout)
     exit(0)
 }
 

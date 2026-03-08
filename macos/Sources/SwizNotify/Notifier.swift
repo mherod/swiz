@@ -79,7 +79,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 await self.waitForResponse()
             }
             if let id = actionId {
-                print(id)  // stdout: the chosen action identifier
+                fputs("\(id)\n", stdout)  // stdout: the chosen action identifier
             }
         } else {
             // Brief wait to ensure delivery before exit
