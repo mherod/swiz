@@ -3,17 +3,19 @@
 // When no pending tasks exist: also surfaces incomplete prior-session tasks.
 
 import {
+  emitContext,
   findPriorSessionTasks,
   formatTaskCompleteCommand,
   formatTaskList,
   readSessionTasks,
+  type SessionHookInput,
   toolNameForCurrentAgent,
 } from "./hook-utils.ts"
 
 const TASK_PREVIEW_LIMIT = 3
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as { session_id?: string; cwd?: string }
+  const input: SessionHookInput = await Bun.stdin.json()
   const sessionId = input.session_id
   if (!sessionId) return
 
@@ -25,12 +27,12 @@ async function main(): Promise<void> {
     (t) => t.status === "pending" || t.status === "in_progress"
   ).length
 
+  const cwd = input.cwd ?? process.cwd()
   const taskCreateName = toolNameForCurrentAgent("TaskCreate")
   let additionalContext: string
 
   if (pendingCount === 0) {
     // Check if the prior session had incomplete tasks the agent should resume
-    const cwd = input.cwd ?? process.cwd()
     const priorResult = await findPriorSessionTasks(cwd, sessionId, home)
 
     if (priorResult && priorResult.tasks.length > 0) {
@@ -52,14 +54,7 @@ async function main(): Promise<void> {
     additionalContext = `Use ${taskCreateName} to create a task for this prompt before starting work on it.`
   }
 
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "UserPromptSubmit",
-        additionalContext,
-      },
-    })
-  )
+  emitContext("UserPromptSubmit", additionalContext, cwd)
 }
 
 main()
