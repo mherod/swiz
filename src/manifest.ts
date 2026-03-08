@@ -283,7 +283,7 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "notification",
-    hooks: [],
+    hooks: [{ file: "notification-swiz-notify.ts", async: true, timeout: 10 }],
   },
   {
     event: "subagentStart",
