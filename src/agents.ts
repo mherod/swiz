@@ -55,7 +55,6 @@ export const AGENTS: AgentDef[] = [
       notification: "Notification",
       subagentStart: "SubagentStart",
       subagentStop: "SubagentStop",
-      subagentError: "SubagentError",
     },
   },
   // ⚠ Cursor CLI (cursor-agent) only supports beforeShellExecution and
@@ -93,7 +92,6 @@ export const AGENTS: AgentDef[] = [
       notification: "notification",
       subagentStart: "subagentStart",
       subagentStop: "subagentStop",
-      subagentError: "subagentError",
     },
   },
   {
@@ -129,7 +127,6 @@ export const AGENTS: AgentDef[] = [
       notification: "Notification",
       subagentStart: "SubagentStart",
       subagentStop: "SubagentStop",
-      subagentError: "SubagentError",
     },
   },
   {

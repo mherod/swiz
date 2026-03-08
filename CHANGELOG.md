@@ -23,25 +23,6 @@
 - Added `--state <state>` as a required flag for `swiz tasks create`,
   `swiz tasks complete`, and `swiz tasks status` subcommands, ensuring
   every task operation records the current project work phase.
-- Added `subagentError` as a canonical event in the dispatch engine
-  (`DISPATCH_ROUTES`, agent `eventMap` entries for Claude Code, Cursor,
-  and Gemini, and manifest). Uses `"blocking"` strategy so host agents
-  can react before execution continues. Maps to `SubagentStop` on agents
-  that do not yet expose a distinct error event.
-
-  To hook into subagent errors, add a hook entry in `.swiz/config.json`:
-  ```json
-  {
-    "hooks": [
-      {
-        "event": "subagentError",
-        "hooks": [{ "file": "hooks/my-subagent-error-handler.ts" }]
-      }
-    ]
-  }
-  ```
-  Or in `swiz dispatch subagentError` via `~/.claude/settings.json`.
-
 ## 2026-03-06
 
 ### New Features
