@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**82 hooks. 11 event types. Every agent. Zero compromises.**
+**83 hooks. 11 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -94,7 +94,7 @@ Notification hooks fire when Claude Code would deliver a system notification —
 |------|-------------|
 | `notification-swiz-notify.ts` | Delivers Claude Code notification events as rich native macOS system notifications via `swiz-notify`. Maps `permission_prompt` to an alert sound, `idle_prompt` to a ping, and falls back gracefully when the binary is not installed. |
 
-### Stop (20)
+### Stop (21)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -103,6 +103,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-secret-scanner.ts` | Scans staged diffs for API keys, tokens, and credentials. Blocks stop if any are found — because secrets in git history are permanent. |
 | `stop-debug-statements.ts` | Catches `console.log`, `debugger`, and other debug artifacts left in source files. Excludes infrastructure files that legitimately reference these patterns. |
 | `stop-workflow-permissions.ts` | Defense-in-depth backstop for workflow permission changes. Scans committed diffs on non-default branches for `permissions:` additions in `.github/workflows/*.yml` files. Catches changes that bypass the PreToolUse gate (shell edits, amends, cherry-picks). Allows permission changes on the default branch where they are intentional. |
+| `stop-suppression-patterns.ts` | Defense-in-depth backstop for type and lint suppression patterns. Scans committed diffs on non-default branches for newly added `@ts-ignore`, `@ts-nocheck`, bare `@ts-expect-error`, lint-disable comments, and `as any` casts in TypeScript/JavaScript files. Catches suppressions that bypass the PreToolUse gates via shell edits, amends, or cherry-picks. |
 | `stop-large-files.ts` | Blocks stop if any uncommitted file exceeds the size threshold — preventing accidental binary or generated-file commits. |
 | `stop-git-status.ts` | Unified git workflow enforcer. If there are uncommitted changes, unpushed commits, or the branch is behind remote, it blocks with a numbered action plan: commit → pull → push. One hook, full workflow. |
 | `stop-lockfile-drift.ts` | Detects when `package.json` has been modified but the lockfile hasn't been updated. Agents forget to run `bun install` — this doesn't let them forget. |
@@ -246,7 +247,7 @@ The `swiz-core` plugin provides:
 
 ### `swiz install`
 
-Deploy all 79 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 80 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks
