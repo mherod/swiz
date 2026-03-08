@@ -1,5 +1,6 @@
 import { basename, join } from "node:path"
 import { BOLD, DIM, RESET } from "../ansi.ts"
+import { getHomeDirOrNull } from "../home.ts"
 import type { Command } from "../types.ts"
 
 const DEFAULT_TOP = 10
@@ -272,7 +273,7 @@ function formatRatio(value: number | null): string {
 }
 
 function formatPath(path: string): string {
-  const home = process.env.HOME
+  const home = getHomeDirOrNull()
   if (home && path.startsWith(home)) {
     return `~${path.slice(home.length)}`
   }
@@ -331,7 +332,7 @@ async function readUsageFile(path: string): Promise<ClaudeUsageFile> {
 }
 
 function defaultUsagePath(): string {
-  const home = process.env.HOME
+  const home = getHomeDirOrNull()
   if (!home) {
     throw new Error(`HOME is not set. Pass --file <path>.\n${usageText()}`)
   }

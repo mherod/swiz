@@ -2,6 +2,7 @@
 // UserPromptSubmit hook: Inject task-creation context on every prompt.
 // When no pending tasks exist: also surfaces incomplete prior-session tasks.
 
+import { getHomeDirOrNull } from "../src/home.ts"
 import {
   emitContext,
   findPriorSessionTasks,
@@ -19,7 +20,7 @@ async function main(): Promise<void> {
   const sessionId = input.session_id
   if (!sessionId) return
 
-  const home = process.env.HOME
+  const home = getHomeDirOrNull()
   if (!home) return
 
   const tasks = await readSessionTasks(sessionId, home)

@@ -7,6 +7,7 @@ import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 import type { HookGroup } from "./manifest.ts"
+import { joinNodeModulesPath } from "./node-modules-path.ts"
 
 export type PluginErrorCode =
   | "not-found"
@@ -98,7 +99,7 @@ async function loadPlugin(entry: string, projectRoot: string): Promise<PluginRes
 function findNodeModulesPlugin(name: string, projectRoot: string): string | null {
   let dir = projectRoot
   while (true) {
-    const candidate = join(dir, "node_modules", name)
+    const candidate = joinNodeModulesPath(dir, name)
     if (existsSync(candidate)) return candidate
     const parent = dirname(dir)
     if (parent === dir) break

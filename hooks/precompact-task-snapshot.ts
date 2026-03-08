@@ -8,6 +8,7 @@
 // files, providing a definitive fallback that does not depend on transcript
 // discovery or the agent's in-context memory.
 
+import { getHomeDirWithFallback } from "../src/home.ts"
 import {
   getSessionCompactSnapshotPath,
   limitItems,
@@ -80,7 +81,7 @@ async function main(): Promise<void> {
   const sessionId = input?.session_id ?? ""
   if (!sessionId) return
 
-  const home = process.env.HOME ?? ""
+  const home = getHomeDirWithFallback("")
   if (!home) return
 
   const tasks = await readSessionTasks(sessionId, home)

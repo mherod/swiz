@@ -15,6 +15,7 @@
 
 import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
+import { isNodeModulesPath, NODE_MODULES_DIR } from "./node-modules-path.ts"
 
 export interface PatternMatch {
   file: string
@@ -58,6 +59,10 @@ const DUPLICATE_PATTERNS = [
   /gh\s+issue\s+create\s+--title\s+"[^"]+"\s+--body/gi,
 ]
 
+const SOURCE_FILE_RE = /\.(ts|tsx|js|jsx)$/
+const SKIPPED_DIR_NAMES = new Set([NODE_MODULES_DIR])
+const PREVIEW_MAX_CHARS = 60
+
 /**
  * Exceptions: files that legitimately need to contain these patterns
  * (e.g., the buildIssueGuidance implementation itself, or tests for it).
@@ -72,28 +77,17 @@ const EXCEPTION_PATTERNS = [
   /pretooluse-sandbox-guidance-consolidation\.ts/, // PreToolUse hook (contains pattern definitions)
 ]
 
+function isExceptionPath(filePath: string): boolean {
+  return EXCEPTION_PATTERNS.some((pattern) => pattern.test(filePath))
+}
+
 /**
  * Check if a file path should be scanned.
  */
 function shouldScanFile(filePath: string): boolean {
-  // Skip non-source files
-  if (!filePath.match(/\.(ts|tsx|js|jsx)$/)) {
-    return false
-  }
-
-  // Skip node_modules
-  if (filePath.includes("node_modules")) {
-    return false
-  }
-
-  // Skip exceptions
-  for (const pattern of EXCEPTION_PATTERNS) {
-    if (pattern.test(filePath)) {
-      return false
-    }
-  }
-
-  return true
+  if (!SOURCE_FILE_RE.test(filePath)) return false
+  if (isNodeModulesPath(filePath)) return false
+  return !isExceptionPath(filePath)
 }
 
 /**
@@ -107,63 +101,99 @@ function findMatches(text: string, pattern: RegExp, filePath: string): PatternMa
     const line = lines[i]
     if (line === undefined) continue
 
-    // Reset regex lastIndex for each line to ensure per-line matching
+    // Preserve behavior with global regexes by resetting lastIndex per line.
     pattern.lastIndex = 0
+    if (!pattern.test(line)) continue
 
-    if (pattern.test(line)) {
-      matches.push({
-        file: filePath,
-        line: i + 1, // Line numbers are 1-based
-        text: line.trim(),
-        pattern: pattern.source,
-      })
-    }
+    matches.push({
+      file: filePath,
+      line: i + 1, // Line numbers are 1-based
+      text: line.trim(),
+      pattern: pattern.source,
+    })
   }
 
   return matches
+}
+
+function shouldSkipEntry(name: string): boolean {
+  return name.startsWith(".") || SKIPPED_DIR_NAMES.has(name)
+}
+
+function appendGroupedMatch(grouped: Map<string, PatternMatch[]>, match: PatternMatch): void {
+  const fileMatches = grouped.get(match.file)
+  if (fileMatches) {
+    fileMatches.push(match)
+    return
+  }
+  grouped.set(match.file, [match])
+}
+
+function truncatePreview(text: string, maxChars = PREVIEW_MAX_CHARS): string {
+  return text.length > maxChars ? `${text.substring(0, maxChars)}...` : text
+}
+
+function formatGroupedMatches(grouped: Map<string, PatternMatch[]>): string {
+  let report = ""
+  for (const [file, fileMatches] of grouped) {
+    report += `  ${file}\n`
+    for (const match of fileMatches) {
+      report += `    Line ${match.line}: ${truncatePreview(match.text)}\n`
+      report += `    → This may need buildIssueGuidance() consolidation\n\n`
+    }
+  }
+  return report
+}
+
+/**
+ * Read and scan one file for duplicate pattern matches.
+ * Returns null when the file cannot be read.
+ */
+async function scanFile(filePath: string): Promise<PatternMatch[] | null> {
+  try {
+    const content = await readFile(filePath, "utf-8")
+    const matches: PatternMatch[] = []
+    for (const pattern of DUPLICATE_PATTERNS) {
+      matches.push(...findMatches(content, pattern, filePath))
+    }
+    return matches
+  } catch {
+    return null
+  }
+}
+
+async function scanDirectoryRecursive(
+  dir: string,
+  result: { matches: PatternMatch[]; filesScanned: number }
+): Promise<void> {
+  const entries = await readdir(dir, { withFileTypes: true })
+
+  for (const entry of entries) {
+    if (shouldSkipEntry(entry.name)) continue
+    const fullPath = join(dir, entry.name)
+
+    if (entry.isDirectory()) {
+      await scanDirectoryRecursive(fullPath, result)
+      continue
+    }
+
+    if (!entry.isFile() || !shouldScanFile(fullPath)) continue
+
+    const fileMatches = await scanFile(fullPath)
+    if (fileMatches === null) continue
+
+    result.filesScanned++
+    result.matches.push(...fileMatches)
+  }
 }
 
 /**
  * Scan a directory recursively for duplicate issue-guidance patterns.
  */
 export async function scanForDuplicatePatterns(directory: string): Promise<ScanResult> {
-  const matches: PatternMatch[] = []
-  let filesScanned = 0
-
-  async function scanDirectory(dir: string): Promise<void> {
-    const entries = await readdir(dir, { withFileTypes: true })
-
-    for (const entry of entries) {
-      const fullPath = join(dir, entry.name)
-
-      // Skip hidden directories and common exclusions
-      if (entry.name.startsWith(".") || entry.name === "node_modules") {
-        continue
-      }
-
-      if (entry.isDirectory()) {
-        await scanDirectory(fullPath)
-      } else if (entry.isFile()) {
-        if (!shouldScanFile(fullPath)) {
-          continue
-        }
-
-        try {
-          const content = await readFile(fullPath, "utf-8")
-          filesScanned++
-
-          for (const pattern of DUPLICATE_PATTERNS) {
-            const patternMatches = findMatches(content, pattern, fullPath)
-            matches.push(...patternMatches)
-          }
-        } catch {}
-      }
-    }
-  }
-
-  await scanDirectory(directory)
-
-  return { matches, filesScanned }
+  const result: ScanResult = { matches: [], filesScanned: 0 }
+  await scanDirectoryRecursive(directory, result)
+  return result
 }
 
 /**
@@ -176,26 +206,11 @@ export function formatScanResults(result: ScanResult): string {
 
   const grouped = new Map<string, PatternMatch[]>()
   for (const match of result.matches) {
-    if (!grouped.has(match.file)) {
-      grouped.set(match.file, [])
-    }
-    const fileMatches = grouped.get(match.file)
-    if (fileMatches) {
-      fileMatches.push(match)
-    }
+    appendGroupedMatch(grouped, match)
   }
 
   let report = `⚠ Found ${result.matches.length} potential duplicate pattern(s) in ${grouped.size} file(s):\n\n`
-
-  for (const [file, fileMatches] of grouped) {
-    report += `  ${file}\n`
-    for (const match of fileMatches) {
-      report += `    Line ${match.line}: ${match.text.substring(0, 60)}${match.text.length > 60 ? "..." : ""}\n`
-      report += `    → This may need buildIssueGuidance() consolidation\n\n`
-    }
-  }
-
+  report += formatGroupedMatches(grouped)
   report += "ACTION: Review matches and consolidate using buildIssueGuidance() in hook-utils.ts\n"
-
   return report
 }

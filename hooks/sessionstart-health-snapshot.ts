@@ -3,6 +3,7 @@
 // SessionStart hook: Inject project health snapshot as additionalContext
 
 import { join } from "node:path"
+import { getHomeDir } from "../src/home.ts"
 import { emitContext, ghJson, git, hasGhCli, isGitHubRemote, isGitRepo } from "./hook-utils.ts"
 import { sessionHookInputSchema } from "./schemas.ts"
 import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"
@@ -25,7 +26,7 @@ const KNOWN_PLUGIN_ENV: PluginEnvRequirement[] = [
 
 async function checkPluginEnv(): Promise<string[]> {
   const warnings: string[] = []
-  const settingsPath = join(process.env.HOME ?? "~", ".claude", "settings.json")
+  const settingsPath = join(getHomeDir(), ".claude", "settings.json")
 
   let enabledPlugins: Record<string, boolean> = {}
   try {

@@ -1,5 +1,6 @@
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, getAgentByFlag, translateEvent } from "../agents.ts"
+import { getHomeDirOrNull } from "../home.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import { loadAllPlugins, pluginErrorHint, pluginResultsToJson } from "../plugins.ts"
 import { readProjectSettings } from "../settings.ts"
@@ -14,7 +15,11 @@ import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 // manifest and DISPATCH_TIMEOUTS imported from ../manifest.ts
 
 // Paths that swiz supersedes — hooks at these locations are replaced by swiz equivalents.
-const LEGACY_HOOK_DIRS = ["$HOME/.claude/hooks/", `${process.env.HOME}/.claude/hooks/`]
+const LEGACY_HOME = getHomeDirOrNull()
+const LEGACY_HOOK_DIRS = [
+  "$HOME/.claude/hooks/",
+  ...(LEGACY_HOME ? [`${LEGACY_HOME}/.claude/hooks/`] : []),
+]
 
 function isSwizCommand(cmd: unknown): boolean {
   if (typeof cmd !== "string") return false

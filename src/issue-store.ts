@@ -12,6 +12,7 @@ import { mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 import { debugLog } from "./debug.ts"
+import { getHomeDirWithFallback } from "./home.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -328,7 +329,7 @@ function logReplayResult(result: ReplayResult, originalCount: number, repo: stri
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function getDefaultDbPath(): string {
-  const home = process.env.HOME ?? "/tmp"
+  const home = getHomeDirWithFallback("/tmp")
   return join(home, ".swiz", "issues.db")
 }
 

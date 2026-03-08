@@ -18,28 +18,26 @@
 //   - Skill content (e.g. /push skill header) — auto-loaded by the agent
 //   - Assistant reasoning ("I'll go ahead and push") — agent-generated text
 
+import { getHomeDirWithFallback } from "../src/home.ts"
 import { denyPreToolUse, GIT_PUSH_RE, isShellTool, type ToolHookInput } from "./hook-utils.ts"
 
 // ── Feature flag: disabled by default ────────────────────────────────────────
 // Enable with: swiz settings enable push-gate
-const HOME = process.env.HOME ?? ""
-if (HOME) {
+async function isPushGateEnabled(): Promise<boolean> {
+  const home = getHomeDirWithFallback("")
+  if (!home) return false
+
   try {
-    const settingsPath = `${HOME}/.swiz/settings.json`
-    const settingsFile = Bun.file(settingsPath)
-    if (await settingsFile.exists()) {
-      const settings = await settingsFile.json()
-      if (settings?.pushGate !== true) process.exit(0)
-    } else {
-      // No settings file → use default (disabled)
-      process.exit(0)
-    }
+    const settingsFile = Bun.file(`${home}/.swiz/settings.json`)
+    if (!(await settingsFile.exists())) return false
+    const settings = await settingsFile.json()
+    return settings?.pushGate === true
   } catch {
-    process.exit(0)
+    return false
   }
-} else {
-  process.exit(0)
 }
+
+if (!(await isPushGateEnabled())) process.exit(0)
 
 const input: ToolHookInput = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)

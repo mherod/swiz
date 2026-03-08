@@ -5,7 +5,15 @@
 // to remove the src-to-hooks coupling (issue #85).
 
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
-import { dirname } from "node:path"
+import { dirname, join } from "node:path"
+
+export const GIT_DIR_NAME = ".git"
+export const GIT_INDEX_LOCK = "index.lock"
+
+/** Join a path under `<repoRoot>/.git/...`. */
+export function joinGitPath(repoRoot: string, ...segments: string[]): string {
+  return join(repoRoot, GIT_DIR_NAME, ...segments)
+}
 
 /** Run a git command and return trimmed stdout. Returns "" on failure. */
 export async function git(args: string[], cwd: string): Promise<string> {
@@ -162,7 +170,7 @@ export function getCanonicalPathHash(cwd: string): string {
 export function resolveGitPaths(cwd: string): { gitDir: string; workTree: string } | null {
   let dir = cwd
   while (true) {
-    const candidate = `${dir}/.git`
+    const candidate = joinGitPath(dir)
     if (existsSync(candidate)) {
       try {
         const st = statSync(candidate)

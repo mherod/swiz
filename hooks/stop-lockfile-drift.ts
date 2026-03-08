@@ -2,6 +2,7 @@
 // Stop hook: Block stop if package.json was modified but lockfile was not
 
 import { dirname, join } from "node:path"
+import { isNodeModulesPath } from "../src/node-modules-path.ts"
 import { blockStop, git, isGitRepo, recentHeadRange } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 
@@ -35,7 +36,7 @@ async function main(): Promise<void> {
 
   // Find changed package.json files (not in node_modules)
   const changedPkgs = [...changedFiles].filter(
-    (f) => f.endsWith("package.json") && !f.includes("node_modules")
+    (f) => f.endsWith("package.json") && !isNodeModulesPath(f)
   )
 
   if (changedPkgs.length === 0) return

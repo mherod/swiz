@@ -62,6 +62,7 @@ export interface ProjectCollaborationDetectionResult extends CollaborationPolicy
 }
 
 const BOT_OR_AUTOMATION_LOGIN_RE = /(?:\[bot\]|dependabot|^claude$|^cursoragent$)/i
+const ONE_DAY_MS = 24 * 60 * 60 * 1000
 
 function normalizeLogin(login: string): string {
   return login.trim()
@@ -73,6 +74,19 @@ function canonicalLogin(login: string): string {
 
 function isNullLike(login: string): boolean {
   return canonicalLogin(login) === "null"
+}
+
+function getComparableLoginParts(
+  login: string | null | undefined
+): { normalized: string; key: string } | null {
+  if (typeof login !== "string") return null
+  const normalized = normalizeLogin(login)
+  if (!normalized || isNullLike(normalized)) return null
+  return { normalized, key: canonicalLogin(normalized) }
+}
+
+function getCurrentUserKey(currentUser: string | null): string | null {
+  return currentUser ? canonicalLogin(currentUser) : null
 }
 
 function dedupeLogins(logins: Array<string | null | undefined>): string[] {
@@ -108,12 +122,13 @@ export function filterHumanContributorLogins(
   logins: Array<string | null | undefined>,
   currentUser: string | null
 ): string[] {
-  const currentUserKey = currentUser ? canonicalLogin(currentUser) : null
+  const currentUserKey = getCurrentUserKey(currentUser)
 
   return dedupeLogins(logins).filter((login) => {
-    const key = canonicalLogin(login)
-    if (currentUserKey && key === currentUserKey) return false
-    return !isAutomationLogin(login)
+    const parts = getComparableLoginParts(login)
+    if (!parts) return false
+    if (currentUserKey && parts.key === currentUserKey) return false
+    return !isAutomationLogin(parts.normalized)
   })
 }
 
@@ -121,17 +136,27 @@ export function filterHumanOpenPullRequests(
   prs: OpenPullRequest[],
   currentUser: string | null
 ): OpenPullRequest[] {
-  const currentUserKey = currentUser ? canonicalLogin(currentUser) : null
+  const currentUserKey = getCurrentUserKey(currentUser)
 
   return prs.filter((pr) => {
-    const login = pr.author?.login
-    if (typeof login !== "string") return false
-    const normalized = normalizeLogin(login)
-    if (!normalized || isNullLike(normalized)) return false
-    const key = canonicalLogin(normalized)
-    if (currentUserKey && key === currentUserKey) return false
-    return !isAutomationLogin(normalized)
+    const parts = getComparableLoginParts(pr.author?.login)
+    if (!parts) return false
+    if (currentUserKey && parts.key === currentUserKey) return false
+    return !isAutomationLogin(parts.normalized)
   })
+}
+
+function getRecentContributorLogins(
+  commits: GitHubCommit[] | null,
+  dayAgoMs: number
+): Array<string | null | undefined> {
+  if (!commits) return []
+  return commits
+    .filter((commit) => {
+      const timestamp = Date.parse(commit.commit.author.date)
+      return Number.isFinite(timestamp) && timestamp > dayAgoMs
+    })
+    .map((commit) => commit.author?.login ?? null)
 }
 
 export function evaluateCollaborationPolicy(
@@ -216,14 +241,8 @@ export async function detectProjectCollaborationPolicy(
       : null,
   ])
 
-  const dayAgoMs = (options.nowMs ?? Date.now()) - 24 * 60 * 60 * 1000
-  const recentContributorLogins =
-    commitsResult
-      ?.filter((commit) => {
-        const timestamp = Date.parse(commit.commit.author.date)
-        return Number.isFinite(timestamp) && timestamp > dayAgoMs
-      })
-      .map((commit) => commit.author?.login ?? null) ?? []
+  const dayAgoMs = (options.nowMs ?? Date.now()) - ONE_DAY_MS
+  const recentContributorLogins = getRecentContributorLogins(commitsResult ?? null, dayAgoMs)
 
   const policy = evaluateCollaborationPolicy({
     currentUser: ownership.currentUser,

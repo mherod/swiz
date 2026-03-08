@@ -6,11 +6,14 @@
 
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { GIT_DIR_NAME } from "../src/git-helpers.ts"
+import { getHomeDirWithFallback } from "../src/home.ts"
 import {
   compactionChecklistSteps,
   manualCompactionFallback,
 } from "../src/memory-compaction-guidance.ts"
 import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
+import { NODE_MODULES_DIR } from "../src/node-modules-path.ts"
 import { blockStop, formatActionPlan, isGitRepo, skillAdvice } from "./hook-utils.ts"
 import { countStats, isMemoryFile, resolveThresholds } from "./posttooluse-memory-size.ts"
 import { stopHookInputSchema } from "./schemas.ts"
@@ -38,7 +41,7 @@ async function findMemoryFiles(dir: string, maxDepth = 4): Promise<string[]> {
       return
     }
     for (const entry of entries) {
-      if (entry === "node_modules" || entry === ".git") continue
+      if (entry === NODE_MODULES_DIR || entry === GIT_DIR_NAME) continue
       const full = join(current, entry)
       if (isMemoryFile(full)) {
         results.push(full)
@@ -62,7 +65,7 @@ async function main(): Promise<void> {
   const { lineThreshold, wordThreshold } = await resolveThresholds(cwd)
 
   // Scan HOME/.claude hierarchy plus the project cwd
-  const home = process.env.HOME ?? ""
+  const home = getHomeDirWithFallback("")
   const searchRoots = [cwd, join(home, ".claude")].filter(Boolean)
 
   const checkedFiles = new Set<string>()

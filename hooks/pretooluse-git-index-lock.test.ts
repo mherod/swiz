@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { GIT_INDEX_LOCK, joinGitPath } from "../src/git-helpers.ts"
 
 const HOOK = "hooks/pretooluse-git-index-lock.ts"
 
@@ -11,10 +12,10 @@ const REPO_WITH_LOCK = join(TMP, "repo-locked")
 const REPO_WITHOUT_LOCK = join(TMP, "repo-clean")
 
 beforeAll(async () => {
-  mkdirSync(join(REPO_WITH_LOCK, ".git"), { recursive: true })
-  mkdirSync(join(REPO_WITHOUT_LOCK, ".git"), { recursive: true })
+  mkdirSync(joinGitPath(REPO_WITH_LOCK), { recursive: true })
+  mkdirSync(joinGitPath(REPO_WITHOUT_LOCK), { recursive: true })
   // Create a lock file in the locked repo.
-  writeFileSync(join(REPO_WITH_LOCK, ".git", "index.lock"), "")
+  writeFileSync(joinGitPath(REPO_WITH_LOCK, GIT_INDEX_LOCK), "")
 
   // Initialize real git repos so `git rev-parse --show-toplevel` works.
   for (const dir of [REPO_WITH_LOCK, REPO_WITHOUT_LOCK]) {
@@ -22,7 +23,7 @@ beforeAll(async () => {
     await proc.exited
   }
   // Re-create the lock file after git init (init may have cleaned it).
-  writeFileSync(join(REPO_WITH_LOCK, ".git", "index.lock"), "")
+  writeFileSync(joinGitPath(REPO_WITH_LOCK, GIT_INDEX_LOCK), "")
 })
 
 afterAll(() => {

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { dirname, isAbsolute, join } from "node:path"
 import { z } from "zod"
+import { getHomeDirOrNull } from "./home.ts"
 import type { HookDef, HookGroup } from "./manifest.ts"
 
 // ─── Central Zod enums — single source of truth for all domain types ─────────
@@ -677,7 +678,7 @@ export async function readProjectSettings(cwd: string): Promise<ProjectSwizSetti
   }
 }
 
-export function getSwizSettingsPath(home = process.env.HOME): string | null {
+export function getSwizSettingsPath(home = getHomeDirOrNull()): string | null {
   if (!home) return null
   return join(home, ".swiz", "settings.json")
 }

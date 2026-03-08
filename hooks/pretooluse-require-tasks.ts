@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Deny Edit/Write/Bash/Shell tools unless:
 //   1. The session has at least one incomplete task (pending or in_progress)
 //   2. Tasks haven't gone stale (no task tool interaction in last STALENESS_THRESHOLD calls)
 
+import { getHomeDirOrNull } from "../src/home.ts"
 import { readProjectState } from "../src/settings.ts"
 import {
   denyPreToolUse as deny,
@@ -82,7 +84,7 @@ async function main() {
   // (CI verification, issue comments, closing issues, etc.). CHECK 2 (staleness)
   // still fires if the agent does excessive unplanned work after completion.
 
-  if (!process.env.HOME) process.exit(0)
+  if (!getHomeDirOrNull()) process.exit(0)
   const allTasks = await readSessionTasks(sessionId)
   const activeTasks = allTasks
     .filter((t) => isIncompleteTaskStatus(t.status))

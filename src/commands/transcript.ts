@@ -3,6 +3,7 @@ import { promptAgent } from "../agent.ts"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
+import { getHomeDirOrNull } from "../home.ts"
 import { getTranscriptProvidersForAgent, type TranscriptProviderId } from "../provider-adapters.ts"
 import {
   type ContentBlock,
@@ -262,7 +263,7 @@ interface DebugEvent {
 const DEBUG_TS_RE = /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+/
 
 async function loadDebugLog(sessionId: string): Promise<DebugLog | null> {
-  const home = process.env.HOME
+  const home = getHomeDirOrNull()
   if (!home) return null
 
   const path = join(home, ".claude", "debug", `${sessionId}.txt`)

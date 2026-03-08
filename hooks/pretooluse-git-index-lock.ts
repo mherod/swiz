@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Block git commands when .git/index.lock exists.
 // Prevents wasting agent turns on git operations that will fail because
 // another git process is running or a stale lock was left behind.
 
-import { join } from "node:path"
+import { GIT_INDEX_LOCK, joinGitPath } from "../src/git-helpers.ts"
 import {
   denyPreToolUse,
   formatActionPlan,
@@ -27,7 +28,7 @@ const cwd = input.cwd || process.cwd()
 const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
 if (!repoRoot) process.exit(0) // Not in a git repo; let git itself report the error.
 
-const lockPath = join(repoRoot, ".git", "index.lock")
+const lockPath = joinGitPath(repoRoot, GIT_INDEX_LOCK)
 if (!(await Bun.file(lockPath).exists())) process.exit(0)
 
 denyPreToolUse(

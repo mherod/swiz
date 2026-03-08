@@ -1,19 +1,20 @@
 #!/usr/bin/env bun
 
-import { dirname, join } from "node:path"
+import { dirname } from "node:path"
+import { joinNodeModulesPath } from "../src/node-modules-path.ts"
 import { emitContext, isFileEditTool } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
 
 /** Walk up from filePath to find node_modules/.bin/prettier */
 async function findPrettier(filePath: string, cwd: string): Promise<string | null> {
   // Check project cwd first
-  const cwdBin = join(cwd, "node_modules", ".bin", "prettier")
+  const cwdBin = joinNodeModulesPath(cwd, ".bin", "prettier")
   if (await Bun.file(cwdBin).exists()) return cwdBin
 
   // Walk up from file location
   let dir = dirname(filePath)
   for (let i = 0; i < 10; i++) {
-    const candidate = join(dir, "node_modules", ".bin", "prettier")
+    const candidate = joinNodeModulesPath(dir, ".bin", "prettier")
     if (await Bun.file(candidate).exists()) return candidate
     const parent = dirname(dir)
     if (parent === dir) break

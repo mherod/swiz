@@ -2,6 +2,7 @@ import { chmod, cp, mkdir, readdir, rename, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
 import { suggest } from "../fuzzy.ts"
+import { getHomeDirWithFallback } from "../home.ts"
 import { manifest } from "../manifest.ts"
 import { readProjectSettings, readSwizSettings } from "../settings.ts"
 import {
@@ -40,7 +41,7 @@ const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
 
 import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 
-const HOME = process.env.HOME ?? ""
+const HOME = getHomeDirWithFallback("")
 
 const PASS = `${GREEN}✓${RESET}`
 const FAIL = `${RED}✗${RESET}`

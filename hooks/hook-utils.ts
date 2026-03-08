@@ -23,6 +23,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { translateMatcher } from "../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
+import { getHomeDirOrNull, getHomeDirWithFallback } from "../src/home.ts"
 import { readProjectSettings, STATE_TRANSITIONS, stateDataSchema } from "../src/settings.ts"
 import { skillAdvice, skillExists } from "../src/skill-utils.ts"
 
@@ -374,7 +375,7 @@ let _updateMemoryFooterEnabledCache: boolean | undefined
 function isUpdateMemoryFooterEnabled(): boolean {
   if (_updateMemoryFooterEnabledCache !== undefined) return _updateMemoryFooterEnabledCache
 
-  const home = process.env.HOME
+  const home = getHomeDirOrNull()
   if (!home) {
     _updateMemoryFooterEnabledCache = false
     return _updateMemoryFooterEnabledCache
@@ -512,13 +513,13 @@ export interface SessionTask {
 }
 
 /** Resolve ~/.claude/tasks for the active home directory. */
-export function getTasksRoot(home: string = process.env.HOME ?? ""): string | null {
+export function getTasksRoot(home: string = getHomeDirWithFallback("")): string | null {
   if (!home) return null
   return join(home, ".claude", "tasks")
 }
 
 /** Resolve ~/.claude/projects for the active home directory. */
-export function getProjectsRoot(home: string = process.env.HOME ?? ""): string | null {
+export function getProjectsRoot(home: string = getHomeDirWithFallback("")): string | null {
   if (!home) return null
   return join(home, ".claude", "projects")
 }
@@ -526,7 +527,7 @@ export function getProjectsRoot(home: string = process.env.HOME ?? ""): string |
 /** Resolve ~/.claude/tasks/<sessionId> for the active home directory. */
 export function getSessionTasksDir(
   sessionId: string,
-  home: string = process.env.HOME ?? ""
+  home: string = getHomeDirWithFallback("")
 ): string | null {
   const tasksRoot = getTasksRoot(home)
   if (!tasksRoot || !sessionId) return null
@@ -537,7 +538,7 @@ export function getSessionTasksDir(
 export function getSessionTaskPath(
   sessionId: string,
   taskId: string,
-  home: string = process.env.HOME ?? ""
+  home: string = getHomeDirWithFallback("")
 ): string | null {
   const tasksDir = getSessionTasksDir(sessionId, home)
   if (!tasksDir || !taskId) return null
@@ -547,7 +548,7 @@ export function getSessionTaskPath(
 /** Resolve ~/.claude/tasks/<sessionId>/compact-snapshot.json. */
 export function getSessionCompactSnapshotPath(
   sessionId: string,
-  home: string = process.env.HOME ?? ""
+  home: string = getHomeDirWithFallback("")
 ): string | null {
   const tasksDir = getSessionTasksDir(sessionId, home)
   if (!tasksDir) return null
@@ -557,7 +558,7 @@ export function getSessionCompactSnapshotPath(
 /** True when a session task directory exists and can be listed. */
 export async function hasSessionTasksDir(
   sessionId: string,
-  home: string = process.env.HOME ?? ""
+  home: string = getHomeDirWithFallback("")
 ): Promise<boolean> {
   const tasksDir = getSessionTasksDir(sessionId, home)
   if (!tasksDir) return false
@@ -582,7 +583,7 @@ import { computeSubjectFingerprint } from "../src/subject-fingerprint.ts"
  */
 export async function readSessionTasks(
   sessionId: string,
-  home: string = process.env.HOME ?? ""
+  home: string = getHomeDirWithFallback("")
 ): Promise<SessionTask[]> {
   const tasksDir = getSessionTasksDir(sessionId, home)
   if (!tasksDir) return []
@@ -647,7 +648,7 @@ export function limitItems<T>(items: T[], limit = 3): LimitedItems<T> {
 export async function findPriorSessionTasks(
   cwd: string,
   excludeSessionId: string,
-  home: string = process.env.HOME ?? ""
+  home: string = getHomeDirWithFallback("")
 ): Promise<PriorSessionResult | null> {
   if (!home || !cwd) return null
   const { projectKeyFromCwd } = await import("../src/transcript-utils.ts")
@@ -825,7 +826,7 @@ export async function createSessionTask(
 ): Promise<void> {
   if (!sessionId || sessionId === "null" || !sessionId.trim()) return
   if (!sentinelKey.trim()) return
-  const home = process.env.HOME
+  const home = getHomeDirOrNull()
   if (!home) return
   // Sanitize sentinel path components: strip path separators and shell metacharacters
   const safeSentinel = sentinelKey.replace(/[^a-zA-Z0-9_-]/g, "")

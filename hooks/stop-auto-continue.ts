@@ -9,6 +9,7 @@ import { join } from "node:path"
 import { z } from "zod"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
 import { hasGeminiApiKey, promptGeminiObject } from "../src/gemini.ts"
+import { getHomeDir, getHomeDirOrNull } from "../src/home.ts"
 import {
   type AmbitionMode,
   getEffectiveSwizSettings,
@@ -44,7 +45,7 @@ const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 90_000
 const WORKFLOW_FINDING =
   "Collaboration/workflow policy finding detected. Report the violation and enforce the gate; do not prescribe project-specific implementation details."
 
-const HOME = process.env.HOME ?? "~"
+const HOME = getHomeDir()
 const PROJECTS_DIR = join(HOME, ".claude", "projects")
 
 const agentResponseSchema = z.object({
@@ -69,7 +70,7 @@ function resolveCwd(cwd?: string): string {
  */
 async function loadTaskContext(sessionId: string): Promise<string> {
   if (!sessionId) return ""
-  const home = process.env.HOME
+  const home = getHomeDirOrNull()
   if (!home) return ""
   const tasks = await readSessionTasks(sessionId, home)
 

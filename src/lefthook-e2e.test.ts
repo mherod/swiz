@@ -15,9 +15,10 @@ import { describe, expect, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "../hooks/test-utils.ts"
+import { joinNodeModulesPath } from "./node-modules-path.ts"
 
 // Resolved once at module load — avoids repeated lookups per test
-const LEFTHOOK_BIN = join(process.cwd(), "node_modules", ".bin", "lefthook")
+const LEFTHOOK_BIN = joinNodeModulesPath(process.cwd(), ".bin", "lefthook")
 
 const tmp = useTempDir("swiz-lefthook-e2e-")
 

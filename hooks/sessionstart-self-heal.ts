@@ -6,9 +6,10 @@
 import { createHash } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { getHomeDir } from "../src/home.ts"
 import { emitContext } from "./hook-utils.ts"
 
-const HASH_FILE = join(process.env.HOME ?? "~", ".local", "share", "swiz", "manifest-hash")
+const HASH_FILE = join(getHomeDir(), ".local", "share", "swiz", "manifest-hash")
 
 async function computeManifestHash(swizRoot: string): Promise<string | null> {
   const manifestPath = join(swizRoot, "src", "manifest.ts")

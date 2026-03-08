@@ -8,6 +8,7 @@
 
 import { stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { getHomeDirOrNull } from "../src/home.ts"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import {
   denyPreToolUse,
@@ -15,7 +16,6 @@ import {
   isEditTool,
   isGitRepo,
   isNotebookTool,
-  isShellTool,
   isWriteTool,
   readSessionTasks,
 } from "./hook-utils.ts"
@@ -52,13 +52,7 @@ function toolReadsUpdateMemorySkill(toolName: string, toolInput: unknown): boole
   if (!toolName) return false
   const strings: string[] = []
   collectStrings(toolInput, strings)
-  const mentionsSkill = strings.some((value) => value.includes(UPDATE_MEMORY_SKILL_PATH_FRAGMENT))
-  if (!mentionsSkill) return false
-
-  // Any explicit skill-path access counts, but bash must still actually target
-  // the skill path to avoid unrelated work slipping through.
-  if (isShellTool(toolName)) return true
-  return true
+  return strings.some((value) => value.includes(UPDATE_MEMORY_SKILL_PATH_FRAGMENT))
 }
 
 function toolWritesMarkdown(toolName: string, toolInput: unknown): boolean {
@@ -92,7 +86,7 @@ async function isMemoryRecentlyUpdated(cwd: string): Promise<boolean> {
   }
 
   // Also check the project auto-memory file
-  const home = process.env.HOME
+  const home = getHomeDirOrNull()
   if (home) {
     const encodedCwd = projectKeyFromCwd(cwd)
     candidates.push(join(home, ".claude", "projects", encodedCwd, "memory", "MEMORY.md"))
@@ -119,7 +113,7 @@ async function isMemoryRecentlyUpdated(cwd: string): Promise<boolean> {
  */
 async function hasActiveTask(sessionId: string | undefined): Promise<boolean> {
   if (!sessionId) return false
-  const home = process.env.HOME
+  const home = getHomeDirOrNull()
   if (!home) return false
   const tasks = await readSessionTasks(sessionId, home)
   return tasks.some((task) => task.status === "in_progress")

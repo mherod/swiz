@@ -6,6 +6,7 @@
 import { realpath } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
+import { getHomeDirOrNull } from "../src/home.ts"
 import { readSwizSettings } from "../src/settings.ts"
 import { buildIssueGuidance, denyPreToolUse, git, isFileEditTool } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
@@ -100,7 +101,7 @@ function parseRemoteUrl(url: string): RemoteInfo | null {
  */
 async function isGitHubHost(host: string): Promise<boolean> {
   if (host === "github.com") return true
-  const home = process.env.HOME
+  const home = getHomeDirOrNull()
   if (!home) return false
   try {
     const content = await Bun.file(`${home}/.config/gh/hosts.yml`).text()
@@ -127,9 +128,8 @@ const tmpLiteral = await resolveCanonical("/tmp")
 // resolveCanonical walks up to HOME (which exists) when .claude/projects
 // hasn't been created yet, ensuring the prefix always matches the target's
 // canonical form.
-const claudeProjectsDir = process.env.HOME
-  ? await resolveCanonical(`${process.env.HOME}/.claude/projects`)
-  : null
+const homeDir = getHomeDirOrNull()
+const claudeProjectsDir = homeDir ? await resolveCanonical(`${homeDir}/.claude/projects`) : null
 const allowedRoots = [cwd, tmp, tmpLiteral, ...(claudeProjectsDir ? [claudeProjectsDir] : [])]
 
 if (allowedRoots.some((root) => isWithin(root, target))) process.exit(0)

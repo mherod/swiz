@@ -4,6 +4,7 @@
 
 import { readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { getHomeDirOrNull } from "../src/home.ts"
 import {
   blockStop,
   computeSubjectFingerprint,
@@ -128,7 +129,7 @@ async function main(): Promise<void> {
   const input = stopHookInputSchema.parse(raw)
   const sessionId = input.session_id ?? ""
   const transcript = input.transcript_path ?? ""
-  const home = process.env.HOME
+  const home = getHomeDirOrNull()
   if (!home) return
   const tasksDir = getSessionTasksDir(sessionId, home)
   if (!tasksDir) return

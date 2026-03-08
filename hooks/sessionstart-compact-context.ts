@@ -4,6 +4,7 @@
 // and recreate any task files that may be missing after compaction.
 
 import { join } from "node:path"
+import { getHomeDirWithFallback } from "../src/home.ts"
 import {
   emitContext,
   findPriorSessionTasks,
@@ -137,7 +138,7 @@ async function main(): Promise<void> {
 
   const cwd = input.cwd ?? process.cwd()
   const sessionId = input.session_id ?? ""
-  const home = process.env.HOME ?? ""
+  const home = getHomeDirWithFallback("")
 
   // Verify task files against the compact snapshot (if one exists).
   // The snapshot was written by precompact-task-snapshot.ts immediately before
