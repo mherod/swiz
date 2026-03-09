@@ -21,6 +21,14 @@ interface Rule {
   message: string
   /** "deny" blocks the command. "warn" allows it with a hint. Default: "deny". */
   severity?: "deny" | "warn"
+  /**
+   * Set to true for rules that must inspect argument *content* (e.g. commit
+   * message body) rather than command structure.  These rules receive the
+   * original, unstripped command so quoted-string content is still visible.
+   * All other rules receive the quote-stripped command to prevent false
+   * positives when banned tokens appear inside string literals.
+   */
+  useRawCommand?: true
 }
 
 /**
@@ -221,6 +229,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
+    // --trailer is a flag on the git command itself, not inside a quoted string.
     match: (c) => /git\s+.*--trailer/.test(c),
     message: [
       "Do not use `--trailer` with git. AI tools use this to inject co-authorship signatures.",
@@ -229,6 +238,9 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
+    // Co-authored-by appears *inside* the quoted commit message, so this rule
+    // needs the raw (unstripped) command to see the message body.
+    useRawCommand: true,
     match: (c) => {
       const mMatch = c.match(/git\s+commit\s.*-m\s+["']([^"']*)/)
       if (!mMatch) return false
@@ -264,7 +276,10 @@ const strippedCommand = stripQuotedStrings(command)
 const warnings: string[] = []
 
 for (const rule of RULES) {
-  if (!rule.match(strippedCommand)) continue
+  // Content-inspection rules (useRawCommand) see the original command so they
+  // can read quoted argument bodies.  All other rules see the stripped command
+  // to avoid false positives on banned tokens embedded in string literals.
+  if (!rule.match(rule.useRawCommand ? command : strippedCommand)) continue
 
   if (rule.severity === "warn") {
     warnings.push(rule.message)
