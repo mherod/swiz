@@ -863,6 +863,33 @@ describe("transcript-utils.ts", () => {
       expect(paths.has("/repo/a.ts")).toBe(true)
       expect(paths.has("/repo/b.ts")).toBe(true)
     })
+
+    it("extracts file from tee command", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("cmd | tee /repo/out.md"))
+      expect(paths.has("/repo/out.md")).toBe(true)
+    })
+
+    it("extracts file from tee -a (append mode)", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("cmd | tee -a /repo/log.txt"))
+      expect(paths.has("/repo/log.txt")).toBe(true)
+    })
+
+    it("extracts multiple files from tee with multiple targets", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("cmd | tee /repo/a.ts /repo/b.ts"))
+      expect(paths.has("/repo/a.ts")).toBe(true)
+      expect(paths.has("/repo/b.ts")).toBe(true)
+    })
+
+    it("extracts file from tee -- (end-of-flags form)", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("cmd | tee -- /repo/file.ts"))
+      expect(paths.has("/repo/file.ts")).toBe(true)
+    })
+
+    it("does not extract process substitution from tee >(cmd)", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("cmd | tee >(gzip > /repo/out.gz)"))
+      // process substitution target — should not appear as a plain file path
+      expect(paths.has(">(gzip")).toBe(false)
+    })
   })
 
   // ─── isDocsOnlySession ──────────────────────────────────────────────────────

@@ -867,6 +867,11 @@ const REDIRECT_WRITE_RE = />>?(?![&(])\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^
 const SED_INPLACE_RE =
   /(?:^|[|;&\s])sed\s+(?:-[a-zA-Z]*i(?:\.[^\s]*)?\s+(?:''|"")?\s?|--in-place(?:=\S+)?\s+)(?:'[^']*'|"[^"]*"|\S+)\s+((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
 
+// Matches tee command file targets: tee [-a] [--] <file> [file2 ...]
+// Excludes process substitution targets >(...).
+const TEE_RE =
+  /(?:^|[|;&\s])tee\s+(?:-a\s+|--\s+)?((?:"[^"]*"|'[^']*'|[^\s|;&"'>(][^\s|;&"']*)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"'>(][^\s|;&"']*))*)/gm
+
 function extractPathsFromCommand(command: string): string[] {
   const results: string[] = []
 
@@ -901,6 +906,17 @@ function extractPathsFromCommand(command: string): string[] {
     }
   }
 
+  // tee command file extractor (cmd | tee [-a] [--] file [file2 ...])
+  TEE_RE.lastIndex = 0
+  for (const m of command.matchAll(TEE_RE)) {
+    const args = m[1]?.trim()
+    if (!args) continue
+    for (const token of args.split(/\s+/)) {
+      const unquoted = token.replace(/^["']|["']$/g, "")
+      if (unquoted && !unquoted.startsWith("-")) results.push(unquoted)
+    }
+  }
+
   return results
 }
 
@@ -912,6 +928,7 @@ function extractPathsFromCommand(command: string): string[] {
  *       trash, rm, mv, cp, git mv/rm (deletions/renames)
  *       output redirections: > file, >> file (echo, cat, heredoc, etc.)
  *       sed -i in-place edits: sed -i 's/.../.../' file
+ *       tee file targets: cmd | tee [-a] file [file2 ...]
  *
  * Used to detect docs-only sessions before invoking the LLM so the analysis
  * can be scoped correctly.
