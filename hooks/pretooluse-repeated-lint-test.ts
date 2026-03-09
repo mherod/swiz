@@ -16,6 +16,7 @@
 //      that ALSO mutates (e.g. lint piped to tee) emits both events.
 
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
+import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
 import {
   collectBlockedToolUseIds,
   denyPreToolUse,
@@ -319,14 +320,7 @@ export async function extractPreviousOutput(
       if (!Array.isArray(content)) continue
       for (const block of content) {
         if (block?.tool_use_id !== toolUseId) continue
-        const inner: unknown = block.content
-        if (typeof inner === "string") return inner
-        if (Array.isArray(inner)) {
-          return (inner as Array<{ type?: string; text?: string }>)
-            .filter((b) => b?.type === "text")
-            .map((b) => b.text ?? "")
-            .join("\n")
-        }
+        return extractTextFromUnknownContent(block.content)
       }
     } catch {
       // ignore malformed lines

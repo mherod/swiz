@@ -8,6 +8,7 @@ import { getTranscriptProvidersForAgent, type TranscriptProviderId } from "../pr
 import {
   type ContentBlock,
   extractText,
+  extractTextFromUnknownContent,
   findAllProviderSessions,
   getUnsupportedTranscriptFormatMessage,
   isUnsupportedTranscriptFormat,
@@ -33,19 +34,29 @@ const TOOL_KEY_PARAM: Record<string, string> = {
   WebSearch: "query",
 }
 
+const TOOL_LABEL_MAX = 70
+const DEFAULT_COLUMNS = 80
+const DEFAULT_WRAP_MAX = 100
+const DEBUG_WRAP_MAX = 130
+const SESSION_RULE_WIDTH = 60
+
+function truncateLabel(value: string, max = TOOL_LABEL_MAX): string {
+  return value.slice(0, max)
+}
+
 function formatToolUse(name: string, input: Record<string, unknown>): string {
   // Task tool: use subagent_type as name, description as param
   if (name === "Task" && input.subagent_type) {
-    const desc = typeof input.description === "string" ? input.description.slice(0, 70) : ""
+    const desc = typeof input.description === "string" ? truncateLabel(input.description) : ""
     return `${input.subagent_type}(${desc})`
   }
   const param = TOOL_KEY_PARAM[name]
   if (param && input[param] !== undefined) {
-    return `${name}(${String(input[param]).slice(0, 70)})`
+    return `${name}(${truncateLabel(String(input[param]))})`
   }
   // Fallback: first string value in input
   const firstStr = Object.values(input).find((v) => typeof v === "string")
-  if (firstStr) return `${name}(${String(firstStr).slice(0, 70)})`
+  if (firstStr) return `${name}(${truncateLabel(String(firstStr))})`
   return name
 }
 
@@ -59,6 +70,33 @@ function formatToolUse(name: string, input: Record<string, unknown>): string {
 const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
 function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "")
+}
+
+function getWrapWidth(indentWidth: number, maxWidth = DEFAULT_WRAP_MAX): number {
+  const cols = process.stdout.columns ?? DEFAULT_COLUMNS
+  return Math.min(cols - indentWidth, maxWidth)
+}
+
+function toContentBlocks(content: string | ContentBlock[] | undefined): ContentBlock[] {
+  if (!content) return []
+  return typeof content === "string" ? [{ type: "text", text: content }] : content
+}
+
+function isVisibleTextBlock(block: ContentBlock): block is TextBlock {
+  const text = (block as TextBlock).text
+  return block.type === "text" && typeof text === "string" && text.trim().length > 0
+}
+
+function isNamedToolUseBlock(block: ContentBlock): block is ToolUseBlock {
+  return block.type === "tool_use" && typeof (block as ToolUseBlock).name === "string"
+}
+
+function hasVisibleAssistantContent(blocks: ContentBlock[]): boolean {
+  return blocks.some((block) => isVisibleTextBlock(block) || isNamedToolUseBlock(block))
+}
+
+function hasToolResults(content: string | ContentBlock[] | undefined): boolean {
+  return Array.isArray(content) && content.some((block) => block.type === "tool_result")
 }
 
 function wordWrap(text: string, width: number, indent: string): string {
@@ -104,42 +142,28 @@ function renderTurn(role: "user" | "assistant", text: string, timestamp?: string
 
   console.log(`\n${color}${BOLD}${label}${RESET}${ts}`)
 
-  const cols = process.stdout.columns ?? 80
-  const wrapWidth = Math.min(cols - 4, 100)
+  const wrapWidth = getWrapWidth(4)
   const wrapped = wordWrap(text.trim(), wrapWidth, "  ")
   console.log(wrapped)
 }
 
 function renderAssistantBlocks(entry: TranscriptEntry): boolean {
-  const content = entry.message?.content
-  if (!content) return false
-
-  const blocks: ContentBlock[] =
-    typeof content === "string" ? [{ type: "text", text: content }] : content
-
-  const visible = blocks.filter(
-    (b) =>
-      (b.type === "text" && !!(b as TextBlock).text?.trim()) ||
-      (b.type === "tool_use" && !!(b as ToolUseBlock).name)
-  )
-  if (visible.length === 0) return false
+  const blocks = toContentBlocks(entry.message?.content)
+  if (!hasVisibleAssistantContent(blocks)) return false
 
   const ts = entry.timestamp ? ` ${DIM}${formatTimestamp(entry.timestamp)}${RESET}` : ""
   console.log(`\n${CYAN}${BOLD}ASSISTANT${RESET}${ts}`)
 
-  const cols = process.stdout.columns ?? 80
-  const wrapWidth = Math.min(cols - 4, 100)
+  const wrapWidth = getWrapWidth(4)
 
   for (const block of blocks) {
-    if (block.type === "text") {
-      const text = (block as TextBlock).text?.trim()
-      if (text) console.log(wordWrap(text, wrapWidth, "  "))
-    } else if (block.type === "tool_use") {
-      const b = block as ToolUseBlock
-      if (b.name) {
-        const label = formatToolUse(b.name, b.input ?? {})
-        console.log(`  ${GREEN}⏺${RESET} ${DIM}${label}${RESET}`)
-      }
+    if (isVisibleTextBlock(block)) {
+      console.log(wordWrap(block.text!.trim(), wrapWidth, "  "))
+      continue
+    }
+    if (isNamedToolUseBlock(block)) {
+      const label = formatToolUse(block.name!, block.input ?? {})
+      console.log(`  ${GREEN}⏺${RESET} ${DIM}${label}${RESET}`)
     }
   }
 
@@ -149,16 +173,7 @@ function renderAssistantBlocks(entry: TranscriptEntry): boolean {
 const TOOL_RESULT_MAX = 600
 
 function extractToolResultContent(block: ToolResultBlock): string {
-  const c = block.content
-  if (typeof c === "string") return c.trim()
-  if (Array.isArray(c)) {
-    return (c as ContentBlock[])
-      .filter((b): b is TextBlock => b.type === "text" && !!(b as TextBlock).text?.trim())
-      .map((b) => b.text!)
-      .join("\n")
-      .trim()
-  }
-  return ""
+  return extractTextFromUnknownContent(block.content)
 }
 
 function renderToolResults(entry: TranscriptEntry): boolean {
@@ -168,8 +183,7 @@ function renderToolResults(entry: TranscriptEntry): boolean {
   const results = content.filter((b): b is ToolResultBlock => b.type === "tool_result")
   if (results.length === 0) return false
 
-  const cols = process.stdout.columns ?? 80
-  const wrapWidth = Math.min(cols - 6, 100)
+  const wrapWidth = getWrapWidth(6)
 
   for (const result of results) {
     const text = extractToolResultContent(result)
@@ -213,20 +227,11 @@ function collectTurns(entries: TranscriptEntry[]): Turn[] {
 
     // Skip turns that would render nothing
     if (entry.type === "assistant") {
-      const content = entry.message?.content
-      const blocks: ContentBlock[] =
-        typeof content === "string" ? [{ type: "text", text: content }] : (content ?? [])
-      const hasVisible = blocks.some(
-        (b) =>
-          (b.type === "text" && !!(b as TextBlock).text?.trim()) ||
-          (b.type === "tool_use" && !!(b as ToolUseBlock).name)
-      )
-      if (!hasVisible) continue
+      const blocks = toContentBlocks(entry.message?.content)
+      if (!hasVisibleAssistantContent(blocks)) continue
     } else {
       const content = msg.content
-      const hasToolResults =
-        Array.isArray(content) && (content as ContentBlock[]).some((b) => b.type === "tool_result")
-      if (!hasToolResults && !extractText(content).trim()) continue
+      if (!hasToolResults(content) && !extractText(content).trim()) continue
     }
 
     turns.push({ entry, role: entry.type as "user" | "assistant" })
@@ -284,11 +289,26 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
   // so the comparator is provably total-ordered even when _idx and iso both match.
   type Tagged = DebugEvent & { _idx: number; _malformed: boolean; _seq: number }
 
-  const valid: Tagged[] = []
-  const malformed: Tagged[] = []
+  const validEvents: Tagged[] = []
+  const malformedEvents: Tagged[] = []
+  const allEvents: Tagged[] = []
 
-  // Accumulates events across both buckets for continuation-line attachment
-  const all: Tagged[] = []
+  const pushTaggedEvent = (
+    event: Omit<Tagged, "_malformed" | "_seq"> & { malformed?: boolean }
+  ): Tagged => {
+    const tagged: Tagged = {
+      ...event,
+      _malformed: Boolean(event.malformed),
+      _seq: event.malformed ? malformedEvents.length : 0,
+    }
+    if (tagged._malformed) {
+      malformedEvents.push(tagged)
+    } else {
+      validEvents.push(tagged)
+    }
+    allEvents.push(tagged)
+    return tagged
+  }
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
@@ -296,22 +316,19 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
     const m = DEBUG_TS_RE.exec(line)
     if (!m) {
       // Continuation line (no ISO prefix): attach to the preceding event so no text is lost.
-      const prev = all[all.length - 1]
+      const prev = allEvents[allEvents.length - 1]
       if (prev) {
         prev.text += `\n${line}`
       } else {
         // Leading continuation before any event — emit a synthetic malformed event (iso:"")
         // so the line is preserved. formatTimestamp("") returns "" safely (NaN guard in place).
-        const ev: Tagged = {
+        pushTaggedEvent({
           iso: "",
           ts: 0,
           text: line,
           _idx: i,
-          _malformed: true,
-          _seq: malformed.length,
-        }
-        malformed.push(ev)
-        all.push(ev)
+          malformed: true,
+        })
       }
       continue
     }
@@ -321,37 +338,30 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
     if (Number.isNaN(parsed)) {
       // Regex-matched but unparseable timestamp (e.g. month 13): tag as malformed and sort
       // by file index rather than inheriting a neighbour's timestamp — avoids ambiguity.
-      const ev: Tagged = {
+      pushTaggedEvent({
         iso,
         ts: 0,
         text: line.slice(m[0].length),
         _idx: i,
-        _malformed: true,
-        _seq: malformed.length,
-      }
-      malformed.push(ev)
-      all.push(ev)
+        malformed: true,
+      })
     } else {
-      const ev: Tagged = {
+      pushTaggedEvent({
         iso,
         ts: parsed,
         text: line.slice(m[0].length),
         _idx: i,
-        _malformed: false,
-        _seq: 0, // unused for valid events
-      }
-      valid.push(ev)
-      all.push(ev)
+      })
     }
   }
 
   // Sort valid events by timestamp, breaking ties by file index
-  valid.sort((a, b) => a.ts - b.ts || a._idx - b._idx)
+  validEvents.sort((a, b) => a.ts - b.ts || a._idx - b._idx)
 
   // Normalize every malformed record before sorting: guarantee string iso and finite numeric
   // _idx/_seq so the comparator never receives unexpected runtime types regardless of how
   // the record was constructed (two creation paths: leading continuation and NaN timestamp).
-  for (const ev of malformed) {
+  for (const ev of malformedEvents) {
     if (typeof ev.iso !== "string") ev.iso = ""
     if (typeof ev._idx !== "number" || !Number.isFinite(ev._idx)) ev._idx = 0
     if (typeof ev._seq !== "number" || !Number.isFinite(ev._seq)) ev._seq = 0
@@ -362,7 +372,7 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
   //   1. _idx — file position (loop var i, structurally unique)
   //   2. iso  — lexicographic fallback; String() guards against non-string runtime values
   //   3. _seq — insertion order into malformed[] (unique within array, set at ev creation)
-  malformed.sort((a, b) => {
+  malformedEvents.sort((a, b) => {
     const byIdx = (a._idx ?? 0) - (b._idx ?? 0)
     if (byIdx !== 0) return byIdx
     const byIso = String(a.iso ?? "").localeCompare(String(b.iso ?? ""))
@@ -375,15 +385,15 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
   // position in the output rather than at an ambiguous inherited timestamp bucket.
   const result: Tagged[] = []
   let vi = 0
-  for (const m of malformed) {
-    while (vi < valid.length && (valid[vi]?._idx ?? Infinity) < m._idx) {
-      result.push(valid[vi]!)
+  for (const malformed of malformedEvents) {
+    while (vi < validEvents.length && (validEvents[vi]?._idx ?? Infinity) < malformed._idx) {
+      result.push(validEvents[vi]!)
       vi++
     }
-    result.push(m)
+    result.push(malformed)
   }
-  while (vi < valid.length) {
-    result.push(valid[vi]!)
+  while (vi < validEvents.length) {
+    result.push(validEvents[vi]!)
     vi++
   }
 
@@ -391,8 +401,7 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
 }
 
 function renderDebugLine(event: DebugEvent): void {
-  const cols = process.stdout.columns ?? 80
-  const wrapWidth = Math.min(cols - 8, 130)
+  const wrapWidth = getWrapWidth(8, DEBUG_WRAP_MAX)
   const ts = formatTimestamp(event.iso)
   // Strip ANSI before wordWrap so byte-length matches visual width.
   // Embedded colour codes (e.g. ESC[33mpendingESC[0m) would otherwise
@@ -414,7 +423,9 @@ function applyHeadTail<T>(
 // ─── Main rendering ──────────────────────────────────────────────────────────
 
 function renderTurns(turns: Turn[], sessionId: string, debugEvents?: DebugEvent[]): void {
-  console.log(`\n${DIM}Session: ${sessionId}${RESET}\n${DIM}${"─".repeat(60)}${RESET}`)
+  console.log(
+    `\n${DIM}Session: ${sessionId}${RESET}\n${DIM}${"─".repeat(SESSION_RULE_WIDTH)}${RESET}`
+  )
 
   // Build a sorted index of debug events for interleaving
   let debugIdx = 0
@@ -439,9 +450,7 @@ function renderTurns(turns: Turn[], sessionId: string, debugEvents?: DebugEvent[
       renderAssistantBlocks(entry)
     } else {
       const content = entry.message?.content
-      const hasToolResults =
-        Array.isArray(content) && (content as ContentBlock[]).some((b) => b.type === "tool_result")
-      if (hasToolResults) {
+      if (hasToolResults(content)) {
         renderToolResults(entry)
       } else {
         renderTurn("user", extractText(content), entry.timestamp)
@@ -460,7 +469,7 @@ function renderTurns(turns: Turn[], sessionId: string, debugEvents?: DebugEvent[
   if (turns.length === 0) {
     console.log(`\n  ${DIM}(no conversation turns found)${RESET}\n`)
   } else {
-    console.log(`\n${DIM}${"─".repeat(60)}${RESET}\n`)
+    console.log(`\n${DIM}${"─".repeat(SESSION_RULE_WIDTH)}${RESET}\n`)
   }
 }
 
@@ -474,11 +483,9 @@ async function generateAutoReply(turns: Turn[]): Promise<void> {
       const text = extractText(entry.message?.content).trim()
       if (text) lines.push(`User: ${text}\n`)
     } else {
-      const content = entry.message?.content
-      const blocks: ContentBlock[] =
-        typeof content === "string" ? [{ type: "text", text: content }] : (content ?? [])
+      const blocks = toContentBlocks(entry.message?.content)
       const textParts = blocks
-        .filter((b): b is TextBlock => b.type === "text" && !!(b as TextBlock).text?.trim())
+        .filter((b): b is TextBlock => isVisibleTextBlock(b))
         .map((b) => b.text!.trim())
       if (textParts.length > 0) {
         lines.push(`Assistant: ${textParts.join("\n")}\n`)
@@ -562,6 +569,52 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
   }
 }
 
+function resolveSelectedAgents(
+  allAgents: boolean,
+  explicitAgents: AgentDef[],
+  detectedAgent: AgentDef | null
+): AgentDef[] {
+  if (allAgents) return AGENTS
+  if (explicitAgents[0]) return [explicitAgents[0]]
+  if (detectedAgent) return [detectedAgent]
+  return AGENTS
+}
+
+function getSelectedProviders(selectedAgents: AgentDef[]): Set<TranscriptProviderId> {
+  const providers = new Set<TranscriptProviderId>()
+  for (const agent of selectedAgents) {
+    for (const provider of getTranscriptProvidersForAgent(agent)) {
+      providers.add(provider)
+    }
+  }
+  return providers
+}
+
+function pickSession(sessions: Session[], sessionQuery: string | null): Session {
+  if (sessionQuery) {
+    const match = sessions.find((session) => session.id.startsWith(sessionQuery))
+    if (!match) {
+      const available = sessions.map((session) => `  ${session.id}`).join("\n")
+      throw new Error(`No session matching: ${sessionQuery}\nAvailable sessions:\n${available}`)
+    }
+    return match
+  }
+  return sessions.find((session) => !isUnsupportedTranscriptFormat(session.format)) ?? sessions[0]!
+}
+
+function renderSessionList(sessions: Session[], targetDir: string): void {
+  console.log(`\n  Transcripts for ${targetDir}\n`)
+  for (const session of sessions) {
+    const date = new Date(session.mtime)
+    const label = date.toLocaleString([], {
+      dateStyle: "short",
+      timeStyle: "short",
+    })
+    console.log(`  ${session.id}  ${DIM}${label}${RESET}`)
+  }
+  console.log()
+}
+
 // ─── Command ─────────────────────────────────────────────────────────────────
 
 export const transcriptCommand: Command = {
@@ -612,21 +665,8 @@ export const transcriptCommand: Command = {
     }
 
     const detectedAgent = detectCurrentAgent()
-    const selectedAgents = allAgents
-      ? AGENTS
-      : explicitAgents[0]
-        ? [explicitAgents[0]]
-        : detectedAgent
-          ? [detectedAgent]
-          : AGENTS
-
-    const selectedProviders = new Set<TranscriptProviderId>()
-    for (const agent of selectedAgents) {
-      const providers = getTranscriptProvidersForAgent(agent)
-      for (const provider of providers) {
-        selectedProviders.add(provider)
-      }
-    }
+    const selectedAgents = resolveSelectedAgents(allAgents, explicitAgents, detectedAgent)
+    const selectedProviders = getSelectedProviders(selectedAgents)
 
     if (selectedProviders.size === 0) {
       const agentLabel = selectedAgents[0]?.name ?? "selected agent"
@@ -648,31 +688,11 @@ export const transcriptCommand: Command = {
     }
 
     if (listOnly) {
-      console.log(`\n  Transcripts for ${targetDir}\n`)
-      for (const s of sessions) {
-        const d = new Date(s.mtime)
-        const label = d.toLocaleString([], {
-          dateStyle: "short",
-          timeStyle: "short",
-        })
-        console.log(`  ${s.id}  ${DIM}${label}${RESET}`)
-      }
-      console.log()
+      renderSessionList(sessions, targetDir)
       return
     }
 
-    // Find the target session
-    let session: Session
-    if (sessionQuery) {
-      const match = sessions.find((s) => s.id.startsWith(sessionQuery!))
-      if (!match) {
-        const available = sessions.map((s) => `  ${s.id}`).join("\n")
-        throw new Error(`No session matching: ${sessionQuery}\nAvailable sessions:\n${available}`)
-      }
-      session = match
-    } else {
-      session = sessions.find((s) => !isUnsupportedTranscriptFormat(s.format)) ?? sessions[0]!
-    }
+    const session = pickSession(sessions, sessionQuery)
 
     let turns = await loadTurns(session)
     turns = applyHeadTail(turns, headCount, tailCount)

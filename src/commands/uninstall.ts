@@ -1,11 +1,7 @@
-import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, getAgentByFlag } from "../agents.ts"
-import type { Command } from "../types.ts"
-
-const SWIZ_ROOT = dirname(Bun.main)
-const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
-
 import { BOLD, DIM, GREEN, RED, RESET } from "../ansi.ts"
+import { isManagedSwizCommand } from "../swiz-hook-commands.ts"
+import type { Command } from "../types.ts"
 
 function removeSwizHooks(obj: unknown): unknown {
   if (Array.isArray(obj)) {
@@ -14,14 +10,14 @@ function removeSwizHooks(obj: unknown): unknown {
   if (obj && typeof obj === "object") {
     const rec = obj as Record<string, unknown>
 
-    if (typeof rec.command === "string" && rec.command.includes(HOOKS_DIR)) {
+    if (isManagedSwizCommand(rec.command)) {
       return null
     }
 
     if (Array.isArray(rec.hooks)) {
       const filtered = rec.hooks.filter((h) => {
         const hh = h as Record<string, unknown>
-        return !(typeof hh.command === "string" && hh.command.includes(HOOKS_DIR))
+        return !isManagedSwizCommand(hh.command)
       })
       if (filtered.length === 0) return null
       return { ...rec, hooks: filtered }
@@ -105,13 +101,13 @@ function countSwizHooks(hooks: Record<string, unknown>): number {
     if (!Array.isArray(entries)) continue
     for (const entry of entries) {
       const e = entry as Record<string, unknown>
-      if (typeof e.command === "string" && e.command.includes(HOOKS_DIR)) {
+      if (isManagedSwizCommand(e.command)) {
         count++
       }
       if (Array.isArray(e.hooks)) {
         for (const h of e.hooks) {
           const hh = h as Record<string, unknown>
-          if (typeof hh.command === "string" && hh.command.includes(HOOKS_DIR)) {
+          if (isManagedSwizCommand(hh.command)) {
             count++
           }
         }

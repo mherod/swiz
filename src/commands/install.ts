@@ -1,43 +1,20 @@
-import { dirname, join } from "node:path"
+import { join } from "node:path"
 import { AGENTS, type AgentDef, getAgentByFlag, translateEvent } from "../agents.ts"
+import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import { loadAllPlugins, pluginErrorHint, pluginResultsToJson } from "../plugins.ts"
 import { readProjectSettings } from "../settings.ts"
+import {
+  HOOKS_DIR,
+  isManagedSwizCommand,
+  isSwizCommand,
+  LEGACY_HOOK_DIRS,
+} from "../swiz-hook-commands.ts"
 import type { Command } from "../types.ts"
-
-const SWIZ_ROOT = dirname(Bun.main)
-const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
-
-import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 
 // ─── Config generators ──────────────────────────────────────────────────────
 // manifest and DISPATCH_TIMEOUTS imported from ../manifest.ts
-
-// Paths that swiz supersedes — hooks at these locations are replaced by swiz equivalents.
-const LEGACY_HOME = getHomeDirOrNull()
-const LEGACY_HOOK_DIRS = [
-  "$HOME/.claude/hooks/",
-  ...(LEGACY_HOME ? [`${LEGACY_HOME}/.claude/hooks/`] : []),
-]
-
-function isSwizCommand(cmd: unknown): boolean {
-  if (typeof cmd !== "string") return false
-  return (
-    cmd.includes(HOOKS_DIR) ||
-    cmd.includes(join(SWIZ_ROOT, "index.ts")) ||
-    cmd.includes("swiz dispatch")
-  )
-}
-
-function isLegacySwizCommand(cmd: unknown): boolean {
-  if (typeof cmd !== "string") return false
-  return LEGACY_HOOK_DIRS.some((dir) => cmd.includes(dir))
-}
-
-function isManagedCommand(cmd: unknown): boolean {
-  return isSwizCommand(cmd) || isLegacySwizCommand(cmd)
-}
 
 // Strip swiz-managed and legacy hooks from a nested matcher group array,
 // returning only user-defined entries.
@@ -47,12 +24,12 @@ function stripManagedFromNestedGroups(groups: unknown[]): unknown[] {
     const g = group as Record<string, unknown>
     if (Array.isArray(g.hooks)) {
       const userHooks = g.hooks.filter(
-        (h) => !isManagedCommand((h as Record<string, unknown>).command)
+        (h) => !isManagedSwizCommand((h as Record<string, unknown>).command)
       )
       if (userHooks.length > 0) {
         kept.push({ ...g, hooks: userHooks })
       }
-    } else if (!isManagedCommand(g.command)) {
+    } else if (!isManagedSwizCommand(g.command)) {
       kept.push(group)
     }
   }
@@ -61,7 +38,7 @@ function stripManagedFromNestedGroups(groups: unknown[]): unknown[] {
 
 // Strip swiz-managed and legacy hooks from a flat hook array.
 function stripManagedFromFlatList(entries: unknown[]): unknown[] {
-  return entries.filter((e) => !isManagedCommand((e as Record<string, unknown>).command))
+  return entries.filter((e) => !isManagedSwizCommand((e as Record<string, unknown>).command))
 }
 
 function mergeNestedConfig(
@@ -90,7 +67,7 @@ function mergeNestedConfig(
     const timeoutScale = agent.id === "gemini" ? 1000 : 1
     const timeout = (DISPATCH_TIMEOUTS[group.event] ?? 30) * timeoutScale
     const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${group.event} ${eventName}`
-    merged[eventName].push({
+    merged[eventName]!.push({
       hooks: [{ type: "command", command: cmd, timeout, statusMessage: "Swizzling..." }],
     })
   }
@@ -124,7 +101,7 @@ function mergeFlatConfig(
     const timeoutScale = agent.id === "gemini" ? 1000 : 1
     const timeout = (DISPATCH_TIMEOUTS[group.event] ?? 30) * timeoutScale
     const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${group.event} ${eventName}`
-    merged[eventName].push({ command: cmd, timeout, statusMessage: "Swizzling..." })
+    merged[eventName]!.push({ command: cmd, timeout, statusMessage: "Swizzling..." })
   }
 
   return merged
@@ -381,7 +358,7 @@ async function installAgent(agent: AgentDef, dryRun: boolean) {
     const oldCmds = collectCommands(oldHooks)
     const allNewCmds = collectCommands(config)
     const swizCmds = new Set([...allNewCmds].filter((c) => isSwizCommand(c)))
-    const userCmds = new Set([...oldCmds].filter((c) => !isManagedCommand(c)))
+    const userCmds = new Set([...oldCmds].filter((c) => !isManagedSwizCommand(c)))
     const legacyCmds = [...oldCmds].filter((c) => LEGACY_HOOK_DIRS.some((d) => c.includes(d)))
 
     const added = [...swizCmds].filter((c) => !oldCmds.has(c))

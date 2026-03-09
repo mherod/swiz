@@ -1,61 +1,66 @@
 import { readdir } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
 import { AGENTS, type AgentDef } from "../agents.ts"
+import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
 import { getHomeDir } from "../home.ts"
 import { readStateData, STATE_TRANSITIONS, TERMINAL_STATES } from "../settings.ts"
+import { HOOKS_DIR, isSwizCommand } from "../swiz-hook-commands.ts"
 import { getDefaultTaskRoots } from "../task-roots.ts"
 import type { Command } from "../types.ts"
 
-const SWIZ_ROOT = dirname(Bun.main)
-const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
+function forEachHookEntry(
+  hooks: Record<string, unknown>,
+  visit: (event: string, entry: Record<string, unknown>) => void
+): void {
+  for (const [event, entries] of Object.entries(hooks)) {
+    if (!Array.isArray(entries)) continue
+    for (const rawEntry of entries) {
+      visit(event, rawEntry as Record<string, unknown>)
+    }
+  }
+}
 
-import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
-
-function isSwizManaged(cmd: string): boolean {
-  return (
-    cmd.includes(HOOKS_DIR) ||
-    cmd.includes(join(SWIZ_ROOT, "index.ts")) ||
-    cmd.includes("swiz dispatch")
-  )
+function entryContainsSwizCommand(entry: Record<string, unknown>): boolean {
+  if (isSwizCommand(entry.command)) return true
+  if (!Array.isArray(entry.hooks)) return false
+  return entry.hooks.some((rawHook) => isSwizCommand((rawHook as Record<string, unknown>).command))
 }
 
 function collectSwizCommands(hooks: Record<string, unknown>): Set<string> {
   const cmds = new Set<string>()
-  for (const entries of Object.values(hooks)) {
-    if (!Array.isArray(entries)) continue
-    for (const entry of entries) {
-      const e = entry as Record<string, unknown>
-      if (typeof e.command === "string" && isSwizManaged(e.command)) {
-        cmds.add(e.command)
-      }
-      if (Array.isArray(e.hooks)) {
-        for (const h of e.hooks) {
-          const hh = h as Record<string, unknown>
-          if (typeof hh.command === "string" && isSwizManaged(hh.command)) {
-            cmds.add(hh.command)
-          }
-        }
-      }
+  forEachHookEntry(hooks, (_event, entry) => {
+    if (isSwizCommand(entry.command)) cmds.add(String(entry.command))
+    if (!Array.isArray(entry.hooks)) return
+    for (const rawHook of entry.hooks) {
+      const nestedHook = rawHook as Record<string, unknown>
+      if (isSwizCommand(nestedHook.command)) cmds.add(String(nestedHook.command))
     }
-  }
+  })
   return cmds
 }
 
 function countAllHooks(hooks: Record<string, unknown>): number {
   let total = 0
-  for (const entries of Object.values(hooks)) {
-    if (!Array.isArray(entries)) continue
-    for (const entry of entries) {
-      const e = entry as Record<string, unknown>
-      if (Array.isArray(e.hooks)) {
-        total += e.hooks.length
-      } else {
-        total++
-      }
-    }
-  }
+  forEachHookEntry(hooks, (_event, entry) => {
+    total += Array.isArray(entry.hooks) ? entry.hooks.length : 1
+  })
   return total
+}
+
+function parseAheadBehind(raw: string | null): { ahead: number; behind: number } | null {
+  if (!raw) return null
+  const parts = raw.split(/\s+/)
+  return {
+    behind: parseInt(parts[0] ?? "0", 10) || 0,
+    ahead: parseInt(parts[1] ?? "0", 10) || 0,
+  }
+}
+
+function parseCiStatus(raw: string): { status: string | null; conclusion: string | null } {
+  if (!raw || raw === "null|null") return { status: null, conclusion: null }
+  const [status, conclusion] = raw.split("|")
+  return { status: status ?? null, conclusion: conclusion ?? null }
 }
 
 async function checkAgent(agent: AgentDef) {
@@ -112,20 +117,9 @@ async function checkAgent(agent: AgentDef) {
       )
 
       const events = new Set<string>()
-      for (const [event, entries] of Object.entries(hooksObj)) {
-        if (!Array.isArray(entries)) continue
-        for (const entry of entries) {
-          const e = entry as Record<string, unknown>
-          const hasSwiz = (list: unknown[]) =>
-            list.some(
-              (h) =>
-                typeof (h as Record<string, unknown>).command === "string" &&
-                isSwizManaged((h as Record<string, unknown>).command as string)
-            )
-          if (Array.isArray(e.hooks) && hasSwiz(e.hooks)) events.add(event)
-          else if (typeof e.command === "string" && isSwizManaged(e.command)) events.add(event)
-        }
-      }
+      forEachHookEntry(hooksObj, (event, entry) => {
+        if (entryContainsSwizCommand(entry)) events.add(event)
+      })
       console.log(`    Events:   ${[...events].join(", ")}`)
     } else {
       console.log(`    Hooks:    ${YELLOW}${totalHooks} hook(s), none from swiz${RESET}`)
@@ -221,15 +215,7 @@ async function getProjectHealth(cwd: string): Promise<ProjectHealth> {
   ])
 
   const uncommittedFiles = statusOut ? statusOut.split("\n").filter(Boolean).length : 0
-  let ahead = 0
-  let behind = 0
-  let aheadBehindResult: { ahead: number; behind: number } | null = null
-  if (aheadBehind) {
-    const parts = aheadBehind.split(/\s+/)
-    behind = parseInt(parts[0] ?? "0", 10) || 0
-    ahead = parseInt(parts[1] ?? "0", 10) || 0
-    aheadBehindResult = { ahead, behind }
-  }
+  const aheadBehindResult = parseAheadBehind(aheadBehind)
 
   const openTasks = await getOpenTaskCount(cwd)
 
@@ -251,11 +237,9 @@ async function getProjectHealth(cwd: string): Promise<ProjectHealth> {
         "--jq",
         '.[0] | .status + "|" + .conclusion',
       ])
-      if (ciOut && ciOut !== "null|null") {
-        const [s, c] = ciOut.split("|")
-        ciStatus = s ?? null
-        ciConclusion = c ?? null
-      }
+      const ci = parseCiStatus(ciOut)
+      ciStatus = ci.status
+      ciConclusion = ci.conclusion
     } catch {}
   }
 

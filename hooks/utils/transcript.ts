@@ -3,6 +3,7 @@
 
 import { normalizeCommand } from "../../src/command-utils.ts"
 import { isShellTool } from "../../src/tool-matchers.ts"
+import { extractTextFromUnknownContent } from "../../src/transcript-utils.ts"
 
 // ── ANSI stripping ────────────────────────────────────────────────────────────
 
@@ -104,14 +105,7 @@ export function collectBlockedToolUseIds(lines: string[]): Set<string> {
       if (!Array.isArray(content)) continue
       for (const block of content) {
         if (block?.type !== "tool_result") continue
-        const inner: unknown = block.content
-        let text = ""
-        if (typeof inner === "string") text = inner
-        else if (Array.isArray(inner))
-          text = (inner as Array<{ type?: string; text?: string }>)
-            .filter((b) => b?.type === "text")
-            .map((b) => b.text ?? "")
-            .join("\n")
+        const text = extractTextFromUnknownContent(block.content)
         if (text.includes("ACTION REQUIRED:")) blocked.add(String(block.tool_use_id ?? ""))
       }
     } catch {

@@ -446,6 +446,22 @@ export function extractText(content: string | ContentBlock[] | undefined): strin
     .trim()
 }
 
+export function extractTextFromUnknownContent(content: unknown): string {
+  if (typeof content === "string") return content.trim()
+  if (!Array.isArray(content)) return ""
+  return content
+    .filter(
+      (block): block is { type: "text"; text: string } =>
+        !!block &&
+        typeof block === "object" &&
+        (block as { type?: unknown }).type === "text" &&
+        typeof (block as { text?: unknown }).text === "string"
+    )
+    .map((block) => block.text)
+    .join("\n")
+    .trim()
+}
+
 export function isHookFeedback(content: string | ContentBlock[] | undefined): boolean {
   if (typeof content !== "string") return false
   return content.startsWith("Stop hook feedback:") || content.startsWith("<command-message>")
@@ -500,19 +516,7 @@ export function extractToolResultText(block: {
   content?: string | ContentBlock[]
   is_error?: boolean
 }): string {
-  const c = block.content
-  let text: string
-  if (typeof c === "string") {
-    text = c.trim()
-  } else if (Array.isArray(c)) {
-    text = c
-      .filter((b: any) => b?.type === "text" && b?.text)
-      .map((b: any) => String(b.text))
-      .join("\n")
-      .trim()
-  } else {
-    return ""
-  }
+  const text = extractTextFromUnknownContent(block.content)
   if (!text) return ""
   const prefix = block.is_error ? "Error: " : ""
   const truncated =
