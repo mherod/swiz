@@ -93,6 +93,20 @@ function setMainUpstreamTracking(repo: string): void {
 }
 
 describe("posttooluse-state-transition no-upstream commit behavior", () => {
+  test("git commit on no-upstream branch transitions planning -> developing", async () => {
+    const repo = await createRepo()
+    try {
+      runGit(repo, ["checkout", "-b", "feature/no-upstream"])
+      await writeProjectState(repo, "planning")
+
+      const exitCode = await runHook(repo, 'git commit -m "test"')
+      expect(exitCode).toBe(0)
+      expect(await readProjectState(repo)).toBe("developing")
+    } finally {
+      await rm(repo, { recursive: true, force: true })
+    }
+  })
+
   test("git commit on no-upstream branch transitions reviewing -> developing", async () => {
     const repo = await createRepo()
     try {
@@ -118,6 +132,28 @@ describe("posttooluse-state-transition no-upstream commit behavior", () => {
       expect(await readProjectState(repo)).toBe("developing")
     } finally {
       await rm(repo, { recursive: true, force: true })
+    }
+  })
+
+  test("git commit on upstream-tracked branch keeps planning unchanged", async () => {
+    const repo = await createRepo()
+    const remote = await mkdtemp(join(tmpdir(), "posttooluse-state-transition-remote-"))
+    try {
+      runGit(remote, ["init", "--bare"])
+      runGit(repo, ["remote", "add", "origin", remote])
+      runGit(repo, ["push", "-u", "origin", "main"])
+      runGit(repo, ["checkout", "-b", "feature/with-upstream"])
+      runGit(repo, ["push", "-u", "origin", "feature/with-upstream"])
+      await writeProjectState(repo, "planning")
+
+      const exitCode = await runHook(repo, 'git commit -m "test"')
+      expect(exitCode).toBe(0)
+      expect(await readProjectState(repo)).toBe("planning")
+    } finally {
+      await Promise.all([
+        rm(repo, { recursive: true, force: true }),
+        rm(remote, { recursive: true, force: true }),
+      ])
     }
   })
 

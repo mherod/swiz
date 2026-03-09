@@ -9,7 +9,7 @@
 //
 // Transitions (async — require runtime checks):
 //   git commit + branch has CHANGES_REQUESTED PR reviews : reviewing → addressing-feedback
-//   git commit + branch has no upstream tracking         : reviewing|addressing-feedback → developing
+//   git commit + branch has no upstream tracking         : planning|reviewing|addressing-feedback → developing
 //   git commit + on default branch (solo repo)           : reviewing|addressing-feedback → developing
 //   git checkout <default-branch>                        : reviewing | addressing-feedback → developing
 //   git checkout -b <new-branch> (from default branch)  : any → developing
@@ -168,14 +168,15 @@ async function handleAsyncTransitions(
 ): Promise<boolean> {
   const isCommit = GIT_COMMIT_RE.test(command)
   const isReviewingLike = isReviewingLikeState(state)
+  const isNoUpstreamTransitionState = state === "planning" || isReviewingLike
 
   // ── git commit: reviewing → addressing-feedback if PR has CHANGES_REQUESTED ──
   if (isCommit && state === "reviewing") {
     if (await transitionToAddressingFeedbackOnChangesRequested(cwd)) return true
   }
 
-  // ── git commit + no valid upstream tracking: reviewing|addressing-feedback → developing ──
-  if (isCommit && isReviewingLike) {
+  // ── git commit + no valid upstream tracking: planning|reviewing|addressing-feedback → developing ──
+  if (isCommit && isNoUpstreamTransitionState) {
     const upstreamStatus = await transitionToDevelopingOnMissingUpstream(cwd)
     if (upstreamStatus === "transitioned") return true
     if (upstreamStatus === "abort") return false
