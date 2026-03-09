@@ -293,6 +293,22 @@ function getPrCreatedAtMs(pr: PR): number {
 }
 
 /**
+ * Deterministically order PR candidates by recency.
+ * Primary: createdAt (newest first)
+ * Fallback: PR number (newest first by monotonic numbering)
+ */
+export function orderRebaseSuggestionPRs(prs: PR[]): PR[] {
+  return [...prs].sort((a, b) => {
+    const aCreatedAt = getPrCreatedAtMs(a)
+    const bCreatedAt = getPrCreatedAtMs(b)
+    if (!Number.isNaN(aCreatedAt) && !Number.isNaN(bCreatedAt)) return bCreatedAt - aCreatedAt
+    if (!Number.isNaN(aCreatedAt)) return -1
+    if (!Number.isNaN(bCreatedAt)) return 1
+    return b.number - a.number
+  })
+}
+
+/**
  * Suggest only the oldest and newest conflicting PRs for rebase.
  * GitHub PR numbers are monotonic, so they act as a stable fallback when
  * createdAt is unavailable or invalid in mocks / degraded CLI responses.
@@ -301,19 +317,11 @@ export function selectRebaseSuggestionPRs(
   prs: PR[],
   perSide = REBASE_SUGGESTIONS_PER_SIDE
 ): { shown: PR[]; hiddenCount: number } {
-  if (prs.length <= perSide * 2) return { shown: [...prs], hiddenCount: 0 }
+  const ordered = orderRebaseSuggestionPRs(prs)
+  if (ordered.length <= perSide * 2) return { shown: ordered, hiddenCount: 0 }
 
-  const sorted = [...prs].sort((a, b) => {
-    const aCreatedAt = getPrCreatedAtMs(a)
-    const bCreatedAt = getPrCreatedAtMs(b)
-    if (!Number.isNaN(aCreatedAt) && !Number.isNaN(bCreatedAt)) return aCreatedAt - bCreatedAt
-    if (!Number.isNaN(aCreatedAt)) return -1
-    if (!Number.isNaN(bCreatedAt)) return 1
-    return a.number - b.number
-  })
-
-  const oldest = sorted.slice(0, perSide)
-  const newest = sorted.slice(-perSide).reverse()
+  const newest = ordered.slice(0, perSide)
+  const oldest = ordered.slice(-perSide).reverse()
   const shown = [...newest, ...oldest].filter(
     (pr, index, items) => items.findIndex((candidate) => candidate.number === pr.number) === index
   )

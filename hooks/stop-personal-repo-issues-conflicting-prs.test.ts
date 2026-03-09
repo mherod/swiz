@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { selectRebaseSuggestionPRs } from "./stop-personal-repo-issues.ts"
+import { orderRebaseSuggestionPRs, selectRebaseSuggestionPRs } from "./stop-personal-repo-issues.ts"
 
 // ── PR interface (mirrors stop-personal-repo-issues.ts) ──────────────────────
 
@@ -432,8 +432,48 @@ describe("selectRebaseSuggestionPRs", () => {
 
     const { shown, hiddenCount } = selectRebaseSuggestionPRs(prs)
 
-    expect(shown.map((pr) => pr.number)).toEqual([1, 2, 3, 4])
+    expect(shown.map((pr) => pr.number)).toEqual([4, 3, 2, 1])
     expect(hiddenCount).toBe(0)
+  })
+
+  test("orders small sets by createdAt newest-first", () => {
+    const prs: PR[] = [
+      makePR({
+        number: 101,
+        title: "Older",
+        mergeable: "CONFLICTING",
+        createdAt: "2026-01-01T00:00:00Z",
+      }),
+      makePR({
+        number: 102,
+        title: "Newest",
+        mergeable: "CONFLICTING",
+        createdAt: "2026-01-03T00:00:00Z",
+      }),
+      makePR({
+        number: 103,
+        title: "Middle",
+        mergeable: "CONFLICTING",
+        createdAt: "2026-01-02T00:00:00Z",
+      }),
+    ]
+
+    const { shown, hiddenCount } = selectRebaseSuggestionPRs(prs)
+    expect(shown.map((pr) => pr.number)).toEqual([102, 103, 101])
+    expect(hiddenCount).toBe(0)
+  })
+})
+
+describe("orderRebaseSuggestionPRs", () => {
+  test("uses PR number fallback newest-first when createdAt is unavailable", () => {
+    const prs: PR[] = [22, 18, 31, 27, 14].map((number) =>
+      makePR({
+        number,
+        title: `PR ${number}`,
+        mergeable: "CONFLICTING",
+      })
+    )
+    expect(orderRebaseSuggestionPRs(prs).map((pr) => pr.number)).toEqual([31, 27, 22, 18, 14])
   })
 })
 
