@@ -51,6 +51,7 @@ Commands are registered in this order in `index.ts`:
 | `status` | `src/commands/status.ts` | Show swiz installation status across agents |
 | `status-line` | `src/commands/status-line.ts` | Output a rich ANSI status bar for Claude Code's statusLine hook |
 | `settings` | `src/commands/settings.ts` | View and modify swiz global and per-session settings |
+| `manage` | `src/commands/manage.ts` | Manage MCP configurations across supported agents |
 | `state` | `src/commands/state.ts` | Show or set the persistent project state |
 | `memory` | `src/commands/memory.ts` | Show hierarchical rule/memory files for one or all agents |
 

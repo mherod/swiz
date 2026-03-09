@@ -11,6 +11,7 @@ import { hooksCommand } from "./src/commands/hooks.ts"
 import { ideaCommand } from "./src/commands/idea.ts"
 import { installCommand } from "./src/commands/install.ts"
 import { issueCommand } from "./src/commands/issue.ts"
+import { manageCommand } from "./src/commands/manage.ts"
 import { memoryCommand } from "./src/commands/memory.ts"
 import { mergetoolCommand } from "./src/commands/mergetool.ts"
 import { pushCiCommand } from "./src/commands/push-ci.ts"
@@ -51,6 +52,7 @@ registerCommand(sentimentCommand)
 registerCommand(sessionCommand)
 registerCommand(ciWaitCommand)
 registerCommand(memoryCommand)
+registerCommand(manageCommand)
 registerCommand(compactCommand)
 registerCommand(mergetoolCommand)
 registerCommand(pushWaitCommand)
