@@ -74,6 +74,7 @@ export interface ProjectSwizSettings {
   defaultBranch?: string
   memoryLineThreshold?: number
   memoryWordThreshold?: number
+  largeFileSizeKb?: number
   ambitionMode?: AmbitionMode
   /** Hook filenames to skip for this project (e.g. "stop-github-ci.ts") */
   disabledHooks?: string[]
@@ -147,6 +148,7 @@ export interface SwizSettings {
   personalRepoIssuesGate: boolean
   memoryLineThreshold: number
   memoryWordThreshold: number
+  largeFileSizeKb: number
   /** Which segments to display in the status line. Defaults to all segments. */
   statusLineSegments: StatusLineSegment[]
   sessions: Record<string, SessionSwizSettings>
@@ -176,6 +178,7 @@ export interface EffectiveSwizSettings {
   personalRepoIssuesGate: boolean
   memoryLineThreshold: number
   memoryWordThreshold: number
+  largeFileSizeKb: number
   statusLineSegments: StatusLineSegment[]
   source: "global" | "session"
 }
@@ -183,6 +186,7 @@ export interface EffectiveSwizSettings {
 /** Default trivial-change thresholds (mirrors the gate hook's original hard-coded values) */
 export const DEFAULT_MEMORY_LINE_THRESHOLD = 1400
 export const DEFAULT_MEMORY_WORD_THRESHOLD = 5000
+export const DEFAULT_LARGE_FILE_SIZE_KB = 500
 
 export const DEFAULT_TRIVIAL_MAX_FILES = 3
 export const DEFAULT_TRIVIAL_MAX_LINES = 20
@@ -286,6 +290,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   personalRepoIssuesGate: true,
   memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
   memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
+  largeFileSizeKb: DEFAULT_LARGE_FILE_SIZE_KB,
   statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
   sessions: {},
 }
@@ -308,6 +313,7 @@ export const projectSettingsSchema = z.object({
   defaultBranch: z.string().min(1).regex(/^\S+$/).optional(),
   memoryLineThreshold: z.number().int().min(1).optional(),
   memoryWordThreshold: z.number().int().min(1).optional(),
+  largeFileSizeKb: z.number().int().min(1).optional(),
   ambitionMode: ambitionModeSchema.optional(),
   disabledHooks: z.array(z.string().min(1)).optional(),
   plugins: z.array(z.string().min(1)).optional(),
@@ -338,6 +344,7 @@ export const swizSettingsSchema = z.object({
   personalRepoIssuesGate: z.boolean().catch(DEFAULT_SETTINGS.personalRepoIssuesGate),
   memoryLineThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.memoryLineThreshold),
   memoryWordThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.memoryWordThreshold),
+  largeFileSizeKb: z.number().int().min(1).catch(DEFAULT_SETTINGS.largeFileSizeKb),
   statusLineSegments: z
     .array(statusLineSegmentSchema)
     .catch([...ALL_STATUS_LINE_SEGMENTS])
@@ -489,6 +496,10 @@ function normalizeSettings(value: unknown): SwizSettings {
       typeof obj.memoryWordThreshold === "number" && obj.memoryWordThreshold > 0
         ? obj.memoryWordThreshold
         : DEFAULT_SETTINGS.memoryWordThreshold,
+    largeFileSizeKb:
+      typeof obj.largeFileSizeKb === "number" && obj.largeFileSizeKb > 0
+        ? obj.largeFileSizeKb
+        : DEFAULT_SETTINGS.largeFileSizeKb,
     statusLineSegments: normalizeStatusLineSegments(obj.statusLineSegments),
     sessions,
     ...(Array.isArray(obj.disabledHooks) &&
@@ -527,6 +538,9 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   }
   if (typeof obj.memoryWordThreshold === "number" && obj.memoryWordThreshold > 0) {
     result.memoryWordThreshold = obj.memoryWordThreshold
+  }
+  if (typeof obj.largeFileSizeKb === "number" && obj.largeFileSizeKb > 0) {
+    result.largeFileSizeKb = obj.largeFileSizeKb
   }
   const ambitionMode = ambitionModeSchema.safeParse(obj.ambitionMode)
   if (ambitionMode.success) {
@@ -742,6 +756,7 @@ export function getEffectiveSwizSettings(
       personalRepoIssuesGate: settings.personalRepoIssuesGate,
       memoryLineThreshold: settings.memoryLineThreshold,
       memoryWordThreshold: settings.memoryWordThreshold,
+      largeFileSizeKb: projectSettings?.largeFileSizeKb ?? settings.largeFileSizeKb,
       statusLineSegments: settings.statusLineSegments,
       source: "session",
     }
@@ -768,6 +783,7 @@ export function getEffectiveSwizSettings(
     personalRepoIssuesGate: settings.personalRepoIssuesGate,
     memoryLineThreshold: settings.memoryLineThreshold,
     memoryWordThreshold: settings.memoryWordThreshold,
+    largeFileSizeKb: projectSettings?.largeFileSizeKb ?? settings.largeFileSizeKb,
     statusLineSegments: settings.statusLineSegments,
     source: "global",
   }

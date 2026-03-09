@@ -846,6 +846,7 @@ describe("SETTINGS_REGISTRY", () => {
       "narratorSpeed",
       "memoryLineThreshold",
       "memoryWordThreshold",
+      "largeFileSizeKb",
       "defaultBranch",
       "narratorVoice",
       "ambitionMode",
@@ -986,6 +987,7 @@ describe("collaborationMode settings", () => {
       personalRepoIssuesGate: true,
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
+      largeFileSizeKb: 500,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {},
     }
@@ -1016,6 +1018,7 @@ describe("collaborationMode settings", () => {
       personalRepoIssuesGate: true,
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
+      largeFileSizeKb: 500,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {
         "test-session": {
@@ -1052,6 +1055,7 @@ describe("collaborationMode settings", () => {
       personalRepoIssuesGate: true,
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
+      largeFileSizeKb: 500,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {
         "test-session": {
@@ -1086,6 +1090,7 @@ describe("collaborationMode settings", () => {
       personalRepoIssuesGate: true,
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
+      largeFileSizeKb: 500,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {},
     }
@@ -1116,6 +1121,7 @@ describe("collaborationMode settings", () => {
       personalRepoIssuesGate: true,
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
+      largeFileSizeKb: 500,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {
         "test-session": {

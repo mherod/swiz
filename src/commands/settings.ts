@@ -179,6 +179,12 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "numeric",
     scopes: ["global", "project"],
   },
+  {
+    key: "largeFileSizeKb",
+    aliases: ["large-file-size-kb", "largefilesizekb", "large_file_size_kb"],
+    kind: "numeric",
+    scopes: ["global", "project"],
+  },
   // ── String settings ───────────────────────────────────────────────────────
   {
     key: "defaultBranch",
@@ -414,6 +420,7 @@ function printSettings(
     personalRepoIssuesGate: boolean
     memoryLineThreshold: number
     memoryWordThreshold: number
+    largeFileSizeKb: number
     source: "global" | "session"
     disabledHooks?: string[]
   },
@@ -493,6 +500,7 @@ function printSettings(
   console.log(`  narrator-speed:  ${speedLabel} (global)`)
   console.log(`  memory-line-threshold: ${effective.memoryLineThreshold} (global)`)
   console.log(`  memory-word-threshold: ${effective.memoryWordThreshold} (global)`)
+  console.log(`  large-file-size-kb: ${effective.largeFileSizeKb} (global)`)
 
   const globalDisabled = effective.disabledHooks ?? []
   if (globalDisabled.length > 0) {
