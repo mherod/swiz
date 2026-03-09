@@ -992,6 +992,47 @@ describe("transcript-utils.ts", () => {
       const paths = extractEditedFilePaths(makeBashEntry('mkdir -p "/repo/my module/src"'))
       expect(paths.has("/repo/my module/src")).toBe(true)
     })
+
+    it("extracts file from chmod command", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("chmod 755 /repo/hooks/stop-hook.ts"))
+      expect(paths.has("/repo/hooks/stop-hook.ts")).toBe(true)
+    })
+
+    it("does not extract mode string as a path for chmod", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("chmod 755 /repo/hooks/stop-hook.ts"))
+      expect(paths.has("755")).toBe(false)
+    })
+
+    it("extracts file from chmod -R (recursive)", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("chmod -R 644 /repo/src"))
+      expect(paths.has("/repo/src")).toBe(true)
+    })
+
+    it("extracts multiple files from chmod", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("chmod +x /repo/a.sh /repo/b.sh"))
+      expect(paths.has("/repo/a.sh")).toBe(true)
+      expect(paths.has("/repo/b.sh")).toBe(true)
+    })
+
+    it("extracts file from chown command", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("chown root:wheel /repo/bin/swiz"))
+      expect(paths.has("/repo/bin/swiz")).toBe(true)
+    })
+
+    it("does not extract owner spec as a path for chown", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("chown root:wheel /repo/bin/swiz"))
+      expect(paths.has("root:wheel")).toBe(false)
+    })
+
+    it("extracts file from chown -R (recursive)", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("chown -R mherod /repo/dist"))
+      expect(paths.has("/repo/dist")).toBe(true)
+    })
+
+    it("extracts quoted path with spaces from chmod", () => {
+      const paths = extractEditedFilePaths(makeBashEntry('chmod 600 "/repo/my file.txt"'))
+      expect(paths.has("/repo/my file.txt")).toBe(true)
+    })
   })
 
   // ─── isDocsOnlySession ──────────────────────────────────────────────────────

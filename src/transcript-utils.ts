@@ -879,6 +879,13 @@ const TEE_RE =
 const TOUCH_TRUNCATE_INSTALL_RE =
   /(?:^|[|;&\s])(?:touch|truncate|mkdir|rmdir)\s+(?:-\S+\s+)*((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
 
+// Matches chmod and chown file targets: chmod [-R] <mode> <file> [file2 ...]
+// and chown [-R] <owner>[:<group>] <file> [file2 ...].
+// The first non-flag argument (mode or owner spec) is NOT a path — captured in group 1.
+// Path arguments follow in group 2 (one or more, quoted or unquoted).
+const CHMOD_CHOWN_RE =
+  /(?:^|[|;&\s])(?:chmod|chown)\s+(?:-\S+\s+)*(?:"[^"]*"|'[^']*'|[^\s|;&"']+)\s+((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
+
 // Tokenizes a shell argument string respecting single and double quoting.
 // "my file.ts" and 'my file.ts' are returned as single tokens (quotes stripped).
 // Unquoted whitespace is the delimiter. Flag tokens starting with '-' are excluded.
@@ -926,9 +933,16 @@ function extractPathsFromCommand(command: string): string[] {
     if (args) for (const t of shellTokens(args)) results.push(t)
   }
 
-  // touch / truncate file extractor
+  // touch / truncate / mkdir / rmdir file extractor
   TOUCH_TRUNCATE_INSTALL_RE.lastIndex = 0
   for (const m of command.matchAll(TOUCH_TRUNCATE_INSTALL_RE)) {
+    const args = m[1]?.trim()
+    if (args) for (const t of shellTokens(args)) results.push(t)
+  }
+
+  // chmod / chown file extractor (skip mode/owner spec in group 1, paths in group 2)
+  CHMOD_CHOWN_RE.lastIndex = 0
+  for (const m of command.matchAll(CHMOD_CHOWN_RE)) {
     const args = m[1]?.trim()
     if (args) for (const t of shellTokens(args)) results.push(t)
   }
@@ -946,6 +960,7 @@ function extractPathsFromCommand(command: string): string[] {
  *       sed -i in-place edits: sed -i 's/.../.../' file
  *       tee file targets: cmd | tee [-a] file [file2 ...]
  *       touch / truncate / mkdir / rmdir targets
+ *       chmod / chown file targets: chmod [-R] <mode> <file>, chown [-R] <owner> <file>
  *
  * Used to detect docs-only sessions before invoking the LLM so the analysis
  * can be scoped correctly.
