@@ -52,6 +52,46 @@ async function createRepo(): Promise<string> {
   return dir
 }
 
+async function createFakeGhBin(
+  currentUser: string,
+  recentContributorLogins: string[] = []
+): Promise<string> {
+  const fakeBin = await mkdtemp(join(tmpdir(), "posttooluse-state-transition-gh-"))
+  const fakeGhPath = join(fakeBin, "gh")
+  const commitsPayload = JSON.stringify(
+    recentContributorLogins.map((login) => ({
+      author: { login },
+      commit: { author: { date: new Date().toISOString() } },
+    }))
+  )
+  await writeFile(
+    fakeGhPath,
+    `#!/bin/sh
+if [ "$1" = "api" ] && echo " $* " | grep -q " user "; then
+  echo "${currentUser}"
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  echo "[]"
+  exit 0
+fi
+if [ "$1" = "api" ]; then
+  echo '${commitsPayload}'
+  exit 0
+fi
+echo ""
+exit 0
+`
+  )
+  await chmod(fakeGhPath, 0o755)
+  return fakeBin
+}
+
+function setMainUpstreamTracking(repo: string): void {
+  runGit(repo, ["update-ref", "refs/remotes/origin/main", "HEAD"])
+  runGit(repo, ["branch", "--set-upstream-to=origin/main", "main"])
+}
+
 describe("posttooluse-state-transition no-upstream commit behavior", () => {
   test("git commit on no-upstream branch transitions reviewing -> developing", async () => {
     const repo = await createRepo()
@@ -127,6 +167,93 @@ describe("posttooluse-state-transition no-upstream commit behavior", () => {
       })
       expect(exitCode).toBe(0)
       expect(await readProjectState(repo)).toBe("addressing-feedback")
+    } finally {
+      await Promise.all([
+        rm(repo, { recursive: true, force: true }),
+        rm(fakeBin, { recursive: true, force: true }),
+      ])
+    }
+  })
+
+  test("solo mode: git commit on default branch transitions reviewing -> developing", async () => {
+    const repo = await createRepo()
+    const fakeBin = await createFakeGhBin("mherod")
+    try {
+      runGit(repo, ["remote", "add", "origin", "https://github.com/mherod/swiz.git"])
+      setMainUpstreamTracking(repo)
+      await writeProjectState(repo, "reviewing")
+
+      const exitCode = await runHook(repo, 'git commit -m "test"', {
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+      })
+      expect(exitCode).toBe(0)
+      expect(await readProjectState(repo)).toBe("developing")
+    } finally {
+      await Promise.all([
+        rm(repo, { recursive: true, force: true }),
+        rm(fakeBin, { recursive: true, force: true }),
+      ])
+    }
+  })
+
+  test("solo mode: git commit on default branch transitions addressing-feedback -> developing", async () => {
+    const repo = await createRepo()
+    const fakeBin = await createFakeGhBin("mherod")
+    try {
+      runGit(repo, ["remote", "add", "origin", "https://github.com/mherod/swiz.git"])
+      setMainUpstreamTracking(repo)
+      await writeProjectState(repo, "addressing-feedback")
+
+      const exitCode = await runHook(repo, 'git commit -m "test"', {
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+      })
+      expect(exitCode).toBe(0)
+      expect(await readProjectState(repo)).toBe("developing")
+    } finally {
+      await Promise.all([
+        rm(repo, { recursive: true, force: true }),
+        rm(fakeBin, { recursive: true, force: true }),
+      ])
+    }
+  })
+
+  test("team mode: git commit on default branch does not auto-transition reviewing", async () => {
+    const repo = await createRepo()
+    const fakeBin = await createFakeGhBin("mherod", ["teammate"])
+    try {
+      runGit(repo, ["remote", "add", "origin", "https://github.com/mherod/swiz.git"])
+      setMainUpstreamTracking(repo)
+      await writeProjectState(repo, "reviewing")
+
+      const exitCode = await runHook(repo, 'git commit -m "test"', {
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+      })
+      expect(exitCode).toBe(0)
+      expect(await readProjectState(repo)).toBe("reviewing")
+    } finally {
+      await Promise.all([
+        rm(repo, { recursive: true, force: true }),
+        rm(fakeBin, { recursive: true, force: true }),
+      ])
+    }
+  })
+
+  test("solo mode: git commit on feature branch keeps reviewing unchanged", async () => {
+    const repo = await createRepo()
+    const fakeBin = await createFakeGhBin("mherod")
+    try {
+      runGit(repo, ["remote", "add", "origin", "https://github.com/mherod/swiz.git"])
+      setMainUpstreamTracking(repo)
+      runGit(repo, ["checkout", "-b", "feature/solo"])
+      runGit(repo, ["update-ref", "refs/remotes/origin/feature/solo", "HEAD"])
+      runGit(repo, ["branch", "--set-upstream-to=origin/feature/solo", "feature/solo"])
+      await writeProjectState(repo, "reviewing")
+
+      const exitCode = await runHook(repo, 'git commit -m "test"', {
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+      })
+      expect(exitCode).toBe(0)
+      expect(await readProjectState(repo)).toBe("reviewing")
     } finally {
       await Promise.all([
         rm(repo, { recursive: true, force: true }),

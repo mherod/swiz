@@ -10,7 +10,7 @@
 // Transitions (async — require runtime checks):
 //   git commit + branch has CHANGES_REQUESTED PR reviews : reviewing → addressing-feedback
 //   git commit + branch has no upstream tracking         : any → developing
-//   git commit + on default branch (solo repo)           : any → developing
+//   git commit + on default branch (solo repo)           : reviewing|addressing-feedback → developing
 //   git checkout <default-branch>                        : reviewing | addressing-feedback → developing
 //   git checkout -b <new-branch> (from default branch)  : any → developing
 //
@@ -108,8 +108,8 @@ async function handleAsyncTransitions(
     }
   }
 
-  // ── git commit on default branch (solo repo): any → developing ──
-  if (GIT_COMMIT_RE.test(command)) {
+  // ── git commit on default branch (solo repo): reviewing|addressing-feedback → developing ──
+  if (GIT_COMMIT_RE.test(command) && (state === "reviewing" || state === "addressing-feedback")) {
     try {
       const branch = (await git(["branch", "--show-current"], cwd)).trim()
       if (branch) {
