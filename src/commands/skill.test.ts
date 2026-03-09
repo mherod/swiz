@@ -309,7 +309,7 @@ describe("swiz skill --sync-gemini", () => {
 
     const { stdout, exitCode } = await runSkillCli(["--sync-gemini", "--dry-run"], fakeHome)
     expect(exitCode).toBe(0)
-    expect(stdout).toContain("Dry run: syncing Gemini skills")
+    expect(stdout).toContain("Dry run: syncing Gemini CLI → Claude Code skills")
     expect(stdout).toContain(`would copy ${skillName}`)
     expect(await Bun.file(targetPath).exists()).toBe(false)
   })

@@ -12,13 +12,12 @@ export { parseFrontmatterField, stripFrontmatter }
 const INLINE_CMD_RE = /!`([^`]+)`/g
 const HOME = getHomeDir()
 
-function primarySkillDir(agentId: "claude" | "gemini"): string {
+function primarySkillDir(agentId: string): string {
   const adapter = getProviderAdapter(agentId)
   const primary = adapter?.getSkillDirs()[0]
   if (primary) return primary
 
-  const configDir = agentId === "claude" ? ".claude" : ".gemini"
-  return join(HOME, configDir, "skills")
+  return join(HOME, `.${agentId}`, "skills")
 }
 
 async function listSkills() {
@@ -289,10 +288,8 @@ async function convertSkills(options: {
     throw new Error(`Unknown agent: ${to}. Valid agent IDs: ${ids}`)
   }
 
-  const fromAdapter = getProviderAdapter(from as "claude" | "gemini")
-  const toAdapter = getProviderAdapter(to as "claude" | "gemini")
-  const fromSkillsDir = fromAdapter?.getSkillDirs()[0] ?? join(HOME, `.${from}`, "skills")
-  const toSkillsDir = toAdapter?.getSkillDirs()[0] ?? join(HOME, `.${to}`, "skills")
+  const fromSkillsDir = primarySkillDir(from)
+  const toSkillsDir = primarySkillDir(to)
 
   let entries: import("node:fs").Dirent[]
   try {
@@ -384,49 +381,69 @@ async function convertSkills(options: {
   }
 }
 
-async function syncGeminiSkills(options: { dryRun: boolean; overwrite: boolean }): Promise<void> {
-  const { dryRun, overwrite } = options
-  const geminiSkillsDir = primarySkillDir("gemini")
-  const claudeSkillsDir = primarySkillDir("claude")
+// Copy-only sync (no tool name remapping). Used by --sync --from <agent> and --sync-gemini alias.
+async function syncSkills(options: {
+  from: string
+  to: string
+  dryRun: boolean
+  overwrite: boolean
+}): Promise<void> {
+  const { from, to, dryRun, overwrite } = options
+  const fromAgent = getAgent(from)
+  const toAgent = getAgent(to)
+
+  if (!fromAgent) {
+    const ids = AGENTS.map((a) => a.id).join(", ")
+    throw new Error(`Unknown agent: ${from}. Valid agent IDs: ${ids}`)
+  }
+  if (!toAgent) {
+    const ids = AGENTS.map((a) => a.id).join(", ")
+    throw new Error(`Unknown agent: ${to}. Valid agent IDs: ${ids}`)
+  }
+
+  const fromSkillsDir = primarySkillDir(from)
+  const toSkillsDir = primarySkillDir(to)
 
   let entries: import("node:fs").Dirent[]
   try {
-    entries = await readdir(geminiSkillsDir, { withFileTypes: true })
+    entries = await readdir(fromSkillsDir, { withFileTypes: true })
   } catch {
-    console.log(`No Gemini skills found at ${displayPath(geminiSkillsDir)}.`)
+    console.log(`No ${fromAgent.name} skills found at ${displayPath(fromSkillsDir)}.`)
     return
   }
 
   const skillNames: string[] = []
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
-    const sourceSkillPath = join(geminiSkillsDir, entry.name, "SKILL.md")
+    const sourceSkillPath = join(fromSkillsDir, entry.name, "SKILL.md")
     if (!(await Bun.file(sourceSkillPath).exists())) continue
     skillNames.push(entry.name)
   }
   skillNames.sort((a, b) => a.localeCompare(b))
 
   if (skillNames.length === 0) {
-    console.log(`No Gemini skills with SKILL.md found at ${displayPath(geminiSkillsDir)}.`)
+    console.log(`No ${fromAgent.name} skills with SKILL.md found at ${displayPath(fromSkillsDir)}.`)
     return
   }
 
   if (dryRun) {
-    console.log("Dry run: syncing Gemini skills to Claude skills (no files will be changed).")
+    console.log(
+      `Dry run: syncing ${fromAgent.name} → ${toAgent.name} skills (no files will be changed).`
+    )
   } else {
-    console.log("Syncing Gemini skills to Claude skills.")
-    await mkdir(claudeSkillsDir, { recursive: true })
+    console.log(`Syncing ${fromAgent.name} → ${toAgent.name} skills.`)
+    await mkdir(toSkillsDir, { recursive: true })
   }
-  console.log(`Source: ${displayPath(geminiSkillsDir)}`)
-  console.log(`Target: ${displayPath(claudeSkillsDir)}\n`)
+  console.log(`Source: ${displayPath(fromSkillsDir)}`)
+  console.log(`Target: ${displayPath(toSkillsDir)}\n`)
 
   let copied = 0
   let overwritten = 0
   let skipped = 0
 
   for (const name of skillNames) {
-    const sourceDir = join(geminiSkillsDir, name)
-    const targetDir = join(claudeSkillsDir, name)
+    const sourceDir = join(fromSkillsDir, name)
+    const targetDir = join(toSkillsDir, name)
     const targetExists = existsSync(targetDir)
 
     if (targetExists && !overwrite) {
@@ -466,15 +483,19 @@ export const skillCommand: Command = {
   name: "skill",
   description: "Read, list, sync, and convert skills",
   usage:
-    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync-gemini [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [--dry-run] [--overwrite]",
+    "swiz skill [--raw] [--no-front-matter] [skill-name] | --sync --from <agent> [--dry-run] [--overwrite] | --sync-gemini [--dry-run] [--overwrite] | --convert --from <agent> --to <agent> [--dry-run] [--overwrite]",
   options: [
     { flags: "<skill-name>", description: "Print the skill content (omit to list all skills)" },
     { flags: "--raw", description: "Skip inline command expansion (!`cmd` substitutions)" },
     { flags: "--no-front-matter", description: "Strip YAML frontmatter from output" },
     {
-      flags: "--sync-gemini",
+      flags: "--sync",
       description:
-        "Copy ~/.gemini/skills into ~/.claude/skills (copy-only; no tool name remapping — use --convert for that)",
+        "Copy skills from --from <agent> into ~/.claude/skills (copy-only; use --convert for tool name remapping)",
+    },
+    {
+      flags: "--sync-gemini",
+      description: "Alias for --sync --from gemini (copy ~/.gemini/skills into ~/.claude/skills)",
     },
     {
       flags: "--convert",
@@ -482,7 +503,7 @@ export const skillCommand: Command = {
     },
     {
       flags: "--from <agent>",
-      description: "Source agent ID for --convert (claude|cursor|gemini|codex)",
+      description: "Source agent ID for --sync or --convert (claude|cursor|gemini|codex)",
     },
     {
       flags: "--to <agent>",
@@ -492,13 +513,17 @@ export const skillCommand: Command = {
     { flags: "--overwrite", description: "Allow overwriting existing target skills" },
   ],
   async run(args) {
+    const sync = args.includes("--sync")
     const syncGemini = args.includes("--sync-gemini")
     const convert = args.includes("--convert")
     const dryRun = args.includes("--dry-run")
     const overwrite = args.includes("--overwrite")
 
-    if (syncGemini && convert) {
-      throw new Error("--sync-gemini and --convert are mutually exclusive.")
+    if ((sync || syncGemini) && convert) {
+      throw new Error("--sync/--sync-gemini and --convert are mutually exclusive.")
+    }
+    if (sync && syncGemini) {
+      throw new Error("--sync and --sync-gemini are mutually exclusive.")
     }
 
     if (convert) {
@@ -516,17 +541,24 @@ export const skillCommand: Command = {
       return
     }
 
-    if (syncGemini) {
+    if (sync || syncGemini) {
       const positional = args.filter((a) => !a.startsWith("--"))
       if (positional.length > 0) {
-        throw new Error("--sync-gemini does not accept a skill name.")
+        throw new Error("--sync/--sync-gemini does not accept a skill name.")
       }
-      await syncGeminiSkills({ dryRun, overwrite })
+      const fromIdx = args.indexOf("--from")
+      const from = syncGemini ? "gemini" : (args[fromIdx + 1] ?? null)
+      if (!from) {
+        throw new Error("--sync requires --from <agent>.")
+      }
+      await syncSkills({ from, to: "claude", dryRun, overwrite })
       return
     }
 
     if (dryRun || overwrite) {
-      throw new Error("--dry-run and --overwrite are only valid with --sync-gemini or --convert.")
+      throw new Error(
+        "--dry-run and --overwrite are only valid with --sync, --sync-gemini, or --convert."
+      )
     }
 
     const raw = args.includes("--raw")
