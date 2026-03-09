@@ -422,6 +422,12 @@ function buildPrompt(
     `use it to understand what has already been achieved and what direction the session was heading. ` +
     `PRIORITY ORDER: ` +
     `(1) If any feature, capability, or behaviour was described or started but is not yet fully implemented in code, implement it. ` +
+    `    CRITICAL DISTINCTION — Documentation updates do NOT count as "not yet implemented": ` +
+    `    if the session only edited documentation files (CLAUDE.md, README.md, *.md, comments, docstrings) ` +
+    `    that describe or clarify existing CLI flags, commands, options, or behavior, ` +
+    `    those descriptions refer to already-shipped code — do NOT treat them as missing implementations. ` +
+    `    Only treat something as unimplemented if source code (*.ts, *.tsx, *.js, *.py, etc.) was discussed ` +
+    `    or modified and the feature is demonstrably absent from those source files. ` +
     `(2) If any errors, failures, bugs, or broken functionality were identified but NOT resolved, fix them. ` +
     `(3) If a PROJECT STATUS section reports stale artifacts (e.g., CHANGELOG.md), ` +
     skillAdvice("changelog", `use the /changelog skill to update them. `, `update them. `) +
