@@ -1,6 +1,6 @@
 {
   "files": {
-    "includes": ["**", "!macos/.build"]
+    "includes": ["**", "!macos/.build", "!.swiz"]
   },
   "linter": {
     "enabled": true,

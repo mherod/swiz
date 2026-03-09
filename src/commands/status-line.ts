@@ -205,6 +205,72 @@ function joinGroups(groups: Array<string | null | undefined>): string {
   return groups.filter(Boolean).join(` ${DIM}│${R} `)
 }
 
+// ── Short-TTL file-based cache for gh list/view queries ─────────────────────
+//
+// gh api calls use the built-in --cache flag (see withApiCache in git-helpers).
+// gh issue list / gh pr list / gh pr view have no equivalent flag, so we
+// maintain a per-project JSON file at .swiz/gh-cache.json with TTL entries.
+
+const GH_CACHE_TTL_MS: number = (() => {
+  const raw = process.env.GH_API_CACHE_DURATION ?? "20s"
+  const match = /^(\d+)(s|m)?$/.exec(raw)
+  if (!match) return 20_000
+  const n = parseInt(match[1]!, 10)
+  return match[2] === "m" ? n * 60_000 : n * 1_000
+})()
+
+interface GhCacheEntry<T> {
+  value: T
+  expiresAt: number
+}
+
+type GhCacheStore = Record<string, GhCacheEntry<unknown>>
+
+export function getGhCachePath(cwd: string): string {
+  return join(cwd, ".swiz", "gh-cache.json")
+}
+
+function readGhCache(cwd: string): GhCacheStore {
+  try {
+    const raw = readFileSync(getGhCachePath(cwd), "utf8")
+    return JSON.parse(raw) as GhCacheStore
+  } catch {
+    return {}
+  }
+}
+
+function writeGhCache(cwd: string, store: GhCacheStore): void {
+  try {
+    mkdirSync(join(cwd, ".swiz"), { recursive: true })
+    writeFileSync(getGhCachePath(cwd), `${JSON.stringify(store)}\n`)
+  } catch {
+    // Non-fatal: status line continues without persisted cache
+  }
+}
+
+/**
+ * Wrap ghJson with a file-based TTL cache stored in .swiz/gh-cache.json.
+ * Cache key is the serialised arg list so each unique command variant is
+ * cached independently. Expired entries are evicted on each write.
+ */
+export async function ghJsonCached<T>(args: string[], cwd: string): Promise<T | null> {
+  const key = args.join("\x00")
+  const now = Date.now()
+  const store = readGhCache(cwd)
+  const entry = store[key] as GhCacheEntry<T> | undefined
+  if (entry && entry.expiresAt > now) {
+    return entry.value
+  }
+  const value = await ghJson<T>(args, cwd)
+  store[key] = { value, expiresAt: now + GH_CACHE_TTL_MS }
+  for (const k of Object.keys(store)) {
+    const e = store[k] as GhCacheEntry<unknown>
+    if (e.expiresAt <= now && k !== key) delete store[k]
+  }
+  writeGhCache(cwd, store)
+  return value
+}
+
 // ── Per-project context usage extremes ─────────────────────────────────────
 
 export interface ContextStats {
@@ -276,7 +342,7 @@ export const statusLineCommand: Command = {
     const gitPromise = getGitBranchAndInfo(cwd)
     const prViewPromise = gitPromise.then(({ branch }) =>
       branch
-        ? ghJson<{ reviewDecision?: string; comments?: unknown[] }>(
+        ? ghJsonCached<{ reviewDecision?: string; comments?: unknown[] }>(
             ["pr", "view", branch, "--json", "reviewDecision,comments"],
             cwd
           )
@@ -286,11 +352,11 @@ export const statusLineCommand: Command = {
     const [gitResult, issueData, prListData, prViewData, swizSettings, projectSettings] =
       await Promise.all([
         gitPromise,
-        ghJson<unknown[]>(
+        ghJsonCached<unknown[]>(
           ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
           cwd
         ),
-        ghJson<unknown[]>(
+        ghJsonCached<unknown[]>(
           ["pr", "list", "--state", "open", "--json", "number", "--limit", "100"],
           cwd
         ),
