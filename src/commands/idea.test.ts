@@ -157,17 +157,17 @@ describe("ideaCommand", () => {
     expect(prompt).not.toMatch(/\n\d+\. feat: step 1\n/)
   })
 
-  it("errors when GEMINI_API_KEY is missing", async () => {
+  it("errors when no AI provider is available", async () => {
     const dir = await makeTempDir()
     await writeFile(join(dir, "README.md"), "# Demo\n")
 
     const result = await runIdea(["--dir", dir], {
       GEMINI_API_KEY: "",
-      // Mock: force hasGeminiApiKey() to return false regardless of installed CLIs.
-      GEMINI_TEST_NO_BACKEND: "1",
+      // Suppress all providers (Gemini + Codex) to simulate no-backend environment.
+      AI_TEST_NO_BACKEND: "1",
     })
 
     expect(result.exitCode).not.toBe(0)
-    expect(result.stderr).toContain("GEMINI_API_KEY")
+    expect(result.stderr).toContain("No AI provider available")
   })
 })
