@@ -1033,6 +1033,44 @@ describe("transcript-utils.ts", () => {
       const paths = extractEditedFilePaths(makeBashEntry('chmod 600 "/repo/my file.txt"'))
       expect(paths.has("/repo/my file.txt")).toBe(true)
     })
+
+    it("extracts destination from basic install command", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry("install macos/.build/debug/swiz-notify /usr/local/bin/swiz-notify")
+      )
+      expect(paths.has("/usr/local/bin/swiz-notify")).toBe(true)
+    })
+
+    it("extracts source from install command", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry("install macos/.build/debug/swiz-notify /usr/local/bin/swiz-notify")
+      )
+      expect(paths.has("macos/.build/debug/swiz-notify")).toBe(true)
+    })
+
+    it("extracts paths from install with mode flag", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry("install -m 755 src/script.sh /usr/local/bin/script.sh")
+      )
+      expect(paths.has("src/script.sh")).toBe(true)
+      expect(paths.has("/usr/local/bin/script.sh")).toBe(true)
+    })
+
+    it("extracts destination from install with -t flag", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry("install -t /usr/local/bin src/tool-a src/tool-b")
+      )
+      expect(paths.has("src/tool-a")).toBe(true)
+      expect(paths.has("src/tool-b")).toBe(true)
+    })
+
+    it("extracts paths from install with multiple flags", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry("install -m 755 -o root -g wheel /repo/bin/swiz /usr/local/bin/swiz")
+      )
+      expect(paths.has("/repo/bin/swiz")).toBe(true)
+      expect(paths.has("/usr/local/bin/swiz")).toBe(true)
+    })
   })
 
   // ─── isDocsOnlySession ──────────────────────────────────────────────────────
