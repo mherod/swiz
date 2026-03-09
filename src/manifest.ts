@@ -209,6 +209,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-claude-word-limit.ts", timeout: 5 },
       { file: "pretooluse-push-cooldown.ts", timeout: 5 },
       { file: "pretooluse-main-branch-scope-gate.ts", timeout: 10 },
+      { file: "pretooluse-block-commit-to-main.ts", timeout: 10 },
       { file: "pretooluse-skill-invocation-gate.ts", timeout: 5 },
       { file: "pretooluse-no-push-when-instructed.ts", timeout: 5 },
       { file: "pretooluse-pr-age-gate.ts", timeout: 10 },

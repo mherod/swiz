@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { selectRebaseSuggestionPRs } from "./stop-personal-repo-issues.ts"
 
 // ── PR interface (mirrors stop-personal-repo-issues.ts) ──────────────────────
 
@@ -8,6 +9,7 @@ interface PR {
   url: string
   reviewDecision: string
   mergeable: string
+  createdAt?: string
 }
 
 // ── Pure filtering logic (mirrors getOpenPRsWithFeedback client-side filter) ──
@@ -384,6 +386,54 @@ describe("feedbackPRCount and conflictCount derivation", () => {
     const cc = conflictCount(prs)
     const shouldBlock = issueCount > 0 || fb > 0 || cc > 0 || refinementCount > 0
     expect(shouldBlock).toBe(true)
+  })
+})
+
+describe("selectRebaseSuggestionPRs", () => {
+  test("keeps only the two newest and two oldest PRs by createdAt", () => {
+    const prs: PR[] = [1, 2, 3, 4, 5, 6].map((number) =>
+      makePR({
+        number,
+        title: `PR ${number}`,
+        mergeable: "CONFLICTING",
+        createdAt: `2026-01-0${number}T00:00:00Z`,
+      })
+    )
+
+    const { shown, hiddenCount } = selectRebaseSuggestionPRs(prs)
+
+    expect(shown.map((pr) => pr.number)).toEqual([6, 5, 1, 2])
+    expect(hiddenCount).toBe(2)
+  })
+
+  test("falls back to PR number when createdAt is unavailable", () => {
+    const prs: PR[] = [22, 18, 31, 27, 14].map((number) =>
+      makePR({
+        number,
+        title: `PR ${number}`,
+        mergeable: "CONFLICTING",
+      })
+    )
+
+    const { shown, hiddenCount } = selectRebaseSuggestionPRs(prs)
+
+    expect(shown.map((pr) => pr.number)).toEqual([31, 27, 14, 18])
+    expect(hiddenCount).toBe(1)
+  })
+
+  test("returns all PRs when four or fewer conflicts exist", () => {
+    const prs: PR[] = [1, 2, 3, 4].map((number) =>
+      makePR({
+        number,
+        title: `PR ${number}`,
+        mergeable: "CONFLICTING",
+      })
+    )
+
+    const { shown, hiddenCount } = selectRebaseSuggestionPRs(prs)
+
+    expect(shown.map((pr) => pr.number)).toEqual([1, 2, 3, 4])
+    expect(hiddenCount).toBe(0)
   })
 })
 

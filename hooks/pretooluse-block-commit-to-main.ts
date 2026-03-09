@@ -1,0 +1,80 @@
+#!/usr/bin/env bun
+
+// PreToolUse hook: Block `git commit` when on the default branch in a collaborative repository.
+//
+// Rationale: Committing directly to main/master in a shared repo bypasses code review.
+// The correct workflow is to use a feature branch and open a PR.
+//
+// Policy:
+//   Collaborative repo + on default branch → BLOCKED (must use feature branch)
+//   Solo repo + on default branch          → allowed
+//   Any repo + on feature branch           → allowed
+
+import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
+import {
+  denyPreToolUse,
+  GIT_COMMIT_RE,
+  git,
+  isShellTool,
+  type ToolHookInput,
+} from "./hook-utils.ts"
+import { getDefaultBranch, isDefaultBranch } from "./utils/git-utils.ts"
+
+const input: ToolHookInput = await Bun.stdin.json()
+if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+
+const command: string = (input?.tool_input?.command as string) ?? ""
+const cwd: string = (input?.tool_input?.cwd as string) ?? process.cwd()
+
+if (!GIT_COMMIT_RE.test(command)) process.exit(0)
+
+// ── Check current branch ──────────────────────────────────────────────────────
+let currentBranch: string
+try {
+  currentBranch = (await git(["branch", "--show-current"], cwd)).trim()
+} catch {
+  process.exit(0) // can't determine branch — allow
+}
+
+if (!currentBranch) process.exit(0) // detached HEAD — allow
+
+// ── Check if on default branch ───────────────────────────────────────────────
+let defaultBranch: string
+try {
+  defaultBranch = await getDefaultBranch(cwd)
+} catch {
+  process.exit(0) // no git remote — allow
+}
+
+if (!isDefaultBranch(currentBranch, defaultBranch)) process.exit(0)
+
+// ── Check collaboration policy ───────────────────────────────────────────────
+let collaboration: Awaited<ReturnType<typeof detectProjectCollaborationPolicy>>
+try {
+  collaboration = await detectProjectCollaborationPolicy(cwd)
+} catch {
+  process.exit(0) // can't determine — allow
+}
+
+if (!collaboration.isCollaborative) process.exit(0)
+
+// ── Block: collaborative repo, committing to default branch ─────────────────
+const signals = collaboration.signals.map((s) => `  - ${s}`).join("\n")
+const owner = collaboration.repoOwner
+const repo = collaboration.repoName
+const repoRef = owner && repo ? `${owner}/${repo}` : "this repository"
+
+denyPreToolUse(`
+Committing directly to '${defaultBranch}' is blocked in ${repoRef} (collaborative repository).
+
+Collaboration signals:
+${signals}
+
+Use the feature branch workflow instead:
+  1. Create a feature branch: git checkout -b feat/description
+  2. Commit your changes there
+  3. Push: git push origin feat/description
+  4. Open PR: gh pr create --base ${defaultBranch}
+
+This ensures code review and prevents unreviewed changes from landing on the default branch.
+`)

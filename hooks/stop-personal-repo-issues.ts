@@ -140,6 +140,7 @@ const PRIORITY_LABELS = new Set([
 const NEEDS_REFINEMENT_LABEL = "needs-refinement"
 
 const MAX_SHOWN_ISSUES = 5
+const REBASE_SUGGESTIONS_PER_SIDE = 2
 const COOLDOWN_SECONDS = 30
 
 /**
@@ -277,12 +278,50 @@ export interface Issue {
   assignees?: Array<{ login: string }>
 }
 
-interface PR {
+export interface PR {
   number: number
   title: string
   url: string
   reviewDecision: string
   mergeable: string
+  createdAt?: string
+}
+
+function getPrCreatedAtMs(pr: PR): number {
+  if (!pr.createdAt) return Number.NaN
+  return new Date(pr.createdAt).getTime()
+}
+
+/**
+ * Suggest only the oldest and newest conflicting PRs for rebase.
+ * GitHub PR numbers are monotonic, so they act as a stable fallback when
+ * createdAt is unavailable or invalid in mocks / degraded CLI responses.
+ */
+export function selectRebaseSuggestionPRs(
+  prs: PR[],
+  perSide = REBASE_SUGGESTIONS_PER_SIDE
+): { shown: PR[]; hiddenCount: number } {
+  if (prs.length <= perSide * 2) return { shown: [...prs], hiddenCount: 0 }
+
+  const sorted = [...prs].sort((a, b) => {
+    const aCreatedAt = getPrCreatedAtMs(a)
+    const bCreatedAt = getPrCreatedAtMs(b)
+    if (!Number.isNaN(aCreatedAt) && !Number.isNaN(bCreatedAt)) return aCreatedAt - bCreatedAt
+    if (!Number.isNaN(aCreatedAt)) return -1
+    if (!Number.isNaN(bCreatedAt)) return 1
+    return a.number - b.number
+  })
+
+  const oldest = sorted.slice(0, perSide)
+  const newest = sorted.slice(-perSide).reverse()
+  const shown = [...newest, ...oldest].filter(
+    (pr, index, items) => items.findIndex((candidate) => candidate.number === pr.number) === index
+  )
+
+  return {
+    shown,
+    hiddenCount: Math.max(0, prs.length - shown.length),
+  }
 }
 
 export async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {
@@ -348,7 +387,7 @@ async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise
       "--author",
       currentUser,
       "--json",
-      "number,title,url,reviewDecision,mergeable",
+      "number,title,url,reviewDecision,mergeable,createdAt",
     ],
     cwd
   )
@@ -437,9 +476,16 @@ async function main(): Promise<void> {
     if (conflictCount > 0) {
       if (reasonLines.length > 0) reasonLines.push("")
       reasonLines.push(`You have ${conflictCount} open PR(s) with merge conflicts:`)
-      for (const pr of conflictingPRs) {
+      const { shown: shownConflictingPRs, hiddenCount: hiddenConflictingPRs } =
+        selectRebaseSuggestionPRs(conflictingPRs)
+      for (const pr of shownConflictingPRs) {
         reasonLines.push(`  #${pr.number} ${pr.title} [merge conflicts]`)
         reasonLines.push(`    ${pr.url}`)
+      }
+      if (hiddenConflictingPRs > 0) {
+        reasonLines.push(
+          `  …and ${hiddenConflictingPRs} more conflicting PR(s) between those extremes`
+        )
       }
       const rebaseAdvice = skillAdvice(
         "rebase-onto-main",

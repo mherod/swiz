@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**90 hooks. 11 event types. Every agent. Zero compromises.**
+**91 hooks. 11 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -122,7 +122,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (43)
+### PreToolUse (44)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -154,6 +154,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-push-checks-gate.ts` | Blocks `git push` unless branch and open-PR checks have already been run in the current session. Prevents pushing without verifying context and avoiding duplicate PRs. |
 | `pretooluse-push-cooldown.ts` | Enforces a 60-second cooldown between `git push` commands for the same repository. Prevents accidental rapid-fire pushes. Bypass with `--force`, `--force-with-lease`, `--force-with-lease=<ref>`, `--force-if-includes`, or `-f`. |
 | `pretooluse-main-branch-scope-gate.ts` | Enforces scope-based push policy for main branch: trivial changes (≤3 files, ≤20 lines, docs-only) can push to main in solo repos; non-trivial work (features, refactors, multi-file changes) in collaborative repos must use feature branch + PR. Blocks push with actionable guidance. |
+| `pretooluse-block-commit-to-main.ts` | Blocks `git commit` when on the default branch in a collaborative repository. Solo repos are allowed to commit directly to main; collaborative repos must use a feature branch and PR workflow. |
 | `pretooluse-skill-invocation-gate.ts` | Blocks `git commit` and `git push` unless the corresponding `/commit` or `/push` skill has been invoked in the current session. Only enforced when the skill is installed on the machine. |
 | `pretooluse-no-push-when-instructed.ts` | Blocks `git push` when the transcript contains an explicit "do not push" instruction (e.g. from the `/commit` skill) without a subsequent push-approval signal. Push requires explicit user authorisation. |
 | `pretooluse-taskupdate-schema.ts` | Blocks TaskUpdate calls that include unsupported fields (e.g. `notes`). Lists the allowed schema fields and redirects to `swiz tasks complete --evidence` for task completion with structured evidence. |

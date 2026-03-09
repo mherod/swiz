@@ -138,13 +138,16 @@ function makeIssue(
 function makePR(
   number: number,
   title: string,
-  reviewDecision: "CHANGES_REQUESTED" | "REVIEW_REQUIRED"
+  reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED",
+  opts: { createdAt?: string; mergeable?: "CONFLICTING" | "MERGEABLE" | "UNKNOWN" } = {}
 ) {
   return {
     number,
     title,
     url: `https://github.com/testowner/testrepo/pull/${number}`,
     reviewDecision,
+    mergeable: opts.mergeable ?? "MERGEABLE",
+    createdAt: opts.createdAt,
   }
 }
 
@@ -461,6 +464,49 @@ describe("E2E stop-personal-repo-issues: PR blocking suppresses issue list", () 
     const dir = await createGitRepoWithGitHubRemote("-empty", "testuser", "myrepo")
     const result = await runHook(dir, { user: "testuser" })
     expect(result.blocked).toBe(false)
+  })
+
+  test("conflicting PR suggestions show only the two newest and two oldest", async () => {
+    const dir = await createGitRepoWithGitHubRemote("-conflictbookends", "testuser", "myrepo")
+    const result = await runHook(dir, {
+      user: "testuser",
+      prs: [
+        makePR(101, "Conflict 101", "APPROVED", {
+          mergeable: "CONFLICTING",
+          createdAt: "2026-01-01T00:00:00Z",
+        }),
+        makePR(102, "Conflict 102", "APPROVED", {
+          mergeable: "CONFLICTING",
+          createdAt: "2026-01-02T00:00:00Z",
+        }),
+        makePR(103, "Conflict 103", "APPROVED", {
+          mergeable: "CONFLICTING",
+          createdAt: "2026-01-03T00:00:00Z",
+        }),
+        makePR(104, "Conflict 104", "APPROVED", {
+          mergeable: "CONFLICTING",
+          createdAt: "2026-01-04T00:00:00Z",
+        }),
+        makePR(105, "Conflict 105", "APPROVED", {
+          mergeable: "CONFLICTING",
+          createdAt: "2026-01-05T00:00:00Z",
+        }),
+        makePR(106, "Conflict 106", "APPROVED", {
+          mergeable: "CONFLICTING",
+          createdAt: "2026-01-06T00:00:00Z",
+        }),
+      ],
+    })
+
+    expect(result.blocked).toBe(true)
+    const r = result.reason!
+    expect(r).toContain("#106")
+    expect(r).toContain("#105")
+    expect(r).toContain("#101")
+    expect(r).toContain("#102")
+    expect(r).not.toContain("#103")
+    expect(r).not.toContain("#104")
+    expect(r).toContain("and 2 more conflicting PR(s) between those extremes")
   })
 })
 
