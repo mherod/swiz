@@ -31,7 +31,7 @@ pre-commit:
         - rebase
 
 pre-push:
-  timeout: 120
+  timeout: 30
   commands:
     disk-space:
       priority: 1
