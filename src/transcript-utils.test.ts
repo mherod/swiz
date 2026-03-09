@@ -770,15 +770,52 @@ describe("transcript-utils.ts", () => {
       expect(paths.has("/repo/CHANGELOG.md")).toBe(true)
     })
 
-    it("ignores non-edit tool calls (e.g. Bash)", () => {
+    it("ignores Bash commands that do not modify files (e.g. ls)", () => {
       const jsonl = JSON.stringify({
         type: "assistant",
         message: {
           role: "assistant",
-          content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }],
+          content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls -la" } }],
         },
       })
       expect(extractEditedFilePaths(jsonl).size).toBe(0)
+    })
+
+    function makeBashEntry(command: string): string {
+      return JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "tb1", name: "Bash", input: { command } }],
+        },
+      })
+    }
+
+    it("extracts path from trash command", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("trash /repo/old-file.ts"))
+      expect(paths.has("/repo/old-file.ts")).toBe(true)
+    })
+
+    it("extracts paths from mv command (rename)", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("mv /repo/src/old.ts /repo/src/new.ts"))
+      expect(paths.has("/repo/src/old.ts")).toBe(true)
+      expect(paths.has("/repo/src/new.ts")).toBe(true)
+    })
+
+    it("extracts path from git rm command", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("git rm /repo/obsolete.md"))
+      expect(paths.has("/repo/obsolete.md")).toBe(true)
+    })
+
+    it("extracts path from git mv command", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("git mv /repo/old.md /repo/new.md"))
+      expect(paths.has("/repo/old.md")).toBe(true)
+      expect(paths.has("/repo/new.md")).toBe(true)
+    })
+
+    it("extracts path from rm -rf command", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("rm -rf /repo/dist"))
+      expect(paths.has("/repo/dist")).toBe(true)
     })
   })
 

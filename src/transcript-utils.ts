@@ -849,15 +849,42 @@ export function countToolCalls(jsonlText: string): number {
 
 // ─── Edited file path extraction ─────────────────────────────────────────────
 
+// Matches file-modifying shell commands and captures path arguments.
+// Covers: trash <path>, rm <path>, mv <src> <dst>, cp <src> <dst>,
+// git mv <src> <dst>, git rm <path>.
+// Paths may be quoted (single or double) or unquoted.
+const SHELL_FILE_MOD_RE =
+  /(?:^|[|;&\s])(?:trash\s+|rm\s+(?:-[rfRF]+\s+)*|mv\s+|cp\s+|git\s+(?:mv|rm)\s+)((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
+
+function extractPathsFromCommand(command: string): string[] {
+  const results: string[] = []
+  SHELL_FILE_MOD_RE.lastIndex = 0
+  // Use matchAll to avoid assignment-in-expression lint violation
+  for (const m of command.matchAll(SHELL_FILE_MOD_RE)) {
+    const args = m[1]?.trim()
+    if (!args) continue
+    // Split on whitespace; strip surrounding quotes
+    for (const token of args.split(/\s+/)) {
+      const unquoted = token.replace(/^["']|["']$/g, "")
+      if (unquoted && !unquoted.startsWith("-")) results.push(unquoted)
+    }
+  }
+  return results
+}
+
 /**
- * Returns the set of file paths that were written or edited in the transcript.
- * Scans assistant tool_use blocks for Edit and Write calls and extracts
- * `file_path` / `path` from their inputs. Used to detect docs-only sessions
- * before invoking the LLM so the analysis can be scoped correctly.
+ * Returns the set of file paths that were written, edited, deleted, or renamed
+ * in the transcript. Covers:
+ *   - Edit / Write / MultiEdit tool_use blocks (file_path / path input)
+ *   - Bash tool_use blocks with file-modifying shell commands (trash, rm, mv, cp, git mv/rm)
+ *
+ * Used to detect docs-only sessions before invoking the LLM so the analysis
+ * can be scoped correctly.
  */
 export function extractEditedFilePaths(jsonlText: string): Set<string> {
   const paths = new Set<string>()
   const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"])
+  const SHELL_TOOLS = new Set(["Bash", "Shell"])
 
   for (const entry of parseTranscriptEntries(jsonlText)) {
     if (entry?.type !== "assistant") continue
@@ -867,9 +894,16 @@ export function extractEditedFilePaths(jsonlText: string): Set<string> {
     for (const block of content) {
       const b = block as { type?: string; name?: string; input?: Record<string, unknown> }
       if (b?.type !== "tool_use") continue
-      if (!b.name || !EDIT_TOOLS.has(b.name)) continue
-      const pathVal = b.input?.file_path ?? b.input?.path
-      if (typeof pathVal === "string" && pathVal) paths.add(pathVal)
+
+      if (b.name && EDIT_TOOLS.has(b.name)) {
+        const pathVal = b.input?.file_path ?? b.input?.path
+        if (typeof pathVal === "string" && pathVal) paths.add(pathVal)
+      } else if (b.name && SHELL_TOOLS.has(b.name)) {
+        const cmd = b.input?.command
+        if (typeof cmd === "string" && cmd) {
+          for (const p of extractPathsFromCommand(cmd)) paths.add(p)
+        }
+      }
     }
   }
 
