@@ -112,7 +112,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /git\s+stash(\s|$)/.test(stripQuotedStrings(c)),
+    match: (c) => /git\s+stash(\s|$)/.test(c),
     message: [
       "Do not use `git stash`. Stashed changes are easy to lose and add hidden state.",
       "",
@@ -125,7 +125,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /git\s+restore(\s|$)/.test(stripQuotedStrings(c)),
+    match: (c) => /git\s+restore(\s|$)/.test(c),
     message: [
       "Do not use `git restore`. It silently discards uncommitted changes.",
       "",
@@ -136,7 +136,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /git\s+reset\s+--hard/.test(stripQuotedStrings(c)),
+    match: (c) => /git\s+reset\s+--hard/.test(c),
     message: [
       "Do not use `git reset --hard`. It permanently destroys uncommitted changes.",
       "",
@@ -147,7 +147,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /git\s+clean(\s|$)/.test(stripQuotedStrings(c)),
+    match: (c) => /git\s+clean(\s|$)/.test(c),
     message: [
       "Do not use `git clean`. It permanently deletes untracked files.",
       "",
@@ -158,7 +158,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /git\s+checkout\s+(?:\S+\s+)?--\s+\S+/.test(stripQuotedStrings(c)),
+    match: (c) => /git\s+checkout\s+(?:\S+\s+)?--\s+\S+/.test(c),
     message: [
       "Do not use `git checkout -- <file-or-glob>` or `git checkout <ref-or-hash> -- <file-or-glob>`. They silently discard file changes.",
       "",
@@ -255,10 +255,16 @@ if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 
 const command: string = input?.tool_input?.command ?? ""
 
+// Strip quoted string contents once before any rule matching so that banned
+// patterns embedded inside commit messages, evidence args, or other quoted
+// flag values never trigger a false positive.  The original `command` is kept
+// for reporter correction output which must reference the real command text.
+const strippedCommand = stripQuotedStrings(command)
+
 const warnings: string[] = []
 
 for (const rule of RULES) {
-  if (!rule.match(command)) continue
+  if (!rule.match(strippedCommand)) continue
 
   if (rule.severity === "warn") {
     warnings.push(rule.message)
