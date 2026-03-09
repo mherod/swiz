@@ -152,45 +152,78 @@ async function spawnLine(cmd: string[]): Promise<string> {
   return out.trim()
 }
 
+async function countOpenTasksForSession(sessionId: string, tasksRoot: string): Promise<number> {
+  const { readSessionMeta } = await import("../tasks/task-repository.ts")
+  // Fast path: read the lightweight .session-meta.json index written by writeTask.
+  const meta = await readSessionMeta(sessionId, tasksRoot)
+  if (meta !== null) return meta.openCount
+  // Fallback: index missing — read every task file (pre-index sessions or corruption).
+  const sessionDir = join(tasksRoot, sessionId)
+  let files: string[]
+  try {
+    files = await readdir(sessionDir)
+  } catch {
+    return 0
+  }
+  let open = 0
+  for (const file of files) {
+    if (!file.endsWith(".json") || file.startsWith(".")) continue
+    try {
+      const task = (await Bun.file(join(sessionDir, file)).json()) as { status?: string }
+      if (task.status === "pending" || task.status === "in_progress") open++
+    } catch {}
+  }
+  return open
+}
+
 async function getOpenTaskCount(cwd: string): Promise<number | null> {
   try {
     const home = getHomeDir()
     const { tasksDir: tasksRoot, projectsDir: projectsRoot } = getDefaultTaskRoots(home)
     const { projectKeyFromCwd } = await import("../project-key.ts")
-    const { readSessionMeta } = await import("../tasks/task-repository.ts")
     const key = projectKeyFromCwd(cwd)
+
+    // Collect session IDs from the project transcript index, stripping .jsonl extension.
     const sessionIdsPath = join(projectsRoot, key)
-    let sessionIds: string[] = []
+    const indexedSessionIds = new Set<string>()
     try {
-      sessionIds = await readdir(sessionIdsPath)
+      for (const f of await readdir(sessionIdsPath)) {
+        if (f.endsWith(".jsonl")) indexedSessionIds.add(f.slice(0, -6))
+      }
     } catch {
-      return null
+      // Project directory missing — fall through to compaction-gap scan below.
     }
-    let open = 0
-    for (const sessionId of sessionIds) {
-      // Fast path: read the lightweight .session-meta.json index written by writeTask.
-      const meta = await readSessionMeta(sessionId, tasksRoot)
-      if (meta !== null) {
-        open += meta.openCount
-        continue
-      }
-      // Fallback: index missing — read every task file (pre-index sessions or corruption).
-      const sessionDir = join(tasksRoot, sessionId)
-      let files: string[]
-      try {
-        files = await readdir(sessionDir)
-      } catch {
-        continue
-      }
-      for (const file of files) {
-        if (!file.endsWith(".json") || file.startsWith(".")) continue
+
+    // Collect all session IDs referenced by any project directory (for compaction-gap detection).
+    const allProjectSessionIds = new Set<string>()
+    try {
+      for (const projectDir of await readdir(projectsRoot)) {
         try {
-          const task = (await Bun.file(join(sessionDir, file)).json()) as {
-            status?: string
+          for (const f of await readdir(join(projectsRoot, projectDir))) {
+            if (f.endsWith(".jsonl")) allProjectSessionIds.add(f.slice(0, -6))
           }
-          if (task.status === "pending" || task.status === "in_progress") open++
         } catch {}
       }
+    } catch {}
+
+    // Union: indexed sessions for this project + task-dir sessions not yet in any project index
+    // (compaction-gap sessions whose transcript hasn't been written yet).
+    let taskDirEntries: string[]
+    try {
+      taskDirEntries = await readdir(tasksRoot)
+    } catch {
+      taskDirEntries = []
+    }
+    const sessionIds = new Set(indexedSessionIds)
+    for (const s of taskDirEntries) {
+      if (!allProjectSessionIds.has(s)) sessionIds.add(s)
+    }
+
+    if (sessionIds.size === 0) return null
+
+    let open = 0
+    for (const sessionId of sessionIds) {
+      open += await countOpenTasksForSession(sessionId, tasksRoot)
     }
     return open
   } catch {
