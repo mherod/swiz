@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**92 hooks. 11 event types. Every agent. Zero compromises.**
+**93 hooks. 11 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -122,7 +122,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (45)
+### PreToolUse (46)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -130,6 +130,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 |------|-------------|
 | `pretooluse-no-mixed-tool-calls.ts` | Blocks Bash commands that are actually tool invocations (e.g. `TaskCreate ...` or `WebFetch ...` in a shell). These are agent tool names, not executables — they must be called as tools, not shell commands. |
 | `pretooluse-banned-commands.ts` | Blocks `grep` (use `rg`), `sed`/`awk` (use Edit), `rm` (use trash), `cd`, and raw `python`. Redirects to safer, more auditable alternatives. |
+| `pretooluse-no-merge-conflict-comments.ts` | Blocks `gh pr comment` and `gh pr review --comment` calls whose body consists only of merge-conflict or rebase-request noise. The project already has local remediation paths (stop-branch-conflicts, /rebase-onto-main) — low-signal public comments add notification noise without value. |
 | `pretooluse-no-cp.ts` | Blocks `cp` usage and redirects to `ditto` for reliable file and directory copying with metadata preservation. |
 | `pretooluse-git-index-lock.ts` | Blocks git commands when `.git/index.lock` exists. Prevents wasting turns on operations that will fail because another git process is running or a stale lock was left behind. |
 | `pretooluse-no-npm.ts` | Intercepts `npm` and `yarn` commands and redirects to the project's actual package manager. No more lock file corruption from the wrong tool. |

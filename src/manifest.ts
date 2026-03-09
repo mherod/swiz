@@ -197,6 +197,7 @@ export const manifest: HookGroup[] = [
     hooks: [
       { file: "pretooluse-no-mixed-tool-calls.ts", timeout: 5 },
       { file: "pretooluse-banned-commands.ts", timeout: 5 },
+      { file: "pretooluse-no-merge-conflict-comments.ts", timeout: 5 },
       { file: "pretooluse-no-cp.ts", timeout: 5 },
       { file: "pretooluse-git-index-lock.ts", timeout: 5 },
       { file: "pretooluse-no-npm.ts", timeout: 5 },
