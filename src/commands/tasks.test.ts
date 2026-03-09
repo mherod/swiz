@@ -417,6 +417,69 @@ describe("resolveTaskById", () => {
       expect(msg).toContain("Prefixed task in session C")
     }
   })
+
+  // ── filterCwd scope-parity tests (regression for #193) ──────────────────────
+  // Before the fix, the prefixed ID path called getSessions(undefined,...) and
+  // ignored filterCwd, letting it resolve tasks outside the current project.
+  // After the fix both paths honour the same filterCwd scope.
+
+  it("prefixed ID respects filterCwd — rejects task outside scoped sessions", async () => {
+    // Isolated projects dir: only SESSION_A is mapped to FILTER_CWD.
+    // SESSION_C (and its prefixed tasks) must not be reachable.
+    const scopedProjects = join(TMP, "projects-scope-parity")
+    const key = projectKeyFromCwd(FILTER_CWD)
+    await mkdir(join(scopedProjects, key), { recursive: true })
+    await writeFile(
+      join(scopedProjects, key, `${SESSION_A}.jsonl`),
+      `${JSON.stringify({ type: "user", cwd: FILTER_CWD })}\n`
+    )
+
+    const prefixC = sessionPrefix(SESSION_C)
+    // SESSION_C is outside the scoped project — should throw
+    await expect(
+      resolveTaskById(`${prefixC}-10`, SESSION_A, FILTER_CWD, TASKS, scopedProjects)
+    ).rejects.toThrow()
+  })
+
+  it("unprefixed ID also respects filterCwd — rejects task outside scoped sessions", async () => {
+    // Mirror test for unprefixed path: task #120 lives in SESSION_B which is NOT
+    // in scopedProjects2 (only SESSION_A is). Must throw, not return SESSION_B's task.
+    const scopedProjects2 = join(TMP, "projects-scope-parity-2")
+    const key = projectKeyFromCwd(FILTER_CWD)
+    await mkdir(join(scopedProjects2, key), { recursive: true })
+    await writeFile(
+      join(scopedProjects2, key, `${SESSION_A}.jsonl`),
+      `${JSON.stringify({ type: "user", cwd: FILTER_CWD })}\n`
+    )
+
+    // Task #120 only exists in SESSION_B — which is excluded by filterCwd
+    await expect(
+      resolveTaskById("120", SESSION_A, FILTER_CWD, TASKS, scopedProjects2)
+    ).rejects.toThrow()
+  })
+
+  it("both ID forms agree on scope — same project, same result", async () => {
+    // When both SESSION_A and SESSION_C are in scope, the prefixed path and the
+    // unprefixed path should both find their respective tasks.
+    // Reuse the shared PROJECTS dir (SESSION_A via canonicalKey, SESSION_C via altDir).
+
+    // Unprefixed: task #1 in SESSION_A resolves correctly under FILTER_CWD
+    const unprefixedResult = await resolveTaskById("1", SESSION_A, FILTER_CWD, TASKS, PROJECTS)
+    expect(unprefixedResult.sessionId).toBe(SESSION_A)
+    expect(unprefixedResult.task.id).toBe("1")
+
+    // Prefixed: cccc-10 in SESSION_C resolves correctly under FILTER_CWD (SESSION_C is in scope)
+    const prefixC = sessionPrefix(SESSION_C)
+    const prefixedResult = await resolveTaskById(
+      `${prefixC}-10`,
+      SESSION_A,
+      FILTER_CWD,
+      TASKS,
+      PROJECTS
+    )
+    expect(prefixedResult.sessionId).toBe(SESSION_C)
+    expect(prefixedResult.task.subject).toBe("Prefixed task in session C")
+  })
 })
 
 // ─── sessionPrefix ──────────────────────────────────────────────────────────

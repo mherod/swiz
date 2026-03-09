@@ -368,10 +368,9 @@ export async function resolveTaskById(
       if (task) return { sessionId: primarySessionId, task }
     }
 
-    // Since prefix is designed to be globally unique (first 4 hex chars of UUID),
-    // search all task sessions, ignoring filterCwd (which fails for Gemini CLI
-    // sessions that lack .claude/projects/ transcripts).
-    const sessions = await getSessions(undefined, tasksDir, projectsDir)
+    // Search sessions using the same filterCwd scope as unprefixed lookup so
+    // both ID forms share consistent project-scoped semantics.
+    const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
     const matchingSession = sessions.find((s) => sessionPrefix(s) === prefix)
     if (matchingSession) {
       const tasks = await readTasks(matchingSession, tasksDir)
