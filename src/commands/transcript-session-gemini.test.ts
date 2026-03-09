@@ -659,7 +659,8 @@ describe("Provider transcript/session command support", () => {
 
     const result = await runSwiz(
       ["continue", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--print"],
-      home
+      home,
+      { AI_TEST_NO_BACKEND: "1" }
     )
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toMatch(/No AI backend found|Authentication required/)
