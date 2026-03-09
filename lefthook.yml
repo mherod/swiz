@@ -40,7 +40,7 @@ pre-push:
         - rebase
     test:
       glob: "*.{ts,tsx,js,jsx,json}"
-      run: timeout 90 bun test --concurrent --timeout=10000 --max-concurrency=8
+      run: timeout 30 bun test --concurrent --timeout=10000 --max-concurrency=8
       skip:
         - merge
         - rebase
