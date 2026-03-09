@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**89 hooks. 11 event types. Every agent. Zero compromises.**
+**90 hooks. 11 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -213,11 +213,12 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `precompact-task-snapshot.ts` | Snapshots all current-session task IDs and statuses to disk before context compaction rewrites the transcript. The sessionstart-compact-context hook reads this snapshot on resume to verify and recreate any missing task files. |
 | `precompact-speak.ts` | Speaks "Just a moment while I gather my thoughts" before context compaction begins, giving audible feedback that the agent is about to pause for compaction. |
 
-### UserPromptSubmit (3)
+### UserPromptSubmit (4)
 
 | Hook | What it does |
 |------|-------------|
 | `userpromptsubmit-git-context.ts` | Injects current git branch and status into every prompt. The agent always knows where it is in the repo. |
+| `userpromptsubmit-notification-feedback.ts` | Reads `~/.swiz/notification-feedback.jsonl`, filters entries matching the current working directory, injects them as context, and removes consumed entries from the file. |
 | `userpromptsubmit-task-advisor.ts` | Surfaces active tasks before each prompt so the agent stays focused on what it was supposed to be doing. |
 | `posttooluse-speak-narrator.ts` | Catches up on any unspoken assistant text when the user submits a prompt. Ensures narration stays current even during idle periods. Runs async. |
 

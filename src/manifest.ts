@@ -300,6 +300,7 @@ export const manifest: HookGroup[] = [
     event: "userPromptSubmit",
     hooks: [
       { file: "userpromptsubmit-git-context.ts", timeout: 5 },
+      { file: "userpromptsubmit-notification-feedback.ts", timeout: 5 },
       { file: "userpromptsubmit-task-advisor.ts", timeout: 5 },
       { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
     ],
