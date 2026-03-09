@@ -966,6 +966,32 @@ describe("transcript-utils.ts", () => {
       expect(paths.has("/repo/my source.ts")).toBe(true)
       expect(paths.has("/repo/my link.ts")).toBe(true)
     })
+
+    it("extracts directory from mkdir command", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("mkdir /repo/src/new-module"))
+      expect(paths.has("/repo/src/new-module")).toBe(true)
+    })
+
+    it("extracts directory from mkdir -p (recursive)", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("mkdir -p /repo/src/a/b/c"))
+      expect(paths.has("/repo/src/a/b/c")).toBe(true)
+    })
+
+    it("extracts multiple directories from mkdir", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("mkdir /repo/src/a /repo/src/b"))
+      expect(paths.has("/repo/src/a")).toBe(true)
+      expect(paths.has("/repo/src/b")).toBe(true)
+    })
+
+    it("extracts directory from rmdir command", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("rmdir /repo/src/old-module"))
+      expect(paths.has("/repo/src/old-module")).toBe(true)
+    })
+
+    it("extracts quoted directory with spaces from mkdir", () => {
+      const paths = extractEditedFilePaths(makeBashEntry('mkdir -p "/repo/my module/src"'))
+      expect(paths.has("/repo/my module/src")).toBe(true)
+    })
   })
 
   // ─── isDocsOnlySession ──────────────────────────────────────────────────────

@@ -873,10 +873,11 @@ const SED_INPLACE_RE =
 const TEE_RE =
   /(?:^|[|;&\s])tee\s+(?:-a\s+|--\s+)?((?:"[^"]*"|'[^']*'|[^\s|;&"'>(][^\s|;&"']*)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"'>(][^\s|;&"']*))*)/gm
 
-// Matches touch, truncate, and install file targets.
-// touch [-t ...] <file> [file2 ...], truncate [-s size] <file>, install [-m mode] src dst.
+// Matches touch, truncate, mkdir, and rmdir file/directory targets.
+// touch [-t] <file> [file2 ...], truncate [-s size] <file>,
+// mkdir [-p] [-m mode] <dir> [dir2 ...], rmdir [-p] <dir> [dir2 ...].
 const TOUCH_TRUNCATE_INSTALL_RE =
-  /(?:^|[|;&\s])(?:touch|truncate)\s+(?:-\S+\s+)*((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
+  /(?:^|[|;&\s])(?:touch|truncate|mkdir|rmdir)\s+(?:-\S+\s+)*((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
 
 // Tokenizes a shell argument string respecting single and double quoting.
 // "my file.ts" and 'my file.ts' are returned as single tokens (quotes stripped).
@@ -944,7 +945,7 @@ function extractPathsFromCommand(command: string): string[] {
  *       output redirections: > file, >> file (echo, cat, heredoc, etc.)
  *       sed -i in-place edits: sed -i 's/.../.../' file
  *       tee file targets: cmd | tee [-a] file [file2 ...]
- *       touch / truncate file targets
+ *       touch / truncate / mkdir / rmdir targets
  *
  * Used to detect docs-only sessions before invoking the LLM so the analysis
  * can be scoped correctly.
