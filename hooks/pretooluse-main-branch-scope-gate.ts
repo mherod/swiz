@@ -25,6 +25,8 @@ import {
 import {
   classifyChangeScope,
   denyPreToolUse,
+  extractPrNumber,
+  GH_PR_MERGE_RE,
   getDefaultBranch,
   git,
   isDefaultBranch,
@@ -45,18 +47,60 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
-// Only check git push commands that target the effective default branch.
+// Only check git push commands that target the effective default branch,
+// or `gh pr merge` commands (which are functionally equivalent to a push to main).
 const pushToDefaultRe = new RegExp(
   `\\bgit\\s+(?:-\\w+\\s+)*push\\s+(?:-\\w+\\s+)*origin\\s+(${escapeRegex(defaultBranch)})\\b`
 )
 const pushMatch = command.match(pushToDefaultRe)
-if (!pushMatch) process.exit(0)
+const prMergeMatch = GH_PR_MERGE_RE.test(command)
+
+if (!pushMatch && !prMergeMatch) process.exit(0)
+
+// ── gh pr merge fast-path ──────────────────────────────────────────────
+// `gh pr merge` lands code on the default branch. When strict mode or collaborative
+// mode is active, block it with the same policy message as a direct push.
+if (prMergeMatch) {
+  const collaboration = await detectProjectCollaborationPolicy(cwd)
+  const owner = collaboration.repoOwner
+  const repo = collaboration.repoName
+  if (!owner || !repo) process.exit(0)
+  const isCollaborative = collaboration.isCollaborative
+  const globalSettings = await readSwizSettings()
+  const effectiveSettings = getEffectiveSwizSettings(
+    globalSettings,
+    null,
+    await readProjectSettings(cwd)
+  )
+  const strictMode = effectiveSettings.strictNoDirectMain
+
+  if (!isCollaborative && !strictMode) process.exit(0)
+
+  const prNumber = extractPrNumber(command)
+  const prRef = prNumber ? `PR #${prNumber}` : "this PR"
+  const repoContext = isCollaborative
+    ? `a collaborative repository.\n\nCollaboration signals:\n${collaboration.signals.map((s) => `  - ${s}`).join("\n")}`
+    : `a solo repository with strict-no-direct-main enabled.\n\n  To disable strict mode: swiz settings disable strict-no-direct-main`
+
+  denyPreToolUse(`
+Merging ${prRef} via \`gh pr merge\` is blocked in ${repoContext}
+
+\`gh pr merge\` lands code directly on '${defaultBranch}', bypassing the intended review workflow.
+
+Allowed merge paths:
+  1. Merge via the GitHub web UI after required reviews are approved
+  2. Wait for an authorized human to merge the PR
+  3. Use auto-merge if branch protection requires it: gh pr merge ${prNumber ?? "<number>"} --auto --squash
+
+Repository: ${owner}/${repo}
+`)
+}
 
 // Determine the effective branch: prefer current branch, fall back to push target.
 // Detached HEAD (CI runners, specific SHA checkouts) returns "" from --show-current,
 // but the push command explicitly names the target branch.
 const checkedOutBranch = await git(["branch", "--show-current"], cwd)
-const targetBranch = pushMatch[1]!
+const targetBranch = pushMatch![1]!
 const currentBranch = checkedOutBranch || targetBranch
 
 if (!isDefaultBranch(currentBranch, defaultBranch)) process.exit(0)
