@@ -35,12 +35,15 @@ describe("hasAiProvider", () => {
 describe("activeProvider", () => {
   const origKey = process.env.GEMINI_API_KEY
   const origNoBackend = process.env.AI_TEST_NO_BACKEND
+  const origAiProvider = process.env.AI_PROVIDER
 
   afterEach(() => {
     if (origKey === undefined) delete process.env.GEMINI_API_KEY
     else process.env.GEMINI_API_KEY = origKey
     if (origNoBackend === undefined) delete process.env.AI_TEST_NO_BACKEND
     else process.env.AI_TEST_NO_BACKEND = origNoBackend
+    if (origAiProvider === undefined) delete process.env.AI_PROVIDER
+    else process.env.AI_PROVIDER = origAiProvider
   })
 
   test("returns null when AI_TEST_NO_BACKEND=1", () => {
@@ -52,6 +55,44 @@ describe("activeProvider", () => {
     delete process.env.AI_TEST_NO_BACKEND
     process.env.GEMINI_API_KEY = "test-key"
     expect(activeProvider()).toBe("gemini")
+  })
+
+  test("override argument takes precedence over auto-select", () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.GEMINI_API_KEY = "test-key"
+    // Codex unavailable in test env, but we can verify gemini override works
+    expect(activeProvider("gemini")).toBe("gemini")
+  })
+
+  test("AI_PROVIDER=gemini env var selects gemini when available", () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.GEMINI_API_KEY = "test-key"
+    process.env.AI_PROVIDER = "gemini"
+    expect(activeProvider()).toBe("gemini")
+  })
+
+  test("throws on unknown AI_PROVIDER value", () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_PROVIDER = "openai"
+    expect(() => activeProvider()).toThrow("Unknown AI provider")
+  })
+
+  test("override argument throws on unknown provider value", () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    // @ts-expect-error — testing invalid runtime value
+    expect(() => activeProvider("openai")).toThrow("Unknown AI provider")
+  })
+
+  test("AI_PROVIDER=codex throws when codex CLI is not installed", () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_PROVIDER = "codex"
+    // In this test environment codex is not installed — Bun.which("codex") returns null
+    if (Bun.which("codex")) {
+      // codex is installed on this machine — skip the unavailable check
+      expect(activeProvider()).toBe("codex")
+    } else {
+      expect(() => activeProvider()).toThrow("codex CLI is not installed")
+    }
   })
 })
 

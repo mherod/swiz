@@ -114,6 +114,20 @@ describe("parseIdeaArgs", () => {
     expect(parsed.timeoutMs).toBe(9000)
   })
 
+  it("parses --provider flag", () => {
+    expect(parseIdeaArgs(["--provider", "gemini"]).provider).toBe("gemini")
+    expect(parseIdeaArgs(["--provider", "codex"]).provider).toBe("codex")
+    expect(parseIdeaArgs(["-p", "gemini"]).provider).toBe("gemini")
+  })
+
+  it("defaults provider to undefined", () => {
+    expect(parseIdeaArgs([]).provider).toBeUndefined()
+  })
+
+  it("throws on invalid --provider value", () => {
+    expect(() => parseIdeaArgs(["--provider", "openai"])).toThrow('must be "gemini" or "codex"')
+  })
+
   it("throws on unknown args", () => {
     expect(() => parseIdeaArgs(["--wat"])).toThrow("Unknown argument")
   })

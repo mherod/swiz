@@ -4,6 +4,11 @@
 //   1. Gemini (via GEMINI_API_KEY or gemini CLI OAuth)
 //   2. Codex CLI (via codex CLI in PATH)
 //
+// Provider override (highest to lowest precedence):
+//   1. options.provider passed to each prompt function
+//   2. AI_PROVIDER env var ("gemini" | "codex")
+//   3. Auto-select: Gemini preferred, Codex CLI fallback
+//
 // Usage:
 //   import { hasAiProvider, promptText, promptStreamText, promptObject } from "./ai-providers.ts"
 //
@@ -22,6 +27,10 @@ import {
   promptGeminiStreamText,
 } from "./gemini.ts"
 
+// ─── Provider types ───────────────────────────────────────────────────────────
+
+export type AiProviderId = "gemini" | "codex"
+
 // ─── Codex provider ──────────────────────────────────────────────────────────
 
 export interface PromptOptions {
@@ -31,6 +40,11 @@ export interface PromptOptions {
   signal?: AbortSignal
   /** Model identifier. Provider-specific defaults apply when omitted. */
   model?: string
+  /**
+   * Force a specific provider. Overrides AI_PROVIDER env var and auto-selection.
+   * Throws if the requested provider is not available.
+   */
+  provider?: AiProviderId
 }
 
 export interface PromptStreamOptions extends PromptOptions {
@@ -119,8 +133,6 @@ async function promptCodexObject<T>(
 
 // ─── Provider selection ───────────────────────────────────────────────────────
 
-export type AiProviderId = "gemini" | "codex"
-
 /**
  * Returns true when at least one AI provider (Gemini or Codex CLI) is available.
  * Call `ensureGeminiApiKey()` before this to populate Gemini key from Keychain.
@@ -133,11 +145,41 @@ export function hasAiProvider(): boolean {
 }
 
 /**
- * Returns the active provider ID, or null if none is available.
- * Prefers Gemini when both are available (lower latency, structured output).
+ * Returns the resolved provider ID, or null if none is available.
+ *
+ * Resolution order (highest to lowest precedence):
+ *   1. `override` argument (from options.provider or CLI --provider flag)
+ *   2. AI_PROVIDER env var ("gemini" | "codex")
+ *   3. Auto-select: Gemini preferred when both are available
+ *
+ * Throws if an explicit override requests a provider that is not available.
  */
-export function activeProvider(): AiProviderId | null {
+export function activeProvider(override?: AiProviderId): AiProviderId | null {
   if (process.env.AI_TEST_NO_BACKEND === "1") return null
+
+  const requested = override ?? (process.env.AI_PROVIDER as AiProviderId | undefined)
+
+  if (requested === "gemini") {
+    if (!hasGeminiApiKey()) {
+      throw new Error(
+        "AI_PROVIDER=gemini requested but Gemini is not available. Set GEMINI_API_KEY or authenticate via `gemini` CLI."
+      )
+    }
+    return "gemini"
+  }
+  if (requested === "codex") {
+    if (!hasCodexCli()) {
+      throw new Error(
+        "AI_PROVIDER=codex requested but the codex CLI is not installed or not in PATH."
+      )
+    }
+    return "codex"
+  }
+  if (requested !== undefined) {
+    throw new Error(`Unknown AI provider "${requested}". Valid values: gemini, codex.`)
+  }
+
+  // Auto-select
   if (hasGeminiApiKey()) return "gemini"
   if (hasCodexCli()) return "codex"
   return null
@@ -156,7 +198,7 @@ export async function promptText(prompt: string, options?: PromptOptions): Promi
     return process.env.AI_TEST_TEXT_RESPONSE.trim()
   }
 
-  const provider = activeProvider()
+  const provider = activeProvider(options?.provider)
   if (provider === "gemini") {
     return promptGemini(prompt, options as PromptGeminiOptions)
   }
@@ -182,7 +224,7 @@ export async function promptStreamText(
     return text
   }
 
-  const provider = activeProvider()
+  const provider = activeProvider(options?.provider)
   if (provider === "gemini") {
     return promptGeminiStreamText(prompt, options as PromptGeminiStreamOptions)
   }
@@ -207,7 +249,7 @@ export async function promptObject<T>(
     return JSON.parse(process.env.AI_TEST_RESPONSE) as T
   }
 
-  const provider = activeProvider()
+  const provider = activeProvider(options?.provider)
   if (provider === "gemini") {
     return promptGeminiObject(prompt, schema, options as PromptGeminiOptions)
   }

@@ -1,6 +1,11 @@
 import { basename, resolve } from "node:path"
 import { z } from "zod"
-import { hasAiProvider, promptObject, promptStreamText } from "../ai-providers.ts"
+import {
+  type AiProviderId,
+  hasAiProvider,
+  promptObject,
+  promptStreamText,
+} from "../ai-providers.ts"
 import { createStreamBufferReporter } from "../stream-buffer-reporter.ts"
 import {
   extractPlainTurns,
@@ -38,6 +43,7 @@ export interface ReflectArgs {
   timeoutMs: number
   json: boolean
   printPrompt: boolean
+  provider?: AiProviderId
 }
 
 function parsePositiveInt(value: string, flag: string): number {
@@ -57,6 +63,7 @@ export function parseReflectArgs(args: string[]): ReflectArgs {
   let json = false
   let printPrompt = false
   let countSpecified = false
+  let provider: AiProviderId | undefined
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -103,6 +110,15 @@ export function parseReflectArgs(args: string[]): ReflectArgs {
       printPrompt = true
       continue
     }
+    if (arg === "--provider") {
+      if (!next) throw new Error("Missing value for --provider")
+      if (next !== "gemini" && next !== "codex") {
+        throw new Error(`--provider must be "gemini" or "codex", got: ${next}`)
+      }
+      provider = next
+      i++
+      continue
+    }
     if (!arg.startsWith("-")) {
       if (countSpecified) throw new Error("Count already specified")
       count = parsePositiveInt(arg, "count")
@@ -112,7 +128,7 @@ export function parseReflectArgs(args: string[]): ReflectArgs {
     throw new Error(`Unknown argument: ${arg}`)
   }
 
-  return { count, targetDir, sessionQuery, model, timeoutMs, json, printPrompt }
+  return { count, targetDir, sessionQuery, model, timeoutMs, json, printPrompt, provider }
 }
 
 function truncateTranscript(text: string, maxChars: number): { text: string; truncated: boolean } {
@@ -308,10 +324,14 @@ export const reflectCommand: Command = {
       flags: "--json, -j",
       description: "Print structured reflection JSON instead of formatted markdown",
     },
-    { flags: "--print-prompt, -p", description: "Print the generated Gemini prompt and exit" },
+    { flags: "--print-prompt, -p", description: "Print the generated prompt and exit" },
+    {
+      flags: "--provider <name>",
+      description: 'AI provider override: "gemini" or "codex" (default: auto-select)',
+    },
   ],
   async run(args: string[]) {
-    const { count, targetDir, sessionQuery, model, timeoutMs, json, printPrompt } =
+    const { count, targetDir, sessionQuery, model, timeoutMs, json, printPrompt, provider } =
       parseReflectArgs(args)
     const transcript = await loadTranscriptContext(targetDir, sessionQuery)
     const prompt = buildPrompt({
@@ -341,6 +361,7 @@ export const reflectCommand: Command = {
       const streamed = await promptStreamText(prompt, {
         model,
         timeout: timeoutMs,
+        provider,
         onTextPart: (textPart: string) => {
           if (json) {
             process.stdout.write(textPart)
@@ -364,6 +385,7 @@ export const reflectCommand: Command = {
       reflection = await promptObject(prompt, SessionReflectionSchema(count), {
         model,
         timeout: timeoutMs,
+        provider,
       })
     }
 

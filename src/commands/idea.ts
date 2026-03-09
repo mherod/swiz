@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { z } from "zod"
-import { hasAiProvider, promptObject } from "../ai-providers.ts"
+import { type AiProviderId, hasAiProvider, promptObject } from "../ai-providers.ts"
 import { detectFrameworks, detectProjectStack } from "../detect-frameworks.ts"
 import type { Command } from "../types.ts"
 
@@ -40,12 +40,14 @@ export interface IdeaArgs {
   targetDir: string
   model?: string
   timeoutMs: number
+  provider?: AiProviderId
 }
 
 export function parseIdeaArgs(args: string[]): IdeaArgs {
   let targetDir = process.cwd()
   let model: string | undefined
   let timeoutMs = DEFAULT_TIMEOUT_MS
+  let provider: AiProviderId | undefined
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -74,10 +76,19 @@ export function parseIdeaArgs(args: string[]): IdeaArgs {
       i++
       continue
     }
+    if (arg === "--provider" || arg === "-p") {
+      if (!next) throw new Error("Missing value for --provider")
+      if (next !== "gemini" && next !== "codex") {
+        throw new Error(`--provider must be "gemini" or "codex", got: ${next}`)
+      }
+      provider = next
+      i++
+      continue
+    }
     throw new Error(`Unknown argument: ${arg}`)
   }
 
-  return { targetDir, model, timeoutMs }
+  return { targetDir, model, timeoutMs, provider }
 }
 
 async function readReadmeContent(targetDir: string): Promise<string | null> {
@@ -216,11 +227,15 @@ export const ideaCommand: Command = {
     { flags: "--dir, -d <path>", description: "Project directory to analyze (default: cwd)" },
     {
       flags: "--model, -m <name>",
-      description: "Gemini model override (default: gemini-flash-latest)",
+      description: "Model override (provider-specific default applies when omitted)",
     },
     {
       flags: "--timeout, -t <ms>",
-      description: `Gemini request timeout in ms (default: ${DEFAULT_TIMEOUT_MS})`,
+      description: `Request timeout in ms (default: ${DEFAULT_TIMEOUT_MS})`,
+    },
+    {
+      flags: "--provider, -p <name>",
+      description: 'AI provider override: "gemini" or "codex" (default: auto-select)',
     },
   ],
   async run(args: string[]) {
@@ -228,7 +243,7 @@ export const ideaCommand: Command = {
       throw new Error("No AI provider available. Set GEMINI_API_KEY or install the codex CLI.")
     }
 
-    const { targetDir, model, timeoutMs } = parseIdeaArgs(args)
+    const { targetDir, model, timeoutMs, provider } = parseIdeaArgs(args)
     const [readme, frameworks, stacks] = await Promise.all([
       readReadmeContent(targetDir),
       Promise.resolve(Array.from(detectFrameworks(targetDir)).sort()),
@@ -244,7 +259,11 @@ export const ideaCommand: Command = {
       stacks,
     })
 
-    const idea = await promptObject(prompt, IssueIdeaSchema, { model, timeout: timeoutMs })
+    const idea = await promptObject(prompt, IssueIdeaSchema, {
+      model,
+      timeout: timeoutMs,
+      provider,
+    })
     console.log(renderIssueDescription(idea))
   },
 }
