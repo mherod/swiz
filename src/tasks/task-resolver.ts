@@ -38,6 +38,31 @@ export async function getSessionIdsForProject(
   return ids
 }
 
+/** Collect all session IDs referenced by any project transcript directory. */
+async function getAllProjectSessionIds(
+  projectsDir = getDefaultTaskRoots().projectsDir
+): Promise<Set<string>> {
+  const ids = new Set<string>()
+  let projectDirs: string[]
+  try {
+    projectDirs = await readdir(projectsDir)
+  } catch {
+    return ids
+  }
+  for (const projectDir of projectDirs) {
+    let files: string[]
+    try {
+      files = await readdir(join(projectsDir, projectDir))
+    } catch {
+      continue
+    }
+    for (const f of files) {
+      if (f.endsWith(".jsonl")) ids.add(f.slice(0, -6))
+    }
+  }
+  return ids
+}
+
 /** Slow fallback: scan all project transcript directories for sessions whose cwd matches. */
 export async function getSessionIdsByCwdScan(
   filterCwd: string,
@@ -112,6 +137,18 @@ export async function getSessions(
       if (unmatched.length > 0) {
         const fallbackIds = await getSessionIdsByCwdScan(filterCwd, unmatched, projectsDir)
         for (const id of fallbackIds) matchedSessionIds.add(id)
+      }
+
+      // Compaction gap: include task-dir sessions that have no transcript in
+      // ANY project directory yet. These are created by TaskCreate immediately
+      // when a session starts, before the transcript file is written. Without
+      // this, a freshly-compacted session is invisible to `swiz tasks` even
+      // though its task files exist — the only session the agent can interact
+      // with. Include them alongside matched sessions; mtime sort ensures they
+      // surface at the top when they are the most recently active session.
+      const allProjectSessionIds = await getAllProjectSessionIds(projectsDir)
+      for (const s of entries) {
+        if (!allProjectSessionIds.has(s)) matchedSessionIds.add(s)
       }
     }
 
