@@ -195,24 +195,24 @@ alwaysApply: false
 - Gate diagnostics with `SWIZ_DEBUG` using `const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {};`.
 - Reference implementations: `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts`.
 ## Conventions
-- DO NOT embed the ESC character (0x1b) directly in regex literals — Biome's `no-control-regex` rule blocks it. Construct ANSI-matching regexes at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
-- When parsing bun test terminal output for counts, check for the completion marker `/\bRan \d+ tests? across \d+ files?\./` (note `tests?`/`files?` for singular/plural) before reporting an exact figure; absent the marker output is truncated and the count is untrustworthy — emit "unknown number of" instead. Strip ANSI before matching. Reference: `detectFailure` in `hooks/posttooluse-task-output.ts`.
-- DO: Read every file being modified in its entirety before making any change. A snippet is insufficient; full read catches conflicts and patterns in other sections.
+- DO NOT embed ESC (0x1b) in regex literals — Biome's `no-control-regex` blocks it. Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
+- When parsing bun test output for counts, check for `/\bRan \d+ tests? across \d+ files?\./` before reporting an exact figure; absent the marker, output is truncated — emit "unknown number of". Strip ANSI before matching. Reference: `detectFailure` in `hooks/posttooluse-task-output.ts`.
+- DO: Read every file being modified in full before editing — snippets miss conflicts and patterns in other sections.
 - Use ANSI escape codes directly; do not add color libraries.
 - Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks.
 - With piped `Bun.spawn`, drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
 - Hooks are `.ts` and run as `bun hooks/<file>.ts`.
 - Settings writes must create `.bak` backups first.
-- For multiline frontmatter regex, do not use `\s*` after closing delimiter if blank lines must remain; use `[ \t]*\n?`. Avoid `/^---[\s\S]*?^---\s*\n?/m`; use `[ \t]*` instead.
-- Stop hooks can inject session tasks from `~/.claude/tasks/<session_id>/`; format `IN PROGRESS` before `COMPLETED`, injected before transcript.
+- For multiline frontmatter regex, avoid `/^---[\s\S]*?^---\s*\n?/m`; use `[ \t]*\n?` after the closing delimiter to preserve blank lines.
+- Stop hooks inject session tasks from `~/.claude/tasks/<session_id>/`; format `IN PROGRESS` before `COMPLETED`, before transcript.
 - Stop-memory prompts must include `Cause to capture: <specific cause>`.
-- On `MEMORY CAPTURE ENFORCEMENT`, immediately: read `/update-memory/SKILL.md`, edit `CLAUDE.md` with the DO/DON'T rule, then resume other work.
+- On `MEMORY CAPTURE ENFORCEMENT`: read `/update-memory/SKILL.md`, edit `CLAUDE.md` with the DO/DON'T rule, then resume work.
 - Do not defer memory capture requested by stop hooks.
-- When unblocking a gated session via prior task completion: mark prior task complete first with evidence, then create an `in_progress` task in current session directory before executing tool calls; do not attempt tool calls while memory enforcement is active.
-- `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip enforcement when not in a git repo or when no `CLAUDE.md` exists up the directory tree; guard with `isGitRepo(cwd)` then upward `CLAUDE.md` search, otherwise `process.exit(0)`.
+- When unblocking a gated session: mark prior task complete with evidence first, then create an `in_progress` task in the current session before executing tool calls; do not attempt tool calls while memory enforcement is active.
+- `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip when not in a git repo or no `CLAUDE.md` exists up the tree; guard with `isGitRepo(cwd)` then upward `CLAUDE.md` search, else `process.exit(0)`.
 - Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for every directory with valid console usage (`hooks/`, `scripts/`, `push/scripts/`, etc.).
-- Bun test reporter: `--reporter=dots` (not `dot`). Run without `| tail` — `pretooluse-repeated-lint-test` treats piped re-runs as consecutive and blocks. Read output once; dots with no `fail` lines is sufficient evidence.
-- **DO**: Make an Edit tool change between `bun run format` and `bun run lint` — `pretooluse-repeated-lint-test` doesn't detect format-via-wrapper as a mutation (no `--write` in wrapper string), so consecutive lint runs without an intervening edit trigger a block.
+- Bun test reporter: `--reporter=dots` (not `dot`). Run without `| tail` — piped re-runs trigger `pretooluse-repeated-lint-test` as consecutive. Read output once; no `fail` lines is sufficient evidence.
+- **DO**: Make an Edit between `bun run format` and `bun run lint` — format-via-wrapper lacks `--write` so `pretooluse-repeated-lint-test` doesn't see it as a mutation; consecutive lint runs without an edit trigger a block.
 - Do not run `cd` in Bash commands; use absolute paths, `git -C <dir>`, `pnpm --prefix <dir>`, or `cwd` in `Bun.spawn()`.
 - Do not edit files with `sed -i`; use Edit tool for file writes; use `sed` only for non-writing stream transforms.
 - Do not use `awk`; use `bun -e`, `sort -u`, `cut -d' ' -f1`, or git `--format`.
@@ -221,16 +221,18 @@ alwaysApply: false
 - Do not edit files outside session sandbox. `~/.claude/hooks/` and `~/.claude/skills/` are owned by external repos. For cross-repo bugs, file GitHub issues in the owning repo with: (1) exact error message and reproduction steps, (2) root cause analysis, (3) proposed fix with code location, (4) success criteria.
 - **DO NOT mark tasks complete without shipped code.** Inline bash testing does not count. Always: (1) modify source files, (2) verify `git diff`, (3) commit, then (4) mark complete. For cross-repo fixes blocked by sandbox, file a GitHub issue with file path, line number, exact fix, and success criteria.
 - Use `swiz tasks complete <id> --evidence "note:..."` for task completion; `tasks-list.ts` is deprecated and must not be invoked directly.
-- Stop-hook footers containing `REMINDER_FRAGMENT` can re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses a 30-minute `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes so installed config updates.
-- Cross-session gap: cooldown does not carry between sessions; complete memory follow-through before session end.
+- Stop-hook footers with `REMINDER_FRAGMENT` re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses a 30-minute `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes.
+- Cross-session gap: cooldown doesn't carry between sessions; complete memory follow-through before session end.
 - For cache-key fixes, search all callers (`Bun.hash(cwd)`, `createHash().update(repoRoot)`) and extract shared utility (for example `getCanonicalPathHash()` in `hook-utils.ts`) using `realpathSync()` and full hashes.
 - Migrate all callers together; check `hooks/*.ts` and `src/commands/*.ts`. Example unified callers: `stop-personal-repo-issues.ts`, `pretooluse-push-cooldown.ts`, `src/commands/push-wait.ts`.
 - Do not leave duplicated cache-key generation logic.
-- In CLI subprocess tests (for example `runSwiz`), do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp-directory `cwd`, and `env: { ...process.env, HOME: tempDir }`.
-- Do not use Agent tool `isolation: "worktree"`; rejected/partial setup can corrupt `.git/config` (`core.bare = true`, bogus `[branch "worktree-..."]`/`[user]`) and break git with "this operation must be run in a work tree".
-- For secret-like test fixtures (e.g., `sk_live_...` in `stop-secret-scanner.ts`), build via array join: `const fakeSecret = ['s','k','_','l','i','v','e','_',...].join('')`. GitHub push protection and git-diff secret scanning both require this.
-- **DO**: When stop hooks detect memory threshold violations outside the session sandbox, file a GitHub issue on the owning repo with word count, threshold, and compaction guidance. Sandbox prevents direct edits—issue filing is the workflow.
+- In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp-directory `cwd`, and `env: { ...process.env, HOME: tempDir }`.
+- Do not use Agent tool `isolation: "worktree"` — rejected/partial setup corrupts `.git/config` (`core.bare = true`, bogus worktree branches) and breaks git with "must be run in a work tree".
+- For secret-like test fixtures (e.g., `sk_live_...`), build via array join: `['s','k','_','l','i','v','e','_',...].join('')` — GitHub push protection and git-diff scanning block literal secret strings.
+- **DO**: When stop hooks detect memory threshold violations outside the sandbox, file a GitHub issue with word count, threshold, and compaction guidance — sandbox prevents direct edits.
 - **DON'T**: Attempt to edit files outside the session sandbox; the Edit tool will block and sandbox enforcement is non-negotiable.
 - **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop. Use `/push` for unpushed commits.
 - **DON'T**: Rely on `git status` alone for unpush detection—it doesn't show upstream divergence. Always use `git log origin/main..HEAD --oneline` to list unpushed commits.
+- **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` in env overrides — prevents real backend calls on machines with Codex/Gemini installed. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
+- **DON'T**: Treat a `pretooluse-repeated-lint-test` block on the first `bun test` of a new session as a real violation — the hook has no session-boundary detection and reads prior-session runs from the full JSONL. Fix: make any Edit between runs to clear the gate. Issue #174.
 - **DON'T**: Declare commit or push success before reading tool output confirming it. Verify from evidence (git status clean, commit SHA captured, push output showing remote updated) before claiming complete.
