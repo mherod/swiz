@@ -1,5 +1,4 @@
 import { dirname, join } from "node:path"
-import { spawnSpeak } from "../../hooks/hook-utils.ts"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import {
   ambitionModeSchema,
@@ -16,6 +15,7 @@ import {
   writeProjectSettings,
   writeSwizSettings,
 } from "../settings.ts"
+import { spawnSpeak } from "../speech.ts"
 import { findAllProviderSessions } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 

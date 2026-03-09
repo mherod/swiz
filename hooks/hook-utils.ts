@@ -309,23 +309,7 @@ export function emitContext(eventName: string, context: string, cwd?: string): n
 
 // ─── Stop hook helpers ────────────────────────────────────────────────────
 
-/**
- * Format a numbered action plan for inclusion in stop hook block reasons.
- * Returns a "<header>\n  1. ...\n  2. ..." block ready to append to a reason string.
- * When requested, canonical tool names (for example "TaskCreate") are
- * translated to the current agent's tool alias before rendering.
- */
-export function formatActionPlan(
-  steps: string[],
-  options?: { translateToolNames?: boolean; header?: string }
-): string {
-  if (steps.length === 0) return ""
-  const agent = options?.translateToolNames ? detectCurrentAgent() : null
-  const renderedSteps = agent ? steps.map((step) => translateMatcher(step, agent) ?? step) : steps
-  const numbered = renderedSteps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")
-  const header = options?.header ?? "Action plan:"
-  return `${header}\n${numbered}\n`
-}
+export { formatActionPlan } from "../src/action-plan.ts"
 
 /** Return the current agent's tool name for a canonical tool identifier. */
 export function toolNameForCurrentAgent(canonicalName: string): string {
@@ -1599,102 +1583,8 @@ export interface SessionHookInput {
   hook_event_name?: string
 }
 
-/**
- * Shared speak invocation helper. Resolves the speak.ts path, builds narrator
- * CLI args from settings, pipes `text` to stdin, and awaits completion.
- *
- * @param text            Text to speak (piped to speak.ts via stdin).
- * @param settings        Object with `narratorVoice` and `narratorSpeed` fields.
- * @param speakScriptPath Absolute path to speak.ts. Defaults to sibling speak.ts
- *                        next to hook-utils.ts (hooks/ directory).
- */
-export async function spawnSpeak(
-  text: string,
-  settings: { narratorVoice: string; narratorSpeed: number },
-  speakScriptPath?: string
-): Promise<void> {
-  const scriptPath = speakScriptPath ?? join(dirname(import.meta.path), "speak.ts")
-  const speakArgs = ["bun", scriptPath]
-  if (settings.narratorVoice) speakArgs.push("--voice", settings.narratorVoice)
-  if (settings.narratorSpeed > 0) speakArgs.push("--speed", String(settings.narratorSpeed))
-  try {
-    const proc = Bun.spawn(speakArgs, {
-      stdin: new Response(text).body!,
-      stderr: "pipe",
-    })
-    await new Response(proc.stderr).text()
-    await proc.exited
-  } catch {
-    // Silent failure — TTS errors must not affect hook behaviour
-  }
-}
+export { spawnSpeak } from "../src/speech.ts"
 
 // ─── File utilities ───────────────────────────────────────────────────────
 
-/**
- * Count words in a file, handling edge cases like BOM, CRLF, Unicode, binary files.
- * Returns null if file is binary, doesn't exist, or can't be read.
- * Returns { words, lines, chars } for text files.
- */
-export async function countFileWords(
-  path: string
-): Promise<{ words: number; lines: number; chars: number } | null> {
-  try {
-    // Check if file exists using statSync
-    const { statSync } = await import("node:fs")
-    try {
-      statSync(path)
-    } catch {
-      return null // File doesn't exist
-    }
-
-    const file = Bun.file(path)
-    const size = file.size
-
-    // Empty file edge case
-    if (size === 0) {
-      return { words: 0, lines: 0, chars: 0 }
-    }
-
-    // Guard against binary files: check first 512 bytes for null bytes
-    const headerBuffer = await file.slice(0, 512).arrayBuffer()
-    const headerView = new Uint8Array(headerBuffer)
-    if (headerView.includes(0)) return null // Binary file detected
-
-    // Read and parse file for stats
-    const content = await file.text()
-    const chars = content.length
-
-    // Count lines (handle CRLF and LF)
-    let lines = 0
-    let words = 0
-    let inWord = false
-
-    for (let i = 0; i < content.length; i++) {
-      const char = content.charAt(i)
-
-      // Line counting: count newlines, add 1 if content doesn't end with newline
-      if (char === "\n") {
-        lines++
-      }
-
-      // Word counting: track whitespace boundaries
-      const isWhitespace = /\s/.test(char)
-      if (!isWhitespace && !inWord) {
-        words++
-        inWord = true
-      } else if (isWhitespace) {
-        inWord = false
-      }
-    }
-
-    // If file doesn't end with newline, add 1 to line count
-    if (content.length > 0 && content[content.length - 1] !== "\n") {
-      lines++
-    }
-
-    return { words, lines, chars }
-  } catch {
-    return null
-  }
-}
+export { countFileWords } from "../src/file-metrics.ts"

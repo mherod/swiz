@@ -1,9 +1,10 @@
 import { existsSync, statSync } from "node:fs"
 import { resolve } from "node:path"
-import { countFileWords, formatActionPlan } from "../../hooks/hook-utils.ts"
+import { formatActionPlan } from "../action-plan.ts"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { BOLD, CYAN, DIM, GREEN, RESET, YELLOW } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
+import { countFileWords } from "../file-metrics.ts"
 import {
   compactionChecklistSteps,
   manualCompactionFallback,
