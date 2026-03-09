@@ -1084,7 +1084,7 @@ export interface GitStatusV2 {
  */
 export async function getGitStatusV2(cwd: string): Promise<GitStatusV2 | null> {
   const out = await git(["status", "--porcelain=v2", "--branch"], cwd)
-  if (out === null) return null
+  if (!out) return null
 
   let branch = "(detached)"
   let ahead = 0

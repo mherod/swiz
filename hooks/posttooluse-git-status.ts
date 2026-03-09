@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // PostToolUse hook: Inject git status context after every tool call
 
-import { emitContext, getGitStatusV2 } from "./hook-utils.ts"
+import { emitContext, getGitStatusV2, isGitRepo } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
 async function main(): Promise<void> {
@@ -9,8 +9,10 @@ async function main(): Promise<void> {
   const cwd = input.cwd
   if (!cwd) return
 
-  // Single subprocess replaces: rev-parse --git-dir, branch --show-current,
-  // status --porcelain, rev-parse @{upstream}, rev-list x2
+  if (!(await isGitRepo(cwd))) return
+
+  // Single subprocess replaces: branch --show-current, status --porcelain,
+  // rev-parse @{upstream}, rev-list x2
   const gitStatus = await getGitStatusV2(cwd)
   if (!gitStatus) return
 
