@@ -148,6 +148,20 @@ describe("stop-secret-scanner: GENERIC_SECRET_RE exclusions allow stop", () => {
     expect(result.blocked).toBe(false)
   })
 
+  test("allows API_KEY with 'not-needed' placeholder", async () => {
+    const dir = await makeTempGitRepo()
+    await commitFile(dir, "config.ts", `const API_KEY = "not-needed";\n`)
+    const result = await runHook(dir)
+    expect(result.blocked).toBe(false)
+  })
+
+  test("allows password with 'not-needed' placeholder", async () => {
+    const dir = await makeTempGitRepo()
+    await commitFile(dir, "config.ts", `const password = "not-needed";\n`)
+    const result = await runHook(dir)
+    expect(result.blocked).toBe(false)
+  })
+
   test("allows short value (< 8 chars, below minimum length)", async () => {
     const dir = await makeTempGitRepo()
     await commitFile(dir, "config.ts", `const API_KEY = "short";\n`)
@@ -240,9 +254,11 @@ describe("stop-secret-scanner: findings collection limit", () => {
     expect(result.blocked).toBe(true)
     // Should contain reason with "Suspicious lines:" header and multiple findings
     expect(result.reason).toContain("Suspicious lines:")
-    // Count lines that start with "  " (indented findings) in the reason
+    // Count finding lines between "Suspicious lines:" and the footer guidance
     const lines = result.reason?.split("\n") ?? []
-    const findingLines = lines.filter((l) => l.startsWith("  "))
+    const headerIdx = lines.findIndex((l) => l.includes("Suspicious lines:"))
+    const footerIdx = lines.findIndex((l) => l.includes("false positives"))
+    const findingLines = lines.slice(headerIdx + 1, footerIdx).filter((l) => l.startsWith("  "))
     expect(findingLines.length).toBe(10) // Exactly 10 findings reported (limit)
   })
 })
