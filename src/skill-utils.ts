@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { orderBy, uniq } from "lodash-es"
 import { AGENTS } from "./agents.ts"
 import { resolveCwd } from "./cwd.ts"
 import { detectCurrentAgent } from "./detect.ts"
@@ -100,7 +101,7 @@ export function extractMandatedSkillTools(content: string): string[] {
     i = j - 1
   }
 
-  return [...new Set(tools)]
+  return uniq(tools)
 }
 
 function detectActiveSkillTools(): string[] {
@@ -122,7 +123,7 @@ function detectActiveSkillTools(): string[] {
     }
   }
 
-  return [...tools].sort((a, b) => a.localeCompare(b))
+  return orderBy([...tools], [(tool) => tool], ["asc"])
 }
 
 export interface SkillToolAvailabilityWarning {
@@ -194,12 +195,10 @@ export async function findSkills(): Promise<SkillInfo[]> {
       continue
     }
 
-    const directoryNames = entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort((a, b) => a.localeCompare(b))
+    const directoryNames = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+    const orderedDirectoryNames = orderBy(directoryNames, [(name) => name], ["asc"])
 
-    for (const name of directoryNames) {
+    for (const name of orderedDirectoryNames) {
       if (seen.has(name)) continue
 
       const skillPath = join(dir, name, "SKILL.md")
@@ -235,12 +234,10 @@ export async function findSkillConflicts(
       continue
     }
 
-    const directoryNames = entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort((a, b) => a.localeCompare(b))
+    const directoryNames = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+    const orderedDirectoryNames = orderBy(directoryNames, [(name) => name], ["asc"])
 
-    for (const name of directoryNames) {
+    for (const name of orderedDirectoryNames) {
       const skillPath = join(dir, name, "SKILL.md")
       if (!(await Bun.file(skillPath).exists())) continue
       const existing = byName.get(name) ?? []
@@ -250,7 +247,7 @@ export async function findSkillConflicts(
   }
 
   const conflicts: SkillConflict[] = []
-  const sortedNames = [...byName.keys()].sort((a, b) => a.localeCompare(b))
+  const sortedNames = orderBy([...byName.keys()], [(name) => name], ["asc"])
   for (const name of sortedNames) {
     const entries = byName.get(name) ?? []
     if (entries.length <= 1) continue

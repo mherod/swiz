@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs"
 import { cp, mkdir, readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { orderBy } from "lodash-es"
 import { AGENTS, getAgent } from "../agents.ts"
 import { getHomeDir } from "../home.ts"
 import { getProviderAdapter } from "../provider-adapters.ts"
@@ -328,7 +329,7 @@ async function convertSkills(options: {
     if (!(await Bun.file(sourceSkillPath).exists())) continue
     skillNames.push(entry.name)
   }
-  skillNames.sort((a, b) => a.localeCompare(b))
+  const orderedSkillNames = orderBy(skillNames, [(name) => name], ["asc"])
 
   if (skillNames.length === 0) {
     console.log(`No ${fromAgent.name} skills with SKILL.md found at ${displayPath(fromSkillsDir)}.`)
@@ -351,7 +352,7 @@ async function convertSkills(options: {
   let skipped = 0
   const allUnmapped = new Set<string>()
 
-  for (const name of skillNames) {
+  for (const name of orderedSkillNames) {
     const sourceSkillPath = join(fromSkillsDir, name, "SKILL.md")
     const targetDir = join(toSkillsDir, name)
     const targetSkillPath = join(targetDir, "SKILL.md")
@@ -441,7 +442,7 @@ async function syncSkills(options: {
     if (!(await Bun.file(sourceSkillPath).exists())) continue
     skillNames.push(entry.name)
   }
-  skillNames.sort((a, b) => a.localeCompare(b))
+  const orderedSkillNames = orderBy(skillNames, [(name) => name], ["asc"])
 
   if (skillNames.length === 0) {
     console.log(`No ${fromAgent.name} skills with SKILL.md found at ${displayPath(fromSkillsDir)}.`)
@@ -463,7 +464,7 @@ async function syncSkills(options: {
   let overwritten = 0
   let skipped = 0
 
-  for (const name of skillNames) {
+  for (const name of orderedSkillNames) {
     const sourceDir = join(fromSkillsDir, name)
     const targetDir = join(toSkillsDir, name)
     const targetExists = existsSync(targetDir)

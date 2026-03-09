@@ -6,6 +6,7 @@
  * the current user has self-authored or self-assigned issues in an org repo.
  */
 
+import { orderBy, uniqBy } from "lodash-es"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
 import { getIssueStore, replayPendingMutations } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
@@ -224,7 +225,8 @@ async function updateCooldown(sessionId: string | null, cwd: string): Promise<vo
  * "high-priority" all normalise to the same canonical key.
  */
 function normaliseLabel(name: string): string {
-  return name.toLowerCase().replace(/[/-]/g, ":").split(":").sort().join(":")
+  const segments = name.toLowerCase().replace(/[/-]/g, ":").split(":")
+  return orderBy(segments, [(segment) => segment], ["asc"]).join(":")
 }
 
 // Pre-compute normalised lookups so source tables stay human-readable.
@@ -287,6 +289,14 @@ export interface PR {
   createdAt?: string
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function logHookEvent(event: string, details: string): void {
+  console.error(`[swiz][stop-personal-repo-issues] ${event} ${details}`)
+}
+
 function getPrCreatedAtMs(pr: PR): number {
   if (!pr.createdAt) return Number.NaN
   return new Date(pr.createdAt).getTime()
@@ -298,14 +308,15 @@ function getPrCreatedAtMs(pr: PR): number {
  * Fallback: PR number (newest first by monotonic numbering)
  */
 export function orderRebaseSuggestionPRs(prs: PR[]): PR[] {
-  return [...prs].sort((a, b) => {
-    const aCreatedAt = getPrCreatedAtMs(a)
-    const bCreatedAt = getPrCreatedAtMs(b)
-    if (!Number.isNaN(aCreatedAt) && !Number.isNaN(bCreatedAt)) return bCreatedAt - aCreatedAt
-    if (!Number.isNaN(aCreatedAt)) return -1
-    if (!Number.isNaN(bCreatedAt)) return 1
-    return b.number - a.number
-  })
+  return orderBy(
+    prs,
+    [
+      (pr) => (Number.isNaN(getPrCreatedAtMs(pr)) ? 0 : 1),
+      (pr) => (Number.isNaN(getPrCreatedAtMs(pr)) ? Number.MIN_SAFE_INTEGER : getPrCreatedAtMs(pr)),
+      (pr) => pr.number,
+    ],
+    ["desc", "desc", "desc"]
+  )
 }
 
 /**
@@ -322,9 +333,7 @@ export function selectRebaseSuggestionPRs(
 
   const newest = ordered.slice(0, perSide)
   const oldest = ordered.slice(-perSide).reverse()
-  const shown = [...newest, ...oldest].filter(
-    (pr, index, items) => items.findIndex((candidate) => candidate.number === pr.number) === index
-  )
+  const shown = uniqBy([...newest, ...oldest], "number")
 
   return {
     shown,
@@ -355,13 +364,11 @@ export async function getActionableIssues(cwd: string, filterUser?: string): Pro
         if (result.failed > 0) parts.push(`${result.failed} failed`)
         if (result.discarded > 0) parts.push(`${result.discarded} discarded`)
         if (parts.length > 0) {
-          console.error(
-            `[swiz] REPLAY_SUMMARY repo=${repoSlug} pending=${pending} ${parts.join(", ")}`
-          )
+          logHookEvent("REPLAY_SUMMARY", `repo=${repoSlug} pending=${pending} ${parts.join(", ")}`)
         }
       }
     } catch (err) {
-      console.error(`[swiz] REPLAY_INFRA_ERROR ${err instanceof Error ? err.message : String(err)}`)
+      logHookEvent("REPLAY_INFRA_ERROR", getErrorMessage(err))
     }
   }
 
@@ -459,8 +466,16 @@ async function main(): Promise<void> {
       return
 
     // Hoist sorted arrays so issue numbers are available for action-plan step text.
-    const sortedRefinement = [...refinementIssues].sort((a, b) => scoreIssue(b) - scoreIssue(a))
-    const sortedIssues = [...actionableIssues].sort((a, b) => scoreIssue(b) - scoreIssue(a))
+    const sortedRefinement = orderBy(
+      refinementIssues,
+      [(issue) => scoreIssue(issue), (issue) => issue.number],
+      ["desc", "desc"]
+    )
+    const sortedIssues = orderBy(
+      actionableIssues,
+      [(issue) => scoreIssue(issue), (issue) => issue.number],
+      ["desc", "desc"]
+    )
     const firstRefinementNum = sortedRefinement[0]?.number
     const firstIssueNum = sortedIssues[0]?.number
 

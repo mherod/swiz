@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // Stop hook: Block stop if current branch has CHANGES_REQUESTED reviews
 
+import { min, uniq } from "lodash-es"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
@@ -73,7 +74,7 @@ async function main(): Promise<void> {
   }
 
   // Earliest CHANGES_REQUESTED timestamp — used to collect all comments since
-  const earliestTimestamp = changesRequested.map((r) => r.submitted_at).sort()[0]!
+  const earliestTimestamp = min(changesRequested.map((r) => r.submitted_at))!
 
   // Fetch inline review comments and conversation comments in parallel
   const [reviewComments, issueComments] = await Promise.all([
@@ -88,7 +89,7 @@ async function main(): Promise<void> {
     (c) => c.created_at >= earliestTimestamp
   )
 
-  const reviewers = [...new Set(changesRequested.map((r) => r.user.login))].join(", ")
+  const reviewers = uniq(changesRequested.map((r) => r.user.login)).join(", ")
   const details = changesRequested
     .slice(0, 5)
     .map((r) => `- @${r.user.login}: ${r.body || "No comment provided"}`)

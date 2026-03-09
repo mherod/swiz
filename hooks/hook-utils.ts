@@ -21,6 +21,7 @@ if (!Bun.which("bun")) {
 
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { orderBy } from "lodash-es"
 import { translateMatcher } from "../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
 import { getHomeDirOrNull, getHomeDirWithFallback } from "../src/home.ts"
@@ -562,10 +563,10 @@ export async function findPriorSessionTasks(
       sessions.push({ id, mtime: s.mtimeMs })
     } catch {}
   }
-  sessions.sort((a, b) => b.mtime - a.mtime)
+  const orderedSessions = orderBy(sessions, [(session) => session.mtime], ["desc"])
 
   // Walk sessions newest-first; return incomplete tasks from first session with tasks
-  for (const { id } of sessions) {
+  for (const { id } of orderedSessions) {
     const tasks = await readSessionTasks(id, home)
     const incomplete = tasks
       .filter((t) => isIncompleteTaskStatus(t.status))

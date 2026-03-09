@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { orderBy } from "lodash-es"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { CYAN as CYAN_H, DIM, RESET as RST } from "../ansi.ts"
 import { expandHomeVars, getHomeDir } from "../home.ts"
@@ -278,7 +279,7 @@ async function showSources(jsonOutput = false) {
   ])
 
   console.log("\n  Hook sources:\n")
-  for (const event of [...allEvents].sort()) {
+  for (const event of orderBy([...allEvents], [(eventName) => eventName], ["asc"])) {
     const builtins = builtinByEvent.get(event) ?? []
     const plugins = pluginByEvent.get(event) ?? []
     const locals = localByEvent.get(event) ?? []

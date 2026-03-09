@@ -7,6 +7,7 @@
 import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { uniq } from "lodash-es"
 import { z } from "zod"
 import { hasAiProvider, promptObject } from "../src/ai-providers.ts"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
@@ -753,7 +754,7 @@ export async function checkReviewingState(
   // 2. CHANGES_REQUESTED reviews — must be addressed before anything else
   const changesRequested = (pr.reviews ?? []).filter((r) => r.state === "CHANGES_REQUESTED")
   if (changesRequested.length > 0) {
-    const reviewers = [...new Set(changesRequested.map((r) => r.author?.login).filter(Boolean))]
+    const reviewers = uniq(changesRequested.map((r) => r.author?.login).filter(Boolean))
     const who = reviewers.length > 0 ? ` from ${reviewers.join(", ")}` : ""
     return `Address CHANGES_REQUESTED review feedback${who} on PR #${pr.number} before merging.`
   }

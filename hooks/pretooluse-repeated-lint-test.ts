@@ -15,6 +15,7 @@
 //      Checked independently from classifyCommand so that a classified command
 //      that ALSO mutates (e.g. lint piped to tee) emits both events.
 
+import { orderBy } from "lodash-es"
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
 import {
@@ -112,9 +113,9 @@ export function commandFingerprint(cmd: string): string | null {
   const scopeTokens = beforePipe
     .split(/\s+/)
     .filter((t) => t && !t.startsWith("-") && !/^\d+$/.test(t))
-    .sort()
+  const orderedScopeTokens = orderBy(scopeTokens, [(token) => token], ["asc"])
 
-  return scopeTokens.length > 0 ? `${kind}:${scopeTokens.join(",")}` : kind
+  return orderedScopeTokens.length > 0 ? `${kind}:${orderedScopeTokens.join(",")}` : kind
 }
 
 // ── Filesystem integrity monitor ─────────────────────────────────────────────
