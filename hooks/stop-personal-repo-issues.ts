@@ -413,18 +413,6 @@ async function main(): Promise<void> {
         reasonLines.push(`  #${pr.number} ${pr.title} ${decisionTag}`)
         reasonLines.push(`    ${pr.url}`)
       }
-      reasonLines.push(
-        formatActionPlan(
-          [
-            skillAdvice(
-              "work-on-prs",
-              "Use the /work-on-prs skill to address all feedback and resolve reviews:\n  /work-on-prs — Start working on the next PR",
-              "Address all PR feedback before stopping:\n  gh pr list --state open\n  gh pr view <number> --comments"
-            ),
-          ],
-          { translateToolNames: true }
-        )
-      )
     }
 
     if (refinementCount > 0) {
@@ -448,27 +436,6 @@ async function main(): Promise<void> {
       if (hiddenRefinement > 0) {
         reasonLines.push(`  …and ${hiddenRefinement} more issue(s) needing refinement`)
       }
-      reasonLines.push(
-        formatActionPlan(
-          [
-            skillAdvice(
-              "refine-issue",
-              "Use the /refine-issue skill to refine and label issues:\n  /refine-issue — Refine the next issue needing attention",
-              "Refine issues before implementation. Every issue MUST have at least one label from each category:\n" +
-                "  1. Type (bug, enhancement, documentation)\n" +
-                "  2. Readiness (ready, triaged, backlog)\n" +
-                "  3. Priority (priority-high, priority-medium, priority-low)\n" +
-                "\n" +
-                "Commands:\n" +
-                "  gh label list\n" +
-                '  gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"\n' +
-                "\n" +
-                "Rule: If you created the issue, NEVER add new comments. Always edit the original issue body instead to add proposals/context."
-            ),
-          ],
-          { translateToolNames: true }
-        )
-      )
     }
 
     if (issueCount > 0) {
@@ -486,24 +453,47 @@ async function main(): Promise<void> {
       if (hiddenCount > 0) {
         reasonLines.push(`  …and ${hiddenCount} more lower-priority issue(s)`)
       }
-      reasonLines.push(
-        formatActionPlan(
-          [
-            skillAdvice(
-              "work-on-issue",
-              "Use the /work-on-issue skill to pick up and resolve issues:\n  /work-on-issue — Start working on the next issue",
-              "Pick up and resolve open issues before stopping:\n  gh issue list --state open\n  gh issue view <number>"
-            ),
-          ],
-          { translateToolNames: true }
+    }
+
+    // Combined action plan — ordered by dependency: PR feedback → refine → pick up issues
+    const planSteps: string[] = []
+    if (prCount > 0) {
+      planSteps.push(
+        skillAdvice(
+          "work-on-prs",
+          "Use the /work-on-prs skill to address all feedback and resolve reviews:\n  /work-on-prs — Start working on the next PR",
+          "Address all PR feedback before stopping:\n  gh pr list --state open\n  gh pr view <number> --comments"
         )
       )
     }
-
-    reasonLines.push("")
-    reasonLines.push(
-      "Work items assigned to or created by you represent code that needs finishing."
-    )
+    if (refinementCount > 0) {
+      planSteps.push(
+        skillAdvice(
+          "refine-issue",
+          "Use the /refine-issue skill to refine and label issues:\n  /refine-issue — Refine the next issue needing attention",
+          "Refine issues before implementation. Every issue MUST have at least one label from each category:\n" +
+            "  1. Type (bug, enhancement, documentation)\n" +
+            "  2. Readiness (ready, triaged, backlog)\n" +
+            "  3. Priority (priority-high, priority-medium, priority-low)\n" +
+            "\n" +
+            "Commands:\n" +
+            "  gh label list\n" +
+            '  gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"\n' +
+            "\n" +
+            "Rule: If you created the issue, NEVER add new comments. Always edit the original issue body instead to add proposals/context."
+        )
+      )
+    }
+    if (issueCount > 0) {
+      planSteps.push(
+        skillAdvice(
+          "work-on-issue",
+          "Use the /work-on-issue skill to pick up and resolve issues:\n  /work-on-issue — Start working on the next issue",
+          "Pick up and resolve open issues before stopping:\n  gh issue list --state open\n  gh issue view <number>"
+        )
+      )
+    }
+    reasonLines.push(formatActionPlan(planSteps, { translateToolNames: true }))
 
     // Only set cooldown when actionable issues or PRs are shown (pickup phase).
     // Refinement-only blocks should NOT set cooldown — resolving the refinement
