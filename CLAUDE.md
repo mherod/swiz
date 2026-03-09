@@ -210,7 +210,7 @@ alwaysApply: false
 - When unblocking a gated session: mark prior task complete with evidence first, then create an `in_progress` task in the current session before executing tool calls; do not attempt tool calls while memory enforcement is active.
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip when not in a git repo or no `CLAUDE.md` exists up the tree; guard with `isGitRepo(cwd)` then upward `CLAUDE.md` search, else `process.exit(0)`.
 - Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for every directory with valid console usage (`hooks/`, `scripts/`, `push/scripts/`, etc.).
-- Bun test reporter: `--reporter=dots` (not `dot`). Run without `| tail` — piped re-runs trigger `pretooluse-repeated-lint-test` as consecutive. Read output once; no `fail` lines is sufficient evidence.
+- Bun test reporter: `--reporter=dots` (not `dot`). Run once without any pipe (`| tail`, `| grep`, etc.) — piped re-runs trigger `pretooluse-repeated-lint-test` as consecutive. Dots with no `fail` lines is sufficient evidence.
 - **DO**: Make an Edit between `bun run format` and `bun run lint` — format-via-wrapper lacks `--write` so `pretooluse-repeated-lint-test` doesn't see it as a mutation; consecutive lint runs without an edit trigger a block.
 - Do not run `cd` in Bash commands; use absolute paths, `git -C <dir>`, `pnpm --prefix <dir>`, or `cwd` in `Bun.spawn()`.
 - Do not edit files with `sed -i`; use Edit tool for file writes; use `sed` only for non-writing stream transforms.

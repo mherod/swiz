@@ -817,6 +817,52 @@ describe("transcript-utils.ts", () => {
       const paths = extractEditedFilePaths(makeBashEntry("rm -rf /repo/dist"))
       expect(paths.has("/repo/dist")).toBe(true)
     })
+
+    it("extracts path from output redirection (> file)", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("echo 'hello' > /repo/output.md"))
+      expect(paths.has("/repo/output.md")).toBe(true)
+    })
+
+    it("extracts path from append redirection (>> file)", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("cat CHANGELOG >> /repo/CHANGELOG.md"))
+      expect(paths.has("/repo/CHANGELOG.md")).toBe(true)
+    })
+
+    it("extracts path from heredoc redirection", () => {
+      const cmd = "cat <<'EOF' > /repo/docs/notes.md\nsome content\nEOF"
+      const paths = extractEditedFilePaths(makeBashEntry(cmd))
+      expect(paths.has("/repo/docs/notes.md")).toBe(true)
+    })
+
+    it("does not extract path from fd duplication (>&)", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("some-cmd 2>&1"))
+      // 2>&1 is fd dup, not a file write — should not produce a path
+      expect(paths.has("1")).toBe(false)
+    })
+
+    it("does not extract path from process substitution (>()", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("tee >(gzip > out.gz)"))
+      // >( is process substitution — should not match as a file path
+      expect(paths.has("(gzip")).toBe(false)
+    })
+
+    it("extracts file from sed -i in-place edit", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("sed -i 's/foo/bar/' /repo/src/index.ts"))
+      expect(paths.has("/repo/src/index.ts")).toBe(true)
+    })
+
+    it("extracts file from sed -i with backup suffix", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("sed -i.bak 's/x/y/' /repo/config.json"))
+      expect(paths.has("/repo/config.json")).toBe(true)
+    })
+
+    it("extracts multiple files from sed -i on multiple targets", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry("sed -i 's/old/new/' /repo/a.ts /repo/b.ts")
+      )
+      expect(paths.has("/repo/a.ts")).toBe(true)
+      expect(paths.has("/repo/b.ts")).toBe(true)
+    })
   })
 
   // ─── isDocsOnlySession ──────────────────────────────────────────────────────

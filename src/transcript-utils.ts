@@ -856,19 +856,51 @@ export function countToolCalls(jsonlText: string): number {
 const SHELL_FILE_MOD_RE =
   /(?:^|[|;&\s])(?:trash\s+|rm\s+(?:-[rfRF]+\s+)*|mv\s+|cp\s+|git\s+(?:mv|rm)\s+)((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
 
+// Matches output redirections that write to a file: > file or >> file.
+// Excludes: >& (fd dup), >( (process substitution), >&- (close fd).
+// Captures the target path (quoted or unquoted).
+const REDIRECT_WRITE_RE = />>?(?![&(])\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s|;&"'>]+)/gm
+
+// Matches sed -i (in-place edit): sed -i[.suffix] 's/.../.../' <file> ...
+// Handles: -i (GNU), -i.bak (attached suffix), -i '' (BSD empty suffix).
+// Captures all path tokens after the script argument.
+const SED_INPLACE_RE =
+  /(?:^|[|;&\s])sed\s+(?:-[a-zA-Z]*i(?:\.[^\s]*)?\s+(?:''|"")?\s?|--in-place(?:=\S+)?\s+)(?:'[^']*'|"[^"]*"|\S+)\s+((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
+
 function extractPathsFromCommand(command: string): string[] {
   const results: string[] = []
+
+  // Existing file-command extractor (trash, rm, mv, cp, git mv/rm)
   SHELL_FILE_MOD_RE.lastIndex = 0
-  // Use matchAll to avoid assignment-in-expression lint violation
   for (const m of command.matchAll(SHELL_FILE_MOD_RE)) {
     const args = m[1]?.trim()
     if (!args) continue
-    // Split on whitespace; strip surrounding quotes
     for (const token of args.split(/\s+/)) {
       const unquoted = token.replace(/^["']|["']$/g, "")
       if (unquoted && !unquoted.startsWith("-")) results.push(unquoted)
     }
   }
+
+  // Output redirection extractor (echo/cat/heredoc > file, >> file)
+  REDIRECT_WRITE_RE.lastIndex = 0
+  for (const m of command.matchAll(REDIRECT_WRITE_RE)) {
+    const raw = m[1]?.trim()
+    if (!raw) continue
+    const unquoted = raw.replace(/^["']|["']$/g, "")
+    if (unquoted && !unquoted.startsWith("-")) results.push(unquoted)
+  }
+
+  // sed -i in-place file extractor
+  SED_INPLACE_RE.lastIndex = 0
+  for (const m of command.matchAll(SED_INPLACE_RE)) {
+    const args = m[1]?.trim()
+    if (!args) continue
+    for (const token of args.split(/\s+/)) {
+      const unquoted = token.replace(/^["']|["']$/g, "")
+      if (unquoted && !unquoted.startsWith("-")) results.push(unquoted)
+    }
+  }
+
   return results
 }
 
@@ -876,7 +908,10 @@ function extractPathsFromCommand(command: string): string[] {
  * Returns the set of file paths that were written, edited, deleted, or renamed
  * in the transcript. Covers:
  *   - Edit / Write / MultiEdit tool_use blocks (file_path / path input)
- *   - Bash tool_use blocks with file-modifying shell commands (trash, rm, mv, cp, git mv/rm)
+ *   - Bash tool_use blocks with file-modifying shell commands:
+ *       trash, rm, mv, cp, git mv/rm (deletions/renames)
+ *       output redirections: > file, >> file (echo, cat, heredoc, etc.)
+ *       sed -i in-place edits: sed -i 's/.../.../' file
  *
  * Used to detect docs-only sessions before invoking the LLM so the analysis
  * can be scoped correctly.
