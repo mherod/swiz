@@ -48,13 +48,13 @@ export interface Session {
   id: string
   path: string
   mtime: number
-  provider?: "claude" | "gemini" | "antigravity" | "codex"
-  format?: "jsonl" | "gemini-json" | "antigravity-pb" | "codex-jsonl"
+  provider?: "claude" | "gemini" | "cursor" | "antigravity" | "codex"
+  format?: "jsonl" | "gemini-json" | "cursor-sqlite" | "antigravity-pb" | "codex-jsonl"
 }
 
 export { projectKeyFromCwd }
 
-const SESSION_PROVIDER_PRECEDENCE = ["claude", "gemini", "antigravity", "codex"] as const
+const SESSION_PROVIDER_PRECEDENCE = ["claude", "gemini", "cursor", "antigravity", "codex"] as const
 
 function providerRank(provider: Session["provider"] | undefined): number {
   if (!provider) return SESSION_PROVIDER_PRECEDENCE.length
@@ -294,6 +294,74 @@ async function findCodexSessions(targetDir: string, home?: string): Promise<Sess
   return sessions
 }
 
+async function cursorSessionMatchesTarget(
+  sessionPath: string,
+  targetDir: string
+): Promise<boolean> {
+  const targetPath = resolve(targetDir)
+  const fileUrlNeedle = `file://${targetPath}`
+  try {
+    const text = await Bun.file(sessionPath).text()
+    return text.includes(targetPath) || text.includes(fileUrlNeedle)
+  } catch {
+    return false
+  }
+}
+
+async function findCursorSessions(targetDir: string, home?: string): Promise<Session[]> {
+  home = home ?? getHomeDir()
+  const chatsRoot = join(home, ".cursor", "chats")
+  const sessions: Session[] = []
+
+  let workspaceEntries: import("node:fs").Dirent[]
+  try {
+    workspaceEntries = await readdir(chatsRoot, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  for (const workspaceEntry of workspaceEntries) {
+    if (!workspaceEntry.isDirectory()) continue
+    const workspaceDir = join(chatsRoot, workspaceEntry.name)
+
+    let sessionEntries: import("node:fs").Dirent[]
+    try {
+      sessionEntries = await readdir(workspaceDir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    for (const sessionEntry of sessionEntries) {
+      if (!sessionEntry.isDirectory()) continue
+      const sessionDir = join(workspaceDir, sessionEntry.name)
+      const sessionPath = join(sessionDir, "store.db")
+
+      try {
+        const s = await stat(sessionPath)
+        if (!s.isFile()) continue
+      } catch {
+        continue
+      }
+
+      const matchesTarget = await cursorSessionMatchesTarget(sessionPath, targetDir)
+      if (!matchesTarget) continue
+
+      try {
+        const s = await stat(sessionPath)
+        sessions.push({
+          id: sessionEntry.name,
+          path: sessionPath,
+          mtime: s.mtimeMs,
+          provider: "cursor",
+          format: "cursor-sqlite",
+        })
+      } catch {}
+    }
+  }
+
+  return sessions
+}
+
 const ANTIGRAVITY_PROJECT_HINT_FILES = new Set([
   "task.md",
   "task.md.resolved",
@@ -385,12 +453,13 @@ async function findAntigravitySessions(targetDir: string, home?: string): Promis
 }
 
 /**
- * Discover sessions across supported transcript providers (Claude, Gemini, Antigravity, Codex).
+ * Discover sessions across supported transcript providers (Claude, Gemini, Cursor, Antigravity, Codex).
  * Aggregates sessions from all available providers, sorted by mtime (most recent first) with
- * deterministic tie-breaking by provider precedence (Claude > Gemini > Antigravity > Codex).
+ * deterministic tie-breaking by provider precedence (Claude > Gemini > Cursor > Antigravity > Codex).
  *
  * For Claude: queries ~/.claude/projects/<projectKey>/ for .jsonl files.
  * For Gemini: queries ~/.gemini/tmp/<bucket>/chats/session-*.json using .project_root metadata.
+ * For Cursor: queries ~/.cursor/chats/<workspace-hash>/<session-id>/store.db and filters by targetDir path hints.
  * For Antigravity: queries ~/.gemini/antigravity/conversations/*.pb and maps by brain metadata.
  * For Codex: recursively queries ~/.codex/sessions/<year>/<month>/<day>/*.jsonl using
  * session_meta payload cwd metadata.
@@ -406,16 +475,19 @@ export async function findAllProviderSessions(
   const effectiveHome = home ?? getHomeDir()
   const { projectsDir } = getDefaultTaskRoots(effectiveHome)
   const claudeProjectDir = join(projectsDir, projectKeyFromCwd(targetDir))
-  const [claudeSessions, geminiSessions, antigravitySessions, codexSessions] = await Promise.all([
-    findSessions(claudeProjectDir),
-    findGeminiSessions(targetDir, effectiveHome),
-    findAntigravitySessions(targetDir, effectiveHome),
-    findCodexSessions(targetDir, effectiveHome),
-  ])
+  const [claudeSessions, geminiSessions, cursorSessions, antigravitySessions, codexSessions] =
+    await Promise.all([
+      findSessions(claudeProjectDir),
+      findGeminiSessions(targetDir, effectiveHome),
+      findCursorSessions(targetDir, effectiveHome),
+      findAntigravitySessions(targetDir, effectiveHome),
+      findCodexSessions(targetDir, effectiveHome),
+    ])
 
   const merged: Session[] = [
     ...claudeSessions.map((s) => ({ ...s, provider: "claude" as const, format: "jsonl" as const })),
     ...geminiSessions,
+    ...cursorSessions,
     ...antigravitySessions,
     ...codexSessions,
   ]
@@ -778,14 +850,145 @@ function parseGeminiEntries(text: string): TranscriptEntry[] {
   return entries
 }
 
+function parseJsonObjectAt(text: string, startIndex: number): Record<string, unknown> | null {
+  if (text[startIndex] !== "{") return null
+
+  let depth = 0
+  let inString = false
+  let escaped = false
+
+  for (let i = startIndex; i < text.length; i++) {
+    const ch = text[i]
+    if (!ch) continue
+
+    if (inString) {
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (ch === "\\") {
+        escaped = true
+        continue
+      }
+      if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+
+    if (ch === "{") {
+      depth++
+      continue
+    }
+
+    if (ch === "}") {
+      depth--
+      if (depth !== 0) continue
+      const slice = text.slice(startIndex, i + 1)
+      try {
+        const parsed = JSON.parse(slice)
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          return parsed as Record<string, unknown>
+        }
+      } catch {
+        return null
+      }
+      return null
+    }
+  }
+
+  return null
+}
+
+function normalizeCursorContent(content: unknown): string | ContentBlock[] {
+  if (typeof content === "string") return content
+  if (!Array.isArray(content)) return ""
+
+  const blocks: ContentBlock[] = []
+  for (const item of content) {
+    if (!item || typeof item !== "object") continue
+    const block = item as Record<string, unknown>
+
+    if (block.type === "text" && typeof block.text === "string") {
+      blocks.push({ type: "text", text: block.text })
+      continue
+    }
+
+    if (block.type === "tool-call" && typeof block.toolName === "string") {
+      const input =
+        block.params && typeof block.params === "object" && !Array.isArray(block.params)
+          ? (block.params as Record<string, unknown>)
+          : {}
+      blocks.push({ type: "tool_use", name: block.toolName, input })
+      continue
+    }
+
+    if (block.type === "tool-result") {
+      const resultText = extractTextFromUnknownContent(block.result)
+      if (resultText) {
+        blocks.push({ type: "tool_result", content: [{ type: "text", text: resultText }] })
+      }
+    }
+  }
+
+  return blocks
+}
+
+function parseCursorSqliteEntries(text: string): TranscriptEntry[] {
+  const entries: TranscriptEntry[] = []
+  let searchFrom = 0
+
+  while (true) {
+    const start = text.indexOf('{"role":', searchFrom)
+    if (start === -1) break
+    searchFrom = start + 1
+
+    const obj = parseJsonObjectAt(text, start)
+    if (!obj) continue
+
+    const role = typeof obj.role === "string" ? obj.role : ""
+    if (role !== "user" && role !== "assistant" && role !== "tool") continue
+
+    const normalizedContent = normalizeCursorContent(obj.content)
+    if (!normalizedContent) continue
+    if (Array.isArray(normalizedContent) && normalizedContent.length === 0) continue
+
+    const messageRole = role === "tool" ? "user" : role
+    const sessionId = typeof obj.id === "string" ? obj.id : undefined
+    const timestamp = typeof obj.timestamp === "string" ? obj.timestamp : undefined
+    entries.push({
+      type: messageRole,
+      sessionId,
+      timestamp,
+      message: {
+        role: messageRole,
+        content: normalizedContent,
+      },
+    })
+  }
+
+  return entries
+}
+
 export function parseTranscriptEntries(
   text: string,
   formatHint?: Session["format"]
 ): TranscriptEntry[] {
   if (formatHint === "antigravity-pb") return []
+  if (formatHint === "cursor-sqlite") return parseCursorSqliteEntries(text)
   if (formatHint === "gemini-json") return parseGeminiEntries(text)
   if (formatHint === "codex-jsonl") return parseCodexJsonlEntries(text)
   if (formatHint === "jsonl") return parseJsonlEntries(text)
+
+  if (text.startsWith("SQLite format 3")) {
+    const cursorEntries = parseCursorSqliteEntries(text)
+    if (cursorEntries.length > 0) return cursorEntries
+  }
 
   const geminiEntries = parseGeminiEntries(text)
   if (geminiEntries.length > 0) return geminiEntries

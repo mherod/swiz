@@ -5,7 +5,7 @@ import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 
 export type ProviderAgentId = "claude" | "cursor" | "gemini" | "codex"
-export type TranscriptProviderId = "claude" | "gemini" | "antigravity" | "codex"
+export type TranscriptProviderId = "claude" | "gemini" | "cursor" | "antigravity" | "codex"
 
 export interface ProviderConfig {
   agentId: ProviderAgentId
@@ -213,10 +213,10 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
       return sources
     },
     getTranscriptProviders() {
-      return new Set<TranscriptProviderId>()
+      return new Set<TranscriptProviderId>(["cursor"])
     },
     getSessionDir() {
-      return join(getHomeDir(), ".cursor", "sessions")
+      return join(getHomeDir(), ".cursor", "chats")
     },
     getSkillDirs() {
       return [join(this.getHomeDir(), "skills")]
