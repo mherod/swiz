@@ -186,20 +186,22 @@ export interface GitStatusV2 {
   ahead: number
   behind: number
   upstream: string | null
+  /** True when branch.upstream is set but the remote branch no longer exists (gone). */
+  upstreamGone: boolean
 }
 
 /**
- * Run `git status --porcelain=v2 --branch` once and parse branch name,
- * ahead/behind counts, and file-change breakdown. Replaces five separate git calls.
+ * Parse the raw output of `git status --porcelain=v2 --branch` into a GitStatusV2 object.
+ * Exported for unit testing — call `getGitStatusV2(cwd)` in production code.
  */
-export async function getGitStatusV2(cwd: string): Promise<GitStatusV2 | null> {
-  const out = await git(["status", "--porcelain=v2", "--branch"], cwd)
+export function parseGitStatusV2Output(out: string): GitStatusV2 | null {
   if (!out) return null
 
   let branch = "(detached)"
   let ahead = 0
   let behind = 0
   let upstream: string | null = null
+  let upstreamAbSeen = false
   let modified = 0
   let added = 0
   let deleted = 0
@@ -217,6 +219,7 @@ export async function getGitStatusV2(cwd: string): Promise<GitStatusV2 | null> {
       continue
     }
     if (line.startsWith("# branch.ab ")) {
+      upstreamAbSeen = true
       const match = /\+(\d+)\s+-(\d+)/.exec(line)
       if (match) {
         ahead = Number(match[1])
@@ -242,7 +245,31 @@ export async function getGitStatusV2(cwd: string): Promise<GitStatusV2 | null> {
   }
 
   const total = lines.length
-  return { branch, total, modified, added, deleted, untracked, lines, ahead, behind, upstream }
+  // upstream is "gone" when the tracking config names a remote branch that no longer exists.
+  // git status --porcelain=v2 shows branch.upstream (stale name) but omits branch.ab in this case.
+  const upstreamGone = upstream !== null && !upstreamAbSeen
+  return {
+    branch,
+    total,
+    modified,
+    added,
+    deleted,
+    untracked,
+    lines,
+    ahead,
+    behind,
+    upstream,
+    upstreamGone,
+  }
+}
+
+/**
+ * Run `git status --porcelain=v2 --branch` once and parse branch name,
+ * ahead/behind counts, and file-change breakdown. Replaces five separate git calls.
+ */
+export async function getGitStatusV2(cwd: string): Promise<GitStatusV2 | null> {
+  const out = await git(["status", "--porcelain=v2", "--branch"], cwd)
+  return parseGitStatusV2Output(out)
 }
 
 /** Canonical empty-tree hash used when repos have fewer than N commits. */
