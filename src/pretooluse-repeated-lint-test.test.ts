@@ -13,6 +13,7 @@ import {
   extractToolUseIdFromLine,
   parseTranscriptEvents,
 } from "../hooks/pretooluse-repeated-lint-test.ts"
+import { extractSessionLines, parseTranscriptSummary } from "../src/transcript-summary.ts"
 
 // ── classifyCommand ───────────────────────────────────────────────────────────
 
@@ -1269,4 +1270,187 @@ describe("buildReadOutputStep", () => {
     expect(withoutOutput).toContain("bun run build")
     expect(noTranscript).toContain("bun run build")
   })
+})
+
+// ── Cached-lines optimization paths ──────────────────────────────────────────
+
+describe("extractSessionLines", () => {
+  test("returns all lines when no system boundary present", () => {
+    const lines = [
+      JSON.stringify({ type: "assistant", message: { content: [] } }),
+      JSON.stringify({ type: "user", message: { content: [] } }),
+    ]
+    const result = extractSessionLines(lines.join("\n"))
+    // All lines returned when no compaction boundary
+    expect(result.length).toBeGreaterThanOrEqual(2)
+  })
+
+  test("returns only post-compaction lines when system boundary exists", () => {
+    const preCompaction = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", name: "Bash", input: { command: "bun run lint" } }],
+      },
+    })
+    const boundary = JSON.stringify({ type: "system", content: "compaction" })
+    const postCompaction = JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", name: "Bash", input: { command: "bun test" } }] },
+    })
+    const text = [preCompaction, boundary, postCompaction].join("\n")
+    const result = extractSessionLines(text)
+    // Should only include lines after the boundary
+    expect(result.some((l) => l.includes('"system"'))).toBe(false)
+    expect(result.some((l) => l.includes("bun test"))).toBe(true)
+    expect(result.some((l) => l.includes("bun run lint"))).toBe(false)
+  })
+})
+
+describe("parseTranscriptSummary sessionLines field", () => {
+  test("includes sessionLines in returned summary", () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", name: "Bash", input: { command: "bun test" } }],
+      },
+    })
+    const summary = parseTranscriptSummary(line)
+    expect(summary.sessionLines).toBeDefined()
+    expect(Array.isArray(summary.sessionLines)).toBe(true)
+    expect(summary.sessionLines.some((l) => l.includes("bun test"))).toBe(true)
+  })
+
+  test("sessionLines respects compaction boundary", () => {
+    const preCompaction = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", name: "Bash", input: { command: "bun run lint" } }],
+      },
+    })
+    const boundary = JSON.stringify({ type: "system", content: "compaction" })
+    const postCompaction = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", name: "Bash", input: { command: "bun test" } }],
+      },
+    })
+    const text = [preCompaction, boundary, postCompaction].join("\n")
+    const summary = parseTranscriptSummary(text)
+    // sessionLines should exclude pre-compaction content
+    expect(summary.sessionLines.some((l) => l.includes("bun run lint"))).toBe(false)
+    expect(summary.sessionLines.some((l) => l.includes("bun test"))).toBe(true)
+    // bashCommands parsed from sessionLines only — no pre-compaction commands
+    expect(summary.bashCommands).not.toContain("bun run lint")
+  })
+})
+
+describe("parseTranscriptEvents with cachedSessionLines", () => {
+  async function withDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-cached-lines-test-"))
+    try {
+      return await fn(dir)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  test("produces same events with cached lines as file read", () =>
+    withDir(async (dir) => {
+      const lines = [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "Bash", input: { command: "bun test" } }],
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                name: "Edit",
+                input: { file_path: "a.ts", new_string: "x" },
+              },
+            ],
+          },
+        }),
+      ]
+      const path = join(dir, "t.jsonl")
+      await writeFile(path, `${lines.join("\n")}\n`, "utf-8")
+
+      const eventsFromFile = await parseTranscriptEvents(path)
+      const eventsFromCache = await parseTranscriptEvents(path, lines)
+
+      expect(eventsFromCache.length).toBe(eventsFromFile.length)
+      for (let i = 0; i < eventsFromFile.length; i++) {
+        expect(eventsFromCache[i]?.kind).toBe(eventsFromFile[i]?.kind)
+        expect(eventsFromCache[i]?.sourceLineIdx).toBe(eventsFromFile[i]?.sourceLineIdx)
+      }
+    }))
+})
+
+describe("extractPreviousOutput with cachedLines", () => {
+  async function withDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+    const dir = await mkdtemp(join(tmpdir(), "swiz-cached-output-test-"))
+    try {
+      return await fn(dir)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  test("produces same output with cached lines as file read", () =>
+    withDir(async (dir) => {
+      const toolUseId = "tu_cached_123"
+      const assistant = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", id: toolUseId, name: "Bash", input: { command: "bun test" } },
+          ],
+        },
+      })
+      const user = JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: toolUseId,
+              content: [{ type: "text", text: "3 pass\n2 fail" }],
+            },
+          ],
+        },
+      })
+      const lines = [assistant, user]
+      const path = join(dir, "t.jsonl")
+      await writeFile(path, `${lines.join("\n")}\n`, "utf-8")
+
+      const fromFile = await extractPreviousOutput(path, 0, "test")
+      const fromCache = await extractPreviousOutput(path, 0, "test", lines)
+
+      expect(fromCache).toBe(fromFile)
+      expect(fromCache).toContain("3 pass")
+      expect(fromCache).toContain("2 fail")
+    }))
+
+  test("returns empty string with cached lines when no matching tool_result", () =>
+    withDir(async (dir) => {
+      const lines = [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", id: "tu_x", name: "Bash", input: { command: "bun test" } },
+            ],
+          },
+        }),
+      ]
+      const path = join(dir, "t.jsonl")
+      await writeFile(path, `${lines.join("\n")}\n`, "utf-8")
+
+      const result = await extractPreviousOutput(path, 0, "test", lines)
+      expect(result).toBe("")
+    }))
 })

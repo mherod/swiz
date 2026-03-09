@@ -22,9 +22,41 @@ export interface TranscriptSummary {
   skillInvocations: string[]
   /** Whether any Bash tool call contains `git push`. */
   hasGitPush: boolean
+  /**
+   * Raw JSONL lines from the current session only (post-compaction boundary).
+   * Mirrors the output of readSessionLines() from hook-utils.ts.
+   * Hooks that previously called readSessionLines() or Bun.file(transcriptPath).text()
+   * should consume this field instead to avoid redundant I/O.
+   */
+  sessionLines: string[]
 }
 
 const GIT_PUSH_PATTERN = /\bgit\s+push\b/
+
+/**
+ * Extract session-boundary-aware lines from a full transcript text.
+ * Mirrors readSessionLines() in hook-utils.ts: returns only lines after the
+ * last {"type":"system"} entry (i.e. post-compaction) so pre-session content
+ * is excluded from hook checks.
+ */
+export function extractSessionLines(jsonlText: string): string[] {
+  const allLines = jsonlText.split("\n")
+  let sessionStartIdx = 0
+  for (let i = allLines.length - 1; i >= 0; i--) {
+    const raw = allLines[i]
+    if (!raw?.trim()) continue
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed?.type === "system") {
+        sessionStartIdx = i + 1
+        break
+      }
+    } catch {
+      // ignore malformed lines
+    }
+  }
+  return sessionStartIdx > 0 ? allLines.slice(sessionStartIdx) : allLines
+}
 
 /**
  * Parse a transcript JSONL string in a single pass and extract all derived
@@ -36,7 +68,10 @@ export function parseTranscriptSummary(jsonlText: string): TranscriptSummary {
   const skillInvocations: string[] = []
   let hasGitPush = false
 
-  for (const line of jsonlText.split("\n")) {
+  // Compute session-boundary-aware lines once; reuse for both parsing and storage.
+  const sessionLines = extractSessionLines(jsonlText)
+
+  for (const line of sessionLines) {
     if (!line.trim()) continue
     try {
       const entry = JSON.parse(line)
@@ -74,6 +109,7 @@ export function parseTranscriptSummary(jsonlText: string): TranscriptSummary {
     bashCommands,
     skillInvocations,
     hasGitPush,
+    sessionLines,
   }
 }
 

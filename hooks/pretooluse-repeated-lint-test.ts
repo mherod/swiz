@@ -15,6 +15,7 @@
 //      Checked independently from classifyCommand so that a classified command
 //      that ALSO mutates (e.g. lint piped to tee) emits both events.
 
+import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import {
   collectBlockedToolUseIds,
   denyPreToolUse,
@@ -196,13 +197,17 @@ export interface TranscriptEvent {
   sourceLineIdx: number
 }
 
-export async function parseTranscriptEvents(transcriptPath: string): Promise<TranscriptEvent[]> {
+export async function parseTranscriptEvents(
+  transcriptPath: string,
+  cachedSessionLines?: string[]
+): Promise<TranscriptEvent[]> {
   const events: TranscriptEvent[] = []
 
+  // Prefer pre-computed session lines injected by dispatch (_transcriptSummary.sessionLines).
   // readSessionLines handles compaction-boundary detection: only lines from
   // after the last {"type":"system"} entry (i.e. the current session) are
   // returned, preventing prior-session bun test calls from triggering the gate.
-  const lines = await readSessionLines(transcriptPath)
+  const lines = cachedSessionLines ?? (await readSessionLines(transcriptPath))
   if (lines.length === 0) return events
 
   // Pre-pass: identify tool_use IDs whose executions were denied by a PreToolUse
@@ -284,16 +289,21 @@ export function extractToolUseIdFromLine(line: string, kind: CommandKind): strin
 export async function extractPreviousOutput(
   transcriptPath: string,
   priorSourceLineIdx: number,
-  kind: CommandKind
+  kind: CommandKind,
+  cachedLines?: string[]
 ): Promise<string> {
-  let text = ""
-  try {
-    text = await Bun.file(transcriptPath).text()
-  } catch {
-    return ""
+  let lines: string[]
+  if (cachedLines) {
+    lines = cachedLines.filter((l) => l.trim())
+  } else {
+    let text = ""
+    try {
+      text = await Bun.file(transcriptPath).text()
+    } catch {
+      return ""
+    }
+    lines = text.split("\n").filter((l) => l.trim())
   }
-
-  const lines = text.split("\n").filter((l) => l.trim())
   const priorLine = lines[priorSourceLineIdx]
   if (!priorLine) return ""
 
@@ -428,7 +438,13 @@ async function main(): Promise<void> {
   if (!(await isGitRepo(cwd))) return
   if (!transcriptPath) return
 
-  const events = await parseTranscriptEvents(transcriptPath)
+  // Use pre-computed session lines from _transcriptSummary if available (injected
+  // by dispatch.ts). Falls back to readSessionLines() when running standalone.
+  const cachedSessionLines = getTranscriptSummary(
+    input as unknown as Record<string, unknown>
+  )?.sessionLines
+
+  const events = await parseTranscriptEvents(transcriptPath, cachedSessionLines)
 
   // Claude Code writes the assistant message (including the current tool_use) to
   // the transcript BEFORE running PreToolUse hooks. So the current call is always
@@ -471,10 +487,12 @@ async function main(): Promise<void> {
   const firstLine = command.split("\n")[0]?.trim().slice(0, 80) ?? command.trim()
 
   // Extract specific errors from the previous run to guide remediation.
+  // Reuse cached session lines to avoid a second file read.
   const prevOutput = await extractPreviousOutput(
     transcriptPath,
     priorEvent.sourceLineIdx,
-    currentKind
+    currentKind,
+    cachedSessionLines
   )
   const remediationHints = buildRemediationHints(prevOutput, currentKind)
 
