@@ -847,6 +847,52 @@ export function countToolCalls(jsonlText: string): number {
   return count
 }
 
+// ─── Edited file path extraction ─────────────────────────────────────────────
+
+/**
+ * Returns the set of file paths that were written or edited in the transcript.
+ * Scans assistant tool_use blocks for Edit and Write calls and extracts
+ * `file_path` / `path` from their inputs. Used to detect docs-only sessions
+ * before invoking the LLM so the analysis can be scoped correctly.
+ */
+export function extractEditedFilePaths(jsonlText: string): Set<string> {
+  const paths = new Set<string>()
+  const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"])
+
+  for (const entry of parseTranscriptEntries(jsonlText)) {
+    if (entry?.type !== "assistant") continue
+    const content = entry?.message?.content
+    if (!Array.isArray(content)) continue
+
+    for (const block of content) {
+      const b = block as { type?: string; name?: string; input?: Record<string, unknown> }
+      if (b?.type !== "tool_use") continue
+      if (!b.name || !EDIT_TOOLS.has(b.name)) continue
+      const pathVal = b.input?.file_path ?? b.input?.path
+      if (typeof pathVal === "string" && pathVal) paths.add(pathVal)
+    }
+  }
+
+  return paths
+}
+
+/**
+ * Returns true when every file edited in the transcript is a documentation
+ * or configuration file — meaning no source code was modified this session.
+ * An empty set (no file edits at all) returns false (not "docs-only").
+ */
+export function isDocsOnlySession(editedPaths: Set<string>): boolean {
+  if (editedPaths.size === 0) return false
+  const DOC_EXT_RE = /\.(md|mdx|txt|rst|adoc|asciidoc|json|yaml|yml|toml|ini|env|cfg|conf)$/i
+  const DOC_NAME_RE = /^(changelog|readme|contributing|license|authors|notice|todo)$/i
+  for (const p of editedPaths) {
+    const base = p.split("/").pop() ?? p
+    const nameNoExt = base.replace(/\.[^.]+$/, "")
+    if (!DOC_EXT_RE.test(base) && !DOC_NAME_RE.test(nameNoExt)) return false
+  }
+  return true
+}
+
 // ─── Context formatting ──────────────────────────────────────────────────────
 // Formats plain turns into a labeled conversation string for LLM prompts.
 

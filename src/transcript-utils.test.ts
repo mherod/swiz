@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
   countToolCalls,
+  extractEditedFilePaths,
   extractPlainTurns,
   extractText,
   extractToolResultText,
   formatTurnsAsContext,
   getUnsupportedTranscriptFormatMessage,
+  isDocsOnlySession,
   isHookFeedback,
   isUnsupportedTranscriptFormat,
   type PlainTurn,
@@ -711,6 +713,108 @@ describe("transcript-utils.ts", () => {
       expect(result).not.toContain(":")
       // C + : + \ each become -, so "C:\" → "C--"
       expect(result).toBe("C--Users-dev")
+    })
+  })
+
+  // ─── extractEditedFilePaths ─────────────────────────────────────────────────
+
+  describe("extractEditedFilePaths", () => {
+    function makeEditEntry(tool: string, filePath: string): string {
+      return JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tu1",
+              name: tool,
+              input: { file_path: filePath },
+            },
+          ],
+        },
+      })
+    }
+
+    it("returns empty set when transcript has no edit calls", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "hello" }],
+        },
+      })
+      expect(extractEditedFilePaths(jsonl).size).toBe(0)
+    })
+
+    it("extracts file_path from Edit tool calls", () => {
+      const jsonl = makeEditEntry("Edit", "/repo/src/main.ts")
+      const paths = extractEditedFilePaths(jsonl)
+      expect(paths.has("/repo/src/main.ts")).toBe(true)
+    })
+
+    it("extracts file_path from Write tool calls", () => {
+      const jsonl = makeEditEntry("Write", "/repo/docs/README.md")
+      const paths = extractEditedFilePaths(jsonl)
+      expect(paths.has("/repo/docs/README.md")).toBe(true)
+    })
+
+    it("collects multiple paths across entries", () => {
+      const jsonl = [
+        makeEditEntry("Edit", "/repo/src/index.ts"),
+        makeEditEntry("Write", "/repo/CHANGELOG.md"),
+      ].join("\n")
+      const paths = extractEditedFilePaths(jsonl)
+      expect(paths.size).toBe(2)
+      expect(paths.has("/repo/src/index.ts")).toBe(true)
+      expect(paths.has("/repo/CHANGELOG.md")).toBe(true)
+    })
+
+    it("ignores non-edit tool calls (e.g. Bash)", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }],
+        },
+      })
+      expect(extractEditedFilePaths(jsonl).size).toBe(0)
+    })
+  })
+
+  // ─── isDocsOnlySession ──────────────────────────────────────────────────────
+
+  describe("isDocsOnlySession", () => {
+    it("returns false for empty set (no edits)", () => {
+      expect(isDocsOnlySession(new Set())).toBe(false)
+    })
+
+    it("returns true when all paths are markdown files", () => {
+      expect(
+        isDocsOnlySession(new Set(["/repo/CLAUDE.md", "/repo/README.md", "/repo/docs/guide.md"]))
+      ).toBe(true)
+    })
+
+    it("returns false when any path is a TypeScript source file", () => {
+      expect(isDocsOnlySession(new Set(["/repo/CLAUDE.md", "/repo/src/settings.ts"]))).toBe(false)
+    })
+
+    it("returns true for CHANGELOG.md (recognized doc name)", () => {
+      expect(isDocsOnlySession(new Set(["/repo/CHANGELOG.md"]))).toBe(true)
+    })
+
+    it("returns true for JSON config files", () => {
+      expect(isDocsOnlySession(new Set(["/repo/.swiz/config.json"]))).toBe(true)
+    })
+
+    it("returns false for mixed source + doc edits", () => {
+      expect(
+        isDocsOnlySession(new Set(["/repo/hooks/stop-auto-continue.ts", "/repo/README.md"]))
+      ).toBe(false)
+    })
+
+    it("returns false for a .ts source file alone", () => {
+      expect(isDocsOnlySession(new Set(["/repo/src/foo.ts"]))).toBe(false)
     })
   })
 })

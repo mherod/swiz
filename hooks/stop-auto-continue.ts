@@ -22,8 +22,10 @@ import {
   buildTaskSection,
   buildUserMessagesSection,
   countToolCalls,
+  extractEditedFilePaths,
   extractPlainTurns,
   formatTurnsAsContext,
+  isDocsOnlySession,
   projectKeyFromCwd,
 } from "../src/transcript-utils.ts"
 import {
@@ -378,7 +380,8 @@ function buildPrompt(
   projectStatus: string,
   context: string,
   ambitionMode: AmbitionMode = "standard",
-  cwd?: string
+  cwd?: string,
+  docsOnly = false
 ): string {
   const statusSection = projectStatus
     ? `=== PROJECT STATUS ===\n${projectStatus}\n=== END OF PROJECT STATUS ===\n\n`
@@ -421,13 +424,11 @@ function buildPrompt(
     `The SESSION TASKS COMPLETED list reveals the work trajectory — ` +
     `use it to understand what has already been achieved and what direction the session was heading. ` +
     `PRIORITY ORDER: ` +
-    `(1) If any feature, capability, or behaviour was described or started but is not yet fully implemented in code, implement it. ` +
-    `    CRITICAL DISTINCTION — Documentation updates do NOT count as "not yet implemented": ` +
-    `    if the session only edited documentation files (CLAUDE.md, README.md, *.md, comments, docstrings) ` +
-    `    that describe or clarify existing CLI flags, commands, options, or behavior, ` +
-    `    those descriptions refer to already-shipped code — do NOT treat them as missing implementations. ` +
-    `    Only treat something as unimplemented if source code (*.ts, *.tsx, *.js, *.py, etc.) was discussed ` +
-    `    or modified and the feature is demonstrably absent from those source files. ` +
+    (docsOnly
+      ? `(1) SKIP — this session only edited documentation files (no source code was modified). ` +
+        `    Rule (1) does not apply: documentation updates describe already-shipped behavior; ` +
+        `    they are never evidence of missing implementations. Proceed to rule (2). `
+      : `(1) If any feature, capability, or behaviour was described or started but is not yet fully implemented in code, implement it. `) +
     `(2) If any errors, failures, bugs, or broken functionality were identified but NOT resolved, fix them. ` +
     `(3) If a PROJECT STATUS section reports stale artifacts (e.g., CHANGELOG.md), ` +
     skillAdvice("changelog", `use the /changelog skill to update them. `, `update them. `) +
@@ -663,6 +664,13 @@ async function main(): Promise<void> {
     terminate("skip", "NO_TURNS", "no parseable conversation turns — skipping block")
   }
 
+  // Deterministic docs-only detection: scan the full transcript for Edit/Write
+  // tool calls and check whether every touched file is a documentation file.
+  // This result is passed into buildPrompt as a hard override for rule (1) so
+  // the LLM cannot misread doc-only diffs as unimplemented features.
+  const editedPaths = extractEditedFilePaths(raw)
+  const docsOnly = isDocsOnlySession(editedPaths)
+
   const taskContext = await loadTaskContext(input.session_id ?? "")
 
   // Detect refinement-needed issues early — this drives both the AI prompt
@@ -697,7 +705,8 @@ async function main(): Promise<void> {
       projectStatus,
       context,
       effective.ambitionMode,
-      input.cwd
+      input.cwd,
+      docsOnly
     )
 
     try {
