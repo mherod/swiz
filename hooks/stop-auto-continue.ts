@@ -380,7 +380,8 @@ function buildPrompt(
   context: string,
   ambitionMode: AmbitionMode = "standard",
   cwd?: string,
-  docsOnly = false
+  docsOnly = false,
+  repoFiles = ""
 ): string {
   const statusSection = projectStatus
     ? `=== PROJECT STATUS ===\n${projectStatus}\n=== END OF PROJECT STATUS ===\n\n`
@@ -423,6 +424,12 @@ function buildPrompt(
     `The SESSION TASKS COMPLETED list reveals the work trajectory — ` +
     `use it to understand what has already been achieved and what direction the session was heading. ` +
     `PRIORITY ORDER: ` +
+    (repoFiles
+      ? `VERIFIED EXISTING FILES (output of git ls-files hooks/ src/ — these files definitively exist in the repo):\n${repoFiles}\n` +
+        `IMPORTANT: Only report a feature as unimplemented if you cannot find its file path in the list above. ` +
+        `Transcript discussion about a feature is NOT evidence of absence — check the file list first. ` +
+        `If a file appears in the list, treat the feature as implemented regardless of what the transcript says.\n\n`
+      : "") +
     (docsOnly
       ? `(1) SKIP — this session only edited documentation files (no source code was modified). ` +
         `    Rule (1) does not apply: documentation updates describe already-shipped behavior; ` +
@@ -727,6 +734,7 @@ async function main(): Promise<void> {
     const userMessagesSection = buildUserMessagesSection(turns)
     const statusParts = [await checkChangelogStaleness(cwd), refinementStatus].filter(Boolean)
     const projectStatus = statusParts.join("\n")
+    const repoFiles = docsOnly ? "" : await git(["ls-files", "hooks/", "src/"], cwd).catch(() => "")
     const prompt = buildPrompt(
       taskSection,
       userMessagesSection,
@@ -734,7 +742,8 @@ async function main(): Promise<void> {
       context,
       effective.ambitionMode,
       input.cwd,
-      docsOnly
+      docsOnly,
+      repoFiles
     )
 
     try {
