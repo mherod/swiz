@@ -792,6 +792,63 @@ describe("parseTranscriptEvents", () => {
       // The blocked run must not count — only the successful run should appear
       expect(testEvents).toHaveLength(1)
     }))
+
+  test("compaction boundary: bun test from prior session is discarded", () =>
+    withDir(async (dir) => {
+      // Simulate a transcript that spans two sessions separated by compaction:
+      //   session 1: bun test  (prior session — must be invisible)
+      //   {"type":"system"} compaction marker
+      //   session 2: bun test  (current session — the only visible run)
+      const systemLine = JSON.stringify({ type: "system" })
+      const path = await writeTranscript(dir, [
+        assistantLine("Bash", "bun test"), // prior session run — before boundary
+        systemLine, // compaction marker
+        assistantLine("Bash", "bun test"), // current session run
+      ])
+      const events = await parseTranscriptEvents(path)
+      const testEvents = events.filter((e) => e.kind === "test")
+      // Only the post-compaction run should be visible — prior session is discarded
+      expect(testEvents).toHaveLength(1)
+    }))
+
+  test("compaction boundary: consecutive runs within the new session are still detected", () =>
+    withDir(async (dir) => {
+      // Compacted session followed by two bun test calls with no intervening edit:
+      //   prior session bun test (discarded)
+      //   {"type":"system"}
+      //   current session: bun test, bun test (second should be blocked)
+      const systemLine = JSON.stringify({ type: "system" })
+      const path = await writeTranscript(dir, [
+        assistantLine("Bash", "bun test"), // prior session — discarded
+        systemLine,
+        assistantLine("Bash", "bun test"), // current session run 1
+        assistantLine("Bash", "bun test"), // current session run 2 — gate should fire
+      ])
+      const events = await parseTranscriptEvents(path)
+      const testEvents = events.filter((e) => e.kind === "test")
+      // Both post-compaction runs are visible; no intervening edit → gate fires
+      expect(testEvents).toHaveLength(2)
+      const hasIntervening = events
+        .slice(events.indexOf(testEvents[0]!) + 1)
+        .some((e) => e.kind === "any_edit")
+      expect(hasIntervening).toBe(false)
+    }))
+
+  test("compaction boundary: multiple system entries — only last is the boundary", () =>
+    withDir(async (dir) => {
+      // Multiple compaction cycles: only the LAST {"type":"system"} is the boundary
+      const systemLine = JSON.stringify({ type: "system" })
+      const path = await writeTranscript(dir, [
+        assistantLine("Bash", "bun test"), // session 1 — discarded
+        systemLine, // first compaction
+        assistantLine("Bash", "bun test"), // session 2 — also discarded (before final boundary)
+        systemLine, // second compaction (the actual boundary)
+        assistantLine("Bash", "bun test"), // current session — only this visible
+      ])
+      const events = await parseTranscriptEvents(path)
+      const testEvents = events.filter((e) => e.kind === "test")
+      expect(testEvents).toHaveLength(1)
+    }))
 })
 
 // ── collectBlockedToolUseIds ──────────────────────────────────────────────────
