@@ -2,6 +2,22 @@
 
 ## 2026-03-09
 
+### Bug Fixes
+
+- Fixed stop-flow behaviour when transcript analysis is unavailable: swiz now
+  prints a ready-to-run continuation prompt instead of leaving the session
+  blocked without actionable guidance. (#57)
+- Fixed commit workflow behaviour in collaborative repositories by preventing
+  direct commits to the default branch and guiding users to the safer path.
+  (#226)
+- Fixed state transition behaviour after commits on branches without valid
+  upstream tracking, reducing incorrect review-state carryover. (#224)
+
+### Improvements
+
+- Improved task lifecycle reliability by applying strict shared session ID
+  validation across task hooks before reading or writing task files.
+
 ### New Features
 
 - Added `posttooluse-task-notify.ts`: async PostToolUse hook that delivers native
