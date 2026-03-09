@@ -23,8 +23,11 @@ import {
   buildTaskSection,
   buildUserMessagesSection,
   extractTranscriptData,
+  findAllProviderSessions,
   formatTurnsAsContext,
+  getUnsupportedTranscriptFormatMessage,
   isDocsOnlySession,
+  isUnsupportedTranscriptFormat,
   projectKeyFromCwd,
 } from "../src/transcript-utils.ts"
 import {
@@ -58,8 +61,55 @@ const agentResponseSchema = z.object({
 
 type AgentResponse = z.infer<typeof agentResponseSchema>
 
+interface TranscriptResolution {
+  raw: string | null
+  sourceDescription: string
+  failureReason?: string
+}
+
 function resolveCwd(cwd?: string): string {
   return cwd ?? process.cwd()
+}
+
+async function resolveTranscriptText(
+  transcriptPath: string | undefined,
+  cwd: string
+): Promise<TranscriptResolution> {
+  if (transcriptPath?.trim()) {
+    try {
+      return {
+        raw: await Bun.file(transcriptPath).text(),
+        sourceDescription: `stop hook input transcript_path (${transcriptPath})`,
+      }
+    } catch {
+      // Fall through to cwd-based transcript discovery.
+    }
+  }
+
+  const sessions = await findAllProviderSessions(cwd)
+  for (const session of sessions) {
+    if (isUnsupportedTranscriptFormat(session.format)) continue
+    try {
+      return {
+        raw: await Bun.file(session.path).text(),
+        sourceDescription: `${session.provider ?? "unknown"} session ${session.id} (${session.path})`,
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  const unsupported = sessions.find((session) => isUnsupportedTranscriptFormat(session.format))
+  const unsupportedMessage = unsupported ? getUnsupportedTranscriptFormatMessage(unsupported) : ""
+  const failureReason = unsupportedMessage
+    ? `${unsupportedMessage} No readable fallback transcript was found for cwd ${cwd}.`
+    : `No readable transcript was found from stop hook input or cwd fallback sessions for ${cwd}.`
+
+  return {
+    raw: null,
+    sourceDescription: "none",
+    failureReason,
+  }
 }
 
 /**
@@ -785,22 +835,30 @@ async function main(): Promise<void> {
 
   const projectState = await readProjectState(cwd)
 
-  if (!input.transcript_path) {
+  const transcriptResolution = await resolveTranscriptText(input.transcript_path, cwd)
+  if (!transcriptResolution.raw) {
+    const taskContext = await loadTaskContext(input.session_id ?? "")
+    const refinementStatus = await checkRefinementNeeds(cwd)
+    const statusParts = [await checkChangelogStaleness(cwd), refinementStatus].filter(Boolean)
+    const projectStatus = statusParts.join("\n")
+    const fallbackPrompt = buildPrompt(
+      buildTaskSection(taskContext),
+      "",
+      projectStatus,
+      `Transcript unavailable. Failure reason: ${transcriptResolution.failureReason ?? "unknown transcript read failure"}`,
+      effective.ambitionMode,
+      input.cwd,
+      false,
+      await git(["ls-files", "hooks/", "src/"], cwd).catch(() => "")
+    )
     terminate(
       "block",
-      "Auto-continue could not analyze this session: transcript_path is missing from stop hook input."
+      "Auto-continue could not analyze this session from transcript data. " +
+        "Continue directly using the internal-agent prompt below:\n\n" +
+        fallbackPrompt
     )
   }
-
-  let raw: string
-  try {
-    raw = await Bun.file(input.transcript_path).text()
-  } catch {
-    terminate(
-      "block",
-      `Auto-continue could not analyze this session: failed to read transcript at ${input.transcript_path}.`
-    )
-  }
+  const raw = transcriptResolution.raw
 
   // Single combined parse: extracts turns, edited paths, and tool-call count
   // in one pass over the transcript — avoids three redundant full parses.

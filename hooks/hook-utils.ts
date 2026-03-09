@@ -45,7 +45,7 @@ export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
 
 // ─── Canonical path hashing — re-exported from src/git-helpers.ts ────────────
 export { getCanonicalPathHash } from "../src/git-helpers.ts"
-export { sanitizeSessionId, sessionPrefix } from "../src/session-id.ts"
+export { resolveSafeSessionId, sanitizeSessionId, sessionPrefix } from "../src/session-id.ts"
 
 export type { PackageManager, Runtime } from "./utils/package-detection.ts"
 export {

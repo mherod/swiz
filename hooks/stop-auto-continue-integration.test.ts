@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import { getSessionTasksDir } from "./hook-utils.ts"
 import { useTempDir } from "./test-utils.ts"
 
@@ -100,12 +101,14 @@ async function runHookRaw(
 // ─── Input validation ─────────────────────────────────────────────────────────
 
 describe("stop-auto-continue: input validation", () => {
-  test("blocks when transcript_path is missing from input", async () => {
+  test("when transcript_path is missing, falls back and emits manual prompt if no transcript is found", async () => {
+    const workDir = await createTempDir()
     // No transcript_path key at all
-    const result = await runHookRaw({ session_id: "test", cwd: "/tmp" })
+    const result = await runHookRaw({ session_id: "test", cwd: workDir })
 
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("transcript_path is missing")
+    expect(result.reason).toContain("Continue directly using the internal-agent prompt below")
+    expect(result.reason).toContain("Transcript unavailable.")
   })
 
   test("blocks when transcript_path is null", async () => {
@@ -119,15 +122,39 @@ describe("stop-auto-continue: input validation", () => {
     expect(result.reason).toContain("malformed stop-hook input")
   })
 
-  test("blocks when transcript file does not exist on disk", async () => {
+  test("falls back when transcript file does not exist on disk, then emits manual prompt if no fallback transcript", async () => {
+    const workDir = await createTempDir()
     const result = await runHookRaw({
       transcript_path: "/nonexistent/path/transcript.jsonl",
       session_id: "test",
-      cwd: "/tmp",
+      cwd: workDir,
     })
 
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("failed to read transcript")
+    expect(result.reason).toContain("Continue directly using the internal-agent prompt below")
+  })
+
+  test("uses cwd transcript fallback when transcript_path is missing", async () => {
+    const fakeHome = await createTempDir()
+    await seedSettings(fakeHome)
+    const workDir = await createTempDir()
+    const projectKey = projectKeyFromCwd(workDir)
+    const claudeProjectDir = join(fakeHome, ".claude", "projects", projectKey)
+    await mkdir(claudeProjectDir, { recursive: true })
+    await writeFile(join(claudeProjectDir, "fallback-session.jsonl"), buildTranscript(2))
+
+    const result = await runHookRaw(
+      {
+        // no transcript_path -> should discover transcript from cwd
+        session_id: "test",
+        cwd: workDir,
+      },
+      { HOME: fakeHome, AI_TEST_NO_BACKEND: "1" }
+    )
+
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("no AI backend available")
+    expect(result.reason).not.toContain("Continue directly using the internal-agent prompt below")
   })
 
   test("blocks when transcript contains no tool calls (all text turns)", async () => {

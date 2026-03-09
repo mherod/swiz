@@ -22,6 +22,7 @@ import {
   getSessionTasksDir,
   isShellTool,
   readSessionTasks,
+  resolveSafeSessionId,
   stripHeredocs,
   toolNameForCurrentAgent,
 } from "./hook-utils.ts"
@@ -31,7 +32,8 @@ const SUBJECT_RE = /\b(commit|push)\b/i
 
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())
-  if (!input.session_id) return
+  const sessionId = resolveSafeSessionId(input.session_id)
+  if (!sessionId) return
   if (!input.tool_name || !isShellTool(input.tool_name)) return
 
   const command = stripHeredocs(String(input.tool_input?.command ?? ""))
@@ -40,9 +42,9 @@ async function main(): Promise<void> {
   if (!isCommit && !isPush) return
 
   const home = homedir()
-  const tasksDir = getSessionTasksDir(input.session_id, home)
+  const tasksDir = getSessionTasksDir(sessionId, home)
   if (!tasksDir) return
-  const tasks = await readSessionTasks(input.session_id, home)
+  const tasks = await readSessionTasks(sessionId, home)
 
   // Auto-complete matching commit/push tasks
   for (const task of tasks) {
@@ -66,7 +68,7 @@ async function main(): Promise<void> {
   if (isPush) {
     const taskCreateName = toolNameForCurrentAgent("TaskCreate")
     const settings = await readSwizSettings()
-    const effective = getEffectiveSwizSettings(settings, input.session_id)
+    const effective = getEffectiveSwizSettings(settings, sessionId)
     const pushContext = effective.prMergeMode
       ? `git push succeeded. Use ${taskCreateName} to create a "Wait for CI and verify pass" task, then mark it in_progress and monitor CI before stopping.`
       : `git push succeeded. Use ${taskCreateName} to create an "Open PR for this branch" task, then mark it in_progress and open the pull request before stopping.`

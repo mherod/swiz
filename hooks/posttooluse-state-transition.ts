@@ -9,7 +9,7 @@
 //
 // Transitions (async — require runtime checks):
 //   git commit + branch has CHANGES_REQUESTED PR reviews : reviewing → addressing-feedback
-//   git commit + branch has no upstream tracking         : any → developing
+//   git commit + branch has no upstream tracking         : reviewing|addressing-feedback → developing
 //   git commit + on default branch (solo repo)           : reviewing|addressing-feedback → developing
 //   git checkout <default-branch>                        : reviewing | addressing-feedback → developing
 //   git checkout -b <new-branch> (from default branch)  : any → developing
@@ -41,6 +41,8 @@ type SyncTransitionRule = {
   to: ProjectState
 }
 
+type UpstreamTransitionStatus = "transitioned" | "no-transition" | "abort"
+
 const SYNC_RULES: readonly SyncTransitionRule[] = [
   { when: GH_PR_CREATE_RE, from: "developing", to: "reviewing" },
   { when: GH_PR_MERGE_RE, from: ["reviewing", "addressing-feedback"], to: "developing" },
@@ -56,6 +58,10 @@ function matchesSyncRule(command: string, state: ProjectState): SyncTransitionRu
   return null
 }
 
+function isReviewingLikeState(state: ProjectState): boolean {
+  return state === "reviewing" || state === "addressing-feedback"
+}
+
 /** Extract the target branch from `git checkout <branch>` (non -b form). */
 function extractCheckoutBranch(command: string): string | null {
   // Match: git checkout <branch> — not a flag, not -b/-B/-c/-C
@@ -63,73 +69,96 @@ function extractCheckoutBranch(command: string): string | null {
   return match?.[1] ?? null
 }
 
+async function transitionToAddressingFeedbackOnChangesRequested(cwd: string): Promise<boolean> {
+  if (!hasGhCli() || !(await isGitHubRemote(cwd))) return false
+
+  try {
+    const branch = (await git(["branch", "--show-current"], cwd)).trim()
+    if (!branch) return false
+
+    const pr = await getOpenPrForBranch<{ reviews: Array<{ state: string }> }>(
+      branch,
+      cwd,
+      "reviews"
+    )
+    if (!pr?.reviews?.some((r) => r.state === "CHANGES_REQUESTED")) return false
+
+    await writeProjectState(cwd, "addressing-feedback")
+    return true
+  } catch {
+    // gh unavailable or API error — skip
+    return false
+  }
+}
+
+async function transitionToDevelopingOnMissingUpstream(
+  cwd: string
+): Promise<UpstreamTransitionStatus> {
+  try {
+    const status = await getGitStatusV2(cwd)
+    // Preserve existing behavior: if status cannot be determined, abort async
+    // transition handling for this command.
+    if (!status) return "abort"
+
+    // "no valid upstream" covers both:
+    // 1) no upstream configured (status.upstream === null)
+    // 2) upstream configured but gone on remote (status.upstreamGone === true)
+    if (status.upstream === null || status.upstreamGone) {
+      await writeProjectState(cwd, "developing")
+      return "transitioned"
+    }
+    return "no-transition"
+  } catch {
+    // skip
+    return "no-transition"
+  }
+}
+
+async function transitionToDevelopingOnSoloDefaultBranchCommit(cwd: string): Promise<boolean> {
+  try {
+    const branch = (await git(["branch", "--show-current"], cwd)).trim()
+    if (!branch) return false
+
+    const defaultBranch = await getDefaultBranch(cwd)
+    if (!isDefaultBranch(branch, defaultBranch)) return false
+
+    const collaboration = await detectProjectCollaborationPolicy(cwd)
+    if (collaboration.isCollaborative) return false
+
+    await writeProjectState(cwd, "developing")
+    return true
+  } catch {
+    // skip
+    return false
+  }
+}
+
 async function handleAsyncTransitions(
   command: string,
   cwd: string,
   state: ProjectState
 ): Promise<boolean> {
+  const isCommit = GIT_COMMIT_RE.test(command)
+  const isReviewingLike = isReviewingLikeState(state)
+
   // ── git commit: reviewing → addressing-feedback if PR has CHANGES_REQUESTED ──
-  if (GIT_COMMIT_RE.test(command) && state === "reviewing") {
-    if (hasGhCli() && (await isGitHubRemote(cwd))) {
-      try {
-        const branch = (await git(["branch", "--show-current"], cwd)).trim()
-        if (branch) {
-          const pr = await getOpenPrForBranch<{ reviews: Array<{ state: string }> }>(
-            branch,
-            cwd,
-            "reviews"
-          )
-          if (pr?.reviews?.some((r) => r.state === "CHANGES_REQUESTED")) {
-            await writeProjectState(cwd, "addressing-feedback")
-            return true
-          }
-        }
-      } catch {
-        // gh unavailable or API error — skip
-      }
-    }
+  if (isCommit && state === "reviewing") {
+    if (await transitionToAddressingFeedbackOnChangesRequested(cwd)) return true
   }
 
   // ── git commit + no valid upstream tracking: reviewing|addressing-feedback → developing ──
-  if (GIT_COMMIT_RE.test(command) && (state === "reviewing" || state === "addressing-feedback")) {
-    try {
-      const status = await getGitStatusV2(cwd)
-      if (!status) return false
+  if (isCommit && isReviewingLike) {
+    const upstreamStatus = await transitionToDevelopingOnMissingUpstream(cwd)
+    if (upstreamStatus === "transitioned") return true
+    if (upstreamStatus === "abort") return false
 
-      // "no valid upstream" covers both:
-      // 1) no upstream configured (status.upstream === null)
-      // 2) upstream configured but gone on remote (status.upstreamGone === true)
-      if (status.upstream === null || status.upstreamGone) {
-        await writeProjectState(cwd, "developing")
-        return true
-      }
-    } catch {
-      // skip
-    }
-  }
-
-  // ── git commit on default branch (solo repo): reviewing|addressing-feedback → developing ──
-  if (GIT_COMMIT_RE.test(command) && (state === "reviewing" || state === "addressing-feedback")) {
-    try {
-      const branch = (await git(["branch", "--show-current"], cwd)).trim()
-      if (branch) {
-        const defaultBranch = await getDefaultBranch(cwd)
-        if (isDefaultBranch(branch, defaultBranch)) {
-          const collaboration = await detectProjectCollaborationPolicy(cwd)
-          if (!collaboration.isCollaborative) {
-            await writeProjectState(cwd, "developing")
-            return true
-          }
-        }
-      }
-    } catch {
-      // skip
-    }
+    // ── git commit on default branch (solo repo): reviewing|addressing-feedback → developing ──
+    if (await transitionToDevelopingOnSoloDefaultBranchCommit(cwd)) return true
   }
 
   // ── git checkout <default-branch>: reviewing|addressing-feedback → developing ──
   if (GIT_CHECKOUT_RE.test(command) && !GIT_CHECKOUT_NEW_BRANCH_RE.test(command)) {
-    if (state === "reviewing" || state === "addressing-feedback") {
+    if (isReviewingLike) {
       const targetBranch = extractCheckoutBranch(command)
       if (targetBranch) {
         try {

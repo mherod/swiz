@@ -16,6 +16,7 @@ import {
   getSessionTaskPath,
   getSessionTasksDir,
   isTaskTool,
+  resolveSafeSessionId,
   type ToolHookInput,
   toolNameForCurrentAgent,
 } from "./hook-utils.ts"
@@ -43,7 +44,8 @@ interface ExtendedToolInput extends ToolHookInput {
 
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as ExtendedToolInput
-  if (!input.session_id) return
+  const sessionId = resolveSafeSessionId(input.session_id)
+  if (!sessionId) return
 
   const toolName = input.tool_name ?? ""
   if (!isTaskTool(toolName)) return
@@ -56,8 +58,8 @@ async function main(): Promise<void> {
   if (toolName === "TaskCreate") return
 
   const home = homedir()
-  const tasksDir = getSessionTasksDir(input.session_id, home)
-  const taskPath = getSessionTaskPath(input.session_id, taskId, home)
+  const tasksDir = getSessionTasksDir(sessionId, home)
+  const taskPath = getSessionTaskPath(sessionId, taskId, home)
   if (!tasksDir || !taskPath) return
   const taskExists = await Bun.file(taskPath).exists()
   if (taskExists) return

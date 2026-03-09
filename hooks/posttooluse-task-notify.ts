@@ -12,7 +12,7 @@
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { getSessionTaskPath } from "./hook-utils.ts"
+import { getSessionTaskPath, resolveSafeSessionId } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
 const raw = await Bun.stdin.json().catch(() => null)
@@ -24,7 +24,8 @@ if (!parsed.success) process.exit(0)
 const input = parsed.data
 const toolName = input.tool_name ?? ""
 if (toolName !== "TaskCreate" && toolName !== "TaskUpdate") process.exit(0)
-if (!input.session_id || !input.tool_input) process.exit(0)
+const sessionId = resolveSafeSessionId(input.session_id)
+if (!sessionId || !input.tool_input) process.exit(0)
 
 // ── Resolve binary ─────────────────────────────────────────────────────────
 function resolveBinary(): string | null {
@@ -54,7 +55,7 @@ let subject = String(ti.subject ?? "")
 if (!subject && toolName === "TaskUpdate") {
   const taskId = String(ti.taskId ?? ti.task_id ?? ti.id ?? "")
   if (taskId) {
-    const taskPath = getSessionTaskPath(input.session_id, taskId, homedir())
+    const taskPath = getSessionTaskPath(sessionId, taskId, homedir())
     if (taskPath) {
       try {
         const taskJson = JSON.parse(await Bun.file(taskPath).text())

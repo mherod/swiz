@@ -21,3 +21,18 @@ export function sanitizeSessionId(sessionId: string | undefined | null): string 
   const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
   return safe || null
 }
+
+/**
+ * Strictly validate and normalize a session ID for filesystem path usage.
+ * Returns null when:
+ * - input is missing/null-like
+ * - sanitization changes the value (rejects traversal/special chars)
+ *
+ * This differs from sanitizeSessionId(), which is lenient and may strip chars.
+ */
+export function resolveSafeSessionId(sessionId: string | undefined | null): string | null {
+  const safe = sanitizeSessionId(sessionId)
+  if (!safe) return null
+  if (sessionId !== safe) return null
+  return safe
+}

@@ -15,7 +15,7 @@
 
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { getSessionTaskPath, type ToolHookInput } from "./hook-utils.ts"
+import { getSessionTaskPath, resolveSafeSessionId, type ToolHookInput } from "./hook-utils.ts"
 
 // ─── Built-in defaults (used when config is missing or malformed) ───────────
 
@@ -186,7 +186,8 @@ function resolveTaskId(ti: Record<string, unknown>, fields: string[]): string {
 
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as ExtendedToolInput
-  if (!input.session_id) return
+  const sessionId = resolveSafeSessionId(input.session_id)
+  if (!sessionId) return
 
   const config = await loadConfig()
 
@@ -203,7 +204,7 @@ async function main(): Promise<void> {
   const evidence = extractEvidence(ti, config.evidenceKeys)
   if (!evidence) return
 
-  const taskPath = getSessionTaskPath(input.session_id, taskId, homedir())
+  const taskPath = getSessionTaskPath(sessionId, taskId, homedir())
   if (!taskPath) return
 
   try {

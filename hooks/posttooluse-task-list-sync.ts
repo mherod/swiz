@@ -20,6 +20,7 @@ import {
   emitContext,
   getSessionTaskPath,
   getSessionTasksDir,
+  resolveSafeSessionId,
   type SessionTask,
   type ToolHookInput,
 } from "./hook-utils.ts"
@@ -79,13 +80,14 @@ function parseToolResponse(raw: ExtendedToolHookInput["tool_response"]): Normali
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as ExtendedToolHookInput
   if (input.tool_name !== "TaskList") return
-  if (!input.session_id) return
+  const sessionId = resolveSafeSessionId(input.session_id)
+  if (!sessionId) return
 
   const tasks = parseToolResponse(input.tool_response)
   if (tasks.length === 0) return
 
   const home = homedir()
-  const tasksDir = getSessionTasksDir(input.session_id, home)
+  const tasksDir = getSessionTasksDir(sessionId, home)
   if (!tasksDir) return
 
   try {
@@ -99,7 +101,7 @@ async function main(): Promise<void> {
   let skipped = 0
 
   for (const task of tasks) {
-    const taskPath = getSessionTaskPath(input.session_id, task.id, home)
+    const taskPath = getSessionTaskPath(sessionId, task.id, home)
     if (!taskPath) continue
 
     const file = Bun.file(taskPath)

@@ -25,6 +25,7 @@ import {
   isTaskTrackingExemptShellCommand,
   isWriteTool,
   readSessionTasks,
+  resolveSafeSessionId,
 } from "./hook-utils.ts"
 
 const STALENESS_THRESHOLD = 20
@@ -45,25 +46,56 @@ export function isLargeContentPayload(input: Record<string, unknown>): boolean {
   return content.split("\n").length >= LARGE_CONTENT_LINE_THRESHOLD
 }
 
+async function isTaskEnforcementProject(cwd: string): Promise<boolean> {
+  if (!(await isGitRepo(cwd))) return false
+  return hasFileInTree(cwd, "CLAUDE.md")
+}
+
+function isBlockedTool(toolName: string): boolean {
+  return isShellTool(toolName) || isEditTool(toolName) || isWriteTool(toolName)
+}
+
+function isMemoryMarkdownEdit(input: Record<string, unknown>, toolName: string): boolean {
+  if (!isEditTool(toolName) && !isWriteTool(toolName)) return false
+  const filePath = String(
+    (input.tool_input as Record<string, unknown> | undefined)?.file_path ?? ""
+  )
+  return MEMORY_MARKDOWN_RE.test(filePath)
+}
+
+function buildIncompleteTaskSummary(
+  allTasks: Array<{ id: string; status: string; subject: string }>
+): {
+  incompleteTasks: Array<{ id: string; status: string; subject: string }>
+  pendingTasks: Array<{ id: string; status: string; subject: string }>
+  allTasksDone: boolean
+  incompleteTaskList: string
+} {
+  const incompleteTasks = allTasks.filter((task) => isIncompleteTaskStatus(task.status))
+  const pendingTasks = incompleteTasks.filter((task) => task.status === "pending")
+  const allTasksDone = allTasks.length > 0 && incompleteTasks.length === 0
+  const incompleteTaskList = incompleteTasks
+    .map((task) => `  • #${task.id} (${task.status}): ${task.subject}`)
+    .join("\n")
+
+  return { incompleteTasks, pendingTasks, allTasksDone, incompleteTaskList }
+}
+
 async function main() {
   const input = await Bun.stdin.json()
   const toolName: string = input?.tool_name ?? ""
-  const sessionId: string = input?.session_id ?? ""
+  const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
   const transcriptPath: string = input?.transcript_path ?? ""
   const cwd: string = input?.cwd ?? process.cwd()
 
   if (!sessionId) process.exit(0)
-  // Sanitize sessionId to prevent path traversal
-  if (/[/\\]|\.\./.test(sessionId)) process.exit(0)
 
   // ── GUARD: Only enforce inside a git repo that has a CLAUDE.md ───────────────
   // Enforcement in non-project directories (e.g. ~) creates an unrecoverable
   // deadlock: the unlock steps (skills, markdown writes) fail without git context.
-  if (!(await isGitRepo(cwd))) process.exit(0)
-  if (!(await hasFileInTree(cwd, "CLAUDE.md"))) process.exit(0)
+  if (!(await isTaskEnforcementProject(cwd))) process.exit(0)
 
-  const isBlockedTool = isShellTool(toolName) || isEditTool(toolName) || isWriteTool(toolName)
-  if (!isBlockedTool) process.exit(0)
+  if (!isBlockedTool(toolName)) process.exit(0)
 
   // ── EXEMPTION: Read-only inspection commands ──────────────────────────────────
   // Orientation commands that don't mutate state are safe to run without a task.
@@ -76,10 +108,7 @@ async function main() {
   // CLAUDE.md and MEMORY.md edits are memory-maintenance work and must never be
   // gated on task existence — the task hook must not prevent the agent from
   // recording learnings or following memory-enforcement instructions.
-  if (isEditTool(toolName) || isWriteTool(toolName)) {
-    const filePath: string = input?.tool_input?.file_path ?? ""
-    if (MEMORY_MARKDOWN_RE.test(filePath)) process.exit(0)
-  }
+  if (isMemoryMarkdownEdit(input, toolName)) process.exit(0)
 
   // ── CHECK 1: Task minimums for this session (file-based) ──────────────────────
   // The session must always keep at least:
@@ -137,14 +166,8 @@ async function main() {
     )
   }
 
-  const incompleteTasks = allTasks.filter((t) => isIncompleteTaskStatus(t.status))
-  const pendingTasks = incompleteTasks.filter((t) => t.status === "pending")
-  const incompleteTaskList = incompleteTasks
-    .map((t) => `  • #${t.id} (${t.status}): ${t.subject}`)
-    .join("\n")
-
-  // Wrap-up exemption: all tasks completed → allow tool calls for CI, commits, etc.
-  const allTasksDone = allTasks.length > 0 && incompleteTasks.length === 0
+  const { incompleteTasks, pendingTasks, allTasksDone, incompleteTaskList } =
+    buildIncompleteTaskSummary(allTasks)
 
   if (
     !allTasksDone &&
