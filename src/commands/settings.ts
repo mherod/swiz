@@ -671,12 +671,12 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
     return
   }
 
-  const value = parseInt(parsed.settingValue, 10)
-  if (Number.isNaN(value) || value < 0) {
+  if (!/^\d+$/.test(parsed.settingValue)) {
     throw new Error(
       `Invalid value "${parsed.settingValue}". Must be a non-negative integer.\n${usage()}`
     )
   }
+  const value = Number(parsed.settingValue)
   const path = await writeSettingToScope(parsed, key, value)
   const label = value === 0 ? "system default" : `${value}`
   console.log(`\n  Set ${parsed.settingArg} = ${label} (${parsed.scope})`)

@@ -385,6 +385,11 @@ describe("swiz settings", () => {
       { args: ["enable", "narrator-voice"], exitCode: 1, stderr: "not a boolean setting" },
       { args: ["enable", "ambition-mode"], exitCode: 1, stderr: "not a boolean setting" },
       { args: ["set", "ambition-mode", "turbo"], exitCode: 1, stderr: "ambition-mode" },
+      // Numeric settings must reject trailing-junk values (parseInt silently accepts these)
+      { args: ["set", "narrator-speed", "30abc"], exitCode: 1, stderr: "non-negative integer" },
+      { args: ["set", "narrator-speed", "3.5"], exitCode: 1, stderr: "non-negative integer" },
+      { args: ["set", "narrator-speed", "1e2"], exitCode: 1, stderr: "non-negative integer" },
+      { args: ["set", "narrator-speed", "-1"], exitCode: 1, stderr: "non-negative integer" },
     ]
     await Promise.all(
       cases.map(async ({ args, exitCode, stderr }) => {
