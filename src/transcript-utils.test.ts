@@ -1172,6 +1172,15 @@ describe("transcript-utils.ts", () => {
         )
         expect(paths.has("src/baz.ts")).toBe(true)
       })
+
+      it("extracts multiple files from git restore file1 file2", () => {
+        const paths = extractEditedFilePaths(
+          makeBashEntry("git restore src/a.ts src/b.ts src/c.ts")
+        )
+        expect(paths.has("src/a.ts")).toBe(true)
+        expect(paths.has("src/b.ts")).toBe(true)
+        expect(paths.has("src/c.ts")).toBe(true)
+      })
     })
 
     // ─── patch <file> ─────────────────────────────────────────────────────────
