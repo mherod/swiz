@@ -197,6 +197,39 @@ async function promptClaudeObject<T>(
   }
 }
 
+// ─── Provider capability registry ────────────────────────────────────────────
+
+interface ProviderCapabilities {
+  text: (prompt: string, options?: PromptOptions) => Promise<string>
+  streamText: (prompt: string, options?: PromptStreamOptions) => Promise<string>
+  // ZodType<any> is intentional: generic T is erased at registry level; callers cast via promptObject<T>
+  object: (prompt: string, schema: ZodType<any>, options?: PromptOptions) => Promise<unknown>
+}
+
+/**
+ * Maps each provider ID to its generation capability functions.
+ * Adding a new provider only requires adding an entry here.
+ */
+const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
+  gemini: {
+    text: (prompt, options) => promptGemini(prompt, options as PromptGeminiOptions),
+    streamText: (prompt, options) =>
+      promptGeminiStreamText(prompt, options as PromptGeminiStreamOptions),
+    object: (prompt, schema, options) =>
+      promptGeminiObject(prompt, schema, options as PromptGeminiOptions),
+  },
+  codex: {
+    text: promptCodexText,
+    streamText: promptCodexStreamText,
+    object: promptCodexObject,
+  },
+  claude: {
+    text: promptClaudeText,
+    streamText: promptClaudeStreamText,
+    object: promptClaudeObject,
+  },
+}
+
 // ─── Provider selection ───────────────────────────────────────────────────────
 
 /**
@@ -274,18 +307,12 @@ export async function promptText(prompt: string, options?: PromptOptions): Promi
   }
 
   const provider = activeProvider(options?.provider)
-  if (provider === "gemini") {
-    return promptGemini(prompt, options as PromptGeminiOptions)
+  if (!provider) {
+    throw new Error(
+      "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
+    )
   }
-  if (provider === "codex") {
-    return promptCodexText(prompt, options)
-  }
-  if (provider === "claude") {
-    return promptClaudeText(prompt, options)
-  }
-  throw new Error(
-    "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
-  )
+  return PROVIDER_REGISTRY[provider].text(prompt, options)
 }
 
 /**
@@ -305,18 +332,12 @@ export async function promptStreamText(
   }
 
   const provider = activeProvider(options?.provider)
-  if (provider === "gemini") {
-    return promptGeminiStreamText(prompt, options as PromptGeminiStreamOptions)
+  if (!provider) {
+    throw new Error(
+      "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
+    )
   }
-  if (provider === "codex") {
-    return promptCodexStreamText(prompt, options)
-  }
-  if (provider === "claude") {
-    return promptClaudeStreamText(prompt, options)
-  }
-  throw new Error(
-    "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
-  )
+  return PROVIDER_REGISTRY[provider].streamText(prompt, options)
 }
 
 /**
@@ -335,18 +356,12 @@ export async function promptObject<T>(
   }
 
   const provider = activeProvider(options?.provider)
-  if (provider === "gemini") {
-    return promptGeminiObject(prompt, schema, options as PromptGeminiOptions)
+  if (!provider) {
+    throw new Error(
+      "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
+    )
   }
-  if (provider === "codex") {
-    return promptCodexObject(prompt, schema, options)
-  }
-  if (provider === "claude") {
-    return promptClaudeObject(prompt, schema, options)
-  }
-  throw new Error(
-    "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
-  )
+  return PROVIDER_REGISTRY[provider].object(prompt, schema, options) as Promise<T>
 }
 
 // Re-export ensureGeminiApiKey so callers only need this module for startup setup.
