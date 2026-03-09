@@ -316,6 +316,14 @@ export const GIT_CHECKOUT_RE = shellStatementCommandRe("git\\s+checkout\\b")
 /** Matches `gh pr checkout` anywhere in a shell command string. */
 export const GH_PR_CHECKOUT_RE = shellStatementCommandRe("gh\\s+pr\\s+checkout\\b")
 
+/** Matches `gh pr review ... --dismiss` anywhere in a shell command string. */
+export const GH_PR_REVIEW_DISMISS_RE = /\bgh\s+pr\s+review\b[^|;&]*--dismiss\b/
+
+/** Matches `git checkout -b` or `git switch -c` — create new branch. */
+export const GIT_CHECKOUT_NEW_BRANCH_RE = shellStatementCommandRe(
+  "git\\s+(?:checkout\\s+-[bcB]|switch\\s+-[cC])\\b"
+)
+
 /** Matches any `git` invocation in a shell command string. */
 export const GIT_ANY_CMD_RE = shellTokenCommandRe("git\\s")
 

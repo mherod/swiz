@@ -2,34 +2,123 @@
 
 // PostToolUse hook: Auto-transition project state based on PR lifecycle events.
 //
-// Transitions:
-//   gh pr create  : developing → reviewing
-//   gh pr merge   : reviewing → developing
+// Transitions (synchronous — command-pattern only):
+//   gh pr create           : developing → reviewing
+//   gh pr merge            : reviewing  → developing
+//   gh pr review --dismiss : reviewing  → addressing-feedback
 //
-// Only transitions if current state matches the expected source state,
+// Transitions (async — require runtime checks):
+//   git commit + branch has CHANGES_REQUESTED PR reviews : reviewing → addressing-feedback
+//   git checkout <default-branch>                        : reviewing | addressing-feedback → developing
+//   git checkout -b <new-branch> (from default branch)  : any → developing
+//
+// Only transitions if current state matches the expected source state(s),
 // so this is safe to run regardless of workflow or whether PRs are used.
 
 import { readProjectState, writeProjectState } from "../src/settings.ts"
-import { GH_PR_CREATE_RE, GH_PR_MERGE_RE, isGitRepo, isShellTool } from "./hook-utils.ts"
+import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote, isGitRepo } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
+import {
+  GH_PR_CREATE_RE,
+  GH_PR_MERGE_RE,
+  GH_PR_REVIEW_DISMISS_RE,
+  GIT_CHECKOUT_NEW_BRANCH_RE,
+  GIT_CHECKOUT_RE,
+  GIT_COMMIT_RE,
+  getDefaultBranch,
+  isDefaultBranch,
+} from "./utils/git-utils.ts"
 
-type ProjectState = "developing" | "reviewing"
-type TransitionRule = {
+type ProjectState = "developing" | "reviewing" | "addressing-feedback" | "planning"
+
+type SyncTransitionRule = {
   when: RegExp
-  from: ProjectState
+  from: ProjectState | ProjectState[]
   to: ProjectState
 }
 
-const TRANSITION_RULES: readonly TransitionRule[] = [
+const SYNC_RULES: readonly SyncTransitionRule[] = [
   { when: GH_PR_CREATE_RE, from: "developing", to: "reviewing" },
-  { when: GH_PR_MERGE_RE, from: "reviewing", to: "developing" },
+  { when: GH_PR_MERGE_RE, from: ["reviewing", "addressing-feedback"], to: "developing" },
+  { when: GH_PR_REVIEW_DISMISS_RE, from: "reviewing", to: "addressing-feedback" },
 ]
 
-function detectTransition(command: string): TransitionRule | null {
-  for (const rule of TRANSITION_RULES) {
-    if (rule.when.test(command)) return rule
+function matchesSyncRule(command: string, state: ProjectState): SyncTransitionRule | null {
+  for (const rule of SYNC_RULES) {
+    if (!rule.when.test(command)) continue
+    const fromStates = Array.isArray(rule.from) ? rule.from : [rule.from]
+    if (fromStates.includes(state)) return rule
   }
   return null
+}
+
+/** Extract the target branch from `git checkout <branch>` (non -b form). */
+function extractCheckoutBranch(command: string): string | null {
+  // Match: git checkout <branch> — not a flag, not -b/-B/-c/-C
+  const match = command.match(/\bgit\s+checkout\s+(?!-[bcBC](?:\s|$))([^\s;|&-][^\s;|&]*)/)
+  return match?.[1] ?? null
+}
+
+async function handleAsyncTransitions(
+  command: string,
+  cwd: string,
+  state: ProjectState
+): Promise<boolean> {
+  // ── git commit: reviewing → addressing-feedback if PR has CHANGES_REQUESTED ──
+  if (GIT_COMMIT_RE.test(command) && state === "reviewing") {
+    if (hasGhCli() && (await isGitHubRemote(cwd))) {
+      try {
+        const branch = (await git(["branch", "--show-current"], cwd)).trim()
+        if (branch) {
+          const pr = await getOpenPrForBranch<{ reviews: Array<{ state: string }> }>(
+            branch,
+            cwd,
+            "reviews"
+          )
+          if (pr?.reviews?.some((r) => r.state === "CHANGES_REQUESTED")) {
+            await writeProjectState(cwd, "addressing-feedback")
+            return true
+          }
+        }
+      } catch {
+        // gh unavailable or API error — skip
+      }
+    }
+  }
+
+  // ── git checkout <default-branch>: reviewing|addressing-feedback → developing ──
+  if (GIT_CHECKOUT_RE.test(command) && !GIT_CHECKOUT_NEW_BRANCH_RE.test(command)) {
+    if (state === "reviewing" || state === "addressing-feedback") {
+      const targetBranch = extractCheckoutBranch(command)
+      if (targetBranch) {
+        try {
+          const defaultBranch = await getDefaultBranch(cwd)
+          if (isDefaultBranch(targetBranch, defaultBranch)) {
+            await writeProjectState(cwd, "developing")
+            return true
+          }
+        } catch {
+          // skip
+        }
+      }
+    }
+  }
+
+  // ── git checkout -b / git switch -c: any → developing (only from default branch) ──
+  if (GIT_CHECKOUT_NEW_BRANCH_RE.test(command)) {
+    try {
+      const currentBranch = (await git(["branch", "--show-current"], cwd)).trim()
+      const defaultBranch = await getDefaultBranch(cwd)
+      if (currentBranch && isDefaultBranch(currentBranch, defaultBranch)) {
+        await writeProjectState(cwd, "developing")
+        return true
+      }
+    } catch {
+      // skip
+    }
+  }
+
+  return false
 }
 
 async function main(): Promise<void> {
@@ -37,17 +126,22 @@ async function main(): Promise<void> {
   const cwd = input.cwd
   if (!cwd) return
 
-  if (!isShellTool(input.tool_name ?? "")) return
+  if (input.tool_name !== "Bash" && input.tool_name !== "mcp__ide__runCommand") return
   if (!(await isGitRepo(cwd))) return
 
   const command = String(input.tool_input?.command ?? "")
-  const transition = detectTransition(command)
-  if (!transition) return
+  const state = (await readProjectState(cwd)) as ProjectState | null
+  if (!state) return
 
-  const state = await readProjectState(cwd)
-  if (state !== transition.from) return
+  // Synchronous rules first (fast, no API calls)
+  const syncRule = matchesSyncRule(command, state)
+  if (syncRule) {
+    await writeProjectState(cwd, syncRule.to)
+    return
+  }
 
-  await writeProjectState(cwd, transition.to)
+  // Async rules (may involve gh API or git subprocess)
+  await handleAsyncTransitions(command, cwd, state)
 }
 
 main()

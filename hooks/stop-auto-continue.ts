@@ -29,6 +29,7 @@ import {
 } from "../src/transcript-utils.ts"
 import {
   buildIssueGuidance,
+  getOpenPrForBranch,
   getTranscriptSummary,
   git,
   hasGhCli,
@@ -146,8 +147,15 @@ const WORKFLOW_PATTERNS = [
   /\b(implement|add|fix|build|extend|wire(?:\s+up)?|update)\b.*\bin\s+[a-z0-9]+-[a-z0-9-]+\b/i,
 ]
 
-export function isWorkflowSuggestion(text: string): boolean {
-  return WORKFLOW_PATTERNS.some((re) => re.test(text))
+export function isWorkflowSuggestion(
+  text: string,
+  opts: { skipPrPattern?: boolean } = {}
+): boolean {
+  return WORKFLOW_PATTERNS.some((re, i) => {
+    // Index 3 is the /\bpull\s+request\b/i pattern — exempt it in reviewing state
+    if (opts.skipPrPattern && i === 3) return false
+    return re.test(text)
+  })
 }
 
 /**
@@ -636,6 +644,104 @@ export function buildFillerSuggestion(editedPaths: Set<string>, docsOnly: boolea
   return `Reflect on this session: ${reflectAdvice} and update MEMORY.md with confirmed directives.`
 }
 
+// ─── Reviewing-state checklist ───────────────────────────────────────────────
+
+interface ReviewingPr {
+  number: number
+  reviews: Array<{ state: string; author: { login: string } }>
+  reviewThreads: Array<{ isResolved: boolean }>
+  statusCheckRollup: Array<{ state?: string; conclusion?: string; name?: string }>
+}
+
+/**
+ * When the project is in `reviewing` or `addressing-feedback` state, run a
+ * deterministic checklist before calling the AI backend. Returns a non-null
+ * directive string (the next step to suggest) when a blocking issue is found,
+ * or null when all checks pass (AI takes over).
+ *
+ * Priority order: conflicts → CHANGES_REQUESTED → unresolved threads → failing CI.
+ */
+export async function checkReviewingState(
+  cwd: string,
+  state: string | null
+): Promise<string | null> {
+  if (state !== "reviewing" && state !== "addressing-feedback") return null
+  if (!isGitRepo(cwd)) return null
+
+  // 1. Merge conflicts — highest priority, always resolvable locally
+  try {
+    const conflictFiles = (await git(["diff", "--name-only", "--diff-filter=U"], cwd)).trim()
+    if (conflictFiles) {
+      const files = conflictFiles.split("\n").filter(Boolean).slice(0, 5)
+      const fileList = files.map((f) => `\`${f}\``).join(", ")
+      return skillAdvice(
+        "resolve-conflicts",
+        `Resolve merge conflicts in ${fileList} before continuing PR review: use the /resolve-conflicts skill.`,
+        `Resolve merge conflicts in ${fileList} before continuing PR review: run \`git rebase --continue\` after fixing conflicts.`
+      )
+    }
+  } catch {
+    // git unavailable or not a git repo — skip conflict check
+  }
+
+  // 2–4. PR-level checks — only when gh is available and a PR exists
+  if (!hasGhCli() || !isGitHubRemote(cwd)) return null
+
+  let branch: string
+  try {
+    branch = (await git(["branch", "--show-current"], cwd)).trim()
+  } catch {
+    return null
+  }
+  if (!branch) return null
+
+  const pr = await getOpenPrForBranch<ReviewingPr>(
+    branch,
+    cwd,
+    "number,reviews,reviewThreads,statusCheckRollup"
+  )
+  if (!pr) return null
+
+  // 2. CHANGES_REQUESTED reviews — must be addressed before anything else
+  const changesRequested = (pr.reviews ?? []).filter((r) => r.state === "CHANGES_REQUESTED")
+  if (changesRequested.length > 0) {
+    const reviewers = [...new Set(changesRequested.map((r) => r.author?.login).filter(Boolean))]
+    const who = reviewers.length > 0 ? ` from ${reviewers.join(", ")}` : ""
+    return `Address CHANGES_REQUESTED review feedback${who} on PR #${pr.number} before merging.`
+  }
+
+  // 3. Unresolved review threads
+  const unresolvedThreads = (pr.reviewThreads ?? []).filter((t) => !t.isResolved)
+  if (unresolvedThreads.length > 0) {
+    const count = unresolvedThreads.length
+    return `Resolve ${count} unresolved review thread${count > 1 ? "s" : ""} on PR #${pr.number} before merging.`
+  }
+
+  // 4. Failing or pending CI checks
+  const failingChecks = (pr.statusCheckRollup ?? []).filter((c) => {
+    const state = c.state ?? ""
+    const conclusion = c.conclusion ?? ""
+    return (
+      state === "FAILURE" ||
+      state === "ERROR" ||
+      conclusion === "failure" ||
+      conclusion === "timed_out" ||
+      conclusion === "cancelled"
+    )
+  })
+  if (failingChecks.length > 0) {
+    const names = failingChecks
+      .map((c) => c.name)
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(", ")
+    const label = names ? ` (${names})` : ""
+    return `Fix failing CI checks${label} on PR #${pr.number} before merging.`
+  }
+
+  return null
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -655,7 +761,6 @@ async function main(): Promise<void> {
   }
 
   const projectState = await readProjectState(cwd)
-  void projectState // All states are active work phases; no state skips auto-continue
 
   if (!input.transcript_path) {
     terminate("skip", "MISSING_TRANSCRIPT", "no transcript_path in hook input — skipping block")
@@ -719,6 +824,14 @@ async function main(): Promise<void> {
     reflections: [],
   }
 
+  // Reviewing-state checklist: deterministic checks that short-circuit the AI call
+  // when the project is in `reviewing` or `addressing-feedback` state.
+  const reviewingDirective = await checkReviewingState(cwd, projectState)
+  if (reviewingDirective) {
+    // Emit the directive directly without calling the AI backend.
+    terminate("block", reviewingDirective)
+  }
+
   // No backend available — fail closed: block stop so the session cannot end silently
   // without a suggestion. The user should configure GEMINI_API_KEY or install claude/codex CLI.
   if (!hasAiProvider()) {
@@ -777,7 +890,10 @@ async function main(): Promise<void> {
     if (reflectiveNext) response.next = reflectiveNext
   }
 
-  if (response.next && isWorkflowSuggestion(response.next)) {
+  // In reviewing/addressing-feedback state, PR-related suggestions are valid next steps
+  // (e.g. "merge the pull request"). Skip the PR pattern check only in those states.
+  const isReviewingState = projectState === "reviewing" || projectState === "addressing-feedback"
+  if (response.next && isWorkflowSuggestion(response.next, { skipPrPattern: isReviewingState })) {
     const truncated = response.next.slice(0, 120).replace(/\s+/g, " ").trim()
     const ellipsis = response.next.length > 120 ? "…" : ""
     response.next = `${WORKFLOW_FINDING} [Filtered suggestion: "${truncated}${ellipsis}"]`
