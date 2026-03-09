@@ -32,6 +32,8 @@ export interface CompactSnapshotSummary {
   openDecisions: string[]
 }
 
+type SnapshotTask = Pick<SessionTask, "id" | "subject" | "status" | "activeForm" | "description">
+
 const SUMMARY_ITEM_LIMIT = 3
 const SUMMARY_TEXT_MAX_CHARS = 96
 const OPEN_DECISION_RE = /\b(decide|decision|choose|choice|confirm|clarify|tbd|open question)\b/i
@@ -75,36 +77,41 @@ export function buildCompactSnapshotSummary(
   }
 }
 
+function toSnapshotTasks(tasks: SessionTask[]): SnapshotTask[] {
+  return tasks.map((task) => ({
+    id: task.id,
+    subject: task.subject,
+    status: task.status,
+    ...(task.activeForm ? { activeForm: task.activeForm } : {}),
+    ...(task.description ? { description: task.description } : {}),
+  }))
+}
+
+function buildSnapshot(sessionId: string, tasks: SnapshotTask[]): CompactSnapshot {
+  return {
+    sessionId,
+    compactedAt: new Date().toISOString(),
+    tasks,
+    summary: buildCompactSnapshotSummary(tasks),
+  }
+}
+
 async function main(): Promise<void> {
-  const raw = (await Bun.stdin.json().catch(() => null)) as Record<string, unknown> | null
-  const input = raw !== null ? sessionHookInputSchema.parse(raw) : null
-  const sessionId = input?.session_id ?? ""
+  const input = sessionHookInputSchema.parse(await Bun.stdin.json())
+  const sessionId = input.session_id ?? ""
   if (!sessionId) return
 
   const home = getHomeDirWithFallback("")
   if (!home) return
 
-  const tasks = await readSessionTasks(sessionId, home)
-  if (tasks.length === 0) return
-
-  const snapshotTasks = tasks.map((t) => ({
-    id: t.id,
-    subject: t.subject,
-    status: t.status,
-    ...(t.activeForm ? { activeForm: t.activeForm } : {}),
-    ...(t.description ? { description: t.description } : {}),
-  }))
-
-  const snapshot: CompactSnapshot = {
-    sessionId,
-    compactedAt: new Date().toISOString(),
-    tasks: snapshotTasks,
-    summary: buildCompactSnapshotSummary(snapshotTasks),
-  }
+  const sessionTasks = await readSessionTasks(sessionId, home)
+  if (sessionTasks.length === 0) return
+  const snapshotTasks = toSnapshotTasks(sessionTasks)
+  const snapshot = buildSnapshot(sessionId, snapshotTasks)
 
   const snapshotPath = getSessionCompactSnapshotPath(sessionId, home)
   if (!snapshotPath) return
   await Bun.write(snapshotPath, JSON.stringify(snapshot, null, 2))
 }
 
-if (import.meta.main) main()
+if (import.meta.main) await main()

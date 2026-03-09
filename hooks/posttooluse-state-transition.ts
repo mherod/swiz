@@ -10,27 +10,44 @@
 // so this is safe to run regardless of workflow or whether PRs are used.
 
 import { readProjectState, writeProjectState } from "../src/settings.ts"
-import { isGitRepo, isShellTool, type ToolHookInput } from "./hook-utils.ts"
+import { GH_PR_CREATE_RE, GH_PR_MERGE_RE, isGitRepo, isShellTool } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
-const input = (await Bun.stdin.json()) as ToolHookInput
-if (!input.tool_name || !isShellTool(input.tool_name)) process.exit(0)
-
-const command = String(input.tool_input?.command ?? "")
-const cwd = input.cwd ?? process.cwd()
-
-if (!cwd || !(await isGitRepo(cwd))) process.exit(0)
-
-// Detect PR lifecycle commands at shell statement boundaries
-const isPrCreate = /(?:^|;|&&|\|\|)\s*gh pr create\b/.test(command)
-const isPrMerge = /(?:^|;|&&|\|\|)\s*gh pr merge\b/.test(command)
-
-if (!isPrCreate && !isPrMerge) process.exit(0)
-
-const state = await readProjectState(cwd)
-if (!state) process.exit(0)
-
-if (isPrCreate && state === "developing") {
-  await writeProjectState(cwd, "reviewing")
-} else if (isPrMerge && state === "reviewing") {
-  await writeProjectState(cwd, "developing")
+type ProjectState = "developing" | "reviewing"
+type TransitionRule = {
+  when: RegExp
+  from: ProjectState
+  to: ProjectState
 }
+
+const TRANSITION_RULES: readonly TransitionRule[] = [
+  { when: GH_PR_CREATE_RE, from: "developing", to: "reviewing" },
+  { when: GH_PR_MERGE_RE, from: "reviewing", to: "developing" },
+]
+
+function detectTransition(command: string): TransitionRule | null {
+  for (const rule of TRANSITION_RULES) {
+    if (rule.when.test(command)) return rule
+  }
+  return null
+}
+
+async function main(): Promise<void> {
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd
+  if (!cwd) return
+
+  if (!isShellTool(input.tool_name ?? "")) return
+  if (!(await isGitRepo(cwd))) return
+
+  const command = String(input.tool_input?.command ?? "")
+  const transition = detectTransition(command)
+  if (!transition) return
+
+  const state = await readProjectState(cwd)
+  if (state !== transition.from) return
+
+  await writeProjectState(cwd, transition.to)
+}
+
+main()

@@ -8,7 +8,14 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { readSwizSettings } from "../src/settings.ts"
-import { buildIssueGuidance, denyPreToolUse, git, isFileEditTool } from "./hook-utils.ts"
+import {
+  buildIssueGuidance,
+  denyPreToolUse,
+  git,
+  isFileEditTool,
+  isGitHubHost,
+  parseRemoteUrl,
+} from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
 const input = toolHookInputSchema.parse(await Bun.stdin.json())
@@ -61,56 +68,6 @@ async function resolveCanonical(p: string): Promise<string> {
 function isWithin(parent: string, child: string): boolean {
   const prefix = parent.endsWith("/") ? parent : `${parent}/`
   return child === parent || child.startsWith(prefix)
-}
-
-interface RemoteInfo {
-  host: string
-  slug: string // "owner/repo"
-}
-
-/**
- * Parse a git remote URL into {host, slug} for HTTPS, SSH colon, SSH slash,
- * and git+ssh:// formats. Returns null if the URL cannot be recognised.
- *
- * Handled formats:
- *   https://host/owner/repo[.git][/]
- *   [git+]ssh://[user@]host/owner/repo[.git]
- *   [user@]host:owner/repo[.git]     (SSH colon / SCP-like notation)
- */
-function parseRemoteUrl(url: string): RemoteInfo | null {
-  if (!url) return null
-
-  // HTTPS: https://host/owner/repo[.git][/]
-  let m = url.match(/^https?:\/\/([^/:]+)\/([^/\s]+\/[^/\s]+?)(?:\.git)?(?:\/)?$/)
-  if (m?.[1] && m?.[2]) return { host: m[1], slug: m[2] }
-
-  // SSH slash notation: [git+]ssh://[user@]host/owner/repo[.git]
-  m = url.match(/^(?:git\+)?ssh:\/\/(?:[^@/]+@)?([^/]+)\/([^/\s]+\/[^/\s]+?)(?:\.git)?$/)
-  if (m?.[1] && m?.[2]) return { host: m[1], slug: m[2] }
-
-  // SSH colon notation: [user@]host:owner/repo[.git]  (SCP-like, e.g. git@github.com:owner/repo)
-  m = url.match(/^(?:[^@\s:]+@)?([^:/\s]+):([^/\s]+\/[^/\s]+?)(?:\.git)?$/)
-  if (m?.[1] && m?.[2]) return { host: m[1], slug: m[2] }
-
-  return null
-}
-
-/**
- * Returns true when host is github.com or a GitHub Enterprise Server instance
- * registered in the gh CLI config (~/.config/gh/hosts.yml).
- */
-async function isGitHubHost(host: string): Promise<boolean> {
-  if (host === "github.com") return true
-  const home = getHomeDirOrNull()
-  if (!home) return false
-  try {
-    const content = await Bun.file(`${home}/.config/gh/hosts.yml`).text()
-    // hosts.yml has each hostname as a top-level YAML key followed by ":"
-    const escaped = host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    return new RegExp(`^${escaped}:`, "m").test(content)
-  } catch {
-    return false
-  }
 }
 
 // All paths are resolved through resolveCanonical so the isWithin() check

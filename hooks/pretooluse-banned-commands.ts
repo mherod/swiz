@@ -11,6 +11,7 @@ import {
   isShellTool,
   skillExists,
 } from "./hook-utils.ts"
+import { SHELL_SEGMENT_BOUNDARY, shellSegmentCommandRe } from "./utils/shell-patterns.ts"
 
 const RUNTIME = detectRuntime()
 const PM = detectPackageManager()
@@ -45,10 +46,19 @@ function stripQuotedStrings(command: string): string {
   return command.replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/'[^']*'/g, "''")
 }
 
+const GREP_CMD_RE = /(?:^|\|\s*)grep\s/
+const CD_CMD_RE = shellSegmentCommandRe("cd(?:\\s|$)")
+const FIND_CMD_RE = shellSegmentCommandRe("find\\s")
+const AWK_CMD_RE = shellSegmentCommandRe("awk\\s")
+const SED_CMD_RE = shellSegmentCommandRe("sed\\s")
+const TOUCH_CMD_RE = shellSegmentCommandRe("touch(?:\\s|$)")
+const PYTHON_CMD_RE = shellSegmentCommandRe("python3?(?:\\s|$)")
+const NODE_TS_NODE_CMD_RE = shellSegmentCommandRe("(node|ts-node)\\s")
+
 const RULES: Rule[] = [
   {
     // grep as a command: at start of line or directly after a pipe (not inside quoted strings)
-    match: (c) => /(?:^|\|\s*)grep\s/.test(c),
+    match: (c) => GREP_CMD_RE.test(c),
     severity: "warn",
     message: [
       "Tip: prefer `rg` (ripgrep) over `grep` — it's faster and respects .gitignore.",
@@ -56,7 +66,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /(?:^|[|;&])\s*cd(\s|$)/.test(c),
+    match: (c) => CD_CMD_RE.test(c),
     message: [
       "Do not use `cd`. Changing directory loses workspace context.",
       "",
@@ -68,7 +78,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /(?:^|[|;&])\s*find\s/.test(c),
+    match: (c) => FIND_CMD_RE.test(c),
     severity: "warn",
     message: [
       "Tip: prefer `fd` or the Glob tool over `find` — faster and respects .gitignore.",
@@ -76,7 +86,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /(?:^|[|;&])\s*awk\s/.test(c),
+    match: (c) => AWK_CMD_RE.test(c),
     message: [
       "Do not use `awk` for file processing. It produces unreviewed changes.",
       "",
@@ -86,7 +96,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /(?:^|[|;&])\s*sed\s/.test(c),
+    match: (c) => SED_CMD_RE.test(c),
     message: [
       "Do not use `sed` to edit files. It is unreliable and produces unreviewed changes.",
       "",
@@ -177,7 +187,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /(?:^|[|;&])\s*touch(\s|$)/.test(c),
+    match: (c) => TOUCH_CMD_RE.test(c),
     message: [
       "Do not use `touch` to create files. Use the Write tool instead.",
       "",
@@ -187,7 +197,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /(?:^|[|;&])\s*python3?(\s|$)/.test(c),
+    match: (c) => PYTHON_CMD_RE.test(c),
     message: [
       "Do not use `python` or `python3`. The system Python version is unreliable",
       "across environments.",
@@ -207,7 +217,7 @@ const RULES: Rule[] = [
   ...((PM === "bun"
     ? [
         {
-          match: (c: string) => /(?:^|[|;&])\s*(node|ts-node)\s/.test(c),
+          match: (c: string) => NODE_TS_NODE_CMD_RE.test(c),
           message: [
             "Do not use `node` or `ts-node`. This project uses bun.",
             "",
@@ -292,7 +302,7 @@ for (const rule of RULES) {
 // Split the command into per-invocation segments at chain operators (|, &, ;)
 // so we never match --reporter flags outside a bun test invocation.
 const SUPPORTED_BUN_REPORTERS = new Set(["dots", "junit"])
-const BUN_TEST_SEGMENT_RE = /(?:^|[|;&])\s*bun\s+test\b([^|;&]*)/g
+const BUN_TEST_SEGMENT_RE = new RegExp(`${SHELL_SEGMENT_BOUNDARY}\\s*bun\\s+test\\b([^|;&]*)`, "g")
 for (const segMatch of command.matchAll(BUN_TEST_SEGMENT_RE)) {
   const segment = segMatch[1] ?? ""
   // Collect ALL --reporter/-r occurrences in this segment so we can apply

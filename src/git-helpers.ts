@@ -7,6 +7,7 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { resolveSpawnCwd } from "./cwd.ts"
+import { getHomeDirOrNull } from "./home.ts"
 
 export const GIT_DIR_NAME = ".git"
 export const GIT_INDEX_LOCK = "index.lock"
@@ -138,6 +139,56 @@ export async function getRepoSlug(cwd: string): Promise<string | null> {
   const httpsMatch = url.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?$/)
   if (httpsMatch?.[1]) return httpsMatch[1]
   return null
+}
+
+export interface RemoteInfo {
+  host: string
+  slug: string // "owner/repo"
+}
+
+/**
+ * Parse a git remote URL into {host, slug} for HTTPS, SSH colon, SSH slash,
+ * and git+ssh:// formats. Returns null if the URL cannot be recognised.
+ *
+ * Handled formats:
+ *   https://host/owner/repo[.git][/]
+ *   [git+]ssh://[user@]host/owner/repo[.git]
+ *   [user@]host:owner/repo[.git]     (SSH colon / SCP-like notation)
+ */
+export function parseRemoteUrl(url: string): RemoteInfo | null {
+  if (!url) return null
+
+  // HTTPS: https://host/owner/repo[.git][/]
+  let m = url.match(/^https?:\/\/([^/:]+)\/([^/\s]+\/[^/\s]+?)(?:\.git)?(?:\/)?$/)
+  if (m?.[1] && m?.[2]) return { host: m[1], slug: m[2] }
+
+  // SSH slash notation: [git+]ssh://[user@]host/owner/repo[.git]
+  m = url.match(/^(?:git\+)?ssh:\/\/(?:[^@/]+@)?([^/]+)\/([^/\s]+\/[^/\s]+?)(?:\.git)?$/)
+  if (m?.[1] && m?.[2]) return { host: m[1], slug: m[2] }
+
+  // SSH colon notation: [user@]host:owner/repo[.git]  (SCP-like, e.g. git@github.com:owner/repo)
+  m = url.match(/^(?:[^@\s:]+@)?([^:/\s]+):([^/\s]+\/[^/\s]+?)(?:\.git)?$/)
+  if (m?.[1] && m?.[2]) return { host: m[1], slug: m[2] }
+
+  return null
+}
+
+/**
+ * Returns true when host is github.com or a GitHub Enterprise Server instance
+ * registered in the gh CLI config (~/.config/gh/hosts.yml).
+ */
+export async function isGitHubHost(host: string): Promise<boolean> {
+  if (host === "github.com") return true
+  const home = getHomeDirOrNull()
+  if (!home) return false
+  try {
+    const content = await Bun.file(`${home}/.config/gh/hosts.yml`).text()
+    // hosts.yml has each hostname as a top-level YAML key followed by ":"
+    const escaped = host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    return new RegExp(`^${escaped}:`, "m").test(content)
+  } catch {
+    return false
+  }
 }
 
 export function hasGhCli(): boolean {

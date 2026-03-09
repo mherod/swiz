@@ -7,7 +7,9 @@ import {
   GIT_DIR_NAME,
   type GitBranchStatus,
   getGitBranchStatus,
+  isGitHubHost,
   isReadOnlyGhApiArgs,
+  parseRemoteUrl,
   resolveGitPaths,
   withApiCache,
 } from "./git-helpers.ts"
@@ -267,5 +269,38 @@ describe("ensureGitExclude", () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }
+  })
+})
+
+describe("parseRemoteUrl", () => {
+  test("parses GitHub HTTPS remote", () => {
+    expect(parseRemoteUrl("https://github.com/acme/widget.git")).toEqual({
+      host: "github.com",
+      slug: "acme/widget",
+    })
+  })
+
+  test("parses GitHub SSH colon remote", () => {
+    expect(parseRemoteUrl("git@github.com:acme/widget.git")).toEqual({
+      host: "github.com",
+      slug: "acme/widget",
+    })
+  })
+
+  test("parses GitHub SSH slash remote", () => {
+    expect(parseRemoteUrl("ssh://git@github.example.com/acme/widget.git")).toEqual({
+      host: "github.example.com",
+      slug: "acme/widget",
+    })
+  })
+
+  test("returns null for unsupported remote format", () => {
+    expect(parseRemoteUrl("invalid-remote-format")).toBeNull()
+  })
+})
+
+describe("isGitHubHost", () => {
+  test("returns true for github.com", async () => {
+    expect(await isGitHubHost("github.com")).toBe(true)
   })
 })

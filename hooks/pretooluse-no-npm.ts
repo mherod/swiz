@@ -8,6 +8,7 @@ import {
   isShellTool,
   type PackageManager,
 } from "./hook-utils.ts"
+import { SHELL_SEGMENT_BOUNDARY } from "./utils/shell-patterns.ts"
 
 const PM = detectPackageManager()
 
@@ -133,9 +134,12 @@ const command: string = input?.tool_input?.command ?? ""
 if (!PM) process.exit(0)
 
 const target = CMD[PM]
+const PACKAGE_MANAGER_INVOKE_RE = new RegExp(
+  `${SHELL_SEGMENT_BOUNDARY}\\s*(npm|npx|yarn|pnpm|pnpx|bunx?)\\s*(\\S*)(.*?)(?=[|;&]|$)`
+)
 
 // Extract the package manager being invoked
-const m = command.match(/(?:^|[|;&])\s*(npm|npx|yarn|pnpm|pnpx|bunx?)\s*(\S*)(.*?)(?=[|;&]|$)/)
+const m = command.match(PACKAGE_MANAGER_INVOKE_RE)
 if (!m) process.exit(0)
 
 const invoked = (m[1] ?? "").toLowerCase()

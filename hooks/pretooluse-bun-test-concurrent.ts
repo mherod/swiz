@@ -2,6 +2,7 @@
 // PreToolUse hook: require --concurrent on bun test invocations.
 
 import { denyPreToolUse, isShellTool } from "./hook-utils.ts"
+import { SHELL_SEGMENT_BOUNDARY } from "./utils/shell-patterns.ts"
 
 const input = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
@@ -10,7 +11,10 @@ const command: string = input?.tool_input?.command ?? ""
 
 // Evaluate each shell segment independently so chained commands are handled.
 // Try \d>&\d? before [^|;&] so redirections like 2>&1 aren't split on &
-const BUN_TEST_SEGMENT_RE = /(?:^|[|;&])\s*bun\s+test\b((?:\d>&\d?|[^|;&])*)/g
+const BUN_TEST_SEGMENT_RE = new RegExp(
+  `${SHELL_SEGMENT_BOUNDARY}\\s*bun\\s+test\\b((?:\\d>&\\d?|[^|;&])*)`,
+  "g"
+)
 for (const segMatch of command.matchAll(BUN_TEST_SEGMENT_RE)) {
   const segment = segMatch[1] ?? ""
   const hasConcurrentFlag = /(?:^|\s)--concurrent(?:\s|=|$)/.test(segment)

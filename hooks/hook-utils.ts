@@ -38,6 +38,7 @@ import {
   GIT_WRITE_RE,
   READ_CMD_RE,
 } from "./utils/git-utils.ts"
+import { shellTokenCommandRe } from "./utils/shell-patterns.ts"
 
 export { skillAdvice, skillExists }
 export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
@@ -106,7 +107,7 @@ import { TASK_TOOLS } from "../src/tool-matchers.ts"
  * unrecoverable deadlocks (e.g. can't run `swiz state set` to escape a state
  * that blocks Bash).
  */
-const SWIZ_CMD_RE = /(?:^|\s|&&|\|\||;)swiz(?:\s|$)/
+const SWIZ_CMD_RE = shellTokenCommandRe("swiz(?:\\s|$)")
 export function isSwizCommand(input: ToolHookInput): boolean {
   const cmd = String(input.tool_input?.command ?? "")
   return SWIZ_CMD_RE.test(cmd)
@@ -783,8 +784,11 @@ export {
   extractPrNumber,
   FORCE_PUSH_RE,
   GH_CMD_RE,
+  GH_PR_CHECKOUT_RE,
+  GH_PR_CREATE_RE,
   GH_PR_MERGE_RE,
   GIT_ANY_CMD_RE,
+  GIT_CHECKOUT_RE,
   GIT_COMMIT_RE,
   GIT_EMPTY_TREE,
   GIT_MERGE_RE,
@@ -799,10 +803,13 @@ export {
   getRepoNameWithOwner,
   hasGitPushForceFlag,
   isDefaultBranch,
+  isGitHubHost,
   PR_CHECK_RE,
   parseGitStatSummary,
   parseGitStatus,
+  parseRemoteUrl,
   READ_CMD_RE,
+  type RemoteInfo,
   recentHeadRange,
   SOURCE_EXT_RE,
   SWIZ_ISSUE_RE,

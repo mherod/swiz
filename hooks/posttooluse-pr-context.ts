@@ -3,7 +3,14 @@
 // Detects branch switches via Bash tool, looks up the associated PR,
 // and injects PR body, merge status, and last comment as additionalContext.
 
-import { emitContext, ghJson, git, isShellTool } from "./hook-utils.ts"
+import {
+  emitContext,
+  GH_PR_CHECKOUT_RE,
+  GIT_CHECKOUT_RE,
+  ghJson,
+  git,
+  isShellTool,
+} from "./hook-utils.ts"
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)
@@ -17,9 +24,7 @@ if (!isShellTool(toolName) || !cwd || !command) process.exit(0)
 // Detect checkout patterns:
 //   git checkout <branch>  /  git checkout -b <branch>
 //   gh pr checkout <number-or-branch>
-const isCheckout =
-  /(?:^|;|&&|\|\|)\s*git checkout\b/.test(command) ||
-  /(?:^|;|&&|\|\|)\s*gh pr checkout\b/.test(command)
+const isCheckout = GIT_CHECKOUT_RE.test(command) || GH_PR_CHECKOUT_RE.test(command)
 
 if (!isCheckout) process.exit(0)
 

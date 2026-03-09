@@ -2,6 +2,7 @@
 
 import { git } from "../../src/git-helpers.ts"
 import { readProjectSettings } from "../../src/settings.ts"
+import { shellStatementCommandRe, shellTokenCommandRe } from "./shell-patterns.ts"
 
 // ── Branch utilities ──────────────────────────────────────────────────────────
 
@@ -257,29 +258,39 @@ export async function recentHeadRange(cwd: string, commitsBack = 10): Promise<st
 // ── Git command regexes ───────────────────────────────────────────────────────
 
 /** Matches `git push` anywhere in a shell command string. */
-export const GIT_PUSH_RE = /(?:^|\n|;|&&|\|\|)\s*git\s+push\b/
+export const GIT_PUSH_RE = shellStatementCommandRe("git\\s+push\\b")
 /** Matches `git commit` anywhere in a shell command string. */
-export const GIT_COMMIT_RE = /(?:^|\n|;|&&|\|\|)\s*git\s+commit\b/
+export const GIT_COMMIT_RE = shellStatementCommandRe("git\\s+commit\\b")
 
 /** Matches git read-only subcommands. */
-export const GIT_READ_RE =
-  /(?:^|\|\||&&|;)\s*git\s+(log|status|diff|show|branch|remote\b|rev-parse|rev-list|reflog|ls-files|describe|tag\b)(\s|$)/
+export const GIT_READ_RE = shellStatementCommandRe(
+  "git\\s+(log|status|diff|show|branch|remote\\b|rev-parse|rev-list|reflog|ls-files|describe|tag\\b)(\\s|$)"
+)
 
 /** Matches git subcommands that mutate state. */
 export const GIT_WRITE_RE =
   /\bgit\s+(add|commit|push|pull|fetch|checkout|switch|restore|reset|rebase|merge|stash\s+(?!list)|cherry-pick|revert|rm|mv|apply)\b/
 
 /** Matches `git push`, `git pull`, or `git fetch` — mechanical sync ops. */
-export const GIT_SYNC_RE = /(?:^|\|\||&&|;)\s*git\s+(push|pull|fetch)\b/
+export const GIT_SYNC_RE = shellStatementCommandRe("git\\s+(push|pull|fetch)\\b")
 
 /** Matches `git merge` anywhere in a shell command string. */
-export const GIT_MERGE_RE = /(?:^|\|\||&&|;)\s*git\s+merge\b/
+export const GIT_MERGE_RE = shellStatementCommandRe("git\\s+merge\\b")
 
 /** Matches `gh pr merge` anywhere in a shell command string. */
-export const GH_PR_MERGE_RE = /(?:^|\|\||&&|;)\s*gh\s+pr\s+merge\b/
+export const GH_PR_MERGE_RE = shellStatementCommandRe("gh\\s+pr\\s+merge\\b")
+
+/** Matches `gh pr create` anywhere in a shell command string. */
+export const GH_PR_CREATE_RE = shellStatementCommandRe("gh\\s+pr\\s+create\\b")
+
+/** Matches `git checkout` anywhere in a shell command string. */
+export const GIT_CHECKOUT_RE = shellStatementCommandRe("git\\s+checkout\\b")
+
+/** Matches `gh pr checkout` anywhere in a shell command string. */
+export const GH_PR_CHECKOUT_RE = shellStatementCommandRe("gh\\s+pr\\s+checkout\\b")
 
 /** Matches any `git` invocation in a shell command string. */
-export const GIT_ANY_CMD_RE = /(?:^|\s|[|;&])git\s/
+export const GIT_ANY_CMD_RE = shellTokenCommandRe("git\\s")
 
 /** Extract the PR number from a `gh pr merge <number>` command. */
 export function extractPrNumber(command: string): string | null {
@@ -389,16 +400,16 @@ export function hasGitPushForceFlag(command: string): boolean {
 }
 
 /** Matches `ls`, `rg`, or `grep` — pure read commands. */
-export const READ_CMD_RE = /(?:^|\|\||&&|;)\s*(ls|rg|grep)\b/
+export const READ_CMD_RE = shellStatementCommandRe("(ls|rg|grep)\\b")
 
 /** Matches any `gh` CLI invocation. */
-export const GH_CMD_RE = /(?:^|\|\||&&|;)\s*gh\b/
+export const GH_CMD_RE = shellStatementCommandRe("gh\\b")
 
 /** Matches `swiz issue close` or `swiz issue comment`. */
-export const SWIZ_ISSUE_RE = /(?:^|\|\||&&|;)\s*swiz\s+issue\s+(close|comment)\b/
+export const SWIZ_ISSUE_RE = shellStatementCommandRe("swiz\\s+issue\\s+(close|comment)\\b")
 
 /** Matches CI verification commands. */
-export const CI_WAIT_RE = /(?:^|\|\||&&|;)\s*(?:swiz|bun\b[^|;]*)\s+ci-wait\b/
+export const CI_WAIT_RE = shellStatementCommandRe("(?:swiz|bun\\b[^|;]*)\\s+ci-wait\\b")
 
 /** Matches `git branch --show-current`. */
 export const BRANCH_CHECK_RE = /\bgit\s+branch\s+--show-current(?!\S)/
@@ -409,6 +420,12 @@ export const PR_CHECK_RE = /\bgh\s+pr\s+list\b.*--head\b/
 // ── GitHub identity helpers ───────────────────────────────────────────────────
 
 import { gh } from "../../src/git-helpers.ts"
+
+export {
+  isGitHubHost,
+  parseRemoteUrl,
+  type RemoteInfo,
+} from "../../src/git-helpers.ts"
 
 /**
  * Extract the repository owner login from a git remote URL.

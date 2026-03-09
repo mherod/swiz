@@ -28,23 +28,29 @@ import {
   stripAnsi,
 } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
+import { shellSegmentCommandRe } from "./utils/shell-patterns.ts"
 
 // ── Command kind classification ───────────────────────────────────────────────
 
 type CommandKind = "test" | "lint" | "typecheck" | "check" | "build"
 
-const TEST_RE = /(?:^|[|;&]|\|\|)\s*bun\s+test\b/
-const LINT_RE = /(?:^|[|;&]|\|\|)\s*bun\s+run\s+lint\b/
-const TYPECHECK_RE = /(?:^|[|;&]|\|\|)\s*bun\s+run\s+typecheck\b/
-const CHECK_RE = /(?:^|[|;&]|\|\|)\s*bun\s+run\s+check\b/
-const BUILD_RE = /(?:^|[|;&]|\|\|)\s*bun\s+run\s+build\b/
+const TEST_RE = shellSegmentCommandRe("bun\\s+test\\b")
+const LINT_RE = shellSegmentCommandRe("bun\\s+run\\s+lint\\b")
+const TYPECHECK_RE = shellSegmentCommandRe("bun\\s+run\\s+typecheck\\b")
+const CHECK_RE = shellSegmentCommandRe("bun\\s+run\\s+check\\b")
+const BUILD_RE = shellSegmentCommandRe("bun\\s+run\\s+build\\b")
+const COMMAND_KIND_MATCHERS: ReadonlyArray<readonly [CommandKind, RegExp]> = [
+  ["test", TEST_RE],
+  ["lint", LINT_RE],
+  ["typecheck", TYPECHECK_RE],
+  ["check", CHECK_RE],
+  ["build", BUILD_RE],
+]
 
 export function classifyCommand(cmd: string): CommandKind | null {
-  if (TEST_RE.test(cmd)) return "test"
-  if (LINT_RE.test(cmd)) return "lint"
-  if (TYPECHECK_RE.test(cmd)) return "typecheck"
-  if (CHECK_RE.test(cmd)) return "check"
-  if (BUILD_RE.test(cmd)) return "build"
+  for (const [kind, pattern] of COMMAND_KIND_MATCHERS) {
+    if (pattern.test(cmd)) return kind
+  }
   return null
 }
 
@@ -102,84 +108,52 @@ export function commandFingerprint(cmd: string): string | null {
 //               controlled by an inline env var (e.g. OUTPUT_FILE=./r.json bun test)
 // Conservative: excludes /dev/ special devices and pure FD-to-FD redirects (2>&1).
 
-export function bashMutatesWorkspace(cmd: string): boolean {
+const WORKSPACE_MUTATION_PATTERNS: readonly RegExp[] = [
   // Plain output redirect: "> file" or ">> file"
   // (?<![0-9&]) excludes 2>&1-style FD redirects but also misses &> and N>.
-  // Those are handled by the two checks below.
+  // Those are handled by dedicated patterns below.
   // IMPORTANT: exclusion lookaheads embed \s* internally so the engine cannot
-  // backtrack the outer \s* to 0 and bypass the /dev/ exclusion. Without this,
-  // "> /dev/null" falsely matches because \s* retracts to 0, leaving the engine
-  // at the space character where (?!\/dev\/) incorrectly passes.
-  if (/(?<![0-9&])>>?(?!\s*\/dev\/)(?!\s*[&])/.test(cmd)) return true
+  // backtrack the outer \s* to 0 and bypass the /dev/ exclusion.
+  /(?<![0-9&])>>?(?!\s*\/dev\/)(?!\s*[&])/,
   // &> and &>> — bash shorthand for redirecting both stdout and stderr to a file
-  if (/&>>?(?!\s*\/dev\/)(?!\s*[&>])/.test(cmd)) return true
+  /&>>?(?!\s*\/dev\/)(?!\s*[&>])/,
   // N> and N>> numbered FD-to-file redirects (e.g. 1> file, 2> file)
-  // Excludes FD-to-FD (2>&1) via (?!\s*[&>])
-  if (/\d>>?(?!\s*\/dev\/)(?!\s*[&>])/.test(cmd)) return true
+  /\d>>?(?!\s*\/dev\/)(?!\s*[&>])/,
   // tee to a named destination (not /dev/null or /dev/stderr)
-  if (/\btee\s+(?!\/dev\/)/.test(cmd)) return true
-  // In-place sed: -i (any position in combined flags, e.g. -i, -iE, -Ei, -ni),
-  //   -i.bak (backup suffix), and GNU long form --in-place / --in-place=.bak
-  if (/\bsed\b(?:[^|;]*\s+-[a-zA-Z]*i[a-zA-Z.]*|[^|;]*--in-place)/.test(cmd)) return true
-  // In-place perl: -i (any position in combined flags, e.g. -i, -pi, -pie, -i.bak)
-  //   perl has no --in-place long form; -i is the only spelling
-  if (/\bperl\b[^|;]*\s+-[a-zA-Z]*i[a-zA-Z.]*/.test(cmd)) return true
-  // In-place ruby: -i (same semantics as perl/sed, e.g. -i, -ri, -i.bak)
-  if (/\bruby\b[^|;]*\s+-[a-zA-Z]*i[a-zA-Z.]*/.test(cmd)) return true
-  // GNU awk in-place: awk/gawk -i inplace (two-token form — inplace is a library name)
-  if (/\b(?:g?awk)\b[^|;]*-i\s+inplace/.test(cmd)) return true
-  // patch: always mutates workspace files (applies unified diffs to source files)
-  if (/\bpatch\b\s+/.test(cmd)) return true
-  // Python -c inline script with write-mode open(): open(..., 'w'/'a'/'x'/variants)
-  //   Covers: open('f','w'), open('f','wb'), open('f','ab'), open('f','xb'), etc.
-  if (/\bpython\d*\b[^|;]*-c\b.*\bopen\s*\([^)]*['"][wax][bt]?['"]/.test(cmd)) return true
-  // Python -c inline script with pathlib filesystem methods:
-  //   write_text/write_bytes (content writes), unlink/rename/replace (deletions/moves),
-  //   rmdir/mkdir/touch (directory and metadata mutations)
-  if (
-    /\bpython\d*\b[^|;]*-c\b.*\.(?:write(?:_text|_bytes)?|unlink|rename|replace|rmdir|mkdir|touch)\s*\(/.test(
-      cmd
-    )
-  )
-    return true
-  // Python -c inline script with os filesystem mutations (remove, unlink, rename, mkdir…)
-  if (
-    /\bpython\d*\b[^|;]*-c\b.*\bos\.(?:remove|unlink|rename|replace|makedirs|mkdir|rmdir)\s*\(/.test(
-      cmd
-    )
-  )
-    return true
-  // Python -c inline script with shutil mutations (copy, move, rmtree)
-  if (/\bpython\d*\b[^|;]*-c\b.*\bshutil\.(?:copy2?|move|rmtree)\s*\(/.test(cmd)) return true
-  // Python -m with in-place formatters that always mutate files (no flag required)
-  if (/\bpython\d*\b[^|;]*-m\s+(?:black|isort|autopep8)\b/.test(cmd)) return true
-  // Python -m 2to3 -w: explicit write-in-place flag
-  if (/\bpython\d*\b[^|;]*-m\s+2to3\b[^|;]*-w\b/.test(cmd)) return true
-  // Common CLI output flags — space-separated: -o path, --output path, --outfile path
-  if (/(?:^|\s)(?:-o|--(?:out(?:put|file|dir)?|report|log-?file))\s+\S/.test(cmd)) return true
-  // Common CLI output flags — equals-separated: --output=path, --outfile=path
-  if (/--(?:out(?:put|file|dir)?|report|log-?file)=\S/.test(cmd)) return true
-  // File deletions: rm, trash, unlink
-  if (/\b(?:rm|trash|unlink)\s+/.test(cmd)) return true
-  // File moves and copies (structural workspace changes)
-  if (/\b(?:mv|cp)\s+/.test(cmd)) return true
-  // Directory creation/deletion
-  if (/\b(?:mkdir|rmdir)\b/.test(cmd)) return true
-  // Environment variable-driven workspace mutations:
-  // Inline KEY=./relative-path assignments mean the command writes output to a
-  // workspace-local location specified by the env var.
-  // ./prefix distinguishes workspace-relative paths from system/absolute paths.
-  if (/\b[A-Z_]+=\.\//i.test(cmd)) return true
-  // Script-wrapper formatters and fixers that always mutate files:
-  //   bun run format / bun run lint:fix / bun run fix
-  //   biome format --write / biome check --write / biome format (implicit write in some configs)
-  //   eslint --fix / eslint --fix-dry-run (latter is not actually a mutation but conservative)
-  //   prettier --write / prettier -w
-  if (/\bbun\s+run\s+(?:format|lint[:-]fix|fix)\b/.test(cmd)) return true
-  if (/\bbiome\s+(?:format|check)\b[^|;]*--write\b/.test(cmd)) return true
-  if (/\beslint\b[^|;]*--fix\b/.test(cmd)) return true
-  if (/\bprettier\b[^|;]*(?:--write|-w)\b/.test(cmd)) return true
-  return false
+  /\btee\s+(?!\/dev\/)/,
+  // In-place sed/perl/ruby/awk operations
+  /\bsed\b(?:[^|;]*\s+-[a-zA-Z]*i[a-zA-Z.]*|[^|;]*--in-place)/,
+  /\bperl\b[^|;]*\s+-[a-zA-Z]*i[a-zA-Z.]*/,
+  /\bruby\b[^|;]*\s+-[a-zA-Z]*i[a-zA-Z.]*/,
+  /\b(?:g?awk)\b[^|;]*-i\s+inplace/,
+  // patch applies diffs to files
+  /\bpatch\b\s+/,
+  // Python -c inline mutation operations
+  /\bpython\d*\b[^|;]*-c\b.*\bopen\s*\([^)]*['"][wax][bt]?['"]/,
+  /\bpython\d*\b[^|;]*-c\b.*\.(?:write(?:_text|_bytes)?|unlink|rename|replace|rmdir|mkdir|touch)\s*\(/,
+  /\bpython\d*\b[^|;]*-c\b.*\bos\.(?:remove|unlink|rename|replace|makedirs|mkdir|rmdir)\s*\(/,
+  /\bpython\d*\b[^|;]*-c\b.*\bshutil\.(?:copy2?|move|rmtree)\s*\(/,
+  // Python -m formatters/fixers with in-place behavior
+  /\bpython\d*\b[^|;]*-m\s+(?:black|isort|autopep8)\b/,
+  /\bpython\d*\b[^|;]*-m\s+2to3\b[^|;]*-w\b/,
+  // CLI output path flags
+  /(?:^|\s)(?:-o|--(?:out(?:put|file|dir)?|report|log-?file))\s+\S/,
+  /--(?:out(?:put|file|dir)?|report|log-?file)=\S/,
+  // Generic file/directory mutations
+  /\b(?:rm|trash|unlink)\s+/,
+  /\b(?:mv|cp)\s+/,
+  /\b(?:mkdir|rmdir)\b/,
+  // Env-driven workspace-local output
+  /\b[A-Z_]+=\.\//i,
+  // Script-wrapper format/fix commands
+  /\bbun\s+run\s+(?:format|lint[:-]fix|fix)\b/,
+  /\bbiome\s+(?:format|check)\b[^|;]*--write\b/,
+  /\beslint\b[^|;]*--fix\b/,
+  /\bprettier\b[^|;]*(?:--write|-w)\b/,
+]
+
+export function bashMutatesWorkspace(cmd: string): boolean {
+  return WORKSPACE_MUTATION_PATTERNS.some((pattern) => pattern.test(cmd))
 }
 
 // ── Transcript event types ───────────────────────────────────────────────────
@@ -395,18 +369,18 @@ export function buildReadOutputStep(
 ): string {
   if (prevOutput) {
     // Output was successfully extracted — point to the exact transcript location.
-    return (
-      `Read the full output from the previous ${label} run ` +
-      `(transcript: \`${transcriptPath}\`, source line index: ${priorSourceLineIdx}).`
-    )
+    return [
+      `Read the full output from the previous ${label} run`,
+      `(transcript: \`${transcriptPath}\`, source line index: ${priorSourceLineIdx}).`,
+    ].join(" ")
   }
   if (transcriptPath) {
     // Transcript exists but output extraction failed — provide the path with softer guidance.
-    return (
-      `Review the previous ${label} output. The transcript is at \`${transcriptPath}\` ` +
-      `(source line index: ${priorSourceLineIdx}), but the prior output could not be extracted automatically — ` +
-      `check the transcript manually or review the errors shown below.`
-    )
+    return [
+      `Review the previous ${label} output. The transcript is at \`${transcriptPath}\``,
+      `(source line index: ${priorSourceLineIdx}), but the prior output could not be extracted automatically —`,
+      "check the transcript manually or review the errors shown below.",
+    ].join(" ")
   }
   // No transcript path at all — generic fallback.
   return `Read the full output from the previous ${label} run.`
@@ -493,18 +467,24 @@ async function main(): Promise<void> {
   // Build the "read previous output" step with a concrete file reference when available.
   const readStep = buildReadOutputStep(label, transcriptPath, priorEvent.sourceLineIdx, prevOutput)
 
-  denyPreToolUse(
-    `**Consecutive ${label} blocked.**\n\n` +
-      `You ran \`${label}\` and immediately tried to run it again without editing any files in between. ` +
-      `This is the over-filtering pattern — re-running with different grep/tail flags instead of reading the full output.\n\n` +
-      formatActionPlan([
-        readStep,
-        "Edit any file to signal you acted on the output, or update CLAUDE.md with a DO/DON'T rule.",
-        `Then re-run without filters: \`${firstLine.replace(/\s*\|.*$/, "").trim()}\``,
-      ]) +
-      remediationHints +
-      `\nThis gate clears once you edit any file — signalling you acted on the output rather than blindly retrying.`
-  )
+  const blockMessage = [
+    `**Consecutive ${label} blocked.**`,
+    [
+      `You ran \`${label}\` and immediately tried to run it again without editing any files in between.`,
+      "This is the over-filtering pattern — re-running with different grep/tail flags instead of reading the full output.",
+    ].join(" "),
+    formatActionPlan([
+      readStep,
+      "Edit any file to signal you acted on the output, or update CLAUDE.md with a DO/DON'T rule.",
+      `Then re-run without filters: \`${firstLine.replace(/\s*\|.*$/, "").trim()}\``,
+    ]),
+    remediationHints.trim(),
+    "This gate clears once you edit any file — signalling you acted on the output rather than blindly retrying.",
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+
+  denyPreToolUse(blockMessage)
 }
 
 if (import.meta.main) await main()

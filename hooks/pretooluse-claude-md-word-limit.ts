@@ -5,6 +5,7 @@
 // Threshold is read from project > global > default (5000) settings, matching
 // posttooluse-memory-size.ts and `swiz memory --strict` pre-commit enforcement.
 
+import { countMarkdownWords } from "../src/markdown-word-count.ts"
 import {
   compactionChecklistSteps,
   manualCompactionGuidanceFallback,
@@ -24,55 +25,6 @@ interface ToolInput {
   old_string?: string
   new_string?: string
   content?: string
-}
-
-async function countWords(text: string): Promise<number> {
-  // Remove YAML frontmatter with BOM and line-ending variants
-  // Matches: [optional BOM] + 3+ dashes + [line ending] + [content] + [line ending] + 3+ dashes + [line ending]
-  // Handles CRLF (\r\n), CR (\r), and LF (\n) line endings, plus UTF-8 BOM
-  let processed = text.replace(/^\uFEFF?---+[\r\n]+[\s\S]*?[\r\n]+---+[\r\n]+/, "")
-
-  // Strip fenced code blocks (```...```)
-  processed = processed.replace(/```[\s\S]*?```/g, "")
-
-  // Remove indented code blocks (consecutive lines with 4+ spaces or tab indentation)
-  // Matches one or more lines that start with 4+ spaces or a tab
-  processed = processed.replace(/(?:^(?: {4}|\t).*\n?)+/gm, "")
-
-  // Strip HTML comments (<!-- ... -->)
-  processed = processed.replace(/<!--[\s\S]*?-->/g, "")
-
-  // Remove markdown heading syntax (##, ###, etc.)
-  processed = processed.replace(/^#+\s/gm, "")
-
-  // Remove markdown emphasis markers (**, __, *, _, ``)
-  processed = processed.replace(/[*_`]/g, "")
-
-  // Remove markdown list markers (-, *, +) at line start
-  processed = processed.replace(/^[\s]*[-*+]\s+/gm, "")
-
-  // Remove blockquote markers (>) at line start
-  processed = processed.replace(/^>\s+/gm, "")
-
-  // Remove markdown link syntax [text](url) -> extract only text
-  processed = processed.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-
-  // Remove markdown image syntax ![alt](url)
-  processed = processed.replace(/!\[[^\]]*\]\([^)]+\)/g, "")
-
-  // Remove inline HTML tags
-  processed = processed.replace(/<[^>]+>/g, "")
-
-  // Remove markdown horizontal rules (---, ***, ___)
-  processed = processed.replace(/^[\s]*(?:---|===|\*\*\*|___)/gm, "")
-
-  // Normalize whitespace
-  processed = processed.trim().replace(/\s+/g, " ")
-
-  // Split on whitespace and count words (minimum 1 character per word)
-  const words = processed.split(/\s+/).filter((w) => w.length > 0)
-
-  return words.length
 }
 
 async function main() {
@@ -122,10 +74,10 @@ async function main() {
     }
 
     // Count words in projected content
-    const projectedWordCount = await countWords(projectedContent)
+    const projectedWordCount = countMarkdownWords(projectedContent)
 
     if (projectedWordCount > wordThreshold) {
-      const currentWordCount = await countWords(currentContent)
+      const currentWordCount = countMarkdownWords(currentContent)
       const skill = skillAdvice(
         "compact-memory",
         `Use the /compact-memory skill to reduce the file below ${wordThreshold} words, then retry this edit.`,
