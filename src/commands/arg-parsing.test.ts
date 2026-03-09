@@ -284,7 +284,13 @@ describe("parseContinueArgs", () => {
   })
 
   test("throws on invalid --provider value", () => {
-    expect(() => parseContinueArgs(["--provider", "openai"])).toThrow('must be "gemini" or "codex"')
+    expect(() => parseContinueArgs(["--provider", "openai"])).toThrow(
+      'must be "gemini", "codex", or "claude"'
+    )
+  })
+
+  test("accepts claude as a valid --provider value", () => {
+    expect(parseContinueArgs(["--provider", "claude"]).provider).toBe("claude")
   })
 
   test("throws when --provider is missing a value", () => {

@@ -94,6 +94,26 @@ describe("activeProvider", () => {
       expect(() => activeProvider()).toThrow("codex CLI is not installed")
     }
   })
+
+  test("AI_PROVIDER=claude is accepted as a valid provider ID", () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.AI_PROVIDER = "claude"
+    // claude CLI availability depends on the machine; just verify it doesn't throw "Unknown AI provider"
+    if (Bun.which("claude")) {
+      expect(activeProvider()).toBe("claude")
+    } else {
+      expect(() => activeProvider()).toThrow("claude CLI is not installed")
+    }
+  })
+
+  test("override argument accepts claude", () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    if (Bun.which("claude")) {
+      expect(activeProvider("claude")).toBe("claude")
+    } else {
+      expect(() => activeProvider("claude")).toThrow("claude CLI is not installed")
+    }
+  })
 })
 
 // ─── promptText ───────────────────────────────────────────────────────────────

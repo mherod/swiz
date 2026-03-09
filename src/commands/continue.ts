@@ -64,8 +64,8 @@ export function parseContinueArgs(args: string[]): ContinueArgs {
       printOnly = true
     } else if (arg === "--provider" || arg === "-p") {
       if (!next) throw new Error("Missing value for --provider")
-      if (next !== "gemini" && next !== "codex") {
-        throw new Error(`--provider must be "gemini" or "codex", got: ${next}`)
+      if (next !== "gemini" && next !== "codex" && next !== "claude") {
+        throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${next}`)
       }
       provider = next
       i++
@@ -87,7 +87,7 @@ export const continueCommand: Command = {
     { flags: "--print", description: "Print the suggested next step without resuming" },
     {
       flags: "--provider, -p <name>",
-      description: 'AI provider override: "gemini" or "codex" (default: auto-select)',
+      description: 'AI provider override: "gemini", "codex", or "claude" (default: auto-select)',
     },
   ],
   async run(args) {

@@ -125,7 +125,17 @@ describe("parseIdeaArgs", () => {
   })
 
   it("throws on invalid --provider value", () => {
-    expect(() => parseIdeaArgs(["--provider", "openai"])).toThrow('must be "gemini" or "codex"')
+    expect(() => parseIdeaArgs(["--provider", "openai"])).toThrow(
+      'must be "gemini", "codex", or "claude"'
+    )
+  })
+
+  it("accepts claude as a valid --provider value", () => {
+    expect(parseIdeaArgs(["--provider", "claude"]).provider).toBe("claude")
+  })
+
+  it("throws when --provider is missing a value", () => {
+    expect(() => parseIdeaArgs(["--provider"])).toThrow("Missing value for --provider")
   })
 
   it("throws on unknown args", () => {

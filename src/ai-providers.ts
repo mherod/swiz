@@ -3,11 +3,12 @@
 // Dispatches text/stream/object generation to whichever provider is available:
 //   1. Gemini (via GEMINI_API_KEY or gemini CLI OAuth)
 //   2. Codex CLI (via codex CLI in PATH)
+//   3. Claude Code (via claude CLI in PATH)
 //
 // Provider override (highest to lowest precedence):
 //   1. options.provider passed to each prompt function
-//   2. AI_PROVIDER env var ("gemini" | "codex")
-//   3. Auto-select: Gemini preferred, Codex CLI fallback
+//   2. AI_PROVIDER env var ("gemini" | "codex" | "claude")
+//   3. Auto-select: Gemini preferred, then Codex CLI, then Claude Code
 //
 // Usage:
 //   import { hasAiProvider, promptText, promptStreamText, promptObject } from "./ai-providers.ts"
@@ -29,7 +30,7 @@ import {
 
 // ─── Provider types ───────────────────────────────────────────────────────────
 
-export type AiProviderId = "gemini" | "codex"
+export type AiProviderId = "gemini" | "codex" | "claude"
 
 // ─── Codex provider ──────────────────────────────────────────────────────────
 
@@ -53,10 +54,16 @@ export interface PromptStreamOptions extends PromptOptions {
 }
 
 const CODEX_DEFAULT_MODEL = "codex-mini-latest"
+const CLAUDE_DEFAULT_MODEL = "sonnet"
 
 function hasCodexCli(): boolean {
   if (process.env.AI_TEST_NO_BACKEND === "1") return false
   return Boolean(Bun.which("codex"))
+}
+
+function hasClaudeCode(): boolean {
+  if (process.env.AI_TEST_NO_BACKEND === "1") return false
+  return Boolean(Bun.which("claude"))
 }
 
 function resolveSignal(options?: PromptOptions): {
@@ -131,17 +138,76 @@ async function promptCodexObject<T>(
   }
 }
 
+async function promptClaudeText(prompt: string, options?: PromptOptions): Promise<string> {
+  const { generateText } = await import("ai")
+  const { createClaudeCode } = await import("ai-sdk-provider-claude-code")
+  const provider = createClaudeCode()
+  const model = provider.languageModel(options?.model ?? CLAUDE_DEFAULT_MODEL)
+  const { signal, cleanup } = resolveSignal(options)
+  try {
+    const { text } = await generateText({ model, prompt, abortSignal: signal })
+    return text.trim()
+  } finally {
+    cleanup()
+  }
+}
+
+async function promptClaudeStreamText(
+  prompt: string,
+  options?: PromptStreamOptions
+): Promise<string> {
+  const { streamText } = await import("ai")
+  const { createClaudeCode } = await import("ai-sdk-provider-claude-code")
+  const provider = createClaudeCode()
+  const model = provider.languageModel(options?.model ?? CLAUDE_DEFAULT_MODEL)
+  const { signal, cleanup } = resolveSignal(options)
+  try {
+    const result = streamText({ model, prompt, abortSignal: signal })
+    let text = ""
+    for await (const part of result.textStream) {
+      text += part
+      options?.onTextPart?.(part)
+    }
+    return text.trim()
+  } finally {
+    cleanup()
+  }
+}
+
+async function promptClaudeObject<T>(
+  prompt: string,
+  schema: ZodType<T>,
+  options?: PromptOptions
+): Promise<T> {
+  const { generateText, Output } = await import("ai")
+  const { createClaudeCode } = await import("ai-sdk-provider-claude-code")
+  const provider = createClaudeCode()
+  const model = provider.languageModel(options?.model ?? CLAUDE_DEFAULT_MODEL)
+  const { signal, cleanup } = resolveSignal(options)
+  try {
+    const { output } = await generateText({
+      model,
+      output: Output.object({ schema }),
+      prompt,
+      abortSignal: signal,
+    })
+    return output
+  } finally {
+    cleanup()
+  }
+}
+
 // ─── Provider selection ───────────────────────────────────────────────────────
 
 /**
- * Returns true when at least one AI provider (Gemini or Codex CLI) is available.
+ * Returns true when at least one AI provider (Gemini, Codex CLI, or Claude Code) is available.
  * Call `ensureGeminiApiKey()` before this to populate Gemini key from Keychain.
  *
  * Set AI_TEST_NO_BACKEND=1 to simulate "no backend" in tests.
  */
 export function hasAiProvider(): boolean {
   if (process.env.AI_TEST_NO_BACKEND === "1") return false
-  return hasGeminiApiKey() || hasCodexCli()
+  return hasGeminiApiKey() || hasCodexCli() || hasClaudeCode()
 }
 
 /**
@@ -149,8 +215,8 @@ export function hasAiProvider(): boolean {
  *
  * Resolution order (highest to lowest precedence):
  *   1. `override` argument (from options.provider or CLI --provider flag)
- *   2. AI_PROVIDER env var ("gemini" | "codex")
- *   3. Auto-select: Gemini preferred when both are available
+ *   2. AI_PROVIDER env var ("gemini" | "codex" | "claude")
+ *   3. Auto-select: Gemini preferred, then Codex CLI, then Claude Code
  *
  * Throws if an explicit override requests a provider that is not available.
  */
@@ -175,13 +241,22 @@ export function activeProvider(override?: AiProviderId): AiProviderId | null {
     }
     return "codex"
   }
+  if (requested === "claude") {
+    if (!hasClaudeCode()) {
+      throw new Error(
+        "AI_PROVIDER=claude requested but the claude CLI is not installed or not in PATH."
+      )
+    }
+    return "claude"
+  }
   if (requested !== undefined) {
-    throw new Error(`Unknown AI provider "${requested}". Valid values: gemini, codex.`)
+    throw new Error(`Unknown AI provider "${requested}". Valid values: gemini, codex, claude.`)
   }
 
   // Auto-select
   if (hasGeminiApiKey()) return "gemini"
   if (hasCodexCli()) return "codex"
+  if (hasClaudeCode()) return "claude"
   return null
 }
 
@@ -205,7 +280,12 @@ export async function promptText(prompt: string, options?: PromptOptions): Promi
   if (provider === "codex") {
     return promptCodexText(prompt, options)
   }
-  throw new Error("No AI provider available. Set GEMINI_API_KEY or install the codex CLI.")
+  if (provider === "claude") {
+    return promptClaudeText(prompt, options)
+  }
+  throw new Error(
+    "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
+  )
 }
 
 /**
@@ -231,7 +311,12 @@ export async function promptStreamText(
   if (provider === "codex") {
     return promptCodexStreamText(prompt, options)
   }
-  throw new Error("No AI provider available. Set GEMINI_API_KEY or install the codex CLI.")
+  if (provider === "claude") {
+    return promptClaudeStreamText(prompt, options)
+  }
+  throw new Error(
+    "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
+  )
 }
 
 /**
@@ -256,7 +341,12 @@ export async function promptObject<T>(
   if (provider === "codex") {
     return promptCodexObject(prompt, schema, options)
   }
-  throw new Error("No AI provider available. Set GEMINI_API_KEY or install the codex CLI.")
+  if (provider === "claude") {
+    return promptClaudeObject(prompt, schema, options)
+  }
+  throw new Error(
+    "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
+  )
 }
 
 // Re-export ensureGeminiApiKey so callers only need this module for startup setup.

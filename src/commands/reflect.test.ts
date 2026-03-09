@@ -153,7 +153,13 @@ describe("parseReflectArgs", () => {
   })
 
   it("throws on invalid --provider value", () => {
-    expect(() => parseReflectArgs(["--provider", "openai"])).toThrow('must be "gemini" or "codex"')
+    expect(() => parseReflectArgs(["--provider", "openai"])).toThrow(
+      'must be "gemini", "codex", or "claude"'
+    )
+  })
+
+  it("accepts claude as a valid --provider value", () => {
+    expect(parseReflectArgs(["--provider", "claude"]).provider).toBe("claude")
   })
 
   it("throws when --provider is missing a value", () => {
