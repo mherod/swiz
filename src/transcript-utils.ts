@@ -868,9 +868,25 @@ const SED_INPLACE_RE =
   /(?:^|[|;&\s])sed\s+(?:-[a-zA-Z]*i(?:\.[^\s]*)?\s+(?:''|"")?\s?|--in-place(?:=\S+)?\s+)(?:'[^']*'|"[^"]*"|\S+)\s+((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
 
 // Matches tee command file targets: tee [-a] [--] <file> [file2 ...]
-// Excludes process substitution targets >(...).
+// Excludes process substitution targets >(cmd).
 const TEE_RE =
   /(?:^|[|;&\s])tee\s+(?:-a\s+|--\s+)?((?:"[^"]*"|'[^']*'|[^\s|;&"'>(][^\s|;&"']*)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"'>(][^\s|;&"']*))*)/gm
+
+// Tokenizes a shell argument string respecting single and double quoting.
+// "my file.ts" and 'my file.ts' are returned as single tokens (quotes stripped).
+// Unquoted whitespace is the delimiter. Flag tokens starting with '-' are excluded.
+const SHELL_TOKEN_RE = /"([^"]*)"|'([^']*)'|([^\s]+)/g
+
+function shellTokens(args: string): string[] {
+  const tokens: string[] = []
+  SHELL_TOKEN_RE.lastIndex = 0
+  for (const m of args.matchAll(SHELL_TOKEN_RE)) {
+    // Group 1 = double-quoted content, 2 = single-quoted content, 3 = unquoted token
+    const token = m[1] ?? m[2] ?? m[3] ?? ""
+    if (token && !token.startsWith("-")) tokens.push(token)
+  }
+  return tokens
+}
 
 function extractPathsFromCommand(command: string): string[] {
   const results: string[] = []
@@ -879,42 +895,28 @@ function extractPathsFromCommand(command: string): string[] {
   SHELL_FILE_MOD_RE.lastIndex = 0
   for (const m of command.matchAll(SHELL_FILE_MOD_RE)) {
     const args = m[1]?.trim()
-    if (!args) continue
-    for (const token of args.split(/\s+/)) {
-      const unquoted = token.replace(/^["']|["']$/g, "")
-      if (unquoted && !unquoted.startsWith("-")) results.push(unquoted)
-    }
+    if (args) for (const t of shellTokens(args)) results.push(t)
   }
 
   // Output redirection extractor (echo/cat/heredoc > file, >> file)
   REDIRECT_WRITE_RE.lastIndex = 0
   for (const m of command.matchAll(REDIRECT_WRITE_RE)) {
     const raw = m[1]?.trim()
-    if (!raw) continue
-    const unquoted = raw.replace(/^["']|["']$/g, "")
-    if (unquoted && !unquoted.startsWith("-")) results.push(unquoted)
+    if (raw) for (const t of shellTokens(raw)) results.push(t)
   }
 
   // sed -i in-place file extractor
   SED_INPLACE_RE.lastIndex = 0
   for (const m of command.matchAll(SED_INPLACE_RE)) {
     const args = m[1]?.trim()
-    if (!args) continue
-    for (const token of args.split(/\s+/)) {
-      const unquoted = token.replace(/^["']|["']$/g, "")
-      if (unquoted && !unquoted.startsWith("-")) results.push(unquoted)
-    }
+    if (args) for (const t of shellTokens(args)) results.push(t)
   }
 
   // tee command file extractor (cmd | tee [-a] [--] file [file2 ...])
   TEE_RE.lastIndex = 0
   for (const m of command.matchAll(TEE_RE)) {
     const args = m[1]?.trim()
-    if (!args) continue
-    for (const token of args.split(/\s+/)) {
-      const unquoted = token.replace(/^["']|["']$/g, "")
-      if (unquoted && !unquoted.startsWith("-")) results.push(unquoted)
-    }
+    if (args) for (const t of shellTokens(args)) results.push(t)
   }
 
   return results

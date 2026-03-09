@@ -890,6 +890,29 @@ describe("transcript-utils.ts", () => {
       // process substitution target — should not appear as a plain file path
       expect(paths.has(">(gzip")).toBe(false)
     })
+
+    it("extracts double-quoted path with spaces from mv", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry('mv "/repo/my file.ts" "/repo/renamed file.ts"')
+      )
+      expect(paths.has("/repo/my file.ts")).toBe(true)
+      expect(paths.has("/repo/renamed file.ts")).toBe(true)
+    })
+
+    it("extracts single-quoted path with spaces from output redirection", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("echo hello > '/repo/my notes.md'"))
+      expect(paths.has("/repo/my notes.md")).toBe(true)
+    })
+
+    it("extracts double-quoted path with spaces from tee", () => {
+      const paths = extractEditedFilePaths(makeBashEntry('cmd | tee "/repo/output file.ts"'))
+      expect(paths.has("/repo/output file.ts")).toBe(true)
+    })
+
+    it("extracts single-quoted path with spaces from sed -i", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("sed -i 's/x/y/' '/repo/source file.ts'"))
+      expect(paths.has("/repo/source file.ts")).toBe(true)
+    })
   })
 
   // ─── isDocsOnlySession ──────────────────────────────────────────────────────
