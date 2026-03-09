@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**88 hooks. 11 event types. Every agent. Zero compromises.**
+**89 hooks. 11 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -122,7 +122,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (42)
+### PreToolUse (43)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -134,6 +134,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-no-npm.ts` | Intercepts `npm` and `yarn` commands and redirects to the project's actual package manager. No more lock file corruption from the wrong tool. |
 | `pretooluse-bun-test-concurrent.ts` | Blocks `bun test` invocations that do not include `--concurrent`. Ensures test runs follow the enforced concurrent execution policy. |
 | `pretooluse-protect-sandbox.ts` | Blocks Bash commands that attempt to disable the sandboxed-edits setting. The sandbox can only be disabled by the user at the terminal — agents cannot opt out. |
+| `pretooluse-protect-strict-main.ts` | Blocks Bash commands that attempt to disable the strict-no-direct-main setting. The feature-branch enforcement can only be disabled by the user at the terminal — agents cannot opt out. |
 | `pretooluse-long-sleep.ts` | Blocks `sleep` commands over a threshold. Agents shouldn't be waiting in loops — if they are, something is wrong. |
 | `pretooluse-no-as-any.ts` | Blocks code edits that introduce `as any` type assertions. TypeScript exists for a reason. |
 | `pretooluse-no-node-modules-edit.ts` | Blocks any edit to files inside `node_modules/`. Manual edits there are overwritten on the next install — use version upgrades, upstream PRs, or patch-package instead. |

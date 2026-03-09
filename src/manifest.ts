@@ -201,6 +201,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-no-npm.ts", timeout: 5 },
       { file: "pretooluse-bun-test-concurrent.ts", timeout: 5 },
       { file: "pretooluse-protect-sandbox.ts", timeout: 5 },
+      { file: "pretooluse-protect-strict-main.ts", timeout: 5 },
       { file: "pretooluse-long-sleep.ts", timeout: 5 },
       { file: "pretooluse-commit-checks-gate.ts", timeout: 5 },
       { file: "pretooluse-stale-approval-gate.ts", timeout: 10, cooldownSeconds: 300 },
