@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 // PreToolUse hook: Block low-signal PR comments about merge conflicts.
-// Detects gh pr comment / gh pr review --comment calls whose body content
-// consists only of merge-conflict or rebase-request noise, and denies them.
-// The project has dedicated local remediation paths for conflict state
+// Detects gh pr comment / gh pr review --comment / gh api POST-to-comments calls
+// whose body content consists only of merge-conflict or rebase-request noise, and
+// denies them.  The project has dedicated local remediation paths for conflict state
 // (stop-branch-conflicts.ts, /rebase-onto-main) that avoid public noise.
 
 import { denyPreToolUse, isShellTool, skillAdvice } from "./hook-utils.ts"
@@ -17,19 +17,39 @@ const command: string = input.tool_input?.command ?? ""
 
 const GH_PR_COMMENT_RE = /\bgh\s+pr\s+comment\b/
 const GH_PR_REVIEW_COMMENT_RE = /\bgh\s+pr\s+review\b.*--comment\b/
+// gh api repos/{owner}/{repo}/issues/{number}/comments  (POST)
+// gh api repos/{owner}/{repo}/pulls/{number}/comments   (POST)
+const GH_API_ISSUE_COMMENT_RE = /\bgh\s+api\b.*\/(?:issues|pulls)\/\d+\/comments\b/
 
 const isPrComment = GH_PR_COMMENT_RE.test(command)
 const isPrReviewComment = GH_PR_REVIEW_COMMENT_RE.test(command)
-if (!isPrComment && !isPrReviewComment) process.exit(0)
+const isApiComment = GH_API_ISSUE_COMMENT_RE.test(command)
+if (!isPrComment && !isPrReviewComment && !isApiComment) process.exit(0)
 
-// Extract --body / -b value from the raw command (need quoted content visible)
-const bodyMatch =
-  command.match(/(?:--body|-b)\s+"((?:[^"\\]|\\.)*)"/s) ??
-  command.match(/(?:--body|-b)\s+'([^']*)'/s) ??
-  command.match(/(?:--body|-b)\s+(\S+)/)
-if (!bodyMatch) process.exit(0)
+// Extract body text from the command.
+// For gh pr comment / gh pr review --comment: --body / -b flags
+// For gh api: --field body=<value> or --input <file> (file-based input is opaque, skip)
+function extractBody(cmd: string): string | null {
+  // --field body="..." or --field body='...' or --field body=value
+  const fieldMatch =
+    cmd.match(/--field\s+body="((?:[^"\\]|\\.)*)"/s) ??
+    cmd.match(/--field\s+body='([^']*)'/s) ??
+    cmd.match(/--field\s+body=(\S+)/)
+  if (fieldMatch) return fieldMatch[1] ?? null
 
-const body = bodyMatch[1] ?? ""
+  // --body / -b flags (used by gh pr comment and gh pr review)
+  const bodyMatch =
+    cmd.match(/(?:--body|-b)\s+"((?:[^"\\]|\\.)*)"/s) ??
+    cmd.match(/(?:--body|-b)\s+'([^']*)'/s) ??
+    cmd.match(/(?:--body|-b)\s+(\S+)/)
+  if (bodyMatch) return bodyMatch[1] ?? null
+
+  return null
+}
+
+const body = extractBody(command)
+if (body === null) process.exit(0)
+
 // NFKC-normalize before pattern matching (required by nfkc-enforcement.test.ts)
 const bodyNormalized = body.normalize("NFKC").toLowerCase()
 
