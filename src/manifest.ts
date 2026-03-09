@@ -335,7 +335,12 @@ export const manifest: HookGroup[] = [
 
 export function validateDispatchRoutes(
   dispatchRoutes: Record<string, string>,
-  agents: { id: string; hooksConfigurable: boolean; eventMap: Record<string, string> }[]
+  agents: {
+    id: string
+    hooksConfigurable: boolean
+    eventMap: Record<string, string>
+    unsupportedEvents?: string[]
+  }[]
 ): void {
   const manifestEvents = [...new Set(manifest.map((g) => g.event))]
   // Scheduled events are dispatched externally (e.g. LaunchAgent) — not by agent hook systems.
@@ -365,7 +370,9 @@ export function validateDispatchRoutes(
 
   // 3. Configurable agents must map all non-scheduled manifest events
   for (const agent of agents.filter((a) => a.hooksConfigurable)) {
+    const unsupported = new Set(agent.unsupportedEvents ?? [])
     for (const event of agentEvents) {
+      if (unsupported.has(event)) continue
       if (!(event in agent.eventMap)) {
         errors.push(
           `Agent "${agent.id}" is missing eventMap entry for manifest event "${event}". ` +

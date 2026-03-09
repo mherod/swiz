@@ -391,6 +391,14 @@ describe("agents.ts", () => {
       const codex = getAgent("codex")!
       expect(codex.eventMap.preToolUse).toBeDefined()
     })
+
+    it("gemini marks subagent lifecycle events unsupported", () => {
+      const gemini = getAgent("gemini")!
+      expect(gemini.unsupportedEvents).toContain("subagentStart")
+      expect(gemini.unsupportedEvents).toContain("subagentStop")
+      expect(gemini.eventMap.subagentStart).toBeUndefined()
+      expect(gemini.eventMap.subagentStop).toBeUndefined()
+    })
   })
 
   describe("detectInstalledAgents", () => {

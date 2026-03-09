@@ -62,7 +62,8 @@ describe("dispatch routing validation", () => {
 
   it("every configurable agent maps all non-scheduled manifest events", () => {
     for (const agent of CONFIGURABLE_AGENTS) {
-      const unmapped = agentEvents.filter((e) => !(e in agent.eventMap))
+      const unsupported = new Set(agent.unsupportedEvents ?? [])
+      const unmapped = agentEvents.filter((e) => !unsupported.has(e) && !(e in agent.eventMap))
       expect(
         unmapped,
         `Agent "${agent.id}" missing eventMap entries for: ${unmapped.join(", ")}`

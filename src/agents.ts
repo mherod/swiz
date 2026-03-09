@@ -21,6 +21,8 @@ export interface AgentDef {
   toolAliases: Record<string, string>
   /** Event name map: canonical → agent-specific */
   eventMap: Record<string, string>
+  /** Canonical events intentionally unsupported by this agent runtime. */
+  unsupportedEvents?: string[]
   /** Whether this agent supports user-configurable hooks via a settings file */
   hooksConfigurable: boolean
   /** One or more env vars — any being set (truthy) identifies this agent */
@@ -127,9 +129,8 @@ export const AGENTS: AgentDef[] = [
       userPromptSubmit: "BeforeAgent",
       preCompact: "PreCompress",
       notification: "Notification",
-      subagentStart: "SubagentStart",
-      subagentStop: "SubagentStop",
     },
+    unsupportedEvents: ["subagentStart", "subagentStop"],
   },
   {
     id: "codex",
