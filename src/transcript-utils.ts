@@ -872,6 +872,11 @@ const SED_INPLACE_RE =
 const TEE_RE =
   /(?:^|[|;&\s])tee\s+(?:-a\s+|--\s+)?((?:"[^"]*"|'[^']*'|[^\s|;&"'>(][^\s|;&"']*)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"'>(][^\s|;&"']*))*)/gm
 
+// Matches touch, truncate, and install file targets.
+// touch [-t ...] <file> [file2 ...], truncate [-s size] <file>, install [-m mode] src dst.
+const TOUCH_TRUNCATE_INSTALL_RE =
+  /(?:^|[|;&\s])(?:touch|truncate)\s+(?:-\S+\s+)*((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
+
 // Tokenizes a shell argument string respecting single and double quoting.
 // "my file.ts" and 'my file.ts' are returned as single tokens (quotes stripped).
 // Unquoted whitespace is the delimiter. Flag tokens starting with '-' are excluded.
@@ -919,6 +924,13 @@ function extractPathsFromCommand(command: string): string[] {
     if (args) for (const t of shellTokens(args)) results.push(t)
   }
 
+  // touch / truncate file extractor
+  TOUCH_TRUNCATE_INSTALL_RE.lastIndex = 0
+  for (const m of command.matchAll(TOUCH_TRUNCATE_INSTALL_RE)) {
+    const args = m[1]?.trim()
+    if (args) for (const t of shellTokens(args)) results.push(t)
+  }
+
   return results
 }
 
@@ -931,6 +943,7 @@ function extractPathsFromCommand(command: string): string[] {
  *       output redirections: > file, >> file (echo, cat, heredoc, etc.)
  *       sed -i in-place edits: sed -i 's/.../.../' file
  *       tee file targets: cmd | tee [-a] file [file2 ...]
+ *       touch / truncate file targets
  *
  * Used to detect docs-only sessions before invoking the LLM so the analysis
  * can be scoped correctly.

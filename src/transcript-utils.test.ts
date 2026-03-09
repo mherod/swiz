@@ -913,6 +913,27 @@ describe("transcript-utils.ts", () => {
       const paths = extractEditedFilePaths(makeBashEntry("sed -i 's/x/y/' '/repo/source file.ts'"))
       expect(paths.has("/repo/source file.ts")).toBe(true)
     })
+
+    it("extracts file from touch command", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("touch /repo/src/new-file.ts"))
+      expect(paths.has("/repo/src/new-file.ts")).toBe(true)
+    })
+
+    it("extracts multiple files from touch", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("touch /repo/a.ts /repo/b.ts"))
+      expect(paths.has("/repo/a.ts")).toBe(true)
+      expect(paths.has("/repo/b.ts")).toBe(true)
+    })
+
+    it("extracts file from truncate command", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("truncate -s 0 /repo/log.txt"))
+      expect(paths.has("/repo/log.txt")).toBe(true)
+    })
+
+    it("extracts quoted path with spaces from touch", () => {
+      const paths = extractEditedFilePaths(makeBashEntry('touch "/repo/my component.ts"'))
+      expect(paths.has("/repo/my component.ts")).toBe(true)
+    })
   })
 
   // ─── isDocsOnlySession ──────────────────────────────────────────────────────
