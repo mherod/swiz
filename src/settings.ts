@@ -350,7 +350,7 @@ export const swizSettingsSchema = z.object({
     .catch([...ALL_STATUS_LINE_SEGMENTS])
     .transform(normalizeStatusLineSegments),
   sessions: z.record(z.string(), sessionSwizSettingsSchema).catch({}),
-  disabledHooks: z.array(z.string().min(1)).optional(),
+  disabledHooks: z.array(z.string().min(1)).optional().catch(undefined),
 })
 
 interface ReadOptions {
@@ -713,7 +713,7 @@ export async function readSwizSettings(options: ReadOptions = {}): Promise<SwizS
   if (!(await file.exists())) return cloneDefaults()
 
   try {
-    return normalizeSettings(await file.json())
+    return swizSettingsSchema.parse(await file.json()) as SwizSettings
   } catch (error) {
     if (options.strict) {
       throw new Error(`Failed to parse swiz settings at ${path}: ${String(error)}`)

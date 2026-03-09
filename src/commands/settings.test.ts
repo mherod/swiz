@@ -1143,3 +1143,96 @@ describe("collaborationMode settings", () => {
     expect(effective.ambitionMode).toBe("aggressive")
   })
 })
+
+// ─── swizSettingsSchema constraint enforcement (regression for #184) ──────────
+// These tests verify that readSwizSettings() enforces swizSettingsSchema bounds
+// instead of the looser normalizeSettings() field-by-field checks.
+
+describe("readSwizSettings schema constraint enforcement", () => {
+  async function writeSettings(home: string, settings: Record<string, unknown>): Promise<void> {
+    const configDir = join(home, ".swiz")
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, "settings.json"), JSON.stringify(settings))
+  }
+
+  test("narratorSpeed above 600 falls back to default", async () => {
+    const home = await createTempHome()
+    await writeSettings(home, { narratorSpeed: 999 })
+    const settings = await readSwizSettings({ home })
+    expect(settings.narratorSpeed).toBe(0) // DEFAULT_SETTINGS.narratorSpeed
+  })
+
+  test("narratorSpeed of 0 is accepted (boundary value)", async () => {
+    const home = await createTempHome()
+    await writeSettings(home, { narratorSpeed: 0 })
+    const settings = await readSwizSettings({ home })
+    expect(settings.narratorSpeed).toBe(0)
+  })
+
+  test("narratorSpeed of 600 is accepted (max boundary)", async () => {
+    const home = await createTempHome()
+    await writeSettings(home, { narratorSpeed: 600 })
+    const settings = await readSwizSettings({ home })
+    expect(settings.narratorSpeed).toBe(600)
+  })
+
+  test("prAgeGateMinutes non-integer falls back to default", async () => {
+    const home = await createTempHome()
+    await writeSettings(home, { prAgeGateMinutes: 2.5 })
+    const settings = await readSwizSettings({ home })
+    expect(settings.prAgeGateMinutes).toBe(10) // DEFAULT_SETTINGS.prAgeGateMinutes
+  })
+
+  test("pushCooldownMinutes non-integer falls back to default", async () => {
+    const home = await createTempHome()
+    await writeSettings(home, { pushCooldownMinutes: 1.2 })
+    const settings = await readSwizSettings({ home })
+    expect(settings.pushCooldownMinutes).toBe(0) // DEFAULT_SETTINGS.pushCooldownMinutes
+  })
+
+  test("disabledHooks with empty string entries falls back to undefined", async () => {
+    const home = await createTempHome()
+    await writeSettings(home, { disabledHooks: ["stop-github-ci.ts", ""] })
+    const settings = await readSwizSettings({ home })
+    // Empty string fails z.string().min(1) → entire disabledHooks falls back to undefined
+    expect(settings.disabledHooks).toBeUndefined()
+  })
+
+  test("disabledHooks with all valid entries is accepted", async () => {
+    const home = await createTempHome()
+    await writeSettings(home, { disabledHooks: ["stop-github-ci.ts", "stop-git-status.ts"] })
+    const settings = await readSwizSettings({ home })
+    expect(settings.disabledHooks).toEqual(["stop-github-ci.ts", "stop-git-status.ts"])
+  })
+
+  test("memoryLineThreshold non-integer falls back to default", async () => {
+    const home = await createTempHome()
+    await writeSettings(home, { memoryLineThreshold: 1400.5 })
+    const settings = await readSwizSettings({ home })
+    expect(settings.memoryLineThreshold).toBe(1400) // DEFAULT_SETTINGS.memoryLineThreshold
+  })
+
+  test("memoryWordThreshold below minimum falls back to default", async () => {
+    const home = await createTempHome()
+    await writeSettings(home, { memoryWordThreshold: 0 })
+    const settings = await readSwizSettings({ home })
+    expect(settings.memoryWordThreshold).toBe(5000) // DEFAULT_SETTINGS.memoryWordThreshold
+  })
+
+  test("valid settings within all bounds are preserved exactly", async () => {
+    const home = await createTempHome()
+    await writeSettings(home, {
+      narratorSpeed: 300,
+      prAgeGateMinutes: 5,
+      pushCooldownMinutes: 10,
+      disabledHooks: ["stop-github-ci.ts"],
+      pushGate: true,
+    })
+    const settings = await readSwizSettings({ home })
+    expect(settings.narratorSpeed).toBe(300)
+    expect(settings.prAgeGateMinutes).toBe(5)
+    expect(settings.pushCooldownMinutes).toBe(10)
+    expect(settings.disabledHooks).toEqual(["stop-github-ci.ts"])
+    expect(settings.pushGate).toBe(true)
+  })
+})
