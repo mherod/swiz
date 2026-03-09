@@ -57,13 +57,11 @@ function mergeNestedConfig(
 
   // Add one dispatch entry per unique canonical event (skip scheduled events — not agent events)
   const seenEvents = new Set<string>()
-  const unsupported = new Set(agent.unsupportedEvents ?? [])
   for (const group of manifest) {
     if (group.scheduled) continue
     if (seenEvents.has(group.event)) continue
     seenEvents.add(group.event)
-    if (unsupported.has(group.event)) continue
-    if (!(group.event in agent.eventMap)) continue
+    if (!supportsAgentEvent(agent, group.event)) continue
 
     const eventName = translateEvent(group.event, agent)
     if (!merged[eventName]) merged[eventName] = []
@@ -77,6 +75,11 @@ function mergeNestedConfig(
   }
 
   return merged
+}
+
+function supportsAgentEvent(agent: AgentDef, canonicalEvent: string): boolean {
+  const unsupported = new Set(agent.unsupportedEvents ?? [])
+  return !unsupported.has(canonicalEvent) && canonicalEvent in agent.eventMap
 }
 
 function mergeFlatConfig(
@@ -94,13 +97,11 @@ function mergeFlatConfig(
 
   // Add one dispatch entry per unique canonical event (skip scheduled events — not agent events)
   const seenEvents = new Set<string>()
-  const unsupported = new Set(agent.unsupportedEvents ?? [])
   for (const group of manifest) {
     if (group.scheduled) continue
     if (seenEvents.has(group.event)) continue
     seenEvents.add(group.event)
-    if (unsupported.has(group.event)) continue
-    if (!(group.event in agent.eventMap)) continue
+    if (!supportsAgentEvent(agent, group.event)) continue
 
     const eventName = translateEvent(group.event, agent)
     if (!merged[eventName]) merged[eventName] = []
