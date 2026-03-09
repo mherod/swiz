@@ -3,8 +3,11 @@
 // Scans CLAUDE.md and MEMORY.md files reachable from the session cwd at stop time.
 // Uses the same threshold resolution and file matching as posttooluse-memory-size.ts
 // to ensure the two hooks cannot drift independently.
+//
+// Performance: uses an incremental mtime/size index at .swiz/memory-index.json so
+// unchanged files are not re-read on every stop invocation.
 
-import { readdir } from "node:fs/promises"
+import { mkdir, readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { GIT_DIR_NAME } from "../src/git-helpers.ts"
 import { getHomeDirWithFallback } from "../src/home.ts"
@@ -24,6 +27,44 @@ interface MemoryViolation {
   lines: number
   words: number
   violations: string[]
+}
+
+/** Cached entry stored in .swiz/memory-index.json per discovered file. */
+interface IndexEntry {
+  /** Last-modified time in milliseconds (from stat.mtimeMs). */
+  mtime: number
+  /** File size in bytes (from stat.size). Used alongside mtime as cache key. */
+  size: number
+  lines: number
+  words: number
+}
+
+type MemoryIndex = Record<string, IndexEntry>
+
+/** Path to the persistent incremental index for a project. */
+export function indexPath(cwd: string): string {
+  return join(cwd, ".swiz", "memory-index.json")
+}
+
+/** Load the existing index from disk; returns empty object on any error. */
+export async function loadIndex(cwd: string): Promise<MemoryIndex> {
+  try {
+    const text = await Bun.file(indexPath(cwd)).text()
+    return JSON.parse(text) as MemoryIndex
+  } catch {
+    return {}
+  }
+}
+
+/** Persist the updated index. Silently ignores write failures. */
+export async function saveIndex(cwd: string, index: MemoryIndex): Promise<void> {
+  try {
+    const dir = join(cwd, ".swiz")
+    await mkdir(dir, { recursive: true })
+    await Bun.write(indexPath(cwd), JSON.stringify(index, null, 2))
+  } catch {
+    // Non-fatal: next invocation will simply do a full read for missed entries.
+  }
 }
 
 /**
@@ -80,13 +121,37 @@ async function main(): Promise<void> {
     }
   }
 
+  // Load the incremental index and build updated stats, reading only changed files.
+  const index = await loadIndex(cwd)
+  const updatedIndex: MemoryIndex = {}
   const violations: MemoryViolation[] = []
 
   for (const filePath of allFiles) {
-    const file = Bun.file(filePath)
-    if (!(await file.exists())) continue
-    const content = await file.text()
-    const { lines, words } = countStats(content)
+    let fileInfo: { mtime: number; size: number }
+    try {
+      const s = await stat(filePath)
+      fileInfo = { mtime: s.mtimeMs, size: s.size }
+    } catch {
+      // File disappeared between discovery and stat — skip it.
+      continue
+    }
+
+    const cached = index[filePath]
+    let lines: number
+    let words: number
+
+    if (cached && cached.mtime === fileInfo.mtime && cached.size === fileInfo.size) {
+      // Cache hit: file unchanged — reuse stored stats.
+      ;({ lines, words } = cached)
+    } else {
+      // Cache miss: file is new or modified — read and recompute.
+      const file = Bun.file(filePath)
+      if (!(await file.exists())) continue
+      const content = await file.text()
+      ;({ lines, words } = countStats(content))
+    }
+
+    updatedIndex[filePath] = { mtime: fileInfo.mtime, size: fileInfo.size, lines, words }
 
     const fileViolations = getMemoryThresholdViolations(
       { lines, words },
@@ -103,6 +168,9 @@ async function main(): Promise<void> {
       })
     }
   }
+
+  // Persist the updated index (only entries for currently-discovered files).
+  await saveIndex(cwd, updatedIndex)
 
   if (violations.length === 0) return
 
@@ -131,4 +199,4 @@ async function main(): Promise<void> {
   blockStop(reason)
 }
 
-main()
+if (import.meta.main) main()
