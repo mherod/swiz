@@ -122,16 +122,18 @@ async function main() {
 
     deny(
       `STOP. ${toolName} is BLOCKED because this session has no incomplete tasks.\n\n` +
-        `You must keep at least one task in pending or in_progress status before using bash/shell/edit tools.\n\n` +
+        `Required:\n` +
+        `  • At least ${MIN_INCOMPLETE_TASKS} incomplete tasks (pending/in_progress)\n` +
+        `  • At least ${MIN_PENDING_TASKS} pending task for the next intended step\n\n` +
         formatActionPlan(
           [
-            "Create or update a task so its status is pending or in_progress.",
+            `Use TaskCreate to add at least ${MIN_INCOMPLETE_TASKS} tasks — one in_progress for current work and at least one pending for the next step.`,
             "Include a concrete description of the current work and next step.",
           ],
           { translateToolNames: true }
         ) +
         `\n` +
-        `After at least one task is incomplete, ${toolName} will be unblocked automatically.`
+        `After task minimums are met, ${toolName} will be unblocked automatically.`
     )
   }
 
@@ -245,6 +247,17 @@ async function main() {
   process.exit(0)
 }
 
-void main().catch(() => {
-  process.exit(0)
+void main().catch((err: unknown) => {
+  const message = err instanceof Error ? err.message : String(err)
+  deny(
+    `STOP. ${"\u26a0\ufe0f"} pretooluse-require-tasks encountered an unexpected error and is failing closed.\n\n` +
+      `Error: ${message}\n\n` +
+      formatActionPlan(
+        [
+          "Check that the hook file and its dependencies are intact.",
+          "If the error persists, inspect the hook source at hooks/pretooluse-require-tasks.ts.",
+        ],
+        { translateToolNames: true }
+      )
+  )
 })

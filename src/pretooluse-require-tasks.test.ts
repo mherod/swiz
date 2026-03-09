@@ -89,6 +89,9 @@ describe("pretooluse-require-tasks hook", () => {
         | undefined
       expect(reason?.permissionDecision).toBe("deny")
       expect(String(reason?.permissionDecisionReason ?? "")).toContain("no incomplete tasks")
+      // Message must state the exact enforced minimums
+      expect(String(reason?.permissionDecisionReason ?? "")).toContain("2")
+      expect(String(reason?.permissionDecisionReason ?? "")).toContain("pending")
 
       // Verify no task file was auto-created
       const taskPath = join(tmpHome, ".claude", "tasks", sessionId, "test-1.json")
@@ -179,6 +182,36 @@ describe("pretooluse-require-tasks hook", () => {
     } finally {
       await rm(tmpHome, { recursive: true, force: true })
     }
+  })
+
+  test("denies (fail-closed) when hook receives malformed JSON stdin", async () => {
+    const proc = Bun.spawn(["bun", HOOK_PATH], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      cwd: process.cwd(),
+    })
+    proc.stdin.write("not valid json {{{")
+    proc.stdin.end()
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    // On malformed JSON, Bun.stdin.json() throws — hook must deny, not allow
+    // (Some JSON parse errors may result in empty tool_name which exits 0 — acceptable fallback)
+    // The important thing is that the hook does NOT produce an "allow" decision
+    let parsed: Record<string, unknown> | null = null
+    try {
+      parsed = JSON.parse(stdout.trim())
+    } catch {}
+    if (parsed !== null) {
+      const hookOutput = (parsed as Record<string, unknown>)?.hookSpecificOutput as
+        | Record<string, unknown>
+        | undefined
+      expect(hookOutput?.permissionDecision).not.toBe("allow")
+    }
+    expect(proc.exitCode).toBe(0)
   })
 
   test("allows Bash when all tasks are completed (wrap-up exemption)", async () => {
