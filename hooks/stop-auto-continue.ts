@@ -717,8 +717,9 @@ export async function checkReviewingState(
     return `Resolve ${count} unresolved review thread${count > 1 ? "s" : ""} on PR #${pr.number} before merging.`
   }
 
-  // 4. Failing or pending CI checks
-  const failingChecks = (pr.statusCheckRollup ?? []).filter((c) => {
+  // 4. CI check state
+  const checks = pr.statusCheckRollup ?? []
+  const failingChecks = checks.filter((c) => {
     const state = c.state ?? ""
     const conclusion = c.conclusion ?? ""
     return (
@@ -739,7 +740,21 @@ export async function checkReviewingState(
     return `Fix failing CI checks${label} on PR #${pr.number} before merging.`
   }
 
-  return null
+  const pendingChecks = checks.filter((c) => {
+    const state = c.state ?? ""
+    const conclusion = c.conclusion ?? ""
+    return state === "PENDING" || state === "EXPECTED" || (conclusion === "" && state !== "SUCCESS")
+  })
+  if (pendingChecks.length > 0) {
+    return `Wait for ${pendingChecks.length} pending CI check${pendingChecks.length > 1 ? "s" : ""} on PR #${pr.number} before merging.`
+  }
+
+  // All checks pass — PR is ready to merge
+  return skillAdvice(
+    "pr-qa-and-merge",
+    `PR #${pr.number} is ready to merge — no conflicts, no pending reviews, CI is green. Use the /pr-qa-and-merge skill to merge.`,
+    `PR #${pr.number} is ready to merge — no conflicts, no pending reviews, CI is green. Run: gh pr merge ${pr.number} --squash`
+  )
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
