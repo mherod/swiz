@@ -785,7 +785,11 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBe("block")
     expect(result.reason).toContain("Collaboration/workflow policy finding detected")
-    expect(result.reason).not.toContain("guard-aware push orchestration module in plugg-platform")
+    // The original suggestion is included as a diagnostic to distinguish genuine violations
+    // from filter false-positives — wrapped in [Filtered suggestion: "..."] for clarity.
+    expect(result.reason).toContain(
+      '[Filtered suggestion: "Implement a guard-aware push orchestration module in plugg-platform"]'
+    )
   })
 
   test("filters out reflections containing XML markup", async () => {
@@ -1642,11 +1646,32 @@ describe("isWorkflowSuggestion", () => {
       "Add pagination to the list endpoints",
       "Implement webhook delivery retry with exponential backoff",
       "Fix the login flow to handle expired refresh tokens",
+      // Product-level suggestions about the swiz hook framework itself (issue #177 false-positives)
+      "Implement session-aware transcript scanning in the hook system",
+      "Implement session-aware parsing in the hook framework",
+      "Add hook-aware context injection to the session start flow",
+      "Fix session boundary detection in the hook infrastructure",
+      "Update the hook system to use readSessionLines for cross-session awareness",
     ]
 
     for (const suggestion of allowed) {
       test(`allows: "${suggestion.slice(0, 60)}..."`, () => {
         expect(isWorkflowSuggestion(suggestion)).toBe(false)
+      })
+    }
+  })
+
+  describe("still blocks specific hook-file implementation directives", () => {
+    const blocked = [
+      "Implement the pretooluse-repeated-lint-test hook to track consecutive runs",
+      "Fix posttooluse-task-output.ts hook to strip ANSI before pattern matching",
+      "Update stop-auto-continue.ts hook to use session-scoped transcript scanning",
+      "Add a pretooluse-foo hook that validates branch naming conventions",
+    ]
+
+    for (const suggestion of blocked) {
+      test(`blocks: "${suggestion.slice(0, 60)}..."`, () => {
+        expect(isWorkflowSuggestion(suggestion)).toBe(true)
       })
     }
   })

@@ -132,7 +132,11 @@ const WORKFLOW_PATTERNS = [
   /\b(push|commit|pr)\s+skill\b/i,
   /\b(pre-?push|pre-?commit|stop)\s+hook/i,
   /\bhook\s+(script|implementation|behaviour|behavior|filtering)\b/i,
-  /\b(implement|modify|wire|add|fix|update)\b.*\bhook\b/i,
+  /\bhook-\w+\b.*\b(filtering|output|suggestion)\b/i,
+  // Match only when a specific hook filename (e.g. stop-auto-continue.ts, pretooluse-foo.ts)
+  // is referenced — prevents false positives on product suggestions about "the hook system/framework".
+  /\b(implement|modify|wire|add|fix|update)\b.*\b(?:pre-?tool-?use|post-?tool-?use|stop-|session-?start|user-?prompt)[a-z0-9-]*(?:\.ts)?\s+hook\b/i,
+  /\b(implement|modify|wire|add|fix|update)\b.*\bhook\b.*\b(?:pre-?tool-?use|post-?tool-?use|stop-|session-?start|user-?prompt)[a-z0-9-]*/i,
   /\bcollaboration\s+(signal|guard|detection|check)\b/i,
   /\bbranch\s+(policy|protection|enforcement)\b/i,
   /\b(push|commit)\s+guard\b/i,
@@ -719,7 +723,9 @@ async function main(): Promise<void> {
   }
 
   if (response.next && isWorkflowSuggestion(response.next)) {
-    response.next = WORKFLOW_FINDING
+    const truncated = response.next.slice(0, 120).replace(/\s+/g, " ").trim()
+    const ellipsis = response.next.length > 120 ? "…" : ""
+    response.next = `${WORKFLOW_FINDING} [Filtered suggestion: "${truncated}${ellipsis}"]`
   }
 
   if (effective.ambitionMode === "creative" && response.next) {
