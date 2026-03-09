@@ -9,12 +9,15 @@
 //
 // Transitions (async — require runtime checks):
 //   git commit + branch has CHANGES_REQUESTED PR reviews : reviewing → addressing-feedback
+//   git commit + branch has no upstream tracking         : any → developing
+//   git commit + on default branch (solo repo)           : any → developing
 //   git checkout <default-branch>                        : reviewing | addressing-feedback → developing
 //   git checkout -b <new-branch> (from default branch)  : any → developing
 //
 // Only transitions if current state matches the expected source state(s),
 // so this is safe to run regardless of workflow or whether PRs are used.
 
+import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
 import { readProjectState, writeProjectState } from "../src/settings.ts"
 import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote, isGitRepo } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
@@ -26,6 +29,7 @@ import {
   GIT_CHECKOUT_RE,
   GIT_COMMIT_RE,
   getDefaultBranch,
+  getGitStatusV2,
   isDefaultBranch,
 } from "./utils/git-utils.ts"
 
@@ -83,6 +87,43 @@ async function handleAsyncTransitions(
       } catch {
         // gh unavailable or API error — skip
       }
+    }
+  }
+
+  // ── git commit + no valid upstream tracking: reviewing|addressing-feedback → developing ──
+  if (GIT_COMMIT_RE.test(command) && (state === "reviewing" || state === "addressing-feedback")) {
+    try {
+      const status = await getGitStatusV2(cwd)
+      if (!status) return false
+
+      // "no valid upstream" covers both:
+      // 1) no upstream configured (status.upstream === null)
+      // 2) upstream configured but gone on remote (status.upstreamGone === true)
+      if (status.upstream === null || status.upstreamGone) {
+        await writeProjectState(cwd, "developing")
+        return true
+      }
+    } catch {
+      // skip
+    }
+  }
+
+  // ── git commit on default branch (solo repo): any → developing ──
+  if (GIT_COMMIT_RE.test(command)) {
+    try {
+      const branch = (await git(["branch", "--show-current"], cwd)).trim()
+      if (branch) {
+        const defaultBranch = await getDefaultBranch(cwd)
+        if (isDefaultBranch(branch, defaultBranch)) {
+          const collaboration = await detectProjectCollaborationPolicy(cwd)
+          if (!collaboration.isCollaborative) {
+            await writeProjectState(cwd, "developing")
+            return true
+          }
+        }
+      }
+    } catch {
+      // skip
     }
   }
 
