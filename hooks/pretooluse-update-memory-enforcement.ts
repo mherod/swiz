@@ -17,6 +17,7 @@ import {
   isGitRepo,
   isNotebookTool,
   isWriteTool,
+  readSessionLines,
   readSessionTasks,
 } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
@@ -188,15 +189,8 @@ async function main(): Promise<void> {
     if (!foundClaudeMd) return
   }
 
-  let transcriptText = ""
-  try {
-    transcriptText = await Bun.file(transcriptPath).text()
-  } catch {
-    return
-  }
-  if (!transcriptText.trim()) return
-
-  const lines = transcriptText.split("\n").filter((line) => line.trim())
+  const lines = (await readSessionLines(transcriptPath)).filter((line) => line.trim())
+  if (lines.length === 0) return
   let lastTriggerIndex = -1
 
   for (let i = lines.length - 1; i >= 0; i--) {

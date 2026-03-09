@@ -1207,6 +1207,43 @@ export function collectBlockedToolUseIds(lines: string[]): Set<string> {
   return blocked
 }
 
+/**
+ * Read transcript JSONL and return only the lines that belong to the current
+ * session — i.e. lines that appear AFTER the last `{"type":"system"}` entry.
+ *
+ * Claude Code inserts a `{"type":"system"}` entry when resuming from a
+ * compacted conversation. Events before that boundary are from prior sessions
+ * and must not influence history-dependent hooks (consecutive-run gates,
+ * instruction trackers, memory-enforcement checks, etc.).
+ *
+ * Returns all non-empty lines when no boundary is found (fresh session or
+ * transcript that predates compaction markers).
+ */
+export async function readSessionLines(transcriptPath: string): Promise<string[]> {
+  let text = ""
+  try {
+    text = await Bun.file(transcriptPath).text()
+  } catch {
+    return []
+  }
+  const allLines = text.split("\n")
+  let sessionStartIdx = 0
+  for (let i = allLines.length - 1; i >= 0; i--) {
+    const raw = allLines[i]
+    if (!raw?.trim()) continue
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed?.type === "system") {
+        sessionStartIdx = i + 1
+        break
+      }
+    } catch {
+      // ignore malformed lines
+    }
+  }
+  return sessionStartIdx > 0 ? allLines.slice(sessionStartIdx) : allLines
+}
+
 // ── Git command regexes ───────────────────────────────────────────────────
 
 /** Matches `git push` anywhere in a shell command string. */

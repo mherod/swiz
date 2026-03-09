@@ -22,6 +22,7 @@ import {
   isCodeChangeTool,
   isGitRepo,
   isShellTool,
+  readSessionLines,
   stripAnsi,
 } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
@@ -197,36 +198,12 @@ export interface TranscriptEvent {
 
 export async function parseTranscriptEvents(transcriptPath: string): Promise<TranscriptEvent[]> {
   const events: TranscriptEvent[] = []
-  let text = ""
-  try {
-    text = await Bun.file(transcriptPath).text()
-  } catch {
-    return events
-  }
 
-  const allLines = text.split("\n")
-
-  // Session-boundary detection: Claude Code inserts a {"type":"system"} JSONL
-  // entry when resuming from a compacted conversation. Events before this
-  // boundary belong to prior sessions and must not be visible to the gate —
-  // otherwise a bun test from a previous (compacted) session appears as the
-  // "prior run", blocking the first legitimate test call in the new session.
-  // Find the LAST such entry and discard everything before it.
-  let sessionStartIdx = 0
-  for (let i = allLines.length - 1; i >= 0; i--) {
-    const raw = allLines[i]
-    if (!raw?.trim()) continue
-    try {
-      const parsed = JSON.parse(raw)
-      if (parsed?.type === "system") {
-        sessionStartIdx = i + 1
-        break
-      }
-    } catch {
-      // ignore malformed lines
-    }
-  }
-  const lines = sessionStartIdx > 0 ? allLines.slice(sessionStartIdx) : allLines
+  // readSessionLines handles compaction-boundary detection: only lines from
+  // after the last {"type":"system"} entry (i.e. the current session) are
+  // returned, preventing prior-session bun test calls from triggering the gate.
+  const lines = await readSessionLines(transcriptPath)
+  if (lines.length === 0) return events
 
   // Pre-pass: identify tool_use IDs whose executions were denied by a PreToolUse
   // hook. These never actually ran, so they must not count as prior runs.

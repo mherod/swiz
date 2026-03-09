@@ -19,7 +19,13 @@
 //   - Assistant reasoning ("I'll go ahead and push") — agent-generated text
 
 import { getHomeDirWithFallback } from "../src/home.ts"
-import { denyPreToolUse, GIT_PUSH_RE, isShellTool, type ToolHookInput } from "./hook-utils.ts"
+import {
+  denyPreToolUse,
+  GIT_PUSH_RE,
+  isShellTool,
+  readSessionLines,
+  type ToolHookInput,
+} from "./hook-utils.ts"
 
 // ── Feature flag: disabled by default ────────────────────────────────────────
 // Enable with: swiz settings enable push-gate
@@ -79,8 +85,7 @@ let blockingLine = "" // text of the most-recent blocking instruction
 let approvedAfter = false // true if an approval signal appears after the block
 
 try {
-  const text = await Bun.file(transcriptPath).text()
-  for (const line of text.split("\n")) {
+  for (const line of await readSessionLines(transcriptPath)) {
     if (!line.trim()) continue
     try {
       const entry = JSON.parse(line)
