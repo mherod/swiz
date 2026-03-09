@@ -306,9 +306,12 @@ export async function updateContextStats(cwd: string, pct: number): Promise<Cont
   const stats: ContextStats = existing
     ? { minPct: Math.min(existing.minPct, pct), maxPct: Math.max(existing.maxPct, pct) }
     : { minPct: pct, maxPct: pct }
-  mkdir(join(cwd, ".swiz"), { recursive: true })
-    .then(() => writeFile(getContextStatsPath(cwd), `${JSON.stringify(stats, null, 2)}\n`))
-    .catch(() => {})
+  try {
+    await mkdir(join(cwd, ".swiz"), { recursive: true })
+    await writeFile(getContextStatsPath(cwd), `${JSON.stringify(stats, null, 2)}\n`)
+  } catch {
+    // Non-fatal — status line continues without persisted stats
+  }
   return stats
 }
 

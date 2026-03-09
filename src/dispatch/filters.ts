@@ -57,8 +57,8 @@ export async function isWithinCooldown(
   }
 }
 
-export function markHookCooldown(hookFile: string, cwd: string): void {
-  writeFile(hookCooldownPath(hookFile, cwd), String(Date.now())).catch(() => {
+export function markHookCooldown(hookFile: string, cwd: string): Promise<void> {
+  return writeFile(hookCooldownPath(hookFile, cwd), String(Date.now())).catch(() => {
     // Non-fatal: if sentinel write fails the hook just runs again next time
   })
 }
