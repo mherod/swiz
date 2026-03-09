@@ -499,6 +499,21 @@ describe("swiz settings", () => {
     expect(json.ambitionMode).toBe("creative")
   })
 
+  test("accepts --project for collaboration-mode", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(
+      ["settings", "set", "collaboration-mode", "team", "--project", "--dir", home],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Set collaboration-mode = team")
+
+    const configPath = join(home, ".swiz", "config.json")
+    const text = await readFile(configPath, "utf-8")
+    const json = JSON.parse(text) as { collaborationMode?: string }
+    expect(json.collaborationMode).toBe("team")
+  })
+
   test("accepts --project for default-branch", async () => {
     const home = await createTempHome()
     const result = await runSwiz(
@@ -1135,6 +1150,38 @@ describe("collaborationMode settings", () => {
     }
     const effective = getEffectiveSwizSettings(settings, null, { ambitionMode: "creative" })
     expect(effective.ambitionMode).toBe("creative")
+  })
+
+  test("project collaborationMode overrides global when no session override", () => {
+    const settings = {
+      autoContinue: true,
+      critiquesEnabled: true,
+      ambitionMode: "standard" as const,
+      collaborationMode: "auto" as const,
+      narratorVoice: "",
+      narratorSpeed: 0,
+      prAgeGateMinutes: 10,
+      prMergeMode: true,
+      pushCooldownMinutes: 0,
+      pushGate: false,
+      sandboxedEdits: true,
+      speak: false,
+      swizNotifyHooks: false,
+      updateMemoryFooter: false,
+      gitStatusGate: true,
+      nonDefaultBranchGate: true,
+      githubCiGate: true,
+      changesRequestedGate: true,
+      personalRepoIssuesGate: true,
+      strictNoDirectMain: false,
+      memoryLineThreshold: 1400,
+      memoryWordThreshold: 5000,
+      largeFileSizeKb: 500,
+      statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      sessions: {},
+    }
+    const effective = getEffectiveSwizSettings(settings, null, { collaborationMode: "team" })
+    expect(effective.collaborationMode).toBe("team")
   })
 
   test("session ambitionMode overrides project and global", () => {

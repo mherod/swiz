@@ -325,7 +325,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
       "collab",
     ],
     kind: "string",
-    scopes: ["global", "session"],
+    scopes: ["global", "project", "session"],
     docs: { valuePlaceholder: "auto|solo|team" },
     validate: (v) =>
       collaborationModeSchema.safeParse(v).success
@@ -345,6 +345,8 @@ export interface ProjectSwizSettings {
   memoryWordThreshold?: number
   largeFileSizeKb?: number
   ambitionMode?: AmbitionMode
+  /** Per-project collaboration mode override (e.g. team repos require PR flow). */
+  collaborationMode?: CollaborationMode
   /** Enforce feature-branch workflow even for solo repositories. */
   strictNoDirectMain?: boolean
   /** Hook filenames to skip for this project (e.g. "stop-github-ci.ts") */
@@ -568,6 +570,7 @@ export const projectSettingsSchema = z.object({
   memoryWordThreshold: z.number().int().min(1).optional(),
   largeFileSizeKb: z.number().int().min(1).optional(),
   ambitionMode: ambitionModeSchema.optional(),
+  collaborationMode: collaborationModeSchema.optional(),
   strictNoDirectMain: z.boolean().optional(),
   disabledHooks: z.array(z.string().min(1)).optional(),
   plugins: z.array(z.string().min(1)).optional(),
@@ -721,6 +724,10 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   const ambitionMode = ambitionModeSchema.safeParse(obj.ambitionMode)
   if (ambitionMode.success) {
     result.ambitionMode = ambitionMode.data
+  }
+  const collaborationMode = collaborationModeSchema.safeParse(obj.collaborationMode)
+  if (collaborationMode.success) {
+    result.collaborationMode = collaborationMode.data
   }
   if (typeof obj.strictNoDirectMain === "boolean") {
     result.strictNoDirectMain = obj.strictNoDirectMain
@@ -917,7 +924,7 @@ export function getEffectiveSwizSettings(
     autoContinue: settings.autoContinue,
     critiquesEnabled: settings.critiquesEnabled,
     ambitionMode: projectSettings?.ambitionMode ?? settings.ambitionMode,
-    collaborationMode: settings.collaborationMode,
+    collaborationMode: projectSettings?.collaborationMode ?? settings.collaborationMode,
     narratorVoice: settings.narratorVoice,
     narratorSpeed: settings.narratorSpeed,
     prAgeGateMinutes: settings.prAgeGateMinutes,
