@@ -163,6 +163,7 @@ async function getOpenTaskCount(cwd: string): Promise<number | null> {
     const home = getHomeDir()
     const { tasksDir: tasksRoot, projectsDir: projectsRoot } = getDefaultTaskRoots(home)
     const { projectKeyFromCwd } = await import("../project-key.ts")
+    const { readSessionMeta } = await import("../tasks/task-repository.ts")
     const key = projectKeyFromCwd(cwd)
     const sessionIdsPath = join(projectsRoot, key)
     let sessionIds: string[] = []
@@ -173,6 +174,13 @@ async function getOpenTaskCount(cwd: string): Promise<number | null> {
     }
     let open = 0
     for (const sessionId of sessionIds) {
+      // Fast path: read the lightweight .session-meta.json index written by writeTask.
+      const meta = await readSessionMeta(sessionId, tasksRoot)
+      if (meta !== null) {
+        open += meta.openCount
+        continue
+      }
+      // Fallback: index missing — read every task file (pre-index sessions or corruption).
       const sessionDir = join(tasksRoot, sessionId)
       let files: string[]
       try {

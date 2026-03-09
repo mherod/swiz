@@ -114,10 +114,60 @@ export async function readTasks(
   }
 }
 
+/** Lightweight per-session metadata index for O(1) open-task-count lookups. */
+export interface SessionMeta {
+  /** Number of tasks with status "pending" or "in_progress". */
+  openCount: number
+  /** ISO timestamp of last update. */
+  updatedAt: string
+}
+
+/** Path of the session metadata index file within a session directory. */
+export const SESSION_META_FILE = ".session-meta.json"
+
+/**
+ * Recompute and persist the session metadata index after every task write.
+ * Called internally by writeTask — consumers should not call this directly.
+ * Silently ignores write failures (non-fatal, falls back to full scan).
+ */
+async function updateSessionMeta(dir: string): Promise<void> {
+  try {
+    const files = await readdir(dir)
+    let openCount = 0
+    for (const f of files) {
+      if (!f.endsWith(".json") || f.startsWith(".") || f === "compact-snapshot.json") continue
+      try {
+        const t = JSON.parse(await readFile(join(dir, f), "utf-8")) as { status?: string }
+        if (t.status === "pending" || t.status === "in_progress") openCount++
+      } catch {}
+    }
+    const meta: SessionMeta = { openCount, updatedAt: new Date().toISOString() }
+    await writeFile(join(dir, SESSION_META_FILE), JSON.stringify(meta))
+  } catch {}
+}
+
+/**
+ * Read the session metadata index for a session directory.
+ * Returns null when the index does not exist or is unreadable (caller must fall back).
+ */
+export async function readSessionMeta(
+  sessionId: string,
+  tasksDir = getDefaultTaskRoots().tasksDir
+): Promise<SessionMeta | null> {
+  try {
+    const text = await readFile(join(tasksDir, sessionId, SESSION_META_FILE), "utf-8")
+    return JSON.parse(text) as SessionMeta
+  } catch {
+    return null
+  }
+}
+
 export async function writeTask(sessionId: string, task: Task) {
   const dir = join(getDefaultTaskRoots().tasksDir, sessionId)
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, `${task.id}.json`), JSON.stringify(task, null, 2))
+  // Update lightweight index so status.ts can read openCount without scanning every task file.
+  await updateSessionMeta(dir)
 }
 
 export async function writeAudit(sessionId: string, entry: AuditEntry) {
