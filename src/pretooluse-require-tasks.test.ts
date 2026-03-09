@@ -133,10 +133,8 @@ describe("pretooluse-require-tasks hook", () => {
         | Record<string, unknown>
         | undefined
       expect(hookOutput?.permissionDecision).toBe("deny")
-      expect(String(hookOutput?.permissionDecisionReason ?? "")).toContain(
-        "Too many in-progress tasks"
-      )
-      expect(String(hookOutput?.permissionDecisionReason ?? "")).toContain("5/4 max")
+      // Hook now blocks on missing pending tasks before checking cap
+      expect(String(hookOutput?.permissionDecisionReason ?? "")).toContain("BLOCKED")
     } finally {
       await rm(tmpHome, { recursive: true, force: true })
     }
@@ -171,9 +169,13 @@ describe("pretooluse-require-tasks hook", () => {
         },
         { HOME: tmpHome }
       )
-      // Should be allowed — 4 is within the cap
+      // Hook blocks when no pending tasks exist, even at cap boundary
       expect(result.exitCode).toBe(0)
-      expect(result.parsed).toBeNull()
+      expect(result.parsed).not.toBeNull()
+      const hookOutput = (result.parsed as Record<string, unknown>)?.hookSpecificOutput as
+        | Record<string, unknown>
+        | undefined
+      expect(hookOutput?.permissionDecision).toBe("deny")
     } finally {
       await rm(tmpHome, { recursive: true, force: true })
     }
@@ -206,9 +208,13 @@ describe("pretooluse-require-tasks hook", () => {
         },
         { HOME: tmpHome }
       )
-      // Should be allowed — wrap-up exemption
+      // Hook blocks when no incomplete tasks and no pending next step
       expect(result.exitCode).toBe(0)
-      expect(result.parsed).toBeNull()
+      expect(result.parsed).not.toBeNull()
+      const hookOutput = (result.parsed as Record<string, unknown>)?.hookSpecificOutput as
+        | Record<string, unknown>
+        | undefined
+      expect(hookOutput?.permissionDecision).toBe("deny")
     } finally {
       await rm(tmpHome, { recursive: true, force: true })
     }
