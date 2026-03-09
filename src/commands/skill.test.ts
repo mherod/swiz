@@ -391,21 +391,34 @@ describe("convertSkillContent", () => {
     expect(result).not.toContain("TaskUpdate")
   })
 
-  test("TaskList and TaskGet pass through unchanged for codex (read-only, no alias)", () => {
+  test("rewrites TaskList and TaskGet to codex equivalent via conversion supplement", () => {
     const content = "---\n---\nUse TaskList first, then TaskGet for details.\n"
     const { content: result } = convertSkillContent(content, "claude", "codex")
-    // TaskList/TaskGet are intentionally absent from Codex toolAliases — they pass through
-    expect(result).toContain("TaskList")
-    expect(result).toContain("TaskGet")
+    // Conversion supplement maps TaskList/TaskGet → update_plan (same as TaskCreate)
+    expect(result).toContain("update_plan")
+    expect(result).not.toContain("TaskList")
+    expect(result).not.toContain("TaskGet")
   })
 
-  test("rewrites YAML-list allowed-tools entries during conversion", () => {
+  test("rewrites TaskList and TaskGet to gemini equivalent via conversion supplement", () => {
+    const content = "---\n---\nUse TaskList first, then TaskGet for details.\n"
+    const { content: result } = convertSkillContent(content, "claude", "gemini")
+    expect(result).toContain("write_todos")
+    expect(result).not.toContain("TaskList")
+    expect(result).not.toContain("TaskGet")
+  })
+
+  test("rewrites YAML-list allowed-tools entries including TaskList/TaskGet during conversion", () => {
     const content =
-      '---\nallowed-tools:\n  - "TaskCreate"\n  - "TaskUpdate"\n---\nTaskCreate TaskUpdate\n'
+      '---\nallowed-tools:\n  - "TaskCreate"\n  - "TaskList"\n  - "TaskGet"\n  - "TaskUpdate"\n---\nTaskCreate TaskList TaskGet TaskUpdate\n'
     const { content: result } = convertSkillContent(content, "claude", "codex")
     expect(result).toContain('  - "update_plan"')
+    expect(result).not.toContain('"TaskList"')
+    expect(result).not.toContain('"TaskGet"')
     expect(result).not.toContain("TaskCreate")
     expect(result).not.toContain("TaskUpdate")
+    expect(result).not.toContain("TaskList")
+    expect(result).not.toContain("TaskGet")
   })
 
   test("rewrites source-specific names back to canonical (gemini → claude)", () => {

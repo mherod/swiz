@@ -229,10 +229,18 @@ export function convertSkillContent(
   const reverseFrom = buildReverseMap(fromAgent.toolAliases)
   const toAliases = toAgent.toolAliases
 
+  // Conversion-only supplement: read-only task tools (TaskList, TaskGet) are intentionally
+  // absent from toolAliases (they must pass through in hook contexts) but should be remapped
+  // during skill conversion to the same target as TaskCreate, if one exists.
+  const taskCreateTarget = toAliases.TaskCreate
+  const conversionSupplement: Record<string, string> = taskCreateTarget
+    ? { TaskList: taskCreateTarget, TaskGet: taskCreateTarget }
+    : {}
+
   /** Resolve a single tool token: source-specific → canonical → target-specific */
   function remap(tool: string): string {
     const canonical = reverseFrom[tool] ?? tool // source → canonical
-    return toAliases[canonical] ?? canonical // canonical → target (identity if absent)
+    return toAliases[canonical] ?? conversionSupplement[canonical] ?? canonical // canonical → target
   }
 
   const unmappedSet = new Set<string>()
@@ -255,6 +263,11 @@ export function convertSkillContent(
     for (const canonical of Object.keys(agent.toolAliases)) {
       sourceNames.add(canonical)
     }
+  }
+  // Ensure read-only task tools are always included — they may not appear in any alias table
+  // but are valid canonical names used in skill bodies.
+  for (const canonical of Object.keys(conversionSupplement)) {
+    sourceNames.add(canonical)
   }
 
   for (const sourceName of sourceNames) {
