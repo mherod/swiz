@@ -93,7 +93,9 @@ async function runHook({
       // Mock all external AI backends by default so tests never spawn real CLIs.
       // When a mock AI seam is active (AI_TEST_RESPONSE or AI_TEST_CAPTURE_FILE),
       // omit AI_TEST_NO_BACKEND so hasAiProvider() returns true and the seam is used.
-      ...("AI_TEST_RESPONSE" in extraEnv || "AI_TEST_CAPTURE_FILE" in extraEnv
+      ...("AI_TEST_RESPONSE" in extraEnv ||
+      "AI_TEST_CAPTURE_FILE" in extraEnv ||
+      "AI_TEST_THROW" in extraEnv
         ? {}
         : { AI_TEST_NO_BACKEND: "1" }),
       ...extraEnv,
