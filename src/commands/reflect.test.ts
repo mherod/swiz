@@ -142,6 +142,23 @@ describe("parseReflectArgs", () => {
     expect(parsed.json).toBe(true)
     expect(parsed.printPrompt).toBe(true)
   })
+
+  it("parses --provider flag", () => {
+    expect(parseReflectArgs(["--provider", "gemini"]).provider).toBe("gemini")
+    expect(parseReflectArgs(["--provider", "codex"]).provider).toBe("codex")
+  })
+
+  it("defaults provider to undefined", () => {
+    expect(parseReflectArgs([]).provider).toBeUndefined()
+  })
+
+  it("throws on invalid --provider value", () => {
+    expect(() => parseReflectArgs(["--provider", "openai"])).toThrow('must be "gemini" or "codex"')
+  })
+
+  it("throws when --provider is missing a value", () => {
+    expect(() => parseReflectArgs(["--provider"])).toThrow("Missing value for --provider")
+  })
 })
 
 describe("reflectCommand", () => {
