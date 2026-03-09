@@ -1,10 +1,4 @@
-import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
-import { join } from "node:path"
-import { BOLD, DIM, RESET } from "../ansi.ts"
-import { debugLog } from "../debug.ts"
-import { formatDuration } from "../format-duration.ts"
-import { projectKeyFromCwd } from "../project-key.ts"
-import { sessionPrefix } from "../session-id.ts"
+import { DIM, RESET } from "../ansi.ts"
 import {
   PROJECT_STATES,
   type ProjectState,
@@ -13,563 +7,115 @@ import {
   writeProjectState,
 } from "../settings.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
-import { getDefaultTaskRoots } from "../task-roots.ts"
+import { type DateFormat, listAllSessionsTasks, listTasks } from "../tasks/task-renderer.ts"
+import {
+  compareTaskIds,
+  parseTaskId,
+  readTasks,
+  STATUS_STYLE,
+  sessionPrefix,
+  type Task,
+  writeAudit,
+  writeTask,
+} from "../tasks/task-repository.ts"
+import {
+  collectIncompleteTasks,
+  findTaskAcrossSessions,
+  getSessionIdsByCwdScan,
+  getSessionIdsForProject,
+  getSessions,
+  resolveTaskById,
+} from "../tasks/task-resolver.ts"
 import type { Command } from "../types.ts"
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
-interface Task {
-  id: string
-  subject: string
-  description: string
-  activeForm?: string
-  status: "pending" | "in_progress" | "completed" | "cancelled"
-  blocks: string[]
-  blockedBy: string[]
-  completionEvidence?: string
-  completionTimestamp?: string
-  /** ISO timestamp of last status change (used for elapsed-time tracking) */
-  statusChangedAt?: string
-  /** Cumulative milliseconds spent in in_progress status */
-  elapsedMs?: number
-  /** Deterministic fingerprint of the normalized subject for deduplication. */
-  subjectFingerprint?: string
+export {
+  compareTaskIds,
+  findTaskAcrossSessions,
+  getSessionIdsByCwdScan,
+  getSessionIdsForProject,
+  getSessions,
+  parseTaskId,
+  resolveTaskById,
+  sessionPrefix,
 }
 
-interface AuditEntry {
-  timestamp: string
-  taskId: string
-  action: "create" | "status_change" | "delete"
-  oldStatus?: Task["status"]
-  newStatus?: Task["status"]
-  verificationText?: string
-  evidence?: string
-  subject?: string
-}
+// ─── Validation & evidence ───────────────────────────────────────────────────
 
-const STATUS_STYLE: Record<Task["status"], { emoji: string; color: string }> = {
-  pending: { emoji: "⏳", color: "\x1b[33m" },
-  in_progress: { emoji: "🔄", color: "\x1b[36m" },
-  completed: { emoji: "✅", color: "\x1b[32m" },
-  cancelled: { emoji: "❌", color: "\x1b[31m" },
-}
-
-type DateFormat = "relative" | "absolute"
-
-function formatDate(date: Date, format: DateFormat): string {
-  if (format === "absolute") {
-    return date.toLocaleString("en-GB", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-  }
-  return timeAgo(date)
-}
-
-function timeAgo(date: Date): string {
-  const ms = Date.now() - date.getTime()
-  const mins = Math.floor(ms / 60000)
-  if (mins < 1) return "just now"
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(ms / 3600000)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(ms / 86400000)
-  if (days < 7) return `${days}d ago`
-  return date.toLocaleDateString()
-}
-
-// ─── Session-scoped task IDs ─────────────────────────────────────────────────
-
-export { sessionPrefix }
+const EVIDENCE_PREFIXES = ["commit:", "pr:", "file:", "test:", "note:"]
 
 /**
- * Parse a potentially prefixed task ID into its components.
- * - "a3f2-5" → { prefix: "a3f2", seq: 5 }
- * - "5" → { prefix: null, seq: 5 }
- * - "a3f2-abc" → { prefix: "a3f2", seq: NaN } (invalid)
+ * Segment-anchored evidence patterns.
+ * Evidence is split on delimiters (—, --, ;, |, ", ") into segments first,
+ * then each pattern is matched against the START of each segment.
+ * This prevents free-text within one field's value (e.g. "note:CI green")
+ * from satisfying the ci_green pattern as a second distinct field.
  */
-export function parseTaskId(taskId: string): { prefix: string | null; seq: number } {
-  const dashIdx = taskId.indexOf("-")
-  if (dashIdx > 0) {
-    const prefix = taskId.slice(0, dashIdx)
-    const seq = parseInt(taskId.slice(dashIdx + 1), 10)
-    return { prefix, seq }
-  }
-  return { prefix: null, seq: parseInt(taskId, 10) }
-}
+const EVIDENCE_SEGMENT_PATTERNS: Array<{ name: string; re: RegExp }> = [
+  { name: "note", re: /^note\s*:\s*\S.{4,}/i },
+  { name: "conclusion", re: /^conclusion\s*:\s*\S+/i },
+  { name: "run", re: /^run\s+\d{3,}/i },
+  { name: "commit", re: /^(?:commit\s*:\s*)?[0-9a-f]{7,40}$/i },
+  { name: "ci_green", re: /^ci[\s_]green$/i },
+  { name: "pr", re: /^pr[:#]\s*\d+/i },
+  { name: "no_ci", re: /^no[\s_]ci\b.*(workflow|run|configured)/i },
+]
 
-/**
- * Sort comparator for task IDs that handles both numeric and prefixed formats.
- * Prefixed IDs sort after numeric IDs; within the same prefix, sort by sequence.
- */
-export function compareTaskIds(a: string, b: string): number {
-  const pa = parseTaskId(a)
-  const pb = parseTaskId(b)
-  // Both numeric — sort numerically
-  if (pa.prefix === null && pb.prefix === null) return pa.seq - pb.seq
-  // Numeric before prefixed
-  if (pa.prefix === null) return -1
-  if (pb.prefix === null) return 1
-  // Both prefixed — sort by prefix then sequence
-  if (pa.prefix !== pb.prefix) return pa.prefix.localeCompare(pb.prefix)
-  return pa.seq - pb.seq
-}
+const REQUIRED_EVIDENCE_FIELDS = 1
 
-// ─── Session discovery ──────────────────────────────────────────────────────
-
-/** Derive session IDs from a single project transcript directory (constant-time lookup). */
-export async function getSessionIdsForProject(
-  projectKey: string,
-  projectsDir = getDefaultTaskRoots().projectsDir
-): Promise<Set<string>> {
-  const projectDir = join(projectsDir, projectKey)
-  const ids = new Set<string>()
-  try {
-    const files = await readdir(projectDir)
-    for (const f of files) {
-      if (f.endsWith(".jsonl")) ids.add(f.slice(0, -6))
-    }
-  } catch {}
-  return ids
-}
-
-/** Slow fallback: scan all project transcript directories for sessions whose cwd matches. */
-export async function getSessionIdsByCwdScan(
-  filterCwd: string,
-  candidates: string[],
-  projectsDir = getDefaultTaskRoots().projectsDir
-): Promise<Set<string>> {
-  const ids = new Set<string>()
-  let dirs: string[]
-  try {
-    dirs = await readdir(projectsDir)
-  } catch {
-    return ids
-  }
-
-  const candidateSet = new Set(candidates)
-  for (const dir of dirs) {
-    const projectDir = join(projectsDir, dir)
-    let files: string[]
-    try {
-      files = await readdir(projectDir)
-    } catch {
-      continue
-    }
-    for (const f of files) {
-      if (!f.endsWith(".jsonl")) continue
-      const sessionId = f.slice(0, -6)
-      if (!candidateSet.has(sessionId)) continue
-      if (ids.has(sessionId)) continue
-      try {
-        const content = await readFile(join(projectDir, f), "utf-8")
-        for (const line of content.split("\n").slice(0, 10)) {
-          if (!line.trim()) continue
-          try {
-            const data = JSON.parse(line)
-            if (data.cwd === filterCwd) {
-              ids.add(sessionId)
-              break
-            }
-          } catch {}
-        }
-      } catch {}
-    }
-  }
-  return ids
-}
-
-export async function getSessions(
-  filterCwd?: string,
-  tasksDir = getDefaultTaskRoots().tasksDir,
-  projectsDir = getDefaultTaskRoots().projectsDir
-): Promise<string[]> {
-  try {
-    const entries = await readdir(tasksDir)
-
-    let matchedSessionIds: Set<string> | null = null
-
-    if (filterCwd) {
-      // Fast path: derive project key directly and intersect with task sessions.
-      const projectSessionIds = await getSessionIdsForProject(
-        projectKeyFromCwd(filterCwd),
-        projectsDir
-      )
-      matchedSessionIds = new Set<string>()
-      for (const s of entries) {
-        if (projectSessionIds.has(s)) matchedSessionIds.add(s)
-      }
-
-      // Fallback: scan transcript cwd values for any task entries NOT already
-      // matched by the fast path. This catches sessions under older or
-      // mismatched project-key encodings, even when the fast path found some.
-      const unmatched = entries.filter((s) => !matchedSessionIds!.has(s))
-      if (unmatched.length > 0) {
-        const fallbackIds = await getSessionIdsByCwdScan(filterCwd, unmatched, projectsDir)
-        for (const id of fallbackIds) matchedSessionIds.add(id)
-      }
-    }
-
-    const stats = await Promise.all(
-      entries
-        .filter((s) => !matchedSessionIds || matchedSessionIds.has(s))
-        .map(async (s) => {
-          const p = join(tasksDir, s)
-          const st = await stat(p)
-          return { session: s, mtime: st.mtime }
-        })
-    )
-    stats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
-    return stats.map((s) => s.session)
-  } catch {
-    return []
-  }
-}
-
-// ─── Task I/O ───────────────────────────────────────────────────────────────
-
-async function readTasks(
-  sessionId: string,
-  tasksDir = getDefaultTaskRoots().tasksDir
-): Promise<Task[]> {
-  const dir = join(tasksDir, sessionId)
-  try {
-    const files = await readdir(dir)
-    const taskFiles = files.filter(
-      (f) => f.endsWith(".json") && !f.startsWith(".") && f !== "compact-snapshot.json"
-    )
-    const tasks = await Promise.all(
-      taskFiles.map(async (f) => {
-        const filePath = join(dir, f)
-        const task = JSON.parse(await readFile(filePath, "utf-8")) as Task
-        // Backfill statusChangedAt from file mtime for legacy tasks
-        if (!task.statusChangedAt) {
-          const st = await stat(filePath)
-          task.statusChangedAt = st.mtime.toISOString()
-        }
-        return task
-      })
-    )
-    return tasks.sort((a, b) => compareTaskIds(a.id, b.id))
-  } catch {
-    return []
-  }
-}
-
-async function writeTask(sessionId: string, task: Task) {
-  const dir = join(getDefaultTaskRoots().tasksDir, sessionId)
-  await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, `${task.id}.json`), JSON.stringify(task, null, 2))
-}
-
-async function writeAudit(sessionId: string, entry: AuditEntry) {
-  try {
-    const dir = join(getDefaultTaskRoots().tasksDir, sessionId)
-    await mkdir(dir, { recursive: true })
-    await appendFile(join(dir, ".audit-log.jsonl"), `${JSON.stringify(entry)}\n`)
-  } catch {}
-}
-
-// ─── Recent task hint (for not-found errors) ─────────────────────────────────
-
-/**
- * Build a hint string listing the 5 most recently created tasks in a session.
- * Appended to "task not found" errors so agents can quickly identify the right ID.
- */
-async function buildRecentTasksHint(
-  sessionId: string,
-  tasksDir = getDefaultTaskRoots().tasksDir
-): Promise<string> {
-  try {
-    const tasks = await readTasks(sessionId, tasksDir)
-    if (tasks.length === 0) return ""
-    const recent = tasks.slice(-5)
-    const lines = recent.map((t) => `  #${t.id} [${t.status}]: ${t.subject}`).join("\n")
-    return `\nRecent tasks in this session:\n${lines}`
-  } catch {
-    return ""
-  }
-}
-
-/**
- * Build a hint listing the most recent sessions with a sample of task subjects
- * from each. Used in "no session found" errors so agents can spot the right
- * session without needing to run `swiz tasks`.
- */
-async function buildRecentSessionsHint(
-  sessions: string[],
-  tasksDir = getDefaultTaskRoots().tasksDir
-): Promise<string> {
-  if (sessions.length === 0) return ""
-  const recent = sessions.slice(0, 5)
-  const lines = await Promise.all(
-    recent.map(async (sessionId) => {
-      try {
-        const tasks = await readTasks(sessionId, tasksDir)
-        const preview = tasks
-          .slice(-3)
-          .map((t) => `    #${t.id} [${t.status}]: ${t.subject}`)
-          .join("\n")
-        return `  ${sessionId.slice(0, 8)}...${preview ? `\n${preview}` : " (no tasks)"}`
-      } catch {
-        return `  ${sessionId.slice(0, 8)}... (unreadable)`
-      }
-    })
-  )
-  return `\nRecent sessions:\n${lines.join("\n")}`
-}
-
-// ─── Cross-session task lookup ───────────────────────────────────────────────
-
-/**
- * Search for a task by ID across all sessions for the current project.
- * Returns all matches (session + task pairs). Callers must handle the
- * case where multiple sessions contain the same task ID.
- */
-export async function findTaskAcrossSessions(
-  taskId: string,
-  filterCwd?: string,
-  tasksDir = getDefaultTaskRoots().tasksDir,
-  projectsDir = getDefaultTaskRoots().projectsDir
-): Promise<{ sessionId: string; task: Task }[]> {
-  const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
-  const matches: { sessionId: string; task: Task }[] = []
-  for (const sessionId of sessions) {
-    const tasks = await readTasks(sessionId, tasksDir)
-    const task = tasks.find((t) => t.id === taskId)
-    if (task) matches.push({ sessionId, task })
-  }
-  return matches
-}
-
-/**
- * Centralized task-by-ID resolution. Checks the primary session first,
- * then falls back to scanning all project sessions. Every command that
- * operates on a task by ID must use this single entry point.
- */
-export async function resolveTaskById(
-  taskId: string,
-  primarySessionId: string,
-  filterCwd?: string,
-  tasksDir = getDefaultTaskRoots().tasksDir,
-  projectsDir = getDefaultTaskRoots().projectsDir
-): Promise<{ sessionId: string; task: Task }> {
-  // Prefix-based fast resolution: if the ID has a session prefix, find the
-  // matching session directly — no ambiguity possible.
-  const { prefix } = parseTaskId(taskId)
-  if (prefix !== null) {
-    // First check if the primary session itself matches the prefix
-    if (sessionPrefix(primarySessionId) === prefix) {
-      const tasks = await readTasks(primarySessionId, tasksDir)
-      const task = tasks.find((t) => t.id === taskId)
-      if (task) return { sessionId: primarySessionId, task }
-    }
-
-    // Search sessions using the same filterCwd scope as unprefixed lookup so
-    // both ID forms share consistent project-scoped semantics.
-    const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
-    const matchingSession = sessions.find((s) => sessionPrefix(s) === prefix)
-    if (matchingSession) {
-      const tasks = await readTasks(matchingSession, tasksDir)
-      const task = tasks.find((t) => t.id === taskId)
-      if (task) {
-        if (matchingSession !== primarySessionId) {
-          debugLog(
-            `  ${DIM}Task #${taskId} resolved via prefix to session ${matchingSession.slice(0, 8)}...${RESET}`
-          )
-        }
-        return { sessionId: matchingSession, task }
-      }
-      // Session matched but the specific task file is absent (deleted or never written).
-      const recentHint = await buildRecentTasksHint(matchingSession, tasksDir)
-      throw new Error(
-        `Task #${taskId} not found in session ${matchingSession.slice(0, 8)}... (prefix "${prefix}" matched but task file is missing).` +
-          `\nUse --session ${matchingSession.slice(0, 8)} with a different task ID, or recreate the task.${recentHint}`
-      )
-    }
-    const sessionsHint = await buildRecentSessionsHint(sessions, tasksDir)
-    throw new Error(
-      `Task #${taskId} not found (no session with prefix "${prefix}" exists in this project).${sessionsHint}`
-    )
-  }
-
-  // Unprefixed numeric ID — check primary session first
-  const tasks = await readTasks(primarySessionId, tasksDir)
-  const task = tasks.find((t) => t.id === taskId)
-  if (task) return { sessionId: primarySessionId, task }
-
-  // Fallback: search across all project sessions
-  const matches = await findTaskAcrossSessions(taskId, filterCwd, tasksDir, projectsDir)
-
-  if (matches.length === 1) {
-    debugLog(
-      `  ${DIM}Task #${taskId} found in session ${matches[0]!.sessionId.slice(0, 8)}... (not current session)${RESET}`
-    )
-    return matches[0]!
-  }
-
-  if (matches.length > 1) {
-    const sessionList = matches
-      .map((m) => `  - ${m.sessionId.slice(0, 8)}... [${m.task.status}]: ${m.task.subject}`)
-      .join("\n")
-    throw new Error(
-      `Task #${taskId} exists in ${matches.length} sessions. Use --session <id> to disambiguate:\n${sessionList}`
-    )
-  }
-
-  // Append recent task IDs from the primary session to help agents find the right ID.
-  const recentHint = await buildRecentTasksHint(primarySessionId, tasksDir)
-  throw new Error(`Task #${taskId} not found in any session for this project.${recentHint}`)
-}
-
-/**
- * Collect all incomplete tasks across all project sessions.
- * Used by complete-all to find tasks that may have been orphaned
- * in other session directories after compaction.
- */
-async function collectIncompleteTasks(
-  filterCwd?: string
-): Promise<{ sessionId: string; task: Task }[]> {
-  const sessions = await getSessions(filterCwd)
-  const results: { sessionId: string; task: Task }[] = []
-  for (const sessionId of sessions) {
-    const tasks = await readTasks(sessionId)
-    for (const task of tasks) {
-      if (task.status === "pending" || task.status === "in_progress") {
-        results.push({ sessionId, task })
+/** Split evidence on delimiters, check each segment independently, return matched field names. */
+function countEvidenceFields(evidence: string): string[] {
+  const segments = evidence
+    .split(/\s*(?:—|--|;|\|)\s*|\s*,\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const foundKeys = new Set<string>()
+  for (const segment of segments) {
+    for (const { name, re } of EVIDENCE_SEGMENT_PATTERNS) {
+      if (re.test(segment)) {
+        foundKeys.add(name)
+        break
       }
     }
   }
-  return results
+  return [...foundKeys]
 }
 
-// ─── Rendering ──────────────────────────────────────────────────────────────
-
-/** Render a single task to stdout. `sessionTag` is an optional `[shortId]` prefix for cross-session views. */
-function renderTask(task: Task, sessionTag?: string, dateFormat: DateFormat = "relative") {
-  const { emoji, color } = STATUS_STYLE[task.status]
-  const tag = sessionTag ? `${DIM}[${sessionTag}]${RESET} ` : ""
-  console.log(
-    `  ${emoji} ${BOLD}#${task.id}${RESET} ${tag}${color}[${task.status.replace("_", " ").toUpperCase()}]${RESET} ${task.subject}`
-  )
-  if (task.description) {
-    const lines = task.description.split("\n").slice(0, 3)
-    for (const line of lines) console.log(`     ${DIM}${line}${RESET}`)
-    if (task.description.split("\n").length > 3) console.log(`     ${DIM}...${RESET}`)
-  }
-  // Show date — statusChangedAt is always present (backfilled from file mtime)
-  if (task.statusChangedAt) {
-    console.log(`     ${DIM}📅 ${formatDate(new Date(task.statusChangedAt), dateFormat)}${RESET}`)
-  }
-  // Show elapsed time for in_progress (live) and completed tasks
-  if (task.status === "in_progress" && task.statusChangedAt) {
-    const live = (task.elapsedMs ?? 0) + (Date.now() - new Date(task.statusChangedAt).getTime())
-    console.log(`     ${DIM}⏱  ${formatDuration(Math.max(0, live))} elapsed${RESET}`)
-  } else if ((task.elapsedMs ?? 0) > 0) {
-    console.log(`     ${DIM}⏱  ${formatDuration(task.elapsedMs!)} elapsed${RESET}`)
-  }
-  if (task.completionEvidence)
-    console.log(`     ${DIM}✓ Evidence: ${task.completionEvidence}${RESET}`)
-  if (task.completionTimestamp)
-    console.log(
-      `     ${DIM}✓ Completed: ${formatDate(new Date(task.completionTimestamp), dateFormat)}${RESET}`
+export function validateEvidence(evidence: string): string | null {
+  if (!EVIDENCE_PREFIXES.some((p) => evidence.startsWith(p))) {
+    return (
+      `Invalid evidence format: "${evidence}"\n` +
+      "Evidence must start with a recognized prefix:\n" +
+      EVIDENCE_PREFIXES.map((p) => `  ${p}<value>`).join("\n") +
+      '\n\nExample: --evidence "commit:abc123f" or --evidence "note:CI green"'
     )
-  if (task.blockedBy.length)
-    console.log(`     ${DIM}Blocked by: #${task.blockedBy.join(", #")}${RESET}`)
-  if (task.blocks.length) console.log(`     ${DIM}Blocks: #${task.blocks.join(", #")}${RESET}`)
-  console.log()
+  }
+
+  const matched = countEvidenceFields(evidence)
+  if (matched.length < REQUIRED_EVIDENCE_FIELDS) {
+    const found = matched.length > 0 ? matched.join(", ") : "none"
+    return (
+      `Evidence must contain at least ${REQUIRED_EVIDENCE_FIELDS} structured field, but found ${matched.length} (${found}).\n\n` +
+      `Structured fields (any ${REQUIRED_EVIDENCE_FIELDS}+ required):\n` +
+      EVIDENCE_SEGMENT_PATTERNS.map(({ name }) => `  • ${name}`).join("\n") +
+      '\n\nExample: --evidence "note:CI green"'
+    )
+  }
+
+  return null
 }
 
-// ─── Actions ────────────────────────────────────────────────────────────────
-
-async function listTasks(sessionId: string, label: string, dateFormat: DateFormat = "relative") {
-  const tasks = await readTasks(sessionId)
-  console.log(`\n  ${BOLD}Tasks${RESET} ${DIM}(${label}: ${sessionId.slice(0, 8)}...)${RESET}\n`)
-
-  if (tasks.length === 0) {
-    console.log("  No tasks found.\n")
-    return
-  }
-
-  const groups: [string, Task[]][] = [
-    ["IN PROGRESS", tasks.filter((t) => t.status === "in_progress")],
-    ["PENDING", tasks.filter((t) => t.status === "pending")],
-    ["COMPLETED", tasks.filter((t) => t.status === "completed")],
-    ["CANCELLED", tasks.filter((t) => t.status === "cancelled")],
-  ]
-
-  for (const [title, group] of groups) {
-    if (group.length === 0) continue
-    console.log(`  ${BOLD}${title}${RESET} (${group.length})\n`)
-    for (const task of group) renderTask(task, undefined, dateFormat)
-  }
-
-  const incomplete = tasks.filter(
-    (t) => t.status === "pending" || t.status === "in_progress"
-  ).length
-  const completed = tasks.filter((t) => t.status === "completed").length
-  console.log(
-    `  ${BOLD}Summary:${RESET} ${incomplete}/${tasks.length} incomplete, ${completed} completed\n`
+export function verifyTaskSubject(taskSubject: string, verifyText: string): string | null {
+  const normalizedSubject = taskSubject.toLowerCase().trim()
+  const normalizedVerify = verifyText.toLowerCase().trim()
+  if (normalizedSubject.startsWith(normalizedVerify)) return null
+  return (
+    `Verification failed.\n` +
+    `  Expected subject to start with: "${verifyText}"\n` +
+    `  Actual subject: "${taskSubject}"`
   )
 }
 
-async function listAllSessionsTasks(filterCwd?: string, dateFormat: DateFormat = "relative") {
-  const sessions = await getSessions(filterCwd)
-  const label = filterCwd ? "current project" : "all projects"
-
-  if (sessions.length === 0) {
-    console.log(`\n  ${BOLD}Tasks${RESET} ${DIM}(${label}, all sessions)${RESET}\n`)
-    console.log("  No sessions found.\n")
-    return
-  }
-
-  let totalTasks = 0
-  let totalIncomplete = 0
-  let totalCompleted = 0
-  let sessionsWithTasks = 0
-
-  for (const sessionId of sessions) {
-    const tasks = await readTasks(sessionId)
-    if (tasks.length === 0) continue
-
-    sessionsWithTasks++
-    totalTasks += tasks.length
-
-    const shortId = sessionId.slice(0, 8)
-    console.log(`\n  ${BOLD}Session${RESET} ${DIM}${shortId}...${RESET}\n`)
-
-    const groups: [string, Task[]][] = [
-      ["IN PROGRESS", tasks.filter((t) => t.status === "in_progress")],
-      ["PENDING", tasks.filter((t) => t.status === "pending")],
-      ["COMPLETED", tasks.filter((t) => t.status === "completed")],
-      ["CANCELLED", tasks.filter((t) => t.status === "cancelled")],
-    ]
-
-    for (const [title, group] of groups) {
-      if (group.length === 0) continue
-      console.log(`  ${BOLD}${title}${RESET} (${group.length})\n`)
-      for (const task of group) renderTask(task, shortId, dateFormat)
-    }
-
-    const incomplete = tasks.filter(
-      (t) => t.status === "pending" || t.status === "in_progress"
-    ).length
-    const completed = tasks.filter((t) => t.status === "completed").length
-    totalIncomplete += incomplete
-    totalCompleted += completed
-    console.log(
-      `  ${DIM}${incomplete}/${tasks.length} incomplete, ${completed} completed${RESET}\n`
-    )
-  }
-
-  console.log(
-    `\n  ${BOLD}All sessions summary:${RESET} ${sessionsWithTasks} session(s), ` +
-      `${totalIncomplete}/${totalTasks} incomplete, ${totalCompleted} completed\n`
-  )
-}
+// ─── Actions ─────────────────────────────────────────────────────────────────
 
 async function createTask(sessionId: string, subject: string, description: string) {
   const tasks = await readTasks(sessionId)
@@ -691,7 +237,7 @@ async function completeAll(filterCwd?: string, evidence?: string) {
   }
 }
 
-// ─── State update ────────────────────────────────────────────────────────────
+// ─── State update ─────────────────────────────────────────────────────────────
 
 async function applyStateUpdate(targetState: string, cwd: string): Promise<void> {
   if (!PROJECT_STATES.includes(targetState as ProjectState)) {
@@ -712,81 +258,7 @@ async function applyStateUpdate(targetState: string, cwd: string): Promise<void>
   console.log(`  project state: ${from}${state}`)
 }
 
-// ─── Verification & Evidence ─────────────────────────────────────────────────
-
-const EVIDENCE_PREFIXES = ["commit:", "pr:", "file:", "test:", "note:"]
-
-/**
- * Segment-anchored evidence patterns.
- * Evidence is split on delimiters (—, --, ;, |, ", ") into segments first,
- * then each pattern is matched against the START of each segment.
- * This prevents free-text within one field's value (e.g. "note:CI green")
- * from satisfying the ci_green pattern as a second distinct field.
- */
-const EVIDENCE_SEGMENT_PATTERNS: Array<{ name: string; re: RegExp }> = [
-  { name: "note", re: /^note\s*:\s*\S.{4,}/i },
-  { name: "conclusion", re: /^conclusion\s*:\s*\S+/i },
-  { name: "run", re: /^run\s+\d{3,}/i },
-  { name: "commit", re: /^(?:commit\s*:\s*)?[0-9a-f]{7,40}$/i },
-  { name: "ci_green", re: /^ci[\s_]green$/i },
-  { name: "pr", re: /^pr[:#]\s*\d+/i },
-  { name: "no_ci", re: /^no[\s_]ci\b.*(workflow|run|configured)/i },
-]
-
-const REQUIRED_EVIDENCE_FIELDS = 1
-
-/** Split evidence on delimiters, check each segment independently, return matched field names. */
-function countEvidenceFields(evidence: string): string[] {
-  const segments = evidence
-    .split(/\s*(?:—|--|;|\|)\s*|\s*,\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const foundKeys = new Set<string>()
-  for (const segment of segments) {
-    for (const { name, re } of EVIDENCE_SEGMENT_PATTERNS) {
-      if (re.test(segment)) {
-        foundKeys.add(name)
-        break
-      }
-    }
-  }
-  return [...foundKeys]
-}
-
-export function validateEvidence(evidence: string): string | null {
-  if (!EVIDENCE_PREFIXES.some((p) => evidence.startsWith(p))) {
-    return (
-      `Invalid evidence format: "${evidence}"\n` +
-      "Evidence must start with a recognized prefix:\n" +
-      EVIDENCE_PREFIXES.map((p) => `  ${p}<value>`).join("\n") +
-      '\n\nExample: --evidence "commit:abc123f" or --evidence "note:CI green"'
-    )
-  }
-
-  const matched = countEvidenceFields(evidence)
-  if (matched.length < REQUIRED_EVIDENCE_FIELDS) {
-    const found = matched.length > 0 ? matched.join(", ") : "none"
-    return (
-      `Evidence must contain at least ${REQUIRED_EVIDENCE_FIELDS} structured field, but found ${matched.length} (${found}).\n\n` +
-      `Structured fields (any ${REQUIRED_EVIDENCE_FIELDS}+ required):\n` +
-      EVIDENCE_SEGMENT_PATTERNS.map(({ name }) => `  • ${name}`).join("\n") +
-      '\n\nExample: --evidence "note:CI green"'
-    )
-  }
-
-  return null
-}
-
-export function verifyTaskSubject(taskSubject: string, verifyText: string): string | null {
-  const normalizedSubject = taskSubject.toLowerCase().trim()
-  const normalizedVerify = verifyText.toLowerCase().trim()
-  if (normalizedSubject.startsWith(normalizedVerify)) return null
-  return (
-    `Verification failed.\n` +
-    `  Expected subject to start with: "${verifyText}"\n` +
-    `  Actual subject: "${taskSubject}"`
-  )
-}
+// ─── Evidence submission ──────────────────────────────────────────────────────
 
 async function submitEvidence(
   sessionId: string,
@@ -826,7 +298,7 @@ async function submitEvidence(
   console.log(`     ${DIM}Evidence: ${evidence}${RESET}\n`)
 }
 
-// ─── Arg parsing ────────────────────────────────────────────────────────────
+// ─── Arg parsing ──────────────────────────────────────────────────────────────
 
 function parseDateFormat(value: string | undefined): DateFormat {
   if (!value) return "relative"
@@ -870,7 +342,7 @@ async function resolveSession(args: string[]): Promise<string> {
   return sessions[0]!
 }
 
-// ─── Command ────────────────────────────────────────────────────────────────
+// ─── Command ──────────────────────────────────────────────────────────────────
 
 export const tasksCommand: Command = {
   name: "tasks",
@@ -944,8 +416,8 @@ export const tasksCommand: Command = {
           (t) => t.status === "pending" || t.status === "in_progress"
         )
         if (!hasIncomplete && tasks.length > 0) {
-          const filterCwd = process.cwd()
-          const sessions = await getSessions(filterCwd)
+          const cwdFilter = process.cwd()
+          const sessions = await getSessions(cwdFilter)
           for (let i = 1; i < sessions.length; i++) {
             const prevSessionId = sessions[i]!
             const prev = await readTasks(prevSessionId)
