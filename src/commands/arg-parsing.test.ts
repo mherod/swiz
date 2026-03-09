@@ -272,4 +272,22 @@ describe("parseContinueArgs", () => {
     const result = parseContinueArgs(["--unknown", "--print"])
     expect(result.printOnly).toBe(true)
   })
+
+  test("parses --provider flag", () => {
+    expect(parseContinueArgs(["--provider", "gemini"]).provider).toBe("gemini")
+    expect(parseContinueArgs(["--provider", "codex"]).provider).toBe("codex")
+    expect(parseContinueArgs(["-p", "gemini"]).provider).toBe("gemini")
+  })
+
+  test("defaults provider to undefined", () => {
+    expect(parseContinueArgs([]).provider).toBeUndefined()
+  })
+
+  test("throws on invalid --provider value", () => {
+    expect(() => parseContinueArgs(["--provider", "openai"])).toThrow('must be "gemini" or "codex"')
+  })
+
+  test("throws when --provider is missing a value", () => {
+    expect(() => parseContinueArgs(["--provider"])).toThrow("Missing value for --provider")
+  })
 })

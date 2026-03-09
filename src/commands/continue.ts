@@ -1,5 +1,6 @@
 import { resolve } from "node:path"
 import { detectAgentCli, promptAgent } from "../agent.ts"
+import { type AiProviderId, hasAiProvider, promptText } from "../ai-providers.ts"
 import { DIM, RESET } from "../ansi.ts"
 import {
   extractPlainTurns,
@@ -13,7 +14,7 @@ import type { Command } from "../types.ts"
 
 // ─── Next-step suggestion ─────────────────────────────────────────────────────
 
-async function generateNextStep(jsonlText: string): Promise<string> {
+async function generateNextStep(jsonlText: string, provider?: AiProviderId): Promise<string> {
   const turns = extractPlainTurns(jsonlText).slice(-20)
   const context = formatTurnsAsContext(turns)
 
@@ -26,6 +27,11 @@ async function generateNextStep(jsonlText: string): Promise<string> {
     `no explanation, no markdown, no prefix, no period at the end.\n\n` +
     `<conversation>\n${context}\n</conversation>`
 
+  // Prefer explicit provider override or ai-providers layer (Gemini/Codex).
+  // Fall back to Cursor Agent CLI when no AI SDK provider is configured.
+  if (provider || hasAiProvider()) {
+    return promptText(prompt, { provider })
+  }
   return promptAgent(prompt)
 }
 
@@ -35,12 +41,14 @@ export interface ContinueArgs {
   targetDir: string
   sessionQuery: string | null
   printOnly: boolean
+  provider?: AiProviderId
 }
 
 export function parseContinueArgs(args: string[]): ContinueArgs {
   let targetDir = process.cwd()
   let sessionQuery: string | null = null
   let printOnly = false
+  let provider: AiProviderId | undefined
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -54,10 +62,17 @@ export function parseContinueArgs(args: string[]): ContinueArgs {
       i++
     } else if (arg === "--print") {
       printOnly = true
+    } else if (arg === "--provider" || arg === "-p") {
+      if (!next) throw new Error("Missing value for --provider")
+      if (next !== "gemini" && next !== "codex") {
+        throw new Error(`--provider must be "gemini" or "codex", got: ${next}`)
+      }
+      provider = next
+      i++
     }
   }
 
-  return { targetDir, sessionQuery, printOnly }
+  return { targetDir, sessionQuery, printOnly, provider }
 }
 
 // ─── Command ──────────────────────────────────────────────────────────────────
@@ -70,9 +85,13 @@ export const continueCommand: Command = {
     { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
     { flags: "--session, -s <id>", description: "Resume a specific session (prefix match)" },
     { flags: "--print", description: "Print the suggested next step without resuming" },
+    {
+      flags: "--provider, -p <name>",
+      description: 'AI provider override: "gemini" or "codex" (default: auto-select)',
+    },
   ],
   async run(args) {
-    const { targetDir, sessionQuery, printOnly } = parseContinueArgs(args)
+    const { targetDir, sessionQuery, printOnly, provider } = parseContinueArgs(args)
 
     const sessions = await findAllProviderSessions(targetDir)
 
@@ -95,9 +114,9 @@ export const continueCommand: Command = {
       throw new Error(getUnsupportedTranscriptFormatMessage(session))
     }
 
-    if (!detectAgentCli()) {
+    if (!hasAiProvider() && !detectAgentCli()) {
       throw new Error(
-        "No AI backend found. Install one of: Cursor Agent (agent), Claude Code (claude), or Gemini CLI (gemini)."
+        "No AI backend found. Set GEMINI_API_KEY, install the codex CLI, or install Cursor Agent."
       )
     }
 
@@ -110,7 +129,7 @@ export const continueCommand: Command = {
 
     let suggestion: string
     try {
-      suggestion = await generateNextStep(raw)
+      suggestion = await generateNextStep(raw, provider)
     } catch (err) {
       throw new Error(`Failed to generate suggestion: ${String(err)}`)
     }

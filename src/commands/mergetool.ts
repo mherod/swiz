@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs"
 import { basename, dirname, resolve } from "node:path"
 import { detectAgentCli, promptAgent } from "../agent.ts"
+import { type AiProviderId, hasAiProvider, promptText } from "../ai-providers.ts"
 import type { Command } from "../types.ts"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -15,11 +16,28 @@ export interface MergetoolArgs {
   local: string
   remote: string
   merged: string
+  provider?: AiProviderId
 }
 
 export function parseMergetoolArgs(args: string[]): MergetoolArgs {
-  // Filter out flags (none supported yet, but future-proof)
-  const positional = args.filter((a) => !a.startsWith("-"))
+  let provider: AiProviderId | undefined
+  const positional: string[] = []
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (!arg) continue
+    if (arg === "--provider") {
+      const next = args[i + 1]
+      if (!next) throw new Error("Missing value for --provider")
+      if (next !== "gemini" && next !== "codex") {
+        throw new Error(`--provider must be "gemini" or "codex", got: ${next}`)
+      }
+      provider = next
+      i++
+    } else if (!arg.startsWith("-")) {
+      positional.push(arg)
+    }
+  }
 
   if (positional.length < 4) {
     throw new Error(
@@ -29,7 +47,7 @@ export function parseMergetoolArgs(args: string[]): MergetoolArgs {
   }
 
   const [base, local, remote, merged] = positional as [string, string, string, string]
-  return { base, local, remote, merged }
+  return { base, local, remote, merged, provider }
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────
@@ -196,15 +214,19 @@ export function buildPrompt(
   ].join("\n")
 }
 
-export async function resolveWithAI(prompt: string): Promise<string> {
-  if (!detectAgentCli()) {
+export async function resolveWithAI(prompt: string, provider?: AiProviderId): Promise<string> {
+  // Prefer explicit provider override or ai-providers layer (Gemini/Codex).
+  // Fall back to Cursor Agent CLI when no AI SDK provider is configured.
+  if (!provider && !hasAiProvider() && !detectAgentCli()) {
     throw new Error(
-      "No AI backend found. Install the Cursor Agent CLI to use AI-powered merge resolution."
+      "No AI backend found. Set GEMINI_API_KEY, install the codex CLI, or install Cursor Agent."
     )
   }
 
-  // Use the agent CLI in read-only ask mode — no file modifications, just Q&A
-  const result = await promptAgent(prompt, { timeout: 120_000 })
+  const result =
+    provider || hasAiProvider()
+      ? await promptText(prompt, { provider })
+      : await promptAgent(prompt, { timeout: 120_000 })
 
   if (!result) {
     throw new Error("AI returned empty response")
@@ -284,7 +306,7 @@ export const mergetoolCommand: Command = {
     // Build prompt and resolve
     console.error("→ Resolving conflict with AI...")
     const prompt = buildPrompt(baseContent, localContent, remoteContent, mergedContent, repoContext)
-    const rawResult = await resolveWithAI(prompt)
+    const rawResult = await resolveWithAI(prompt, parsed.provider)
 
     // Post-process: strip code fences if present
     const result = stripCodeFences(rawResult)

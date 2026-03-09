@@ -57,6 +57,29 @@ describe("parseMergetoolArgs", () => {
     expect(result.base).toBe("/a")
     expect(result.merged).toBe("/d")
   })
+
+  it("parses --provider flag", () => {
+    expect(parseMergetoolArgs(["--provider", "gemini", "/a", "/b", "/c", "/d"]).provider).toBe(
+      "gemini"
+    )
+    expect(parseMergetoolArgs(["--provider", "codex", "/a", "/b", "/c", "/d"]).provider).toBe(
+      "codex"
+    )
+  })
+
+  it("defaults provider to undefined", () => {
+    expect(parseMergetoolArgs(["/a", "/b", "/c", "/d"]).provider).toBeUndefined()
+  })
+
+  it("throws on invalid --provider value", () => {
+    expect(() => parseMergetoolArgs(["--provider", "openai", "/a", "/b", "/c", "/d"])).toThrow(
+      'must be "gemini" or "codex"'
+    )
+  })
+
+  it("throws when --provider is missing a value", () => {
+    expect(() => parseMergetoolArgs(["--provider"])).toThrow("Missing value for --provider")
+  })
 })
 
 // ─── validatePaths ───────────────────────────────────────────────────────────
