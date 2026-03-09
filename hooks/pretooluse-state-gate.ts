@@ -28,6 +28,11 @@ async function main(): Promise<void> {
   if (!isBlocked) return
 
   const metadata = STATE_METADATA[state]
+  if (!metadata) {
+    denyPreToolUse(
+      `Project state is "${state}" but no metadata is registered for it — blocking ${toolName} until state metadata is repaired.`
+    )
+  }
   const reason =
     `Project state is "${state}" (${metadata.intent}) — ${toolName} is not allowed.\n\n` +
     `${metadata.description}\n\n` +

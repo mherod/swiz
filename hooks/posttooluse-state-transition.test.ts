@@ -261,4 +261,48 @@ describe("posttooluse-state-transition no-upstream commit behavior", () => {
       ])
     }
   })
+
+  test("git checkout -b from default branch transitions to developing", async () => {
+    const repo = await createRepo()
+    try {
+      await writeProjectState(repo, "reviewing")
+      runGit(repo, ["checkout", "-b", "feature/from-main"])
+
+      const exitCode = await runHook(repo, "git checkout -b feature/from-main")
+      expect(exitCode).toBe(0)
+      expect(await readProjectState(repo)).toBe("developing")
+    } finally {
+      await rm(repo, { recursive: true, force: true })
+    }
+  })
+
+  test("git checkout -b from non-default branch does not transition", async () => {
+    const repo = await createRepo()
+    try {
+      runGit(repo, ["checkout", "-b", "feature/base"])
+      await writeProjectState(repo, "reviewing")
+      runGit(repo, ["checkout", "-b", "feature/child"])
+
+      const exitCode = await runHook(repo, "git checkout -b feature/child")
+      expect(exitCode).toBe(0)
+      expect(await readProjectState(repo)).toBe("reviewing")
+    } finally {
+      await rm(repo, { recursive: true, force: true })
+    }
+  })
+
+  test("git checkout -b with explicit default start-point transitions to developing", async () => {
+    const repo = await createRepo()
+    try {
+      runGit(repo, ["checkout", "-b", "feature/base"])
+      await writeProjectState(repo, "reviewing")
+      runGit(repo, ["checkout", "-b", "feature/from-main", "main"])
+
+      const exitCode = await runHook(repo, "git checkout -b feature/from-main main")
+      expect(exitCode).toBe(0)
+      expect(await readProjectState(repo)).toBe("developing")
+    } finally {
+      await rm(repo, { recursive: true, force: true })
+    }
+  })
 })

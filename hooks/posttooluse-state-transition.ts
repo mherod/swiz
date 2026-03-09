@@ -69,6 +69,34 @@ function extractCheckoutBranch(command: string): string | null {
   return match?.[1] ?? null
 }
 
+function extractCheckoutStartPoint(command: string): string | null {
+  const checkoutMatch = command.match(
+    /\bgit\s+checkout\s+-[bB]\s+[^\s;|&]+(?:\s+([^\s;|&-][^\s;|&]*))?/
+  )
+  if (checkoutMatch?.[1]) return checkoutMatch[1]
+
+  const switchMatch = command.match(
+    /\bgit\s+switch\s+-[cC]\s+[^\s;|&]+(?:\s+([^\s;|&-][^\s;|&]*))?/
+  )
+  if (switchMatch?.[1]) return switchMatch[1]
+
+  return null
+}
+
+async function resolveCheckoutSourceBranch(command: string, cwd: string): Promise<string | null> {
+  const explicitStartPoint = extractCheckoutStartPoint(command)
+  if (explicitStartPoint) return explicitStartPoint
+
+  try {
+    const previousBranch = (await git(["rev-parse", "--abbrev-ref", "@{-1}"], cwd)).trim()
+    if (previousBranch && previousBranch !== "@{-1}") return previousBranch
+  } catch {
+    // ignore and fall through
+  }
+
+  return null
+}
+
 async function transitionToAddressingFeedbackOnChangesRequested(cwd: string): Promise<boolean> {
   if (!hasGhCli() || !(await isGitHubRemote(cwd))) return false
 
@@ -177,9 +205,9 @@ async function handleAsyncTransitions(
   // ── git checkout -b / git switch -c: any → developing (only from default branch) ──
   if (GIT_CHECKOUT_NEW_BRANCH_RE.test(command)) {
     try {
-      const currentBranch = (await git(["branch", "--show-current"], cwd)).trim()
+      const sourceBranch = await resolveCheckoutSourceBranch(command, cwd)
       const defaultBranch = await getDefaultBranch(cwd)
-      if (currentBranch && isDefaultBranch(currentBranch, defaultBranch)) {
+      if (sourceBranch && isDefaultBranch(sourceBranch, defaultBranch)) {
         await writeProjectState(cwd, "developing")
         return true
       }
