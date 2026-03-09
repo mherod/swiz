@@ -200,6 +200,7 @@ function printSettings(
   fileExists: boolean,
   sessionId: string | null,
   ambitionSource?: "global" | "project" | "session",
+  strictNoDirectMainSource?: "global" | "project",
   projectPolicyInfo?: {
     configPath: string
     profile: string | null
@@ -265,8 +266,10 @@ function printSettings(
   console.log(
     `  changes-requested-gate:  ${effective.changesRequestedGate ? "enabled" : "disabled"} (global)`
   )
+  const strictNoDirectMainScopeLabel =
+    strictNoDirectMainSource === "project" ? "project override" : "global"
   console.log(
-    `  strict-no-direct-main:   ${effective.strictNoDirectMain ? "enabled" : "disabled"} (global)`
+    `  strict-no-direct-main:   ${effective.strictNoDirectMain ? "enabled" : "disabled"} (${strictNoDirectMainScopeLabel})`
   )
   const voiceLabel = effective.narratorVoice || "system default"
   console.log(`  narrator-voice:  ${voiceLabel} (global)`)
@@ -335,6 +338,8 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
     : projectSettings?.ambitionMode
       ? "project"
       : "global"
+  const strictNoDirectMainSource: "global" | "project" =
+    projectSettings?.strictNoDirectMain !== undefined ? "project" : "global"
 
   const policy = resolvePolicy(projectSettings)
   const memoryThresholds = resolveMemoryThresholds(
@@ -369,6 +374,7 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
     fileExists,
     sessionId,
     ambitionSource,
+    strictNoDirectMainSource,
     projectPolicyInfo,
     detectProjectStack(parsed.targetDir)
   )

@@ -16,7 +16,12 @@
 //   Collaborative + non-trivial: BLOCKED — must use feature branch + PR
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
-import { readProjectSettings, readSwizSettings, resolvePolicy } from "../src/settings.ts"
+import {
+  getEffectiveSwizSettings,
+  readProjectSettings,
+  readSwizSettings,
+  resolvePolicy,
+} from "../src/settings.ts"
 import {
   classifyChangeScope,
   denyPreToolUse,
@@ -145,7 +150,8 @@ const isCollaborative = collaboration.isCollaborative
 
 // ─── Check strict mode ────────────────────────────────────────────────
 const globalSettings = await readSwizSettings()
-const strictMode = globalSettings.strictNoDirectMain
+const effectiveSettings = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+const strictMode = effectiveSettings.strictNoDirectMain
 
 // ─── Enforce policy ────────────────────────────────────────────────────
 

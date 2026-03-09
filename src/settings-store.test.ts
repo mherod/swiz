@@ -227,4 +227,15 @@ describe("effective", () => {
       const sessionEffective = await store.effective(projectDir, sessionId)
       expect(sessionEffective.largeFileSizeKb).toBe(900)
     }))
+
+  test("project strictNoDirectMain overrides global in effective settings", () =>
+    withTmpHome(async (home) => {
+      const store = new SettingsStore({ home })
+      const projectDir = join(home, "my-project")
+      await mkdir(join(projectDir, ".swiz"), { recursive: true })
+      await store.setGlobal("strictNoDirectMain", false)
+      await store.setProject(projectDir, "strictNoDirectMain", true)
+      const effective = await store.effective(projectDir)
+      expect(effective.strictNoDirectMain).toBe(true)
+    }))
 })

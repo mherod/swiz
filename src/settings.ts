@@ -228,7 +228,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
       "no-direct-main",
     ],
     kind: "boolean",
-    scopes: ["global"],
+    scopes: ["global", "project"],
   },
   {
     key: "prAgeGateMinutes",
@@ -345,6 +345,8 @@ export interface ProjectSwizSettings {
   memoryWordThreshold?: number
   largeFileSizeKb?: number
   ambitionMode?: AmbitionMode
+  /** Enforce feature-branch workflow even for solo repositories. */
+  strictNoDirectMain?: boolean
   /** Hook filenames to skip for this project (e.g. "stop-github-ci.ts") */
   disabledHooks?: string[]
   /** External hook plugin bundles — package names or local paths */
@@ -566,6 +568,7 @@ export const projectSettingsSchema = z.object({
   memoryWordThreshold: z.number().int().min(1).optional(),
   largeFileSizeKb: z.number().int().min(1).optional(),
   ambitionMode: ambitionModeSchema.optional(),
+  strictNoDirectMain: z.boolean().optional(),
   disabledHooks: z.array(z.string().min(1)).optional(),
   plugins: z.array(z.string().min(1)).optional(),
   allowedSkillCategories: z.array(z.string().min(1)).optional(),
@@ -718,6 +721,9 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   const ambitionMode = ambitionModeSchema.safeParse(obj.ambitionMode)
   if (ambitionMode.success) {
     result.ambitionMode = ambitionMode.data
+  }
+  if (typeof obj.strictNoDirectMain === "boolean") {
+    result.strictNoDirectMain = obj.strictNoDirectMain
   }
   if (
     Array.isArray(obj.disabledHooks) &&
@@ -927,7 +933,7 @@ export function getEffectiveSwizSettings(
     githubCiGate: settings.githubCiGate,
     changesRequestedGate: settings.changesRequestedGate,
     personalRepoIssuesGate: settings.personalRepoIssuesGate,
-    strictNoDirectMain: settings.strictNoDirectMain,
+    strictNoDirectMain: projectSettings?.strictNoDirectMain ?? settings.strictNoDirectMain,
     memoryLineThreshold: settings.memoryLineThreshold,
     memoryWordThreshold: settings.memoryWordThreshold,
     largeFileSizeKb: projectSettings?.largeFileSizeKb ?? settings.largeFileSizeKb,

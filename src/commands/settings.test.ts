@@ -1297,6 +1297,17 @@ describe("strictNoDirectMain setting", () => {
     expect(final.strictNoDirectMain).toBe(false)
   })
 
+  test("accepts --project scope and writes strictNoDirectMain to project config", async () => {
+    const home = await createTempHome()
+    const { exitCode } = await runSwiz(
+      ["settings", "enable", "strict-no-direct-main", "--project", "--dir", home, "--force"],
+      home
+    )
+    expect(exitCode).toBe(0)
+    const projectSettings = await readProjectSettings(home)
+    expect(projectSettings?.strictNoDirectMain).toBe(true)
+  })
+
   test("enable is blocked when collaborationMode=solo without --force", async () => {
     const home = await createTempHome()
     // Pre-set collaborationMode=solo
@@ -1383,6 +1394,17 @@ describe("strictNoDirectMain setting", () => {
     expect(stdout).toContain("strict-no-direct-main")
   })
 
+  test("swiz settings show reports project source for strict-no-direct-main", async () => {
+    const home = await createTempHome()
+    const { exitCode: setExitCode } = await runSwiz(
+      ["settings", "enable", "strict-no-direct-main", "--project", "--dir", home, "--force"],
+      home
+    )
+    expect(setExitCode).toBe(0)
+    const { stdout } = await runSwiz(["settings", "show", "--project", "--dir", home], home)
+    expect(stdout).toContain("strict-no-direct-main:   enabled (project override)")
+  })
+
   test("getEffectiveSwizSettings propagates strictNoDirectMain", () => {
     const settings = {
       autoContinue: false,
@@ -1412,6 +1434,38 @@ describe("strictNoDirectMain setting", () => {
       sessions: {},
     }
     const effective = getEffectiveSwizSettings(settings)
+    expect(effective.strictNoDirectMain).toBe(true)
+  })
+
+  test("getEffectiveSwizSettings applies project strictNoDirectMain override", () => {
+    const settings = {
+      autoContinue: false,
+      critiquesEnabled: false,
+      ambitionMode: "standard" as const,
+      collaborationMode: "auto" as const,
+      narratorVoice: "",
+      narratorSpeed: 0,
+      prAgeGateMinutes: 10,
+      prMergeMode: true,
+      pushCooldownMinutes: 0,
+      pushGate: true,
+      sandboxedEdits: false,
+      speak: false,
+      swizNotifyHooks: false,
+      updateMemoryFooter: false,
+      gitStatusGate: true,
+      nonDefaultBranchGate: true,
+      githubCiGate: true,
+      changesRequestedGate: true,
+      personalRepoIssuesGate: true,
+      strictNoDirectMain: false,
+      memoryLineThreshold: 1400,
+      memoryWordThreshold: 5000,
+      largeFileSizeKb: 500,
+      statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      sessions: {},
+    }
+    const effective = getEffectiveSwizSettings(settings, null, { strictNoDirectMain: true })
     expect(effective.strictNoDirectMain).toBe(true)
   })
 })
