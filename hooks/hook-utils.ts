@@ -24,8 +24,15 @@ import { dirname, join } from "node:path"
 import { translateMatcher } from "../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
 import { getHomeDirOrNull, getHomeDirWithFallback } from "../src/home.ts"
-import { readProjectSettings, STATE_TRANSITIONS, stateDataSchema } from "../src/settings.ts"
+import { STATE_TRANSITIONS, stateDataSchema } from "../src/settings.ts"
 import { skillAdvice, skillExists } from "../src/skill-utils.ts"
+import {
+  GH_CMD_RE,
+  GIT_READ_RE,
+  GIT_SYNC_RE,
+  GIT_WRITE_RE,
+  READ_CMD_RE,
+} from "./utils/git-utils.ts"
 
 export { skillAdvice, skillExists }
 export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
@@ -34,8 +41,12 @@ export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
 export { getCanonicalPathHash } from "../src/git-helpers.ts"
 export { sanitizeSessionId, sessionPrefix } from "../src/session-id.ts"
 
-export type PackageManager = "bun" | "pnpm" | "yarn" | "npm"
-export type Runtime = "bun" | "node"
+export type { PackageManager, Runtime } from "./utils/package-detection.ts"
+export {
+  detectPackageManager,
+  detectPkgRunner,
+  detectRuntime,
+} from "./utils/package-detection.ts"
 
 // ─── Framework detection ──────────────────────────────────────────────────
 // Re-exported from src/detect-frameworks.ts so hook scripts can access it
@@ -48,104 +59,6 @@ export {
   detectFrameworks,
   detectProjectStack,
 } from "../src/detect-frameworks.ts"
-
-let _pmCache: PackageManager | null | undefined
-
-export function detectPackageManager(): PackageManager | null {
-  if (_pmCache !== undefined) return _pmCache
-
-  let dir = process.cwd()
-  while (true) {
-    // Primary: Check for packageManager field in package.json (Node.js standard)
-    const pkgJsonPath = join(dir, "package.json")
-    if (existsSync(pkgJsonPath)) {
-      try {
-        const content = readFileSync(pkgJsonPath, "utf-8")
-        const pkg = JSON.parse(content)
-        if (pkg.packageManager && typeof pkg.packageManager === "string") {
-          // Format: "pnpm@10.29.3" → extract "pnpm"
-          const pmName = pkg.packageManager.split("@")[0] as PackageManager
-          if (pmName === "bun" || pmName === "pnpm" || pmName === "yarn" || pmName === "npm") {
-            _pmCache = pmName
-            return _pmCache
-          }
-        }
-      } catch {
-        // If package.json is invalid JSON, continue to other detection methods
-      }
-    }
-
-    // Secondary: Check for pnpm-specific config hints in .npmrc
-    const npmrcPath = join(dir, ".npmrc")
-    if (existsSync(npmrcPath)) {
-      try {
-        const content = readFileSync(npmrcPath, "utf-8")
-        // Look for pnpm-specific config keys
-        if (
-          /^\s*node-linker\s*=\s*hoisted/m.test(content) ||
-          /^\s*shamefully-hoist\s*=\s*true/m.test(content) ||
-          /^\s*strict-peer-dependencies\s*=\s*false/m.test(content)
-        ) {
-          _pmCache = "pnpm"
-          return _pmCache
-        }
-      } catch {
-        // If .npmrc is unreadable, continue to lock file detection
-      }
-    }
-
-    // Tertiary: Check for lockfile signals
-    if (existsSync(join(dir, "bun.lockb")) || existsSync(join(dir, "bun.lock"))) {
-      _pmCache = "bun"
-      return _pmCache
-    }
-    if (existsSync(join(dir, "pnpm-lock.yaml")) || existsSync(join(dir, "shrinkwrap.yaml"))) {
-      _pmCache = "pnpm"
-      return _pmCache
-    }
-    if (
-      existsSync(join(dir, "yarn.lock")) ||
-      existsSync(join(dir, ".pnp.cjs")) ||
-      existsSync(join(dir, ".pnp.js"))
-    ) {
-      _pmCache = "yarn"
-      return _pmCache
-    }
-    if (
-      existsSync(join(dir, "package-lock.json")) ||
-      existsSync(join(dir, "npm-shrinkwrap.json"))
-    ) {
-      _pmCache = "npm"
-      return _pmCache
-    }
-    const parent = dirname(dir)
-    if (parent === dir) break
-    dir = parent
-  }
-
-  _pmCache = null
-  return null
-}
-
-export function detectRuntime(): Runtime {
-  const pm = detectPackageManager()
-  return pm === "bun" ? "bun" : "node"
-}
-
-/** The "run package" command for the detected PM (e.g. bunx, pnpm dlx, npx) */
-export function detectPkgRunner(): string {
-  const pm = detectPackageManager()
-  switch (pm) {
-    case "bun":
-      return "bunx"
-    case "pnpm":
-      return "pnpm dlx"
-    case "yarn":
-      return "yarn dlx"
-    default:
-      return "npx"
-  }
-}
 
 // ─── Cross-agent tool equivalence ──────────────────────────────────────────
 // Each set contains all names an agent might use for the same concept.
@@ -179,7 +92,7 @@ export {
 } from "../src/tool-matchers.ts"
 
 // Local import for names used within this file (re-exports don't create local bindings)
-import { isShellTool, TASK_TOOLS } from "../src/tool-matchers.ts"
+import { TASK_TOOLS } from "../src/tool-matchers.ts"
 
 /**
  * Returns true if the Bash command is a `swiz` CLI invocation.
@@ -841,322 +754,6 @@ export async function createSessionTask(
   }
 }
 
-// ─── Branch utilities ───────────────────────────────────────────────────
-
-/** True if branch matches the configured default branch. */
-export function isDefaultBranch(
-  branch: string,
-  defaultBranches: string | readonly string[] = ["main", "master"]
-): boolean {
-  const candidates = Array.isArray(defaultBranches) ? defaultBranches : [defaultBranches]
-  return candidates.includes(branch)
-}
-
-/**
- * Resolve the effective default branch for a repository.
- * Precedence:
- *   1. Project setting `.swiz/config.json` → `defaultBranch`
- *   2. Git remote HEAD (`refs/remotes/origin/HEAD`)
- *   3. Local `main` branch
- *   4. Local `master` branch
- *   5. Fallback `main`
- */
-export async function getDefaultBranch(cwd: string): Promise<string> {
-  const projectSettings = await readProjectSettings(cwd)
-  const configured = projectSettings?.defaultBranch?.trim()
-  if (configured) return configured
-
-  const remoteHeadRef = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd)
-  const remoteHead = remoteHeadRef.replace(/^refs\/remotes\/origin\//, "").trim()
-  if (remoteHead) return remoteHead
-
-  const localMain = await git(["rev-parse", "--verify", "refs/heads/main"], cwd)
-  if (localMain) return "main"
-
-  const localMaster = await git(["rev-parse", "--verify", "refs/heads/master"], cwd)
-  if (localMaster) return "master"
-
-  return "main"
-}
-
-// ─── Git status parsing ─────────────────────────────────────────────────
-
-export interface GitStatusCounts {
-  total: number
-  modified: number
-  added: number
-  deleted: number
-  untracked: number
-  lines: string[]
-}
-
-/** Parse `git status --porcelain` output into a breakdown of file counts. */
-export function parseGitStatus(porcelain: string): GitStatusCounts {
-  const lines = porcelain.split("\n").filter((l) => l.trim())
-  let modified = 0,
-    added = 0,
-    deleted = 0,
-    untracked = 0
-  for (const line of lines) {
-    if (line.startsWith(" M")) modified++
-    else if (line.startsWith("A ")) added++
-    else if (line.startsWith("D ")) deleted++
-    else if (line.startsWith("??")) untracked++
-  }
-  return { total: lines.length, modified, added, deleted, untracked, lines }
-}
-
-// ─── Git diff --stat summary parsing ────────────────────────────────────
-
-export interface GitStatSummary {
-  filesChanged: number
-  insertions: number
-  deletions: number
-}
-
-/**
- * Parse the summary line from `git diff --stat` output.
- *
- * Handles all variants:
- * - Both: "3 files changed, 160 insertions(+), 2 deletions(-)"
- * - Insertions only: "2 files changed, 21 insertions(+)"
- * - Deletions only: "1 file changed, 5 deletions(-)"
- * - Rename only: "1 file changed" (no insertions/deletions)
- * - Empty/no changes: returns zeros
- *
- * Pass the full `--stat` output; the function finds and parses
- * the summary line (last non-empty line matching "file(s) changed").
- */
-export function parseGitStatSummary(statOutput: string): GitStatSummary {
-  const lines = statOutput.trim().split("\n")
-
-  // Find the summary line — last line matching "N file(s) changed"
-  const summaryLine = lines.findLast((l) => /\d+\s+files?\s+changed/.test(l)) ?? ""
-  if (!summaryLine) return { filesChanged: 0, insertions: 0, deletions: 0 }
-
-  const filesMatch = summaryLine.match(/(\d+)\s+files?\s+changed/)
-  const insertMatch = summaryLine.match(/(\d+)\s+insertions?\(\+\)/)
-  const deleteMatch = summaryLine.match(/(\d+)\s+deletions?\(-\)/)
-
-  return {
-    filesChanged: filesMatch ? parseInt(filesMatch[1]!, 10) : 0,
-    insertions: insertMatch ? parseInt(insertMatch[1]!, 10) : 0,
-    deletions: deleteMatch ? parseInt(deleteMatch[1]!, 10) : 0,
-  }
-}
-
-export interface ChangeScopeResult {
-  /** True when --stat returned zero files but --name-only found changes */
-  statParsingFailed: boolean
-  isTrivial: boolean
-  isSmallFix: boolean
-  isDocsOnly: boolean
-  scopeDescription: string
-  fileCount: number
-  totalLinesChanged: number
-}
-
-export interface ClassifyChangeScopeOptions {
-  /** Override the max file count for trivial classification (default: 3) */
-  trivialMaxFiles?: number
-  /** Override the max line count for trivial classification (default: 20) */
-  trivialMaxLines?: number
-}
-
-/**
- * Classify a set of changes as trivial, small-fix, docs-only, or non-trivial.
- *
- * Fail-closed: when stat parsing disagrees with the file list (fileCount === 0
- * but changedFiles is non-empty), forces non-trivial classification so the
- * caller blocks rather than allows.
- */
-export function classifyChangeScope(
-  stat: GitStatSummary,
-  changedFiles: string[],
-  options: ClassifyChangeScopeOptions = {}
-): ChangeScopeResult {
-  const { filesChanged: fileCount, insertions, deletions } = stat
-  const totalLinesChanged = insertions + deletions
-  const trivialMaxFiles = options.trivialMaxFiles ?? 3
-  const trivialMaxLines = options.trivialMaxLines ?? 20
-
-  // Fail-closed: stat returned zeros but files actually changed
-  const statParsingFailed = changedFiles.length > 0 && fileCount === 0
-
-  const docsOnlyRe =
-    /\.(md|txt|rst)$|^(README|CHANGELOG|LICENSE|docs\/)|(\.config\.|\.json|\.yaml|\.yml|\.toml)$/i
-  const isDocsOnly = changedFiles.length > 0 && changedFiles.every((f) => docsOnlyRe.test(f))
-
-  const isTrivial =
-    !statParsingFailed &&
-    fileCount <= trivialMaxFiles &&
-    totalLinesChanged <= trivialMaxLines &&
-    !changedFiles.some((f) => /src\/|lib\/|components\//.test(f))
-
-  const isSmallFix = !statParsingFailed && fileCount <= 2 && totalLinesChanged <= 30
-
-  const scopeDescription = statParsingFailed
-    ? `stat-unparseable (${changedFiles.length} files detected)`
-    : isDocsOnly
-      ? "docs-only"
-      : isTrivial
-        ? "trivial"
-        : isSmallFix
-          ? "small-fix"
-          : `${fileCount}-files, ${totalLinesChanged}-lines`
-
-  return {
-    statParsingFailed,
-    isTrivial,
-    isSmallFix,
-    isDocsOnly,
-    scopeDescription,
-    fileCount,
-    totalLinesChanged,
-  }
-}
-
-// ─── Git ahead/behind ───────────────────────────────────────────────────
-
-/**
- * Return how many commits the current branch is ahead/behind its upstream,
- * plus the upstream ref name. Returns null if no upstream is set or counts
- * cannot be parsed.
- */
-export async function getGitAheadBehind(
-  cwd: string
-): Promise<{ ahead: number; behind: number; upstream: string } | null> {
-  const upstream = await git(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd)
-  if (!upstream) return null
-  const ahead = parseInt(await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd), 10)
-  const behind = parseInt(await git(["rev-list", "--count", "HEAD..@{upstream}"], cwd), 10)
-  if (Number.isNaN(ahead) || Number.isNaN(behind)) return null
-  return { ahead, behind, upstream }
-}
-
-export interface GitStatusV2 {
-  /** Current branch name, or "(detached)" in detached-HEAD state. */
-  branch: string
-  /** Total number of changed files (modified + added + deleted + untracked). */
-  total: number
-  modified: number
-  added: number
-  deleted: number
-  untracked: number
-  /** File-status lines for display (first column stripped). */
-  lines: string[]
-  /** Commits ahead of upstream, or 0 if no upstream. */
-  ahead: number
-  /** Commits behind upstream, or 0 if no upstream. */
-  behind: number
-  /** Upstream ref name, e.g. "origin/main", or null if no upstream is configured. */
-  upstream: string | null
-}
-
-/**
- * Run `git status --porcelain=v2 --branch` once and parse branch name,
- * ahead/behind counts, and file-change breakdown from the single output.
- *
- * Replaces the previous fan-out of five separate git subprocess calls:
- *   git branch --show-current
- *   git status --porcelain
- *   git rev-parse --abbrev-ref @{upstream}
- *   git rev-list --count @{upstream}..HEAD
- *   git rev-list --count HEAD..@{upstream}
- *
- * Returns null when the directory is not a git repository or the command fails.
- */
-export async function getGitStatusV2(cwd: string): Promise<GitStatusV2 | null> {
-  const out = await git(["status", "--porcelain=v2", "--branch"], cwd)
-  if (!out) return null
-
-  let branch = "(detached)"
-  let ahead = 0
-  let behind = 0
-  let upstream: string | null = null
-  let modified = 0
-  let added = 0
-  let deleted = 0
-  let untracked = 0
-  const lines: string[] = []
-
-  for (const line of out.split("\n")) {
-    if (line.startsWith("# branch.head ")) {
-      const head = line.slice("# branch.head ".length).trim()
-      branch = head === "(detached)" ? "(detached)" : head
-      continue
-    }
-    if (line.startsWith("# branch.upstream ")) {
-      upstream = line.slice("# branch.upstream ".length).trim()
-      continue
-    }
-    if (line.startsWith("# branch.ab ")) {
-      const match = /\+(\d+)\s+-(\d+)/.exec(line)
-      if (match) {
-        ahead = Number(match[1])
-        behind = Number(match[2])
-      }
-      continue
-    }
-    // Ordinary changed entry (type "1" or "2")
-    if (line.startsWith("1 ") || line.startsWith("2 ")) {
-      const xy = line.split(" ")[1] ?? ".."
-      // Index status (first char of xy)
-      if (xy[0] === "D") deleted++
-      else if (xy[0] === "A") added++
-      else if (xy[0] !== ".") modified++
-      // Worktree status (second char of xy)
-      if (xy[1] === "D") deleted++
-      else if (xy[1] !== ".") modified++
-      // File path: type "1" uses last token; type "2" (rename) uses tab-separated last field
-      const path = line.includes("\t") ? line.split("\t").pop()! : line.split(" ").pop()!
-      lines.push(path)
-      continue
-    }
-    if (line.startsWith("? ")) {
-      untracked++
-      lines.push(line.slice(2))
-    }
-  }
-
-  const total = lines.length
-  return { branch, total, modified, added, deleted, untracked, lines, ahead, behind, upstream }
-}
-
-/** Canonical empty-tree hash used when repos have fewer than N commits. */
-export const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-
-/**
- * Resolve a recent-commit diff range ending at HEAD.
- * Uses `HEAD~<commitsBack>` when available, otherwise falls back to the empty tree.
- */
-export async function recentHeadRange(cwd: string, commitsBack = 10): Promise<string> {
-  const base =
-    (await git(["rev-parse", "--verify", `HEAD~${Math.max(1, Math.floor(commitsBack))}`], cwd)) ||
-    GIT_EMPTY_TREE
-  return `${base}..HEAD`
-}
-
-// ─── Source file classification ─────────────────────────────────────────
-
-/** Source file extensions worth scanning for code issues. */
-export const SOURCE_EXT_RE =
-  /\.(ts|tsx|js|jsx|mjs|cjs|py|rb|go|java|kt|swift|php|cs|cpp|c|rs|vue|svelte)$/
-
-/** Files that are tests — skip for debug/TODO checks. */
-export const TEST_FILE_RE = /\.test\.|\.spec\.|__tests__|\/test\//
-
-// ─── Transcript parsing ─────────────────────────────────────────────────
-
-/**
- * Parse a Claude Code JSONL transcript and return every tool name called by
- * the assistant, in order. Returns [] if the file is missing or unreadable.
- */
-export async function extractToolNamesFromTranscript(transcriptPath: string): Promise<string[]> {
-  const blocks = await readTranscriptToolBlocks(transcriptPath)
-  return blocks.flatMap((b) => (b.name ? [String(b.name)] : []))
-}
-
 // ─── Command normalisation (re-exported from src/) ──────────────────────
 export { normalizeCommand, stripHeredocs } from "../src/command-utils.ts"
 // ─── Transcript summary (re-exported from src/) ────────────────────────
@@ -1167,333 +764,64 @@ export {
   type TranscriptSummary,
 } from "../src/transcript-summary.ts"
 
-import { normalizeCommand } from "../src/command-utils.ts"
+// ─── Branch, git status, and source file utilities ─────────────────────
+// Implementations live in ./utils/git-utils.ts; re-exported here for
+// backward-compatible access via the single hook-utils.ts import.
 
-/**
- * Read all `tool_use` blocks from assistant messages in a JSONL transcript.
- * Shared by the extract* helpers below to avoid duplicating the JSONL-parsing loop.
- */
-async function readTranscriptToolBlocks(path: string): Promise<Array<Record<string, unknown>>> {
-  try {
-    const text = await Bun.file(path).text()
-    const blocks: Array<Record<string, unknown>> = []
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue
-      try {
-        const entry = JSON.parse(line)
-        if (entry?.type !== "assistant") continue
-        const content = entry?.message?.content
-        if (!Array.isArray(content)) continue
-        for (const block of content) {
-          if (block?.type === "tool_use") blocks.push(block)
-        }
-      } catch {}
-    }
-    return blocks
-  } catch {
-    return []
-  }
-}
+export type {
+  ChangeScopeResult,
+  ClassifyChangeScopeOptions,
+  GitStatSummary,
+  GitStatusCounts,
+  GitStatusV2,
+} from "./utils/git-utils.ts"
+export {
+  BRANCH_CHECK_RE,
+  CI_WAIT_RE,
+  classifyChangeScope,
+  extractMergeBranch,
+  extractOwnerFromUrl,
+  extractPrNumber,
+  FORCE_PUSH_RE,
+  GH_CMD_RE,
+  GH_PR_MERGE_RE,
+  GIT_ANY_CMD_RE,
+  GIT_COMMIT_RE,
+  GIT_EMPTY_TREE,
+  GIT_MERGE_RE,
+  GIT_PUSH_RE,
+  GIT_READ_RE,
+  GIT_SYNC_RE,
+  GIT_WRITE_RE,
+  getCurrentGitHubUser,
+  getDefaultBranch,
+  getGitAheadBehind,
+  getGitStatusV2,
+  getRepoNameWithOwner,
+  hasGitPushForceFlag,
+  isDefaultBranch,
+  PR_CHECK_RE,
+  parseGitStatSummary,
+  parseGitStatus,
+  READ_CMD_RE,
+  recentHeadRange,
+  SOURCE_EXT_RE,
+  SWIZ_ISSUE_RE,
+  TEST_FILE_RE,
+} from "./utils/git-utils.ts"
 
-/**
- * Extract all shell commands from assistant Bash tool_use blocks in a transcript.
- * Each command is normalised (backslash-newline continuations collapsed) before
- * being returned.
- */
-export async function extractBashCommands(path: string): Promise<string[]> {
-  const blocks = await readTranscriptToolBlocks(path)
-  const commands: string[] = []
-  for (const block of blocks) {
-    if (!isShellTool(String(block.name ?? ""))) continue
-    const cmd = String((block.input as Record<string, unknown>)?.command ?? "")
-    if (cmd) commands.push(normalizeCommand(cmd))
-  }
-  return commands
-}
+// ─── Transcript parsing ─────────────────────────────────────────────────
+// Implementations live in ./utils/transcript.ts; re-exported here for
+// backward-compatible access via the single hook-utils.ts import.
 
-/**
- * Extract the names of all skills invoked via the Skill tool in a transcript.
- * Returns an array of skill name strings (e.g. ["commit", "push"]).
- */
-export async function extractSkillInvocations(path: string): Promise<string[]> {
-  const blocks = await readTranscriptToolBlocks(path)
-  const skills: string[] = []
-  for (const block of blocks) {
-    if (block.name !== "Skill") continue
-    const skill = String((block.input as Record<string, unknown>)?.skill ?? "")
-    if (skill) skills.push(skill)
-  }
-  return skills
-}
-
-// ── ANSI stripping ──────────────────────────────────────────────────────────
-
-/**
- * Strip ANSI escape sequences from a string so regex pattern matching works on
- * real terminal output (bun test, biome, tsc, etc. embed colour codes).
- * Uses String.fromCharCode(27) to satisfy the no-control-regex lint rule.
- */
-const _ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
-export function stripAnsi(s: string): string {
-  return s.replace(_ANSI_RE, "")
-}
-
-// ── Blocked tool_use detection ──────────────────────────────────────────────
-
-/**
- * Collect the tool_use IDs of calls denied by a PreToolUse hook.
- *
- * When a PreToolUse hook blocks a tool call, Claude Code writes the assistant
- * message to the transcript before running the hook, but the corresponding
- * tool_result in the next user message contains the denial reason rather than
- * actual output. All hook denial messages end with the mandatory
- * `ACTION REQUIRED:` footer, which is the reliable detection signal.
- *
- * Pass the result to parseTranscriptEvents (or similar) to skip blocked entries
- * so they are not counted as actual executions.
- */
-export function collectBlockedToolUseIds(lines: string[]): Set<string> {
-  const blocked = new Set<string>()
-  for (const line of lines) {
-    if (!line.trim()) continue
-    try {
-      const entry = JSON.parse(line)
-      if (entry?.type !== "user") continue
-      const content = entry?.message?.content
-      if (!Array.isArray(content)) continue
-      for (const block of content) {
-        if (block?.type !== "tool_result") continue
-        const inner: unknown = block.content
-        let text = ""
-        if (typeof inner === "string") text = inner
-        else if (Array.isArray(inner))
-          text = (inner as Array<{ type?: string; text?: string }>)
-            .filter((b) => b?.type === "text")
-            .map((b) => b.text ?? "")
-            .join("\n")
-        if (text.includes("ACTION REQUIRED:")) blocked.add(String(block.tool_use_id ?? ""))
-      }
-    } catch {
-      // Ignore malformed lines
-    }
-  }
-  return blocked
-}
-
-/**
- * Read transcript JSONL and return only the lines that belong to the current
- * session — i.e. lines that appear AFTER the last `{"type":"system"}` entry.
- *
- * Claude Code inserts a `{"type":"system"}` entry when resuming from a
- * compacted conversation. Events before that boundary are from prior sessions
- * and must not influence history-dependent hooks (consecutive-run gates,
- * instruction trackers, memory-enforcement checks, etc.).
- *
- * Returns all non-empty lines when no boundary is found (fresh session or
- * transcript that predates compaction markers).
- */
-export async function readSessionLines(transcriptPath: string): Promise<string[]> {
-  let text = ""
-  try {
-    text = await Bun.file(transcriptPath).text()
-  } catch {
-    return []
-  }
-  const allLines = text.split("\n")
-  let sessionStartIdx = 0
-  for (let i = allLines.length - 1; i >= 0; i--) {
-    const raw = allLines[i]
-    if (!raw?.trim()) continue
-    try {
-      const parsed = JSON.parse(raw)
-      if (parsed?.type === "system") {
-        sessionStartIdx = i + 1
-        break
-      }
-    } catch {
-      // ignore malformed lines
-    }
-  }
-  return sessionStartIdx > 0 ? allLines.slice(sessionStartIdx) : allLines
-}
-
-// ── Git command regexes ───────────────────────────────────────────────────
-
-/** Matches `git push` anywhere in a shell command string. */
-export const GIT_PUSH_RE = /(?:^|\n|;|&&|\|\|)\s*git\s+push\b/
-/** Matches `git commit` anywhere in a shell command string. */
-export const GIT_COMMIT_RE = /(?:^|\n|;|&&|\|\|)\s*git\s+commit\b/
-
-/**
- * Matches git read-only subcommands.
- * Used with `!GIT_WRITE_RE.test(cmd)` to gate purely read-only git calls.
- */
-export const GIT_READ_RE =
-  /(?:^|\|\||&&|;)\s*git\s+(log|status|diff|show|branch|remote\b|rev-parse|rev-list|reflog|ls-files|describe|tag\b)(\s|$)/
-
-/** Matches git subcommands that mutate state. */
-export const GIT_WRITE_RE =
-  /\bgit\s+(add|commit|push|pull|fetch|checkout|switch|restore|reset|rebase|merge|stash\s+(?!list)|cherry-pick|revert|rm|mv|apply)\b/
-
-/** Matches `git push`, `git pull`, or `git fetch` — mechanical sync ops. */
-export const GIT_SYNC_RE = /(?:^|\|\||&&|;)\s*git\s+(push|pull|fetch)\b/
-
-/** Matches `git merge` anywhere in a shell command string (chain-boundary anchored). */
-export const GIT_MERGE_RE = /(?:^|\|\||&&|;)\s*git\s+merge\b/
-
-/** Matches `gh pr merge` anywhere in a shell command string (chain-boundary anchored). */
-export const GH_PR_MERGE_RE = /(?:^|\|\||&&|;)\s*gh\s+pr\s+merge\b/
-
-/**
- * Matches any `git` invocation in a shell command string.
- * Uses a broader boundary set (whitespace, pipe, semicolon, `&`) so it catches
- * git inside subshells and pipelines, not just shell chain operators.
- * Use for presence detection (e.g. lock-file checks); prefer the stricter
- * GIT_MERGE_RE / GIT_PUSH_RE etc. for command-type gating.
- */
-export const GIT_ANY_CMD_RE = /(?:^|\s|[|;&])git\s/
-
-/** Extract the PR number from a `gh pr merge <number>` command. */
-export function extractPrNumber(command: string): string | null {
-  const match = command.match(/gh\s+pr\s+merge\s+(\d+)/)
-  return match?.[1] ?? null
-}
-
-/** Extract the branch name from a `git merge <branch>` command. */
-export function extractMergeBranch(command: string): string | null {
-  // Match `git merge <branch>`, skipping flags (--no-ff, --squash, etc.)
-  const match = command.match(/git\s+merge\s+(?:--\S+\s+)*([^\s;|&]+)/)
-  if (!match?.[1]) return null
-  const branch = match[1]
-  // Filter out flags that look like branches
-  if (branch.startsWith("-")) return null
-  return branch
-}
-
-/**
- * Matches any force-push flag on a `git push` command:
- *   --force, --force-with-lease, --force-with-lease=<ref>,
- *   --force-if-includes, -f, or combined short flags containing f (e.g. -fu).
- * Used by pretooluse-push-cooldown.ts to bypass the cooldown.
- */
-export const FORCE_PUSH_RE =
-  /\bgit\s+push\b.*(?:--force(?:-with-lease(?:=[^\s]+)?|-if-includes)?(?!\S)|-[a-zA-Z]*f)/
-
-// ── Token-based git push argument parser ─────────────────────────────────────
-
-/** Long force flags for git push (without = suffix). */
-const FORCE_LONG_FLAG_NAMES = new Set(["--force", "--force-with-lease", "--force-if-includes"])
-
-/** Git global options that consume the following token as their value. */
-const GIT_VALUE_OPTS = new Set(["-C", "-c", "--work-tree", "--git-dir", "--namespace"])
-
-/** Returns true if a single parsed flag token is a force-push flag. */
-function isGitPushForceToken(token: string): boolean {
-  if (!token.startsWith("-")) return false
-  if (token.startsWith("--")) {
-    // Strip optional =<value> suffix before looking up the flag name
-    const name = token.includes("=") ? token.slice(0, token.indexOf("=")) : token
-    return FORCE_LONG_FLAG_NAMES.has(name)
-  }
-  // Short flags: -f alone or combined like -fu
-  return token.slice(1).includes("f")
-}
-
-/**
- * Minimal shell tokenizer — splits on unquoted whitespace, respects single
- * and double quotes and backslash escapes.  Returns a flat list of tokens.
- */
-function shellTokenize(segment: string): string[] {
-  const tokens: string[] = []
-  let token = ""
-  let quote: '"' | "'" | null = null
-
-  for (let i = 0; i < segment.length; i++) {
-    const ch = segment[i]!
-    if (quote) {
-      if (ch === quote) quote = null
-      else token += ch
-    } else if (ch === '"' || ch === "'") {
-      quote = ch
-    } else if (ch === "\\" && i + 1 < segment.length) {
-      token += segment[++i]!
-    } else if (ch === " " || ch === "\t") {
-      if (token) {
-        tokens.push(token)
-        token = ""
-      }
-    } else {
-      token += ch
-    }
-  }
-  if (token) tokens.push(token)
-  return tokens
-}
-
-/**
- * Token-based detection of force flags in a `git push` command.
- *
- * Handles edge cases that regex cannot:
- *   - `git push -- --force`   → `--force` is a refspec, NOT a flag (blocked correctly)
- *   - `git -C /path push -f`  → git global option before subcommand (detected correctly)
- *   - `git push origin --force main` → force flag between operands (detected correctly)
- *   - Chained commands via `&&`, `||`, `;`, newlines
- */
-export function hasGitPushForceFlag(command: string): boolean {
-  // Split on shell command separators to process each command in a chain
-  const segments = command
-    .split(/&&|\|\||;|\n/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-
-  for (const segment of segments) {
-    const tokens = shellTokenize(segment)
-    let i = 0
-
-    while (i < tokens.length) {
-      if (tokens[i] !== "git") {
-        i++
-        continue
-      }
-      i++ // skip "git"
-
-      // Skip git's own global options before the subcommand (e.g. -C <dir>, -c key=val).
-      // Options that consume the next token as a value are listed in GIT_VALUE_OPTS.
-      while (i < tokens.length && tokens[i]!.startsWith("-")) {
-        if (GIT_VALUE_OPTS.has(tokens[i]!)) i++ // skip the value token
-        i++
-      }
-
-      if (tokens[i] !== "push") continue
-      i++ // skip "push"
-
-      // Walk git push flags, respecting the -- end-of-flags sentinel
-      let endOfFlags = false
-      while (i < tokens.length) {
-        const t = tokens[i]!
-        i++
-        if (t === "--") {
-          endOfFlags = true
-          continue
-        }
-        if (!endOfFlags && isGitPushForceToken(t)) return true
-      }
-    }
-  }
-  return false
-}
-
-/** Matches `ls`, `rg`, or `grep` — pure read commands. */
-export const READ_CMD_RE = /(?:^|\|\||&&|;)\s*(ls|rg|grep)\b/
-
-/** Matches any `gh` CLI invocation. */
-export const GH_CMD_RE = /(?:^|\|\||&&|;)\s*gh\b/
-
-/** Matches `swiz issue close` or `swiz issue comment` — thin gh-issue wrappers. */
-export const SWIZ_ISSUE_RE = /(?:^|\|\||&&|;)\s*swiz\s+issue\s+(close|comment)\b/
-
-/** Matches CI verification commands: `swiz ci-wait`, `bun ... ci-wait`, `bun run index.ts ci-wait`. */
-export const CI_WAIT_RE = /(?:^|\|\||&&|;)\s*(?:swiz|bun\b[^|;]*)\s+ci-wait\b/
+export {
+  collectBlockedToolUseIds,
+  extractBashCommands,
+  extractSkillInvocations,
+  extractToolNamesFromTranscript,
+  readSessionLines,
+  stripAnsi,
+} from "./utils/transcript.ts"
 
 /** True when a shell command is exempt from task-tracking enforcement. */
 export function isTaskTrackingExemptShellCommand(command: string): boolean {
@@ -1504,55 +832,6 @@ export function isTaskTrackingExemptShellCommand(command: string): boolean {
     GH_CMD_RE.test(command) ||
     SWIZ_CMD_RE.test(command)
   )
-}
-
-// ── Push-gate check regexes ───────────────────────────────────────────────
-
-/**
- * Matches `git branch --show-current` (exact flag, no suffix like -upstream).
- * (?!\S) ensures `--show-current` is the last token, not a prefix of another flag.
- */
-export const BRANCH_CHECK_RE = /\bgit\s+branch\s+--show-current(?!\S)/
-
-/** Matches `gh pr list --head` (open-PR check). */
-export const PR_CHECK_RE = /\bgh\s+pr\s+list\b.*--head\b/
-
-// ─── GitHub identity ────────────────────────────────────────────────────
-
-/**
- * Extract the repository owner login from a git remote URL.
- * Handles both SSH (`git@github.com:owner/repo.git`) and
- * HTTPS (`https://github.com/owner/repo.git`) formats.
- * Returns `null` for non-GitHub remotes or unrecognised formats.
- */
-export function extractOwnerFromUrl(remoteUrl: string): string | null {
-  const sshMatch = remoteUrl.match(/git@github\.com:([^/]+)\//)
-  if (sshMatch?.[1]) return sshMatch[1]
-
-  const httpsMatch = remoteUrl.match(/github\.com\/([^/]+)\//)
-  if (httpsMatch?.[1]) return httpsMatch[1]
-
-  return null
-}
-
-/**
- * Return the login of the currently-authenticated GitHub user via
- * `gh api user --jq .login`. Returns `null` when the `gh` CLI is
- * unavailable or unauthenticated.
- */
-export async function getCurrentGitHubUser(cwd: string): Promise<string | null> {
-  const login = await gh(["api", "user", "--jq", ".login"], cwd)
-  return login || null
-}
-
-/**
- * Return the `owner/repo` slug for the GitHub remote at `cwd` via
- * `gh repo view --json nameWithOwner`. Returns `null` when the `gh`
- * CLI is unavailable or the directory is not a GitHub-backed repo.
- */
-export async function getRepoNameWithOwner(cwd: string): Promise<string | null> {
-  const name = await gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], cwd)
-  return name || null
 }
 
 // Re-exported from src/git-helpers.ts
