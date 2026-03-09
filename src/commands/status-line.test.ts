@@ -182,6 +182,39 @@ describe("buildSettingsFlags", () => {
     expect(normalized).toContain("direct-main:off")
     expect(normalized).toContain("sandbox:off")
   })
+
+  it("shows catch-all count for uncovered non-default settings", () => {
+    const flags = buildSettingsFlags({
+      ...DEFAULT_SETTINGS,
+      critiquesEnabled: false,
+      swizNotifyHooks: true,
+      source: "global",
+    })
+    const normalized = flags.map(stripAnsi).join(" ")
+    expect(normalized).toContain("+2 cfg")
+  })
+
+  it("does not show catch-all when all uncovered settings are default", () => {
+    const flags = buildSettingsFlags({
+      ...DEFAULT_SETTINGS,
+      collaborationMode: "team",
+      source: "global",
+    })
+    const normalized = flags.map(stripAnsi).join(" ")
+    expect(normalized).not.toContain("cfg")
+  })
+
+  it("catch-all count excludes already-covered settings", () => {
+    const flags = buildSettingsFlags({
+      ...DEFAULT_SETTINGS,
+      collaborationMode: "team", // covered — should NOT be counted in catch-all
+      critiquesEnabled: false, // uncovered — should appear in count
+      source: "global",
+    })
+    const normalized = flags.map(stripAnsi).join(" ")
+    expect(normalized).toContain("team")
+    expect(normalized).toContain("+1 cfg")
+  })
 })
 
 // ─── ghJsonCached — file-based TTL cache (regression for #188) ───────────────

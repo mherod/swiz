@@ -208,6 +208,21 @@ export function formatProjectState(state: ProjectState | null | undefined): stri
   }
 }
 
+// Keys with dedicated indicators — excluded from the catch-all count.
+const COVERED_SETTING_KEYS = new Set([
+  "autoContinue",
+  "ambitionMode",
+  "speak",
+  "collaborationMode",
+  "prMergeMode",
+  "pushGate",
+  "strictNoDirectMain",
+  "sandboxedEdits",
+])
+
+// Keys that cannot be compared with simple equality (arrays, objects, metadata).
+const UNCOUNTABLE_SETTING_KEYS = new Set(["statusLineSegments", "sessions", "source"])
+
 export function buildSettingsFlags(effective: EffectiveSwizSettings | null): string[] {
   if (!effective) return []
 
@@ -249,6 +264,17 @@ export function buildSettingsFlags(effective: EffectiveSwizSettings | null): str
       effective.sandboxedEdits ? `\x1b[92m🧪 sandbox:on${R}` : `\x1b[93m🧪 sandbox:off${R}`
     )
   }
+
+  // Catch-all: count uncovered settings that differ from defaults.
+  let extraNonDefault = 0
+  for (const key of Object.keys(DEFAULT_SETTINGS) as Array<keyof typeof DEFAULT_SETTINGS>) {
+    if (COVERED_SETTING_KEYS.has(key) || UNCOUNTABLE_SETTING_KEYS.has(key)) continue
+    if (effective[key as keyof EffectiveSwizSettings] !== DEFAULT_SETTINGS[key]) extraNonDefault++
+  }
+  if (extraNonDefault > 0) {
+    settingsParts.push(`\x1b[90m+${extraNonDefault} cfg${R}`)
+  }
+
   return settingsParts
 }
 
