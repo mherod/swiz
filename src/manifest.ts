@@ -185,6 +185,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-no-as-any.ts", timeout: 5 },
       { file: "pretooluse-no-secrets.ts", timeout: 5 },
       { file: "pretooluse-debug-statements.ts", timeout: 5 },
+      { file: "pretooluse-todo-tracker.ts", timeout: 5 },
       { file: "pretooluse-large-files.ts", timeout: 5 },
       { file: "pretooluse-workflow-permissions-gate.ts", timeout: 5 },
       { file: "pretooluse-claude-md-word-limit.ts", timeout: 5 },
