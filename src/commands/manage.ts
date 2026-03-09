@@ -6,6 +6,7 @@ import type { Command } from "../types.ts"
 type ManageSubject = "mcp"
 type ManageAction = "list" | "add" | "remove" | "validate" | "show"
 type AgentId = "cursor" | "claude" | "gemini"
+type AgentScope = "global" | "project"
 
 interface McpServerDef {
   command: string
@@ -20,9 +21,11 @@ interface McpFileData {
 
 interface AgentConfig {
   id: AgentId
+  scope: AgentScope
   flag: `--${AgentId}`
   displayName: string
-  resolvePath: (home: string) => string
+  /** Resolves the config path given a base directory (home for global, cwd for project). */
+  resolvePath: (base: string) => string
 }
 
 interface ParsedManageArgs {
@@ -33,39 +36,78 @@ interface ParsedManageArgs {
   args: string[]
   env: Record<string, string>
   targetAgents: AgentId[]
+  /** When true, target project-scoped config files resolved from cwd. */
+  project: boolean
 }
 
-const AGENTS: AgentConfig[] = [
+const GLOBAL_AGENTS: AgentConfig[] = [
   {
     id: "cursor",
+    scope: "global",
     flag: "--cursor",
     displayName: "Cursor",
     resolvePath: (home) => join(home, ".cursor", "mcp.json"),
   },
   {
     id: "claude",
+    scope: "global",
     flag: "--claude",
     displayName: "Claude Code",
     resolvePath: (home) => join(home, ".claude.json"),
   },
   {
     id: "gemini",
+    scope: "global",
     flag: "--gemini",
     displayName: "Gemini CLI",
     resolvePath: (home) => join(home, ".gemini", "settings.json"),
   },
 ]
 
+/** Project-level MCP config files, resolved relative to the project root (cwd). */
+const PROJECT_AGENTS: AgentConfig[] = [
+  {
+    id: "cursor",
+    scope: "project",
+    flag: "--cursor",
+    displayName: "Cursor (project)",
+    resolvePath: (cwd) => join(cwd, ".cursor", "mcp.json"),
+  },
+  {
+    id: "claude",
+    scope: "project",
+    flag: "--claude",
+    displayName: "Claude Code (project)",
+    resolvePath: (cwd) => join(cwd, ".mcp.json"),
+  },
+  {
+    id: "gemini",
+    scope: "project",
+    flag: "--gemini",
+    displayName: "VS Code / Gemini (project)",
+    resolvePath: (cwd) => join(cwd, ".vscode", "mcp.json"),
+  },
+]
+
+/** Returns the appropriate agent list for the given scope. */
+function agentList(project: boolean): AgentConfig[] {
+  return project ? PROJECT_AGENTS : GLOBAL_AGENTS
+}
+
 function usage(): string {
   return [
     "Usage: swiz manage mcp <list|show|add|remove|validate> [options]",
     "Examples:",
     "  swiz manage mcp list",
+    "  swiz manage mcp list --project",
     "  swiz manage mcp show figma --cursor",
     "  swiz manage mcp add figma --command npx --arg -y --arg @modelcontextprotocol/server-figma --env FIGMA_TOKEN=token --cursor",
+    "  swiz manage mcp add figma --command npx --project --cursor",
     "  swiz manage mcp remove figma --claude --cursor",
     "  swiz manage mcp validate",
+    "  swiz manage mcp validate --project",
     "Agent flags (optional): --cursor --claude --gemini (default: all)",
+    "Scope flags (optional): --project (target project-level files; default: global home files)",
   ].join("\n")
 }
 
@@ -96,6 +138,7 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
   const action = actionToken as ManageAction
   let name: string | undefined
   let command: string | undefined
+  let project = false
   const actionArgs: string[] = []
   const env: Record<string, string> = {}
   const selectedAgentFlags = new Set<AgentId>()
@@ -104,7 +147,12 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
     const token = args[i]
     if (!token) continue
 
-    const byFlag = AGENTS.find((a) => a.flag === token)
+    if (token === "--project") {
+      project = true
+      continue
+    }
+
+    const byFlag = GLOBAL_AGENTS.find((a) => a.flag === token)
     if (byFlag) {
       selectedAgentFlags.add(byFlag.id)
       continue
@@ -154,10 +202,11 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
     throw new Error(`"add" requires --command <cmd>\n${usage()}`)
   }
 
+  const agents = agentList(project)
   const targetAgents =
     selectedAgentFlags.size > 0
-      ? AGENTS.filter((a) => selectedAgentFlags.has(a.id)).map((a) => a.id)
-      : AGENTS.map((a) => a.id)
+      ? agents.filter((a) => selectedAgentFlags.has(a.id)).map((a) => a.id)
+      : agents.map((a) => a.id)
 
   return {
     subject: "mcp",
@@ -167,6 +216,7 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
     args: actionArgs,
     env,
     targetAgents,
+    project,
   }
 }
 
@@ -185,8 +235,9 @@ async function writeMcpFile(path: string, value: McpFileData): Promise<void> {
   await Bun.write(path, `${JSON.stringify(value, null, 2)}\n`)
 }
 
-function getAgentConfig(agentId: AgentId): AgentConfig {
-  const agent = AGENTS.find((a) => a.id === agentId)
+function getAgentConfig(agentId: AgentId, project: boolean): AgentConfig {
+  const agents = agentList(project)
+  const agent = agents.find((a) => a.id === agentId)
   if (!agent) throw new Error(`Unknown agent: ${agentId}`)
   return agent
 }
@@ -229,10 +280,14 @@ function validateServerBinary(name: string, server: McpServerDef, issues: string
   }
 }
 
-async function listMcpServers(targetAgents: AgentId[], home: string): Promise<void> {
+async function listMcpServers(
+  targetAgents: AgentId[],
+  base: string,
+  project: boolean
+): Promise<void> {
   for (const agentId of targetAgents) {
-    const agent = getAgentConfig(agentId)
-    const path = agent.resolvePath(home)
+    const agent = getAgentConfig(agentId, project)
+    const path = agent.resolvePath(base)
     const json = await readMcpFile(path)
     const servers = json.mcpServers ?? {}
     const names = Object.keys(servers)
@@ -250,10 +305,15 @@ async function listMcpServers(targetAgents: AgentId[], home: string): Promise<vo
   console.log("")
 }
 
-async function showMcpServer(targetAgents: AgentId[], home: string, name: string): Promise<void> {
+async function showMcpServer(
+  targetAgents: AgentId[],
+  base: string,
+  project: boolean,
+  name: string
+): Promise<void> {
   for (const agentId of targetAgents) {
-    const agent = getAgentConfig(agentId)
-    const path = agent.resolvePath(home)
+    const agent = getAgentConfig(agentId, project)
+    const path = agent.resolvePath(base)
     const json = await readMcpFile(path)
     const server = json.mcpServers?.[name]
     console.log(`\n${agent.displayName} (${path})`)
@@ -276,12 +336,12 @@ async function showMcpServer(targetAgents: AgentId[], home: string, name: string
   console.log("")
 }
 
-async function addMcpServer(parsed: ParsedManageArgs, home: string): Promise<void> {
+async function addMcpServer(parsed: ParsedManageArgs, base: string): Promise<void> {
   const name = parsed.name!
   const command = parsed.command!
   for (const agentId of parsed.targetAgents) {
-    const agent = getAgentConfig(agentId)
-    const path = agent.resolvePath(home)
+    const agent = getAgentConfig(agentId, parsed.project)
+    const path = agent.resolvePath(base)
     const json = await readMcpFile(path)
     const mcpServers = { ...(json.mcpServers ?? {}) }
     const server: McpServerDef = { command }
@@ -293,11 +353,11 @@ async function addMcpServer(parsed: ParsedManageArgs, home: string): Promise<voi
   }
 }
 
-async function removeMcpServer(parsed: ParsedManageArgs, home: string): Promise<void> {
+async function removeMcpServer(parsed: ParsedManageArgs, base: string): Promise<void> {
   const name = parsed.name!
   for (const agentId of parsed.targetAgents) {
-    const agent = getAgentConfig(agentId)
-    const path = agent.resolvePath(home)
+    const agent = getAgentConfig(agentId, parsed.project)
+    const path = agent.resolvePath(base)
     const json = await readMcpFile(path)
     const mcpServers = { ...(json.mcpServers ?? {}) }
     if (!(name in mcpServers)) {
@@ -310,11 +370,11 @@ async function removeMcpServer(parsed: ParsedManageArgs, home: string): Promise<
   }
 }
 
-async function validateMcpServers(parsed: ParsedManageArgs, home: string): Promise<void> {
+async function validateMcpServers(parsed: ParsedManageArgs, base: string): Promise<void> {
   const issues: string[] = []
   for (const agentId of parsed.targetAgents) {
-    const agent = getAgentConfig(agentId)
-    const path = agent.resolvePath(home)
+    const agent = getAgentConfig(agentId, parsed.project)
+    const path = agent.resolvePath(base)
     try {
       const json = await readMcpFile(path)
       const servers = json.mcpServers ?? {}
@@ -357,6 +417,11 @@ export const manageCommand: Command = {
     { flags: "mcp remove <name>", description: "Remove an MCP server entry" },
     { flags: "mcp validate", description: "Validate MCP server configuration files" },
     { flags: "--cursor --claude --gemini", description: "Limit action to selected agents" },
+    {
+      flags: "--project",
+      description:
+        "Target project-level config files (.cursor/mcp.json, .mcp.json, .vscode/mcp.json)",
+    },
   ],
   async run(args) {
     const parsed = parseManageArgs(args)
@@ -367,17 +432,20 @@ export const manageCommand: Command = {
       throw new Error(`Unsupported manage subject: ${parsed.subject}`)
     }
 
+    // Project-scoped actions resolve paths relative to cwd; global actions use home.
+    const base = parsed.project ? process.cwd() : home
+
     switch (parsed.action) {
       case "list":
-        return listMcpServers(parsed.targetAgents, home)
+        return listMcpServers(parsed.targetAgents, base, parsed.project)
       case "show":
-        return showMcpServer(parsed.targetAgents, home, parsed.name!)
+        return showMcpServer(parsed.targetAgents, base, parsed.project, parsed.name!)
       case "add":
-        return addMcpServer(parsed, home)
+        return addMcpServer(parsed, base)
       case "remove":
-        return removeMcpServer(parsed, home)
+        return removeMcpServer(parsed, base)
       case "validate":
-        return validateMcpServers(parsed, home)
+        return validateMcpServers(parsed, base)
     }
   },
 }
