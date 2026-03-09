@@ -286,13 +286,13 @@ interface PR {
 
 export async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {
   const jsonFields = "number,title,labels,author,assignees"
-  const repoSlug = await getRepoSlug(cwd)
+  const [repoSlug, liveIssues] = await Promise.all([
+    getRepoSlug(cwd),
+    ghJson<Issue[]>(["issue", "list", "--state", "open", "--json", jsonFields], cwd),
+  ])
 
   // Try live GitHub first
-  let issues = await ghJson<Issue[]>(
-    ["issue", "list", "--state", "open", "--json", jsonFields],
-    cwd
-  )
+  let issues = liveIssues
 
   if (issues && repoSlug) {
     // Cache successful result and replay any queued mutations
@@ -363,16 +363,20 @@ async function main(): Promise<void> {
     const sessionId = sanitizeSessionId(input.session_id)
 
     if (!(await isGitRepo(cwd))) return
+    if (!hasGhCli()) return
 
-    const settings = await readSwizSettings()
+    const [settings, hasRemote, inCooldown] = await Promise.all([
+      readSwizSettings(),
+      isGitHubRemote(cwd),
+      isInCooldown(sessionId, cwd),
+    ])
     const effective = getEffectiveSwizSettings(settings, input.session_id)
     if (!effective.personalRepoIssuesGate) return
 
-    if (!hasGhCli()) return
-    if (!(await isGitHubRemote(cwd))) return
+    if (!hasRemote) return
 
     // Check if already blocked within cooldown window
-    if (await isInCooldown(sessionId, cwd)) return
+    if (inCooldown) return
 
     const ownership = await detectRepoOwnership(cwd)
     if (!ownership.repoOwner) return
