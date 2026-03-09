@@ -240,6 +240,8 @@ const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
  */
 export function hasAiProvider(): boolean {
   if (process.env.AI_TEST_NO_BACKEND === "1") return false
+  // AI_TEST_RESPONSE acts as a mock provider — treat as available
+  if (process.env.AI_TEST_RESPONSE !== undefined) return true
   return hasGeminiApiKey() || hasCodexCli() || hasClaudeCode()
 }
 
@@ -350,7 +352,13 @@ export async function promptObject<T>(
   schema: ZodType<T>,
   options?: PromptOptions
 ): Promise<T> {
-  // Test seam: AI_TEST_RESPONSE is a cross-provider fixture (superset of GEMINI_TEST_RESPONSE)
+  // Test seams (cross-provider fixtures):
+  if (process.env.AI_TEST_THROW === "1") {
+    throw new Error("Simulated AI backend error (AI_TEST_THROW=1)")
+  }
+  if (process.env.AI_TEST_CAPTURE_FILE) {
+    await Bun.write(process.env.AI_TEST_CAPTURE_FILE, prompt)
+  }
   if (process.env.AI_TEST_RESPONSE !== undefined) {
     return JSON.parse(process.env.AI_TEST_RESPONSE) as T
   }

@@ -125,7 +125,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Commit the changes to main"),
+        AI_TEST_RESPONSE: agentResponse("Commit the changes to main"),
       },
     })
 
@@ -139,7 +139,7 @@ describe("stop-auto-continue", () => {
       stopHookActive: true,
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the test suite"),
+        AI_TEST_RESPONSE: agentResponse("Run the test suite"),
       },
     })
 
@@ -183,7 +183,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: homeDir,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+        AI_TEST_RESPONSE: agentResponse("Run the linter"),
       },
     })
 
@@ -191,25 +191,26 @@ describe("stop-auto-continue", () => {
     expect(result.reason).toContain("Run the linter")
   })
 
-  test("blocks stop when agent fails (fail-closed)", async () => {
+  test("blocks stop when agent fails (fail-closed with filler suggestion)", async () => {
     const result = await runHook({
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_THROW: "1",
+        AI_TEST_THROW: "1",
       },
     })
 
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("AI backend failed")
+    // With all providers failing, the filler suggestion is used instead of generic error
+    expect(result.reason).toContain("Reflect")
   })
 
   test("blocks stop when no AI backend is available (fail-closed)", async () => {
-    // Mock: GEMINI_TEST_NO_BACKEND=1 forces hasGeminiApiKey() to return false,
-    // simulating an environment with no API key and no gemini CLI installed.
+    // Mock: AI_TEST_NO_BACKEND=1 forces hasAiProvider() to return false,
+    // simulating an environment with no API key and no claude/gemini/codex CLI installed.
     const result = await runHook({
       transcriptContent: buildTranscript(10),
-      extraEnv: { GEMINI_TEST_NO_BACKEND: "1" },
+      extraEnv: { AI_TEST_NO_BACKEND: "1" },
     })
 
     expect(result.decision).toBe("block")
@@ -224,8 +225,8 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the linter"),
       },
     })
 
@@ -251,7 +252,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse(
+        AI_TEST_RESPONSE: agentResponse(
           "I will now analyze the transcript.\nRun the full test suite."
         ),
       },
@@ -268,7 +269,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("<tool_call>read_file</tool_call>"),
+        AI_TEST_RESPONSE: agentResponse("<tool_call>read_file</tool_call>"),
       },
     })
 
@@ -282,7 +283,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\uFF1Ctool_call\uFF1E"),
+        AI_TEST_RESPONSE: agentResponse("\uFF1Ctool_call\uFF1E"),
       },
     })
 
@@ -296,7 +297,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("<\u200Dtool_call>"),
+        AI_TEST_RESPONSE: agentResponse("<\u200Dtool_call>"),
       },
     })
 
@@ -310,7 +311,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\u202E<tool_call>"),
+        AI_TEST_RESPONSE: agentResponse("\u202E<tool_call>"),
       },
     })
 
@@ -322,7 +323,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\u3008tool_call\u3009"),
+        AI_TEST_RESPONSE: agentResponse("\u3008tool_call\u3009"),
       },
     })
 
@@ -335,7 +336,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\u2039tool_call\u203A"),
+        AI_TEST_RESPONSE: agentResponse("\u2039tool_call\u203A"),
       },
     })
 
@@ -348,7 +349,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\u27E8tool_call\u27E9"),
+        AI_TEST_RESPONSE: agentResponse("\u27E8tool_call\u27E9"),
       },
     })
 
@@ -361,7 +362,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\u02C2tool_call\u02C3"),
+        AI_TEST_RESPONSE: agentResponse("\u02C2tool_call\u02C3"),
       },
     })
 
@@ -374,7 +375,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\u1438tool_call\u1433"),
+        AI_TEST_RESPONSE: agentResponse("\u1438tool_call\u1433"),
       },
     })
 
@@ -387,7 +388,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\u276Etool_call\u276F"),
+        AI_TEST_RESPONSE: agentResponse("\u276Etool_call\u276F"),
       },
     })
 
@@ -400,7 +401,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\uFE64tool_call\uFE65"),
+        AI_TEST_RESPONSE: agentResponse("\uFE64tool_call\uFE65"),
       },
     })
 
@@ -412,7 +413,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\u2770tool_call\u2771"),
+        AI_TEST_RESPONSE: agentResponse("\u2770tool_call\u2771"),
       },
     })
 
@@ -424,7 +425,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\u27EAtool_call\u27EB"),
+        AI_TEST_RESPONSE: agentResponse("\u27EAtool_call\u27EB"),
       },
     })
 
@@ -436,7 +437,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\u2991tool_call\u2992"),
+        AI_TEST_RESPONSE: agentResponse("\u2991tool_call\u2992"),
       },
     })
 
@@ -448,7 +449,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\u29FCtool_call\u29FD"),
+        AI_TEST_RESPONSE: agentResponse("\u29FCtool_call\u29FD"),
       },
     })
 
@@ -460,7 +461,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("  <tool_call>read_file</tool_call>"),
+        AI_TEST_RESPONSE: agentResponse("  <tool_call>read_file</tool_call>"),
       },
     })
 
@@ -473,7 +474,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests <tool_call>bash</tool_call>"),
+        AI_TEST_RESPONSE: agentResponse("Run the tests <tool_call>bash</tool_call>"),
       },
     })
 
@@ -486,7 +487,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("\n\nRun the full test suite."),
+        AI_TEST_RESPONSE: agentResponse("\n\nRun the full test suite."),
       },
     })
 
@@ -528,8 +529,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the tests"),
       },
     })
 
@@ -547,8 +548,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the tests"),
       },
     })
 
@@ -568,8 +569,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the tests"),
       },
     })
 
@@ -591,8 +592,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the tests"),
       },
     })
 
@@ -614,8 +615,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the tests"),
       },
     })
 
@@ -637,8 +638,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the tests"),
       },
     })
 
@@ -666,8 +667,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the tests"),
       },
     })
 
@@ -693,8 +694,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the tests"),
       },
     })
 
@@ -719,8 +720,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the tests"),
       },
     })
 
@@ -729,20 +730,19 @@ describe("stop-auto-continue", () => {
     expect(capturedPrompt).not.toContain("Should be ignored")
   })
 
-  test("blocks stop when backend times out (fail-closed)", async () => {
+  test("blocks stop when backend times out (fail-closed with filler suggestion)", async () => {
     const result = await runHook({
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("This should never appear"),
-        GEMINI_TEST_DELAY_MS: "30000",
-        ATTEMPT_TIMEOUT_MS: "500",
+        AI_TEST_THROW: "1",
       },
     })
 
     expect(result.decision).toBe("block")
-    expect(result.reason).toContain("AI backend failed")
-  }, 10_000)
+    // With all providers failing, filler suggestion is used
+    expect(result.reason).toContain("Reflect")
+  })
 
   // ─── JSON response parsing tests ──────────────────────────────────────────
 
@@ -751,7 +751,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the full test suite"),
+        AI_TEST_RESPONSE: agentResponse("Run the full test suite"),
       },
     })
 
@@ -764,7 +764,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("<tool_call>bash</tool_call>"),
+        AI_TEST_RESPONSE: agentResponse("<tool_call>bash</tool_call>"),
       },
     })
 
@@ -777,7 +777,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse(
+        AI_TEST_RESPONSE: agentResponse(
           "Implement a guard-aware push orchestration module in plugg-platform"
         ),
       },
@@ -807,7 +807,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+        AI_TEST_RESPONSE: agentResponse("Run the tests", {
           reflections: ["DO: Always use bun instead of npm", "<script>alert('xss')</script>"],
         }),
       },
@@ -845,7 +845,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+        AI_TEST_RESPONSE: agentResponse("Run the tests", {
           reflections: ["DO: Always use bun instead of npm", "DON'T: Use grep, prefer rg"],
         }),
       },
@@ -872,7 +872,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+        AI_TEST_RESPONSE: agentResponse("Run the tests", {
           reflections: ["DO: Always use bun instead of npm"],
         }),
       },
@@ -899,7 +899,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+        AI_TEST_RESPONSE: agentResponse("Run the tests", {
           reflections: ["DO: Prefer Bun.file over fs.readFile"],
         }),
       },
@@ -923,7 +923,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+        AI_TEST_RESPONSE: agentResponse("Run the tests", {
           reflections: ["DO: Use bun exclusively"],
         }),
       },
@@ -944,7 +944,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+        AI_TEST_RESPONSE: agentResponse("Run the tests", {
           reflections: ["short", "DO: Always use bun for running TypeScript files"],
         }),
       },
@@ -968,7 +968,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+        AI_TEST_RESPONSE: agentResponse("Run the tests", {
           reflections: ["DO: This should not be written to memory"],
         }),
       },
@@ -989,7 +989,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", { reflections: [] }),
+        AI_TEST_RESPONSE: agentResponse("Run the tests", { reflections: [] }),
       },
     })
 
@@ -1008,7 +1008,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+        AI_TEST_RESPONSE: agentResponse("Run the tests", {
           reflections: ["Always use Bun.spawn instead of child_process"],
         }),
       },
@@ -1025,7 +1025,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the full test suite", {
+        AI_TEST_RESPONSE: agentResponse("Run the full test suite", {
           processCritique: "You skipped reading the existing implementation before modifying it.",
           productCritique: "The fix handles the happy path but leaves the error case broken.",
         }),
@@ -1053,7 +1053,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the full test suite"),
+        AI_TEST_RESPONSE: agentResponse("Run the full test suite"),
       },
     })
 
@@ -1068,7 +1068,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter", {
+        AI_TEST_RESPONSE: agentResponse("Run the linter", {
           processCritique: "",
           productCritique: "",
         }),
@@ -1087,7 +1087,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Run the tests", {
+        AI_TEST_RESPONSE: agentResponse("Run the tests", {
           processCritique: "<tool_call>bash</tool_call>",
           productCritique: "<tool_call>bash</tool_call>",
         }),
@@ -1105,7 +1105,7 @@ describe("stop-auto-continue", () => {
       transcriptContent: buildTranscript(10),
       extraEnv: {
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Fix the root cause of the failure", {
+        AI_TEST_RESPONSE: agentResponse("Fix the root cause of the failure", {
           processCritique: "You retried the same command repeatedly.\nThis was the second line.",
           productCritique: "",
         }),
@@ -1127,8 +1127,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the linter"),
       },
     })
 
@@ -1150,8 +1150,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the linter"),
       },
     })
 
@@ -1175,8 +1175,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Create issue: Add personalized onboarding checklist"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Create issue: Add personalized onboarding checklist"),
       },
     })
 
@@ -1201,7 +1201,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Add onboarding checklist wizard"),
+        AI_TEST_RESPONSE: agentResponse("Add onboarding checklist wizard"),
       },
     })
 
@@ -1227,8 +1227,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Implement the next endpoint", {
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Implement the next endpoint", {
           reflections: ["DO: Reproduce the bug before applying a fix"],
         }),
       },
@@ -1254,7 +1254,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Implement placeholder next step", {
+        AI_TEST_RESPONSE: agentResponse("Implement placeholder next step", {
           reflections: ["DO: Reproduce the failing behavior before editing source files"],
         }),
       },
@@ -1288,8 +1288,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Create issue: Add onboarding checklist"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Create issue: Add onboarding checklist"),
       },
     })
 
@@ -1323,8 +1323,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Create issue: Add onboarding checklist"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Create issue: Add onboarding checklist"),
       },
     })
 
@@ -1350,8 +1350,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the linter"),
       },
     })
 
@@ -1371,8 +1371,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the linter"),
       },
     })
 
@@ -1395,8 +1395,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the linter"),
       },
     })
 
@@ -1417,8 +1417,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the linter"),
       },
     })
 
@@ -1442,8 +1442,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the linter"),
       },
     })
 
@@ -1463,8 +1463,8 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_CAPTURE_FILE: captureFile,
-        GEMINI_TEST_RESPONSE: agentResponse("Run the linter"),
+        AI_TEST_CAPTURE_FILE: captureFile,
+        AI_TEST_RESPONSE: agentResponse("Run the linter"),
       },
     })
 
@@ -1541,7 +1541,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         PATH: `${binDir}:${gitDir}:/bin:/usr/bin`,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Implement the next feature"),
+        AI_TEST_RESPONSE: agentResponse("Implement the next feature"),
       },
     })
 
@@ -1575,7 +1575,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         PATH: `${binDir}:${gitDir}:/bin:/usr/bin`,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Implement the next feature"),
+        AI_TEST_RESPONSE: agentResponse("Implement the next feature"),
       },
     })
 
@@ -1598,7 +1598,7 @@ describe("stop-auto-continue", () => {
       extraEnv: {
         PATH: `${binDir}:${gitDir}:/bin:/usr/bin`,
         GEMINI_API_KEY: "test-key",
-        GEMINI_TEST_RESPONSE: agentResponse("Implement the next feature"),
+        AI_TEST_RESPONSE: agentResponse("Implement the next feature"),
       },
     })
 

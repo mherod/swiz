@@ -8,8 +8,9 @@ import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
+import { hasAiProvider, promptObject } from "../src/ai-providers.ts"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
-import { ensureGeminiApiKey, hasGeminiApiKey, promptGeminiObject } from "../src/gemini.ts"
+import { ensureGeminiApiKey } from "../src/gemini.ts"
 import { getHomeDir, getHomeDirOrNull } from "../src/home.ts"
 import {
   type AmbitionMode,
@@ -41,7 +42,7 @@ import {
 import { stopHookInputSchema } from "./schemas.ts"
 import { getActionableIssues, needsRefinement } from "./stop-personal-repo-issues.ts"
 
-const MIN_TOOL_CALLS = 5 // Don't engage for trivial sessions
+const MIN_TOOL_CALLS = 5 // Don't engage for trivial sessions (< 5 tool calls)
 const CONTEXT_TURNS = 20 // Recent turns to send as context
 const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 90_000
 
@@ -604,6 +605,32 @@ function spawnAmbitionNotification(currentMode: AmbitionMode, nextStep: string, 
   }
 }
 
+// ─── Filler suggestion ───────────────────────────────────────────────────────
+
+/**
+ * Build a deterministic filler next-step suggestion when all AI backends fail.
+ * Uses the session's edited file paths to produce a context-aware suggestion.
+ * Returns "" if no useful suggestion can be derived.
+ */
+export function buildFillerSuggestion(editedPaths: Set<string>, docsOnly: boolean): string {
+  const reflectAdvice = skillAdvice(
+    "reflect-on-session-mistakes",
+    "run /reflect-on-session-mistakes to identify patterns to avoid",
+    "review the session transcript for patterns to avoid"
+  )
+  if (docsOnly) {
+    return skillAdvice(
+      "changelog",
+      "Review the documentation changes for accuracy and completeness, then use /changelog to update CHANGELOG.md if it reflects user-facing behavior.",
+      "Review the documentation changes for accuracy and completeness, then update CHANGELOG.md if it reflects user-facing behavior."
+    )
+  }
+  if (editedPaths.size > 0) {
+    return `Reflect on this session's work: ${reflectAdvice}, then update MEMORY.md with any confirmed directives from this session.`
+  }
+  return `Reflect on this session: ${reflectAdvice} and update MEMORY.md with confirmed directives.`
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -685,11 +712,11 @@ async function main(): Promise<void> {
   }
 
   // No backend available — fail closed: block stop so the session cannot end silently
-  // without a suggestion. The user should configure GEMINI_API_KEY or install the gemini CLI.
-  if (!hasGeminiApiKey()) {
+  // without a suggestion. The user should configure GEMINI_API_KEY or install claude/codex CLI.
+  if (!hasAiProvider()) {
     terminate(
       "block",
-      "Auto-continue could not generate a next-step suggestion: no AI backend available.\nSet GEMINI_API_KEY or install the gemini CLI, then continue working."
+      "Auto-continue could not generate a next-step suggestion: no AI backend available.\nSet GEMINI_API_KEY or install the claude or codex CLI, then continue working."
     )
   }
 
@@ -710,15 +737,18 @@ async function main(): Promise<void> {
     )
 
     try {
-      const parsed = await promptGeminiObject(prompt, agentResponseSchema, {
+      const parsed = await promptObject(prompt, agentResponseSchema, {
         timeout: ATTEMPT_TIMEOUT_MS,
       })
       response = filterAgentResponse(parsed)
     } catch {
-      // promptGeminiObject threw (backend unreachable or schema validation failed).
-      // Fail closed: block stop so the session cannot end silently without a suggestion.
-      // If there is also a runtime refinement finding, fall through so it can be delivered.
-      if (!refinementStatus) {
+      // All providers failed. Use a filler suggestion derived from session context so
+      // the hook always produces actionable output rather than a generic error message.
+      const fillerNext = buildFillerSuggestion(editedPaths, docsOnly)
+      if (fillerNext) {
+        response = { processCritique: "", productCritique: "", next: fillerNext, reflections: [] }
+      } else if (!refinementStatus) {
+        // No filler and no refinement finding — fall back to generic guidance.
         terminate(
           "block",
           "Auto-continue could not generate a next-step suggestion: AI backend failed during call.\nReview your recent changes and continue working if there is more to do."
