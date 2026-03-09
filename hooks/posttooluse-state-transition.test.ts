@@ -342,3 +342,97 @@ describe("posttooluse-state-transition no-upstream commit behavior", () => {
     }
   })
 })
+
+describe("posttooluse-state-transition foreign-author checkout behavior", () => {
+  test("git checkout branch with foreign-author HEAD transitions developing → reviewing", async () => {
+    const repo = await createRepo()
+    try {
+      // Create a branch whose HEAD commit was authored by someone else
+      runGit(repo, ["checkout", "-b", "feature/other"])
+      runGit(repo, ["config", "user.email", "other@example.com"])
+      runGit(repo, ["config", "user.name", "Other User"])
+      await writeFile(join(repo, "other.txt"), "change\n")
+      runGit(repo, ["add", "other.txt"])
+      runGit(repo, ["commit", "-m", "other user commit"])
+      // Reset to self identity, check out feature branch
+      runGit(repo, ["config", "user.email", "test@example.com"])
+      runGit(repo, ["config", "user.name", "Test User"])
+      runGit(repo, ["checkout", "feature/other"])
+
+      await writeProjectState(repo, "developing")
+      const exitCode = await runHook(repo, "git checkout feature/other")
+      expect(exitCode).toBe(0)
+      expect(await readProjectState(repo)).toBe("reviewing")
+    } finally {
+      await rm(repo, { recursive: true, force: true })
+    }
+  })
+
+  test("git checkout branch with self-authored HEAD does not transition to reviewing", async () => {
+    const repo = await createRepo()
+    try {
+      runGit(repo, ["checkout", "-b", "feature/mine"])
+      await writeFile(join(repo, "mine.txt"), "change\n")
+      runGit(repo, ["add", "mine.txt"])
+      runGit(repo, ["commit", "-m", "self commit"])
+      runGit(repo, ["checkout", "feature/mine"])
+
+      await writeProjectState(repo, "developing")
+      const exitCode = await runHook(repo, "git checkout feature/mine")
+      expect(exitCode).toBe(0)
+      expect(await readProjectState(repo)).toBe("developing")
+    } finally {
+      await rm(repo, { recursive: true, force: true })
+    }
+  })
+
+  test("foreign-author checkout does not re-transition when already reviewing", async () => {
+    const repo = await createRepo()
+    try {
+      runGit(repo, ["checkout", "-b", "feature/other"])
+      runGit(repo, ["config", "user.email", "other@example.com"])
+      runGit(repo, ["config", "user.name", "Other User"])
+      await writeFile(join(repo, "other.txt"), "change\n")
+      runGit(repo, ["add", "other.txt"])
+      runGit(repo, ["commit", "-m", "other user commit"])
+      runGit(repo, ["config", "user.email", "test@example.com"])
+      runGit(repo, ["config", "user.name", "Test User"])
+      runGit(repo, ["checkout", "feature/other"])
+
+      await writeProjectState(repo, "reviewing")
+      const exitCode = await runHook(repo, "git checkout feature/other")
+      expect(exitCode).toBe(0)
+      // Still reviewing — no change
+      expect(await readProjectState(repo)).toBe("reviewing")
+    } finally {
+      await rm(repo, { recursive: true, force: true })
+    }
+  })
+
+  test("checkout default branch takes priority over foreign-author rule", async () => {
+    const repo = await createRepo()
+    try {
+      // Amend the initial commit to look like it was authored by someone else
+      runGit(repo, [
+        "-c",
+        "user.email=other@example.com",
+        "-c",
+        "user.name=Other User",
+        "commit",
+        "--allow-empty",
+        "--amend",
+        "--no-edit",
+        "--reset-author",
+      ])
+      runGit(repo, ["checkout", "main"])
+
+      await writeProjectState(repo, "reviewing")
+      const exitCode = await runHook(repo, "git checkout main")
+      expect(exitCode).toBe(0)
+      // Default-branch rule fires first → developing (not reviewing)
+      expect(await readProjectState(repo)).toBe("developing")
+    } finally {
+      await rm(repo, { recursive: true, force: true })
+    }
+  })
+})

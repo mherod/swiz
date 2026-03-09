@@ -13,6 +13,8 @@
 //   git commit + on default branch (solo repo)           : reviewing|addressing-feedback → developing
 //   git checkout <default-branch>                        : reviewing | addressing-feedback → developing
 //   git checkout -b <new-branch> (from default branch)  : any → developing
+//   git checkout <branch> (HEAD authored by other user)  : any → reviewing
+//   gh pr checkout <number> (HEAD authored by other user): any → reviewing
 //
 // Only transitions if current state matches the expected source state(s),
 // so this is safe to run regardless of workflow or whether PRs are used.
@@ -22,6 +24,7 @@ import { readProjectState, writeProjectState } from "../src/settings.ts"
 import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote, isGitRepo } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 import {
+  GH_PR_CHECKOUT_RE,
   GH_PR_CREATE_RE,
   GH_PR_MERGE_RE,
   GH_PR_REVIEW_DISMISS_RE,
@@ -95,6 +98,24 @@ async function resolveCheckoutSourceBranch(command: string, cwd: string): Promis
   }
 
   return null
+}
+
+/**
+ * Return true if the HEAD commit of the current branch was authored by someone
+ * other than the configured git user. Compares `git log -1 --format=%ae HEAD`
+ * against `git config user.email`, case-insensitively. Returns false on any
+ * error (missing git config, empty output, etc.) so the caller can skip silently.
+ */
+async function isHeadAuthoredByOther(cwd: string): Promise<boolean> {
+  try {
+    const headEmail = (await git(["log", "-1", "--format=%ae", "HEAD"], cwd)).trim().toLowerCase()
+    if (!headEmail) return false
+    const userEmail = (await git(["config", "user.email"], cwd)).trim().toLowerCase()
+    if (!userEmail) return false
+    return headEmail !== userEmail
+  } catch {
+    return false
+  }
 }
 
 async function transitionToAddressingFeedbackOnChangesRequested(cwd: string): Promise<boolean> {
@@ -200,6 +221,18 @@ async function handleAsyncTransitions(
           // skip
         }
       }
+    }
+  }
+
+  // ── git checkout / gh pr checkout: any → reviewing if HEAD authored by other user ──
+  // Runs after the default-branch rule above so developing takes priority over reviewing
+  // when checking out the default branch.
+  const isPlainCheckout = GIT_CHECKOUT_RE.test(command) && !GIT_CHECKOUT_NEW_BRANCH_RE.test(command)
+  const isPrCheckout = GH_PR_CHECKOUT_RE.test(command)
+  if ((isPlainCheckout || isPrCheckout) && state !== "reviewing") {
+    if (await isHeadAuthoredByOther(cwd)) {
+      await writeProjectState(cwd, "reviewing")
+      return true
     }
   }
 
