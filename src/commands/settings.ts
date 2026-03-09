@@ -1,10 +1,9 @@
 import { dirname, join } from "node:path"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import {
-  ambitionModeSchema,
-  collaborationModeSchema,
   DEFAULT_MEMORY_LINE_THRESHOLD,
   DEFAULT_MEMORY_WORD_THRESHOLD,
+  type EffectiveSwizSettings,
   getEffectiveSwizSettings,
   getProjectSettingsPath,
   getSwizSettingsPath,
@@ -12,243 +11,16 @@ import {
   readSwizSettings,
   resolveMemoryThresholds,
   resolvePolicy,
+  SETTINGS_REGISTRY,
+  type SettingDef,
+  type SettingsScope,
   settingsStore,
 } from "../settings.ts"
 import { spawnSpeak } from "../speech.ts"
 import { findAllProviderSessions } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
-type SettingsScope = "global" | "project" | "session"
-type ValueKind = "boolean" | "numeric" | "string"
 type Action = "show" | "enable" | "disable" | "set" | "disable-hook" | "enable-hook"
-
-export interface SettingDef {
-  key: string
-  aliases: string[]
-  kind: ValueKind
-  scopes: readonly SettingsScope[]
-  validate?: (value: string) => string | null // returns error message or null
-}
-
-/**
- * Single source of truth for all CLI settings.
- *
- * To add a new setting: add one entry here. Alias resolution, type guards,
- * scope validation, and value validation are all derived from this registry.
- */
-export const SETTINGS_REGISTRY: SettingDef[] = [
-  // ── Boolean settings ──────────────────────────────────────────────────────
-  {
-    key: "autoContinue",
-    aliases: ["auto-continue", "autocontinue", "auto_continue"],
-    kind: "boolean",
-    scopes: ["global", "session"],
-  },
-  {
-    key: "prMergeMode",
-    aliases: ["pr-merge-mode", "prmergemode", "pr_merge_mode", "pr-merge", "prmerge"],
-    kind: "boolean",
-    scopes: ["global", "session"],
-  },
-  {
-    key: "critiquesEnabled",
-    aliases: ["critiques-enabled", "critiquesenabled", "critiques_enabled", "critiques"],
-    kind: "boolean",
-    scopes: ["global"],
-  },
-  {
-    key: "pushGate",
-    aliases: ["push-gate", "pushgate", "push_gate"],
-    kind: "boolean",
-    scopes: ["global"],
-  },
-  {
-    key: "sandboxedEdits",
-    aliases: ["sandboxed-edits", "sandboxededits", "sandboxed_edits"],
-    kind: "boolean",
-    scopes: ["global"],
-  },
-  {
-    key: "speak",
-    aliases: ["speak", "tts"],
-    kind: "boolean",
-    scopes: ["global"],
-  },
-  {
-    key: "swizNotifyHooks",
-    aliases: [
-      "swiz-notify-hooks",
-      "swiznotifyhooks",
-      "swiz_notify_hooks",
-      "swiz-notify",
-      "notify-hooks",
-    ],
-    kind: "boolean",
-    scopes: ["global"],
-  },
-  {
-    key: "updateMemoryFooter",
-    aliases: [
-      "update-memory-footer",
-      "updatememoryfooter",
-      "update_memory_footer",
-      "memory-footer",
-    ],
-    kind: "boolean",
-    scopes: ["global"],
-  },
-  {
-    key: "gitStatusGate",
-    aliases: ["git-status-gate", "gitstatusgate", "git_status_gate", "git-status"],
-    kind: "boolean",
-    scopes: ["global"],
-  },
-  {
-    key: "nonDefaultBranchGate",
-    aliases: [
-      "non-default-branch-gate",
-      "nondefaultbranchgate",
-      "non_default_branch_gate",
-      "branch-gate",
-    ],
-    kind: "boolean",
-    scopes: ["global"],
-  },
-  {
-    key: "githubCiGate",
-    aliases: ["github-ci-gate", "githubcigate", "github_ci_gate", "ci-gate"],
-    kind: "boolean",
-    scopes: ["global"],
-  },
-  {
-    key: "changesRequestedGate",
-    aliases: [
-      "changes-requested-gate",
-      "changesrequestedgate",
-      "changes_requested_gate",
-      "pr-review-gate",
-    ],
-    kind: "boolean",
-    scopes: ["global"],
-  },
-  {
-    key: "personalRepoIssuesGate",
-    aliases: [
-      "personal-repo-issues-gate",
-      "personalrepoissuesgate",
-      "personal_repo_issues_gate",
-      "issue-gate",
-    ],
-    kind: "boolean",
-    scopes: ["global"],
-  },
-  {
-    key: "strictNoDirectMain",
-    aliases: [
-      "strict-no-direct-main",
-      "strictnodirectmain",
-      "strict_no_direct_main",
-      "strict-main",
-      "no-direct-main",
-    ],
-    kind: "boolean",
-    scopes: ["global"],
-  },
-  // ── Numeric settings ──────────────────────────────────────────────────────
-  {
-    key: "prAgeGateMinutes",
-    aliases: ["pr-age-gate", "pragegate", "pr_age_gate", "pragegateminutes", "pr-age-gate-minutes"],
-    kind: "numeric",
-    scopes: ["global"],
-  },
-  {
-    key: "pushCooldownMinutes",
-    aliases: [
-      "push-cooldown-minutes",
-      "pushcooldownminutes",
-      "push_cooldown_minutes",
-      "push-cooldown",
-    ],
-    kind: "numeric",
-    scopes: ["global"],
-  },
-  {
-    key: "narratorSpeed",
-    aliases: ["narrator-speed", "narratorspeed", "narrator_speed", "speed"],
-    kind: "numeric",
-    scopes: ["global"],
-  },
-  {
-    key: "memoryLineThreshold",
-    aliases: ["memory-line-threshold", "memorylinethreshold", "memory_line_threshold"],
-    kind: "numeric",
-    scopes: ["global", "project"],
-  },
-  {
-    key: "memoryWordThreshold",
-    aliases: ["memory-word-threshold", "memorywordthreshold", "memory_word_threshold"],
-    kind: "numeric",
-    scopes: ["global", "project"],
-  },
-  {
-    key: "largeFileSizeKb",
-    aliases: ["large-file-size-kb", "largefilesizekb", "large_file_size_kb"],
-    kind: "numeric",
-    scopes: ["global", "project"],
-  },
-  // ── String settings ───────────────────────────────────────────────────────
-  {
-    key: "defaultBranch",
-    aliases: ["default-branch", "defaultbranch", "default_branch"],
-    kind: "string",
-    scopes: ["project"],
-    validate: (v) => {
-      if (!v.trim()) {
-        return `Invalid value "${v}" for default-branch. Must be a non-empty branch name`
-      }
-      if (v !== v.trim()) {
-        return `Invalid value "${v}" for default-branch. Do not include leading or trailing whitespace`
-      }
-      if (/\s/.test(v)) {
-        return `Invalid value "${v}" for default-branch. Branch names cannot contain whitespace`
-      }
-      return null
-    },
-  },
-  {
-    key: "narratorVoice",
-    aliases: ["narrator-voice", "narratorvoice", "narrator_voice", "voice"],
-    kind: "string",
-    scopes: ["global"],
-  },
-  {
-    key: "ambitionMode",
-    aliases: ["ambition-mode", "ambitionmode", "ambition_mode", "ambition"],
-    kind: "string",
-    scopes: ["global", "project", "session"],
-    validate: (v) =>
-      ambitionModeSchema.safeParse(v).success
-        ? null
-        : `Invalid value "${v}" for ambition-mode. Must be: ${ambitionModeSchema.options.join(" | ")}`,
-  },
-  {
-    key: "collaborationMode",
-    aliases: [
-      "collaboration-mode",
-      "collaborationmode",
-      "collaboration_mode",
-      "collaboration",
-      "collab-mode",
-      "collab",
-    ],
-    kind: "string",
-    scopes: ["global", "session"],
-    validate: (v) =>
-      collaborationModeSchema.safeParse(v).success
-        ? null
-        : `Invalid value "${v}" for collaboration-mode. Must be: ${collaborationModeSchema.options.join(" | ")}`,
-  },
-]
 
 // ── Derived lookups (built once from the registry) ────────────────────────
 
@@ -286,17 +58,23 @@ function validateSettingScope(key: SettingKey, scope: SettingsScope, settingArg:
   }
 }
 
+function primaryAlias(def: SettingDef): string {
+  return def.aliases[0] ?? def.key
+}
+
+function aliasesForScope(scope: SettingsScope): string {
+  return SETTINGS_REGISTRY.filter((def) => def.scopes.includes(scope))
+    .map(primaryAlias)
+    .join(", ")
+}
+
 function usage(): string {
   return (
     "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--global | --project | --session [id]] [--dir <path>] [--force]\n" +
     "Scope: --global (default, ~/.swiz/settings.json), --project (.swiz/config.json), --session [id] (per-session)\n" +
-    "Settings (global): auto-continue, critiques-enabled, pr-merge-mode, collaboration-mode,\n" +
-    "  push-gate, sandboxed-edits, speak, swiz-notify-hooks, update-memory-footer, pr-age-gate,\n" +
-    "  narrator-voice, narrator-speed, ambition-mode,\n" +
-    "  git-status-gate, github-ci-gate, changes-requested-gate, personal-repo-issues-gate,\n" +
-    "  non-default-branch-gate, strict-no-direct-main\n" +
-    "Settings (--project): memory-line-threshold, memory-word-threshold, default-branch, ambition-mode\n" +
-    "Settings (--session): auto-continue, pr-merge-mode, collaboration-mode, ambition-mode\n" +
+    `Settings (--global): ${aliasesForScope("global")}\n` +
+    `Settings (--project): ${aliasesForScope("project")}\n` +
+    `Settings (--session): ${aliasesForScope("session")}\n` +
     "Hook management: disable-hook <filename> (e.g. stop-github-ci.ts), enable-hook <filename>"
   )
 }
@@ -417,33 +195,7 @@ async function resolveSessionId(query: string | null, targetDir: string): Promis
 }
 
 function printSettings(
-  effective: {
-    autoContinue: boolean
-    critiquesEnabled: boolean
-    ambitionMode: string
-    collaborationMode: string
-    narratorVoice: string
-    narratorSpeed: number
-    prAgeGateMinutes: number
-    prMergeMode: boolean
-    pushCooldownMinutes: number
-    pushGate: boolean
-    sandboxedEdits: boolean
-    speak: boolean
-    swizNotifyHooks: boolean
-    updateMemoryFooter: boolean
-    gitStatusGate: boolean
-    nonDefaultBranchGate: boolean
-    githubCiGate: boolean
-    changesRequestedGate: boolean
-    personalRepoIssuesGate: boolean
-    strictNoDirectMain: boolean
-    memoryLineThreshold: number
-    memoryWordThreshold: number
-    largeFileSizeKb: number
-    source: "global" | "session"
-    disabledHooks?: string[]
-  },
+  effective: EffectiveSwizSettings & { disabledHooks?: string[] },
   path: string | null,
   fileExists: boolean,
   sessionId: string | null,
@@ -799,6 +551,30 @@ async function enableHook(parsed: ParsedSettingsArgs): Promise<void> {
   console.log(`  Saved: ${path}\n`)
 }
 
+function buildSettingOptions(): Array<{ flags: string; description: string }> {
+  const options: Array<{ flags: string; description: string }> = []
+  for (const def of SETTINGS_REGISTRY) {
+    const alias = primaryAlias(def)
+    if (def.kind === "boolean") {
+      options.push({
+        flags: `enable ${alias}`,
+        description: def.docs?.enableDescription ?? `Enable ${alias}`,
+      })
+      options.push({
+        flags: `disable ${alias}`,
+        description: def.docs?.disableDescription ?? `Disable ${alias}`,
+      })
+      continue
+    }
+    const valuePlaceholder = def.docs?.valuePlaceholder ?? "value"
+    options.push({
+      flags: `set ${alias} <${valuePlaceholder}>`,
+      description: def.docs?.setDescription ?? `Set ${alias}`,
+    })
+  }
+  return options
+}
+
 export const settingsCommand: Command = {
   name: "settings",
   description: "View and modify swiz global and per-session settings",
@@ -806,120 +582,7 @@ export const settingsCommand: Command = {
     "swiz settings [show | enable <setting> | disable <setting>] [--global | --project | --session [id]] [--dir <path>]",
   options: [
     { flags: "show", description: "Show current effective settings (default action)" },
-    { flags: "enable auto-continue", description: "Enable stop auto-continue behavior" },
-    { flags: "disable auto-continue", description: "Disable stop auto-continue behavior" },
-    {
-      flags: "enable sandboxed-edits",
-      description: "Block file edits outside cwd and /tmp (default: enabled)",
-    },
-    {
-      flags: "disable sandboxed-edits",
-      description: "Allow file edits anywhere on the filesystem",
-    },
-    { flags: "enable speak", description: "Enable TTS narrator (speaks assistant text aloud)" },
-    { flags: "disable speak", description: "Disable TTS narrator (default: disabled)" },
-    {
-      flags: "enable swiz-notify-hooks",
-      description: "Enable swiz-notify backed notification hooks",
-    },
-    {
-      flags: "disable swiz-notify-hooks",
-      description: "Disable swiz-notify backed notification hooks (default)",
-    },
-    {
-      flags: "enable update-memory-footer",
-      description: "Include update-memory guidance in ACTION REQUIRED footers",
-    },
-    {
-      flags: "disable update-memory-footer",
-      description: "Exclude update-memory guidance from ACTION REQUIRED footers (default)",
-    },
-    {
-      flags: "enable critiques-enabled",
-      description: "Show Process/Product critique lines in auto-continue output (default: enabled)",
-    },
-    {
-      flags: "disable critiques-enabled",
-      description: "Suppress critique lines — only emit the next-step directive",
-    },
-    {
-      flags: "set ambition-mode <standard|aggressive|creative|reflective>",
-      description:
-        "Set auto-continue ambition level: standard (balanced), aggressive (feature-gap focused), creative (roadmap-oriented issue drafting), or reflective (reflection-driven next step)",
-    },
-    {
-      flags: "set collaboration-mode <auto|solo|team>",
-      description:
-        "Set collaboration workflow: auto (heuristic), solo (direct push), team (PR required)",
-    },
-    {
-      flags: "set pr-age-gate <minutes>",
-      description: "Set PR merge grace period in minutes (0 to disable, default: 10)",
-    },
-    {
-      flags: "enable pr-merge-mode",
-      description: "Enable merge-oriented PR hooks (default: enabled)",
-    },
-    {
-      flags: "disable pr-merge-mode",
-      description: "Disable merge-oriented PR hooks; keep creation-oriented guidance only",
-    },
-    {
-      flags: "enable git-status-gate",
-      description: "Enable stop-hook enforcement of git status / push state (default: enabled)",
-    },
-    {
-      flags: "disable git-status-gate",
-      description:
-        "Disable stop-hook git status enforcement (allow stopping with uncommitted changes)",
-    },
-    {
-      flags: "enable non-default-branch-gate",
-      description: "Enable stop-hook blocking on feature branches (default: enabled)",
-    },
-    {
-      flags: "disable non-default-branch-gate",
-      description:
-        "Disable stop-hook non-default-branch enforcement (allow stopping on any branch)",
-    },
-    {
-      flags: "enable github-ci-gate",
-      description: "Enable stop-hook GitHub CI enforcement (default: enabled)",
-    },
-    {
-      flags: "disable github-ci-gate",
-      description: "Disable stop-hook GitHub CI enforcement (manage CI follow-through manually)",
-    },
-    {
-      flags: "set narrator-voice <name>",
-      description: "Set TTS voice (e.g. Samantha, Alex; empty for system default)",
-    },
-    {
-      flags: "set narrator-speed <wpm>",
-      description: "Set TTS speaking rate in words per minute (0 for system default)",
-    },
-    {
-      flags: "set memory-line-threshold <lines>",
-      description: "Max lines for CLAUDE.md/memory files before compaction advice (default: 1400)",
-    },
-    {
-      flags: "set memory-word-threshold <words>",
-      description: "Max words for CLAUDE.md/memory files before compaction advice (default: 5000)",
-    },
-    {
-      flags: "set default-branch <name>",
-      description:
-        "Set the project default branch override used by branch-aware hooks (e.g. main, master, trunk)",
-    },
-    {
-      flags: "enable strict-no-direct-main",
-      description:
-        "Block all direct pushes to the default branch regardless of repo type (conflicts require --force)",
-    },
-    {
-      flags: "disable strict-no-direct-main",
-      description: "Disable strict no-direct-main enforcement (revert to heuristic mode)",
-    },
+    ...buildSettingOptions(),
     {
       flags: "--force, -f",
       description:

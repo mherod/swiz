@@ -11,9 +11,9 @@ import {
   readProjectSettings,
   readSwizSettings,
   resolvePolicy,
+  SETTINGS_REGISTRY,
 } from "../settings.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
-import { SETTINGS_REGISTRY } from "./settings.ts"
 
 const _tmp = useTempDir("swiz-settings-test-")
 async function createTempHome(): Promise<string> {
@@ -796,6 +796,9 @@ describe("readProjectSettings", () => {
 // ─── SETTINGS_REGISTRY unit tests ───────────────────────────────────────────
 
 describe("SETTINGS_REGISTRY", () => {
+  const primaryAlias = (key: string) =>
+    SETTINGS_REGISTRY.find((d) => d.key === key)?.aliases[0] ?? key
+
   test("every entry has at least one alias", () => {
     for (const def of SETTINGS_REGISTRY) {
       expect(def.aliases.length).toBeGreaterThan(0)
@@ -897,6 +900,32 @@ describe("SETTINGS_REGISTRY", () => {
     expect(def).toBeDefined()
     expect(def!.scopes).toContain("global")
     expect(def!.scopes).toContain("session")
+  })
+
+  test("settings usage output includes project-scoped aliases from shared registry", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["help", "settings"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain(`set ${primaryAlias("largeFileSizeKb")} <kb>`)
+    expect(result.stdout).toContain(`set ${primaryAlias("memoryLineThreshold")} <lines>`)
+    expect(result.stdout).toContain(`set ${primaryAlias("defaultBranch")} <name>`)
+  })
+
+  test("settings help renders every shared registry key", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["help", "settings"], home)
+    expect(result.exitCode).toBe(0)
+    for (const def of SETTINGS_REGISTRY) {
+      const alias = def.aliases[0]
+      expect(alias).toBeDefined()
+      if (!alias) continue
+      if (def.kind === "boolean") {
+        expect(result.stdout).toContain(`enable ${alias}`)
+        expect(result.stdout).toContain(`disable ${alias}`)
+      } else {
+        expect(result.stdout).toContain(`set ${alias}`)
+      }
+    }
   })
 })
 
