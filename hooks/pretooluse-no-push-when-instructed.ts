@@ -18,7 +18,7 @@
 //   - Skill content (e.g. /push skill header) — auto-loaded by the agent
 //   - Assistant reasoning ("I'll go ahead and push") — agent-generated text
 
-import { getHomeDirWithFallback } from "../src/home.ts"
+import { getSwizSettingsPath, readSwizSettings } from "../src/settings.ts"
 import {
   denyPreToolUse,
   GIT_PUSH_RE,
@@ -29,17 +29,26 @@ import {
 
 // ── Feature flag: disabled by default ────────────────────────────────────────
 // Enable with: swiz settings enable push-gate
+//
+// Fail-closed: if settings.json is present but cannot be parsed, the gate
+// remains active (returns true). Silent bypass on parse errors would defeat
+// the purpose of a security guardrail.
 async function isPushGateEnabled(): Promise<boolean> {
-  const home = getHomeDirWithFallback("")
-  if (!home) return false
+  const path = getSwizSettingsPath()
+  if (!path) return false
 
+  // File absent → gate off (pushGate defaults to false)
+  const file = Bun.file(path)
+  if (!(await file.exists())) return false
+
+  // File present — use strict parsing so malformed JSON throws instead of
+  // silently returning defaults (which include pushGate: false).
   try {
-    const settingsFile = Bun.file(`${home}/.swiz/settings.json`)
-    if (!(await settingsFile.exists())) return false
-    const settings = await settingsFile.json()
-    return settings?.pushGate === true
+    const settings = await readSwizSettings({ strict: true })
+    return settings.pushGate === true
   } catch {
-    return false
+    // Parse failure on a present file → fail-closed: keep the gate active.
+    return true
   }
 }
 

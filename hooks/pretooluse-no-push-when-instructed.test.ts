@@ -36,6 +36,7 @@ async function runHook(opts: {
   command: string
   transcriptContent?: string
   transcriptPath?: string
+  home?: string
 }): Promise<HookResult> {
   let tPath = opts.transcriptPath ?? ""
 
@@ -56,7 +57,7 @@ async function runHook(opts: {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, HOME: fakeHome },
+    env: { ...process.env, HOME: opts.home ?? fakeHome },
   })
   proc.stdin.write(payload)
   proc.stdin.end()
@@ -667,6 +668,60 @@ describe("pretooluse-no-push-when-instructed", () => {
         message: { content: [{ type: "text", text: "DO NOT push to remote" }] },
       })
       const result = await runHook({ command: "git push origin main", transcriptContent: content })
+      expect(result.blocked).toBe(false)
+    })
+  })
+
+  describe("settings resilience — malformed settings.json is fail-closed", () => {
+    // When settings.json is present but cannot be parsed, the gate must remain
+    // active (fail-closed). Silent bypass on parse errors would defeat the
+    // purpose of a security guardrail.
+
+    test("malformed settings.json with do-not-push in transcript still blocks push", async () => {
+      // Create a home with a corrupt settings.json (pushGate field is present but file is invalid)
+      const malformedHome = join(tmpDir, "home-malformed")
+      await mkdir(join(malformedHome, ".swiz"), { recursive: true })
+      await Bun.write(join(malformedHome, ".swiz", "settings.json"), "{ not valid json }")
+
+      const transcript = makeTranscript(userText("DO NOT push to remote without approval"))
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+        home: malformedHome,
+      })
+      // Fail-closed: malformed settings must not silently disable the gate
+      expect(result.blocked).toBe(true)
+    })
+
+    test("malformed settings.json without do-not-push instruction allows push", async () => {
+      // Even with malformed settings (gate treated as enabled), if there is no
+      // blocking instruction in the transcript the push is allowed.
+      const malformedHome = join(tmpDir, "home-malformed-no-block")
+      await mkdir(join(malformedHome, ".swiz"), { recursive: true })
+      await Bun.write(join(malformedHome, ".swiz", "settings.json"), "not valid json")
+
+      const transcript = makeTranscript(userText("Run lint and typecheck"))
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+        home: malformedHome,
+      })
+      expect(result.blocked).toBe(false)
+    })
+
+    test("absent settings.json silently disables gate (pushGate defaults to false)", async () => {
+      // No settings file → gate off → hook exits 0 without blocking regardless of transcript
+      const absentHome = join(tmpDir, "home-absent-settings")
+      await mkdir(join(absentHome, ".swiz"), { recursive: true })
+      // Do NOT write settings.json
+
+      const transcript = makeTranscript(userText("DO NOT push to remote without approval"))
+      const result = await runHook({
+        command: "git push origin main",
+        transcriptContent: transcript,
+        home: absentHome,
+      })
+      // Gate is off (settings absent) → no block even with do-not-push in transcript
       expect(result.blocked).toBe(false)
     })
   })
