@@ -11,6 +11,8 @@ import {
   ghJson,
 } from "../git-helpers.ts"
 import {
+  DEFAULT_SETTINGS,
+  type EffectiveSwizSettings,
   getEffectiveSwizSettings,
   type ProjectState,
   readProjectSettings,
@@ -204,6 +206,50 @@ export function formatProjectState(state: ProjectState | null | undefined): stri
     case "addressing-feedback":
       return `\x1b[95m${state}${R}`
   }
+}
+
+export function buildSettingsFlags(effective: EffectiveSwizSettings | null): string[] {
+  if (!effective) return []
+
+  const settingsParts: string[] = []
+  if (effective.autoContinue !== DEFAULT_SETTINGS.autoContinue) {
+    settingsParts.push(effective.autoContinue ? `\x1b[92m⟳ auto:on${R}` : `\x1b[90m⟳ auto:off${R}`)
+  }
+  if (effective.ambitionMode !== DEFAULT_SETTINGS.ambitionMode) {
+    if (effective.ambitionMode === "aggressive") settingsParts.push(`\x1b[93m⚡ aggressive${R}`)
+    if (effective.ambitionMode === "creative") settingsParts.push(`\x1b[95m✦ creative${R}`)
+    if (effective.ambitionMode === "reflective") settingsParts.push(`\x1b[96m🪞 reflective${R}`)
+  }
+  if (effective.speak !== DEFAULT_SETTINGS.speak) {
+    settingsParts.push(effective.speak ? `\x1b[96m🔊 narrator${R}` : `\x1b[90m🔇 narrator${R}`)
+  }
+  if (effective.collaborationMode !== DEFAULT_SETTINGS.collaborationMode) {
+    if (effective.collaborationMode === "team") settingsParts.push(`\x1b[95m🤝 team${R}`)
+    if (effective.collaborationMode === "solo") settingsParts.push(`\x1b[94m👤 solo${R}`)
+  }
+  if (effective.prMergeMode !== DEFAULT_SETTINGS.prMergeMode) {
+    settingsParts.push(
+      effective.prMergeMode ? `\x1b[92m🔀 pr-merge:on${R}` : `\x1b[90m🔀 pr-merge:off${R}`
+    )
+  }
+  if (effective.pushGate !== DEFAULT_SETTINGS.pushGate) {
+    settingsParts.push(
+      effective.pushGate ? `\x1b[93m🚧 push-gate:on${R}` : `\x1b[90m🚧 push-gate:off${R}`
+    )
+  }
+  if (effective.strictNoDirectMain !== DEFAULT_SETTINGS.strictNoDirectMain) {
+    settingsParts.push(
+      effective.strictNoDirectMain
+        ? `\x1b[91m🛡 direct-main:off${R}`
+        : `\x1b[90m🛡 direct-main:on${R}`
+    )
+  }
+  if (effective.sandboxedEdits !== DEFAULT_SETTINGS.sandboxedEdits) {
+    settingsParts.push(
+      effective.sandboxedEdits ? `\x1b[92m🧪 sandbox:on${R}` : `\x1b[93m🧪 sandbox:off${R}`
+    )
+  }
+  return settingsParts
 }
 
 function joinGroups(groups: Array<string | null | undefined>): string {
@@ -416,7 +462,8 @@ export const statusLineCommand: Command = {
       issueCount !== null || prCount !== null ? [issueSeg, prSeg].filter(Boolean).join("  ") : ""
 
     const reviewDecision = prViewData?.reviewDecision ?? ""
-    const commentCount = Array.isArray(prViewData?.comments) ? prViewData.comments.length : 0
+    const comments = prViewData?.comments
+    const commentCount = Array.isArray(comments) ? comments.length : 0
     const currentState = await readProjectState(cwd)
     const stateSeg = formatProjectState(currentState)
     const reviewStatus =
@@ -433,14 +480,7 @@ export const statusLineCommand: Command = {
     const timeSeg = `${DIM}${formatTime()}${R}`
 
     // ── Effective settings indicators ───────────────────────────────────────
-    const settingsParts: string[] = []
-    if (effective) {
-      if (effective.autoContinue) settingsParts.push(`\x1b[92m⟳ auto${R}`)
-      if (effective.ambitionMode === "aggressive") settingsParts.push(`\x1b[93m⚡ aggressive${R}`)
-      if (effective.ambitionMode === "creative") settingsParts.push(`\x1b[95m✦ creative${R}`)
-      if (effective.ambitionMode === "reflective") settingsParts.push(`\x1b[96m🪞 reflective${R}`)
-      if (effective.speak) settingsParts.push(`\x1b[96m🔊 narrator${R}`)
-    }
+    const settingsParts = buildSettingsFlags(effective)
     const settingsSeg = settingsParts.join(" ")
 
     // ── Assemble ────────────────────────────────────────────────────────────

@@ -467,42 +467,49 @@ async function main(): Promise<void> {
     // formatActionPlan ends with \n, so no separator push is needed before it.
     const planSteps: string[] = []
     if (prCount > 0) {
-      planSteps.push(
-        skillAdvice(
-          "work-on-prs",
-          "Use the /work-on-prs skill to address all feedback and resolve reviews:\n  /work-on-prs — Start working on the next PR",
-          "Address all PR feedback before stopping:\n  gh pr list --state open\n  gh pr view <number> --comments"
-        )
-      )
+      const workOnPrsSkill = [
+        "Use the /work-on-prs skill to address all feedback and resolve reviews:",
+        "  /work-on-prs — Start working on the next PR",
+      ].join("\n")
+      const workOnPrsFallback = [
+        "Address all PR feedback before stopping:",
+        "  gh pr list --state open",
+        "  gh pr view <number> --comments",
+      ].join("\n")
+      planSteps.push(skillAdvice("work-on-prs", workOnPrsSkill, workOnPrsFallback))
     }
     if (refinementCount > 0) {
       const refineArg = firstRefinementNum !== undefined ? ` ${firstRefinementNum}` : ""
-      planSteps.push(
-        skillAdvice(
-          "refine-issue",
-          `Use the /refine-issue skill to refine and label issues:\n  /refine-issue${refineArg} — Refine the next issue needing attention`,
-          "Refine issues before implementation. Every issue MUST have at least one label from each category:\n" +
-            "  1. Type (bug, enhancement, documentation)\n" +
-            "  2. Readiness (ready, triaged, backlog)\n" +
-            "  3. Priority (priority-high, priority-medium, priority-low)\n" +
-            "\n" +
-            "Commands:\n" +
-            "  gh label list\n" +
-            '  gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"\n' +
-            "\n" +
-            "Rule: If you created the issue, NEVER add new comments. Always edit the original issue body instead to add proposals/context."
-        )
-      )
+      const refineSkill = [
+        "Use the /refine-issue skill to refine and label issues:",
+        `  /refine-issue${refineArg} — Refine the next issue needing attention`,
+      ].join("\n")
+      const refineFallback = [
+        "Refine issues before implementation. Every issue MUST have at least one label from each category:",
+        "  1. Type (bug, enhancement, documentation)",
+        "  2. Readiness (ready, triaged, backlog)",
+        "  3. Priority (priority-high, priority-medium, priority-low)",
+        "",
+        "Commands:",
+        "  gh label list",
+        '  gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"',
+        "",
+        "Rule: If you created the issue, NEVER add new comments. Always edit the original issue body instead to add proposals/context.",
+      ].join("\n")
+      planSteps.push(skillAdvice("refine-issue", refineSkill, refineFallback))
     }
     if (issueCount > 0) {
       const issueArg = firstIssueNum !== undefined ? ` ${firstIssueNum}` : ""
-      planSteps.push(
-        skillAdvice(
-          "work-on-issue",
-          `Use the /work-on-issue skill to pick up and resolve issues:\n  /work-on-issue${issueArg} — Start working on the next issue`,
-          `Pick up and resolve open issues before stopping:\n  gh issue list --state open\n  gh issue view ${firstIssueNum ?? "<number>"}`
-        )
-      )
+      const workOnIssueSkill = [
+        "Use the /work-on-issue skill to pick up and resolve issues:",
+        `  /work-on-issue${issueArg} — Start working on the next issue`,
+      ].join("\n")
+      const workOnIssueFallback = [
+        "Pick up and resolve open issues before stopping:",
+        "  gh issue list --state open",
+        `  gh issue view ${firstIssueNum ?? "<number>"}`,
+      ].join("\n")
+      planSteps.push(skillAdvice("work-on-issue", workOnIssueSkill, workOnIssueFallback))
     }
     reasonLines.push(formatActionPlan(planSteps, { translateToolNames: true }))
 

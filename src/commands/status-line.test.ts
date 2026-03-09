@@ -2,7 +2,9 @@ import { describe, expect, it } from "bun:test"
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { DEFAULT_SETTINGS } from "../settings.ts"
 import {
+  buildSettingsFlags,
   formatCountSegment,
   formatProjectState,
   getContextStatsPath,
@@ -149,6 +151,36 @@ describe("formatProjectState", () => {
     const result = formatProjectState("planning")
     expect(result).not.toBeNull()
     expect(result).toContain("planning")
+  })
+})
+
+describe("buildSettingsFlags", () => {
+  function stripAnsi(text: string): string {
+    const esc = String.fromCharCode(27)
+    return text.replace(new RegExp(`${esc}\\[[0-9;]*m`, "g"), "")
+  }
+
+  it("returns no flags for default settings", () => {
+    expect(buildSettingsFlags({ ...DEFAULT_SETTINGS, source: "global" })).toEqual([])
+  })
+
+  it("renders high-signal non-default toggles", () => {
+    const flags = buildSettingsFlags({
+      ...DEFAULT_SETTINGS,
+      collaborationMode: "team",
+      prMergeMode: false,
+      pushGate: true,
+      strictNoDirectMain: true,
+      sandboxedEdits: false,
+      source: "global",
+    })
+    const normalized = flags.map(stripAnsi).join(" ")
+
+    expect(normalized).toContain("team")
+    expect(normalized).toContain("pr-merge:off")
+    expect(normalized).toContain("push-gate:on")
+    expect(normalized).toContain("direct-main:off")
+    expect(normalized).toContain("sandbox:off")
   })
 })
 
