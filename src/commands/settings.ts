@@ -12,8 +12,7 @@ import {
   readSwizSettings,
   resolveMemoryThresholds,
   resolvePolicy,
-  writeProjectSettings,
-  writeSwizSettings,
+  settingsStore,
 } from "../settings.ts"
 import { spawnSpeak } from "../speech.ts"
 import { findAllProviderSessions } from "../transcript-utils.ts"
@@ -613,27 +612,15 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
 
   if (parsed.scope === "session") {
     const sessionId = await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
-    const current = await readSwizSettings({ strict: true })
-    const next = {
-      ...current,
-      sessions: {
-        ...current.sessions,
-        [sessionId]: {
-          ...(current.sessions[sessionId] ?? { autoContinue: current.autoContinue }),
-          [key]: enabled,
-        },
-      },
-    }
-    path = await writeSwizSettings(next)
+    path = await settingsStore.setSession(sessionId, key, enabled)
     console.log(
       `\n  ${enabled ? "Enabled" : "Disabled"} ${parsed.settingArg ?? key} (session ${sessionId})`
     )
   } else if (parsed.scope === "project") {
-    path = await writeProjectSettings(parsed.targetDir, { [key]: enabled })
+    path = await settingsStore.setProject(parsed.targetDir, key, enabled)
     console.log(`\n  ${enabled ? "Enabled" : "Disabled"} ${parsed.settingArg ?? key} (project)`)
   } else {
-    const current = await readSwizSettings({ strict: true })
-    path = await writeSwizSettings({ ...current, [key]: enabled })
+    path = await settingsStore.setGlobal(key, enabled)
     console.log(
       `\n  ${enabled ? "Enabled" : "Disabled"} ${parsed.settingArg ?? key} (${scopeLabel})`
     )
@@ -683,32 +670,20 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
   console.log(`  Saved: ${path}\n`)
 }
 
-/** Write a single key-value pair to the appropriate scope. */
+/** Write a single key-value pair to the appropriate scope via SettingsStore. */
 async function writeSettingToScope(
   parsed: ParsedSettingsArgs,
   key: string,
   value: unknown
 ): Promise<string> {
   if (parsed.scope === "project") {
-    return writeProjectSettings(parsed.targetDir, { [key]: value })
+    return settingsStore.setProject(parsed.targetDir, key, value)
   }
   if (parsed.scope === "session") {
     const sessionId = await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
-    const current = await readSwizSettings({ strict: true })
-    return writeSwizSettings({
-      ...current,
-      sessions: {
-        ...current.sessions,
-        [sessionId]: {
-          ...(current.sessions[sessionId] ?? { autoContinue: current.autoContinue }),
-          [key]: value,
-        },
-      },
-    })
+    return settingsStore.setSession(sessionId, key, value)
   }
-  // global
-  const current = await readSwizSettings({ strict: true })
-  return writeSwizSettings({ ...current, [key]: value })
+  return settingsStore.setGlobal(key, value)
 }
 
 async function disableHook(parsed: ParsedSettingsArgs): Promise<void> {
@@ -716,30 +691,17 @@ async function disableHook(parsed: ParsedSettingsArgs): Promise<void> {
   if (!filename)
     throw new Error(`Missing hook filename.\nUsage: swiz settings disable-hook <filename>`)
 
-  if (parsed.scope === "project") {
-    const projectSettings = await readProjectSettings(parsed.targetDir)
-    const existing = projectSettings?.disabledHooks ?? []
-    if (existing.includes(filename)) {
-      console.log(`\n  ${filename} is already disabled (project)\n`)
-      return
-    }
-    const path = await writeProjectSettings(parsed.targetDir, {
-      disabledHooks: [...existing, filename],
-    })
-    console.log(`\n  Disabled hook: ${filename} (project)`)
-    console.log(`  Saved: ${path}\n`)
+  const scope = parsed.scope === "project" ? "project" : "global"
+  const { path, alreadyDisabled } = await settingsStore.disableHook(
+    scope,
+    filename,
+    parsed.targetDir
+  )
+  if (alreadyDisabled) {
+    console.log(`\n  ${filename} is already disabled (${scope})\n`)
     return
   }
-
-  const current = await readSwizSettings({ strict: true })
-  const existing = current.disabledHooks ?? []
-  if (existing.includes(filename)) {
-    console.log(`\n  ${filename} is already disabled (global)\n`)
-    return
-  }
-  const next = { ...current, disabledHooks: [...existing, filename] }
-  const path = await writeSwizSettings(next)
-  console.log(`\n  Disabled hook: ${filename} (global)`)
+  console.log(`\n  Disabled hook: ${filename} (${scope})`)
   console.log(`  Saved: ${path}\n`)
 }
 
@@ -748,30 +710,13 @@ async function enableHook(parsed: ParsedSettingsArgs): Promise<void> {
   if (!filename)
     throw new Error(`Missing hook filename.\nUsage: swiz settings enable-hook <filename>`)
 
-  if (parsed.scope === "project") {
-    const projectSettings = await readProjectSettings(parsed.targetDir)
-    const existing = projectSettings?.disabledHooks ?? []
-    if (!existing.includes(filename)) {
-      console.log(`\n  ${filename} is not in the disabled list (project)\n`)
-      return
-    }
-    const path = await writeProjectSettings(parsed.targetDir, {
-      disabledHooks: existing.filter((f) => f !== filename),
-    })
-    console.log(`\n  Re-enabled hook: ${filename} (project)`)
-    console.log(`  Saved: ${path}\n`)
+  const scope = parsed.scope === "project" ? "project" : "global"
+  const { path, wasEnabled } = await settingsStore.enableHook(scope, filename, parsed.targetDir)
+  if (!wasEnabled) {
+    console.log(`\n  ${filename} is not in the disabled list (${scope})\n`)
     return
   }
-
-  const current = await readSwizSettings({ strict: true })
-  const existing = current.disabledHooks ?? []
-  if (!existing.includes(filename)) {
-    console.log(`\n  ${filename} is not in the disabled list (global)\n`)
-    return
-  }
-  const next = { ...current, disabledHooks: existing.filter((f) => f !== filename) }
-  const path = await writeSwizSettings(next)
-  console.log(`\n  Re-enabled hook: ${filename} (global)`)
+  console.log(`\n  Re-enabled hook: ${filename} (${scope})`)
   console.log(`  Saved: ${path}\n`)
 }
 

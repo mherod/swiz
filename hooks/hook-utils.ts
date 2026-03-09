@@ -24,7 +24,7 @@ import { dirname, join } from "node:path"
 import { translateMatcher } from "../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
 import { getHomeDirOrNull, getHomeDirWithFallback } from "../src/home.ts"
-import { STATE_TRANSITIONS, stateDataSchema } from "../src/settings.ts"
+import { getSwizSettingsPath, STATE_TRANSITIONS, stateDataSchema } from "../src/settings.ts"
 import { skillAdvice, skillExists } from "../src/skill-utils.ts"
 import {
   GH_CMD_RE,
@@ -272,14 +272,8 @@ let _updateMemoryFooterEnabledCache: boolean | undefined
 function isUpdateMemoryFooterEnabled(): boolean {
   if (_updateMemoryFooterEnabledCache !== undefined) return _updateMemoryFooterEnabledCache
 
-  const home = getHomeDirOrNull()
-  if (!home) {
-    _updateMemoryFooterEnabledCache = false
-    return _updateMemoryFooterEnabledCache
-  }
-
-  const settingsPath = join(home, ".swiz", "settings.json")
-  if (!existsSync(settingsPath)) {
+  const settingsPath = getSwizSettingsPath()
+  if (!settingsPath || !existsSync(settingsPath)) {
     _updateMemoryFooterEnabledCache = false
     return _updateMemoryFooterEnabledCache
   }
