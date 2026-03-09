@@ -2,7 +2,7 @@
 // Receives a JSON object via stdin with model, workspace, context window, and cost info.
 // Uses time-based rainbow cycling so colors shift on each render.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { type GitBranchStatus, getGitBranchStatus, ghJson } from "../git-helpers.ts"
 import {
@@ -230,19 +230,19 @@ export function getGhCachePath(cwd: string): string {
   return join(cwd, ".swiz", "gh-cache.json")
 }
 
-function readGhCache(cwd: string): GhCacheStore {
+async function readGhCache(cwd: string): Promise<GhCacheStore> {
   try {
-    const raw = readFileSync(getGhCachePath(cwd), "utf8")
+    const raw = await readFile(getGhCachePath(cwd), "utf8")
     return JSON.parse(raw) as GhCacheStore
   } catch {
     return {}
   }
 }
 
-function writeGhCache(cwd: string, store: GhCacheStore): void {
+async function writeGhCache(cwd: string, store: GhCacheStore): Promise<void> {
   try {
-    mkdirSync(join(cwd, ".swiz"), { recursive: true })
-    writeFileSync(getGhCachePath(cwd), `${JSON.stringify(store)}\n`)
+    await mkdir(join(cwd, ".swiz"), { recursive: true })
+    await writeFile(getGhCachePath(cwd), `${JSON.stringify(store)}\n`)
   } catch {
     // Non-fatal: status line continues without persisted cache
   }
@@ -256,7 +256,7 @@ function writeGhCache(cwd: string, store: GhCacheStore): void {
 export async function ghJsonCached<T>(args: string[], cwd: string): Promise<T | null> {
   const key = args.join("\x00")
   const now = Date.now()
-  const store = readGhCache(cwd)
+  const store = await readGhCache(cwd)
   const entry = store[key] as GhCacheEntry<T> | undefined
   if (entry && entry.expiresAt > now) {
     return entry.value
@@ -267,7 +267,7 @@ export async function ghJsonCached<T>(args: string[], cwd: string): Promise<T | 
     const e = store[k] as GhCacheEntry<unknown>
     if (e.expiresAt <= now && k !== key) delete store[k]
   }
-  writeGhCache(cwd, store)
+  await writeGhCache(cwd, store)
   return value
 }
 
@@ -282,9 +282,9 @@ export function getContextStatsPath(cwd: string): string {
   return join(cwd, ".swiz", "context-stats.json")
 }
 
-export function readContextStats(cwd: string): ContextStats | null {
+export async function readContextStats(cwd: string): Promise<ContextStats | null> {
   try {
-    const raw = readFileSync(getContextStatsPath(cwd), "utf8")
+    const raw = await readFile(getContextStatsPath(cwd), "utf8")
     const obj = JSON.parse(raw)
     if (
       typeof obj?.minPct === "number" &&
@@ -300,19 +300,15 @@ export function readContextStats(cwd: string): ContextStats | null {
   }
 }
 
-export function updateContextStats(cwd: string, pct: number): ContextStats | null {
+export async function updateContextStats(cwd: string, pct: number): Promise<ContextStats | null> {
   if (pct <= 0) return readContextStats(cwd)
-  const existing = readContextStats(cwd)
+  const existing = await readContextStats(cwd)
   const stats: ContextStats = existing
     ? { minPct: Math.min(existing.minPct, pct), maxPct: Math.max(existing.maxPct, pct) }
     : { minPct: pct, maxPct: pct }
-  try {
-    const dir = join(cwd, ".swiz")
-    mkdirSync(dir, { recursive: true })
-    writeFileSync(getContextStatsPath(cwd), `${JSON.stringify(stats, null, 2)}\n`)
-  } catch {
-    // Non-fatal — status line continues without persisted stats
-  }
+  mkdir(join(cwd, ".swiz"), { recursive: true })
+    .then(() => writeFile(getContextStatsPath(cwd), `${JSON.stringify(stats, null, 2)}\n`))
+    .catch(() => {})
   return stats
 }
 
@@ -383,7 +379,7 @@ export const statusLineCommand: Command = {
     const midLeft = rb("├──")
     const bottomLeft = rb("└──")
 
-    const ctxStats = updateContextStats(cwd, ctxPct)
+    const ctxStats = await updateContextStats(cwd, ctxPct)
     const ctxBar = progressBar(ctxPct, 20, ctxStats)
     const ctxColor = colorForPct(ctxPct)
     const tokenStr = ctxTokens > 0 ? ` ${DIM}${formatTokens(ctxTokens)}${R}` : ""

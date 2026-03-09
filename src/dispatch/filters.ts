@@ -5,7 +5,7 @@
  * Extracted from src/commands/dispatch.ts (issue #84).
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { readFile, writeFile } from "node:fs/promises"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import type { HookGroup } from "../manifest.ts"
 import {
@@ -41,11 +41,14 @@ export function hookCooldownPath(hookFile: string, cwd: string): string {
   return `/tmp/swiz-hook-cooldown-${key}.timestamp`
 }
 
-export function isWithinCooldown(hookFile: string, cooldownSeconds: number, cwd: string): boolean {
+export async function isWithinCooldown(
+  hookFile: string,
+  cooldownSeconds: number,
+  cwd: string
+): Promise<boolean> {
   const sentinelPath = hookCooldownPath(hookFile, cwd)
-  if (!existsSync(sentinelPath)) return false
   try {
-    const raw = readFileSync(sentinelPath, "utf8").trim()
+    const raw = (await readFile(sentinelPath, "utf8")).trim()
     const lastRun = parseInt(raw, 10)
     if (Number.isNaN(lastRun)) return false
     return Date.now() - lastRun < cooldownSeconds * 1000
@@ -55,11 +58,9 @@ export function isWithinCooldown(hookFile: string, cooldownSeconds: number, cwd:
 }
 
 export function markHookCooldown(hookFile: string, cwd: string): void {
-  try {
-    writeFileSync(hookCooldownPath(hookFile, cwd), String(Date.now()))
-  } catch {
+  writeFile(hookCooldownPath(hookFile, cwd), String(Date.now())).catch(() => {
     // Non-fatal: if sentinel write fails the hook just runs again next time
-  }
+  })
 }
 
 // ─── Payload helpers ────────────────────────────────────────────────────────

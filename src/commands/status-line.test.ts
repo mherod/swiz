@@ -17,92 +17,92 @@ function makeTempProject(): string {
 }
 
 describe("readContextStats", () => {
-  it("returns null when no stats file exists", () => {
+  it("returns null when no stats file exists", async () => {
     const dir = makeTempProject()
-    expect(readContextStats(dir)).toBeNull()
+    expect(await readContextStats(dir)).toBeNull()
   })
 
-  it("returns null for corrupt JSON", () => {
+  it("returns null for corrupt JSON", async () => {
     const dir = makeTempProject()
     const statsPath = getContextStatsPath(dir)
     mkdirSync(join(dir, ".swiz"), { recursive: true })
     writeFileSync(statsPath, "not-json")
-    expect(readContextStats(dir)).toBeNull()
+    expect(await readContextStats(dir)).toBeNull()
   })
 
-  it("returns null for invalid schema (missing fields)", () => {
+  it("returns null for invalid schema (missing fields)", async () => {
     const dir = makeTempProject()
     const statsPath = getContextStatsPath(dir)
     mkdirSync(join(dir, ".swiz"), { recursive: true })
     writeFileSync(statsPath, JSON.stringify({ minPct: 10 }))
-    expect(readContextStats(dir)).toBeNull()
+    expect(await readContextStats(dir)).toBeNull()
   })
 
-  it("returns null for zero values", () => {
+  it("returns null for zero values", async () => {
     const dir = makeTempProject()
     const statsPath = getContextStatsPath(dir)
     mkdirSync(join(dir, ".swiz"), { recursive: true })
     writeFileSync(statsPath, JSON.stringify({ minPct: 0, maxPct: 50 }))
-    expect(readContextStats(dir)).toBeNull()
+    expect(await readContextStats(dir)).toBeNull()
   })
 
-  it("reads valid stats", () => {
+  it("reads valid stats", async () => {
     const dir = makeTempProject()
     const statsPath = getContextStatsPath(dir)
     mkdirSync(join(dir, ".swiz"), { recursive: true })
     writeFileSync(statsPath, JSON.stringify({ minPct: 15, maxPct: 85 }))
-    const stats = readContextStats(dir)
+    const stats = await readContextStats(dir)
     expect(stats).toEqual({ minPct: 15, maxPct: 85 })
   })
 })
 
 describe("updateContextStats", () => {
-  it("initializes both min and max on first non-zero observation", () => {
+  it("initializes both min and max on first non-zero observation", async () => {
     const dir = makeTempProject()
-    const stats = updateContextStats(dir, 42)
+    const stats = await updateContextStats(dir, 42)
     expect(stats).toEqual({ minPct: 42, maxPct: 42 })
-    expect(readContextStats(dir)).toEqual({ minPct: 42, maxPct: 42 })
+    expect(await readContextStats(dir)).toEqual({ minPct: 42, maxPct: 42 })
   })
 
-  it("ignores 0% and returns existing stats", () => {
+  it("ignores 0% and returns existing stats", async () => {
     const dir = makeTempProject()
-    updateContextStats(dir, 50)
-    const stats = updateContextStats(dir, 0)
+    await updateContextStats(dir, 50)
+    const stats = await updateContextStats(dir, 0)
     expect(stats).toEqual({ minPct: 50, maxPct: 50 })
   })
 
-  it("ignores 0% when no prior stats exist", () => {
+  it("ignores 0% when no prior stats exist", async () => {
     const dir = makeTempProject()
-    const stats = updateContextStats(dir, 0)
+    const stats = await updateContextStats(dir, 0)
     expect(stats).toBeNull()
   })
 
-  it("updates min when smaller value observed", () => {
+  it("updates min when smaller value observed", async () => {
     const dir = makeTempProject()
-    updateContextStats(dir, 50)
-    const stats = updateContextStats(dir, 20)
+    await updateContextStats(dir, 50)
+    const stats = await updateContextStats(dir, 20)
     expect(stats).toEqual({ minPct: 20, maxPct: 50 })
   })
 
-  it("updates max when larger value observed", () => {
+  it("updates max when larger value observed", async () => {
     const dir = makeTempProject()
-    updateContextStats(dir, 50)
-    const stats = updateContextStats(dir, 90)
+    await updateContextStats(dir, 50)
+    const stats = await updateContextStats(dir, 90)
     expect(stats).toEqual({ minPct: 50, maxPct: 90 })
   })
 
-  it("does not change extremes when value is within range", () => {
+  it("does not change extremes when value is within range", async () => {
     const dir = makeTempProject()
-    updateContextStats(dir, 20)
-    updateContextStats(dir, 80)
-    const stats = updateContextStats(dir, 50)
+    await updateContextStats(dir, 20)
+    await updateContextStats(dir, 80)
+    const stats = await updateContextStats(dir, 50)
     expect(stats).toEqual({ minPct: 20, maxPct: 80 })
   })
 
-  it("creates .swiz directory if missing", () => {
+  it("creates .swiz directory if missing", async () => {
     const dir = makeTempProject()
-    updateContextStats(dir, 33)
-    const stats = readContextStats(dir)
+    await updateContextStats(dir, 33)
+    const stats = await readContextStats(dir)
     expect(stats).toEqual({ minPct: 33, maxPct: 33 })
   })
 })

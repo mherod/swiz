@@ -5,7 +5,7 @@
  * Extracted from src/commands/dispatch.ts (issue #84).
  */
 
-import { appendFileSync } from "node:fs"
+import { appendFile } from "node:fs/promises"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
 import { evalCondition, type HookGroup } from "../manifest.ts"
@@ -68,12 +68,8 @@ type HookDef = HookGroup["hooks"][number]
 // ─── Debug logger ───────────────────────────────────────────────────────────
 
 export function log(msg: string): void {
-  try {
-    appendFileSync(LOG_PATH, `${msg}\n`)
-    debugLog(msg)
-  } catch {
-    // Never let logging break dispatch
-  }
+  appendFile(LOG_PATH, `${msg}\n`).catch(() => {})
+  debugLog(msg)
 }
 
 export function logHeader(
@@ -258,18 +254,18 @@ function createSkippedExecution(
   }
 }
 
-function tryRecordSkippedHook(
+async function tryRecordSkippedHook(
   hook: HookDef,
   matcher: string | undefined,
   cwd: string,
   executions: HookExecution[]
-): boolean {
+): Promise<boolean> {
   if (!evalCondition(hook.condition)) {
     log(`   ⏭ ${hook.file} [condition false, skipping]`)
     executions.push(createSkippedExecution(hook, matcher, "condition-false"))
     return true
   }
-  if (hook.cooldownSeconds && isWithinCooldown(hook.file, hook.cooldownSeconds, cwd)) {
+  if (hook.cooldownSeconds && (await isWithinCooldown(hook.file, hook.cooldownSeconds, cwd))) {
     log(`   ⏭ ${hook.file} [cooldown active, skipping]`)
     executions.push(createSkippedExecution(hook, matcher, "cooldown-active"))
     return true
@@ -361,7 +357,7 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
-      if (tryRecordSkippedHook(hook, group.matcher, cwd, executions)) {
+      if (await tryRecordSkippedHook(hook, group.matcher, cwd, executions)) {
         continue
       }
       log(`   → ${formatHookTarget(hook.file, group.matcher)}`)
@@ -425,7 +421,7 @@ export async function runBlocking(
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
-      if (tryRecordSkippedHook(hook, group.matcher, cwd, executions)) {
+      if (await tryRecordSkippedHook(hook, group.matcher, cwd, executions)) {
         continue
       }
       log(`   → ${formatHookTarget(hook.file, group.matcher)}`)
@@ -468,7 +464,7 @@ export async function runContext(
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
-      if (tryRecordSkippedHook(hook, group.matcher, cwd, executions)) {
+      if (await tryRecordSkippedHook(hook, group.matcher, cwd, executions)) {
         continue
       }
       log(`   → ${formatHookTarget(hook.file, group.matcher)}`)
