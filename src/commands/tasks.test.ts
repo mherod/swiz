@@ -370,8 +370,52 @@ describe("resolveTaskById", () => {
 
   it("throws for prefixed ID with no matching session", async () => {
     await expect(resolveTaskById("zzzz-99", SESSION_A, undefined, TASKS, PROJECTS)).rejects.toThrow(
-      /prefix "zzzz" matched no session/
+      /no session with prefix "zzzz" exists in this project/
     )
+  })
+
+  it("includes recent session IDs in no-session error for agent recovery", async () => {
+    // The error should inline session IDs so the agent can recover without running swiz tasks.
+    try {
+      await resolveTaskById("zzzz-99", SESSION_A, undefined, TASKS, PROJECTS)
+      expect.unreachable("should have thrown")
+    } catch (err: unknown) {
+      const msg = (err as Error).message
+      // At least one known session prefix should appear inline
+      const knownPrefix = SESSION_A.slice(0, 8)
+      expect(msg).toContain(knownPrefix)
+    }
+  })
+
+  it("throws distinct error when session matches prefix but task file is absent", async () => {
+    // SESSION_C exists and has prefix cccc, but task cccc-99 was never written.
+    const prefixC = sessionPrefix(SESSION_C)
+    try {
+      await resolveTaskById(`${prefixC}-99`, SESSION_A, undefined, TASKS, PROJECTS)
+      expect.unreachable("should have thrown")
+    } catch (err: unknown) {
+      const msg = (err as Error).message
+      // Must name the matched session (not claim no session exists)
+      expect(msg).toContain(SESSION_C.slice(0, 8))
+      // Must give actionable guidance
+      expect(msg).toContain("--session")
+      // Must NOT say "matched no session" (the old misleading message)
+      expect(msg).not.toContain("matched no session")
+    }
+  })
+
+  it("hint on session-found-but-task-absent uses matching session tasks, not primary", async () => {
+    // Verify buildRecentTasksHint is called with matchingSession, not primarySessionId.
+    // SESSION_C has task cccc-10 but not cccc-99. The hint should reference cccc-10.
+    const prefixC = sessionPrefix(SESSION_C)
+    try {
+      await resolveTaskById(`${prefixC}-99`, SESSION_A, undefined, TASKS, PROJECTS)
+      expect.unreachable("should have thrown")
+    } catch (err: unknown) {
+      const msg = (err as Error).message
+      // The hint should list tasks from SESSION_C (which has cccc-10)
+      expect(msg).toContain("Prefixed task in session C")
+    }
   })
 })
 

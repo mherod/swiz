@@ -294,6 +294,34 @@ async function buildRecentTasksHint(
   }
 }
 
+/**
+ * Build a hint listing the most recent sessions with a sample of task subjects
+ * from each. Used in "no session found" errors so agents can spot the right
+ * session without needing to run `swiz tasks`.
+ */
+async function buildRecentSessionsHint(
+  sessions: string[],
+  tasksDir = getDefaultTaskRoots().tasksDir
+): Promise<string> {
+  if (sessions.length === 0) return ""
+  const recent = sessions.slice(0, 5)
+  const lines = await Promise.all(
+    recent.map(async (sessionId) => {
+      try {
+        const tasks = await readTasks(sessionId, tasksDir)
+        const preview = tasks
+          .slice(-3)
+          .map((t) => `    #${t.id} [${t.status}]: ${t.subject}`)
+          .join("\n")
+        return `  ${sessionId.slice(0, 8)}...${preview ? `\n${preview}` : " (no tasks)"}`
+      } catch {
+        return `  ${sessionId.slice(0, 8)}... (unreadable)`
+      }
+    })
+  )
+  return `\nRecent sessions:\n${lines.join("\n")}`
+}
+
 // ─── Cross-session task lookup ───────────────────────────────────────────────
 
 /**
@@ -356,10 +384,16 @@ export async function resolveTaskById(
         }
         return { sessionId: matchingSession, task }
       }
+      // Session matched but the specific task file is absent (deleted or never written).
+      const recentHint = await buildRecentTasksHint(matchingSession, tasksDir)
+      throw new Error(
+        `Task #${taskId} not found in session ${matchingSession.slice(0, 8)}... (prefix "${prefix}" matched but task file is missing).` +
+          `\nUse --session ${matchingSession.slice(0, 8)} with a different task ID, or recreate the task.${recentHint}`
+      )
     }
-    const recentHint = await buildRecentTasksHint(primarySessionId, tasksDir)
+    const sessionsHint = await buildRecentSessionsHint(sessions, tasksDir)
     throw new Error(
-      `Task #${taskId} not found (prefix "${prefix}" matched no session with that task).${recentHint}`
+      `Task #${taskId} not found (no session with prefix "${prefix}" exists in this project).${sessionsHint}`
     )
   }
 
