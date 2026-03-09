@@ -66,6 +66,48 @@ describe("classifyCommand", () => {
     expect(classifyCommand("ls -la")).toBeNull()
     expect(classifyCommand("echo hello")).toBeNull()
   })
+
+  test("classifies timeout-prefixed bun test as 'test'", () => {
+    expect(classifyCommand("timeout 60 bun test")).toBe("test")
+    expect(classifyCommand("timeout 30 bun test --concurrent src/foo.test.ts")).toBe("test")
+    expect(
+      classifyCommand("timeout 60 bun test --concurrent --timeout=10000 2>&1 | tail -15")
+    ).toBe("test")
+  })
+
+  test("classifies timeout-prefixed bun run lint as 'lint'", () => {
+    expect(classifyCommand("timeout 60 bun run lint")).toBe("lint")
+    expect(classifyCommand("timeout 30 bun run lint 2>&1")).toBe("lint")
+  })
+
+  test("classifies timeout-prefixed bun run typecheck as 'typecheck'", () => {
+    expect(classifyCommand("timeout 60 bun run typecheck")).toBe("typecheck")
+  })
+
+  test("classifies nice-prefixed commands correctly", () => {
+    expect(classifyCommand("nice bun test")).toBe("test")
+    expect(classifyCommand("nice -n 10 bun test")).toBe("test")
+    expect(classifyCommand("nice -n 10 bun run lint")).toBe("lint")
+  })
+
+  test("classifies sudo-prefixed commands correctly", () => {
+    expect(classifyCommand("sudo bun test")).toBe("test")
+    expect(classifyCommand("sudo -u user bun run lint")).toBe("lint")
+  })
+
+  test("classifies time-prefixed commands correctly", () => {
+    expect(classifyCommand("time bun test")).toBe("test")
+    expect(classifyCommand("time bun run lint")).toBe("lint")
+  })
+
+  test("classifies stacked prefix wrappers correctly", () => {
+    expect(classifyCommand("timeout 60 nice -n 5 bun test")).toBe("test")
+  })
+
+  test("classifies timeout-prefixed commands after pipe boundary", () => {
+    expect(classifyCommand("echo foo | timeout 60 bun test")).toBe("test")
+    expect(classifyCommand("echo foo; timeout 60 bun run lint")).toBe("lint")
+  })
 })
 
 // ── commandFingerprint ────────────────────────────────────────────────────────

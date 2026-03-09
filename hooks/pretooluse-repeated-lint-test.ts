@@ -52,9 +52,26 @@ export function isHelpQuery(cmd: string): boolean {
   return /\s--help\b/.test(cmd)
 }
 
+// Matches one or more command-prefix wrappers at the start of a (trimmed) shell segment.
+// These wrappers don't change the command's kind, but they prevent the segment-boundary
+// regex from matching because `bun test` is no longer at a boundary.
+// Handles: timeout [N], nice [-n N], env, command, sudo [-flag [val]...], time
+const SEGMENT_PREFIX_RE =
+  /^(?:(?:timeout\s+\d+|nice(?:\s+-n\s*[-\d]+)?|env|command|sudo(?:\s+-\S+(?:\s+\S+)?)*|time)\s+)+/
+
+/** Strip common command-prefix wrappers from each shell segment so classification sees the real command. */
+function normalizeCommand(cmd: string): string {
+  // Split on shell operators (|, &, ;), trim each segment, strip wrappers, then rejoin.
+  return cmd
+    .split(/([|;&])/)
+    .map((part, i) => (i % 2 === 0 ? part.trim().replace(SEGMENT_PREFIX_RE, "") : part))
+    .join("")
+}
+
 export function classifyCommand(cmd: string): CommandKind | null {
+  const normalized = normalizeCommand(cmd)
   for (const [kind, pattern] of COMMAND_KIND_MATCHERS) {
-    if (pattern.test(cmd)) return kind
+    if (pattern.test(normalized)) return kind
   }
   return null
 }
