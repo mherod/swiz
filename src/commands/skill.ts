@@ -83,7 +83,7 @@ async function readSkill(name: string, raw: boolean, noFrontMatter: boolean) {
   let content = await Bun.file(skill.path).text()
   const availabilityWarning = getSkillToolAvailabilityWarning(name, content)
   if (availabilityWarning) {
-    console.error(availabilityWarning.message)
+    console.log(availabilityWarning.message)
   }
   if (!raw) {
     content = await expandInlineCommands(content)

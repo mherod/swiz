@@ -192,10 +192,10 @@ describe("swiz skill --no-front-matter", () => {
 
   test("warns before output when required tools are unavailable", async () => {
     const content = "---\nallowed-tools: Bash, ImaginaryTool\n---\n# Body\n"
-    const { stdout, stderr, exitCode } = await runSkillCmd(content, [], { CLAUDECODE: "1" })
+    const { stdout, exitCode } = await runSkillCmd(content, [], { CLAUDECODE: "1" })
     expect(exitCode).toBe(0)
-    expect(stderr).toContain("Skill tool availability warning")
-    expect(stderr).toContain("ImaginaryTool")
+    expect(stdout).toContain("Skill tool availability warning")
+    expect(stdout).toContain("ImaginaryTool")
     expect(stdout).toContain("# Body")
   })
 })
