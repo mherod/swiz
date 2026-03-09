@@ -11,9 +11,26 @@ import {
   commandFingerprint,
   extractPreviousOutput,
   extractToolUseIdFromLine,
+  isHelpQuery,
   parseTranscriptEvents,
 } from "../hooks/pretooluse-repeated-lint-test.ts"
 import { extractSessionLines, parseTranscriptSummary } from "../src/transcript-summary.ts"
+
+// ── isHelpQuery ───────────────────────────────────────────────────────────────
+
+describe("isHelpQuery", () => {
+  test("returns true for --help commands", () => {
+    expect(isHelpQuery("bun test --help")).toBe(true)
+    expect(isHelpQuery("bun test --concurrent --help")).toBe(true)
+    expect(isHelpQuery("bun run lint --help")).toBe(true)
+  })
+
+  test("returns false for normal commands", () => {
+    expect(isHelpQuery("bun test")).toBe(false)
+    expect(isHelpQuery("bun test --concurrent --timeout=30000")).toBe(false)
+    expect(isHelpQuery("bun run lint")).toBe(false)
+  })
+})
 
 // ── classifyCommand ───────────────────────────────────────────────────────────
 

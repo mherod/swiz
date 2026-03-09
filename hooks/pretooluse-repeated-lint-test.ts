@@ -47,6 +47,11 @@ const COMMAND_KIND_MATCHERS: ReadonlyArray<readonly [CommandKind, RegExp]> = [
   ["build", BUILD_RE],
 ]
 
+/** Returns true when the command is a help/usage query that should never be blocked. */
+export function isHelpQuery(cmd: string): boolean {
+  return /\s--help\b/.test(cmd)
+}
+
 export function classifyCommand(cmd: string): CommandKind | null {
   for (const [kind, pattern] of COMMAND_KIND_MATCHERS) {
     if (pattern.test(cmd)) return kind
@@ -402,6 +407,9 @@ async function main(): Promise<void> {
 
   const currentKind = classifyCommand(command)
   if (!currentKind) return
+
+  // --help queries are informational, not repeated runs — never block them.
+  if (isHelpQuery(command)) return
 
   if (!(await isGitRepo(cwd))) return
   if (!transcriptPath) return
