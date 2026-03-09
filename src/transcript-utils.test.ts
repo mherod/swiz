@@ -1064,6 +1064,27 @@ describe("transcript-utils.ts", () => {
       expect(paths.has("src/tool-b")).toBe(true)
     })
 
+    it("extracts -t destdir itself as a path", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry("install -t /usr/local/bin src/tool-a src/tool-b")
+      )
+      expect(paths.has("/usr/local/bin")).toBe(true)
+    })
+
+    it("extracts --target-directory=destdir as a path", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry("install --target-directory=/usr/local/bin src/tool-a")
+      )
+      expect(paths.has("/usr/local/bin")).toBe(true)
+    })
+
+    it("extracts source from install --target-directory", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry("install --target-directory=/usr/local/bin src/tool-a")
+      )
+      expect(paths.has("src/tool-a")).toBe(true)
+    })
+
     it("extracts paths from install with multiple flags", () => {
       const paths = extractEditedFilePaths(
         makeBashEntry("install -m 755 -o root -g wheel /repo/bin/swiz /usr/local/bin/swiz")

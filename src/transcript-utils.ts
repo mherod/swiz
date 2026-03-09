@@ -886,12 +886,17 @@ const TOUCH_TRUNCATE_INSTALL_RE =
 const CHMOD_CHOWN_RE =
   /(?:^|[|;&\s])(?:chmod|chown)\s+(?:-\S+\s+)*(?:"[^"]*"|'[^']*'|[^\s|;&"']+)\s+((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
 
-// Matches install command file targets: install [-m mode] [-o owner] [-g group] src... dest
-// or install -t destdir src...
-// Flags with values (-m 755, -o root, -g wheel, -t dir, -S suffix) are skipped by
-// the (?:-\S+\s+\S+\s+|-\S+\s+)* prefix; remaining tokens include source and destination paths.
+// Matches install command positional file targets: install [-m mode] [-o owner] [-g group] src... dest
+// Flags with values (-m 755, -o root, -g wheel, -S suffix) are consumed by the prefix;
+// remaining tokens include source and destination paths.
+// Note: -t / --target-directory destination is handled separately by INSTALL_TARGET_DIR_RE.
 const INSTALL_CMD_RE =
   /(?:^|[|;&\s])install\s+(?:(?:-[mogtS]\s+\S+|-\S+)\s+)*((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
+
+// Extracts the destination directory from install -t <dir> or install --target-directory=<dir>.
+// Group 1 captures the directory value (quoted or unquoted, = or space-separated).
+const INSTALL_TARGET_DIR_RE =
+  /(?:^|[|;&\s])install\b[^|;&]*?(?:-t\s+("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s|;&"']+)|--target-directory=("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s|;&"']+))/gm
 
 // Tokenizes a shell argument string respecting single and double quoting.
 // "my file.ts" and 'my file.ts' are returned as single tokens (quotes stripped).
@@ -954,11 +959,18 @@ function extractPathsFromCommand(command: string): string[] {
     if (args) for (const t of shellTokens(args)) results.push(t)
   }
 
-  // install command file extractor (src... dest or -t destdir src...)
+  // install command file extractor (src... dest — positional args)
   INSTALL_CMD_RE.lastIndex = 0
   for (const m of command.matchAll(INSTALL_CMD_RE)) {
     const args = m[1]?.trim()
     if (args) for (const t of shellTokens(args)) results.push(t)
+  }
+
+  // install -t / --target-directory destination extractor
+  INSTALL_TARGET_DIR_RE.lastIndex = 0
+  for (const m of command.matchAll(INSTALL_TARGET_DIR_RE)) {
+    const raw = (m[1] ?? m[2])?.trim()
+    if (raw) for (const t of shellTokens(raw)) results.push(t)
   }
 
   return results
@@ -975,7 +987,8 @@ function extractPathsFromCommand(command: string): string[] {
  *       tee file targets: cmd | tee [-a] file [file2 ...]
  *       touch / truncate / mkdir / rmdir targets
  *       chmod / chown file targets: chmod [-R] <mode> <file>, chown [-R] <owner> <file>
- *       install command targets: install [-m mode] [-o owner] src... dest
+ *       install command targets: install [-m mode] src... dest, install -t destdir src...,
+ *         install --target-directory=destdir src...
  *
  * Used to detect docs-only sessions before invoking the LLM so the analysis
  * can be scoped correctly.
