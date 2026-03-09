@@ -1098,6 +1098,90 @@ export function isDocsOnlySession(editedPaths: Set<string>): boolean {
   return true
 }
 
+// ─── Combined single-pass extraction ─────────────────────────────────────────
+// Performs one `parseTranscriptEntries` call and populates all three derived
+// views: plain turns (for AI context), edited file paths (for docs-only check),
+// and tool-call count (for the min-calls gate).
+//
+// Use this in stop hooks instead of calling extractPlainTurns + extractEditedFilePaths
+// + countToolCalls separately to avoid three redundant full parses on large transcripts.
+
+export interface TranscriptData {
+  turns: PlainTurn[]
+  editedPaths: Set<string>
+  toolCallCount: number
+}
+
+export function extractTranscriptData(jsonlText: string): TranscriptData {
+  const turns: PlainTurn[] = []
+  const editedPaths = new Set<string>()
+  const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"])
+  const SHELL_TOOLS = new Set(["Bash", "Shell"])
+  let toolCallCount = 0
+
+  for (const entry of parseTranscriptEntries(jsonlText)) {
+    if (entry?.type !== "user" && entry?.type !== "assistant") continue
+
+    const content = entry?.message?.content
+
+    // ── Assistant entries: count tool calls + collect edited paths ──
+    if (entry.type === "assistant") {
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          const b = block as { type?: string; name?: string; input?: Record<string, unknown> }
+          if (b?.type !== "tool_use") continue
+          toolCallCount++
+
+          if (b.name && EDIT_TOOLS.has(b.name)) {
+            const pathVal = b.input?.file_path ?? b.input?.path
+            if (typeof pathVal === "string" && pathVal) editedPaths.add(pathVal)
+          } else if (b.name && SHELL_TOOLS.has(b.name)) {
+            const cmd = b.input?.command
+            if (typeof cmd === "string" && cmd) {
+              for (const p of extractPathsFromCommand(cmd)) editedPaths.add(p)
+            }
+          }
+        }
+      }
+    }
+
+    // ── Plain turns for AI context (both user and assistant) ──
+    if (!content) continue
+    if (entry.type === "user" && isHookFeedback(content)) continue
+
+    let text: string
+    if (typeof content === "string") {
+      text = content
+    } else if (Array.isArray(content)) {
+      text = content
+        .filter((b): b is TextBlock => b?.type === "text" && typeof b.text === "string")
+        .map((b) => b.text)
+        .join("\n")
+
+      const toolSummary = summarizeToolCalls(content)
+      if (toolSummary) text = text ? `${text}\n${toolSummary}` : toolSummary
+
+      if (entry.type === "user") {
+        const resultTexts = content
+          .filter((b: any) => b?.type === "tool_result")
+          .map((b: any) => extractToolResultText(b))
+          .filter(Boolean)
+        if (resultTexts.length > 0) {
+          const resultSummary = resultTexts.map((t) => `[Result: ${t}]`).join("\n")
+          text = text ? `${text}\n${resultSummary}` : resultSummary
+        }
+      }
+    } else {
+      continue
+    }
+
+    text = text.trim()
+    if (text) turns.push({ role: entry.type, text })
+  }
+
+  return { turns, editedPaths, toolCallCount }
+}
+
 // ─── Context formatting ──────────────────────────────────────────────────────
 // Formats plain turns into a labeled conversation string for LLM prompts.
 

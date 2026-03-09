@@ -22,9 +22,7 @@ import {
 import {
   buildTaskSection,
   buildUserMessagesSection,
-  countToolCalls,
-  extractEditedFilePaths,
-  extractPlainTurns,
+  extractTranscriptData,
   formatTurnsAsContext,
   isDocsOnlySession,
   projectKeyFromCwd,
@@ -674,19 +672,22 @@ async function main(): Promise<void> {
     terminate("skip", "TRANSCRIPT_READ_ERROR", "could not read transcript file — skipping block")
   }
 
+  // Single combined parse: extracts turns, edited paths, and tool-call count
+  // in one pass over the transcript — avoids three redundant full parses.
+  const transcriptData = extractTranscriptData(raw)
+
   // Fallback: count tool calls from raw text if no summary was available
   if (!summary) {
-    const count = countToolCalls(raw)
-    if (count < MIN_TOOL_CALLS) {
+    if (transcriptData.toolCallCount < MIN_TOOL_CALLS) {
       terminate(
         "skip",
         "TRIVIAL_SESSION",
-        `only ${count} tool calls (min ${MIN_TOOL_CALLS}) — skipping block`
+        `only ${transcriptData.toolCallCount} tool calls (min ${MIN_TOOL_CALLS}) — skipping block`
       )
     }
   }
 
-  const turns = extractPlainTurns(raw).slice(-CONTEXT_TURNS)
+  const turns = transcriptData.turns.slice(-CONTEXT_TURNS)
   if (turns.length === 0) {
     terminate("skip", "NO_TURNS", "no parseable conversation turns — skipping block")
   }
@@ -695,7 +696,7 @@ async function main(): Promise<void> {
   // tool calls and check whether every touched file is a documentation file.
   // This result is passed into buildPrompt as a hard override for rule (1) so
   // the LLM cannot misread doc-only diffs as unimplemented features.
-  const editedPaths = extractEditedFilePaths(raw)
+  const editedPaths = transcriptData.editedPaths
   const docsOnly = isDocsOnlySession(editedPaths)
 
   const taskContext = await loadTaskContext(input.session_id ?? "")

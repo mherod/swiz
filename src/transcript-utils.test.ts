@@ -5,6 +5,7 @@ import {
   extractPlainTurns,
   extractText,
   extractToolResultText,
+  extractTranscriptData,
   formatTurnsAsContext,
   getUnsupportedTranscriptFormatMessage,
   isDocsOnlySession,
@@ -1236,6 +1237,404 @@ describe("transcript-utils.ts", () => {
 
     it("returns false for a .ts source file alone", () => {
       expect(isDocsOnlySession(new Set(["/repo/src/foo.ts"]))).toBe(false)
+    })
+  })
+
+  // ─── extractTranscriptData ───────────────────────────────────────────────────
+
+  describe("extractTranscriptData", () => {
+    it("returns empty results for empty input", () => {
+      const result = extractTranscriptData("")
+      expect(result.turns).toEqual([])
+      expect(result.editedPaths.size).toBe(0)
+      expect(result.toolCallCount).toBe(0)
+    })
+
+    it("returns empty results for whitespace-only input", () => {
+      const result = extractTranscriptData("   \n\n  ")
+      expect(result.turns).toEqual([])
+      expect(result.editedPaths.size).toBe(0)
+      expect(result.toolCallCount).toBe(0)
+    })
+
+    it("extracts a user turn", () => {
+      const jsonl = JSON.stringify({ type: "user", message: { content: "Hello world" } })
+      const result = extractTranscriptData(jsonl)
+      expect(result.turns).toHaveLength(1)
+      expect(result.turns[0]?.role).toBe("user")
+      expect(result.turns[0]?.text).toBe("Hello world")
+      expect(result.toolCallCount).toBe(0)
+      expect(result.editedPaths.size).toBe(0)
+    })
+
+    it("extracts an assistant text turn", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "Here is my response." }] },
+      })
+      const result = extractTranscriptData(jsonl)
+      expect(result.turns).toHaveLength(1)
+      expect(result.turns[0]?.role).toBe("assistant")
+      expect(result.turns[0]?.text).toBe("Here is my response.")
+    })
+
+    it("counts tool calls in assistant messages", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", name: "Bash", input: { command: "ls" } },
+            { type: "tool_use", name: "Read", input: { file_path: "/repo/src/foo.ts" } },
+          ],
+        },
+      })
+      const result = extractTranscriptData(jsonl)
+      expect(result.toolCallCount).toBe(2)
+    })
+
+    it("does not count tool_use blocks in user messages", () => {
+      const jsonl = JSON.stringify({
+        type: "user",
+        message: {
+          content: [{ type: "tool_use", name: "Bash" }],
+        },
+      })
+      const result = extractTranscriptData(jsonl)
+      expect(result.toolCallCount).toBe(0)
+    })
+
+    it("extracts edited paths from Edit tool calls", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "Edit",
+              input: { file_path: "/repo/src/index.ts" },
+            },
+          ],
+        },
+      })
+      const result = extractTranscriptData(jsonl)
+      expect(result.editedPaths.has("/repo/src/index.ts")).toBe(true)
+      expect(result.toolCallCount).toBe(1)
+    })
+
+    it("extracts edited paths from Write tool calls", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "Write",
+              input: { file_path: "/repo/README.md" },
+            },
+          ],
+        },
+      })
+      const result = extractTranscriptData(jsonl)
+      expect(result.editedPaths.has("/repo/README.md")).toBe(true)
+    })
+
+    it("extracts edited paths from MultiEdit tool calls", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "MultiEdit",
+              input: { file_path: "/repo/src/utils.ts" },
+            },
+          ],
+        },
+      })
+      const result = extractTranscriptData(jsonl)
+      expect(result.editedPaths.has("/repo/src/utils.ts")).toBe(true)
+    })
+
+    it("extracts edited paths from Bash file-modifying commands", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "Bash",
+              input: { command: "trash /repo/old-file.ts" },
+            },
+          ],
+        },
+      })
+      const result = extractTranscriptData(jsonl)
+      expect(result.editedPaths.has("/repo/old-file.ts")).toBe(true)
+      expect(result.toolCallCount).toBe(1)
+    })
+
+    it("does not extract paths from read-only Bash commands", () => {
+      const jsonl = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "Bash",
+              input: { command: "ls -la /repo/src" },
+            },
+          ],
+        },
+      })
+      const result = extractTranscriptData(jsonl)
+      expect(result.editedPaths.size).toBe(0)
+      expect(result.toolCallCount).toBe(1)
+    })
+
+    it("filters hook feedback from user turns", () => {
+      const hookFeedback = JSON.stringify({
+        type: "user",
+        message: { content: "Stop hook feedback: something blocked" },
+      })
+      const normal = JSON.stringify({
+        type: "user",
+        message: { content: "normal user message" },
+      })
+      const jsonl = [hookFeedback, normal].join("\n")
+      const result = extractTranscriptData(jsonl)
+      expect(result.turns).toHaveLength(1)
+      expect(result.turns[0]?.text).toBe("normal user message")
+    })
+
+    it("filters command-message hook feedback from user turns", () => {
+      const hookFeedback = JSON.stringify({
+        type: "user",
+        message: { content: "<command-message>hook output here</command-message>" },
+      })
+      const jsonl = hookFeedback
+      const result = extractTranscriptData(jsonl)
+      expect(result.turns).toHaveLength(0)
+    })
+
+    it("handles multi-entry transcript with mixed content", () => {
+      const entries = [
+        JSON.stringify({ type: "user", message: { content: "Run the tests" } }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              { type: "text", text: "Running tests now." },
+              { type: "tool_use", name: "Bash", input: { command: "bun test" } },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "user",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tu1",
+                content: "All tests passed",
+                is_error: false,
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              { type: "text", text: "Tests are green." },
+              {
+                type: "tool_use",
+                name: "Edit",
+                input: { file_path: "/repo/src/foo.ts" },
+              },
+            ],
+          },
+        }),
+      ]
+      const jsonl = entries.join("\n")
+      const result = extractTranscriptData(jsonl)
+
+      expect(result.turns.length).toBeGreaterThanOrEqual(3)
+      expect(result.turns.some((t) => t.role === "user" && t.text.includes("Run the tests"))).toBe(
+        true
+      )
+      expect(
+        result.turns.some((t) => t.role === "assistant" && t.text.includes("Running tests now"))
+      ).toBe(true)
+      expect(result.toolCallCount).toBe(2) // Bash + Edit
+      expect(result.editedPaths.has("/repo/src/foo.ts")).toBe(true)
+    })
+
+    it("toolCallCount matches countToolCalls for the same input", () => {
+      const entries = [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", name: "Bash", input: { command: "ls" } },
+              { type: "tool_use", name: "Read", input: { file_path: "/foo.ts" } },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "Edit", input: { file_path: "/bar.ts" } }],
+          },
+        }),
+      ]
+      const jsonl = entries.join("\n")
+      const combinedResult = extractTranscriptData(jsonl)
+      const individualCount = countToolCalls(jsonl)
+      expect(combinedResult.toolCallCount).toBe(individualCount)
+    })
+
+    it("editedPaths matches extractEditedFilePaths for the same input", () => {
+      const entries = [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", name: "Edit", input: { file_path: "/repo/a.ts" } },
+              { type: "tool_use", name: "Write", input: { file_path: "/repo/b.md" } },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                name: "Bash",
+                input: { command: "trash /repo/old.ts" },
+              },
+            ],
+          },
+        }),
+      ]
+      const jsonl = entries.join("\n")
+      const combinedResult = extractTranscriptData(jsonl)
+      const individualPaths = extractEditedFilePaths(jsonl)
+      expect(combinedResult.editedPaths).toEqual(individualPaths)
+    })
+
+    it("turns matches extractPlainTurns for the same input", () => {
+      const entries = [
+        JSON.stringify({ type: "user", message: { content: "Hello" } }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [{ type: "text", text: "Hi there." }],
+          },
+        }),
+        JSON.stringify({
+          type: "user",
+          message: { content: "Stop hook feedback: blocked by hook" },
+        }),
+      ]
+      const jsonl = entries.join("\n")
+      const combinedResult = extractTranscriptData(jsonl)
+      const individualTurns = extractPlainTurns(jsonl)
+      expect(combinedResult.turns).toEqual(individualTurns)
+    })
+
+    it("handles Gemini JSON session format", () => {
+      const geminiSession = JSON.stringify({
+        sessionId: "gemini-abc",
+        messages: [
+          { type: "user", content: [{ text: "What is 2+2?" }] },
+          {
+            type: "gemini",
+            content: "It is 4.",
+            toolCalls: [{ name: "calculate", args: { expr: "2+2" } }],
+          },
+        ],
+      })
+      const result = extractTranscriptData(geminiSession)
+      expect(result.turns).toHaveLength(2)
+      expect(result.turns[0]?.role).toBe("user")
+      expect(result.turns[1]?.role).toBe("assistant")
+      expect(result.toolCallCount).toBe(1)
+    })
+
+    it("handles Codex JSONL session format", () => {
+      const codexJsonl = [
+        JSON.stringify({
+          type: "session_meta",
+          payload: { id: "codex-123", cwd: "/tmp/project" },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          payload: { type: "user_message", message: "Fix the bug" },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "edit_file",
+            arguments: '{"file_path":"/tmp/project/src/fix.ts"}',
+          },
+        }),
+      ].join("\n")
+      const result = extractTranscriptData(codexJsonl)
+      expect(result.turns.some((t) => t.role === "user" && t.text.includes("Fix the bug"))).toBe(
+        true
+      )
+      expect(result.toolCallCount).toBe(1)
+    })
+
+    it("ignores entries with no message content", () => {
+      const jsonl = [
+        JSON.stringify({ type: "user" }),
+        JSON.stringify({ type: "assistant" }),
+        JSON.stringify({ type: "user", message: { content: "real message" } }),
+      ].join("\n")
+      const result = extractTranscriptData(jsonl)
+      expect(result.turns).toHaveLength(1)
+      expect(result.turns[0]?.text).toBe("real message")
+    })
+
+    it("accumulates tool calls across multiple assistant entries", () => {
+      const entries = Array.from({ length: 5 }, (_, i) =>
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "Bash", input: { command: `echo ${i}` } }],
+          },
+        })
+      )
+      const jsonl = entries.join("\n")
+      const result = extractTranscriptData(jsonl)
+      expect(result.toolCallCount).toBe(5)
+    })
+
+    it("deduplicates edited paths across multiple entries for the same file", () => {
+      const entries = [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "Edit", input: { file_path: "/repo/src/foo.ts" } }],
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", name: "Write", input: { file_path: "/repo/src/foo.ts" } },
+            ],
+          },
+        }),
+      ]
+      const jsonl = entries.join("\n")
+      const result = extractTranscriptData(jsonl)
+      expect(result.editedPaths.size).toBe(1)
+      expect(result.editedPaths.has("/repo/src/foo.ts")).toBe(true)
+      expect(result.toolCallCount).toBe(2)
     })
   })
 })
