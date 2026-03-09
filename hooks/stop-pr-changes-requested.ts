@@ -57,7 +57,20 @@ async function main(): Promise<void> {
   if (!reviews) return
 
   const changesRequested = reviews.filter((r) => r.state === "CHANGES_REQUESTED")
-  if (changesRequested.length === 0) return
+  if (changesRequested.length === 0) {
+    // Distinct queue state: PR exists but no reviewer has responded yet.
+    if (reviews.length === 0) {
+      const reason =
+        `PR #${pr.number} is awaiting first review — no reviewers have responded yet.\n\n` +
+        skillAdvice(
+          "pr-request-changes",
+          "Use the /pr-request-changes skill to submit an actionable review request or wait for reviewer feedback before stopping.",
+          `Request review or wait for feedback before stopping:\n  gh pr view ${pr.number}`
+        )
+      blockStop(reason, { includeUpdateMemoryAdvice: false })
+    }
+    return
+  }
 
   // Earliest CHANGES_REQUESTED timestamp — used to collect all comments since
   const earliestTimestamp = changesRequested.map((r) => r.submitted_at).sort()[0]!
