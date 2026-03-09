@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 
 // PreToolUse hook: Deny Edit/Write/Bash/Shell tools unless:
-//   1. The session has at least one incomplete task (pending or in_progress)
-//   2. Tasks haven't gone stale (no task tool interaction in last STALENESS_THRESHOLD calls)
+//   1. The session has at least two incomplete tasks (pending or in_progress)
+//   2. At least one incomplete task is pending to represent the next intended step
+//   3. Tasks haven't gone stale (no task tool interaction in last STALENESS_THRESHOLD calls)
 
 import { getHomeDirOrNull } from "../src/home.ts"
 import { readProjectState } from "../src/settings.ts"
@@ -29,6 +30,8 @@ import {
 const STALENESS_THRESHOLD = 20
 const LARGE_CONTENT_LINE_THRESHOLD = 10
 const IN_PROGRESS_CAP = 4
+const MIN_INCOMPLETE_TASKS = 2
+const MIN_PENDING_TASKS = 1
 const MEMORY_MARKDOWN_RE = /(?:^|[\\/])(?:CLAUDE|MEMORY)\.md$/i
 
 /**
@@ -78,11 +81,10 @@ async function main() {
     if (MEMORY_MARKDOWN_RE.test(filePath)) process.exit(0)
   }
 
-  // ── CHECK 1: Tasks have been created for this session (file-based) ────────────
-  // Blocks when NO tasks have ever been created — the agent is working without a plan.
-  // Does NOT block when all tasks are completed: that is legitimate wrap-up work
-  // (CI verification, issue comments, closing issues, etc.). CHECK 2 (staleness)
-  // still fires if the agent does excessive unplanned work after completion.
+  // ── CHECK 1: Task minimums for this session (file-based) ──────────────────────
+  // The session must always keep at least:
+  //   - MIN_INCOMPLETE_TASKS incomplete tasks (pending or in_progress), and
+  //   - MIN_PENDING_TASKS pending task to represent the next intended step.
 
   if (!getHomeDirOrNull()) process.exit(0)
   const allTasks = await readSessionTasks(sessionId)
@@ -133,11 +135,32 @@ async function main() {
     )
   }
 
-  // ── WRAP-UP EXEMPTION: All tasks completed ────────────────────────────────────
-  // When every task in the session is done, the agent is in wrap-up mode
-  // (CI checks, closing issues, pushing, etc.). Staleness enforcement is
-  // meaningless at this point — skip CHECK 2 entirely.
-  if (activeTasks.length === 0) process.exit(0)
+  const incompleteTasks = allTasks.filter((t) => isIncompleteTaskStatus(t.status))
+  const pendingTasks = incompleteTasks.filter((t) => t.status === "pending")
+  const incompleteTaskList = incompleteTasks
+    .map((t) => `  • #${t.id} (${t.status}): ${t.subject}`)
+    .join("\n")
+
+  if (incompleteTasks.length < MIN_INCOMPLETE_TASKS || pendingTasks.length < MIN_PENDING_TASKS) {
+    deny(
+      `STOP. ${toolName} is BLOCKED because task minimums are not met.\n\n` +
+        `Required:\n` +
+        `  • At least ${MIN_INCOMPLETE_TASKS} incomplete tasks (pending/in_progress)\n` +
+        `  • At least ${MIN_PENDING_TASKS} pending task for the next intended step\n\n` +
+        `Current:\n` +
+        `  • Incomplete tasks: ${incompleteTasks.length}\n` +
+        `  • Pending tasks: ${pendingTasks.length}\n` +
+        `${incompleteTaskList ? `\nCurrent incomplete tasks:\n${incompleteTaskList}\n` : "\n"}` +
+        formatActionPlan(
+          [
+            "Use TaskCreate to add any missing next-step tasks.",
+            "Use TaskUpdate to keep exactly one current task in_progress and at least one clear next step in pending.",
+            `Retry this ${toolName} call after task minimums are restored.`,
+          ],
+          { translateToolNames: true }
+        )
+    )
+  }
 
   // ── CHECK 3: In-progress task cap ────────────────────────────────────────────
   // More than IN_PROGRESS_CAP simultaneous in_progress tasks weakens focus.
