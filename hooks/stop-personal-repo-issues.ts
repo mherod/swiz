@@ -282,6 +282,7 @@ interface PR {
   title: string
   url: string
   reviewDecision: string
+  mergeable: string
 }
 
 export async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {
@@ -347,13 +348,16 @@ async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise
       "--author",
       currentUser,
       "--json",
-      "number,title,url,reviewDecision",
-      "--jq",
-      'map(select(.reviewDecision == "CHANGES_REQUESTED" or .reviewDecision == "REVIEW_REQUIRED"))',
+      "number,title,url,reviewDecision,mergeable",
     ],
     cwd
   )
-  return prs ?? []
+  return (prs ?? []).filter(
+    (p) =>
+      p.reviewDecision === "CHANGES_REQUESTED" ||
+      p.reviewDecision === "REVIEW_REQUIRED" ||
+      p.mergeable === "CONFLICTING"
+  )
 }
 
 async function main(): Promise<void> {
@@ -386,6 +390,8 @@ async function main(): Promise<void> {
     const isPersonalRepo = ownership.isPersonalRepo
     const prs = await getOpenPRsWithFeedback(cwd, currentUser)
     const changesRequestedPRs = prs.filter((p) => p.reviewDecision === "CHANGES_REQUESTED")
+    const conflictingPRs = prs.filter((p) => p.mergeable === "CONFLICTING")
+    const reviewRequiredPRs = prs.filter((p) => p.reviewDecision === "REVIEW_REQUIRED")
     const hasChangesRequested = changesRequestedPRs.length > 0
 
     // When there are PRs with CHANGES_REQUESTED, skip issues — the PR block is more urgent
@@ -399,9 +405,11 @@ async function main(): Promise<void> {
 
     const issueCount = actionableIssues.length
     const refinementCount = refinementIssues.length
-    const prCount = prs.length
+    const feedbackPRCount = changesRequestedPRs.length + reviewRequiredPRs.length
+    const conflictCount = conflictingPRs.length
 
-    if (issueCount === 0 && prCount === 0 && refinementCount === 0) return
+    if (issueCount === 0 && feedbackPRCount === 0 && conflictCount === 0 && refinementCount === 0)
+      return
 
     // Hoist sorted arrays so issue numbers are available for action-plan step text.
     const sortedRefinement = [...refinementIssues].sort((a, b) => scoreIssue(b) - scoreIssue(a))
@@ -411,18 +419,55 @@ async function main(): Promise<void> {
 
     const reasonLines: string[] = []
 
-    if (prCount > 0) {
-      const allChangesRequested = prs.every((p) => p.reviewDecision === "CHANGES_REQUESTED")
+    if (feedbackPRCount > 0) {
+      const feedbackPRs = [...changesRequestedPRs, ...reviewRequiredPRs]
+      const allChangesRequested = feedbackPRs.every((p) => p.reviewDecision === "CHANGES_REQUESTED")
       const label = allChangesRequested
         ? "changes requested"
         : "pending feedback (CHANGES_REQUESTED or REVIEW_REQUIRED)"
-      reasonLines.push(`You have ${prCount} open PR(s) with ${label}:`)
-      for (const pr of prs) {
+      reasonLines.push(`You have ${feedbackPRCount} open PR(s) with ${label}:`)
+      for (const pr of feedbackPRs) {
         const decisionTag =
           pr.reviewDecision === "CHANGES_REQUESTED" ? "[changes requested]" : "[review required]"
         reasonLines.push(`  #${pr.number} ${pr.title} ${decisionTag}`)
         reasonLines.push(`    ${pr.url}`)
       }
+    }
+
+    if (conflictCount > 0) {
+      if (reasonLines.length > 0) reasonLines.push("")
+      reasonLines.push(`You have ${conflictCount} open PR(s) with merge conflicts:`)
+      for (const pr of conflictingPRs) {
+        reasonLines.push(`  #${pr.number} ${pr.title} [merge conflicts]`)
+        reasonLines.push(`    ${pr.url}`)
+      }
+      const rebaseAdvice = skillAdvice(
+        "rebase-onto-main",
+        [
+          "Use the /rebase-onto-main skill to rebase and resolve conflicts:",
+          "  /rebase-onto-main --push",
+        ].join("\n"),
+        [
+          "Rebase manually:",
+          "  git fetch origin",
+          "  git checkout <branch>",
+          "  git rebase origin/<base-branch>",
+          "  # resolve conflicts, then:",
+          "  git rebase --continue",
+          "  git push --force-with-lease",
+        ].join("\n")
+      )
+      const resolveAdvice = skillAdvice(
+        "resolve-conflicts",
+        "Use the /resolve-conflicts skill if the rebase encounters conflicts.",
+        "Resolve conflicts: edit files, remove markers, git add <file>, git rebase --continue"
+      )
+      reasonLines.push(
+        formatActionPlan([rebaseAdvice, resolveAdvice], {
+          header: "Rebase conflicting PRs before stopping:",
+          translateToolNames: true,
+        })
+      )
     }
 
     if (refinementCount > 0) {
@@ -466,8 +511,9 @@ async function main(): Promise<void> {
     // Combined action plan — ordered by dependency: PR feedback → refine → pick up issues.
     // formatActionPlan ends with \n, so no separator push is needed before it.
     const planSteps: string[] = []
-    if (prCount > 0) {
-      const firstPrNum = prs[0]?.number ?? "<number>"
+    if (feedbackPRCount > 0) {
+      const firstPrNum =
+        changesRequestedPRs[0]?.number ?? reviewRequiredPRs[0]?.number ?? "<number>"
       const workOnPrsSkill = [
         "Use the /work-on-prs skill to address all feedback and resolve reviews:",
         "  /work-on-prs — Start working on the next PR",
@@ -522,7 +568,7 @@ async function main(): Promise<void> {
     // Only set cooldown when actionable issues or PRs are shown (pickup phase).
     // Refinement-only blocks should NOT set cooldown — resolving the refinement
     // should allow the pickup check to run immediately on the next stop attempt.
-    if (issueCount > 0 || prCount > 0) {
+    if (issueCount > 0 || feedbackPRCount > 0 || conflictCount > 0) {
       await updateCooldown(sessionId, cwd)
     }
     // Open-issue reminders are actionable work triage, not workflow-memory misses.
