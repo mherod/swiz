@@ -24,7 +24,7 @@ const input: ToolHookInput = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 
 const command: string = (input?.tool_input?.command as string) ?? ""
-const cwd: string = (input?.tool_input?.cwd as string) ?? process.cwd()
+const cwd: string = input.cwd ?? process.cwd()
 
 if (!GIT_COMMIT_RE.test(command)) process.exit(0)
 

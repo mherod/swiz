@@ -29,15 +29,27 @@ export async function getDefaultBranch(cwd: string): Promise<string> {
   const configured = projectSettings?.defaultBranch?.trim()
   if (configured) return configured
 
-  const remoteHeadRef = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd)
-  const remoteHead = remoteHeadRef.replace(/^refs\/remotes\/origin\//, "").trim()
-  if (remoteHead) return remoteHead
+  try {
+    const remoteHeadRef = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd)
+    const remoteHead = remoteHeadRef.replace(/^refs\/remotes\/origin\//, "").trim()
+    if (remoteHead) return remoteHead
+  } catch {
+    // Fallback to local branches when origin/HEAD is unavailable.
+  }
 
-  const localMain = await git(["rev-parse", "--verify", "refs/heads/main"], cwd)
-  if (localMain) return "main"
+  try {
+    const localMain = await git(["rev-parse", "--verify", "refs/heads/main"], cwd)
+    if (localMain) return "main"
+  } catch {
+    // continue fallback
+  }
 
-  const localMaster = await git(["rev-parse", "--verify", "refs/heads/master"], cwd)
-  if (localMaster) return "master"
+  try {
+    const localMaster = await git(["rev-parse", "--verify", "refs/heads/master"], cwd)
+    if (localMaster) return "master"
+  } catch {
+    // continue fallback
+  }
 
   return "main"
 }
