@@ -329,7 +329,15 @@ async function resolveSession(args: string[]): Promise<string> {
 
   const allProjects = args.includes("--all-projects")
   const filterCwd = allProjects ? undefined : process.cwd()
-  const sessions = await getSessions(filterCwd)
+  let sessions = await getSessions(filterCwd)
+
+  // Compaction fallback: if no sessions found for cwd (e.g. new post-compaction
+  // session whose transcript hasn't been indexed yet), fall back to the most
+  // recently modified session across all projects. This handles the gap where
+  // Claude Code creates a task directory before the transcript is written.
+  if (sessions.length === 0 && filterCwd) {
+    sessions = await getSessions(undefined)
+  }
 
   if (sessions.length === 0) {
     if (filterCwd) {

@@ -193,6 +193,19 @@ describe("getSessions", () => {
     const sessions = await getSessions("/nonexistent/path", TASKS, PROJECTS)
     expect(sessions).toEqual([])
   })
+
+  it("returns all sessions when filterCwd matches no sessions (compaction fallback scenario)", async () => {
+    // Simulates post-compaction: task dir exists but transcript hasn't been indexed yet.
+    // getSessions("/nonexistent/path") returns [] — callers fall back to getSessions(undefined).
+    const noMatch = await getSessions("/nonexistent/path", TASKS, PROJECTS)
+    expect(noMatch).toEqual([])
+    // The fallback call (undefined filterCwd) still finds all sessions:
+    const allSessions = await getSessions(undefined, TASKS, PROJECTS)
+    expect(allSessions).toContain(SESSION_A)
+    expect(allSessions).toContain(SESSION_B)
+    expect(allSessions).toContain(SESSION_C)
+    expect(allSessions.length).toBe(3)
+  })
 })
 
 // ─── validateEvidence ─────────────────────────────────────────────────────────
