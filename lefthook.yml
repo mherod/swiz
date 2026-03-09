@@ -31,7 +31,6 @@ pre-commit:
         - rebase
 
 pre-push:
-  timeout: 30
   commands:
     disk-space:
       priority: 1
@@ -41,7 +40,7 @@ pre-push:
         - rebase
     test:
       glob: "*.{ts,tsx,js,jsx,json}"
-      run: bun test --concurrent --timeout=30000 --max-concurrency=8
+      run: timeout 30 bun test --concurrent --timeout=10000 --max-concurrency=8
       skip:
         - merge
         - rebase
