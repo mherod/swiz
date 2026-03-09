@@ -1092,6 +1092,46 @@ describe("transcript-utils.ts", () => {
       expect(paths.has("/repo/bin/swiz")).toBe(true)
       expect(paths.has("/usr/local/bin/swiz")).toBe(true)
     })
+
+    it("extracts cp -t destination directory", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("cp -t /repo/dist src/a.js src/b.js"))
+      expect(paths.has("/repo/dist")).toBe(true)
+    })
+
+    it("extracts cp -t source files", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("cp -t /repo/dist src/a.js src/b.js"))
+      expect(paths.has("src/a.js")).toBe(true)
+      expect(paths.has("src/b.js")).toBe(true)
+    })
+
+    it("extracts cp --target-directory destination", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry("cp --target-directory=/repo/dist src/a.js")
+      )
+      expect(paths.has("/repo/dist")).toBe(true)
+    })
+
+    it("extracts mv -t destination directory", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry("mv -t /repo/archive old-file.ts old-file2.ts")
+      )
+      expect(paths.has("/repo/archive")).toBe(true)
+    })
+
+    it("extracts mv -t source files", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry("mv -t /repo/archive old-file.ts old-file2.ts")
+      )
+      expect(paths.has("old-file.ts")).toBe(true)
+      expect(paths.has("old-file2.ts")).toBe(true)
+    })
+
+    it("extracts mv --target-directory destination", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry("mv --target-directory=/repo/archive old-file.ts")
+      )
+      expect(paths.has("/repo/archive")).toBe(true)
+    })
   })
 
   // ─── isDocsOnlySession ──────────────────────────────────────────────────────

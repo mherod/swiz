@@ -894,9 +894,14 @@ const INSTALL_CMD_RE =
   /(?:^|[|;&\s])install\s+(?:(?:-[mogtS]\s+\S+|-\S+)\s+)*((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
 
 // Extracts the destination directory from install -t <dir> or install --target-directory=<dir>.
-// Group 1 captures the directory value (quoted or unquoted, = or space-separated).
+// Group 1 captures the -t value; group 2 captures the --target-directory= value.
 const INSTALL_TARGET_DIR_RE =
   /(?:^|[|;&\s])install\b[^|;&]*?(?:-t\s+("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s|;&"']+)|--target-directory=("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s|;&"']+))/gm
+
+// Extracts the destination directory from cp/mv -t <dir> or cp/mv --target-directory=<dir>.
+// Both cp and mv support this GNU long-form flag. Group 1 = -t value; group 2 = --target-directory= value.
+const CP_MV_TARGET_DIR_RE =
+  /(?:^|[|;&\s])(?:cp|mv)\b[^|;&]*?(?:-t\s+("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s|;&"']+)|--target-directory=("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s|;&"']+))/gm
 
 // Tokenizes a shell argument string respecting single and double quoting.
 // "my file.ts" and 'my file.ts' are returned as single tokens (quotes stripped).
@@ -973,6 +978,13 @@ function extractPathsFromCommand(command: string): string[] {
     if (raw) for (const t of shellTokens(raw)) results.push(t)
   }
 
+  // cp / mv -t / --target-directory destination extractor
+  CP_MV_TARGET_DIR_RE.lastIndex = 0
+  for (const m of command.matchAll(CP_MV_TARGET_DIR_RE)) {
+    const raw = (m[1] ?? m[2])?.trim()
+    if (raw) for (const t of shellTokens(raw)) results.push(t)
+  }
+
   return results
 }
 
@@ -989,6 +1001,7 @@ function extractPathsFromCommand(command: string): string[] {
  *       chmod / chown file targets: chmod [-R] <mode> <file>, chown [-R] <owner> <file>
  *       install command targets: install [-m mode] src... dest, install -t destdir src...,
  *         install --target-directory=destdir src...
+ *       cp / mv -t / --target-directory destination directory
  *
  * Used to detect docs-only sessions before invoking the LLM so the analysis
  * can be scoped correctly.
