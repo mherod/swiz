@@ -14,29 +14,78 @@ import {
   SETTINGS_REGISTRY,
 } from "../settings.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
+import { settingsCommand } from "./settings.ts"
 
 const _tmp = useTempDir("swiz-settings-test-")
 async function createTempHome(): Promise<string> {
   return realpath(await _tmp.create())
 }
 
+// Serialize in-process calls — they mutate process.env.HOME and console
+let _inProcessQueue: Promise<unknown> = Promise.resolve()
+
+/**
+ * Run the settings command in-process with a temporary HOME directory.
+ * Captures console.log (stdout) and console.error/console.warn (stderr).
+ * Returns exitCode 0 on success, 1 on thrown error.
+ * Serialized via a queue to prevent HOME/console collisions in concurrent callers.
+ */
 async function runSwiz(
   args: string[],
   home: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  const indexPath = join(process.cwd(), "index.ts")
-  const proc = Bun.spawn(["bun", "run", indexPath, ...args], {
-    cwd: home,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env, HOME: home },
+  // Only handle `settings` subcommand in-process; delegate `help` to subprocess
+  if (args[0] !== "settings") {
+    const indexPath = join(process.cwd(), "index.ts")
+    const proc = Bun.spawn(["bun", "run", indexPath, ...args], {
+      cwd: home,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, HOME: home },
+    })
+    proc.stdin.end()
+    const stdout = await new Response(proc.stdout).text()
+    const stderr = await new Response(proc.stderr).text()
+    await proc.exited
+    return { stdout, stderr, exitCode: proc.exitCode }
+  }
+
+  // Enqueue to serialize — concurrent callers wait for the previous to finish
+  const result = _inProcessQueue.then(async () => {
+    const prevHome = process.env.HOME
+    process.env.HOME = home
+
+    const stdoutLines: string[] = []
+    const stderrLines: string[] = []
+    const origLog = console.log
+    const origError = console.error
+    const origWarn = console.warn
+    console.log = (...a: unknown[]) => stdoutLines.push(a.map(String).join(" "))
+    console.error = (...a: unknown[]) => stderrLines.push(a.map(String).join(" "))
+    console.warn = (...a: unknown[]) => stderrLines.push(a.map(String).join(" "))
+
+    let exitCode = 0
+    try {
+      await settingsCommand.run(args.slice(1))
+    } catch (err) {
+      exitCode = 1
+      stderrLines.push(err instanceof Error ? err.message : String(err))
+    } finally {
+      console.log = origLog
+      console.error = origError
+      console.warn = origWarn
+      process.env.HOME = prevHome
+    }
+
+    return {
+      stdout: stdoutLines.join("\n"),
+      stderr: stderrLines.join("\n"),
+      exitCode,
+    }
   })
-  proc.stdin.end()
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
-  await proc.exited
-  return { stdout, stderr, exitCode: proc.exitCode }
+  _inProcessQueue = result.catch(() => {})
+  return result
 }
 
 async function createSession(home: string, targetDir: string, sessionId: string): Promise<void> {
@@ -441,10 +490,9 @@ describe("swiz settings", () => {
     const swizDir = join(home, ".swiz")
     await mkdir(swizDir, { recursive: true })
     await writeFile(join(swizDir, "settings.json"), JSON.stringify({ autoContinue: false }))
-    // Session must target the home dir (which is also cwd for the subprocess)
     await createSession(home, home, "sess-ac-test")
     const result = await runSwiz(
-      ["settings", "enable", "auto-continue", "--session", "sess-ac-test"],
+      ["settings", "enable", "auto-continue", "--session", "sess-ac-test", "--dir", home],
       home
     )
     expect(result.stderr).toBe("")
@@ -460,7 +508,16 @@ describe("swiz settings", () => {
     await createSession(home, home, "sess-ambition-test")
 
     const result = await runSwiz(
-      ["settings", "set", "ambition-mode", "creative", "--session", "sess-ambition-test"],
+      [
+        "settings",
+        "set",
+        "ambition-mode",
+        "creative",
+        "--session",
+        "sess-ambition-test",
+        "--dir",
+        home,
+      ],
       home
     )
     expect(result.exitCode).toBe(0)
