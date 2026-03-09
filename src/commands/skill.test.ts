@@ -391,21 +391,19 @@ describe("convertSkillContent", () => {
     expect(result).not.toContain("TaskUpdate")
   })
 
-  test("rewrites TaskList and TaskGet to codex equivalents", () => {
+  test("TaskList and TaskGet pass through unchanged for codex (read-only, no alias)", () => {
     const content = "---\n---\nUse TaskList first, then TaskGet for details.\n"
     const { content: result } = convertSkillContent(content, "claude", "codex")
-    expect(result).toContain("update_plan")
-    expect(result).not.toContain("TaskList")
-    expect(result).not.toContain("TaskGet")
+    // TaskList/TaskGet are intentionally absent from Codex toolAliases — they pass through
+    expect(result).toContain("TaskList")
+    expect(result).toContain("TaskGet")
   })
 
   test("rewrites YAML-list allowed-tools entries during conversion", () => {
     const content =
-      '---\nallowed-tools:\n  - "TaskCreate"\n  - "TaskList"\n  - "TaskGet"\n  - "TaskUpdate"\n---\nTaskCreate TaskList TaskGet TaskUpdate\n'
+      '---\nallowed-tools:\n  - "TaskCreate"\n  - "TaskUpdate"\n---\nTaskCreate TaskUpdate\n'
     const { content: result } = convertSkillContent(content, "claude", "codex")
     expect(result).toContain('  - "update_plan"')
-    expect(result).not.toContain('"TaskList"')
-    expect(result).not.toContain('"TaskGet"')
     expect(result).not.toContain("TaskCreate")
     expect(result).not.toContain("TaskUpdate")
   })
