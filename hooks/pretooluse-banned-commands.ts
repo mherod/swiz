@@ -23,6 +23,20 @@ interface Rule {
   severity?: "deny" | "warn"
 }
 
+/**
+ * Remove quoted string contents from a shell command so that git subcommand
+ * patterns (e.g. `git restore`) don't match text embedded inside commit
+ * messages (-m "..."), evidence args, or other flag values.
+ *
+ * Handles double-quoted and single-quoted spans.  Escape sequences inside
+ * double-quoted strings are respected (\") so we don't prematurely end a span.
+ * The replacement keeps an empty pair of quotes so spacing is preserved and
+ * the remaining tokens stay at roughly the right positions.
+ */
+function stripQuotedStrings(command: string): string {
+  return command.replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/'[^']*'/g, "''")
+}
+
 const RULES: Rule[] = [
   {
     // grep as a command: at start of line or directly after a pipe (not inside quoted strings)
@@ -98,7 +112,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /git\s+stash(\s|$)/.test(c),
+    match: (c) => /git\s+stash(\s|$)/.test(stripQuotedStrings(c)),
     message: [
       "Do not use `git stash`. Stashed changes are easy to lose and add hidden state.",
       "",
@@ -111,7 +125,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /git\s+restore(\s|$)/.test(c),
+    match: (c) => /git\s+restore(\s|$)/.test(stripQuotedStrings(c)),
     message: [
       "Do not use `git restore`. It silently discards uncommitted changes.",
       "",
@@ -122,7 +136,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /git\s+reset\s+--hard/.test(c),
+    match: (c) => /git\s+reset\s+--hard/.test(stripQuotedStrings(c)),
     message: [
       "Do not use `git reset --hard`. It permanently destroys uncommitted changes.",
       "",
@@ -133,7 +147,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /git\s+clean(\s|$)/.test(c),
+    match: (c) => /git\s+clean(\s|$)/.test(stripQuotedStrings(c)),
     message: [
       "Do not use `git clean`. It permanently deletes untracked files.",
       "",
@@ -144,7 +158,7 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => /git\s+checkout\s+(?:\S+\s+)?--\s+\S+/.test(c),
+    match: (c) => /git\s+checkout\s+(?:\S+\s+)?--\s+\S+/.test(stripQuotedStrings(c)),
     message: [
       "Do not use `git checkout -- <file-or-glob>` or `git checkout <ref-or-hash> -- <file-or-glob>`. They silently discard file changes.",
       "",

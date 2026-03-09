@@ -277,6 +277,32 @@ describe("pretooluse-banned-commands", () => {
       const result = await runHook("rg 'pattern' src/")
       expect(result.decision).toBeUndefined()
     })
+
+    // ── False-positive guard: banned patterns inside quoted arguments ──────────
+
+    test("commit message containing 'git stash' in quotes passes through", async () => {
+      const result = await runHook(`git commit -m "docs: explain why git stash is avoided"`)
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("commit message containing banned pattern in single quotes passes through", async () => {
+      const result = await runHook(
+        `git commit -m 'test: add multi-file path extraction for restore command'`
+      )
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("evidence arg containing 'git reset --hard' in quotes passes through", async () => {
+      const result = await runHook(
+        `swiz tasks complete 42 --evidence "note: avoid git reset --hard" --state developing`
+      )
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("commit message containing 'git clean' in double quotes passes through", async () => {
+      const result = await runHook(`git commit -m "docs: document git clean risks"`)
+      expect(result.decision).toBeUndefined()
+    })
   })
 
   describe("non-Bash tools are ignored", () => {
