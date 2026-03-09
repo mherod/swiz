@@ -1132,6 +1132,66 @@ describe("transcript-utils.ts", () => {
       )
       expect(paths.has("/repo/archive")).toBe(true)
     })
+
+    // ─── git checkout -- <file> ────────────────────────────────────────────────
+
+    describe("git checkout -- <file>", () => {
+      it("extracts file path from git checkout -- file", () => {
+        const paths = extractEditedFilePaths(makeBashEntry("git checkout -- src/foo.ts"))
+        expect(paths.has("src/foo.ts")).toBe(true)
+      })
+
+      it("extracts file path from git checkout <branch> -- file", () => {
+        const paths = extractEditedFilePaths(makeBashEntry("git checkout main -- src/bar.ts"))
+        expect(paths.has("src/bar.ts")).toBe(true)
+      })
+
+      it("extracts multiple files from git checkout -- file1 file2", () => {
+        const paths = extractEditedFilePaths(makeBashEntry("git checkout -- src/a.ts src/b.ts"))
+        expect(paths.has("src/a.ts")).toBe(true)
+        expect(paths.has("src/b.ts")).toBe(true)
+      })
+    })
+
+    // ─── git restore <file> ───────────────────────────────────────────────────
+
+    describe("git restore <file>", () => {
+      it("extracts file path from git restore file", () => {
+        const paths = extractEditedFilePaths(makeBashEntry("git restore src/foo.ts"))
+        expect(paths.has("src/foo.ts")).toBe(true)
+      })
+
+      it("extracts file path from git restore --staged file", () => {
+        const paths = extractEditedFilePaths(makeBashEntry("git restore --staged src/bar.ts"))
+        expect(paths.has("src/bar.ts")).toBe(true)
+      })
+
+      it("extracts file path from git restore --source=HEAD~1 file", () => {
+        const paths = extractEditedFilePaths(
+          makeBashEntry("git restore --source=HEAD~1 src/baz.ts")
+        )
+        expect(paths.has("src/baz.ts")).toBe(true)
+      })
+    })
+
+    // ─── patch <file> ─────────────────────────────────────────────────────────
+
+    describe("patch <file>", () => {
+      it("extracts file path from patch <file>", () => {
+        const paths = extractEditedFilePaths(makeBashEntry("patch src/foo.ts"))
+        expect(paths.has("src/foo.ts")).toBe(true)
+      })
+
+      it("extracts file path from patch -p1 <file>", () => {
+        const paths = extractEditedFilePaths(makeBashEntry("patch -p1 src/bar.ts"))
+        expect(paths.has("src/bar.ts")).toBe(true)
+      })
+
+      it("extracts file path from patch -i patchfile <file>", () => {
+        const paths = extractEditedFilePaths(makeBashEntry("patch -i changes.patch src/baz.ts"))
+        expect(paths.has("src/baz.ts")).toBe(true)
+      })
+    })
   })
 
   // ─── isDocsOnlySession ──────────────────────────────────────────────────────

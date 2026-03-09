@@ -903,6 +903,24 @@ const INSTALL_TARGET_DIR_RE =
 const CP_MV_TARGET_DIR_RE =
   /(?:^|[|;&\s])(?:cp|mv)\b[^|;&]*?(?:-t\s+("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s|;&"']+)|--target-directory=("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s|;&"']+))/gm
 
+// Matches git checkout <tree-ish> -- <file> [file2 ...] patterns that overwrite working-tree files.
+// The -- separator is required; everything after it is a path.
+// Captures all tokens after the -- in group 1.
+const GIT_CHECKOUT_FILES_RE =
+  /(?:^|[|;&\s])git\s+checkout\b[^|;&]*?--\s+((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
+
+// Matches git restore <file> [file2 ...] patterns that restore working-tree or staged files.
+// Skips --source=<tree>, --staged, --worktree, and other flags; captures remaining path tokens.
+const GIT_RESTORE_RE =
+  /(?:^|[|;&\s])git\s+restore\s+(?:(?:--source=\S+|--staged|--worktree|-\S+)\s+)*((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
+
+// Matches patch <file> positional target: patch [-p<n>] [--dry-run] [flags] <file>
+// Also handles patch -i <patchfile> <file> where -i consumes the patchfile argument.
+// Captures the trailing path arguments (the files being patched) in group 1.
+// Note: `patch < patchfile` rewrites paths embedded in the patch — not capturable here.
+const PATCH_CMD_RE =
+  /(?:^|[|;&\s])patch\s+(?:(?:-i\s+(?:"[^"]*"|'[^']*'|\S+)|--input=(?:"[^"]*"|'[^']*'|\S+)|-\S+)\s+)*((?:"[^"]*"|'[^']*'|[^\s|;&"'<>]+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"'<>]+))*)/gm
+
 // Tokenizes a shell argument string respecting single and double quoting.
 // "my file.ts" and 'my file.ts' are returned as single tokens (quotes stripped).
 // Unquoted whitespace is the delimiter. Flag tokens starting with '-' are excluded.
@@ -985,6 +1003,27 @@ function extractPathsFromCommand(command: string): string[] {
     if (raw) for (const t of shellTokens(raw)) results.push(t)
   }
 
+  // git checkout <tree-ish> -- <file> [file2 ...] extractor
+  GIT_CHECKOUT_FILES_RE.lastIndex = 0
+  for (const m of command.matchAll(GIT_CHECKOUT_FILES_RE)) {
+    const args = m[1]?.trim()
+    if (args) for (const t of shellTokens(args)) results.push(t)
+  }
+
+  // git restore <file> [file2 ...] extractor
+  GIT_RESTORE_RE.lastIndex = 0
+  for (const m of command.matchAll(GIT_RESTORE_RE)) {
+    const args = m[1]?.trim()
+    if (args) for (const t of shellTokens(args)) results.push(t)
+  }
+
+  // patch <file> positional target extractor
+  PATCH_CMD_RE.lastIndex = 0
+  for (const m of command.matchAll(PATCH_CMD_RE)) {
+    const args = m[1]?.trim()
+    if (args) for (const t of shellTokens(args)) results.push(t)
+  }
+
   return results
 }
 
@@ -1002,6 +1041,9 @@ function extractPathsFromCommand(command: string): string[] {
  *       install command targets: install [-m mode] src... dest, install -t destdir src...,
  *         install --target-directory=destdir src...
  *       cp / mv -t / --target-directory destination directory
+ *       git checkout <tree-ish> -- <file>: overwrites working-tree files
+ *       git restore [--source=<tree>] <file>: restores working-tree/staged files
+ *       patch [flags] <file>: applies a patch to a target file
  *
  * Used to detect docs-only sessions before invoking the LLM so the analysis
  * can be scoped correctly.
