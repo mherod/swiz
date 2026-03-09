@@ -198,4 +198,33 @@ describe("effective", () => {
       const effective = await store.effective(projectDir)
       expect(effective.ambitionMode).toBe("aggressive")
     }))
+
+  test("session ambitionMode falls back to project ambitionMode", () =>
+    withTmpHome(async (home) => {
+      const store = new SettingsStore({ home })
+      const projectDir = join(home, "my-project")
+      await mkdir(join(projectDir, ".swiz"), { recursive: true })
+      const sessionId = "session-project-ambition"
+      await store.setProject(projectDir, "ambitionMode", "creative")
+      await store.setSession(sessionId, "autoContinue", true)
+      const effective = await store.effective(projectDir, sessionId)
+      expect(effective.source).toBe("session")
+      expect(effective.ambitionMode).toBe("creative")
+    }))
+
+  test("project largeFileSizeKb overrides global in effective settings", () =>
+    withTmpHome(async (home) => {
+      const store = new SettingsStore({ home })
+      const projectDir = join(home, "my-project")
+      await mkdir(join(projectDir, ".swiz"), { recursive: true })
+      await store.setGlobal("largeFileSizeKb", 600)
+      await store.setProject(projectDir, "largeFileSizeKb", 900)
+      const globalEffective = await store.effective(projectDir)
+      expect(globalEffective.largeFileSizeKb).toBe(900)
+
+      const sessionId = "session-large-file"
+      await store.setSession(sessionId, "autoContinue", true)
+      const sessionEffective = await store.effective(projectDir, sessionId)
+      expect(sessionEffective.largeFileSizeKb).toBe(900)
+    }))
 })

@@ -427,32 +427,9 @@ export interface SwizSettings {
   disabledHooks?: string[]
 }
 
-export interface EffectiveSwizSettings {
-  autoContinue: boolean
-  critiquesEnabled: boolean
-  ambitionMode: AmbitionMode
-  collaborationMode: CollaborationMode
-  narratorVoice: string
-  narratorSpeed: number
-  prAgeGateMinutes: number
-  prMergeMode: boolean
-  pushCooldownMinutes: number
-  pushGate: boolean
-  sandboxedEdits: boolean
-  speak: boolean
-  swizNotifyHooks: boolean
-  updateMemoryFooter: boolean
-  gitStatusGate: boolean
-  nonDefaultBranchGate: boolean
-  githubCiGate: boolean
-  changesRequestedGate: boolean
-  personalRepoIssuesGate: boolean
-  /** When true, blocks all direct pushes to the default branch regardless of repo type. */
-  strictNoDirectMain: boolean
-  memoryLineThreshold: number
-  memoryWordThreshold: number
-  largeFileSizeKb: number
-  statusLineSegments: StatusLineSegment[]
+type EffectiveSettingsBase = Omit<SwizSettings, "sessions" | "disabledHooks">
+
+export interface EffectiveSwizSettings extends EffectiveSettingsBase {
   source: "global" | "session"
 }
 
@@ -628,6 +605,8 @@ export const swizSettingsSchema = z.object({
   disabledHooks: z.array(z.string().min(1)).optional().catch(undefined),
 })
 
+const swizSettingsWithoutSessionsSchema = swizSettingsSchema.omit({ sessions: true })
+
 interface ReadOptions {
   home?: string | undefined
   strict?: boolean | undefined
@@ -698,93 +677,8 @@ function normalizeSettings(value: unknown): SwizSettings {
   }
 
   return {
-    autoContinue:
-      typeof obj.autoContinue === "boolean" ? obj.autoContinue : DEFAULT_SETTINGS.autoContinue,
-    critiquesEnabled:
-      typeof obj.critiquesEnabled === "boolean"
-        ? obj.critiquesEnabled
-        : DEFAULT_SETTINGS.critiquesEnabled,
-    ambitionMode:
-      obj.ambitionMode === "standard" ||
-      obj.ambitionMode === "aggressive" ||
-      obj.ambitionMode === "creative" ||
-      obj.ambitionMode === "reflective"
-        ? obj.ambitionMode
-        : DEFAULT_SETTINGS.ambitionMode,
-    collaborationMode:
-      obj.collaborationMode === "auto" ||
-      obj.collaborationMode === "solo" ||
-      obj.collaborationMode === "team"
-        ? obj.collaborationMode
-        : DEFAULT_SETTINGS.collaborationMode,
-    narratorVoice:
-      typeof obj.narratorVoice === "string" ? obj.narratorVoice : DEFAULT_SETTINGS.narratorVoice,
-    narratorSpeed:
-      typeof obj.narratorSpeed === "number" && obj.narratorSpeed >= 0
-        ? obj.narratorSpeed
-        : DEFAULT_SETTINGS.narratorSpeed,
-    prAgeGateMinutes:
-      typeof obj.prAgeGateMinutes === "number" && obj.prAgeGateMinutes >= 0
-        ? obj.prAgeGateMinutes
-        : DEFAULT_SETTINGS.prAgeGateMinutes,
-    prMergeMode:
-      typeof obj.prMergeMode === "boolean" ? obj.prMergeMode : DEFAULT_SETTINGS.prMergeMode,
-    pushCooldownMinutes:
-      typeof obj.pushCooldownMinutes === "number" && obj.pushCooldownMinutes >= 0
-        ? obj.pushCooldownMinutes
-        : DEFAULT_SETTINGS.pushCooldownMinutes,
-    pushGate: typeof obj.pushGate === "boolean" ? obj.pushGate : DEFAULT_SETTINGS.pushGate,
-    sandboxedEdits:
-      typeof obj.sandboxedEdits === "boolean"
-        ? obj.sandboxedEdits
-        : DEFAULT_SETTINGS.sandboxedEdits,
-    speak: typeof obj.speak === "boolean" ? obj.speak : DEFAULT_SETTINGS.speak,
-    swizNotifyHooks:
-      typeof obj.swizNotifyHooks === "boolean"
-        ? obj.swizNotifyHooks
-        : DEFAULT_SETTINGS.swizNotifyHooks,
-    updateMemoryFooter:
-      typeof obj.updateMemoryFooter === "boolean"
-        ? obj.updateMemoryFooter
-        : DEFAULT_SETTINGS.updateMemoryFooter,
-    gitStatusGate:
-      typeof obj.gitStatusGate === "boolean" ? obj.gitStatusGate : DEFAULT_SETTINGS.gitStatusGate,
-    nonDefaultBranchGate:
-      typeof obj.nonDefaultBranchGate === "boolean"
-        ? obj.nonDefaultBranchGate
-        : DEFAULT_SETTINGS.nonDefaultBranchGate,
-    githubCiGate:
-      typeof obj.githubCiGate === "boolean" ? obj.githubCiGate : DEFAULT_SETTINGS.githubCiGate,
-    changesRequestedGate:
-      typeof obj.changesRequestedGate === "boolean"
-        ? obj.changesRequestedGate
-        : DEFAULT_SETTINGS.changesRequestedGate,
-    personalRepoIssuesGate:
-      typeof obj.personalRepoIssuesGate === "boolean"
-        ? obj.personalRepoIssuesGate
-        : DEFAULT_SETTINGS.personalRepoIssuesGate,
-    strictNoDirectMain:
-      typeof obj.strictNoDirectMain === "boolean"
-        ? obj.strictNoDirectMain
-        : DEFAULT_SETTINGS.strictNoDirectMain,
-    memoryLineThreshold:
-      typeof obj.memoryLineThreshold === "number" && obj.memoryLineThreshold > 0
-        ? obj.memoryLineThreshold
-        : DEFAULT_SETTINGS.memoryLineThreshold,
-    memoryWordThreshold:
-      typeof obj.memoryWordThreshold === "number" && obj.memoryWordThreshold > 0
-        ? obj.memoryWordThreshold
-        : DEFAULT_SETTINGS.memoryWordThreshold,
-    largeFileSizeKb:
-      typeof obj.largeFileSizeKb === "number" && obj.largeFileSizeKb > 0
-        ? obj.largeFileSizeKb
-        : DEFAULT_SETTINGS.largeFileSizeKb,
-    statusLineSegments: normalizeStatusLineSegments(obj.statusLineSegments),
+    ...swizSettingsWithoutSessionsSchema.parse(obj),
     sessions,
-    ...(Array.isArray(obj.disabledHooks) &&
-    obj.disabledHooks.every((h: unknown) => typeof h === "string")
-      ? { disabledHooks: obj.disabledHooks as string[] }
-      : {}),
   }
 }
 
@@ -1013,45 +907,10 @@ export function getEffectiveSwizSettings(
   sessionId?: string | null,
   projectSettings?: ProjectSwizSettings | null
 ): EffectiveSwizSettings {
-  const projectAmbitionMode = projectSettings?.ambitionMode ?? settings.ambitionMode
-
-  if (sessionId && settings.sessions[sessionId]) {
-    const sessionSettings = settings.sessions[sessionId]!
-    return {
-      autoContinue: sessionSettings.autoContinue,
-      critiquesEnabled: settings.critiquesEnabled,
-      ambitionMode: sessionSettings.ambitionMode ?? projectAmbitionMode,
-      collaborationMode: sessionSettings.collaborationMode ?? settings.collaborationMode,
-      narratorVoice: settings.narratorVoice,
-      narratorSpeed: settings.narratorSpeed,
-      prAgeGateMinutes: settings.prAgeGateMinutes,
-      prMergeMode:
-        typeof sessionSettings.prMergeMode === "boolean"
-          ? sessionSettings.prMergeMode
-          : settings.prMergeMode,
-      pushCooldownMinutes: settings.pushCooldownMinutes,
-      pushGate: settings.pushGate,
-      sandboxedEdits: settings.sandboxedEdits,
-      speak: settings.speak,
-      swizNotifyHooks: settings.swizNotifyHooks,
-      updateMemoryFooter: settings.updateMemoryFooter,
-      gitStatusGate: settings.gitStatusGate,
-      nonDefaultBranchGate: settings.nonDefaultBranchGate,
-      githubCiGate: settings.githubCiGate,
-      changesRequestedGate: settings.changesRequestedGate,
-      personalRepoIssuesGate: settings.personalRepoIssuesGate,
-      strictNoDirectMain: settings.strictNoDirectMain,
-      memoryLineThreshold: settings.memoryLineThreshold,
-      memoryWordThreshold: settings.memoryWordThreshold,
-      largeFileSizeKb: projectSettings?.largeFileSizeKb ?? settings.largeFileSizeKb,
-      statusLineSegments: settings.statusLineSegments,
-      source: "session",
-    }
-  }
-  return {
+  const base: EffectiveSettingsBase = {
     autoContinue: settings.autoContinue,
     critiquesEnabled: settings.critiquesEnabled,
-    ambitionMode: projectAmbitionMode,
+    ambitionMode: projectSettings?.ambitionMode ?? settings.ambitionMode,
     collaborationMode: settings.collaborationMode,
     narratorVoice: settings.narratorVoice,
     narratorSpeed: settings.narratorSpeed,
@@ -1073,8 +932,23 @@ export function getEffectiveSwizSettings(
     memoryWordThreshold: settings.memoryWordThreshold,
     largeFileSizeKb: projectSettings?.largeFileSizeKb ?? settings.largeFileSizeKb,
     statusLineSegments: settings.statusLineSegments,
-    source: "global",
   }
+
+  if (sessionId && settings.sessions[sessionId]) {
+    const sessionSettings = settings.sessions[sessionId]!
+    return {
+      ...base,
+      autoContinue: sessionSettings.autoContinue,
+      ambitionMode: sessionSettings.ambitionMode ?? base.ambitionMode,
+      collaborationMode: sessionSettings.collaborationMode ?? base.collaborationMode,
+      prMergeMode:
+        typeof sessionSettings.prMergeMode === "boolean"
+          ? sessionSettings.prMergeMode
+          : base.prMergeMode,
+      source: "session",
+    }
+  }
+  return { ...base, source: "global" }
 }
 
 export async function writeSwizSettings(
