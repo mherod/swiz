@@ -338,31 +338,12 @@ export const statusLineCommand: Command = {
 
     const shortCwd = shortenPath(cwd)
 
-    const gitPromise = getGitBranchAndInfo(cwd)
-    const prViewPromise = gitPromise.then(({ branch }) =>
-      branch
-        ? ghJsonCached<{ reviewDecision?: string; comments?: unknown[] }>(
-            ["pr", "view", branch, "--json", "reviewDecision,comments"],
-            cwd
-          )
-        : null
-    )
-
-    const [gitResult, issueData, prListData, prViewData, swizSettings, projectSettings] =
-      await Promise.all([
-        gitPromise,
-        ghJsonCached<unknown[]>(
-          ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
-          cwd
-        ),
-        ghJsonCached<unknown[]>(
-          ["pr", "list", "--state", "open", "--json", "number", "--limit", "100"],
-          cwd
-        ),
-        prViewPromise,
-        readSwizSettings().catch(() => null),
-        readProjectSettings(cwd).catch(() => null),
-      ])
+    // Phase 1: fetch settings and git info (needed to compute segment visibility)
+    const [gitResult, swizSettings, projectSettings] = await Promise.all([
+      getGitBranchAndInfo(cwd),
+      readSwizSettings().catch(() => null),
+      readProjectSettings(cwd).catch(() => null),
+    ])
 
     const { info: gitInfo } = gitResult
 
@@ -372,6 +353,32 @@ export const statusLineCommand: Command = {
       : null
     const activeSegments = new Set<string>(effective?.statusLineSegments ?? [])
     const seg = (name: string) => activeSegments.size === 0 || activeSegments.has(name)
+
+    // Phase 2: conditionally fetch GitHub data only for active segments
+    const needsPr = seg("pr")
+    const needsBacklog = seg("backlog")
+    const prViewPromise =
+      needsPr && gitResult.branch
+        ? ghJsonCached<{ reviewDecision?: string; comments?: unknown[] }>(
+            ["pr", "view", gitResult.branch, "--json", "reviewDecision,comments"],
+            cwd
+          )
+        : Promise.resolve(null)
+    const [issueData, prListData, prViewData] = await Promise.all([
+      needsBacklog
+        ? ghJsonCached<unknown[]>(
+            ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
+            cwd
+          )
+        : Promise.resolve(null),
+      needsBacklog
+        ? ghJsonCached<unknown[]>(
+            ["pr", "list", "--state", "open", "--json", "number", "--limit", "100"],
+            cwd
+          )
+        : Promise.resolve(null),
+      prViewPromise,
+    ])
 
     // ── Build segments ──────────────────────────────────────────────────────
 
