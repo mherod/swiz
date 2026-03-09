@@ -934,6 +934,38 @@ describe("transcript-utils.ts", () => {
       const paths = extractEditedFilePaths(makeBashEntry('touch "/repo/my component.ts"'))
       expect(paths.has("/repo/my component.ts")).toBe(true)
     })
+
+    it("extracts src and dst from ln command (hard link)", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("ln /repo/src.ts /repo/dst.ts"))
+      expect(paths.has("/repo/src.ts")).toBe(true)
+      expect(paths.has("/repo/dst.ts")).toBe(true)
+    })
+
+    it("extracts src and dst from ln -s (symbolic link)", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("ln -s /repo/src.ts /repo/link.ts"))
+      expect(paths.has("/repo/src.ts")).toBe(true)
+      expect(paths.has("/repo/link.ts")).toBe(true)
+    })
+
+    it("extracts paths from ln -sf (force symbolic link)", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("ln -sf /repo/target.ts /repo/link.ts"))
+      expect(paths.has("/repo/target.ts")).toBe(true)
+      expect(paths.has("/repo/link.ts")).toBe(true)
+    })
+
+    it("extracts src and dst from link command", () => {
+      const paths = extractEditedFilePaths(makeBashEntry("link /repo/src.ts /repo/dst.ts"))
+      expect(paths.has("/repo/src.ts")).toBe(true)
+      expect(paths.has("/repo/dst.ts")).toBe(true)
+    })
+
+    it("extracts quoted paths with spaces from ln -s", () => {
+      const paths = extractEditedFilePaths(
+        makeBashEntry('ln -s "/repo/my source.ts" "/repo/my link.ts"')
+      )
+      expect(paths.has("/repo/my source.ts")).toBe(true)
+      expect(paths.has("/repo/my link.ts")).toBe(true)
+    })
   })
 
   // ─── isDocsOnlySession ──────────────────────────────────────────────────────

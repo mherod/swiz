@@ -851,10 +851,11 @@ export function countToolCalls(jsonlText: string): number {
 
 // Matches file-modifying shell commands and captures path arguments.
 // Covers: trash <path>, rm <path>, mv <src> <dst>, cp <src> <dst>,
+// ln [-s|-f] <src> <dst>, link <src> <dst>,
 // git mv <src> <dst>, git rm <path>.
 // Paths may be quoted (single or double) or unquoted.
 const SHELL_FILE_MOD_RE =
-  /(?:^|[|;&\s])(?:trash\s+|rm\s+(?:-[rfRF]+\s+)*|mv\s+|cp\s+|git\s+(?:mv|rm)\s+)((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
+  /(?:^|[|;&\s])(?:trash\s+|rm\s+(?:-[rfRF]+\s+)*|mv\s+|cp\s+|ln\s+(?:-\S+\s+)*|link\s+|git\s+(?:mv|rm)\s+)((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
 
 // Matches output redirections that write to a file: > file or >> file.
 // Excludes: >& (fd dup), >( (process substitution), >&- (close fd).
@@ -939,7 +940,7 @@ function extractPathsFromCommand(command: string): string[] {
  * in the transcript. Covers:
  *   - Edit / Write / MultiEdit tool_use blocks (file_path / path input)
  *   - Bash tool_use blocks with file-modifying shell commands:
- *       trash, rm, mv, cp, git mv/rm (deletions/renames)
+ *       trash, rm, mv, cp, ln, link, git mv/rm (deletions/renames/links)
  *       output redirections: > file, >> file (echo, cat, heredoc, etc.)
  *       sed -i in-place edits: sed -i 's/.../.../' file
  *       tee file targets: cmd | tee [-a] file [file2 ...]
