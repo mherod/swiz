@@ -326,6 +326,49 @@ export function extractContext(resp: Record<string, unknown>): string | null {
   return typeof ctx === "string" ? ctx : null
 }
 
+// ─── Concurrent hook runner ──────────────────────────────────────────────────
+
+/**
+ * Flat entry representing one synchronous hook with its group context,
+ * used by the concurrent fan-out helpers.
+ */
+export interface HookEntry {
+  hook: HookDef
+  matcher: string | undefined
+}
+
+/** Collect all sync hooks from all groups into a flat ordered list. Exported for unit tests. */
+export function flatSyncHooks(groups: HookGroup[]): HookEntry[] {
+  const entries: HookEntry[] = []
+  for (const group of groups) {
+    for (const hook of group.hooks) {
+      if (!hook.async) entries.push({ hook, matcher: group.matcher })
+    }
+  }
+  return entries
+}
+
+/**
+ * Run a single hook entry concurrently: first check skip conditions, then
+ * execute the hook if not skipped. Returns the execution record and parsed
+ * response (null when skipped or no valid JSON).
+ */
+async function runEntry(
+  entry: HookEntry,
+  payloadStr: string,
+  cwd: string
+): Promise<{ execution: HookExecution; parsed: Record<string, unknown> | null }> {
+  const { hook, matcher } = entry
+  const skipExecs: HookExecution[] = []
+  if (await tryRecordSkippedHook(hook, matcher, cwd, skipExecs)) {
+    return { execution: skipExecs[0]!, parsed: null }
+  }
+  log(`   → ${formatHookTarget(hook.file, matcher)}`)
+  const { parsed, execution } = await runHook(hook.file, payloadStr, hook.timeout)
+  finalizeExecution(execution, matcher, hook, cwd)
+  return { execution, parsed }
+}
+
 // ─── Dispatch strategies ────────────────────────────────────────────────────
 
 /** Fire all async hooks immediately without awaiting. */
@@ -354,36 +397,34 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
   const finalResponse: Record<string, unknown> = {}
   const executions: HookExecution[] = []
 
-  for (const group of groups) {
-    for (const hook of group.hooks) {
-      if (hook.async) continue
-      if (await tryRecordSkippedHook(hook, group.matcher, cwd, executions)) {
+  // Fan out all sync hooks concurrently; scan results in declaration order.
+  const entries = flatSyncHooks(groups)
+  const results = await Promise.all(entries.map((e) => runEntry(e, payloadStr, cwd)))
+
+  for (const { execution, parsed: resp } of results) {
+    if (execution.status === "skipped") {
+      executions.push(execution)
+      continue
+    }
+    if (resp && isDeny(resp)) {
+      log(`   ✗ DENY from ${execution.file}`)
+      execution.status = "deny"
+      executions.push(execution)
+      Object.assign(finalResponse, resp)
+      break
+    }
+    if (resp && isAllowWithReason(resp)) {
+      const reason = extractAllowReason(resp)
+      if (reason) {
+        execution.status = "allow-with-reason"
+        executions.push(execution)
+        hints.push(reason)
+        log(`   ~ ${execution.file} (hint: ${reason.slice(0, 100)})`)
         continue
       }
-      log(`   → ${formatHookTarget(hook.file, group.matcher)}`)
-      const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
-      finalizeExecution(execution, group.matcher, hook, cwd)
-      if (resp && isDeny(resp)) {
-        log(`   ✗ DENY from ${hook.file}`)
-        execution.status = "deny"
-        executions.push(execution)
-        Object.assign(finalResponse, resp)
-        break
-      }
-      if (resp && isAllowWithReason(resp)) {
-        const reason = extractAllowReason(resp)
-        if (reason) {
-          execution.status = "allow-with-reason"
-          executions.push(execution)
-          hints.push(reason)
-          log(`   ~ ${hook.file} (hint: ${reason.slice(0, 100)})`)
-          continue
-        }
-      }
-      log(`   ✓ ${hook.file} (${resp ? "allow" : "no output"})`)
-      executions.push(execution)
     }
-    if (isDeny(finalResponse)) break
+    log(`   ✓ ${execution.file} (${resp ? "allow" : "no output"})`)
+    executions.push(execution)
   }
 
   if (!isDeny(finalResponse)) {
@@ -418,28 +459,26 @@ export async function runBlocking(
   const finalResponse: Record<string, unknown> = {}
   const executions: HookExecution[] = []
 
-  for (const group of groups) {
-    for (const hook of group.hooks) {
-      if (hook.async) continue
-      if (await tryRecordSkippedHook(hook, group.matcher, cwd, executions)) {
-        continue
-      }
-      log(`   → ${formatHookTarget(hook.file, group.matcher)}`)
-      const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
-      finalizeExecution(execution, group.matcher, hook, cwd)
-      if (resp && isBlock(resp)) {
-        log(`   ✗ BLOCK from ${hook.file}`)
-        execution.status = "block"
-        executions.push(execution)
-        // Keep the first block response exactly as produced.
-        if (!isBlock(finalResponse)) Object.assign(finalResponse, resp)
-        if (!runAllHooks) break
-        continue
-      }
-      log(`   ✓ ${hook.file} (${resp ? "ok" : "no output"})`)
+  // Fan out all sync hooks concurrently; scan results in declaration order.
+  const entries = flatSyncHooks(groups)
+  const results = await Promise.all(entries.map((e) => runEntry(e, payloadStr, cwd)))
+
+  for (const { execution, parsed: resp } of results) {
+    if (execution.status === "skipped") {
       executions.push(execution)
+      continue
     }
-    if (!runAllHooks && isBlock(finalResponse)) break
+    if (resp && isBlock(resp)) {
+      log(`   ✗ BLOCK from ${execution.file}`)
+      execution.status = "block"
+      executions.push(execution)
+      // Keep the first block response exactly as produced.
+      if (!isBlock(finalResponse)) Object.assign(finalResponse, resp)
+      if (!runAllHooks) break
+      continue
+    }
+    log(`   ✓ ${execution.file} (${resp ? "ok" : "no output"})`)
+    executions.push(execution)
   }
 
   if (!isBlock(finalResponse)) {
@@ -461,30 +500,30 @@ export async function runContext(
   const cwd = extractCwd(payloadStr)
   const contexts: string[] = []
   const executions: HookExecution[] = []
-  for (const group of groups) {
-    for (const hook of group.hooks) {
-      if (hook.async) continue
-      if (await tryRecordSkippedHook(hook, group.matcher, cwd, executions)) {
-        continue
-      }
-      log(`   → ${formatHookTarget(hook.file, group.matcher)}`)
-      const { parsed: resp, execution } = await runHook(hook.file, payloadStr, hook.timeout)
-      finalizeExecution(execution, group.matcher, hook, cwd)
-      if (!resp) {
-        log(`   ✓ ${hook.file} (no output)`)
-        executions.push(execution)
-        continue
-      }
-      const ctx = extractContext(resp)
-      if (ctx) {
-        execution.status = "allow-with-reason"
-        contexts.push(ctx)
-        log(`   ✓ ${hook.file} (context: ${ctx.slice(0, 100)})`)
-      } else {
-        log(`   ✓ ${hook.file} (no context extracted)`)
-      }
+
+  // All context hooks are independent — fan out fully, merge results in order.
+  const entries = flatSyncHooks(groups)
+  const results = await Promise.all(entries.map((e) => runEntry(e, payloadStr, cwd)))
+
+  for (const { execution, parsed: resp } of results) {
+    if (execution.status === "skipped") {
       executions.push(execution)
+      continue
     }
+    if (!resp) {
+      log(`   ✓ ${execution.file} (no output)`)
+      executions.push(execution)
+      continue
+    }
+    const ctx = extractContext(resp)
+    if (ctx) {
+      execution.status = "allow-with-reason"
+      contexts.push(ctx)
+      log(`   ✓ ${execution.file} (context: ${ctx.slice(0, 100)})`)
+    } else {
+      log(`   ✓ ${execution.file} (no context extracted)`)
+    }
+    executions.push(execution)
   }
 
   const finalResponse: Record<string, unknown> = {}

@@ -381,11 +381,11 @@ export function validateDispatchRoutes(
 }
 
 // Per-event timeout budget for the dispatcher (seconds).
-// Covers worst-case sequential execution of all hooks in that event.
+// Sync hooks run concurrently (Promise.all); budget equals the slowest single hook, not the sum.
 export const DISPATCH_TIMEOUTS: Record<string, number> = {
-  stop: 360, // 16 hooks × ~10s avg + 120s AI call (stop-auto-continue) + 30s CI polling (stop-github-ci)
-  preToolUse: 60, // 12 hooks × ~5s avg
-  postToolUse: 90, // 8 hooks × ~10s avg
+  stop: 180, // dominated by stop-auto-continue AI call (~120s) + stop-github-ci CI polling (~30s)
+  preToolUse: 15, // concurrent: budget = slowest hook (~5s) + overhead
+  postToolUse: 15, // concurrent: budget = slowest hook (~10s) + overhead
   sessionStart: 20,
   preCompact: 15,
   userPromptSubmit: 15,

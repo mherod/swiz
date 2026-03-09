@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { classifyHookOutput, type HookStatus, logSlowHook, toolMatchesToken } from "./engine.ts"
+import {
+  classifyHookOutput,
+  flatSyncHooks,
+  type HookEntry,
+  type HookStatus,
+  logSlowHook,
+  toolMatchesToken,
+} from "./engine.ts"
 
 // ─── classifyHookOutput: pure status classification ─────────────────────────
 
@@ -200,6 +207,57 @@ describe("toolMatchesToken", () => {
       expect(toolMatchesToken("TaskOutput", "TaskUpdate")).toBe(false)
       expect(toolMatchesToken("TaskOutput", "TaskOutput")).toBe(true)
     })
+  })
+})
+
+describe("flatSyncHooks", () => {
+  it("excludes async hooks", () => {
+    const groups = [
+      {
+        event: "preToolUse",
+        hooks: [
+          { file: "sync-hook.ts", async: false },
+          { file: "async-hook.ts", async: true },
+        ],
+      },
+    ]
+    const entries = flatSyncHooks(groups)
+    expect(entries.map((e: HookEntry) => e.hook.file)).toEqual(["sync-hook.ts"])
+  })
+
+  it("preserves declaration order across groups", () => {
+    const groups = [
+      {
+        event: "preToolUse",
+        hooks: [{ file: "a.ts" }, { file: "b.ts" }],
+      },
+      {
+        event: "preToolUse",
+        matcher: "Bash",
+        hooks: [{ file: "c.ts" }, { file: "d.ts" }],
+      },
+    ]
+    const entries = flatSyncHooks(groups)
+    expect(entries.map((e: HookEntry) => e.hook.file)).toEqual(["a.ts", "b.ts", "c.ts", "d.ts"])
+  })
+
+  it("propagates matcher from group to entry", () => {
+    const groups = [
+      { event: "preToolUse", hooks: [{ file: "no-matcher.ts" }] },
+      { event: "preToolUse", matcher: "Edit|Write", hooks: [{ file: "with-matcher.ts" }] },
+    ]
+    const entries = flatSyncHooks(groups)
+    expect(entries[0]?.matcher).toBeUndefined()
+    expect(entries[1]?.matcher).toBe("Edit|Write")
+  })
+
+  it("returns empty array for empty groups", () => {
+    expect(flatSyncHooks([])).toEqual([])
+  })
+
+  it("returns empty array when all hooks are async", () => {
+    const groups = [{ event: "stop", hooks: [{ file: "async.ts", async: true }] }]
+    expect(flatSyncHooks(groups)).toEqual([])
   })
 })
 
