@@ -4,17 +4,18 @@ import type { Command } from "../types.ts"
 // Known sandbox-to-repo mappings for auto-inferring --repo from a blocked file path.
 const SANDBOX_REPO_MAP: Array<{ prefix: string; repo: string }> = [
   { prefix: `${homedir()}/.claude/skills/`, repo: "mherod/skills" },
+  { prefix: `${homedir()}/.cursor/skills/`, repo: "mherod/skills" },
   { prefix: `${homedir()}/.claude/hooks/`, repo: "mherod/.claude" },
 ]
 
-function inferRepo(filePath: string): string | null {
+export function inferRepo(filePath: string): string | null {
   for (const { prefix, repo } of SANDBOX_REPO_MAP) {
     if (filePath.startsWith(prefix)) return repo
   }
   return null
 }
 
-function relativeFilePath(filePath: string): string {
+export function relativeFilePath(filePath: string): string {
   for (const { prefix } of SANDBOX_REPO_MAP) {
     if (filePath.startsWith(prefix)) return filePath.slice(prefix.length)
   }
@@ -122,7 +123,7 @@ export const crossRepoIssueCommand: Command = {
   name: "cross-repo-issue",
   description:
     "File a GitHub issue with exact change details when a sandbox edit is blocked. " +
-    "Auto-infers --repo from known sandbox paths (~/.claude/skills/ → mherod/skills, ~/.claude/hooks/ → mherod/.claude).",
+    "Auto-infers --repo from known sandbox paths (~/.claude/skills/ → mherod/skills, ~/.cursor/skills/ → mherod/skills, ~/.claude/hooks/ → mherod/.claude).",
   usage:
     "swiz cross-repo-issue --file <path> --title <title> [--line <n>] [--snippet <text>] [--repo <owner/repo>] [--criteria <text>]... [--context <text>]",
   options: [
