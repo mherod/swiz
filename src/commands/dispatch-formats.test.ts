@@ -53,7 +53,12 @@ async function dispatch({
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, HOME: homeDir },
+    env: {
+      ...process.env,
+      HOME: homeDir,
+      // Prevent stop-auto-continue from waiting on live AI backends in format tests.
+      AI_TEST_NO_BACKEND: "1",
+    },
   })
 
   proc.stdin.write(JSON.stringify(payload))

@@ -85,7 +85,12 @@ async function runHookScript(
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, HOME: homeDir },
+    env: {
+      ...process.env,
+      HOME: homeDir,
+      // Keep hook contract tests deterministic and fast for hooks that can call AI.
+      AI_TEST_NO_BACKEND: "1",
+    },
   })
 
   proc.stdin.write(JSON.stringify(payload))
