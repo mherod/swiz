@@ -232,6 +232,11 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "postToolUse",
+    matcher: "TaskList",
+    hooks: [{ file: "posttooluse-task-list-sync.ts", timeout: 5 }],
+  },
+  {
+    event: "postToolUse",
     matcher: "TaskUpdate",
     hooks: [{ file: "posttooluse-task-evidence.ts", timeout: 5 }],
   },
