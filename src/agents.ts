@@ -115,6 +115,8 @@ export const AGENTS: AgentDef[] = [
       Glob: "glob",
       Task: "write_todos",
       TaskCreate: "write_todos",
+      TaskList: "write_todos",
+      TaskGet: "write_todos",
       TaskUpdate: "write_todos",
       NotebookEdit: "NotebookEdit", // no equivalent
     },
@@ -149,6 +151,8 @@ export const AGENTS: AgentDef[] = [
       Glob: "list_dir",
       Task: "update_plan",
       TaskCreate: "update_plan",
+      TaskList: "update_plan",
+      TaskGet: "update_plan",
       TaskUpdate: "update_plan",
       NotebookEdit: "apply_patch",
     },

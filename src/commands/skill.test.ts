@@ -391,6 +391,25 @@ describe("convertSkillContent", () => {
     expect(result).not.toContain("TaskUpdate")
   })
 
+  test("rewrites TaskList and TaskGet to codex equivalents", () => {
+    const content = "---\n---\nUse TaskList first, then TaskGet for details.\n"
+    const { content: result } = convertSkillContent(content, "claude", "codex")
+    expect(result).toContain("update_plan")
+    expect(result).not.toContain("TaskList")
+    expect(result).not.toContain("TaskGet")
+  })
+
+  test("rewrites YAML-list allowed-tools entries during conversion", () => {
+    const content =
+      '---\nallowed-tools:\n  - "TaskCreate"\n  - "TaskList"\n  - "TaskGet"\n  - "TaskUpdate"\n---\nTaskCreate TaskList TaskGet TaskUpdate\n'
+    const { content: result } = convertSkillContent(content, "claude", "codex")
+    expect(result).toContain('  - "update_plan"')
+    expect(result).not.toContain('"TaskList"')
+    expect(result).not.toContain('"TaskGet"')
+    expect(result).not.toContain("TaskCreate")
+    expect(result).not.toContain("TaskUpdate")
+  })
+
   test("rewrites source-specific names back to canonical (gemini → claude)", () => {
     const content =
       "---\nallowed-tools: run_shell_command, write_file\n---\nUse run_shell_command.\n"

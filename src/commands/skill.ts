@@ -119,18 +119,89 @@ function remapToolList(
   list: string,
   remap: (tool: string) => string
 ): { result: string; unmapped: string[] } {
+  function remapToken(raw: string): { token: string; unmapped?: string } {
+    const trimmed = raw.trim()
+    const quoted =
+      (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    const quoteChar = quoted ? trimmed[0] : ""
+    const unquoted = quoted ? trimmed.slice(1, -1) : trimmed
+    const mapped = remap(unquoted)
+    return {
+      token: quoteChar ? `${quoteChar}${mapped}${quoteChar}` : mapped,
+      unmapped: mapped === unquoted ? unquoted : undefined,
+    }
+  }
+
   const unmapped: string[] = []
   const result = list
     .split(",")
     .map((raw) => {
-      const tool = raw.trim()
-      if (!tool) return raw
-      const mapped = remap(tool)
-      if (mapped === tool) unmapped.push(tool)
-      return mapped
+      if (!raw.trim()) return raw
+      const { token, unmapped: u } = remapToken(raw)
+      if (u) unmapped.push(u)
+      return token
     })
     .join(", ")
   return { result, unmapped }
+}
+
+function remapAllowedToolsFrontmatter(
+  content: string,
+  remap: (tool: string) => string
+): { result: string; unmapped: string[] } {
+  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---([ \t]*\n?)/)
+  if (!frontmatterMatch) return { result: content, unmapped: [] }
+
+  const fullMatch = frontmatterMatch[0]
+  const frontmatterBody = frontmatterMatch[1] ?? ""
+  const frontmatterLines = frontmatterBody.split("\n")
+  const unmapped: string[] = []
+
+  const remappedLines: string[] = []
+  for (let i = 0; i < frontmatterLines.length; i++) {
+    const line = frontmatterLines[i]!
+    const inlineMatch = line.match(/^(allowed-tools\s*:\s*)(.+)$/)
+    if (inlineMatch) {
+      const { result: remapped, unmapped: inlineUnmapped } = remapToolList(inlineMatch[2]!, remap)
+      for (const u of inlineUnmapped) unmapped.push(u)
+      remappedLines.push(`${inlineMatch[1]}${remapped}`)
+      continue
+    }
+
+    const blockMatch = line.match(/^(allowed-tools\s*:\s*)$/)
+    if (!blockMatch) {
+      remappedLines.push(line)
+      continue
+    }
+
+    remappedLines.push(line)
+    let j = i + 1
+    while (j < frontmatterLines.length) {
+      const listLine = frontmatterLines[j]!
+      const itemMatch = listLine.match(/^(\s*-\s*)(.+)$/)
+      if (!itemMatch) break
+
+      const raw = itemMatch[2]!.trim()
+      const quoted =
+        (raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))
+      const quoteChar = quoted ? raw[0] : ""
+      const unquoted = quoted ? raw.slice(1, -1) : raw
+      const mapped = remap(unquoted)
+      if (mapped === unquoted) unmapped.push(unquoted)
+      const mappedRaw = quoteChar ? `${quoteChar}${mapped}${quoteChar}` : mapped
+      remappedLines.push(`${itemMatch[1]}${mappedRaw}`)
+      j++
+    }
+
+    i = j - 1
+  }
+
+  const remappedFrontmatter = `---\n${remappedLines.join("\n")}\n---${frontmatterMatch[2] ?? ""}`
+  return {
+    result: content.replace(fullMatch, remappedFrontmatter),
+    unmapped,
+  }
 }
 
 /**
@@ -168,12 +239,10 @@ export function convertSkillContent(
   const unmappedSet = new Set<string>()
 
   // ── Rewrite frontmatter allowed-tools field ──────────────────────────────
-  // Matches: `allowed-tools: Bash, Edit, Write` (inline list on one line)
-  let result = content.replace(/^(allowed-tools\s*:\s*)(.+)$/m, (_match, prefix, list) => {
-    const { result: remapped, unmapped } = remapToolList(list, remap)
-    for (const u of unmapped) unmappedSet.add(u)
-    return `${prefix}${remapped}`
-  })
+  // Supports both inline and YAML-list forms.
+  const remappedFrontmatter = remapAllowedToolsFrontmatter(content, remap)
+  for (const u of remappedFrontmatter.unmapped) unmappedSet.add(u)
+  let result = remappedFrontmatter.result
 
   // ── Rewrite whole-word tool name references in the body ──────────────────
   // Collect all known source-agent names (canonical + agent-specific aliases)
