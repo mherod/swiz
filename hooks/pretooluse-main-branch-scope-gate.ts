@@ -16,7 +16,7 @@
 //   Collaborative + non-trivial: BLOCKED — must use feature branch + PR
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
-import { readProjectSettings, resolvePolicy } from "../src/settings.ts"
+import { readProjectSettings, readSwizSettings, resolvePolicy } from "../src/settings.ts"
 import {
   classifyChangeScope,
   denyPreToolUse,
@@ -143,10 +143,14 @@ const repo = collaboration.repoName
 if (!owner || !repo) process.exit(0) // Can't parse GitHub repo, allow push
 const isCollaborative = collaboration.isCollaborative
 
+// ─── Check strict mode ────────────────────────────────────────────────
+const globalSettings = await readSwizSettings()
+const strictMode = globalSettings.strictNoDirectMain
+
 // ─── Enforce policy ────────────────────────────────────────────────────
 
-if (!isCollaborative) {
-  // Solo repo: allow all changes to the default branch
+if (!isCollaborative && !strictMode) {
+  // Solo repo without strict mode: allow all changes to the default branch
   process.exit(0)
 }
 
@@ -177,14 +181,16 @@ Remediation:
 `)
 }
 
-// Non-trivial work in collaborative repo: BLOCK
+// Non-trivial work: BLOCK (collaborative repo, or strict mode active)
+const repoContext = isCollaborative
+  ? `a collaborative repository.\n\nCollaboration signals:\n${collaboration.signals.map((s) => `  - ${s}`).join("\n")}`
+  : `a solo repository with strict-no-direct-main enabled.\n\n  To disable strict mode: swiz settings disable strict-no-direct-main`
+
 const reason = `
-Non-trivial changes to '${defaultBranch}' in a collaborative repository.
+Non-trivial changes to '${defaultBranch}' in ${repoContext}
 
 Change scope: ${scopeDescription} (${fileCount} files, ${totalLinesChanged} lines)
 Repository: ${owner}/${repo}
-Collaboration signals:
-${collaboration.signals.map((s) => `  - ${s}`).join("\n")}
 
 For non-trivial work, use the feature branch workflow:
   1. Create a feature branch: git checkout -b feat/description

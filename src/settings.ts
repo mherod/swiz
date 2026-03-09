@@ -147,6 +147,8 @@ export interface SwizSettings {
   githubCiGate: boolean
   changesRequestedGate: boolean
   personalRepoIssuesGate: boolean
+  /** When true, blocks all direct pushes to the default branch regardless of repo type. */
+  strictNoDirectMain: boolean
   memoryLineThreshold: number
   memoryWordThreshold: number
   largeFileSizeKb: number
@@ -177,6 +179,8 @@ export interface EffectiveSwizSettings {
   githubCiGate: boolean
   changesRequestedGate: boolean
   personalRepoIssuesGate: boolean
+  /** When true, blocks all direct pushes to the default branch regardless of repo type. */
+  strictNoDirectMain: boolean
   memoryLineThreshold: number
   memoryWordThreshold: number
   largeFileSizeKb: number
@@ -289,6 +293,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   githubCiGate: true,
   changesRequestedGate: true,
   personalRepoIssuesGate: true,
+  strictNoDirectMain: false,
   memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
   memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
   largeFileSizeKb: DEFAULT_LARGE_FILE_SIZE_KB,
@@ -343,6 +348,7 @@ export const swizSettingsSchema = z.object({
   githubCiGate: z.boolean().catch(DEFAULT_SETTINGS.githubCiGate),
   changesRequestedGate: z.boolean().catch(DEFAULT_SETTINGS.changesRequestedGate),
   personalRepoIssuesGate: z.boolean().catch(DEFAULT_SETTINGS.personalRepoIssuesGate),
+  strictNoDirectMain: z.boolean().catch(DEFAULT_SETTINGS.strictNoDirectMain),
   memoryLineThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.memoryLineThreshold),
   memoryWordThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.memoryWordThreshold),
   largeFileSizeKb: z.number().int().min(1).catch(DEFAULT_SETTINGS.largeFileSizeKb),
@@ -489,6 +495,10 @@ function normalizeSettings(value: unknown): SwizSettings {
       typeof obj.personalRepoIssuesGate === "boolean"
         ? obj.personalRepoIssuesGate
         : DEFAULT_SETTINGS.personalRepoIssuesGate,
+    strictNoDirectMain:
+      typeof obj.strictNoDirectMain === "boolean"
+        ? obj.strictNoDirectMain
+        : DEFAULT_SETTINGS.strictNoDirectMain,
     memoryLineThreshold:
       typeof obj.memoryLineThreshold === "number" && obj.memoryLineThreshold > 0
         ? obj.memoryLineThreshold
@@ -762,6 +772,7 @@ export function getEffectiveSwizSettings(
       githubCiGate: settings.githubCiGate,
       changesRequestedGate: settings.changesRequestedGate,
       personalRepoIssuesGate: settings.personalRepoIssuesGate,
+      strictNoDirectMain: settings.strictNoDirectMain,
       memoryLineThreshold: settings.memoryLineThreshold,
       memoryWordThreshold: settings.memoryWordThreshold,
       largeFileSizeKb: projectSettings?.largeFileSizeKb ?? settings.largeFileSizeKb,
@@ -789,6 +800,7 @@ export function getEffectiveSwizSettings(
     githubCiGate: settings.githubCiGate,
     changesRequestedGate: settings.changesRequestedGate,
     personalRepoIssuesGate: settings.personalRepoIssuesGate,
+    strictNoDirectMain: settings.strictNoDirectMain,
     memoryLineThreshold: settings.memoryLineThreshold,
     memoryWordThreshold: settings.memoryWordThreshold,
     largeFileSizeKb: projectSettings?.largeFileSizeKb ?? settings.largeFileSizeKb,

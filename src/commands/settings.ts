@@ -142,6 +142,18 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "boolean",
     scopes: ["global"],
   },
+  {
+    key: "strictNoDirectMain",
+    aliases: [
+      "strict-no-direct-main",
+      "strictnodirectmain",
+      "strict_no_direct_main",
+      "strict-main",
+      "no-direct-main",
+    ],
+    kind: "boolean",
+    scopes: ["global"],
+  },
   // ── Numeric settings ──────────────────────────────────────────────────────
   {
     key: "prAgeGateMinutes",
@@ -261,6 +273,7 @@ interface ParsedSettingsArgs {
   targetDir: string
   scope: SettingsScope
   sessionQuery: string | null
+  force: boolean
 }
 
 function validateSettingScope(key: SettingKey, scope: SettingsScope, settingArg: string): void {
@@ -275,13 +288,13 @@ function validateSettingScope(key: SettingKey, scope: SettingsScope, settingArg:
 
 function usage(): string {
   return (
-    "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--global | --project | --session [id]] [--dir <path>]\n" +
+    "Usage: swiz settings [show | enable <setting> | disable <setting> | set <setting> <value> | disable-hook <filename> | enable-hook <filename>] [--global | --project | --session [id]] [--dir <path>] [--force]\n" +
     "Scope: --global (default, ~/.swiz/settings.json), --project (.swiz/config.json), --session [id] (per-session)\n" +
     "Settings (global): auto-continue, critiques-enabled, pr-merge-mode, collaboration-mode,\n" +
     "  push-gate, sandboxed-edits, speak, swiz-notify-hooks, update-memory-footer, pr-age-gate,\n" +
     "  narrator-voice, narrator-speed, ambition-mode,\n" +
     "  git-status-gate, github-ci-gate, changes-requested-gate, personal-repo-issues-gate,\n" +
-    "  non-default-branch-gate\n" +
+    "  non-default-branch-gate, strict-no-direct-main\n" +
     "Settings (--project): memory-line-threshold, memory-word-threshold, default-branch, ambition-mode\n" +
     "Settings (--session): auto-continue, pr-merge-mode, collaboration-mode, ambition-mode\n" +
     "Hook management: disable-hook <filename> (e.g. stop-github-ci.ts), enable-hook <filename>"
@@ -316,11 +329,17 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
   let scope: SettingsScope = "global"
   let sessionQuery: string | null = null
   let scopeExplicit = false
+  let force = false
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (!arg) continue
     const next = args[i + 1]
+
+    if (arg === "--force" || arg === "-f") {
+      force = true
+      continue
+    }
 
     if (arg === "--dir" || arg === "-d") {
       if (!next || next.startsWith("-")) throw new Error(`Missing value for ${arg}.\n${usage()}`)
@@ -377,6 +396,7 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
     targetDir,
     scope,
     sessionQuery,
+    force,
   }
 }
 
@@ -417,6 +437,7 @@ function printSettings(
     githubCiGate: boolean
     changesRequestedGate: boolean
     personalRepoIssuesGate: boolean
+    strictNoDirectMain: boolean
     memoryLineThreshold: number
     memoryWordThreshold: number
     largeFileSizeKb: number
@@ -491,6 +512,9 @@ function printSettings(
   )
   console.log(
     `  changes-requested-gate:  ${effective.changesRequestedGate ? "enabled" : "disabled"} (global)`
+  )
+  console.log(
+    `  strict-no-direct-main:   ${effective.strictNoDirectMain ? "enabled" : "disabled"} (global)`
   )
   const voiceLabel = effective.narratorVoice || "system default"
   console.log(`  narrator-voice:  ${voiceLabel} (global)`)
@@ -598,6 +622,41 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
   )
 }
 
+/**
+ * Detect settings that conflict with enabling strictNoDirectMain.
+ * Returns a list of human-readable conflict descriptions, or [] if none.
+ */
+async function detectStrictNoDirectMainConflicts(targetDir: string): Promise<string[]> {
+  const settings = await readSwizSettings()
+  const projectSettings = await readProjectSettings(targetDir)
+  const conflicts: string[] = []
+
+  if (settings.collaborationMode === "solo") {
+    conflicts.push(
+      `collaborationMode=solo (relaxes branch protection to solo workflow; ` +
+        `set it to "auto" or "team" first, or use --force to override)`
+    )
+  }
+  if (!settings.nonDefaultBranchGate) {
+    conflicts.push(
+      `nonDefaultBranchGate=false (disables branch gate enforcement; ` +
+        `re-enable it with: swiz settings enable non-default-branch-gate)`
+    )
+  }
+  if (!settings.pushGate) {
+    conflicts.push(
+      `pushGate=false (push gate is disabled; ` + `enable it with: swiz settings enable push-gate)`
+    )
+  }
+  if (projectSettings?.profile === "solo") {
+    conflicts.push(
+      `project profile=solo (relaxes trivial-change thresholds; ` +
+        `remove or change the profile in .swiz/config.json)`
+    )
+  }
+  return conflicts
+}
+
 async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise<void> {
   const key = parseSetting(parsed.settingArg)
   if (isNumericSetting(key) || isStringSetting(key)) {
@@ -606,6 +665,26 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
     )
   }
   validateSettingScope(key, parsed.scope, parsed.settingArg ?? key)
+
+  // Conflict check for strictNoDirectMain (only when enabling)
+  if (key === "strictNoDirectMain" && enabled) {
+    const conflicts = await detectStrictNoDirectMainConflicts(parsed.targetDir)
+    if (conflicts.length > 0 && !parsed.force) {
+      const conflictList = conflicts.map((c) => `  - ${c}`).join("\n")
+      throw new Error(
+        `Cannot enable strict-no-direct-main: conflicting settings detected:\n\n${conflictList}\n\n` +
+          `Resolve the conflicts above, or use --force to override:\n` +
+          `  swiz settings enable strict-no-direct-main --force\n`
+      )
+    }
+    if (conflicts.length > 0 && parsed.force) {
+      console.warn(
+        `\n  Warning: enabling strict-no-direct-main with conflicting settings (--force):\n` +
+          conflicts.map((c) => `    - ${c}`).join("\n") +
+          `\n`
+      )
+    }
+  }
 
   const scopeLabel = parsed.scope
   let path: string
@@ -831,6 +910,20 @@ export const settingsCommand: Command = {
       flags: "set default-branch <name>",
       description:
         "Set the project default branch override used by branch-aware hooks (e.g. main, master, trunk)",
+    },
+    {
+      flags: "enable strict-no-direct-main",
+      description:
+        "Block all direct pushes to the default branch regardless of repo type (conflicts require --force)",
+    },
+    {
+      flags: "disable strict-no-direct-main",
+      description: "Disable strict no-direct-main enforcement (revert to heuristic mode)",
+    },
+    {
+      flags: "--force, -f",
+      description:
+        "Override conflict checks when enabling settings that conflict with existing configuration",
     },
     {
       flags: "--global, -g",

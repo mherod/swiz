@@ -27,6 +27,8 @@ const STDERR_ALLOWLIST = new Set([
   "src/commands/dispatch.ts",
   // Dispatch replay ANSI trace output (extracted from dispatch.ts)
   "src/dispatch/replay.ts",
+  // settings enable --force prints a warning about conflicting settings
+  "src/commands/settings.ts",
   // The shared debug utility itself
   "src/debug.ts",
 ])

@@ -856,6 +856,7 @@ describe("SETTINGS_REGISTRY", () => {
       "narratorVoice",
       "ambitionMode",
       "collaborationMode",
+      "strictNoDirectMain",
     ]
     const registryKeys = SETTINGS_REGISTRY.map((d) => d.key)
     for (const key of expectedKeys) {
@@ -990,6 +991,7 @@ describe("collaborationMode settings", () => {
       githubCiGate: true,
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
+      strictNoDirectMain: false,
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
       largeFileSizeKb: 500,
@@ -1021,6 +1023,7 @@ describe("collaborationMode settings", () => {
       githubCiGate: true,
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
+      strictNoDirectMain: false,
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
       largeFileSizeKb: 500,
@@ -1058,6 +1061,7 @@ describe("collaborationMode settings", () => {
       githubCiGate: true,
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
+      strictNoDirectMain: false,
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
       largeFileSizeKb: 500,
@@ -1093,6 +1097,7 @@ describe("collaborationMode settings", () => {
       githubCiGate: true,
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
+      strictNoDirectMain: false,
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
       largeFileSizeKb: 500,
@@ -1124,6 +1129,7 @@ describe("collaborationMode settings", () => {
       githubCiGate: true,
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
+      strictNoDirectMain: false,
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
       largeFileSizeKb: 500,
@@ -1234,5 +1240,149 @@ describe("readSwizSettings schema constraint enforcement", () => {
     expect(settings.pushCooldownMinutes).toBe(10)
     expect(settings.disabledHooks).toEqual(["stop-github-ci.ts"])
     expect(settings.pushGate).toBe(true)
+  })
+})
+
+// ─── strictNoDirectMain: enable/disable, conflict detection, --force ──────────
+
+describe("strictNoDirectMain setting", () => {
+  test("defaults to false", async () => {
+    const home = await createTempHome()
+    const settings = await readSwizSettings({ home })
+    expect(settings.strictNoDirectMain).toBe(false)
+  })
+
+  test("enable and disable round-trip", async () => {
+    const home = await createTempHome()
+    const { exitCode: ec1 } = await runSwiz(
+      ["settings", "enable", "strict-no-direct-main", "--force"],
+      home
+    )
+    expect(ec1).toBe(0)
+    const after = await readSwizSettings({ home })
+    expect(after.strictNoDirectMain).toBe(true)
+
+    const { exitCode: ec2 } = await runSwiz(["settings", "disable", "strict-no-direct-main"], home)
+    expect(ec2).toBe(0)
+    const final = await readSwizSettings({ home })
+    expect(final.strictNoDirectMain).toBe(false)
+  })
+
+  test("enable is blocked when collaborationMode=solo without --force", async () => {
+    const home = await createTempHome()
+    // Pre-set collaborationMode=solo
+    await runSwiz(["settings", "set", "collaboration-mode", "solo"], home)
+    const { exitCode, stderr } = await runSwiz(
+      ["settings", "enable", "strict-no-direct-main"],
+      home
+    )
+    expect(exitCode).not.toBe(0)
+    expect(stderr).toContain("collaborationMode=solo")
+    expect(stderr).toContain("--force")
+    // Setting must remain disabled
+    const settings = await readSwizSettings({ home })
+    expect(settings.strictNoDirectMain).toBe(false)
+  })
+
+  test("enable is blocked when pushGate=false without --force", async () => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "disable", "push-gate"], home)
+    const { exitCode, stderr } = await runSwiz(
+      ["settings", "enable", "strict-no-direct-main"],
+      home
+    )
+    expect(exitCode).not.toBe(0)
+    expect(stderr).toContain("pushGate=false")
+    const settings = await readSwizSettings({ home })
+    expect(settings.strictNoDirectMain).toBe(false)
+  })
+
+  test("enable is blocked when nonDefaultBranchGate=false without --force", async () => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "disable", "non-default-branch-gate"], home)
+    const { exitCode, stderr } = await runSwiz(
+      ["settings", "enable", "strict-no-direct-main"],
+      home
+    )
+    expect(exitCode).not.toBe(0)
+    expect(stderr).toContain("nonDefaultBranchGate=false")
+    const settings = await readSwizSettings({ home })
+    expect(settings.strictNoDirectMain).toBe(false)
+  })
+
+  test("--force overrides conflicts and enables the setting", async () => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "set", "collaboration-mode", "solo"], home)
+    const { exitCode, stderr } = await runSwiz(
+      ["settings", "enable", "strict-no-direct-main", "--force"],
+      home
+    )
+    expect(exitCode).toBe(0)
+    // Warning is emitted but the setting is written
+    expect(stderr).toContain("Warning")
+    const settings = await readSwizSettings({ home })
+    expect(settings.strictNoDirectMain).toBe(true)
+  })
+
+  test("-f short flag is equivalent to --force", async () => {
+    const home = await createTempHome()
+    await runSwiz(["settings", "set", "collaboration-mode", "solo"], home)
+    const { exitCode } = await runSwiz(["settings", "enable", "strict-no-direct-main", "-f"], home)
+    expect(exitCode).toBe(0)
+    const settings = await readSwizSettings({ home })
+    expect(settings.strictNoDirectMain).toBe(true)
+  })
+
+  test("enable succeeds with no conflicts (auto mode, all gates enabled)", async () => {
+    const home = await createTempHome()
+    // pushGate defaults to false — enable it so no conflicts exist
+    await runSwiz(["settings", "enable", "push-gate"], home)
+    const { exitCode, stderr } = await runSwiz(
+      ["settings", "enable", "strict-no-direct-main"],
+      home
+    )
+    expect(exitCode).toBe(0)
+    // No warning expected when there are no conflicts
+    expect(stderr).not.toContain("Warning")
+    const settings = await readSwizSettings({ home })
+    expect(settings.strictNoDirectMain).toBe(true)
+  })
+
+  test("swiz settings show surfaces strict-no-direct-main", async () => {
+    const home = await createTempHome()
+    const { stdout } = await runSwiz(["settings", "show"], home)
+    expect(stdout).toContain("strict-no-direct-main")
+  })
+
+  test("getEffectiveSwizSettings propagates strictNoDirectMain", () => {
+    const settings = {
+      autoContinue: false,
+      critiquesEnabled: false,
+      ambitionMode: "standard" as const,
+      collaborationMode: "auto" as const,
+      narratorVoice: "",
+      narratorSpeed: 0,
+      prAgeGateMinutes: 10,
+      prMergeMode: true,
+      pushCooldownMinutes: 0,
+      pushGate: true,
+      sandboxedEdits: false,
+      speak: false,
+      swizNotifyHooks: false,
+      updateMemoryFooter: false,
+      gitStatusGate: true,
+      nonDefaultBranchGate: true,
+      githubCiGate: true,
+      changesRequestedGate: true,
+      personalRepoIssuesGate: true,
+      strictNoDirectMain: true,
+      memoryLineThreshold: 1400,
+      memoryWordThreshold: 5000,
+      largeFileSizeKb: 500,
+      statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      sessions: {},
+    }
+    const effective = getEffectiveSwizSettings(settings)
+    expect(effective.strictNoDirectMain).toBe(true)
   })
 })
