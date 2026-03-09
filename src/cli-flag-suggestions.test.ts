@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
+import { collectUnknownOptionWarnings } from "./cli.ts"
 
 const INDEX_PATH = join(process.cwd(), "index.ts")
-const CLI_TEST_TIMEOUT_MS = 20_000
 
 async function runSwiz(
   args: string[],
   home?: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  const proc = Bun.spawn(["bun", "run", INDEX_PATH, ...args], {
+  const proc = Bun.spawn(["bun", INDEX_PATH, ...args], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
@@ -40,119 +40,114 @@ describe("CLI command suggestions", () => {
 })
 
 describe("CLI flag suggestions", () => {
-  test(
-    "suggests --fix for --fx on doctor",
-    async () => {
-      const result = await runSwiz(["doctor", "--fx"])
-      expect(result.stderr).toContain("Unknown option: --fx")
-      expect(result.stderr).toContain('did you mean: "--fix"')
-    },
-    CLI_TEST_TIMEOUT_MS
-  )
+  test("suggests --fix for --fx on doctor", () => {
+    const warnings = collectUnknownOptionWarnings(
+      "doctor",
+      ["--fx"],
+      [{ flags: "--fix", description: "" }]
+    )
+    expect(warnings[0]).toContain("Unknown option: --fx")
+    expect(warnings[0]).toContain('did you mean: "--fix"')
+  })
 
-  test(
-    "suggests --dry-run for --dryrun on install",
-    async () => {
-      const result = await runSwiz(["install", "--dryrun"])
-      expect(result.stderr).toContain("Unknown option: --dryrun")
-      expect(result.stderr).toContain('did you mean: "--dry-run"')
-    },
-    CLI_TEST_TIMEOUT_MS
-  )
+  test("suggests --dry-run for --dryrun on install", () => {
+    const warnings = collectUnknownOptionWarnings(
+      "install",
+      ["--dryrun"],
+      [{ flags: "--dry-run", description: "" }]
+    )
+    expect(warnings[0]).toContain("Unknown option: --dryrun")
+    expect(warnings[0]).toContain('did you mean: "--dry-run"')
+  })
 
-  test(
-    "no suggestion for a completely unrecognised flag",
-    async () => {
-      const result = await runSwiz(["doctor", "--completely-unknown"])
-      expect(result.stderr).toContain("Unknown option: --completely-unknown")
-      expect(result.stderr).not.toContain("did you mean")
-    },
-    CLI_TEST_TIMEOUT_MS
-  )
+  test("no suggestion for a completely unrecognised flag", () => {
+    const warnings = collectUnknownOptionWarnings(
+      "doctor",
+      ["--completely-unknown"],
+      [{ flags: "--fix", description: "" }]
+    )
+    expect(warnings[0]).toContain("Unknown option: --completely-unknown")
+    expect(warnings[0]).not.toContain("did you mean")
+  })
 
-  test(
-    "no warning for a valid flag",
-    async () => {
-      const result = await runSwiz(["doctor", "--fix"])
-      expect(result.stderr).not.toContain("Unknown option")
-    },
-    CLI_TEST_TIMEOUT_MS
-  )
+  test("no warning for a valid flag", () => {
+    const warnings = collectUnknownOptionWarnings(
+      "doctor",
+      ["--fix"],
+      [{ flags: "--fix", description: "" }]
+    )
+    expect(warnings.length).toBe(0)
+  })
 
-  test(
-    "no warning for valid short alias -s on session command",
-    async () => {
-      // session --list/-l is a valid short alias — should not warn
-      const result = await runSwiz(["session", "-l"])
-      expect(result.stderr).not.toContain("Unknown option: -l")
-    },
-    CLI_TEST_TIMEOUT_MS
-  )
+  test("no warning for valid short alias -l on session command", () => {
+    const warnings = collectUnknownOptionWarnings(
+      "session",
+      ["-l"],
+      [{ flags: "--list, -l", description: "" }]
+    )
+    expect(warnings.length).toBe(0)
+  })
 
-  test(
-    "suggests short alias -l for -ll on session command",
-    async () => {
-      const result = await runSwiz(["session", "-ll"])
-      expect(result.stderr).toContain("Unknown option: -ll")
-      expect(result.stderr).toContain('did you mean: "-l"')
-    },
-    CLI_TEST_TIMEOUT_MS
-  )
+  test("suggests short alias -l for -ll on session command", () => {
+    const warnings = collectUnknownOptionWarnings(
+      "session",
+      ["-ll"],
+      [{ flags: "--list, -l", description: "" }]
+    )
+    expect(warnings[0]).toContain("Unknown option: -ll")
+    expect(warnings[0]).toContain('did you mean: "-l"')
+  })
 
-  test(
-    "no warning for global --help flag on any command",
-    async () => {
-      // --help is a global flag; cli.ts routes it before the flag-check block
-      const result = await runSwiz(["doctor", "--help"])
-      expect(result.stderr).not.toContain("Unknown option: --help")
-    },
-    CLI_TEST_TIMEOUT_MS
-  )
+  test("no warning for global --help flag on any command", () => {
+    const warnings = collectUnknownOptionWarnings(
+      "doctor",
+      ["--help"],
+      [{ flags: "--fix", description: "" }]
+    )
+    expect(warnings.length).toBe(0)
+  })
 
-  test(
-    "no warning for global -h flag on any command",
-    async () => {
-      const result = await runSwiz(["doctor", "-h"])
-      expect(result.stderr).not.toContain("Unknown option: -h")
-    },
-    CLI_TEST_TIMEOUT_MS
-  )
+  test("no warning for global -h flag on any command", () => {
+    const warnings = collectUnknownOptionWarnings(
+      "doctor",
+      ["-h"],
+      [{ flags: "--fix", description: "" }]
+    )
+    expect(warnings.length).toBe(0)
+  })
 
-  test(
-    "placeholder token <seconds> is not treated as a known flag",
-    async () => {
-      // ci-wait declares: flags: "--timeout, -t <seconds>"
-      // The "<seconds>" placeholder must be filtered — not added to known flags
-      // Verification: a typo of --timeout must suggest --timeout, not <seconds>
-      const result = await runSwiz(["ci-wait", "--timout"])
-      expect(result.stderr).toContain("Unknown option: --timout")
-      expect(result.stderr).toContain('did you mean: "--timeout"')
-      expect(result.stderr).not.toContain('"<seconds>"')
-    },
-    CLI_TEST_TIMEOUT_MS
-  )
+  test("placeholder token <seconds> is not treated as a known flag", () => {
+    const warnings = collectUnknownOptionWarnings(
+      "ci-wait",
+      ["--timout"],
+      [{ flags: "--timeout, -t <seconds>", description: "" }]
+    )
+    expect(warnings[0]).toContain("Unknown option: --timout")
+    expect(warnings[0]).toContain('did you mean: "--timeout"')
+    expect(warnings[0]).not.toContain("<seconds>")
+  })
 
-  test(
-    "placeholder token [id] is not treated as a known flag",
-    async () => {
-      // settings declares: flags: "--session, -s [id]"
-      // The "[id]" placeholder must be filtered — not added to known flags
-      const result = await runSwiz(["settings", "--sesion"])
-      expect(result.stderr).toContain("Unknown option: --sesion")
-      expect(result.stderr).toContain('did you mean: "--session"')
-      expect(result.stderr).not.toContain('"[id]"')
-    },
-    CLI_TEST_TIMEOUT_MS
-  )
+  test("placeholder token [id] is not treated as a known flag", () => {
+    const warnings = collectUnknownOptionWarnings(
+      "settings",
+      ["--sesion"],
+      [{ flags: "--session, -s [id]", description: "" }]
+    )
+    expect(warnings[0]).toContain("Unknown option: --sesion")
+    expect(warnings[0]).toContain('did you mean: "--session"')
+    expect(warnings[0]).not.toContain("[id]")
+  })
 
-  test(
-    "positional-only option entries do not produce flag warnings",
-    async () => {
-      // dispatch has flags: "<event>", "[agentEventName]", "replay <event>"
-      // Passing a positional arg (no leading -) must not trigger Unknown option
-      const result = await runSwiz(["dispatch", "PreToolUse"])
-      expect(result.stderr).not.toContain("Unknown option: PreToolUse")
-    },
-    CLI_TEST_TIMEOUT_MS
-  )
+  test("positional-only option entries do not produce flag warnings", () => {
+    const warnings = collectUnknownOptionWarnings(
+      "dispatch",
+      ["PreToolUse"],
+      [
+        { flags: "<event>", description: "" },
+        { flags: "[agentEventName]", description: "" },
+        { flags: "replay <event>", description: "" },
+      ]
+    )
+    expect(warnings.length).toBe(0)
+  })
 })

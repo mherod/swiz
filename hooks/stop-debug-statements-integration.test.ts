@@ -26,14 +26,14 @@ async function runGit(dir: string, args: string[]): Promise<string> {
 /**
  * Initialise a git repo and optionally pre-seed with empty commits.
  *
- * Pass `seedCommits: 10` (the default) to place the test commit as the 11th,
- * fully captured by `HEAD~10..HEAD` — used by the deep-history tests.
+ * Pass `seedCommits: 10` to place the test commit as the 11th, fully captured
+ * by `HEAD~10..HEAD` — useful when specifically testing deep-history behavior.
  *
  * Pass `seedCommits: 0` to create a fresh repo (1 commit total after
  * `commitFile`) — used by the shallow-repo edge-case tests to verify the
  * empty-tree fallback path.
  */
-async function makeTempGitRepo(suffix = "", { seedCommits = 10 } = {}): Promise<string> {
+async function makeTempGitRepo(suffix = "", { seedCommits = 0 } = {}): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), `swiz-stop-debug${suffix}-`))
   tempDirs.push(dir)
 

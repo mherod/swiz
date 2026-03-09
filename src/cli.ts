@@ -11,6 +11,27 @@ export function registerCommand(command: Command) {
   commands.set(command.name, command)
 }
 
+export function collectUnknownOptionWarnings(
+  commandName: string,
+  rest: string[],
+  options: Command["options"] = []
+): string[] {
+  const GLOBAL_FLAGS = new Set(["--help", "-h"])
+  const commandFlags = new Set(
+    options.flatMap((o) => o.flags.split(/[\s,]+/).filter((t) => t.startsWith("-")))
+  )
+  const knownFlags = new Set([...GLOBAL_FLAGS, ...commandFlags])
+  const warnings: string[] = []
+  for (const arg of rest) {
+    if (!arg.startsWith("-") || knownFlags.has(arg)) continue
+    const hint = suggest(arg, knownFlags)
+    warnings.push(
+      `Unknown option: ${arg}${hint ? ` (did you mean: "${hint}"?)` : ""} — run: swiz help ${commandName}`
+    )
+  }
+  return warnings
+}
+
 async function run() {
   const help = createHelpCommand(commands)
   commands.set("help", help)
@@ -42,25 +63,15 @@ async function run() {
   }
 
   // Fuzzy flag suggestions — warn on unknown flags before delegating to command
-  {
-    // Global flags recognised at the CLI level (--help/-h handled above)
-    const GLOBAL_FLAGS = new Set(["--help", "-h"])
-    // Extract every -/-- token from each option's flags string.
-    // Pattern: "--long, -s <arg>" → split on whitespace+commas, keep tokens starting with "-"
-    const commandFlags = new Set(
-      (command.options ?? []).flatMap((o) =>
-        o.flags.split(/[\s,]+/).filter((t) => t.startsWith("-"))
-      )
-    )
-    const knownFlags = new Set([...GLOBAL_FLAGS, ...commandFlags])
-    for (const arg of rest) {
-      if (!arg.startsWith("-") || knownFlags.has(arg)) continue
-      const hint = suggest(arg, knownFlags)
-      console.error(
-        `Unknown option: ${arg}${hint ? ` (did you mean: "${hint}"?)` : ""}` +
-          ` — run: swiz help ${commandName}`
-      )
-    }
+  const unknownOptionWarnings = collectUnknownOptionWarnings(
+    commandName,
+    rest,
+    command.options ?? []
+  )
+  if (unknownOptionWarnings.length > 0) {
+    for (const warning of unknownOptionWarnings) console.error(warning)
+    process.exitCode = 1
+    return
   }
 
   // Best-effort: drain any offline issue mutations before running commands
