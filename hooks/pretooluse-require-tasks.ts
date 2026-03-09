@@ -141,7 +141,13 @@ async function main() {
     .map((t) => `  • #${t.id} (${t.status}): ${t.subject}`)
     .join("\n")
 
-  if (incompleteTasks.length < MIN_INCOMPLETE_TASKS || pendingTasks.length < MIN_PENDING_TASKS) {
+  // Wrap-up exemption: all tasks completed → allow tool calls for CI, commits, etc.
+  const allTasksDone = allTasks.length > 0 && incompleteTasks.length === 0
+
+  if (
+    !allTasksDone &&
+    (incompleteTasks.length < MIN_INCOMPLETE_TASKS || pendingTasks.length < MIN_PENDING_TASKS)
+  ) {
     deny(
       `STOP. ${toolName} is BLOCKED because task minimums are not met.\n\n` +
         `Required:\n` +
@@ -195,8 +201,9 @@ async function main() {
     const total = toolNames.length
     const lastTaskIndex = findLastTaskToolCallIndex(toolNames)
 
-    // Only flag staleness if the agent has previously used task tools
-    if (lastTaskIndex >= 0) {
+    // Only flag staleness if the agent has previously used task tools and has incomplete work.
+    // Skip staleness when all tasks are done — wrap-up operations must not be blocked.
+    if (lastTaskIndex >= 0 && !allTasksDone) {
       const callsSinceTask = total - 1 - lastTaskIndex
       if (callsSinceTask >= STALENESS_THRESHOLD) {
         // ── LARGE-CONTENT EXEMPTION ───────────────────────────────────────

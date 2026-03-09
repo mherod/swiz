@@ -212,6 +212,11 @@ describe("pretooluse-require-tasks", () => {
     const sessionId = "session-pending"
     await writeTask(homeDir, sessionId, {
       id: "1",
+      subject: "Current work",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
       subject: "Next step",
       status: "pending",
     })
@@ -228,6 +233,11 @@ describe("pretooluse-require-tasks", () => {
       subject: "Current work",
       status: "in_progress",
     })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Next step",
+      status: "pending",
+    })
 
     const result = await runHook({ homeDir, toolName: "Edit", sessionId })
     expect(result.decision).toBeUndefined()
@@ -240,6 +250,11 @@ describe("pretooluse-require-tasks", () => {
       id: "1",
       subject: "Active task",
       status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Next step",
+      status: "pending",
     })
 
     // Build a transcript: one TaskCreate call, then 21 non-task calls
@@ -271,6 +286,11 @@ describe("pretooluse-require-tasks", () => {
       id: "1",
       subject: "Active task",
       status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Next step",
+      status: "pending",
     })
 
     const lines: string[] = []
@@ -305,6 +325,11 @@ describe("pretooluse-require-tasks", () => {
       id: "1",
       subject: "Active task",
       status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Next step",
+      status: "pending",
     })
 
     const lines: string[] = []
@@ -539,6 +564,11 @@ describe("pretooluse-require-tasks", () => {
     const sessionId = "session-notask-tool"
     await writeTask(homeDir, sessionId, {
       id: "1",
+      subject: "Active task",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
       subject: "Bootstrap task",
       status: "pending",
     })
@@ -564,12 +594,17 @@ describe("pretooluse-require-tasks", () => {
   })
 
   describe("large-content stale-task exemption (issue #89)", () => {
-    /** Helper: build a stale transcript (1 TaskCreate + 21 Reads = 21 calls since task) */
+    /** Helper: build a stale transcript (1 TaskCreate + 21 Reads = 21 calls since task). Includes a pending task to ensure staleness check fires before the pending-task check. */
     async function buildStaleTranscript(homeDir: string, sessionId: string) {
       await writeTask(homeDir, sessionId, {
         id: "1",
         subject: "Active task",
         status: "in_progress",
+      })
+      await writeTask(homeDir, sessionId, {
+        id: "2",
+        subject: "Next step",
+        status: "pending",
       })
       const lines: string[] = []
       const makeEntry = (toolName: string) =>

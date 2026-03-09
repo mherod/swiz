@@ -208,13 +208,9 @@ describe("pretooluse-require-tasks hook", () => {
         },
         { HOME: tmpHome }
       )
-      // Hook blocks when no incomplete tasks and no pending next step
+      // Hook allows when all tasks are completed (wrap-up exemption)
       expect(result.exitCode).toBe(0)
-      expect(result.parsed).not.toBeNull()
-      const hookOutput = (result.parsed as Record<string, unknown>)?.hookSpecificOutput as
-        | Record<string, unknown>
-        | undefined
-      expect(hookOutput?.permissionDecision).toBe("deny")
+      expect(result.parsed).toBeNull()
     } finally {
       await rm(tmpHome, { recursive: true, force: true })
     }

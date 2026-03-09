@@ -351,16 +351,16 @@ export async function promptStreamText(
     options?.onTextPart?.(text)
     return text
   }
-  // Backward-compatible Gemini test fixtures used by existing hook tests
+  // Backward-compatible Gemini test fixtures used by existing hook tests.
+  // GEMINI_TEST_RESPONSE is treated as raw text here (not { next } format).
   const geminiTextFixture =
     process.env.GEMINI_TEST_STREAM_RESPONSE ??
     process.env.GEMINI_TEST_TEXT_RESPONSE ??
     process.env.GEMINI_TEST_RESPONSE
   if (geminiTextFixture !== undefined) {
-    const text =
-      process.env.GEMINI_TEST_RESPONSE !== undefined
-        ? String((JSON.parse(geminiTextFixture) as { next?: string }).next ?? "").trim()
-        : geminiTextFixture.trim()
+    const captureFile = process.env.AI_TEST_CAPTURE_FILE ?? process.env.GEMINI_TEST_CAPTURE_FILE
+    if (captureFile) await Bun.write(captureFile, prompt)
+    const text = geminiTextFixture.trim()
     options?.onTextPart?.(text)
     return text
   }
