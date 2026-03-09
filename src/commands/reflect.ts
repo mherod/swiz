@@ -1,6 +1,6 @@
 import { basename, resolve } from "node:path"
 import { z } from "zod"
-import { hasGeminiApiKey, promptGeminiObject, promptGeminiStreamText } from "../gemini.ts"
+import { hasAiProvider, promptObject, promptStreamText } from "../ai-providers.ts"
 import { createStreamBufferReporter } from "../stream-buffer-reporter.ts"
 import {
   extractPlainTurns,
@@ -330,18 +330,18 @@ export const reflectCommand: Command = {
       return
     }
 
-    if (!hasGeminiApiKey()) {
-      throw new Error("No Gemini API key found. Set GEMINI_API_KEY env var.")
+    if (!hasAiProvider()) {
+      throw new Error("No AI provider available. Set GEMINI_API_KEY or install the codex CLI.")
     }
 
     let reflection: SessionReflection
     const bufferReporter = createStreamBufferReporter({ enabled: !json })
     try {
       bufferReporter.startSubmitting()
-      const streamed = await promptGeminiStreamText(prompt, {
+      const streamed = await promptStreamText(prompt, {
         model,
         timeout: timeoutMs,
-        onTextPart: (textPart) => {
+        onTextPart: (textPart: string) => {
           if (json) {
             process.stdout.write(textPart)
             return
@@ -361,7 +361,7 @@ export const reflectCommand: Command = {
       // that would produce mixed/duplicated content.
       if (json) throw error
 
-      reflection = await promptGeminiObject(prompt, SessionReflectionSchema(count), {
+      reflection = await promptObject(prompt, SessionReflectionSchema(count), {
         model,
         timeout: timeoutMs,
       })

@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { z } from "zod"
+import { hasAiProvider, promptObject } from "../ai-providers.ts"
 import { detectFrameworks, detectProjectStack } from "../detect-frameworks.ts"
-import { hasGeminiApiKey, promptGeminiObject } from "../gemini.ts"
 import type { Command } from "../types.ts"
 
 const DEFAULT_TIMEOUT_MS = 90_000
@@ -224,8 +224,8 @@ export const ideaCommand: Command = {
     },
   ],
   async run(args: string[]) {
-    if (!hasGeminiApiKey()) {
-      throw new Error("No Gemini API key found. Set GEMINI_API_KEY env var.")
+    if (!hasAiProvider()) {
+      throw new Error("No AI provider available. Set GEMINI_API_KEY or install the codex CLI.")
     }
 
     const { targetDir, model, timeoutMs } = parseIdeaArgs(args)
@@ -244,7 +244,7 @@ export const ideaCommand: Command = {
       stacks,
     })
 
-    const idea = await promptGeminiObject(prompt, IssueIdeaSchema, { model, timeout: timeoutMs })
+    const idea = await promptObject(prompt, IssueIdeaSchema, { model, timeout: timeoutMs })
     console.log(renderIssueDescription(idea))
   },
 }
