@@ -112,8 +112,7 @@ alwaysApply: false
 - `find` is not exempt; use `rg` or Glob for discovery.
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
-- For push verification task completion use evidence, for example: `swiz tasks complete <id> --evidence "note:CI green — conclusion: success, run <run-id>"`.
-- **Task completion**: `swiz tasks complete <id> --evidence "note:..."`. Use only `note:` prefix — compound strings (e.g. `commit:abc run:123`) are rejected. Plain `TaskUpdate status=completed` rejected by stop hooks. Do not invoke `tasks-list.ts` directly.
+- **Task completion**: `swiz tasks complete <id> --evidence "note:..." --state <state>`. The `--state` flag is required. Valid single-prefix evidence values: `commit:`, `pr:`, `file:`, `test:`, `note:` — compound strings (e.g. `"commit:abc run:123"`) and unrecognized prefixes (e.g. `ci_green:`) are rejected. Plain `TaskUpdate status=completed` rejected by stop hooks. Do not invoke `tasks-list.ts` directly.
 - **DON'T**: Assume CI success from partial output (e.g., `gh run watch` alone). Always verify terminal job states with `gh run view <run-id> --json conclusion,status,jobs` and confirm every job reached `conclusion: "success"` before claiming CI green.
 - Mark tasks complete immediately at work completion.
 - Treat `gh issue create` and task completion as atomic; recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.
