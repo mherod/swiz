@@ -240,8 +240,16 @@ const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
  */
 export function hasAiProvider(): boolean {
   if (process.env.AI_TEST_NO_BACKEND === "1") return false
-  // AI_TEST_RESPONSE acts as a mock provider — treat as available
-  if (process.env.AI_TEST_RESPONSE !== undefined) return true
+  // Test fixtures act as mock providers — treat as available
+  if (
+    process.env.AI_TEST_RESPONSE !== undefined ||
+    process.env.AI_TEST_TEXT_RESPONSE !== undefined ||
+    process.env.GEMINI_TEST_RESPONSE !== undefined ||
+    process.env.GEMINI_TEST_TEXT_RESPONSE !== undefined ||
+    process.env.GEMINI_TEST_STREAM_RESPONSE !== undefined
+  ) {
+    return true
+  }
   return hasGeminiApiKey() || hasCodexCli() || hasClaudeCode()
 }
 
@@ -307,6 +315,17 @@ export async function promptText(prompt: string, options?: PromptOptions): Promi
   if (process.env.AI_TEST_TEXT_RESPONSE !== undefined) {
     return process.env.AI_TEST_TEXT_RESPONSE.trim()
   }
+  // Backward-compatible Gemini test fixtures used by existing hook tests
+  if (process.env.GEMINI_TEST_TEXT_RESPONSE !== undefined) {
+    return process.env.GEMINI_TEST_TEXT_RESPONSE.trim()
+  }
+  if (process.env.GEMINI_TEST_STREAM_RESPONSE !== undefined) {
+    return process.env.GEMINI_TEST_STREAM_RESPONSE.trim()
+  }
+  if (process.env.GEMINI_TEST_RESPONSE !== undefined) {
+    const parsed = JSON.parse(process.env.GEMINI_TEST_RESPONSE) as { next?: string }
+    return String(parsed.next ?? "").trim()
+  }
 
   const provider = activeProvider(options?.provider)
   if (!provider) {
@@ -332,6 +351,19 @@ export async function promptStreamText(
     options?.onTextPart?.(text)
     return text
   }
+  // Backward-compatible Gemini test fixtures used by existing hook tests
+  const geminiTextFixture =
+    process.env.GEMINI_TEST_STREAM_RESPONSE ??
+    process.env.GEMINI_TEST_TEXT_RESPONSE ??
+    process.env.GEMINI_TEST_RESPONSE
+  if (geminiTextFixture !== undefined) {
+    const text =
+      process.env.GEMINI_TEST_RESPONSE !== undefined
+        ? String((JSON.parse(geminiTextFixture) as { next?: string }).next ?? "").trim()
+        : geminiTextFixture.trim()
+    options?.onTextPart?.(text)
+    return text
+  }
 
   const provider = activeProvider(options?.provider)
   if (!provider) {
@@ -353,14 +385,16 @@ export async function promptObject<T>(
   options?: PromptOptions
 ): Promise<T> {
   // Test seams (cross-provider fixtures):
-  if (process.env.AI_TEST_THROW === "1") {
+  if (process.env.AI_TEST_THROW === "1" || process.env.GEMINI_TEST_THROW === "1") {
     throw new Error("Simulated AI backend error (AI_TEST_THROW=1)")
   }
-  if (process.env.AI_TEST_CAPTURE_FILE) {
-    await Bun.write(process.env.AI_TEST_CAPTURE_FILE, prompt)
+  const captureFile = process.env.AI_TEST_CAPTURE_FILE ?? process.env.GEMINI_TEST_CAPTURE_FILE
+  if (captureFile) {
+    await Bun.write(captureFile, prompt)
   }
-  if (process.env.AI_TEST_RESPONSE !== undefined) {
-    return JSON.parse(process.env.AI_TEST_RESPONSE) as T
+  const objectFixture = process.env.AI_TEST_RESPONSE ?? process.env.GEMINI_TEST_RESPONSE
+  if (objectFixture !== undefined) {
+    return JSON.parse(objectFixture) as T
   }
 
   const provider = activeProvider(options?.provider)
