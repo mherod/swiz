@@ -24,16 +24,27 @@ async function createRepo(remoteUrl: string): Promise<string> {
 }
 
 async function createFakeGhBin(
-  mode: "awaiting" | "approved" | "changes-requested"
+  mode:
+    | "awaiting"
+    | "awaiting-self-authored"
+    | "awaiting-self-authored-with-reviewer"
+    | "approved"
+    | "changes-requested"
 ): Promise<string> {
   const fakeBin = await mkdtemp(join(tmpdir(), "stop-pr-changes-gh-"))
   const ghPath = join(fakeBin, "gh")
-  const reviews =
-    mode === "awaiting"
-      ? "[]"
-      : mode === "approved"
-        ? '[{"state":"APPROVED","user":{"login":"reviewer1"},"submitted_at":"2026-03-01T00:00:00Z"}]'
-        : '[{"state":"CHANGES_REQUESTED","user":{"login":"reviewer1"},"body":"needs updates","submitted_at":"2026-03-01T00:00:00Z"}]'
+  const isAwaiting =
+    mode === "awaiting" ||
+    mode === "awaiting-self-authored" ||
+    mode === "awaiting-self-authored-with-reviewer"
+  const reviews = isAwaiting
+    ? "[]"
+    : mode === "approved"
+      ? '[{"state":"APPROVED","user":{"login":"reviewer1"},"submitted_at":"2026-03-01T00:00:00Z"}]'
+      : '[{"state":"CHANGES_REQUESTED","user":{"login":"reviewer1"},"body":"needs updates","submitted_at":"2026-03-01T00:00:00Z"}]'
+  const isSelfAuthored =
+    mode === "awaiting-self-authored" || mode === "awaiting-self-authored-with-reviewer"
+  const hasRequestedReviewer = mode === "awaiting-self-authored-with-reviewer"
 
   await writeFile(
     ghPath,
@@ -43,12 +54,28 @@ if [ "$1" = "repo" ] && [ "$2" = "view" ]; then
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
-  echo '[{"number":222,"title":"Test PR"}]'
+  if [ "${isSelfAuthored}" = "true" ]; then
+    echo '[{"number":222,"title":"Test PR","author":{"login":"mherod"}}]'
+    exit 0
+  fi
+  echo '[{"number":222,"title":"Test PR","author":{"login":"teammate"}}]'
   exit 0
 fi
 if [ "$1" = "api" ]; then
+  if echo "$*" | grep -q ' user '; then
+    echo 'mherod'
+    exit 0
+  fi
   if echo "$*" | grep -q '/pulls/222/reviews'; then
     echo '${reviews}'
+    exit 0
+  fi
+  if echo "$*" | grep -q '/pulls/222$'; then
+    if [ "${hasRequestedReviewer}" = "true" ]; then
+      echo '{"requested_reviewers":[{"login":"reviewer1"}],"requested_teams":[]}'
+      exit 0
+    fi
+    echo '{"requested_reviewers":[],"requested_teams":[]}'
     exit 0
   fi
   if echo "$*" | grep -q '/pulls/222/comments'; then
@@ -136,6 +163,39 @@ describe("stop-pr-changes-requested", () => {
       const reason = String(result.parsed?.reason ?? "")
       expect(reason).toContain("changes requested")
       expect(reason).toContain("reviewer1")
+    } finally {
+      await Promise.all([
+        rm(repo, { recursive: true, force: true }),
+        rm(fakeGh, { recursive: true, force: true }),
+      ])
+    }
+  })
+
+  test("blocks self-authored awaiting-review PR with valid actionable guidance", async () => {
+    const repo = await createRepo("https://github.com/mherod/swiz.git")
+    const fakeGh = await createFakeGhBin("awaiting-self-authored")
+    try {
+      const result = await runHook(repo, fakeGh)
+      expect(result.parsed?.decision).toBe("block")
+      const reason = String(result.parsed?.reason ?? "")
+      expect(reason).toContain("self-authored PR")
+      expect(reason).toContain("gh pr edit 222 --add-reviewer")
+      expect(reason).not.toContain("/pr-request-changes")
+    } finally {
+      await Promise.all([
+        rm(repo, { recursive: true, force: true }),
+        rm(fakeGh, { recursive: true, force: true }),
+      ])
+    }
+  })
+
+  test("allows self-authored awaiting-review PR when reviewer is already requested", async () => {
+    const repo = await createRepo("https://github.com/mherod/swiz.git")
+    const fakeGh = await createFakeGhBin("awaiting-self-authored-with-reviewer")
+    try {
+      const result = await runHook(repo, fakeGh)
+      expect(result.raw).toBe("")
+      expect(result.parsed).toBeNull()
     } finally {
       await Promise.all([
         rm(repo, { recursive: true, force: true }),

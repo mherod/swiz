@@ -5,6 +5,7 @@ import { min, uniq } from "lodash-es"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
+  getCurrentGitHubUser,
   getDefaultBranch,
   getOpenPrForBranch,
   getRepoNameWithOwner,
@@ -35,15 +36,16 @@ async function main(): Promise<void> {
   const defaultBranch = await getDefaultBranch(cwd)
   if (isDefaultBranch(branch, defaultBranch)) return
 
-  const pr = await getOpenPrForBranch<{ number: number; title: string }>(
-    branch,
-    cwd,
-    "number,title"
-  )
+  const pr = await getOpenPrForBranch<{
+    number: number
+    title: string
+    author?: { login?: string }
+  }>(branch, cwd, "number,title,author")
   if (!pr) return
 
   const repo = await getRepoNameWithOwner(cwd)
   if (!repo) return
+  const currentUser = await getCurrentGitHubUser(cwd)
 
   type Review = {
     state: string
@@ -61,6 +63,35 @@ async function main(): Promise<void> {
   if (changesRequested.length === 0) {
     // Distinct queue state: PR exists but no reviewer has responded yet.
     if (reviews.length === 0) {
+      const isSelfAuthored =
+        Boolean(currentUser) &&
+        Boolean(pr.author?.login) &&
+        currentUser === (pr.author?.login ?? "")
+      if (isSelfAuthored) {
+        type PullDetails = {
+          requested_reviewers?: Array<{ login: string }>
+          requested_teams?: Array<{ slug: string }>
+        }
+        const pullDetails = await ghJson<PullDetails>(
+          ["api", `repos/${repo}/pulls/${pr.number}`],
+          cwd
+        )
+        const hasRequestedReviewer =
+          (pullDetails?.requested_reviewers?.length ?? 0) +
+            (pullDetails?.requested_teams?.length ?? 0) >
+          0
+        if (hasRequestedReviewer) return
+
+        const reason =
+          `PR #${pr.number} is awaiting first review on a self-authored PR.\n\n` +
+          `You cannot request changes on your own PR. Request an external reviewer or wait for feedback before stopping.\n\n` +
+          `Actionable next step:\n` +
+          `  gh pr edit ${pr.number} --add-reviewer <github-handle>\n\n` +
+          `Current status:\n` +
+          `  gh pr view ${pr.number}`
+        blockStop(reason, { includeUpdateMemoryAdvice: false })
+      }
+
       const reason =
         `PR #${pr.number} is awaiting first review — no reviewers have responded yet.\n\n` +
         skillAdvice(
