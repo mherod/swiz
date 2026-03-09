@@ -51,10 +51,15 @@ describe("activeProvider", () => {
     expect(activeProvider()).toBeNull()
   })
 
-  test("returns 'gemini' when GEMINI_API_KEY is set", () => {
+  test("returns 'gemini' when GEMINI_API_KEY is set and claude CLI is unavailable", () => {
     delete process.env.AI_TEST_NO_BACKEND
     process.env.GEMINI_API_KEY = "test-key"
-    expect(activeProvider()).toBe("gemini")
+    // Claude takes priority in auto-select; this assertion holds only when claude is not installed
+    if (!Bun.which("claude")) {
+      expect(activeProvider()).toBe("gemini")
+    } else {
+      expect(activeProvider()).toBe("claude")
+    }
   })
 
   test("override argument takes precedence over auto-select", () => {
@@ -218,12 +223,14 @@ describe("promptObject with Gemini test seam (GEMINI_TEST_RESPONSE)", () => {
   afterEach(() => {
     delete process.env.GEMINI_TEST_RESPONSE
     delete process.env.GEMINI_API_KEY
+    delete process.env.AI_PROVIDER
   })
 
-  test("dispatches to Gemini when GEMINI_API_KEY is set and uses GEMINI_TEST_RESPONSE fixture", async () => {
+  test("dispatches to Gemini when AI_PROVIDER=gemini and uses GEMINI_TEST_RESPONSE fixture", async () => {
     const { z } = await import("zod")
     const schema = z.object({ value: z.number() })
     process.env.GEMINI_API_KEY = "test-key"
+    process.env.AI_PROVIDER = "gemini"
     process.env.GEMINI_TEST_RESPONSE = JSON.stringify({ value: 42 })
     const result = await promptObject("prompt", schema)
     expect(result.value).toBe(42)

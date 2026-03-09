@@ -1,14 +1,14 @@
 // Unified AI provider layer built on AI SDK v6.
 //
 // Dispatches text/stream/object generation to whichever provider is available:
-//   1. Gemini (via GEMINI_API_KEY or gemini CLI OAuth)
-//   2. Codex CLI (via codex CLI in PATH)
-//   3. Claude Code (via claude CLI in PATH)
+//   1. Claude Code (via claude CLI in PATH)
+//   2. Gemini (via GEMINI_API_KEY or gemini CLI OAuth)
+//   3. Codex CLI (via codex CLI in PATH)
 //
 // Provider override (highest to lowest precedence):
 //   1. options.provider passed to each prompt function
 //   2. AI_PROVIDER env var ("gemini" | "codex" | "claude")
-//   3. Auto-select: Gemini preferred, then Codex CLI, then Claude Code
+//   3. Auto-select: Claude Code preferred, then Gemini, then Codex CLI
 //
 // Usage:
 //   import { hasAiProvider, promptText, promptStreamText, promptObject } from "./ai-providers.ts"
@@ -249,7 +249,7 @@ export function hasAiProvider(): boolean {
  * Resolution order (highest to lowest precedence):
  *   1. `override` argument (from options.provider or CLI --provider flag)
  *   2. AI_PROVIDER env var ("gemini" | "codex" | "claude")
- *   3. Auto-select: Gemini preferred, then Codex CLI, then Claude Code
+ *   3. Auto-select: Claude Code preferred, then Gemini, then Codex CLI
  *
  * Throws if an explicit override requests a provider that is not available.
  */
@@ -287,9 +287,9 @@ export function activeProvider(override?: AiProviderId): AiProviderId | null {
   }
 
   // Auto-select
+  if (hasClaudeCode()) return "claude"
   if (hasGeminiApiKey()) return "gemini"
   if (hasCodexCli()) return "codex"
-  if (hasClaudeCode()) return "claude"
   return null
 }
 
