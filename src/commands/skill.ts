@@ -4,7 +4,12 @@ import { join } from "node:path"
 import { AGENTS, getAgent } from "../agents.ts"
 import { getHomeDir } from "../home.ts"
 import { getProviderAdapter } from "../provider-adapters.ts"
-import { findSkills, parseFrontmatterField, stripFrontmatter } from "../skill-utils.ts"
+import {
+  findSkills,
+  getSkillToolAvailabilityWarning,
+  parseFrontmatterField,
+  stripFrontmatter,
+} from "../skill-utils.ts"
 import type { Command } from "../types.ts"
 
 export { parseFrontmatterField, stripFrontmatter }
@@ -76,6 +81,10 @@ async function readSkill(name: string, raw: boolean, noFrontMatter: boolean) {
   }
 
   let content = await Bun.file(skill.path).text()
+  const availabilityWarning = getSkillToolAvailabilityWarning(name, content)
+  if (availabilityWarning) {
+    console.error(availabilityWarning.message)
+  }
   if (!raw) {
     content = await expandInlineCommands(content)
   }

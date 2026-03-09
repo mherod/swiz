@@ -121,7 +121,8 @@ const { create: createTempDir } = useTempDir("swiz-skill-test-")
 /** Write a skill with frontmatter to a temp .skills dir and run swiz skill against it. */
 async function runSkillCmd(
   skillContent: string,
-  extraArgs: string[] = []
+  extraArgs: string[] = [],
+  envOverrides: Record<string, string> = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   const fakeHome = await createTempDir()
   const skillName = "test-skill"
@@ -136,7 +137,7 @@ async function runSkillCmd(
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, HOME: skillsDir },
+    env: { ...process.env, HOME: skillsDir, ...envOverrides },
   })
   proc.stdin.end()
   const stdout = await new Response(proc.stdout).text()
@@ -187,6 +188,15 @@ describe("swiz skill --no-front-matter", () => {
   test("exits with code 0 on success", async () => {
     const { exitCode } = await runSkillCmd(SKILL_WITH_FM, ["--no-front-matter"])
     expect(exitCode).toBe(0)
+  })
+
+  test("warns before output when required tools are unavailable", async () => {
+    const content = "---\nallowed-tools: Bash, ImaginaryTool\n---\n# Body\n"
+    const { stdout, stderr, exitCode } = await runSkillCmd(content, [], { CLAUDECODE: "1" })
+    expect(exitCode).toBe(0)
+    expect(stderr).toContain("Skill tool availability warning")
+    expect(stderr).toContain("ImaginaryTool")
+    expect(stdout).toContain("# Body")
   })
 })
 

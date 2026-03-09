@@ -1,7 +1,9 @@
 import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { AGENTS } from "./agents.ts"
 import { resolveCwd } from "./cwd.ts"
+import { detectCurrentAgent } from "./detect.ts"
 import { getAllProviderSkillDirs } from "./provider-utils.ts"
 
 // Skills live in .skills/ (project-local) and provider-specific global directories.
@@ -47,6 +49,117 @@ export function parseFrontmatterField(content: string, field: string): string | 
 export function stripFrontmatter(content: string): string {
   // Use [ \t]* (not \s*) to avoid consuming the blank line that may follow the closing ---
   return content.replace(/^---[\s\S]*?^---[ \t]*\n?/m, "")
+}
+
+// ─── Skill tool availability checks ──────────────────────────────────────────
+
+function normalizeToolSpec(raw: string): string | null {
+  const trimmed = raw.trim().replace(/^["']|["']$/g, "")
+  if (!trimmed) return null
+  const base = trimmed.split("(")[0]?.trim() ?? ""
+  return base || null
+}
+
+function parseAllowedToolsValue(value: string): string[] {
+  return value
+    .split(",")
+    .map((part) => normalizeToolSpec(part))
+    .filter((name): name is string => Boolean(name))
+}
+
+/**
+ * Extract required tools from SKILL.md frontmatter `allowed-tools`.
+ * Supports both inline and YAML-list forms.
+ */
+export function extractMandatedSkillTools(content: string): string[] {
+  const match = content.match(/^---\n([\s\S]*?)\n---(?:[ \t]*\n?)/)
+  if (!match?.[1]) return []
+
+  const lines = match[1].split("\n")
+  const tools: string[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? ""
+    const inline = line.match(/^allowed-tools\s*:\s*(.+)\s*$/)
+    if (inline?.[1]) {
+      tools.push(...parseAllowedToolsValue(inline[1]))
+      continue
+    }
+
+    const block = line.match(/^allowed-tools\s*:\s*$/)
+    if (!block) continue
+
+    let j = i + 1
+    while (j < lines.length) {
+      const item = (lines[j] ?? "").match(/^\s*-\s*(.+)\s*$/)
+      if (!item?.[1]) break
+      const normalized = normalizeToolSpec(item[1])
+      if (normalized) tools.push(normalized)
+      j++
+    }
+    i = j - 1
+  }
+
+  return [...new Set(tools)]
+}
+
+function detectActiveSkillTools(): string[] {
+  const active = detectCurrentAgent()
+  if (!active) return []
+
+  const tools = new Set<string>()
+
+  // Agent-specific aliases are the primary invocation names.
+  for (const alias of Object.values(active.toolAliases)) tools.add(alias)
+
+  // Include canonical names that map for this agent (identity for Claude, helpful for mixed skills).
+  for (const canonical of Object.keys(active.toolAliases)) tools.add(canonical)
+
+  // Claude uses canonical names directly and has an empty alias table.
+  if (active.id === "claude") {
+    for (const agent of AGENTS) {
+      for (const canonical of Object.keys(agent.toolAliases)) tools.add(canonical)
+    }
+  }
+
+  return [...tools].sort((a, b) => a.localeCompare(b))
+}
+
+export interface SkillToolAvailabilityWarning {
+  missingTools: string[]
+  activeTools: string[]
+  requiredTools: string[]
+  message: string
+}
+
+/**
+ * Check whether the current runtime can satisfy a skill's mandated tools.
+ * Returns null when no warning is needed.
+ */
+export function getSkillToolAvailabilityWarning(
+  skillName: string,
+  content: string,
+  activeTools?: string[]
+): SkillToolAvailabilityWarning | null {
+  const requiredTools = extractMandatedSkillTools(content)
+  if (requiredTools.length === 0) return null
+
+  const available = (activeTools ?? detectActiveSkillTools()).map((t) => t.trim()).filter(Boolean)
+  if (available.length === 0) return null
+  const availableSet = new Set(available)
+
+  const missingTools = requiredTools.filter((tool) => !availableSet.has(tool))
+  if (missingTools.length === 0) return null
+
+  return {
+    missingTools,
+    activeTools: available,
+    requiredTools,
+    message:
+      `⚠ Skill tool availability warning for /${skillName}: ` +
+      `required tool(s) not active in this session: ${missingTools.join(", ")}. ` +
+      `Active tool list: ${available.join(", ")}.`,
+  }
 }
 
 // ─── Skill listing (async) ───────────────────────────────────────────────────

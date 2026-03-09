@@ -3,6 +3,8 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "../hooks/test-utils.ts"
 import {
+  extractMandatedSkillTools,
+  getSkillToolAvailabilityWarning,
   parseFrontmatterField,
   SKILL_DIRS,
   skillAdvice,
@@ -156,6 +158,43 @@ describe("stripFrontmatter", () => {
 
   test("returns empty string when file is only frontmatter", () => {
     expect(stripFrontmatter("---\ndescription: only meta\n---\n")).toBe("")
+  })
+})
+
+// ─── skill tool availability checks ──────────────────────────────────────────
+
+describe("extractMandatedSkillTools", () => {
+  test("extracts inline allowed-tools and strips argument constraints", () => {
+    const content = "---\nallowed-tools: Bash(git log:*), Read, Edit\n---\nUse the skill.\n"
+    expect(extractMandatedSkillTools(content)).toEqual(["Bash", "Read", "Edit"])
+  })
+
+  test("extracts YAML list allowed-tools entries", () => {
+    const content =
+      '---\nallowed-tools:\n  - "TaskCreate"\n  - "TaskUpdate(status:completed)"\n---\nBody\n'
+    expect(extractMandatedSkillTools(content)).toEqual(["TaskCreate", "TaskUpdate"])
+  })
+
+  test("returns empty list when no allowed-tools is present", () => {
+    const content = "---\ndescription: test\n---\nBody\n"
+    expect(extractMandatedSkillTools(content)).toEqual([])
+  })
+})
+
+describe("getSkillToolAvailabilityWarning", () => {
+  test("returns warning with missing tools when required tools are not active", () => {
+    const content = "---\nallowed-tools: Bash, ImaginaryTool\n---\nBody\n"
+    const warning = getSkillToolAvailabilityWarning("example", content, ["Bash", "Read", "Edit"])
+    expect(warning).not.toBeNull()
+    expect(warning?.missingTools).toEqual(["ImaginaryTool"])
+    expect(warning?.message).toContain("/example")
+    expect(warning?.message).toContain("ImaginaryTool")
+  })
+
+  test("returns null when all required tools are active", () => {
+    const content = "---\nallowed-tools: Bash, Read\n---\nBody\n"
+    const warning = getSkillToolAvailabilityWarning("example", content, ["Bash", "Read", "Edit"])
+    expect(warning).toBeNull()
   })
 })
 
