@@ -87,9 +87,75 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
         if hasActions, let output = result {
             fputs("\(output)\n", stdout)  // stdout: "id" or "id:userText"
+            writeFeedback(output: output, args: args)
         }
 
         return .success
+    }
+
+    /// Appends a JSONL feedback entry to the feedback file so the receiving
+    /// Claude Code session can pick it up at the next userPromptSubmit event.
+    private func writeFeedback(output: String, args: NotifyArgs) {
+        // Resolve feedback file path — default to ~/.swiz/notification-feedback.jsonl
+        let feedbackPath: String
+        if args.feedbackFile.isEmpty {
+            let home = ProcessInfo.processInfo.environment["HOME"] ?? "~"
+            feedbackPath = "\(home)/.swiz/notification-feedback.jsonl"
+        } else {
+            feedbackPath = args.feedbackFile
+        }
+
+        // Parse output: "id" or "id:userText"
+        let actionId: String
+        let userText: String?
+        if let colonIdx = output.firstIndex(of: ":") {
+            actionId = String(output[output.startIndex..<colonIdx])
+            userText = String(output[output.index(after: colonIdx)...])
+        } else {
+            actionId = output
+            userText = nil
+        }
+
+        // Build JSON object manually — no Codable needed for this small struct
+        let ts = Int64(Date().timeIntervalSince1970 * 1000)
+        var fields: [(String, String)] = [
+            ("ts", "\(ts)"),
+            ("actionId", jsonString(actionId)),
+        ]
+        if let text = userText {
+            fields.append(("userText", jsonString(text)))
+        }
+        fields.append(("targetCwd", jsonString(args.targetCwd)))
+
+        let jsonLine = "{\(fields.map { "\(jsonString($0.0)):\($0.1)" }.joined(separator: ","))}\n"
+
+        // Create directory if needed, then append
+        let fileURL = URL(fileURLWithPath: feedbackPath)
+        let dirURL = fileURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
+
+        if let data = jsonLine.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: feedbackPath) {
+                if let handle = try? FileHandle(forWritingTo: fileURL) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    try? handle.close()
+                }
+            } else {
+                try? data.write(to: fileURL, options: .atomic)
+            }
+        }
+    }
+
+    /// Wraps a string as a JSON string literal with minimal escaping.
+    private func jsonString(_ s: String) -> String {
+        let escaped = s
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
+        return "\"\(escaped)\""
     }
 
     private func requestAuthorization() async -> Bool {

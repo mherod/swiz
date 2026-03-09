@@ -20,6 +20,7 @@ if (!raw) process.exit(0)
 const parsed = sessionHookInputSchema.safeParse(raw)
 const input = parsed.success ? parsed.data : (raw as Record<string, unknown>)
 
+const cwd = (input.cwd as string | undefined) ?? ""
 const message = (input.message as string | undefined)?.trim() ?? ""
 const notificationType = (input.notification_type as string | undefined) ?? ""
 const providedTitle = (input.title as string | undefined)?.trim() ?? ""
@@ -71,20 +72,23 @@ function soundForType(type: string): string {
   }
 }
 
-const proc = Bun.spawn(
-  [
-    binary,
-    "--title",
-    titleForType(notificationType),
-    "--body",
-    message,
-    "--sound",
-    soundForType(notificationType),
-    "--timeout",
-    "3",
-  ],
-  { stdout: "inherit", stderr: "inherit" }
-)
+const spawnArgs = [
+  binary,
+  "--title",
+  titleForType(notificationType),
+  "--body",
+  message,
+  "--sound",
+  soundForType(notificationType),
+  "--timeout",
+  "3",
+]
+
+if (cwd) {
+  spawnArgs.push("--target-cwd", cwd)
+}
+
+const proc = Bun.spawn(spawnArgs, { stdout: "inherit", stderr: "inherit" })
 
 await proc.exited
 process.exit(0)

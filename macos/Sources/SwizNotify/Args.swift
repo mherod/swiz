@@ -10,6 +10,12 @@ struct NotifyArgs {
     var imageURL: String = ""
     var timeout: Double = 10.0
     var actions: [Action] = []
+    /// Path to append JSONL feedback entries when an action is tapped.
+    /// Defaults to ~/.swiz/notification-feedback.jsonl when non-empty.
+    var feedbackFile: String = ""
+    /// The working directory of the session that sent this notification.
+    /// Written into JSONL feedback entries so the receiving session can filter by project.
+    var targetCwd: String = ""
 
     struct Action {
         let identifier: String
@@ -101,6 +107,14 @@ func parseArgs(_ args: [String]) throws -> NotifyArgs {
             guard i < args.endIndex else { throw ArgError.missingValue("--text-action placeholder") }
             let taPlaceholder = args[i]
             result.textActions.append(.init(identifier: taId, title: taTitle, placeholder: taPlaceholder))
+        case "--feedback-file":
+            i = args.index(after: i)
+            guard i < args.endIndex else { throw ArgError.missingValue("--feedback-file") }
+            result.feedbackFile = args[i]
+        case "--target-cwd":
+            i = args.index(after: i)
+            guard i < args.endIndex else { throw ArgError.missingValue("--target-cwd") }
+            result.targetCwd = args[i]
         default:
             if arg.hasPrefix("-") {
                 throw ArgError.unknownFlag(arg)
