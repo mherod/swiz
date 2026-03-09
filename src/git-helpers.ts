@@ -4,7 +4,7 @@
 // layer (src/) and the hook layer (hooks/). Extracted from hooks/hook-utils.ts
 // to remove the src-to-hooks coupling (issue #85).
 
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { resolveSpawnCwd } from "./cwd.ts"
 
@@ -187,6 +187,38 @@ export function resolveGitPaths(cwd: string): { gitDir: string; workTree: string
     const parent = dirname(dir)
     if (parent === dir) return null
     dir = parent
+  }
+}
+
+// ─── Local git exclude management ────────────────────────────────────────────
+
+/**
+ * Ensure that `entry` appears in the repo-local `.git/info/exclude` file for
+ * the repository containing `cwd`. Idempotent — does not add duplicates.
+ *
+ * This is the correct mechanism for local-only excludes that should not be
+ * committed or shared via `.gitignore`. Silently no-ops when `cwd` is not
+ * inside a git repository or any I/O operation fails.
+ */
+export function ensureGitExclude(cwd: string, entry: string): void {
+  try {
+    const paths = resolveGitPaths(cwd)
+    if (!paths) return
+    const infoDir = join(paths.gitDir, "info")
+    const excludePath = join(infoDir, "exclude")
+    mkdirSync(infoDir, { recursive: true })
+    let existing = ""
+    try {
+      existing = readFileSync(excludePath, "utf8")
+    } catch {
+      // File does not exist yet — start with empty string
+    }
+    const lines = existing.split("\n")
+    if (lines.some((l) => l.trim() === entry.trim())) return
+    const appended = existing.endsWith("\n") || existing === "" ? existing : `${existing}\n`
+    writeFileSync(excludePath, `${appended}${entry}\n`)
+  } catch {
+    // Non-fatal: silently ignore all failures
   }
 }
 

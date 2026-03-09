@@ -4,7 +4,12 @@
 
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
-import { type GitBranchStatus, getGitBranchStatus, ghJson } from "../git-helpers.ts"
+import {
+  ensureGitExclude,
+  type GitBranchStatus,
+  getGitBranchStatus,
+  ghJson,
+} from "../git-helpers.ts"
 import {
   getEffectiveSwizSettings,
   type ProjectState,
@@ -309,6 +314,7 @@ export async function updateContextStats(cwd: string, pct: number): Promise<Cont
   try {
     await mkdir(join(cwd, ".swiz"), { recursive: true })
     await writeFile(getContextStatsPath(cwd), `${JSON.stringify(stats, null, 2)}\n`)
+    ensureGitExclude(cwd, ".swiz/")
   } catch {
     // Non-fatal — status line continues without persisted stats
   }

@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  ensureGitExclude,
   GIT_DIR_NAME,
   type GitBranchStatus,
   getGitBranchStatus,
@@ -166,5 +167,105 @@ describe("getGitBranchStatus", () => {
     const fromCwd = await getGitBranchStatus(process.cwd())
     const fromSub = await getGitBranchStatus(`${process.cwd()}/src`)
     expect(fromSub?.branch).toBe(fromCwd?.branch)
+  })
+})
+
+// ─── ensureGitExclude ─────────────────────────────────────────────────────────
+
+function makeFakeRepo(base: string): string {
+  const repoDir = join(base, "repo")
+  mkdirSync(join(repoDir, ".git", "info"), { recursive: true })
+  writeFileSync(join(repoDir, ".git", "HEAD"), "ref: refs/heads/main\n")
+  return repoDir
+}
+
+describe("ensureGitExclude", () => {
+  test("creates exclude file with entry when it does not exist", () => {
+    const tmp = join(tmpdir(), `swiz-exclude-test-${process.pid}-1`)
+    mkdirSync(tmp, { recursive: true })
+    try {
+      const repo = makeFakeRepo(tmp)
+      const excludePath = join(repo, ".git", "info", "exclude")
+      expect(existsSync(excludePath)).toBe(false)
+      ensureGitExclude(repo, ".swiz/")
+      expect(existsSync(excludePath)).toBe(true)
+      expect(readFileSync(excludePath, "utf8")).toContain(".swiz/")
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  test("is idempotent — does not duplicate entry", () => {
+    const tmp = join(tmpdir(), `swiz-exclude-test-${process.pid}-2`)
+    mkdirSync(tmp, { recursive: true })
+    try {
+      const repo = makeFakeRepo(tmp)
+      ensureGitExclude(repo, ".swiz/")
+      ensureGitExclude(repo, ".swiz/")
+      ensureGitExclude(repo, ".swiz/")
+      const content = readFileSync(join(repo, ".git", "info", "exclude"), "utf8")
+      const occurrences = content.split(".swiz/").length - 1
+      expect(occurrences).toBe(1)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  test("creates .git/info/ directory when it is missing", () => {
+    const tmp = join(tmpdir(), `swiz-exclude-test-${process.pid}-3`)
+    mkdirSync(tmp, { recursive: true })
+    try {
+      // Set up a git repo WITHOUT .git/info/
+      const repoDir = join(tmp, "repo")
+      mkdirSync(join(repoDir, ".git"), { recursive: true })
+      writeFileSync(join(repoDir, ".git", "HEAD"), "ref: refs/heads/main\n")
+      expect(existsSync(join(repoDir, ".git", "info"))).toBe(false)
+      ensureGitExclude(repoDir, ".swiz/")
+      expect(existsSync(join(repoDir, ".git", "info", "exclude"))).toBe(true)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  test("appends to existing exclude file without duplicating", () => {
+    const tmp = join(tmpdir(), `swiz-exclude-test-${process.pid}-4`)
+    mkdirSync(tmp, { recursive: true })
+    try {
+      const repo = makeFakeRepo(tmp)
+      const excludePath = join(repo, ".git", "info", "exclude")
+      writeFileSync(excludePath, "*.log\n*.tmp\n")
+      ensureGitExclude(repo, ".swiz/")
+      const content = readFileSync(excludePath, "utf8")
+      expect(content).toContain("*.log")
+      expect(content).toContain(".swiz/")
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  test("does not add entry when already present", () => {
+    const tmp = join(tmpdir(), `swiz-exclude-test-${process.pid}-5`)
+    mkdirSync(tmp, { recursive: true })
+    try {
+      const repo = makeFakeRepo(tmp)
+      const excludePath = join(repo, ".git", "info", "exclude")
+      writeFileSync(excludePath, "*.log\n.swiz/\n*.tmp\n")
+      ensureGitExclude(repo, ".swiz/")
+      const content = readFileSync(excludePath, "utf8")
+      const occurrences = content.split(".swiz/").length - 1
+      expect(occurrences).toBe(1)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  test("silently no-ops outside a git repo", () => {
+    const tmp = join(tmpdir(), `swiz-exclude-test-${process.pid}-6`)
+    mkdirSync(tmp, { recursive: true })
+    try {
+      expect(() => ensureGitExclude(tmp, ".swiz/")).not.toThrow()
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })
