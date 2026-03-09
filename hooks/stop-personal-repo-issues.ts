@@ -399,6 +399,12 @@ async function main(): Promise<void> {
 
     if (issueCount === 0 && prCount === 0 && refinementCount === 0) return
 
+    // Hoist sorted arrays so issue numbers are available for action-plan step text.
+    const sortedRefinement = [...refinementIssues].sort((a, b) => scoreIssue(b) - scoreIssue(a))
+    const sortedIssues = [...actionableIssues].sort((a, b) => scoreIssue(b) - scoreIssue(a))
+    const firstRefinementNum = sortedRefinement[0]?.number
+    const firstIssueNum = sortedIssues[0]?.number
+
     const reasonLines: string[] = []
 
     if (prCount > 0) {
@@ -420,7 +426,6 @@ async function main(): Promise<void> {
       reasonLines.push(
         `${refinementCount} issue(s) need refinement before they are ready for implementation:`
       )
-      const sortedRefinement = [...refinementIssues].sort((a, b) => scoreIssue(b) - scoreIssue(a))
       const shownRefinement = sortedRefinement.slice(0, MAX_SHOWN_ISSUES)
       const hiddenRefinement = sortedRefinement.length - shownRefinement.length
       for (const issue of shownRefinement) {
@@ -444,7 +449,6 @@ async function main(): Promise<void> {
         ? "in this personal repository"
         : "assigned to or created by you in this repository"
       reasonLines.push(`You have ${issueCount} open issue(s) ${issueContext}:`)
-      const sortedIssues = [...actionableIssues].sort((a, b) => scoreIssue(b) - scoreIssue(a))
       const shownIssues = sortedIssues.slice(0, MAX_SHOWN_ISSUES)
       const hiddenCount = sortedIssues.length - shownIssues.length
       for (const issue of shownIssues) {
@@ -455,7 +459,8 @@ async function main(): Promise<void> {
       }
     }
 
-    // Combined action plan — ordered by dependency: PR feedback → refine → pick up issues
+    // Combined action plan — ordered by dependency: PR feedback → refine → pick up issues.
+    // formatActionPlan ends with \n, so no separator push is needed before it.
     const planSteps: string[] = []
     if (prCount > 0) {
       planSteps.push(
@@ -467,10 +472,11 @@ async function main(): Promise<void> {
       )
     }
     if (refinementCount > 0) {
+      const refineArg = firstRefinementNum !== undefined ? ` ${firstRefinementNum}` : ""
       planSteps.push(
         skillAdvice(
           "refine-issue",
-          "Use the /refine-issue skill to refine and label issues:\n  /refine-issue — Refine the next issue needing attention",
+          `Use the /refine-issue skill to refine and label issues:\n  /refine-issue${refineArg} — Refine the next issue needing attention`,
           "Refine issues before implementation. Every issue MUST have at least one label from each category:\n" +
             "  1. Type (bug, enhancement, documentation)\n" +
             "  2. Readiness (ready, triaged, backlog)\n" +
@@ -485,11 +491,12 @@ async function main(): Promise<void> {
       )
     }
     if (issueCount > 0) {
+      const issueArg = firstIssueNum !== undefined ? ` ${firstIssueNum}` : ""
       planSteps.push(
         skillAdvice(
           "work-on-issue",
-          "Use the /work-on-issue skill to pick up and resolve issues:\n  /work-on-issue — Start working on the next issue",
-          "Pick up and resolve open issues before stopping:\n  gh issue list --state open\n  gh issue view <number>"
+          `Use the /work-on-issue skill to pick up and resolve issues:\n  /work-on-issue${issueArg} — Start working on the next issue`,
+          `Pick up and resolve open issues before stopping:\n  gh issue list --state open\n  gh issue view ${firstIssueNum ?? "<number>"}`
         )
       )
     }
