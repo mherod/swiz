@@ -467,15 +467,21 @@ async function main(): Promise<void> {
     // formatActionPlan ends with \n, so no separator push is needed before it.
     const planSteps: string[] = []
     if (prCount > 0) {
+      const firstPrNum = prs[0]?.number ?? "<number>"
       const workOnPrsSkill = [
         "Use the /work-on-prs skill to address all feedback and resolve reviews:",
         "  /work-on-prs — Start working on the next PR",
       ].join("\n")
-      const workOnPrsFallback = [
-        "Address all PR feedback before stopping:",
-        "  gh pr list --state open",
-        "  gh pr view <number> --comments",
-      ].join("\n")
+      const workOnPrsFallback = formatActionPlan(
+        [
+          `Read ALL feedback for PR #${firstPrNum}: top-level comments, inline review comments, and review summaries`,
+          "Implement a fix for each unresolved item; commit each fix separately",
+          "Run quality checks: bun run typecheck && bun run lint && bun test",
+          `Push and verify CI: git push && gh pr checks ${firstPrNum}`,
+          `Dismiss stale CHANGES_REQUESTED reviews and request re-review: gh pr edit ${firstPrNum} --add-reviewer <reviewer>`,
+        ],
+        { header: "Address all PR feedback before stopping:" }
+      )
       planSteps.push(skillAdvice("work-on-prs", workOnPrsSkill, workOnPrsFallback))
     }
     if (refinementCount > 0) {
