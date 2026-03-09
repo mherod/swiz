@@ -12,10 +12,9 @@ import {
   blockStop,
   createSessionTask,
   formatActionPlan,
-  getGitAheadBehind,
+  getGitStatusV2,
   git,
   isGitRepo,
-  parseGitStatus,
   sanitizeSessionId,
   skillAdvice,
 } from "./hook-utils.ts"
@@ -79,12 +78,19 @@ async function markPushPrompted(sessionId: string | undefined): Promise<void> {
 }
 
 function buildUncommittedReason(
-  porcelain: string,
+  status: {
+    total: number
+    modified: number
+    added: number
+    deleted: number
+    untracked: number
+    lines: string[]
+  },
   branch: string,
   upstream: string,
   behind: number
 ): string {
-  const { total, modified, added, deleted, untracked, lines } = parseGitStatus(porcelain)
+  const { total, modified, added, deleted, untracked, lines } = status
 
   const summary = [
     modified > 0 ? `${modified} modified` : "",
@@ -148,23 +154,21 @@ async function main(): Promise<void> {
   const effective = getEffectiveSwizSettings(settings, input.session_id)
   if (!effective.gitStatusGate) return
 
-  const branch = await git(["branch", "--show-current"], cwd)
-  if (!branch) return // detached HEAD — nothing sensible to report
-
-  // Run status and remote check in parallel
-  const [porcelain, remoteUrl] = await Promise.all([
-    git(["status", "--porcelain"], cwd),
+  // Single subprocess replaces: branch --show-current, status --porcelain,
+  // rev-parse @{upstream}, rev-list x2. Remote URL check is still separate
+  // because porcelain=v2 --branch does not expose the remote fetch URL.
+  const [gitStatus, remoteUrl] = await Promise.all([
+    getGitStatusV2(cwd),
     git(["remote", "get-url", "origin"], cwd),
   ])
 
-  const hasUncommitted = !!porcelain
-  const hasRemote = !!remoteUrl
+  if (!gitStatus) return
+  const { branch, ahead, behind } = gitStatus
+  if (!branch || branch === "(detached)") return // detached HEAD — nothing sensible to report
 
-  // Fetch ahead/behind only when a remote tracking branch exists
-  const aheadBehind = hasRemote ? await getGitAheadBehind(cwd) : null
-  const ahead = aheadBehind?.ahead ?? 0
-  const behind = aheadBehind?.behind ?? 0
-  const upstream = aheadBehind?.upstream ?? `origin/${branch}`
+  const hasUncommitted = gitStatus.total > 0
+  const hasRemote = !!remoteUrl
+  const upstream = gitStatus.upstream ?? `origin/${branch}`
 
   // Nothing to report
   if (!hasUncommitted && ahead === 0 && behind === 0) return
@@ -223,11 +227,12 @@ async function main(): Promise<void> {
       // Get our git root so we only react to pushes within this repo
       const gitRoot = await git(["rev-parse", "--show-toplevel"], cwd)
 
-      // Filter candidates: non-ancestor, and CWD is within our git root
+      // Batch all non-ancestor PIDs into a single lsof call (replaces sequential per-PID fan-out).
+      // lsof -p p1,p2,... -d cwd -Fn prints "p<pid>" then "n<cwd>" for each process.
       const nonAncestorPids = pushPids.filter((pid) => !ancestors.has(pid))
       let hasBackgroundPush = false
-      for (const pid of nonAncestorPids) {
-        const lsofProc = Bun.spawn(["lsof", "-p", pid.toString(), "-d", "cwd", "-Fn"], {
+      if (nonAncestorPids.length > 0) {
+        const lsofProc = Bun.spawn(["lsof", "-p", nonAncestorPids.join(","), "-d", "cwd", "-Fn"], {
           stdout: "pipe",
           stderr: "pipe",
         })
@@ -239,14 +244,14 @@ async function main(): Promise<void> {
         const lsofOut = await new Response(lsofProc.stdout).text()
         await lsofProc.exited
         clearTimeout(killTimer)
-        if (lsofKilled) continue // Skip this PID if lsof timed out
-        const procCwd = lsofOut
-          .split("\n")
-          .find((l) => l.startsWith("n"))
-          ?.slice(1)
-        if (procCwd && gitRoot && procCwd.startsWith(gitRoot)) {
-          hasBackgroundPush = true
-          break
+        if (!lsofKilled && gitRoot) {
+          // Each "n<path>" line following a "p<pid>" header is a CWD entry
+          for (const line of lsofOut.split("\n")) {
+            if (line.startsWith("n") && line.slice(1).startsWith(gitRoot)) {
+              hasBackgroundPush = true
+              break
+            }
+          }
         }
       }
 
@@ -266,7 +271,7 @@ async function main(): Promise<void> {
   const steps: string[] = []
 
   let reason = hasUncommitted
-    ? buildUncommittedReason(porcelain, branch, upstream, behind)
+    ? buildUncommittedReason(gitStatus, branch, upstream, behind)
     : describeRemoteState(branch, upstream, ahead, behind)
 
   if (hasUncommitted) {

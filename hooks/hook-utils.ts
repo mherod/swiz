@@ -1050,6 +1050,95 @@ export async function getGitAheadBehind(
   return { ahead, behind, upstream }
 }
 
+export interface GitStatusV2 {
+  /** Current branch name, or "(detached)" in detached-HEAD state. */
+  branch: string
+  /** Total number of changed files (modified + added + deleted + untracked). */
+  total: number
+  modified: number
+  added: number
+  deleted: number
+  untracked: number
+  /** File-status lines for display (first column stripped). */
+  lines: string[]
+  /** Commits ahead of upstream, or 0 if no upstream. */
+  ahead: number
+  /** Commits behind upstream, or 0 if no upstream. */
+  behind: number
+  /** Upstream ref name, e.g. "origin/main", or null if no upstream is configured. */
+  upstream: string | null
+}
+
+/**
+ * Run `git status --porcelain=v2 --branch` once and parse branch name,
+ * ahead/behind counts, and file-change breakdown from the single output.
+ *
+ * Replaces the previous fan-out of five separate git subprocess calls:
+ *   git branch --show-current
+ *   git status --porcelain
+ *   git rev-parse --abbrev-ref @{upstream}
+ *   git rev-list --count @{upstream}..HEAD
+ *   git rev-list --count HEAD..@{upstream}
+ *
+ * Returns null when the directory is not a git repository or the command fails.
+ */
+export async function getGitStatusV2(cwd: string): Promise<GitStatusV2 | null> {
+  const out = await git(["status", "--porcelain=v2", "--branch"], cwd)
+  if (out === null) return null
+
+  let branch = "(detached)"
+  let ahead = 0
+  let behind = 0
+  let upstream: string | null = null
+  let modified = 0
+  let added = 0
+  let deleted = 0
+  let untracked = 0
+  const lines: string[] = []
+
+  for (const line of out.split("\n")) {
+    if (line.startsWith("# branch.head ")) {
+      const head = line.slice("# branch.head ".length).trim()
+      branch = head === "(detached)" ? "(detached)" : head
+      continue
+    }
+    if (line.startsWith("# branch.upstream ")) {
+      upstream = line.slice("# branch.upstream ".length).trim()
+      continue
+    }
+    if (line.startsWith("# branch.ab ")) {
+      const match = /\+(\d+)\s+-(\d+)/.exec(line)
+      if (match) {
+        ahead = Number(match[1])
+        behind = Number(match[2])
+      }
+      continue
+    }
+    // Ordinary changed entry (type "1" or "2")
+    if (line.startsWith("1 ") || line.startsWith("2 ")) {
+      const xy = line.split(" ")[1] ?? ".."
+      // Index status (first char of xy)
+      if (xy[0] === "D") deleted++
+      else if (xy[0] === "A") added++
+      else if (xy[0] !== ".") modified++
+      // Worktree status (second char of xy)
+      if (xy[1] === "D") deleted++
+      else if (xy[1] !== ".") modified++
+      // File path: type "1" uses last token; type "2" (rename) uses tab-separated last field
+      const path = line.includes("\t") ? line.split("\t").pop()! : line.split(" ").pop()!
+      lines.push(path)
+      continue
+    }
+    if (line.startsWith("? ")) {
+      untracked++
+      lines.push(line.slice(2))
+    }
+  }
+
+  const total = lines.length
+  return { branch, total, modified, added, deleted, untracked, lines, ahead, behind, upstream }
+}
+
 /** Canonical empty-tree hash used when repos have fewer than N commits. */
 export const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
