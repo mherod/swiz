@@ -24,7 +24,12 @@ import { dirname, join } from "node:path"
 import { translateMatcher } from "../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
 import { getHomeDirOrNull, getHomeDirWithFallback } from "../src/home.ts"
-import { getSwizSettingsPath, STATE_TRANSITIONS, stateDataSchema } from "../src/settings.ts"
+import {
+  getStatePath,
+  getSwizSettingsPath,
+  STATE_TRANSITIONS,
+  stateDataSchema,
+} from "../src/settings.ts"
 import { skillAdvice, skillExists } from "../src/skill-utils.ts"
 import {
   GH_CMD_RE,
@@ -192,7 +197,7 @@ export function denyPostToolUse(reason: string): never {
 /** Read current project state line synchronously, e.g. "State: developing → [reviewing, planning]". */
 function readStateLineSyncMaybe(cwd: string): string | null {
   try {
-    const raw = readFileSync(join(cwd, ".swiz", "state.json"), "utf-8")
+    const raw = readFileSync(getStatePath(cwd), "utf-8")
     const result = stateDataSchema.safeParse(JSON.parse(raw))
     if (!result.success) return null
     const allowed = STATE_TRANSITIONS[result.data.state]

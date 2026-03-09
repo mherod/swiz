@@ -7,7 +7,8 @@
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname } from "node:path"
+import { getPrPollStatePath } from "./settings.ts"
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
@@ -29,15 +30,11 @@ export interface PrNotification {
   updated_at: string
 }
 
-const STATE_FILENAME = "pr-poll-state.json"
-
-function statePath(home: string): string {
-  return join(home, ".swiz", STATE_FILENAME)
-}
-
 export function readPrPollState(home: string): PrPollState {
+  const path = getPrPollStatePath(home)
   try {
-    const raw = readFileSync(statePath(home), "utf8")
+    if (!path) throw new Error("no home")
+    const raw = readFileSync(path, "utf8")
     const parsed = JSON.parse(raw) as Partial<PrPollState>
     if (parsed.lastPolledAt) return { lastPolledAt: parsed.lastPolledAt }
   } catch {
@@ -48,7 +45,8 @@ export function readPrPollState(home: string): PrPollState {
 }
 
 export function writePrPollState(home: string, state: PrPollState): void {
-  const path = statePath(home)
+  const path = getPrPollStatePath(home)
+  if (!path) return
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, "utf8")
 }

@@ -708,6 +708,11 @@ export function getSwizSettingsPath(home = getHomeDirOrNull()): string | null {
   return join(home, ".swiz", "settings.json")
 }
 
+export function getPrPollStatePath(home = getHomeDirOrNull()): string | null {
+  if (!home) return null
+  return join(home, ".swiz", "pr-poll-state.json")
+}
+
 export async function readSwizSettings(options: ReadOptions = {}): Promise<SwizSettings> {
   const path = getSwizSettingsPath(options.home)
   if (!path) return cloneDefaults()
