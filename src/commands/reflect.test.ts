@@ -178,6 +178,7 @@ describe("reflectCommand", () => {
     const promptCapture = join(home, "captured-reflect-prompt.txt")
     const result = await runReflect(["3", "--dir", projectDir], {
       HOME: home,
+      AI_PROVIDER: "gemini",
       GEMINI_API_KEY: "test-key",
       GEMINI_TEST_RESPONSE: JSON.stringify(STRUCTURED_REFLECTION_FIXTURE),
       GEMINI_TEST_CAPTURE_FILE: promptCapture,
@@ -228,6 +229,7 @@ describe("reflectCommand", () => {
 
     const result = await runReflect(["3", "--dir", projectDir, "--json"], {
       HOME: home,
+      AI_PROVIDER: "gemini",
       GEMINI_API_KEY: "test-key",
       GEMINI_TEST_RESPONSE: JSON.stringify(STRUCTURED_REFLECTION_FIXTURE),
     })

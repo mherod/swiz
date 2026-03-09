@@ -154,6 +154,7 @@ describe("ideaCommand", () => {
 
     const promptCapture = join(dir, "captured-prompt.txt")
     const result = await runIdea(["--dir", dir], {
+      AI_PROVIDER: "gemini",
       GEMINI_API_KEY: "test-key",
       GEMINI_TEST_RESPONSE: JSON.stringify(STRUCTURED_IDEA_FIXTURE),
       GEMINI_TEST_CAPTURE_FILE: promptCapture,
