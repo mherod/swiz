@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { orderBy } from "lodash-es"
 import { AGENTS, type AgentDef, getAgentByFlag, translateEvent } from "../agents.ts"
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import { getHomeDirOrNull } from "../home.ts"
@@ -365,11 +366,27 @@ async function installAgent(agent: AgentDef, dryRun: boolean) {
     const allNewCmds = collectCommands(config)
     const swizCmds = new Set([...allNewCmds].filter((c) => isSwizCommand(c)))
     const userCmds = new Set([...oldCmds].filter((c) => !isManagedSwizCommand(c)))
-    const legacyCmds = [...oldCmds].filter((c) => LEGACY_HOOK_DIRS.some((d) => c.includes(d)))
+    const legacyCmds = orderBy(
+      [...oldCmds].filter((c) => LEGACY_HOOK_DIRS.some((d) => c.includes(d))),
+      [(command) => command],
+      ["asc"]
+    )
 
-    const added = [...swizCmds].filter((c) => !oldCmds.has(c))
-    const removed = [...oldCmds].filter((c) => isSwizCommand(c) && !swizCmds.has(c))
-    const kept = [...swizCmds].filter((c) => oldCmds.has(c))
+    const added = orderBy(
+      [...swizCmds].filter((c) => !oldCmds.has(c)),
+      [(command) => command],
+      ["asc"]
+    )
+    const removed = orderBy(
+      [...oldCmds].filter((c) => isSwizCommand(c) && !swizCmds.has(c)),
+      [(command) => command],
+      ["asc"]
+    )
+    const kept = orderBy(
+      [...swizCmds].filter((c) => oldCmds.has(c)),
+      [(command) => command],
+      ["asc"]
+    )
 
     if (added.length) {
       console.log(`    ${GREEN}+ ${added.length} hook(s) added:${RESET}`)
