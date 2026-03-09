@@ -298,7 +298,10 @@ describe("findTaskAcrossSessions", () => {
   })
 
   it("scopes search to project sessions when filterCwd is provided", async () => {
-    // Create an isolated setup where only SESSION_A matches the CWD
+    // Create an isolated setup where only SESSION_A matches the CWD.
+    // SESSION_B and SESSION_C are indexed under a different project key to
+    // simulate the real-world case where they belong to other projects —
+    // this prevents the compaction-gap fallback from including them.
     const isolatedProjects = join(TMP, "projects-isolated-cross")
     const key = projectKeyFromCwd(FILTER_CWD)
     await mkdir(join(isolatedProjects, key), { recursive: true })
@@ -306,8 +309,12 @@ describe("findTaskAcrossSessions", () => {
       join(isolatedProjects, key, `${SESSION_A}.jsonl`),
       `${JSON.stringify({ type: "user", cwd: FILTER_CWD })}\n`
     )
+    const otherKey = "other-project-cross"
+    await mkdir(join(isolatedProjects, otherKey), { recursive: true })
+    await writeFile(join(isolatedProjects, otherKey, `${SESSION_B}.jsonl`), "\n")
+    await writeFile(join(isolatedProjects, otherKey, `${SESSION_C}.jsonl`), "\n")
 
-    // Task #120 is in SESSION_B which is NOT in this isolated project dir
+    // Task #120 is in SESSION_B which is NOT in this project — must not match
     const results = await findTaskAcrossSessions("120", FILTER_CWD, TASKS, isolatedProjects)
     expect(results.length).toBe(0)
   })
@@ -438,7 +445,9 @@ describe("resolveTaskById", () => {
 
   it("prefixed ID respects filterCwd — rejects task outside scoped sessions", async () => {
     // Isolated projects dir: only SESSION_A is mapped to FILTER_CWD.
-    // SESSION_C (and its prefixed tasks) must not be reachable.
+    // SESSION_B and SESSION_C are indexed under a different project key to
+    // simulate the real-world case where they belong to other projects —
+    // this prevents the compaction-gap fallback from including them.
     const scopedProjects = join(TMP, "projects-scope-parity")
     const key = projectKeyFromCwd(FILTER_CWD)
     await mkdir(join(scopedProjects, key), { recursive: true })
@@ -446,6 +455,10 @@ describe("resolveTaskById", () => {
       join(scopedProjects, key, `${SESSION_A}.jsonl`),
       `${JSON.stringify({ type: "user", cwd: FILTER_CWD })}\n`
     )
+    const otherKey1 = "other-project-scope-parity"
+    await mkdir(join(scopedProjects, otherKey1), { recursive: true })
+    await writeFile(join(scopedProjects, otherKey1, `${SESSION_B}.jsonl`), "\n")
+    await writeFile(join(scopedProjects, otherKey1, `${SESSION_C}.jsonl`), "\n")
 
     const prefixC = sessionPrefix(SESSION_C)
     // SESSION_C is outside the scoped project — should throw
@@ -457,6 +470,8 @@ describe("resolveTaskById", () => {
   it("unprefixed ID also respects filterCwd — rejects task outside scoped sessions", async () => {
     // Mirror test for unprefixed path: task #120 lives in SESSION_B which is NOT
     // in scopedProjects2 (only SESSION_A is). Must throw, not return SESSION_B's task.
+    // SESSION_B and SESSION_C are indexed under a different project key to
+    // simulate the real-world case where they belong to other projects.
     const scopedProjects2 = join(TMP, "projects-scope-parity-2")
     const key = projectKeyFromCwd(FILTER_CWD)
     await mkdir(join(scopedProjects2, key), { recursive: true })
@@ -464,6 +479,10 @@ describe("resolveTaskById", () => {
       join(scopedProjects2, key, `${SESSION_A}.jsonl`),
       `${JSON.stringify({ type: "user", cwd: FILTER_CWD })}\n`
     )
+    const otherKey2 = "other-project-scope-parity-2"
+    await mkdir(join(scopedProjects2, otherKey2), { recursive: true })
+    await writeFile(join(scopedProjects2, otherKey2, `${SESSION_B}.jsonl`), "\n")
+    await writeFile(join(scopedProjects2, otherKey2, `${SESSION_C}.jsonl`), "\n")
 
     // Task #120 only exists in SESSION_B — which is excluded by filterCwd
     await expect(
