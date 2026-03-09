@@ -100,37 +100,37 @@ async function runHookRaw(
 // ─── Input validation ─────────────────────────────────────────────────────────
 
 describe("stop-auto-continue: input validation", () => {
-  test("exits silently when transcript_path is missing from input", async () => {
+  test("blocks when transcript_path is missing from input", async () => {
     // No transcript_path key at all
     const result = await runHookRaw({ session_id: "test", cwd: "/tmp" })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput.trim()).toBe("")
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("transcript_path is missing")
   })
 
-  test("exits silently when transcript_path is null", async () => {
+  test("blocks when transcript_path is null", async () => {
     const result = await runHookRaw({
       transcript_path: null,
       session_id: "test",
       cwd: "/tmp",
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput.trim()).toBe("")
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("malformed stop-hook input")
   })
 
-  test("exits silently when transcript file does not exist on disk", async () => {
+  test("blocks when transcript file does not exist on disk", async () => {
     const result = await runHookRaw({
       transcript_path: "/nonexistent/path/transcript.jsonl",
       session_id: "test",
       cwd: "/tmp",
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.rawOutput.trim()).toBe("")
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("failed to read transcript")
   })
 
-  test("exits silently when transcript contains no tool calls (all text turns)", async () => {
+  test("blocks when transcript contains no tool calls (all text turns)", async () => {
     const workDir = await createTempDir()
 
     // Transcript with only user+assistant text turns, no tool_use blocks
@@ -145,35 +145,42 @@ describe("stop-auto-continue: input validation", () => {
     const transcriptPath = join(workDir, "transcript.jsonl")
     await writeFile(transcriptPath, transcript)
 
-    const result = await runHookRaw({
-      transcript_path: transcriptPath,
-      session_id: "test",
-      cwd: workDir,
-    })
+    const result = await runHookRaw(
+      {
+        transcript_path: transcriptPath,
+        session_id: "test",
+        cwd: workDir,
+      },
+      { AI_TEST_NO_BACKEND: "1" }
+    )
 
-    // Zero tool calls → below MIN_TOOL_CALLS (5) → silent
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("no AI backend available")
   })
 })
 
-// ─── Threshold boundary ───────────────────────────────────────────────────────
+// ─── Small-session behavior ───────────────────────────────────────────────────
 
-describe("stop-auto-continue: MIN_TOOL_CALLS boundary", () => {
-  test("4 tool calls → exits silently (below threshold)", async () => {
+describe("stop-auto-continue: small-session behavior", () => {
+  test("4 tool calls still blocks (no threshold bypass)", async () => {
     const workDir = await createTempDir()
     const transcriptPath = join(workDir, "transcript.jsonl")
     await writeFile(transcriptPath, buildTranscript(4))
 
-    const result = await runHookRaw({
-      transcript_path: transcriptPath,
-      session_id: "test",
-      cwd: workDir,
-    })
+    const result = await runHookRaw(
+      {
+        transcript_path: transcriptPath,
+        session_id: "test",
+        cwd: workDir,
+      },
+      { AI_TEST_NO_BACKEND: "1" }
+    )
 
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("no AI backend available")
   })
 
-  test("5 tool calls → blocks (at threshold)", async () => {
+  test("5 tool calls blocks", async () => {
     const workDir = await createTempDir()
     const transcriptPath = join(workDir, "transcript.jsonl")
     await writeFile(transcriptPath, buildTranscript(5))

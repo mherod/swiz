@@ -30,7 +30,6 @@ import {
 import {
   buildIssueGuidance,
   getOpenPrForBranch,
-  getTranscriptSummary,
   git,
   hasGhCli,
   isGitHubRemote,
@@ -41,7 +40,6 @@ import {
 import { stopHookInputSchema } from "./schemas.ts"
 import { getActionableIssues, needsRefinement } from "./stop-personal-repo-issues.ts"
 
-const MIN_TOOL_CALLS = 5 // Don't engage for trivial sessions (< 5 tool calls)
 const CONTEXT_TURNS = 20 // Recent turns to send as context
 const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 90_000
 
@@ -760,8 +758,18 @@ export async function checkReviewingState(
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
-  const input = stopHookInputSchema.parse(hookRaw)
+  let hookRaw: Record<string, unknown>
+  try {
+    hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
+  } catch {
+    terminate("block", "Auto-continue could not parse stop-hook input JSON.")
+  }
+
+  const parsedInput = stopHookInputSchema.safeParse(hookRaw)
+  if (!parsedInput.success) {
+    terminate("block", "Auto-continue received malformed stop-hook input.")
+  }
+  const input = parsedInput.data
   const cwd = resolveCwd(input.cwd)
 
   // Populate GEMINI_API_KEY from Keychain if not already in env.
@@ -778,17 +786,9 @@ async function main(): Promise<void> {
   const projectState = await readProjectState(cwd)
 
   if (!input.transcript_path) {
-    terminate("skip", "MISSING_TRANSCRIPT", "no transcript_path in hook input — skipping block")
-  }
-
-  // Use pre-computed summary for the tool-call threshold check when available.
-  // This avoids reading the transcript file at all for trivial sessions.
-  const summary = getTranscriptSummary(hookRaw)
-  if (summary && summary.toolCallCount < MIN_TOOL_CALLS) {
     terminate(
-      "skip",
-      "TRIVIAL_SESSION",
-      `only ${summary.toolCallCount} tool calls (min ${MIN_TOOL_CALLS}) — skipping block`
+      "block",
+      "Auto-continue could not analyze this session: transcript_path is missing from stop hook input."
     )
   }
 
@@ -796,27 +796,22 @@ async function main(): Promise<void> {
   try {
     raw = await Bun.file(input.transcript_path).text()
   } catch {
-    terminate("skip", "TRANSCRIPT_READ_ERROR", "could not read transcript file — skipping block")
+    terminate(
+      "block",
+      `Auto-continue could not analyze this session: failed to read transcript at ${input.transcript_path}.`
+    )
   }
 
   // Single combined parse: extracts turns, edited paths, and tool-call count
   // in one pass over the transcript — avoids three redundant full parses.
   const transcriptData = extractTranscriptData(raw)
 
-  // Fallback: count tool calls from raw text if no summary was available
-  if (!summary) {
-    if (transcriptData.toolCallCount < MIN_TOOL_CALLS) {
-      terminate(
-        "skip",
-        "TRIVIAL_SESSION",
-        `only ${transcriptData.toolCallCount} tool calls (min ${MIN_TOOL_CALLS}) — skipping block`
-      )
-    }
-  }
-
   const turns = transcriptData.turns.slice(-CONTEXT_TURNS)
   if (turns.length === 0) {
-    terminate("skip", "NO_TURNS", "no parseable conversation turns — skipping block")
+    terminate(
+      "block",
+      "Auto-continue could not analyze this session: transcript has no parseable conversation turns."
+    )
   }
 
   // Deterministic docs-only detection: scan the full transcript for Edit/Write

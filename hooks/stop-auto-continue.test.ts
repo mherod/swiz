@@ -155,13 +155,13 @@ describe("stop-auto-continue", () => {
     expect(result.reason).toContain("Run the test suite")
   })
 
-  test("allows stop for trivial sessions (< 5 tool calls)", async () => {
+  test("blocks stop for small sessions (no trivial-session bypass)", async () => {
     const result = await runHook({
       transcriptContent: buildTranscript(3),
     })
 
-    expect(result.decision).toBeUndefined()
-    expect(result.stderr).toContain("[stop-auto-continue:TRIVIAL_SESSION]")
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("no AI backend available")
   })
 
   test("allows stop when auto-continue is disabled in global swiz settings", async () => {
