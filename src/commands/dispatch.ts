@@ -6,6 +6,7 @@
  * and re-exports all public symbols for backward compatibility.
  */
 
+import { merge, orderBy } from "lodash-es"
 import {
   applyHookSettingFilters,
   countHooks,
@@ -30,6 +31,23 @@ import { computeTranscriptSummary } from "../transcript-summary.ts"
 import type { Command } from "../types.ts"
 
 const STDIN_PAYLOAD_TIMEOUT_MS = 2_000
+const TOOL_NAME_OPTIONAL_EVENTS = new Set([
+  "sessionStart",
+  "subagentStart",
+  "subagentStop",
+  "userPromptSubmit",
+  "stop",
+])
+
+interface ParsedPayload {
+  payload: Record<string, unknown>
+  parseError: boolean
+}
+
+interface HookContext {
+  toolName: string | undefined
+  trigger: string | undefined
+}
 
 async function readStdinPayloadWithTimeout(
   timeoutMs: number = STDIN_PAYLOAD_TIMEOUT_MS
@@ -72,6 +90,95 @@ async function readStdinPayloadWithTimeout(
       reader.releaseLock()
     } catch {}
   }
+}
+
+function parsePayload(payloadStr: string): ParsedPayload {
+  try {
+    return {
+      payload: JSON.parse(payloadStr || "{}") as Record<string, unknown>,
+      parseError: false,
+    }
+  } catch {
+    return { payload: {}, parseError: true }
+  }
+}
+
+function getHookContext(canonicalEvent: string, payload: Record<string, unknown>): HookContext {
+  const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
+  const trigger =
+    canonicalEvent === "sessionStart"
+      ? ((payload.trigger ?? payload.hook_event_name) as string | undefined)
+      : undefined
+  return { toolName, trigger }
+}
+
+function backfillPayloadDefaults(payload: Record<string, unknown>): void {
+  if (!payload.cwd) {
+    payload.cwd =
+      process.env.GEMINI_CWD ||
+      process.env.GEMINI_PROJECT_DIR ||
+      process.env.CLAUDE_PROJECT_DIR ||
+      process.cwd()
+  }
+  if (!payload.session_id) {
+    payload.session_id = process.env.GEMINI_SESSION_ID || "unknown-session"
+  }
+}
+
+function shouldWarnMissingToolName(
+  canonicalEvent: string,
+  payload: Record<string, unknown>
+): boolean {
+  if (payload.tool_name || payload.toolName) return false
+  return !TOOL_NAME_OPTIONAL_EVENTS.has(canonicalEvent)
+}
+
+async function loadCombinedManifest(cwd: string): Promise<HookGroup[]> {
+  let combinedManifest: HookGroup[] = [...manifest]
+  const projectSettings = await readProjectSettings(cwd)
+
+  if (projectSettings?.plugins?.length) {
+    const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
+    const pluginHooks = pluginResults.flatMap((r) => r.hooks)
+    for (const result of pluginResults) {
+      if (result.error) log(`   ⚠ plugin ${result.name}: ${result.error}`)
+    }
+    if (pluginHooks.length > 0) {
+      combinedManifest = [...combinedManifest, ...pluginHooks]
+      log(`   loaded ${pluginHooks.length} plugin hook group(s)`)
+    }
+  }
+
+  if (projectSettings?.hooks?.length) {
+    const { resolved, warnings } = resolveProjectHooks(projectSettings.hooks, cwd)
+    for (const warning of warnings) log(`   ⚠ ${warning}`)
+    if (resolved.length > 0) {
+      combinedManifest = [...combinedManifest, ...resolved]
+      log(`   loaded ${resolved.length} project-local hook group(s)`)
+    }
+  }
+
+  return combinedManifest
+}
+
+async function enrichPayloadForHooks(
+  payload: Record<string, unknown>,
+  parseError: boolean,
+  fallbackPayloadStr: string
+): Promise<string> {
+  if (parseError) return fallbackPayloadStr
+
+  let enrichedPayloadStr = fallbackPayloadStr
+  const transcriptPath = payload.transcript_path as string | undefined
+  if (!transcriptPath) return enrichedPayloadStr
+
+  const summary = await computeTranscriptSummary(transcriptPath)
+  if (!summary) return enrichedPayloadStr
+
+  const enriched = merge({}, payload, { _transcriptSummary: summary })
+  enrichedPayloadStr = JSON.stringify(enriched)
+  log(`   transcript summary: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`)
+  return enrichedPayloadStr
 }
 
 // ─── Backward-compatible re-exports ─────────────────────────────────────────
@@ -142,16 +249,8 @@ export const dispatchCommand: Command = {
       }
 
       const payloadStr = await readStdinPayloadWithTimeout()
-      let payload: Record<string, unknown> = {}
-      try {
-        payload = JSON.parse(payloadStr) as Record<string, unknown>
-      } catch {}
-
-      const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
-      const trigger =
-        canonicalEvent === "sessionStart"
-          ? ((payload.trigger ?? payload.hook_event_name) as string | undefined)
-          : undefined
+      const { payload } = parsePayload(payloadStr)
+      const { toolName, trigger } = getHookContext(canonicalEvent, payload)
 
       const matchingGroups = manifest.filter(
         (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
@@ -159,19 +258,12 @@ export const dispatchCommand: Command = {
       const filteredGroups = await applyHookSettingFilters(matchingGroups, payload)
 
       const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
-
-      let traces: Awaited<ReturnType<typeof replayPreToolUse>>
-      switch (strategy) {
-        case "preToolUse":
-          traces = await replayPreToolUse(filteredGroups, payloadStr)
-          break
-        case "blocking":
-          traces = await replayBlocking(filteredGroups, payloadStr, canonicalEvent)
-          break
-        case "context":
-          traces = await replayContext(filteredGroups, payloadStr)
-          break
-      }
+      const traces =
+        strategy === "preToolUse"
+          ? await replayPreToolUse(filteredGroups, payloadStr)
+          : strategy === "blocking"
+            ? await replayBlocking(filteredGroups, payloadStr, canonicalEvent)
+            : await replayContext(filteredGroups, payloadStr)
 
       formatTrace(canonicalEvent, strategy, filteredGroups.length, traces, jsonMode)
       return
@@ -184,31 +276,11 @@ export const dispatchCommand: Command = {
     const hookEventName = args[1] ?? canonicalEvent
 
     const payloadStr = await readStdinPayloadWithTimeout()
-    let payload: Record<string, unknown> = {}
-    let parseError = false
-    try {
-      payload = JSON.parse(payloadStr || "{}") as Record<string, unknown>
-    } catch {
-      parseError = true
-    }
+    const { payload, parseError } = parsePayload(payloadStr)
 
     // ── Backfill missing fields from agent environment variables ──
-    if (!payload.cwd) {
-      payload.cwd =
-        process.env.GEMINI_CWD ||
-        process.env.GEMINI_PROJECT_DIR ||
-        process.env.CLAUDE_PROJECT_DIR ||
-        process.cwd()
-    }
-    if (!payload.session_id) {
-      payload.session_id = process.env.GEMINI_SESSION_ID || "unknown-session"
-    }
-
-    const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
-    const trigger =
-      canonicalEvent === "sessionStart"
-        ? ((payload.trigger ?? payload.hook_event_name) as string | undefined)
-        : undefined
+    backfillPayloadDefaults(payload)
+    const { toolName, trigger } = getHookContext(canonicalEvent, payload)
 
     logHeader(canonicalEvent, hookEventName, toolName, trigger)
     log(`   payload: ${payloadStr.length} bytes${parseError ? " ⚠ INVALID JSON" : ""}`)
@@ -219,19 +291,10 @@ export const dispatchCommand: Command = {
     if (payloadStr.length === 0) {
       log(`   ⚠ EMPTY STDIN — no payload received from agent`)
     } else {
-      const keys = Object.keys(payload)
+      const keys = orderBy(Object.keys(payload), [(key) => key], ["asc"])
       log(`   keys: ${keys.join(", ")}`)
       if (!payload.session_id) log(`   ⚠ missing session_id`)
-      if (
-        !payload.tool_name &&
-        !payload.toolName &&
-        canonicalEvent !== "sessionStart" &&
-        canonicalEvent !== "subagentStart" &&
-        canonicalEvent !== "subagentStop" &&
-        canonicalEvent !== "userPromptSubmit" &&
-        canonicalEvent !== "stop"
-      )
-        log(`   ⚠ missing tool_name`)
+      if (shouldWarnMissingToolName(canonicalEvent, payload)) log(`   ⚠ missing tool_name`)
     }
 
     // ── Best-effort: drain any offline issue mutations before hooks run ──
@@ -239,27 +302,7 @@ export const dispatchCommand: Command = {
     await tryReplayPendingMutations(cwd)
 
     // ── Load plugin + project-local hooks and merge with built-in manifest ──
-    let combinedManifest: HookGroup[] = [...manifest]
-    const projectSettings = await readProjectSettings(cwd)
-    if (projectSettings?.plugins?.length) {
-      const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
-      const pluginHooks = pluginResults.flatMap((r) => r.hooks)
-      for (const r of pluginResults) {
-        if (r.error) log(`   ⚠ plugin ${r.name}: ${r.error}`)
-      }
-      if (pluginHooks.length > 0) {
-        combinedManifest = [...combinedManifest, ...pluginHooks]
-        log(`   loaded ${pluginHooks.length} plugin hook group(s)`)
-      }
-    }
-    if (projectSettings?.hooks?.length) {
-      const { resolved, warnings } = resolveProjectHooks(projectSettings.hooks, cwd)
-      for (const w of warnings) log(`   ⚠ ${w}`)
-      if (resolved.length > 0) {
-        combinedManifest = [...combinedManifest, ...resolved]
-        log(`   loaded ${resolved.length} project-local hook group(s)`)
-      }
-    }
+    const combinedManifest = await loadCombinedManifest(cwd)
 
     const matchingGroups = combinedManifest.filter(
       (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
@@ -277,18 +320,7 @@ export const dispatchCommand: Command = {
     if (filteredGroups.length === 0) return
 
     // ── Pre-compute transcript summary for hooks ──────────────────────────
-    let enrichedPayloadStr = finalPayloadStr
-    const transcriptPath = payload.transcript_path as string | undefined
-    if (transcriptPath && !parseError) {
-      const summary = await computeTranscriptSummary(transcriptPath)
-      if (summary) {
-        const enriched = { ...payload, _transcriptSummary: summary }
-        enrichedPayloadStr = JSON.stringify(enriched)
-        log(
-          `   transcript summary: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`
-        )
-      }
-    }
+    const enrichedPayloadStr = await enrichPayloadForHooks(payload, parseError, finalPayloadStr)
 
     const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
     switch (strategy) {
