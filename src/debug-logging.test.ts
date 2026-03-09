@@ -29,6 +29,8 @@ const STDERR_ALLOWLIST = new Set([
   "src/dispatch/replay.ts",
   // settings enable --force prints a warning about conflicting settings
   "src/commands/settings.ts",
+  // manage validate emits validation failures to stderr
+  "src/commands/manage.ts",
   // The shared debug utility itself
   "src/debug.ts",
 ])
@@ -55,6 +57,8 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/install.ts",
   "src/commands/issue.ts",
   "src/commands/memory.ts",
+  // manage command prints MCP list/show/add/remove output
+  "src/commands/manage.ts",
   "src/commands/push-ci.ts",
   "src/commands/push-wait.ts",
   // reflect — prints prompt (--print-prompt) and reflection output to user
