@@ -73,7 +73,25 @@ async function expandInlineCommands(content: string): Promise<string> {
   return content.replace(INLINE_CMD_RE, () => results[i++]!)
 }
 
-async function readSkill(name: string, raw: boolean, noFrontMatter: boolean) {
+function substituteArgs(content: string, positionalArgs: string[]): string {
+  if (positionalArgs.length === 0) return content
+  let result = content
+  // $ARGUMENTS → full space-joined remaining args
+  result = result.replace(/\$ARGUMENTS\b/g, positionalArgs.join(" "))
+  // $0, $1, … → individual positional args (empty string if out of range)
+  for (let i = 0; i < positionalArgs.length; i++) {
+    const escaped = positionalArgs[i]!.replace(/[$&`\\]/g, "\\$&")
+    result = result.replace(new RegExp(`\\$${i}\\b`, "g"), escaped)
+  }
+  return result
+}
+
+async function readSkill(
+  name: string,
+  raw: boolean,
+  noFrontMatter: boolean,
+  positionalArgs: string[] = []
+) {
   const skills = await findSkills()
   const skill = skills.find((s) => s.name === name)
 
@@ -86,6 +104,7 @@ async function readSkill(name: string, raw: boolean, noFrontMatter: boolean) {
   if (availabilityWarning) {
     console.log(availabilityWarning.message)
   }
+  content = substituteArgs(content, positionalArgs)
   if (!raw) {
     content = await expandInlineCommands(content)
   }
@@ -587,11 +606,12 @@ export const skillCommand: Command = {
     const raw = args.includes("--raw")
     const noFrontMatter = args.includes("--no-front-matter")
     const flags = new Set(["--raw", "--no-front-matter"])
-    const name = args.find((a) => !flags.has(a))
+    const positionals = args.filter((a) => !flags.has(a))
+    const name = positionals[0]
     if (!name) {
       await listSkills()
     } else {
-      await readSkill(name, raw, noFrontMatter)
+      await readSkill(name, raw, noFrontMatter, positionals.slice(1))
     }
   },
 }
