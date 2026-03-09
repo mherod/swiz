@@ -83,6 +83,12 @@ describe("manifest.ts", () => {
       expect(taskCreateHook?.hooks.some((h) => h.file.includes("subject-validation")))
     })
 
+    it("Bash matcher blocks mixed-up tool calls before other shell guards", () => {
+      const bashGroup = manifest.find((g) => g.event === "preToolUse" && g.matcher === "Bash")
+      expect(bashGroup).toBeDefined()
+      expect(bashGroup?.hooks[0]?.file).toBe("pretooluse-no-mixed-tool-calls.ts")
+    })
+
     it("Edit|Write|Bash matcher has require-tasks hook", () => {
       const requireTasksGroup = manifest.find(
         (g) => g.event === "preToolUse" && g.matcher === "Edit|Write|Bash"

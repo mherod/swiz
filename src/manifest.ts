@@ -195,6 +195,7 @@ export const manifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Bash",
     hooks: [
+      { file: "pretooluse-no-mixed-tool-calls.ts", timeout: 5 },
       { file: "pretooluse-banned-commands.ts", timeout: 5 },
       { file: "pretooluse-no-cp.ts", timeout: 5 },
       { file: "pretooluse-git-index-lock.ts", timeout: 5 },

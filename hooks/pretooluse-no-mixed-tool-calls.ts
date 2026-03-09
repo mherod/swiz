@@ -1,0 +1,81 @@
+#!/usr/bin/env bun
+// PreToolUse hook: Block Bash/Shell commands that are actually tool invocations.
+// Example failure mode:
+//   Bash(TaskCreate ...; swiz tasks ...)
+// where `TaskCreate` is a tool name, not an executable shell command.
+
+import { normalizeCommand, stripHeredocs } from "../src/command-utils.ts"
+import {
+  denyPreToolUse,
+  EDIT_TOOLS,
+  isShellTool,
+  NOTEBOOK_TOOLS,
+  READ_TOOLS,
+  SEARCH_TOOLS,
+  SHELL_TOOLS,
+  TASK_TOOLS,
+  WRITE_TOOLS,
+} from "./hook-utils.ts"
+import { SHELL_STATEMENT_BOUNDARY } from "./utils/shell-patterns.ts"
+
+const EXTRA_TOOL_NAMES = ["AskUserQuestion", "LS", "MultiEdit", "WebFetch", "WebSearch"]
+
+const TOOL_NAMES = [
+  ...new Set([
+    ...SHELL_TOOLS,
+    ...EDIT_TOOLS,
+    ...WRITE_TOOLS,
+    ...READ_TOOLS,
+    ...SEARCH_TOOLS,
+    ...NOTEBOOK_TOOLS,
+    ...TASK_TOOLS,
+    ...EXTRA_TOOL_NAMES,
+  ]),
+].sort((a, b) => b.length - a.length)
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+const LEADING_ENV_ASSIGNMENTS = String.raw`(?:[A-Za-z_][A-Za-z0-9_]*=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s;|&()]+)\s+)*`
+const TOOL_NAME_ALT = TOOL_NAMES.map(escapeRegex).join("|")
+const MIXED_TOOL_CALL_RE = new RegExp(
+  `${SHELL_STATEMENT_BOUNDARY}\\s*${LEADING_ENV_ASSIGNMENTS}(?<tool>${TOOL_NAME_ALT})(?=$|\\s|[();|&])`
+)
+
+function toolSpecificGuidance(toolName: string): string {
+  if (TASK_TOOLS.has(toolName)) {
+    return [
+      `Call \`${toolName}\` directly instead of wrapping it in Bash.`,
+      "If you meant the swiz task CLI rather than the tool, run `swiz tasks ...`.",
+    ].join("\n")
+  }
+
+  if (SHELL_TOOLS.has(toolName)) {
+    return [
+      `Do not nest \`${toolName}\` inside another shell tool call.`,
+      "Pass only the raw terminal command to Bash/Shell, for example: `git status`.",
+    ].join("\n")
+  }
+
+  return `Call \`${toolName}\` directly via the tool interface instead of invoking it as a shell command.`
+}
+
+const input = await Bun.stdin.json()
+if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+
+const rawCommand = String(input?.tool_input?.command ?? "")
+const normalizedCommand = stripHeredocs(normalizeCommand(rawCommand))
+const match = MIXED_TOOL_CALL_RE.exec(normalizedCommand)
+
+if (!match?.groups?.tool) process.exit(0)
+
+const toolName = match.groups.tool
+const commandPreview = rawCommand.replace(/\s+/g, " ").trim().slice(0, 140) || toolName
+
+denyPreToolUse(
+  `Mixed-up tool call detected: \`${toolName}\` is a tool, not a terminal command.\n\n` +
+    "Do not invoke tools inside Bash/Shell.\n\n" +
+    `Command:\n  ${commandPreview}\n\n` +
+    toolSpecificGuidance(toolName)
+)
