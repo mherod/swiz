@@ -562,6 +562,72 @@ export class ProjectSettingsCache {
   }
 }
 
+// ─── Combined manifest cache ──────────────────────────────────────────────
+
+/**
+ * Cached combined manifest for a project — includes the built-in manifest,
+ * plugin hook groups, and resolved project-local hooks. Eliminates redundant
+ * file I/O and plugin loading on repeated daemon dispatches for the same cwd.
+ */
+export interface CachedManifest {
+  groups: import("../manifest.ts").HookGroup[]
+  cachedAt: number
+}
+
+export class ManifestCache {
+  private entries = new Map<string, CachedManifest>()
+  private projectSettingsCache: ProjectSettingsCache
+
+  constructor(projectSettingsCache: ProjectSettingsCache) {
+    this.projectSettingsCache = projectSettingsCache
+  }
+
+  async get(cwd: string): Promise<import("../manifest.ts").HookGroup[]> {
+    const cached = this.entries.get(cwd)
+    if (cached) return cached.groups
+
+    const groups = await this.build(cwd)
+    this.entries.set(cwd, { groups, cachedAt: Date.now() })
+    return groups
+  }
+
+  private async build(cwd: string): Promise<import("../manifest.ts").HookGroup[]> {
+    const { manifest: builtinManifest } = await import("../manifest.ts")
+    const { loadAllPlugins } = await import("../plugins.ts")
+
+    let combined: import("../manifest.ts").HookGroup[] = [...builtinManifest]
+    const cachedSettings = await this.projectSettingsCache.get(cwd)
+    const projectSettings = cachedSettings.settings
+
+    if (projectSettings?.plugins?.length) {
+      const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
+      const pluginHooks = pluginResults.flatMap((r) => r.hooks)
+      if (pluginHooks.length > 0) {
+        combined = [...combined, ...pluginHooks]
+      }
+    }
+
+    // Use cached resolved hooks from ProjectSettingsCache
+    if (cachedSettings.resolvedHooks.length > 0) {
+      combined = [...combined, ...cachedSettings.resolvedHooks]
+    }
+
+    return combined
+  }
+
+  invalidateProject(cwd: string): void {
+    this.entries.delete(cwd)
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+}
+
 export function hasSnapshotInvalidated(
   previous: SnapshotFingerprint | null,
   next: SnapshotFingerprint
@@ -784,6 +850,7 @@ export const daemonCommand: Command = {
     const cooldownRegistry = new CooldownRegistry()
     const gitStateCache = new GitStateCache()
     const projectSettingsCache = new ProjectSettingsCache()
+    const manifestCache = new ManifestCache(projectSettingsCache)
     const projectRoot = dirname(Bun.main)
     const hooksDir = join(projectRoot, "hooks/")
     const manifestPath = join(projectRoot, "src", "manifest.ts")
@@ -814,6 +881,7 @@ export const daemonCommand: Command = {
       eligibilityCache.invalidateAll()
       gitStateCache.invalidateAll()
       projectSettingsCache.invalidateAll()
+      manifestCache.invalidateAll()
     }
 
     watchers.register(manifestPath, "manifest", flushSnapshots)
@@ -827,7 +895,7 @@ export const daemonCommand: Command = {
       if (registeredProjects.has(cwd)) return
       registeredProjects.add(cwd)
       const projectFlush = () => {
-        // Flush snapshots, gh cache, eligibility, and git state for this project
+        // Flush snapshots, gh cache, eligibility, git state, and manifest for this project
         for (const key of snapshots.keys()) {
           if (key.startsWith(cwd)) snapshots.delete(key)
         }
@@ -835,6 +903,7 @@ export const daemonCommand: Command = {
         eligibilityCache.invalidateProject(cwd)
         gitStateCache.invalidateProject(cwd)
         projectSettingsCache.invalidateProject(cwd)
+        manifestCache.invalidateProject(cwd)
       }
       const projectSettings = getProjectSettingsPath(cwd)
       if (projectSettings)
@@ -874,6 +943,7 @@ export const daemonCommand: Command = {
               const index = await transcriptIndex.get(path)
               return index?.summary ?? null
             },
+            manifestProvider: async (cwd) => manifestCache.get(cwd),
           })
           const durationMs = performance.now() - start
           recordDispatch(globalMetrics, canonicalEvent, durationMs)
@@ -1035,6 +1105,7 @@ export const daemonCommand: Command = {
             cooldownRegistrySize: cooldownRegistry.size,
             gitStateCacheSize: gitStateCache.size,
             projectSettingsCacheSize: projectSettingsCache.size,
+            manifestCacheSize: manifestCache.size,
           })
         }
 

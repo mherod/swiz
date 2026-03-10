@@ -96,6 +96,48 @@ describe("transcriptSummaryProvider", () => {
   })
 })
 
+describe("manifestProvider", () => {
+  it("uses cached manifest provider instead of loading from disk", async () => {
+    let providerCalled = false
+    let providerCwd = ""
+    const req: DispatchRequest = {
+      canonicalEvent: "preToolUse",
+      hookEventName: "PreToolUse",
+      payloadStr: JSON.stringify({
+        cwd: "/tmp/test-manifest-provider",
+        session_id: "test-session",
+        tool_name: "Bash",
+        tool_input: { command: "echo hello" },
+      }),
+      manifestProvider: async (cwd) => {
+        providerCalled = true
+        providerCwd = cwd
+        return [] // Return empty manifest — no hooks match
+      },
+    }
+    const result = await executeDispatch(req)
+    expect(providerCalled).toBe(true)
+    expect(providerCwd).toBe("/tmp/test-manifest-provider")
+    expect(result.response).toEqual({})
+  })
+
+  it("falls back to loadCombinedManifest when no provider is given", async () => {
+    const req: DispatchRequest = {
+      canonicalEvent: "preToolUse",
+      hookEventName: "PreToolUse",
+      payloadStr: JSON.stringify({
+        cwd: "/tmp/test-no-manifest-provider",
+        session_id: "test-session",
+        tool_name: "Bash",
+        tool_input: { command: "echo hello" },
+      }),
+    }
+    // Should load the built-in manifest (no provider) and execute normally
+    const result = await executeDispatch(req)
+    expect(result).toBeDefined()
+  })
+})
+
 describe("daemon /dispatch endpoint", () => {
   let server: ReturnType<typeof Bun.serve>
   const TEST_PORT = 17943

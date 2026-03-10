@@ -134,6 +134,8 @@ export interface DispatchRequest {
   daemonContext?: boolean
   /** Optional cached transcript summary provider (injected by daemon). */
   transcriptSummaryProvider?: (path: string) => Promise<TranscriptSummary | null>
+  /** Optional cached manifest provider (injected by daemon to skip cold manifest rebuild). */
+  manifestProvider?: (cwd: string) => Promise<HookGroup[]>
 }
 
 export interface DispatchResult {
@@ -152,8 +154,14 @@ export interface DispatchResult {
  * connected to the agent — only the returned response matters.
  */
 export async function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
-  const { canonicalEvent, hookEventName, payloadStr, daemonContext, transcriptSummaryProvider } =
-    req
+  const {
+    canonicalEvent,
+    hookEventName,
+    payloadStr,
+    daemonContext,
+    transcriptSummaryProvider,
+    manifestProvider,
+  } = req
 
   const { payload, parseError } = parsePayload(payloadStr)
 
@@ -179,7 +187,9 @@ export async function executeDispatch(req: DispatchRequest): Promise<DispatchRes
   const cwd = (payload.cwd as string) ?? process.cwd()
   await tryReplayPendingMutations(cwd)
 
-  const combinedManifest = await loadCombinedManifest(cwd)
+  const combinedManifest = manifestProvider
+    ? await manifestProvider(cwd)
+    : await loadCombinedManifest(cwd)
 
   const matchingGroups = combinedManifest.filter(
     (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)

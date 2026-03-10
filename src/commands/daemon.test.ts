@@ -10,6 +10,7 @@ import {
   GitStateCache,
   HookEligibilityCache,
   hasSnapshotInvalidated,
+  ManifestCache,
   ProjectSettingsCache,
   recordDispatch,
   serializeMetrics,
@@ -567,5 +568,62 @@ describe("ProjectSettingsCache", () => {
 
     cache.invalidateAll()
     expect(cache.size).toBe(0)
+  })
+})
+
+describe("ManifestCache", () => {
+  it("caches combined manifest on first call and returns same on second", async () => {
+    const settingsCache = new ProjectSettingsCache()
+    const cache = new ManifestCache(settingsCache)
+    const cwd = process.cwd()
+
+    const first = await cache.get(cwd)
+    expect(first.length).toBeGreaterThan(0)
+    expect(cache.size).toBe(1)
+
+    const second = await cache.get(cwd)
+    // Should be the exact same array reference (cached)
+    expect(second).toBe(first)
+  })
+
+  it("invalidateProject clears only the specified project", async () => {
+    const settingsCache = new ProjectSettingsCache()
+    const cache = new ManifestCache(settingsCache)
+    const cwd = process.cwd()
+
+    await cache.get(cwd)
+    expect(cache.size).toBe(1)
+
+    cache.invalidateProject("/some/other/cwd")
+    expect(cache.size).toBe(1)
+
+    cache.invalidateProject(cwd)
+    expect(cache.size).toBe(0)
+  })
+
+  it("invalidateAll clears everything", async () => {
+    const settingsCache = new ProjectSettingsCache()
+    const cache = new ManifestCache(settingsCache)
+
+    await cache.get(process.cwd())
+    expect(cache.size).toBe(1)
+
+    cache.invalidateAll()
+    expect(cache.size).toBe(0)
+  })
+
+  it("rebuilds after invalidation", async () => {
+    const settingsCache = new ProjectSettingsCache()
+    const cache = new ManifestCache(settingsCache)
+    const cwd = process.cwd()
+
+    const first = await cache.get(cwd)
+    cache.invalidateProject(cwd)
+    const second = await cache.get(cwd)
+
+    // New array after invalidation (not same reference)
+    expect(second).not.toBe(first)
+    // But same content
+    expect(second.length).toBe(first.length)
   })
 })
