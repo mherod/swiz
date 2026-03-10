@@ -43,14 +43,19 @@ async function main(): Promise<void> {
       if (pr.state === "OPEN" && pr.mergeable === "CONFLICTING") {
         let reason = `PR #${pr.number} for branch '${branch}' has merge conflicts (GitHub: mergeable=CONFLICTING, mergeStateStatus=${pr.mergeStateStatus}).\n\n`
         reason += `${pr.url}\n\n`
+        const rebaseSteps = [
+          `Rebase and resolve conflicts before stopping:`,
+          `  git fetch origin ${defaultBranch}`,
+          `  git rebase ${defaultRemoteRef}`,
+          "  # resolve any conflicts, then: git rebase --continue",
+          "",
+          "Tip: Use `swiz mergetool` for AI-powered conflict resolution:",
+          '  git config merge.tool swiz && git config mergetool.swiz.cmd \'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"\' && git config mergetool.swiz.trustExitCode true',
+        ].join("\n")
         reason += skillAdvice(
           "rebase-onto-main",
-          "Use the /rebase-onto-main skill to rebase and resolve conflicts before stopping.\n" +
-            "Tip: Configure `swiz mergetool` as your Git mergetool for AI-powered conflict resolution:\n" +
-            '  git config merge.tool swiz && git config mergetool.swiz.cmd \'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"\' && git config mergetool.swiz.trustExitCode true',
-          `Rebase and resolve conflicts before stopping:\n  git fetch origin ${defaultBranch}\n  git rebase ${defaultRemoteRef}\n` +
-            "Tip: Use `swiz mergetool` for AI-powered conflict resolution:\n" +
-            '  git config merge.tool swiz && git config mergetool.swiz.cmd \'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"\' && git config mergetool.swiz.trustExitCode true'
+          "Use the /rebase-onto-main skill to rebase and resolve conflicts before stopping.",
+          rebaseSteps
         )
         blockStop(reason)
       }
@@ -77,14 +82,19 @@ async function main(): Promise<void> {
   if (conflictCount > 0) {
     let reason = `Branch '${branch}' has conflicts with ${defaultRemoteRef}.\n\n`
     reason += `${conflictCount} conflict(s) detected — ${behind} commit(s) on ${defaultRemoteRef} not yet in this branch.\n\n`
+    const rebaseSteps2 = [
+      `Rebase and resolve conflicts before stopping:`,
+      `  git fetch origin ${defaultBranch}`,
+      `  git rebase ${defaultRemoteRef}`,
+      "  # resolve any conflicts, then: git rebase --continue",
+      "",
+      "Tip: Use `swiz mergetool` for AI-powered conflict resolution:",
+      '  git config merge.tool swiz && git config mergetool.swiz.cmd \'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"\' && git config mergetool.swiz.trustExitCode true',
+    ].join("\n")
     reason += skillAdvice(
       "rebase-onto-main",
-      "Use the /rebase-onto-main skill to rebase and resolve conflicts before stopping.\n" +
-        "Tip: Configure `swiz mergetool` as your Git mergetool for AI-powered conflict resolution:\n" +
-        '  git config merge.tool swiz && git config mergetool.swiz.cmd \'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"\' && git config mergetool.swiz.trustExitCode true',
-      `Rebase and resolve conflicts before stopping:\n  git fetch origin ${defaultBranch}\n  git rebase ${defaultRemoteRef}\n` +
-        "Tip: Use `swiz mergetool` for AI-powered conflict resolution:\n" +
-        '  git config merge.tool swiz && git config mergetool.swiz.cmd \'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"\' && git config mergetool.swiz.trustExitCode true'
+      "Use the /rebase-onto-main skill to rebase and resolve conflicts before stopping.",
+      rebaseSteps2
     )
     blockStop(reason)
   }

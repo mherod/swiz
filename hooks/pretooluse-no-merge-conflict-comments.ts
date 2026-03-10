@@ -95,7 +95,13 @@ if (!allNoise) process.exit(0)
 const rebaseAdvice = skillAdvice(
   "rebase-onto-main",
   "Use the /rebase-onto-main skill to automatically rebase the branch.",
-  "Rebase the branch: git fetch origin && git rebase origin/main"
+  [
+    `Rebase the branch to resolve conflicts:`,
+    `  git fetch origin`,
+    `  git rebase origin/main`,
+    `  # if conflicts arise: fix files, git add <file>, git rebase --continue`,
+    `  git push --force-with-lease`,
+  ].join("\n")
 )
 
 denyPreToolUse(

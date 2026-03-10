@@ -54,7 +54,18 @@ async function main(): Promise<void> {
   const prAdvice = skillAdvice(
     "refine-pr",
     "Use the /refine-pr skill to populate the PR description before stopping.",
-    `Update the PR description before stopping:\n  gh pr edit ${pr.number} --body "<description>"`
+    [
+      `Update the PR description before stopping:`,
+      `  gh pr edit ${pr.number} --body "$(cat <<'EOF'`,
+      `## Summary`,
+      `<one sentence describing what this PR does>`,
+      ``,
+      `## Changes`,
+      `- <key change 1>`,
+      `- <key change 2>`,
+      `EOF`,
+      `)"`,
+    ].join("\n")
   )
 
   // Empty body

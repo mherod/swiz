@@ -97,7 +97,15 @@ async function main(): Promise<void> {
         skillAdvice(
           "pr-request-changes",
           "Use the /pr-request-changes skill to submit an actionable review request or wait for reviewer feedback before stopping.",
-          `Request review or wait for feedback before stopping:\n  gh pr view ${pr.number}`
+          [
+            `Request review or wait for feedback before stopping:`,
+            `  gh pr view ${pr.number}`,
+            `  gh pr edit ${pr.number} --add-reviewer <github-handle>`,
+            ``,
+            `Options:`,
+            `  a) Add a reviewer and wait for their response before stopping.`,
+            `  b) Self-review: leave a detailed comment summarising the changes and close any open questions.`,
+          ].join("\n")
         )
       blockStop(reason, { includeUpdateMemoryAdvice: false })
     }
@@ -143,7 +151,20 @@ async function main(): Promise<void> {
   reason += skillAdvice(
     "pr-comments-address",
     "Use the /pr-comments-address skill to address all feedback before stopping.",
-    `Address all review feedback before stopping:\n  gh pr view ${pr.number} --comments`
+    [
+      `Address all review feedback before stopping:`,
+      `  gh pr view ${pr.number} --comments`,
+      ``,
+      `For each requested change:`,
+      `  1. Read the reviewer's comment carefully`,
+      `  2. Make the requested code change`,
+      `  3. Reply to the comment confirming the change (or explaining your decision)`,
+      `  4. Re-run quality checks: bun run typecheck && bun run lint && bun test`,
+      `  5. Push: git push origin $(git branch --show-current)`,
+      ``,
+      `Once all feedback is addressed, request a re-review:`,
+      `  gh pr edit ${pr.number} --add-reviewer <reviewer-handle>`,
+    ].join("\n")
   )
 
   // Review-feedback triage is actionable queue work, not a memory-capture miss.

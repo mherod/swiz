@@ -111,7 +111,14 @@ async function main(): Promise<void> {
       skillAdvice(
         "ci-status",
         "Use the /ci-status skill to analyze failures and fix them before stopping.",
-        "Analyze CI failures and fix them before stopping. View logs with:\n  gh run view <run-id> --log-failed"
+        [
+          `Analyze and fix CI failures before stopping:`,
+          `  1. View failure details: gh run view <run-id> --log-failed`,
+          `  2. Fix the failing code (type errors, test failures, lint issues)`,
+          `  3. Run checks locally: bun run typecheck && bun run lint && bun test`,
+          `  4. Commit and push the fix`,
+          `  5. Wait for CI to go green: gh run watch <run-id> --exit-status`,
+        ].join("\n")
       )
     blockStop(reason)
   }
@@ -124,7 +131,13 @@ async function main(): Promise<void> {
     reason += skillAdvice(
       "ci-status",
       "Wait for CI to complete, then check results with the /ci-status skill.",
-      `Wait for CI to complete, then check results:\n  gh run list --branch ${branch}`
+      [
+        `Wait for CI to complete, then check results:`,
+        `  gh run list --branch ${branch}`,
+        `  gh run watch <run-id> --exit-status`,
+        ``,
+        `Once complete: if passing → stop. If failing → fix before stopping.`,
+      ].join("\n")
     )
     blockStop(reason)
   }

@@ -279,7 +279,14 @@ async function main(): Promise<void> {
       skillAdvice(
         "commit",
         "Commit your changes with /commit",
-        'Commit your changes:\n  git add .\n  git commit -m "<type>(<scope>): <summary>"'
+        [
+          "Commit your changes:",
+          "  git add .",
+          '  git commit -m "<type>(<scope>): <summary>"',
+          "",
+          "Commit message types: feat, fix, refactor, docs, style, test, chore",
+          "Keep summary under 50 characters. Use present tense. No Co-Authored-By trailers.",
+        ].join("\n")
       )
     )
   }
@@ -303,7 +310,18 @@ async function main(): Promise<void> {
         ? `Push ${ahead} commit(s) to '${upstream}'`
         : `Push your committed changes to '${upstream}'`
     steps.push(
-      skillAdvice("push", `${pushLabel} with /push`, `${pushLabel}:\n  git push origin ${branch}`)
+      skillAdvice(
+        "push",
+        `${pushLabel} with /push`,
+        [
+          `${pushLabel}:`,
+          `  git push origin ${branch}`,
+          "",
+          "Before pushing — run the collaboration guard:",
+          "  Solo repo → direct push to main is permitted.",
+          "  Org repo or other contributors active → use a feature branch and PR instead.",
+        ].join("\n")
+      )
     )
   }
 
