@@ -424,6 +424,166 @@ describe("posttooluse-task-output: go test runner detection", () => {
   })
 })
 
+// ─── Maven runner detection ───────────────────────────────────────────────────
+
+const MAVEN_COMPLETE_OUTPUT = `
+[INFO] Running com.example.AuthTest
+[ERROR] Tests run: 7, Failures: 2, Errors: 0, Skipped: 0, Time elapsed: 0.45 s <<< FAILURE! - in com.example.AuthTest
+[ERROR] testLogin(com.example.AuthTest)  Time elapsed: 0.12 s  <<< FAILURE!
+[INFO] BUILD FAILURE
+`.trim()
+
+const MAVEN_TRUNCATED_OUTPUT = `
+[INFO] Running com.example.AuthTest
+[ERROR] Tests run: 7, Failures: 2, Errors: 0, Skipped: 0
+`.trim()
+
+describe("posttooluse-task-output: Maven runner detection", () => {
+  test("Maven complete output with failures reports exact count", async () => {
+    const result = await runHook(makePayload(MAVEN_COMPLETE_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("2 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
+
+  test("Maven truncated output with failures reports unknown count", async () => {
+    const result = await runHook(makePayload(MAVEN_TRUNCATED_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("unknown number of test(s) failed")
+  })
+
+  test("Maven exit 0 does not block", async () => {
+    const output = "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0\n[INFO] BUILD SUCCESS"
+    const result = await runHook(makePayload(output, 0))
+    expect(result.decision).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+  })
+})
+
+// ─── Gradle runner detection ──────────────────────────────────────────────────
+
+const GRADLE_COMPLETE_OUTPUT = `
+AuthTest > testLogin FAILED
+    org.opentest4j.AssertionFailedError at AuthTest.java:42
+
+AuthTest > testToken FAILED
+    org.opentest4j.AssertionFailedError at AuthTest.java:67
+
+7 tests completed, 2 failed
+
+BUILD FAILED in 1s
+`.trim()
+
+const GRADLE_TRUNCATED_OUTPUT = `
+AuthTest > testLogin FAILED
+    org.opentest4j.AssertionFailedError at AuthTest.java:42
+`.trim()
+
+describe("posttooluse-task-output: Gradle runner detection", () => {
+  test("Gradle complete output with failures reports exact count", async () => {
+    const result = await runHook(makePayload(GRADLE_COMPLETE_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("2 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
+
+  test("Gradle truncated output with failures reports unknown count", async () => {
+    const result = await runHook(makePayload(GRADLE_TRUNCATED_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("unknown number of test(s) failed")
+  })
+
+  test("Gradle exit 0 does not block", async () => {
+    const output = "5 tests completed\n\nBUILD SUCCESSFUL in 1s"
+    const result = await runHook(makePayload(output, 0))
+    expect(result.decision).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+  })
+})
+
+// ─── RSpec runner detection ───────────────────────────────────────────────────
+
+const RSPEC_COMPLETE_OUTPUT = `
+Failures:
+
+  1) Auth#login returns false for invalid credentials
+     Failure/Error: expect(auth.login("bad")).to be true
+       expected true
+       got false
+
+  2) Auth#token raises on expiry
+     Failure/Error: expect { auth.token }.not_to raise_error
+
+Finished in 0.12345 seconds (files took 1.23 seconds to load)
+7 examples, 2 failures
+`.trim()
+
+const RSPEC_TRUNCATED_OUTPUT = `
+Failures:
+
+  1) Auth#login returns false for invalid credentials
+     Failure/Error: expect(auth.login("bad")).to be true
+`.trim()
+
+describe("posttooluse-task-output: RSpec runner detection", () => {
+  test("RSpec complete output with failures reports exact count", async () => {
+    const result = await runHook(makePayload(RSPEC_COMPLETE_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("2 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
+
+  test("RSpec truncated output with failures reports unknown count", async () => {
+    const result = await runHook(makePayload(RSPEC_TRUNCATED_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("unknown number of test(s) failed")
+  })
+
+  test("RSpec exit 0 does not block", async () => {
+    const output = "Finished in 0.05s\n5 examples, 0 failures"
+    const result = await runHook(makePayload(output, 0))
+    expect(result.decision).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+  })
+})
+
+// ─── dotnet test runner detection ─────────────────────────────────────────────
+
+const DOTNET_COMPLETE_OUTPUT = `
+  Failed AuthTests.LoginTest.InvalidCredentials [12 ms]
+  Failed AuthTests.TokenTest.ExpiredToken [8 ms]
+
+Failed!  - Failed:     2, Passed:     5, Skipped:    0, Total:      7, Duration: 45 ms
+`.trim()
+
+const DOTNET_TRUNCATED_OUTPUT = `
+  Failed AuthTests.LoginTest.InvalidCredentials [12 ms]
+  Failed AuthTests.TokenTest.ExpiredToken [8 ms]
+`.trim()
+
+describe("posttooluse-task-output: dotnet test runner detection", () => {
+  test("dotnet test complete output with failures reports exact count", async () => {
+    const result = await runHook(makePayload(DOTNET_COMPLETE_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("2 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
+
+  test("dotnet test truncated output with failures reports unknown count", async () => {
+    const result = await runHook(makePayload(DOTNET_TRUNCATED_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("unknown number of test(s) failed")
+  })
+
+  test("dotnet test exit 0 does not block", async () => {
+    const output =
+      "Passed!  - Failed:     0, Passed:     5, Skipped:    0, Total:      5, Duration: 30 ms"
+    const result = await runHook(makePayload(output, 0))
+    expect(result.decision).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+  })
+})
+
 // ─── Tool error handling ──────────────────────────────────────────────────────
 
 /** CWD used for output-file recovery tests; encodes to a known key under /tmp. */

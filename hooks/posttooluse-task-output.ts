@@ -136,6 +136,62 @@ const GOTEST_COMPLETE_RE = /^(?:ok|FAIL)\s+\S+\s+\d+\.\d+s/m
 /** Matches go test failure count from "--- FAIL:" lines */
 const GOTEST_FAIL_RE = /^--- FAIL:/m
 
+/**
+ * Detects Maven Surefire output (any line containing "Tests run: N, Failures:").
+ * Maven prefixes the line with "[INFO]" or "[ERROR]" depending on result.
+ * Used for runner identification; count extraction uses MAVEN_SUMMARY_RE.
+ */
+const MAVEN_FAIL_RE = /Tests run: \d+, Failures: (\d+), Errors: (\d+)/
+
+/**
+ * Matches Maven build completion footer:
+ *   "BUILD FAILURE" or "BUILD SUCCESS"
+ * Only printed after the Maven lifecycle completes. Its presence means
+ * output was not truncated mid-run.
+ */
+const MAVEN_COMPLETE_RE = /BUILD (?:FAILURE|SUCCESS)/
+
+/**
+ * Detects Gradle test failure lines: "ClassName > testName FAILED"
+ * Used for runner identification; count extracted from GRADLE_SUMMARY_RE.
+ */
+const GRADLE_FAIL_RE = /^\S.*> \S.* FAILED$/m
+
+/**
+ * Matches Gradle test completion summary:
+ *   "7 tests completed, 2 failed"
+ *   "5 tests completed"
+ * Always emitted after the test task finishes.
+ */
+const GRADLE_COMPLETE_RE = /^\d+ tests? completed/m
+
+/** Extracts Gradle failure count from summary: "N tests completed, M failed" */
+const GRADLE_SUMMARY_RE = /^\d+ tests? completed, (\d+) failed/m
+
+/**
+ * Matches RSpec summary line:
+ *   "7 examples, 2 failures"
+ *   "5 examples, 0 failures"
+ * Always the last meaningful line of RSpec output.
+ */
+const RSPEC_COMPLETE_RE = /^\d+ examples?, \d+ failures?/m
+
+/** Matches RSpec failure count: "N examples, M failures" */
+const RSPEC_FAIL_RE = /^\d+ examples?, (\d+) failures?/m
+
+/**
+ * Detects dotnet test failure lines: "  Failed ClassName.TestName"
+ * Used for runner identification in truncated output.
+ */
+const DOTNET_FAIL_RE = /^\s+Failed \S/m
+
+/**
+ * Matches dotnet test VSTest summary line:
+ *   "Failed!  - Failed:     2, Passed:     5, Skipped:    0, Total:      7"
+ * Always emitted at the end of a dotnet test run.
+ */
+const DOTNET_COMPLETE_RE = /Failed:\s+(\d+), Passed:\s+\d+.*Total:\s+\d+/
+
 /** Matches lefthook hook block indicators */
 const HOOK_FAIL_RE = /🥊.*hook: (pre-push|pre-commit)|error: failed to push/i
 
@@ -230,6 +286,56 @@ function detectFailure(output: string, exitCode: number | null): string | null {
       const failCount = (clean.match(/^--- FAIL:/gm) ?? []).length
       const countLabel = isComplete && failCount > 0 ? `${failCount}` : "unknown number of"
       const failLine = lines.find((l) => l.startsWith("--- FAIL:"))
+      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
+      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+    }
+
+    // Maven Surefire/Failsafe failures
+    const mavenFailMatch = clean.match(MAVEN_FAIL_RE)
+    if (mavenFailMatch) {
+      // Failures + Errors both count as test failures
+      const failures = parseInt(mavenFailMatch[1]!, 10)
+      const errors = parseInt(mavenFailMatch[2]!, 10)
+      const total = failures + errors
+      const isComplete = MAVEN_COMPLETE_RE.test(clean)
+      const countLabel = isComplete && total > 0 ? `${total}` : "unknown number of"
+      const failLine = lines.find((l) => l.includes("<<< FAILURE!") || l.includes("<<< ERROR!"))
+      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
+      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+    }
+
+    // Gradle test failures
+    if (GRADLE_FAIL_RE.test(clean)) {
+      const summaryMatch = clean.match(GRADLE_SUMMARY_RE)
+      const isComplete = GRADLE_COMPLETE_RE.test(clean)
+      const countLabel = isComplete && summaryMatch ? `${summaryMatch[1]}` : "unknown number of"
+      const failLine = lines.find((l) => l.match(/^\S.*> \S.* FAILED$/))
+      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
+      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+    }
+
+    // RSpec failures
+    const rspecFailMatch = clean.match(RSPEC_FAIL_RE)
+    if (rspecFailMatch && parseInt(rspecFailMatch[1]!, 10) > 0) {
+      const isComplete = RSPEC_COMPLETE_RE.test(clean)
+      const countLabel = isComplete ? `${rspecFailMatch[1]}` : "unknown number of"
+      const failLine = lines.find((l) => l.trim().match(/^\d+\)/) || l.includes("Failure/Error:"))
+      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
+      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+    }
+    // RSpec truncated: has "Failure/Error:" but no summary line yet
+    if (clean.includes("Failure/Error:")) {
+      const failLine = lines.find((l) => l.includes("Failure/Error:"))
+      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
+      return `unknown number of test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+    }
+
+    // dotnet test failures
+    if (DOTNET_FAIL_RE.test(clean)) {
+      const summaryMatch = clean.match(DOTNET_COMPLETE_RE)
+      const isComplete = summaryMatch !== null
+      const countLabel = isComplete ? `${summaryMatch![1]}` : "unknown number of"
+      const failLine = lines.find((l) => l.trim().startsWith("Failed "))
       const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
       return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
     }
