@@ -1,3 +1,4 @@
+import { stderrLog } from "../debug.ts"
 import type { Command } from "../types.ts"
 
 // ─── Polling utilities ─────────────────────────────────────────────────────
@@ -148,15 +149,18 @@ export const ciWaitCommand: Command = {
       if (conclusion === "success") {
         process.exitCode = 0
       } else if (conclusion === "failure") {
-        console.error("✗ CI run failed")
+        stderrLog("CI failure status reporting with exit codes", "✗ CI run failed")
         process.exitCode = 1
       } else {
-        console.error(`✗ Unexpected conclusion: ${conclusion}`)
+        stderrLog(
+          "CI failure status reporting with exit codes",
+          `✗ Unexpected conclusion: ${conclusion}`
+        )
         process.exitCode = 2
       }
     } catch (err) {
       const errMsg = String(err)
-      console.error(`✗ Error: ${errMsg}`)
+      stderrLog("CI failure status reporting with exit codes", `✗ Error: ${errMsg}`)
       // Exit code 1 for timeout or CI failure; 2 for unexpected errors
       if (errMsg.includes("timeout")) {
         process.exitCode = 1

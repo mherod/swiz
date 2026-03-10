@@ -1,4 +1,5 @@
 import { dirname, join } from "node:path"
+import { stderrLog } from "../debug.ts"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import {
   DEFAULT_MEMORY_LINE_THRESHOLD,
@@ -436,7 +437,8 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
       )
     }
     if (conflicts.length > 0 && parsed.force) {
-      console.warn(
+      stderrLog(
+        "settings enable --force prints a warning about conflicting settings",
         `\n  Warning: enabling strict-no-direct-main with conflicting settings (--force):\n` +
           conflicts.map((c) => `    - ${c}`).join("\n") +
           `\n`

@@ -211,4 +211,34 @@ describe("debugLog enforcement", () => {
         missing.map((r) => `  "${r}": ""  // ← add justification here`).join("\n")
     ).toEqual([])
   })
+
+  it("STDERR_ALLOWLIST files use stderrLog instead of bare console.error", () => {
+    // src/debug.ts is exempt — it defines stderrLog itself using console.error
+    const EXEMPT = new Set(["src/debug.ts"])
+    const violations: string[] = []
+
+    for (const rel of STDERR_ALLOWLIST.keys()) {
+      if (EXEMPT.has(rel)) continue
+      const full = join(SRC_ROOT, rel)
+      const content = readFileSync(full, "utf8")
+      const lines = content.split("\n")
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!
+        const trimmed = line.trim()
+        if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue
+
+        if (/\bconsole\.(error|warn)\b/.test(line)) {
+          violations.push(`${rel}:${i + 1}: ${trimmed}`)
+        }
+      }
+    }
+
+    expect(
+      violations,
+      `STDERR_ALLOWLIST files must use stderrLog() from debug.ts instead of bare console.error/console.warn.\n` +
+        `Replace: console.error(msg) → stderrLog("reason", msg)\n\n` +
+        violations.map((v) => `  ${v}`).join("\n")
+    ).toEqual([])
+  })
 })

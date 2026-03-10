@@ -2,6 +2,7 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs"
 import { basename, dirname, resolve } from "node:path"
 import { detectAgentCli, promptAgent } from "../agent.ts"
 import { type AiProviderId, hasAiProvider, promptText } from "../ai-providers.ts"
+import { stderrLog } from "../debug.ts"
 import type { Command } from "../types.ts"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -300,11 +301,11 @@ export const mergetoolCommand: Command = {
     const mergedContent = readFileSync(parsed.merged, "utf8")
 
     // Gather repository context
-    console.error("→ Gathering repository context...")
+    stderrLog("Interactive merge progress indicators", "→ Gathering repository context...")
     const repoContext = await gatherRepoContext(parsed.merged)
 
     // Build prompt and resolve
-    console.error("→ Resolving conflict with AI...")
+    stderrLog("Interactive merge progress indicators", "→ Resolving conflict with AI...")
     const prompt = buildPrompt(baseContent, localContent, remoteContent, mergedContent, repoContext)
     const rawResult = await resolveWithAI(prompt, parsed.provider)
 
@@ -314,6 +315,6 @@ export const mergetoolCommand: Command = {
     validateResolvedContent(result)
     await writeResolvedContent(parsed.merged, result)
 
-    console.error("✓ Conflict resolved successfully")
+    stderrLog("Interactive merge progress indicators", "✓ Conflict resolved successfully")
   },
 }

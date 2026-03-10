@@ -7,6 +7,7 @@
 
 import { getDefaultBranch, isDefaultBranch } from "../../hooks/utils/git-utils.ts"
 import { requiresPeerReview } from "../collaboration-policy.ts"
+import { stderrLog } from "../debug.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 import { waitForCiCompletion } from "./ci-wait.ts"
@@ -153,7 +154,7 @@ export const pushCiCommand: Command = {
     console.log(`✓ CI completed in ${elapsedSeconds}s — conclusion: ${conclusion}`)
 
     if (conclusion !== "success") {
-      console.error(`✗ CI ${conclusion}`)
+      stderrLog("push-ci failure reporting (CI conclusion !== 'success')", `✗ CI ${conclusion}`)
       process.exitCode = 1
     }
   },

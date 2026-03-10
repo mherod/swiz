@@ -1,5 +1,6 @@
 import { CONFIGURABLE_AGENTS } from "./agents.ts"
 import { createHelpCommand } from "./commands/help.ts"
+import { stderrLog } from "./debug.ts"
 import { suggest } from "./fuzzy.ts"
 import { tryReplayPendingMutations } from "./issue-store.ts"
 import { validateDispatchRoutes } from "./manifest.ts"
@@ -51,8 +52,11 @@ async function run() {
 
   if (!command) {
     const hint = suggest(commandName, commands.keys())
-    console.error(`Unknown command: ${commandName}${hint ? ` (did you mean: "${hint}"?)` : ""}`)
-    console.error(`Run "swiz help" to see available commands.`)
+    stderrLog(
+      "CLI error handler — unknown command",
+      `Unknown command: ${commandName}${hint ? ` (did you mean: "${hint}"?)` : ""}`
+    )
+    stderrLog("CLI error handler — unknown command", `Run "swiz help" to see available commands.`)
     process.exitCode = 1
     return
   }
@@ -69,7 +73,8 @@ async function run() {
     command.options ?? []
   )
   if (unknownOptionWarnings.length > 0) {
-    for (const warning of unknownOptionWarnings) console.error(warning)
+    for (const warning of unknownOptionWarnings)
+      stderrLog("CLI error handler — unknown option warnings", warning)
     process.exitCode = 1
     return
   }
@@ -80,7 +85,7 @@ async function run() {
   try {
     await command.run(rest)
   } catch (err) {
-    console.error(String(err))
+    stderrLog("CLI error handler — uncaught exception", String(err))
     process.exitCode = 1
   }
 }

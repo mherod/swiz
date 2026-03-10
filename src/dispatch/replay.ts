@@ -5,6 +5,7 @@
  */
 
 import { BOLD, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
+import { stderrLog } from "../debug.ts"
 import { evalCondition, type HookGroup } from "../manifest.ts"
 import {
   extractAllowReason,
@@ -249,10 +250,13 @@ export function formatTrace(
   }
 
   const hr = "━".repeat(50)
-  console.error(`\n${BOLD}${hr}${RESET}`)
-  console.error(`${BOLD}swiz dispatch replay:${RESET} ${event}`)
-  console.error(`${DIM}strategy: ${strategy} | ${matchedCount} group(s) matched${RESET}`)
-  console.error(`${BOLD}${hr}${RESET}\n`)
+  stderrLog("Dispatch replay ANSI trace output", `\n${BOLD}${hr}${RESET}`)
+  stderrLog("Dispatch replay ANSI trace output", `${BOLD}swiz dispatch replay:${RESET} ${event}`)
+  stderrLog(
+    "Dispatch replay ANSI trace output",
+    `${DIM}strategy: ${strategy} | ${matchedCount} group(s) matched${RESET}`
+  )
+  stderrLog("Dispatch replay ANSI trace output", `${BOLD}${hr}${RESET}\n`)
 
   traces.forEach((t, i) => {
     const ms = t.endTime !== undefined ? `${t.endTime - t.startTime}ms` : "?"
@@ -277,7 +281,10 @@ export function formatTrace(
         statusStr = `${GREEN}✓ ${t.status}${RESET}`
     }
 
-    console.error(`  ${i + 1}. ${fileStr}  ${DIM}${ms}${RESET}  ${statusStr}`)
+    stderrLog(
+      "Dispatch replay ANSI trace output",
+      `  ${i + 1}. ${fileStr}  ${DIM}${ms}${RESET}  ${statusStr}`
+    )
     if ((t.status === "block" || t.status === "deny") && t.output) {
       try {
         const parsed = JSON.parse(t.output) as Record<string, unknown>
@@ -289,26 +296,33 @@ export function formatTrace(
           (hso?.additionalContext as string | undefined)
         if (reason) {
           const preview = reason.trim().split("\n").slice(0, 3).join("\n     ")
-          console.error(`     ${DIM}${preview}${RESET}`)
+          stderrLog("Dispatch replay ANSI trace output", `     ${DIM}${preview}${RESET}`)
         }
       } catch {
-        console.error(`     ${DIM}${t.output.slice(0, 200)}${RESET}`)
+        stderrLog(
+          "Dispatch replay ANSI trace output",
+          `     ${DIM}${t.output.slice(0, 200)}${RESET}`
+        )
       }
     }
     if (t.reason && t.status === "allow-with-reason") {
       const preview = t.reason.trim().split("\n").slice(0, 2).join("\n     ")
-      console.error(`     ${DIM}${preview}${RESET}`)
+      stderrLog("Dispatch replay ANSI trace output", `     ${DIM}${preview}${RESET}`)
     }
   })
 
   const blocked = traces.find((t) => t.status === "block" || t.status === "deny")
-  console.error(`\n${BOLD}${hr}${RESET}`)
+  stderrLog("Dispatch replay ANSI trace output", `\n${BOLD}${hr}${RESET}`)
   if (blocked) {
-    console.error(
+    stderrLog(
+      "Dispatch replay ANSI trace output",
       `${BOLD}Result:${RESET} ${RED}${blocked.status.toUpperCase()} by ${blocked.file}${RESET}`
     )
   } else {
-    console.error(`${BOLD}Result:${RESET} ${GREEN}all passed${RESET}`)
+    stderrLog(
+      "Dispatch replay ANSI trace output",
+      `${BOLD}Result:${RESET} ${GREEN}all passed${RESET}`
+    )
   }
-  console.error(`${BOLD}${hr}${RESET}\n`)
+  stderrLog("Dispatch replay ANSI trace output", `${BOLD}${hr}${RESET}\n`)
 }

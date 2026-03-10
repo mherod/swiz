@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { stderrLog } from "../debug.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import type { Command } from "../types.ts"
 
@@ -398,7 +399,7 @@ async function validateMcpServers(parsed: ParsedManageArgs, base: string): Promi
   }
 
   for (const issue of issues) {
-    console.error(`- ${issue}`)
+    stderrLog("manage validate emits validation failures to stderr", `- ${issue}`)
   }
   throw new Error(`MCP validation failed with ${issues.length} issue(s)`)
 }
