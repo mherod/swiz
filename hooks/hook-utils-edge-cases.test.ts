@@ -876,10 +876,13 @@ describe("skillAdvice() with edge-case inputs", () => {
     expect(result).toBe("without")
   })
 
-  it("returns withSkill for known skill (environment-dependent)", () => {
+  it("always includes withoutSkill; prepends withSkill when skill exists (environment-dependent)", () => {
     // "commit" exists locally; in CI it may not — test both paths
     const result = skillAdvice("commit", "with", "without")
-    expect(result === "with" || result === "without").toBe(true)
+    // skill found: "with\n\nwithout"; skill absent: "without"
+    expect(result === "with\n\nwithout" || result === "without").toBe(true)
+    // fallback steps always present
+    expect(result).toContain("without")
   })
 
   it("handles empty withSkill and withoutSkill strings", () => {
