@@ -821,6 +821,108 @@ export const tasksCommand: Command = {
         break
       }
 
+      case "update": {
+        const [taskId, ...sessionArgs] = rest
+        if (!taskId) {
+          throw new Error(
+            "Usage: swiz tasks update <task-id> [--subject TEXT] [--description TEXT] [--status STATUS] [--state STATE] [--subject TEXT]\n" +
+              "At least one of --subject, --description, or --status is required."
+          )
+        }
+        const newSubject = extractFlag(rest, "--subject")
+        const newDescription = extractFlag(rest, "--description")
+        const newStatusRaw = extractFlag(rest, "--status")
+        const stateFlag = extractFlag(rest, "--state")
+        const newStatus = newStatusRaw as Task["status"] | undefined
+        const valid: Task["status"][] = ["pending", "in_progress", "completed", "cancelled"]
+        if (newStatus && !valid.includes(newStatus)) {
+          throw new Error(`--status must be one of: ${valid.join(" | ")}`)
+        }
+        if (!newSubject && !newDescription && !newStatus) {
+          throw new Error("At least one of --subject, --description, or --status is required.")
+        }
+        const sessionId = await resolveSession(sessionArgs)
+
+        // Stub creation for native-tool tasks with no file counterpart.
+        let updateTaskExistsInStore = true
+        try {
+          await resolveTaskById(taskId, sessionId, filterCwd)
+        } catch (e) {
+          if (e instanceof Error && e.message.includes("not found") && newSubject) {
+            updateTaskExistsInStore = false
+          } else {
+            throw e
+          }
+        }
+
+        if (!updateTaskExistsInStore && newSubject) {
+          const stubTask: Task = {
+            id: taskId,
+            subject: newSubject,
+            description: newDescription ?? newSubject,
+            status: newStatus ?? "in_progress",
+            statusChangedAt: new Date().toISOString(),
+            elapsedMs: 0,
+            blocks: [],
+            blockedBy: [],
+          }
+          await writeTask(sessionId, stubTask, process.cwd())
+          await writeAudit(sessionId, {
+            timestamp: new Date().toISOString(),
+            taskId,
+            action: "create",
+            newStatus: stubTask.status,
+            subject: newSubject,
+          })
+          console.log(`  ℹ️  Task #${taskId} not in file store — created stub from --subject`)
+          if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
+          break
+        }
+
+        const { sessionId: effectiveSessionId, task } = await resolveTaskById(
+          taskId,
+          sessionId,
+          filterCwd
+        )
+        if (newSubject) task.subject = newSubject
+        if (newDescription) task.description = newDescription
+        if (newStatus) {
+          const oldStatus = task.status
+          if (oldStatus === "in_progress" && task.statusChangedAt) {
+            const elapsed = Date.now() - new Date(task.statusChangedAt).getTime()
+            task.elapsedMs = (task.elapsedMs ?? 0) + Math.max(0, elapsed)
+          }
+          task.status = newStatus
+          task.statusChangedAt = new Date().toISOString()
+          await writeTask(effectiveSessionId, task, process.cwd())
+          await writeAudit(effectiveSessionId, {
+            timestamp: new Date().toISOString(),
+            taskId,
+            action: "status_change",
+            oldStatus,
+            newStatus,
+            subject: task.subject,
+          })
+          const { emoji, color } = STATUS_STYLE[newStatus]
+          console.log(`\n  ${emoji} #${taskId}: ${oldStatus} → ${color}${newStatus}${RESET}`)
+          console.log(`     ${task.subject}`)
+        } else {
+          await writeTask(effectiveSessionId, task, process.cwd())
+          await writeAudit(effectiveSessionId, {
+            timestamp: new Date().toISOString(),
+            taskId,
+            action: "status_change",
+            oldStatus: task.status,
+            newStatus: task.status,
+            subject: task.subject,
+          })
+          console.log(`\n  ✏️  #${taskId}: updated`)
+          console.log(`     ${task.subject}`)
+        }
+        if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
+        break
+      }
+
       case "complete-all": {
         const evidence = extractFlag(rest, "--evidence")
         await completeAll(filterCwd, evidence ?? undefined)
