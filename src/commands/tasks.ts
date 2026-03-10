@@ -710,11 +710,49 @@ export const tasksCommand: Command = {
         const [taskId, evidenceText, ...sessionArgs] = rest
         if (!taskId || !evidenceText) {
           throw new Error(
-            'Usage: swiz tasks evidence <task-id> "<evidence>"\n' +
+            'Usage: swiz tasks evidence <task-id> "<evidence>" [--subject TEXT]\n' +
               "Prefixes: commit:, pr:, file:, test:, note:"
           )
         }
+        const subjectFlag = extractFlag(rest, "--subject")
         const sessionId = await resolveSession(sessionArgs)
+
+        // Same stub-creation logic as complete and status: if the task has no file
+        // counterpart (e.g. created by the native TaskCreate tool post-compaction) and
+        // --subject is provided, write a stub so submitEvidence can find it.
+        let evidenceTaskExistsInStore = true
+        try {
+          await resolveTaskById(taskId, sessionId, filterCwd)
+        } catch (e) {
+          if (e instanceof Error && e.message.includes("not found") && subjectFlag) {
+            evidenceTaskExistsInStore = false
+          } else {
+            throw e
+          }
+        }
+
+        if (!evidenceTaskExistsInStore && subjectFlag) {
+          const stubTask: Task = {
+            id: taskId,
+            subject: subjectFlag,
+            description: subjectFlag,
+            status: "in_progress",
+            statusChangedAt: new Date().toISOString(),
+            elapsedMs: 0,
+            blocks: [],
+            blockedBy: [],
+          }
+          await writeTask(sessionId, stubTask, process.cwd())
+          await writeAudit(sessionId, {
+            timestamp: new Date().toISOString(),
+            taskId,
+            action: "create",
+            newStatus: "in_progress",
+            subject: subjectFlag,
+          })
+          console.log(`  ℹ️  Task #${taskId} not in file store — created stub from --subject`)
+        }
+
         await submitEvidence(sessionId, taskId, evidenceText, filterCwd)
         break
       }
