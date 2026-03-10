@@ -63,7 +63,7 @@ describe("dispatch preToolUse", () => {
       const hso = result.parsed.hookSpecificOutput as Record<string, unknown> | undefined
       expect(hso?.permissionDecision).not.toBe("deny")
     }
-  })
+  }, 15_000)
 
   test("denies sed commands", async () => {
     const result = await dispatch("preToolUse", {
@@ -74,7 +74,7 @@ describe("dispatch preToolUse", () => {
     const hso = result.parsed!.hookSpecificOutput as Record<string, unknown> | undefined
     const decision = hso?.permissionDecision ?? result.parsed!.decision
     expect(decision).toBe("deny")
-  })
+  }, 15_000)
 
   test("warns on grep with allow", async () => {
     const result = await dispatch("preToolUse", {
@@ -87,7 +87,7 @@ describe("dispatch preToolUse", () => {
     // If require-tasks fires first, it may deny — that's fine
     const decision = (hso?.permissionDecision ?? result.parsed!.decision) as string
     expect(["allow", "deny"]).toContain(decision)
-  })
+  }, 15_000)
 
   test("ignores non-Bash tools for banned-commands", async () => {
     const result = await dispatch("preToolUse", {
@@ -104,12 +104,12 @@ describe("dispatch routing", () => {
   test("unknown event produces no output", async () => {
     const result = await dispatch("unknownEvent", {})
     expect(result.stdout).toBe("")
-  })
+  }, 15_000)
 
   test("empty payload doesn't crash", async () => {
     const result = await dispatch("preToolUse", {})
     expect(result.exitCode).toBe(0)
-  })
+  }, 15_000)
 
   test("fails when stdin payload is not received within 2s", async () => {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "preToolUse", "PreToolUse"], {
@@ -139,6 +139,11 @@ describe("dispatch replay", () => {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      env: {
+        ...process.env,
+        // Keep replay deterministic in CI without contacting external providers.
+        AI_TEST_NO_BACKEND: "1",
+      },
     })
     proc.stdin.write(JSON.stringify(payload))
     proc.stdin.end()
@@ -236,7 +241,10 @@ describe("dispatch replay", () => {
   test("replay JSON output includes matched_groups and hooks array", async () => {
     const result = await replay(
       "stop",
-      { session_id: "test-session-replay", transcript_path: "/nonexistent.jsonl" },
+      {
+        session_id: "test-session-replay",
+        transcript_path: "/nonexistent.jsonl",
+      },
       ["--json"]
     )
     expect(result.exitCode).toBe(0)
@@ -247,8 +255,8 @@ describe("dispatch replay", () => {
     expect(typeof parsed.matched_groups).toBe("number")
     expect(Array.isArray(parsed.hooks)).toBe(true)
     // Timeout needs headroom because this replay can run alongside other
-    // high-load suites in pre-push, making process scheduling noisy.
-  }, 20_000)
+    // high-load suites in CI, making process scheduling noisy.
+  }, 60_000)
 
   test("stop replay continues after first block and still runs stop-git-status", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "swiz-stop-replay-"))

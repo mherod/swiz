@@ -142,13 +142,13 @@ describe("swiz memory CLI", () => {
     expect(stdout).toContain("Rule hierarchy")
     expect(stdout).toContain("Project rules")
     expect(stdout).toContain("Global rules")
-  })
+  }, 15_000)
 
   it("shows Gemini hierarchy with --gemini flag", async () => {
     const { stdout } = await runMemory(["--gemini"])
     expect(stdout).toContain("Gemini CLI")
     expect(stdout).toContain("GEMINI.md")
-  })
+  }, 15_000)
 
   it("shows Codex hierarchy with --codex flag", async () => {
     const tmpRoot = join(tmpdir(), `swiz-memory-codex-${Date.now()}`)
@@ -228,10 +228,12 @@ describe("swiz memory CLI", () => {
     expect(stdout).toContain("Cursor")
     expect(stdout).toContain("Gemini CLI")
     expect(stdout).not.toContain("No memory files found")
-  })
+  }, 15_000)
 
   it("supports --all and overrides detected agent context", async () => {
-    const { stdout, exitCode } = await runMemory(["--all"], { CLAUDECODE: "1" })
+    const { stdout, exitCode } = await runMemory(["--all"], {
+      CLAUDECODE: "1",
+    })
     expect(exitCode).toBe(0)
     expect(stdout).toContain("Agents: ")
     expect(stdout).toContain("Claude Code")

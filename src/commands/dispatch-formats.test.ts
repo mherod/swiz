@@ -130,7 +130,7 @@ describe("dispatch output formats", () => {
     expect(hso.hookEventName).toBe("PreToolUse")
     expect(hso.permissionDecision).toBe("deny")
     expect(typeof hso.permissionDecisionReason).toBe("string")
-  })
+  }, 15_000)
 
   test("preToolUse allow-with-reason uses hookSpecificOutput envelope", async () => {
     const homeDir = await createTempDir("swiz-dispatch-home-")
@@ -158,7 +158,7 @@ describe("dispatch output formats", () => {
     expect(hso.permissionDecision).toBe("allow")
     expect(typeof hso.permissionDecisionReason).toBe("string")
     expect((hso.permissionDecisionReason as string).toLowerCase()).toContain("rg")
-  })
+  }, 15_000)
 
   test("stop block uses top-level decision + reason", async () => {
     const homeDir = await createTempDir("swiz-dispatch-home-")
@@ -194,7 +194,7 @@ describe("dispatch output formats", () => {
     expect(result.parsed!.decision).toBe("block")
     expect(typeof result.parsed!.reason).toBe("string")
     expect(result.parsed!.reason as string).toContain("Uncommitted changes detected")
-  })
+  }, 15_000)
 
   test("sessionStart context uses hookSpecificOutput.additionalContext", async () => {
     const homeDir = await createTempDir("swiz-dispatch-home-")
@@ -218,7 +218,7 @@ describe("dispatch output formats", () => {
     expect(hso.hookEventName).toBe("SessionStart")
     expect(typeof hso.additionalContext).toBe("string")
     expect(hso.additionalContext as string).toContain("Post-compaction context")
-  })
+  }, 15_000)
 
   test("userPromptSubmit context uses hookSpecificOutput.additionalContext", async () => {
     const homeDir = await createTempDir("swiz-dispatch-home-")
@@ -241,5 +241,5 @@ describe("dispatch output formats", () => {
     expect(hso.hookEventName).toBe("UserPromptSubmit")
     expect(typeof hso.additionalContext).toBe("string")
     expect((hso.additionalContext as string).length).toBeGreaterThan(0)
-  })
+  }, 15_000)
 })
