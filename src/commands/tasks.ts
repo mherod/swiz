@@ -286,12 +286,14 @@ async function updateStatus(
   console.log()
 }
 
-async function completeAll(filterCwd?: string, evidence?: string) {
+async function completeAll(targetSessionId: string, filterCwd?: string, evidence?: string) {
   const resolvedEvidence = evidence ?? "note:bulk-complete — conclusion: all tasks completed"
   const evidenceError = validateEvidence(resolvedEvidence)
   if (evidenceError) throw new Error(evidenceError)
 
-  const incomplete = await collectIncompleteTasks(filterCwd)
+  const incomplete = (await collectIncompleteTasks(filterCwd)).filter(
+    ({ sessionId }) => sessionId === targetSessionId
+  )
 
   if (incomplete.length === 0) {
     console.log("\n  No incomplete tasks.\n")
@@ -301,8 +303,15 @@ async function completeAll(filterCwd?: string, evidence?: string) {
   console.log(
     `\n  Completing ${incomplete.length} task(s) across ${new Set(incomplete.map((i) => i.sessionId)).size} session(s)...\n`
   )
-  for (const { sessionId, task } of incomplete) {
-    await updateStatus(sessionId, task.id, "completed", resolvedEvidence, undefined, filterCwd)
+  for (const { task } of incomplete) {
+    await updateStatus(
+      targetSessionId,
+      task.id,
+      "completed",
+      resolvedEvidence,
+      undefined,
+      filterCwd
+    )
   }
 }
 
@@ -662,14 +671,6 @@ export const tasksCommand: Command = {
           break
         }
 
-        if (!stateFlag) {
-          throw new Error(
-            `--state <state> is required.\n` +
-              `It sets the session's active working phase (not the task's todo status).\n` +
-              `Valid phases: ${PROJECT_STATES.join(" | ")}\n` +
-              `Example: swiz tasks complete ${taskId} --evidence "note:done" --state developing`
-          )
-        }
         let verify = extractFlag(rest, "--verify")
         const sessionId = await resolveSession(sessionArgs)
 
@@ -721,7 +722,7 @@ export const tasksCommand: Command = {
         }
 
         await updateStatus(sessionId, taskId, "completed", evidence, verify, filterCwd)
-        await applyStateUpdate(stateFlag, process.cwd())
+        if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
         break
       }
 
@@ -789,14 +790,6 @@ export const tasksCommand: Command = {
         const verify = extractFlag(rest, "--verify")
         const stateFlag = extractFlag(rest, "--state")
         const subjectFlag = extractFlag(rest, "--subject")
-        if (!stateFlag) {
-          throw new Error(
-            `--state <state> is required.\n` +
-              `It sets the session's active working phase (not the task's todo status).\n` +
-              `Valid phases: ${PROJECT_STATES.join(" | ")}\n` +
-              `Example: swiz tasks status ${taskId} ${newStatus} --state developing`
-          )
-        }
         const sessionId = await resolveSession(sessionArgs)
 
         // Same stub-creation logic as the complete subcommand: if the task has no file
@@ -836,7 +829,7 @@ export const tasksCommand: Command = {
         }
 
         await updateStatus(sessionId, taskId, newStatus, evidence, verify, filterCwd)
-        await applyStateUpdate(stateFlag, process.cwd())
+        if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
         break
       }
 
@@ -985,8 +978,9 @@ export const tasksCommand: Command = {
       }
 
       case "complete-all": {
+        const sessionId = await resolveSession(rest)
         const evidence = extractFlag(rest, "--evidence")
-        await completeAll(filterCwd, evidence ?? undefined)
+        await completeAll(sessionId, filterCwd, evidence ?? undefined)
         break
       }
 
