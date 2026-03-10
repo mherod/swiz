@@ -14,6 +14,7 @@
 // until the background task completes; the cooldown is handled by the
 // pretooluse hook reading the stale sentinel.
 
+import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
 import {
   GIT_PUSH_RE,
   getCanonicalPathHash,
@@ -51,7 +52,7 @@ if (isBackground) process.exit(0)
 const cwd = input.cwd ?? process.cwd()
 const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
 const repoKey = getCanonicalPathHash(repoRoot || cwd)
-const sentinelPath = `/tmp/swiz-push-cooldown-${repoKey}.timestamp`
+const sentinelPath = swizPushCooldownSentinelPath(repoKey)
 
 // Write the timestamp — this arms the cooldown for subsequent push attempts.
 try {

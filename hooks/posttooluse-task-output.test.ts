@@ -15,6 +15,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, rm } from "node:fs/promises"
 import { join } from "node:path"
+import { claudeTaskOutputPath } from "../src/temp-paths.ts"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ const UID = process.getuid?.() ?? 501
  */
 function outputFilePath(cwd: string, taskId: string): string {
   const cwdKey = cwd.replace(/[/.]/g, "-")
-  return `/tmp/claude-${UID}/${cwdKey}/tasks/${taskId}.output`
+  return claudeTaskOutputPath(UID, cwdKey, taskId)
 }
 
 /** Write a fake output file at the path the hook will look up, returning the path. */
@@ -863,5 +864,21 @@ describe("posttooluse-task-output: composite concrete + presence-only fallback",
     // Bun contributes a concrete lower-bound count even though it's incomplete.
     expect(result.reason).toMatch(/2\+ test\(s\) failed across multiple runners/)
     expect(result.reason).toMatch(/bun, cargo/)
+  })
+
+  test("counts distinct fail lines when all counts are null", async () => {
+    // Both runners are incomplete and provide no numeric failCount.
+    // Aggregation should count distinct matched failure lines (2) instead of "unknown".
+    const output = [
+      "FAIL src/auth/login.test.ts",
+      "Tests: 2 failed",
+      "",
+      " FAIL  src/auth/session.test.ts > session > fails",
+      " Tests  1 failed",
+    ].join("\n")
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toMatch(/2 test\(s\) failed across multiple runners/)
+    expect(result.reason).toMatch(/jest, vitest/)
   })
 })

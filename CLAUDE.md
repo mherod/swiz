@@ -70,9 +70,10 @@ alwaysApply: false
 - Use `TEST_FILE_RE` (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`) for test-file exclusions.
 - DO NOT test external repo code in this repo. Example: remove `src/tasks-list-verify.test.ts` that targeted `~/.claude/hooks/tasks-list.ts`; file issue in owning repo instead.
 - Track current diff file from `+++ b/<path>` headers; apply file-level exclusions via that path.
-- Use shared `sanitizeSessionId()` for `/tmp` sentinel file names.
-- DO NOT hardcode `/tmp` sentinel session IDs in tests; use unique IDs or `mtime` cooldown checks.
-- For `pgrep` checks, use two filters: ancestry (`process.ppid`) and repo scope (`lsof -p <pid> -d cwd -Fn`).
+- Use `sanitizeSessionId()` for `/tmp` names.
+- DO: Use `src/temp-paths.ts` for `/tmp` paths; no `/tmp/*` literals.
+- DO NOT hardcode `/tmp` sentinel session IDs in tests; use unique IDs or `mtime` checks.
+- For `pgrep` checks, use ancestry (`process.ppid`) and repo scope (`lsof -p <pid> -d cwd -Fn`).
 - Reference implementation: `hooks/stop-git-status.ts`.
 - For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts`; use encoding `cwd.replace(/[/.]/g, "-")`.
 - DO NOT reimplement project-key logic with slash-only replacement (`/\//g`).

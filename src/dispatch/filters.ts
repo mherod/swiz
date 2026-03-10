@@ -16,6 +16,7 @@ import {
   readSwizSettings,
 } from "../settings.ts"
 import { getWorkflowIntent } from "../state-machine.ts"
+import { swizHookCooldownPath } from "../temp-paths.ts"
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -38,7 +39,7 @@ export const SWIZ_NOTIFY_HOOK_FILES = new Set([
 
 export function hookCooldownPath(hookFile: string, cwd: string): string {
   const key = Bun.hash(hookFile + cwd).toString(16)
-  return `/tmp/swiz-hook-cooldown-${key}.timestamp`
+  return swizHookCooldownPath(key)
 }
 
 export async function isWithinCooldown(

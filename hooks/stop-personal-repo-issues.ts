@@ -10,6 +10,7 @@ import { orderBy, uniqBy } from "lodash-es"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
 import { getIssueStore, replayPendingMutations } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
+import { stopPersonalRepoIssuesCooldownPath } from "../src/temp-paths.ts"
 import {
   blockStop,
   formatActionPlan,
@@ -162,7 +163,7 @@ function getCooldownKey(sessionId: string, cwd: string): string {
  */
 function getCooldownFilePath(sessionId: string, cwd: string): string {
   const key = getCooldownKey(sessionId, cwd)
-  return `/tmp/stop-personal-repo-issues-${key}.cooldown`
+  return stopPersonalRepoIssuesCooldownPath(key)
 }
 
 /**

@@ -32,6 +32,7 @@ import {
   stateDataSchema,
 } from "../src/settings.ts"
 import { skillAdvice, skillExists } from "../src/skill-utils.ts"
+import { sessionTaskSentinelPath } from "../src/temp-paths.ts"
 import {
   GH_CMD_RE,
   GIT_READ_RE,
@@ -718,7 +719,7 @@ export async function createSessionTask(
   const safeSentinel = sentinelKey.replace(/[^a-zA-Z0-9_-]/g, "")
   const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
   if (!safeSentinel || !safeSession) return
-  const sentinel = `/tmp/${safeSentinel}-${safeSession}.flag`
+  const sentinel = sessionTaskSentinelPath(safeSentinel, safeSession)
   if (await Bun.file(sentinel).exists()) return
   // Defensive: fall back to defaultTaskExecutor if the injected value is not callable.
   if (typeof executor !== "function") {

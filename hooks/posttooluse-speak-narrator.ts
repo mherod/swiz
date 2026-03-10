@@ -7,6 +7,7 @@
  */
 
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
+import { speakLockPath, speakPositionPath } from "../src/temp-paths.ts"
 import { spawnSpeak } from "./hook-utils.ts"
 
 const input = await Bun.stdin.json().catch(() => null)
@@ -23,7 +24,7 @@ if (!settings.speak) process.exit(0)
 if (!transcriptPath || !sessionId || !(await Bun.file(transcriptPath).exists())) process.exit(0)
 
 // ── Lock infrastructure (defined early so stale scavenging runs on every invocation) ──
-const lockFile = `/tmp/speak-lock-${sessionId}.lock`
+const lockFile = speakLockPath(sessionId)
 const LOCK_STALE_MS = 30_000
 const HEARTBEAT_MS = 5_000
 
@@ -53,7 +54,7 @@ async function clearStaleLock(): Promise<void> {
 await clearStaleLock()
 
 // Track last spoken line position
-const posFile = `/tmp/speak-pos-${sessionId}.txt`
+const posFile = speakPositionPath(sessionId)
 let lastPos = 0
 try {
   if (await Bun.file(posFile).exists()) {

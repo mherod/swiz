@@ -14,6 +14,7 @@
 // Rationale: prevents accidental rapid-fire pushes that could trigger CI
 // loops, burn through rate limits, or push partially-prepared commits.
 
+import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
 import {
   denyPreToolUse,
   GIT_PUSH_RE,
@@ -43,7 +44,7 @@ if (hasGitPushForceFlag(command)) process.exit(0)
 const cwd: string = (input?.tool_input?.cwd as string) ?? process.cwd()
 const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
 const repoKey = getCanonicalPathHash(repoRoot || cwd)
-const sentinelPath = `/tmp/swiz-push-cooldown-${repoKey}.timestamp`
+const sentinelPath = swizPushCooldownSentinelPath(repoKey)
 
 // Read last push time
 const now = Date.now()

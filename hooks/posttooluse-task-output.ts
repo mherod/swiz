@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // PostToolUse hook: Parse TaskOutput results for failures and push context.
 //
 // On non-zero exit or error patterns in the output:
@@ -7,6 +8,7 @@
 //   → injects the CI run ID as additionalContext so the agent can watch CI
 //     without re-running the git log / gh run list dance.
 
+import { claudeTaskOutputPath } from "../src/temp-paths.ts"
 import {
   denyPostToolUse,
   emitContext,
@@ -247,6 +249,7 @@ type RunnerResult = {
   failCount: number | null // null = no numeric count available
   isComplete: boolean
   firstFailLine: string | null
+  matchedFailureLines: string[]
 }
 
 /**
@@ -256,6 +259,9 @@ type RunnerResult = {
  */
 function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
   const results: RunnerResult[] = []
+  const uniqueLines = (items: Array<string | null | undefined>): string[] => [
+    ...new Set(items.map((item) => item?.trim()).filter((item): item is string => Boolean(item))),
+  ]
 
   // Bun
   const bunFailMatch = clean.match(BUN_FAIL_RE)
@@ -264,11 +270,13 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
     // Bun may print a running fail tally before the final completion line.
     // Keep that concrete lower-bound count even when output is truncated.
     const failCount = parseInt(bunFailMatch[1]!, 10)
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.includes("✗")))
     results.push({
       runner: "bun",
       failCount,
       isComplete,
-      firstFailLine: lines.find((l) => l.includes("✗") || l.includes("error:")) ?? null,
+      firstFailLine: matchedFailureLines[0] ?? lines.find((l) => l.includes("error:")) ?? null,
+      matchedFailureLines,
     })
   }
 
@@ -276,11 +284,13 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
   const jestFailMatch = clean.match(JEST_FAIL_RE)
   if (jestFailMatch) {
     const isComplete = JEST_COMPLETE_RE.test(clean)
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.startsWith("FAIL ")))
     results.push({
       runner: "jest",
       failCount: isComplete ? parseInt(jestFailMatch[1]!, 10) : null,
       isComplete,
-      firstFailLine: lines.find((l) => l.includes("FAIL") || l.includes("●")) ?? null,
+      firstFailLine: matchedFailureLines[0] ?? lines.find((l) => l.includes("●")) ?? null,
+      matchedFailureLines,
     })
   }
 
@@ -288,11 +298,14 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
   const vitestFailMatch = clean.match(VITEST_FAIL_RE)
   if (vitestFailMatch) {
     const isComplete = VITEST_COMPLETE_RE.test(clean)
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.match(/^\s*FAIL\s+/)))
     results.push({
       runner: "vitest",
       failCount: isComplete ? parseInt(vitestFailMatch[1]!, 10) : null,
       isComplete,
-      firstFailLine: lines.find((l) => l.includes("FAIL") || l.includes("AssertionError")) ?? null,
+      firstFailLine:
+        matchedFailureLines[0] ?? lines.find((l) => l.includes("AssertionError")) ?? null,
+      matchedFailureLines,
     })
   }
 
@@ -300,22 +313,28 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
   if (PYTEST_FAIL_RE.test(clean)) {
     const isComplete = PYTEST_COMPLETE_RE.test(clean)
     const summaryMatch = clean.match(PYTEST_SUMMARY_RE)
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.startsWith("FAILED ")))
     results.push({
       runner: "pytest",
       failCount: isComplete && summaryMatch ? parseInt(summaryMatch[1]!, 10) : null,
       isComplete,
-      firstFailLine: lines.find((l) => l.startsWith("FAILED ")) ?? null,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
     })
   }
 
   // cargo test — FAIL_RE and COMPLETE_RE are on the same line, so match = complete
   const cargoFailMatch = clean.match(CARGO_FAIL_RE)
   if (cargoFailMatch) {
+    const matchedFailureLines = uniqueLines(
+      lines.filter((l) => l.startsWith("---- ") || l.includes(" ... FAILED"))
+    )
     results.push({
       runner: "cargo",
       failCount: parseInt(cargoFailMatch[1]!, 10),
       isComplete: true,
-      firstFailLine: lines.find((l) => l.includes("FAILED") || l.startsWith("---- ")) ?? null,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
     })
   }
 
@@ -323,11 +342,13 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
   if (GOTEST_FAIL_RE.test(clean)) {
     const isComplete = GOTEST_COMPLETE_RE.test(clean)
     const failCount = (clean.match(/^--- FAIL:/gm) ?? []).length
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.startsWith("--- FAIL:")))
     results.push({
       runner: "go test",
       failCount: isComplete && failCount > 0 ? failCount : null,
       isComplete,
-      firstFailLine: lines.find((l) => l.startsWith("--- FAIL:")) ?? null,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
     })
   }
 
@@ -338,12 +359,15 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
     const errors = parseInt(mavenFailMatch[2]!, 10)
     const total = failures + errors
     const isComplete = MAVEN_COMPLETE_RE.test(clean)
+    const matchedFailureLines = uniqueLines(
+      lines.filter((l) => l.includes("<<< FAILURE!") || l.includes("<<< ERROR!"))
+    )
     results.push({
       runner: "maven",
       failCount: isComplete && total > 0 ? total : null,
       isComplete,
-      firstFailLine:
-        lines.find((l) => l.includes("<<< FAILURE!") || l.includes("<<< ERROR!")) ?? null,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
     })
   }
 
@@ -351,11 +375,13 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
   if (GRADLE_FAIL_RE.test(clean)) {
     const summaryMatch = clean.match(GRADLE_SUMMARY_RE)
     const isComplete = GRADLE_COMPLETE_RE.test(clean)
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.match(/^\S.*> \S.* FAILED$/)))
     results.push({
       runner: "gradle",
       failCount: isComplete && summaryMatch ? parseInt(summaryMatch[1]!, 10) : null,
       isComplete,
-      firstFailLine: lines.find((l) => l.match(/^\S.*> \S.* FAILED$/)) ?? null,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
     })
   }
 
@@ -363,31 +389,38 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
   const rspecFailMatch = clean.match(RSPEC_FAIL_RE)
   if (rspecFailMatch && parseInt(rspecFailMatch[1]!, 10) > 0) {
     const isComplete = RSPEC_COMPLETE_RE.test(clean)
+    const matchedFailureLines = uniqueLines(
+      lines.filter((l) => l.trim().match(/^\d+\)/) || l.includes("Failure/Error:"))
+    )
     results.push({
       runner: "rspec",
       failCount: isComplete ? parseInt(rspecFailMatch[1]!, 10) : null,
       isComplete,
-      firstFailLine:
-        lines.find((l) => l.trim().match(/^\d+\)/) || l.includes("Failure/Error:")) ?? null,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
     })
   } else if (clean.includes("Failure/Error:")) {
     // RSpec truncated: failure body visible but no summary line yet
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.includes("Failure/Error:")))
     results.push({
       runner: "rspec",
       failCount: null,
       isComplete: false,
-      firstFailLine: lines.find((l) => l.includes("Failure/Error:")) ?? null,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
     })
   }
 
   // dotnet
   if (DOTNET_FAIL_RE.test(clean)) {
     const summaryMatch = clean.match(DOTNET_COMPLETE_RE)
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.trim().startsWith("Failed ")))
     results.push({
       runner: "dotnet",
       failCount: summaryMatch ? parseInt(summaryMatch[1]!, 10) : null,
       isComplete: summaryMatch !== null,
-      firstFailLine: lines.find((l) => l.trim().startsWith("Failed ")) ?? null,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
     })
   }
 
@@ -395,11 +428,15 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
   if (PHPUNIT_FAIL_RE.test(clean)) {
     const isComplete = PHPUNIT_COMPLETE_RE.test(clean)
     const countMatch = clean.match(PHPUNIT_COUNT_RE)
+    const matchedFailureLines = uniqueLines(
+      lines.filter((l) => l.trim().match(/^\d+\)/) || l.includes("Error: "))
+    )
     results.push({
       runner: "phpunit",
       failCount: isComplete && countMatch ? parseInt(countMatch[1]!, 10) : null,
       isComplete,
-      firstFailLine: lines.find((l) => l.trim().match(/^\d+\)/) || l.includes("Error: ")) ?? null,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
     })
   }
 
@@ -423,11 +460,15 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
   ]
   for (const { runner, re, errorHint } of presenceChecks) {
     if (!detected.has(runner) && re.test(clean)) {
+      const matchedFailureLines = uniqueLines(
+        lines.filter((l) => l.toLowerCase().includes(errorHint.toLowerCase()))
+      )
       results.push({
         runner,
         failCount: null,
         isComplete: false,
-        firstFailLine: lines.find((l) => l.toLowerCase().includes(errorHint.toLowerCase())) ?? null,
+        firstFailLine: matchedFailureLines[0] ?? null,
+        matchedFailureLines,
       })
     }
   }
@@ -457,11 +498,14 @@ function formatRunnerFailure(results: RunnerResult[], exitCode: number): string 
   const hasPresenceOnly = results.some((r) => r.failCount === null)
   const hasIncompleteConcrete = concrete.some((r) => !r.isComplete)
   const concreteFails = concrete.reduce((sum, r) => sum + r.failCount!, 0)
+  const matchedFailureLineCount = new Set(
+    results.flatMap((r) => r.matchedFailureLines.map((line) => line.trim()))
+  ).size
 
   let countLabel: string
   if (concrete.length === 0) {
-    // All presence-only — no concrete counts at all
-    countLabel = "unknown number of"
+    // All presence-only: use distinct matched failure lines when available.
+    countLabel = matchedFailureLineCount > 0 ? `${matchedFailureLineCount}` : "unknown number of"
   } else if (hasPresenceOnly || hasIncompleteConcrete) {
     // Mix includes unknown contribution or incomplete tallies: lower bound only.
     countLabel = `${concreteFails}+`
@@ -527,7 +571,7 @@ async function tryReadOutputFile(taskId: string, cwd: string): Promise<string | 
   try {
     const uid = process.getuid?.() ?? 501
     const cwdKey = cwd.replace(/[/.]/g, "-")
-    const filePath = `/tmp/claude-${uid}/${cwdKey}/tasks/${taskId}.output`
+    const filePath = claudeTaskOutputPath(uid, cwdKey, taskId)
     const file = Bun.file(filePath)
     if (!(await file.exists())) return null
     return await file.text()

@@ -1,10 +1,10 @@
 import { existsSync, readFileSync } from "node:fs"
 import { getCanonicalPathHash } from "../git-helpers.ts"
+import { swizPushCooldownSentinelPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
 
 // Must match the values in hooks/pretooluse-push-cooldown.ts
 export const COOLDOWN_MS = 60_000
-const SENTINEL_PREFIX = "/tmp/swiz-push-cooldown-"
 const POLL_INTERVAL_MS = 2_000
 
 // ─── Cooldown utilities ──────────────────────────────────────────────────
@@ -17,7 +17,7 @@ export function getSentinelPath(cwd: string): string {
   })
   const repoRoot = new TextDecoder().decode(proc.stdout).trim() || cwd
   const repoKey = getCanonicalPathHash(repoRoot)
-  return `${SENTINEL_PREFIX}${repoKey}.timestamp`
+  return swizPushCooldownSentinelPath(repoKey)
 }
 
 export function getRemainingCooldownMs(sentinelPath: string): number {

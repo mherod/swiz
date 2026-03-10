@@ -12,6 +12,7 @@ import {
   isSwizCommand,
   LEGACY_HOOK_DIRS,
 } from "../swiz-hook-commands.ts"
+import { swizPrPollErrorLogPath, swizPrPollLogPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
 
 // ─── Config generators ──────────────────────────────────────────────────────
@@ -496,7 +497,9 @@ const PR_POLL_PLIST = join(
 )
 
 function buildPrPollPlist(bunBin: string, indexPath: string): string {
-  const cmd = `echo '{}' | '${bunBin}' '${indexPath}' dispatch prPoll 2>>/tmp/swiz-prpoll.log`
+  const logPath = swizPrPollLogPath()
+  const errorLogPath = swizPrPollErrorLogPath()
+  const cmd = `echo '{}' | '${bunBin}' '${indexPath}' dispatch prPoll 2>>${logPath}`
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -514,9 +517,9 @@ function buildPrPollPlist(bunBin: string, indexPath: string): string {
 \t<key>RunAtLoad</key>
 \t<false/>
 \t<key>StandardOutPath</key>
-\t<string>/tmp/swiz-prpoll.log</string>
+\t<string>${logPath}</string>
 \t<key>StandardErrorPath</key>
-\t<string>/tmp/swiz-prpoll-error.log</string>
+\t<string>${errorLogPath}</string>
 </dict>
 </plist>
 `

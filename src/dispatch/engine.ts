@@ -9,6 +9,7 @@ import { appendFile } from "node:fs/promises"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
 import { evalCondition, type HookGroup } from "../manifest.ts"
+import { swizDispatchLogPath } from "../temp-paths.ts"
 import {
   isEditTool,
   isNotebookTool,
@@ -26,7 +27,7 @@ import { extractCwd, isWithinCooldown, markHookCooldown } from "./filters.ts"
 
 const SWIZ_ROOT = join(import.meta.dir, "..", "..")
 const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
-const LOG_PATH = "/tmp/swiz-dispatch.log"
+const LOG_PATH = swizDispatchLogPath()
 export const DEFAULT_TIMEOUT = 10 // seconds
 
 /** Slow-hook threshold: hooks taking longer than this are flagged in the log.

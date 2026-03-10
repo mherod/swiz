@@ -8,6 +8,7 @@
 // Uncommitted changes are always enforced regardless of cooldown.
 
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
+import { stopGitPushPromptedFlagPath } from "../src/temp-paths.ts"
 import {
   blockStop,
   createSessionTask,
@@ -23,7 +24,7 @@ import { stopHookInputSchema } from "./schemas.ts"
 const DEFAULT_PUSH_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
 
 function pushSentinelPath(safeSession: string): string {
-  return `/tmp/stop-git-push-prompted-${safeSession}.flag`
+  return stopGitPushPromptedFlagPath(safeSession)
 }
 
 /**

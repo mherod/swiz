@@ -3,6 +3,7 @@
 
 import { dirname, join } from "node:path"
 import { isNodeModulesPath } from "../src/node-modules-path.ts"
+import { stopLockfileDriftBlockedFlagPath } from "../src/temp-paths.ts"
 import { blockStop, git, isGitRepo, recentHeadRange } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 
@@ -21,7 +22,7 @@ async function main(): Promise<void> {
 
   // Only block once per session
   if (sessionId) {
-    const sentinel = `/tmp/stop-lockfile-drift-blocked-${sessionId}.flag`
+    const sentinel = stopLockfileDriftBlockedFlagPath(sessionId)
     if (await Bun.file(sentinel).exists()) return
   }
 
@@ -102,7 +103,7 @@ async function main(): Promise<void> {
 
   // Mark as blocked for this session
   if (sessionId) {
-    await Bun.write(`/tmp/stop-lockfile-drift-blocked-${sessionId}.flag`, "")
+    await Bun.write(stopLockfileDriftBlockedFlagPath(sessionId), "")
   }
 
   let reason = "Package dependency changes detected without lockfile updates.\n\n"
