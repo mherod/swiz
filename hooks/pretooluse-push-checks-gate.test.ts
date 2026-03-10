@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -347,6 +347,90 @@ describe("pretooluse-push-checks-gate", () => {
       expect(result.advisory).toBe(true)
       expect(result.reason).toContain("git branch --show-current")
     })
+  })
+})
+
+// ─── CI check advisory (team / relaxed-collab modes) ─────────────────────────
+
+describe("CI check advisory — prHooksActive modes", () => {
+  async function runHookWithMode(
+    mode: "team" | "relaxed-collab",
+    transcriptCommands: string[]
+  ): Promise<HookResult> {
+    // Use a per-call subdirectory so concurrent tests don't share config.json
+    const projectDir = await mkdtemp(join(tmpDir, `mode-${mode}-`))
+    const swizDir = join(projectDir, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await Bun.write(join(swizDir, "config.json"), JSON.stringify({ collaborationMode: mode }))
+    const transcript = makeTranscript(...transcriptCommands)
+    const tPath = join(tmpDir, `t-${Math.random().toString(36).slice(2)}.jsonl`)
+    await Bun.write(tPath, transcript)
+    const payload = JSON.stringify({
+      tool_name: "Bash",
+      tool_input: { command: "git push origin main", cwd: projectDir },
+      transcript_path: tPath,
+      session_id: "test",
+    })
+    const proc = Bun.spawn(["bun", "hooks/pretooluse-push-checks-gate.ts"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    proc.stdin.write(payload)
+    proc.stdin.end()
+    const out = await new Response(proc.stdout).text()
+    await proc.exited
+    if (!out.trim()) return { blocked: false, reason: "", advisory: false }
+    const parsed = JSON.parse(out.trim())
+    const hso = parsed?.hookSpecificOutput
+    const decision = hso?.permissionDecision ?? parsed?.decision
+    return {
+      blocked: decision === "deny",
+      reason: hso?.permissionDecisionReason ?? parsed?.reason ?? "",
+      advisory: decision === "allow" && !!hso?.permissionDecisionReason,
+    }
+  }
+
+  test("relaxed-collab without swiz ci-wait triggers CI check advisory", async () => {
+    const result = await runHookWithMode("relaxed-collab", [
+      "git branch --show-current",
+      "gh pr list --state open --head main",
+    ])
+    expect(result.blocked).toBe(false)
+    expect(result.advisory).toBe(true)
+    expect(result.reason).toContain("swiz ci-wait")
+    expect(result.reason).toContain("relaxed-collab")
+  })
+
+  test("team without swiz ci-wait triggers CI check advisory", async () => {
+    const result = await runHookWithMode("team", [
+      "git branch --show-current",
+      "gh pr list --state open --head main",
+    ])
+    expect(result.blocked).toBe(false)
+    expect(result.advisory).toBe(true)
+    expect(result.reason).toContain("swiz ci-wait")
+    expect(result.reason).toContain("team")
+  })
+
+  test("relaxed-collab with all three checks passes", async () => {
+    const result = await runHookWithMode("relaxed-collab", [
+      "git branch --show-current",
+      "gh pr list --state open --head main",
+      "swiz ci-wait abc123 --timeout 300",
+    ])
+    expect(result.blocked).toBe(false)
+    expect(result.advisory).toBe(false)
+  })
+
+  test("team with all three checks passes", async () => {
+    const result = await runHookWithMode("team", [
+      "git branch --show-current",
+      "gh pr list --state open --head main",
+      "swiz ci-wait abc123 --timeout 300",
+    ])
+    expect(result.blocked).toBe(false)
+    expect(result.advisory).toBe(false)
   })
 })
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Advise on branch/PR/collaboration checks before `git push`.
 // Non-blocking — provides advisory context when checks haven't been run.
 //
@@ -9,9 +10,12 @@
 // Rationale: pushing without these checks risks pushing large work directly
 // to main in a collaborative repo, or creating duplicate PRs.
 
+import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
   allowPreToolUse,
   BRANCH_CHECK_RE,
+  CI_WAIT_RE,
   extractBashCommands,
   formatActionPlan,
   GIT_PUSH_RE,
@@ -33,7 +37,16 @@ if (!GIT_PUSH_RE.test(command)) process.exit(0)
 const transcriptPath: string = input?.transcript_path ?? ""
 if (!transcriptPath) process.exit(0) // no transcript → can't enforce; allow
 
-const priorCommands = await extractBashCommands(transcriptPath)
+const cwd: string = (input?.tool_input?.cwd as string) ?? process.cwd()
+
+const [priorCommands, globalSettings, projectSettings] = await Promise.all([
+  extractBashCommands(transcriptPath),
+  readSwizSettings(),
+  readProjectSettings(cwd),
+])
+
+const effectiveSettings = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+const modePolicy = getCollaborationModePolicy(effectiveSettings.collaborationMode)
 
 // Check 1: branch check — must use `git branch --show-current` explicitly.
 // Bare `git branch`, `git branch -a`, `git branch -d foo` etc. do NOT satisfy
@@ -45,7 +58,11 @@ const hasBranchCheck = priorCommands.some((c) => BRANCH_CHECK_RE.test(c))
 // Check 2: open-PR check (`gh pr list` with `--head`)
 const hasPRCheck = priorCommands.some((c) => PR_CHECK_RE.test(c))
 
-if (hasBranchCheck && hasPRCheck) process.exit(0)
+// Check 3: CI check — required when prHooksActive (team/relaxed-collab).
+// Satisfied by `swiz ci-wait` in the transcript.
+const hasCICheck = modePolicy.prHooksActive ? priorCommands.some((c) => CI_WAIT_RE.test(c)) : true // not required for solo/auto
+
+if (hasBranchCheck && hasPRCheck && hasCICheck) process.exit(0)
 
 // ── Advise on missing checks ─────────────────────────────────────────────────
 
@@ -57,6 +74,12 @@ if (!hasPRCheck) {
   missing.push(
     "Open-PR check (not run yet): " +
       "`gh pr list --state open --head $(git branch --show-current)`"
+  )
+}
+if (!hasCICheck) {
+  missing.push(
+    `CI check (not run yet, required for ${effectiveSettings.collaborationMode} mode): ` +
+      "`swiz ci-wait $(git rev-parse HEAD) --timeout 300`"
   )
 }
 
