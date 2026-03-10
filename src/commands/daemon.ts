@@ -4,7 +4,7 @@ import { stderrLog } from "../debug.ts"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import { executeDispatch } from "../dispatch/execute.ts"
 import { resolvePrMergeActive, SWIZ_NOTIFY_HOOK_FILES } from "../dispatch/filters.ts"
-import { getGitBranchStatus, ghJson } from "../git-helpers.ts"
+import { type GitBranchStatus, getGitBranchStatus, ghJson } from "../git-helpers.ts"
 import { evalCondition, manifest } from "../manifest.ts"
 import {
   getEffectiveSwizSettings,
@@ -458,6 +458,52 @@ export class CooldownRegistry {
   }
 }
 
+// ─── Warm git state cache ─────────────────────────────────────────────────
+
+/**
+ * Cached git state for a project. Wraps `GitBranchStatus` with a timestamp
+ * so consumers can tell how fresh the data is.
+ */
+export interface CachedGitState {
+  status: GitBranchStatus
+  cachedAt: number
+}
+
+/**
+ * Per-project cache of `getGitBranchStatus()` results. The daemon
+ * invalidates entries when `.git/` changes are detected by the
+ * `FileWatcherRegistry`, so hook dispatches can read branch/status/divergence
+ * without spawning `git status` on every request.
+ */
+export class GitStateCache {
+  private entries = new Map<string, CachedGitState>()
+
+  /** Get cached git state, computing it if missing. */
+  async get(cwd: string): Promise<CachedGitState | null> {
+    const cached = this.entries.get(cwd)
+    if (cached) return cached
+
+    const status = await getGitBranchStatus(cwd)
+    if (!status) return null
+
+    const entry: CachedGitState = { status, cachedAt: Date.now() }
+    this.entries.set(cwd, entry)
+    return entry
+  }
+
+  invalidateProject(cwd: string): void {
+    this.entries.delete(cwd)
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+}
+
 export function hasSnapshotInvalidated(
   previous: SnapshotFingerprint | null,
   next: SnapshotFingerprint
@@ -678,6 +724,7 @@ export const daemonCommand: Command = {
     const eligibilityCache = new HookEligibilityCache()
     const transcriptIndex = new TranscriptIndexCache()
     const cooldownRegistry = new CooldownRegistry()
+    const gitStateCache = new GitStateCache()
     const projectRoot = dirname(Bun.main)
     const hooksDir = join(projectRoot, "hooks/")
     const manifestPath = join(projectRoot, "src", "manifest.ts")
@@ -706,6 +753,7 @@ export const daemonCommand: Command = {
       snapshots.clear()
       ghCache.invalidateAll()
       eligibilityCache.invalidateAll()
+      gitStateCache.invalidateAll()
     }
 
     watchers.register(manifestPath, "manifest", flushSnapshots)
@@ -719,12 +767,13 @@ export const daemonCommand: Command = {
       if (registeredProjects.has(cwd)) return
       registeredProjects.add(cwd)
       const projectFlush = () => {
-        // Flush snapshots, gh cache, and eligibility for this project
+        // Flush snapshots, gh cache, eligibility, and git state for this project
         for (const key of snapshots.keys()) {
           if (key.startsWith(cwd)) snapshots.delete(key)
         }
         ghCache.invalidateProject(cwd)
         eligibilityCache.invalidateProject(cwd)
+        gitStateCache.invalidateProject(cwd)
       }
       const projectSettings = getProjectSettingsPath(cwd)
       if (projectSettings)
@@ -882,6 +931,22 @@ export const daemonCommand: Command = {
           return Response.json({ marked: true })
         }
 
+        if (url.pathname === "/git/state" && req.method === "POST") {
+          const body = (await req.json().catch(() => null)) as {
+            cwd?: string
+          } | null
+          const cwd = body?.cwd
+          if (typeof cwd !== "string" || cwd.length === 0) {
+            return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
+          }
+          registerProjectWatchers(cwd)
+          const state = await gitStateCache.get(cwd)
+          if (!state) {
+            return Response.json({ error: "Not a git repository or no branch" }, { status: 404 })
+          }
+          return Response.json(state)
+        }
+
         if (url.pathname === "/cache/status" && req.method === "GET") {
           return Response.json({
             watchers: watchers.status(),
@@ -890,6 +955,7 @@ export const daemonCommand: Command = {
             eligibilityCacheSize: eligibilityCache.size,
             transcriptIndexSize: transcriptIndex.size,
             cooldownRegistrySize: cooldownRegistry.size,
+            gitStateCacheSize: gitStateCache.size,
           })
         }
 

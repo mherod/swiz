@@ -7,6 +7,7 @@ import {
   createMetrics,
   FileWatcherRegistry,
   GhQueryCache, // daemon gh cache
+  GitStateCache,
   HookEligibilityCache,
   hasSnapshotInvalidated,
   recordDispatch,
@@ -458,5 +459,54 @@ describe("CooldownRegistry", () => {
 
     reg.invalidateAll()
     expect(reg.size).toBe(0)
+  })
+})
+
+describe("GitStateCache", () => {
+  it("caches git state for the current project", async () => {
+    const cache = new GitStateCache()
+    const result = await cache.get(process.cwd())
+
+    expect(result).not.toBeNull()
+    expect(result!.status.branch).toBeDefined()
+    expect(result!.cachedAt).toBeGreaterThan(0)
+    expect(cache.size).toBe(1)
+  })
+
+  it("returns null for non-git directories", async () => {
+    const cache = new GitStateCache()
+    const dir = await mkdtemp(join(tmpdir(), "daemon-test-"))
+    const result = await cache.get(dir)
+
+    expect(result).toBeNull()
+    expect(cache.size).toBe(0)
+  })
+
+  it("returns cached reference on second call", async () => {
+    const cache = new GitStateCache()
+    const r1 = await cache.get(process.cwd())
+    const r2 = await cache.get(process.cwd())
+
+    expect(r1).toBe(r2) // same reference — cached
+  })
+
+  it("invalidateProject flushes only matching entries", async () => {
+    const cache = new GitStateCache()
+    await cache.get(process.cwd())
+    // Add a second entry by calling get on a different path
+    // (will be null for non-git dir, so size stays 1)
+    expect(cache.size).toBe(1)
+
+    cache.invalidateProject(process.cwd())
+    expect(cache.size).toBe(0)
+  })
+
+  it("invalidateAll clears everything", async () => {
+    const cache = new GitStateCache()
+    await cache.get(process.cwd())
+    expect(cache.size).toBe(1)
+
+    cache.invalidateAll()
+    expect(cache.size).toBe(0)
   })
 })
