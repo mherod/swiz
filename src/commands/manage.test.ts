@@ -4,6 +4,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parseManageArgs } from "./manage.ts"
 
+const DESKTOP_CONFIG_SUBPATH = join(
+  "Library",
+  "Application Support",
+  "Claude",
+  "claude_desktop_config.json"
+)
+
 const INDEX_PATH = join(import.meta.dir, "..", "..", "index.ts")
 
 async function makeTempHome(prefix = "swiz-manage-test-"): Promise<string> {
@@ -30,10 +37,15 @@ async function runManage(
 }
 
 describe("parseManageArgs", () => {
-  it("parses list defaults to all agents", () => {
+  it("parses list defaults to all agents including claude-desktop", () => {
     const parsed = parseManageArgs(["mcp", "list"])
     expect(parsed.action).toBe("list")
-    expect(parsed.targetAgents).toEqual(["cursor", "claude", "gemini"])
+    expect(parsed.targetAgents).toEqual(["cursor", "claude", "claude-desktop", "gemini"])
+  })
+
+  it("parses --claude-desktop flag", () => {
+    const parsed = parseManageArgs(["mcp", "list", "--claude-desktop"])
+    expect(parsed.targetAgents).toEqual(["claude-desktop"])
   })
 
   it("parses add with command/arg/env", () => {
@@ -342,5 +354,98 @@ describe("manage mcp --project (global behavior unchanged)", () => {
     expect(list.stdout).toContain("global_server: npx")
     // Path shown should be in home, not projectDir
     expect(list.stdout).toContain(home)
+  })
+})
+
+describe("manage mcp --claude-desktop (global Claude Desktop config)", () => {
+  it("resolves path to Library/Application Support/Claude/claude_desktop_config.json", async () => {
+    const home = await makeTempHome()
+    const list = await runManage(["mcp", "list", "--claude-desktop"], home)
+    expect(list.exitCode).toBe(0)
+    expect(list.stdout).toContain("Claude Desktop")
+    expect(list.stdout).toContain(join(home, DESKTOP_CONFIG_SUBPATH))
+  })
+
+  it("adds and lists MCP servers in Claude Desktop config", async () => {
+    const home = await makeTempHome()
+    const add = await runManage(
+      ["mcp", "add", "magic-ui", "--command", "npx", "--claude-desktop"],
+      home
+    )
+    expect(add.exitCode).toBe(0)
+    expect(add.stdout).toContain('Added "magic-ui"')
+    expect(add.stdout).toContain("Claude Desktop")
+
+    const configPath = join(home, DESKTOP_CONFIG_SUBPATH)
+    const jsonText = await readFile(configPath, "utf-8")
+    const json = JSON.parse(jsonText) as { mcpServers?: Record<string, { command?: string }> }
+    expect(json.mcpServers?.["magic-ui"]?.command).toBe("npx")
+
+    const list = await runManage(["mcp", "list", "--claude-desktop"], home)
+    expect(list.exitCode).toBe(0)
+    expect(list.stdout).toContain("Claude Desktop")
+    expect(list.stdout).toContain("magic-ui: npx")
+  })
+
+  it("removes MCP server from Claude Desktop config", async () => {
+    const home = await makeTempHome()
+    const desktopDir = join(home, "Library", "Application Support", "Claude")
+    await mkdir(desktopDir, { recursive: true })
+    await writeFile(
+      join(desktopDir, "claude_desktop_config.json"),
+      JSON.stringify({ mcpServers: { "magic-ui": { command: "npx" } } })
+    )
+
+    const remove = await runManage(["mcp", "remove", "magic-ui", "--claude-desktop"], home)
+    expect(remove.exitCode).toBe(0)
+    expect(remove.stdout).toContain('Removed "magic-ui"')
+
+    const jsonText = await readFile(join(desktopDir, "claude_desktop_config.json"), "utf-8")
+    const json = JSON.parse(jsonText) as { mcpServers?: Record<string, unknown> }
+    expect(json.mcpServers).toEqual({})
+  })
+
+  it("validate reports malformed server in Claude Desktop config", async () => {
+    const home = await makeTempHome()
+    const desktopDir = join(home, "Library", "Application Support", "Claude")
+    await mkdir(desktopDir, { recursive: true })
+    await writeFile(
+      join(desktopDir, "claude_desktop_config.json"),
+      JSON.stringify({ mcpServers: { bad: { args: ["-y"] } } })
+    )
+
+    const result = await runManage(["mcp", "validate", "--claude-desktop"], home)
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("missing a non-empty command")
+  })
+
+  it("validate succeeds with valid Claude Desktop config", async () => {
+    const home = await makeTempHome()
+    const desktopDir = join(home, "Library", "Application Support", "Claude")
+    await mkdir(desktopDir, { recursive: true })
+    await writeFile(
+      join(desktopDir, "claude_desktop_config.json"),
+      JSON.stringify({
+        mcpServers: { "my-server": { command: "/usr/bin/env", args: ["echo", "ok"] } },
+      })
+    )
+
+    const result = await runManage(["mcp", "validate", "--claude-desktop"], home)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("MCP validation passed")
+  })
+
+  it("existing Claude Code --claude behavior unchanged", async () => {
+    const home = await makeTempHome()
+    await writeFile(
+      join(home, ".claude.json"),
+      JSON.stringify({ mcpServers: { "code-server": { command: "node" } } })
+    )
+
+    const list = await runManage(["mcp", "list", "--claude"], home)
+    expect(list.exitCode).toBe(0)
+    expect(list.stdout).toContain("Claude Code")
+    expect(list.stdout).toContain(join(home, ".claude.json"))
+    expect(list.stdout).toContain("code-server: node")
   })
 })

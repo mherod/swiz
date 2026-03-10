@@ -19,12 +19,20 @@ export function collectUnknownOptionWarnings(
 ): string[] {
   const GLOBAL_FLAGS = new Set(["--help", "-h"])
   const commandFlags = new Set(
-    options.flatMap((o) => o.flags.split(/[\s,]+/).filter((t) => t.startsWith("-")))
+    options.flatMap((o) =>
+      o.flags
+        .split(/[\s,]+/)
+        .map((t) => t.replace(/^[^-]+/, ""))
+        .filter((t) => t.startsWith("-"))
+    )
   )
   const knownFlags = new Set([...GLOBAL_FLAGS, ...commandFlags])
   const warnings: string[] = []
-  for (const arg of rest) {
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i]!
     if (!arg.startsWith("-") || knownFlags.has(arg)) continue
+    // Skip if the preceding token was a known flag — this arg is its value, not a flag itself
+    if (i > 0 && knownFlags.has(rest[i - 1]!)) continue
     const hint = suggest(arg, knownFlags)
     warnings.push(
       `Unknown option: ${arg}${hint ? ` (did you mean: "${hint}"?)` : ""} — run: swiz help ${commandName}`

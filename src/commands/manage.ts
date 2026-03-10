@@ -6,7 +6,7 @@ import type { Command } from "../types.ts"
 
 type ManageSubject = "mcp"
 type ManageAction = "list" | "add" | "remove" | "validate" | "show"
-type AgentId = "cursor" | "claude" | "gemini"
+type AgentId = "cursor" | "claude" | "claude-desktop" | "gemini"
 type AgentScope = "global" | "project"
 
 interface McpServerDef {
@@ -55,6 +55,14 @@ const GLOBAL_AGENTS: AgentConfig[] = [
     flag: "--claude",
     displayName: "Claude Code",
     resolvePath: (home) => join(home, ".claude.json"),
+  },
+  {
+    id: "claude-desktop",
+    scope: "global",
+    flag: "--claude-desktop",
+    displayName: "Claude Desktop",
+    resolvePath: (home) =>
+      join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json"),
   },
   {
     id: "gemini",
@@ -107,7 +115,7 @@ function usage(): string {
     "  swiz manage mcp remove figma --claude --cursor",
     "  swiz manage mcp validate",
     "  swiz manage mcp validate --project",
-    "Agent flags (optional): --cursor --claude --gemini (default: all)",
+    "Agent flags (optional): --cursor --claude --claude-desktop --gemini (default: all)",
     "Scope flags (optional): --project (target project-level files; default: global home files)",
   ].join("\n")
 }
@@ -417,7 +425,10 @@ export const manageCommand: Command = {
     },
     { flags: "mcp remove <name>", description: "Remove an MCP server entry" },
     { flags: "mcp validate", description: "Validate MCP server configuration files" },
-    { flags: "--cursor --claude --gemini", description: "Limit action to selected agents" },
+    {
+      flags: "--cursor --claude --claude-desktop --gemini",
+      description: "Limit action to selected agents",
+    },
     {
       flags: "--project",
       description:
