@@ -9,6 +9,7 @@ import {
   isAutomationLogin,
   isOrgRepo,
   isPersonalRepo,
+  requiresPeerReview,
 } from "./collaboration-policy.ts"
 
 describe("isAutomationLogin", () => {
@@ -180,6 +181,18 @@ describe("detectRepoOwnership", () => {
 
     expect(result.resolved).toBe(false)
     expect(result.isPersonalRepo).toBe(false)
+  })
+})
+
+describe("requiresPeerReview", () => {
+  it("returns true only for team mode", () => {
+    expect(requiresPeerReview("team")).toBe(true)
+  })
+
+  it("returns false for solo, auto, and relaxed-collab", () => {
+    expect(requiresPeerReview("solo")).toBe(false)
+    expect(requiresPeerReview("auto")).toBe(false)
+    expect(requiresPeerReview("relaxed-collab")).toBe(false)
   })
 })
 

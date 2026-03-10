@@ -283,6 +283,16 @@ export function getCollaborationModePolicy(mode: CollaborationMode): Collaborati
   }
 }
 
+/**
+ * Returns true if the given collaboration mode requires a peer review approval
+ * before work can be merged to the default branch.
+ *
+ * Convenience wrapper around `getCollaborationModePolicy(mode).requirePeerReview`.
+ */
+export function requiresPeerReview(mode: CollaborationMode): boolean {
+  return getCollaborationModePolicy(mode).requirePeerReview
+}
+
 export async function detectProjectCollaborationPolicy(
   cwd: string,
   options: DetectProjectCollaborationOptions = {}

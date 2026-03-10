@@ -5,6 +5,9 @@
 // It emits the same CI verification evidence the manual sequence would produce,
 // so transcript-based workflow checks can treat the result as verified.
 
+import { getDefaultBranch, isDefaultBranch } from "../../hooks/utils/git-utils.ts"
+import { requiresPeerReview } from "../collaboration-policy.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 import { waitForCiCompletion } from "./ci-wait.ts"
 import { getSentinelPath, parsePushWaitArgs, waitForCooldown } from "./push-wait.ts"
@@ -77,6 +80,26 @@ export const pushCiCommand: Command = {
     const commitSha = new TextDecoder().decode(shaProc.stdout).trim()
     if (!commitSha) {
       throw new Error("Could not determine HEAD SHA")
+    }
+
+    // 0. Peer-review gate: block direct default-branch pushes in team mode
+    const defaultBranch = await getDefaultBranch(cwd)
+    if (isDefaultBranch(targetBranch, defaultBranch)) {
+      const [globalSettings, projectSettings] = await Promise.all([
+        readSwizSettings(),
+        readProjectSettings(cwd),
+      ])
+      const effective = getEffectiveSwizSettings(globalSettings, undefined, projectSettings)
+      if (requiresPeerReview(effective.collaborationMode)) {
+        throw new Error(
+          `Collaboration mode "${effective.collaborationMode}" requires peer review — ` +
+            `direct pushes to ${targetBranch} are not allowed.\n\n` +
+            `Push to a feature branch and open a PR instead:\n` +
+            `  git checkout -b feat/<description>\n` +
+            `  git push origin feat/<description>\n` +
+            `  gh pr create`
+        )
+      }
     }
 
     // 1. Wait for push cooldown
