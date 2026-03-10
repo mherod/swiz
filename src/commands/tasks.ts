@@ -822,24 +822,57 @@ export const tasksCommand: Command = {
       }
 
       case "update": {
+        const UPDATE_USAGE =
+          "Usage: swiz tasks update <task-id> [--subject TEXT] [--description TEXT]\n" +
+          "                         [--active-form TEXT] [--status STATUS] [--state STATE]\n" +
+          "                         [--session ID]\n\n" +
+          "Mutable fields:\n" +
+          "  --subject TEXT       Replace the task subject (one-line imperative title)\n" +
+          "  --description TEXT   Replace the task description\n" +
+          "  --active-form TEXT   Replace the in-progress spinner label\n" +
+          "  --status STATUS      Change status: pending | in_progress | completed | cancelled\n" +
+          "  --state STATE        Update the session working phase\n\n" +
+          "At least one of --subject, --description, --active-form, or --status is required.\n" +
+          'To add evidence to a completed task, use: swiz tasks evidence <task-id> "<evidence>"'
+
         const [taskId, ...sessionArgs] = rest
-        if (!taskId) {
-          throw new Error(
-            "Usage: swiz tasks update <task-id> [--subject TEXT] [--description TEXT] [--status STATUS] [--state STATE] [--subject TEXT]\n" +
-              "At least one of --subject, --description, or --status is required."
-          )
+        if (!taskId || taskId === "--help" || taskId === "-h") {
+          console.log(UPDATE_USAGE)
+          break
         }
+
+        const KNOWN_UPDATE_FLAGS = new Set([
+          "--subject",
+          "--description",
+          "--active-form",
+          "--status",
+          "--state",
+          "--session",
+        ])
+        // Detect unknown --flags (positional after taskId are passed to resolveSession; skip them)
+        const flagTokens = rest.slice(1).filter((t) => t.startsWith("--"))
+        const unknownFlags = flagTokens.filter((t) => !KNOWN_UPDATE_FLAGS.has(t))
+        if (unknownFlags.length > 0) {
+          throw new Error(`Unknown flag(s): ${unknownFlags.join(", ")}\n\n${UPDATE_USAGE}`)
+        }
+
         const newSubject = extractFlag(rest, "--subject")
         const newDescription = extractFlag(rest, "--description")
+        const newActiveForm = extractFlag(rest, "--active-form")
         const newStatusRaw = extractFlag(rest, "--status")
         const stateFlag = extractFlag(rest, "--state")
         const newStatus = newStatusRaw as Task["status"] | undefined
         const valid: Task["status"][] = ["pending", "in_progress", "completed", "cancelled"]
         if (newStatus && !valid.includes(newStatus)) {
-          throw new Error(`--status must be one of: ${valid.join(" | ")}`)
+          throw new Error(
+            `--status "${newStatusRaw}" is not valid. Must be one of: ${valid.join(" | ")}`
+          )
         }
-        if (!newSubject && !newDescription && !newStatus) {
-          throw new Error("At least one of --subject, --description, or --status is required.")
+        if (!newSubject && !newDescription && !newActiveForm && !newStatus) {
+          throw new Error(
+            "At least one of --subject, --description, --active-form, or --status is required.\n\n" +
+              UPDATE_USAGE
+          )
         }
         const sessionId = await resolveSession(sessionArgs)
 
@@ -860,6 +893,7 @@ export const tasksCommand: Command = {
             id: taskId,
             subject: newSubject,
             description: newDescription ?? newSubject,
+            activeForm: newActiveForm,
             status: newStatus ?? "in_progress",
             statusChangedAt: new Date().toISOString(),
             elapsedMs: 0,
@@ -886,6 +920,7 @@ export const tasksCommand: Command = {
         )
         if (newSubject) task.subject = newSubject
         if (newDescription) task.description = newDescription
+        if (newActiveForm) task.activeForm = newActiveForm
         if (newStatus) {
           const oldStatus = task.status
           if (oldStatus === "in_progress" && task.statusChangedAt) {
