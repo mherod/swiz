@@ -285,6 +285,31 @@ export async function resolveTaskById(
           `\nUse --session ${matchingSession.slice(0, 8)} with a different task ID, or recreate the task.${recentHint}`
       )
     }
+    // Compaction-recovery fallback for prefixed IDs: search orphan sessions only
+    // (those with no transcript in ANY project directory). Same constraint as the
+    // unprefixed path to prevent cross-project contamination.
+    if (filterCwd) {
+      const allIndexedIds = await getAllProjectSessionIds(projectsDir)
+      let taskDirEntries: string[]
+      try {
+        taskDirEntries = await readdir(tasksDir)
+      } catch {
+        taskDirEntries = []
+      }
+      const orphanSession = taskDirEntries.find(
+        (s) => !allIndexedIds.has(s) && sessionPrefix(s) === prefix
+      )
+      if (orphanSession) {
+        const tasks = await readTasks(orphanSession, tasksDir)
+        const task = tasks.find((t) => t.id === taskId)
+        if (task) {
+          debugLog(
+            `  ${DIM}Task #${taskId} resolved via compaction-recovery fallback in orphan session ${orphanSession.slice(0, 8)}...${RESET}`
+          )
+          return { sessionId: orphanSession, task }
+        }
+      }
+    }
     const sessionsHint = await buildRecentSessionsHint(sessions, tasksDir)
     throw new Error(
       `Task #${taskId} not found (no session with prefix "${prefix}" exists in this project).${sessionsHint}`
@@ -297,7 +322,35 @@ export async function resolveTaskById(
   if (task) return { sessionId: primarySessionId, task }
 
   // Fallback: search across all project sessions
-  const matches = await findTaskAcrossSessions(taskId, filterCwd, tasksDir, projectsDir)
+  let matches = await findTaskAcrossSessions(taskId, filterCwd, tasksDir, projectsDir)
+
+  // Compaction-recovery fallback: if no match found within the project scope,
+  // search sessions that have no transcript in ANY project directory. These are
+  // true orphans — sessions whose transcript was never written (compaction gap)
+  // and therefore cannot be attributed to any project. Cross-project contamination
+  // is not a risk here because indexed sessions (belonging to other projects) are
+  // explicitly excluded.
+  if (matches.length === 0 && filterCwd) {
+    const allIndexedIds = await getAllProjectSessionIds(projectsDir)
+    let taskDirEntries: string[]
+    try {
+      taskDirEntries = await readdir(tasksDir)
+    } catch {
+      taskDirEntries = []
+    }
+    for (const s of taskDirEntries) {
+      if (allIndexedIds.has(s)) continue
+      const tasks = await readTasks(s, tasksDir)
+      const task = tasks.find((t) => t.id === taskId)
+      if (task) {
+        debugLog(
+          `  ${DIM}Task #${taskId} found via compaction-recovery fallback in orphan session ${s.slice(0, 8)}...${RESET}`
+        )
+        matches = [{ sessionId: s, task }]
+        break
+      }
+    }
+  }
 
   if (matches.length === 1) {
     debugLog(
