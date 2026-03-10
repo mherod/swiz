@@ -2,8 +2,11 @@
 
 // PreToolUse hook: Enforce a 60-second cooldown between git pushes.
 //
-// After any git push the last-push timestamp is written to a per-repo file in
-// /tmp. If another git push is attempted within 60 seconds, the hook blocks it.
+// Reads the last-push timestamp written by posttooluse-push-cooldown.ts.
+// If a push was made within 60 seconds, the hook blocks the new attempt.
+// The sentinel is only written *after* a push executes (PostToolUse), so
+// blocked pushes — rejected by a later PreToolUse hook — do not arm the
+// cooldown.
 //
 // Bypass: force flags (--force, -f, --force-with-lease, --force-if-includes)
 // skip the cooldown. Recommended alternative: `swiz push-wait` which waits
@@ -61,9 +64,5 @@ if (await Bun.file(sentinelPath).exists()) {
   }
 }
 
-// Record this push attempt timestamp
-try {
-  await Bun.write(sentinelPath, String(now))
-} catch {
-  // Non-fatal: if we can't write the sentinel, allow the push
-}
+// Sentinel is written by posttooluse-push-cooldown.ts after the push executes,
+// so only successful (non-blocked) pushes arm the cooldown.

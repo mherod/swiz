@@ -4,7 +4,7 @@ AI coding agents are capable of impressive things. They're also capable of forge
 
 One manifest of TypeScript hook scripts gets installed across Claude Code, Cursor, Gemini CLI, and Codex CLI — translating tool names, event names, and config formats automatically so every agent plays by the same rules. The hooks enforce discipline at every stage of the agent loop: before tools run, after they complete, and before the session is allowed to stop.
 
-**93 hooks. 11 event types. Every agent. Zero compromises.**
+**94 hooks. 11 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -175,7 +175,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-claude-word-limit.ts` | Blocks `git push` when CLAUDE.md exceeds 5000 words, enforcing the limit at release time. Provides actionable error showing current word count, overage, and required reduction. Integrates with word-counting utility in hook-utils. |
 | `posttooluse-speak-narrator.ts` | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async. |
 
-### PostToolUse (17)
+### PostToolUse (18)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -196,6 +196,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS. Incremental — only speaks text added since the last invocation. Runs async so it never slows the agent down. |
 | `posttooluse-memory-size.ts` | Checks CLAUDE.md and memory files after edits — if they exceed line/word thresholds, advises compaction using the /compact-memory skill. Keeps guidance files lean. |
 | `posttooluse-task-output.ts` | Parses TaskOutput results: blocks on non-zero exits with actionable error context; on successful git push, injects the CI run ID and watch commands so the agent can verify CI without extra plumbing. |
+| `posttooluse-push-cooldown.ts` | After any `git push` executes, writes the cooldown sentinel. Pairs with `pretooluse-push-cooldown.ts` — by writing *after* the push runs, only successful pushes arm the cooldown, so blocked pushes no longer trigger a false 60-second wait. |
 | `posttooluse-verify-push.ts` | After any `git push`, verifies the local HEAD SHA matches the remote tracking branch SHA. Blocks with a hard error if they diverge — prevents the agent from declaring push success when the commit didn't land on the remote. |
 | `posttooluse-state-transition.ts` | Auto-transitions project state based on PR lifecycle: `gh pr create` moves `in-development` → `awaiting-feedback`; `gh pr merge` moves `awaiting-feedback` → `in-development`. |
 
