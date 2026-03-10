@@ -69,6 +69,22 @@ const EVIDENCE_SEGMENT_PATTERNS: Array<{ name: string; re: RegExp }> = [
 
 const REQUIRED_EVIDENCE_FIELDS = 1
 
+// Invariant: every EVIDENCE_PREFIXES entry must have a matching pattern name.
+// Throws at module load time so drift is caught immediately rather than silently
+// accepting a prefix that will never satisfy field validation.
+{
+  const _patternNames = new Set(EVIDENCE_SEGMENT_PATTERNS.map((p) => p.name))
+  for (const prefix of EVIDENCE_PREFIXES) {
+    const key = prefix.replace(/:$/, "")
+    if (!_patternNames.has(key)) {
+      throw new Error(
+        `[tasks] EVIDENCE_PREFIXES mismatch: "${prefix}" has no corresponding entry in ` +
+          `EVIDENCE_SEGMENT_PATTERNS. Add { name: "${key}", re: /^${key}\\s*:\\s*\\S+/i } to EVIDENCE_SEGMENT_PATTERNS.`
+      )
+    }
+  }
+}
+
 const COMMIT_PREFIX_RE = /^commit\s*:\s*/i
 const HEX_SHA_RE = /^[0-9a-f]{7,40}$/i
 
