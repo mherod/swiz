@@ -374,6 +374,30 @@ export async function resolveTaskById(
 }
 
 /**
+ * Return the set of session IDs in tasksDir that are NOT indexed under any
+ * project transcript directory. These are "orphan" sessions created during the
+ * compaction gap (TaskCreate runs before the transcript .jsonl is written).
+ * Used by the task renderer to annotate tasks with a [recovered] indicator.
+ */
+export async function getOrphanSessionIds(
+  tasksDir = getDefaultTaskRoots().tasksDir,
+  projectsDir = getDefaultTaskRoots().projectsDir
+): Promise<Set<string>> {
+  const allIndexed = await getAllProjectSessionIds(projectsDir)
+  let entries: string[]
+  try {
+    entries = await readdir(tasksDir)
+  } catch {
+    return new Set()
+  }
+  const orphans = new Set<string>()
+  for (const s of entries) {
+    if (!allIndexed.has(s)) orphans.add(s)
+  }
+  return orphans
+}
+
+/**
  * Collect all incomplete tasks across all project sessions.
  * Used by complete-all to find tasks that may have been orphaned
  * in other session directories after compaction.

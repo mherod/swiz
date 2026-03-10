@@ -3,10 +3,10 @@
  * Owns: DateFormat, formatDate, timeAgo, renderTask, listTasks, listAllSessionsTasks.
  */
 
-import { BOLD, DIM, RESET } from "../ansi.ts"
+import { BOLD, DIM, RESET, YELLOW } from "../ansi.ts"
 import { formatDuration } from "../format-duration.ts"
 import { readTasks, STATUS_STYLE, type Task } from "./task-repository.ts"
-import { getSessions } from "./task-resolver.ts"
+import { getOrphanSessionIds, getSessions } from "./task-resolver.ts"
 
 export type { Task }
 
@@ -81,10 +81,14 @@ export function renderTask(task: Task, sessionTag?: string, dateFormat: DateForm
 export async function listTasks(
   sessionId: string,
   label: string,
-  dateFormat: DateFormat = "relative"
+  dateFormat: DateFormat = "relative",
+  recovered = false
 ) {
   const tasks = await readTasks(sessionId)
-  console.log(`\n  ${BOLD}Tasks${RESET} ${DIM}(${label}: ${sessionId.slice(0, 8)}...)${RESET}\n`)
+  const recoveredTag = recovered ? ` ${YELLOW}[recovered]${RESET}` : ""
+  console.log(
+    `\n  ${BOLD}Tasks${RESET} ${DIM}(${label}: ${sessionId.slice(0, 8)}...)${RESET}${recoveredTag}\n`
+  )
 
   if (tasks.length === 0) {
     console.log("  No tasks found.\n")
@@ -117,7 +121,7 @@ export async function listAllSessionsTasks(
   filterCwd?: string,
   dateFormat: DateFormat = "relative"
 ) {
-  const sessions = await getSessions(filterCwd)
+  const [sessions, orphanIds] = await Promise.all([getSessions(filterCwd), getOrphanSessionIds()])
   const label = filterCwd ? "current project" : "all projects"
 
   if (sessions.length === 0) {
@@ -139,7 +143,8 @@ export async function listAllSessionsTasks(
     totalTasks += tasks.length
 
     const shortId = sessionId.slice(0, 8)
-    console.log(`\n  ${BOLD}Session${RESET} ${DIM}${shortId}...${RESET}\n`)
+    const recoveredTag = orphanIds.has(sessionId) ? ` ${YELLOW}[recovered]${RESET}` : ""
+    console.log(`\n  ${BOLD}Session${RESET} ${DIM}${shortId}...${RESET}${recoveredTag}\n`)
 
     const groups: [string, Task[]][] = [
       ["IN PROGRESS", tasks.filter((t: Task) => t.status === "in_progress")],

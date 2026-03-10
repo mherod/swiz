@@ -21,6 +21,7 @@ import {
 import {
   collectIncompleteTasks,
   findTaskAcrossSessions,
+  getOrphanSessionIds,
   getSessionIdsByCwdScan,
   getSessionIdsForProject,
   getSessions,
@@ -31,6 +32,7 @@ import type { Command } from "../types.ts"
 export {
   compareTaskIds,
   findTaskAcrossSessions,
+  getOrphanSessionIds,
   getSessionIdsByCwdScan,
   getSessionIdsForProject,
   getSessions,
@@ -416,7 +418,13 @@ export const tasksCommand: Command = {
       }
 
       const sessionId = await resolveSession(args)
-      await listTasks(sessionId, allProjects ? "all projects" : "current project", dateFormat)
+      const orphanIds = await getOrphanSessionIds()
+      await listTasks(
+        sessionId,
+        allProjects ? "all projects" : "current project",
+        dateFormat,
+        orphanIds.has(sessionId)
+      )
 
       if (!args.includes("--session") && !allProjects) {
         const tasks = await readTasks(sessionId)
