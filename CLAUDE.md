@@ -146,6 +146,7 @@ alwaysApply: false
 - Treat push as inseparable from commit.
 - Wait for background pushes (`TaskOutput block:true`) before CI verification.
 - Use `swiz issue resolve <number> --body "<text>"` instead of `gh issue comment` + `gh issue close`; for close-only use `swiz issue close <number>`.
+- **DON'T** close as `duplicate`/`wontfix` without reading the implementation and verifying each acceptance criterion. "Already implemented" requires file+line evidence, not inference.
 - **DO** check issue state before resolving: `gh issue view <number> --json state -q .state`. `Fixes #N` in a commit message auto-closes on push — `swiz issue resolve` on a closed issue posts a comment (doesn't fail, but wastes an API call).
 ## Push and CI
 - Repo is solo (`mherod/swiz`); push directly to `main` (no PR required).
@@ -210,16 +211,15 @@ alwaysApply: false
 - When unblocking a gated session: mark prior task complete with evidence first, then create an `in_progress` task in the current session before executing tool calls; do not attempt tool calls while memory enforcement is active.
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip when not in a git repo or no `CLAUDE.md` exists up the tree; guard with `isGitRepo(cwd)` then upward `CLAUDE.md` search, else `process.exit(0)`.
 - Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for every directory with valid console usage (`hooks/`, `scripts/`, `push/scripts/`, etc.).
-- Bun test reporter: `--reporter=dots` (not `dot`). Run once without any pipe (`| tail`, `| grep`, etc.) — piped re-runs trigger `pretooluse-repeated-lint-test` as consecutive. Dots with no `fail` lines is sufficient evidence.
+- Bun test reporter: `--reporter=dots --concurrent` (`--concurrent` required by hook). Run once without any pipe — piped re-runs trigger `pretooluse-repeated-lint-test` as consecutive.
 - **DO**: Make an Edit between `bun run format` and `bun run lint` — format-via-wrapper lacks `--write` so `pretooluse-repeated-lint-test` doesn't see it as a mutation; consecutive lint runs without an edit trigger a block.
 - Do not run `cd` in Bash commands; use absolute paths, `git -C <dir>`, `pnpm --prefix <dir>`, or `cwd` in `Bun.spawn()`.
-- Do not edit files with `sed -i`; use Edit tool for file writes; use `sed` only for non-writing stream transforms.
+- Do not use `sed` — `pretooluse-banned-commands.ts` blocks all `sed` including `sed -n`. Use Read tool `offset`/`limit` for line ranges.
 - Do not use `awk`; use `bun -e`, `sort -u`, `cut -d' ' -f1`, or git `--format`.
 - Do not use `python`/`python3`; use `bun -e` or `jq`.
-- Do not use `rm`/`rm -rf`; use `trash <path>` and guard missing paths with `[[ -e <path> ]] && trash <path>`.
+- Do not use `rm`/`rm -rf`; use `trash <path>`; guard with `[[ -e <path> ]] && trash <path>`.
 - Do not edit files outside session sandbox. `~/.claude/hooks/` and `~/.claude/skills/` are owned by external repos. For cross-repo bugs, file GitHub issues in the owning repo with: (1) exact error message and reproduction steps, (2) root cause analysis, (3) proposed fix with code location, (4) success criteria.
 - **DO NOT mark tasks complete without shipped code.** Inline bash testing does not count. Always: (1) modify source files, (2) verify `git diff`, (3) commit, then (4) mark complete. For cross-repo fixes blocked by sandbox, file a GitHub issue with file path, line number, exact fix, and success criteria.
-- Use `swiz tasks complete <id> --evidence "note:..."` for task completion; `tasks-list.ts` is deprecated and must not be invoked directly.
 - Stop-hook footers with `REMINDER_FRAGMENT` re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses a 30-minute `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes.
 - Cross-session gap: cooldown doesn't carry between sessions; complete memory follow-through before session end.
 - For cache-key fixes, search all callers (`Bun.hash(cwd)`, `createHash().update(repoRoot)`) and extract shared utility (for example `getCanonicalPathHash()` in `hook-utils.ts`) using `realpathSync()` and full hashes.
@@ -235,3 +235,4 @@ alwaysApply: false
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` in env overrides — prevents real backend calls on machines with Codex/Gemini installed. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
 - **DON'T**: Treat a `pretooluse-repeated-lint-test` block on the first `bun test` of a new session as a real violation — the hook has no session-boundary detection and reads prior-session runs from the full JSONL. Fix: make any Edit between runs to clear the gate. Issue #174.
 - **DON'T**: Declare commit or push success before reading tool output confirming it. Verify from evidence (git status clean, commit SHA captured, push output showing remote updated) before claiming complete.
+- **DON'T**: Work on auto-continue findings without a filed issue. `stop-personal-repo-issues.ts` actionable issues take priority.
