@@ -40,17 +40,26 @@ async function main(): Promise<void> {
 
     const body = `${prefix}: ${title}`
 
-    Bun.spawnSync([
+    // Extract PR number from the GitHub API URL (e.g. .../pulls/123)
+    const prNumberMatch = notif.subject.url.match(/\/pulls\/(\d+)$/)
+    const prNumber = prNumberMatch ? prNumberMatch[1] : undefined
+
+    const spawnArgs = [
       swizNotify,
       "--title",
       repo,
       "--body",
-      body,
+      prNumber ? `#${prNumber} · ${body}` : body,
       "--sound",
       "Glass",
       "--timeout",
-      "5",
-    ])
+      "10",
+      "--action",
+      "view",
+      "View PR",
+    ]
+
+    Bun.spawnSync(spawnArgs)
   }
 }
 
