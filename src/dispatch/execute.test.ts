@@ -48,6 +48,54 @@ describe("executeDispatch", () => {
   })
 })
 
+describe("transcriptSummaryProvider", () => {
+  it("uses cached provider instead of reading file when provided", async () => {
+    let providerCalled = false
+    let providerPath = ""
+    const req: DispatchRequest = {
+      canonicalEvent: "preToolUse",
+      hookEventName: "PreToolUse",
+      payloadStr: JSON.stringify({
+        cwd: "/tmp/test-provider",
+        session_id: "test-session",
+        transcript_path: "/nonexistent/transcript.jsonl",
+        tool_name: "Bash",
+        tool_input: { command: "echo hello" },
+      }),
+      transcriptSummaryProvider: async (path) => {
+        providerCalled = true
+        providerPath = path
+        return {
+          toolNames: ["Bash"],
+          toolCallCount: 1,
+          bashCommands: ["echo hello"],
+          skillInvocations: [],
+          hasGitPush: false,
+          sessionLines: [],
+        }
+      },
+    }
+    await executeDispatch(req)
+    expect(providerCalled).toBe(true)
+    expect(providerPath).toBe("/nonexistent/transcript.jsonl")
+  })
+
+  it("falls back to file read when no provider is given", async () => {
+    const req: DispatchRequest = {
+      canonicalEvent: "nonexistentEvent",
+      hookEventName: "NonexistentEvent",
+      payloadStr: JSON.stringify({
+        cwd: "/tmp/test-no-provider",
+        session_id: "test-session",
+        transcript_path: "/nonexistent/transcript.jsonl",
+      }),
+    }
+    // Should not throw — computeTranscriptSummary returns null for missing files
+    const result = await executeDispatch(req)
+    expect(result).toBeDefined()
+  })
+})
+
 describe("daemon /dispatch endpoint", () => {
   let server: ReturnType<typeof Bun.serve>
   const TEST_PORT = 17943

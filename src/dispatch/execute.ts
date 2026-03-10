@@ -12,7 +12,7 @@ import type { HookGroup } from "../manifest.ts"
 import { manifest } from "../manifest.ts"
 import { loadAllPlugins } from "../plugins.ts"
 import { readProjectSettings, resolveProjectHooks } from "../settings.ts"
-import { computeTranscriptSummary } from "../transcript-summary.ts"
+import { computeTranscriptSummary, type TranscriptSummary } from "../transcript-summary.ts"
 import {
   applyHookSettingFilters,
   countHooks,
@@ -105,14 +105,17 @@ async function loadCombinedManifest(cwd: string): Promise<HookGroup[]> {
 async function enrichPayloadForHooks(
   payload: Record<string, unknown>,
   parseError: boolean,
-  fallbackPayloadStr: string
+  fallbackPayloadStr: string,
+  summaryProvider?: (path: string) => Promise<TranscriptSummary | null>
 ): Promise<string> {
   if (parseError) return fallbackPayloadStr
 
   const transcriptPath = payload.transcript_path as string | undefined
   if (!transcriptPath) return fallbackPayloadStr
 
-  const summary = await computeTranscriptSummary(transcriptPath)
+  const summary = summaryProvider
+    ? await summaryProvider(transcriptPath)
+    : await computeTranscriptSummary(transcriptPath)
   if (!summary) return fallbackPayloadStr
 
   const enriched = merge({}, payload, { _transcriptSummary: summary })
@@ -129,6 +132,8 @@ export interface DispatchRequest {
   payloadStr: string
   /** When true, async hooks are awaited with timeout instead of fire-and-forget. */
   daemonContext?: boolean
+  /** Optional cached transcript summary provider (injected by daemon). */
+  transcriptSummaryProvider?: (path: string) => Promise<TranscriptSummary | null>
 }
 
 export interface DispatchResult {
@@ -147,7 +152,8 @@ export interface DispatchResult {
  * connected to the agent — only the returned response matters.
  */
 export async function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
-  const { canonicalEvent, hookEventName, payloadStr, daemonContext } = req
+  const { canonicalEvent, hookEventName, payloadStr, daemonContext, transcriptSummaryProvider } =
+    req
 
   const { payload, parseError } = parsePayload(payloadStr)
 
@@ -192,7 +198,12 @@ export async function executeDispatch(req: DispatchRequest): Promise<DispatchRes
     return { response: {} }
   }
 
-  const enrichedPayloadStr = await enrichPayloadForHooks(payload, parseError, finalPayloadStr)
+  const enrichedPayloadStr = await enrichPayloadForHooks(
+    payload,
+    parseError,
+    finalPayloadStr,
+    transcriptSummaryProvider
+  )
 
   const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
   let response: Record<string, unknown>

@@ -870,6 +870,10 @@ export const daemonCommand: Command = {
             hookEventName,
             payloadStr,
             daemonContext: true,
+            transcriptSummaryProvider: async (path) => {
+              const index = await transcriptIndex.get(path)
+              return index?.summary ?? null
+            },
           })
           const durationMs = performance.now() - start
           recordDispatch(globalMetrics, canonicalEvent, durationMs)
