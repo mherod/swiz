@@ -214,8 +214,8 @@ alwaysApply: false
 - Bun test reporter: `--reporter=dots --concurrent` (`--concurrent` required by hook). Run once without any pipe — piped re-runs trigger `pretooluse-repeated-lint-test` as consecutive.
 - **DO**: Make an Edit between `bun run format` and `bun run lint` — format-via-wrapper lacks `--write` so `pretooluse-repeated-lint-test` doesn't see it as a mutation; consecutive lint runs without an edit trigger a block.
 - Do not run `cd` in Bash commands; use absolute paths, `git -C <dir>`, `pnpm --prefix <dir>`, or `cwd` in `Bun.spawn()`.
-- `sed -i` and `sed > file` are blocked. `sed -n` pipelines are allowed. Use Read `offset`/`limit` for line ranges.
-- Do not use `awk`; use `bun -e`, `sort -u`, `cut -d' ' -f1`, or git `--format`.
+- `sed -i`/`sed > file` blocked; `sed -n` pipelines allowed. Use Read `offset`/`limit`.
+- `awk > file`/`awk | tee -i` blocked; `awk '{print $1}'` and `awk --help` allowed. Prefer `bun -e`, `cut`, or git `--format`.
 - Do not use `python`/`python3`; use `bun -e` or `jq`.
 - Do not use `rm`/`rm -rf`; use `trash <path>`; guard with `[[ -e <path> ]] && trash <path>`.
 - Do not edit files outside session sandbox. `~/.claude/hooks/` and `~/.claude/skills/` are owned by external repos. For cross-repo bugs, file GitHub issues in the owning repo with: (1) exact error message and reproduction steps, (2) root cause analysis, (3) proposed fix with code location, (4) success criteria.

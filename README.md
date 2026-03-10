@@ -129,7 +129,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | Hook | What it does |
 |------|-------------|
 | `pretooluse-no-mixed-tool-calls.ts` | Blocks Bash commands that are actually tool invocations (e.g. `TaskCreate ...` or `WebFetch ...` in a shell). These are agent tool names, not executables — they must be called as tools, not shell commands. |
-| `pretooluse-banned-commands.ts` | Blocks `grep` (use `rg`), `sed`/`awk` (use Edit), `rm` (use trash), `cd`, and raw `python`. Redirects to safer, more auditable alternatives. |
+| `pretooluse-banned-commands.ts` | Blocks `grep` (use `rg`), file-writing `sed`/`awk` (use Edit; read-only usage is allowed), `rm` (use trash), `cd`, and raw `python`. Redirects to safer, more auditable alternatives. |
 | `pretooluse-no-merge-conflict-comments.ts` | Blocks `gh pr comment` and `gh pr review --comment` calls whose body consists only of merge-conflict or rebase-request noise. The project already has local remediation paths (stop-branch-conflicts, /rebase-onto-main) — low-signal public comments add notification noise without value. |
 | `pretooluse-no-cp.ts` | Blocks `cp` usage and redirects to `ditto` for reliable file and directory copying with metadata preservation. |
 | `pretooluse-git-index-lock.ts` | Blocks git commands when `.git/index.lock` exists. Prevents wasting turns on operations that will fail because another git process is running or a stale lock was left behind. |
