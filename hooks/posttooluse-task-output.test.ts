@@ -258,7 +258,7 @@ describe("posttooluse-task-output: tool error handling", () => {
     expect(result.reason).toContain("block: true")
   })
 
-  test("'No task found' with no output file emits stderr warning and exits 0", async () => {
+  test("'No task found' with no output file blocks with actionable message naming the task ID", async () => {
     const payload = {
       tool_name: "TaskOutput",
       cwd: RECOVERY_CWD,
@@ -267,10 +267,9 @@ describe("posttooluse-task-output: tool error handling", () => {
       tool_input: { task_id: "nonexistent-task-xyz" },
     }
     const result = await runHook(payload)
-    expect(result.decision).toBeUndefined()
-    expect(result.exitCode).toBe(0)
-    expect(result.stderr).toContain("[posttooluse-task-output:TASK_NOT_FOUND]")
-    expect(result.stderr).toContain("nonexistent-task-xyz")
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("nonexistent-task-xyz")
+    expect(result.reason).toContain("garbage-collected")
   })
 
   test("'No task found' with clean output file injects recovered content as context", async () => {
