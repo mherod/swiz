@@ -28,7 +28,8 @@ Parse `$ARGUMENTS` for a preset keyword and run the corresponding commands:
 | Preset | Commands | Description |
 |--------|----------|-------------|
 | `solo` | `set collaboration-mode solo` | Direct push to main, no PRs |
-| `team` | `set collaboration-mode team` | Require PRs for all changes |
+| `team` | `set collaboration-mode team` | Require PRs + peer review for all changes |
+| `relaxed-collab` | `set collaboration-mode relaxed-collab` | Feature branches + PRs, self-review is sufficient |
 
 ### Safety presets
 

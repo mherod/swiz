@@ -85,6 +85,7 @@ export function countHooks(groups: HookGroup[]): number {
  * and the legacy prMergeMode boolean.
  *
  * - `team` → always enable PR-merge hooks
+ * - `relaxed-collab` → always enable PR-merge hooks (branch/PR hygiene without peer-review requirement)
  * - `solo` → always disable PR-merge hooks
  * - `auto` → fall back to prMergeMode boolean
  */
@@ -92,7 +93,7 @@ export function resolvePrMergeActive(
   collaborationMode: CollaborationMode,
   prMergeMode: boolean
 ): boolean {
-  if (collaborationMode === "team") return true
+  if (collaborationMode === "team" || collaborationMode === "relaxed-collab") return true
   if (collaborationMode === "solo") return false
   return prMergeMode // auto: use legacy boolean
 }

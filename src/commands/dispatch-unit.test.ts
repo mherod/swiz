@@ -191,6 +191,19 @@ describe("dispatch.ts unit tests", () => {
       expect(filtered).toEqual(groups)
     })
 
+    it("relaxed-collab collaborationMode enables PR hooks regardless of prMergeMode", () => {
+      const groups = [
+        {
+          event: "stop",
+          hooks: [{ file: "stop-github-ci.ts" }, { file: "stop-non-default-branch.ts" }],
+        },
+      ]
+
+      const filtered = filterPrMergeModeHooks(groups, false, "relaxed-collab")
+
+      expect(filtered).toEqual(groups)
+    })
+
     it("auto collaborationMode falls back to prMergeMode boolean", () => {
       const groups = [
         {
@@ -258,6 +271,11 @@ describe("dispatch.ts unit tests", () => {
     it("team always returns true", () => {
       expect(resolvePrMergeActive("team", false)).toBe(true)
       expect(resolvePrMergeActive("team", true)).toBe(true)
+    })
+
+    it("relaxed-collab always returns true", () => {
+      expect(resolvePrMergeActive("relaxed-collab", false)).toBe(true)
+      expect(resolvePrMergeActive("relaxed-collab", true)).toBe(true)
     })
 
     it("solo always returns false", () => {

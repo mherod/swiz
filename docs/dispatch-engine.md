@@ -187,9 +187,10 @@ Before dispatching, `applyHookSettingFilters()` (`src/dispatch/filters.ts`) appl
 `filterPrMergeModeHooks()` removes PR-related hooks when PR-merge mode is inactive:
 
 ```
-collaborationMode = "team"   → always keep PR hooks
-collaborationMode = "solo"   → always remove PR hooks
-collaborationMode = "auto"   → use prMergeMode boolean
+collaborationMode = "team"          → always keep PR hooks
+collaborationMode = "relaxed-collab" → always keep PR hooks (branch/PR hygiene, no peer-review requirement)
+collaborationMode = "solo"          → always remove PR hooks
+collaborationMode = "auto"          → use prMergeMode boolean
 ```
 
 Hooks disabled in non-PR-merge mode: `posttooluse-pr-context.ts`, `pretooluse-pr-age-gate.ts`, `stop-branch-conflicts.ts`, `stop-pr-description.ts`, `stop-pr-changes-requested.ts`, `stop-github-ci.ts`.

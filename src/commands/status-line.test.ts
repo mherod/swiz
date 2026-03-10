@@ -183,6 +183,16 @@ describe("buildSettingsFlags", () => {
     expect(normalized).toContain("sandbox:off")
   })
 
+  it("renders relaxed-collab collaboration mode", () => {
+    const flags = buildSettingsFlags({
+      ...DEFAULT_SETTINGS,
+      collaborationMode: "relaxed-collab",
+      source: "global",
+    })
+    const normalized = flags.map(stripAnsi).join(" ")
+    expect(normalized).toContain("relaxed-collab")
+  })
+
   it("shows catch-all count for uncovered non-default settings", () => {
     const flags = buildSettingsFlags({
       ...DEFAULT_SETTINGS,

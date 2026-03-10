@@ -241,6 +241,8 @@ export function buildSettingsFlags(effective: EffectiveSwizSettings | null): str
   if (effective.collaborationMode !== DEFAULT_SETTINGS.collaborationMode) {
     if (effective.collaborationMode === "team") settingsParts.push(`\x1b[95m🤝 team${R}`)
     if (effective.collaborationMode === "solo") settingsParts.push(`\x1b[94m👤 solo${R}`)
+    if (effective.collaborationMode === "relaxed-collab")
+      settingsParts.push(`\x1b[93m🔀 relaxed-collab${R}`)
   }
   if (effective.prMergeMode !== DEFAULT_SETTINGS.prMergeMode) {
     settingsParts.push(

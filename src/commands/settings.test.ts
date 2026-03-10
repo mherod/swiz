@@ -964,6 +964,7 @@ describe("SETTINGS_REGISTRY", () => {
     expect(def!.validate!("auto")).toBeNull()
     expect(def!.validate!("solo")).toBeNull()
     expect(def!.validate!("team")).toBeNull()
+    expect(def!.validate!("relaxed-collab")).toBeNull()
     expect(def!.validate!("invalid")).toContain("Invalid value")
   })
 

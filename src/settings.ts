@@ -14,7 +14,7 @@ export type PolicyProfile = z.infer<typeof policyProfileSchema>
 export const ambitionModeSchema = z.enum(["standard", "aggressive", "creative", "reflective"])
 export type AmbitionMode = z.infer<typeof ambitionModeSchema>
 
-export const collaborationModeSchema = z.enum(["auto", "solo", "team"])
+export const collaborationModeSchema = z.enum(["auto", "solo", "team", "relaxed-collab"])
 export type CollaborationMode = z.infer<typeof collaborationModeSchema>
 
 export const projectStateSchema = z.enum([
@@ -326,7 +326,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     ],
     kind: "string",
     scopes: ["global", "project", "session"],
-    docs: { valuePlaceholder: "auto|solo|team" },
+    docs: { valuePlaceholder: "auto|solo|team|relaxed-collab" },
     validate: (v) =>
       collaborationModeSchema.safeParse(v).success
         ? null
@@ -659,12 +659,8 @@ function normalizeSessionSettings(value: unknown): SessionSwizSettings | null {
   ) {
     session.ambitionMode = obj.ambitionMode
   }
-  if (
-    obj.collaborationMode === "auto" ||
-    obj.collaborationMode === "solo" ||
-    obj.collaborationMode === "team"
-  ) {
-    session.collaborationMode = obj.collaborationMode
+  if (collaborationModeSchema.safeParse(obj.collaborationMode).success) {
+    session.collaborationMode = obj.collaborationMode as CollaborationMode
   }
   return session
 }

@@ -88,13 +88,15 @@ export const STATE_METADATA: Record<ProjectState, StateMetadata> = {
 }
 
 /**
- * Guard: Require clean/default branch when entering active development in team mode.
- * This prevents team members from starting work on a polluted branch.
+ * Guard: Require clean/default branch when entering active development in team or relaxed-collab mode.
+ * This prevents starting work on a polluted branch when branch hygiene is required.
  */
 export async function requireCleanBranchInTeamMode(
   context: TransitionContext
 ): Promise<{ allowed: boolean; reason?: string }> {
-  const isTeamMode = context.currentSettings.collaborationMode === "team"
+  const isTeamMode =
+    context.currentSettings.collaborationMode === "team" ||
+    context.currentSettings.collaborationMode === "relaxed-collab"
   const enteringActiveWork = context.to === "developing"
 
   if (!isTeamMode || !enteringActiveWork) {
