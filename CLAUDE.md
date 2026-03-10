@@ -193,8 +193,7 @@ alwaysApply: false
 - `src/commands/continue.ts` pattern: `process.exitCode = proc.exitCode ?? 0; return`.
 - Hook scripts (`hooks/*.ts`) are the exception: `process.exit(0)` is intentional.
 - In CI/hook scripts, do not use `console.log` for status/debug; use `console.error`.
-- In `src/commands/`, `console.error` and `console.warn` are banned (`src/debug-logging.test.ts` enforces this). Use `console.log` for all output including user-facing errors.
-- Gate diagnostics with `SWIZ_DEBUG` using `const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {};`.
+- `src/debug-logging.test.ts` enforces allowlists for `console.error`/`console.warn` (STDERR_ALLOWLIST) and `console.log`/`console.info` (STDOUT_ALLOWLIST). Files not on an allowlist must use `import { debugLog } from "./debug.ts"` for diagnostics. Adding to an allowlist requires a justification comment in the test.
 - Reference implementations: `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts`.
 ## Conventions
 - DO NOT embed ESC (0x1b) in regex literals — Biome's `no-control-regex` blocks it. Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
