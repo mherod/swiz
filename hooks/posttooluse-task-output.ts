@@ -228,6 +228,12 @@ if (typeof response === "string") {
   }
 
   // Case 2: task record cleaned up — attempt fallback read from output file.
+  // This entire block only runs when the record is already gone (TASK_NOT_FOUND_RE matched).
+  // There is no "record exists but file missing" case here — the output file is only
+  // consulted as a fallback when the record has been garbage-collected.
+  //
+  // All branches below exit via denyPostToolUse/emitContext (both return never).
+  // The denyPostToolUse at the bottom is the catch-all for: taskId empty, or file missing.
   const notFoundMatch = response.match(TASK_NOT_FOUND_RE)
   if (notFoundMatch) {
     const taskId = String(input.tool_input?.task_id ?? notFoundMatch[1] ?? "")
@@ -236,11 +242,12 @@ if (typeof response === "string") {
       if (recovered) {
         const failureReason = detectFailure(recovered, null)
         if (failureReason) {
+          // Record gone + file found + failure detected → block with recovered failure detail.
           denyPostToolUse(
             `Task \`${taskId}\` output (recovered from file — record had expired):\n\n${failureReason}`
           )
         }
-        // No failure detected — inject recovered content as context.
+        // Record gone + file found + no failure → inject recovered content as context.
         emitContext(
           "PostToolUse",
           `Task \`${taskId}\` output recovered from file (record had expired).\n` +
@@ -248,9 +255,9 @@ if (typeof response === "string") {
           input.cwd ?? process.cwd()
         )
       }
+      // Record gone + file missing → fall through to denyPostToolUse below.
     }
-    // Output file also unavailable — surface the garbage-collected task ID so the agent
-    // receives actionable feedback rather than null/silent output.
+    // Record gone + taskId empty OR record gone + file missing → block with actionable message.
     denyPostToolUse(
       `Task \`${notFoundMatch[1]}\` output unavailable: the task record has been garbage-collected and no output file was found.\n\n` +
         `The task completed (or was cleaned up) before its output could be read. ` +
