@@ -127,6 +127,8 @@ export interface DispatchRequest {
   canonicalEvent: string
   hookEventName: string
   payloadStr: string
+  /** When true, async hooks are awaited with timeout instead of fire-and-forget. */
+  daemonContext?: boolean
 }
 
 export interface DispatchResult {
@@ -145,7 +147,7 @@ export interface DispatchResult {
  * connected to the agent — only the returned response matters.
  */
 export async function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
-  const { canonicalEvent, hookEventName, payloadStr } = req
+  const { canonicalEvent, hookEventName, payloadStr, daemonContext } = req
 
   const { payload, parseError } = parsePayload(payloadStr)
 
@@ -197,13 +199,18 @@ export async function executeDispatch(req: DispatchRequest): Promise<DispatchRes
 
   switch (strategy) {
     case "preToolUse":
-      response = await runPreToolUse(filteredGroups, enrichedPayloadStr)
+      response = await runPreToolUse(filteredGroups, enrichedPayloadStr, daemonContext)
       break
     case "blocking":
-      response = await runBlocking(filteredGroups, enrichedPayloadStr, canonicalEvent)
+      response = await runBlocking(
+        filteredGroups,
+        enrichedPayloadStr,
+        canonicalEvent,
+        daemonContext
+      )
       break
     case "context":
-      response = await runContext(filteredGroups, enrichedPayloadStr, hookEventName)
+      response = await runContext(filteredGroups, enrichedPayloadStr, hookEventName, daemonContext)
       break
     default:
       response = {}

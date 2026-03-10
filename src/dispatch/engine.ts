@@ -372,8 +372,13 @@ async function runEntry(
 
 // ─── Dispatch strategies ────────────────────────────────────────────────────
 
-/** Fire all async hooks immediately without awaiting. */
-export function launchAsyncHooks(groups: HookGroup[], payloadStr: string): void {
+/** Fire async hooks — fire-and-forget in CLI, awaited with timeout in daemon. */
+export async function launchAsyncHooks(
+  groups: HookGroup[],
+  payloadStr: string,
+  daemonContext?: boolean
+): Promise<void> {
+  const promises: Promise<void>[] = []
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) {
@@ -381,21 +386,37 @@ export function launchAsyncHooks(groups: HookGroup[], payloadStr: string): void 
           log(`   ⏭ ${hook.file} [condition false, skipping]`)
           continue
         }
-        log(`   → ${hook.file} [async, fire-and-forget]`)
-        runHook(hook.file, payloadStr, hook.timeout)
-          .then(() => {})
-          .catch(() => {})
+        if (daemonContext) {
+          log(`   → ${hook.file} [async, daemon-awaited]`)
+          const timeout = hook.timeout ?? DEFAULT_TIMEOUT
+          const p = runHook(hook.file, payloadStr, timeout)
+            .then(() => {})
+            .catch((err) => {
+              log(`   ⚠ ${hook.file} [async error: ${err}]`)
+            })
+          promises.push(p)
+        } else {
+          log(`   → ${hook.file} [async, fire-and-forget]`)
+          runHook(hook.file, payloadStr, hook.timeout)
+            .then(() => {})
+            .catch(() => {})
+        }
       }
     }
+  }
+  if (daemonContext && promises.length > 0) {
+    log(`   awaiting ${promises.length} async hook(s) in daemon context`)
+    await Promise.all(promises)
   }
 }
 
 /** PreToolUse: short-circuit on first deny; collect and merge allow-with-reason hints. */
 export async function runPreToolUse(
   groups: HookGroup[],
-  payloadStr: string
+  payloadStr: string,
+  daemonContext?: boolean
 ): Promise<Record<string, unknown>> {
-  launchAsyncHooks(groups, payloadStr)
+  await launchAsyncHooks(groups, payloadStr, daemonContext)
   const cwd = extractCwd(payloadStr)
   const hints: string[] = []
   const finalResponse: Record<string, unknown> = {}
@@ -456,9 +477,10 @@ export async function runPreToolUse(
 export async function runBlocking(
   groups: HookGroup[],
   payloadStr: string,
-  canonicalEvent?: string
+  canonicalEvent?: string,
+  daemonContext?: boolean
 ): Promise<Record<string, unknown>> {
-  launchAsyncHooks(groups, payloadStr)
+  await launchAsyncHooks(groups, payloadStr, daemonContext)
   const cwd = extractCwd(payloadStr)
   const runAllHooks = canonicalEvent === "stop"
   const finalResponse: Record<string, unknown> = {}
@@ -500,9 +522,10 @@ export async function runBlocking(
 export async function runContext(
   groups: HookGroup[],
   payloadStr: string,
-  eventName: string
+  eventName: string,
+  daemonContext?: boolean
 ): Promise<Record<string, unknown>> {
-  launchAsyncHooks(groups, payloadStr)
+  await launchAsyncHooks(groups, payloadStr, daemonContext)
   const cwd = extractCwd(payloadStr)
   const contexts: string[] = []
   const executions: HookExecution[] = []

@@ -34,6 +34,18 @@ describe("executeDispatch", () => {
     expect(result).toBeDefined()
     expect(result.response).toEqual({})
   })
+
+  it("accepts daemonContext flag without error", async () => {
+    const req: DispatchRequest = {
+      canonicalEvent: "nonexistentEvent",
+      hookEventName: "NonexistentEvent",
+      payloadStr: JSON.stringify({ cwd: "/tmp/test-daemon-ctx", session_id: "daemon-test" }),
+      daemonContext: true,
+    }
+    const result = await executeDispatch(req)
+    expect(result).toBeDefined()
+    expect(result.response).toEqual({})
+  })
 })
 
 describe("daemon /dispatch endpoint", () => {
@@ -58,7 +70,12 @@ describe("daemon /dispatch endpoint", () => {
           }
 
           const payloadStr = await req.text()
-          const result = await executeDispatch({ canonicalEvent, hookEventName, payloadStr })
+          const result = await executeDispatch({
+            canonicalEvent,
+            hookEventName,
+            payloadStr,
+            daemonContext: true,
+          })
           return Response.json(result.response)
         }
 

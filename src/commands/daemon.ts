@@ -132,7 +132,12 @@ export const daemonCommand: Command = {
           }
 
           const payloadStr = await req.text()
-          const result = await executeDispatch({ canonicalEvent, hookEventName, payloadStr })
+          const result = await executeDispatch({
+            canonicalEvent,
+            hookEventName,
+            payloadStr,
+            daemonContext: true,
+          })
           return Response.json(result.response)
         }
 
