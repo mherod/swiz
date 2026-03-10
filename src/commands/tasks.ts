@@ -62,6 +62,8 @@ const EVIDENCE_SEGMENT_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: "commit", re: /^(?:commit\s*:\s*)?[0-9a-f]{7,40}$/i },
   { name: "ci_green", re: /^ci[\s_]green$/i },
   { name: "pr", re: /^pr[:#]\s*\d+/i },
+  { name: "file", re: /^file\s*:\s*\S+/i },
+  { name: "test", re: /^test\s*:\s*\S+/i },
   { name: "no_ci", re: /^no[\s_]ci\b.*(workflow|run|configured)/i },
 ]
 
