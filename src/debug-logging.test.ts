@@ -45,6 +45,8 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/cross-repo-issue.ts",
   "src/commands/compact.ts",
   "src/commands/continue.ts",
+  // daemon — prints LaunchAgent install/uninstall status and server URL
+  "src/commands/daemon.ts",
   "src/commands/dispatch.ts",
   // Dispatch engine structured JSON output to stdout (extracted from dispatch.ts)
   "src/dispatch/engine.ts",
