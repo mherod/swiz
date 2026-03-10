@@ -92,12 +92,12 @@ alwaysApply: false
 ## Task Data
 - Task storage: `~/.claude/tasks/<session-id>/<id>.json`; audit log: `~/.claude/tasks/<session-id>/.audit-log.jsonl`.
 - Session-to-project mapping resolves from `~/.claude/projects/` transcript `cwd` fields.
-- For cross-session task/evidence checks in `hooks/stop-completion-auditor.ts`, add fallback scan of `~/.claude/tasks/` and load JSON via `readSessionTasks()`.
-- Completion command requires evidence: `swiz tasks complete <id> --evidence "text"`; enforced by `stop-completion-auditor`.
+- Cross-session task checks in `hooks/stop-completion-auditor.ts`: fallback scan `~/.claude/tasks/`, load JSON via `readSessionTasks()`.
+- Completion requires evidence: `swiz tasks complete <id> --evidence "text"`; enforced by `stop-completion-auditor`.
 - First action must be `TaskCreate`/`TaskUpdate`; required again after compaction resumes.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash when no incomplete task exists.
-- When the no-task block reports prior-session tasks, recreate and set `in_progress` before retrying blocked work.
-- After compaction, run `TaskList`; close stale tasks after verification (`git log --oneline -3`, `gh run view --json conclusion`).
+- When no-task block reports prior-session tasks, recreate and set `in_progress` before retrying.
+- After compaction, run `TaskList`; close stale tasks after `git log --oneline -3` and `gh run view --json conclusion`.
 - DO NOT create compound task subjects; `pretooluse-task-subject-validation.ts` rejects multi-action subjects.
 - Keep one task per verb (`Run tests`, `Commit fix`, `Push to origin`, `Verify CI`, `Close issue #N`).
 - Keep at least one `pending`/`in_progress` task before `git add` or `git commit`; mark commit task complete only after commit success.
@@ -113,6 +113,8 @@ alwaysApply: false
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
 - **Task completion**: `swiz tasks complete <id> --evidence "note:..." --state <state>`. The `--state` flag is required. Valid single-prefix evidence values: `commit:`, `pr:`, `file:`, `test:`, `note:` — compound strings (e.g. `"commit:abc run:123"`) and unrecognized prefixes (e.g. `ci_green:`) are rejected. Plain `TaskUpdate status=completed` rejected by stop hooks. Do not invoke `tasks-list.ts` directly.
+- **`swiz tasks complete` has NO `--subject` flag**: `complete <id> --evidence TEXT --state STATE`; `status <id> <status>`; `evidence <id> <text>`. Run `swiz help tasks` before guessing flags. For native-tool tasks (no file counterpart): stub first via `swiz tasks update <id> --subject "..." --status in_progress`, then complete normally.
+- **`swiz tasks update` bulk IDs**: `swiz tasks update <id1> <id2> ... [--subject TEXT] [--status STATUS] [--description TEXT] [--active-form TEXT]` — leading non-flag tokens are IDs; flags start at first `--`.
 - **DON'T**: Assume CI success from partial output (e.g., `gh run watch` alone). Always verify terminal job states with `gh run view <run-id> --json conclusion,status,jobs` and confirm every job reached `conclusion: "success"` before claiming CI green.
 - Mark tasks complete immediately at work completion.
 - Treat `gh issue create` and task completion as atomic; recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.
@@ -137,24 +139,24 @@ alwaysApply: false
   8. `swiz ci-wait $SHA --timeout 300`.
   9. Confirm CI success; if failed, fix and re-push.
   10. Announce result.
-- Keep `Push and verify CI` task `in_progress` for 5-10; complete after `gh run view --json` confirms success.
+- Keep `Push and verify CI` task `in_progress` until `gh run view --json` confirms success.
 - Capture SHA before push; CI checks must reference that SHA.
 - Use `swiz push-wait`; no fixed sleeps and no `--force-with-lease`.
 - Use `swiz ci-wait`; no manual `gh run watch/view` loops.
 - Do not call `TaskUpdate`/`TaskList` during steps 7-10.
 - DO NOT stop after step 3; stop hook requires origin up to date.
-- Treat push as inseparable from commit.
-- Wait for background pushes (`TaskOutput block:true`) before CI verification.
-- Use `swiz issue resolve <number> --body "<text>"` instead of `gh issue comment` + `gh issue close`; for close-only use `swiz issue close <number>`.
+- Push is inseparable from commit.
+- Await background pushes (`TaskOutput block:true`) before CI verification.
+- Use `swiz issue resolve <number> --body "<text>"` (not `gh issue comment` + `gh issue close`); close-only: `swiz issue close <number>`.
 - **DON'T** close as `duplicate`/`wontfix` without reading the implementation and verifying each acceptance criterion. "Already implemented" requires file+line evidence, not inference.
 - **DO** check issue state before resolving: `gh issue view <number> --json state -q .state`. `Fixes #N` in a commit message auto-closes on push — `swiz issue resolve` on a closed issue posts a comment (doesn't fail, but wastes an API call).
 ## Push and CI
 - Repo is solo (`mherod/swiz`); push directly to `main` (no PR required).
 - Run `/push` before `git push`; PreToolUse push gate requires it.
 - If collaboration guard errors, fix and re-run guard checks before pushing.
-- CI workflow (`.github/workflows/ci.yml` lines 3-21) has `paths-ignore` for `**/*.md`, `.claude/**`, and `docs/**`; documentation-only commits skip CI. Pre-push hooks verify code quality locally before push is allowed, so no CI run is needed for markdown-only changes.
+- CI workflow (`.github/workflows/ci.yml` lines 3-21) `paths-ignore`: `**/*.md`, `.claude/**`, `docs/**` — markdown-only commits skip CI; pre-push hooks verify quality locally.
 - Pre-push checklist:
-  0. **Run Step 0 collaboration guard** from the `/push` skill before every push to `main`/`master` — no exceptions. Assumed repo type is not sufficient; the signal checks must be executed and their output evaluated.
+  0. **Run Step 0 collaboration guard** (`/push` skill) before every push to `main`/`master` — execute and read signal checks, never assume repo type.
   1. `git log origin/main..HEAD --oneline`.
   2. `git branch --show-current`; `gh pr list --state open --head $(git branch --show-current)`.
   3. `SHA=$(git rev-parse HEAD)`.
@@ -168,23 +170,23 @@ alwaysApply: false
 - Always verify CI with `gh run view --json`; `gh run watch` alone is insufficient.
 - For workflow jobs using `github.base_ref`, run only on `pull_request`/`pull_request_target`, never `push`; `github.base_ref` is empty on push and breaks `git diff origin/BASE_REF...HEAD`.
 
-- For push-command parsing in hooks, use token parsing to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
+- Push-command parsing in hooks: token-parse to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
 - DO NOT call `TaskUpdate` or `TaskList` after push starts.
 - DO NOT stop with unpushed commits.
-- DO NOT push to `main`/`master` without running the Step 0 collaboration guard script first and reading its output — two pushes in a prior session (`dbe3440`, `2339489`) skipped Step 0 and violated the mandatory gate.
+- DO NOT push to `main`/`master` without running the Step 0 collaboration guard and reading its output (`dbe3440`, `2339489` skipped this gate).
 - DO NOT skip `git log origin/main..HEAD --oneline` pre-push review.
 - DO NOT run branch/collaboration/open-PR checks after push.
 - DO NOT add `Co-Authored-By: Claude` or other AI attribution in commits/PR descriptions.
 - DO NOT use destructive git commands: `git revert`, `git restore`, `git stash`, `git reset --hard`, `git checkout -- <file>`; use `git reflog` for recovery.
 ## Settings Configuration
-- **DO**: Use separate state files for mutable runtime data (e.g., `.swiz/context-stats.json`) to avoid polluting user-authored configuration files (e.g., `.swiz/config.json`). Runtime observations change frequently and should never mix with intentional user settings.
+- Use separate state files for mutable runtime data (e.g., `.swiz/context-stats.json`); never mix runtime observations into user-authored config (`.swiz/config.json`).
 - Use 3-tier setting resolution: `project > user > default`.
 - Track source per value, not per group (`memoryLineSource`, `memoryWordSource`).
 - Always show effective values, regardless of source tier.
 - Label each setting with source tier: `(project)`, `(user)`, `(default)`.
 - Do not hide user/default values.
 - Do not use one shared `source` for multiple settings.
-- Verify implementation directly before declaring completion: hierarchy, per-value source tracking, display correctness.
+- Verify before declaring completion: hierarchy, per-value source tracking, display correctness.
 ## CLI Error Handling
 - In `src/commands/`, throw errors instead of `process.exit(1)`.
 - `src/cli.ts` handles command errors via `process.exitCode = 1`.
@@ -197,7 +199,7 @@ alwaysApply: false
 ## Conventions
 - DO NOT embed ESC (0x1b) in regex literals — Biome's `no-control-regex` blocks it. Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
 - When parsing bun test output for counts, check for `/\bRan \d+ tests? across \d+ files?\./` before reporting an exact figure; absent the marker, output is truncated — emit "unknown number of". Strip ANSI before matching. Reference: `detectFailure` in `hooks/posttooluse-task-output.ts`.
-- DO: Read every file being modified in full before editing — snippets miss conflicts and patterns in other sections.
+- DO: Read every file in full before editing — snippets miss conflicts and patterns in other sections.
 - Use ANSI escape codes directly; do not add color libraries.
 - Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks.
 - With piped `Bun.spawn`, drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
