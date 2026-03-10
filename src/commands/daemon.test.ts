@@ -3,6 +3,7 @@ import {
   createMetrics,
   FileWatcherRegistry,
   GhQueryCache, // daemon gh cache
+  HookEligibilityCache,
   hasSnapshotInvalidated,
   recordDispatch,
   serializeMetrics,
@@ -209,5 +210,62 @@ describe("GhQueryCache", () => {
 
     cache.invalidateAll()
     expect(cache.size).toBe(0)
+  })
+})
+
+describe("HookEligibilityCache", () => {
+  it("computes and caches eligibility for a project", async () => {
+    const cache = new HookEligibilityCache()
+    const snapshot = await cache.compute(process.cwd())
+
+    expect(snapshot.computedAt).toBeGreaterThan(0)
+    expect(Array.isArray(snapshot.disabledHooks)).toBeTrue()
+    expect(Array.isArray(snapshot.detectedStacks)).toBeTrue()
+    expect(typeof snapshot.prMergeActive).toBe("boolean")
+    expect(typeof snapshot.conditionResults).toBe("object")
+    expect(cache.size).toBe(1)
+  })
+
+  it("returns cached result on second call", async () => {
+    const cache = new HookEligibilityCache()
+    const s1 = await cache.compute(process.cwd())
+    const s2 = await cache.compute(process.cwd())
+
+    expect(s1).toBe(s2) // same reference — cached
+  })
+
+  it("caches different projects independently", async () => {
+    const cache = new HookEligibilityCache()
+    await cache.compute("/tmp/project-a")
+    await cache.compute("/tmp/project-b")
+    expect(cache.size).toBe(2)
+  })
+
+  it("invalidateProject flushes only matching entries", async () => {
+    const cache = new HookEligibilityCache()
+    await cache.compute("/tmp/project-a")
+    await cache.compute("/tmp/project-b")
+    expect(cache.size).toBe(2)
+
+    cache.invalidateProject("/tmp/project-a")
+    expect(cache.size).toBe(1)
+  })
+
+  it("invalidateAll flushes everything", async () => {
+    const cache = new HookEligibilityCache()
+    await cache.compute("/tmp/project-a")
+    await cache.compute("/tmp/project-b")
+    expect(cache.size).toBe(2)
+
+    cache.invalidateAll()
+    expect(cache.size).toBe(0)
+  })
+
+  it("detects stacks for the current project", async () => {
+    const cache = new HookEligibilityCache()
+    const snapshot = await cache.compute(process.cwd())
+
+    // This project uses bun
+    expect(snapshot.detectedStacks).toContain("bun")
   })
 })

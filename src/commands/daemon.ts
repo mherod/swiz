@@ -1,9 +1,22 @@
 import { type FSWatcher, watch } from "node:fs"
 import { dirname, join } from "node:path"
 import { stderrLog } from "../debug.ts"
+import { detectProjectStack } from "../detect-frameworks.ts"
 import { executeDispatch } from "../dispatch/execute.ts"
+import { resolvePrMergeActive, SWIZ_NOTIFY_HOOK_FILES } from "../dispatch/filters.ts"
 import { getGitBranchStatus, ghJson } from "../git-helpers.ts"
-import { getProjectSettingsPath, getStatePath, getSwizSettingsPath } from "../settings.ts"
+import { evalCondition, manifest } from "../manifest.ts"
+import {
+  getEffectiveSwizSettings,
+  getProjectSettingsPath,
+  getStatePath,
+  getSwizSettingsPath,
+  readProjectSettings,
+  readProjectState,
+  readSwizSettings,
+  resolveProjectHooks,
+} from "../settings.ts"
+import { getWorkflowIntent } from "../state-machine.ts"
 import type { Command } from "../types.ts"
 import {
   computeWarmStatusLineSnapshot,
@@ -197,6 +210,113 @@ export class GhQueryCache {
 
   get size(): number {
     return this.entries.size
+  }
+}
+
+// ─── Hook eligibility precomputation ──────────────────────────────────────
+
+/**
+ * Serializable snapshot of precomputed hook eligibility for a project.
+ * Captures all the decisions that `applyHookSettingFilters` would make
+ * so that dispatch can skip the cold-path computation.
+ */
+export interface EligibilitySnapshot {
+  /** Hook files that should be disabled (from settings + notifications + PR mode). */
+  disabledHooks: string[]
+  /** Detected project stacks (e.g. ["bun"]). */
+  detectedStacks: string[]
+  /** Whether PR-merge-mode hooks are active. */
+  prMergeActive: boolean
+  /** Workflow intent from project state (null if no state). */
+  workflowIntent: string | null
+  /** Per-hook condition results: hookFile → true (run) / false (skip). */
+  conditionResults: Record<string, boolean>
+  /** Timestamp when this snapshot was computed. */
+  computedAt: number
+}
+
+export class HookEligibilityCache {
+  private entries = new Map<string, EligibilitySnapshot>()
+
+  async compute(cwd: string): Promise<EligibilitySnapshot> {
+    const cached = this.entries.get(cwd)
+    if (cached) return cached
+
+    const snapshot = await computeEligibility(cwd)
+    this.entries.set(cwd, snapshot)
+    return snapshot
+  }
+
+  invalidateProject(cwd: string): void {
+    this.entries.delete(cwd)
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+}
+
+async function computeEligibility(cwd: string): Promise<EligibilitySnapshot> {
+  const settings = await readSwizSettings()
+  const projectSettings = cwd ? await readProjectSettings(cwd) : null
+  const effective = getEffectiveSwizSettings(settings, null)
+
+  // Build disabled set (same logic as applyHookSettingFilters)
+  const disabledSet = new Set([
+    ...(settings.disabledHooks ?? []),
+    ...(projectSettings?.disabledHooks ?? []),
+  ])
+  if (!effective.swizNotifyHooks) {
+    for (const file of SWIZ_NOTIFY_HOOK_FILES) disabledSet.add(file)
+  }
+
+  const detectedStacks = cwd ? detectProjectStack(cwd) : []
+  const prMergeActive = resolvePrMergeActive(effective.collaborationMode, effective.prMergeMode)
+
+  // Workflow intent from project state
+  let workflowIntent: string | null = null
+  try {
+    const state = await readProjectState(cwd)
+    if (state) {
+      workflowIntent = getWorkflowIntent(state)
+    }
+  } catch {
+    // State reading failures → no state filtering
+  }
+
+  // Evaluate conditions for all manifest hooks
+  const conditionResults: Record<string, boolean> = {}
+  for (const group of manifest) {
+    for (const hook of group.hooks) {
+      if (hook.condition && !(hook.file in conditionResults)) {
+        conditionResults[hook.file] = evalCondition(hook.condition)
+      }
+    }
+  }
+
+  // Also evaluate conditions for project-local hooks
+  if (projectSettings?.hooks?.length) {
+    const { resolved } = resolveProjectHooks(projectSettings.hooks, cwd)
+    for (const group of resolved) {
+      for (const hook of group.hooks) {
+        if (hook.condition && !(hook.file in conditionResults)) {
+          conditionResults[hook.file] = evalCondition(hook.condition)
+        }
+      }
+    }
+  }
+
+  return {
+    disabledHooks: [...disabledSet],
+    detectedStacks,
+    prMergeActive,
+    workflowIntent,
+    conditionResults,
+    computedAt: Date.now(),
   }
 }
 
@@ -417,6 +537,7 @@ export const daemonCommand: Command = {
 
     const watchers = new FileWatcherRegistry()
     const ghCache = new GhQueryCache()
+    const eligibilityCache = new HookEligibilityCache()
     const projectRoot = dirname(Bun.main)
     const hooksDir = join(projectRoot, "hooks/")
     const manifestPath = join(projectRoot, "src", "manifest.ts")
@@ -444,6 +565,7 @@ export const daemonCommand: Command = {
     const flushSnapshots = () => {
       snapshots.clear()
       ghCache.invalidateAll()
+      eligibilityCache.invalidateAll()
     }
 
     watchers.register(manifestPath, "manifest", flushSnapshots)
@@ -457,11 +579,12 @@ export const daemonCommand: Command = {
       if (registeredProjects.has(cwd)) return
       registeredProjects.add(cwd)
       const projectFlush = () => {
-        // Flush snapshots and gh cache for this project
+        // Flush snapshots, gh cache, and eligibility for this project
         for (const key of snapshots.keys()) {
           if (key.startsWith(cwd)) snapshots.delete(key)
         }
         ghCache.invalidateProject(cwd)
+        eligibilityCache.invalidateProject(cwd)
       }
       const projectSettings = getProjectSettingsPath(cwd)
       if (projectSettings)
@@ -544,11 +667,25 @@ export const daemonCommand: Command = {
           return Response.json({ hit, value })
         }
 
+        if (url.pathname === "/hooks/eligible" && req.method === "POST") {
+          const body = (await req.json().catch(() => null)) as {
+            cwd?: string
+          } | null
+          const cwd = body?.cwd
+          if (typeof cwd !== "string" || cwd.length === 0) {
+            return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
+          }
+          registerProjectWatchers(cwd)
+          const snapshot = await eligibilityCache.compute(cwd)
+          return Response.json(snapshot)
+        }
+
         if (url.pathname === "/cache/status" && req.method === "GET") {
           return Response.json({
             watchers: watchers.status(),
             snapshotCacheSize: snapshots.size,
             ghCacheSize: ghCache.size,
+            eligibilityCacheSize: eligibilityCache.size,
           })
         }
 
