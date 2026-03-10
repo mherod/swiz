@@ -435,7 +435,8 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
 /**
  * Format a failure message from one or more RunnerResult entries.
  * Single-runner output preserves the existing message format exactly.
- * Multi-runner composite output aggregates counts across all runners.
+ * Multi-runner composite output aggregates counts across all runners,
+ * preserving concrete counts when mixed with presence-only fallbacks.
  */
 function formatRunnerFailure(results: RunnerResult[], exitCode: number): string {
   if (results.length === 1) {
@@ -445,10 +446,25 @@ function formatRunnerFailure(results: RunnerResult[], exitCode: number): string 
     return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
   }
 
-  // Composite: aggregate across all runners
-  const anyIncomplete = results.some((r) => !r.isComplete)
-  const totalFails = results.reduce((sum, r) => sum + (r.failCount ?? 0), 0)
-  const countLabel = anyIncomplete ? "unknown number of" : `${totalFails}`
+  // Composite: aggregate across all runners, distinguishing concrete vs presence-only
+  const concrete = results.filter((r) => r.failCount !== null)
+  const presenceOnly = results.filter((r) => r.failCount === null)
+  const concreteFails = concrete.reduce((sum, r) => sum + r.failCount!, 0)
+  const allConcreteComplete = concrete.every((r) => r.isComplete)
+
+  let countLabel: string
+  if (concrete.length === 0) {
+    // All presence-only — no concrete counts at all
+    countLabel = "unknown number of"
+  } else if (presenceOnly.length > 0) {
+    // Mix of concrete + presence-only: concrete counts are real but total is unknown
+    countLabel = `${concreteFails}+`
+  } else if (!allConcreteComplete) {
+    // All have fail counts but some are truncated
+    countLabel = "unknown number of"
+  } else {
+    countLabel = `${concreteFails}`
+  }
   const runnerNames = results.map((r) => r.runner).join(", ")
   const firstFailLine = results.find((r) => r.firstFailLine)?.firstFailLine ?? null
   const detail = firstFailLine ? `\n\nFirst failure: ${firstFailLine.trim()}` : ""

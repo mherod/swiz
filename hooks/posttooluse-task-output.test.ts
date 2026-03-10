@@ -750,8 +750,9 @@ describe("posttooluse-task-output: composite multi-runner output", () => {
     expect(result.reason).toMatch(/13 test\(s\) failed across multiple runners \(bun, jest\)/)
   })
 
-  test("reports unknown count when one runner output is truncated", async () => {
-    // bun is complete but jest has FAIL_RE match without COMPLETE_RE (no "N total" line)
+  test("preserves concrete count with + when one runner output is truncated", async () => {
+    // bun is complete (5 failures) but jest has FAIL_RE match without COMPLETE_RE (no "N total" line)
+    // Jest sets failCount: null when incomplete, so it's a concrete+presence-only mix → "5+"
     const output = [
       "bun test v1.3.10",
       "✗ src/foo.test.ts > fails",
@@ -765,7 +766,7 @@ describe("posttooluse-task-output: composite multi-runner output", () => {
     ].join("\n")
     const result = await runHook(makePayload(output, 1))
     expect(result.decision).toBe("block")
-    expect(result.reason).toMatch(/unknown number of test\(s\) failed across multiple runners/)
+    expect(result.reason).toMatch(/5\+ test\(s\) failed across multiple runners/)
   })
 
   test("does not report failure when composite output shows no failures", async () => {
@@ -806,5 +807,42 @@ describe("posttooluse-task-output: runner presence without FAIL_RE", () => {
     expect(result.decision).toBe("block")
     expect(result.reason).toMatch(/unknown number of test\(s\) failed/)
     expect(result.reason).toMatch(/error/)
+  })
+})
+
+describe("posttooluse-task-output: composite concrete + presence-only fallback", () => {
+  test("preserves concrete bun count when cargo presence-only fallback fires", async () => {
+    // bun has concrete failures; cargo presence detected (compile error before tests run)
+    const output = [
+      "bun test v1.3.10",
+      "✗ src/foo.test.ts > fails",
+      "Ran 5 tests across 1 file.",
+      "5 fail",
+      "",
+      "   Compiling mylib v0.1.0",
+      "error[E0308]: mismatched types",
+      "   running 0 tests",
+    ].join("\n")
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    // Should show concrete count with "+" rather than "unknown number of"
+    expect(result.reason).toMatch(/5\+ test\(s\) failed across multiple runners/)
+    expect(result.reason).toMatch(/bun, cargo/)
+  })
+
+  test("preserves concrete pytest count when dotnet presence-only fires", async () => {
+    // pytest has concrete failures; dotnet presence detected but no fail summary
+    const output = [
+      "============================= test session starts ==============================",
+      "FAILED tests/test_main.py::test_one",
+      "=========================== 3 failed, 2 passed in 1.23s ========================",
+      "",
+      "Starting test execution",
+      "error: Build failed",
+    ].join("\n")
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toMatch(/3\+ test\(s\) failed across multiple runners/)
+    expect(result.reason).toMatch(/pytest, dotnet/)
   })
 })
