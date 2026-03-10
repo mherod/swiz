@@ -67,12 +67,30 @@ const EVIDENCE_SEGMENT_PATTERNS: Array<{ name: string; re: RegExp }> = [
 
 const REQUIRED_EVIDENCE_FIELDS = 1
 
+const COMMIT_PREFIX_RE = /^commit\s*:\s*/i
+const HEX_SHA_RE = /^[0-9a-f]{7,40}$/i
+
 /** Split evidence on delimiters, check each segment independently, return matched field names. */
 function countEvidenceFields(evidence: string): string[] {
-  const segments = evidence
+  const rawSegments = evidence
     .split(/\s*(?:—|--|;|\|)\s*|\s*,\s+/)
     .map((s) => s.trim())
     .filter(Boolean)
+
+  // Expand "commit:<sha1> <sha2> ..." into one "commit:<sha>" segment per SHA
+  const segments: string[] = []
+  for (const seg of rawSegments) {
+    const prefixMatch = COMMIT_PREFIX_RE.exec(seg)
+    if (prefixMatch) {
+      const rest = seg.slice(prefixMatch[0].length).trim()
+      const tokens = rest.split(/\s+/)
+      if (tokens.length > 1 && tokens.every((t) => HEX_SHA_RE.test(t))) {
+        for (const sha of tokens) segments.push(`commit:${sha}`)
+        continue
+      }
+    }
+    segments.push(seg)
+  }
   const foundKeys = new Set<string>()
   for (const segment of segments) {
     for (const { name, re } of EVIDENCE_SEGMENT_PATTERNS) {

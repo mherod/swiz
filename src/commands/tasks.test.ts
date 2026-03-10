@@ -221,6 +221,11 @@ describe("validateEvidence", () => {
     expect(validateEvidence("note:CI green only one field here")).toBeNull()
   })
 
+  it("accepts commit: with space-separated SHA list", () => {
+    expect(validateEvidence("commit:abc123f def456a")).toBeNull()
+    expect(validateEvidence("commit:abc123f def456a 1234567")).toBeNull()
+  })
+
   it("rejects evidence without a recognized prefix", () => {
     const error = validateEvidence("just some text")
     expect(error).not.toBeNull()
