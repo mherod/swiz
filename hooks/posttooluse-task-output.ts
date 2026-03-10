@@ -67,6 +67,30 @@ const BUN_FAIL_RE = /\b(\d+)\s+fail\b/
  */
 const BUN_COMPLETE_RE = /\bRan \d+ tests? across \d+ files?\./
 
+/**
+ * Matches Jest summary line indicating test results:
+ *   "Tests:       2 failed, 5 passed, 7 total"
+ *   "Tests:       5 passed, 5 total"
+ * Presence means Jest ran to completion (output not truncated).
+ */
+const JEST_COMPLETE_RE = /^Tests:\s+.+\d+ total/m
+
+/** Matches Jest failure count: "Tests:  N failed" */
+const JEST_FAIL_RE = /^Tests:\s+(\d+)\s+failed/m
+
+/**
+ * Matches Vitest summary line indicating test results:
+ *   "Tests  3 passed (3)"
+ *   "Tests  2 failed | 1 passed (3)"
+ * The parenthetical total `(N)` is only printed when Vitest completes;
+ * a truncated output may contain " Tests  N failed" without it.
+ * Presence means Vitest ran to completion (output not truncated).
+ */
+const VITEST_COMPLETE_RE = /^ Tests\s+.*\(\d+\)/m
+
+/** Matches Vitest failure count: " Tests  N failed" */
+const VITEST_FAIL_RE = /^ Tests\s+(\d+)\s+failed/m
+
 /** Matches lefthook hook block indicators */
 const HOOK_FAIL_RE = /🥊.*hook: (pre-push|pre-commit)|error: failed to push/i
 
@@ -97,14 +121,34 @@ function detectFailure(output: string, exitCode: number | null): string | null {
     const lines = clean.split("\n").filter((l) => l.trim())
 
     // Bun test failures
-    const failMatch = clean.match(BUN_FAIL_RE)
-    if (failMatch) {
+    const bunFailMatch = clean.match(BUN_FAIL_RE)
+    if (bunFailMatch) {
       // Only claim an exact count when the bun completion marker is present.
       // Its absence means output was truncated — report "unknown" instead.
       const isComplete = BUN_COMPLETE_RE.test(clean)
-      const countLabel = isComplete ? `${failMatch[1]}` : "unknown number of"
+      const countLabel = isComplete ? `${bunFailMatch[1]}` : "unknown number of"
       // Find first ✗ failure line for context
       const failLine = lines.find((l) => l.includes("✗") || l.includes("error:"))
+      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
+      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+    }
+
+    // Jest test failures
+    const jestFailMatch = clean.match(JEST_FAIL_RE)
+    if (jestFailMatch) {
+      const isComplete = JEST_COMPLETE_RE.test(clean)
+      const countLabel = isComplete ? `${jestFailMatch[1]}` : "unknown number of"
+      const failLine = lines.find((l) => l.includes("FAIL") || l.includes("●"))
+      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
+      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+    }
+
+    // Vitest test failures
+    const vitestFailMatch = clean.match(VITEST_FAIL_RE)
+    if (vitestFailMatch) {
+      const isComplete = VITEST_COMPLETE_RE.test(clean)
+      const countLabel = isComplete ? `${vitestFailMatch[1]}` : "unknown number of"
+      const failLine = lines.find((l) => l.includes("FAIL") || l.includes("AssertionError"))
       const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
       return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
     }

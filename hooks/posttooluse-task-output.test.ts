@@ -223,6 +223,97 @@ describe("posttooluse-task-output: result-validation guard", () => {
   })
 })
 
+// ─── Jest runner detection ────────────────────────────────────────────────────
+
+// Jest output with completion marker
+const JEST_COMPLETE_OUTPUT = `
+FAIL src/auth/login.test.ts
+  ● login > handles invalid credentials
+
+    expect(received).toBe(expected)
+
+    Expected: true
+    Received: false
+
+PASS src/auth/logout.test.ts
+
+Test Suites: 1 failed, 1 passed, 2 total
+Tests:       2 failed, 5 passed, 7 total
+Snapshots:   0 total
+Time:        1.234 s
+`.trim()
+
+// Jest output WITHOUT completion marker (truncated)
+const JEST_TRUNCATED_OUTPUT = `
+FAIL src/auth/login.test.ts
+  ● login > handles invalid credentials
+
+Tests:       2 failed
+`.trim()
+
+describe("posttooluse-task-output: Jest runner detection", () => {
+  test("Jest complete output with failures reports exact count", async () => {
+    const result = await runHook(makePayload(JEST_COMPLETE_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("2 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
+
+  test("Jest truncated output with failures reports unknown count", async () => {
+    const result = await runHook(makePayload(JEST_TRUNCATED_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("unknown number of test(s) failed")
+  })
+
+  test("Jest exit 0 does not block", async () => {
+    const output = "Tests:       5 passed, 5 total\nTest Suites: 1 passed, 1 total\nTime: 0.5s"
+    const result = await runHook(makePayload(output, 0))
+    expect(result.decision).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+  })
+})
+
+// ─── Vitest runner detection ──────────────────────────────────────────────────
+
+// Vitest output with completion marker
+const VITEST_COMPLETE_OUTPUT = `
+ FAIL  src/utils/format.test.ts > format > handles null input
+AssertionError: expected null to equal ""
+
+ Tests  3 failed | 4 passed (7)
+ Duration  0.50s
+`.trim()
+
+// Vitest output WITHOUT completion marker (truncated)
+const VITEST_TRUNCATED_OUTPUT = `
+ FAIL  src/utils/format.test.ts > format > handles null input
+AssertionError: expected null to equal ""
+
+ Tests  3 failed
+`.trim()
+
+describe("posttooluse-task-output: Vitest runner detection", () => {
+  test("Vitest complete output with failures reports exact count", async () => {
+    const result = await runHook(makePayload(VITEST_COMPLETE_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("3 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
+
+  test("Vitest truncated output with failures reports unknown count", async () => {
+    const result = await runHook(makePayload(VITEST_TRUNCATED_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("unknown number of test(s) failed")
+  })
+
+  test("Vitest exit 0 does not block", async () => {
+    const output = " Tests  6 passed (6)\n Duration  0.30s"
+    const result = await runHook(makePayload(output, 0))
+    expect(result.decision).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+  })
+})
+
 // ─── Tool error handling ──────────────────────────────────────────────────────
 
 /** CWD used for output-file recovery tests; encodes to a known key under /tmp. */
