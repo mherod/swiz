@@ -1,4 +1,5 @@
 import { getRepoSlug, gh, ghJson } from "./git-helpers.ts"
+import type { CollaborationMode } from "./settings.ts"
 
 export interface OpenPullRequest {
   author?: { login?: string | null } | null
@@ -221,6 +222,64 @@ export async function detectRepoOwnership(
     repoOwner,
     repoSlug,
     resolved: repoOwner !== null && currentUser !== null,
+  }
+}
+
+/**
+ * Describes the permission boundaries enforced for a given collaboration mode.
+ * This is the settings-layer complement to the signal-based `CollaborationPolicyResult`.
+ */
+export interface CollaborationModePolicy {
+  /** Whether feature branches are required for all work (no direct default-branch commits). */
+  requireFeatureBranch: boolean
+  /** Whether an open PR is required before merging to the default branch. */
+  requirePullRequest: boolean
+  /** Whether a peer review (approval from another human) is required to merge. */
+  requirePeerReview: boolean
+  /** Whether PR-context hooks (CI gate, description gate, age gate, etc.) are active. */
+  prHooksActive: boolean
+}
+
+/**
+ * Returns the explicit permission boundaries for the given collaboration mode.
+ *
+ * - `solo`: Direct default-branch commits allowed; no branch, PR, or review requirements.
+ * - `relaxed-collab`: Feature branches + PRs required; self-review is sufficient; no peer-review requirement.
+ * - `team`: Feature branches + PRs required; peer review required before merge.
+ * - `auto`: Defers to signal-based detection — returns the most permissive safe default (same as `solo`).
+ */
+export function getCollaborationModePolicy(mode: CollaborationMode): CollaborationModePolicy {
+  switch (mode) {
+    case "solo":
+      return {
+        requireFeatureBranch: false,
+        requirePullRequest: false,
+        requirePeerReview: false,
+        prHooksActive: false,
+      }
+    case "relaxed-collab":
+      return {
+        requireFeatureBranch: true,
+        requirePullRequest: true,
+        requirePeerReview: false,
+        prHooksActive: true,
+      }
+    case "team":
+      return {
+        requireFeatureBranch: true,
+        requirePullRequest: true,
+        requirePeerReview: true,
+        prHooksActive: true,
+      }
+    case "auto":
+      // Signal-based: resolved at runtime via detectProjectCollaborationPolicy().
+      // Return permissive defaults; callers that need enforcement must use signal detection.
+      return {
+        requireFeatureBranch: false,
+        requirePullRequest: false,
+        requirePeerReview: false,
+        prHooksActive: false,
+      }
   }
 }
 

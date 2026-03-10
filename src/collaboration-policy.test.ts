@@ -5,6 +5,7 @@ import {
   evaluateCollaborationPolicy,
   filterHumanContributorLogins,
   filterHumanOpenPullRequests,
+  getCollaborationModePolicy,
   isAutomationLogin,
   isOrgRepo,
   isPersonalRepo,
@@ -179,5 +180,49 @@ describe("detectRepoOwnership", () => {
 
     expect(result.resolved).toBe(false)
     expect(result.isPersonalRepo).toBe(false)
+  })
+})
+
+describe("getCollaborationModePolicy", () => {
+  it("solo: no branch, PR, or review requirements", () => {
+    const policy = getCollaborationModePolicy("solo")
+    expect(policy.requireFeatureBranch).toBe(false)
+    expect(policy.requirePullRequest).toBe(false)
+    expect(policy.requirePeerReview).toBe(false)
+    expect(policy.prHooksActive).toBe(false)
+  })
+
+  it("relaxed-collab: feature branch + PR required, peer review not required", () => {
+    const policy = getCollaborationModePolicy("relaxed-collab")
+    expect(policy.requireFeatureBranch).toBe(true)
+    expect(policy.requirePullRequest).toBe(true)
+    expect(policy.requirePeerReview).toBe(false)
+    expect(policy.prHooksActive).toBe(true)
+  })
+
+  it("team: feature branch + PR + peer review all required", () => {
+    const policy = getCollaborationModePolicy("team")
+    expect(policy.requireFeatureBranch).toBe(true)
+    expect(policy.requirePullRequest).toBe(true)
+    expect(policy.requirePeerReview).toBe(true)
+    expect(policy.prHooksActive).toBe(true)
+  })
+
+  it("auto: permissive defaults (defers to signal detection at runtime)", () => {
+    const policy = getCollaborationModePolicy("auto")
+    expect(policy.requireFeatureBranch).toBe(false)
+    expect(policy.requirePullRequest).toBe(false)
+    expect(policy.requirePeerReview).toBe(false)
+    expect(policy.prHooksActive).toBe(false)
+  })
+
+  it("relaxed-collab differs from team only in requirePeerReview", () => {
+    const relaxed = getCollaborationModePolicy("relaxed-collab")
+    const team = getCollaborationModePolicy("team")
+    expect(relaxed.requireFeatureBranch).toBe(team.requireFeatureBranch)
+    expect(relaxed.requirePullRequest).toBe(team.requirePullRequest)
+    expect(relaxed.prHooksActive).toBe(team.prHooksActive)
+    expect(relaxed.requirePeerReview).toBe(false)
+    expect(team.requirePeerReview).toBe(true)
   })
 })
