@@ -51,6 +51,7 @@ export {
   type SkipReason,
   toolMatchesToken,
 } from "./engine.ts"
+export { type DispatchRequest, type DispatchResult, executeDispatch } from "./execute.ts"
 export {
   applyHookSettingFilters,
   countHooks,
@@ -65,7 +66,6 @@ export {
   resolvePrMergeActive,
   SWIZ_NOTIFY_HOOK_FILES,
 } from "./filters.ts"
-
 export {
   formatTrace,
   replayBlocking,

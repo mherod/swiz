@@ -391,7 +391,10 @@ export function launchAsyncHooks(groups: HookGroup[], payloadStr: string): void 
 }
 
 /** PreToolUse: short-circuit on first deny; collect and merge allow-with-reason hints. */
-export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Promise<void> {
+export async function runPreToolUse(
+  groups: HookGroup[],
+  payloadStr: string
+): Promise<Record<string, unknown>> {
   launchAsyncHooks(groups, payloadStr)
   const cwd = extractCwd(payloadStr)
   const hints: string[] = []
@@ -446,6 +449,7 @@ export async function runPreToolUse(groups: HookGroup[], payloadStr: string): Pr
   if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
 
   writeResponse(finalResponse)
+  return finalResponse
 }
 
 /** Stop / PostToolUse: forward first block; stop runs all hooks, postToolUse short-circuits. */
@@ -453,7 +457,7 @@ export async function runBlocking(
   groups: HookGroup[],
   payloadStr: string,
   canonicalEvent?: string
-): Promise<void> {
+): Promise<Record<string, unknown>> {
   launchAsyncHooks(groups, payloadStr)
   const cwd = extractCwd(payloadStr)
   const runAllHooks = canonicalEvent === "stop"
@@ -489,6 +493,7 @@ export async function runBlocking(
   if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
 
   writeResponse(finalResponse)
+  return finalResponse
 }
 
 /** SessionStart / UserPromptSubmit: run all hooks, merge additionalContext. */
@@ -496,7 +501,7 @@ export async function runContext(
   groups: HookGroup[],
   payloadStr: string,
   eventName: string
-): Promise<void> {
+): Promise<Record<string, unknown>> {
   launchAsyncHooks(groups, payloadStr)
   const cwd = extractCwd(payloadStr)
   const contexts: string[] = []
@@ -544,4 +549,5 @@ export async function runContext(
   if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
 
   writeResponse(finalResponse)
+  return finalResponse
 }

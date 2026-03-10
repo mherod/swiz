@@ -6,38 +6,61 @@
  * and re-exports all public symbols for backward compatibility.
  */
 
-import { merge, orderBy } from "lodash-es"
 import {
   applyHookSettingFilters,
-  countHooks,
   DISPATCH_ROUTES,
   formatTrace,
   groupMatches,
   log,
-  logHeader,
   replayBlocking,
   replayContext,
   replayPreToolUse,
-  runBlocking,
-  runContext,
-  runPreToolUse,
 } from "../dispatch/index.ts"
-import { tryReplayPendingMutations } from "../issue-store.ts"
-import type { HookGroup } from "../manifest.ts"
 import { manifest } from "../manifest.ts"
-import { loadAllPlugins } from "../plugins.ts"
-import { readProjectSettings, resolveProjectHooks } from "../settings.ts"
-import { computeTranscriptSummary } from "../transcript-summary.ts"
 import type { Command } from "../types.ts"
 
+const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
+const DAEMON_TIMEOUT_MS = 5_000
+
+/**
+ * Try to forward the dispatch request to the daemon.
+ * Returns the parsed response on success, or null if the daemon is
+ * unavailable, times out, or returns an invalid response.
+ */
+async function tryDaemonDispatch(
+  canonicalEvent: string,
+  hookEventName: string,
+  payloadStr: string
+): Promise<Record<string, unknown> | null> {
+  if (process.env.SWIZ_NO_DAEMON === "1") return null
+
+  const url = `http://127.0.0.1:${DAEMON_PORT}/dispatch?event=${encodeURIComponent(canonicalEvent)}&hookEventName=${encodeURIComponent(hookEventName)}`
+
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), DAEMON_TIMEOUT_MS)
+
+    const resp = await fetch(url, {
+      method: "POST",
+      body: payloadStr,
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    })
+
+    clearTimeout(timer)
+
+    if (!resp.ok) return null
+
+    const json = (await resp.json()) as Record<string, unknown>
+    log(`   daemon dispatch: forwarded ${canonicalEvent} to daemon (${resp.status})`)
+    return json
+  } catch {
+    // Daemon unavailable, timeout, or network error — fall back to local
+    return null
+  }
+}
+
 const STDIN_PAYLOAD_TIMEOUT_MS = 2_000
-const TOOL_NAME_OPTIONAL_EVENTS = new Set([
-  "sessionStart",
-  "subagentStart",
-  "subagentStop",
-  "userPromptSubmit",
-  "stop",
-])
 
 interface ParsedPayload {
   payload: Record<string, unknown>
@@ -112,75 +135,6 @@ function getHookContext(canonicalEvent: string, payload: Record<string, unknown>
   return { toolName, trigger }
 }
 
-function backfillPayloadDefaults(payload: Record<string, unknown>): void {
-  if (!payload.cwd) {
-    payload.cwd =
-      process.env.GEMINI_CWD ||
-      process.env.GEMINI_PROJECT_DIR ||
-      process.env.CLAUDE_PROJECT_DIR ||
-      process.cwd()
-  }
-  if (!payload.session_id) {
-    payload.session_id = process.env.GEMINI_SESSION_ID || "unknown-session"
-  }
-}
-
-function shouldWarnMissingToolName(
-  canonicalEvent: string,
-  payload: Record<string, unknown>
-): boolean {
-  if (payload.tool_name || payload.toolName) return false
-  return !TOOL_NAME_OPTIONAL_EVENTS.has(canonicalEvent)
-}
-
-async function loadCombinedManifest(cwd: string): Promise<HookGroup[]> {
-  let combinedManifest: HookGroup[] = [...manifest]
-  const projectSettings = await readProjectSettings(cwd)
-
-  if (projectSettings?.plugins?.length) {
-    const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
-    const pluginHooks = pluginResults.flatMap((r) => r.hooks)
-    for (const result of pluginResults) {
-      if (result.error) log(`   ⚠ plugin ${result.name}: ${result.error}`)
-    }
-    if (pluginHooks.length > 0) {
-      combinedManifest = [...combinedManifest, ...pluginHooks]
-      log(`   loaded ${pluginHooks.length} plugin hook group(s)`)
-    }
-  }
-
-  if (projectSettings?.hooks?.length) {
-    const { resolved, warnings } = resolveProjectHooks(projectSettings.hooks, cwd)
-    for (const warning of warnings) log(`   ⚠ ${warning}`)
-    if (resolved.length > 0) {
-      combinedManifest = [...combinedManifest, ...resolved]
-      log(`   loaded ${resolved.length} project-local hook group(s)`)
-    }
-  }
-
-  return combinedManifest
-}
-
-async function enrichPayloadForHooks(
-  payload: Record<string, unknown>,
-  parseError: boolean,
-  fallbackPayloadStr: string
-): Promise<string> {
-  if (parseError) return fallbackPayloadStr
-
-  let enrichedPayloadStr = fallbackPayloadStr
-  const transcriptPath = payload.transcript_path as string | undefined
-  if (!transcriptPath) return enrichedPayloadStr
-
-  const summary = await computeTranscriptSummary(transcriptPath)
-  if (!summary) return enrichedPayloadStr
-
-  const enriched = merge({}, payload, { _transcriptSummary: summary })
-  enrichedPayloadStr = JSON.stringify(enriched)
-  log(`   transcript summary: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`)
-  return enrichedPayloadStr
-}
-
 // ─── Backward-compatible re-exports ─────────────────────────────────────────
 // Tests and other consumers import from this file; re-export everything.
 
@@ -189,6 +143,9 @@ export {
   applyHookSettingFilters,
   countHooks,
   DISPATCH_ROUTES,
+  type DispatchRequest,
+  type DispatchResult,
+  executeDispatch,
   extractCwd,
   filterDisabledHooks,
   filterPrMergeModeHooks,
@@ -276,63 +233,21 @@ export const dispatchCommand: Command = {
     const hookEventName = args[1] ?? canonicalEvent
 
     const payloadStr = await readStdinPayloadWithTimeout()
-    const { payload, parseError } = parsePayload(payloadStr)
 
-    // ── Backfill missing fields from agent environment variables ──
-    backfillPayloadDefaults(payload)
-    const { toolName, trigger } = getHookContext(canonicalEvent, payload)
-
-    logHeader(canonicalEvent, hookEventName, toolName, trigger)
-    log(`   payload: ${payloadStr.length} bytes${parseError ? " ⚠ INVALID JSON" : ""}`)
-
-    // Re-serialize payload if we modified it
-    const finalPayloadStr = parseError ? payloadStr : JSON.stringify(payload)
-
-    if (payloadStr.length === 0) {
-      log(`   ⚠ EMPTY STDIN — no payload received from agent`)
-    } else {
-      const keys = orderBy(Object.keys(payload), [(key) => key], ["asc"])
-      log(`   keys: ${keys.join(", ")}`)
-      if (!payload.session_id) log(`   ⚠ missing session_id`)
-      if (shouldWarnMissingToolName(canonicalEvent, payload)) log(`   ⚠ missing tool_name`)
+    // ── Try daemon first, fall back to local execution ──
+    const daemonResponse = await tryDaemonDispatch(canonicalEvent, hookEventName, payloadStr)
+    if (daemonResponse !== null) {
+      if (Object.keys(daemonResponse).length > 0) {
+        process.stdout.write(`${JSON.stringify(daemonResponse)}\n`)
+      }
+      return
     }
 
-    // ── Best-effort: drain any offline issue mutations before hooks run ──
-    const cwd = (payload.cwd as string) ?? process.cwd()
-    await tryReplayPendingMutations(cwd)
-
-    // ── Load plugin + project-local hooks and merge with built-in manifest ──
-    const combinedManifest = await loadCombinedManifest(cwd)
-
-    const matchingGroups = combinedManifest.filter(
-      (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
-    )
-    const filteredGroups = await applyHookSettingFilters(matchingGroups, payload)
-
-    log(
-      `   matched ${matchingGroups.length} group(s) from ${combinedManifest.filter((g) => g.event === canonicalEvent).length} total`
-    )
-    const skippedHooks = countHooks(matchingGroups) - countHooks(filteredGroups)
-    if (skippedHooks > 0) {
-      log(`   skipped ${skippedHooks} PR-merge hook(s) (pr-merge-mode disabled)`)
-    }
-
-    if (filteredGroups.length === 0) return
-
-    // ── Pre-compute transcript summary for hooks ──────────────────────────
-    const enrichedPayloadStr = await enrichPayloadForHooks(payload, parseError, finalPayloadStr)
-
-    const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
-    switch (strategy) {
-      case "preToolUse":
-        await runPreToolUse(filteredGroups, enrichedPayloadStr)
-        break
-      case "blocking":
-        await runBlocking(filteredGroups, enrichedPayloadStr, canonicalEvent)
-        break
-      case "context":
-        await runContext(filteredGroups, enrichedPayloadStr, hookEventName)
-        break
-    }
+    // ── Local execution fallback ──
+    const { executeDispatch } = await import("../dispatch/execute.ts")
+    const { response } = await executeDispatch({ canonicalEvent, hookEventName, payloadStr })
+    // Response already written to stdout by engine strategy functions.
+    // The returned response is used only by the daemon path above.
+    void response
   },
 }

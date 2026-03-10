@@ -128,8 +128,8 @@ describe("mutation replay wiring", () => {
     expect(src).toMatch(/await\s+tryReplayPendingMutations\(/)
   })
 
-  it("dispatch.ts imports and calls tryReplayPendingMutations", () => {
-    const src = readFileSync(join(SRC, "src", "commands", "dispatch.ts"), "utf8")
+  it("dispatch execute.ts imports and calls tryReplayPendingMutations", () => {
+    const src = readFileSync(join(SRC, "src", "dispatch", "execute.ts"), "utf8")
     expect(src).toContain("tryReplayPendingMutations")
     expect(src).toMatch(/await\s+tryReplayPendingMutations\(/)
   })
