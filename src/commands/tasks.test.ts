@@ -593,3 +593,38 @@ describe("compareTaskIds", () => {
     expect(ids.sort(compareTaskIds)).toEqual(["a3f2-1", "a3f2-3", "b7c1-1", "b7c1-2"])
   })
 })
+
+// ─── complete --dry-run validation ──────────────────────────────────────────
+// The dry-run path calls resolveTaskById for the given ID and reports
+// whether the task exists — without writing or mutating anything.
+
+describe("complete --dry-run: resolveTaskById validation", () => {
+  it("resolves a task that exists in the session", async () => {
+    // Task #1 exists in SESSION_A — resolution should succeed
+    const result = await resolveTaskById("1", SESSION_A, FILTER_CWD, TASKS, PROJECTS)
+    expect(result.task.id).toBe("1")
+    expect(result.task.subject).toBe("Test task")
+  })
+
+  it("throws 'not found' for a task ID that does not exist", async () => {
+    await expect(resolveTaskById("9999", SESSION_A, FILTER_CWD, TASKS, PROJECTS)).rejects.toThrow(
+      /not found/
+    )
+  })
+
+  it("throws for a missing task even when session is valid", async () => {
+    // SESSION_B has task 120 but not task 999
+    await expect(resolveTaskById("999", SESSION_B, FILTER_CWD, TASKS, PROJECTS)).rejects.toThrow(
+      /not found/
+    )
+  })
+
+  it("does not write any files during dry-run validation", async () => {
+    // Resolution of an existing task is pure read — no side effects
+    const { readdir } = await import("node:fs/promises")
+    const before = await readdir(join(TASKS, SESSION_A))
+    await resolveTaskById("1", SESSION_A, FILTER_CWD, TASKS, PROJECTS)
+    const after = await readdir(join(TASKS, SESSION_A))
+    expect(after).toEqual(before)
+  })
+})

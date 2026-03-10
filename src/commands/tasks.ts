@@ -640,12 +640,28 @@ export const tasksCommand: Command = {
         const [taskId, ...sessionArgs] = rest
         if (!taskId) {
           throw new Error(
-            "Usage: swiz tasks complete <task-id> --evidence TEXT --state <state> [--verify TEXT] [--subject TEXT]"
+            "Usage: swiz tasks complete <task-id> --evidence TEXT --state <state> [--verify TEXT] [--subject TEXT] [--dry-run]"
           )
         }
+        const dryRun = rest.includes("--dry-run")
         const evidence = extractFlag(rest, "--evidence")
         const stateFlag = extractFlag(rest, "--state")
         const subjectFlag = extractFlag(rest, "--subject")
+
+        // --dry-run: validate the task exists without performing any mutations.
+        if (dryRun) {
+          const sessionId = await resolveSession(sessionArgs)
+          try {
+            const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
+            console.log(`  ✅ #${taskId}: found — "${task.subject}" (${task.status})`)
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            console.error(`  ❌ #${taskId}: ${msg}`)
+            process.exitCode = 1
+          }
+          break
+        }
+
         if (!stateFlag) {
           throw new Error(
             `--state <state> is required.\n` +
