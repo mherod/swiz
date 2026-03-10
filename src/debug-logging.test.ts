@@ -241,4 +241,39 @@ describe("debugLog enforcement", () => {
         violations.map((v) => `  ${v}`).join("\n")
     ).toEqual([])
   })
+
+  it("stdout-only files must not import or call stderrLog", () => {
+    // Files in STDOUT_ALLOWLIST but NOT STDERR_ALLOWLIST are stdout-only.
+    // They must never call stderrLog — errors belong on stdout as structured output
+    // or should not be emitted at all from these files.
+    // e.g. src/dispatch/engine.ts emits JSON to stdout only; stderrLog there would
+    // mix stderr into the structured output stream.
+    const violations: string[] = []
+
+    for (const rel of STDOUT_ALLOWLIST) {
+      if (STDERR_ALLOWLIST.has(rel)) continue // dual-listed files are allowed stderrLog
+
+      const full = join(SRC_ROOT, rel)
+      const content = readFileSync(full, "utf8")
+      const lines = content.split("\n")
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!
+        const trimmed = line.trim()
+        if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue
+
+        if (/\bstderrLog\b/.test(line)) {
+          violations.push(`${rel}:${i + 1}: ${trimmed}`)
+        }
+      }
+    }
+
+    expect(
+      violations,
+      `stdout-only files (in STDOUT_ALLOWLIST but not STDERR_ALLOWLIST) must not use stderrLog.\n` +
+        `These files emit structured output to stdout; mixing stderr would corrupt the stream.\n` +
+        `To allow stderrLog in a file, add it to STDERR_ALLOWLIST with a justification.\n\n` +
+        violations.map((v) => `  ${v}`).join("\n")
+    ).toEqual([])
+  })
 })
