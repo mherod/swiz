@@ -49,7 +49,10 @@ function stripQuotedStrings(command: string): string {
 const GREP_CMD_RE = /(?:^|\|\s*)grep\s/
 const CD_CMD_RE = shellSegmentCommandRe("cd(?:\\s|$)")
 const FIND_CMD_RE = shellSegmentCommandRe("find\\s")
-const AWK_CMD_RE = shellSegmentCommandRe("awk\\s")
+// Only block awk when it writes output to a file (redirect or tee -i).
+// Read-only awk (stdout extraction, --help, pipelines) is permitted.
+const AWK_REDIRECT_RE = shellSegmentCommandRe("awk\\s[^|;&]*>\\s*\\S")
+const AWK_TEE_INPLACE_RE = /awk\b.*\|\s*tee\s+-i\b/
 // Only block sed when it writes files in-place (-i flag) or redirects output to a file.
 // Read-only sed (e.g. sed -n '...' file, sed '...' file | ...) is permitted.
 const SED_INPLACE_RE = shellSegmentCommandRe("sed\\s+(?:[^-]|-[^-])*-[a-zA-Z]*i")
@@ -89,13 +92,13 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => AWK_CMD_RE.test(c),
+    match: (c) => AWK_REDIRECT_RE.test(c) || AWK_TEE_INPLACE_RE.test(c),
     message: [
-      "Do not use `awk` for file processing. It produces unreviewed changes.",
+      "Do not use `awk` to write files. It produces unreviewed changes.",
       "",
       "Instead, use the Edit tool for file modifications:",
       "  • Edit tool: precise old_string → new_string replacements (preferred)",
-      "  • For data extraction, consider `bun -e` with a TypeScript one-liner",
+      "  • For data extraction, `awk '{print $1}' file` and `awk --help` are allowed.",
     ].join("\n"),
   },
   {

@@ -51,8 +51,14 @@ describe("pretooluse-banned-commands", () => {
       expect(result.reason).toContain("Edit tool")
     })
 
-    test("awk is blocked", async () => {
-      const result = await runHook("awk '{print $1}' file.ts")
+    test("awk redirecting to a file is blocked", async () => {
+      const result = await runHook("awk '{print $1}' file.ts > output.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Edit tool")
+    })
+
+    test("awk piped through tee -i is blocked", async () => {
+      const result = await runHook("awk '{print $1}' file.ts | tee -i output.txt")
       expect(result.decision).toBe("deny")
     })
 
@@ -275,6 +281,26 @@ describe("pretooluse-banned-commands", () => {
 
     test("rg passes through", async () => {
       const result = await runHook("rg 'pattern' src/")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("awk stdout extraction passes through", async () => {
+      const result = await runHook("awk '{print $1}' file.ts")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("awk --help passes through", async () => {
+      const result = await runHook("awk --help")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("awk in pipeline (no file redirect) passes through", async () => {
+      const result = await runHook("gh issue list --json number | awk '{print $1}'")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("sed -n read-only passes through", async () => {
+      const result = await runHook("sed -n '1,10p' file.ts")
       expect(result.decision).toBeUndefined()
     })
 
