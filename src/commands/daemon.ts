@@ -1,9 +1,71 @@
 import { dirname, join } from "node:path"
 import { executeDispatch } from "../dispatch/execute.ts"
+import { getGitBranchStatus } from "../git-helpers.ts"
+import { getProjectSettingsPath, getStatePath, getSwizSettingsPath } from "../settings.ts"
 import type { Command } from "../types.ts"
+import {
+  computeWarmStatusLineSnapshot,
+  getGhCachePath,
+  type WarmStatusLineSnapshot,
+} from "./status-line.ts"
 
 const LABEL = "com.swiz.daemon"
 const PLIST_PATH = join(process.env.HOME ?? "", "Library/LaunchAgents", `${LABEL}.plist`)
+const GITHUB_REFRESH_WINDOW_MS = 20_000
+
+interface SnapshotFingerprint {
+  git: string
+  projectSettingsMtimeMs: number
+  projectStateMtimeMs: number
+  globalSettingsMtimeMs: number
+  ghCacheMtimeMs: number
+  githubBucket: number
+}
+
+interface CachedSnapshot {
+  snapshot: WarmStatusLineSnapshot
+  fingerprint: SnapshotFingerprint
+}
+
+export function hasSnapshotInvalidated(
+  previous: SnapshotFingerprint | null,
+  next: SnapshotFingerprint
+): boolean {
+  if (!previous) return true
+  return (
+    previous.git !== next.git ||
+    previous.projectSettingsMtimeMs !== next.projectSettingsMtimeMs ||
+    previous.projectStateMtimeMs !== next.projectStateMtimeMs ||
+    previous.globalSettingsMtimeMs !== next.globalSettingsMtimeMs ||
+    previous.ghCacheMtimeMs !== next.ghCacheMtimeMs ||
+    previous.githubBucket !== next.githubBucket
+  )
+}
+
+async function safeMtime(path: string | null): Promise<number> {
+  if (!path) return 0
+  try {
+    const file = Bun.file(path)
+    if (!(await file.exists())) return 0
+    const info = await file.stat()
+    return info.mtimeMs ?? 0
+  } catch {
+    return 0
+  }
+}
+
+async function buildSnapshotFingerprint(cwd: string): Promise<SnapshotFingerprint> {
+  const gitStatus = await getGitBranchStatus(cwd)
+  const globalSettingsPath = getSwizSettingsPath()
+  return {
+    git: gitStatus ? JSON.stringify(gitStatus) : "not-git",
+    projectSettingsMtimeMs: await safeMtime(getProjectSettingsPath(cwd)),
+    projectStateMtimeMs: await safeMtime(getStatePath(cwd)),
+    globalSettingsMtimeMs: await safeMtime(globalSettingsPath),
+    ghCacheMtimeMs: await safeMtime(getGhCachePath(cwd)),
+    githubBucket: Math.floor(Date.now() / GITHUB_REFRESH_WINDOW_MS),
+  }
+}
 
 function buildPlist(port: number): string {
   const bunPath = Bun.which("bun") ?? "/opt/homebrew/bin/bun"
@@ -116,6 +178,24 @@ export const daemonCommand: Command = {
       return
     }
 
+    const snapshots = new Map<string, CachedSnapshot>()
+    const cacheKey = (cwd: string, sessionId: string | null | undefined) =>
+      `${cwd}\x00${sessionId ?? ""}`
+    const resolveSnapshot = async (
+      cwd: string,
+      sessionId: string | null | undefined
+    ): Promise<WarmStatusLineSnapshot> => {
+      const key = cacheKey(cwd, sessionId)
+      const nextFingerprint = await buildSnapshotFingerprint(cwd)
+      const existing = snapshots.get(key)
+      if (existing && !hasSnapshotInvalidated(existing.fingerprint, nextFingerprint)) {
+        return existing.snapshot
+      }
+      const snapshot = await computeWarmStatusLineSnapshot(cwd, sessionId)
+      snapshots.set(key, { snapshot, fingerprint: nextFingerprint })
+      return snapshot
+    }
+
     const server = Bun.serve({
       port,
       routes: {
@@ -139,6 +219,19 @@ export const daemonCommand: Command = {
             daemonContext: true,
           })
           return Response.json(result.response)
+        }
+
+        if (url.pathname === "/status-line/snapshot" && req.method === "POST") {
+          const body = (await req.json().catch(() => null)) as {
+            cwd?: string
+            sessionId?: string | null
+          } | null
+          const cwd = body?.cwd
+          if (typeof cwd !== "string" || cwd.length === 0) {
+            return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
+          }
+          const snapshot = await resolveSnapshot(cwd, body?.sessionId ?? null)
+          return Response.json({ snapshot })
         }
 
         return new Response("Not Found", { status: 404 })

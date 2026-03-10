@@ -33,6 +33,22 @@ interface StatusLineInput {
 
 import { BOLD, DIM, RESET as R } from "../ansi.ts"
 
+export interface WarmStatusLineSnapshot {
+  shortCwd: string
+  gitInfo: string
+  gitBranch: string
+  activeSegments: string[]
+  issueCount: number | null
+  prCount: number | null
+  reviewDecision: string
+  commentCount: number
+  projectState: ProjectState | null
+  settingsParts: string[]
+}
+
+const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT ?? "7943")
+const DAEMON_ORIGIN = process.env.SWIZ_DAEMON_ORIGIN ?? `http://127.0.0.1:${DAEMON_PORT}`
+
 // 256-color foreground: \x1b[38;5;Nm
 const fg256 = (n: number) => `\x1b[38;5;${n}m`
 
@@ -395,6 +411,182 @@ export async function updateContextStats(cwd: string, pct: number): Promise<Cont
   return stats
 }
 
+function activeSegmentsFromEffective(effective: EffectiveSwizSettings | null): string[] {
+  return effective?.statusLineSegments ?? []
+}
+
+export async function computeWarmStatusLineSnapshot(
+  cwd: string,
+  sessionId: string | null | undefined
+): Promise<WarmStatusLineSnapshot> {
+  const shortCwd = shortenPath(cwd)
+  const [gitResult, swizSettings, projectSettings] = await Promise.all([
+    getGitBranchAndInfo(cwd),
+    readSwizSettings().catch(() => null),
+    readProjectSettings(cwd).catch(() => null),
+  ])
+
+  const effective = swizSettings
+    ? getEffectiveSwizSettings(swizSettings, sessionId ?? null, projectSettings)
+    : null
+  const activeSegments = activeSegmentsFromEffective(effective)
+  const seg = (name: string) => activeSegments.length === 0 || activeSegments.includes(name)
+
+  const needsPr = seg("pr")
+  const needsBacklog = seg("backlog")
+
+  const prViewPromise =
+    needsPr && gitResult.branch
+      ? ghJsonCached<{ reviewDecision?: string; comments?: unknown[] }>(
+          ["pr", "view", gitResult.branch, "--json", "reviewDecision,comments"],
+          cwd
+        )
+      : Promise.resolve(null)
+
+  const [issueData, prListData, prViewData, projectState] = await Promise.all([
+    needsBacklog
+      ? ghJsonCached<unknown[]>(
+          ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
+          cwd
+        )
+      : Promise.resolve(null),
+    needsBacklog
+      ? ghJsonCached<unknown[]>(
+          ["pr", "list", "--state", "open", "--json", "number", "--limit", "100"],
+          cwd
+        )
+      : Promise.resolve(null),
+    prViewPromise,
+    readProjectState(cwd),
+  ])
+
+  return {
+    shortCwd,
+    gitInfo: gitResult.info,
+    gitBranch: gitResult.branch,
+    activeSegments,
+    issueCount: Array.isArray(issueData) ? issueData.length : null,
+    prCount: Array.isArray(prListData) ? prListData.length : null,
+    reviewDecision: prViewData?.reviewDecision ?? "",
+    commentCount: Array.isArray(prViewData?.comments) ? prViewData.comments.length : 0,
+    projectState,
+    settingsParts: buildSettingsFlags(effective),
+  }
+}
+
+async function readWarmSnapshotFromDaemon(
+  cwd: string,
+  sessionId: string | null | undefined
+): Promise<WarmStatusLineSnapshot | null> {
+  const timeout = Number(process.env.SWIZ_STATUS_DAEMON_TIMEOUT_MS ?? "400")
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeout)
+  try {
+    const res = await fetch(`${DAEMON_ORIGIN}/status-line/snapshot`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd, sessionId }),
+      signal: controller.signal,
+    })
+    if (!res.ok) return null
+    const payload = (await res.json().catch(() => null)) as {
+      snapshot?: WarmStatusLineSnapshot
+    } | null
+    return payload?.snapshot ?? null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export function renderStatusLineFromSnapshot(
+  input: StatusLineInput,
+  snapshot: WarmStatusLineSnapshot,
+  ctxPct: number,
+  ctxTokens: number,
+  ctxStats: ContextStats | null,
+  timeOffset: number
+): string {
+  const model = input.model?.display_name ?? "claude"
+  const agentName = input.agent?.name
+  const vimMode = input.vim?.mode
+  const seg = (name: string) =>
+    snapshot.activeSegments.length === 0 || snapshot.activeSegments.includes(name)
+
+  // Accent colors at fixed phase offsets
+  const a2 = fg256(RAINBOW[(timeOffset + 6) % RL]!)
+  const a4 = fg256(RAINBOW[(timeOffset + 18) % RL]!)
+
+  const rb = (s: string, idx = 0) => rainbowStr(s, idx, timeOffset)
+  const label = (s: string) => `${DIM}${s}${R}`
+
+  const topLeft = rb("┌──")
+  const midLeft = rb("├──")
+  const bottomLeft = rb("└──")
+
+  const ctxBar = progressBar(ctxPct, 20, ctxStats)
+  const ctxColor = colorForPct(ctxPct)
+  const tokenStr = ctxTokens > 0 ? ` ${DIM}${formatTokens(ctxTokens)}${R}` : ""
+  const rangeSpread = ctxStats ? ctxStats.maxPct - ctxStats.minPct : 0
+  const rangeWarn = rangeSpread > 0 && rangeSpread < 40 ? "⚠️ " : ""
+  const rangeSeg =
+    ctxStats && ctxStats.minPct !== ctxStats.maxPct
+      ? ` ${DIM}${rangeWarn}(${ctxStats.minPct.toFixed(0)}–${ctxStats.maxPct.toFixed(0)}%)${R}`
+      : ""
+  const ctxSeg = `${ctxBar}${ctxColor}${ctxPct.toFixed(0)}%${R}${tokenStr}${rangeSeg}`
+
+  const issueSeg =
+    snapshot.issueCount !== null
+      ? formatCountSegment(snapshot.issueCount, "issue", "issues", 10, 25)
+      : ""
+  const prSeg =
+    snapshot.prCount !== null ? formatCountSegment(snapshot.prCount, "PR", "PRs", 5, 12) : ""
+  const ghCountSeg =
+    snapshot.issueCount !== null || snapshot.prCount !== null
+      ? [issueSeg, prSeg].filter(Boolean).join("  ")
+      : ""
+
+  const stateSeg = formatProjectState(snapshot.projectState)
+  const reviewStatus =
+    snapshot.reviewDecision === "CHANGES_REQUESTED"
+      ? `\x1b[91m⚠ changes requested${R}`
+      : snapshot.reviewDecision === "APPROVED"
+        ? `\x1b[92m✓ approved${R}`
+        : snapshot.commentCount > 0
+          ? `${DIM}💬 ${snapshot.commentCount}${R}`
+          : ""
+
+  const agentTag = agentName ? `${a4}[${agentName}]${R}` : ""
+  const vimTag = vimMode ? formatVimMode(vimMode) : ""
+  const timeSeg = `${DIM}${formatTime()}${R}`
+  const settingsSeg = snapshot.settingsParts.join(" ")
+
+  const line1Groups = joinGroups([
+    seg("repo") ? `${label("repo")} ${a2}${snapshot.shortCwd}${R}` : "",
+    seg("git") && snapshot.gitInfo ? `${label("git")} ${snapshot.gitInfo}` : "",
+    seg("pr") && reviewStatus ? `${label("pr")} ${reviewStatus}` : "",
+  ])
+  const line2Groups = joinGroups([
+    seg("model") ? `${label("model")} ${rb(model)}` : "",
+    seg("ctx") && ctxPct > 0 ? `${label("ctx")} ${ctxSeg}` : "",
+  ])
+  const modeSeg = [agentTag, vimTag].filter(Boolean).join(" ")
+  const line3Groups = joinGroups([
+    seg("state") && stateSeg ? `${label("state")} ${stateSeg}` : "",
+    seg("backlog") && ghCountSeg ? `${label("backlog")} ${ghCountSeg}` : "",
+    seg("mode") && modeSeg ? `${label("mode")} ${modeSeg}` : "",
+    seg("flags") && settingsSeg ? `${label("flags")} ${settingsSeg}` : "",
+    seg("time") ? `${label("time")} ${timeSeg}` : "",
+  ])
+
+  const line1 = `${topLeft} ${line1Groups || `${DIM}─${R}`}`
+  const line2 = `${midLeft} ${line2Groups || `${DIM}─${R}`}`
+  const line3 = `${bottomLeft} ${line3Groups || `${DIM}─${R}`}`
+
+  return `${line1}\n${line2}\n${line3}`
+}
+
 export const statusLineCommand: Command = {
   name: "status-line",
   description: "Output a rich ANSI status bar for Claude Code's statusLine hook",
@@ -403,138 +595,19 @@ export const statusLineCommand: Command = {
     const input: StatusLineInput = await Bun.stdin.json().catch(() => ({}))
 
     const cwd = input.workspace?.current_dir ?? process.cwd()
-    const model = input.model?.display_name ?? "claude"
     const ctxPct = input.context_window?.used_percentage ?? 0
     const ctxTokens = input.context_window?.current_usage ?? 0
-    const agentName = input.agent?.name
-    const vimMode = input.vim?.mode
 
     // Time-based offset: cycles through full rainbow every ~1 minute (~1.7s per step)
     const timeOffset = Math.floor(Date.now() / 1667) % RL
 
-    // Accent colors at fixed phase offsets
-    const a2 = fg256(RAINBOW[(timeOffset + 6) % RL]!)
-    const a4 = fg256(RAINBOW[(timeOffset + 18) % RL]!)
-
-    const shortCwd = shortenPath(cwd)
-
-    // Phase 1: fetch settings and git info (needed to compute segment visibility)
-    const [gitResult, swizSettings, projectSettings] = await Promise.all([
-      getGitBranchAndInfo(cwd),
-      readSwizSettings().catch(() => null),
-      readProjectSettings(cwd).catch(() => null),
-    ])
-
-    const { info: gitInfo } = gitResult
-
-    // ── Segment visibility ───────────────────────────────────────────────────
-    const effective = swizSettings
-      ? getEffectiveSwizSettings(swizSettings, input.session_id ?? null, projectSettings)
-      : null
-    const activeSegments = new Set<string>(effective?.statusLineSegments ?? [])
-    const seg = (name: string) => activeSegments.size === 0 || activeSegments.has(name)
-
-    // Phase 2: conditionally fetch GitHub data only for active segments
-    const needsPr = seg("pr")
-    const needsBacklog = seg("backlog")
-    const prViewPromise =
-      needsPr && gitResult.branch
-        ? ghJsonCached<{ reviewDecision?: string; comments?: unknown[] }>(
-            ["pr", "view", gitResult.branch, "--json", "reviewDecision,comments"],
-            cwd
-          )
-        : Promise.resolve(null)
-    const [issueData, prListData, prViewData] = await Promise.all([
-      needsBacklog
-        ? ghJsonCached<unknown[]>(
-            ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
-            cwd
-          )
-        : Promise.resolve(null),
-      needsBacklog
-        ? ghJsonCached<unknown[]>(
-            ["pr", "list", "--state", "open", "--json", "number", "--limit", "100"],
-            cwd
-          )
-        : Promise.resolve(null),
-      prViewPromise,
-    ])
-
-    // ── Build segments ──────────────────────────────────────────────────────
-
-    const rb = (s: string, idx = 0) => rainbowStr(s, idx, timeOffset)
-    const label = (s: string) => `${DIM}${s}${R}`
-
-    const topLeft = rb("┌──")
-    const midLeft = rb("├──")
-    const bottomLeft = rb("└──")
-
     const ctxStats = await updateContextStats(cwd, ctxPct)
-    const ctxBar = progressBar(ctxPct, 20, ctxStats)
-    const ctxColor = colorForPct(ctxPct)
-    const tokenStr = ctxTokens > 0 ? ` ${DIM}${formatTokens(ctxTokens)}${R}` : ""
-    const rangeSpread = ctxStats ? ctxStats.maxPct - ctxStats.minPct : 0
-    const rangeWarn = rangeSpread > 0 && rangeSpread < 40 ? "⚠️ " : ""
-    const rangeSeg =
-      ctxStats && ctxStats.minPct !== ctxStats.maxPct
-        ? ` ${DIM}${rangeWarn}(${ctxStats.minPct.toFixed(0)}–${ctxStats.maxPct.toFixed(0)}%)${R}`
-        : ""
-    const ctxSeg = `${ctxBar}${ctxColor}${ctxPct.toFixed(0)}%${R}${tokenStr}${rangeSeg}`
+    const snapshot =
+      (await readWarmSnapshotFromDaemon(cwd, input.session_id ?? null)) ??
+      (await computeWarmStatusLineSnapshot(cwd, input.session_id ?? null))
 
-    const issueCount = Array.isArray(issueData) ? issueData.length : null
-    const prCount = Array.isArray(prListData) ? prListData.length : null
-    const issueSeg =
-      issueCount !== null ? formatCountSegment(issueCount, "issue", "issues", 10, 25) : ""
-    const prSeg = prCount !== null ? formatCountSegment(prCount, "PR", "PRs", 5, 12) : ""
-    const ghCountSeg =
-      issueCount !== null || prCount !== null ? [issueSeg, prSeg].filter(Boolean).join("  ") : ""
-
-    const reviewDecision = prViewData?.reviewDecision ?? ""
-    const comments = prViewData?.comments
-    const commentCount = Array.isArray(comments) ? comments.length : 0
-    const currentState = await readProjectState(cwd)
-    const stateSeg = formatProjectState(currentState)
-    const reviewStatus =
-      reviewDecision === "CHANGES_REQUESTED"
-        ? `\x1b[91m⚠ changes requested${R}`
-        : reviewDecision === "APPROVED"
-          ? `\x1b[92m✓ approved${R}`
-          : commentCount > 0
-            ? `${DIM}💬 ${commentCount}${R}`
-            : ""
-
-    const agentTag = agentName ? `${a4}[${agentName}]${R}` : ""
-    const vimTag = vimMode ? formatVimMode(vimMode) : ""
-    const timeSeg = `${DIM}${formatTime()}${R}`
-
-    // ── Effective settings indicators ───────────────────────────────────────
-    const settingsParts = buildSettingsFlags(effective)
-    const settingsSeg = settingsParts.join(" ")
-
-    // ── Assemble ────────────────────────────────────────────────────────────
-
-    const line1Groups = joinGroups([
-      seg("repo") ? `${label("repo")} ${a2}${shortCwd}${R}` : "",
-      seg("git") && gitInfo ? `${label("git")} ${gitInfo}` : "",
-      seg("pr") && reviewStatus ? `${label("pr")} ${reviewStatus}` : "",
-    ])
-    const line2Groups = joinGroups([
-      seg("model") ? `${label("model")} ${rb(model)}` : "",
-      seg("ctx") && ctxPct > 0 ? `${label("ctx")} ${ctxSeg}` : "",
-    ])
-    const modeSeg = [agentTag, vimTag].filter(Boolean).join(" ")
-    const line3Groups = joinGroups([
-      seg("state") && stateSeg ? `${label("state")} ${stateSeg}` : "",
-      seg("backlog") && ghCountSeg ? `${label("backlog")} ${ghCountSeg}` : "",
-      seg("mode") && modeSeg ? `${label("mode")} ${modeSeg}` : "",
-      seg("flags") && settingsSeg ? `${label("flags")} ${settingsSeg}` : "",
-      seg("time") ? `${label("time")} ${timeSeg}` : "",
-    ])
-
-    const line1 = `${topLeft} ${line1Groups || `${DIM}─${R}`}`
-    const line2 = `${midLeft} ${line2Groups || `${DIM}─${R}`}`
-    const line3 = `${bottomLeft} ${line3Groups || `${DIM}─${R}`}`
-
-    console.log(`${line1}\n${line2}\n${line3}`)
+    console.log(
+      renderStatusLineFromSnapshot(input, snapshot, ctxPct, ctxTokens, ctxStats, timeOffset)
+    )
   },
 }

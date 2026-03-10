@@ -11,6 +11,7 @@ import {
   getGhCachePath,
   ghJsonCached,
   readContextStats,
+  renderStatusLineFromSnapshot,
   updateContextStats,
 } from "./status-line.ts"
 
@@ -320,5 +321,47 @@ describe("ghJsonCached", () => {
 
   it("getGhCachePath returns path under .swiz", () => {
     expect(getGhCachePath("/some/project")).toBe("/some/project/.swiz/gh-cache.json")
+  })
+})
+
+describe("renderStatusLineFromSnapshot", () => {
+  const baseSnapshot = {
+    shortCwd: "swiz",
+    gitInfo: "✦ main",
+    gitBranch: "main",
+    activeSegments: [],
+    issueCount: 2,
+    prCount: 1,
+    reviewDecision: "",
+    commentCount: 0,
+    projectState: "developing" as const,
+    settingsParts: [],
+  }
+
+  it("renders a stable three-line output shape from warm snapshots", () => {
+    const out = renderStatusLineFromSnapshot(
+      { model: { display_name: "claude-sonnet" } },
+      baseSnapshot,
+      50,
+      1200,
+      { minPct: 40, maxPct: 80 },
+      0
+    )
+    const lines = out.split("\n")
+    expect(lines.length).toBe(3)
+  })
+
+  it("respects segment gating semantics from snapshot activeSegments", () => {
+    const out = renderStatusLineFromSnapshot(
+      { model: { display_name: "claude-haiku" } },
+      { ...baseSnapshot, activeSegments: ["model"] },
+      0,
+      0,
+      null,
+      0
+    )
+    expect(out).toContain("model")
+    expect(out).not.toContain("backlog")
+    expect(out).not.toContain("state")
   })
 })

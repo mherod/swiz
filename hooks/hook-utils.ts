@@ -341,7 +341,7 @@ export function blockStopRaw(reason: string): never {
  * Appends a note to the reason explaining this.
  */
 export function blockStopHumanRequired(reason: string): never {
-  const fullReason = reason + "\n\nACTION REQUIRED: Resolve this block before stopping."
+  const fullReason = `${reason}\n\nACTION REQUIRED: Resolve this block before stopping.`
   console.log(
     JSON.stringify({ decision: "block", reason: fullReason, resolution: "human-required" })
   )
