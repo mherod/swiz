@@ -81,11 +81,18 @@ const spawnArgs = [
   "--sound",
   soundForType(notificationType),
   "--timeout",
-  "3",
+  "10",
 ]
 
 if (cwd) {
   spawnArgs.push("--target-cwd", cwd)
+}
+
+// Add a dismiss action for interactive notification types so the Swift
+// writeFeedback path fires when the user taps, giving the
+// userpromptsubmit-notification-feedback consumer real JSONL input.
+if (notificationType === "permission_prompt" || notificationType === "idle_prompt") {
+  spawnArgs.push("--action", "dismiss", "Dismiss")
 }
 
 const proc = Bun.spawn(spawnArgs, { stdout: "inherit", stderr: "inherit" })
