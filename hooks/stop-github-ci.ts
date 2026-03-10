@@ -3,7 +3,8 @@
 // When CI is in_progress, polls up to MAX_POLL_MS before blocking — avoids
 // false-positive blocks for short CI runs that complete within seconds.
 
-import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
+import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
   getDefaultBranch,
@@ -74,9 +75,15 @@ async function main(): Promise<void> {
 
   if (!(await isGitRepo(cwd))) return
 
-  const settings = await readSwizSettings()
-  const effective = getEffectiveSwizSettings(settings, input.session_id)
+  const [globalSettings, projectSettings] = await Promise.all([
+    readSwizSettings(),
+    readProjectSettings(cwd),
+  ])
+  const effective = getEffectiveSwizSettings(globalSettings, input.session_id, projectSettings)
   if (!effective.githubCiGate) return
+
+  const modePolicy = getCollaborationModePolicy(effective.collaborationMode)
+  if (!modePolicy.requirePeerReview) return
 
   if (!hasGhCli()) return
   if (!(await isGitHubRemote(cwd))) return
