@@ -29,15 +29,22 @@ export function skillExists(name: string): boolean {
 }
 
 /**
- * Return actionable advice that references a skill if it exists,
- * or falls back to concrete manual steps.
+ * Return actionable advice that references a skill.
+ *
+ * When the skill exists, the skill directive (`withSkill`) is prepended to the
+ * concrete manual steps (`withoutSkill`) so the reader gets both the quick
+ * invocation shortcut AND the full step-by-step guide.
+ * When the skill is absent, only `withoutSkill` is returned.
  *
  * @param skill - The skill name without leading slash (e.g. "commit")
- * @param withSkill - Message to use when the skill exists (may include `/<skill>`)
- * @param withoutSkill - Fallback message with concrete manual steps
+ * @param withSkill - Skill invocation directive shown when the skill exists
+ * @param withoutSkill - Concrete manual steps, always shown
  */
 export function skillAdvice(skill: string, withSkill: string, withoutSkill: string): string {
-  return skillExists(skill) ? withSkill : withoutSkill
+  if (skillExists(skill)) {
+    return `${withSkill}\n\n${withoutSkill}`
+  }
+  return withoutSkill
 }
 
 // ─── Frontmatter parsing ─────────────────────────────────────────────────────

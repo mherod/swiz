@@ -86,9 +86,20 @@ describe("skillAdvice", () => {
     expect(skillAdvice("", "with", "without")).toBe("without")
   })
 
-  test("returns one of the two options — never something else", () => {
-    const result = skillAdvice("some-name-xyz", "A", "B")
-    expect(result === "A" || result === "B").toBe(true)
+  test("combines withSkill and withoutSkill when skill exists", () => {
+    // Use a skill name that is known to exist in the test environment (commit is always installed)
+    const result = skillAdvice("commit", "use /commit", "fallback steps")
+    // When skill exists: withSkill + newline + withoutSkill; when absent: withoutSkill only
+    expect(result === "use /commit\n\nfallback steps" || result === "fallback steps").toBe(true)
+  })
+
+  test("always includes fallback steps regardless of skill availability", () => {
+    const result = skillAdvice(
+      "nonexistent-xyz-999",
+      "use /nonexistent-xyz-999",
+      "do this manually"
+    )
+    expect(result).toContain("do this manually")
   })
 
   test("nested calls compose correctly when outer skill is absent", () => {

@@ -621,11 +621,11 @@ async function main(): Promise<void> {
     }
     if (issueCount > 0) {
       const issueArg = firstIssueNum !== undefined ? ` ${firstIssueNum}` : ""
+      const issueNum = firstIssueNum ?? "<number>"
       const workOnIssueSkill = [
-        "Use the /work-on-issue skill to pick up and resolve issues:",
+        "Use the /work-on-issue skill (follow its full guide — the steps below are a quick reference):",
         `  /work-on-issue${issueArg} — Start working on the next issue`,
       ].join("\n")
-      const issueNum = firstIssueNum ?? "<number>"
       const workOnIssueFallback = [
         `Pick up and resolve issue #${issueNum} before stopping:`,
         "",
