@@ -474,9 +474,7 @@ describe("transcript-utils.ts", () => {
     it("handles tool call with pattern input", () => {
       const jsonl = JSON.stringify({
         type: "assistant",
-        message: {
-          content: [{ type: "tool_use", name: "Grep", input: { pattern: "TODO" } }],
-        },
+        message: { content: [{ type: "tool_use", name: "Grep", input: { pattern: "TODO" } }] },
       })
       const result = extractPlainTurns(jsonl)
       expect(result.length).toBe(1)
@@ -487,13 +485,7 @@ describe("transcript-utils.ts", () => {
       const jsonl = JSON.stringify({
         type: "assistant",
         message: {
-          content: [
-            {
-              type: "tool_use",
-              name: "Glob",
-              input: { glob_pattern: "**/*.ts" },
-            },
-          ],
+          content: [{ type: "tool_use", name: "Glob", input: { glob_pattern: "**/*.ts" } }],
         },
       })
       const result = extractPlainTurns(jsonl)
@@ -505,9 +497,7 @@ describe("transcript-utils.ts", () => {
       const longQuery = "a".repeat(100)
       const jsonl = JSON.stringify({
         type: "assistant",
-        message: {
-          content: [{ type: "tool_use", name: "Search", input: { query: longQuery } }],
-        },
+        message: { content: [{ type: "tool_use", name: "Search", input: { query: longQuery } }] },
       })
       const result = extractPlainTurns(jsonl)
       expect(result.length).toBe(1)
@@ -527,13 +517,7 @@ describe("transcript-utils.ts", () => {
       const jsonl = JSON.stringify({
         type: "assistant",
         message: {
-          content: [
-            {
-              type: "tool_use",
-              name: "Edit",
-              input: { file_path: "/path/to/file.ts" },
-            },
-          ],
+          content: [{ type: "tool_use", name: "Edit", input: { file_path: "/path/to/file.ts" } }],
         },
       })
       const result = extractPlainTurns(jsonl)
@@ -546,9 +530,7 @@ describe("transcript-utils.ts", () => {
     it("includes pattern input in label", () => {
       const jsonl = JSON.stringify({
         type: "assistant",
-        message: {
-          content: [{ type: "tool_use", name: "Grep", input: { pattern: "ERROR" } }],
-        },
+        message: { content: [{ type: "tool_use", name: "Grep", input: { pattern: "ERROR" } }] },
       })
       const result = extractPlainTurns(jsonl)
       expect(result.length).toBeGreaterThan(0)
@@ -561,13 +543,7 @@ describe("transcript-utils.ts", () => {
       const jsonl = JSON.stringify({
         type: "assistant",
         message: {
-          content: [
-            {
-              type: "tool_use",
-              name: "Glob",
-              input: { glob_pattern: "src/**/*.ts" },
-            },
-          ],
+          content: [{ type: "tool_use", name: "Glob", input: { glob_pattern: "src/**/*.ts" } }],
         },
       })
       const result = extractPlainTurns(jsonl)
@@ -601,18 +577,12 @@ describe("transcript-utils.ts", () => {
 
   describe("extractToolResultText", () => {
     it("extracts string content from tool_result block", () => {
-      const result = extractToolResultText({
-        content: "file contents here",
-        is_error: false,
-      })
+      const result = extractToolResultText({ content: "file contents here", is_error: false })
       expect(result).toBe("file contents here")
     })
 
     it("prefixes error results with 'Error: '", () => {
-      const result = extractToolResultText({
-        content: "command not found",
-        is_error: true,
-      })
+      const result = extractToolResultText({ content: "command not found", is_error: true })
       expect(result).toBe("Error: command not found")
     })
 
@@ -637,10 +607,7 @@ describe("transcript-utils.ts", () => {
     })
 
     it("returns empty string for undefined content", () => {
-      const result = extractToolResultText({
-        content: undefined,
-        is_error: false,
-      })
+      const result = extractToolResultText({ content: undefined, is_error: false })
       expect(result).toBe("")
     })
   })
@@ -651,12 +618,7 @@ describe("transcript-utils.ts", () => {
         type: "user",
         message: {
           content: [
-            {
-              type: "tool_result",
-              tool_use_id: "id1",
-              content: "ls output here",
-              is_error: false,
-            },
+            { type: "tool_result", tool_use_id: "id1", content: "ls output here", is_error: false },
           ],
         },
       })
@@ -671,12 +633,7 @@ describe("transcript-utils.ts", () => {
         type: "user",
         message: {
           content: [
-            {
-              type: "tool_result",
-              tool_use_id: "id1",
-              content: "command failed",
-              is_error: true,
-            },
+            { type: "tool_result", tool_use_id: "id1", content: "command failed", is_error: true },
           ],
         },
       })
@@ -690,12 +647,7 @@ describe("transcript-utils.ts", () => {
         type: "user",
         message: {
           content: [
-            {
-              type: "tool_result",
-              tool_use_id: "id1",
-              content: "output",
-              is_error: false,
-            },
+            { type: "tool_result", tool_use_id: "id1", content: "output", is_error: false },
           ],
         },
       })
@@ -707,14 +659,7 @@ describe("transcript-utils.ts", () => {
       const jsonl = JSON.stringify({
         type: "user",
         message: {
-          content: [
-            {
-              type: "tool_result",
-              tool_use_id: "id1",
-              content: "",
-              is_error: false,
-            },
-          ],
+          content: [{ type: "tool_result", tool_use_id: "id1", content: "", is_error: false }],
         },
       })
       const turns = extractPlainTurns(jsonl)
@@ -726,18 +671,8 @@ describe("transcript-utils.ts", () => {
         type: "user",
         message: {
           content: [
-            {
-              type: "tool_result",
-              tool_use_id: "id1",
-              content: "result one",
-              is_error: false,
-            },
-            {
-              type: "tool_result",
-              tool_use_id: "id2",
-              content: "result two",
-              is_error: false,
-            },
+            { type: "tool_result", tool_use_id: "id1", content: "result one", is_error: false },
+            { type: "tool_result", tool_use_id: "id2", content: "result two", is_error: false },
           ],
         },
       })
@@ -848,14 +783,7 @@ describe("transcript-utils.ts", () => {
         type: "assistant",
         message: {
           role: "assistant",
-          content: [
-            {
-              type: "tool_use",
-              id: "t1",
-              name: "Bash",
-              input: { command: "ls -la" },
-            },
-          ],
+          content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls -la" } }],
         },
       })
       expect(extractEditedFilePaths(jsonl).size).toBe(0)
@@ -1337,10 +1265,7 @@ describe("transcript-utils.ts", () => {
     })
 
     it("extracts a user turn", () => {
-      const jsonl = JSON.stringify({
-        type: "user",
-        message: { content: "Hello world" },
-      })
+      const jsonl = JSON.stringify({ type: "user", message: { content: "Hello world" } })
       const result = extractTranscriptData(jsonl)
       expect(result.turns).toHaveLength(1)
       expect(result.turns[0]?.role).toBe("user")
@@ -1366,11 +1291,7 @@ describe("transcript-utils.ts", () => {
         message: {
           content: [
             { type: "tool_use", name: "Bash", input: { command: "ls" } },
-            {
-              type: "tool_use",
-              name: "Read",
-              input: { file_path: "/repo/src/foo.ts" },
-            },
+            { type: "tool_use", name: "Read", input: { file_path: "/repo/src/foo.ts" } },
           ],
         },
       })
@@ -1495,9 +1416,7 @@ describe("transcript-utils.ts", () => {
     it("filters command-message hook feedback from user turns", () => {
       const hookFeedback = JSON.stringify({
         type: "user",
-        message: {
-          content: "<command-message>hook output here</command-message>",
-        },
+        message: { content: "<command-message>hook output here</command-message>" },
       })
       const jsonl = hookFeedback
       const result = extractTranscriptData(jsonl)
@@ -1512,11 +1431,7 @@ describe("transcript-utils.ts", () => {
           message: {
             content: [
               { type: "text", text: "Running tests now." },
-              {
-                type: "tool_use",
-                name: "Bash",
-                input: { command: "bun test" },
-              },
+              { type: "tool_use", name: "Bash", input: { command: "bun test" } },
             ],
           },
         }),
@@ -1568,24 +1483,14 @@ describe("transcript-utils.ts", () => {
           message: {
             content: [
               { type: "tool_use", name: "Bash", input: { command: "ls" } },
-              {
-                type: "tool_use",
-                name: "Read",
-                input: { file_path: "/foo.ts" },
-              },
+              { type: "tool_use", name: "Read", input: { file_path: "/foo.ts" } },
             ],
           },
         }),
         JSON.stringify({
           type: "assistant",
           message: {
-            content: [
-              {
-                type: "tool_use",
-                name: "Edit",
-                input: { file_path: "/bar.ts" },
-              },
-            ],
+            content: [{ type: "tool_use", name: "Edit", input: { file_path: "/bar.ts" } }],
           },
         }),
       ]
@@ -1601,16 +1506,8 @@ describe("transcript-utils.ts", () => {
           type: "assistant",
           message: {
             content: [
-              {
-                type: "tool_use",
-                name: "Edit",
-                input: { file_path: "/repo/a.ts" },
-              },
-              {
-                type: "tool_use",
-                name: "Write",
-                input: { file_path: "/repo/b.md" },
-              },
+              { type: "tool_use", name: "Edit", input: { file_path: "/repo/a.ts" } },
+              { type: "tool_use", name: "Write", input: { file_path: "/repo/b.md" } },
             ],
           },
         }),
@@ -1714,13 +1611,7 @@ describe("transcript-utils.ts", () => {
         JSON.stringify({
           type: "assistant",
           message: {
-            content: [
-              {
-                type: "tool_use",
-                name: "Bash",
-                input: { command: `echo ${i}` },
-              },
-            ],
+            content: [{ type: "tool_use", name: "Bash", input: { command: `echo ${i}` } }],
           },
         })
       )
@@ -1734,24 +1625,14 @@ describe("transcript-utils.ts", () => {
         JSON.stringify({
           type: "assistant",
           message: {
-            content: [
-              {
-                type: "tool_use",
-                name: "Edit",
-                input: { file_path: "/repo/src/foo.ts" },
-              },
-            ],
+            content: [{ type: "tool_use", name: "Edit", input: { file_path: "/repo/src/foo.ts" } }],
           },
         }),
         JSON.stringify({
           type: "assistant",
           message: {
             content: [
-              {
-                type: "tool_use",
-                name: "Write",
-                input: { file_path: "/repo/src/foo.ts" },
-              },
+              { type: "tool_use", name: "Write", input: { file_path: "/repo/src/foo.ts" } },
             ],
           },
         }),

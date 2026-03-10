@@ -294,11 +294,7 @@ async function loadDebugLog(sessionId: string): Promise<DebugLog | null> {
 function parseDebugEvents(lines: string[]): DebugEvent[] {
   // _seq is the insertion index into the malformed array — used as the final sort tie-breaker
   // so the comparator is provably total-ordered even when _idx and iso both match.
-  type Tagged = DebugEvent & {
-    _idx: number
-    _malformed: boolean
-    _seq: number
-  }
+  type Tagged = DebugEvent & { _idx: number; _malformed: boolean; _seq: number }
 
   const validEvents: Tagged[] = []
   const malformedEvents: Tagged[] = []
@@ -634,30 +630,12 @@ export const transcriptCommand: Command = {
   usage:
     "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--auto-reply] [--include-debug] [--all|--claude|--cursor|--gemini|--codex]",
   options: [
-    {
-      flags: "--session, -s <id>",
-      description: "Show a specific session (prefix match)",
-    },
-    {
-      flags: "--dir, -d <path>",
-      description: "Target project directory (default: cwd)",
-    },
-    {
-      flags: "--list, -l",
-      description: "List available sessions without displaying content",
-    },
-    {
-      flags: "--head, -H <n>",
-      description: "Show only the first N conversation turns",
-    },
-    {
-      flags: "--tail, -T <n>",
-      description: "Show only the last N conversation turns",
-    },
-    {
-      flags: "--auto-reply",
-      description: "Generate an AI-suggested follow-up message",
-    },
+    { flags: "--session, -s <id>", description: "Show a specific session (prefix match)" },
+    { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
+    { flags: "--list, -l", description: "List available sessions without displaying content" },
+    { flags: "--head, -H <n>", description: "Show only the first N conversation turns" },
+    { flags: "--tail, -T <n>", description: "Show only the last N conversation turns" },
+    { flags: "--auto-reply", description: "Generate an AI-suggested follow-up message" },
     {
       flags: "--include-debug",
       description:
@@ -669,10 +647,7 @@ export const transcriptCommand: Command = {
         "Show sessions from all providers (default when no agent context is detected and no agent flag is provided)",
     },
     { flags: "--claude", description: "Show Claude sessions only" },
-    {
-      flags: "--cursor",
-      description: "Show Cursor sessions only (currently unsupported)",
-    },
+    { flags: "--cursor", description: "Show Cursor sessions only (currently unsupported)" },
     { flags: "--gemini", description: "Show Gemini/Antigravity sessions only" },
     { flags: "--codex", description: "Show Codex sessions only" },
   ],
