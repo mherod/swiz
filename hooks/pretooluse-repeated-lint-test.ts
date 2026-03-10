@@ -4,6 +4,9 @@
 // between them. Prevents the wasteful pattern of re-running the same command
 // with different output filters instead of reading the full output.
 //
+// Supports: bun, npm, pnpm, yarn, turbo, nx, and direct test runners
+// (jest, vitest, pytest, cargo test, go test, phpunit, rspec, dotnet test, mocha, ava).
+//
 // "Uninterrupted" means: no file-modifying operation between the previous
 // same-type run and the current one. Two complementary checks detect edits:
 //   1. isCodeChangeTool — agent edit tools across all runtimes:
@@ -35,17 +38,73 @@ import { shellSegmentCommandRe } from "./utils/shell-patterns.ts"
 
 type CommandKind = "test" | "lint" | "typecheck" | "check" | "build"
 
-const TEST_RE = shellSegmentCommandRe("bun\\s+test\\b")
-const LINT_RE = shellSegmentCommandRe("bun\\s+run\\s+lint\\b")
-const TYPECHECK_RE = shellSegmentCommandRe("bun\\s+run\\s+typecheck\\b")
-const CHECK_RE = shellSegmentCommandRe("bun\\s+run\\s+check\\b")
-const BUILD_RE = shellSegmentCommandRe("bun\\s+run\\s+build\\b")
+// Package manager "run" patterns that precede \s+<scriptName>.
+// Each alternative must end at a word boundary or \s, so that buildKindRe
+// can append \s+<scriptName> without double-spacing.
+//   bun run, npm run, pnpm run, pnpm exec, yarn run → end with "run" or "exec"
+//   yarn, pnpm, npx, bunx → bare invocations (yarn test, pnpm test, npx test)
+const PM_RUN = String.raw`(?:bun\s+run|npm\s+run|pnpm\s+(?:run|exec)|yarn\s+run|yarn|pnpm|npx|bunx)`
+
+// Monorepo orchestrators that wrap package scripts:
+//   pnpm turbo run <script>, npx turbo run <script>, turbo run <script>, turbo <script>
+//   pnpm nx run <target>, nx run <target>, nx <target>, nx run-many --target=<target>
+const TURBO_PREFIX = String.raw`(?:(?:pnpm|npx|bunx|yarn)\s+)?turbo\s+(?:run\s+)?`
+const NX_PREFIX = String.raw`(?:(?:pnpm|npx|bunx|yarn)\s+)?nx\s+(?:run\s+)?`
+const NX_RUN_MANY = String.raw`(?:(?:pnpm|npx|bunx|yarn)\s+)?nx\s+run-many\b`
+
+// Direct test runner invocations (not behind a package manager)
+const DIRECT_TEST = String.raw`(?:jest|vitest|pytest|cargo\s+test|go\s+test|phpunit|rspec|dotnet\s+test|mocha|ava)\b`
+
+// Build each kind matcher as an array of patterns, then combine with alternation.
+// Order matters: more specific patterns (turbo/nx) before generic PM patterns.
+function buildKindRe(scriptName: string, extras: string[] = []): RegExp {
+  const patterns = [
+    // turbo run <script>
+    `${TURBO_PREFIX}${scriptName}\\b`,
+    // nx run <script> / nx <script>
+    `${NX_PREFIX}${scriptName}\\b`,
+    // <pm> run <script>
+    `${PM_RUN}\\s+${scriptName}\\b`,
+    // bun <script> (bun allows bare script names)
+    `bun\\s+${scriptName}\\b`,
+    ...extras,
+  ]
+  return shellSegmentCommandRe(`(?:${patterns.join("|")})`)
+}
+
+// nx run-many needs special handling: --target=<script> appears as a flag
+function buildNxRunManyRe(scriptName: string): RegExp {
+  return shellSegmentCommandRe(`${NX_RUN_MANY}[^|;&]*--target[=\\s]+${scriptName}\\b`)
+}
+
+const TEST_RE = buildKindRe("test", [
+  // bun test (bun's built-in test runner, distinct from "bun run test")
+  String.raw`bun\s+test\b`,
+  // Direct test runner invocations
+  DIRECT_TEST,
+])
+const LINT_RE = buildKindRe("lint")
+const TYPECHECK_RE = buildKindRe("typecheck")
+const CHECK_RE = buildKindRe("check")
+const BUILD_RE = buildKindRe("build")
+
+const NX_TEST_RE = buildNxRunManyRe("test")
+const NX_LINT_RE = buildNxRunManyRe("lint")
+const NX_TYPECHECK_RE = buildNxRunManyRe("typecheck")
+const NX_CHECK_RE = buildNxRunManyRe("check")
+const NX_BUILD_RE = buildNxRunManyRe("build")
+
 const COMMAND_KIND_MATCHERS: ReadonlyArray<readonly [CommandKind, RegExp]> = [
   ["test", TEST_RE],
+  ["test", NX_TEST_RE],
   ["lint", LINT_RE],
+  ["lint", NX_LINT_RE],
   ["typecheck", TYPECHECK_RE],
+  ["typecheck", NX_TYPECHECK_RE],
   ["check", CHECK_RE],
+  ["check", NX_CHECK_RE],
   ["build", BUILD_RE],
+  ["build", NX_BUILD_RE],
 ]
 
 /** Returns true when the command is a help/usage query that should never be blocked. */
@@ -77,12 +136,22 @@ export function classifyCommand(cmd: string): CommandKind | null {
   return null
 }
 
-const COMMAND_LABEL: Record<CommandKind, string> = {
-  test: "bun test",
-  lint: "bun run lint",
-  typecheck: "bun run typecheck",
-  check: "bun run check",
-  build: "bun run build",
+/**
+ * Derive a human-readable label from the actual command.
+ * Extracts the core invocation (e.g. "pnpm turbo run build", "npm run test")
+ * by stripping pipe suffixes, redirect suffixes, and trimming to a reasonable length.
+ * Falls back to "test"/"build"/etc. if extraction fails.
+ */
+export function commandLabel(cmd: string, kind: CommandKind): string {
+  // Strip everything after the first pipe or semicolon boundary.
+  // Keep > because it may be part of 2>&1 FD redirects, not file redirects.
+  const core = cmd.split(/\s*[|;]\s*/)[0]?.trim() ?? ""
+  // Remove prefix wrappers (timeout, nice, env, etc.) for a cleaner label
+  const cleaned = normalizeCommand(core).trim()
+  // Truncate to a reasonable length for display
+  if (cleaned.length > 0 && cleaned.length <= 60) return cleaned
+  if (cleaned.length > 60) return `${cleaned.slice(0, 57)}...`
+  return kind
 }
 
 // ── Command fingerprint ───────────────────────────────────────────────────────
@@ -91,31 +160,66 @@ const COMMAND_LABEL: Record<CommandKind, string> = {
 // `bun test src/a.test.ts` vs `bun test src/b.test.ts`) produce different
 // fingerprints and should NOT trigger the consecutive-run gate.
 //
-// For test commands, the scope is the set of path arguments (non-flag tokens
-// that look like file paths or globs). For lint/typecheck/build commands the
-// scope is always empty — their targets are project-wide and not path-scoped
-// in our typical invocations.
+// Scope extraction strategies:
+//   - turbo --filter:  `pnpm turbo run build --filter=app-a` → "build:app-a"
+//   - nx --projects:   `nx run-many --target=build --projects=app-a` → "build:app-a"
+//   - test file paths: `bun test src/a.test.ts` → "test:src/a.test.ts"
+//   - unscoped:        `npm run lint` → "lint"
 //
 // Returns null when the command does not match any known kind.
+
+/** Extract turbo --filter values from a command string. */
+function extractTurboFilters(cmd: string): string[] {
+  // Matches --filter=value and --filter value (short form not supported by turbo)
+  const matches = [...cmd.matchAll(/--filter[=\s]+(\S+)/g)]
+  return matches.map((m) => m[1]!).filter(Boolean)
+}
+
+/** Extract nx --projects values from a command string. */
+function extractNxProjects(cmd: string): string[] {
+  // Matches --projects=value and --projects value (comma-separated lists)
+  const matches = [...cmd.matchAll(/--projects?[=\s]+(\S+)/g)]
+  return matches.flatMap((m) => (m[1] ?? "").split(",")).filter(Boolean)
+}
+
+/** Extract test file path arguments from a test command. */
+function extractTestScope(cmd: string): string[] {
+  // Strip everything up to and including the test runner keyword
+  const afterRunner = cmd.replace(
+    /^.*(?:bun\s+test|jest|vitest|mocha|ava|pytest|rspec|phpunit|cargo\s+test|go\s+test|dotnet\s+test)\s*/,
+    ""
+  )
+  // Truncate at the first shell operator (pipe, redirect, logical AND/OR, semi)
+  const beforePipe = afterRunner.split(/\s*[|&;>]\s*/)[0] ?? ""
+  return beforePipe.split(/\s+/).filter((t) => t && !t.startsWith("-") && !/^\d+$/.test(t))
+}
 
 export function commandFingerprint(cmd: string): string | null {
   const kind = classifyCommand(cmd)
   if (!kind) return null
 
-  if (kind !== "test") return kind
+  // Turbo --filter scoping (applies to any kind: build, test, lint, etc.)
+  const turboFilters = extractTurboFilters(cmd)
+  if (turboFilters.length > 0) {
+    const sorted = orderBy(turboFilters, [(t) => t], ["asc"])
+    return `${kind}:${sorted.join(",")}`
+  }
 
-  // For test commands, extract non-flag tokens after `bun test` as scope,
-  // stopping at the first pipe/redirect boundary so piped commands (tee, grep)
-  // are not captured as scope targets.
-  const afterBunTest = cmd.replace(/^.*bun\s+test\s*/, "")
-  // Truncate at the first shell operator (pipe, redirect, logical AND/OR, semi)
-  const beforePipe = afterBunTest.split(/\s*[|&;>]\s*/)[0] ?? ""
-  const scopeTokens = beforePipe
-    .split(/\s+/)
-    .filter((t) => t && !t.startsWith("-") && !/^\d+$/.test(t))
-  const orderedScopeTokens = orderBy(scopeTokens, [(token) => token], ["asc"])
+  // Nx --projects scoping
+  const nxProjects = extractNxProjects(cmd)
+  if (nxProjects.length > 0) {
+    const sorted = orderBy(nxProjects, [(t) => t], ["asc"])
+    return `${kind}:${sorted.join(",")}`
+  }
 
-  return orderedScopeTokens.length > 0 ? `${kind}:${orderedScopeTokens.join(",")}` : kind
+  // Test commands: extract file path scope
+  if (kind === "test") {
+    const scopeTokens = extractTestScope(cmd)
+    const ordered = orderBy(scopeTokens, [(t) => t], ["asc"])
+    if (ordered.length > 0) return `${kind}:${ordered.join(",")}`
+  }
+
+  return kind
 }
 
 // ── Filesystem integrity monitor ─────────────────────────────────────────────
@@ -477,7 +581,7 @@ async function main(): Promise<void> {
   if (hasInterveningWork) return
 
   // Block: consecutive repeat of the same command kind with no intervening work.
-  const label = COMMAND_LABEL[currentKind]
+  const label = commandLabel(command, currentKind)
   const firstLine = command.split("\n")[0]?.trim().slice(0, 80) ?? command.trim()
 
   // Extract specific errors from the previous run to guide remediation.

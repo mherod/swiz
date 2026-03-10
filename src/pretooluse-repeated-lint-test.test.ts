@@ -9,6 +9,7 @@ import {
   buildRemediationHints,
   classifyCommand,
   commandFingerprint,
+  commandLabel,
   extractPreviousOutput,
   extractToolUseIdFromLine,
   isHelpQuery,
@@ -108,6 +109,127 @@ describe("classifyCommand", () => {
     expect(classifyCommand("echo foo | timeout 60 bun test")).toBe("test")
     expect(classifyCommand("echo foo; timeout 60 bun run lint")).toBe("lint")
   })
+
+  // ── pnpm ────────────────────────────────────────────────────────────────────
+  test("detects pnpm run test/lint/build/typecheck/check", () => {
+    expect(classifyCommand("pnpm run test")).toBe("test")
+    expect(classifyCommand("pnpm run lint")).toBe("lint")
+    expect(classifyCommand("pnpm run build")).toBe("build")
+    expect(classifyCommand("pnpm run typecheck")).toBe("typecheck")
+    expect(classifyCommand("pnpm run check")).toBe("check")
+  })
+
+  test("detects pnpm exec and bare pnpm test", () => {
+    expect(classifyCommand("pnpm exec test")).toBe("test")
+    expect(classifyCommand("pnpm test")).toBe("test")
+  })
+
+  // ── npm ─────────────────────────────────────────────────────────────────────
+  test("detects npm run test/lint/build/typecheck/check", () => {
+    expect(classifyCommand("npm run test")).toBe("test")
+    expect(classifyCommand("npm run lint")).toBe("lint")
+    expect(classifyCommand("npm run build")).toBe("build")
+    expect(classifyCommand("npm run typecheck")).toBe("typecheck")
+    expect(classifyCommand("npm run check")).toBe("check")
+  })
+
+  // ── yarn ────────────────────────────────────────────────────────────────────
+  test("detects yarn run and bare yarn test/lint/build", () => {
+    expect(classifyCommand("yarn run test")).toBe("test")
+    expect(classifyCommand("yarn test")).toBe("test")
+    expect(classifyCommand("yarn lint")).toBe("lint")
+    expect(classifyCommand("yarn build")).toBe("build")
+    expect(classifyCommand("yarn run build")).toBe("build")
+    expect(classifyCommand("yarn typecheck")).toBe("typecheck")
+  })
+
+  // ── npx / bunx ──────────────────────────────────────────────────────────────
+  test("detects npx and bunx invocations", () => {
+    expect(classifyCommand("npx jest")).toBeNull() // npx jest is direct runner, not "npx test"
+    expect(classifyCommand("npx test")).toBe("test")
+    expect(classifyCommand("bunx test")).toBe("test")
+  })
+
+  // ── turbo ───────────────────────────────────────────────────────────────────
+  test("detects turbo run build/test/lint", () => {
+    expect(classifyCommand("turbo run build")).toBe("build")
+    expect(classifyCommand("turbo run test")).toBe("test")
+    expect(classifyCommand("turbo run lint")).toBe("lint")
+    expect(classifyCommand("turbo build")).toBe("build")
+  })
+
+  test("detects pnpm turbo run build with filters", () => {
+    expect(classifyCommand("pnpm turbo run build --filter=client-web --filter=main-web")).toBe(
+      "build"
+    )
+    expect(
+      classifyCommand("pnpm turbo run build --filter=client-web --filter=main-web 2>&1 | tail -5")
+    ).toBe("build")
+  })
+
+  test("detects npx/bunx/yarn turbo", () => {
+    expect(classifyCommand("npx turbo run build")).toBe("build")
+    expect(classifyCommand("bunx turbo run lint")).toBe("lint")
+    expect(classifyCommand("yarn turbo run test")).toBe("test")
+  })
+
+  // ── nx ──────────────────────────────────────────────────────────────────────
+  test("detects nx run/build/test/lint", () => {
+    expect(classifyCommand("nx run build")).toBe("build")
+    expect(classifyCommand("nx build")).toBe("build")
+    expect(classifyCommand("nx test")).toBe("test")
+    expect(classifyCommand("nx lint")).toBe("lint")
+  })
+
+  test("detects nx run-many --target=build", () => {
+    expect(classifyCommand("nx run-many --target=build")).toBe("build")
+    expect(classifyCommand("nx run-many --target=test --projects=app-a")).toBe("test")
+    expect(classifyCommand("pnpm nx run-many --target=lint")).toBe("lint")
+  })
+
+  test("detects pnpm/npx nx", () => {
+    expect(classifyCommand("pnpm nx build")).toBe("build")
+    expect(classifyCommand("npx nx test")).toBe("test")
+  })
+
+  // ── Direct test runners ─────────────────────────────────────────────────────
+  test("detects direct test runner invocations", () => {
+    expect(classifyCommand("jest")).toBe("test")
+    expect(classifyCommand("jest --watch")).toBe("test")
+    expect(classifyCommand("vitest")).toBe("test")
+    expect(classifyCommand("vitest run")).toBe("test")
+    expect(classifyCommand("pytest")).toBe("test")
+    expect(classifyCommand("pytest tests/")).toBe("test")
+    expect(classifyCommand("cargo test")).toBe("test")
+    expect(classifyCommand("go test ./...")).toBe("test")
+    expect(classifyCommand("phpunit")).toBe("test")
+    expect(classifyCommand("rspec")).toBe("test")
+    expect(classifyCommand("dotnet test")).toBe("test")
+    expect(classifyCommand("mocha")).toBe("test")
+    expect(classifyCommand("ava")).toBe("test")
+  })
+
+  // ── Piped overfiltering (the motivating pattern) ────────────────────────────
+  test("classifies piped turbo build as build (overfiltering detection)", () => {
+    expect(
+      classifyCommand("pnpm turbo run build --filter=client-web --filter=main-web 2>&1 | tail -5")
+    ).toBe("build")
+    expect(
+      classifyCommand(
+        'pnpm turbo run build --filter=main-web 2>&1 | rg -i "error|ERR|failed" | head -20'
+      )
+    ).toBe("build")
+  })
+
+  // ── Negative: unrelated commands still return null ──────────────────────────
+  test("does not misclassify unrelated pnpm/npm commands", () => {
+    expect(classifyCommand("pnpm install")).toBeNull()
+    expect(classifyCommand("npm install")).toBeNull()
+    expect(classifyCommand("pnpm add lodash")).toBeNull()
+    expect(classifyCommand("yarn add react")).toBeNull()
+    expect(classifyCommand("turbo prune")).toBeNull()
+    expect(classifyCommand("nx graph")).toBeNull()
+  })
 })
 
 // ── commandFingerprint ────────────────────────────────────────────────────────
@@ -162,6 +284,92 @@ describe("commandFingerprint", () => {
     const fp1 = commandFingerprint("bun test src/a.test.ts")
     const fp2 = commandFingerprint("bun test src/a.test.ts")
     expect(fp1).toBe(fp2)
+  })
+
+  // ── turbo --filter scoping ──────────────────────────────────────────────────
+  test("turbo --filter produces scoped fingerprint", () => {
+    expect(commandFingerprint("pnpm turbo run build --filter=client-web")).toBe("build:client-web")
+    expect(commandFingerprint("pnpm turbo run build --filter=client-web --filter=main-web")).toBe(
+      "build:client-web,main-web"
+    )
+  })
+
+  test("turbo --filter order is normalized (sorted)", () => {
+    const fp1 = commandFingerprint("turbo run build --filter=main-web --filter=client-web")
+    const fp2 = commandFingerprint("turbo run build --filter=client-web --filter=main-web")
+    expect(fp1).toBe(fp2)
+    expect(fp1).toBe("build:client-web,main-web")
+  })
+
+  test("different turbo filters produce different fingerprints", () => {
+    const fp1 = commandFingerprint("pnpm turbo run build --filter=client-web")
+    const fp2 = commandFingerprint("pnpm turbo run build --filter=main-web")
+    expect(fp1).not.toBe(fp2)
+  })
+
+  test("turbo --filter scoping applies to test kind too", () => {
+    expect(commandFingerprint("turbo run test --filter=@app/core")).toBe("test:@app/core")
+  })
+
+  // ── nx --projects scoping ──────────────────────────────────────────────────
+  test("nx --projects produces scoped fingerprint", () => {
+    expect(commandFingerprint("nx run-many --target=build --projects=app-a")).toBe("build:app-a")
+    expect(commandFingerprint("nx run-many --target=build --projects=app-a,app-b")).toBe(
+      "build:app-a,app-b"
+    )
+  })
+
+  // ── pnpm/npm/yarn unscoped fingerprints ─────────────────────────────────────
+  test("pnpm/npm/yarn non-test kinds return kind only", () => {
+    expect(commandFingerprint("pnpm run build")).toBe("build")
+    expect(commandFingerprint("npm run lint")).toBe("lint")
+    expect(commandFingerprint("yarn typecheck")).toBe("typecheck")
+  })
+
+  // ── Direct runner test scope ────────────────────────────────────────────────
+  test("jest with file path returns scoped fingerprint", () => {
+    expect(commandFingerprint("jest src/a.test.ts")).toBe("test:src/a.test.ts")
+  })
+
+  test("vitest with file path returns scoped fingerprint", () => {
+    expect(commandFingerprint("vitest src/utils.test.ts")).toBe("test:src/utils.test.ts")
+  })
+
+  test("pytest with file path returns scoped fingerprint", () => {
+    expect(commandFingerprint("pytest tests/test_foo.py")).toBe("test:tests/test_foo.py")
+  })
+})
+
+// ── commandLabel ──────────────────────────────────────────────────────────────
+
+describe("commandLabel", () => {
+  test("returns core command for simple invocations", () => {
+    expect(commandLabel("bun test", "test")).toBe("bun test")
+    expect(commandLabel("pnpm run build", "build")).toBe("pnpm run build")
+    expect(commandLabel("npm run lint", "lint")).toBe("npm run lint")
+  })
+
+  test("strips pipe suffixes but keeps FD redirects", () => {
+    expect(commandLabel("pnpm turbo run build --filter=main-web 2>&1 | tail -5", "build")).toBe(
+      "pnpm turbo run build --filter=main-web 2>&1"
+    )
+    expect(commandLabel("bun test 2>&1 | rg error | head -5", "test")).toBe("bun test 2>&1")
+  })
+
+  test("strips prefix wrappers", () => {
+    expect(commandLabel("timeout 60 bun test", "test")).toBe("bun test")
+  })
+
+  test("truncates very long commands", () => {
+    const long = "pnpm turbo run build " + "--filter=a ".repeat(20)
+    const label = commandLabel(long, "build")
+    expect(label.length).toBeLessThanOrEqual(60)
+    expect(label.endsWith("...")).toBe(true)
+  })
+
+  test("falls back to kind when command is empty after stripping", () => {
+    // Edge case: should not happen in practice
+    expect(commandLabel("", "build")).toBe("build")
   })
 })
 
