@@ -446,23 +446,21 @@ function formatRunnerFailure(results: RunnerResult[], exitCode: number): string 
     return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
   }
 
-  // Composite: aggregate across all runners, distinguishing concrete vs presence-only
+  // Composite: aggregate across all runners, distinguishing concrete vs presence-only.
+  // All runners set failCount only when isComplete is true, so failCount !== null ↔ isComplete.
   const concrete = results.filter((r) => r.failCount !== null)
-  const presenceOnly = results.filter((r) => r.failCount === null)
+  const hasPresenceOnly = results.some((r) => r.failCount === null)
   const concreteFails = concrete.reduce((sum, r) => sum + r.failCount!, 0)
-  const allConcreteComplete = concrete.every((r) => r.isComplete)
 
   let countLabel: string
   if (concrete.length === 0) {
     // All presence-only — no concrete counts at all
     countLabel = "unknown number of"
-  } else if (presenceOnly.length > 0) {
-    // Mix of concrete + presence-only: concrete counts are real but total is unknown
+  } else if (hasPresenceOnly) {
+    // Mix of concrete + presence-only: concrete sum is real but total is unknown
     countLabel = `${concreteFails}+`
-  } else if (!allConcreteComplete) {
-    // All have fail counts but some are truncated
-    countLabel = "unknown number of"
   } else {
+    // All runners have concrete, complete counts — sum is exact
     countLabel = `${concreteFails}`
   }
   const runnerNames = results.map((r) => r.runner).join(", ")

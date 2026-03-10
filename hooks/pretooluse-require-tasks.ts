@@ -173,21 +173,30 @@ async function main() {
     !allTasksDone &&
     (incompleteTasks.length < MIN_INCOMPLETE_TASKS || pendingTasks.length < MIN_PENDING_TASKS)
   ) {
+    const missingIncomplete = Math.max(0, MIN_INCOMPLETE_TASKS - incompleteTasks.length)
+    const missingPending = Math.max(0, MIN_PENDING_TASKS - pendingTasks.length)
+    const actions: string[] = []
+
+    if (missingIncomplete > 0 && missingPending > 0) {
+      actions.push(
+        `Use TaskCreate to add ${missingIncomplete} incomplete task(s) (including at least ${missingPending} pending task(s)).`
+      )
+    } else if (missingPending > 0) {
+      actions.push(
+        `Use TaskCreate to add ${missingPending} pending task(s) for the next intended step.`
+      )
+    } else if (missingIncomplete > 0) {
+      actions.push(`Use TaskCreate to add ${missingIncomplete} incomplete task(s).`)
+    }
+
     deny(
-      `STOP. ${toolName} is BLOCKED because task minimums are not met.\n\n` +
-        `Required:\n` +
-        `  • At least ${MIN_INCOMPLETE_TASKS} incomplete tasks (pending/in_progress)\n` +
-        `  • At least ${MIN_PENDING_TASKS} pending task for the next intended step\n\n` +
+      `STOP. ${toolName} is BLOCKED because the required tasks are missing.\n\n` +
         `Current:\n` +
         `  • Incomplete tasks: ${incompleteTasks.length}\n` +
         `  • Pending tasks: ${pendingTasks.length}\n` +
         `${incompleteTaskList ? `\nCurrent incomplete tasks:\n${incompleteTaskList}\n` : "\n"}` +
         formatActionPlan(
-          [
-            "Use TaskCreate to add any missing next-step tasks.",
-            "Use TaskUpdate to keep exactly one current task in_progress and at least one clear next step in pending.",
-            `Retry this ${toolName} call after task minimums are restored.`,
-          ],
+          [...actions, `Retry this ${toolName} call after the missing task(s) have been created.`],
           { translateToolNames: true }
         )
     )
