@@ -5,6 +5,7 @@ import { DIM, RESET } from "../ansi.ts"
 import {
   extractPlainTurns,
   findAllProviderSessions,
+  findHumanRequiredBlock,
   formatTurnsAsContext,
   getUnsupportedTranscriptFormatMessage,
   isUnsupportedTranscriptFormat,
@@ -125,6 +126,12 @@ export const continueCommand: Command = {
       raw = await Bun.file(session.path).text()
     } catch {
       throw new Error(`Could not read transcript: ${session.path}`)
+    }
+
+    const humanRequiredReason = findHumanRequiredBlock(raw)
+    if (humanRequiredReason) {
+      console.log(humanRequiredReason)
+      return
     }
 
     let suggestion: string

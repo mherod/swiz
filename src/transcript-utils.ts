@@ -539,6 +539,45 @@ export function isHookFeedback(content: string | ContentBlock[] | undefined): bo
   return content.startsWith("Stop hook feedback:") || content.startsWith("<command-message>")
 }
 
+/**
+ * Returns the block reason text if the most recent stop-hook feedback in the
+ * transcript carried `resolution: "human-required"`, otherwise null.
+ *
+ * Detection: scan the last `limit` entries for a user-role `<command-message>`
+ * turn whose content includes the sentinel injected by `blockStopHumanRequired`.
+ * A human-required block from any earlier session turn is considered stale once
+ * a newer non-hook-feedback assistant turn appears after it.
+ */
+export function findHumanRequiredBlock(transcriptText: string, limit = 20): string | null {
+  const SENTINEL = "HUMAN ACTION REQUIRED:"
+  const entries: Array<{ type?: string; message?: { role?: string; content?: unknown } }> = []
+  for (const entry of parseTranscriptEntries(transcriptText)) {
+    entries.push(entry)
+  }
+  const recent = entries.slice(-limit)
+  // Walk backwards: return the block reason if we find a human-required message
+  // before we find a post-hook assistant turn (which means the agent already acted).
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const entry = recent[i]!
+    if (entry?.type === "assistant") {
+      // An assistant response after the block means the agent already acted on it.
+      return null
+    }
+    if (entry?.type === "user") {
+      const content = entry?.message?.content
+      if (typeof content === "string" && content.startsWith("<command-message>")) {
+        if (content.includes(SENTINEL)) {
+          return content
+            .replace(/^<command-message>\s*/i, "")
+            .replace(/<\/command-message>\s*$/i, "")
+            .trim()
+        }
+      }
+    }
+  }
+  return null
+}
+
 // ─── Plain turn extraction ───────────────────────────────────────────────────
 // Produces simple {role, text} pairs from raw JSONL — shared by continue.ts
 // and stop-auto-continue.ts where rendering details are not needed.
