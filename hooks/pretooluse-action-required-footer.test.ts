@@ -180,12 +180,12 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
     expect(result.reason).toContain(FOOTER_MARKER)
   })
 
-  test("pretooluse-no-direct-deps: editing package.json deps denial includes footer", async () => {
+  test("pretooluse-no-direct-deps: writing package.json deps denial includes footer", async () => {
     const result = await runHook("pretooluse-no-direct-deps.ts", {
-      tool_name: "Edit",
+      tool_name: "Write",
       tool_input: {
         file_path: "/tmp/package.json",
-        new_string: JSON.stringify({ name: "test", dependencies: { lodash: "^4.0.0" } }),
+        content: JSON.stringify({ name: "test", dependencies: { lodash: "^4.0.0" } }),
       },
     })
     expect(result.denied).toBe(true)

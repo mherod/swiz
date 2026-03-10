@@ -362,7 +362,7 @@ describe("commandLabel", () => {
   })
 
   test("truncates very long commands", () => {
-    const long = "pnpm turbo run build " + "--filter=a ".repeat(20)
+    const long = `pnpm turbo run build ${"--filter=a ".repeat(20)}`
     const label = commandLabel(long, "build")
     expect(label.length).toBeLessThanOrEqual(60)
     expect(label.endsWith("...")).toBe(true)

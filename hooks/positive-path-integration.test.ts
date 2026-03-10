@@ -243,19 +243,19 @@ describe("pretooluse-no-as-any: positive paths", () => {
 describe("pretooluse-no-direct-deps: positive paths", () => {
   const HOOK = "hooks/pretooluse-no-direct-deps.ts"
 
-  test("editing package.json scripts emits no output (allow)", async () => {
+  test("Write with scripts-only emits no deny (allow)", async () => {
     const r = await runHook(HOOK, {
-      tool_name: "Edit",
+      tool_name: "Write",
       tool_input: {
         file_path: "package.json",
-        new_string: '{"name": "app", "version": "1.0.0", "scripts": {"start": "bun run index.ts"}}',
+        content: '{"name": "app", "version": "1.0.0", "scripts": {"start": "bun run index.ts"}}',
       },
     })
     expect(r.exitCode).toBe(0)
     expect(r.stdout).toBe("")
   })
 
-  test("adding devDependencies emits deny with reason", async () => {
+  test("Write with devDependencies emits deny with reason", async () => {
     const r = await runHook(HOOK, {
       tool_name: "Write",
       tool_input: {

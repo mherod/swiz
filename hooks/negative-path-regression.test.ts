@@ -205,7 +205,7 @@ describe("pretooluse-no-direct-deps", () => {
   test("non-package.json file exits cleanly", async () => {
     const r = await runHook(HOOK, {
       tool_name: "Edit",
-      tool_input: { file_path: "src/index.ts", new_string: "code" },
+      tool_input: { file_path: "src/index.ts", old_string: "a", new_string: "b" },
     })
     expect(r.exitCode).toBe(0)
   })
@@ -223,48 +223,50 @@ describe("pretooluse-no-direct-deps", () => {
       tool_name: "Edit",
       tool_input: {
         file_path: "node_modules/foo/package.json",
-        new_string: '{"dependencies": {"bar": "1.0"}}',
+        old_string: "a",
+        new_string: "b",
       },
     })
     expect(r.exitCode).toBe(0)
   })
 
-  test("package.json with dependencies block is denied", async () => {
+  test("Write with dependencies block is denied", async () => {
     const r = await runHook(HOOK, {
-      tool_name: "Edit",
+      tool_name: "Write",
       tool_input: {
         file_path: "package.json",
-        new_string: '{"dependencies": {"lodash": "^4.0.0"}}',
+        content: '{"dependencies": {"lodash": "^4.0.0"}}',
       },
     })
     expect(r.exitCode).toBe(0)
     expect(r.stdout).toContain("deny")
   })
 
-  test("package.json with scripts-only edit is allowed", async () => {
+  test("Write with scripts-only is allowed", async () => {
     const r = await runHook(HOOK, {
-      tool_name: "Edit",
+      tool_name: "Write",
       tool_input: {
         file_path: "package.json",
-        new_string: '{"scripts": {"test": "vitest"}}',
+        content: '{"scripts": {"test": "vitest"}}',
       },
     })
     expect(r.exitCode).toBe(0)
     expect(r.stdout).not.toContain('"deny"')
   })
 
-  test("invalid JSON in new_string is allowed (catch block)", async () => {
+  test("Edit with nonexistent file exits cleanly (fail-open)", async () => {
     const r = await runHook(HOOK, {
       tool_name: "Edit",
       tool_input: {
-        file_path: "package.json",
-        new_string: "not json at all",
+        file_path: "/tmp/swiz-no-direct-deps-nonexistent/package.json",
+        old_string: '"zod": "^4.3.6"',
+        new_string: '"zod": "^4.3.7"',
       },
     })
     expect(r.exitCode).toBe(0)
   })
 
-  test("empty new_string exits cleanly", async () => {
+  test("empty old_string and new_string exits cleanly", async () => {
     const r = await runHook(HOOK, {
       tool_name: "Edit",
       tool_input: { file_path: "package.json" },

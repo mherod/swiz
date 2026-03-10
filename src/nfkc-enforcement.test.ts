@@ -18,7 +18,7 @@ const HOOKS_DIR = join(import.meta.dir, "..", "hooks")
 const EXEMPT_HOOKS = new Set([
   // Word counting only — normalizing would break string.replace against file content
   "pretooluse-claude-md-word-limit.ts",
-  // JSON.parse + key check — homoglyphs produce invalid JSON (safe)
+  // Projected content via string.replace — normalizing would break replace against file content
   "pretooluse-no-direct-deps.ts",
 ])
 
