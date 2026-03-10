@@ -119,14 +119,22 @@ export async function listTasks(
 
 export async function listAllSessionsTasks(
   filterCwd?: string,
-  dateFormat: DateFormat = "relative"
+  dateFormat: DateFormat = "relative",
+  recoveredOnly = false
 ) {
   const [sessions, orphanIds] = await Promise.all([getSessions(filterCwd), getOrphanSessionIds()])
-  const label = filterCwd ? "current project" : "all projects"
+  const filteredSessions = recoveredOnly ? sessions.filter((s) => orphanIds.has(s)) : sessions
+  const label = recoveredOnly
+    ? "recovered sessions"
+    : filterCwd
+      ? "current project"
+      : "all projects"
 
-  if (sessions.length === 0) {
+  if (filteredSessions.length === 0) {
     console.log(`\n  ${BOLD}Tasks${RESET} ${DIM}(${label}, all sessions)${RESET}\n`)
-    console.log("  No sessions found.\n")
+    console.log(
+      recoveredOnly ? "  No recovered (compaction-gap) sessions found.\n" : "  No sessions found.\n"
+    )
     return
   }
 
@@ -135,7 +143,7 @@ export async function listAllSessionsTasks(
   let totalCompleted = 0
   let sessionsWithTasks = 0
 
-  for (const sessionId of sessions) {
+  for (const sessionId of filteredSessions) {
     const tasks = await readTasks(sessionId)
     if (tasks.length === 0) continue
 

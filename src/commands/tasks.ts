@@ -358,7 +358,7 @@ export const tasksCommand: Command = {
   name: "tasks",
   description: "View and manage agent tasks",
   usage:
-    "swiz tasks [create|complete|evidence|status|complete-all] [--session <id>] [--all-projects] [--all-sessions] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
+    "swiz tasks [create|complete|evidence|status|complete-all] [--session <id>] [--all-projects] [--all-sessions] [--recovered] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
   options: [
     { flags: "create <subject> <desc>", description: "Create a new task in the current session" },
     {
@@ -379,6 +379,10 @@ export const tasksCommand: Command = {
     {
       flags: "--all-sessions",
       description: "Show tasks from all sessions (not just the most recent)",
+    },
+    {
+      flags: "--recovered",
+      description: "Show only tasks from orphan (compaction-gap) sessions",
     },
     {
       flags: "--date-format <relative|absolute>",
@@ -405,15 +409,17 @@ export const tasksCommand: Command = {
       subcommand === "--session" ||
       subcommand === "--all-projects" ||
       subcommand === "--all-sessions" ||
+      subcommand === "--recovered" ||
       subcommand === "--date-format"
     ) {
       const allProjects = args.includes("--all-projects")
       const allSessions = args.includes("--all-sessions")
+      const recovered = args.includes("--recovered")
       const filterCwd = allProjects ? undefined : process.cwd()
       const dateFormat = parseDateFormat(extractFlag(args, "--date-format"))
 
-      if (allSessions) {
-        await listAllSessionsTasks(filterCwd, dateFormat)
+      if (allSessions || recovered) {
+        await listAllSessionsTasks(filterCwd, dateFormat, recovered)
         return
       }
 
