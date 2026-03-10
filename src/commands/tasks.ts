@@ -674,26 +674,28 @@ export const tasksCommand: Command = {
         const sessionId = await resolveSession(sessionArgs)
 
         // If the task doesn't exist in the file store (e.g. created by the native TaskCreate
-        // tool which writes to its own internal store, not to ~/.claude/tasks/), and a --subject
-        // is provided, create a stub task with the given ID so it can be completed normally.
-        // This bridges the post-compaction gap where native tool tasks have no file counterpart.
+        // tool which writes to its own internal store, not to ~/.claude/tasks/), create a stub
+        // task with the given ID so it can be completed normally. If --subject is provided use
+        // it; otherwise fall back to the task ID as a placeholder subject. This bridges the
+        // post-compaction and cross-session gap where native tool tasks have no file counterpart.
         let taskExistsInStore = true
         try {
           await resolveTaskById(taskId, sessionId, filterCwd)
         } catch (e) {
-          if (e instanceof Error && e.message.includes("not found") && subjectFlag) {
+          if (e instanceof Error && e.message.includes("not found")) {
             taskExistsInStore = false
           } else {
             throw e
           }
         }
 
-        if (!taskExistsInStore && subjectFlag) {
+        if (!taskExistsInStore) {
+          const subject = subjectFlag ?? `Task #${taskId}`
           // Write a stub task file with the requested ID directly so updateStatus can find it
           const stubTask: Task = {
             id: taskId,
-            subject: subjectFlag,
-            description: subjectFlag,
+            subject,
+            description: subject,
             status: "in_progress",
             statusChangedAt: new Date().toISOString(),
             elapsedMs: 0,
@@ -706,9 +708,10 @@ export const tasksCommand: Command = {
             taskId,
             action: "create",
             newStatus: "in_progress",
-            subject: subjectFlag,
+            subject,
           })
-          console.log(`  ℹ️  Task #${taskId} not in file store — created stub from --subject`)
+          const note = subjectFlag ? "from --subject" : "using task ID as placeholder"
+          console.log(`  ℹ️  Task #${taskId} not in file store — created stub (${note})`)
         }
 
         // Auto-verify: if no explicit --verify was provided, extract and use task subject
