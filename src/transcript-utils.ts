@@ -535,8 +535,8 @@ export function extractTextFromUnknownContent(content: unknown): string {
 }
 
 export function isHookFeedback(content: string | ContentBlock[] | undefined): boolean {
-  if (typeof content !== "string") return false
-  return content.startsWith("Stop hook feedback:") || content.startsWith("<command-message>")
+  const text = extractText(content)
+  return text.startsWith("Stop hook feedback:") || text.startsWith("<command-message>")
 }
 
 /**
