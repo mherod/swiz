@@ -214,7 +214,7 @@ alwaysApply: false
 - Bun test reporter: `--reporter=dots --concurrent` (`--concurrent` required by hook). Run once without any pipe — piped re-runs trigger `pretooluse-repeated-lint-test` as consecutive.
 - **DO**: Make an Edit between `bun run format` and `bun run lint` — format-via-wrapper lacks `--write` so `pretooluse-repeated-lint-test` doesn't see it as a mutation; consecutive lint runs without an edit trigger a block.
 - Do not run `cd` in Bash commands; use absolute paths, `git -C <dir>`, `pnpm --prefix <dir>`, or `cwd` in `Bun.spawn()`.
-- Do not use `sed` — `pretooluse-banned-commands.ts` blocks all `sed` including `sed -n`. Use Read tool `offset`/`limit` for line ranges.
+- `sed -i` and `sed > file` are blocked. `sed -n` pipelines are allowed. Use Read `offset`/`limit` for line ranges.
 - Do not use `awk`; use `bun -e`, `sort -u`, `cut -d' ' -f1`, or git `--format`.
 - Do not use `python`/`python3`; use `bun -e` or `jq`.
 - Do not use `rm`/`rm -rf`; use `trash <path>`; guard with `[[ -e <path> ]] && trash <path>`.

@@ -50,7 +50,10 @@ const GREP_CMD_RE = /(?:^|\|\s*)grep\s/
 const CD_CMD_RE = shellSegmentCommandRe("cd(?:\\s|$)")
 const FIND_CMD_RE = shellSegmentCommandRe("find\\s")
 const AWK_CMD_RE = shellSegmentCommandRe("awk\\s")
-const SED_CMD_RE = shellSegmentCommandRe("sed\\s")
+// Only block sed when it writes files in-place (-i flag) or redirects output to a file.
+// Read-only sed (e.g. sed -n '...' file, sed '...' file | ...) is permitted.
+const SED_INPLACE_RE = shellSegmentCommandRe("sed\\s+(?:[^-]|-[^-])*-[a-zA-Z]*i")
+const SED_REDIRECT_RE = shellSegmentCommandRe("sed\\s[^|;&]*>\\s*\\S")
 const TOUCH_CMD_RE = shellSegmentCommandRe("touch(?:\\s|$)")
 const PYTHON_CMD_RE = shellSegmentCommandRe("python3?(?:\\s|$)")
 const NODE_TS_NODE_CMD_RE = shellSegmentCommandRe("(node|ts-node)\\s")
@@ -96,16 +99,15 @@ const RULES: Rule[] = [
     ].join("\n"),
   },
   {
-    match: (c) => SED_CMD_RE.test(c),
+    match: (c) => SED_INPLACE_RE.test(c) || SED_REDIRECT_RE.test(c),
     message: [
-      "Do not use `sed` to edit files. It is unreliable and produces unreviewed changes.",
+      "Do not use `sed` to write or edit files. It is unreliable and produces unreviewed changes.",
       "",
       "Instead, use the Edit tool for file modifications:",
       "  • Edit tool: precise old_string → new_string replacements (preferred)",
       "  • Write tool: overwrite a file with entirely new content",
       "",
-      "If you need sed for non-edit stream transformation in a pipeline where output",
-      "is not written to a file, reconsider if a dedicated tool covers it.",
+      "Read-only sed usage (e.g. `sed -n '...' file` in a pipeline) is allowed.",
     ].join("\n"),
   },
   {
