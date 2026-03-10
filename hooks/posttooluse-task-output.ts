@@ -249,11 +249,13 @@ if (typeof response === "string") {
         )
       }
     }
-    // Output file also unavailable — warn and pass through.
-    console.error(
-      `[posttooluse-task-output:TASK_NOT_FOUND] task ${notFoundMatch[1]} not found; output file unavailable`
+    // Output file also unavailable — surface the garbage-collected task ID so the agent
+    // receives actionable feedback rather than null/silent output.
+    denyPostToolUse(
+      `Task \`${notFoundMatch[1]}\` output unavailable: the task record has been garbage-collected and no output file was found.\n\n` +
+        `The task completed (or was cleaned up) before its output could be read. ` +
+        `Check recent git log or CI status to determine whether the task succeeded.`
     )
-    process.exit(0)
   }
 }
 
