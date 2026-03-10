@@ -732,3 +732,49 @@ describe("posttooluse-task-output: PHPUnit runner detection", () => {
     expect(result.decision).toBeUndefined()
   })
 })
+
+describe("posttooluse-task-output: composite multi-runner output", () => {
+  test("aggregates failures from bun + jest when both summaries present", async () => {
+    const output = [
+      "bun test v1.3.10",
+      "✗ src/foo.test.ts > fails",
+      "Ran 10 tests across 2 files.",
+      "10 fail",
+      "",
+      "FAIL src/bar.test.ts",
+      "  ● bar › fails",
+      "Tests: 3 failed, 7 passed, 10 total",
+    ].join("\n")
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toMatch(/13 test\(s\) failed across multiple runners \(bun, jest\)/)
+  })
+
+  test("reports unknown count when one runner output is truncated", async () => {
+    // bun is complete but jest has FAIL_RE match without COMPLETE_RE (no "N total" line)
+    const output = [
+      "bun test v1.3.10",
+      "✗ src/foo.test.ts > fails",
+      "Ran 5 tests across 1 file.",
+      "5 fail",
+      "",
+      "FAIL src/bar.test.ts",
+      "  ● bar › fails",
+      "Tests: 2 failed",
+      // Jest COMPLETE_RE requires "N total" at end — absent here means truncated
+    ].join("\n")
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toMatch(/unknown number of test\(s\) failed across multiple runners/)
+  })
+
+  test("does not report failure when composite output shows no failures", async () => {
+    const output = [
+      "bun test v1.3.10",
+      "Ran 10 tests across 2 files.",
+      "Tests: 5 passed, 5 total",
+    ].join("\n")
+    const result = await runHook(makePayload(output, 0))
+    expect(result.decision).toBeUndefined()
+  })
+})

@@ -232,6 +232,191 @@ const BLOCK_TYPE_ERR_RE = /InputValidationError[\s\S]*\bblock\b[\s\S]*boolean/i
  */
 const TASK_NOT_FOUND_RE = /no task found with id:?\s*(\S+)/i
 
+/** A detected failure from a single test runner within an output stream. */
+type RunnerResult = {
+  runner: string
+  failCount: number | null // null = truncated / unknown
+  isComplete: boolean
+  firstFailLine: string | null
+}
+
+/**
+ * Collect RunnerResult entries for every test runner whose FAIL_RE matches `clean`.
+ * All runners are checked — no early return — so composite multi-runner output is
+ * handled correctly when multiple runners write to the same output stream.
+ */
+function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
+  const results: RunnerResult[] = []
+
+  // Bun
+  const bunFailMatch = clean.match(BUN_FAIL_RE)
+  if (bunFailMatch) {
+    const isComplete = BUN_COMPLETE_RE.test(clean)
+    results.push({
+      runner: "bun",
+      failCount: isComplete ? parseInt(bunFailMatch[1]!, 10) : null,
+      isComplete,
+      firstFailLine: lines.find((l) => l.includes("✗") || l.includes("error:")) ?? null,
+    })
+  }
+
+  // Jest
+  const jestFailMatch = clean.match(JEST_FAIL_RE)
+  if (jestFailMatch) {
+    const isComplete = JEST_COMPLETE_RE.test(clean)
+    results.push({
+      runner: "jest",
+      failCount: isComplete ? parseInt(jestFailMatch[1]!, 10) : null,
+      isComplete,
+      firstFailLine: lines.find((l) => l.includes("FAIL") || l.includes("●")) ?? null,
+    })
+  }
+
+  // Vitest
+  const vitestFailMatch = clean.match(VITEST_FAIL_RE)
+  if (vitestFailMatch) {
+    const isComplete = VITEST_COMPLETE_RE.test(clean)
+    results.push({
+      runner: "vitest",
+      failCount: isComplete ? parseInt(vitestFailMatch[1]!, 10) : null,
+      isComplete,
+      firstFailLine: lines.find((l) => l.includes("FAIL") || l.includes("AssertionError")) ?? null,
+    })
+  }
+
+  // pytest
+  if (PYTEST_FAIL_RE.test(clean)) {
+    const isComplete = PYTEST_COMPLETE_RE.test(clean)
+    const summaryMatch = clean.match(PYTEST_SUMMARY_RE)
+    results.push({
+      runner: "pytest",
+      failCount: isComplete && summaryMatch ? parseInt(summaryMatch[1]!, 10) : null,
+      isComplete,
+      firstFailLine: lines.find((l) => l.startsWith("FAILED ")) ?? null,
+    })
+  }
+
+  // cargo test — FAIL_RE and COMPLETE_RE are on the same line, so match = complete
+  const cargoFailMatch = clean.match(CARGO_FAIL_RE)
+  if (cargoFailMatch) {
+    results.push({
+      runner: "cargo",
+      failCount: parseInt(cargoFailMatch[1]!, 10),
+      isComplete: true,
+      firstFailLine: lines.find((l) => l.includes("FAILED") || l.startsWith("---- ")) ?? null,
+    })
+  }
+
+  // go test — count "--- FAIL:" lines
+  if (GOTEST_FAIL_RE.test(clean)) {
+    const isComplete = GOTEST_COMPLETE_RE.test(clean)
+    const failCount = (clean.match(/^--- FAIL:/gm) ?? []).length
+    results.push({
+      runner: "go test",
+      failCount: isComplete && failCount > 0 ? failCount : null,
+      isComplete,
+      firstFailLine: lines.find((l) => l.startsWith("--- FAIL:")) ?? null,
+    })
+  }
+
+  // Maven Surefire/Failsafe
+  const mavenFailMatch = clean.match(MAVEN_FAIL_RE)
+  if (mavenFailMatch) {
+    const failures = parseInt(mavenFailMatch[1]!, 10)
+    const errors = parseInt(mavenFailMatch[2]!, 10)
+    const total = failures + errors
+    const isComplete = MAVEN_COMPLETE_RE.test(clean)
+    results.push({
+      runner: "maven",
+      failCount: isComplete && total > 0 ? total : null,
+      isComplete,
+      firstFailLine:
+        lines.find((l) => l.includes("<<< FAILURE!") || l.includes("<<< ERROR!")) ?? null,
+    })
+  }
+
+  // Gradle
+  if (GRADLE_FAIL_RE.test(clean)) {
+    const summaryMatch = clean.match(GRADLE_SUMMARY_RE)
+    const isComplete = GRADLE_COMPLETE_RE.test(clean)
+    results.push({
+      runner: "gradle",
+      failCount: isComplete && summaryMatch ? parseInt(summaryMatch[1]!, 10) : null,
+      isComplete,
+      firstFailLine: lines.find((l) => l.match(/^\S.*> \S.* FAILED$/)) ?? null,
+    })
+  }
+
+  // RSpec
+  const rspecFailMatch = clean.match(RSPEC_FAIL_RE)
+  if (rspecFailMatch && parseInt(rspecFailMatch[1]!, 10) > 0) {
+    const isComplete = RSPEC_COMPLETE_RE.test(clean)
+    results.push({
+      runner: "rspec",
+      failCount: isComplete ? parseInt(rspecFailMatch[1]!, 10) : null,
+      isComplete,
+      firstFailLine:
+        lines.find((l) => l.trim().match(/^\d+\)/) || l.includes("Failure/Error:")) ?? null,
+    })
+  } else if (clean.includes("Failure/Error:")) {
+    // RSpec truncated: failure body visible but no summary line yet
+    results.push({
+      runner: "rspec",
+      failCount: null,
+      isComplete: false,
+      firstFailLine: lines.find((l) => l.includes("Failure/Error:")) ?? null,
+    })
+  }
+
+  // dotnet
+  if (DOTNET_FAIL_RE.test(clean)) {
+    const summaryMatch = clean.match(DOTNET_COMPLETE_RE)
+    results.push({
+      runner: "dotnet",
+      failCount: summaryMatch ? parseInt(summaryMatch[1]!, 10) : null,
+      isComplete: summaryMatch !== null,
+      firstFailLine: lines.find((l) => l.trim().startsWith("Failed ")) ?? null,
+    })
+  }
+
+  // PHPUnit
+  if (PHPUNIT_FAIL_RE.test(clean)) {
+    const isComplete = PHPUNIT_COMPLETE_RE.test(clean)
+    const countMatch = clean.match(PHPUNIT_COUNT_RE)
+    results.push({
+      runner: "phpunit",
+      failCount: isComplete && countMatch ? parseInt(countMatch[1]!, 10) : null,
+      isComplete,
+      firstFailLine: lines.find((l) => l.trim().match(/^\d+\)/) || l.includes("Error: ")) ?? null,
+    })
+  }
+
+  return results
+}
+
+/**
+ * Format a failure message from one or more RunnerResult entries.
+ * Single-runner output preserves the existing message format exactly.
+ * Multi-runner composite output aggregates counts across all runners.
+ */
+function formatRunnerFailure(results: RunnerResult[], exitCode: number): string {
+  if (results.length === 1) {
+    const r = results[0]!
+    const countLabel = r.failCount !== null ? `${r.failCount}` : "unknown number of"
+    const detail = r.firstFailLine ? `\n\nFirst failure: ${r.firstFailLine.trim()}` : ""
+    return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+  }
+
+  // Composite: aggregate across all runners
+  const anyIncomplete = results.some((r) => !r.isComplete)
+  const totalFails = results.reduce((sum, r) => sum + (r.failCount ?? 0), 0)
+  const countLabel = anyIncomplete ? "unknown number of" : `${totalFails}`
+  const runnerNames = results.map((r) => r.runner).join(", ")
+  const firstFailLine = results.find((r) => r.firstFailLine)?.firstFailLine ?? null
+  const detail = firstFailLine ? `\n\nFirst failure: ${firstFailLine.trim()}` : ""
+  return `${countLabel} test(s) failed across multiple runners (${runnerNames}) (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+}
+
 function detectFailure(output: string, exitCode: number | null): string | null {
   // Normalize once — all pattern matching below operates on ANSI-free text.
   const clean = stripAnsi(output)
@@ -241,133 +426,17 @@ function detectFailure(output: string, exitCode: number | null): string | null {
     // Try to surface the most actionable line from the output
     const lines = clean.split("\n").filter((l) => l.trim())
 
-    // Bun test failures
-    const bunFailMatch = clean.match(BUN_FAIL_RE)
-    if (bunFailMatch) {
-      // Only claim an exact count when the bun completion marker is present.
-      // Its absence means output was truncated — report "unknown" instead.
-      const isComplete = BUN_COMPLETE_RE.test(clean)
-      const countLabel = isComplete ? `${bunFailMatch[1]}` : "unknown number of"
-      // Find first ✗ failure line for context
-      const failLine = lines.find((l) => l.includes("✗") || l.includes("error:"))
-      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
-      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+    // Collect results from all matching runners (no short-circuit — supports composite output)
+    const runnerResults = collectRunnerResults(clean, lines)
+    if (runnerResults.length > 0) {
+      return formatRunnerFailure(runnerResults, exitCode)
     }
 
-    // Jest test failures
-    const jestFailMatch = clean.match(JEST_FAIL_RE)
-    if (jestFailMatch) {
-      const isComplete = JEST_COMPLETE_RE.test(clean)
-      const countLabel = isComplete ? `${jestFailMatch[1]}` : "unknown number of"
-      const failLine = lines.find((l) => l.includes("FAIL") || l.includes("●"))
-      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
-      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
-    }
-
-    // Vitest test failures
-    const vitestFailMatch = clean.match(VITEST_FAIL_RE)
-    if (vitestFailMatch) {
-      const isComplete = VITEST_COMPLETE_RE.test(clean)
-      const countLabel = isComplete ? `${vitestFailMatch[1]}` : "unknown number of"
-      const failLine = lines.find((l) => l.includes("FAIL") || l.includes("AssertionError"))
-      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
-      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
-    }
-
-    // pytest failures
-    if (PYTEST_FAIL_RE.test(clean)) {
-      const isComplete = PYTEST_COMPLETE_RE.test(clean)
-      const summaryMatch = clean.match(PYTEST_SUMMARY_RE)
-      const countLabel = isComplete && summaryMatch ? `${summaryMatch[1]}` : "unknown number of"
-      const failLine = lines.find((l) => l.startsWith("FAILED "))
-      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
-      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
-    }
-
-    // cargo test failures
-    const cargoFailMatch = clean.match(CARGO_FAIL_RE)
-    if (cargoFailMatch) {
-      // CARGO_COMPLETE_RE and CARGO_FAIL_RE are both on the same line — if FAIL_RE matched, run is complete
-      const countLabel = `${cargoFailMatch[1]}`
-      const failLine = lines.find((l) => l.includes("FAILED") || l.startsWith("---- "))
-      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
-      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
-    }
-    // cargo test run completed with non-zero exit but no FAILED result line (e.g. compile error)
+    // cargo compile error (COMPLETE_RE present but no FAIL_RE match above)
     if (CARGO_COMPLETE_RE.test(clean)) {
       const failLine = lines.find((l) => l.toLowerCase().includes("error"))
       const detail = failLine ? `\n\nError: ${failLine.trim()}` : ""
       return `Background task exited with code ${exitCode}.${detail}\n\nDo not proceed until this failure is resolved.`
-    }
-
-    // go test failures — count "--- FAIL:" occurrences as a proxy for failed test count
-    if (GOTEST_FAIL_RE.test(clean)) {
-      const isComplete = GOTEST_COMPLETE_RE.test(clean)
-      const failCount = (clean.match(/^--- FAIL:/gm) ?? []).length
-      const countLabel = isComplete && failCount > 0 ? `${failCount}` : "unknown number of"
-      const failLine = lines.find((l) => l.startsWith("--- FAIL:"))
-      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
-      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
-    }
-
-    // Maven Surefire/Failsafe failures
-    const mavenFailMatch = clean.match(MAVEN_FAIL_RE)
-    if (mavenFailMatch) {
-      // Failures + Errors both count as test failures
-      const failures = parseInt(mavenFailMatch[1]!, 10)
-      const errors = parseInt(mavenFailMatch[2]!, 10)
-      const total = failures + errors
-      const isComplete = MAVEN_COMPLETE_RE.test(clean)
-      const countLabel = isComplete && total > 0 ? `${total}` : "unknown number of"
-      const failLine = lines.find((l) => l.includes("<<< FAILURE!") || l.includes("<<< ERROR!"))
-      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
-      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
-    }
-
-    // Gradle test failures
-    if (GRADLE_FAIL_RE.test(clean)) {
-      const summaryMatch = clean.match(GRADLE_SUMMARY_RE)
-      const isComplete = GRADLE_COMPLETE_RE.test(clean)
-      const countLabel = isComplete && summaryMatch ? `${summaryMatch[1]}` : "unknown number of"
-      const failLine = lines.find((l) => l.match(/^\S.*> \S.* FAILED$/))
-      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
-      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
-    }
-
-    // RSpec failures
-    const rspecFailMatch = clean.match(RSPEC_FAIL_RE)
-    if (rspecFailMatch && parseInt(rspecFailMatch[1]!, 10) > 0) {
-      const isComplete = RSPEC_COMPLETE_RE.test(clean)
-      const countLabel = isComplete ? `${rspecFailMatch[1]}` : "unknown number of"
-      const failLine = lines.find((l) => l.trim().match(/^\d+\)/) || l.includes("Failure/Error:"))
-      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
-      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
-    }
-    // RSpec truncated: has "Failure/Error:" but no summary line yet
-    if (clean.includes("Failure/Error:")) {
-      const failLine = lines.find((l) => l.includes("Failure/Error:"))
-      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
-      return `unknown number of test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
-    }
-
-    // dotnet test failures
-    if (DOTNET_FAIL_RE.test(clean)) {
-      const summaryMatch = clean.match(DOTNET_COMPLETE_RE)
-      const isComplete = summaryMatch !== null
-      const countLabel = isComplete ? `${summaryMatch![1]}` : "unknown number of"
-      const failLine = lines.find((l) => l.trim().startsWith("Failed "))
-      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
-      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
-    }
-
-    // PHPUnit failures
-    if (PHPUNIT_FAIL_RE.test(clean)) {
-      const isComplete = PHPUNIT_COMPLETE_RE.test(clean)
-      const countMatch = clean.match(PHPUNIT_COUNT_RE)
-      const countLabel = isComplete && countMatch ? `${countMatch[1]}` : "unknown number of"
-      const failLine = lines.find((l) => l.trim().match(/^\d+\)/) || l.includes("Error: "))
-      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
-      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
     }
 
     // Push / hook failures
