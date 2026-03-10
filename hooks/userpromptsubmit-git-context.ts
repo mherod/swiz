@@ -14,4 +14,4 @@ async function main(): Promise<void> {
   emitContext("UserPromptSubmit", `[git] branch: ${branch} | uncommitted files: ${dirty}`, cwd)
 }
 
-main()
+if (import.meta.main) main()

@@ -23,4 +23,4 @@ async function main(): Promise<void> {
   denyPostToolUse(message)
 }
 
-main()
+if (import.meta.main) main()

@@ -22,4 +22,4 @@ async function main(): Promise<void> {
   }
 }
 
-main()
+if (import.meta.main) main()

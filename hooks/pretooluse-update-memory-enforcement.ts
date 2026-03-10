@@ -253,4 +253,4 @@ async function main(): Promise<void> {
   denyPreToolUse(reason)
 }
 
-await main()
+if (import.meta.main) await main()

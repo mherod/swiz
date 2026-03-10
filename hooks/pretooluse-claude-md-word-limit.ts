@@ -107,6 +107,8 @@ async function main() {
   }
 }
 
-main().catch(() => {
-  process.exit(0)
-})
+if (import.meta.main) {
+  main().catch(() => {
+    process.exit(0)
+  })
+}

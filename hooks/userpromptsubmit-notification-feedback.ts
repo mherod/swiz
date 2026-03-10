@@ -72,4 +72,4 @@ async function main(): Promise<void> {
   emitContext("UserPromptSubmit", contextLines.join("\n"), cwd)
 }
 
-main()
+if (import.meta.main) main()

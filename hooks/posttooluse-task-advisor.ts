@@ -78,4 +78,4 @@ function emit(context: string): never {
   return emitContext("PostToolUse", context)
 }
 
-main()
+if (import.meta.main) main()

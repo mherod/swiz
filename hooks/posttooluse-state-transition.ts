@@ -276,4 +276,4 @@ async function main(): Promise<void> {
   await handleAsyncTransitions(command, cwd, state)
 }
 
-main()
+if (import.meta.main) main()

@@ -57,4 +57,4 @@ async function main() {
   }
 }
 
-main().catch(() => {})
+if (import.meta.main) main().catch(() => {})

@@ -46,7 +46,9 @@ async function main() {
   allowPreToolUse("")
 }
 
-main().catch((e) => {
-  console.error("Hook error:", e)
-  process.exit(1)
-})
+if (import.meta.main) {
+  main().catch((e) => {
+    console.error("Hook error:", e)
+    process.exit(1)
+  })
+}

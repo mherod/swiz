@@ -32,4 +32,4 @@ async function main(): Promise<void> {
   emitContext("SessionStart", parts.join(" "))
 }
 
-await main()
+if (import.meta.main) await main()

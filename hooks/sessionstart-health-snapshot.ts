@@ -131,4 +131,4 @@ async function main(): Promise<void> {
   emitContext("SessionStart", parts.join(" "), cwd)
 }
 
-main()
+if (import.meta.main) main()

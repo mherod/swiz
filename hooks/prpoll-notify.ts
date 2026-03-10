@@ -63,7 +63,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error("[prpoll-notify]", err)
-  process.exit(0)
-})
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error("[prpoll-notify]", err)
+    process.exit(0)
+  })
+}

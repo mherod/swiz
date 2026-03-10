@@ -216,4 +216,4 @@ async function main(): Promise<void> {
   emitContext("SessionStart", ctx)
 }
 
-main()
+if (import.meta.main) main()

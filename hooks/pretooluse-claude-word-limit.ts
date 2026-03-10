@@ -48,4 +48,4 @@ Current: ${stats.words} words | Limit: ${WORD_LIMIT} words | Target: ${WORD_LIMI
   }
 }
 
-await main()
+if (import.meta.main) await main()

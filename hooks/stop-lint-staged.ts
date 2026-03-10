@@ -80,4 +80,4 @@ async function main(): Promise<void> {
   blockStop(reason, { includeUpdateMemoryAdvice: false })
 }
 
-main()
+if (import.meta.main) main()

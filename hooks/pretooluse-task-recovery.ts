@@ -92,4 +92,4 @@ async function main(): Promise<void> {
   // the stub file and succeed. The agent receives a transparent recovery.
 }
 
-main()
+if (import.meta.main) main()

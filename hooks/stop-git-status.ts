@@ -353,4 +353,4 @@ async function main(): Promise<void> {
   blockStop(reason)
 }
 
-main()
+if (import.meta.main) main()

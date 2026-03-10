@@ -15,4 +15,4 @@ async function main(): Promise<void> {
   await spawnSpeak("Just a moment while I gather my thoughts", settings)
 }
 
-main()
+if (import.meta.main) main()
