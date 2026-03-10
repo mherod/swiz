@@ -141,7 +141,7 @@ async function createTask(sessionId: string, subject: string, description: strin
     blockedBy: [],
   }
 
-  await writeTask(sessionId, task)
+  await writeTask(sessionId, task, process.cwd())
   await writeAudit(sessionId, {
     timestamp: new Date().toISOString(),
     taskId: id,
@@ -199,7 +199,7 @@ async function updateStatus(
     task.completionTimestamp = now
   }
 
-  await writeTask(effectiveSessionId, task)
+  await writeTask(effectiveSessionId, task, process.cwd())
   await writeAudit(effectiveSessionId, {
     timestamp: new Date().toISOString(),
     taskId,
@@ -282,7 +282,7 @@ async function submitEvidence(
     task.completionTimestamp = new Date().toISOString()
   }
 
-  await writeTask(effectiveSessionId, task)
+  await writeTask(effectiveSessionId, task, process.cwd())
   await writeAudit(effectiveSessionId, {
     timestamp: new Date().toISOString(),
     taskId,

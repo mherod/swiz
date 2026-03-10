@@ -120,6 +120,8 @@ export interface SessionMeta {
   openCount: number
   /** ISO timestamp of last update. */
   updatedAt: string
+  /** Working directory of the project that owns this session. Set on first write. */
+  cwd?: string
 }
 
 /** Path of the session metadata index file within a session directory. */
@@ -129,8 +131,9 @@ export const SESSION_META_FILE = ".session-meta.json"
  * Recompute and persist the session metadata index after every task write.
  * Called internally by writeTask — consumers should not call this directly.
  * Silently ignores write failures (non-fatal, falls back to full scan).
+ * @param cwd - Working directory of the owning project. Written once; preserved on subsequent updates.
  */
-async function updateSessionMeta(dir: string): Promise<void> {
+async function updateSessionMeta(dir: string, cwd?: string): Promise<void> {
   try {
     const files = await readdir(dir)
     let openCount = 0
@@ -141,7 +144,21 @@ async function updateSessionMeta(dir: string): Promise<void> {
         if (t.status === "pending" || t.status === "in_progress") openCount++
       } catch {}
     }
-    const meta: SessionMeta = { openCount, updatedAt: new Date().toISOString() }
+    // Preserve existing cwd when cwd is not provided; write it on first call that has it.
+    let effectiveCwd = cwd
+    if (!effectiveCwd) {
+      try {
+        const existing = JSON.parse(
+          await readFile(join(dir, SESSION_META_FILE), "utf-8")
+        ) as SessionMeta
+        effectiveCwd = existing.cwd
+      } catch {}
+    }
+    const meta: SessionMeta = {
+      openCount,
+      updatedAt: new Date().toISOString(),
+      ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
+    }
     await writeFile(join(dir, SESSION_META_FILE), JSON.stringify(meta))
   } catch {}
 }
@@ -162,12 +179,12 @@ export async function readSessionMeta(
   }
 }
 
-export async function writeTask(sessionId: string, task: Task) {
+export async function writeTask(sessionId: string, task: Task, cwd?: string) {
   const dir = join(getDefaultTaskRoots().tasksDir, sessionId)
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, `${task.id}.json`), JSON.stringify(task, null, 2))
   // Update lightweight index so status.ts can read openCount without scanning every task file.
-  await updateSessionMeta(dir)
+  await updateSessionMeta(dir, cwd)
 }
 
 export async function writeAudit(sessionId: string, entry: AuditEntry) {

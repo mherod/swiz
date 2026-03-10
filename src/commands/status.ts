@@ -208,6 +208,7 @@ async function getOpenTaskCount(cwd: string): Promise<number | null> {
 
     // Union: indexed sessions for this project + task-dir sessions not yet in any project index
     // (compaction-gap sessions whose transcript hasn't been written yet).
+    // For unindexed sessions, check .session-meta.json cwd to avoid cross-project contamination.
     let taskDirEntries: string[]
     try {
       taskDirEntries = await readdir(tasksRoot)
@@ -215,8 +216,13 @@ async function getOpenTaskCount(cwd: string): Promise<number | null> {
       taskDirEntries = []
     }
     const sessionIds = new Set(indexedSessionIds)
+    const { readSessionMeta: readMeta } = await import("../tasks/task-repository.ts")
     for (const s of taskDirEntries) {
-      if (!allProjectSessionIds.has(s)) sessionIds.add(s)
+      if (allProjectSessionIds.has(s)) continue
+      // Unindexed compaction-gap session: filter by cwd if meta has one.
+      const meta = await readMeta(s, tasksRoot)
+      if (meta?.cwd !== undefined && meta.cwd !== cwd) continue
+      sessionIds.add(s)
     }
 
     if (sessionIds.size === 0) return null
