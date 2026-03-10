@@ -13,8 +13,16 @@
 // Exits: 0 = allow, 1 = block (prints BLOCKED message to stderr)
 
 import { getDefaultBranch, gh, git, isDefaultBranch, isGitRepo } from "../../hooks/hook-utils.ts"
-import { detectProjectCollaborationPolicy } from "../../src/collaboration-policy.ts"
+import {
+  detectProjectCollaborationPolicy,
+  getCollaborationModePolicy,
+} from "../../src/collaboration-policy.ts"
 import { isDocsOrConfig, parseCommitType } from "../../src/git-helpers.ts"
+import {
+  getEffectiveSwizSettings,
+  readProjectSettings,
+  readSwizSettings,
+} from "../../src/settings.ts"
 
 const MAX_FILES_HARD_BLOCK = 5
 const MAX_TRIVIAL_FILES = 3
@@ -111,10 +119,31 @@ if (!ghAvailable) {
   )
 }
 
-// ── Check 2: Collaboration detection ────────────────────────────────────
+// ── Check 2: Collaboration detection + mode policy ───────────────────────
 
-const collaboration = await detectProjectCollaborationPolicy(cwd)
+const [collaboration, globalSettings, projectSettings] = await Promise.all([
+  detectProjectCollaborationPolicy(cwd),
+  readSwizSettings(),
+  readProjectSettings(cwd),
+])
 collaborationResolved = collaboration.resolved
+
+const effectiveSettings = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+const modePolicy = getCollaborationModePolicy(effectiveSettings.collaborationMode)
+
+// Settings-layer mode takes precedence over signal-based detection:
+// - If requireFeatureBranch=true (team/relaxed-collab), block direct push regardless of signals.
+// - If requireFeatureBranch=false and signals say collaborative, also block.
+// - If requireFeatureBranch=false and signals say solo (auto/solo), allow.
+if (modePolicy.requireFeatureBranch) {
+  block(
+    `Collaboration mode "${effectiveSettings.collaborationMode}" requires a feature branch — direct pushes to ${branch} are not allowed.\n\n` +
+      "Create a feature branch:\n" +
+      "  git checkout -b feat/<description>\n" +
+      "  git push origin feat/<description>\n" +
+      "  gh pr create"
+  )
+}
 
 if (collaboration.isCollaborative) {
   block(
