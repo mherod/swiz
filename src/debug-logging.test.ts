@@ -243,9 +243,13 @@ describe("debugLog enforcement", () => {
   })
 
   it("stdout-only files must not import or call stderrLog", () => {
-    // Files in STDOUT_ALLOWLIST but NOT STDERR_ALLOWLIST are stdout-only.
-    // They must never call stderrLog — errors belong on stdout as structured output
-    // or should not be emitted at all from these files.
+    // Stdout-only files are discovered DYNAMICALLY at test time by diffing the two
+    // allowlists: any file in STDOUT_ALLOWLIST but NOT in STDERR_ALLOWLIST is
+    // stdout-only. No static list is maintained — adding a new file to STDOUT_ALLOWLIST
+    // automatically brings it under this constraint without any extra manual step.
+    //
+    // Files in STDOUT_ALLOWLIST but NOT STDERR_ALLOWLIST must never call stderrLog —
+    // errors belong on stdout as structured output or should not be emitted at all.
     // e.g. src/dispatch/engine.ts emits JSON to stdout only; stderrLog there would
     // mix stderr into the structured output stream.
     const violations: string[] = []
