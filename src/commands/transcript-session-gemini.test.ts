@@ -67,7 +67,8 @@ function stripAnsi(text: string): string {
 async function createGeminiSession(
   home: string,
   projectDir: string,
-  sessionId: string
+  sessionId: string,
+  command = "echo hi"
 ): Promise<void> {
   const bucket = basename(projectDir)
   const bucketDir = join(home, ".gemini", "tmp", bucket)
@@ -90,7 +91,7 @@ async function createGeminiSession(
           type: "gemini",
           timestamp: "2026-03-05T10:00:01.000Z",
           content: "Hi from Gemini assistant",
-          toolCalls: [{ name: "run_shell_command", args: { command: "echo hi" } }],
+          toolCalls: [{ name: "run_shell_command", args: { command } }],
         },
       ],
     })
@@ -188,6 +189,24 @@ describe("Provider transcript/session command support", () => {
     expect(out).toContain("ASSISTANT")
     expect(out).toContain("Hello from Gemini session")
     expect(out).toContain("Hi from Gemini assistant")
+  })
+
+  test("swiz transcript --session preserves full long shell command labels", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-proj")
+    const sessionId = "abcdef12-1111-2222-3333-555555555555"
+    const marker = "SENTINEL_AFTER_70_CHARS"
+    const longCommand = `${"echo x && ".repeat(10)}${marker}`
+    await mkdir(projectDir, { recursive: true })
+    await createGeminiSession(home, projectDir, sessionId, longCommand)
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain(marker)
   })
 
   test("swiz session --list includes Gemini sessions", async () => {

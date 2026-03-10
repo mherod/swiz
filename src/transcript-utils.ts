@@ -485,7 +485,11 @@ export async function findAllProviderSessions(
     ])
 
   const merged: Session[] = [
-    ...claudeSessions.map((s) => ({ ...s, provider: "claude" as const, format: "jsonl" as const })),
+    ...claudeSessions.map((s) => ({
+      ...s,
+      provider: "claude" as const,
+      format: "jsonl" as const,
+    })),
     ...geminiSessions,
     ...cursorSessions,
     ...antigravitySessions,
@@ -551,7 +555,10 @@ export function isHookFeedback(content: string | ContentBlock[] | undefined): bo
  */
 export function findHumanRequiredBlock(transcriptText: string, limit = 20): string | null {
   const SENTINEL = "ACTION REQUIRED:"
-  const entries: Array<{ type?: string; message?: { role?: string; content?: unknown } }> = []
+  const entries: Array<{
+    type?: string
+    message?: { role?: string; content?: unknown }
+  }> = []
   for (const entry of parseTranscriptEntries(transcriptText)) {
     entries.push(entry)
   }
@@ -615,8 +622,9 @@ function toolCallLabel(block: { name?: string; input?: Record<string, unknown> }
   if (typeof pathVal === "string") return `${name}(${pathVal})`
 
   if (typeof input.command === "string") {
-    const cmd = input.command.length > 80 ? `${input.command.slice(0, 77)}...` : input.command
-    return `${name}(${cmd})`
+    // Keep shell commands lossless in transcript-derived context so
+    // downstream review/enforcement can see the full operation.
+    return `${name}(${input.command})`
   }
 
   if (typeof input.pattern === "string") return `${name}(${input.pattern})`
@@ -978,7 +986,10 @@ function normalizeCursorContent(content: unknown): string | ContentBlock[] {
     if (block.type === "tool-result") {
       const resultText = extractTextFromUnknownContent(block.result)
       if (resultText) {
-        blocks.push({ type: "tool_result", content: [{ type: "text", text: resultText }] })
+        blocks.push({
+          type: "tool_result",
+          content: [{ type: "text", text: resultText }],
+        })
       }
     }
   }
@@ -1313,7 +1324,11 @@ export function extractEditedFilePaths(jsonlText: string): Set<string> {
     if (!Array.isArray(content)) continue
 
     for (const block of content) {
-      const b = block as { type?: string; name?: string; input?: Record<string, unknown> }
+      const b = block as {
+        type?: string
+        name?: string
+        input?: Record<string, unknown>
+      }
       if (b?.type !== "tool_use") continue
 
       if (b.name && EDIT_TOOLS.has(b.name)) {
@@ -1378,7 +1393,11 @@ export function extractTranscriptData(jsonlText: string): TranscriptData {
     if (entry.type === "assistant") {
       if (Array.isArray(content)) {
         for (const block of content) {
-          const b = block as { type?: string; name?: string; input?: Record<string, unknown> }
+          const b = block as {
+            type?: string
+            name?: string
+            input?: Record<string, unknown>
+          }
           if (b?.type !== "tool_use") continue
           toolCallCount++
 
