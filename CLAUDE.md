@@ -109,19 +109,19 @@ alwaysApply: false
 - Create tasks before non-exempt Bash.
 - **DON'T**: Complete your last in-progress task while shell commands remain (e.g., push verification). Keep ≥1 task `in_progress` until all shell work finishes. `pretooluse-require-tasks` blocks Bash when zero incomplete tasks exist.
 - Exempt Bash categories: `ls`, `rg`, `grep`; read-only `git` subcommands (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`, etc.); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
-- `find` is not exempt; use `rg` or Glob for discovery.
+- `find` is not exempt; use `rg` or Glob.
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
 - **Task completion**: `swiz tasks complete <id> --evidence "note:..." --state <state>`. The `--state` flag is required. Valid single-prefix evidence values: `commit:`, `pr:`, `file:`, `test:`, `note:` — compound strings (e.g. `"commit:abc run:123"`) and unrecognized prefixes (e.g. `ci_green:`) are rejected. Plain `TaskUpdate status=completed` rejected by stop hooks. Do not invoke `tasks-list.ts` directly.
 - **`swiz tasks complete` has NO `--subject` flag**: `complete <id> --evidence TEXT --state STATE`; `status <id> <status>`; `evidence <id> <text>`. Run `swiz help tasks` before guessing flags. For native-tool tasks (no file counterpart): stub first via `swiz tasks update <id> --subject "..." --status in_progress`, then complete normally.
 - **`swiz tasks update` bulk IDs**: `swiz tasks update <id1> <id2> ... [--subject TEXT] [--status STATUS] [--description TEXT] [--active-form TEXT]` — leading non-flag tokens are IDs; flags start at first `--`.
 - **DON'T**: Assume CI success from partial output (e.g., `gh run watch` alone). Always verify terminal job states with `gh run view <run-id> --json conclusion,status,jobs` and confirm every job reached `conclusion: "success"` before claiming CI green.
-- Mark tasks complete immediately at work completion.
+- Mark tasks complete immediately on completion.
 - Treat `gh issue create` and task completion as atomic; recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.
 - Run `git diff <files>` before `git add`.
 - Run `git status` immediately after each `git commit`.
-- After each `CLAUDE.md` edit, run `wc -w CLAUDE.md` to verify it stays below the configured threshold; run `/compact-memory` when approaching (default 5000, project-configurable via `.swiz/config.json` `memoryWordThreshold`).
-- Before adding a new rule to `CLAUDE.md`, scan nearby rules for conflicts.
+- After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` when approaching the threshold (default 5000, project-configurable via `.swiz/config.json` `memoryWordThreshold`).
+- Before adding a rule to `CLAUDE.md`, scan nearby rules for conflicts.
 - Before issue labeling, run `gh label list`; use requested literal labels when present, otherwise ask before substituting.
 - When user provides explicit labels, remove conflicting inferred labels; do not restore inferred labels.
 - After `gh issue create`, immediately run `/refine-issue <number>` and apply readiness label (`ready`, `triaged`, `confirmed`, `accepted`, `spec-approved`); `backlog` is not readiness.
@@ -140,11 +140,11 @@ alwaysApply: false
   9. Confirm CI success; if failed, fix and re-push.
   10. Announce result.
 - Keep `Push and verify CI` task `in_progress` until `gh run view --json` confirms success.
-- Capture SHA before push; CI checks must reference that SHA.
+- Capture SHA before push; CI checks must reference it.
 - Use `swiz push-wait`; no fixed sleeps and no `--force-with-lease`.
-- Use `swiz ci-wait`; no manual `gh run watch/view` loops.
-- Do not call `TaskUpdate`/`TaskList` during steps 7-10.
-- DO NOT stop after step 3; stop hook requires origin up to date.
+- Use `swiz ci-wait`; no manual watch/view loops.
+- Don't call `TaskUpdate`/`TaskList` during steps 7-10.
+- Don't stop after step 3; stop hook requires origin up to date.
 - Push is inseparable from commit.
 - Await background pushes (`TaskOutput block:true`) before CI verification.
 - Use `swiz issue resolve <number> --body "<text>"` (not `gh issue comment` + `gh issue close`); close-only: `swiz issue close <number>`.
@@ -193,7 +193,7 @@ alwaysApply: false
 - `src/commands/continue.ts` pattern: `process.exitCode = proc.exitCode ?? 0; return`.
 - Hook scripts (`hooks/*.ts`) are the exception: `process.exit(0)` is intentional.
 - In CI/hook scripts, do not use `console.log` for status/debug; use `console.error`.
-- Use `console.log` only for structured machine-consumed output.
+- In `src/commands/`, `console.error` and `console.warn` are banned (`src/debug-logging.test.ts` enforces this). Use `console.log` for all output including user-facing errors.
 - Gate diagnostics with `SWIZ_DEBUG` using `const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {};`.
 - Reference implementations: `src/issue-store.ts`, `src/manifest.ts`, `src/commands/tasks.ts`.
 ## Conventions
