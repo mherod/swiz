@@ -640,11 +640,12 @@ export const tasksCommand: Command = {
         const [taskId, ...sessionArgs] = rest
         if (!taskId) {
           throw new Error(
-            "Usage: swiz tasks complete <task-id> --evidence TEXT --state <state> [--verify TEXT]"
+            "Usage: swiz tasks complete <task-id> --evidence TEXT --state <state> [--verify TEXT] [--subject TEXT]"
           )
         }
         const evidence = extractFlag(rest, "--evidence")
         const stateFlag = extractFlag(rest, "--state")
+        const subjectFlag = extractFlag(rest, "--subject")
         if (!stateFlag) {
           throw new Error(
             `--state <state> is required.\n` +
@@ -655,6 +656,44 @@ export const tasksCommand: Command = {
         }
         let verify = extractFlag(rest, "--verify")
         const sessionId = await resolveSession(sessionArgs)
+
+        // If the task doesn't exist in the file store (e.g. created by the native TaskCreate
+        // tool which writes to its own internal store, not to ~/.claude/tasks/), and a --subject
+        // is provided, create a stub task with the given ID so it can be completed normally.
+        // This bridges the post-compaction gap where native tool tasks have no file counterpart.
+        let taskExistsInStore = true
+        try {
+          await resolveTaskById(taskId, sessionId, filterCwd)
+        } catch (e) {
+          if (e instanceof Error && e.message.includes("not found") && subjectFlag) {
+            taskExistsInStore = false
+          } else {
+            throw e
+          }
+        }
+
+        if (!taskExistsInStore && subjectFlag) {
+          // Write a stub task file with the requested ID directly so updateStatus can find it
+          const stubTask: Task = {
+            id: taskId,
+            subject: subjectFlag,
+            description: subjectFlag,
+            status: "in_progress",
+            statusChangedAt: new Date().toISOString(),
+            elapsedMs: 0,
+            blocks: [],
+            blockedBy: [],
+          }
+          await writeTask(sessionId, stubTask, process.cwd())
+          await writeAudit(sessionId, {
+            timestamp: new Date().toISOString(),
+            taskId,
+            action: "create",
+            newStatus: "in_progress",
+            subject: subjectFlag,
+          })
+          console.log(`  ℹ️  Task #${taskId} not in file store — created stub from --subject`)
+        }
 
         // Auto-verify: if no explicit --verify was provided, extract and use task subject
         if (!verify) {
