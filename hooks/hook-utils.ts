@@ -334,6 +334,24 @@ export function blockStopRaw(reason: string): never {
   process.exit(0)
 }
 
+/**
+ * Emit a stop block that requires human action to resolve.
+ * Adds `resolution: "human-required"` to the output so the agent understands
+ * it cannot resolve the block autonomously — a human must intervene.
+ * Appends a note to the reason explaining this.
+ */
+export function blockStopHumanRequired(reason: string): never {
+  const fullReason =
+    reason +
+    "\n\nHUMAN ACTION REQUIRED: This block cannot be resolved autonomously. " +
+    "A human must take action before this session can stop. " +
+    "Report this to the user and wait for their intervention."
+  console.log(
+    JSON.stringify({ decision: "block", reason: fullReason, resolution: "human-required" })
+  )
+  process.exit(0)
+}
+
 // ─── Git / CLI helpers ──────────────────────────────────────────────────
 // Canonical definitions live in src/git-helpers.ts. Imported here so
 // internal callers within hook-utils can reference them, and re-exported

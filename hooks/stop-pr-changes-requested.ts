@@ -6,6 +6,7 @@ import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
+  blockStopHumanRequired,
   getCurrentGitHubUser,
   getDefaultBranch,
   getOpenPrForBranch,
@@ -91,12 +92,12 @@ async function main(): Promise<void> {
 
         const reason =
           `PR #${pr.number} is awaiting first review on a self-authored PR.\n\n` +
-          `You cannot request changes on your own PR. Request an external reviewer or wait for feedback before stopping.\n\n` +
+          `You cannot request changes on your own PR. An external reviewer must be assigned by a human.\n\n` +
           `Actionable next step:\n` +
           `  gh pr edit ${pr.number} --add-reviewer <github-handle>\n\n` +
           `Current status:\n` +
           `  gh pr view ${pr.number}`
-        blockStop(reason, { includeUpdateMemoryAdvice: false })
+        blockStopHumanRequired(reason)
       }
 
       const reason =

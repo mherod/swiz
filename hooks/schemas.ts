@@ -144,6 +144,9 @@ export type SessionHookInput = z.infer<typeof sessionHookInputSchema>
 export const hookOutputSchema = z
   .looseObject({
     decision: z.enum(["approve", "block"]).optional(),
+    /** When decision is "block", signals the resolution type.
+     *  "human-required" means the agent cannot resolve this autonomously — a human must act. */
+    resolution: z.enum(["human-required"]).optional(),
     hookSpecificOutput: z.looseObject({ hookEventName: z.string().optional() }).optional(),
     ok: z.boolean().optional(),
     continue: z.unknown().optional(),
