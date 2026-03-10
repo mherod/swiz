@@ -17,6 +17,7 @@ import {
   resolveProjectHooks,
 } from "../settings.ts"
 import { getWorkflowIntent } from "../state-machine.ts"
+import { parseTranscriptSummary, type TranscriptSummary } from "../transcript-summary.ts"
 import type { Command } from "../types.ts"
 import {
   computeWarmStatusLineSnapshot,
@@ -320,6 +321,92 @@ async function computeEligibility(cwd: string): Promise<EligibilitySnapshot> {
   }
 }
 
+// ─── Transcript index cache ───────────────────────────────────────────────
+
+/**
+ * Cached transcript index entry. Stores a pre-parsed TranscriptSummary
+ * plus derived artifacts, keyed by file path and validated by mtime.
+ */
+export interface TranscriptIndex {
+  summary: TranscriptSummary
+  /** tool_use IDs that were blocked by PreToolUse hooks. */
+  blockedToolUseIds: string[]
+  /** File mtime when this index was computed. */
+  mtimeMs: number
+  /** Timestamp when this index was computed. */
+  computedAt: number
+}
+
+export class TranscriptIndexCache {
+  private entries = new Map<string, TranscriptIndex>()
+
+  async get(transcriptPath: string): Promise<TranscriptIndex | null> {
+    try {
+      const file = Bun.file(transcriptPath)
+      const stat = await file.stat()
+      const mtimeMs = stat.mtimeMs ?? 0
+
+      const cached = this.entries.get(transcriptPath)
+      if (cached && cached.mtimeMs === mtimeMs) {
+        return cached
+      }
+
+      const text = await file.text()
+      const summary = parseTranscriptSummary(text)
+
+      // Collect blocked tool_use IDs from session lines
+      const blockedIds: string[] = []
+      for (const line of summary.sessionLines) {
+        if (!line.trim()) continue
+        try {
+          const entry = JSON.parse(line)
+          if (entry?.type !== "user") continue
+          const content = entry?.message?.content
+          if (!Array.isArray(content)) continue
+          for (const block of content) {
+            if (block?.type !== "tool_result") continue
+            const blockContent = block.content
+            const text =
+              typeof blockContent === "string"
+                ? blockContent
+                : Array.isArray(blockContent)
+                  ? blockContent
+                      .map((c: Record<string, unknown>) =>
+                        typeof c === "string" ? c : (c?.text ?? "")
+                      )
+                      .join("")
+                  : ""
+            if (text.includes("ACTION REQUIRED:")) {
+              blockedIds.push(String(block.tool_use_id ?? ""))
+            }
+          }
+        } catch {
+          // ignore malformed lines
+        }
+      }
+
+      const index: TranscriptIndex = {
+        summary,
+        blockedToolUseIds: blockedIds,
+        mtimeMs,
+        computedAt: Date.now(),
+      }
+      this.entries.set(transcriptPath, index)
+      return index
+    } catch {
+      return null
+    }
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+}
+
 export function hasSnapshotInvalidated(
   previous: SnapshotFingerprint | null,
   next: SnapshotFingerprint
@@ -538,6 +625,7 @@ export const daemonCommand: Command = {
     const watchers = new FileWatcherRegistry()
     const ghCache = new GhQueryCache()
     const eligibilityCache = new HookEligibilityCache()
+    const transcriptIndex = new TranscriptIndexCache()
     const projectRoot = dirname(Bun.main)
     const hooksDir = join(projectRoot, "hooks/")
     const manifestPath = join(projectRoot, "src", "manifest.ts")
@@ -680,12 +768,31 @@ export const daemonCommand: Command = {
           return Response.json(snapshot)
         }
 
+        if (url.pathname === "/transcript/index" && req.method === "POST") {
+          const body = (await req.json().catch(() => null)) as {
+            transcriptPath?: string
+          } | null
+          const tp = body?.transcriptPath
+          if (typeof tp !== "string" || tp.length === 0) {
+            return Response.json(
+              { error: "Missing required field: transcriptPath" },
+              { status: 400 }
+            )
+          }
+          const index = await transcriptIndex.get(tp)
+          if (!index) {
+            return Response.json({ error: "Transcript not found or unreadable" }, { status: 404 })
+          }
+          return Response.json(index)
+        }
+
         if (url.pathname === "/cache/status" && req.method === "GET") {
           return Response.json({
             watchers: watchers.status(),
             snapshotCacheSize: snapshots.size,
             ghCacheSize: ghCache.size,
             eligibilityCacheSize: eligibilityCache.size,
+            transcriptIndexSize: transcriptIndex.size,
           })
         }
 

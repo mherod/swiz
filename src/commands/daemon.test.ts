@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test"
+import { mkdtemp, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   createMetrics,
   FileWatcherRegistry,
@@ -7,6 +10,7 @@ import {
   hasSnapshotInvalidated,
   recordDispatch,
   serializeMetrics,
+  TranscriptIndexCache,
 } from "./daemon.ts"
 
 describe("hasSnapshotInvalidated", () => {
@@ -267,5 +271,126 @@ describe("HookEligibilityCache", () => {
 
     // This project uses bun
     expect(snapshot.detectedStacks).toContain("bun")
+  })
+})
+
+describe("TranscriptIndexCache", () => {
+  it("indexes a transcript file and caches by mtime", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "daemon-test-"))
+    const tp = join(dir, "transcript.jsonl")
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", name: "Bash", input: { command: "ls" } }],
+        },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", name: "Read", input: { file_path: "/a" } }],
+        },
+      }),
+    ]
+    await writeFile(tp, lines.join("\n"))
+
+    const cache = new TranscriptIndexCache()
+    const index = await cache.get(tp)
+    expect(index).not.toBeNull()
+    expect(index!.summary.toolCallCount).toBe(2)
+    expect(index!.summary.toolNames).toEqual(["Bash", "Read"])
+    expect(index!.summary.bashCommands).toEqual(["ls"])
+    expect(cache.size).toBe(1)
+
+    // Second call returns same cached entry (same mtime)
+    const index2 = await cache.get(tp)
+    expect(index2).toBe(index) // same reference
+  })
+
+  it("returns null for non-existent file", async () => {
+    const cache = new TranscriptIndexCache()
+    const index = await cache.get("/nonexistent/transcript.jsonl")
+    expect(index).toBeNull()
+    expect(cache.size).toBe(0)
+  })
+
+  it("detects blocked tool_use IDs from ACTION REQUIRED", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "daemon-test-"))
+    const tp = join(dir, "transcript.jsonl")
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", id: "tu_1", name: "Edit", input: {} }],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tu_1",
+              content: "Hook denied. ACTION REQUIRED: fix the issue.",
+            },
+          ],
+        },
+      }),
+    ]
+    await writeFile(tp, lines.join("\n"))
+
+    const cache = new TranscriptIndexCache()
+    const index = await cache.get(tp)
+    expect(index).not.toBeNull()
+    expect(index!.blockedToolUseIds).toContain("tu_1")
+  })
+
+  it("invalidateAll clears all entries", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "daemon-test-"))
+    const tp = join(dir, "transcript.jsonl")
+    await writeFile(tp, JSON.stringify({ type: "assistant", message: { content: [] } }))
+
+    const cache = new TranscriptIndexCache()
+    await cache.get(tp)
+    expect(cache.size).toBe(1)
+
+    cache.invalidateAll()
+    expect(cache.size).toBe(0)
+  })
+
+  it("re-indexes when file mtime changes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "daemon-test-"))
+    const tp = join(dir, "transcript.jsonl")
+    await writeFile(
+      tp,
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: "Read", input: {} }] },
+      })
+    )
+
+    const cache = new TranscriptIndexCache()
+    const index1 = await cache.get(tp)
+    expect(index1!.summary.toolCallCount).toBe(1)
+
+    // Wait briefly to ensure mtime differs, then append a line
+    await Bun.sleep(50)
+    await writeFile(
+      tp,
+      [
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "tool_use", name: "Read", input: {} }] },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "tool_use", name: "Bash", input: { command: "echo hi" } }] },
+        }),
+      ].join("\n")
+    )
+
+    const index2 = await cache.get(tp)
+    expect(index2).not.toBe(index1) // different reference — re-indexed
+    expect(index2!.summary.toolCallCount).toBe(2)
   })
 })
