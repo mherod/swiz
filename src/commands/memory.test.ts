@@ -231,9 +231,7 @@ describe("swiz memory CLI", () => {
   }, 15_000)
 
   it("supports --all and overrides detected agent context", async () => {
-    const { stdout, exitCode } = await runMemory(["--all"], {
-      CLAUDECODE: "1",
-    })
+    const { stdout, exitCode } = await runMemory(["--all"], { CLAUDECODE: "1" })
     expect(exitCode).toBe(0)
     expect(stdout).toContain("Agents: ")
     expect(stdout).toContain("Claude Code")

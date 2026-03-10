@@ -241,10 +241,7 @@ describe("dispatch replay", () => {
   test("replay JSON output includes matched_groups and hooks array", async () => {
     const result = await replay(
       "stop",
-      {
-        session_id: "test-session-replay",
-        transcript_path: "/nonexistent.jsonl",
-      },
+      { session_id: "test-session-replay", transcript_path: "/nonexistent.jsonl" },
       ["--json"]
     )
     expect(result.exitCode).toBe(0)
