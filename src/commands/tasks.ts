@@ -656,7 +656,7 @@ export const tasksCommand: Command = {
             console.log(`  ✅ #${taskId}: found — "${task.subject}" (${task.status})`)
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e)
-            console.error(`  ❌ #${taskId}: ${msg}`)
+            console.log(`  ❌ #${taskId}: ${msg}`)
             process.exitCode = 1
           }
           break
