@@ -511,6 +511,7 @@ export function getUnsupportedTranscriptFormatMessage(session: Session): string 
 export function extractText(content: string | ContentBlock[] | undefined): string {
   if (!content) return ""
   if (typeof content === "string") return content
+  if (!Array.isArray(content)) return ""
   return content
     .filter((b): b is TextBlock => b.type === "text" && !!(b as TextBlock).text)
     .map((b) => b.text!)
