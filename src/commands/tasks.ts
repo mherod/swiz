@@ -261,7 +261,7 @@ async function adoptOrphanedTasks(targetSessionId: string, cwd: string): Promise
   const { tasksDir } = getDefaultTaskRoots()
   const prefix = sessionPrefix(targetSessionId)
 
-  // Determine starting sequence number for the target session
+  // Determine starting sequence number and build dedup index for the target session
   const existing = await readTasks(targetSessionId)
   let maxSeq = existing.reduce((m, t) => {
     const parsed = parseTaskId(t.id)
@@ -269,13 +269,26 @@ async function adoptOrphanedTasks(targetSessionId: string, cwd: string): Promise
     return Math.max(m, Number.isNaN(seq) ? 0 : seq)
   }, 0)
 
+  // Dedup index: set of subject fingerprints already present in the target session
+  const existingFingerprints = new Set(
+    existing.map((t) => t.subjectFingerprint ?? computeSubjectFingerprint(t.subject))
+  )
+
   let adopted = 0
+  let skipped = 0
 
   for (const orphanSessionId of orphanIds) {
     const tasks = await readTasks(orphanSessionId)
     if (tasks.length === 0) continue
 
     for (const task of tasks) {
+      const fp = task.subjectFingerprint ?? computeSubjectFingerprint(task.subject)
+      if (existingFingerprints.has(fp)) {
+        console.log(`  ${DIM}⚠ Skipped #${task.id} (duplicate subject): ${task.subject}${RESET}`)
+        skipped++
+        continue
+      }
+      existingFingerprints.add(fp)
       maxSeq++
       const newId = `${prefix}-${maxSeq}`
       const adoptedTask: Task = { ...task, id: newId }
@@ -299,7 +312,10 @@ async function adoptOrphanedTasks(targetSessionId: string, cwd: string): Promise
     }
   }
 
-  console.log(`\n  ${adopted} task(s) adopted into session ${targetSessionId.slice(0, 8)}...\n`)
+  const skippedNote = skipped > 0 ? `, ${skipped} skipped (duplicate subject)` : ""
+  console.log(
+    `\n  ${adopted} task(s) adopted into session ${targetSessionId.slice(0, 8)}...${skippedNote}\n`
+  )
 }
 
 // ─── State update ─────────────────────────────────────────────────────────────
