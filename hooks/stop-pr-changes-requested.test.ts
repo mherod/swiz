@@ -1,10 +1,18 @@
 import { describe, expect, test } from "bun:test"
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const BUN_EXE = Bun.which("bun") ?? "bun"
 const WORKSPACE_ROOT = process.cwd()
+
+async function setTeamMode(repoDir: string): Promise<void> {
+  await mkdir(join(repoDir, ".swiz"), { recursive: true })
+  await writeFile(
+    join(repoDir, ".swiz", "config.json"),
+    JSON.stringify({ collaborationMode: "team" })
+  )
+}
 
 async function createRepo(remoteUrl: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "stop-pr-changes-requested-"))
@@ -124,6 +132,7 @@ async function runHook(
 describe("stop-pr-changes-requested", () => {
   test("blocks with awaiting-first-review message when PR has zero reviews", async () => {
     const repo = await createRepo("https://github.com/mherod/swiz.git")
+    await setTeamMode(repo)
     const fakeGh = await createFakeGhBin("awaiting")
     try {
       const result = await runHook(repo, fakeGh)
@@ -131,6 +140,26 @@ describe("stop-pr-changes-requested", () => {
       const reason = String(result.parsed?.reason ?? "")
       expect(reason).toContain("awaiting first review")
       expect(reason).toContain("PR #222")
+    } finally {
+      await Promise.all([
+        rm(repo, { recursive: true, force: true }),
+        rm(fakeGh, { recursive: true, force: true }),
+      ])
+    }
+  })
+
+  test("allows stop in relaxed-collab mode even with CHANGES_REQUESTED (no peer review required)", async () => {
+    const repo = await createRepo("https://github.com/mherod/swiz.git")
+    await mkdir(join(repo, ".swiz"), { recursive: true })
+    await writeFile(
+      join(repo, ".swiz", "config.json"),
+      JSON.stringify({ collaborationMode: "relaxed-collab" })
+    )
+    const fakeGh = await createFakeGhBin("changes-requested")
+    try {
+      const result = await runHook(repo, fakeGh)
+      expect(result.raw).toBe("")
+      expect(result.parsed).toBeNull()
     } finally {
       await Promise.all([
         rm(repo, { recursive: true, force: true }),
@@ -156,6 +185,7 @@ describe("stop-pr-changes-requested", () => {
 
   test("keeps existing CHANGES_REQUESTED blocking behaviour", async () => {
     const repo = await createRepo("https://github.com/mherod/swiz.git")
+    await setTeamMode(repo)
     const fakeGh = await createFakeGhBin("changes-requested")
     try {
       const result = await runHook(repo, fakeGh)
@@ -173,6 +203,7 @@ describe("stop-pr-changes-requested", () => {
 
   test("blocks self-authored awaiting-review PR with valid actionable guidance", async () => {
     const repo = await createRepo("https://github.com/mherod/swiz.git")
+    await setTeamMode(repo)
     const fakeGh = await createFakeGhBin("awaiting-self-authored")
     try {
       const result = await runHook(repo, fakeGh)
