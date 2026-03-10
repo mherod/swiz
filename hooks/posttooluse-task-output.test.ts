@@ -791,6 +791,15 @@ describe("posttooluse-task-output: runner presence without FAIL_RE", () => {
     expect(result.reason).toMatch(/error:.*missing-module/i)
   })
 
+  test("reports exact 0 when bun completes with no failures", async () => {
+    // Non-zero exit can still occur from non-test errors; completed runner output
+    // without fail summary should contribute an exact zero, not unknown.
+    const output = ["bun test v1.3.10", "Ran 3 tests across 1 file."].join("\n")
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toMatch(/^0 test\(s\) failed \(exit code 1\)\./)
+  })
+
   test("does not attribute runner when presence detected and exit 0", async () => {
     // Runner present but exited successfully — no failure
     const output = ["bun test v1.3.10", "Ran 3 tests across 1 file."].join("\n")
@@ -880,5 +889,17 @@ describe("posttooluse-task-output: composite concrete + presence-only fallback",
     expect(result.decision).toBe("block")
     expect(result.reason).toMatch(/2 test\(s\) failed across multiple runners/)
     expect(result.reason).toMatch(/jest, vitest/)
+  })
+
+  test("reports exact 0 for composite complete summaries with no failures", async () => {
+    const output = [
+      "bun test v1.3.10",
+      "Ran 10 tests across 2 files.",
+      "",
+      "Tests: 5 passed, 5 total",
+    ].join("\n")
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toMatch(/0 test\(s\) failed across multiple runners \(bun, jest\)/)
   })
 })

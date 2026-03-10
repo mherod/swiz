@@ -117,6 +117,8 @@ const PYTEST_SUMMARY_RE = /^=+\s+(\d+)\s+failed/m
 
 /** Matches cargo test failure: "test result: FAILED. N passed; M failed;" */
 const CARGO_FAIL_RE = /^test result: FAILED\. \d+ passed; (\d+) failed;/m
+/** Matches cargo test completion summary for pass/fail runs. */
+const CARGO_COMPLETE_RE = /^test result: (?:ok|FAILED)\./m
 
 /**
  * Matches go test completion line:
@@ -126,6 +128,8 @@ const CARGO_FAIL_RE = /^test result: FAILED\. \d+ passed; (\d+) failed;/m
  * Presence means go test ran to completion (output not truncated).
  */
 const GOTEST_COMPLETE_RE = /^(?:ok|FAIL)\s+\S+\s+\d+\.\d+s/m
+/** Matches go test success summary line only ("ok ..."). */
+const GOTEST_OK_RE = /^ok\s+\S+\s+\d+\.\d+s/m
 
 /** Matches go test failure count from "--- FAIL:" lines */
 const GOTEST_FAIL_RE = /^--- FAIL:/m
@@ -278,6 +282,15 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
       firstFailLine: matchedFailureLines[0] ?? lines.find((l) => l.includes("error:")) ?? null,
       matchedFailureLines,
     })
+  } else if (BUN_COMPLETE_RE.test(clean)) {
+    // Completed Bun run with no fail summary means zero test failures.
+    results.push({
+      runner: "bun",
+      failCount: 0,
+      isComplete: true,
+      firstFailLine: null,
+      matchedFailureLines: [],
+    })
   }
 
   // Jest
@@ -291,6 +304,14 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
       isComplete,
       firstFailLine: matchedFailureLines[0] ?? lines.find((l) => l.includes("●")) ?? null,
       matchedFailureLines,
+    })
+  } else if (JEST_COMPLETE_RE.test(clean)) {
+    results.push({
+      runner: "jest",
+      failCount: 0,
+      isComplete: true,
+      firstFailLine: null,
+      matchedFailureLines: [],
     })
   }
 
@@ -307,6 +328,14 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
         matchedFailureLines[0] ?? lines.find((l) => l.includes("AssertionError")) ?? null,
       matchedFailureLines,
     })
+  } else if (VITEST_COMPLETE_RE.test(clean)) {
+    results.push({
+      runner: "vitest",
+      failCount: 0,
+      isComplete: true,
+      firstFailLine: null,
+      matchedFailureLines: [],
+    })
   }
 
   // pytest
@@ -320,6 +349,14 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
       isComplete,
       firstFailLine: matchedFailureLines[0] ?? null,
       matchedFailureLines,
+    })
+  } else if (PYTEST_COMPLETE_RE.test(clean)) {
+    results.push({
+      runner: "pytest",
+      failCount: 0,
+      isComplete: true,
+      firstFailLine: null,
+      matchedFailureLines: [],
     })
   }
 
@@ -336,6 +373,14 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
       firstFailLine: matchedFailureLines[0] ?? null,
       matchedFailureLines,
     })
+  } else if (CARGO_COMPLETE_RE.test(clean)) {
+    results.push({
+      runner: "cargo",
+      failCount: 0,
+      isComplete: true,
+      firstFailLine: null,
+      matchedFailureLines: [],
+    })
   }
 
   // go test — count "--- FAIL:" lines
@@ -349,6 +394,14 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
       isComplete,
       firstFailLine: matchedFailureLines[0] ?? null,
       matchedFailureLines,
+    })
+  } else if (GOTEST_OK_RE.test(clean)) {
+    results.push({
+      runner: "go test",
+      failCount: 0,
+      isComplete: true,
+      firstFailLine: null,
+      matchedFailureLines: [],
     })
   }
 
@@ -364,7 +417,7 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
     )
     results.push({
       runner: "maven",
-      failCount: isComplete && total > 0 ? total : null,
+      failCount: isComplete ? total : null,
       isComplete,
       firstFailLine: matchedFailureLines[0] ?? null,
       matchedFailureLines,
@@ -383,21 +436,31 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
       firstFailLine: matchedFailureLines[0] ?? null,
       matchedFailureLines,
     })
+  } else if (GRADLE_COMPLETE_RE.test(clean)) {
+    const summaryMatch = clean.match(GRADLE_SUMMARY_RE)
+    results.push({
+      runner: "gradle",
+      failCount: summaryMatch ? parseInt(summaryMatch[1]!, 10) : 0,
+      isComplete: true,
+      firstFailLine: null,
+      matchedFailureLines: [],
+    })
   }
 
   // RSpec
   const rspecFailMatch = clean.match(RSPEC_FAIL_RE)
-  if (rspecFailMatch && parseInt(rspecFailMatch[1]!, 10) > 0) {
+  if (rspecFailMatch) {
     const isComplete = RSPEC_COMPLETE_RE.test(clean)
+    const failureCount = parseInt(rspecFailMatch[1]!, 10)
     const matchedFailureLines = uniqueLines(
       lines.filter((l) => l.trim().match(/^\d+\)/) || l.includes("Failure/Error:"))
     )
     results.push({
       runner: "rspec",
-      failCount: isComplete ? parseInt(rspecFailMatch[1]!, 10) : null,
+      failCount: isComplete ? failureCount : null,
       isComplete,
-      firstFailLine: matchedFailureLines[0] ?? null,
-      matchedFailureLines,
+      firstFailLine: failureCount > 0 ? (matchedFailureLines[0] ?? null) : null,
+      matchedFailureLines: failureCount > 0 ? matchedFailureLines : [],
     })
   } else if (clean.includes("Failure/Error:")) {
     // RSpec truncated: failure body visible but no summary line yet
@@ -412,15 +475,19 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
   }
 
   // dotnet
-  if (DOTNET_FAIL_RE.test(clean)) {
-    const summaryMatch = clean.match(DOTNET_COMPLETE_RE)
+  const dotnetSummaryMatch = clean.match(DOTNET_COMPLETE_RE)
+  if (DOTNET_FAIL_RE.test(clean) || dotnetSummaryMatch) {
     const matchedFailureLines = uniqueLines(lines.filter((l) => l.trim().startsWith("Failed ")))
     results.push({
       runner: "dotnet",
-      failCount: summaryMatch ? parseInt(summaryMatch[1]!, 10) : null,
-      isComplete: summaryMatch !== null,
-      firstFailLine: matchedFailureLines[0] ?? null,
-      matchedFailureLines,
+      failCount: dotnetSummaryMatch ? parseInt(dotnetSummaryMatch[1]!, 10) : null,
+      isComplete: dotnetSummaryMatch !== null,
+      firstFailLine:
+        dotnetSummaryMatch && parseInt(dotnetSummaryMatch[1]!, 10) === 0
+          ? null
+          : (matchedFailureLines[0] ?? null),
+      matchedFailureLines:
+        dotnetSummaryMatch && parseInt(dotnetSummaryMatch[1]!, 10) === 0 ? [] : matchedFailureLines,
     })
   }
 
@@ -437,6 +504,14 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
       isComplete,
       firstFailLine: matchedFailureLines[0] ?? null,
       matchedFailureLines,
+    })
+  } else if (PHPUNIT_COMPLETE_RE.test(clean)) {
+    results.push({
+      runner: "phpunit",
+      failCount: 0,
+      isComplete: true,
+      firstFailLine: null,
+      matchedFailureLines: [],
     })
   }
 
