@@ -3,6 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  CooldownRegistry,
   createMetrics,
   FileWatcherRegistry,
   GhQueryCache, // daemon gh cache
@@ -392,5 +393,70 @@ describe("TranscriptIndexCache", () => {
     const index2 = await cache.get(tp)
     expect(index2).not.toBe(index1) // different reference — re-indexed
     expect(index2!.summary.toolCallCount).toBe(2)
+  })
+})
+
+describe("CooldownRegistry", () => {
+  it("returns false when no cooldown has been marked", () => {
+    const reg = new CooldownRegistry()
+    expect(reg.isWithinCooldown("hook-a.ts", 60, "/repo")).toBeFalse()
+  })
+
+  it("returns true when within cooldown window", () => {
+    const reg = new CooldownRegistry()
+    reg.mark("hook-a.ts", "/repo")
+    expect(reg.isWithinCooldown("hook-a.ts", 60, "/repo")).toBeTrue()
+  })
+
+  it("returns false after cooldown expires", () => {
+    const reg = new CooldownRegistry()
+    // Manually set a timestamp in the past
+    ;(reg as unknown as { entries: Map<string, number> }).entries.set(
+      "hook-a.ts\x00/repo",
+      Date.now() - 120_000 // 2 minutes ago
+    )
+    expect(reg.isWithinCooldown("hook-a.ts", 60, "/repo")).toBeFalse()
+  })
+
+  it("isolates different cwds", () => {
+    const reg = new CooldownRegistry()
+    reg.mark("hook-a.ts", "/repo-a")
+    expect(reg.isWithinCooldown("hook-a.ts", 60, "/repo-a")).toBeTrue()
+    expect(reg.isWithinCooldown("hook-a.ts", 60, "/repo-b")).toBeFalse()
+  })
+
+  it("isolates different hook files", () => {
+    const reg = new CooldownRegistry()
+    reg.mark("hook-a.ts", "/repo")
+    expect(reg.isWithinCooldown("hook-a.ts", 60, "/repo")).toBeTrue()
+    expect(reg.isWithinCooldown("hook-b.ts", 60, "/repo")).toBeFalse()
+  })
+
+  it("checkAndMark returns false on first call and true on second", () => {
+    const reg = new CooldownRegistry()
+    expect(reg.checkAndMark("hook-a.ts", 60, "/repo")).toBeFalse()
+    expect(reg.checkAndMark("hook-a.ts", 60, "/repo")).toBeTrue()
+  })
+
+  it("invalidateProject flushes only matching entries", () => {
+    const reg = new CooldownRegistry()
+    reg.mark("hook-a.ts", "/repo-a")
+    reg.mark("hook-a.ts", "/repo-b")
+    expect(reg.size).toBe(2)
+
+    reg.invalidateProject("/repo-a")
+    expect(reg.size).toBe(1)
+    expect(reg.isWithinCooldown("hook-a.ts", 60, "/repo-a")).toBeFalse()
+    expect(reg.isWithinCooldown("hook-a.ts", 60, "/repo-b")).toBeTrue()
+  })
+
+  it("invalidateAll clears everything", () => {
+    const reg = new CooldownRegistry()
+    reg.mark("hook-a.ts", "/repo-a")
+    reg.mark("hook-b.ts", "/repo-b")
+    expect(reg.size).toBe(2)
+
+    reg.invalidateAll()
+    expect(reg.size).toBe(0)
   })
 })

@@ -407,6 +407,57 @@ export class TranscriptIndexCache {
   }
 }
 
+// ─── In-memory hook cooldown tracking ─────────────────────────────────────
+
+/**
+ * In-memory cooldown registry for daemon-backed dispatches.
+ * Replaces file-based sentinel reads/writes on the hot path.
+ * Keyed by `hookFile\0cwd` — same logical scope as `hookCooldownPath`.
+ *
+ * On daemon restart all cooldowns reset (intentional: daemon lifetime
+ * is the cache lifetime, same as GhQueryCache).
+ */
+export class CooldownRegistry {
+  private entries = new Map<string, number>()
+
+  private key(hookFile: string, cwd: string): string {
+    return `${hookFile}\x00${cwd}`
+  }
+
+  /** Check whether a hook is within its cooldown window. */
+  isWithinCooldown(hookFile: string, cooldownSeconds: number, cwd: string): boolean {
+    const lastRun = this.entries.get(this.key(hookFile, cwd))
+    if (lastRun === undefined) return false
+    return Date.now() - lastRun < cooldownSeconds * 1000
+  }
+
+  /** Record that a hook just ran (sets the cooldown start to now). */
+  mark(hookFile: string, cwd: string): void {
+    this.entries.set(this.key(hookFile, cwd), Date.now())
+  }
+
+  /** Check cooldown and mark in one call. Returns true if within cooldown. */
+  checkAndMark(hookFile: string, cooldownSeconds: number, cwd: string): boolean {
+    if (this.isWithinCooldown(hookFile, cooldownSeconds, cwd)) return true
+    this.mark(hookFile, cwd)
+    return false
+  }
+
+  invalidateProject(cwd: string): void {
+    for (const k of this.entries.keys()) {
+      if (k.endsWith(`\x00${cwd}`)) this.entries.delete(k)
+    }
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+}
+
 export function hasSnapshotInvalidated(
   previous: SnapshotFingerprint | null,
   next: SnapshotFingerprint
@@ -626,6 +677,7 @@ export const daemonCommand: Command = {
     const ghCache = new GhQueryCache()
     const eligibilityCache = new HookEligibilityCache()
     const transcriptIndex = new TranscriptIndexCache()
+    const cooldownRegistry = new CooldownRegistry()
     const projectRoot = dirname(Bun.main)
     const hooksDir = join(projectRoot, "hooks/")
     const manifestPath = join(projectRoot, "src", "manifest.ts")
@@ -786,6 +838,50 @@ export const daemonCommand: Command = {
           return Response.json(index)
         }
 
+        if (url.pathname === "/hooks/cooldown" && req.method === "POST") {
+          const body = (await req.json().catch(() => null)) as {
+            hookFile?: string
+            cooldownSeconds?: number
+            cwd?: string
+          } | null
+          const hookFile = body?.hookFile
+          const cooldownSeconds = body?.cooldownSeconds
+          const cwd = body?.cwd
+          if (
+            typeof hookFile !== "string" ||
+            typeof cooldownSeconds !== "number" ||
+            typeof cwd !== "string" ||
+            cwd.length === 0
+          ) {
+            return Response.json(
+              {
+                error:
+                  "Missing required fields: hookFile (string), cooldownSeconds (number), cwd (string)",
+              },
+              { status: 400 }
+            )
+          }
+          const withinCooldown = cooldownRegistry.isWithinCooldown(hookFile, cooldownSeconds, cwd)
+          return Response.json({ withinCooldown })
+        }
+
+        if (url.pathname === "/hooks/cooldown/mark" && req.method === "POST") {
+          const body = (await req.json().catch(() => null)) as {
+            hookFile?: string
+            cwd?: string
+          } | null
+          const hookFile = body?.hookFile
+          const cwd = body?.cwd
+          if (typeof hookFile !== "string" || typeof cwd !== "string" || cwd.length === 0) {
+            return Response.json(
+              { error: "Missing required fields: hookFile (string), cwd (string)" },
+              { status: 400 }
+            )
+          }
+          cooldownRegistry.mark(hookFile, cwd)
+          return Response.json({ marked: true })
+        }
+
         if (url.pathname === "/cache/status" && req.method === "GET") {
           return Response.json({
             watchers: watchers.status(),
@@ -793,6 +889,7 @@ export const daemonCommand: Command = {
             ghCacheSize: ghCache.size,
             eligibilityCacheSize: eligibilityCache.size,
             transcriptIndexSize: transcriptIndex.size,
+            cooldownRegistrySize: cooldownRegistry.size,
           })
         }
 
