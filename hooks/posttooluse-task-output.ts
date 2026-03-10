@@ -244,7 +244,7 @@ const TASK_NOT_FOUND_RE = /no task found with id:?\s*(\S+)/i
 /** A detected failure from a single test runner within an output stream. */
 type RunnerResult = {
   runner: string
-  failCount: number | null // null = truncated / unknown
+  failCount: number | null // null = no numeric count available
   isComplete: boolean
   firstFailLine: string | null
 }
@@ -261,9 +261,12 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
   const bunFailMatch = clean.match(BUN_FAIL_RE)
   if (bunFailMatch) {
     const isComplete = BUN_COMPLETE_RE.test(clean)
+    // Bun may print a running fail tally before the final completion line.
+    // Keep that concrete lower-bound count even when output is truncated.
+    const failCount = parseInt(bunFailMatch[1]!, 10)
     results.push({
       runner: "bun",
-      failCount: isComplete ? parseInt(bunFailMatch[1]!, 10) : null,
+      failCount,
       isComplete,
       firstFailLine: lines.find((l) => l.includes("✗") || l.includes("error:")) ?? null,
     })
@@ -441,23 +444,26 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
 function formatRunnerFailure(results: RunnerResult[], exitCode: number): string {
   if (results.length === 1) {
     const r = results[0]!
-    const countLabel = r.failCount !== null ? `${r.failCount}` : "unknown number of"
+    // For a single incomplete runner, avoid presenting partial tallies as exact.
+    const countLabel =
+      r.failCount === null || !r.isComplete ? "unknown number of" : `${r.failCount}`
     const detail = r.firstFailLine ? `\n\nFirst failure: ${r.firstFailLine.trim()}` : ""
     return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
   }
 
-  // Composite: aggregate across all runners, distinguishing concrete vs presence-only.
-  // All runners set failCount only when isComplete is true, so failCount !== null ↔ isComplete.
+  // Composite: aggregate across all runners.
+  // Incomplete runners with concrete counts are lower bounds, not exact totals.
   const concrete = results.filter((r) => r.failCount !== null)
   const hasPresenceOnly = results.some((r) => r.failCount === null)
+  const hasIncompleteConcrete = concrete.some((r) => !r.isComplete)
   const concreteFails = concrete.reduce((sum, r) => sum + r.failCount!, 0)
 
   let countLabel: string
   if (concrete.length === 0) {
     // All presence-only — no concrete counts at all
     countLabel = "unknown number of"
-  } else if (hasPresenceOnly) {
-    // Mix of concrete + presence-only: concrete sum is real but total is unknown
+  } else if (hasPresenceOnly || hasIncompleteConcrete) {
+    // Mix includes unknown contribution or incomplete tallies: lower bound only.
     countLabel = `${concreteFails}+`
   } else {
     // All runners have concrete, complete counts — sum is exact

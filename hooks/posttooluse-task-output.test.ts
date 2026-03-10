@@ -845,4 +845,23 @@ describe("posttooluse-task-output: composite concrete + presence-only fallback",
     expect(result.reason).toMatch(/3\+ test\(s\) failed across multiple runners/)
     expect(result.reason).toMatch(/pytest, dotnet/)
   })
+
+  test("uses lower-bound count when bun tally is incomplete", async () => {
+    // Bun emits a fail tally but not the completion marker (truncated output),
+    // while cargo is detected via presence-only fallback.
+    const output = [
+      "bun test v1.3.10",
+      "✗ src/foo.test.ts > fails",
+      "2 fail",
+      "",
+      "   Compiling mylib v0.1.0",
+      "error[E0308]: mismatched types",
+      "   running 0 tests",
+    ].join("\n")
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    // Bun contributes a concrete lower-bound count even though it's incomplete.
+    expect(result.reason).toMatch(/2\+ test\(s\) failed across multiple runners/)
+    expect(result.reason).toMatch(/bun, cargo/)
+  })
 })
