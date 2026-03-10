@@ -2,7 +2,8 @@
 // Stop hook: Block stop if current branch has CHANGES_REQUESTED reviews
 
 import { min, uniq } from "lodash-es"
-import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
+import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
   getCurrentGitHubUser,
@@ -23,9 +24,15 @@ async function main(): Promise<void> {
   const input = stopHookInputSchema.parse(await Bun.stdin.json())
   const cwd = input.cwd ?? process.cwd()
 
-  const settings = await readSwizSettings()
-  const effective = getEffectiveSwizSettings(settings, input.session_id)
+  const [globalSettings, projectSettings] = await Promise.all([
+    readSwizSettings(),
+    readProjectSettings(cwd),
+  ])
+  const effective = getEffectiveSwizSettings(globalSettings, input.session_id, projectSettings)
   if (!effective.changesRequestedGate) return
+
+  const modePolicy = getCollaborationModePolicy(effective.collaborationMode)
+  if (!modePolicy.requirePeerReview) return
 
   if (!(await isGitRepo(cwd))) return
   if (!hasGhCli()) return
