@@ -550,7 +550,7 @@ export function isHookFeedback(content: string | ContentBlock[] | undefined): bo
  * a newer non-hook-feedback assistant turn appears after it.
  */
 export function findHumanRequiredBlock(transcriptText: string, limit = 20): string | null {
-  const SENTINEL = "HUMAN ACTION REQUIRED:"
+  const SENTINEL = "ACTION REQUIRED:"
   const entries: Array<{ type?: string; message?: { role?: string; content?: unknown } }> = []
   for (const entry of parseTranscriptEntries(transcriptText)) {
     entries.push(entry)
