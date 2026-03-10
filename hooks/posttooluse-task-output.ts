@@ -192,6 +192,26 @@ const DOTNET_FAIL_RE = /^\s+Failed \S/m
  */
 const DOTNET_COMPLETE_RE = /Failed:\s+(\d+), Passed:\s+\d+.*Total:\s+\d+/
 
+/**
+ * Detects PHPUnit failure summary lines:
+ *   "FAILURES!"  — test failures
+ *   "ERRORS!"    — test errors
+ * Only present when the full test run completes.
+ */
+const PHPUNIT_FAIL_RE = /^(?:FAILURES!|ERRORS!)/m
+
+/**
+ * Matches PHPUnit completion summary lines:
+ *   "OK (7 tests, 14 assertions)"
+ *   "FAILURES!\nTests: 7, Assertions: 10, Failures: 2."
+ *   "ERRORS!\nTests: 7, Assertions: 10, Errors: 1."
+ * Always the last line of PHPUnit output.
+ */
+const PHPUNIT_COMPLETE_RE = /^(?:OK \(\d+|Tests: \d+, Assertions: \d+)/m
+
+/** Extracts PHPUnit failure or error count from summary line */
+const PHPUNIT_COUNT_RE = /(?:Failures|Errors):\s*(\d+)/
+
 /** Matches lefthook hook block indicators */
 const HOOK_FAIL_RE = /🥊.*hook: (pre-push|pre-commit)|error: failed to push/i
 
@@ -336,6 +356,16 @@ function detectFailure(output: string, exitCode: number | null): string | null {
       const isComplete = summaryMatch !== null
       const countLabel = isComplete ? `${summaryMatch![1]}` : "unknown number of"
       const failLine = lines.find((l) => l.trim().startsWith("Failed "))
+      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
+      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+    }
+
+    // PHPUnit failures
+    if (PHPUNIT_FAIL_RE.test(clean)) {
+      const isComplete = PHPUNIT_COMPLETE_RE.test(clean)
+      const countMatch = clean.match(PHPUNIT_COUNT_RE)
+      const countLabel = isComplete && countMatch ? `${countMatch[1]}` : "unknown number of"
+      const failLine = lines.find((l) => l.trim().match(/^\d+\)/) || l.includes("Error: "))
       const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
       return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
     }

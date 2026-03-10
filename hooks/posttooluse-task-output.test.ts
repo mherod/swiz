@@ -674,3 +674,61 @@ describe("posttooluse-task-output: tool error handling", () => {
     expect(result.reason).toContain("recovered from file")
   })
 })
+
+describe("posttooluse-task-output: PHPUnit runner detection", () => {
+  test("PHPUnit complete run with failures reports exact count", async () => {
+    const output = [
+      "PHPUnit 10.5.0 by Sebastian Bergmann and contributors.",
+      "",
+      "..F..E.",
+      "",
+      "FAILURES!",
+      "Tests: 7, Assertions: 10, Failures: 2, Errors: 1.",
+    ].join("\n")
+    const payload = {
+      tool_name: "TaskOutput",
+      cwd: "/project",
+      session_id: "test-session",
+      tool_response: { output, exit_code: 1 },
+      tool_input: { task_id: "test-task" },
+    }
+    const result = await runHook(payload)
+    expect(result.decision).toBe("block")
+    expect(result.reason).toMatch(/^2 test\(s\) failed/)
+  })
+
+  test("PHPUnit truncated output with FAILURES! reports unknown count", async () => {
+    const output = ["PHPUnit 10.5.0 by Sebastian Bergmann and contributors.", "", "FAILURES!"].join(
+      "\n"
+    )
+    const payload = {
+      tool_name: "TaskOutput",
+      cwd: "/project",
+      session_id: "test-session",
+      tool_response: { output, exit_code: 1 },
+      tool_input: { task_id: "test-task" },
+    }
+    const result = await runHook(payload)
+    expect(result.decision).toBe("block")
+    expect(result.reason).toMatch(/^unknown number of test\(s\) failed/)
+  })
+
+  test("PHPUnit all passing does not block", async () => {
+    const output = [
+      "PHPUnit 10.5.0 by Sebastian Bergmann and contributors.",
+      "",
+      ".......",
+      "",
+      "OK (7 tests, 14 assertions)",
+    ].join("\n")
+    const payload = {
+      tool_name: "TaskOutput",
+      cwd: "/project",
+      session_id: "test-session",
+      tool_response: { output, exit_code: 0 },
+      tool_input: { task_id: "test-task" },
+    }
+    const result = await runHook(payload)
+    expect(result.decision).toBeUndefined()
+  })
+})
