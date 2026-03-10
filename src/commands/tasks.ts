@@ -131,6 +131,34 @@ export function validateEvidence(evidence: string): string | null {
     )
   }
 
+  // Validate every segment's prefix, not just the first one.
+  // A segment "looks like" it has a prefix when it contains ":" and the text
+  // before the first ":" is 2–20 word characters (not a URL or plain sentence).
+  // A prefix-shaped segment is valid if it either starts with an EVIDENCE_PREFIXES
+  // entry OR matches at least one EVIDENCE_SEGMENT_PATTERNS regex (e.g. "conclusion:").
+  const SEGMENT_SPLIT_RE = /\s*(?:—|--|;|\|)\s*|\s*,\s+/
+  const PREFIX_SHAPE_RE = /^(\w{2,20}):/
+  const segments = evidence
+    .split(SEGMENT_SPLIT_RE)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  for (const seg of segments) {
+    const m = PREFIX_SHAPE_RE.exec(seg)
+    if (m) {
+      const candidate = `${m[1]}:`
+      const isKnownPrefix = EVIDENCE_PREFIXES.includes(candidate)
+      const matchesPattern = EVIDENCE_SEGMENT_PATTERNS.some(({ re }) => re.test(seg))
+      if (!isKnownPrefix && !matchesPattern) {
+        return (
+          `Invalid evidence prefix "${candidate}" in segment: "${seg}"\n` +
+          "Recognized prefixes:\n" +
+          EVIDENCE_PREFIXES.map((p) => `  ${p}<value>`).join("\n") +
+          '\n\nExample: --evidence "commit:abc123f" or --evidence "note:CI green"'
+        )
+      }
+    }
+  }
+
   const matched = countEvidenceFields(evidence)
   if (matched.length < REQUIRED_EVIDENCE_FIELDS) {
     const found = matched.length > 0 ? matched.join(", ") : "none"

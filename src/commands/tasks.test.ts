@@ -250,6 +250,26 @@ describe("validateEvidence", () => {
   it("rejects empty-ish evidence without prefix", () => {
     expect(validateEvidence("CI passed")).not.toBeNull()
   })
+
+  it("rejects multi-segment evidence where a later segment has an unrecognized prefix", () => {
+    const error = validateEvidence("note:CI green -- bogus:whatever")
+    expect(error).not.toBeNull()
+    expect(error).toContain("bogus:")
+    expect(error).toContain("Invalid evidence prefix")
+  })
+
+  it("accepts multi-segment evidence where all segments use recognized prefixes", () => {
+    expect(validateEvidence("commit:abc1234 -- note:all jobs passed")).toBeNull()
+    expect(validateEvidence("pr:#42 -- note:squash merged")).toBeNull()
+    expect(validateEvidence("file:src/foo.ts -- note:updated")).toBeNull()
+    expect(validateEvidence("test:passing -- note:all green")).toBeNull()
+  })
+
+  it("rejects a three-char unknown prefix in a later segment", () => {
+    const error = validateEvidence("note:CI green -- foo:bar")
+    expect(error).not.toBeNull()
+    expect(error).toContain("foo:")
+  })
 })
 
 // ─── verifyTaskSubject ────────────────────────────────────────────────────────
