@@ -11,6 +11,7 @@ import {
   getProjectSettingsPath,
   getStatePath,
   getSwizSettingsPath,
+  type ProjectSwizSettings,
   readProjectSettings,
   readProjectState,
   readSwizSettings,
@@ -504,6 +505,63 @@ export class GitStateCache {
   }
 }
 
+// ─── Project settings cache ───────────────────────────────────────────────
+
+/**
+ * Cached project settings and resolved hook groups for a single project.
+ */
+export interface CachedProjectSettings {
+  settings: ProjectSwizSettings | null
+  resolvedHooks: import("../manifest.ts").HookGroup[]
+  warnings: string[]
+  cachedAt: number
+}
+
+/**
+ * Per-project cache of `readProjectSettings()` + `resolveProjectHooks()`.
+ * Avoids re-reading `.swiz/config.json` and re-running `existsSync` checks
+ * on every dispatch. Invalidated when the project settings file changes.
+ */
+export class ProjectSettingsCache {
+  private entries = new Map<string, CachedProjectSettings>()
+
+  async get(cwd: string): Promise<CachedProjectSettings> {
+    const cached = this.entries.get(cwd)
+    if (cached) return cached
+
+    const settings = await readProjectSettings(cwd)
+    let resolvedHooks: import("../manifest.ts").HookGroup[] = []
+    let warnings: string[] = []
+
+    if (settings?.hooks?.length) {
+      const result = resolveProjectHooks(settings.hooks, cwd)
+      resolvedHooks = result.resolved
+      warnings = result.warnings
+    }
+
+    const entry: CachedProjectSettings = {
+      settings,
+      resolvedHooks,
+      warnings,
+      cachedAt: Date.now(),
+    }
+    this.entries.set(cwd, entry)
+    return entry
+  }
+
+  invalidateProject(cwd: string): void {
+    this.entries.delete(cwd)
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+}
+
 export function hasSnapshotInvalidated(
   previous: SnapshotFingerprint | null,
   next: SnapshotFingerprint
@@ -725,6 +783,7 @@ export const daemonCommand: Command = {
     const transcriptIndex = new TranscriptIndexCache()
     const cooldownRegistry = new CooldownRegistry()
     const gitStateCache = new GitStateCache()
+    const projectSettingsCache = new ProjectSettingsCache()
     const projectRoot = dirname(Bun.main)
     const hooksDir = join(projectRoot, "hooks/")
     const manifestPath = join(projectRoot, "src", "manifest.ts")
@@ -754,6 +813,7 @@ export const daemonCommand: Command = {
       ghCache.invalidateAll()
       eligibilityCache.invalidateAll()
       gitStateCache.invalidateAll()
+      projectSettingsCache.invalidateAll()
     }
 
     watchers.register(manifestPath, "manifest", flushSnapshots)
@@ -774,6 +834,7 @@ export const daemonCommand: Command = {
         ghCache.invalidateProject(cwd)
         eligibilityCache.invalidateProject(cwd)
         gitStateCache.invalidateProject(cwd)
+        projectSettingsCache.invalidateProject(cwd)
       }
       const projectSettings = getProjectSettingsPath(cwd)
       if (projectSettings)
@@ -947,6 +1008,19 @@ export const daemonCommand: Command = {
           return Response.json(state)
         }
 
+        if (url.pathname === "/settings/project" && req.method === "POST") {
+          const body = (await req.json().catch(() => null)) as {
+            cwd?: string
+          } | null
+          const cwd = body?.cwd
+          if (typeof cwd !== "string" || cwd.length === 0) {
+            return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
+          }
+          registerProjectWatchers(cwd)
+          const cached = await projectSettingsCache.get(cwd)
+          return Response.json(cached)
+        }
+
         if (url.pathname === "/cache/status" && req.method === "GET") {
           return Response.json({
             watchers: watchers.status(),
@@ -956,6 +1030,7 @@ export const daemonCommand: Command = {
             transcriptIndexSize: transcriptIndex.size,
             cooldownRegistrySize: cooldownRegistry.size,
             gitStateCacheSize: gitStateCache.size,
+            projectSettingsCacheSize: projectSettingsCache.size,
           })
         }
 

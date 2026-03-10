@@ -10,6 +10,7 @@ import {
   GitStateCache,
   HookEligibilityCache,
   hasSnapshotInvalidated,
+  ProjectSettingsCache,
   recordDispatch,
   serializeMetrics,
   TranscriptIndexCache,
@@ -503,6 +504,64 @@ describe("GitStateCache", () => {
 
   it("invalidateAll clears everything", async () => {
     const cache = new GitStateCache()
+    await cache.get(process.cwd())
+    expect(cache.size).toBe(1)
+
+    cache.invalidateAll()
+    expect(cache.size).toBe(0)
+  })
+})
+
+describe("ProjectSettingsCache", () => {
+  it("caches project settings for a directory", async () => {
+    const cache = new ProjectSettingsCache()
+    const result = await cache.get(process.cwd())
+
+    expect(result).not.toBeNull()
+    expect(result.cachedAt).toBeGreaterThan(0)
+    expect(cache.size).toBe(1)
+  })
+
+  it("returns null settings for directory without .swiz/config.json", async () => {
+    const cache = new ProjectSettingsCache()
+    const dir = await mkdtemp(join(tmpdir(), "daemon-test-"))
+    const result = await cache.get(dir)
+
+    expect(result.settings).toBeNull()
+    expect(result.resolvedHooks).toEqual([])
+    expect(result.warnings).toEqual([])
+    expect(cache.size).toBe(1)
+  })
+
+  it("returns cached reference on second call", async () => {
+    const cache = new ProjectSettingsCache()
+    const r1 = await cache.get(process.cwd())
+    const r2 = await cache.get(process.cwd())
+
+    expect(r1).toBe(r2) // same reference — cached
+  })
+
+  it("caches different projects independently", async () => {
+    const cache = new ProjectSettingsCache()
+    const dir = await mkdtemp(join(tmpdir(), "daemon-test-"))
+    await cache.get(process.cwd())
+    await cache.get(dir)
+    expect(cache.size).toBe(2)
+  })
+
+  it("invalidateProject flushes only matching entries", async () => {
+    const cache = new ProjectSettingsCache()
+    const dir = await mkdtemp(join(tmpdir(), "daemon-test-"))
+    await cache.get(process.cwd())
+    await cache.get(dir)
+    expect(cache.size).toBe(2)
+
+    cache.invalidateProject(dir)
+    expect(cache.size).toBe(1)
+  })
+
+  it("invalidateAll clears everything", async () => {
+    const cache = new ProjectSettingsCache()
     await cache.get(process.cwd())
     expect(cache.size).toBe(1)
 
