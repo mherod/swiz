@@ -215,6 +215,67 @@ This cycle is the self-directed loop in practice. Each invocation of `swiz idea`
 | `auto-vibed` | Informal; unclear in engineering contexts without explanation |
 | `vibe-specced` | Same; sounds like slang and would require a definition footnote every time |
 
+---
+
+## Reflective Mode Loop
+
+When `ambitionMode` is set to `"reflective"`, the stop-auto-continue hook runs a self-reinforcing critique cycle rather than a forward-progress cycle.
+
+### How it works
+
+Each stop attempt triggers the following sequence:
+
+```
+1. stop-auto-continue fires on Stop event
+          ↓
+2. AI extracts concrete DO/DON'T directives from the transcript ("reflections")
+          ↓
+3. normalizeReflectiveNextStep() converts the top reflection into a blocking next directive
+          ↓
+4. writeReflections() appends new directives to MEMORY.md (deduplicated)
+          ↓
+5. blockStopRaw() blocks stop — next session's transcript contains the new directives
+          ↓
+6. Next session reads directives, generates new critique → repeat
+```
+
+### `normalizeReflectiveNextStep(reflections)`
+
+Located in `hooks/stop-auto-continue.ts`. Takes the first reflection from the AI response and maps it to a blocking `next` directive:
+
+| Reflection prefix | Blocking directive |
+|-------------------|--------------------|
+| `DO: X` | `"Apply this confirmed reflection immediately in code: X"` |
+| `DON'T: X` | `"Avoid this confirmed anti-pattern in the next code change: X"` |
+| Other | `"Apply this confirmed reflection immediately in code: <text>"` |
+
+This override replaces any `next` value the AI produced — the top reflection always drives the next block reason in reflective mode.
+
+### `writeReflections(cwd, reflections)`
+
+Appends new directives to `MEMORY.md` under `## Confirmed Patterns`, with:
+
+- **Deduplication**: Checks first ~60 chars of each reflection (after stripping `DO:`/`DON'T:` prefix) against existing content. Already-present directives are skipped.
+- **Line cap**: Stops appending once `MEMORY.md` approaches ~200 lines.
+- **Format**: Each entry is written as a bold `**DO**` or `**DON'T**` directive.
+
+This call is **unconditional** when reflections are non-empty — it fires regardless of whether the stop is blocked.
+
+### When the loop is expected behavior
+
+The reflective mode loop is intentional. When all real work is committed and pushed, the cycle shifts to meta-improvement: the AI critiques its own prior session behavior, writes the strongest directives to `MEMORY.md`, and blocks stop until the directives are acted on.
+
+The loop terminates naturally when the AI runs out of high-signal directives to extract. It is not an error to be fixed.
+
+### When to investigate
+
+Investigate if:
+- The same directive appears repeatedly across many sessions (dedup should prevent this — check `writeReflections` dedup logic)
+- Stop is blocked with an empty or nonsensical `next` value (check `normalizeReflectiveNextStep` edge cases)
+- `MEMORY.md` grows past the 200-line cap (compaction via `/compact-memory` is needed)
+
+---
+
 See also:
 - [`commands.md`](./commands.md) — full command reference including `idea`, `reflect`, and `continue`
 - [`dispatch-engine.md`](./dispatch-engine.md) — how hook events are dispatched at runtime
