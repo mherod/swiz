@@ -1,4 +1,6 @@
-import { DIM, RESET } from "../ansi.ts"
+import { unlink } from "node:fs/promises"
+import { join } from "node:path"
+import { DIM, GREEN, RESET } from "../ansi.ts"
 import {
   PROJECT_STATES,
   type ProjectState,
@@ -7,6 +9,7 @@ import {
   writeProjectState,
 } from "../settings.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
+import { getDefaultTaskRoots } from "../task-roots.ts"
 import { type DateFormat, listAllSessionsTasks, listTasks } from "../tasks/task-renderer.ts"
 import {
   compareTaskIds,
@@ -239,6 +242,66 @@ async function completeAll(filterCwd?: string, evidence?: string) {
   }
 }
 
+// ─── Adopt ────────────────────────────────────────────────────────────────────
+
+/**
+ * Re-associate all tasks from orphan (compaction-gap) sessions into the given
+ * target session. Each task is written to the target session directory under a
+ * new prefixed ID to avoid collisions, then removed from the orphan session.
+ * Skips orphan sessions that already belong to another project (none do by
+ * definition, but guards against stale index races).
+ */
+async function adoptOrphanedTasks(targetSessionId: string, cwd: string): Promise<void> {
+  const orphanIds = await getOrphanSessionIds()
+  if (orphanIds.size === 0) {
+    console.log("\n  No recovered sessions to adopt.\n")
+    return
+  }
+
+  const { tasksDir } = getDefaultTaskRoots()
+  const prefix = sessionPrefix(targetSessionId)
+
+  // Determine starting sequence number for the target session
+  const existing = await readTasks(targetSessionId)
+  let maxSeq = existing.reduce((m, t) => {
+    const parsed = parseTaskId(t.id)
+    const seq = parsed.prefix === prefix || parsed.prefix === null ? parsed.seq : 0
+    return Math.max(m, Number.isNaN(seq) ? 0 : seq)
+  }, 0)
+
+  let adopted = 0
+
+  for (const orphanSessionId of orphanIds) {
+    const tasks = await readTasks(orphanSessionId)
+    if (tasks.length === 0) continue
+
+    for (const task of tasks) {
+      maxSeq++
+      const newId = `${prefix}-${maxSeq}`
+      const adoptedTask: Task = { ...task, id: newId }
+      await writeTask(targetSessionId, adoptedTask, cwd)
+      await writeAudit(targetSessionId, {
+        timestamp: new Date().toISOString(),
+        taskId: newId,
+        action: "create",
+        newStatus: adoptedTask.status,
+        subject: adoptedTask.subject,
+        verificationText: `adopted from orphan session ${orphanSessionId.slice(0, 8)}`,
+      })
+      // Remove from orphan session
+      try {
+        await unlink(join(tasksDir, orphanSessionId, `${task.id}.json`))
+      } catch {}
+      console.log(
+        `  ${GREEN}✓${RESET} Adopted #${newId} ${DIM}(was ${task.id} in ${orphanSessionId.slice(0, 8)}...)${RESET}: ${task.subject}`
+      )
+      adopted++
+    }
+  }
+
+  console.log(`\n  ${adopted} task(s) adopted into session ${targetSessionId.slice(0, 8)}...\n`)
+}
+
 // ─── State update ─────────────────────────────────────────────────────────────
 
 async function applyStateUpdate(targetState: string, cwd: string): Promise<void> {
@@ -358,7 +421,7 @@ export const tasksCommand: Command = {
   name: "tasks",
   description: "View and manage agent tasks",
   usage:
-    "swiz tasks [create|complete|evidence|status|complete-all] [--session <id>] [--all-projects] [--all-sessions] [--recovered] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
+    "swiz tasks [create|complete|evidence|status|complete-all|adopt] [--session <id>] [--all-projects] [--all-sessions] [--recovered] [--date-format <relative|absolute>] [--evidence <text>] [--verify <text>] [--state <state>]",
   options: [
     { flags: "create <subject> <desc>", description: "Create a new task in the current session" },
     {
@@ -374,6 +437,10 @@ export const tasksCommand: Command = {
       description: "Set status: pending | in_progress | completed | cancelled",
     },
     { flags: "complete-all", description: "Mark all incomplete tasks in the session completed" },
+    {
+      flags: "adopt [--recovered]",
+      description: "Re-associate orphan (compaction-gap) session tasks to the current session",
+    },
     { flags: "--session <id>", description: "Target a specific session (prefix match)" },
     { flags: "--all-projects", description: "Show tasks from all projects, not just cwd" },
     {
@@ -562,6 +629,12 @@ export const tasksCommand: Command = {
       case "complete-all": {
         const evidence = extractFlag(rest, "--evidence")
         await completeAll(filterCwd, evidence ?? undefined)
+        break
+      }
+
+      case "adopt": {
+        const sessionId = await resolveSession(rest)
+        await adoptOrphanedTasks(sessionId, process.cwd())
         break
       }
 
