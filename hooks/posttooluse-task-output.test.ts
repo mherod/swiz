@@ -778,3 +778,33 @@ describe("posttooluse-task-output: composite multi-runner output", () => {
     expect(result.decision).toBeUndefined()
   })
 })
+
+describe("posttooluse-task-output: runner presence without FAIL_RE", () => {
+  test("attributes failure to bun when presence detected but no fail summary", async () => {
+    // Compile error — bun test starts but crashes before emitting fail count
+    const output = ["bun test v1.3.10", 'error: Could not resolve "missing-module"', ""].join("\n")
+    const result = await runHook(makePayload(output, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toMatch(/unknown number of test\(s\) failed/)
+    expect(result.reason).toMatch(/error:.*missing-module/i)
+  })
+
+  test("does not attribute runner when presence detected and exit 0", async () => {
+    // Runner present but exited successfully — no failure
+    const output = ["bun test v1.3.10", "Ran 3 tests across 1 file."].join("\n")
+    const result = await runHook(makePayload(output, 0))
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("attributes failure to cargo when compile error before tests run", async () => {
+    const output = [
+      "   Compiling mylib v0.1.0",
+      "error[E0308]: mismatched types",
+      "   running 0 tests",
+    ].join("\n")
+    const result = await runHook(makePayload(output, 101))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toMatch(/unknown number of test\(s\) failed/)
+    expect(result.reason).toMatch(/error/)
+  })
+})

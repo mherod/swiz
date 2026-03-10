@@ -113,14 +113,6 @@ const PYTEST_FAIL_RE = /^FAILED /m
  */
 const PYTEST_SUMMARY_RE = /^=+\s+(\d+)\s+failed/m
 
-/**
- * Matches cargo test completion line:
- *   "test result: FAILED. 1 passed; 2 failed; 0 ignored;"
- *   "test result: ok. 5 passed; 0 failed;"
- * Always the last line of a cargo test run.
- */
-const CARGO_COMPLETE_RE = /^test result: (?:ok|FAILED)\./m
-
 /** Matches cargo test failure: "test result: FAILED. N passed; M failed;" */
 const CARGO_FAIL_RE = /^test result: FAILED\. \d+ passed; (\d+) failed;/m
 
@@ -211,6 +203,23 @@ const PHPUNIT_COMPLETE_RE = /^(?:OK \(\d+|Tests: \d+, Assertions: \d+)/m
 
 /** Extracts PHPUnit failure or error count from summary line */
 const PHPUNIT_COUNT_RE = /(?:Failures|Errors):\s*(\d+)/
+
+// ─── Runner presence patterns ────────────────────────────────────────────────
+// These detect that a runner was invoked even when no FAIL_RE matches (e.g.,
+// compile error before any tests run). Used as a fallback in collectRunnerResults
+// to attribute a non-zero exit to a specific runner.
+
+const BUN_PRESENCE_RE = /\bbun test\b/
+const JEST_PRESENCE_RE = /\bjest\b.*--/i
+const VITEST_PRESENCE_RE = /\bvitest\b/i
+const PYTEST_PRESENCE_RE = /^={3,} test session starts ={3,}/m
+const GOTEST_PRESENCE_RE = /^=== RUN\s/m
+const MAVEN_PRESENCE_RE = /\[INFO\] --- .*surefire|failsafe/i
+const GRADLE_PRESENCE_RE = /> Task :.*test/
+const RSPEC_PRESENCE_RE = /^Randomized with seed \d+|^Finished in \d+/m
+const DOTNET_PRESENCE_RE = /^Starting test execution/m
+const PHPUNIT_PRESENCE_RE = /^PHPUnit \d+/m
+const CARGO_PRESENCE_RE = /^\s+running \d+ tests?$/m
 
 /** Matches lefthook hook block indicators */
 const HOOK_FAIL_RE = /🥊.*hook: (pre-push|pre-commit)|error: failed to push/i
@@ -391,6 +400,35 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
     })
   }
 
+  // ─── Fallback: runner presence without FAIL_RE match ───────────────────────
+  // When a runner's output is present but no FAIL_RE matched (e.g., compile error
+  // before tests run), attribute the non-zero exit to that runner rather than
+  // falling through to the generic handler.
+  const detected = new Set(results.map((r) => r.runner))
+  const presenceChecks: Array<{ runner: string; re: RegExp; errorHint: string }> = [
+    { runner: "bun", re: BUN_PRESENCE_RE, errorHint: "error:" },
+    { runner: "jest", re: JEST_PRESENCE_RE, errorHint: "Error:" },
+    { runner: "vitest", re: VITEST_PRESENCE_RE, errorHint: "Error:" },
+    { runner: "pytest", re: PYTEST_PRESENCE_RE, errorHint: "ERROR " },
+    { runner: "cargo", re: CARGO_PRESENCE_RE, errorHint: "error[" },
+    { runner: "go test", re: GOTEST_PRESENCE_RE, errorHint: "Error" },
+    { runner: "maven", re: MAVEN_PRESENCE_RE, errorHint: "ERROR" },
+    { runner: "gradle", re: GRADLE_PRESENCE_RE, errorHint: "FAILED" },
+    { runner: "rspec", re: RSPEC_PRESENCE_RE, errorHint: "Error:" },
+    { runner: "dotnet", re: DOTNET_PRESENCE_RE, errorHint: "Error" },
+    { runner: "phpunit", re: PHPUNIT_PRESENCE_RE, errorHint: "Error" },
+  ]
+  for (const { runner, re, errorHint } of presenceChecks) {
+    if (!detected.has(runner) && re.test(clean)) {
+      results.push({
+        runner,
+        failCount: null,
+        isComplete: false,
+        firstFailLine: lines.find((l) => l.toLowerCase().includes(errorHint.toLowerCase())) ?? null,
+      })
+    }
+  }
+
   return results
 }
 
@@ -430,13 +468,6 @@ function detectFailure(output: string, exitCode: number | null): string | null {
     const runnerResults = collectRunnerResults(clean, lines)
     if (runnerResults.length > 0) {
       return formatRunnerFailure(runnerResults, exitCode)
-    }
-
-    // cargo compile error (COMPLETE_RE present but no FAIL_RE match above)
-    if (CARGO_COMPLETE_RE.test(clean)) {
-      const failLine = lines.find((l) => l.toLowerCase().includes("error"))
-      const detail = failLine ? `\n\nError: ${failLine.trim()}` : ""
-      return `Background task exited with code ${exitCode}.${detail}\n\nDo not proceed until this failure is resolved.`
     }
 
     // Push / hook failures
