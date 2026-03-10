@@ -565,13 +565,20 @@ export function findHumanRequiredBlock(transcriptText: string, limit = 20): stri
     }
     if (entry?.type === "user") {
       const content = entry?.message?.content
-      if (typeof content === "string" && content.startsWith("<command-message>")) {
-        if (content.includes(SENTINEL)) {
-          return content
-            .replace(/^<command-message>\s*/i, "")
-            .replace(/<\/command-message>\s*$/i, "")
-            .trim()
-        }
+      const text =
+        typeof content === "string"
+          ? content
+          : Array.isArray(content)
+            ? content
+                .filter((b): b is TextBlock => b.type === "text")
+                .map((b) => b.text ?? "")
+                .join("")
+            : ""
+      if (text.startsWith("<command-message>") && text.includes(SENTINEL)) {
+        return text
+          .replace(/^<command-message>\s*/i, "")
+          .replace(/<\/command-message>\s*$/i, "")
+          .trim()
       }
     }
   }
