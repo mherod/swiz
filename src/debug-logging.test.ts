@@ -13,26 +13,27 @@ import { describe, expect, it } from "vitest"
 
 const SRC_ROOT = join(import.meta.dirname ?? ".", "..")
 
-/** Files in src/ that legitimately use console.error for user-facing output. */
-const STDERR_ALLOWLIST = new Set([
-  // CLI error handler — unknown command, uncaught exception
-  "src/cli.ts",
-  // CI failure/error status reporting with exit codes
-  "src/commands/ci-wait.ts",
-  // push-ci failure reporting (CI conclusion !== "success")
-  "src/commands/push-ci.ts",
-  // Interactive merge progress indicators (→ Gathering..., ✓ Resolved)
-  "src/commands/mergetool.ts",
-  // User-invoked replay trace (`swiz dispatch replay`)
-  "src/commands/dispatch.ts",
-  // Dispatch replay ANSI trace output (extracted from dispatch.ts)
-  "src/dispatch/replay.ts",
-  // settings enable --force prints a warning about conflicting settings
-  "src/commands/settings.ts",
-  // manage validate emits validation failures to stderr
-  "src/commands/manage.ts",
-  // The shared debug utility itself
-  "src/debug.ts",
+/**
+ * Files in src/ that legitimately use console.error/console.warn.
+ * Each entry MUST include a non-empty justification string explaining why
+ * console.error is appropriate rather than debugLog.
+ */
+const STDERR_ALLOWLIST = new Map<string, string>([
+  ["src/cli.ts", "CLI error handler — unknown command, uncaught exception"],
+  ["src/commands/ci-wait.ts", "CI failure/error status reporting with exit codes"],
+  ["src/commands/push-ci.ts", "push-ci failure reporting (CI conclusion !== 'success')"],
+  [
+    "src/commands/mergetool.ts",
+    "Interactive merge progress indicators (→ Gathering..., ✓ Resolved)",
+  ],
+  ["src/commands/dispatch.ts", "User-invoked replay trace (`swiz dispatch replay`)"],
+  ["src/dispatch/replay.ts", "Dispatch replay ANSI trace output (extracted from dispatch.ts)"],
+  [
+    "src/commands/settings.ts",
+    "settings enable --force prints a warning about conflicting settings",
+  ],
+  ["src/commands/manage.ts", "manage validate emits validation failures to stderr"],
+  ["src/debug.ts", "The shared debug utility itself"],
 ])
 
 /** Files in src/ that legitimately use console.log/console.info for CLI output. */
@@ -187,7 +188,7 @@ describe("debugLog enforcement", () => {
   })
 
   it("allowlisted files actually exist", () => {
-    for (const rel of STDERR_ALLOWLIST) {
+    for (const rel of STDERR_ALLOWLIST.keys()) {
       const full = join(SRC_ROOT, rel)
       expect(statSync(full).isFile(), `STDERR_ALLOWLIST file missing: ${rel}`).toBe(true)
     }
@@ -195,5 +196,19 @@ describe("debugLog enforcement", () => {
       const full = join(SRC_ROOT, rel)
       expect(statSync(full).isFile(), `STDOUT_ALLOWLIST file missing: ${rel}`).toBe(true)
     }
+  })
+
+  it("every STDERR_ALLOWLIST entry has a non-empty justification", () => {
+    const missing: string[] = []
+    for (const [rel, justification] of STDERR_ALLOWLIST) {
+      if (!justification || justification.trim().length === 0) {
+        missing.push(rel)
+      }
+    }
+    expect(
+      missing,
+      `STDERR_ALLOWLIST entries missing justification. Add a non-empty reason string explaining why console.error is appropriate:\n\n` +
+        missing.map((r) => `  "${r}": ""  // ← add justification here`).join("\n")
+    ).toEqual([])
   })
 })
