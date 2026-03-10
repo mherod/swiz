@@ -1,4 +1,5 @@
 import { dirname, join } from "node:path"
+import { stderrLog } from "../debug.ts"
 import { executeDispatch } from "../dispatch/execute.ts"
 import { getGitBranchStatus } from "../git-helpers.ts"
 import { getProjectSettingsPath, getStatePath, getSwizSettingsPath } from "../settings.ts"
@@ -9,6 +10,7 @@ import {
   type WarmStatusLineSnapshot,
 } from "./status-line.ts"
 
+const DAEMON_PORT = 7_943
 const LABEL = "com.swiz.daemon"
 const PLIST_PATH = join(process.env.HOME ?? "", "Library/LaunchAgents", `${LABEL}.plist`)
 const GITHUB_REFRESH_WINDOW_MS = 20_000
@@ -25,6 +27,56 @@ interface SnapshotFingerprint {
 interface CachedSnapshot {
   snapshot: WarmStatusLineSnapshot
   fingerprint: SnapshotFingerprint
+}
+
+export interface EventMetrics {
+  count: number
+  totalMs: number
+}
+
+export interface DaemonMetrics {
+  startedAt: number
+  dispatches: Map<string, EventMetrics>
+}
+
+export function createMetrics(): DaemonMetrics {
+  return { startedAt: Date.now(), dispatches: new Map() }
+}
+
+export function recordDispatch(metrics: DaemonMetrics, event: string, durationMs: number): void {
+  const existing = metrics.dispatches.get(event)
+  if (existing) {
+    existing.count += 1
+    existing.totalMs += durationMs
+  } else {
+    metrics.dispatches.set(event, { count: 1, totalMs: durationMs })
+  }
+}
+
+export function serializeMetrics(metrics: DaemonMetrics) {
+  const uptimeMs = Date.now() - metrics.startedAt
+  const byEvent: Record<string, { count: number; avgMs: number }> = {}
+  let totalDispatches = 0
+  for (const [event, m] of metrics.dispatches) {
+    byEvent[event] = { count: m.count, avgMs: Math.round(m.totalMs / m.count) }
+    totalDispatches += m.count
+  }
+  return {
+    uptimeMs,
+    uptimeHuman: formatUptime(uptimeMs),
+    totalDispatches,
+    byEvent,
+  }
+}
+
+function formatUptime(ms: number): string {
+  const s = Math.floor(ms / 1000)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (h > 0) return `${h}h ${m}m ${sec}s`
+  if (m > 0) return `${m}m ${sec}s`
+  return `${sec}s`
 }
 
 export function hasSnapshotInvalidated(
@@ -155,18 +207,71 @@ async function uninstall() {
   console.log(`Unloaded ${LABEL}`)
 }
 
+async function fetchDaemonStatus(port: number): Promise<void> {
+  try {
+    const resp = await fetch(`http://127.0.0.1:${port}/metrics`, {
+      signal: AbortSignal.timeout(3000),
+    })
+    if (!resp.ok) {
+      stderrLog("daemon-status", `Daemon returned ${resp.status}`)
+      process.exitCode = 1
+      return
+    }
+    const data = (await resp.json()) as {
+      uptimeHuman: string
+      totalDispatches: number
+      byEvent: Record<string, { count: number; avgMs: number }>
+      projects?: Record<
+        string,
+        {
+          uptimeHuman: string
+          totalDispatches: number
+          byEvent: Record<string, { count: number; avgMs: number }>
+        }
+      >
+    }
+    console.log(`Daemon uptime: ${data.uptimeHuman}`)
+    console.log(`Total dispatches: ${data.totalDispatches}`)
+    const events = Object.entries(data.byEvent)
+    if (events.length > 0) {
+      console.log("\nDispatches by event:")
+      for (const [event, m] of events.sort((a, b) => b[1].count - a[1].count)) {
+        console.log(`  ${event}: ${m.count} (avg ${m.avgMs}ms)`)
+      }
+    }
+    if (data.projects) {
+      const projectEntries = Object.entries(data.projects)
+      if (projectEntries.length > 0) {
+        console.log(`\nProjects: ${projectEntries.length}`)
+        for (const [cwd, pm] of projectEntries) {
+          console.log(`  ${cwd}: ${pm.totalDispatches} dispatches`)
+        }
+      }
+    }
+  } catch {
+    stderrLog("daemon-status", `Daemon not reachable on port ${port}`)
+    process.exitCode = 1
+  }
+}
+
 export const daemonCommand: Command = {
   name: "daemon",
   description: "Run a background web server",
-  usage: "swiz daemon [--port <port>] [--install] [--uninstall]",
+  usage: "swiz daemon [--port <port>] [--install] [--uninstall] [status]",
   options: [
     { flags: "--port <port>", description: "Port to listen on (default: 7943)" },
     { flags: "--install", description: "Install as a LaunchAgent" },
     { flags: "--uninstall", description: "Uninstall the LaunchAgent" },
+    { flags: "status", description: "Show daemon metrics and status" },
   ],
   async run(args) {
     const portIndex = args.indexOf("--port")
-    const port = portIndex !== -1 ? Number(args[portIndex + 1]) : 7943
+    const port = portIndex !== -1 ? Number(args[portIndex + 1]) : DAEMON_PORT
+
+    if (args.includes("status")) {
+      await fetchDaemonStatus(port)
+      return
+    }
 
     if (args.includes("--install")) {
       await install(port)
@@ -176,6 +281,17 @@ export const daemonCommand: Command = {
     if (args.includes("--uninstall")) {
       await uninstall()
       return
+    }
+
+    const globalMetrics = createMetrics()
+    const projectMetrics = new Map<string, DaemonMetrics>()
+    const getProjectMetrics = (cwd: string): DaemonMetrics => {
+      let m = projectMetrics.get(cwd)
+      if (!m) {
+        m = createMetrics()
+        projectMetrics.set(cwd, m)
+      }
+      return m
     }
 
     const snapshots = new Map<string, CachedSnapshot>()
@@ -212,13 +328,37 @@ export const daemonCommand: Command = {
           }
 
           const payloadStr = await req.text()
+          const start = performance.now()
           const result = await executeDispatch({
             canonicalEvent,
             hookEventName,
             payloadStr,
             daemonContext: true,
           })
+          const durationMs = performance.now() - start
+          recordDispatch(globalMetrics, canonicalEvent, durationMs)
+          try {
+            const parsed = JSON.parse(payloadStr) as { cwd?: string }
+            if (parsed.cwd)
+              recordDispatch(getProjectMetrics(parsed.cwd), canonicalEvent, durationMs)
+          } catch {
+            /* ignore parse errors */
+          }
           return Response.json(result.response)
+        }
+
+        if (url.pathname === "/metrics" && req.method === "GET") {
+          const projectParam = url.searchParams.get("project")
+          if (projectParam) {
+            const pm = projectMetrics.get(projectParam)
+            if (!pm) return Response.json({ error: "No metrics for project" }, { status: 404 })
+            return Response.json({ ...serializeMetrics(pm), project: projectParam })
+          }
+          const projects: Record<string, ReturnType<typeof serializeMetrics>> = {}
+          for (const [cwd, m] of projectMetrics) {
+            projects[cwd] = serializeMetrics(m)
+          }
+          return Response.json({ ...serializeMetrics(globalMetrics), projects })
         }
 
         if (url.pathname === "/status-line/snapshot" && req.method === "POST") {

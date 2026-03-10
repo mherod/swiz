@@ -54,11 +54,10 @@ alwaysApply: false
 - **DO NOT** write `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: ..., additionalContext: ... } }))` — use `emitContext(eventName, context, cwd)` instead.
 - **DO NOT** write `console.log(JSON.stringify({ decision: "block", reason: ... }))` in Stop hooks — use `blockStop(reason)` or `blockStopRaw(reason)` instead.
 - Git/GitHub helpers: `git`, `gh`, `ghJson`, `getOpenPrForBranch`, `isGitRepo`, `isGitHubRemote`, `hasGhCli`.
-- **Git Utilities Policy** — canonical locations and no-duplication rule:
-  - `hooks/hook-utils.ts` — hook Git helpers: command-matching regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`, `GH_PR_MERGE_RE`, `GIT_ANY_CMD_RE`, …), extractors (`extractPrNumber`, `extractMergeBranch`), runtime helpers (`git`, `gh`, `ghJson`, …).
-  - `src/git-helpers.ts` — command Git helpers: branch-policy classifiers (`isDocsOrConfig`, `parseCommitType`, `DOCS_CONFIG_RE`), Git status types, query functions.
-  - **DO NOT** define Git utilities locally in hooks or commands when an equivalent exists here or the logic is generic. Import from the canonical source.
-  - When a duplicate is found: (1) add the export to `hook-utils.ts` or `git-helpers.ts`, (2) update consumers to import from there, (3) delete the local definition.
+- **Git Utilities Policy** — canonical locations, no duplication:
+  - `hooks/hook-utils.ts` — hook Git helpers: regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`, etc.), extractors, runtime helpers (`git`, `gh`, `ghJson`).
+  - `src/git-helpers.ts` — command Git helpers: classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries.
+  - DO NOT define Git utilities locally — import from canonical source. Duplicates: move to canonical file, update consumers, delete local.
 - Skill helpers: `skillExists` (checks `.skills/` and `~/.claude/skills/` for `SKILL.md`), `skillAdvice`.
 - Cross-agent tool checks: `isShellTool`, `isEditTool`, `isFileEditTool`, `isCodeChangeTool`, `isTaskTool`, `isTaskCreateTool`.
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
@@ -114,9 +113,9 @@ alwaysApply: false
 - `find` is not exempt; use `rg` or Glob.
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
-- **Task completion**: `swiz tasks complete <id> --evidence "note:..." --state <state>`. The `--state` flag is required. Valid single-prefix evidence values: `commit:`, `pr:`, `file:`, `test:`, `note:` — compound strings (e.g. `"commit:abc run:123"`) and unrecognized prefixes (e.g. `ci_green:`) are rejected. Plain `TaskUpdate status=completed` rejected by stop hooks. Do not invoke `tasks-list.ts` directly.
-- **`swiz tasks complete` has NO `--subject` flag**: `complete <id> --evidence TEXT --state STATE`; `status <id> <status>`; `evidence <id> <text>`. Run `swiz help tasks` before guessing flags. For native-tool tasks (no file counterpart): stub first via `swiz tasks update <id> --subject "..." --status in_progress`, then complete normally.
-- **`swiz tasks update` bulk IDs**: `swiz tasks update <id1> <id2> ... [--subject TEXT] [--status STATUS] [--description TEXT] [--active-form TEXT]` — leading non-flag tokens are IDs; flags start at first `--`.
+- **Task completion**: `swiz tasks complete <id> --evidence "note:..."`. Valid evidence prefixes: `commit:`, `pr:`, `file:`, `test:`, `note:` — compound strings and unrecognized prefixes rejected. Plain `TaskUpdate status=completed` rejected by stop hooks.
+- **`swiz tasks complete` has NO `--subject` flag**. For native-tool tasks: stub via `swiz tasks update <id> --subject "..." --status in_progress`, then complete.
+- **`swiz tasks update` bulk IDs**: `swiz tasks update <id1> <id2> ... [--subject TEXT] [--status STATUS]` — leading non-flag tokens are IDs.
 - **DON'T**: Assume CI success from partial output (e.g., `gh run watch` alone). Always verify terminal job states with `gh run view <run-id> --json conclusion,status,jobs` and confirm every job reached `conclusion: "success"` before claiming CI green.
 - Mark tasks complete immediately on completion.
 - Treat `gh issue create` and task completion as atomic; recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.
@@ -180,6 +179,11 @@ alwaysApply: false
 - DO NOT run branch/collaboration/open-PR checks after push.
 - DO NOT add `Co-Authored-By: Claude` or other AI attribution in commits/PR descriptions.
 - DO NOT use destructive git commands: `git revert`, `git restore`, `git stash`, `git reset --hard`, `git checkout -- <file>`; use `git reflog` for recovery.
+## Daemon
+- `src/commands/daemon.ts`: long-lived `Bun.serve` on port 7943; serves multiple projects simultaneously — scope per-project state by `cwd`.
+- Endpoints: `/health`, `/dispatch` (POST), `/status-line/snapshot` (POST), `/metrics` (GET).
+- `swiz daemon status` fetches `/metrics`. Metrics are in-memory only; tracked globally and per-project.
+- LaunchAgent: `~/Library/LaunchAgents/com.swiz.daemon.plist`; `swiz daemon --install` / `--uninstall`.
 ## Settings Configuration
 - Use separate state files for mutable runtime data (e.g., `.swiz/context-stats.json`); never mix runtime observations into user-authored config (`.swiz/config.json`).
 - Use 3-tier setting resolution: `project > user > default`.
@@ -222,8 +226,8 @@ alwaysApply: false
 - `awk > file`/`awk | tee -i` blocked; `awk '{print $1}'` and `awk --help` allowed. Prefer `bun -e`, `cut`, or git `--format`.
 - Do not use `python`/`python3`; use `bun -e` or `jq`.
 - Do not use `rm`/`rm -rf`; use `trash <path>`; guard with `[[ -e <path> ]] && trash <path>`.
-- Do not edit files outside session sandbox. `~/.claude/hooks/` and `~/.claude/skills/` are owned by external repos. For cross-repo bugs, file GitHub issues in the owning repo with: (1) exact error message and reproduction steps, (2) root cause analysis, (3) proposed fix with code location, (4) success criteria.
-- **DO NOT mark tasks complete without shipped code.** Inline bash testing does not count. Always: (1) modify source files, (2) verify `git diff`, (3) commit, then (4) mark complete. For cross-repo fixes blocked by sandbox, file a GitHub issue with file path, line number, exact fix, and success criteria.
+- DO NOT edit files outside session sandbox. `~/.claude/hooks/` and `~/.claude/skills/` are owned by external repos. For cross-repo bugs, file GitHub issues with: error, root cause, proposed fix, success criteria.
+- **DO NOT mark tasks complete without shipped code.** Always: modify source, verify `git diff`, commit, then mark complete.
 - Stop-hook footers with `REMINDER_FRAGMENT` re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses a 30-minute `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes.
 - Cross-session gap: cooldown doesn't carry between sessions; complete memory follow-through before session end.
 - Cache-key generation: use shared `getCanonicalPathHash()` in `hook-utils.ts` with `realpathSync()`. DO NOT duplicate cache-key logic across hooks/commands.

@@ -21,6 +21,10 @@ const SRC_ROOT = join(import.meta.dirname ?? ".", "..")
 const STDERR_ALLOWLIST = new Map<string, string>([
   ["src/cli.ts", "CLI error handler — unknown command, uncaught exception"],
   ["src/commands/ci-wait.ts", "CI failure/error status reporting with exit codes"],
+  [
+    "src/commands/daemon.ts",
+    "daemon status subcommand — reports unreachable daemon or error responses",
+  ],
   ["src/commands/push-ci.ts", "push-ci failure reporting (CI conclusion !== 'success')"],
   [
     "src/commands/mergetool.ts",
