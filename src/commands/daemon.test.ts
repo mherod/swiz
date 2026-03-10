@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 import {
   createMetrics,
   FileWatcherRegistry,
+  GhQueryCache, // daemon gh cache
   hasSnapshotInvalidated,
   recordDispatch,
   serializeMetrics,
@@ -137,5 +138,76 @@ describe("FileWatcherRegistry", () => {
     reg.register("/nonexistent/path/that/does/not/exist", "missing", () => {})
     reg.start()
     expect(reg.status()[0]?.watching).toBeFalse()
+  })
+})
+
+describe("GhQueryCache", () => {
+  it("returns miss on first call and caches the result", async () => {
+    let calls = 0
+    const cache = new GhQueryCache(async () => {
+      calls++
+      return { data: "test" }
+    })
+
+    const r1 = await cache.get(["pr", "list"], "/repo")
+    expect(r1.hit).toBeFalse()
+    expect(r1.value).toEqual({ data: "test" })
+    expect(calls).toBe(1)
+
+    const r2 = await cache.get(["pr", "list"], "/repo")
+    expect(r2.hit).toBeTrue()
+    expect(r2.value).toEqual({ data: "test" })
+    expect(calls).toBe(1)
+  })
+
+  it("caches different args independently", async () => {
+    let calls = 0
+    const cache = new GhQueryCache(async (_args) => {
+      calls++
+      return calls
+    })
+
+    await cache.get(["pr", "list"], "/repo")
+    await cache.get(["issue", "list"], "/repo")
+    expect(calls).toBe(2)
+    expect(cache.size).toBe(2)
+  })
+
+  it("caches different cwds independently", async () => {
+    let calls = 0
+    const cache = new GhQueryCache(async () => {
+      calls++
+      return calls
+    })
+
+    await cache.get(["pr", "list"], "/repo-a")
+    await cache.get(["pr", "list"], "/repo-b")
+    expect(calls).toBe(2)
+    expect(cache.size).toBe(2)
+  })
+
+  it("invalidateProject flushes only matching entries", async () => {
+    const cache = new GhQueryCache(async () => "val")
+
+    await cache.get(["pr", "list"], "/repo-a")
+    await cache.get(["pr", "list"], "/repo-b")
+    expect(cache.size).toBe(2)
+
+    cache.invalidateProject("/repo-a")
+    expect(cache.size).toBe(1)
+
+    const r = await cache.get(["pr", "list"], "/repo-b")
+    expect(r.hit).toBeTrue()
+  })
+
+  it("invalidateAll flushes everything", async () => {
+    const cache = new GhQueryCache(async () => "val")
+
+    await cache.get(["pr", "list"], "/repo-a")
+    await cache.get(["issue", "list"], "/repo-b")
+    expect(cache.size).toBe(2)
+
+    cache.invalidateAll()
+    expect(cache.size).toBe(0)
   })
 })

@@ -105,6 +105,31 @@ export async function ghJson<T>(args: string[], cwd: string): Promise<T | null> 
   }
 }
 
+const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
+const DAEMON_GH_TIMEOUT_MS = 3_000
+
+/**
+ * Try to resolve a gh JSON query via the daemon cache.
+ * Falls back to direct ghJson when the daemon is unavailable.
+ */
+export async function ghJsonViaDaemon<T>(args: string[], cwd: string): Promise<T | null> {
+  if (process.env.SWIZ_NO_DAEMON === "1") return ghJson<T>(args, cwd)
+
+  try {
+    const resp = await fetch(`http://127.0.0.1:${DAEMON_PORT}/gh-query`, {
+      method: "POST",
+      body: JSON.stringify({ args, cwd }),
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(DAEMON_GH_TIMEOUT_MS),
+    })
+    if (!resp.ok) return ghJson<T>(args, cwd)
+    const data = (await resp.json()) as { hit: boolean; value: T | null }
+    return data.value
+  } catch {
+    return ghJson<T>(args, cwd)
+  }
+}
+
 /** Find the first open PR for a branch and return the requested JSON fields. */
 export async function getOpenPrForBranch<T>(
   branch: string,

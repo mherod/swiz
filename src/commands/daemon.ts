@@ -2,7 +2,7 @@ import { type FSWatcher, watch } from "node:fs"
 import { dirname, join } from "node:path"
 import { stderrLog } from "../debug.ts"
 import { executeDispatch } from "../dispatch/execute.ts"
-import { getGitBranchStatus } from "../git-helpers.ts"
+import { getGitBranchStatus, ghJson } from "../git-helpers.ts"
 import { getProjectSettingsPath, getStatePath, getSwizSettingsPath } from "../settings.ts"
 import type { Command } from "../types.ts"
 import {
@@ -150,6 +150,53 @@ export class FileWatcherRegistry {
       lastInvalidation: e.lastInvalidation,
       invalidationCount: e.invalidationCount,
     }))
+  }
+}
+
+const GH_QUERY_TTL_MS = 20_000
+
+interface GhCacheEntry {
+  value: unknown
+  expiresAt: number
+}
+
+type GhFetcher = (args: string[], cwd: string) => Promise<unknown>
+
+export class GhQueryCache {
+  private entries = new Map<string, GhCacheEntry>()
+  private fetcher: GhFetcher
+
+  constructor(fetcher?: GhFetcher) {
+    this.fetcher = fetcher ?? ((args, cwd) => ghJson(args, cwd))
+  }
+
+  private key(args: string[], cwd: string): string {
+    return `${cwd}\x00${args.join("\x00")}`
+  }
+
+  async get(args: string[], cwd: string): Promise<{ hit: boolean; value: unknown }> {
+    const k = this.key(args, cwd)
+    const entry = this.entries.get(k)
+    if (entry && entry.expiresAt > Date.now()) {
+      return { hit: true, value: entry.value }
+    }
+    const value = await this.fetcher(args, cwd)
+    this.entries.set(k, { value, expiresAt: Date.now() + GH_QUERY_TTL_MS })
+    return { hit: false, value }
+  }
+
+  invalidateProject(cwd: string): void {
+    for (const k of this.entries.keys()) {
+      if (k.startsWith(cwd)) this.entries.delete(k)
+    }
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
   }
 }
 
@@ -369,6 +416,7 @@ export const daemonCommand: Command = {
     }
 
     const watchers = new FileWatcherRegistry()
+    const ghCache = new GhQueryCache()
     const projectRoot = dirname(Bun.main)
     const hooksDir = join(projectRoot, "hooks/")
     const manifestPath = join(projectRoot, "src", "manifest.ts")
@@ -393,7 +441,10 @@ export const daemonCommand: Command = {
     }
 
     // Register watchers for cache invalidation
-    const flushSnapshots = () => snapshots.clear()
+    const flushSnapshots = () => {
+      snapshots.clear()
+      ghCache.invalidateAll()
+    }
 
     watchers.register(manifestPath, "manifest", flushSnapshots)
     watchers.register(hooksDir, "hooks", flushSnapshots)
@@ -406,10 +457,11 @@ export const daemonCommand: Command = {
       if (registeredProjects.has(cwd)) return
       registeredProjects.add(cwd)
       const projectFlush = () => {
-        // Flush snapshots for this project
+        // Flush snapshots and gh cache for this project
         for (const key of snapshots.keys()) {
           if (key.startsWith(cwd)) snapshots.delete(key)
         }
+        ghCache.invalidateProject(cwd)
       }
       const projectSettings = getProjectSettingsPath(cwd)
       if (projectSettings)
@@ -474,10 +526,29 @@ export const daemonCommand: Command = {
           return Response.json({ ...serializeMetrics(globalMetrics), projects })
         }
 
+        if (url.pathname === "/gh-query" && req.method === "POST") {
+          const body = (await req.json().catch(() => null)) as {
+            args?: string[]
+            cwd?: string
+          } | null
+          const args = body?.args
+          const cwd = body?.cwd
+          if (!Array.isArray(args) || typeof cwd !== "string" || cwd.length === 0) {
+            return Response.json(
+              { error: "Missing required fields: args (string[]), cwd (string)" },
+              { status: 400 }
+            )
+          }
+          registerProjectWatchers(cwd)
+          const { hit, value } = await ghCache.get(args, cwd)
+          return Response.json({ hit, value })
+        }
+
         if (url.pathname === "/cache/status" && req.method === "GET") {
           return Response.json({
             watchers: watchers.status(),
             snapshotCacheSize: snapshots.size,
+            ghCacheSize: ghCache.size,
           })
         }
 
