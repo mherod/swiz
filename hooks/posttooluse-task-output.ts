@@ -91,6 +91,51 @@ const VITEST_COMPLETE_RE = /^ Tests\s+.*\(\d+\)/m
 /** Matches Vitest failure count: " Tests  N failed" */
 const VITEST_FAIL_RE = /^ Tests\s+(\d+)\s+failed/m
 
+/**
+ * Matches pytest summary line indicating test results:
+ *   "== 2 failed, 5 passed in 1.23s =="
+ *   "== 5 passed in 0.50s =="
+ * The double-equals delimiters are only printed at the end of a full run.
+ * Presence means pytest ran to completion (output not truncated).
+ */
+const PYTEST_COMPLETE_RE = /^=+ .+ in \d+\.\d+s =+$/m
+
+/**
+ * Detects pytest failure output (any line starting with "FAILED ").
+ * Used to identify pytest output; count extraction uses PYTEST_SUMMARY_RE.
+ */
+const PYTEST_FAIL_RE = /^FAILED /m
+
+/**
+ * Extracts failure count from the pytest equals-bordered summary line:
+ *   "== 2 failed, 5 passed in 1.23s =="
+ * Only present when pytest ran to completion.
+ */
+const PYTEST_SUMMARY_RE = /^=+\s+(\d+)\s+failed/m
+
+/**
+ * Matches cargo test completion line:
+ *   "test result: FAILED. 1 passed; 2 failed; 0 ignored;"
+ *   "test result: ok. 5 passed; 0 failed;"
+ * Always the last line of a cargo test run.
+ */
+const CARGO_COMPLETE_RE = /^test result: (?:ok|FAILED)\./m
+
+/** Matches cargo test failure: "test result: FAILED. N passed; M failed;" */
+const CARGO_FAIL_RE = /^test result: FAILED\. \d+ passed; (\d+) failed;/m
+
+/**
+ * Matches go test completion line:
+ *   "FAIL\tgithub.com/user/repo\t0.123s"
+ *   "ok  \tgithub.com/user/repo\t0.123s"
+ * The package summary line is only emitted when the test binary exits.
+ * Presence means go test ran to completion (output not truncated).
+ */
+const GOTEST_COMPLETE_RE = /^(?:ok|FAIL)\s+\S+\s+\d+\.\d+s/m
+
+/** Matches go test failure count from "--- FAIL:" lines */
+const GOTEST_FAIL_RE = /^--- FAIL:/m
+
 /** Matches lefthook hook block indicators */
 const HOOK_FAIL_RE = /🥊.*hook: (pre-push|pre-commit)|error: failed to push/i
 
@@ -149,6 +194,42 @@ function detectFailure(output: string, exitCode: number | null): string | null {
       const isComplete = VITEST_COMPLETE_RE.test(clean)
       const countLabel = isComplete ? `${vitestFailMatch[1]}` : "unknown number of"
       const failLine = lines.find((l) => l.includes("FAIL") || l.includes("AssertionError"))
+      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
+      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+    }
+
+    // pytest failures
+    if (PYTEST_FAIL_RE.test(clean)) {
+      const isComplete = PYTEST_COMPLETE_RE.test(clean)
+      const summaryMatch = clean.match(PYTEST_SUMMARY_RE)
+      const countLabel = isComplete && summaryMatch ? `${summaryMatch[1]}` : "unknown number of"
+      const failLine = lines.find((l) => l.startsWith("FAILED "))
+      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
+      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+    }
+
+    // cargo test failures
+    const cargoFailMatch = clean.match(CARGO_FAIL_RE)
+    if (cargoFailMatch) {
+      // CARGO_COMPLETE_RE and CARGO_FAIL_RE are both on the same line — if FAIL_RE matched, run is complete
+      const countLabel = `${cargoFailMatch[1]}`
+      const failLine = lines.find((l) => l.includes("FAILED") || l.startsWith("---- "))
+      const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
+      return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+    }
+    // cargo test run completed with non-zero exit but no FAILED result line (e.g. compile error)
+    if (CARGO_COMPLETE_RE.test(clean)) {
+      const failLine = lines.find((l) => l.toLowerCase().includes("error"))
+      const detail = failLine ? `\n\nError: ${failLine.trim()}` : ""
+      return `Background task exited with code ${exitCode}.${detail}\n\nDo not proceed until this failure is resolved.`
+    }
+
+    // go test failures — count "--- FAIL:" occurrences as a proxy for failed test count
+    if (GOTEST_FAIL_RE.test(clean)) {
+      const isComplete = GOTEST_COMPLETE_RE.test(clean)
+      const failCount = (clean.match(/^--- FAIL:/gm) ?? []).length
+      const countLabel = isComplete && failCount > 0 ? `${failCount}` : "unknown number of"
+      const failLine = lines.find((l) => l.startsWith("--- FAIL:"))
       const detail = failLine ? `\n\nFirst failure: ${failLine.trim()}` : ""
       return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
     }

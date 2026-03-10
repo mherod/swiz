@@ -314,6 +314,116 @@ describe("posttooluse-task-output: Vitest runner detection", () => {
   })
 })
 
+// ─── pytest runner detection ─────────────────────────────────────────────────
+
+const PYTEST_COMPLETE_OUTPUT = `
+FAILED tests/test_auth.py::test_login_invalid - AssertionError: expected True
+FAILED tests/test_auth.py::test_token_expired - AssertionError: expected False
+
+========================= 2 failed, 5 passed in 1.23s =========================
+`.trim()
+
+const PYTEST_TRUNCATED_OUTPUT = `
+FAILED tests/test_auth.py::test_login_invalid - AssertionError: expected True
+
+2 failed
+`.trim()
+
+describe("posttooluse-task-output: pytest runner detection", () => {
+  test("pytest complete output with failures reports exact count", async () => {
+    const result = await runHook(makePayload(PYTEST_COMPLETE_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("2 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
+
+  test("pytest truncated output with failures reports unknown count", async () => {
+    const result = await runHook(makePayload(PYTEST_TRUNCATED_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("unknown number of test(s) failed")
+  })
+
+  test("pytest exit 0 does not block", async () => {
+    const output = "========================= 5 passed in 0.50s ========================="
+    const result = await runHook(makePayload(output, 0))
+    expect(result.decision).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+  })
+})
+
+// ─── cargo test runner detection ─────────────────────────────────────────────
+
+const CARGO_COMPLETE_OUTPUT = `
+running 7 tests
+test auth::test_valid_token ... ok
+test auth::test_expired_token ... FAILED
+test auth::test_missing_token ... FAILED
+
+failures:
+
+---- auth::test_expired_token stdout ----
+thread 'auth::test_expired_token' panicked at 'assertion failed'
+
+test result: FAILED. 5 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+`.trim()
+
+describe("posttooluse-task-output: cargo test runner detection", () => {
+  test("cargo test complete output with failures reports exact count", async () => {
+    const result = await runHook(makePayload(CARGO_COMPLETE_OUTPUT, 101))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("2 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
+
+  test("cargo test exit 0 does not block", async () => {
+    const output =
+      "running 5 tests\ntest result: ok. 5 passed; 0 failed; 0 ignored; finished in 0.02s"
+    const result = await runHook(makePayload(output, 0))
+    expect(result.decision).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+  })
+})
+
+// ─── go test runner detection ─────────────────────────────────────────────────
+
+const GOTEST_COMPLETE_OUTPUT = `
+--- FAIL: TestLogin (0.01s)
+    auth_test.go:42: expected true, got false
+--- FAIL: TestToken (0.00s)
+    auth_test.go:67: token mismatch
+FAIL
+FAIL\tgithub.com/example/repo\t0.123s
+`.trim()
+
+const GOTEST_TRUNCATED_OUTPUT = `
+--- FAIL: TestLogin (0.01s)
+    auth_test.go:42: expected true, got false
+--- FAIL: TestToken (0.00s)
+    auth_test.go:67: token mismatch
+`.trim()
+
+describe("posttooluse-task-output: go test runner detection", () => {
+  test("go test complete output with failures reports exact count", async () => {
+    const result = await runHook(makePayload(GOTEST_COMPLETE_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("2 test(s) failed")
+    expect(result.reason).not.toContain("unknown")
+  })
+
+  test("go test truncated output with failures reports unknown count", async () => {
+    const result = await runHook(makePayload(GOTEST_TRUNCATED_OUTPUT, 1))
+    expect(result.decision).toBe("block")
+    expect(result.reason).toContain("unknown number of test(s) failed")
+  })
+
+  test("go test exit 0 does not block", async () => {
+    const output = "ok  \tgithub.com/example/repo\t0.050s"
+    const result = await runHook(makePayload(output, 0))
+    expect(result.decision).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+  })
+})
+
 // ─── Tool error handling ──────────────────────────────────────────────────────
 
 /** CWD used for output-file recovery tests; encodes to a known key under /tmp. */
