@@ -10,6 +10,7 @@ import {
   classifyCommand,
   commandFingerprint,
   commandLabel,
+  detectOverfiltering,
   extractPreviousOutput,
   extractToolUseIdFromLine,
   isHelpQuery,
@@ -370,6 +371,125 @@ describe("commandLabel", () => {
   test("falls back to kind when command is empty after stripping", () => {
     // Edge case: should not happen in practice
     expect(commandLabel("", "build")).toBe("build")
+  })
+})
+
+// ── detectOverfiltering ───────────────────────────────────────────────────────
+
+describe("detectOverfiltering", () => {
+  // ── tail with too few lines ─────────────────────────────────────────────
+  test("blocks tail -5 on build commands", () => {
+    const result = detectOverfiltering(
+      "pnpm turbo run build --filter=main-web 2>&1 | tail -5",
+      "build"
+    )
+    expect(result).not.toBeNull()
+    expect(result).toContain("tail -5")
+    expect(result).toContain("20")
+  })
+
+  test("blocks tail -n 3 on test commands", () => {
+    const result = detectOverfiltering("bun test 2>&1 | tail -n 3", "test")
+    expect(result).not.toBeNull()
+    expect(result).toContain("tail -3")
+  })
+
+  test("allows tail -20 (meets minimum)", () => {
+    expect(detectOverfiltering("bun test 2>&1 | tail -20", "test")).toBeNull()
+  })
+
+  test("allows tail -50 (exceeds minimum)", () => {
+    expect(detectOverfiltering("pnpm run build 2>&1 | tail -50", "build")).toBeNull()
+  })
+
+  // ── head with too few lines ─────────────────────────────────────────────
+  test("blocks head -10 on lint commands", () => {
+    const result = detectOverfiltering("bun run lint 2>&1 | head -10", "lint")
+    expect(result).not.toBeNull()
+    expect(result).toContain("head -10")
+  })
+
+  test("blocks head -n 5 on build commands", () => {
+    const result = detectOverfiltering("pnpm run build | head -n 5", "build")
+    expect(result).not.toBeNull()
+  })
+
+  test("allows head -20 (meets minimum)", () => {
+    expect(detectOverfiltering("bun run lint 2>&1 | head -20", "lint")).toBeNull()
+  })
+
+  test("allows head -100 (exceeds minimum)", () => {
+    expect(detectOverfiltering("pnpm run build 2>&1 | head -100", "build")).toBeNull()
+  })
+
+  // ── narrow grep/rg patterns ─────────────────────────────────────────────
+  test("blocks rg with only error keywords", () => {
+    const result = detectOverfiltering(
+      'pnpm turbo run build --filter=main-web 2>&1 | rg -i "error|ERR|failed" | head -20',
+      "build"
+    )
+    expect(result).not.toBeNull()
+    expect(result).toContain("grep/rg")
+  })
+
+  test("blocks grep with single 'error' keyword", () => {
+    const result = detectOverfiltering("bun test 2>&1 | grep error", "test")
+    expect(result).not.toBeNull()
+  })
+
+  test("blocks grep -i 'failed'", () => {
+    const result = detectOverfiltering("bun run build 2>&1 | grep -i 'failed'", "build")
+    expect(result).not.toBeNull()
+  })
+
+  test("allows grep with specific file/function patterns (not just error keywords)", () => {
+    expect(detectOverfiltering("bun test 2>&1 | grep 'src/utils'", "test")).toBeNull()
+    expect(detectOverfiltering("bun run build 2>&1 | rg 'Module not found'", "build")).toBeNull()
+  })
+
+  // ── No pipe = no issue ──────────────────────────────────────────────────
+  test("returns null for commands without pipes", () => {
+    expect(detectOverfiltering("bun test", "test")).toBeNull()
+    expect(detectOverfiltering("pnpm run build", "build")).toBeNull()
+    expect(detectOverfiltering("pnpm turbo run build --filter=main-web", "build")).toBeNull()
+  })
+
+  // ── Combined issues ─────────────────────────────────────────────────────
+  test("detects both narrow grep AND small head in same command", () => {
+    const result = detectOverfiltering(
+      'pnpm turbo run build 2>&1 | rg -i "error|ERR|failed" | head -5',
+      "build"
+    )
+    expect(result).not.toBeNull()
+    expect(result).toContain("grep/rg")
+    expect(result).toContain("head -5")
+  })
+
+  // ── The exact motivating example from the user ──────────────────────────
+  test("blocks the exact pattern from the user's example", () => {
+    // First run: tail -5
+    const r1 = detectOverfiltering(
+      "pnpm turbo run build --filter=client-web --filter=main-web 2>&1 | tail -5",
+      "build"
+    )
+    expect(r1).not.toBeNull()
+
+    // Second run: rg error keywords + head -20
+    const r2 = detectOverfiltering(
+      'pnpm turbo run build --filter=main-web 2>&1 | rg -i "error|ERR|failed" | head -20',
+      "build"
+    )
+    expect(r2).not.toBeNull()
+  })
+
+  // ── Suggested fix in block message ──────────────────────────────────────
+  test("suggests the unfiltered command in block message", () => {
+    const result = detectOverfiltering(
+      "pnpm turbo run build --filter=main-web 2>&1 | tail -5",
+      "build"
+    )
+    expect(result).toContain("pnpm turbo run build --filter=main-web 2>&1")
+    expect(result).toContain("Run without filters")
   })
 })
 

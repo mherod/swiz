@@ -513,6 +513,88 @@ export function buildReadOutputStep(
   return `Read the full output from the previous ${label} run.`
 }
 
+// ── Proactive overfiltering detection ─────────────────────────────────────────
+// Detects and blocks build/test/lint commands piped through overly restrictive
+// filters that discard important output context. Fires on the FIRST run, not
+// just on consecutive repeats.
+
+const MIN_TAIL_HEAD_LINES = 20
+
+/** Matches `| tail -N` or `| tail -n N` and captures N. */
+const TAIL_LINES_RE = /\|\s*tail\s+(?:-n\s+)?-?(\d+)\b/
+/** Matches `| head -N` or `| head -n N` and captures N. */
+const HEAD_LINES_RE = /\|\s*head\s+(?:-n\s+)?-?(\d+)\b/
+/**
+ * Matches `| rg` or `| grep` filtering for only error keywords.
+ * Captures the pattern to check if it's overly narrow (just error/fail/ERR).
+ */
+const GREP_ERROR_ONLY_RE = /\|\s*(?:rg|grep)\s+(?:-[a-zA-Z]+\s+)*["']?([^|;&"']+)["']?/
+
+/** Keywords that indicate a too-narrow grep filter on build/test output. */
+const NARROW_GREP_KEYWORDS =
+  /^[\s"']*(?:-[a-zA-Z]+\s+)*["']?\s*(?:error|err|fail(?:ed|ure)?|warn(?:ing)?)\s*["']?\s*$/i
+
+/**
+ * Detect overly restrictive output filtering on a classified command.
+ * Returns a block message if the command pipes through filters that would
+ * discard important build/test context, or null if the command is fine.
+ */
+export function detectOverfiltering(cmd: string, kind: CommandKind): string | null {
+  // Only check commands that pipe their output somewhere
+  if (!cmd.includes("|")) return null
+
+  const issues: string[] = []
+  const kindLabel = kind === "test" ? "test" : kind === "build" ? "build" : kind
+
+  // Check tail -N where N < MIN_TAIL_HEAD_LINES
+  const tailMatch = cmd.match(TAIL_LINES_RE)
+  if (tailMatch) {
+    const n = parseInt(tailMatch[1]!, 10)
+    if (n < MIN_TAIL_HEAD_LINES) {
+      issues.push(
+        `\`tail -${n}\` only shows the last ${n} lines — ${kindLabel} output often needs ${MIN_TAIL_HEAD_LINES}+ lines for meaningful context.`
+      )
+    }
+  }
+
+  // Check head -N where N < MIN_TAIL_HEAD_LINES
+  const headMatch = cmd.match(HEAD_LINES_RE)
+  if (headMatch) {
+    const n = parseInt(headMatch[1]!, 10)
+    if (n < MIN_TAIL_HEAD_LINES) {
+      issues.push(
+        `\`head -${n}\` only shows the first ${n} lines — ${kindLabel} output often needs ${MIN_TAIL_HEAD_LINES}+ lines for meaningful context.`
+      )
+    }
+  }
+
+  // Check for narrow grep/rg patterns (error-only filtering)
+  const grepMatch = cmd.match(GREP_ERROR_ONLY_RE)
+  if (grepMatch) {
+    const pattern = grepMatch[1]?.trim() ?? ""
+    if (NARROW_GREP_KEYWORDS.test(pattern)) {
+      issues.push(
+        `Piping through \`grep/rg\` for only error keywords loses file paths, line numbers, and surrounding context needed to diagnose failures.`
+      )
+    }
+  }
+
+  if (issues.length === 0) return null
+
+  // Strip the pipe suffix to suggest the unfiltered command
+  const unfiltered = cmd.replace(/\s*\|.*$/, "").trim()
+
+  return [
+    `**Overly restrictive output filtering on \`${kindLabel}\` command.**`,
+    issues.join("\n"),
+    formatActionPlan([
+      `Run without filters: \`${unfiltered}\``,
+      `If output is too long, use \`| tail -${MIN_TAIL_HEAD_LINES}\` or higher (minimum ${MIN_TAIL_HEAD_LINES} lines).`,
+      "Read the full output first, then filter if needed on a subsequent diagnostic pass.",
+    ]),
+  ].join("\n\n")
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -532,6 +614,14 @@ async function main(): Promise<void> {
 
   // --help queries are informational, not repeated runs — never block them.
   if (isHelpQuery(command)) return
+
+  // ── Proactive overfiltering check ─────────────────────────────────────────
+  // Block build/test/lint commands piped through overly restrictive filters
+  // BEFORE they run — prevents the first wasted run, not just repeats.
+  const overfilterIssue = detectOverfiltering(command, currentKind)
+  if (overfilterIssue) {
+    denyPreToolUse(overfilterIssue)
+  }
 
   if (!(await isGitRepo(cwd))) return
   if (!transcriptPath) return
