@@ -200,6 +200,7 @@ alwaysApply: false
 ## Conventions
 - DO NOT embed ESC (0x1b) in regex literals — Biome's `no-control-regex` blocks it. Construct at runtime: `new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")`. Reference: `hooks/posttooluse-task-output.ts` `ANSI_RE`.
 - When parsing bun test output for counts, check for `/\bRan \d+ tests? across \d+ files?\./` before reporting an exact figure; absent the marker, output is truncated — emit "unknown number of". Strip ANSI before matching. Reference: `detectFailure` in `hooks/posttooluse-task-output.ts`.
+- **DO**: Rename variable/constant declaration and all usages in one edit. Split renames in PreToolUse hooks cause unrecoverable deadlocks (broken hook blocks Edit/Write/Bash).
 - DO: Read every file in full before editing — snippets miss conflicts and patterns in other sections.
 - Use ANSI escape codes directly; do not add color libraries.
 - Prefer `Bun.spawn(["sh", "-c", cmd])` for shell execution in skills/hooks.
@@ -229,8 +230,7 @@ alwaysApply: false
 - In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp-directory `cwd`, and `env: { ...process.env, HOME: tempDir }`.
 - Do not use Agent tool `isolation: "worktree"` — rejected/partial setup corrupts `.git/config` (`core.bare = true`, bogus worktree branches) and breaks git with "must be run in a work tree".
 - For secret-like test fixtures (e.g., `sk_live_...`), build via array join: `['s','k','_','l','i','v','e','_',...].join('')` — GitHub push protection and git-diff scanning block literal secret strings.
-- **DO**: When stop hooks detect memory threshold violations outside the sandbox, file a GitHub issue with word count, threshold, and compaction guidance — sandbox prevents direct edits.
-- **DON'T**: Attempt to edit files outside the session sandbox; the Edit tool will block and sandbox enforcement is non-negotiable.
+- **DON'T**: Edit files outside session sandbox — Edit tool blocks it. For out-of-sandbox memory threshold violations, file a GitHub issue instead.
 - **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop. Use `/push` for unpushed commits.
 - **DON'T**: Rely on `git status` alone for unpush detection—it doesn't show upstream divergence. Always use `git log origin/main..HEAD --oneline` to list unpushed commits.
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` in env overrides — prevents real backend calls on machines with Codex/Gemini installed. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.

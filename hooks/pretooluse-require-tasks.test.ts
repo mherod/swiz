@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { getSessionTasksDir } from "./hook-utils.ts"
-import { isLargeContentPayload } from "./pretooluse-require-tasks.ts"
+import { DIRECT_MERGE_INTENT_RE, isLargeContentPayload } from "./pretooluse-require-tasks.ts"
 import { useTempDir } from "./test-utils.ts"
 
 interface HookResult {
@@ -721,5 +721,129 @@ describe("isLargeContentPayload", () => {
       },
     }
     expect(isLargeContentPayload(input)).toBe(true)
+  })
+})
+
+describe("DIRECT_MERGE_INTENT_RE", () => {
+  const shouldMatch = [
+    "Merge PR",
+    "Merge PR #42 into main",
+    "merge pr",
+    "Merge to main",
+    "Merge into main",
+    "Merge into master",
+    "Merge to master",
+    "Rebase and merge",
+    "Squash and merge",
+    "Merge branch to main",
+    "Merge branch into master",
+    "Merge directly",
+  ]
+  for (const subject of shouldMatch) {
+    test(`matches: "${subject}"`, () => {
+      expect(DIRECT_MERGE_INTENT_RE.test(subject)).toBe(true)
+    })
+  }
+
+  const shouldNotMatch = [
+    "Open PR for review",
+    "Request PR review",
+    "Create feature branch",
+    "Run tests",
+    "Push to origin",
+    "Merge conflicts in feature branch",
+    "Review merge request",
+  ]
+  for (const subject of shouldNotMatch) {
+    test(`does not match: "${subject}"`, () => {
+      expect(DIRECT_MERGE_INTENT_RE.test(subject)).toBe(false)
+    })
+  }
+})
+
+describe("strict-no-direct-main merge task blocking", () => {
+  async function writeSwizSettings(homeDir: string, settings: Record<string, unknown>) {
+    const dir = join(homeDir, ".swiz")
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, "settings.json"), JSON.stringify(settings, null, 2))
+  }
+
+  test("denies Bash when strict-no-direct-main enabled and task has 'Merge PR' subject", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-merge-pr-block"
+    await writeSwizSettings(homeDir, { strictNoDirectMain: true })
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Implement feature",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, { id: "2", subject: "Merge PR", status: "pending" })
+
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("strict-no-direct-main")
+    expect(result.reason).toContain("Merge PR")
+  })
+
+  test("denies Edit when strict-no-direct-main enabled and task has 'Merge into main'", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-merge-into-main"
+    await writeSwizSettings(homeDir, { strictNoDirectMain: true })
+    await writeTask(homeDir, sessionId, { id: "1", subject: "Fix bug", status: "in_progress" })
+    await writeTask(homeDir, sessionId, { id: "2", subject: "Merge into main", status: "pending" })
+
+    const result = await runHook({
+      homeDir,
+      toolName: "Edit",
+      sessionId,
+      filePath: "/some/file.ts",
+    })
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("strict-no-direct-main")
+  })
+
+  test("allows Bash when strict-no-direct-main is disabled even with 'Merge PR' task", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-merge-pr-allowed"
+    await writeSwizSettings(homeDir, { strictNoDirectMain: false })
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Implement feature",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, { id: "2", subject: "Merge PR", status: "pending" })
+
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId })
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("allows Bash when strict-no-direct-main enabled but no merge-intent tasks", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-no-merge-tasks"
+    await writeSwizSettings(homeDir, { strictNoDirectMain: true })
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Implement feature",
+      status: "in_progress",
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Open PR for review",
+      status: "pending",
+    })
+
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId })
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("allows when no swiz settings file exists (fail-open)", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-no-settings"
+    // No settings file written — readSwizSettings returns defaults (strictNoDirectMain: false)
+    await writeTask(homeDir, sessionId, { id: "1", subject: "Fix thing", status: "in_progress" })
+    await writeTask(homeDir, sessionId, { id: "2", subject: "Merge PR", status: "pending" })
+
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId })
+    expect(result.decision).toBeUndefined()
   })
 })

@@ -6,7 +6,7 @@
 //   3. Tasks haven't gone stale (no task tool interaction in last STALENESS_THRESHOLD calls)
 
 import { getHomeDirOrNull } from "../src/home.ts"
-import { readProjectState } from "../src/settings.ts"
+import { readProjectState, readSwizSettings } from "../src/settings.ts"
 import {
   denyPreToolUse as deny,
   extractToolNamesFromTranscript,
@@ -34,6 +34,12 @@ const IN_PROGRESS_CAP = 4
 const MIN_INCOMPLETE_TASKS = 2
 const MIN_PENDING_TASKS = 1
 const MEMORY_MARKDOWN_RE = /(?:^|[\\/])(?:CLAUDE|MEMORY)\.md$/i
+/**
+ * Heuristic patterns that indicate intent to merge directly to the default branch,
+ * which contradicts the strict-no-direct-main PR-based workflow.
+ */
+export const DIRECT_MERGE_INTENT_RE =
+  /\bmerge\s+pr\b|\bmerge\s+(?:to|into)\s+(?:main|master)\b|\brebase\s+and\s+merge\b|\bmerge\s+branch\s+(?:to|into)\s+(?:main|master)\b|\bsquash\s+and\s+merge\b|\bmerge\s+directly\b/i
 
 /**
  * Detect whether an Edit/Write payload carries substantial content (10+ lines).
@@ -225,6 +231,36 @@ async function main() {
     )
   }
 
+  // ── CHECK 4: Merge PR task contradicts strict-no-direct-main ───────────────────
+  // When strict-no-direct-main is enabled, a "Merge PR" task signals intent to
+  // bypass the feature-branch workflow. Block until the task plan is corrected.
+  const mergePrTasks = incompleteTasks.filter((t) => DIRECT_MERGE_INTENT_RE.test(t.subject))
+  if (mergePrTasks.length > 0) {
+    try {
+      const settings = await readSwizSettings()
+      if (settings.strictNoDirectMain) {
+        const taskList = mergePrTasks
+          .map((t) => `  • #${t.id} (${t.status}): ${t.subject}`)
+          .join("\n")
+        deny(
+          `STOP. ${toolName} is BLOCKED because strict-no-direct-main is enabled but the task plan includes "Merge PR" tasks.\n\n` +
+            `Conflicting tasks:\n${taskList}\n\n` +
+            `When strict-no-direct-main is enabled, all merges must go through the PR review workflow — ` +
+            `direct merges are not permitted.\n\n` +
+            formatActionPlan(
+              [
+                'Use TaskUpdate to delete or rewrite the "Merge PR" task(s) — replace with PR-based steps (e.g. "Open PR", "Request review").',
+                `Retry this ${toolName} call after the task plan no longer contains merge-to-main intent.`,
+              ],
+              { translateToolNames: true }
+            )
+        )
+      }
+    } catch {
+      // Settings read failure → fail-open; other checks still apply.
+    }
+  }
+
   // ── CHECK 2: Task staleness (transcript scan) ─────────────────────────────────
   // Only enforced when a transcript is available and task tools have been used
   // at least once (i.e. the agent has already engaged with the task system).
@@ -279,17 +315,19 @@ async function main() {
   process.exit(0)
 }
 
-void main().catch((err: unknown) => {
-  const message = err instanceof Error ? err.message : String(err)
-  deny(
-    `STOP. ${"\u26a0\ufe0f"} pretooluse-require-tasks encountered an unexpected error and is failing closed.\n\n` +
-      `Error: ${message}\n\n` +
-      formatActionPlan(
-        [
-          "Check that the hook file and its dependencies are intact.",
-          "If the error persists, inspect the hook source at hooks/pretooluse-require-tasks.ts.",
-        ],
-        { translateToolNames: true }
-      )
-  )
-})
+if (import.meta.main) {
+  void main().catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err)
+    deny(
+      `STOP. ${"\u26a0\ufe0f"} pretooluse-require-tasks encountered an unexpected error and is failing closed.\n\n` +
+        `Error: ${message}\n\n` +
+        formatActionPlan(
+          [
+            "Check that the hook file and its dependencies are intact.",
+            "If the error persists, inspect the hook source at hooks/pretooluse-require-tasks.ts.",
+          ],
+          { translateToolNames: true }
+        )
+    )
+  })
+}
