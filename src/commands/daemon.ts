@@ -1,3 +1,4 @@
+import { type FSWatcher, watch } from "node:fs"
 import { dirname, join } from "node:path"
 import { stderrLog } from "../debug.ts"
 import { executeDispatch } from "../dispatch/execute.ts"
@@ -77,6 +78,79 @@ function formatUptime(ms: number): string {
   if (h > 0) return `${h}h ${m}m ${sec}s`
   if (m > 0) return `${m}m ${sec}s`
   return `${sec}s`
+}
+
+export interface WatchEntry {
+  path: string
+  label: string
+  callbacks: Set<() => void>
+  watcher: FSWatcher | null
+  lastInvalidation: number | null
+  invalidationCount: number
+}
+
+export class FileWatcherRegistry {
+  private entries = new Map<string, WatchEntry>()
+
+  register(path: string, label: string, callback: () => void): void {
+    let entry = this.entries.get(path)
+    if (!entry) {
+      entry = {
+        path,
+        label,
+        callbacks: new Set(),
+        watcher: null,
+        lastInvalidation: null,
+        invalidationCount: 0,
+      }
+      this.entries.set(path, entry)
+    }
+    entry.callbacks.add(callback)
+  }
+
+  start(): void {
+    for (const entry of this.entries.values()) {
+      if (entry.watcher) continue
+      try {
+        entry.watcher = watch(entry.path, { recursive: entry.path.endsWith("/") }, () => {
+          entry.lastInvalidation = Date.now()
+          entry.invalidationCount += 1
+          for (const cb of entry.callbacks) {
+            try {
+              cb()
+            } catch {
+              /* ignore callback errors */
+            }
+          }
+        })
+      } catch {
+        /* path may not exist yet — that's fine */
+      }
+    }
+  }
+
+  close(): void {
+    for (const entry of this.entries.values()) {
+      entry.watcher?.close()
+      entry.watcher = null
+    }
+  }
+
+  status(): Array<{
+    path: string
+    label: string
+    watching: boolean
+    lastInvalidation: number | null
+    invalidationCount: number
+  }> {
+    return [...this.entries.values()].map((e) => ({
+      path: e.path,
+      label: e.label,
+      watching: e.watcher !== null,
+      lastInvalidation: e.lastInvalidation,
+      invalidationCount: e.invalidationCount,
+    }))
+  }
 }
 
 export function hasSnapshotInvalidated(
@@ -294,6 +368,12 @@ export const daemonCommand: Command = {
       return m
     }
 
+    const watchers = new FileWatcherRegistry()
+    const projectRoot = dirname(Bun.main)
+    const hooksDir = join(projectRoot, "hooks/")
+    const manifestPath = join(projectRoot, "src", "manifest.ts")
+    const globalSettingsPath = getSwizSettingsPath()
+
     const snapshots = new Map<string, CachedSnapshot>()
     const cacheKey = (cwd: string, sessionId: string | null | undefined) =>
       `${cwd}\x00${sessionId ?? ""}`
@@ -311,6 +391,37 @@ export const daemonCommand: Command = {
       snapshots.set(key, { snapshot, fingerprint: nextFingerprint })
       return snapshot
     }
+
+    // Register watchers for cache invalidation
+    const flushSnapshots = () => snapshots.clear()
+
+    watchers.register(manifestPath, "manifest", flushSnapshots)
+    watchers.register(hooksDir, "hooks", flushSnapshots)
+    if (globalSettingsPath) {
+      watchers.register(globalSettingsPath, "global-settings", flushSnapshots)
+    }
+
+    const registeredProjects = new Set<string>()
+    const registerProjectWatchers = (cwd: string) => {
+      if (registeredProjects.has(cwd)) return
+      registeredProjects.add(cwd)
+      const projectFlush = () => {
+        // Flush snapshots for this project
+        for (const key of snapshots.keys()) {
+          if (key.startsWith(cwd)) snapshots.delete(key)
+        }
+      }
+      const projectSettings = getProjectSettingsPath(cwd)
+      if (projectSettings)
+        watchers.register(projectSettings, `project-settings:${cwd}`, projectFlush)
+      const gitDir = join(cwd, ".git/")
+      watchers.register(gitDir, `git:${cwd}`, projectFlush)
+      // Re-start to pick up new watchers
+      watchers.start()
+    }
+
+    watchers.start()
+    process.on("exit", () => watchers.close())
 
     const server = Bun.serve({
       port,
@@ -339,8 +450,10 @@ export const daemonCommand: Command = {
           recordDispatch(globalMetrics, canonicalEvent, durationMs)
           try {
             const parsed = JSON.parse(payloadStr) as { cwd?: string }
-            if (parsed.cwd)
+            if (parsed.cwd) {
               recordDispatch(getProjectMetrics(parsed.cwd), canonicalEvent, durationMs)
+              registerProjectWatchers(parsed.cwd)
+            }
           } catch {
             /* ignore parse errors */
           }
@@ -359,6 +472,13 @@ export const daemonCommand: Command = {
             projects[cwd] = serializeMetrics(m)
           }
           return Response.json({ ...serializeMetrics(globalMetrics), projects })
+        }
+
+        if (url.pathname === "/cache/status" && req.method === "GET") {
+          return Response.json({
+            watchers: watchers.status(),
+            snapshotCacheSize: snapshots.size,
+          })
         }
 
         if (url.pathname === "/status-line/snapshot" && req.method === "POST") {

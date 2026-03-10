@@ -1,6 +1,7 @@
-import { describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "bun:test"
 import {
   createMetrics,
+  FileWatcherRegistry,
   hasSnapshotInvalidated,
   recordDispatch,
   serializeMetrics,
@@ -89,5 +90,52 @@ describe("daemon metrics", () => {
     const serialized = serializeMetrics(m)
     expect(serialized.totalDispatches).toBe(0)
     expect(Object.keys(serialized.byEvent)).toHaveLength(0)
+  })
+})
+
+describe("FileWatcherRegistry", () => {
+  const registries: FileWatcherRegistry[] = []
+  afterEach(() => {
+    for (const r of registries) r.close()
+    registries.length = 0
+  })
+
+  it("registers paths and reports status", () => {
+    const reg = new FileWatcherRegistry()
+    registries.push(reg)
+    reg.register("/tmp/test-path", "test-label", () => {})
+    const status = reg.status()
+    expect(status).toHaveLength(1)
+    expect(status[0]?.label).toBe("test-label")
+    expect(status[0]?.watching).toBeFalse()
+    expect(status[0]?.invalidationCount).toBe(0)
+  })
+
+  it("multiple callbacks on same path", () => {
+    const reg = new FileWatcherRegistry()
+    registries.push(reg)
+    const calls: string[] = []
+    reg.register("/tmp/test-path", "test", () => calls.push("a"))
+    reg.register("/tmp/test-path", "test", () => calls.push("b"))
+    const status = reg.status()
+    expect(status).toHaveLength(1)
+  })
+
+  it("close stops all watchers", () => {
+    const reg = new FileWatcherRegistry()
+    registries.push(reg)
+    reg.register("/tmp", "tmp", () => {})
+    reg.start()
+    expect(reg.status()[0]?.watching).toBeTrue()
+    reg.close()
+    expect(reg.status()[0]?.watching).toBeFalse()
+  })
+
+  it("start ignores non-existent paths gracefully", () => {
+    const reg = new FileWatcherRegistry()
+    registries.push(reg)
+    reg.register("/nonexistent/path/that/does/not/exist", "missing", () => {})
+    reg.start()
+    expect(reg.status()[0]?.watching).toBeFalse()
   })
 })
