@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { getAgentSettingsPath } from "../agent-paths.ts"
 import { stderrLog } from "../debug.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import type { Command } from "../types.ts"
@@ -69,7 +70,7 @@ const GLOBAL_AGENTS: AgentConfig[] = [
     scope: "global",
     flag: "--gemini",
     displayName: "Gemini CLI",
-    resolvePath: (home) => join(home, ".gemini", "settings.json"),
+    resolvePath: (home) => getAgentSettingsPath("gemini", home),
   },
 ]
 

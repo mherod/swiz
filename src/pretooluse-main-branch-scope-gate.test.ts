@@ -29,6 +29,19 @@ describe("GH_PR_MERGE_RE (scope gate — blocked commands)", () => {
   test("matches gh pr merge in && chain", () => {
     expect(GH_PR_MERGE_RE.test("git push origin feat/x && gh pr merge 42 --squash")).toBe(true)
   })
+
+  test("matches gh pr merge after heredoc body assignment", () => {
+    const command = [
+      "body=$(cat <<'EOF'",
+      "## Summary",
+      "- sample",
+      "EOF",
+      ")",
+      'gh pr create --body "$body"',
+      "gh pr merge 1072 --squash",
+    ].join("\n")
+    expect(GH_PR_MERGE_RE.test(command)).toBe(true)
+  })
 })
 
 describe("GH_PR_MERGE_RE (scope gate — allowed commands)", () => {

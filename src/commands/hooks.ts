@@ -1,8 +1,8 @@
-import { join } from "node:path"
 import { orderBy } from "lodash-es"
+import { getAgentSettingsSearchPaths } from "../agent-paths.ts"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { CYAN as CYAN_H, DIM, RESET as RST } from "../ansi.ts"
-import { expandHomeVars, getHomeDir } from "../home.ts"
+import { expandHomeVars } from "../home.ts"
 import { manifest } from "../manifest.ts"
 import { loadAllPlugins, pluginResultsToJson } from "../plugins.ts"
 import { readProjectSettings, readSwizSettings, resolveProjectHooks } from "../settings.ts"
@@ -71,18 +71,18 @@ function normalizeFlatHooks(raw: Record<string, HookEntry[]>): HooksConfig {
 // ─── Settings loading ───────────────────────────────────────────────────────
 
 function settingsPaths(agent: AgentDef): string[] {
-  const paths = [agent.settingsPath]
-  if (agent.id === "claude") {
-    const HOME = getHomeDir()
-    paths.push(join(HOME, ".claude", "settings.local.json"))
-    paths.push(".claude/settings.json")
-    paths.push(".claude/settings.local.json")
-  } else if (agent.id === "cursor") {
-    paths.push(".cursor/hooks.json")
-  } else if (agent.id === "gemini") {
-    paths.push(".gemini/settings.json")
+  switch (agent.id) {
+    case "claude":
+      return getAgentSettingsSearchPaths("claude")
+    case "cursor":
+      return getAgentSettingsSearchPaths("cursor")
+    case "gemini":
+      return getAgentSettingsSearchPaths("gemini")
+    case "codex":
+      return [agent.settingsPath]
+    default:
+      return [agent.settingsPath]
   }
-  return paths
 }
 
 async function loadAllSettings(): Promise<LoadedSettings[]> {
@@ -90,8 +90,7 @@ async function loadAllSettings(): Promise<LoadedSettings[]> {
 
   for (const agent of AGENTS) {
     for (const path of settingsPaths(agent)) {
-      const resolved = path.startsWith("/") ? path : join(process.cwd(), path)
-      const file = Bun.file(resolved)
+      const file = Bun.file(path)
       if (!(await file.exists())) continue
       try {
         const json = await file.json()
@@ -100,7 +99,7 @@ async function loadAllSettings(): Promise<LoadedSettings[]> {
 
         const hooks = agent.configStyle === "flat" ? normalizeFlatHooks(raw) : (raw as HooksConfig)
 
-        results.push({ source: resolved, agent, hooks })
+        results.push({ source: path, agent, hooks })
       } catch {}
     }
   }

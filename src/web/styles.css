@@ -456,6 +456,15 @@ tbody tr:hover {
   gap: 6px;
 }
 
+.project-status-line {
+  color: #9eb1d7;
+  font-size: 0.64rem;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .session-dispatches {
   font-size: 0.6rem;
   font-weight: 700;

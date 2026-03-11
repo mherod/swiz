@@ -24,11 +24,10 @@ import {
   resolveProjectHooks,
 } from "../settings.ts"
 import { getWorkflowIntent } from "../state-machine.ts"
-import { readTasks, type Task as StoredTask } from "../tasks/task-repository.ts"
+import { readTasks } from "../tasks/task-repository.ts"
 import { getSessions } from "../tasks/task-resolver.ts"
 import { parseTranscriptSummary, type TranscriptSummary } from "../transcript-summary.ts"
 import {
-  extractText,
   findAllProviderSessions,
   isHookFeedback,
   parseTranscriptEntries,
@@ -36,6 +35,23 @@ import {
 } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 import { handleSessionRoutes } from "./daemon/session-routes.ts"
+import {
+  buildProjectTasksView,
+  buildSessionTasksView,
+  type CapturedToolCall,
+  captureSessionToolCall,
+  extractMessageText,
+  extractToolCalls,
+  mergeToolStats,
+  type ProjectTaskPreview,
+  restartDaemon,
+  type SessionMessage,
+  type SessionTaskPreview,
+  type SessionTaskSummary,
+  stripAnsi,
+  supplementMessagesWithCapturedToolCalls,
+  transcriptWatchPathsForProject,
+} from "./daemon/utils.ts"
 import {
   computeWarmStatusLineSnapshot,
   getGhCachePath,
@@ -89,13 +105,6 @@ interface SessionPreview {
   startedAt?: number
   lastMessageAt?: number
   dispatches?: number
-}
-
-interface SessionMessage {
-  role: "user" | "assistant"
-  timestamp: string | null
-  text: string
-  toolCalls?: ToolCallSummary[]
 }
 
 export interface CiWatchRun {
@@ -939,60 +948,24 @@ async function serveWebAsset(pathname: string): Promise<Response | null> {
   })
 }
 
-interface ToolCallSummary {
-  name: string
-  detail: string
-}
-
-function extractToolCalls(content: unknown): ToolCallSummary[] {
-  if (!Array.isArray(content)) return []
-  return content
-    .filter(
-      (block): block is { type: string; name?: string; input?: Record<string, unknown> } =>
-        !!block &&
-        typeof block === "object" &&
-        block.type === "tool_use" &&
-        typeof block.name === "string"
-    )
-    .map((block) => {
-      const name = block.name!
-      const input = block.input
-      let detail = ""
-      if (input) {
-        if (typeof input.subject === "string") {
-          detail = input.subject.length > 60 ? `${input.subject.slice(0, 57)}...` : input.subject
-        } else if (typeof input.taskId === "string") {
-          const parts = [`#${input.taskId}`]
-          if (typeof input.status === "string") parts.push(input.status)
-          detail = parts.join(" → ")
-        } else if (typeof input.skill === "string") {
-          detail = typeof input.args === "string" ? `${input.skill} ${input.args}` : input.skill
-        } else {
-          const pathVal = input.path ?? input.file_path
-          if (typeof pathVal === "string") {
-            const short = pathVal.split("/").slice(-2).join("/")
-            detail = short
-          } else if (typeof input.command === "string") {
-            const cmd =
-              input.command.length > 80 ? `${input.command.slice(0, 77)}...` : input.command
-            detail = cmd
-          } else if (typeof input.pattern === "string") {
-            detail = input.pattern
-          } else if (typeof input.query === "string") {
-            detail = input.query.length > 60 ? `${input.query.slice(0, 57)}...` : input.query
-          } else if (typeof input.content === "string") {
-            detail = `${input.content.length} chars`
-          } else if (typeof input.old_string === "string") {
-            detail = `replacing ${input.old_string.split("\n").length} lines`
-          }
-        }
-      }
-      return { name, detail }
-    })
-}
-
-function extractMessageText(content: unknown): string {
-  return extractText(content as string | { type: string; text?: string }[] | undefined).trim()
+function formatWebProjectStatusLine(snapshot: WarmStatusLineSnapshot): string {
+  const parts: string[] = []
+  const gitInfo = stripAnsi(snapshot.gitInfo).trim()
+  if (gitInfo) parts.push(gitInfo)
+  if (snapshot.projectState) parts.push(`state: ${snapshot.projectState}`)
+  if (snapshot.issueCount !== null)
+    parts.push(`${snapshot.issueCount} issue${snapshot.issueCount === 1 ? "" : "s"}`)
+  if (snapshot.prCount !== null)
+    parts.push(`${snapshot.prCount} PR${snapshot.prCount === 1 ? "" : "s"}`)
+  if (snapshot.reviewDecision === "CHANGES_REQUESTED") {
+    parts.push("changes requested")
+  } else if (snapshot.reviewDecision === "APPROVED") {
+    parts.push("approved")
+  } else if (snapshot.commentCount > 0) {
+    parts.push(`${snapshot.commentCount} comment${snapshot.commentCount === 1 ? "" : "s"}`)
+  }
+  if (parts.length === 0) return "No status data yet"
+  return parts.join(" | ")
 }
 
 interface SessionScanResult {
@@ -1138,6 +1111,10 @@ class SessionDataCache {
       if (activityMs < cutoffMs) this.entries.delete(sessionPath)
     }
   }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
 }
 
 const sessionDataCache = new SessionDataCache()
@@ -1175,15 +1152,21 @@ async function listProjectSessions(
   for (let i = 0; i < scanTargets.length; i++) {
     if (scans[i]!.hasMessages) withMessages.push({ session: scanTargets[i]!, scan: scans[i]! })
   }
+  const ACTIVE_DISPATCH_WINDOW_MS = 6 * 60 * 1000
   const getActivity = (id: string) => liveActivity?.get(id)
+  const getRecentDispatches = (id: string): number => {
+    const activity = getActivity(id)
+    if (!activity) return 0
+    return Date.now() - activity.lastSeen <= ACTIVE_DISPATCH_WINDOW_MS ? activity.dispatches : 0
+  }
   const effectiveLastMessage = (s: Session, scan: SessionScanResult): number => {
     const live = getActivity(s.id)?.lastSeen ?? 0
     return Math.max(scan.lastMessageAt, live)
   }
   // Sort: sessions with dispatch activity first, then by last message time
   withMessages.sort((a, b) => {
-    const aDisp = getActivity(a.session.id)?.dispatches ?? 0
-    const bDisp = getActivity(b.session.id)?.dispatches ?? 0
+    const aDisp = getRecentDispatches(a.session.id)
+    const bDisp = getRecentDispatches(b.session.id)
     if (bDisp > 0 && aDisp === 0) return 1
     if (aDisp > 0 && bDisp === 0) return -1
     return effectiveLastMessage(b.session, b.scan) - effectiveLastMessage(a.session, a.scan)
@@ -1206,7 +1189,7 @@ async function listProjectSessions(
       mtime: session.mtime,
       startedAt: scan.startedAt || undefined,
       lastMessageAt: effectiveLastMessage(session, scan) || undefined,
-      dispatches: getActivity(session.id)?.dispatches || undefined,
+      dispatches: getRecentDispatches(session.id) || undefined,
     })),
   }
 }
@@ -1216,27 +1199,12 @@ interface SessionData {
   toolStats: Array<{ name: string; count: number }>
 }
 
-interface SessionTaskSummary {
-  total: number
-  open: number
-  completed: number
-  cancelled: number
-}
-
-interface SessionTaskPreview {
-  id: string
-  subject: string
-  status: StoredTask["status"]
-  statusChangedAt: string | null
-  completionTimestamp: string | null
-  completionEvidence: string | null
-}
-
-interface ProjectTaskPreview extends SessionTaskPreview {
-  sessionId: string
-}
-
-async function getSessionData(cwd: string, sessionId: string, limit = 30): Promise<SessionData> {
+async function getSessionData(
+  cwd: string,
+  sessionId: string,
+  limit = 30,
+  sessionToolCalls?: Map<string, CapturedToolCall[]>
+): Promise<SessionData> {
   const sessions = await findAllProviderSessions(cwd)
   const session = sessions.find(
     (candidate) => candidate.id === sessionId || candidate.id.startsWith(sessionId)
@@ -1244,24 +1212,27 @@ async function getSessionData(cwd: string, sessionId: string, limit = 30): Promi
   if (!session) return { messages: [], toolStats: [] }
   const cached = await sessionDataCache.get(session)
   if (!cached) return { messages: [], toolStats: [] }
-  return {
-    messages: cached.messages.slice(-limit),
-    toolStats: cached.toolStats,
-  }
-}
 
-function taskStatusRank(status: StoredTask["status"]): number {
-  switch (status) {
-    case "in_progress":
-      return 0
-    case "pending":
-      return 1
-    case "completed":
-      return 2
-    case "cancelled":
-      return 3
-    default:
-      return 4
+  const messages = cached.messages.slice(-limit)
+  const hasToolCalls = messages.some((message) => (message.toolCalls?.length ?? 0) > 0)
+  const captured = (sessionToolCalls?.get(session.id) ?? []).map((entry) => ({
+    name: entry.name,
+    detail: entry.detail,
+  }))
+  if (captured.length === 0 || hasToolCalls || session.format !== "cursor-agent-jsonl") {
+    return {
+      messages,
+      toolStats: cached.toolStats,
+    }
+  }
+
+  const supplemented = supplementMessagesWithCapturedToolCalls(
+    messages,
+    sessionToolCalls?.get(session.id) ?? []
+  )
+  return {
+    messages: supplemented.slice(-limit),
+    toolStats: mergeToolStats(cached.toolStats, captured),
   }
 }
 
@@ -1270,31 +1241,7 @@ async function getSessionTasks(
   limit = 20
 ): Promise<{ tasks: SessionTaskPreview[]; summary: SessionTaskSummary }> {
   const tasks = await readTasks(sessionId)
-  const summary: SessionTaskSummary = {
-    total: tasks.length,
-    open: tasks.filter((task) => task.status === "pending" || task.status === "in_progress").length,
-    completed: tasks.filter((task) => task.status === "completed").length,
-    cancelled: tasks.filter((task) => task.status === "cancelled").length,
-  }
-  const sorted = [...tasks].sort((a, b) => {
-    const rankDiff = taskStatusRank(a.status) - taskStatusRank(b.status)
-    if (rankDiff !== 0) return rankDiff
-    const aTs = a.statusChangedAt ?? a.completionTimestamp ?? ""
-    const bTs = b.statusChangedAt ?? b.completionTimestamp ?? ""
-    if (aTs !== bTs) return bTs.localeCompare(aTs)
-    return b.id.localeCompare(a.id)
-  })
-  return {
-    tasks: sorted.slice(0, limit).map((task) => ({
-      id: task.id,
-      subject: task.subject,
-      status: task.status,
-      statusChangedAt: task.statusChangedAt ?? null,
-      completionTimestamp: task.completionTimestamp ?? null,
-      completionEvidence: task.completionEvidence ?? null,
-    })),
-    summary,
-  }
+  return buildSessionTasksView(tasks, limit)
 }
 
 async function getProjectTasks(
@@ -1318,28 +1265,7 @@ async function getProjectTasks(
     }
   }
 
-  const summary: SessionTaskSummary = {
-    total: allTasks.length,
-    open: allTasks.filter((task) => task.status === "pending" || task.status === "in_progress")
-      .length,
-    completed: allTasks.filter((task) => task.status === "completed").length,
-    cancelled: allTasks.filter((task) => task.status === "cancelled").length,
-  }
-
-  const sorted = [...allTasks].sort((a, b) => {
-    const rankDiff = taskStatusRank(a.status) - taskStatusRank(b.status)
-    if (rankDiff !== 0) return rankDiff
-    const aTs = a.statusChangedAt ?? a.completionTimestamp ?? ""
-    const bTs = b.statusChangedAt ?? b.completionTimestamp ?? ""
-    if (aTs !== bTs) return bTs.localeCompare(aTs)
-    if (a.sessionId !== b.sessionId) return b.sessionId.localeCompare(a.sessionId)
-    return b.id.localeCompare(a.id)
-  })
-
-  return {
-    tasks: sorted.slice(0, limit),
-    summary,
-  }
+  return buildProjectTasksView(allTasks, limit)
 }
 
 async function safeMtime(path: string | null): Promise<number> {
@@ -1499,9 +1425,10 @@ async function fetchDaemonStatus(port: number): Promise<void> {
 export const daemonCommand: Command = {
   name: "daemon",
   description: "Run a background web server",
-  usage: "swiz daemon [--port <port>] [--install] [--uninstall] [status]",
+  usage: "swiz daemon [--port <port>] [--restart] [--install] [--uninstall] [status]",
   options: [
     { flags: "--port <port>", description: "Port to listen on (default: 7943)" },
+    { flags: "--restart", description: "Stop any daemon on the port, then start fresh" },
     { flags: "--install", description: "Install as a LaunchAgent" },
     { flags: "--uninstall", description: "Uninstall the LaunchAgent" },
     { flags: "status", description: "Show daemon metrics and status" },
@@ -1525,11 +1452,27 @@ export const daemonCommand: Command = {
       return
     }
 
+    if (args.includes("--restart")) {
+      const restarted = await restartDaemon(port, process.pid)
+      if (restarted.mode === "launchagent") {
+        const runningMsg = restarted.hadRunning ? "reloaded" : "loaded"
+        console.log(`${SWIZ_DAEMON_LABEL} ${runningMsg} via launchctl.`)
+        return
+      }
+      if (!restarted.hadRunning) console.log(`No daemon detected on port ${port}; starting fresh.`)
+      else
+        console.log(
+          `Restarting daemon on port ${port} (stopped ${restarted.stoppedCount} process${restarted.stoppedCount === 1 ? "" : "es"}).`
+        )
+    }
+
     const globalMetrics = createMetrics()
     const projectMetrics = new Map<string, DaemonMetrics>()
     const projectLastSeen = new Map<string, number>()
     /** Tracks the latest dispatch timestamp per session ID (from hook events). */
     const sessionActivity = new Map<string, { lastSeen: number; dispatches: number }>()
+    /** Per-session tool calls captured from hook dispatch payloads. */
+    const sessionToolCalls = new Map<string, CapturedToolCall[]>()
     let lastTranscriptMemoryPruneAt = 0
     const getProjectMetrics = (cwd: string): DaemonMetrics => {
       let m = projectMetrics.get(cwd)
@@ -1551,6 +1494,16 @@ export const daemonCommand: Command = {
       transcriptIndex.pruneOlderThan(cutoffMs)
       for (const [sessionId, activity] of sessionActivity) {
         if (activity.lastSeen < cutoffMs) sessionActivity.delete(sessionId)
+      }
+      for (const [sessionId, toolCalls] of sessionToolCalls) {
+        const recent = toolCalls.filter((call) => new Date(call.timestamp).getTime() >= cutoffMs)
+        if (recent.length === 0) {
+          sessionToolCalls.delete(sessionId)
+          continue
+        }
+        if (recent.length !== toolCalls.length) {
+          sessionToolCalls.set(sessionId, recent)
+        }
       }
     }
     touchProject(process.cwd())
@@ -1617,12 +1570,19 @@ export const daemonCommand: Command = {
         gitStateCache.invalidateProject(cwd)
         projectSettingsCache.invalidateProject(cwd)
         manifestCache.invalidateProject(cwd)
+        // Transcript/session caches are path-based and can include multiple providers.
+        // Clear on project-related watcher events to avoid stale ordering/message views.
+        transcriptIndex.invalidateAll()
+        sessionDataCache.invalidateAll()
       }
       const projectSettings = getProjectSettingsPath(cwd)
       if (projectSettings)
         watchers.register(projectSettings, `project-settings:${cwd}`, projectFlush)
       const gitDir = join(cwd, ".git/")
       watchers.register(gitDir, `git:${cwd}`, projectFlush)
+      for (const transcriptWatch of transcriptWatchPathsForProject(cwd)) {
+        watchers.register(transcriptWatch.path, transcriptWatch.label, projectFlush)
+      }
       // Re-start to pick up new watchers
       watchers.start()
     }
@@ -1691,7 +1651,12 @@ export const daemonCommand: Command = {
             const parsed = JSON.parse(payloadStr) as {
               cwd?: string
               session_id?: string
+              tool_name?: string
+              toolName?: string
+              tool_input?: Record<string, unknown>
+              toolInput?: Record<string, unknown>
             }
+            const nowMs = Date.now()
             if (parsed.cwd) {
               touchProject(parsed.cwd)
               recordDispatch(getProjectMetrics(parsed.cwd), canonicalEvent, durationMs)
@@ -1700,9 +1665,33 @@ export const daemonCommand: Command = {
             if (parsed.session_id) {
               const prev = sessionActivity.get(parsed.session_id)
               sessionActivity.set(parsed.session_id, {
-                lastSeen: Date.now(),
+                lastSeen: nowMs,
                 dispatches: (prev?.dispatches ?? 0) + 1,
               })
+
+              if (canonicalEvent === "preToolUse") {
+                const toolName =
+                  typeof parsed.tool_name === "string"
+                    ? parsed.tool_name
+                    : typeof parsed.toolName === "string"
+                      ? parsed.toolName
+                      : null
+                if (toolName) {
+                  const toolInput =
+                    parsed.tool_input && typeof parsed.tool_input === "object"
+                      ? parsed.tool_input
+                      : parsed.toolInput && typeof parsed.toolInput === "object"
+                        ? parsed.toolInput
+                        : undefined
+                  captureSessionToolCall(
+                    sessionToolCalls,
+                    parsed.session_id,
+                    toolName,
+                    toolInput,
+                    nowMs
+                  )
+                }
+              }
             }
           } catch {
             /* ignore parse errors */
@@ -1930,9 +1919,14 @@ export const daemonCommand: Command = {
             ...new Set([process.cwd(), ...registeredProjects, ...projectMetrics.keys()]),
           ],
           getProjectLastSeen: (cwd) => projectLastSeen.get(cwd) ?? 0,
+          getProjectStatusLine: async (cwd, sessionId) => {
+            const snapshot = await resolveSnapshot(cwd, sessionId ?? null)
+            return formatWebProjectStatusLine(snapshot)
+          },
           listProjectSessions: (cwd, limit, pinnedSessionId) =>
             listProjectSessions(cwd, limit, sessionActivity, pinnedSessionId),
-          getSessionData,
+          getSessionData: (cwd, sessionId, limit) =>
+            getSessionData(cwd, sessionId, limit, sessionToolCalls),
           getSessionTasks,
           getProjectTasks,
         })

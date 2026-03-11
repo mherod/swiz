@@ -39,7 +39,10 @@ const input: ToolHookInput = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 
 const command: string = (input?.tool_input?.command as string) ?? ""
-const cwd: string = (input?.tool_input?.cwd as string) ?? process.cwd()
+// Use the canonical top-level cwd from the hook payload.
+// Some tool payloads may not mirror cwd inside tool_input, and falling back
+// to process.cwd() can evaluate policy against the wrong repository.
+const cwd: string = input?.cwd ?? (input?.tool_input?.cwd as string) ?? process.cwd()
 
 const defaultBranch = await getDefaultBranch(cwd)
 

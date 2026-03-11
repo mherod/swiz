@@ -24,6 +24,7 @@ export interface ProjectSessions {
   lastSeenAt: number
   sessionCount: number
   sessions: SessionPreview[]
+  statusLine?: string
 }
 
 export interface ToolCallSummary {
@@ -307,7 +308,8 @@ export function SessionNav({
         return (b.lastMessageAt ?? b.mtime) - (a.lastMessageAt ?? a.mtime)
       })
     : null
-  const activeThresholdMs = 30 * 60 * 1000
+  // Keep "Active now" focused on truly recent activity.
+  const activeThresholdMs = 6 * 60 * 1000
   const activeSessions = sortedSessions?.filter(
     (session) => Date.now() - (session.lastMessageAt ?? session.mtime) <= activeThresholdMs
   )
@@ -329,6 +331,11 @@ export function SessionNav({
               onClick={() => onSelectProject(project.cwd)}
             >
               <span className="project-name">{project.name}</span>
+              {project.statusLine ? (
+                <span className="project-status-line" title={project.statusLine}>
+                  {project.statusLine}
+                </span>
+              ) : null}
               <span className="project-meta">{project.sessionCount} sessions</span>
             </button>
           </li>

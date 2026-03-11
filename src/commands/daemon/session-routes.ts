@@ -2,6 +2,7 @@ interface SessionRoutesContext {
   touchProject: (cwd: string) => void
   getKnownProjects: () => string[]
   getProjectLastSeen: (cwd: string) => number
+  getProjectStatusLine: (cwd: string, sessionId?: string) => Promise<string>
   listProjectSessions: (
     cwd: string,
     limit: number,
@@ -50,10 +51,17 @@ export async function handleSessionRoutes(
 
     const allProjects = await Promise.all(
       ordered.map(async ({ cwd, lastSeenAt }) => {
+        const pinnedSessionId =
+          body?.selectedProjectCwd === cwd ? body?.selectedSessionId : undefined
         const sessions = await ctx.listProjectSessions(
           cwd,
           limitSessionsPerProject,
-          body?.selectedProjectCwd === cwd ? body?.selectedSessionId : undefined
+          pinnedSessionId
+        )
+        const firstSession = (sessions.sessions as Array<{ id?: string }>)[0]
+        const statusLine = await ctx.getProjectStatusLine(
+          cwd,
+          pinnedSessionId ?? (typeof firstSession?.id === "string" ? firstSession.id : undefined)
         )
         return {
           cwd,
@@ -61,6 +69,7 @@ export async function handleSessionRoutes(
           lastSeenAt,
           sessionCount: sessions.sessionCount,
           sessions: sessions.sessions,
+          statusLine,
         }
       })
     )

@@ -1,4 +1,4 @@
-import { join } from "node:path"
+import { getAgentSettingsPath } from "./agent-paths.ts"
 import { getHomeDir } from "./home.ts"
 
 const HOME = getHomeDir()
@@ -40,7 +40,7 @@ export const AGENTS: AgentDef[] = [
   {
     id: "claude",
     name: "Claude Code",
-    settingsPath: join(HOME, ".claude", "settings.json"),
+    settingsPath: getAgentSettingsPath("claude", HOME),
     hooksKey: "hooks",
     configStyle: "nested",
     binary: "claude",
@@ -68,7 +68,7 @@ export const AGENTS: AgentDef[] = [
   {
     id: "cursor",
     name: "Cursor",
-    settingsPath: join(HOME, ".cursor", "hooks.json"),
+    settingsPath: getAgentSettingsPath("cursor", HOME),
     hooksKey: "hooks",
     wrapsHooks: { version: 1 },
     configStyle: "flat",
@@ -101,7 +101,7 @@ export const AGENTS: AgentDef[] = [
   {
     id: "gemini",
     name: "Gemini CLI",
-    settingsPath: join(HOME, ".gemini", "settings.json"),
+    settingsPath: getAgentSettingsPath("gemini", HOME),
     hooksKey: "hooks",
     configStyle: "nested",
     binary: "gemini",
@@ -135,7 +135,7 @@ export const AGENTS: AgentDef[] = [
   {
     id: "codex",
     name: "Codex CLI",
-    settingsPath: join(HOME, ".codex", "config.toml"),
+    settingsPath: getAgentSettingsPath("codex", HOME),
     hooksKey: "hooks",
     configStyle: "nested",
     binary: "codex",
