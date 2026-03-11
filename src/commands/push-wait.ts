@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { getCanonicalPathHash } from "../git-helpers.ts"
 import { swizPushCooldownSentinelPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
+import { startCiWatchViaDaemon } from "./ci-wait.ts"
 
 // Must match the values in hooks/pretooluse-push-cooldown.ts
 export const COOLDOWN_MS = 60_000
@@ -158,6 +159,16 @@ export const pushWaitCommand: Command = {
       }
     }
 
+    const headProc = Bun.spawnSync(["git", "rev-parse", "HEAD"], {
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const commitSha = new TextDecoder().decode(headProc.stdout).trim()
+    if (!commitSha) {
+      throw new Error("Could not determine HEAD SHA")
+    }
+
     const sentinelPath = getSentinelPath(cwd)
 
     // Wait for cooldown to clear
@@ -179,5 +190,15 @@ export const pushWaitCommand: Command = {
     }
 
     console.log("✓ Push succeeded")
+
+    const watch = await startCiWatchViaDaemon(commitSha, cwd)
+    if (watch) {
+      const mode = watch.deduped ? "already active" : "started"
+      console.log(`✓ CI background watch ${mode} for ${commitSha.slice(0, 8)}`)
+    } else {
+      console.log(
+        `⚠ Could not reach daemon for CI watch; run 'swiz daemon' to enable background CI notifications.`
+      )
+    }
   },
 }

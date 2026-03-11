@@ -3,6 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  CiWatchRegistry,
   CooldownRegistry,
   createMetrics,
   FileWatcherRegistry,
@@ -57,6 +58,57 @@ describe("hasSnapshotInvalidated", () => {
 
   it("invalidates on github refresh bucket change", () => {
     expect(hasSnapshotInvalidated(base, { ...base, githubBucket: 11 })).toBeTrue()
+  })
+})
+
+describe("CiWatchRegistry", () => {
+  it("deduplicates active watches by cwd+sha", () => {
+    const registry = new CiWatchRegistry({
+      pollMs: 1000,
+      timeoutMs: 10_000,
+      fetchRun: async () => null,
+      notify: async () => {},
+    })
+
+    const first = registry.start("/repo", "abc123")
+    const second = registry.start("/repo", "abc123")
+
+    expect(first.deduped).toBeFalse()
+    expect(second.deduped).toBeTrue()
+    expect(registry.listActive()).toHaveLength(1)
+    registry.close()
+  })
+
+  it("completes and notifies when run reaches completed status", async () => {
+    const notifications: string[] = []
+    let polls = 0
+
+    const registry = new CiWatchRegistry({
+      pollMs: 10,
+      timeoutMs: 1000,
+      fetchRun: async () => {
+        polls += 1
+        if (polls < 2) return null
+        return {
+          databaseId: 99,
+          status: "completed",
+          conclusion: "success",
+          url: "https://github.com/mherod/swiz/actions/runs/99",
+        }
+      },
+      notify: async (watch) => {
+        notifications.push(`${watch.conclusion}:${watch.runId}`)
+      },
+    })
+
+    registry.start("/repo", "abc123")
+    const waitUntil = Date.now() + 1000
+    while (notifications.length === 0 && Date.now() < waitUntil) {
+      await Bun.sleep(20)
+    }
+    expect(notifications).toEqual(["success:99"])
+    expect(registry.listActive()).toHaveLength(0)
+    registry.close()
   })
 })
 

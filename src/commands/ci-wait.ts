@@ -2,6 +2,38 @@ import { stderrLog } from "../debug.ts"
 import type { Command } from "../types.ts"
 
 // ─── Utilities ────────────────────────────────────────────────────────────
+const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT ?? "7943")
+const DAEMON_ORIGIN = process.env.SWIZ_DAEMON_ORIGIN ?? `http://127.0.0.1:${DAEMON_PORT}`
+
+export interface CiWatchStartResponse {
+  deduped: boolean
+  watch: {
+    sha: string
+    cwd: string
+    startedAt: number
+    lastCheckedAt: number | null
+    runId: number | null
+    runUrl: string | null
+  }
+}
+
+export async function startCiWatchViaDaemon(
+  sha: string,
+  cwd: string
+): Promise<CiWatchStartResponse | null> {
+  try {
+    const resp = await fetch(`${DAEMON_ORIGIN}/ci-watch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sha, cwd }),
+      signal: AbortSignal.timeout(1500),
+    })
+    if (!resp.ok) return null
+    return (await resp.json()) as CiWatchStartResponse
+  } catch {
+    return null
+  }
+}
 
 /**
  * Expand a short or full SHA to its full 40-character form using `git rev-parse`.
