@@ -49,6 +49,9 @@
       "includes": ["hooks/**"],
       "linter": {
         "rules": {
+          "correctness": {
+            "useHookAtTopLevel": "off"
+          },
           "suspicious": {
             "noConsole": "off"
           }
@@ -56,7 +59,7 @@
       }
     },
     {
-      "includes": ["**/*.test.ts"],
+      "includes": ["**/*.test.ts", "**/*.test.tsx"],
       "linter": {
         "rules": {
           "correctness": {
