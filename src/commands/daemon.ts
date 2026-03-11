@@ -812,10 +812,7 @@ export const daemonCommand: Command = {
   description: "Run a background web server",
   usage: "swiz daemon [--port <port>] [--install] [--uninstall] [status]",
   options: [
-    {
-      flags: "--port <port>",
-      description: "Port to listen on (default: 7943)",
-    },
+    { flags: "--port <port>", description: "Port to listen on (default: 7943)" },
     { flags: "--install", description: "Install as a LaunchAgent" },
     { flags: "--uninstall", description: "Uninstall the LaunchAgent" },
     { flags: "status", description: "Show daemon metrics and status" },
@@ -971,19 +968,13 @@ export const daemonCommand: Command = {
           if (projectParam) {
             const pm = projectMetrics.get(projectParam)
             if (!pm) return Response.json({ error: "No metrics for project" }, { status: 404 })
-            return Response.json({
-              ...serializeMetrics(pm),
-              project: projectParam,
-            })
+            return Response.json({ ...serializeMetrics(pm), project: projectParam })
           }
           const projects: Record<string, ReturnType<typeof serializeMetrics>> = {}
           for (const [cwd, m] of projectMetrics) {
             projects[cwd] = serializeMetrics(m)
           }
-          return Response.json({
-            ...serializeMetrics(globalMetrics),
-            projects,
-          })
+          return Response.json({ ...serializeMetrics(globalMetrics), projects })
         }
 
         if (url.pathname === "/gh-query" && req.method === "POST") {
@@ -996,9 +987,7 @@ export const daemonCommand: Command = {
           const cwd = body?.cwd
           if (!Array.isArray(args) || typeof cwd !== "string" || cwd.length === 0) {
             return Response.json(
-              {
-                error: "Missing required fields: args (string[]), cwd (string)",
-              },
+              { error: "Missing required fields: args (string[]), cwd (string)" },
               { status: 400 }
             )
           }
@@ -1075,9 +1064,7 @@ export const daemonCommand: Command = {
           const cwd = body?.cwd
           if (typeof hookFile !== "string" || typeof cwd !== "string" || cwd.length === 0) {
             return Response.json(
-              {
-                error: "Missing required fields: hookFile (string), cwd (string)",
-              },
+              { error: "Missing required fields: hookFile (string), cwd (string)" },
               { status: 400 }
             )
           }

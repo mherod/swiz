@@ -47,11 +47,7 @@ export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
 
 // ─── Canonical path hashing — re-exported from src/git-helpers.ts ────────────
 export { getCanonicalPathHash } from "../src/git-helpers.ts"
-export {
-  resolveSafeSessionId,
-  sanitizeSessionId,
-  sessionPrefix,
-} from "../src/session-id.ts"
+export { resolveSafeSessionId, sanitizeSessionId, sessionPrefix } from "../src/session-id.ts"
 
 export type { PackageManager, Runtime } from "./utils/package-detection.ts"
 export {
@@ -327,10 +323,7 @@ export function blockStop(
   options: { includeUpdateMemoryAdvice?: boolean } = {}
 ): never {
   console.log(
-    JSON.stringify({
-      decision: "block",
-      reason: reason + actionRequired(reason, options),
-    })
+    JSON.stringify({ decision: "block", reason: reason + actionRequired(reason, options) })
   )
   process.exit(0)
 }
@@ -350,11 +343,7 @@ export function blockStopRaw(reason: string): never {
 export function blockStopHumanRequired(reason: string): never {
   const fullReason = `${reason}\n\nACTION REQUIRED: Resolve this block before stopping.`
   console.log(
-    JSON.stringify({
-      decision: "block",
-      reason: fullReason,
-      resolution: "human-required",
-    })
+    JSON.stringify({ decision: "block", reason: fullReason, resolution: "human-required" })
   )
   process.exit(0)
 }
@@ -504,10 +493,7 @@ export async function hasSessionTasksDir(
 }
 
 // ─── Subject fingerprinting (re-exported from src/) ─────────────────────
-export {
-  computeSubjectFingerprint,
-  stemWord,
-} from "../src/subject-fingerprint.ts"
+export { computeSubjectFingerprint, stemWord } from "../src/subject-fingerprint.ts"
 
 import { computeSubjectFingerprint } from "../src/subject-fingerprint.ts"
 

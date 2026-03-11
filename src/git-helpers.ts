@@ -22,11 +22,7 @@ export function joinGitPath(repoRoot: string, ...segments: string[]): string {
 export async function git(args: string[], cwd: string): Promise<string> {
   try {
     const effectiveCwd = resolveSpawnCwd(cwd)
-    const proc = Bun.spawn(["git", ...args], {
-      cwd: effectiveCwd,
-      stdout: "pipe",
-      stderr: "pipe",
-    })
+    const proc = Bun.spawn(["git", ...args], { cwd: effectiveCwd, stdout: "pipe", stderr: "pipe" })
     const [output] = await Promise.all([
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
@@ -349,10 +345,7 @@ export function resolveGitPaths(cwd: string): { gitDir: string; workTree: string
         if (st.isDirectory()) return { gitDir: candidate, workTree: dir }
         const content = readFileSync(candidate, "utf8").trim()
         if (content.startsWith("gitdir: ")) {
-          return {
-            gitDir: content.slice("gitdir: ".length).trim(),
-            workTree: dir,
-          }
+          return { gitDir: content.slice("gitdir: ".length).trim(), workTree: dir }
         }
       } catch {
         /* fall through */
@@ -506,17 +499,7 @@ export async function getGitBranchStatus(cwd: string): Promise<GitBranchStatus |
     /* no stash info */
   }
 
-  return {
-    branch,
-    ahead,
-    behind,
-    staged,
-    unstaged,
-    untracked,
-    conflicts,
-    stash,
-    changedFallback,
-  }
+  return { branch, ahead, behind, staged, unstaged, untracked, conflicts, stash, changedFallback }
 }
 
 // ─── Branch-policy classification helpers ────────────────────────────────────
