@@ -9,10 +9,29 @@ export interface ParsedObjective {
   bullets: string[]
 }
 
+export interface ParsedAttachedSkill {
+  name: string
+  path: string | null
+}
+
+export interface ParsedAttachedSkills {
+  title: string
+  skills: ParsedAttachedSkill[]
+  notes: string[]
+}
+
+export interface ParsedUserMetadataBlock {
+  title: string
+  details: Array<{ label: string; value: string }>
+  notes: string[]
+}
+
 export interface UserMessageParts {
   visibleText: string
   hookContext: ParsedHookContext | null
   parsedObjective: ParsedObjective | null
+  attachedSkills: ParsedAttachedSkills | null
+  metadataBlocks: ParsedUserMetadataBlock[]
 }
 
 export interface AssistantMessageParts {
@@ -54,25 +73,163 @@ export function splitAssistantMessage(text: string): AssistantMessageParts {
 }
 
 export function splitUserMessage(text: string): UserMessageParts {
+  const {
+    cleanedText,
+    blockContent: attachedSkillsRaw,
+    metadataBlocks,
+  } = extractUserMetadataBlocks(text)
+  const normalizedText = unwrapLeadingTag(cleanedText, "user_query")
+  const attachedSkills = parseManuallyAttachedSkills(attachedSkillsRaw)
+
   const marker = "<hook_context>"
-  const markerIndex = text.indexOf(marker)
+  const markerIndex = normalizedText.indexOf(marker)
   if (markerIndex < 0) {
-    const visibleText = text.trim()
+    const visibleText = normalizedText.trim()
     return {
       visibleText,
       hookContext: null,
       parsedObjective: parseObjective(visibleText),
+      attachedSkills,
+      metadataBlocks,
     }
   }
 
-  const visibleText = text.slice(0, markerIndex).trim()
-  const rawContext = text.slice(markerIndex + marker.length).trim()
+  const visibleText = normalizedText.slice(0, markerIndex).trim()
+  const rawContext = normalizedText.slice(markerIndex + marker.length).trim()
   const hookContext = parseHookContext(rawContext)
 
   return {
     visibleText,
     hookContext,
     parsedObjective: parseObjective(visibleText),
+    attachedSkills,
+    metadataBlocks,
+  }
+}
+
+function unwrapLeadingTag(text: string, tagName: string): string {
+  const escapedTag = tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const regex = new RegExp(`^\\s*<${escapedTag}>\\s*([\\s\\S]*?)\\s*<\\/${escapedTag}>\\s*`, "i")
+  const match = regex.exec(text)
+  if (!match?.[1]) return text
+  const trailing = text.slice(match[0].length).trim()
+  const inner = match[1].trim()
+  return trailing ? `${inner}\n\n${trailing}` : inner
+}
+
+function extractLeadingTaggedBlock(
+  text: string,
+  tagName: string
+): { cleanedText: string; blockContent: string | null } {
+  const escapedTag = tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const regex = new RegExp(`^\\s*<${escapedTag}>\\s*([\\s\\S]*?)(?:\\s*<\\/${escapedTag}>|$)`, "i")
+  const match = regex.exec(text)
+  if (!match) return { cleanedText: text, blockContent: null }
+
+  const blockContent = match[1]?.trim() ?? null
+  const cleanedText = text.slice(match[0].length).trim()
+  return { cleanedText, blockContent }
+}
+
+function extractUserMetadataBlocks(text: string): {
+  cleanedText: string
+  blockContent: string | null
+  metadataBlocks: ParsedUserMetadataBlock[]
+} {
+  let cleanedText = text
+  let attachedSkillsRaw: string | null = null
+  const metadataBlocks: ParsedUserMetadataBlock[] = []
+  const metadataTags = [
+    "user_info",
+    "open_and_recently_viewed_files",
+    "git_status",
+    "system_reminder",
+  ] as const
+
+  const attached = extractLeadingTaggedBlock(cleanedText, "manually_attached_skills")
+  cleanedText = attached.cleanedText
+  attachedSkillsRaw = attached.blockContent
+
+  for (const tagName of metadataTags) {
+    const extracted = extractLeadingTaggedBlock(cleanedText, tagName)
+    cleanedText = extracted.cleanedText
+    if (!extracted.blockContent) continue
+    const block = parseGenericMetadataBlock(tagName, extracted.blockContent)
+    if (block) metadataBlocks.push(block)
+  }
+
+  return {
+    cleanedText,
+    blockContent: attachedSkillsRaw,
+    metadataBlocks,
+  }
+}
+
+function parseGenericMetadataBlock(tagName: string, raw: string): ParsedUserMetadataBlock | null {
+  const lines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  if (lines.length === 0) return null
+
+  const details: Array<{ label: string; value: string }> = []
+  const notes: string[] = []
+  for (const line of lines) {
+    const kv = /^([^:]{1,40}):\s*(.+)$/.exec(line)
+    if (kv?.[1] && kv[2]) {
+      details.push({ label: kv[1].trim().toLowerCase(), value: kv[2].trim() })
+      continue
+    }
+    notes.push(line)
+  }
+
+  const visibleNotes = notes.slice(0, 4)
+  if (notes.length > 4) {
+    visibleNotes.push(`...${notes.length - 4} more lines`)
+  }
+
+  return {
+    title: tagName.replace(/_/g, " "),
+    details: details.slice(0, 6),
+    notes: visibleNotes,
+  }
+}
+
+function parseManuallyAttachedSkills(raw: string | null): ParsedAttachedSkills | null {
+  if (!raw) return null
+  const lines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  if (lines.length === 0) return null
+
+  const skills: ParsedAttachedSkill[] = []
+  let current: ParsedAttachedSkill | null = null
+
+  for (const line of lines) {
+    const nameMatch = /^Skill Name:\s*(.+)$/i.exec(line)
+    if (nameMatch?.[1]) {
+      if (current) skills.push(current)
+      current = { name: nameMatch[1].trim(), path: null }
+      continue
+    }
+
+    const pathMatch = /^Path:\s*(.+)$/i.exec(line)
+    if (pathMatch?.[1]) {
+      if (current) current.path = pathMatch[1].trim()
+      continue
+    }
+
+    if (/^SKILL\.md content:/i.test(line)) continue
+  }
+
+  if (current) skills.push(current)
+  if (skills.length === 0) return null
+
+  return {
+    title: `Attached skills${skills.length > 0 ? ` (${skills.length})` : ""}`,
+    skills,
+    notes: [],
   }
 }
 

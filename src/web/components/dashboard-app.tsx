@@ -36,6 +36,11 @@ type ProjectsOptimisticAction =
   | { type: "sync"; projects: ProjectSessions[] }
   | { type: "removeSession"; cwd: string; sessionId: string }
 
+type PendingSessionDeletionAction =
+  | { type: "add"; key: string }
+  | { type: "remove"; key: string }
+  | { type: "sync"; keys: Set<string> }
+
 function removePidFromProviders(
   providers: Record<string, number[]>,
   pid: number
@@ -61,6 +66,29 @@ function removeSessionFromProjects(
         ...project,
         sessions: nextSessions,
         sessionCount: Math.max(project.sessionCount - 1, 0),
+      }
+    })
+    .filter((project) => project.sessions.length > 0)
+}
+
+function sessionDeletionKey(cwd: string, sessionId: string): string {
+  return `${cwd}::${sessionId}`
+}
+
+function applyPendingSessionDeletions(
+  projects: ProjectSessions[],
+  pendingDeletionKeys: Set<string>
+): ProjectSessions[] {
+  if (pendingDeletionKeys.size === 0) return projects
+  return projects
+    .map((project) => {
+      const nextSessions = project.sessions.filter(
+        (session) => !pendingDeletionKeys.has(sessionDeletionKey(project.cwd, session.id))
+      )
+      return {
+        ...project,
+        sessions: nextSessions,
+        sessionCount: nextSessions.length,
       }
     })
     .filter((project) => project.sessions.length > 0)
@@ -98,6 +126,17 @@ export function DashboardApp() {
     (current, action: AgentProcessOptimisticAction) => {
       if (action.type === "sync") return action.providers
       return removePidFromProviders(current, action.pid)
+    }
+  )
+  const [pendingSessionDeletions, setPendingSessionDeletions] = useState<Set<string>>(new Set())
+  const [optimisticPendingSessionDeletions, addOptimisticPendingSessionDeletions] = useOptimistic(
+    pendingSessionDeletions,
+    (current, action: PendingSessionDeletionAction) => {
+      if (action.type === "sync") return action.keys
+      const next = new Set(current)
+      if (action.type === "add") next.add(action.key)
+      else next.delete(action.key)
+      return next
     }
   )
   const [, startSelectionTransition] = useTransition()
@@ -238,7 +277,9 @@ export function DashboardApp() {
   const handleDeleteSession = useCallback(
     (cwd: string, sessionId: string) => {
       setDeletingSessionId(sessionId)
+      const deletionKey = sessionDeletionKey(cwd, sessionId)
       startMutationTransition(async () => {
+        addOptimisticPendingSessionDeletions({ type: "add", key: deletionKey })
         addOptimisticProjects({ type: "removeSession", cwd, sessionId })
         try {
           await postJson<{ ok: boolean; deletedCount: number; sessionIds: string[] }>(
@@ -258,11 +299,22 @@ export function DashboardApp() {
             setQueryParams({ session: null })
           }
         } finally {
+          setPendingSessionDeletions((previous) => {
+            const next = new Set(previous)
+            next.delete(deletionKey)
+            return next
+          })
+          addOptimisticPendingSessionDeletions({ type: "remove", key: deletionKey })
           setDeletingSessionId(null)
         }
       })
     },
-    [addOptimisticProjects, addOptimisticSessionId, selectedSessionId]
+    [
+      addOptimisticPendingSessionDeletions,
+      addOptimisticProjects,
+      addOptimisticSessionId,
+      selectedSessionId,
+    ]
   )
 
   useDashboardOverviewPolling({
@@ -309,10 +361,14 @@ export function DashboardApp() {
   })
 
   const m = metrics ?? {}
-  const projectCount = optimisticProjects.filter(hasProjectMessages).length
+  const visibleProjects = applyPendingSessionDeletions(
+    optimisticProjects,
+    optimisticPendingSessionDeletions
+  )
+  const projectCount = visibleProjects.filter(hasProjectMessages).length
   const watchCount = (watches?.active ?? []).length
   const activeProject = optimisticProjectCwd
-    ? optimisticProjects.find((project) => project.cwd === optimisticProjectCwd)
+    ? visibleProjects.find((project) => project.cwd === optimisticProjectCwd)
     : null
   const activeSession = optimisticSessionId
     ? (activeProject?.sessions.find((session) => session.id === optimisticSessionId) ?? null)
@@ -342,7 +398,7 @@ export function DashboardApp() {
         activeWatches={watchCount}
       />
       <SessionNav
-        projects={optimisticProjects}
+        projects={visibleProjects}
         activeAgentPidsByProvider={optimisticAgentProcessProviders}
         killingPid={killingPid}
         deletingSessionId={deletingSessionId}

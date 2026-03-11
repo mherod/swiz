@@ -194,6 +194,8 @@ function MessageBody({ text, role }: { text: string; role: "user" | "assistant" 
   const userParts = role === "user" ? splitUserMessage(text) : null
   const userVisible = userParts?.visibleText ?? text
   const parsedObjective = userParts?.parsedObjective
+  const attachedSkills = userParts?.attachedSkills
+  const metadataBlocks = userParts?.metadataBlocks ?? []
   const assistantWithJson =
     role === "assistant" ? formatAssistantJsonBlocks(assistantVisible) : text
   const preparedText =
@@ -295,6 +297,46 @@ function MessageBody({ text, role }: { text: string; role: "user" | "assistant" 
             ))}
           </div>
         ) : null}
+        {attachedSkills ? (
+          <div className="hook-context-box">
+            <p className="hook-context-title">{attachedSkills.title}</p>
+            {attachedSkills.skills.length > 0 ? (
+              <ul className="hook-context-list">
+                {attachedSkills.skills.map((skill) => (
+                  <li key={`${skill.name}:${skill.path ?? ""}`} className="hook-context-item">
+                    <span className="hook-context-label">{skill.name}</span>
+                    {skill.path ? <code className="hook-context-value">{skill.path}</code> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {attachedSkills.notes.map((note) => (
+              <p key={note} className="hook-context-note">
+                {note}
+              </p>
+            ))}
+          </div>
+        ) : null}
+        {metadataBlocks.map((block) => (
+          <div key={block.title} className="hook-context-box">
+            <p className="hook-context-title">{block.title}</p>
+            {block.details.length > 0 ? (
+              <ul className="hook-context-list">
+                {block.details.map((item) => (
+                  <li key={`${item.label}:${item.value}`} className="hook-context-item">
+                    <span className="hook-context-label">{item.label}</span>
+                    <code className="hook-context-value">{item.value}</code>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {block.notes.map((note) => (
+              <p key={note} className="hook-context-note">
+                {note}
+              </p>
+            ))}
+          </div>
+        ))}
       </>
     )
   }
@@ -344,6 +386,46 @@ function MessageBody({ text, role }: { text: string; role: "user" | "assistant" 
           ))}
         </div>
       ) : null}
+      {attachedSkills ? (
+        <div className="hook-context-box">
+          <p className="hook-context-title">{attachedSkills.title}</p>
+          {attachedSkills.skills.length > 0 ? (
+            <ul className="hook-context-list">
+              {attachedSkills.skills.map((skill) => (
+                <li key={`${skill.name}:${skill.path ?? ""}`} className="hook-context-item">
+                  <span className="hook-context-label">{skill.name}</span>
+                  {skill.path ? <code className="hook-context-value">{skill.path}</code> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {attachedSkills.notes.map((note) => (
+            <p key={note} className="hook-context-note">
+              {note}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {metadataBlocks.map((block) => (
+        <div key={block.title} className="hook-context-box">
+          <p className="hook-context-title">{block.title}</p>
+          {block.details.length > 0 ? (
+            <ul className="hook-context-list">
+              {block.details.map((item) => (
+                <li key={`${item.label}:${item.value}`} className="hook-context-item">
+                  <span className="hook-context-label">{item.label}</span>
+                  <code className="hook-context-value">{item.value}</code>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {block.notes.map((note) => (
+            <p key={note} className="hook-context-note">
+              {note}
+            </p>
+          ))}
+        </div>
+      ))}
     </>
   )
 }

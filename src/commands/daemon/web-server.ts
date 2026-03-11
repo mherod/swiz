@@ -137,6 +137,25 @@ interface AgentProcessSnapshot {
   providers: Record<string, number[]>
 }
 
+function isCursorMacProcess(command: string): boolean {
+  return command.includes("cursor.app/contents/macos/cursor")
+}
+
+async function getProcessCommand(pid: number): Promise<string | null> {
+  const proc = Bun.spawn(["ps", "-p", String(pid), "-o", "command="], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [stdout] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  if (proc.exitCode !== 0) return null
+  const command = stdout.trim().toLowerCase()
+  return command.length > 0 ? command : null
+}
+
 async function getActiveAgentProcesses(): Promise<AgentProcessSnapshot> {
   const proc = Bun.spawn(["ps", "-Ao", "pid,command"], {
     stdout: "pipe",
@@ -164,6 +183,7 @@ async function getActiveAgentProcesses(): Promise<AgentProcessSnapshot> {
     if (!match) continue
     const pid = Number(match[1])
     const command = (match[2] ?? "").toLowerCase()
+    const executable = command.split(/\s+/, 1)[0] ?? ""
     if (!pid || !command) continue
 
     if (command.includes("claude-agent-sdk/cli.js")) {
@@ -174,6 +194,9 @@ async function getActiveAgentProcesses(): Promise<AgentProcessSnapshot> {
     }
     if (command.includes("gemini")) {
       addProviderPid("gemini", pid)
+    }
+    if (isCursorMacProcess(command) || executable === "agent" || executable.endsWith("/agent")) {
+      addProviderPid("cursor", pid)
     }
   }
 
@@ -348,7 +371,11 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
             { status: 400 }
           )
         }
-        const killProc = Bun.spawn(["kill", "-TERM", String(pid)], {
+        const command = await getProcessCommand(pid)
+        const killCommand = isCursorMacProcess(command ?? "")
+          ? ["osascript", "-e", 'tell application "Cursor" to quit']
+          : ["kill", "-TERM", String(pid)]
+        const killProc = Bun.spawn(killCommand, {
           stdout: "pipe",
           stderr: "pipe",
         })
