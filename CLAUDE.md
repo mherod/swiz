@@ -170,6 +170,7 @@ alwaysApply: false
 - During cooldown use `swiz push-wait origin <branch>` instead of raw `git push`.
 - Never bypass mandatory hooks: no `--no-verify`; pre-push runs `bun test`; CI jobs `lint -> typecheck -> test` must pass.
 - Always verify CI with `gh run view --json`; `gh run watch` alone is insufficient.
+- DO NOT block the session waiting for CI. Pre-push hooks run the full test suite locally; if those pass, move on. Check CI asynchronously — use `gh run view` once after a reasonable interval, or wait for daemon CI notifications (issue #266). Never loop `gh run watch` or `timeout` polls for 20+ minutes.
 - For workflow jobs using `github.base_ref`, run only on `pull_request`/`pull_request_target`, never `push`; `github.base_ref` is empty on push and breaks `git diff origin/BASE_REF...HEAD`.
 
 - Push-command parsing in hooks: token-parse to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
