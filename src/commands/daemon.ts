@@ -932,21 +932,30 @@ function extractToolCalls(content: unknown): ToolCallSummary[] {
       const input = block.input
       let detail = ""
       if (input) {
-        const pathVal = input.path ?? input.file_path
-        if (typeof pathVal === "string") {
-          const short = pathVal.split("/").slice(-2).join("/")
-          detail = short
-        } else if (typeof input.command === "string") {
-          const cmd = input.command.length > 80 ? `${input.command.slice(0, 77)}...` : input.command
-          detail = cmd
-        } else if (typeof input.pattern === "string") {
-          detail = input.pattern
-        } else if (typeof input.query === "string") {
-          detail = input.query.length > 60 ? `${input.query.slice(0, 57)}...` : input.query
-        } else if (typeof input.content === "string") {
-          detail = `${input.content.length} chars`
-        } else if (typeof input.old_string === "string") {
-          detail = `replacing ${input.old_string.split("\n").length} lines`
+        if (typeof input.subject === "string") {
+          detail = input.subject.length > 60 ? `${input.subject.slice(0, 57)}...` : input.subject
+        } else if (typeof input.taskId === "string") {
+          const parts = [`#${input.taskId}`]
+          if (typeof input.status === "string") parts.push(input.status)
+          detail = parts.join(" → ")
+        } else {
+          const pathVal = input.path ?? input.file_path
+          if (typeof pathVal === "string") {
+            const short = pathVal.split("/").slice(-2).join("/")
+            detail = short
+          } else if (typeof input.command === "string") {
+            const cmd =
+              input.command.length > 80 ? `${input.command.slice(0, 77)}...` : input.command
+            detail = cmd
+          } else if (typeof input.pattern === "string") {
+            detail = input.pattern
+          } else if (typeof input.query === "string") {
+            detail = input.query.length > 60 ? `${input.query.slice(0, 57)}...` : input.query
+          } else if (typeof input.content === "string") {
+            detail = `${input.content.length} chars`
+          } else if (typeof input.old_string === "string") {
+            detail = `replacing ${input.old_string.split("\n").length} lines`
+          }
         }
       }
       return { name, detail }
