@@ -2,37 +2,41 @@ interface HeaderProps {
   lastUpdated: string
   uptime: string
   totalDispatches: number
+  projects: number
+  activeWatches: number
 }
 
-export function Header({ lastUpdated, uptime, totalDispatches }: HeaderProps): string {
-  return `
-    <header class="card header" role="banner">
-      <span class="header-glow" aria-hidden="true"></span>
-      <div class="header-row">
-        <div>
-          <p class="eyebrow">Observability</p>
-          <h1>swiz daemon</h1>
-          <p>Realtime daemon status, cache health, and dispatch telemetry.</p>
-        </div>
-        <div class="status-pill" role="status" aria-label="Daemon status is live">
-          <span class="status-dot" aria-hidden="true"></span>
+export function Header({
+  lastUpdated,
+  uptime,
+  totalDispatches,
+  projects,
+  activeWatches,
+}: HeaderProps) {
+  return (
+    <header className="topbar">
+      <h1 className="topbar-title">swiz daemon</h1>
+      <div className="topbar-stats">
+        <span className="topbar-stat">
+          <strong>{uptime}</strong> uptime
+        </span>
+        <span className="topbar-stat">
+          <strong>{totalDispatches}</strong> dispatches
+        </span>
+        <span className="topbar-stat">
+          <strong>{projects}</strong> projects
+        </span>
+        <span className="topbar-stat">
+          <strong>{activeWatches}</strong> CI watches
+        </span>
+      </div>
+      <div className="topbar-right">
+        <output className="status-pill" aria-label="Daemon status is live">
+          <span className="status-dot" aria-hidden="true" />
           <span>Live</span>
-        </div>
-      </div>
-      <div class="header-kpis">
-        <article>
-          <span>Uptime</span>
-          <strong>${uptime}</strong>
-        </article>
-        <article>
-          <span>Total Dispatches</span>
-          <strong>${totalDispatches}</strong>
-        </article>
-      </div>
-      <div class="header-meta">
-        <span>Auto-refresh: every 5s</span>
-        <span>Last update: ${lastUpdated}</span>
+        </output>
+        <span className="topbar-meta">Updated {lastUpdated}</span>
       </div>
     </header>
-  `
+  )
 }

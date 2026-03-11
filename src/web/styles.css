@@ -46,7 +46,8 @@
 
 body {
   margin: 0;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background:
     radial-gradient(1300px 640px at 8% -20%, rgba(64, 112, 255, 0.34), transparent 55%),
     radial-gradient(920px 520px at 95% 0%, rgba(3, 217, 255, 0.16), transparent 45%),
@@ -66,249 +67,149 @@ body::before {
   opacity: 0.3;
 }
 
+/* ── Full-viewport dashboard grid ── */
+
 #app {
   margin: 0 auto;
-  max-width: 1040px;
-  padding: 28px 24px 40px;
+  max-width: 1280px;
+  padding: 16px 20px;
+  height: 100vh;
   display: grid;
-  gap: 18px;
+  grid-template-rows: auto auto 1fr;
+  grid-template-columns: 1fr;
+  gap: 12px;
 }
 
-.card {
-  border: 1px solid var(--panel-border);
-  background: linear-gradient(180deg, rgba(15, 25, 51, 0.76) 0%, var(--panel) 100%);
-  border-radius: 16px;
-  padding: 20px;
-  backdrop-filter: blur(14px);
-  box-shadow:
-    0 14px 34px rgba(0, 0, 0, 0.36),
-    inset 0 1px 0 rgba(195, 213, 255, 0.05);
-  transition:
-    transform 180ms ease,
-    border-color 180ms ease,
-    box-shadow 180ms ease;
-}
+/* ── Top bar: title + inline stats ── */
 
-.card:hover {
-  border-color: rgba(104, 132, 197, 0.65);
-  box-shadow:
-    0 18px 42px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(195, 213, 255, 0.07);
-  transform: translateY(-1px);
-}
-
-.section {
-  position: relative;
-  overflow: hidden;
-}
-
-.section::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(163, 192, 255, 0.35), transparent);
-}
-
-.header {
-  position: relative;
-  overflow: hidden;
-}
-
-.header-glow {
-  position: absolute;
-  right: -120px;
-  top: -120px;
-  width: 340px;
-  height: 340px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(88, 130, 255, 0.42), transparent 68%);
-  pointer-events: none;
-}
-
-.header-row {
+.topbar {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
 }
 
-.eyebrow {
-  margin: 0 0 8px;
-  color: #88a3ff;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 0.73rem;
-  font-weight: 700;
-}
-
-.header h1 {
-  margin: 0;
+.topbar-title {
   font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
-  font-size: clamp(2.2rem, 3vw, 3rem);
+  font-size: 1.4rem;
   letter-spacing: -0.02em;
-  line-height: 0.95;
+  margin: 0;
+  white-space: nowrap;
 }
 
-.header p {
-  margin: 10px 0 0;
+.topbar-stats {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.topbar-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.82rem;
   color: var(--text-muted);
-  max-width: 62ch;
-  line-height: 1.45;
 }
 
-.header-kpis {
-  margin-top: 14px;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(2, minmax(140px, 220px));
-}
-
-.header-kpis article {
-  border: 1px solid rgba(97, 124, 181, 0.45);
-  background: linear-gradient(180deg, rgba(11, 20, 41, 0.62), rgba(8, 17, 37, 0.62));
-  border-radius: 10px;
-  padding: 10px 12px;
-  display: grid;
-  gap: 3px;
-}
-
-.header-kpis span {
-  color: #8fa7da;
-  font-size: 0.74rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
-}
-
-.header-kpis strong {
-  font-size: 1.18rem;
-  letter-spacing: -0.01em;
+.topbar-stat strong {
+  color: var(--text-main);
   font-variant-numeric: tabular-nums;
 }
 
-.header-meta {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(137, 164, 225, 0.18);
-  color: #8ea5d9;
-  font-size: 0.9rem;
+.topbar-right {
+  margin-left: auto;
   display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
 }
 
 .status-pill {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 6px;
+  padding: 4px 10px;
   border-radius: 999px;
   border: 1px solid #2f7f64;
   background: rgba(44, 202, 132, 0.12);
   color: #8af0be;
-  font-size: 0.88rem;
+  font-size: 0.78rem;
   font-weight: 700;
   box-shadow: inset 0 1px 0 rgba(139, 255, 198, 0.2);
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
   background: #32d186;
   box-shadow: 0 0 10px rgba(50, 209, 134, 0.75);
 }
 
-.section-title-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.section-title-row h2 {
-  margin: 0;
-  font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
-  font-size: 2rem;
-  letter-spacing: -0.015em;
-}
-
-.section-subtitle {
+.topbar-meta {
   color: #8ea5d9;
-  font-size: 0.86rem;
+  font-size: 0.76rem;
+  white-space: nowrap;
 }
 
-.metric-grid {
-  margin-top: 14px;
+/* ── Three-column main area ── */
+
+.main-columns {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: minmax(280px, 1fr) minmax(240px, 1fr) minmax(0, 2fr);
+  min-height: 0;
 }
 
-.metric {
-  border: 1px solid rgba(74, 102, 157, 0.58);
+/* ── Cards (shared) ── */
+
+.card {
+  border: 1px solid var(--panel-border);
+  background: linear-gradient(180deg, rgba(15, 25, 51, 0.76) 0%, var(--panel) 100%);
   border-radius: 12px;
-  background: linear-gradient(180deg, rgba(10, 18, 38, 0.9) 0%, rgba(10, 19, 41, 0.9) 100%);
-  padding: 13px 14px;
-  display: grid;
-  gap: 4px;
-  transition: border-color 180ms ease;
-  position: relative;
+  padding: 14px;
+  backdrop-filter: blur(14px);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(195, 213, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.metric:hover {
-  border-color: rgba(113, 145, 212, 0.75);
-}
-
-.metric::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 2px;
-  background: linear-gradient(180deg, var(--accent), transparent);
-  opacity: 0.8;
-}
-
-.metric-label {
-  color: #95acd8;
-  font-size: 0.82rem;
+.section-title {
+  margin: 0 0 8px;
+  font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
+  font-size: 0.88rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: #8ea5d9;
+  font-weight: 700;
 }
 
-.metric-value {
-  font-size: 1.28rem;
-  letter-spacing: -0.01em;
-  font-variant-numeric: tabular-nums;
-}
+/* ── Events table ── */
 
-.grid {
-  display: grid;
-  gap: 18px;
-  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+.panel-events {
+  overflow-y: auto;
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 14px;
 }
 
 th,
 td {
   text-align: left;
   border-bottom: 1px solid var(--line);
-  padding: 8px 6px;
+  padding: 5px 4px;
+  font-size: 0.84rem;
 }
 
 th {
   color: #8ea5d9;
-  font-size: 0.84rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 700;
@@ -322,13 +223,13 @@ th {
 
 .count-cell {
   display: grid;
-  grid-template-columns: auto minmax(80px, 1fr);
+  grid-template-columns: auto minmax(50px, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: 6px;
 }
 
 .count-bar {
-  height: 6px;
+  height: 4px;
   border-radius: 999px;
   background: rgba(23, 35, 64, 0.92);
   overflow: hidden;
@@ -347,32 +248,40 @@ tbody tr:hover {
 
 .empty {
   color: #9ab0df;
+  font-size: 0.84rem;
+}
+
+/* ── Cache list ── */
+
+.panel-cache {
+  overflow-y: auto;
 }
 
 .cache-list {
   list-style: none;
-  margin: 14px 0 0;
+  margin: 0;
   padding: 0;
 }
 
 .cache-row {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   border-bottom: 1px solid var(--line);
-  padding: 8px 0;
+  padding: 5px 0;
+  font-size: 0.84rem;
 }
 
 .cache-value-wrap {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .cache-badge {
   border-radius: 999px;
-  padding: 3px 8px;
-  font-size: 0.7rem;
+  padding: 2px 6px;
+  font-size: 0.64rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 700;
@@ -400,29 +309,38 @@ tbody tr:hover {
   color: #ffb4b4;
 }
 
+/* ── Sessions panel (right column) ── */
+
+.sessions-panel {
+  overflow: hidden;
+}
+
 .sessions-panel h3 {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   color: #9cb1df;
-  font-size: 0.88rem;
+  font-size: 0.76rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
 .sessions-layout {
-  margin-top: 14px;
   display: grid;
-  gap: 14px;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 10px;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
 }
 
 .sessions-sidebar {
   border: 1px solid rgba(83, 113, 173, 0.45);
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(7, 15, 33, 0.75);
-  padding: 12px;
-  display: grid;
-  gap: 10px;
-  align-content: start;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .project-list,
@@ -436,7 +354,7 @@ tbody tr:hover {
 .project-list,
 .session-list {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .project-btn,
@@ -444,13 +362,14 @@ tbody tr:hover {
   width: 100%;
   border: 1px solid rgba(76, 106, 166, 0.5);
   background: rgba(14, 26, 53, 0.82);
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--text-main);
-  padding: 9px 10px;
+  padding: 6px 8px;
   text-align: left;
   display: grid;
-  gap: 4px;
+  gap: 2px;
   cursor: pointer;
+  font-size: 0.82rem;
   transition:
     border-color 120ms ease,
     background 120ms ease;
@@ -476,33 +395,34 @@ tbody tr:hover {
 .session-id {
   font-weight: 700;
   letter-spacing: -0.01em;
+  font-size: 0.8rem;
 }
 
 .project-meta,
 .session-meta {
   color: #95abd9;
-  font-size: 0.82rem;
+  font-size: 0.72rem;
 }
 
 .sessions-messages {
   border: 1px solid rgba(83, 113, 173, 0.45);
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(7, 15, 33, 0.75);
-  padding: 12px;
-  min-height: 360px;
+  padding: 10px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .messages-list {
-  margin-top: 10px;
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .message-row {
   border: 1px solid rgba(70, 98, 154, 0.42);
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(12, 24, 50, 0.82);
-  padding: 10px;
+  padding: 8px;
 }
 
 .message-row.user {
@@ -516,10 +436,10 @@ tbody tr:hover {
 .message-meta {
   display: flex;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   color: #9ab0df;
-  font-size: 0.8rem;
-  margin-bottom: 8px;
+  font-size: 0.72rem;
+  margin-bottom: 4px;
 }
 
 .message-role {
@@ -533,8 +453,8 @@ tbody tr:hover {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  font-size: 0.92rem;
-  line-height: 1.45;
+  font-size: 0.82rem;
+  line-height: 1.4;
   color: #dfe8ff;
 }
 
@@ -562,12 +482,14 @@ tbody tr:hover {
 
 .message-expand-hint {
   display: inline-block;
-  margin-top: 4px;
+  margin-top: 2px;
   color: var(--accent);
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
+
+/* ── Entry animation (first load only) ── */
 
 @keyframes riseIn {
   from {
@@ -580,9 +502,8 @@ tbody tr:hover {
   }
 }
 
-#app > .card,
-#app > .section,
-#app > .grid {
+#app > header,
+#app > .main-columns {
   animation: riseIn 340ms ease both;
 }
 
@@ -594,25 +515,40 @@ tbody tr:hover {
   animation-delay: 90ms;
 }
 
-@media (max-width: 760px) {
-  #app {
-    padding: 20px 14px 28px;
+/* ── Responsive ── */
+
+@media (max-width: 960px) {
+  .main-columns {
+    grid-template-columns: 1fr 1fr;
   }
 
-  .header-row {
+  .sessions-panel {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  body {
+    height: auto;
+    overflow: auto;
+  }
+
+  #app {
+    height: auto;
+    padding: 16px 12px 24px;
+    grid-template-rows: auto auto auto;
+  }
+
+  .topbar {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .header h1 {
-    font-size: 1.7rem;
+  .topbar-right {
+    margin-left: 0;
   }
 
-  .header-kpis {
-    grid-template-columns: 1fr;
-  }
-
-  .grid {
+  .main-columns {
     grid-template-columns: 1fr;
   }
 

@@ -1,26 +1,22 @@
 type CacheState = "cold" | "warm" | "hot"
 
 function getCacheState(value: number): CacheState {
-  if (value === 0) {
-    return "cold"
-  }
-  if (value < 5) {
-    return "warm"
-  }
+  if (value === 0) return "cold"
+  if (value < 5) return "warm"
   return "hot"
 }
 
-function row(label: string, value: number): string {
+function CacheRow({ label, value }: { label: string; value: number }) {
   const state = getCacheState(value)
-  return `
-    <li class="cache-row">
-      <span>${label}</span>
-      <span class="cache-value-wrap">
-        <span class="cache-badge cache-${state}">${state}</span>
-        <strong>${value}</strong>
+  return (
+    <li className="cache-row">
+      <span>{label}</span>
+      <span className="cache-value-wrap">
+        <span className={`cache-badge cache-${state}`}>{state}</span>
+        <strong>{value}</strong>
       </span>
     </li>
-  `
+  )
 }
 
 interface CacheSummary {
@@ -34,23 +30,20 @@ interface CacheSummary {
   manifestCacheSize?: number
 }
 
-export function CacheList(cache: CacheSummary = {}): string {
-  return `
-    <section class="card section panel-cache">
-      <div class="section-title-row">
-        <h2>Cache Sizes</h2>
-        <span class="section-subtitle">Memory utilization hints</span>
-      </div>
-      <ul class="cache-list" aria-label="Daemon cache size breakdown">
-        ${row("Snapshots", cache.snapshotCacheSize ?? 0)}
-        ${row("GitHub query", cache.ghCacheSize ?? 0)}
-        ${row("Eligibility", cache.eligibilityCacheSize ?? 0)}
-        ${row("Transcript index", cache.transcriptIndexSize ?? 0)}
-        ${row("Cooldown", cache.cooldownRegistrySize ?? 0)}
-        ${row("Git state", cache.gitStateCacheSize ?? 0)}
-        ${row("Project settings", cache.projectSettingsCacheSize ?? 0)}
-        ${row("Manifest", cache.manifestCacheSize ?? 0)}
+export function CacheList({ cache = {} }: { cache?: CacheSummary }) {
+  return (
+    <section className="card panel-cache">
+      <h2 className="section-title">Caches</h2>
+      <ul className="cache-list" aria-label="Daemon cache size breakdown">
+        <CacheRow label="Snapshots" value={cache.snapshotCacheSize ?? 0} />
+        <CacheRow label="GitHub" value={cache.ghCacheSize ?? 0} />
+        <CacheRow label="Eligibility" value={cache.eligibilityCacheSize ?? 0} />
+        <CacheRow label="Transcripts" value={cache.transcriptIndexSize ?? 0} />
+        <CacheRow label="Cooldown" value={cache.cooldownRegistrySize ?? 0} />
+        <CacheRow label="Git state" value={cache.gitStateCacheSize ?? 0} />
+        <CacheRow label="Settings" value={cache.projectSettingsCacheSize ?? 0} />
+        <CacheRow label="Manifest" value={cache.manifestCacheSize ?? 0} />
       </ul>
     </section>
-  `
+  )
 }

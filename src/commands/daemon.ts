@@ -42,6 +42,7 @@ const CI_WATCH_TIMEOUT_MS = 60 * 60 * 1000
 const WEB_ROOT = join(dirname(Bun.main), "src", "web")
 const WEB_TSX_TRANSPILER = new Bun.Transpiler({
   loader: "tsx",
+  autoImportJSX: true,
 })
 
 const WEB_MIME_TYPES: Record<string, string> = {
