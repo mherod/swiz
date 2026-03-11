@@ -6,6 +6,15 @@ interface HeaderProps {
   activeWatches: number
 }
 
+function StatCard({ label, value }: { label: string; value: string | number }) {
+  return (
+    <article className="bento-stat">
+      <span className="stat-label">{label}</span>
+      <strong className="stat-value">{value}</strong>
+    </article>
+  )
+}
+
 export function Header({
   lastUpdated,
   uptime,
@@ -14,29 +23,21 @@ export function Header({
   activeWatches,
 }: HeaderProps) {
   return (
-    <header className="topbar">
-      <h1 className="topbar-title">swiz daemon</h1>
-      <div className="topbar-stats">
-        <span className="topbar-stat">
-          <strong>{uptime}</strong> uptime
-        </span>
-        <span className="topbar-stat">
-          <strong>{totalDispatches}</strong> dispatches
-        </span>
-        <span className="topbar-stat">
-          <strong>{projects}</strong> projects
-        </span>
-        <span className="topbar-stat">
-          <strong>{activeWatches}</strong> CI watches
-        </span>
-      </div>
-      <div className="topbar-right">
-        <output className="status-pill" aria-label="Daemon status is live">
-          <span className="status-dot" aria-hidden="true" />
-          <span>Live</span>
-        </output>
+    <>
+      <header className="bento-title">
+        <div className="title-row">
+          <h1 className="topbar-title">swiz daemon</h1>
+          <output className="status-pill" aria-label="Daemon status is live">
+            <span className="status-dot" aria-hidden="true" />
+            <span>Live</span>
+          </output>
+        </div>
         <span className="topbar-meta">Updated {lastUpdated}</span>
-      </div>
-    </header>
+      </header>
+      <StatCard label="Uptime" value={uptime} />
+      <StatCard label="Dispatches" value={totalDispatches} />
+      <StatCard label="Projects" value={projects} />
+      <StatCard label="CI Watches" value={activeWatches} />
+    </>
   )
 }

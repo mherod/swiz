@@ -7,7 +7,8 @@
   --panel: rgba(13, 25, 56, 0.84);
   --panel-border: rgba(77, 111, 182, 0.44);
   --accent: #76a9ff;
-  --accent-soft: rgba(118, 169, 255, 0.15);
+  --radius: 18px;
+  --gap: 10px;
 }
 
 .sr-only {
@@ -27,7 +28,7 @@
   top: -48px;
   left: 16px;
   z-index: 999;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: #f2f7ff;
   color: #0f1d3f;
   padding: 10px 12px;
@@ -53,7 +54,6 @@ body {
     radial-gradient(920px 520px at 95% 0%, rgba(3, 217, 255, 0.16), transparent 45%),
     radial-gradient(900px 540px at 50% 120%, rgba(4, 26, 90, 0.55), transparent 60%), #060b1c;
   color: var(--text-main);
-  position: relative;
 }
 
 body::before {
@@ -67,106 +67,36 @@ body::before {
   opacity: 0.3;
 }
 
-/* ── Full-viewport dashboard grid ── */
-
 #app {
-  margin: 0 auto;
-  max-width: 1280px;
-  padding: 16px 20px;
   height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  padding: 14px;
+}
+
+/* ── Bento grid ── */
+
+.bento {
+  width: 100%;
+  max-width: 1400px;
   display: grid;
-  grid-template-rows: auto auto 1fr;
-  grid-template-columns: 1fr;
-  gap: 12px;
-}
-
-/* ── Top bar: title + inline stats ── */
-
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.topbar-title {
-  font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
-  font-size: 1.4rem;
-  letter-spacing: -0.02em;
-  margin: 0;
-  white-space: nowrap;
-}
-
-.topbar-stats {
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.topbar-stat {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.82rem;
-  color: var(--text-muted);
-}
-
-.topbar-stat strong {
-  color: var(--text-main);
-  font-variant-numeric: tabular-nums;
-}
-
-.topbar-right {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid #2f7f64;
-  background: rgba(44, 202, 132, 0.12);
-  color: #8af0be;
-  font-size: 0.78rem;
-  font-weight: 700;
-  box-shadow: inset 0 1px 0 rgba(139, 255, 198, 0.2);
-}
-
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: #32d186;
-  box-shadow: 0 0 10px rgba(50, 209, 134, 0.75);
-}
-
-.topbar-meta {
-  color: #8ea5d9;
-  font-size: 0.76rem;
-  white-space: nowrap;
-}
-
-/* ── Three-column main area ── */
-
-.main-columns {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(280px, 1fr) minmax(240px, 1fr) minmax(0, 2fr);
+  gap: var(--gap);
+  grid-template-columns: 1fr 1fr 1fr 1.2fr 2fr;
+  grid-template-rows: auto 1fr 1fr;
+  grid-template-areas:
+    "title  stat1  stat2  stat3  stat4"
+    "events cache  nav    msgs   msgs"
+    "events cache  nav    msgs   msgs";
   min-height: 0;
 }
 
-/* ── Cards (shared) ── */
+/* ── Card base ── */
 
 .card {
   border: 1px solid var(--panel-border);
   background: linear-gradient(180deg, rgba(15, 25, 51, 0.76) 0%, var(--panel) 100%);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 14px;
   backdrop-filter: blur(14px);
   box-shadow:
@@ -181,16 +111,112 @@ body::before {
 .section-title {
   margin: 0 0 8px;
   font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   color: #8ea5d9;
   font-weight: 700;
 }
 
-/* ── Events table ── */
+/* ── Title cell ── */
+
+.bento-title {
+  grid-area: title;
+  border: 1px solid var(--panel-border);
+  background: linear-gradient(180deg, rgba(15, 25, 51, 0.76) 0%, var(--panel) 100%);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  backdrop-filter: blur(14px);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(195, 213, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.topbar-title {
+  font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
+  font-size: 1.3rem;
+  letter-spacing: -0.02em;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.topbar-meta {
+  color: #8ea5d9;
+  font-size: 0.72rem;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #2f7f64;
+  background: rgba(44, 202, 132, 0.12);
+  color: #8af0be;
+  font-size: 0.72rem;
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(139, 255, 198, 0.2);
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #32d186;
+  box-shadow: 0 0 10px rgba(50, 209, 134, 0.75);
+}
+
+/* ── Stat cards ── */
+
+.bento-stat {
+  border: 1px solid var(--panel-border);
+  background: linear-gradient(180deg, rgba(15, 25, 51, 0.76) 0%, var(--panel) 100%);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  backdrop-filter: blur(14px);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(195, 213, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.bento-stat:nth-of-type(1) { grid-area: stat1; }
+.bento-stat:nth-of-type(2) { grid-area: stat2; }
+.bento-stat:nth-of-type(3) { grid-area: stat3; }
+.bento-stat:nth-of-type(4) { grid-area: stat4; }
+
+.stat-label {
+  color: #8ea5d9;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.stat-value {
+  font-size: 1.2rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* ── Events ── */
 
 .panel-events {
+  grid-area: events;
   overflow-y: auto;
 }
 
@@ -204,12 +230,12 @@ td {
   text-align: left;
   border-bottom: 1px solid var(--line);
   padding: 5px 4px;
-  font-size: 0.84rem;
+  font-size: 0.82rem;
 }
 
 th {
   color: #8ea5d9;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 700;
@@ -218,12 +244,11 @@ th {
 .event-name {
   font-weight: 600;
   color: #dce5ff;
-  letter-spacing: -0.01em;
 }
 
 .count-cell {
   display: grid;
-  grid-template-columns: auto minmax(50px, 1fr);
+  grid-template-columns: auto minmax(40px, 1fr);
   align-items: center;
   gap: 6px;
 }
@@ -248,12 +273,13 @@ tbody tr:hover {
 
 .empty {
   color: #9ab0df;
-  font-size: 0.84rem;
+  font-size: 0.82rem;
 }
 
-/* ── Cache list ── */
+/* ── Cache ── */
 
 .panel-cache {
+  grid-area: cache;
   overflow-y: auto;
 }
 
@@ -266,22 +292,22 @@ tbody tr:hover {
 .cache-row {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   border-bottom: 1px solid var(--line);
   padding: 5px 0;
-  font-size: 0.84rem;
+  font-size: 0.82rem;
 }
 
 .cache-value-wrap {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .cache-badge {
   border-radius: 999px;
   padding: 2px 6px;
-  font-size: 0.64rem;
+  font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 700;
@@ -309,38 +335,11 @@ tbody tr:hover {
   color: #ffb4b4;
 }
 
-/* ── Sessions panel (right column) ── */
+/* ── Session nav ── */
 
-.sessions-panel {
-  overflow: hidden;
-}
-
-.sessions-panel h3 {
-  margin: 0 0 6px;
-  color: #9cb1df;
-  font-size: 0.76rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.sessions-layout {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
-  flex: 1;
-  min-height: 0;
-}
-
-.sessions-sidebar {
-  border: 1px solid rgba(83, 113, 173, 0.45);
-  border-radius: 10px;
-  background: rgba(7, 15, 33, 0.75);
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.bento-nav {
+  grid-area: nav;
   overflow-y: auto;
-  min-height: 0;
 }
 
 .project-list,
@@ -362,14 +361,14 @@ tbody tr:hover {
   width: 100%;
   border: 1px solid rgba(76, 106, 166, 0.5);
   background: rgba(14, 26, 53, 0.82);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--text-main);
   padding: 6px 8px;
   text-align: left;
   display: grid;
   gap: 2px;
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   transition:
     border-color 120ms ease,
     background 120ms ease;
@@ -395,22 +394,20 @@ tbody tr:hover {
 .session-id {
   font-weight: 700;
   letter-spacing: -0.01em;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
 }
 
 .project-meta,
 .session-meta {
   color: #95abd9;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
 }
 
-.sessions-messages {
-  border: 1px solid rgba(83, 113, 173, 0.45);
-  border-radius: 10px;
-  background: rgba(7, 15, 33, 0.75);
-  padding: 10px;
+/* ── Messages ── */
+
+.bento-messages {
+  grid-area: msgs;
   overflow-y: auto;
-  min-height: 0;
 }
 
 .messages-list {
@@ -420,7 +417,7 @@ tbody tr:hover {
 
 .message-row {
   border: 1px solid rgba(70, 98, 154, 0.42);
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(12, 24, 50, 0.82);
   padding: 8px;
 }
@@ -438,7 +435,7 @@ tbody tr:hover {
   justify-content: space-between;
   gap: 8px;
   color: #9ab0df;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   margin-bottom: 4px;
 }
 
@@ -453,7 +450,7 @@ tbody tr:hover {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   line-height: 1.4;
   color: #dfe8ff;
 }
@@ -484,17 +481,61 @@ tbody tr:hover {
   display: inline-block;
   margin-top: 2px;
   color: var(--accent);
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
 }
 
-/* ── Entry animation (first load only) ── */
+/* ── Tool calls ── */
+
+.tool-calls {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tool-call {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  border-radius: 6px;
+  padding: 2px 7px;
+  background: rgba(90, 130, 220, 0.1);
+  border: 1px solid rgba(90, 130, 220, 0.25);
+  font-size: 0.7rem;
+  line-height: 1.3;
+}
+
+.tool-name {
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.tool-detail {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+/* ── Error ── */
+
+.bento-error {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+}
+
+/* ── Entry animation ── */
 
 @keyframes riseIn {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -502,28 +543,30 @@ tbody tr:hover {
   }
 }
 
-#app > header,
-#app > .main-columns {
-  animation: riseIn 340ms ease both;
+.bento > * {
+  animation: riseIn 300ms ease both;
 }
 
-#app > :nth-child(2) {
-  animation-delay: 40ms;
-}
-
-#app > :nth-child(3) {
-  animation-delay: 90ms;
-}
+.bento > :nth-child(2) { animation-delay: 30ms; }
+.bento > :nth-child(3) { animation-delay: 50ms; }
+.bento > :nth-child(4) { animation-delay: 70ms; }
+.bento > :nth-child(5) { animation-delay: 90ms; }
+.bento > :nth-child(6) { animation-delay: 110ms; }
+.bento > :nth-child(7) { animation-delay: 130ms; }
+.bento > :nth-child(8) { animation-delay: 150ms; }
+.bento > :nth-child(9) { animation-delay: 170ms; }
 
 /* ── Responsive ── */
 
-@media (max-width: 960px) {
-  .main-columns {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .sessions-panel {
-    grid-column: 1 / -1;
+@media (max-width: 1100px) {
+  .bento {
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: auto auto 1fr 1fr;
+    grid-template-areas:
+      "title  stat1  stat2"
+      "stat3  stat4  nav"
+      "events cache  nav"
+      "msgs   msgs   msgs";
   }
 }
 
@@ -535,25 +578,18 @@ tbody tr:hover {
 
   #app {
     height: auto;
-    padding: 16px 12px 24px;
-    grid-template-rows: auto auto auto;
   }
 
-  .topbar {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .topbar-right {
-    margin-left: 0;
-  }
-
-  .main-columns {
-    grid-template-columns: 1fr;
-  }
-
-  .sessions-layout {
-    grid-template-columns: 1fr;
+  .bento {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto;
+    grid-template-areas:
+      "title  title"
+      "stat1  stat2"
+      "stat3  stat4"
+      "events cache"
+      "nav    nav"
+      "msgs   msgs";
   }
 }
 

@@ -79,6 +79,7 @@ interface SessionMessage {
   role: "user" | "assistant"
   timestamp: string | null
   text: string
+  toolCalls?: ToolCallSummary[]
 }
 
 export interface CiWatchRun {
@@ -911,23 +912,49 @@ async function serveWebAsset(pathname: string): Promise<Response | null> {
   })
 }
 
-function summarizeToolUses(content: unknown): string {
-  if (!Array.isArray(content)) return ""
-  const labels = content
+interface ToolCallSummary {
+  name: string
+  detail: string
+}
+
+function extractToolCalls(content: unknown): ToolCallSummary[] {
+  if (!Array.isArray(content)) return []
+  return content
     .filter(
-      (block): block is { type: string; name?: string } => !!block && typeof block === "object"
+      (block): block is { type: string; name?: string; input?: Record<string, unknown> } =>
+        !!block &&
+        typeof block === "object" &&
+        block.type === "tool_use" &&
+        typeof block.name === "string"
     )
-    .filter((block) => block.type === "tool_use" && typeof block.name === "string")
-    .map((block) => block.name!)
-  if (labels.length === 0) return ""
-  return `[Tools: ${labels.join(", ")}]`
+    .map((block) => {
+      const name = block.name!
+      const input = block.input
+      let detail = ""
+      if (input) {
+        const pathVal = input.path ?? input.file_path
+        if (typeof pathVal === "string") {
+          const short = pathVal.split("/").slice(-2).join("/")
+          detail = short
+        } else if (typeof input.command === "string") {
+          const cmd = input.command.length > 80 ? `${input.command.slice(0, 77)}...` : input.command
+          detail = cmd
+        } else if (typeof input.pattern === "string") {
+          detail = input.pattern
+        } else if (typeof input.query === "string") {
+          detail = input.query.length > 60 ? `${input.query.slice(0, 57)}...` : input.query
+        } else if (typeof input.content === "string") {
+          detail = `${input.content.length} chars`
+        } else if (typeof input.old_string === "string") {
+          detail = `replacing ${input.old_string.split("\n").length} lines`
+        }
+      }
+      return { name, detail }
+    })
 }
 
 function extractMessageText(content: unknown): string {
-  const text = extractText(content as string | { type: string; text?: string }[] | undefined).trim()
-  const tools = summarizeToolUses(content)
-  if (text && tools) return `${text}\n${tools}`
-  return text || tools
+  return extractText(content as string | { type: string; text?: string }[] | undefined).trim()
 }
 
 async function listProjectSessions(
@@ -966,11 +993,13 @@ async function getSessionMessages(
     const content = entry.message?.content
     if (entry.type === "user" && isHookFeedback(content)) continue
     const extracted = extractMessageText(content)
-    if (!extracted) continue
+    const toolCalls = extractToolCalls(content)
+    if (!extracted && toolCalls.length === 0) continue
     messages.push({
       role: entry.type,
       timestamp: entry.timestamp ?? null,
       text: extracted,
+      ...(toolCalls.length > 0 ? { toolCalls } : {}),
     })
   }
   return messages.slice(-limit)

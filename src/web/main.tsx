@@ -5,8 +5,9 @@ import { EventTable } from "./components/event-table.tsx"
 import { Header } from "./components/header.tsx"
 import {
   type ProjectSessions,
-  SessionBrowser,
   type SessionMessage,
+  SessionMessages,
+  SessionNav,
 } from "./components/session-browser.tsx"
 
 interface MetricsResponse {
@@ -46,23 +47,42 @@ function toSortedEvents(
     .sort((a, b) => b.count - a.count)
 }
 
+function getQueryParam(key: string): string | null {
+  return new URLSearchParams(window.location.search).get(key)
+}
+
+function setQueryParams(params: Record<string, string | null>) {
+  const url = new URL(window.location.href)
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null) url.searchParams.delete(key)
+    else url.searchParams.set(key, value)
+  }
+  window.history.replaceState(null, "", url.toString())
+}
+
 function App() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [cacheStatus, setCacheStatus] = useState<Record<string, number> | null>(null)
   const [watches, setWatches] = useState<WatchesResponse | null>(null)
   const [projects, setProjects] = useState<ProjectSessions[]>([])
-  const [selectedProjectCwd, setSelectedProjectCwd] = useState<string | null>(null)
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  const [selectedProjectCwd, setSelectedProjectCwd] = useState<string | null>(() =>
+    getQueryParam("project")
+  )
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() =>
+    getQueryParam("session")
+  )
   const [sessionMessages, setSessionMessages] = useState<SessionMessage[]>([])
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [error, setError] = useState("")
   const [lastUpdated, setLastUpdated] = useState("starting")
   const prevSnapshotRef = useRef("")
+  const initialLoadDone = useRef(false)
 
   const loadMessages = useCallback(async (cwd: string, sessionId: string) => {
     setMessagesLoading(true)
     setSelectedProjectCwd(cwd)
     setSelectedSessionId(sessionId)
+    setQueryParams({ project: cwd, session: sessionId })
     try {
       const result = await postJson<{ messages: SessionMessage[] }>("/sessions/messages", {
         cwd,
@@ -85,6 +105,7 @@ function App() {
       } else {
         setSelectedSessionId(null)
         setSessionMessages([])
+        setQueryParams({ project: cwd, session: null })
       }
     },
     [projects, loadMessages]
@@ -116,9 +137,32 @@ function App() {
         setMetrics(m)
         setCacheStatus(cs)
         setWatches(w)
-        setProjects(pr.projects ?? [])
+        const loadedProjects = pr.projects ?? []
+        setProjects(loadedProjects)
         setError("")
         setLastUpdated(new Date().toLocaleTimeString())
+
+        if (!initialLoadDone.current && loadedProjects.length > 0) {
+          initialLoadDone.current = true
+          const paramProject = getQueryParam("project")
+          const paramSession = getQueryParam("session")
+          if (paramProject && paramSession) {
+            const match = loadedProjects.find((p) => p.cwd === paramProject)
+            if (match) {
+              void loadMessages(paramProject, paramSession)
+              return
+            }
+          }
+          const newest = [...loadedProjects].sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0]
+          if (newest) {
+            const newestSession = [...newest.sessions].sort((a, b) => b.mtime - a.mtime)[0]
+            if (newestSession) {
+              void loadMessages(newest.cwd, newestSession.id)
+            } else {
+              setSelectedProjectCwd(newest.cwd)
+            }
+          }
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown fetch failure")
       }
@@ -127,7 +171,7 @@ function App() {
     void refresh()
     const id = setInterval(() => void refresh(), 5000)
     return () => clearInterval(id)
-  }, [])
+  }, [loadMessages])
 
   const m = metrics ?? {}
   const projectCount = Object.keys(m.projects ?? {}).length
@@ -135,24 +179,17 @@ function App() {
 
   if (error) {
     return (
-      <>
-        <Header
-          lastUpdated={lastUpdated}
-          uptime="unknown"
-          totalDispatches={0}
-          projects={0}
-          activeWatches={0}
-        />
-        <section className="card error" role="alert" aria-live="assertive">
-          <h2>Frontend error</h2>
+      <div className="bento">
+        <section className="card bento-error" role="alert" aria-live="assertive">
+          <h2>Error</h2>
           <p>{error}</p>
         </section>
-      </>
+      </div>
     )
   }
 
   return (
-    <>
+    <div className="bento">
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         Dashboard updated at {lastUpdated}.
       </p>
@@ -163,20 +200,17 @@ function App() {
         projects={projectCount}
         activeWatches={watchCount}
       />
-      <div className="main-columns">
-        <EventTable events={toSortedEvents(m.byEvent)} />
-        <CacheList cache={cacheStatus ?? {}} />
-        <SessionBrowser
-          projects={projects}
-          selectedProjectCwd={selectedProjectCwd}
-          selectedSessionId={selectedSessionId}
-          messages={sessionMessages}
-          messagesLoading={messagesLoading}
-          onSelectProject={handleSelectProject}
-          onSelectSession={handleSelectSession}
-        />
-      </div>
-    </>
+      <EventTable events={toSortedEvents(m.byEvent)} />
+      <CacheList cache={cacheStatus ?? {}} />
+      <SessionNav
+        projects={projects}
+        selectedProjectCwd={selectedProjectCwd}
+        selectedSessionId={selectedSessionId}
+        onSelectProject={handleSelectProject}
+        onSelectSession={handleSelectSession}
+      />
+      <SessionMessages messages={sessionMessages} loading={messagesLoading} />
+    </div>
   )
 }
 
