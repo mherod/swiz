@@ -45,7 +45,7 @@ import { stopHookInputSchema } from "./schemas.ts"
 import { getActionableIssues, needsRefinement } from "./stop-personal-repo-issues.ts"
 
 const CONTEXT_TURNS = 20 // Recent turns to send as context
-const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 90_000
+const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 120_000
 
 const WORKFLOW_FINDING =
   "Collaboration/workflow policy finding detected. Report the violation and enforce the gate; do not prescribe project-specific implementation details."
