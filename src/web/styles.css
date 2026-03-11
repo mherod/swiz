@@ -194,10 +194,18 @@ body::before {
   gap: 4px;
 }
 
-.bento-stat:nth-of-type(1) { grid-area: stat1; }
-.bento-stat:nth-of-type(2) { grid-area: stat2; }
-.bento-stat:nth-of-type(3) { grid-area: stat3; }
-.bento-stat:nth-of-type(4) { grid-area: stat4; }
+.bento-stat:nth-of-type(1) {
+  grid-area: stat1;
+}
+.bento-stat:nth-of-type(2) {
+  grid-area: stat2;
+}
+.bento-stat:nth-of-type(3) {
+  grid-area: stat3;
+}
+.bento-stat:nth-of-type(4) {
+  grid-area: stat4;
+}
 
 .stat-label {
   color: #8ea5d9;
@@ -568,14 +576,30 @@ tbody tr:hover {
   animation: riseIn 300ms ease both;
 }
 
-.bento > :nth-child(2) { animation-delay: 30ms; }
-.bento > :nth-child(3) { animation-delay: 50ms; }
-.bento > :nth-child(4) { animation-delay: 70ms; }
-.bento > :nth-child(5) { animation-delay: 90ms; }
-.bento > :nth-child(6) { animation-delay: 110ms; }
-.bento > :nth-child(7) { animation-delay: 130ms; }
-.bento > :nth-child(8) { animation-delay: 150ms; }
-.bento > :nth-child(9) { animation-delay: 170ms; }
+.bento > :nth-child(2) {
+  animation-delay: 30ms;
+}
+.bento > :nth-child(3) {
+  animation-delay: 50ms;
+}
+.bento > :nth-child(4) {
+  animation-delay: 70ms;
+}
+.bento > :nth-child(5) {
+  animation-delay: 90ms;
+}
+.bento > :nth-child(6) {
+  animation-delay: 110ms;
+}
+.bento > :nth-child(7) {
+  animation-delay: 130ms;
+}
+.bento > :nth-child(8) {
+  animation-delay: 150ms;
+}
+.bento > :nth-child(9) {
+  animation-delay: 170ms;
+}
 
 /* ── Responsive ── */
 

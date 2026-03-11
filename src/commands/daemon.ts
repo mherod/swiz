@@ -938,6 +938,8 @@ function extractToolCalls(content: unknown): ToolCallSummary[] {
           const parts = [`#${input.taskId}`]
           if (typeof input.status === "string") parts.push(input.status)
           detail = parts.join(" → ")
+        } else if (typeof input.skill === "string") {
+          detail = typeof input.args === "string" ? `${input.skill} ${input.args}` : input.skill
         } else {
           const pathVal = input.path ?? input.file_path
           if (typeof pathVal === "string") {
