@@ -28,6 +28,22 @@ export interface SessionMessage {
   toolCalls?: ToolCallSummary[]
 }
 
+export interface SessionTask {
+  id: string
+  subject: string
+  status: "pending" | "in_progress" | "completed" | "cancelled"
+  statusChangedAt: string | null
+  completionTimestamp: string | null
+  completionEvidence: string | null
+}
+
+export interface SessionTaskSummary {
+  total: number
+  open: number
+  completed: number
+  cancelled: number
+}
+
 interface GroupedSessionMessage {
   message: SessionMessage
   count: number
@@ -35,7 +51,14 @@ interface GroupedSessionMessage {
 }
 
 function formatTime(ts: number): string {
-  return new Date(ts).toLocaleString([], { dateStyle: "short", timeStyle: "short" })
+  return new Date(ts).toLocaleString([], {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
 }
 
 function formatCompactTime(ts: number): string {
@@ -425,9 +448,73 @@ interface MessagesProps {
   newKeys?: Set<string>
   msgKey?: (msg: SessionMessage, i: number) => string
   toolStats?: ToolStat[]
+  tasks?: SessionTask[]
+  taskSummary?: SessionTaskSummary | null
+  tasksLoading?: boolean
 }
 
-export function SessionMessages({ messages, loading, newKeys, msgKey, toolStats }: MessagesProps) {
+function TaskStatusBadge({ status }: { status: SessionTask["status"] }) {
+  const label = status.replace("_", " ")
+  return <span className={`task-status task-status-${status}`}>{label}</span>
+}
+
+function SessionTasksSection({
+  tasks,
+  summary,
+  loading,
+}: {
+  tasks: SessionTask[]
+  summary: SessionTaskSummary | null
+  loading: boolean
+}) {
+  return (
+    <section className="session-tasks-section" aria-label="Current tasks for selected session">
+      <h3 className="session-tasks-title">Session tasks</h3>
+      {summary ? (
+        <p className="session-tasks-summary">
+          {summary.open} open · {summary.completed} completed · {summary.cancelled} cancelled
+        </p>
+      ) : null}
+      {loading ? (
+        <p className="empty">Loading tasks...</p>
+      ) : tasks.length === 0 ? (
+        <p className="empty">No tasks recorded for this session.</p>
+      ) : (
+        <ul className="session-task-list">
+          {tasks.map((task) => {
+            const taskTime = task.statusChangedAt ?? task.completionTimestamp
+            return (
+              <li key={task.id} className="session-task-row">
+                <div className="session-task-meta">
+                  <span className="session-task-id">#{task.id}</span>
+                  <TaskStatusBadge status={task.status} />
+                </div>
+                <p className="session-task-subject">{task.subject}</p>
+                {taskTime ? (
+                  <p className="session-task-time">{formatTime(new Date(taskTime).getTime())}</p>
+                ) : null}
+                {task.completionEvidence ? (
+                  <p className="session-task-evidence">{task.completionEvidence}</p>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+export function SessionMessages({
+  messages,
+  loading,
+  newKeys,
+  msgKey,
+  toolStats,
+  tasks = [],
+  taskSummary = null,
+  tasksLoading = false,
+}: MessagesProps) {
   const sorted = [...messages].sort((a, b) => {
     if (!a.timestamp || !b.timestamp) return 0
     return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
@@ -480,6 +567,7 @@ export function SessionMessages({ messages, loading, newKeys, msgKey, toolStats 
           })}
         </ul>
       )}
+      <SessionTasksSection tasks={tasks} summary={taskSummary} loading={tasksLoading} />
     </section>
   )
 }

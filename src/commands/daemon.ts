@@ -18,6 +18,7 @@ import {
   resolveProjectHooks,
 } from "../settings.ts"
 import { getWorkflowIntent } from "../state-machine.ts"
+import { readTasks, type Task as StoredTask } from "../tasks/task-repository.ts"
 import { parseTranscriptSummary, type TranscriptSummary } from "../transcript-summary.ts"
 import {
   extractText,
@@ -985,39 +986,149 @@ interface SessionScanResult {
   lastMessageAt: number
 }
 
-async function scanSession(session: Pick<Session, "path" | "format">): Promise<SessionScanResult> {
-  const empty = { hasMessages: false, startedAt: 0, lastMessageAt: 0 }
-  try {
-    const file = Bun.file(session.path)
-    if (!(await file.exists())) return empty
-    const info = await file.stat()
-    const fileMtimeMs = info.mtimeMs ?? 0
-    const text = await file.text()
-    const entries = parseTranscriptEntries(text, session.format)
-    let hasMessages = false
+interface CachedSessionData {
+  mtimeMs: number
+  size: number
+  startedAt: number
+  lastMessageAt: number
+  messages: SessionMessage[]
+  toolStats: Array<{ name: string; count: number }>
+  fallbackTimestamps: Map<string, string>
+  lastAssignedFallbackMs: number
+}
+
+function messageFallbackKey(message: SessionMessage, occurrence: number): string {
+  const toolSig = (message.toolCalls ?? []).map((tc) => `${tc.name}:${tc.detail}`).join("|")
+  return `${message.role}\x00${message.text}\x00${toolSig}\x00${occurrence}`
+}
+
+class SessionDataCache {
+  private entries = new Map<string, CachedSessionData>()
+
+  private buildFromEntries(
+    entries: ReturnType<typeof parseTranscriptEntries>,
+    fileMtimeMs: number,
+    prev?: CachedSessionData
+  ): CachedSessionData {
+    const messages: SessionMessage[] = []
+    const toolCounts = new Map<string, number>()
+    const fallbackTimestamps = new Map<string, string>()
+    const seenSignatures = new Map<string, number>()
+    const pendingFallback: Array<{ messageIndex: number; key: string }> = []
+
     let startedAt = 0
     let lastMessageAt = 0
+    let lastAssignedFallbackMs = prev?.lastAssignedFallbackMs ?? 0
+
     for (const entry of entries) {
       if (entry.type !== "user" && entry.type !== "assistant") continue
-      const ts = entry.timestamp ? new Date(entry.timestamp).getTime() : 0
-      if (ts > 0 && (startedAt === 0 || ts < startedAt)) startedAt = ts
       const content = entry.message?.content
       if (entry.type === "user" && isHookFeedback(content)) continue
+
       const extracted = extractMessageText(content)
       const toolCalls = extractToolCalls(content)
-      if (extracted || toolCalls.length > 0) {
-        hasMessages = true
-        if (ts > lastMessageAt) lastMessageAt = ts
+      for (const tc of toolCalls) {
+        toolCounts.set(tc.name, (toolCounts.get(tc.name) ?? 0) + 1)
       }
+      if (!extracted && toolCalls.length === 0) continue
+
+      const message: SessionMessage = {
+        role: entry.type,
+        timestamp: entry.timestamp ?? null,
+        text: extracted,
+        ...(toolCalls.length > 0 ? { toolCalls } : {}),
+      }
+      messages.push(message)
+
+      const ts = entry.timestamp ? new Date(entry.timestamp).getTime() : 0
+      if (ts > 0) {
+        if (startedAt === 0 || ts < startedAt) startedAt = ts
+        if (ts > lastMessageAt) lastMessageAt = ts
+        continue
+      }
+
+      const baseSig = `${message.role}\x00${message.text}\x00${JSON.stringify(message.toolCalls ?? [])}`
+      const seen = (seenSignatures.get(baseSig) ?? 0) + 1
+      seenSignatures.set(baseSig, seen)
+      pendingFallback.push({
+        messageIndex: messages.length - 1,
+        key: messageFallbackKey(message, seen),
+      })
     }
-    if (hasMessages && lastMessageAt === 0 && fileMtimeMs > 0) {
-      // Some transcript formats do not store per-message timestamps.
-      startedAt = startedAt || fileMtimeMs
-      lastMessageAt = fileMtimeMs
+
+    // Assign stable synthetic timestamps for transcripts that don't include per-message times.
+    // Existing keys preserve prior assigned times; new keys get monotonic timestamps.
+    let seed = Math.max(lastAssignedFallbackMs, fileMtimeMs - pendingFallback.length * 1000)
+    for (let i = 0; i < pendingFallback.length; i++) {
+      const target = pendingFallback[i]!
+      const priorIso = prev?.fallbackTimestamps.get(target.key) ?? null
+      let assignedMs = priorIso ? new Date(priorIso).getTime() : 0
+      if (!assignedMs || Number.isNaN(assignedMs)) {
+        const minForOrder = fileMtimeMs - (pendingFallback.length - i) * 1000
+        assignedMs = Math.max(seed + 1000, minForOrder)
+      }
+      seed = Math.max(seed, assignedMs)
+      const iso = new Date(assignedMs).toISOString()
+      fallbackTimestamps.set(target.key, iso)
+      messages[target.messageIndex]!.timestamp = iso
+      if (startedAt === 0 || assignedMs < startedAt) startedAt = assignedMs
+      if (assignedMs > lastMessageAt) lastMessageAt = assignedMs
     }
-    return { hasMessages, startedAt, lastMessageAt }
-  } catch {
-    return empty
+    lastAssignedFallbackMs = seed
+
+    const toolStats = [...toolCounts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+
+    return {
+      mtimeMs: fileMtimeMs,
+      size: 0,
+      startedAt,
+      lastMessageAt,
+      messages,
+      toolStats,
+      fallbackTimestamps,
+      lastAssignedFallbackMs,
+    }
+  }
+
+  async get(session: Pick<Session, "path" | "format">): Promise<CachedSessionData | null> {
+    try {
+      const file = Bun.file(session.path)
+      if (!(await file.exists())) return null
+      const info = await file.stat()
+      const mtimeMs = info.mtimeMs ?? 0
+      const size = info.size
+
+      const cached = this.entries.get(session.path)
+      if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+        return cached
+      }
+
+      const text = await file.text()
+      const parsed = parseTranscriptEntries(text, session.format)
+      const next = this.buildFromEntries(parsed, mtimeMs, cached)
+      next.mtimeMs = mtimeMs
+      next.size = size
+      this.entries.set(session.path, next)
+      return next
+    } catch {
+      return null
+    }
+  }
+}
+
+const sessionDataCache = new SessionDataCache()
+
+async function scanSession(session: Pick<Session, "path" | "format">): Promise<SessionScanResult> {
+  const empty = { hasMessages: false, startedAt: 0, lastMessageAt: 0 }
+  const cached = await sessionDataCache.get(session)
+  if (!cached) return empty
+  if (cached.messages.length === 0) return empty
+  return {
+    hasMessages: true,
+    startedAt: cached.startedAt,
+    lastMessageAt: cached.lastMessageAt,
   }
 }
 
@@ -1083,41 +1194,81 @@ interface SessionData {
   toolStats: Array<{ name: string; count: number }>
 }
 
+interface SessionTaskSummary {
+  total: number
+  open: number
+  completed: number
+  cancelled: number
+}
+
+interface SessionTaskPreview {
+  id: string
+  subject: string
+  status: StoredTask["status"]
+  statusChangedAt: string | null
+  completionTimestamp: string | null
+  completionEvidence: string | null
+}
+
 async function getSessionData(cwd: string, sessionId: string, limit = 30): Promise<SessionData> {
   const sessions = await findAllProviderSessions(cwd)
   const session = sessions.find(
     (candidate) => candidate.id === sessionId || candidate.id.startsWith(sessionId)
   )
   if (!session) return { messages: [], toolStats: [] }
-  const file = Bun.file(session.path)
-  if (!(await file.exists())) return { messages: [], toolStats: [] }
-  const info = await file.stat()
-  const fallbackIso = info.mtimeMs ? new Date(info.mtimeMs).toISOString() : null
-  const text = await file.text()
-  const entries = parseTranscriptEntries(text, session.format)
-  const messages: SessionMessage[] = []
-  const toolCounts = new Map<string, number>()
-  for (const entry of entries) {
-    if (entry.type !== "user" && entry.type !== "assistant") continue
-    const content = entry.message?.content
-    if (entry.type === "user" && isHookFeedback(content)) continue
-    const extracted = extractMessageText(content)
-    const toolCalls = extractToolCalls(content)
-    for (const tc of toolCalls) {
-      toolCounts.set(tc.name, (toolCounts.get(tc.name) ?? 0) + 1)
-    }
-    if (!extracted && toolCalls.length === 0) continue
-    messages.push({
-      role: entry.type,
-      timestamp: entry.timestamp ?? fallbackIso,
-      text: extracted,
-      ...(toolCalls.length > 0 ? { toolCalls } : {}),
-    })
+  const cached = await sessionDataCache.get(session)
+  if (!cached) return { messages: [], toolStats: [] }
+  return {
+    messages: cached.messages.slice(-limit),
+    toolStats: cached.toolStats,
   }
-  const toolStats = [...toolCounts.entries()]
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count)
-  return { messages: messages.slice(-limit), toolStats }
+}
+
+function taskStatusRank(status: StoredTask["status"]): number {
+  switch (status) {
+    case "in_progress":
+      return 0
+    case "pending":
+      return 1
+    case "completed":
+      return 2
+    case "cancelled":
+      return 3
+    default:
+      return 4
+  }
+}
+
+async function getSessionTasks(
+  sessionId: string,
+  limit = 20
+): Promise<{ tasks: SessionTaskPreview[]; summary: SessionTaskSummary }> {
+  const tasks = await readTasks(sessionId)
+  const summary: SessionTaskSummary = {
+    total: tasks.length,
+    open: tasks.filter((task) => task.status === "pending" || task.status === "in_progress").length,
+    completed: tasks.filter((task) => task.status === "completed").length,
+    cancelled: tasks.filter((task) => task.status === "cancelled").length,
+  }
+  const sorted = [...tasks].sort((a, b) => {
+    const rankDiff = taskStatusRank(a.status) - taskStatusRank(b.status)
+    if (rankDiff !== 0) return rankDiff
+    const aTs = a.statusChangedAt ?? a.completionTimestamp ?? ""
+    const bTs = b.statusChangedAt ?? b.completionTimestamp ?? ""
+    if (aTs !== bTs) return bTs.localeCompare(aTs)
+    return b.id.localeCompare(a.id)
+  })
+  return {
+    tasks: sorted.slice(0, limit).map((task) => ({
+      id: task.id,
+      subject: task.subject,
+      status: task.status,
+      statusChangedAt: task.statusChangedAt ?? null,
+      completionTimestamp: task.completionTimestamp ?? null,
+      completionEvidence: task.completionEvidence ?? null,
+    })),
+    summary,
+  }
 }
 
 async function safeMtime(path: string | null): Promise<number> {
@@ -1752,6 +1903,26 @@ export const daemonCommand: Command = {
           const limit = Math.max(1, Math.min(100, body?.limit ?? 30))
           const data = await getSessionData(cwd, sessionId, limit)
           return Response.json({ messages: data.messages, toolStats: data.toolStats })
+        }
+
+        if (url.pathname === "/sessions/tasks" && req.method === "POST") {
+          const body = (await req.json().catch(() => null)) as {
+            cwd?: string
+            sessionId?: string
+            limit?: number
+          } | null
+          const cwd = body?.cwd
+          const sessionId = body?.sessionId
+          if (typeof cwd !== "string" || cwd.length === 0 || typeof sessionId !== "string") {
+            return Response.json(
+              { error: "Missing required fields: cwd (string), sessionId (string)" },
+              { status: 400 }
+            )
+          }
+          touchProject(cwd)
+          const limit = Math.max(1, Math.min(100, body?.limit ?? 20))
+          const data = await getSessionTasks(sessionId, limit)
+          return Response.json(data)
         }
 
         if (url.pathname === "/cache/status" && req.method === "GET") {

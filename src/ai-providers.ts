@@ -55,6 +55,36 @@ export interface PromptStreamOptions extends PromptOptions {
 
 const CODEX_DEFAULT_MODEL = "codex-mini-latest"
 const CLAUDE_DEFAULT_MODEL = "sonnet"
+const GEMINI_KNOWN_MODELS = [
+  "gemini-flash-latest",
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+] as const
+
+function buildGeminiModelValidationError(model: string, source: string): Error {
+  const valid = GEMINI_KNOWN_MODELS.join(", ")
+  return new Error(
+    `Invalid Gemini model "${model}" from ${source}. Valid Gemini models: ${valid}. ` +
+      "Fix the configured model name and restart."
+  )
+}
+
+function validateGeminiModelName(model: string | undefined, source: string): void {
+  if (!model) return
+  if (GEMINI_KNOWN_MODELS.includes(model as (typeof GEMINI_KNOWN_MODELS)[number])) return
+  throw buildGeminiModelValidationError(model, source)
+}
+
+function validateConfiguredModelAtStartup(): void {
+  // Fail fast on boot when a global Gemini model override is invalid.
+  // This prevents repeated backend failures inside hooks/loops.
+  const startupModel = process.env.GEMINI_MODEL
+  validateGeminiModelName(startupModel, "GEMINI_MODEL")
+}
+
+validateConfiguredModelAtStartup()
 
 function hasCodexCli(): boolean {
   if (process.env.AI_TEST_NO_BACKEND === "1") return false
@@ -357,6 +387,9 @@ export async function promptText(prompt: string, options?: PromptOptions): Promi
       "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
     )
   }
+  if (providers.length === 1 && providers[0] === "gemini") {
+    validateGeminiModelName(options?.model, "promptText(options.model)")
+  }
 
   let lastError: unknown
   for (const provider of providers) {
@@ -404,6 +437,9 @@ export async function promptStreamText(
       "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
     )
   }
+  if (providers.length === 1 && providers[0] === "gemini") {
+    validateGeminiModelName(options?.model, "promptStreamText(options.model)")
+  }
 
   let lastError: unknown
   for (const provider of providers) {
@@ -444,6 +480,9 @@ export async function promptObject<T>(
     throw new Error(
       "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
     )
+  }
+  if (providers.length === 1 && providers[0] === "gemini") {
+    validateGeminiModelName(options?.model, "promptObject(options.model)")
   }
 
   let lastError: unknown

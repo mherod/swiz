@@ -14,6 +14,8 @@ import {
   type SessionMessage,
   SessionMessages,
   SessionNav,
+  type SessionTask,
+  type SessionTaskSummary,
   type ToolStat,
 } from "./session-browser.tsx"
 
@@ -40,6 +42,9 @@ export function DashboardApp() {
   )
   const [sessionMessages, setSessionMessages] = useState<SessionMessage[]>([])
   const [sessionToolStats, setSessionToolStats] = useState<ToolStat[]>([])
+  const [sessionTasks, setSessionTasks] = useState<SessionTask[]>([])
+  const [sessionTaskSummary, setSessionTaskSummary] = useState<SessionTaskSummary | null>(null)
+  const [sessionTasksLoading, setSessionTasksLoading] = useState(false)
   const [newMessageKeys, setNewMessageKeys] = useState<Set<string>>(new Set())
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [projectEvents, setProjectEvents] = useState<
@@ -74,6 +79,20 @@ export function DashboardApp() {
     }
   }, [])
 
+  const loadTasks = useCallback(async (cwd: string, sessionId: string) => {
+    setSessionTasksLoading(true)
+    try {
+      const result = await postJson<{ tasks: SessionTask[]; summary?: SessionTaskSummary }>(
+        "/sessions/tasks",
+        { cwd, sessionId, limit: 20 }
+      )
+      setSessionTasks(result.tasks ?? [])
+      setSessionTaskSummary(result.summary ?? null)
+    } finally {
+      setSessionTasksLoading(false)
+    }
+  }, [])
+
   const handleSelectProject = useCallback(
     (cwd: string) => {
       setSelectedProjectCwd(cwd)
@@ -81,20 +100,24 @@ export function DashboardApp() {
       const firstSession = project?.sessions[0]
       if (firstSession) {
         void loadMessages(cwd, firstSession.id)
+        void loadTasks(cwd, firstSession.id)
       } else {
         setSelectedSessionId(null)
         setSessionMessages([])
+        setSessionTasks([])
+        setSessionTaskSummary(null)
         setQueryParams({ project: cwd, session: null })
       }
     },
-    [projects, loadMessages]
+    [projects, loadMessages, loadTasks]
   )
 
   const handleSelectSession = useCallback(
     (cwd: string, sessionId: string) => {
       void loadMessages(cwd, sessionId)
+      void loadTasks(cwd, sessionId)
     },
-    [loadMessages]
+    [loadMessages, loadTasks]
   )
 
   useEffect(() => {
@@ -131,6 +154,7 @@ export function DashboardApp() {
             const match = loadedProjects.find((p) => p.cwd === paramProject)
             if (match) {
               void loadMessages(paramProject, paramSession)
+              void loadTasks(paramProject, paramSession)
               return
             }
           }
@@ -139,6 +163,7 @@ export function DashboardApp() {
             const newestSession = [...newest.sessions].sort((a, b) => b.mtime - a.mtime)[0]
             if (newestSession) {
               void loadMessages(newest.cwd, newestSession.id)
+              void loadTasks(newest.cwd, newestSession.id)
             } else {
               setSelectedProjectCwd(newest.cwd)
             }
@@ -152,7 +177,7 @@ export function DashboardApp() {
     void refresh()
     const id = setInterval(() => void refresh(), 5000)
     return () => clearInterval(id)
-  }, [loadMessages])
+  }, [loadMessages, loadTasks])
 
   useEffect(() => {
     if (!selectedProjectCwd) {
@@ -178,36 +203,49 @@ export function DashboardApp() {
     const cwd = selectedProjectCwd
     const sid = selectedSessionId
 
-    async function pollMessages() {
+    async function pollSessionData() {
       try {
-        const result = await postJson<{ messages: SessionMessage[]; toolStats?: ToolStat[] }>(
-          "/sessions/messages",
-          { cwd, sessionId: sid, limit: 30 }
-        )
-        const msgs = result.messages ?? []
+        const [messagesResult, tasksResult] = await Promise.all([
+          postJson<{ messages: SessionMessage[]; toolStats?: ToolStat[] }>("/sessions/messages", {
+            cwd,
+            sessionId: sid,
+            limit: 30,
+          }),
+          postJson<{ tasks: SessionTask[]; summary?: SessionTaskSummary }>("/sessions/tasks", {
+            cwd,
+            sessionId: sid,
+            limit: 20,
+          }),
+        ])
+        const msgs = messagesResult.messages ?? []
         const snap = JSON.stringify(msgs)
-        if (snap === messagesPrevSnapshotRef.current) return
-        messagesPrevSnapshotRef.current = snap
+        let fresh = new Set<string>()
+        if (snap !== messagesPrevSnapshotRef.current) {
+          messagesPrevSnapshotRef.current = snap
 
-        const fresh = new Set<string>()
-        for (let i = 0; i < msgs.length; i++) {
-          const m = msgs[i]!
-          const key = msgKey(m, i)
-          if (!knownKeysRef.current.has(key)) fresh.add(key)
+          fresh = new Set<string>()
+          for (let i = 0; i < msgs.length; i++) {
+            const m = msgs[i]!
+            const key = msgKey(m, i)
+            if (!knownKeysRef.current.has(key)) fresh.add(key)
+          }
+          knownKeysRef.current = new Set(msgs.map(msgKey))
+          setNewMessageKeys(fresh)
+          setSessionMessages(msgs)
+          setSessionToolStats(messagesResult.toolStats ?? [])
+          if (fresh.size > 0) {
+            setTimeout(() => setNewMessageKeys(new Set()), 500)
+          }
         }
-        knownKeysRef.current = new Set(msgs.map(msgKey))
-        setNewMessageKeys(fresh)
-        setSessionMessages(msgs)
-        setSessionToolStats(result.toolStats ?? [])
-        if (fresh.size > 0) {
-          setTimeout(() => setNewMessageKeys(new Set()), 500)
-        }
+
+        setSessionTasks(tasksResult.tasks ?? [])
+        setSessionTaskSummary(tasksResult.summary ?? null)
       } catch {
         /* ignore polling errors */
       }
     }
 
-    const id = setInterval(() => void pollMessages(), 2000)
+    const id = setInterval(() => void pollSessionData(), 2000)
     return () => clearInterval(id)
   }, [selectedProjectCwd, selectedSessionId])
 
@@ -257,6 +295,9 @@ export function DashboardApp() {
         newKeys={newMessageKeys}
         msgKey={msgKey}
         toolStats={sessionToolStats}
+        tasks={sessionTasks}
+        taskSummary={sessionTaskSummary}
+        tasksLoading={sessionTasksLoading}
       />
       <MetricsRail
         events={projectEvents.length > 0 ? projectEvents : toSortedEvents(m.byEvent)}

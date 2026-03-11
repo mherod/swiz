@@ -723,6 +723,113 @@ tbody tr:hover {
   font-style: italic;
 }
 
+/* ── Session tasks ── */
+
+.session-tasks-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(46, 64, 101, 0.55);
+}
+
+.session-tasks-title {
+  margin: 0;
+  font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #93b4ff;
+}
+
+.session-tasks-summary {
+  margin: 4px 0 10px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.session-task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.session-task-row {
+  border: 1px solid rgba(86, 112, 166, 0.24);
+  border-radius: 10px;
+  background: rgba(33, 37, 45, 0.72);
+  padding: 8px 9px;
+}
+
+.session-task-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.session-task-id {
+  color: #9fb4dd;
+  font-size: 0.7rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.task-status {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 1px 7px;
+  text-transform: capitalize;
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+  font-weight: 700;
+}
+
+.task-status-in_progress {
+  color: #6dddf0;
+  border-color: rgba(77, 205, 229, 0.4);
+  background: rgba(77, 205, 229, 0.16);
+}
+
+.task-status-pending {
+  color: #f4ce7a;
+  border-color: rgba(236, 191, 82, 0.4);
+  background: rgba(236, 191, 82, 0.16);
+}
+
+.task-status-completed {
+  color: #88de98;
+  border-color: rgba(108, 215, 124, 0.4);
+  background: rgba(108, 215, 124, 0.16);
+}
+
+.task-status-cancelled {
+  color: #ef9d9d;
+  border-color: rgba(236, 119, 119, 0.4);
+  background: rgba(236, 119, 119, 0.16);
+}
+
+.session-task-subject {
+  margin: 6px 0 0;
+  color: #d9dee9;
+  font-size: 0.82rem;
+  line-height: 1.42;
+}
+
+.session-task-time {
+  margin: 4px 0 0;
+  color: #8fa0bc;
+  font-size: 0.68rem;
+}
+
+.session-task-evidence {
+  margin: 4px 0 0;
+  color: #9fb0cb;
+  font-size: 0.72rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .metric-kpis {
   display: flex;
   flex-wrap: wrap;
