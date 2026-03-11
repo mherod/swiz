@@ -6,7 +6,7 @@ import { detectCurrentAgent } from "../detect.ts"
 import { getHomeDir } from "../home.ts"
 import { readStateData, STATE_TRANSITIONS, TERMINAL_STATES } from "../settings.ts"
 import { HOOKS_DIR, isSwizCommand } from "../swiz-hook-commands.ts"
-import { getDefaultTaskRoots } from "../task-roots.ts"
+import { createDefaultTaskStore } from "../task-roots.ts"
 import type { Command } from "../types.ts"
 
 function forEachHookEntry(
@@ -179,7 +179,7 @@ async function countOpenTasksForSession(sessionId: string, tasksRoot: string): P
 async function getOpenTaskCount(cwd: string): Promise<number | null> {
   try {
     const home = getHomeDir()
-    const { tasksDir: tasksRoot, projectsDir: projectsRoot } = getDefaultTaskRoots(home)
+    const { tasksDir: tasksRoot, projectsDir: projectsRoot } = createDefaultTaskStore(home)
     const { projectKeyFromCwd } = await import("../project-key.ts")
     const key = projectKeyFromCwd(cwd)
 

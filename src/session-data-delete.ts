@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises"
 import { join } from "node:path"
-import { getDefaultTaskRoots } from "./task-roots.ts"
+import { createDefaultTaskStore } from "./task-roots.ts"
 import { findAllProviderSessions, type Session } from "./transcript-utils.ts"
 
 export interface SessionDeletionTargets {
@@ -32,7 +32,7 @@ export async function resolveSessionDeletionTargets(
   )
   const transcriptPaths = [...new Set(matchedSessions.map((session) => session.path))]
   const sessionIds = [...new Set(matchedSessions.map((session) => session.id))]
-  const { tasksDir } = getDefaultTaskRoots()
+  const { tasksDir } = createDefaultTaskStore()
 
   const taskDirPaths: string[] = []
   for (const id of sessionIds) {

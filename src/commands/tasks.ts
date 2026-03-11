@@ -9,7 +9,7 @@ import {
   writeProjectState,
 } from "../settings.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
-import { getDefaultTaskRoots } from "../task-roots.ts"
+import { createDefaultTaskStore } from "../task-roots.ts"
 import { type DateFormat, listAllSessionsTasks, listTasks } from "../tasks/task-renderer.ts"
 import {
   compareTaskIds,
@@ -419,7 +419,7 @@ async function adoptOrphanedTasks(targetSessionId: string, cwd: string): Promise
     return
   }
 
-  const { tasksDir } = getDefaultTaskRoots()
+  const { tasksDir } = createDefaultTaskStore()
   const prefix = sessionPrefix(targetSessionId)
 
   // Determine starting sequence number and build dedup index for the target session

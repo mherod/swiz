@@ -7,7 +7,7 @@
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { sessionPrefix } from "../session-id.ts"
-import { getDefaultTaskRoots } from "../task-roots.ts"
+import { createDefaultTaskStore } from "../task-roots.ts"
 import { backfillTaskTimingFields } from "./task-timing.ts"
 
 export { sessionPrefix }
@@ -93,7 +93,7 @@ export function compareTaskIds(a: string, b: string): number {
 
 export async function readTasks(
   sessionId: string,
-  tasksDir = getDefaultTaskRoots().tasksDir
+  tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Task[]> {
   const dir = join(tasksDir, sessionId)
   try {
@@ -173,7 +173,7 @@ async function updateSessionMeta(dir: string, cwd?: string): Promise<void> {
  */
 export async function readSessionMeta(
   sessionId: string,
-  tasksDir = getDefaultTaskRoots().tasksDir
+  tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<SessionMeta | null> {
   try {
     const text = await readFile(join(tasksDir, sessionId, SESSION_META_FILE), "utf-8")
@@ -183,17 +183,26 @@ export async function readSessionMeta(
   }
 }
 
-export async function writeTask(sessionId: string, task: Task, cwd?: string) {
-  const dir = join(getDefaultTaskRoots().tasksDir, sessionId)
+export async function writeTask(
+  sessionId: string,
+  task: Task,
+  cwd?: string,
+  tasksDir = createDefaultTaskStore().tasksDir
+) {
+  const dir = join(tasksDir, sessionId)
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, `${task.id}.json`), JSON.stringify(task, null, 2))
   // Update lightweight index so status.ts can read openCount without scanning every task file.
   await updateSessionMeta(dir, cwd)
 }
 
-export async function writeAudit(sessionId: string, entry: AuditEntry) {
+export async function writeAudit(
+  sessionId: string,
+  entry: AuditEntry,
+  tasksDir = createDefaultTaskStore().tasksDir
+) {
   try {
-    const dir = join(getDefaultTaskRoots().tasksDir, sessionId)
+    const dir = join(tasksDir, sessionId)
     await mkdir(dir, { recursive: true })
     await appendFile(join(dir, ".audit-log.jsonl"), `${JSON.stringify(entry)}\n`)
   } catch {}

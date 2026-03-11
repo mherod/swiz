@@ -2,7 +2,7 @@ import { open, readdir, readFile, stat } from "node:fs/promises"
 import { basename, join, resolve } from "node:path"
 import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
-import { getDefaultTaskRoots } from "./task-roots.ts"
+import { createDefaultTaskStore } from "./task-roots.ts"
 
 // ─── Content block types ─────────────────────────────────────────────────────
 
@@ -544,7 +544,7 @@ export async function findAllProviderSessions(
 ): Promise<Session[]> {
   const targetDir = resolve(projectDir)
   const effectiveHome = home ?? getHomeDir()
-  const { projectsDir } = getDefaultTaskRoots(effectiveHome)
+  const { projectsDir } = createDefaultTaskStore(effectiveHome)
   const claudeProjectDir = join(projectsDir, projectKeyFromCwd(targetDir))
   const [
     claudeSessions,

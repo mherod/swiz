@@ -9,7 +9,7 @@ import { join } from "node:path"
 import { DIM, RESET } from "../ansi.ts"
 import { debugLog } from "../debug.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
-import { getDefaultTaskRoots } from "../task-roots.ts"
+import { createDefaultTaskStore } from "../task-roots.ts"
 import {
   compareTaskIds,
   parseTaskId,
@@ -25,7 +25,7 @@ export type { Task }
 /** Derive session IDs from a single project transcript directory (constant-time lookup). */
 export async function getSessionIdsForProject(
   projectKey: string,
-  projectsDir = getDefaultTaskRoots().projectsDir
+  projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<Set<string>> {
   const projectDir = join(projectsDir, projectKey)
   const ids = new Set<string>()
@@ -40,7 +40,7 @@ export async function getSessionIdsForProject(
 
 /** Collect all session IDs referenced by any project transcript directory. */
 async function getAllProjectSessionIds(
-  projectsDir = getDefaultTaskRoots().projectsDir
+  projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<Set<string>> {
   const ids = new Set<string>()
   let projectDirs: string[]
@@ -67,7 +67,7 @@ async function getAllProjectSessionIds(
 export async function getSessionIdsByCwdScan(
   filterCwd: string,
   candidates: string[],
-  projectsDir = getDefaultTaskRoots().projectsDir
+  projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<Set<string>> {
   const ids = new Set<string>()
   let dirs: string[]
@@ -111,8 +111,8 @@ export async function getSessionIdsByCwdScan(
 
 export async function getSessions(
   filterCwd?: string,
-  tasksDir = getDefaultTaskRoots().tasksDir,
-  projectsDir = getDefaultTaskRoots().projectsDir
+  tasksDir = createDefaultTaskStore().tasksDir,
+  projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<string[]> {
   try {
     const entries = await readdir(tasksDir)
@@ -176,7 +176,7 @@ export async function getSessions(
  */
 export async function buildRecentTasksHint(
   sessionId: string,
-  tasksDir = getDefaultTaskRoots().tasksDir
+  tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<string> {
   try {
     const tasks = await readTasks(sessionId, tasksDir)
@@ -196,7 +196,7 @@ export async function buildRecentTasksHint(
  */
 export async function buildRecentSessionsHint(
   sessions: string[],
-  tasksDir = getDefaultTaskRoots().tasksDir
+  tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<string> {
   if (sessions.length === 0) return ""
   const recent = sessions.slice(0, 5)
@@ -227,8 +227,8 @@ export async function buildRecentSessionsHint(
 export async function findTaskAcrossSessions(
   taskId: string,
   filterCwd?: string,
-  tasksDir = getDefaultTaskRoots().tasksDir,
-  projectsDir = getDefaultTaskRoots().projectsDir
+  tasksDir = createDefaultTaskStore().tasksDir,
+  projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<{ sessionId: string; task: Task }[]> {
   const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
   const matches: { sessionId: string; task: Task }[] = []
@@ -249,8 +249,8 @@ export async function resolveTaskById(
   taskId: string,
   primarySessionId: string,
   filterCwd?: string,
-  tasksDir = getDefaultTaskRoots().tasksDir,
-  projectsDir = getDefaultTaskRoots().projectsDir
+  tasksDir = createDefaultTaskStore().tasksDir,
+  projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<{ sessionId: string; task: Task }> {
   // Prefix-based fast resolution: if the ID has a session prefix, find the
   // matching session directly — no ambiguity possible.
@@ -380,8 +380,8 @@ export async function resolveTaskById(
  * Used by the task renderer to annotate tasks with a [recovered] indicator.
  */
 export async function getOrphanSessionIds(
-  tasksDir = getDefaultTaskRoots().tasksDir,
-  projectsDir = getDefaultTaskRoots().projectsDir
+  tasksDir = createDefaultTaskStore().tasksDir,
+  projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<Set<string>> {
   const allIndexed = await getAllProjectSessionIds(projectsDir)
   let entries: string[]

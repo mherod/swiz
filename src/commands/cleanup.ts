@@ -10,7 +10,7 @@ import {
   unloadLaunchAgent,
 } from "../launch-agents.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
-import { getDefaultTaskRoots } from "../task-roots.ts"
+import { createDefaultTaskStore } from "../task-roots.ts"
 import type { Command } from "../types.ts"
 
 const HOME = getHomeDir()
@@ -367,7 +367,7 @@ async function findOldTaskFiles(
 async function findSessions(
   projectDir: string,
   cutoffMs: number,
-  tasksDir = getDefaultTaskRoots().tasksDir
+  tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<{ keep: SessionInfo[]; old: SessionInfo[] }> {
   const keep: SessionInfo[] = []
   const old: SessionInfo[] = []
@@ -542,7 +542,7 @@ export const cleanupCommand: Command = {
       dryRun,
       projectFilter,
     } = parseCleanupArgs(args)
-    const { projectsDir, tasksDir } = getDefaultTaskRoots()
+    const { projectsDir, tasksDir } = createDefaultTaskStore()
 
     const cutoffMs = Date.now() - olderThanMs
     const taskCutoffMs = taskOlderThanMs ? Date.now() - taskOlderThanMs : null
