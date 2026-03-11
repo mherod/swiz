@@ -37,6 +37,7 @@ alwaysApply: false
 - `validateDispatchRoutes()` in `src/manifest.ts` must pass from both `swiz dispatch` and `swiz install`.
 - Keep `src/dispatch-routing.test.ts` passing.
 - DO NOT hard-code agent-specific event names or tool names in hook scripts.
+- `classifyHookOutput` in `src/dispatch/engine.ts` extracts JSON from polluted stdout (non-JSON prefix text from SDK log lines). DO NOT revert this fallback — it's defense-in-depth against any SDK writing to `process.stdout` in hook subprocesses.
 ## Writing Hooks
 - Update `README.md` whenever `src/manifest.ts` changes.
 - `src/readme-hook-counts.test.ts` invariants:
