@@ -30,6 +30,8 @@ const DAEMON_PORT = 7_943
 const LABEL = "com.swiz.daemon"
 const PLIST_PATH = join(process.env.HOME ?? "", "Library/LaunchAgents", `${LABEL}.plist`)
 const GITHUB_REFRESH_WINDOW_MS = 20_000
+const CI_WATCH_POLL_MS = 30_000
+const CI_WATCH_TIMEOUT_MS = 60 * 60 * 1000
 
 interface SnapshotFingerprint {
   git: string
@@ -43,6 +45,198 @@ interface SnapshotFingerprint {
 interface CachedSnapshot {
   snapshot: WarmStatusLineSnapshot
   fingerprint: SnapshotFingerprint
+}
+
+export interface CiWatchRun {
+  databaseId: number
+  status?: string | null
+  conclusion?: string | null
+  url?: string | null
+}
+
+export interface CiWatchStatus {
+  sha: string
+  cwd: string
+  startedAt: number
+  lastCheckedAt: number | null
+  runId: number | null
+  runUrl: string | null
+}
+
+type CiRunFetcher = (cwd: string, sha: string) => Promise<CiWatchRun | null>
+type CiNotify = (watch: CiWatchStatus & { conclusion: string }) => Promise<void>
+
+interface CiWatchInternal extends CiWatchStatus {
+  deadlineAt: number
+  timer: ReturnType<typeof setTimeout> | null
+}
+
+function ciWatchKey(cwd: string, sha: string): string {
+  return `${cwd}\x00${sha}`
+}
+
+function resolveNotifyBinary(): string | null {
+  const envBin = process.env.SWIZ_NOTIFY_BIN
+  if (envBin?.trim()) return envBin
+
+  const repoRoot = dirname(Bun.main)
+  const devPath = join(repoRoot, "macos", "SwizNotify.app", "Contents", "MacOS", "swiz-notify")
+  if (Bun.file(devPath).size > 0) return devPath
+
+  const installed = "/usr/local/bin/swiz-notify"
+  if (Bun.file(installed).size > 0) return installed
+
+  return null
+}
+
+async function defaultCiCompletionNotify(
+  watch: CiWatchStatus & { conclusion: string }
+): Promise<void> {
+  const binary = resolveNotifyBinary()
+  if (!binary) return
+
+  const sound = watch.conclusion === "success" ? "Hero" : "Bottle"
+  const title = watch.conclusion === "success" ? "swiz CI passed" : "swiz CI failed"
+  const body = watch.runUrl
+    ? `${watch.sha.slice(0, 8)} • ${watch.runUrl}`
+    : `${watch.sha.slice(0, 8)} • run ${watch.runId ?? "unknown"}`
+
+  const proc = Bun.spawn(
+    [binary, "--title", title, "--body", body, "--sound", sound, "--timeout", "20"],
+    {
+      stdout: "ignore",
+      stderr: "ignore",
+    }
+  )
+  await proc.exited
+}
+
+async function defaultCiRunFetcher(cwd: string, sha: string): Promise<CiWatchRun | null> {
+  const runs = await ghJson<CiWatchRun[]>(
+    ["run", "list", "--commit", sha, "--json", "databaseId,status,conclusion,url", "--limit", "1"],
+    cwd
+  )
+  if (!Array.isArray(runs) || runs.length === 0) return null
+  return runs[0] ?? null
+}
+
+export class CiWatchRegistry {
+  private watches = new Map<string, CiWatchInternal>()
+  private pollMs: number
+  private timeoutMs: number
+  private fetchRun: CiRunFetcher
+  private notify: CiNotify
+
+  constructor(
+    opts: {
+      pollMs?: number
+      timeoutMs?: number
+      fetchRun?: CiRunFetcher
+      notify?: CiNotify
+    } = {}
+  ) {
+    this.pollMs = opts.pollMs ?? CI_WATCH_POLL_MS
+    this.timeoutMs = opts.timeoutMs ?? CI_WATCH_TIMEOUT_MS
+    this.fetchRun = opts.fetchRun ?? defaultCiRunFetcher
+    this.notify = opts.notify ?? defaultCiCompletionNotify
+  }
+
+  listActive(): CiWatchStatus[] {
+    return [...this.watches.values()].map((w) => ({
+      sha: w.sha,
+      cwd: w.cwd,
+      startedAt: w.startedAt,
+      lastCheckedAt: w.lastCheckedAt,
+      runId: w.runId,
+      runUrl: w.runUrl,
+    }))
+  }
+
+  start(cwd: string, sha: string): { deduped: boolean; watch: CiWatchStatus } {
+    const key = ciWatchKey(cwd, sha)
+    const existing = this.watches.get(key)
+    if (existing) {
+      return {
+        deduped: true,
+        watch: {
+          sha: existing.sha,
+          cwd: existing.cwd,
+          startedAt: existing.startedAt,
+          lastCheckedAt: existing.lastCheckedAt,
+          runId: existing.runId,
+          runUrl: existing.runUrl,
+        },
+      }
+    }
+
+    const watch: CiWatchInternal = {
+      sha,
+      cwd,
+      startedAt: Date.now(),
+      lastCheckedAt: null,
+      runId: null,
+      runUrl: null,
+      deadlineAt: Date.now() + this.timeoutMs,
+      timer: null,
+    }
+    this.watches.set(key, watch)
+    this.schedulePoll(key)
+
+    return {
+      deduped: false,
+      watch: {
+        sha: watch.sha,
+        cwd: watch.cwd,
+        startedAt: watch.startedAt,
+        lastCheckedAt: watch.lastCheckedAt,
+        runId: watch.runId,
+        runUrl: watch.runUrl,
+      },
+    }
+  }
+
+  close(): void {
+    for (const watch of this.watches.values()) {
+      if (watch.timer) clearTimeout(watch.timer)
+      watch.timer = null
+    }
+    this.watches.clear()
+  }
+
+  private schedulePoll(key: string): void {
+    const watch = this.watches.get(key)
+    if (!watch) return
+    watch.timer = setTimeout(() => {
+      void this.poll(key)
+    }, this.pollMs)
+  }
+
+  private async poll(key: string): Promise<void> {
+    const watch = this.watches.get(key)
+    if (!watch) return
+
+    if (Date.now() > watch.deadlineAt) {
+      this.watches.delete(key)
+      await this.notify({ ...watch, conclusion: "timeout" })
+      return
+    }
+
+    watch.lastCheckedAt = Date.now()
+    const run = await this.fetchRun(watch.cwd, watch.sha)
+    if (run?.databaseId) {
+      watch.runId = run.databaseId
+      watch.runUrl = run.url ?? null
+      const status = (run.status ?? "").toLowerCase()
+      if (status === "completed") {
+        const conclusion = (run.conclusion ?? "unknown").toLowerCase()
+        this.watches.delete(key)
+        await this.notify({ ...watch, conclusion })
+        return
+      }
+    }
+
+    this.schedulePoll(key)
+  }
 }
 
 export interface EventMetrics {
@@ -852,6 +1046,7 @@ export const daemonCommand: Command = {
     const eligibilityCache = new HookEligibilityCache()
     const transcriptIndex = new TranscriptIndexCache()
     const cooldownRegistry = new CooldownRegistry()
+    const ciWatchRegistry = new CiWatchRegistry()
     const gitStateCache = new GitStateCache()
     const projectSettingsCache = new ProjectSettingsCache()
     const manifestCache = new ManifestCache(projectSettingsCache)
@@ -919,7 +1114,10 @@ export const daemonCommand: Command = {
     }
 
     watchers.start()
-    process.on("exit", () => watchers.close())
+    process.on("exit", () => {
+      watchers.close()
+      ciWatchRegistry.close()
+    })
 
     const server = Bun.serve({
       port,
@@ -1086,6 +1284,37 @@ export const daemonCommand: Command = {
             return Response.json({ error: "Not a git repository or no branch" }, { status: 404 })
           }
           return Response.json(state)
+        }
+
+        if (url.pathname === "/ci-watch" && req.method === "POST") {
+          const body = (await req.json().catch(() => null)) as {
+            cwd?: string
+            sha?: string
+          } | null
+          const cwd = body?.cwd
+          const sha = body?.sha
+          if (
+            typeof cwd !== "string" ||
+            cwd.length === 0 ||
+            typeof sha !== "string" ||
+            sha.length === 0
+          ) {
+            return Response.json(
+              { error: "Missing required fields: cwd (string), sha (string)" },
+              { status: 400 }
+            )
+          }
+          registerProjectWatchers(cwd)
+          const started = ciWatchRegistry.start(cwd, sha)
+          return Response.json(started)
+        }
+
+        if (url.pathname === "/ci-watches" && req.method === "GET") {
+          const cwd = url.searchParams.get("cwd")
+          const active = ciWatchRegistry
+            .listActive()
+            .filter((entry) => (cwd ? entry.cwd === cwd : true))
+          return Response.json({ active })
         }
 
         if (url.pathname === "/settings/project" && req.method === "POST") {
