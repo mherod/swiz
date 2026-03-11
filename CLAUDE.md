@@ -98,10 +98,9 @@ alwaysApply: false
 - Completion requires evidence: `swiz tasks complete <id> --evidence "text"`; enforced by `stop-completion-auditor`.
 - First action must be `TaskCreate`/`TaskUpdate`; required again after compaction resumes.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash when no incomplete task exists.
-- When no-task block reports prior-session tasks, recreate and set `in_progress` before retrying.
-- After compaction, run `TaskList`; close stale tasks after `git log --oneline -3` and `gh run view --json conclusion`.
-- DO NOT create compound task subjects; `pretooluse-task-subject-validation.ts` rejects multi-action subjects.
-- Keep one task per verb (`Run tests`, `Commit fix`, `Push to origin`, `Verify CI`, `Close issue #N`).
+- Prior-session task blocks: recreate and set `in_progress` before retrying.
+- After compaction: `TaskList`, close stale tasks after `git log --oneline -3`.
+- One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects.
 - Keep at least one `pending`/`in_progress` task before `git add` or `git commit`; mark commit task complete only after commit success.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: branch verification, task preflight, Conventional Commits `<type>(<scope>): <summary>`.
@@ -109,7 +108,7 @@ alwaysApply: false
 - Call task tools (`TaskUpdate`, `TaskCreate`, `TaskList`, `TaskGet`) regularly: at least every 10 calls; staleness gate triggers at 20.
 - During multi-file work, call `TaskUpdate` after each file; add updates at least every 3 edits.
 - Create tasks before non-exempt Bash.
-- **DON'T**: Complete your last in-progress task while shell commands remain (e.g., push verification). Keep ≥1 task `in_progress` until all shell work finishes. `pretooluse-require-tasks` blocks Bash when zero incomplete tasks exist.
+- **DON'T**: Complete last in-progress task while shell commands remain. Keep ≥1 `in_progress` until all shell work finishes.
 - Exempt Bash categories: `ls`, `rg`, `grep`; read-only `git` subcommands (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`, etc.); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - `find` is not exempt; use `rg` or Glob.
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
@@ -181,9 +180,10 @@ alwaysApply: false
 - DO NOT run branch/collaboration/open-PR checks after push.
 - DO NOT add `Co-Authored-By: Claude` or other AI attribution in commits/PR descriptions.
 - DO NOT use destructive git commands: `git revert`, `git restore`, `git stash`, `git reset --hard`, `git checkout -- <file>`; use `git reflog` for recovery.
+- DO: When reverting file edits, read the full file first — Biome auto-formatting may have changed other sections, so naive diff-based undos create new errors.
 ## Daemon
 - `src/commands/daemon.ts`: long-lived `Bun.serve` on port 7943; serves multiple projects simultaneously — scope per-project state by `cwd`.
-- Endpoints: `/health`, `/dispatch` (POST), `/status-line/snapshot` (POST), `/metrics` (GET).
+- Endpoints: `/health`, `/dispatch` (POST), `/status-line/snapshot` (POST), `/metrics` (GET), `/ci-watch` (POST), `/ci-watches` (GET).
 - `swiz daemon status` fetches `/metrics`. Metrics are in-memory only; tracked globally and per-project.
 - LaunchAgent: `~/Library/LaunchAgents/com.swiz.daemon.plist`; `swiz daemon --install` / `--uninstall`.
 ## Settings Configuration
