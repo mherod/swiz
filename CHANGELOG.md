@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-03-11
+
+### New Features
+
+- Added a live daemon dashboard with project activity, session timelines,
+  dispatch counts, and per-session tool usage insights.
+- Added CI watch integration in push workflows, including daemon-backed
+  notifications when runs complete.
+- Added daemon status and metrics visibility for quicker runtime checks of
+  hook dispatch behaviour.
+
+### Bug Fixes
+
+- Fixed daemon web module loading by serving browser modules with the correct
+  MIME type and handling favicon requests without noisy 404s.
+- Fixed dashboard UX issues including panel layout stability, reduced flicker,
+  and prioritised display of active sessions.
+
+### Improvements
+
+- Improved dashboard responsiveness by moving web asset routing into Bun's
+  route table for more direct request handling.
+- Improved stop-flow guidance by surfacing clearer human-required actions when
+  maintenance or release steps are still pending.
+
 ## 2026-03-09
 
 ### Bug Fixes
