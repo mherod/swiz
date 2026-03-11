@@ -525,6 +525,7 @@ export function SessionMessages({
     <section className="card bento-messages">
       <h2 className="section-title">Transcript</h2>
       <p className="section-subtitle">Conversation history for selected session</p>
+      <SessionTasksSection tasks={tasks} summary={taskSummary} loading={tasksLoading} />
       {toolStats && toolStats.length > 0 && <ToolStatsBar stats={toolStats} />}
       {loading ? (
         <p className="empty">Loading...</p>
@@ -567,7 +568,6 @@ export function SessionMessages({
           })}
         </ul>
       )}
-      <SessionTasksSection tasks={tasks} summary={taskSummary} loading={tasksLoading} />
     </section>
   )
 }
