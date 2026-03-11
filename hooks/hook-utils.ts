@@ -47,7 +47,11 @@ export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
 
 // ─── Canonical path hashing — re-exported from src/git-helpers.ts ────────────
 export { getCanonicalPathHash } from "../src/git-helpers.ts"
-export { resolveSafeSessionId, sanitizeSessionId, sessionPrefix } from "../src/session-id.ts"
+export {
+  resolveSafeSessionId,
+  sanitizeSessionId,
+  sessionPrefix,
+} from "../src/session-id.ts"
 
 export type { PackageManager, Runtime } from "./utils/package-detection.ts"
 export {
@@ -323,7 +327,10 @@ export function blockStop(
   options: { includeUpdateMemoryAdvice?: boolean } = {}
 ): never {
   console.log(
-    JSON.stringify({ decision: "block", reason: reason + actionRequired(reason, options) })
+    JSON.stringify({
+      decision: "block",
+      reason: reason + actionRequired(reason, options),
+    })
   )
   process.exit(0)
 }
@@ -343,7 +350,11 @@ export function blockStopRaw(reason: string): never {
 export function blockStopHumanRequired(reason: string): never {
   const fullReason = `${reason}\n\nACTION REQUIRED: Resolve this block before stopping.`
   console.log(
-    JSON.stringify({ decision: "block", reason: fullReason, resolution: "human-required" })
+    JSON.stringify({
+      decision: "block",
+      reason: fullReason,
+      resolution: "human-required",
+    })
   )
   process.exit(0)
 }
@@ -354,15 +365,35 @@ export function blockStopHumanRequired(reason: string): never {
 // so all hook scripts can keep importing from "./hook-utils.ts" unchanged.
 
 import {
-  getOpenPrForBranch,
   getRepoSlug,
   gh,
-  ghJson,
+  ghJsonViaDaemon,
   git,
   hasGhCli,
   isGitHubRemote,
   isGitRepo,
 } from "../src/git-helpers.ts"
+
+/**
+ * Hooks should prefer daemon-backed gh query caching to reduce API pressure.
+ * Falls back to direct gh + local TTL cache when daemon is unavailable.
+ */
+async function ghJson<T>(args: string[], cwd: string): Promise<T | null> {
+  return ghJsonViaDaemon<T>(args, cwd, { ttlMs: 300_000 })
+}
+
+async function getOpenPrForBranch<T>(
+  branch: string,
+  cwd: string,
+  jsonFields: string
+): Promise<T | null> {
+  if (!branch) return null
+  const prs = await ghJson<T[]>(
+    ["pr", "list", "--head", branch, "--state", "open", "--json", jsonFields],
+    cwd
+  )
+  return prs?.[0] ?? null
+}
 
 export { getOpenPrForBranch, getRepoSlug, gh, ghJson, git, hasGhCli, isGitHubRemote, isGitRepo }
 
@@ -473,7 +504,10 @@ export async function hasSessionTasksDir(
 }
 
 // ─── Subject fingerprinting (re-exported from src/) ─────────────────────
-export { computeSubjectFingerprint, stemWord } from "../src/subject-fingerprint.ts"
+export {
+  computeSubjectFingerprint,
+  stemWord,
+} from "../src/subject-fingerprint.ts"
 
 import { computeSubjectFingerprint } from "../src/subject-fingerprint.ts"
 

@@ -189,14 +189,18 @@ export class GhQueryCache {
     return `${cwd}\x00${args.join("\x00")}`
   }
 
-  async get(args: string[], cwd: string): Promise<{ hit: boolean; value: unknown }> {
+  async get(
+    args: string[],
+    cwd: string,
+    ttlMs: number = GH_QUERY_TTL_MS
+  ): Promise<{ hit: boolean; value: unknown }> {
     const k = this.key(args, cwd)
     const entry = this.entries.get(k)
     if (entry && entry.expiresAt > Date.now()) {
       return { hit: true, value: entry.value }
     }
     const value = await this.fetcher(args, cwd)
-    this.entries.set(k, { value, expiresAt: Date.now() + GH_QUERY_TTL_MS })
+    this.entries.set(k, { value, expiresAt: Date.now() + Math.max(0, ttlMs) })
     return { hit: false, value }
   }
 
@@ -808,7 +812,10 @@ export const daemonCommand: Command = {
   description: "Run a background web server",
   usage: "swiz daemon [--port <port>] [--install] [--uninstall] [status]",
   options: [
-    { flags: "--port <port>", description: "Port to listen on (default: 7943)" },
+    {
+      flags: "--port <port>",
+      description: "Port to listen on (default: 7943)",
+    },
     { flags: "--install", description: "Install as a LaunchAgent" },
     { flags: "--uninstall", description: "Uninstall the LaunchAgent" },
     { flags: "status", description: "Show daemon metrics and status" },
@@ -964,30 +971,40 @@ export const daemonCommand: Command = {
           if (projectParam) {
             const pm = projectMetrics.get(projectParam)
             if (!pm) return Response.json({ error: "No metrics for project" }, { status: 404 })
-            return Response.json({ ...serializeMetrics(pm), project: projectParam })
+            return Response.json({
+              ...serializeMetrics(pm),
+              project: projectParam,
+            })
           }
           const projects: Record<string, ReturnType<typeof serializeMetrics>> = {}
           for (const [cwd, m] of projectMetrics) {
             projects[cwd] = serializeMetrics(m)
           }
-          return Response.json({ ...serializeMetrics(globalMetrics), projects })
+          return Response.json({
+            ...serializeMetrics(globalMetrics),
+            projects,
+          })
         }
 
         if (url.pathname === "/gh-query" && req.method === "POST") {
           const body = (await req.json().catch(() => null)) as {
             args?: string[]
             cwd?: string
+            ttlMs?: number
           } | null
           const args = body?.args
           const cwd = body?.cwd
           if (!Array.isArray(args) || typeof cwd !== "string" || cwd.length === 0) {
             return Response.json(
-              { error: "Missing required fields: args (string[]), cwd (string)" },
+              {
+                error: "Missing required fields: args (string[]), cwd (string)",
+              },
               { status: 400 }
             )
           }
           registerProjectWatchers(cwd)
-          const { hit, value } = await ghCache.get(args, cwd)
+          const ttlMs = typeof body?.ttlMs === "number" ? body.ttlMs : GH_QUERY_TTL_MS
+          const { hit, value } = await ghCache.get(args, cwd, ttlMs)
           return Response.json({ hit, value })
         }
 
@@ -1058,7 +1075,9 @@ export const daemonCommand: Command = {
           const cwd = body?.cwd
           if (typeof hookFile !== "string" || typeof cwd !== "string" || cwd.length === 0) {
             return Response.json(
-              { error: "Missing required fields: hookFile (string), cwd (string)" },
+              {
+                error: "Missing required fields: hookFile (string), cwd (string)",
+              },
               { status: 400 }
             )
           }

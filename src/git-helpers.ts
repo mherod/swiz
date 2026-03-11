@@ -5,6 +5,7 @@
 // to remove the src-to-hooks coupling (issue #85).
 
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { resolveSpawnCwd } from "./cwd.ts"
 import { getHomeDirOrNull } from "./home.ts"
@@ -21,7 +22,11 @@ export function joinGitPath(repoRoot: string, ...segments: string[]): string {
 export async function git(args: string[], cwd: string): Promise<string> {
   try {
     const effectiveCwd = resolveSpawnCwd(cwd)
-    const proc = Bun.spawn(["git", ...args], { cwd: effectiveCwd, stdout: "pipe", stderr: "pipe" })
+    const proc = Bun.spawn(["git", ...args], {
+      cwd: effectiveCwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
     const [output] = await Promise.all([
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
@@ -36,6 +41,8 @@ export async function git(args: string[], cwd: string): Promise<string> {
 // ─── gh helpers ───────────────────────────────────────────────────────────────
 
 const GH_API_CACHE_DURATION: string = process.env.GH_API_CACHE_DURATION || "20s"
+const GH_FALLBACK_CACHE_TTL_MS = Number(process.env.GH_FALLBACK_CACHE_TTL_MS) || 300_000
+const GH_FALLBACK_CACHE_DIR = process.env.SWIZ_GH_CACHE_DIR || "/tmp/swiz-gh-cache"
 
 /**
  * Returns true when the gh api arg list represents a read-only GET request.
@@ -108,25 +115,113 @@ export async function ghJson<T>(args: string[], cwd: string): Promise<T | null> 
 const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
 const DAEMON_GH_TIMEOUT_MS = 3_000
 
+interface GhFallbackCacheEntry {
+  expiresAt: number
+  value: unknown
+}
+
+export interface GhQueryOptions {
+  ttlMs?: number
+}
+
+function ensureGhFallbackCacheDir(): void {
+  try {
+    mkdirSync(GH_FALLBACK_CACHE_DIR, { recursive: true })
+  } catch {
+    // Best-effort cache directory creation.
+  }
+}
+
+function ghFallbackCachePath(args: string[], cwd: string): string {
+  const key = Bun.hash(`${cwd}\x00${args.join("\x00")}`).toString(16)
+  return join(GH_FALLBACK_CACHE_DIR, `${key}.json`)
+}
+
+function readGhFallbackCache<T>(
+  args: string[],
+  cwd: string,
+  includeStale = false
+): { value: T; stale: boolean } | null {
+  try {
+    const parsed = JSON.parse(
+      readFileSync(ghFallbackCachePath(args, cwd), "utf8")
+    ) as GhFallbackCacheEntry
+    if (typeof parsed !== "object" || parsed === null) return null
+    const expiresAt = Number((parsed as { expiresAt?: unknown }).expiresAt)
+    if (!Number.isFinite(expiresAt)) return null
+    if (expiresAt > Date.now()) return { value: parsed.value as T, stale: false }
+    if (includeStale) return { value: parsed.value as T, stale: true }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function writeGhFallbackCache(args: string[], cwd: string, ttlMs: number, value: unknown): void {
+  try {
+    ensureGhFallbackCacheDir()
+    const payload: GhFallbackCacheEntry = {
+      expiresAt: Date.now() + Math.max(0, ttlMs),
+      value,
+    }
+    writeFileSync(ghFallbackCachePath(args, cwd), JSON.stringify(payload))
+  } catch {
+    // Best-effort file cache.
+  }
+}
+
 /**
  * Try to resolve a gh JSON query via the daemon cache.
  * Falls back to direct ghJson when the daemon is unavailable.
  */
-export async function ghJsonViaDaemon<T>(args: string[], cwd: string): Promise<T | null> {
-  if (process.env.SWIZ_NO_DAEMON === "1") return ghJson<T>(args, cwd)
+export async function ghJsonViaDaemon<T>(
+  args: string[],
+  cwd: string,
+  options: GhQueryOptions = {}
+): Promise<T | null> {
+  const ghPath = Bun.which("gh") ?? ""
+  const mockedGhBinary = ghPath.startsWith(tmpdir()) || ghPath.includes("swiz-test")
+  const shouldBypassDaemon =
+    process.env.SWIZ_NO_DAEMON === "1" ||
+    process.env.BUN_TEST === "1" ||
+    process.env.GH_MOCK_ISSUES !== undefined ||
+    process.env.GH_MOCK_PRS !== undefined ||
+    process.env.GH_MOCK_USER !== undefined ||
+    mockedGhBinary
+
+  const ttlMs = options.ttlMs ?? GH_FALLBACK_CACHE_TTL_MS
+  if (shouldBypassDaemon) {
+    const direct = await ghJson<T>(args, cwd)
+    if (direct !== null) writeGhFallbackCache(args, cwd, ttlMs, direct)
+    if (direct === null) return readGhFallbackCache<T>(args, cwd, true)?.value ?? null
+    return direct
+  }
 
   try {
     const resp = await fetch(`http://127.0.0.1:${DAEMON_PORT}/gh-query`, {
       method: "POST",
-      body: JSON.stringify({ args, cwd }),
+      body: JSON.stringify({ args, cwd, ttlMs }),
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(DAEMON_GH_TIMEOUT_MS),
     })
-    if (!resp.ok) return ghJson<T>(args, cwd)
+    if (!resp.ok) {
+      const direct = await ghJson<T>(args, cwd)
+      if (direct !== null) {
+        writeGhFallbackCache(args, cwd, ttlMs, direct)
+        return direct
+      }
+      return readGhFallbackCache<T>(args, cwd, true)?.value ?? null
+    }
     const data = (await resp.json()) as { hit: boolean; value: T | null }
+    if (data.value !== null) writeGhFallbackCache(args, cwd, ttlMs, data.value)
     return data.value
   } catch {
-    return ghJson<T>(args, cwd)
+    const direct = await ghJson<T>(args, cwd)
+    if (direct !== null) {
+      writeGhFallbackCache(args, cwd, ttlMs, direct)
+      return direct
+    }
+    return readGhFallbackCache<T>(args, cwd, true)?.value ?? null
   }
 }
 
@@ -254,7 +349,10 @@ export function resolveGitPaths(cwd: string): { gitDir: string; workTree: string
         if (st.isDirectory()) return { gitDir: candidate, workTree: dir }
         const content = readFileSync(candidate, "utf8").trim()
         if (content.startsWith("gitdir: ")) {
-          return { gitDir: content.slice("gitdir: ".length).trim(), workTree: dir }
+          return {
+            gitDir: content.slice("gitdir: ".length).trim(),
+            workTree: dir,
+          }
         }
       } catch {
         /* fall through */
@@ -408,7 +506,17 @@ export async function getGitBranchStatus(cwd: string): Promise<GitBranchStatus |
     /* no stash info */
   }
 
-  return { branch, ahead, behind, staged, unstaged, untracked, conflicts, stash, changedFallback }
+  return {
+    branch,
+    ahead,
+    behind,
+    staged,
+    unstaged,
+    untracked,
+    conflicts,
+    stash,
+    changedFallback,
+  }
 }
 
 // ─── Branch-policy classification helpers ────────────────────────────────────
