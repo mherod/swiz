@@ -431,6 +431,7 @@ export async function runPreToolUse(
   await launchAsyncHooks(groups, payloadStr, daemonContext)
   const cwd = extractCwd(payloadStr)
   const hints: string[] = []
+  const contexts: string[] = []
   const finalResponse: Record<string, unknown> = {}
   const executions: HookExecution[] = []
 
@@ -450,13 +451,17 @@ export async function runPreToolUse(
       Object.assign(finalResponse, resp)
       break
     }
-    if (resp && isAllowWithReason(resp)) {
+    if (resp) {
+      const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
       const reason = extractAllowReason(resp)
-      if (reason) {
+      const context = extractContext(resp)
+      if (hso?.permissionDecision === "allow" && (reason || context)) {
         execution.status = "allow-with-reason"
         executions.push(execution)
-        hints.push(reason)
-        log(`   ~ ${execution.file} (hint: ${reason.slice(0, 100)})`)
+        if (reason) hints.push(reason)
+        if (context) contexts.push(context)
+        const preview = reason ?? context ?? ""
+        log(`   ~ ${execution.file} (hint: ${preview.slice(0, 100)})`)
         continue
       }
     }
@@ -465,13 +470,18 @@ export async function runPreToolUse(
   }
 
   if (!isDeny(finalResponse)) {
-    if (hints.length > 0) {
-      log(`   result: passed with ${hints.length} hint(s)`)
+    if (hints.length > 0 || contexts.length > 0) {
+      log(
+        `   result: passed with ${hints.length} hint(s)` +
+          (contexts.length > 0 ? ` and ${contexts.length} context(s)` : "")
+      )
       Object.assign(finalResponse, {
+        ...(contexts.length > 0 ? { systemMessage: contexts.join("\n\n") } : {}),
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
           permissionDecision: "allow",
-          permissionDecisionReason: hints.join("\n\n"),
+          ...(hints.length > 0 ? { permissionDecisionReason: hints.join("\n\n") } : {}),
+          ...(contexts.length > 0 ? { additionalContext: contexts.join("\n\n") } : {}),
         },
       })
     } else {

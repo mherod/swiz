@@ -41,6 +41,11 @@ interface TaskFile {
   status: string
   blocks: string[]
   blockedBy: string[]
+  statusChangedAt: string
+  elapsedMs: number
+  startedAt: number | null
+  completedAt: number | null
+  completionTimestamp?: string
 }
 
 async function main(): Promise<void> {
@@ -68,6 +73,8 @@ async function main(): Promise<void> {
 
   // Build a stub task. Use "in_progress" as the initial status so TaskUpdate
   // can transition it to whatever the agent requested (typically "completed").
+  const nowIso = new Date().toISOString()
+  const nowMs = Date.now()
   const stub: TaskFile = {
     id: taskId,
     subject: `Recovered task #${taskId} (lost during compaction)`,
@@ -78,6 +85,10 @@ async function main(): Promise<void> {
     status: "in_progress",
     blocks: [],
     blockedBy: [],
+    statusChangedAt: nowIso,
+    elapsedMs: 0,
+    startedAt: nowMs,
+    completedAt: null,
   }
 
   try {

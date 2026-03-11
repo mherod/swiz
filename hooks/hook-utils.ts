@@ -32,6 +32,7 @@ import {
   stateDataSchema,
 } from "../src/settings.ts"
 import { skillAdvice, skillExists } from "../src/skill-utils.ts"
+import { backfillTaskTimingFields } from "../src/tasks/task-timing.ts"
 import { sessionTaskSentinelPath } from "../src/temp-paths.ts"
 import {
   GH_CMD_RE,
@@ -158,6 +159,23 @@ export function allowPreToolUse(reason: string): never {
         hookEventName: "PreToolUse",
         permissionDecision: "allow",
         permissionDecisionReason: reason,
+      },
+    })
+  )
+  process.exit(0)
+}
+
+/** Emit a PreToolUse allow with both a visible hint and additionalContext. */
+export function allowPreToolUseWithContext(reason: string, additionalContext: string): never {
+  const effectiveReason = reason || additionalContext
+  console.log(
+    JSON.stringify({
+      ...(additionalContext && { systemMessage: additionalContext }),
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+        ...(effectiveReason && { permissionDecisionReason: effectiveReason }),
+        ...(additionalContext && { additionalContext }),
       },
     })
   )
@@ -429,6 +447,11 @@ export interface SessionTask {
   blocks?: string[]
   blockedBy?: string[]
   completionEvidence?: string
+  completionTimestamp?: string
+  statusChangedAt?: string
+  elapsedMs?: number
+  startedAt?: number | null
+  completedAt?: number | null
   /** Deterministic fingerprint of the normalized subject for deduplication. */
   subjectFingerprint?: string
 }
@@ -525,6 +548,7 @@ export async function readSessionTasks(
         if (!task.subjectFingerprint) {
           task.subjectFingerprint = computeSubjectFingerprint(task.subject)
         }
+        backfillTaskTimingFields(task)
         tasks.push(task)
       }
     } catch {

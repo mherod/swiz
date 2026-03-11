@@ -214,8 +214,12 @@ async function main(): Promise<void> {
     // Idempotent — skip if evidence is already identical
     if (task.completionEvidence === evidence) return
 
+    const nowIso = new Date().toISOString()
     task.completionEvidence = evidence
-    task.completionTimestamp = new Date().toISOString()
+    task.completionTimestamp = nowIso
+    if (task.completedAt === undefined || task.completedAt === null) {
+      task.completedAt = Date.now()
+    }
     await Bun.write(taskPath, JSON.stringify(task, null, 2))
   } catch {
     // Task file doesn't exist or is unreadable — skip silently

@@ -92,10 +92,20 @@ async function writeTask(
     id,
     subject,
     status,
+    statusChangedAt,
+    completionTimestamp,
+    elapsedMs,
+    startedAt,
+    completedAt,
   }: {
     id: string
     subject: string
     status: "pending" | "in_progress" | "completed" | "cancelled"
+    statusChangedAt?: string
+    completionTimestamp?: string
+    elapsedMs?: number
+    startedAt?: number | null
+    completedAt?: number | null
   }
 ) {
   const dir = getSessionTasksDir(sessionId, homeDir)
@@ -111,11 +121,22 @@ async function writeTask(
         status,
         blocks: [],
         blockedBy: [],
+        ...(statusChangedAt ? { statusChangedAt } : {}),
+        ...(completionTimestamp ? { completionTimestamp } : {}),
+        ...(elapsedMs !== undefined ? { elapsedMs } : {}),
+        ...(startedAt !== undefined ? { startedAt } : {}),
+        ...(completedAt !== undefined ? { completedAt } : {}),
       },
       null,
       2
     )
   )
+}
+
+async function writeSwizSettings(homeDir: string, settings: Record<string, unknown>) {
+  const dir = join(homeDir, ".swiz")
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, "settings.json"), JSON.stringify(settings, null, 2))
 }
 
 describe("pretooluse-require-tasks", () => {
@@ -241,6 +262,54 @@ describe("pretooluse-require-tasks", () => {
 
     const result = await runHook({ homeDir, toolName: "Edit", sessionId })
     expect(result.decision).toBeUndefined()
+  })
+
+  test("allows with a non-blocking warning when an in-progress task exceeds the default duration threshold", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-slow-warning-default"
+    const startedAt = Date.now() - 12 * 60_000
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Verify CI passes",
+      status: "in_progress",
+      startedAt,
+      statusChangedAt: new Date(startedAt).toISOString(),
+      elapsedMs: 0,
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Open follow-up issue",
+      status: "pending",
+    })
+
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId })
+    expect(result.decision).toBe("allow")
+    expect(result.reason).toContain("Task #1 has been in_progress for 12m")
+    expect(result.reason).toContain("consider backgrounding or switching approach")
+  })
+
+  test("uses the configured task duration warning threshold", async () => {
+    const homeDir = await createTempHome()
+    const sessionId = "session-slow-warning-configured"
+    const startedAt = Date.now() - 2 * 60_000
+    await writeSwizSettings(homeDir, { taskDurationWarningMinutes: 1 })
+    await writeTask(homeDir, sessionId, {
+      id: "1",
+      subject: "Investigate slow task",
+      status: "in_progress",
+      startedAt,
+      statusChangedAt: new Date(startedAt).toISOString(),
+      elapsedMs: 0,
+    })
+    await writeTask(homeDir, sessionId, {
+      id: "2",
+      subject: "Document findings",
+      status: "pending",
+    })
+
+    const result = await runHook({ homeDir, toolName: "Bash", sessionId })
+    expect(result.decision).toBe("allow")
+    expect(result.reason).toContain("Task #1 has been in_progress for 2m")
   })
 
   test("denies when tasks exist but are stale (20+ calls since last task tool)", async () => {
@@ -762,12 +831,6 @@ describe("DIRECT_MERGE_INTENT_RE", () => {
 })
 
 describe("strict-no-direct-main merge task blocking", () => {
-  async function writeSwizSettings(homeDir: string, settings: Record<string, unknown>) {
-    const dir = join(homeDir, ".swiz")
-    await mkdir(dir, { recursive: true })
-    await writeFile(join(dir, "settings.json"), JSON.stringify(settings, null, 2))
-  }
-
   test("denies Bash when strict-no-direct-main enabled and task has 'Merge PR' subject", async () => {
     const homeDir = await createTempHome()
     const sessionId = "session-merge-pr-block"

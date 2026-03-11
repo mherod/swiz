@@ -29,6 +29,11 @@ interface TaskFile {
   status: string
   blocks: string[]
   blockedBy: string[]
+  statusChangedAt: string
+  elapsedMs: number
+  startedAt: number | null
+  completedAt: number | null
+  completionTimestamp?: string
 }
 
 interface ExtendedToolInput extends ToolHookInput {
@@ -79,6 +84,8 @@ async function main(): Promise<void> {
   // Only valid statuses
   const validStatuses = ["pending", "in_progress", "completed"]
   const status = validStatuses.includes(requestedStatus) ? requestedStatus : "completed"
+  const nowIso = new Date().toISOString()
+  const nowMs = Date.now()
 
   const task: TaskFile = {
     id: taskId,
@@ -88,6 +95,11 @@ async function main(): Promise<void> {
     status,
     blocks: [],
     blockedBy: [],
+    statusChangedAt: nowIso,
+    elapsedMs: 0,
+    startedAt: status === "in_progress" ? nowMs : null,
+    completedAt: status === "completed" ? nowMs : null,
+    ...(status === "completed" ? { completionTimestamp: nowIso } : {}),
   }
 
   try {

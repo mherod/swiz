@@ -250,6 +250,19 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     docs: { valuePlaceholder: "minutes" },
   },
   {
+    key: "taskDurationWarningMinutes",
+    aliases: [
+      "task-duration-warning-minutes",
+      "taskdurationwarningminutes",
+      "task_duration_warning_minutes",
+      "task-duration-warning",
+      "slow-task-warning-minutes",
+    ],
+    kind: "numeric",
+    scopes: ["global", "project"],
+    docs: { valuePlaceholder: "minutes" },
+  },
+  {
     key: "narratorSpeed",
     aliases: ["narrator-speed", "narratorspeed", "narrator_speed", "speed"],
     kind: "numeric",
@@ -349,6 +362,8 @@ export interface ProjectSwizSettings {
   collaborationMode?: CollaborationMode
   /** Enforce feature-branch workflow even for solo repositories. */
   strictNoDirectMain?: boolean
+  /** Warn when an in-progress task exceeds this runtime. */
+  taskDurationWarningMinutes?: number
   /** Hook filenames to skip for this project (e.g. "stop-github-ci.ts") */
   disabledHooks?: string[]
   /** External hook plugin bundles — package names or local paths */
@@ -421,6 +436,7 @@ export interface SwizSettings {
   personalRepoIssuesGate: boolean
   /** When true, blocks all direct pushes to the default branch regardless of repo type. */
   strictNoDirectMain: boolean
+  taskDurationWarningMinutes: number
   memoryLineThreshold: number
   memoryWordThreshold: number
   largeFileSizeKb: number
@@ -441,6 +457,7 @@ export interface EffectiveSwizSettings extends EffectiveSettingsBase {
 export const DEFAULT_MEMORY_LINE_THRESHOLD = 1400
 export const DEFAULT_MEMORY_WORD_THRESHOLD = 5000
 export const DEFAULT_LARGE_FILE_SIZE_KB = 500
+export const DEFAULT_TASK_DURATION_WARNING_MINUTES = 10
 
 export const DEFAULT_TRIVIAL_MAX_FILES = 3
 export const DEFAULT_TRIVIAL_MAX_LINES = 20
@@ -543,6 +560,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   changesRequestedGate: true,
   personalRepoIssuesGate: true,
   strictNoDirectMain: false,
+  taskDurationWarningMinutes: DEFAULT_TASK_DURATION_WARNING_MINUTES,
   memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
   memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
   largeFileSizeKb: DEFAULT_LARGE_FILE_SIZE_KB,
@@ -572,6 +590,7 @@ export const projectSettingsSchema = z.object({
   ambitionMode: ambitionModeSchema.optional(),
   collaborationMode: collaborationModeSchema.optional(),
   strictNoDirectMain: z.boolean().optional(),
+  taskDurationWarningMinutes: z.number().int().min(1).optional(),
   disabledHooks: z.array(z.string().min(1)).optional(),
   plugins: z.array(z.string().min(1)).optional(),
   allowedSkillCategories: z.array(z.string().min(1)).optional(),
@@ -600,6 +619,11 @@ export const swizSettingsSchema = z.object({
   changesRequestedGate: z.boolean().catch(DEFAULT_SETTINGS.changesRequestedGate),
   personalRepoIssuesGate: z.boolean().catch(DEFAULT_SETTINGS.personalRepoIssuesGate),
   strictNoDirectMain: z.boolean().catch(DEFAULT_SETTINGS.strictNoDirectMain),
+  taskDurationWarningMinutes: z
+    .number()
+    .int()
+    .min(1)
+    .catch(DEFAULT_SETTINGS.taskDurationWarningMinutes),
   memoryLineThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.memoryLineThreshold),
   memoryWordThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.memoryWordThreshold),
   largeFileSizeKb: z.number().int().min(1).catch(DEFAULT_SETTINGS.largeFileSizeKb),
@@ -727,6 +751,9 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   }
   if (typeof obj.strictNoDirectMain === "boolean") {
     result.strictNoDirectMain = obj.strictNoDirectMain
+  }
+  if (typeof obj.taskDurationWarningMinutes === "number" && obj.taskDurationWarningMinutes > 0) {
+    result.taskDurationWarningMinutes = obj.taskDurationWarningMinutes
   }
   if (
     Array.isArray(obj.disabledHooks) &&
@@ -937,6 +964,8 @@ export function getEffectiveSwizSettings(
     changesRequestedGate: settings.changesRequestedGate,
     personalRepoIssuesGate: settings.personalRepoIssuesGate,
     strictNoDirectMain: projectSettings?.strictNoDirectMain ?? settings.strictNoDirectMain,
+    taskDurationWarningMinutes:
+      projectSettings?.taskDurationWarningMinutes ?? settings.taskDurationWarningMinutes,
     memoryLineThreshold: settings.memoryLineThreshold,
     memoryWordThreshold: settings.memoryWordThreshold,
     largeFileSizeKb: projectSettings?.largeFileSizeKb ?? settings.largeFileSizeKb,

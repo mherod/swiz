@@ -8,6 +8,7 @@ import { BOLD, DIM, RESET, YELLOW } from "../ansi.ts"
 import { formatDuration } from "../format-duration.ts"
 import { readTasks, STATUS_STYLE, type Task } from "./task-repository.ts"
 import { getOrphanSessionIds, getSessions } from "./task-resolver.ts"
+import { getTaskCompletedAtMs, getTaskCurrentDurationMs } from "./task-timing.ts"
 
 export type { Task }
 
@@ -32,8 +33,12 @@ export function timeAgo(date: Date): string {
 export function renderTask(task: Task, sessionTag?: string, dateFormat: DateFormat = "relative") {
   const { emoji, color } = STATUS_STYLE[task.status]
   const tag = sessionTag ? `${DIM}[${sessionTag}]${RESET} ` : ""
+  const durationTag =
+    task.status === "in_progress"
+      ? `${DIM}(${formatDuration(getTaskCurrentDurationMs(task))})${RESET} `
+      : ""
   console.log(
-    `  ${emoji} ${BOLD}#${task.id}${RESET} ${tag}${color}[${task.status.replace("_", " ").toUpperCase()}]${RESET} ${task.subject}`
+    `  ${emoji} ${BOLD}#${task.id}${RESET} ${tag}${color}[${task.status.replace("_", " ").toUpperCase()}]${RESET} ${durationTag}${task.subject}`
   )
   if (task.description) {
     const lines = task.description.split("\n").slice(0, 3)
@@ -44,18 +49,16 @@ export function renderTask(task: Task, sessionTag?: string, dateFormat: DateForm
   if (task.statusChangedAt) {
     console.log(`     ${DIM}📅 ${formatDate(new Date(task.statusChangedAt), dateFormat)}${RESET}`)
   }
-  // Show elapsed time for in_progress (live) and completed tasks
-  if (task.status === "in_progress" && task.statusChangedAt) {
-    const live = (task.elapsedMs ?? 0) + (Date.now() - new Date(task.statusChangedAt).getTime())
-    console.log(`     ${DIM}⏱  ${formatDuration(Math.max(0, live))} elapsed${RESET}`)
-  } else if ((task.elapsedMs ?? 0) > 0) {
+  // Show elapsed time for completed tasks after the final status settles.
+  if (task.status !== "in_progress" && (task.elapsedMs ?? 0) > 0) {
     console.log(`     ${DIM}⏱  ${formatDuration(task.elapsedMs!)} elapsed${RESET}`)
   }
   if (task.completionEvidence)
     console.log(`     ${DIM}✓ Evidence: ${task.completionEvidence}${RESET}`)
-  if (task.completionTimestamp)
+  const completedAtMs = getTaskCompletedAtMs(task)
+  if (completedAtMs !== null)
     console.log(
-      `     ${DIM}✓ Completed: ${formatDate(new Date(task.completionTimestamp), dateFormat)}${RESET}`
+      `     ${DIM}✓ Completed: ${formatDate(new Date(completedAtMs), dateFormat)}${RESET}`
     )
   if (task.blockedBy.length)
     console.log(`     ${DIM}Blocked by: #${task.blockedBy.join(", #")}${RESET}`)

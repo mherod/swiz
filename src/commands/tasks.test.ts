@@ -753,6 +753,118 @@ describe("tasks command regressions (#242)", () => {
   })
 })
 
+describe("task timing fields (#267)", () => {
+  it("sets startedAt when a task enters in_progress", async () => {
+    const home = join(TMP, "issue-267-home-started-at")
+    const repoCwd = join(TMP, "issue-267-repo-started-at")
+    const sessionId = "66666666-aaaa-bbbb-cccc-000000000001"
+    const taskId = "1"
+    const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
+
+    await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+    await mkdir(repoCwd, { recursive: true })
+    await writeFile(
+      taskPath,
+      JSON.stringify({
+        id: taskId,
+        subject: "Start task timing",
+        description: "desc",
+        status: "pending",
+        startedAt: null,
+        completedAt: null,
+        statusChangedAt: new Date().toISOString(),
+        elapsedMs: 0,
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+
+    const prevHome = process.env.HOME
+    const prevCwd = process.cwd()
+    process.env.HOME = home
+    process.chdir(repoCwd)
+    try {
+      await expect(
+        tasksCommand.run(["status", taskId, "in_progress", "--session", sessionId.slice(0, 8)])
+      ).resolves.toBeUndefined()
+    } finally {
+      process.chdir(prevCwd)
+      if (prevHome === undefined) delete process.env.HOME
+      else process.env.HOME = prevHome
+    }
+
+    const updated = JSON.parse(await readFile(taskPath, "utf8")) as {
+      status: string
+      startedAt: number | null
+      completedAt: number | null
+    }
+    expect(updated.status).toBe("in_progress")
+    expect(typeof updated.startedAt).toBe("number")
+    expect(updated.completedAt).toBeNull()
+  })
+
+  it("sets completedAt when a task enters completed", async () => {
+    const home = join(TMP, "issue-267-home-completed-at")
+    const repoCwd = join(TMP, "issue-267-repo-completed-at")
+    const sessionId = "77777777-aaaa-bbbb-cccc-000000000001"
+    const taskId = "1"
+    const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
+    const startedAt = Date.now() - 60_000
+
+    await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+    await mkdir(repoCwd, { recursive: true })
+    await writeFile(
+      taskPath,
+      JSON.stringify({
+        id: taskId,
+        subject: "Finish task timing",
+        description: "desc",
+        status: "in_progress",
+        startedAt,
+        completedAt: null,
+        statusChangedAt: new Date(startedAt).toISOString(),
+        elapsedMs: 0,
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+
+    const prevHome = process.env.HOME
+    const prevCwd = process.cwd()
+    process.env.HOME = home
+    process.chdir(repoCwd)
+    try {
+      await expect(
+        tasksCommand.run([
+          "status",
+          taskId,
+          "completed",
+          "--session",
+          sessionId.slice(0, 8),
+          "--evidence",
+          "note:completed with timing",
+        ])
+      ).resolves.toBeUndefined()
+    } finally {
+      process.chdir(prevCwd)
+      if (prevHome === undefined) delete process.env.HOME
+      else process.env.HOME = prevHome
+    }
+
+    const updated = JSON.parse(await readFile(taskPath, "utf8")) as {
+      status: string
+      startedAt: number | null
+      completedAt: number | null
+      completionTimestamp?: string
+    }
+    expect(updated.status).toBe("completed")
+    expect(updated.startedAt).toBe(startedAt)
+    expect(typeof updated.completedAt).toBe("number")
+    expect(updated.completedAt).toBeGreaterThanOrEqual(startedAt)
+    expect(updated.completionTimestamp).toBeTruthy()
+  })
+})
+
 describe("native task recovery paths (#271)", () => {
   it("complete creates placeholder stub when --subject is omitted", async () => {
     const home = join(TMP, "issue-271-home-complete-placeholder")

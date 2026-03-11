@@ -16,6 +16,7 @@
 
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
+import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
   emitContext,
   getSessionTaskPath,
@@ -108,11 +109,18 @@ async function main(): Promise<void> {
     const exists = await file.exists()
 
     if (!exists) {
+      const nowIso = new Date().toISOString()
+      const nowMs = Date.now()
       // Write new task file
       const taskRecord: SessionTask = {
         id: task.id,
         subject: task.subject,
         status: task.status,
+        statusChangedAt: nowIso,
+        elapsedMs: 0,
+        startedAt: task.status === "in_progress" ? nowMs : null,
+        completedAt: task.status === "completed" ? nowMs : null,
+        ...(task.status === "completed" ? { completionTimestamp: nowIso } : {}),
       }
       try {
         await Bun.write(taskPath, JSON.stringify(taskRecord, null, 2))
@@ -144,6 +152,22 @@ async function main(): Promise<void> {
       ...existing,
       subject: task.subject,
       status: task.status,
+    }
+
+    if (statusChanged) {
+      const nowIso = new Date().toISOString()
+      const nowMs = Date.now()
+      if (existing.status === "in_progress") {
+        merged.elapsedMs = getTaskCurrentDurationMs(existing, nowMs)
+      }
+      merged.statusChangedAt = nowIso
+      if (task.status === "in_progress") {
+        merged.startedAt = nowMs
+      }
+      if (task.status === "completed") {
+        merged.completedAt = nowMs
+        if (!merged.completionTimestamp) merged.completionTimestamp = nowIso
+      }
     }
 
     try {

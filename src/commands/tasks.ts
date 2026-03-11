@@ -203,6 +203,8 @@ async function createTask(sessionId: string, subject: string, description: strin
     subject,
     description,
     status: "pending",
+    startedAt: null,
+    completedAt: null,
     statusChangedAt: new Date().toISOString(),
     elapsedMs: 0,
     subjectFingerprint: computeSubjectFingerprint(subject),
@@ -263,6 +265,9 @@ async function ensureFileBackedTask({
     description: description ?? recoveredSubject,
     activeForm,
     status,
+    startedAt: status === "in_progress" ? Date.now() : null,
+    completedAt: status === "completed" ? Date.now() : null,
+    ...(status === "completed" ? { completionTimestamp: new Date().toISOString() } : {}),
     statusChangedAt: new Date().toISOString(),
     elapsedMs: 0,
     blocks: [],
@@ -285,6 +290,33 @@ async function ensureFileBackedTask({
     console.log(`  ℹ️  Task #${taskId} not in file store — created stub from --subject`)
   }
   return true
+}
+
+function applyStatusTransition(
+  task: Task,
+  newStatus: Task["status"],
+  nowIso = new Date().toISOString(),
+  nowMs = Date.now()
+): void {
+  if (task.status === "in_progress" && task.statusChangedAt) {
+    const elapsed = nowMs - new Date(task.statusChangedAt).getTime()
+    task.elapsedMs = (task.elapsedMs ?? 0) + Math.max(0, elapsed)
+  }
+
+  task.status = newStatus
+  task.statusChangedAt = nowIso
+
+  if (task.startedAt === undefined) task.startedAt = null
+  if (task.completedAt === undefined) task.completedAt = null
+
+  if (newStatus === "in_progress") {
+    task.startedAt = nowMs
+  }
+
+  if (newStatus === "completed") {
+    task.completedAt = nowMs
+    if (!task.completionTimestamp) task.completionTimestamp = nowIso
+  }
 }
 
 async function updateStatus(
@@ -320,15 +352,9 @@ async function updateStatus(
 
   const oldStatus = task.status
   const now = new Date().toISOString()
+  const nowMs = Date.now()
 
-  // Accumulate elapsed time when leaving in_progress
-  if (oldStatus === "in_progress" && task.statusChangedAt) {
-    const elapsed = Date.now() - new Date(task.statusChangedAt).getTime()
-    task.elapsedMs = (task.elapsedMs ?? 0) + Math.max(0, elapsed)
-  }
-
-  task.status = newStatus
-  task.statusChangedAt = now
+  applyStatusTransition(task, newStatus, now, nowMs)
   if (newStatus === "completed" && evidence) {
     task.completionEvidence = evidence
     task.completionTimestamp = now
@@ -496,6 +522,9 @@ async function submitEvidence(
   task.completionEvidence = evidence
   if (!task.completionTimestamp) {
     task.completionTimestamp = new Date().toISOString()
+  }
+  if (task.completedAt === undefined || task.completedAt === null) {
+    task.completedAt = Date.now()
   }
 
   await writeTask(effectiveSessionId, task, process.cwd())
@@ -835,12 +864,8 @@ async function writeTaskUpdate(
 ): Promise<void> {
   if (newStatus) {
     const oldStatus = task.status
-    if (oldStatus === "in_progress" && task.statusChangedAt) {
-      const elapsed = Date.now() - new Date(task.statusChangedAt).getTime()
-      task.elapsedMs = (task.elapsedMs ?? 0) + Math.max(0, elapsed)
-    }
-    task.status = newStatus
-    task.statusChangedAt = new Date().toISOString()
+    const nowIso = new Date().toISOString()
+    applyStatusTransition(task, newStatus, nowIso, Date.now())
     await writeTask(sessionId, task, process.cwd())
     await writeAudit(sessionId, {
       timestamp: new Date().toISOString(),

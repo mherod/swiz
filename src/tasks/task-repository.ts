@@ -8,6 +8,7 @@ import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/p
 import { join } from "node:path"
 import { sessionPrefix } from "../session-id.ts"
 import { getDefaultTaskRoots } from "../task-roots.ts"
+import { backfillTaskTimingFields } from "./task-timing.ts"
 
 export { sessionPrefix }
 
@@ -23,6 +24,10 @@ export interface Task {
   blockedBy: string[]
   completionEvidence?: string
   completionTimestamp?: string
+  /** Epoch milliseconds when the task most recently entered in_progress. */
+  startedAt?: number | null
+  /** Epoch milliseconds when the task most recently entered completed. */
+  completedAt?: number | null
   /** ISO timestamp of last status change (used for elapsed-time tracking) */
   statusChangedAt?: string
   /** Cumulative milliseconds spent in in_progress status */
@@ -100,11 +105,10 @@ export async function readTasks(
       taskFiles.map(async (f) => {
         const filePath = join(dir, f)
         const task = JSON.parse(await readFile(filePath, "utf-8")) as Task
-        // Backfill statusChangedAt from file mtime for legacy tasks
-        if (!task.statusChangedAt) {
-          const st = await stat(filePath)
-          task.statusChangedAt = st.mtime.toISOString()
-        }
+        const st = await stat(filePath)
+        // Backfill timing fields for legacy tasks that predate explicit timestamps.
+        if (!task.statusChangedAt) task.statusChangedAt = st.mtime.toISOString()
+        backfillTaskTimingFields(task, st.mtimeMs)
         return task
       })
     )

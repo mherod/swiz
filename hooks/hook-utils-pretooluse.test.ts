@@ -167,6 +167,22 @@ describe("allowPreToolUseWithUpdatedInput", () => {
   })
 })
 
+describe("allowPreToolUseWithContext", () => {
+  test("emits allow decision with both hint and additionalContext", async () => {
+    const { exitCode, parsed } = await runHelper(
+      `allowPreToolUseWithContext } from "./hook-utils.ts"; ` +
+        `allowPreToolUseWithContext("Heads up", "Task #7 has been running for 12m")`
+    )
+    expect(exitCode).toBe(0)
+    const hso = parsed.hookSpecificOutput as JsonObject
+    expect(hso.hookEventName).toBe("PreToolUse")
+    expect(hso.permissionDecision).toBe("allow")
+    expect(hso.permissionDecisionReason).toBe("Heads up")
+    expect(hso.additionalContext).toBe("Task #7 has been running for 12m")
+    expect(parsed.systemMessage).toBe("Task #7 has been running for 12m")
+  })
+})
+
 describe("denyPreToolUse edge cases", () => {
   test("handles empty string reason", async () => {
     const { exitCode, parsed } = await runHelper(

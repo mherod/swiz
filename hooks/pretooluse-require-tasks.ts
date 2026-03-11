@@ -5,9 +5,17 @@
 //   2. At least one incomplete task is pending to represent the next intended step
 //   3. Tasks haven't gone stale (no task tool interaction in last STALENESS_THRESHOLD calls)
 
+import { formatDuration } from "../src/format-duration.ts"
 import { getHomeDirOrNull } from "../src/home.ts"
-import { readProjectState, readSwizSettings } from "../src/settings.ts"
 import {
+  getEffectiveSwizSettings,
+  readProjectSettings,
+  readProjectState,
+  readSwizSettings,
+} from "../src/settings.ts"
+import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
+import {
+  allowPreToolUseWithContext,
   denyPreToolUse as deny,
   extractToolNamesFromTranscript,
   findLastTaskToolCallIndex,
@@ -85,6 +93,34 @@ function buildIncompleteTaskSummary(
     .join("\n")
 
   return { incompleteTasks, pendingTasks, allTasksDone, incompleteTaskList }
+}
+
+function buildSlowTaskWarning(
+  allTasks: Array<{
+    id: string
+    status: string
+    subject: string
+    startedAt?: number | null
+    statusChangedAt?: string
+    elapsedMs?: number
+  }>,
+  thresholdMinutes: number
+): string | null {
+  const thresholdMs = thresholdMinutes * 60_000
+  const warnings = allTasks
+    .filter((task) => task.status === "in_progress")
+    .map((task) => {
+      const durationMs = getTaskCurrentDurationMs(task)
+      if (durationMs <= thresholdMs) return null
+      return (
+        `Task #${task.id} has been in_progress for ${formatDuration(durationMs)} ` +
+        `(${task.subject}) — consider backgrounding or switching approach.`
+      )
+    })
+    .filter((warning): warning is string => Boolean(warning))
+
+  if (warnings.length === 0) return null
+  return warnings.join("\n")
 }
 
 async function main() {
@@ -310,6 +346,23 @@ async function main() {
         )
       }
     }
+  }
+
+  try {
+    const [settings, projectSettings] = await Promise.all([
+      readSwizSettings(),
+      readProjectSettings(cwd),
+    ])
+    const effectiveSettings = getEffectiveSwizSettings(settings, sessionId, projectSettings)
+    const slowTaskWarning = buildSlowTaskWarning(
+      allTasks,
+      effectiveSettings.taskDurationWarningMinutes
+    )
+    if (slowTaskWarning) {
+      allowPreToolUseWithContext(slowTaskWarning, slowTaskWarning)
+    }
+  } catch {
+    // Settings lookup failures should never block or crash the tool call.
   }
 
   process.exit(0)
