@@ -5,6 +5,7 @@ export interface SessionPreview {
   mtime: number
   startedAt?: number
   lastMessageAt?: number
+  dispatches?: number
 }
 
 export interface ProjectSessions {
@@ -125,7 +126,12 @@ export function SessionNav({
                 aria-pressed={session.id === selectedSessionId}
                 onClick={() => onSelectSession(selectedProject!.cwd, session.id)}
               >
-                <span className="session-id">{session.id}</span>
+                <span className="session-id">
+                  {session.id}
+                  {session.dispatches ? (
+                    <span className="session-dispatches">{session.dispatches}</span>
+                  ) : null}
+                </span>
                 <span className="session-meta">
                   {session.provider ?? "unknown"} &bull;{" "}
                   {session.startedAt

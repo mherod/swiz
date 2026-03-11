@@ -75,6 +75,7 @@ interface SessionPreview {
   mtime: number
   startedAt?: number
   lastMessageAt?: number
+  dispatches?: number
 }
 
 interface SessionMessage {
@@ -1008,7 +1009,7 @@ async function scanSession(session: Pick<Session, "path" | "format">): Promise<S
 async function listProjectSessions(
   cwd: string,
   limit = 20,
-  liveActivity?: Map<string, number>
+  liveActivity?: Map<string, { lastSeen: number; dispatches: number }>
 ): Promise<{ sessionCount: number; sessions: SessionPreview[] }> {
   const all = await findAllProviderSessions(cwd)
   const candidates = all.slice(0, limit * 2)
@@ -1017,13 +1018,19 @@ async function listProjectSessions(
   for (let i = 0; i < candidates.length; i++) {
     if (scans[i]!.hasMessages) withMessages.push({ session: candidates[i]!, scan: scans[i]! })
   }
+  const getActivity = (id: string) => liveActivity?.get(id)
   const effectiveLastMessage = (s: Session, scan: SessionScanResult): number => {
-    const live = liveActivity?.get(s.id) ?? 0
+    const live = getActivity(s.id)?.lastSeen ?? 0
     return Math.max(scan.lastMessageAt, live)
   }
-  withMessages.sort(
-    (a, b) => effectiveLastMessage(b.session, b.scan) - effectiveLastMessage(a.session, a.scan)
-  )
+  // Sort: sessions with dispatch activity first, then by last message time
+  withMessages.sort((a, b) => {
+    const aDisp = getActivity(a.session.id)?.dispatches ?? 0
+    const bDisp = getActivity(b.session.id)?.dispatches ?? 0
+    if (bDisp > 0 && aDisp === 0) return 1
+    if (aDisp > 0 && bDisp === 0) return -1
+    return effectiveLastMessage(b.session, b.scan) - effectiveLastMessage(a.session, a.scan)
+  })
   return {
     sessionCount: withMessages.length,
     sessions: withMessages.slice(0, limit).map(({ session, scan }) => ({
@@ -1033,6 +1040,7 @@ async function listProjectSessions(
       mtime: session.mtime,
       startedAt: scan.startedAt || undefined,
       lastMessageAt: effectiveLastMessage(session, scan) || undefined,
+      dispatches: getActivity(session.id)?.dispatches || undefined,
     })),
   }
 }
@@ -1270,7 +1278,7 @@ export const daemonCommand: Command = {
     const projectMetrics = new Map<string, DaemonMetrics>()
     const projectLastSeen = new Map<string, number>()
     /** Tracks the latest dispatch timestamp per session ID (from hook events). */
-    const sessionActivity = new Map<string, number>()
+    const sessionActivity = new Map<string, { lastSeen: number; dispatches: number }>()
     const getProjectMetrics = (cwd: string): DaemonMetrics => {
       let m = projectMetrics.get(cwd)
       if (!m) {
@@ -1416,7 +1424,11 @@ export const daemonCommand: Command = {
               registerProjectWatchers(parsed.cwd)
             }
             if (parsed.session_id) {
-              sessionActivity.set(parsed.session_id, Date.now())
+              const prev = sessionActivity.get(parsed.session_id)
+              sessionActivity.set(parsed.session_id, {
+                lastSeen: Date.now(),
+                dispatches: (prev?.dispatches ?? 0) + 1,
+              })
             }
           } catch {
             /* ignore parse errors */
