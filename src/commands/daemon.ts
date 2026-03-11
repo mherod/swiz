@@ -990,6 +990,8 @@ async function scanSession(session: Pick<Session, "path" | "format">): Promise<S
   try {
     const file = Bun.file(session.path)
     if (!(await file.exists())) return empty
+    const info = await file.stat()
+    const fileMtimeMs = info.mtimeMs ?? 0
     const text = await file.text()
     const entries = parseTranscriptEntries(text, session.format)
     let hasMessages = false
@@ -1008,6 +1010,11 @@ async function scanSession(session: Pick<Session, "path" | "format">): Promise<S
         if (ts > lastMessageAt) lastMessageAt = ts
       }
     }
+    if (hasMessages && lastMessageAt === 0 && fileMtimeMs > 0) {
+      // Some transcript formats do not store per-message timestamps.
+      startedAt = startedAt || fileMtimeMs
+      lastMessageAt = fileMtimeMs
+    }
     return { hasMessages, startedAt, lastMessageAt }
   } catch {
     return empty
@@ -1017,14 +1024,23 @@ async function scanSession(session: Pick<Session, "path" | "format">): Promise<S
 async function listProjectSessions(
   cwd: string,
   limit = 20,
-  liveActivity?: Map<string, { lastSeen: number; dispatches: number }>
+  liveActivity?: Map<string, { lastSeen: number; dispatches: number }>,
+  pinnedSessionId?: string
 ): Promise<{ sessionCount: number; sessions: SessionPreview[] }> {
   const all = await findAllProviderSessions(cwd)
   const candidates = all.slice(0, limit * 2)
-  const scans = await Promise.all(candidates.map((s) => scanSession(s)))
+  const pinned =
+    typeof pinnedSessionId === "string" && pinnedSessionId.length > 0
+      ? all.find((s) => s.id === pinnedSessionId || s.id.startsWith(pinnedSessionId))
+      : null
+  const scanTargets =
+    pinned && !candidates.some((session) => session.id === pinned.id)
+      ? [...candidates, pinned]
+      : candidates
+  const scans = await Promise.all(scanTargets.map((s) => scanSession(s)))
   const withMessages: Array<{ session: Session; scan: SessionScanResult }> = []
-  for (let i = 0; i < candidates.length; i++) {
-    if (scans[i]!.hasMessages) withMessages.push({ session: candidates[i]!, scan: scans[i]! })
+  for (let i = 0; i < scanTargets.length; i++) {
+    if (scans[i]!.hasMessages) withMessages.push({ session: scanTargets[i]!, scan: scans[i]! })
   }
   const getActivity = (id: string) => liveActivity?.get(id)
   const effectiveLastMessage = (s: Session, scan: SessionScanResult): number => {
@@ -1039,9 +1055,18 @@ async function listProjectSessions(
     if (aDisp > 0 && bDisp === 0) return -1
     return effectiveLastMessage(b.session, b.scan) - effectiveLastMessage(a.session, a.scan)
   })
+  let visible = withMessages.slice(0, limit)
+  if (pinnedSessionId) {
+    const pinnedEntry = withMessages.find(
+      ({ session }) => session.id === pinnedSessionId || session.id.startsWith(pinnedSessionId)
+    )
+    if (pinnedEntry && !visible.some(({ session }) => session.id === pinnedEntry.session.id)) {
+      visible = [pinnedEntry, ...visible].slice(0, limit)
+    }
+  }
   return {
     sessionCount: withMessages.length,
-    sessions: withMessages.slice(0, limit).map(({ session, scan }) => ({
+    sessions: visible.map(({ session, scan }) => ({
       id: session.id,
       provider: session.provider,
       format: session.format,
@@ -1066,6 +1091,8 @@ async function getSessionData(cwd: string, sessionId: string, limit = 30): Promi
   if (!session) return { messages: [], toolStats: [] }
   const file = Bun.file(session.path)
   if (!(await file.exists())) return { messages: [], toolStats: [] }
+  const info = await file.stat()
+  const fallbackIso = info.mtimeMs ? new Date(info.mtimeMs).toISOString() : null
   const text = await file.text()
   const entries = parseTranscriptEntries(text, session.format)
   const messages: SessionMessage[] = []
@@ -1082,7 +1109,7 @@ async function getSessionData(cwd: string, sessionId: string, limit = 30): Promi
     if (!extracted && toolCalls.length === 0) continue
     messages.push({
       role: entry.type,
-      timestamp: entry.timestamp ?? null,
+      timestamp: entry.timestamp ?? fallbackIso,
       text: extracted,
       ...(toolCalls.length > 0 ? { toolCalls } : {}),
     })
@@ -1670,6 +1697,8 @@ export const daemonCommand: Command = {
           const body = (await req.json().catch(() => null)) as {
             limitProjects?: number
             limitSessionsPerProject?: number
+            selectedProjectCwd?: string
+            selectedSessionId?: string
           } | null
           const limitProjects = Math.max(1, Math.min(30, body?.limitProjects ?? 8))
           const limitSessionsPerProject = Math.max(
@@ -1689,7 +1718,8 @@ export const daemonCommand: Command = {
               const sessions = await listProjectSessions(
                 cwd,
                 limitSessionsPerProject,
-                sessionActivity
+                sessionActivity,
+                body?.selectedProjectCwd === cwd ? body?.selectedSessionId : undefined
               )
               return {
                 cwd,

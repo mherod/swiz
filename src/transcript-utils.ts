@@ -49,7 +49,13 @@ export interface Session {
   path: string
   mtime: number
   provider?: "claude" | "gemini" | "cursor" | "antigravity" | "codex"
-  format?: "jsonl" | "gemini-json" | "cursor-sqlite" | "antigravity-pb" | "codex-jsonl"
+  format?:
+    | "jsonl"
+    | "gemini-json"
+    | "cursor-sqlite"
+    | "antigravity-pb"
+    | "codex-jsonl"
+    | "cursor-agent-jsonl"
 }
 
 export { projectKeyFromCwd }
@@ -362,6 +368,70 @@ async function findCursorSessions(targetDir: string, home?: string): Promise<Ses
   return sessions
 }
 
+function cursorProjectKeyCandidates(targetDir: string): Set<string> {
+  const key = projectKeyFromCwd(resolve(targetDir))
+  const withoutLeadingDashes = key.replace(/^-+/, "")
+  return new Set([key, withoutLeadingDashes])
+}
+
+async function findCursorAgentTranscriptSessions(
+  targetDir: string,
+  home?: string
+): Promise<Session[]> {
+  home = home ?? getHomeDir()
+  const projectsRoot = join(home, ".cursor", "projects")
+  const keyCandidates = cursorProjectKeyCandidates(targetDir)
+  const sessions: Session[] = []
+
+  let projectEntries: import("node:fs").Dirent[]
+  try {
+    projectEntries = await readdir(projectsRoot, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  for (const projectEntry of projectEntries) {
+    if (!projectEntry.isDirectory()) continue
+    if (!keyCandidates.has(projectEntry.name)) continue
+
+    const transcriptRoot = join(projectsRoot, projectEntry.name, "agent-transcripts")
+    let transcriptEntries: import("node:fs").Dirent[]
+    try {
+      transcriptEntries = await readdir(transcriptRoot, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    for (const entry of transcriptEntries) {
+      if (!entry.isDirectory()) continue
+      const sessionDir = join(transcriptRoot, entry.name)
+      let files: import("node:fs").Dirent[]
+      try {
+        files = await readdir(sessionDir, { withFileTypes: true })
+      } catch {
+        continue
+      }
+
+      for (const file of files) {
+        if (!file.isFile() || !file.name.endsWith(".jsonl")) continue
+        const sessionPath = join(sessionDir, file.name)
+        try {
+          const s = await stat(sessionPath)
+          sessions.push({
+            id: file.name.replace(/\.jsonl$/, ""),
+            path: sessionPath,
+            mtime: s.mtimeMs,
+            provider: "cursor",
+            format: "cursor-agent-jsonl",
+          })
+        } catch {}
+      }
+    }
+  }
+
+  return sessions
+}
+
 const ANTIGRAVITY_PROJECT_HINT_FILES = new Set([
   "task.md",
   "task.md.resolved",
@@ -459,7 +529,8 @@ async function findAntigravitySessions(targetDir: string, home?: string): Promis
  *
  * For Claude: queries ~/.claude/projects/<projectKey>/ for .jsonl files.
  * For Gemini: queries ~/.gemini/tmp/<bucket>/chats/session-*.json using .project_root metadata.
- * For Cursor: queries ~/.cursor/chats/<workspace-hash>/<session-id>/store.db and filters by targetDir path hints.
+ * For Cursor: queries ~/.cursor/chats/<workspace-hash>/<session-id>/store.db and
+ * ~/.cursor/projects/<project-key>/agent-transcripts/<session-id>/*.jsonl.
  * For Antigravity: queries ~/.gemini/antigravity/conversations/*.pb and maps by brain metadata.
  * For Codex: recursively queries ~/.codex/sessions/<year>/<month>/<day>/*.jsonl using
  * session_meta payload cwd metadata.
@@ -475,19 +546,27 @@ export async function findAllProviderSessions(
   const effectiveHome = home ?? getHomeDir()
   const { projectsDir } = getDefaultTaskRoots(effectiveHome)
   const claudeProjectDir = join(projectsDir, projectKeyFromCwd(targetDir))
-  const [claudeSessions, geminiSessions, cursorSessions, antigravitySessions, codexSessions] =
-    await Promise.all([
-      findSessions(claudeProjectDir),
-      findGeminiSessions(targetDir, effectiveHome),
-      findCursorSessions(targetDir, effectiveHome),
-      findAntigravitySessions(targetDir, effectiveHome),
-      findCodexSessions(targetDir, effectiveHome),
-    ])
+  const [
+    claudeSessions,
+    geminiSessions,
+    cursorSessions,
+    cursorAgentSessions,
+    antigravitySessions,
+    codexSessions,
+  ] = await Promise.all([
+    findSessions(claudeProjectDir),
+    findGeminiSessions(targetDir, effectiveHome),
+    findCursorSessions(targetDir, effectiveHome),
+    findCursorAgentTranscriptSessions(targetDir, effectiveHome),
+    findAntigravitySessions(targetDir, effectiveHome),
+    findCodexSessions(targetDir, effectiveHome),
+  ])
 
   const merged: Session[] = [
     ...claudeSessions.map((s) => ({ ...s, provider: "claude" as const, format: "jsonl" as const })),
     ...geminiSessions,
     ...cursorSessions,
+    ...cursorAgentSessions,
     ...antigravitySessions,
     ...codexSessions,
   ]
@@ -509,30 +588,44 @@ export function getUnsupportedTranscriptFormatMessage(session: Session): string 
 // ─── Text extraction ─────────────────────────────────────────────────────────
 
 export function extractText(content: string | ContentBlock[] | undefined): string {
+  const normalizeExtractedText = (text: string): string => {
+    const userQueryMatch = text.match(/^\s*<user_query>\s*([\s\S]*?)\s*<\/user_query>\s*$/i)
+    if (userQueryMatch) return userQueryMatch[1]!.trim()
+    return text.trim()
+  }
+
   if (!content) return ""
-  if (typeof content === "string") return content
+  if (typeof content === "string") return normalizeExtractedText(content)
   if (!Array.isArray(content)) return ""
-  return content
-    .filter((b): b is TextBlock => b.type === "text" && !!(b as TextBlock).text)
-    .map((b) => b.text!)
-    .join("\n")
-    .trim()
+  return normalizeExtractedText(
+    content
+      .filter((b): b is TextBlock => b.type === "text" && !!(b as TextBlock).text)
+      .map((b) => b.text!)
+      .join("\n")
+  )
 }
 
 export function extractTextFromUnknownContent(content: unknown): string {
-  if (typeof content === "string") return content.trim()
+  const normalizeExtractedText = (text: string): string => {
+    const userQueryMatch = text.match(/^\s*<user_query>\s*([\s\S]*?)\s*<\/user_query>\s*$/i)
+    if (userQueryMatch) return userQueryMatch[1]!.trim()
+    return text.trim()
+  }
+
+  if (typeof content === "string") return normalizeExtractedText(content)
   if (!Array.isArray(content)) return ""
-  return content
-    .filter(
-      (block): block is { type: "text"; text: string } =>
-        !!block &&
-        typeof block === "object" &&
-        (block as { type?: unknown }).type === "text" &&
-        typeof (block as { text?: unknown }).text === "string"
-    )
-    .map((block) => block.text)
-    .join("\n")
-    .trim()
+  return normalizeExtractedText(
+    content
+      .filter(
+        (block): block is { type: "text"; text: string } =>
+          !!block &&
+          typeof block === "object" &&
+          (block as { type?: unknown }).type === "text" &&
+          typeof (block as { text?: unknown }).text === "string"
+      )
+      .map((block) => block.text)
+      .join("\n")
+  )
 }
 
 export function isHookFeedback(content: string | ContentBlock[] | undefined): boolean {
@@ -656,8 +749,16 @@ function parseJsonlEntries(text: string): TranscriptEntry[] {
   const entries: TranscriptEntry[] = []
   for (const line of text.split("\n").filter(Boolean)) {
     try {
-      const parsed = JSON.parse(line) as TranscriptEntry
-      if (parsed && typeof parsed === "object") entries.push(parsed)
+      const parsed = JSON.parse(line) as (TranscriptEntry & { role?: string }) | null
+      if (!parsed || typeof parsed !== "object") continue
+
+      if (typeof parsed.type !== "string" && typeof parsed.role === "string") {
+        const role = parsed.role
+        if (role === "user" || role === "assistant") {
+          parsed.type = role
+        }
+      }
+      entries.push(parsed)
     } catch {}
   }
   return entries
@@ -1029,6 +1130,7 @@ export function parseTranscriptEntries(
 ): TranscriptEntry[] {
   if (formatHint === "antigravity-pb") return []
   if (formatHint === "cursor-sqlite") return parseCursorSqliteEntries(text)
+  if (formatHint === "cursor-agent-jsonl") return parseJsonlEntries(text)
   if (formatHint === "gemini-json") return parseGeminiEntries(text)
   if (formatHint === "codex-jsonl") return parseCodexJsonlEntries(text)
   if (formatHint === "jsonl") return parseJsonlEntries(text)

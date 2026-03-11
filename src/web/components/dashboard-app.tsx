@@ -107,6 +107,8 @@ export function DashboardApp() {
           postJson<{ projects: ProjectSessions[] }>("/sessions/projects", {
             limitProjects: 10,
             limitSessionsPerProject: 10,
+            selectedProjectCwd: getQueryParam("project"),
+            selectedSessionId: getQueryParam("session"),
           }),
         ])
         const snapshot = JSON.stringify({ m, cs, w, pr })

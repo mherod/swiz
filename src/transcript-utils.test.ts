@@ -34,6 +34,13 @@ describe("transcript-utils.ts", () => {
       expect(result).toBe(content)
     })
 
+    it("unwraps <user_query> wrappers in string content", () => {
+      const content =
+        "<user_query>\nWe should be able to find this very chat transcript\n</user_query>"
+      const result = extractText(content)
+      expect(result).toBe("We should be able to find this very chat transcript")
+    })
+
     it("extracts text from text blocks in array", () => {
       const content = [
         { type: "text" as const, text: "First" },
@@ -58,6 +65,19 @@ describe("transcript-utils.ts", () => {
       const content = [{ type: "text" as const }]
       const result = extractText(content)
       expect(result).toBe("")
+    })
+
+    it("unwraps <user_query> wrappers in text blocks", () => {
+      const content = [
+        {
+          type: "text" as const,
+          text: "<user_query>\nGreat! let's improve our transcript loading system to support this format\n</user_query>",
+        },
+      ]
+      const result = extractText(content)
+      expect(result).toBe(
+        "Great! let's improve our transcript loading system to support this format"
+      )
     })
   })
 
@@ -451,7 +471,7 @@ describe("transcript-utils.ts", () => {
     it("handles whitespace-only text", () => {
       const content = "   "
       const result = extractText(content)
-      expect(result).toBe("   ")
+      expect(result).toBe("")
     })
 
     it("preserves multiline text", () => {

@@ -84,4 +84,48 @@ describe("Cursor transcript support", () => {
       await rm(home, { recursive: true, force: true })
     }
   })
+
+  it("discovers cursor agent-transcripts jsonl sessions for project key", async () => {
+    const home = await makeTmpDir("cursor-agent-transcript-home")
+    const targetProject = join(home, "workspace", "target-project")
+    await mkdir(targetProject, { recursive: true })
+
+    const projectKey = targetProject.replace(/[/.\\:]/g, "-").replace(/^-+/, "")
+    const sessionId = "82d66b73-ff3a-4e1b-b2e2-61542c509b32"
+    const transcriptPath = join(
+      home,
+      ".cursor",
+      "projects",
+      projectKey,
+      "agent-transcripts",
+      sessionId,
+      `${sessionId}.jsonl`
+    )
+    await mkdir(dirname(transcriptPath), { recursive: true })
+    await writeFile(
+      transcriptPath,
+      '{"role":"user","message":{"content":[{"type":"text","text":"hello"}]}}\n' +
+        '{"role":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}\n'
+    )
+
+    try {
+      const sessions = await findAllProviderSessions(targetProject, home)
+      const cursorSessions = sessions.filter(
+        (session) => session.provider === "cursor" && session.format === "cursor-agent-jsonl"
+      )
+      expect(cursorSessions.length).toBe(1)
+      expect(cursorSessions[0]?.id).toBe(sessionId)
+
+      const parsed = parseTranscriptEntries(
+        await Bun.file(transcriptPath).text(),
+        "cursor-agent-jsonl"
+      )
+      expect(parsed.map((entry) => entry.type)).toEqual(["user", "assistant"])
+
+      const turns = extractPlainTurns(await Bun.file(transcriptPath).text())
+      expect(turns.map((turn) => turn.text)).toEqual(["hello", "hi"])
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
 })
