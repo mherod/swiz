@@ -342,6 +342,48 @@ export function selectRebaseSuggestionPRs(
   }
 }
 
+async function cacheIssuesAndReplayMutations(
+  repoSlug: string,
+  issues: Issue[],
+  cwd: string
+): Promise<void> {
+  try {
+    const store = getIssueStore()
+    store.upsertIssues(repoSlug, issues)
+    const pending = store.pendingCount(repoSlug)
+    if (pending <= 0) return
+
+    const result = await replayPendingMutations(repoSlug, cwd, store)
+    const parts: string[] = []
+    if (result.replayed > 0) parts.push(`${result.replayed} replayed`)
+    if (result.failed > 0) parts.push(`${result.failed} failed`)
+    if (result.discarded > 0) parts.push(`${result.discarded} discarded`)
+    if (parts.length > 0) {
+      logHookEvent("REPLAY_SUMMARY", `repo=${repoSlug} pending=${pending} ${parts.join(", ")}`)
+    }
+  } catch (err) {
+    logHookEvent("REPLAY_INFRA_ERROR", getErrorMessage(err))
+  }
+}
+
+function readCachedIssues(repoSlug: string): Issue[] {
+  try {
+    const store = getIssueStore()
+    return store.listIssues<Issue>(repoSlug)
+  } catch {
+    return []
+  }
+}
+
+function filterVisibleIssues(issues: Issue[], filterUser?: string): Issue[] {
+  const userFiltered = filterUser
+    ? issues.filter(
+        (i) => i.author?.login === filterUser || i.assignees?.some((a) => a.login === filterUser)
+      )
+    : issues
+  return userFiltered.filter((i) => !i.labels.some((l) => SKIP_NORM.has(normaliseLabel(l.name))))
+}
+
 export async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {
   const jsonFields = "number,title,labels,author,assignees"
   const [repoSlug, liveIssues] = await Promise.all([
@@ -349,48 +391,12 @@ export async function getActionableIssues(cwd: string, filterUser?: string): Pro
     ghJson<Issue[]>(["issue", "list", "--state", "open", "--json", jsonFields], cwd),
   ])
 
-  // Try live GitHub first
-  let issues = liveIssues
-
-  if (issues && repoSlug) {
-    // Cache successful result and replay any queued mutations
-    try {
-      const store = getIssueStore()
-      store.upsertIssues(repoSlug, issues)
-      const pending = store.pendingCount(repoSlug)
-      if (pending > 0) {
-        const result = await replayPendingMutations(repoSlug, cwd, store)
-        const parts: string[] = []
-        if (result.replayed > 0) parts.push(`${result.replayed} replayed`)
-        if (result.failed > 0) parts.push(`${result.failed} failed`)
-        if (result.discarded > 0) parts.push(`${result.discarded} discarded`)
-        if (parts.length > 0) {
-          logHookEvent("REPLAY_SUMMARY", `repo=${repoSlug} pending=${pending} ${parts.join(", ")}`)
-        }
-      }
-    } catch (err) {
-      logHookEvent("REPLAY_INFRA_ERROR", getErrorMessage(err))
-    }
+  if (liveIssues && repoSlug) {
+    await cacheIssuesAndReplayMutations(repoSlug, liveIssues, cwd)
   }
 
-  if (!issues && repoSlug) {
-    // GitHub unavailable — fall back to cached data
-    try {
-      const store = getIssueStore()
-      issues = store.listIssues<Issue>(repoSlug)
-    } catch {
-      issues = []
-    }
-  }
-
-  issues = issues ?? []
-
-  if (filterUser) {
-    issues = issues.filter(
-      (i) => i.author?.login === filterUser || i.assignees?.some((a) => a.login === filterUser)
-    )
-  }
-  return issues.filter((i) => !i.labels.some((l) => SKIP_NORM.has(normaliseLabel(l.name))))
+  const issues = liveIssues ?? (repoSlug ? readCachedIssues(repoSlug) : [])
+  return filterVisibleIssues(issues, filterUser)
 }
 
 async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise<PR[]> {
@@ -413,6 +419,220 @@ async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise
       p.reviewDecision === "REVIEW_REQUIRED" ||
       p.mergeable === "CONFLICTING"
   )
+}
+
+interface StopContext {
+  cwd: string
+  sessionId: string | null
+  isPersonalRepo: boolean
+  changesRequestedPRs: PR[]
+  reviewRequiredPRs: PR[]
+  conflictingPRs: PR[]
+  sortedRefinement: Issue[]
+  sortedIssues: Issue[]
+  firstRefinementNum?: number
+  firstIssueNum?: number
+}
+
+function buildStopReasonLines(ctx: StopContext): string[] {
+  const reasonLines: string[] = [
+    "STOP: We have detected open issues and PRs that need your attention.",
+    "",
+  ]
+  const feedbackPRCount = ctx.changesRequestedPRs.length + ctx.reviewRequiredPRs.length
+  const conflictCount = ctx.conflictingPRs.length
+  const refinementCount = ctx.sortedRefinement.length
+  const issueCount = ctx.sortedIssues.length
+
+  if (feedbackPRCount > 0) {
+    const feedbackPRs = [...ctx.changesRequestedPRs, ...ctx.reviewRequiredPRs]
+    const allChangesRequested = feedbackPRs.every((p) => p.reviewDecision === "CHANGES_REQUESTED")
+    const label = allChangesRequested
+      ? "changes requested"
+      : "pending feedback (CHANGES_REQUESTED or REVIEW_REQUIRED)"
+    reasonLines.push(`You have ${feedbackPRCount} open PR(s) with ${label}:`)
+    for (const pr of feedbackPRs) {
+      const decisionTag =
+        pr.reviewDecision === "CHANGES_REQUESTED" ? "[changes requested]" : "[review required]"
+      reasonLines.push(`  #${pr.number} ${pr.title} ${decisionTag}`)
+      reasonLines.push(`    ${pr.url}`)
+    }
+  }
+
+  if (conflictCount > 0) {
+    if (reasonLines.length > 0) reasonLines.push("")
+    reasonLines.push(`You have ${conflictCount} open PR(s) with merge conflicts:`)
+    const { shown: shownConflictingPRs, hiddenCount: hiddenConflictingPRs } =
+      selectRebaseSuggestionPRs(ctx.conflictingPRs)
+    for (const pr of shownConflictingPRs) {
+      reasonLines.push(`  #${pr.number} ${pr.title} [merge conflicts]`)
+      reasonLines.push(`    ${pr.url}`)
+    }
+    if (hiddenConflictingPRs > 0) {
+      reasonLines.push(
+        `  …and ${hiddenConflictingPRs} more conflicting PR(s) between those extremes`
+      )
+    }
+    const rebaseAdvice = skillAdvice(
+      "rebase-onto-main",
+      [
+        "Use the /rebase-onto-main skill to rebase and resolve conflicts:",
+        "  /rebase-onto-main --push",
+      ].join("\n"),
+      [
+        "Rebase manually:",
+        "  git fetch origin",
+        "  git checkout <branch>",
+        "  git rebase origin/<base-branch>",
+        "  # resolve conflicts, then:",
+        "  git rebase --continue",
+        "  git push --force-with-lease",
+      ].join("\n")
+    )
+    const resolveAdvice = skillAdvice(
+      "resolve-conflicts",
+      "Use the /resolve-conflicts skill if the rebase encounters conflicts.",
+      "Resolve conflicts: edit files, remove markers, git add <file>, git rebase --continue"
+    )
+    reasonLines.push(
+      formatActionPlan([rebaseAdvice, resolveAdvice], {
+        header: "Rebase conflicting PRs before stopping:",
+        translateToolNames: true,
+      })
+    )
+  }
+
+  if (refinementCount > 0) {
+    if (reasonLines.length > 0) reasonLines.push("")
+    reasonLines.push(
+      `${refinementCount} issue(s) need refinement before they are ready for implementation:`
+    )
+    const shownRefinement = ctx.sortedRefinement.slice(0, MAX_SHOWN_ISSUES)
+    const hiddenRefinement = ctx.sortedRefinement.length - shownRefinement.length
+    for (const issue of shownRefinement) {
+      const hasExplicitLabel = issue.labels.some(
+        (l) => normaliseLabel(l.name) === NEEDS_REFINEMENT_NORM
+      )
+      const missing = missingRefinementCategories(issue)
+      const tag = hasExplicitLabel
+        ? "[needs-refinement]"
+        : `[missing labels: ${missing.join(", ")}]`
+      reasonLines.push(`  #${issue.number} ${issue.title} ${tag}`)
+    }
+    if (hiddenRefinement > 0) {
+      reasonLines.push(`  …and ${hiddenRefinement} more issue(s) needing refinement`)
+    }
+  }
+
+  if (issueCount > 0) {
+    if (reasonLines.length > 0) reasonLines.push("")
+    const issueContext = ctx.isPersonalRepo
+      ? "in this personal repository"
+      : "assigned to or created by you in this repository"
+    reasonLines.push(`You have ${issueCount} open issue(s) ${issueContext}:`)
+    const shownIssues = ctx.sortedIssues.slice(0, MAX_SHOWN_ISSUES)
+    const hiddenCount = ctx.sortedIssues.length - shownIssues.length
+    for (const issue of shownIssues) {
+      reasonLines.push(`  #${issue.number} ${issue.title}`)
+    }
+    if (hiddenCount > 0) {
+      reasonLines.push(`  …and ${hiddenCount} more lower-priority issue(s)`)
+    }
+  }
+
+  return reasonLines
+}
+
+function buildStopPlanSteps(ctx: StopContext): string[] {
+  const planSteps: string[] = []
+  const feedbackPRCount = ctx.changesRequestedPRs.length + ctx.reviewRequiredPRs.length
+  const refinementCount = ctx.sortedRefinement.length
+  const issueCount = ctx.sortedIssues.length
+  if (feedbackPRCount > 0) {
+    const firstPrNum =
+      ctx.changesRequestedPRs[0]?.number ?? ctx.reviewRequiredPRs[0]?.number ?? "<number>"
+    const workOnPrsSkill = [
+      "Use the /work-on-prs skill to address all feedback and resolve reviews:",
+      "  /work-on-prs — Start working on the next PR",
+    ].join("\n")
+    const workOnPrsFallback = formatActionPlan(
+      [
+        `Read ALL feedback for PR #${firstPrNum}: top-level comments, inline review comments, and review summaries`,
+        "Implement a fix for each unresolved item; commit each fix separately",
+        "Run quality checks: bun run typecheck && bun run lint && bun test",
+        `Push and verify CI: git push && gh pr checks ${firstPrNum}`,
+        `Dismiss stale CHANGES_REQUESTED reviews and request re-review: gh pr edit ${firstPrNum} --add-reviewer <reviewer>`,
+      ],
+      { header: "Address all PR feedback before stopping:" }
+    )
+    planSteps.push(skillAdvice("work-on-prs", workOnPrsSkill, workOnPrsFallback))
+  }
+  if (refinementCount > 0) {
+    const refineArg = ctx.firstRefinementNum !== undefined ? ` ${ctx.firstRefinementNum}` : ""
+    const refineSkill = [
+      "Use the /refine-issue skill to refine and label issues:",
+      `  /refine-issue${refineArg} — Refine the next issue needing attention`,
+    ].join("\n")
+    const refineFallback = [
+      "Refine issues before implementation. Every issue MUST have at least one label from each category:",
+      "  1. Type (bug, enhancement, documentation)",
+      "  2. Readiness (ready, triaged, backlog)",
+      "  3. Priority (priority-high, priority-medium, priority-low)",
+      "",
+      "Commands:",
+      "  gh label list",
+      '  gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"',
+      "",
+      "Rule: If you created the issue, NEVER add new comments. Always edit the original issue body instead to add proposals/context.",
+    ].join("\n")
+    planSteps.push(skillAdvice("refine-issue", refineSkill, refineFallback))
+  }
+  if (issueCount > 0) {
+    const issueArg = ctx.firstIssueNum !== undefined ? ` ${ctx.firstIssueNum}` : ""
+    const issueNum = ctx.firstIssueNum ?? "<number>"
+    const workOnIssueSkill = [
+      "Use the /work-on-issue skill (follow its full guide — the steps below are a quick reference):",
+      `  /work-on-issue${issueArg} — Start working on the next issue`,
+    ].join("\n")
+    const workOnIssueFallback = [
+      `Pick up and resolve issue #${issueNum} before stopping:`,
+      "",
+      "Step 0 — Check for existing work first:",
+      `  LINKED_PR=$(gh pr list --search "linked:${issueNum} OR ${issueNum} in:title" --state open --json number,url --limit 1)`,
+      '  echo "Linked PRs: $LINKED_PR"',
+      "  git fetch origin --prune",
+      "",
+      `  If an open PR for #${issueNum} exists with passing checks → merge it (gh pr merge <PR_NUMBER> --squash).`,
+      "  If checks are failing → switch to the PR branch and fix them.",
+      "  If no PR exists → proceed to claim and implement.",
+      "",
+      "Step 0.5 — Claim ownership:",
+      `  gh issue edit ${issueNum} --add-assignee @me`,
+      "",
+      "Step 0.7 — Verify branch starting point:",
+      "  git branch --show-current  # must be main for a solo repo",
+      "  git pull --rebase --autostash",
+      "",
+      `Step 1 — Plan with TaskCreate before touching any code (issue #${issueNum}):`,
+      "  1. Analyze issue requirements",
+      "  2. Implement solution",
+      "  3. Run quality checks (bun run typecheck && bun run lint && bun test)",
+      "  4. Commit, push, and verify CI",
+      `  5. swiz issue resolve ${issueNum} --body "<evidence>"`,
+      "",
+      `Step 2a — Check for blockers on #${issueNum}:`,
+      `  gh issue view ${issueNum} --json labels -q '.labels[].name' | rg -i blocked`,
+      `  gh issue view ${issueNum} --json body -q '.body' | rg -i 'blocked by|depends on'`,
+      `  If #${issueNum} is blocked → resolve the blocking issue first.`,
+      "",
+      "Step 4 — Quality checks (MANDATORY before commit):",
+      "  bun run typecheck",
+      "  bun run lint",
+      "  bun test --concurrent",
+    ].join("\n")
+    planSteps.push(skillAdvice("work-on-issue", workOnIssueSkill, workOnIssueFallback))
+  }
+  return planSteps
 }
 
 async function main(): Promise<void> {
@@ -480,191 +700,20 @@ async function main(): Promise<void> {
     const firstRefinementNum = sortedRefinement[0]?.number
     const firstIssueNum = sortedIssues[0]?.number
 
-    const reasonLines: string[] = []
-
-    if (feedbackPRCount > 0) {
-      const feedbackPRs = [...changesRequestedPRs, ...reviewRequiredPRs]
-      const allChangesRequested = feedbackPRs.every((p) => p.reviewDecision === "CHANGES_REQUESTED")
-      const label = allChangesRequested
-        ? "changes requested"
-        : "pending feedback (CHANGES_REQUESTED or REVIEW_REQUIRED)"
-      reasonLines.push(`You have ${feedbackPRCount} open PR(s) with ${label}:`)
-      for (const pr of feedbackPRs) {
-        const decisionTag =
-          pr.reviewDecision === "CHANGES_REQUESTED" ? "[changes requested]" : "[review required]"
-        reasonLines.push(`  #${pr.number} ${pr.title} ${decisionTag}`)
-        reasonLines.push(`    ${pr.url}`)
-      }
+    const context: StopContext = {
+      cwd,
+      sessionId,
+      isPersonalRepo,
+      changesRequestedPRs,
+      reviewRequiredPRs,
+      conflictingPRs,
+      sortedRefinement,
+      sortedIssues,
+      firstRefinementNum,
+      firstIssueNum,
     }
-
-    if (conflictCount > 0) {
-      if (reasonLines.length > 0) reasonLines.push("")
-      reasonLines.push(`You have ${conflictCount} open PR(s) with merge conflicts:`)
-      const { shown: shownConflictingPRs, hiddenCount: hiddenConflictingPRs } =
-        selectRebaseSuggestionPRs(conflictingPRs)
-      for (const pr of shownConflictingPRs) {
-        reasonLines.push(`  #${pr.number} ${pr.title} [merge conflicts]`)
-        reasonLines.push(`    ${pr.url}`)
-      }
-      if (hiddenConflictingPRs > 0) {
-        reasonLines.push(
-          `  …and ${hiddenConflictingPRs} more conflicting PR(s) between those extremes`
-        )
-      }
-      const rebaseAdvice = skillAdvice(
-        "rebase-onto-main",
-        [
-          "Use the /rebase-onto-main skill to rebase and resolve conflicts:",
-          "  /rebase-onto-main --push",
-        ].join("\n"),
-        [
-          "Rebase manually:",
-          "  git fetch origin",
-          "  git checkout <branch>",
-          "  git rebase origin/<base-branch>",
-          "  # resolve conflicts, then:",
-          "  git rebase --continue",
-          "  git push --force-with-lease",
-        ].join("\n")
-      )
-      const resolveAdvice = skillAdvice(
-        "resolve-conflicts",
-        "Use the /resolve-conflicts skill if the rebase encounters conflicts.",
-        "Resolve conflicts: edit files, remove markers, git add <file>, git rebase --continue"
-      )
-      reasonLines.push(
-        formatActionPlan([rebaseAdvice, resolveAdvice], {
-          header: "Rebase conflicting PRs before stopping:",
-          translateToolNames: true,
-        })
-      )
-    }
-
-    if (refinementCount > 0) {
-      if (reasonLines.length > 0) reasonLines.push("")
-      reasonLines.push(
-        `${refinementCount} issue(s) need refinement before they are ready for implementation:`
-      )
-      const shownRefinement = sortedRefinement.slice(0, MAX_SHOWN_ISSUES)
-      const hiddenRefinement = sortedRefinement.length - shownRefinement.length
-      for (const issue of shownRefinement) {
-        const hasExplicitLabel = issue.labels.some(
-          (l) => normaliseLabel(l.name) === NEEDS_REFINEMENT_NORM
-        )
-        const missing = missingRefinementCategories(issue)
-        const tag = hasExplicitLabel
-          ? "[needs-refinement]"
-          : `[missing labels: ${missing.join(", ")}]`
-        reasonLines.push(`  #${issue.number} ${issue.title} ${tag}`)
-      }
-      if (hiddenRefinement > 0) {
-        reasonLines.push(`  …and ${hiddenRefinement} more issue(s) needing refinement`)
-      }
-    }
-
-    if (issueCount > 0) {
-      if (reasonLines.length > 0) reasonLines.push("")
-      const issueContext = isPersonalRepo
-        ? "in this personal repository"
-        : "assigned to or created by you in this repository"
-      reasonLines.push(`You have ${issueCount} open issue(s) ${issueContext}:`)
-      const shownIssues = sortedIssues.slice(0, MAX_SHOWN_ISSUES)
-      const hiddenCount = sortedIssues.length - shownIssues.length
-      for (const issue of shownIssues) {
-        reasonLines.push(`  #${issue.number} ${issue.title}`)
-      }
-      if (hiddenCount > 0) {
-        reasonLines.push(`  …and ${hiddenCount} more lower-priority issue(s)`)
-      }
-    }
-
-    // Combined action plan — ordered by dependency: PR feedback → refine → pick up issues.
-    // formatActionPlan ends with \n, so no separator push is needed before it.
-    const planSteps: string[] = []
-    if (feedbackPRCount > 0) {
-      const firstPrNum =
-        changesRequestedPRs[0]?.number ?? reviewRequiredPRs[0]?.number ?? "<number>"
-      const workOnPrsSkill = [
-        "Use the /work-on-prs skill to address all feedback and resolve reviews:",
-        "  /work-on-prs — Start working on the next PR",
-      ].join("\n")
-      const workOnPrsFallback = formatActionPlan(
-        [
-          `Read ALL feedback for PR #${firstPrNum}: top-level comments, inline review comments, and review summaries`,
-          "Implement a fix for each unresolved item; commit each fix separately",
-          "Run quality checks: bun run typecheck && bun run lint && bun test",
-          `Push and verify CI: git push && gh pr checks ${firstPrNum}`,
-          `Dismiss stale CHANGES_REQUESTED reviews and request re-review: gh pr edit ${firstPrNum} --add-reviewer <reviewer>`,
-        ],
-        { header: "Address all PR feedback before stopping:" }
-      )
-      planSteps.push(skillAdvice("work-on-prs", workOnPrsSkill, workOnPrsFallback))
-    }
-    if (refinementCount > 0) {
-      const refineArg = firstRefinementNum !== undefined ? ` ${firstRefinementNum}` : ""
-      const refineSkill = [
-        "Use the /refine-issue skill to refine and label issues:",
-        `  /refine-issue${refineArg} — Refine the next issue needing attention`,
-      ].join("\n")
-      const refineFallback = [
-        "Refine issues before implementation. Every issue MUST have at least one label from each category:",
-        "  1. Type (bug, enhancement, documentation)",
-        "  2. Readiness (ready, triaged, backlog)",
-        "  3. Priority (priority-high, priority-medium, priority-low)",
-        "",
-        "Commands:",
-        "  gh label list",
-        '  gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"',
-        "",
-        "Rule: If you created the issue, NEVER add new comments. Always edit the original issue body instead to add proposals/context.",
-      ].join("\n")
-      planSteps.push(skillAdvice("refine-issue", refineSkill, refineFallback))
-    }
-    if (issueCount > 0) {
-      const issueArg = firstIssueNum !== undefined ? ` ${firstIssueNum}` : ""
-      const issueNum = firstIssueNum ?? "<number>"
-      const workOnIssueSkill = [
-        "Use the /work-on-issue skill (follow its full guide — the steps below are a quick reference):",
-        `  /work-on-issue${issueArg} — Start working on the next issue`,
-      ].join("\n")
-      const workOnIssueFallback = [
-        `Pick up and resolve issue #${issueNum} before stopping:`,
-        "",
-        "Step 0 — Check for existing work first:",
-        `  LINKED_PR=$(gh pr list --search "linked:${issueNum} OR ${issueNum} in:title" --state open --json number,url --limit 1)`,
-        '  echo "Linked PRs: $LINKED_PR"',
-        "  git fetch origin --prune",
-        "",
-        `  If an open PR for #${issueNum} exists with passing checks → merge it (gh pr merge <PR_NUMBER> --squash).`,
-        "  If checks are failing → switch to the PR branch and fix them.",
-        "  If no PR exists → proceed to claim and implement.",
-        "",
-        "Step 0.5 — Claim ownership:",
-        `  gh issue edit ${issueNum} --add-assignee @me`,
-        "",
-        "Step 0.7 — Verify branch starting point:",
-        "  git branch --show-current  # must be main for a solo repo",
-        "  git pull --rebase --autostash",
-        "",
-        `Step 1 — Plan with TaskCreate before touching any code (issue #${issueNum}):`,
-        "  1. Analyze issue requirements",
-        "  2. Implement solution",
-        "  3. Run quality checks (bun run typecheck && bun run lint && bun test)",
-        "  4. Commit, push, and verify CI",
-        `  5. swiz issue resolve ${issueNum} --body "<evidence>"`,
-        "",
-        `Step 2a — Check for blockers on #${issueNum}:`,
-        `  gh issue view ${issueNum} --json labels -q '.labels[].name' | rg -i blocked`,
-        `  gh issue view ${issueNum} --json body -q '.body' | rg -i 'blocked by|depends on'`,
-        `  If #${issueNum} is blocked → resolve the blocking issue first.`,
-        "",
-        "Step 4 — Quality checks (MANDATORY before commit):",
-        "  bun run typecheck",
-        "  bun run lint",
-        "  bun test --concurrent",
-      ].join("\n")
-      planSteps.push(skillAdvice("work-on-issue", workOnIssueSkill, workOnIssueFallback))
-    }
+    const reasonLines = buildStopReasonLines(context)
+    const planSteps = buildStopPlanSteps(context)
     reasonLines.push(formatActionPlan(planSteps, { translateToolNames: true }))
 
     // Only set cooldown when actionable issues or PRs are shown (pickup phase).
