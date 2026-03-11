@@ -73,6 +73,8 @@ interface SessionPreview {
   provider?: Session["provider"]
   format?: Session["format"]
   mtime: number
+  startedAt?: number
+  lastMessageAt?: number
 }
 
 interface SessionMessage {
@@ -968,23 +970,38 @@ function extractMessageText(content: unknown): string {
   return extractText(content as string | { type: string; text?: string }[] | undefined).trim()
 }
 
-async function sessionHasMessages(session: Pick<Session, "path" | "format">): Promise<boolean> {
+interface SessionScanResult {
+  hasMessages: boolean
+  startedAt: number
+  lastMessageAt: number
+}
+
+async function scanSession(session: Pick<Session, "path" | "format">): Promise<SessionScanResult> {
+  const empty = { hasMessages: false, startedAt: 0, lastMessageAt: 0 }
   try {
     const file = Bun.file(session.path)
-    if (!(await file.exists())) return false
+    if (!(await file.exists())) return empty
     const text = await file.text()
     const entries = parseTranscriptEntries(text, session.format)
+    let hasMessages = false
+    let startedAt = 0
+    let lastMessageAt = 0
     for (const entry of entries) {
       if (entry.type !== "user" && entry.type !== "assistant") continue
+      const ts = entry.timestamp ? new Date(entry.timestamp).getTime() : 0
+      if (ts > 0 && (startedAt === 0 || ts < startedAt)) startedAt = ts
       const content = entry.message?.content
       if (entry.type === "user" && isHookFeedback(content)) continue
       const extracted = extractMessageText(content)
       const toolCalls = extractToolCalls(content)
-      if (extracted || toolCalls.length > 0) return true
+      if (extracted || toolCalls.length > 0) {
+        hasMessages = true
+        if (ts > lastMessageAt) lastMessageAt = ts
+      }
     }
-    return false
+    return { hasMessages, startedAt, lastMessageAt }
   } catch {
-    return false
+    return empty
   }
 }
 
@@ -994,15 +1011,21 @@ async function listProjectSessions(
 ): Promise<{ sessionCount: number; sessions: SessionPreview[] }> {
   const all = await findAllProviderSessions(cwd)
   const candidates = all.slice(0, limit * 2)
-  const checks = await Promise.all(candidates.map((s) => sessionHasMessages(s)))
-  const withMessages = candidates.filter((_, i) => checks[i])
+  const scans = await Promise.all(candidates.map((s) => scanSession(s)))
+  const withMessages: Array<{ session: Session; scan: SessionScanResult }> = []
+  for (let i = 0; i < candidates.length; i++) {
+    if (scans[i]!.hasMessages) withMessages.push({ session: candidates[i]!, scan: scans[i]! })
+  }
+  withMessages.sort((a, b) => b.scan.lastMessageAt - a.scan.lastMessageAt)
   return {
     sessionCount: withMessages.length,
-    sessions: withMessages.slice(0, limit).map((session) => ({
+    sessions: withMessages.slice(0, limit).map(({ session, scan }) => ({
       id: session.id,
       provider: session.provider,
       format: session.format,
       mtime: session.mtime,
+      startedAt: scan.startedAt,
+      lastMessageAt: scan.lastMessageAt,
     })),
   }
 }

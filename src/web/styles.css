@@ -531,6 +531,57 @@ tbody tr:hover {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
 }
 
+/* ── Tool stats bar ── */
+
+.tool-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.tool-stats-total {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.tool-stats-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tool-stat-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  border-radius: 6px;
+  padding: 1px 6px;
+  background: rgba(90, 130, 220, 0.08);
+  border: 1px solid rgba(90, 130, 220, 0.18);
+  font-size: 0.68rem;
+  line-height: 1.3;
+}
+
+.tool-stat-name {
+  color: var(--text-muted);
+}
+
+.tool-stat-count {
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.tool-stat-more {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* ── Error ── */
 
 .bento-error {

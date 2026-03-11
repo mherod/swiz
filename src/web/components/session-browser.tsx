@@ -3,6 +3,8 @@ export interface SessionPreview {
   provider?: string
   format?: string
   mtime: number
+  startedAt?: number
+  lastMessageAt?: number
 }
 
 export interface ProjectSessions {
@@ -87,7 +89,9 @@ export function SessionNav({
   const sortedProjects = [...projects].sort((a, b) => b.lastSeenAt - a.lastSeenAt)
   const selectedProject = sortedProjects.find((p) => p.cwd === selectedProjectCwd) ?? null
   const sortedSessions = selectedProject
-    ? [...selectedProject.sessions].sort((a, b) => b.mtime - a.mtime)
+    ? [...selectedProject.sessions].sort(
+        (a, b) => (b.lastMessageAt ?? b.mtime) - (a.lastMessageAt ?? a.mtime)
+      )
     : null
 
   return (
@@ -123,7 +127,10 @@ export function SessionNav({
               >
                 <span className="session-id">{session.id}</span>
                 <span className="session-meta">
-                  {session.provider ?? "unknown"} &bull; {formatTime(session.mtime)}
+                  {session.provider ?? "unknown"} &bull;{" "}
+                  {session.startedAt
+                    ? `${formatTime(session.startedAt)} → ${formatTime(session.lastMessageAt ?? session.mtime)}`
+                    : formatTime(session.mtime)}
                 </span>
               </button>
             </li>
