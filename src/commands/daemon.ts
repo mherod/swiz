@@ -1308,12 +1308,9 @@ function buildPlist(port: number): string {
 
   <key>ProgramArguments</key>
   <array>
-    <string>${bunPath}</string>
-    <string>--watch</string>
-    <string>${indexPath}</string>
-    <string>daemon</string>
-    <string>--port</string>
-    <string>${port}</string>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>(sleep 1200 &amp;&amp; kill $$) &amp; exec ${bunPath} --watch ${indexPath} daemon --port ${port}</string>
   </array>
 
   <key>WorkingDirectory</key>
@@ -1324,6 +1321,9 @@ function buildPlist(port: number): string {
 
   <key>KeepAlive</key>
   <true/>
+
+  <key>StartInterval</key>
+  <integer>1200</integer>
 
   <key>StandardOutPath</key>
   <string>/tmp/swiz-daemon.log</string>
