@@ -968,14 +968,37 @@ function extractMessageText(content: unknown): string {
   return extractText(content as string | { type: string; text?: string }[] | undefined).trim()
 }
 
+async function sessionHasMessages(session: Pick<Session, "path" | "format">): Promise<boolean> {
+  try {
+    const file = Bun.file(session.path)
+    if (!(await file.exists())) return false
+    const text = await file.text()
+    const entries = parseTranscriptEntries(text, session.format)
+    for (const entry of entries) {
+      if (entry.type !== "user" && entry.type !== "assistant") continue
+      const content = entry.message?.content
+      if (entry.type === "user" && isHookFeedback(content)) continue
+      const extracted = extractMessageText(content)
+      const toolCalls = extractToolCalls(content)
+      if (extracted || toolCalls.length > 0) return true
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
 async function listProjectSessions(
   cwd: string,
   limit = 20
 ): Promise<{ sessionCount: number; sessions: SessionPreview[] }> {
   const all = await findAllProviderSessions(cwd)
+  const candidates = all.slice(0, limit * 2)
+  const checks = await Promise.all(candidates.map((s) => sessionHasMessages(s)))
+  const withMessages = candidates.filter((_, i) => checks[i])
   return {
-    sessionCount: all.length,
-    sessions: all.slice(0, limit).map((session) => ({
+    sessionCount: withMessages.length,
+    sessions: withMessages.slice(0, limit).map((session) => ({
       id: session.id,
       provider: session.provider,
       format: session.format,
@@ -1547,7 +1570,7 @@ export const daemonCommand: Command = {
             .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
             .slice(0, limitProjects)
 
-          const projects = await Promise.all(
+          const allProjects = await Promise.all(
             ordered.map(async ({ cwd, lastSeenAt }) => {
               const sessions = await listProjectSessions(cwd, limitSessionsPerProject)
               return {
@@ -1559,6 +1582,7 @@ export const daemonCommand: Command = {
               }
             })
           )
+          const projects = allProjects.filter((p) => p.sessionCount > 0)
           return Response.json({ projects })
         }
 
