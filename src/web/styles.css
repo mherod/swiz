@@ -585,6 +585,34 @@ tbody tr:hover {
   color: #d8deea;
 }
 
+.assistant-thought {
+  margin-top: 8px;
+  border: 1px dashed rgba(141, 160, 200, 0.35);
+  border-radius: 10px;
+  background: rgba(25, 30, 40, 0.5);
+}
+
+.assistant-thought > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  padding: 6px 10px;
+  color: #9db4df;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.assistant-thought > summary::-webkit-details-marker {
+  display: none;
+}
+
+.assistant-thought-body {
+  margin: 0;
+  padding: 0 10px 10px;
+  color: #bfc9dc;
+  font-size: 0.76rem;
+}
+
 /* ── Tool calls ── */
 
 .tool-calls {
@@ -827,6 +855,9 @@ tbody tr:hover {
   background: none;
   border: none;
   padding: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .md-body .md-list {

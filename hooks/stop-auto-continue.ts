@@ -30,6 +30,7 @@ import {
   isDocsOnlySession,
   isUnsupportedTranscriptFormat,
   projectKeyFromCwd,
+  type Session,
 } from "../src/transcript-utils.ts"
 import {
   buildIssueGuidance,
@@ -65,6 +66,7 @@ type AgentResponse = z.infer<typeof agentResponseSchema>
 interface TranscriptResolution {
   raw: string | null
   sourceDescription: string
+  formatHint?: Session["format"]
   failureReason?: string
 }
 
@@ -72,39 +74,83 @@ function resolveCwd(cwd?: string): string {
   return cwd ?? process.cwd()
 }
 
+function inferTranscriptFormatFromPath(path: string): Session["format"] | undefined {
+  const lowerPath = path.toLowerCase()
+  if (lowerPath.endsWith(".db")) return "cursor-sqlite"
+  if (lowerPath.includes("/.codex/sessions/") && lowerPath.endsWith(".jsonl")) return "codex-jsonl"
+  if (lowerPath.includes("/.cursor/projects/") && lowerPath.endsWith(".jsonl")) {
+    return "cursor-agent-jsonl"
+  }
+  if (lowerPath.endsWith(".jsonl")) return "jsonl"
+  return undefined
+}
+
 async function resolveTranscriptText(
   transcriptPath: string | undefined,
   cwd: string
 ): Promise<TranscriptResolution> {
+  let unreadableInputTranscript = false
+  let inputTranscriptUnparseable = false
+
   if (transcriptPath?.trim()) {
+    const hintedFormat = inferTranscriptFormatFromPath(transcriptPath)
     try {
-      return {
-        raw: await Bun.file(transcriptPath).text(),
-        sourceDescription: `stop hook input transcript_path (${transcriptPath})`,
+      const raw = await Bun.file(transcriptPath).text()
+      const hintedTurns = extractTranscriptData(raw, hintedFormat).turns.length
+      const fallbackTurns = hintedFormat ? extractTranscriptData(raw).turns.length : 0
+      if (hintedTurns > 0 || fallbackTurns > 0) {
+        return {
+          raw,
+          sourceDescription: `stop hook input transcript_path (${transcriptPath})`,
+          formatHint: hintedTurns > 0 ? hintedFormat : undefined,
+        }
       }
+      inputTranscriptUnparseable = true
     } catch {
-      // Fall through to cwd-based transcript discovery.
+      unreadableInputTranscript = true
     }
   }
 
   const sessions = await findAllProviderSessions(cwd)
+  let firstReadable: TranscriptResolution | null = null
   for (const session of sessions) {
     if (isUnsupportedTranscriptFormat(session.format)) continue
     try {
-      return {
-        raw: await Bun.file(session.path).text(),
+      const raw = await Bun.file(session.path).text()
+      const resolution: TranscriptResolution = {
+        raw,
+        formatHint: session.format,
         sourceDescription: `${session.provider ?? "unknown"} session ${session.id} (${session.path})`,
+      }
+      if (!firstReadable) firstReadable = resolution
+      if (extractTranscriptData(raw, session.format).turns.length > 0) {
+        return resolution
       }
     } catch {
       // Try the next candidate.
     }
   }
 
+  if (firstReadable) {
+    return {
+      ...firstReadable,
+      failureReason: inputTranscriptUnparseable
+        ? `Input transcript ${transcriptPath} had no parseable turns; using best readable fallback transcript.`
+        : undefined,
+    }
+  }
+
   const unsupported = sessions.find((session) => isUnsupportedTranscriptFormat(session.format))
   const unsupportedMessage = unsupported ? getUnsupportedTranscriptFormatMessage(unsupported) : ""
-  const failureReason = unsupportedMessage
+  const inputFailure = unreadableInputTranscript
+    ? `Input transcript ${transcriptPath} could not be read.`
+    : inputTranscriptUnparseable
+      ? `Input transcript ${transcriptPath} had no parseable turns.`
+      : ""
+  const failureReasonBase = unsupportedMessage
     ? `${unsupportedMessage} No readable fallback transcript was found for cwd ${cwd}.`
     : `No readable transcript was found from stop hook input or cwd fallback sessions for ${cwd}.`
+  const failureReason = [inputFailure, failureReasonBase].filter(Boolean).join(" ")
 
   return {
     raw: null,
@@ -863,7 +909,7 @@ async function main(): Promise<void> {
 
   // Single combined parse: extracts turns, edited paths, and tool-call count
   // in one pass over the transcript — avoids three redundant full parses.
-  const transcriptData = extractTranscriptData(raw)
+  const transcriptData = extractTranscriptData(raw, transcriptResolution.formatHint)
 
   const turns = transcriptData.turns.slice(-CONTEXT_TURNS)
   if (turns.length === 0) {

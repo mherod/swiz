@@ -1465,14 +1465,17 @@ export interface TranscriptData {
   toolCallCount: number
 }
 
-export function extractTranscriptData(jsonlText: string): TranscriptData {
+export function extractTranscriptData(
+  jsonlText: string,
+  formatHint?: Session["format"]
+): TranscriptData {
   const turns: PlainTurn[] = []
   const editedPaths = new Set<string>()
   const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"])
   const SHELL_TOOLS = new Set(["Bash", "Shell"])
   let toolCallCount = 0
 
-  for (const entry of parseTranscriptEntries(jsonlText)) {
+  for (const entry of parseTranscriptEntries(jsonlText, formatHint)) {
     if (entry?.type !== "user" && entry?.type !== "assistant") continue
 
     const content = entry?.message?.content

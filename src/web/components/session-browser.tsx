@@ -91,31 +91,133 @@ function normalizeAssistantText(text: string): string {
     .replace(/: (?=[A-Z][a-z]{2,}\b)/g, ":\n")
 }
 
+interface AssistantMessageParts {
+  visibleText: string
+  thoughtText: string | null
+}
+
+function splitAssistantMessage(text: string): AssistantMessageParts {
+  const thoughts: string[] = []
+  const visibleText = text
+    .replace(/<thought>([\s\S]*?)(?:<\/thought>|$)/gi, (_, inner: string) => {
+      const cleaned = inner.trim()
+      if (cleaned) thoughts.push(cleaned)
+      return ""
+    })
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+
+  const thoughtText = thoughts.join("\n\n").trim()
+  return {
+    visibleText,
+    thoughtText: thoughtText.length > 0 ? thoughtText : null,
+  }
+}
+
+function tryParseJson(text: string): string | null {
+  const candidate = text.trim()
+  if (!(candidate.startsWith("{") || candidate.startsWith("["))) return null
+  try {
+    const parsed = JSON.parse(candidate)
+    return JSON.stringify(parsed, null, 2)
+  } catch {
+    return null
+  }
+}
+
+function normalizeInlineFencedCode(text: string): string {
+  if (!text.includes("```")) return text
+  const normalized = text.replace(
+    /```([a-zA-Z0-9_-]*)\s*([\s\S]*?)```/g,
+    (_match: string, lang: string, code: string) => `\n\`\`\`${lang}\n${code.trim()}\n\`\`\`\n`
+  )
+  return normalized.replace(/\n{3,}/g, "\n\n").trim()
+}
+
+function formatAssistantJsonBlocks(text: string): string {
+  if (!text) return text
+  const withNormalizedFences = normalizeInlineFencedCode(text)
+  if (withNormalizedFences.includes("```")) return withNormalizedFences
+
+  const wholeJson = tryParseJson(withNormalizedFences)
+  if (wholeJson) return `\`\`\`json\n${wholeJson}\n\`\`\``
+
+  // Common case: prose prefix followed by a JSON payload (for example API errors).
+  const firstBrace = withNormalizedFences.indexOf("{")
+  const firstBracket = withNormalizedFences.indexOf("[")
+  const startCandidates = [firstBrace, firstBracket].filter((idx) => idx >= 0)
+  if (startCandidates.length === 0) return withNormalizedFences
+  const start = Math.min(...startCandidates)
+
+  const jsonLike = withNormalizedFences.slice(start).trim()
+  const parsed = tryParseJson(jsonLike)
+  if (!parsed) return withNormalizedFences
+
+  const prefix = withNormalizedFences.slice(0, start).trimEnd()
+  if (!prefix) return `\`\`\`json\n${parsed}\n\`\`\``
+  return `${prefix}\n\n\`\`\`json\n${parsed}\n\`\`\``
+}
+
 function MessageBody({ text, role }: { text: string; role: "user" | "assistant" }) {
-  const preparedText = role === "assistant" ? normalizeAssistantText(text) : text
+  const assistantParts = role === "assistant" ? splitAssistantMessage(text) : null
+  const assistantVisible = assistantParts?.visibleText ?? text
+  const assistantWithJson =
+    role === "assistant" ? formatAssistantJsonBlocks(assistantVisible) : text
+  const preparedText = role === "assistant" ? normalizeAssistantText(assistantWithJson) : text
   const lines = preparedText.split("\n")
   const shouldCollapse =
     lines.length > COLLAPSE_LINE_THRESHOLD || preparedText.length > COLLAPSE_CHAR_THRESHOLD
-  const renderAsLog = role === "assistant" && looksLikeLogBlob(preparedText)
+  const hasCodeFence = preparedText.includes("```")
+  const renderAsLog = role === "assistant" && !hasCodeFence && looksLikeLogBlob(preparedText)
   if (role === "assistant") {
-    if (!shouldCollapse) {
-      if (renderAsLog) return <pre className="message-log">{preparedText}</pre>
-      return <Markdown text={preparedText} />
+    const thoughtText = assistantParts?.thoughtText
+    if (!shouldCollapse || hasCodeFence) {
+      return (
+        <>
+          {preparedText ? (
+            renderAsLog ? (
+              <pre className="message-log">{preparedText}</pre>
+            ) : (
+              <Markdown text={preparedText} />
+            )
+          ) : null}
+          {thoughtText ? (
+            <details className="assistant-thought">
+              <summary>Model reasoning</summary>
+              <pre className="message-log assistant-thought-body">{thoughtText}</pre>
+            </details>
+          ) : null}
+        </>
+      )
     }
     const preview = summarizeText(preparedText)
     const remaining = Math.max(preparedText.length - preview.length, 0)
     return (
-      <details className="message-collapsible">
-        <summary>
-          {renderAsLog ? <pre className="message-log">{preview}</pre> : <Markdown text={preview} />}
-          <span className="message-expand-hint">{remaining} more chars</span>
-        </summary>
-        {renderAsLog ? (
-          <pre className="message-log">{preparedText}</pre>
-        ) : (
-          <Markdown text={preparedText} />
-        )}
-      </details>
+      <>
+        {preparedText ? (
+          <details className="message-collapsible">
+            <summary>
+              {renderAsLog ? (
+                <pre className="message-log">{preview}</pre>
+              ) : (
+                <Markdown text={preview} />
+              )}
+              <span className="message-expand-hint">{remaining} more chars</span>
+            </summary>
+            {renderAsLog ? (
+              <pre className="message-log">{preparedText}</pre>
+            ) : (
+              <Markdown text={preparedText} />
+            )}
+          </details>
+        ) : null}
+        {thoughtText ? (
+          <details className="assistant-thought">
+            <summary>Model reasoning</summary>
+            <pre className="message-log assistant-thought-body">{thoughtText}</pre>
+          </details>
+        ) : null}
+      </>
     )
   }
   if (!shouldCollapse) {
