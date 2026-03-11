@@ -136,10 +136,23 @@ export interface DispatchRequest {
   transcriptSummaryProvider?: (path: string) => Promise<TranscriptSummary | null>
   /** Optional cached manifest provider (injected by daemon to skip cold manifest rebuild). */
   manifestProvider?: (cwd: string) => Promise<HookGroup[]>
+  /** Optional lifecycle callback for in-flight dispatch tracking. */
+  onDispatchLifecycle?: (update: DispatchLifecycleUpdate) => void
 }
 
 export interface DispatchResult {
   response: Record<string, unknown>
+}
+
+export interface DispatchLifecycleUpdate {
+  phase: "start" | "end"
+  requestId: string
+  canonicalEvent: string
+  hookEventName: string
+  cwd: string
+  sessionId: string | null
+  hooks: string[]
+  startedAt: number
 }
 
 /**
@@ -161,6 +174,7 @@ export async function executeDispatch(req: DispatchRequest): Promise<DispatchRes
     daemonContext,
     transcriptSummaryProvider,
     manifestProvider,
+    onDispatchLifecycle,
   } = req
 
   const { payload, parseError } = parsePayload(payloadStr)
@@ -208,6 +222,22 @@ export async function executeDispatch(req: DispatchRequest): Promise<DispatchRes
     return { response: {} }
   }
 
+  const requestedHooks = filteredGroups.flatMap((group) => group.hooks.map((hook) => hook.file))
+  const lifecycleRequestId =
+    (payload.request_id as string | undefined) ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const lifecycleStartedAt = Date.now()
+  onDispatchLifecycle?.({
+    phase: "start",
+    requestId: lifecycleRequestId,
+    canonicalEvent,
+    hookEventName,
+    cwd,
+    sessionId: typeof payload.session_id === "string" ? payload.session_id : null,
+    hooks: [...new Set(requestedHooks)],
+    startedAt: lifecycleStartedAt,
+  })
+
   const enrichedPayloadStr = await enrichPayloadForHooks(
     payload,
     parseError,
@@ -216,26 +246,44 @@ export async function executeDispatch(req: DispatchRequest): Promise<DispatchRes
   )
 
   const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
-  let response: Record<string, unknown>
+  try {
+    let response: Record<string, unknown>
 
-  switch (strategy) {
-    case "preToolUse":
-      response = await runPreToolUse(filteredGroups, enrichedPayloadStr, daemonContext)
-      break
-    case "blocking":
-      response = await runBlocking(
-        filteredGroups,
-        enrichedPayloadStr,
-        canonicalEvent,
-        daemonContext
-      )
-      break
-    case "context":
-      response = await runContext(filteredGroups, enrichedPayloadStr, hookEventName, daemonContext)
-      break
-    default:
-      response = {}
+    switch (strategy) {
+      case "preToolUse":
+        response = await runPreToolUse(filteredGroups, enrichedPayloadStr, daemonContext)
+        break
+      case "blocking":
+        response = await runBlocking(
+          filteredGroups,
+          enrichedPayloadStr,
+          canonicalEvent,
+          daemonContext
+        )
+        break
+      case "context":
+        response = await runContext(
+          filteredGroups,
+          enrichedPayloadStr,
+          hookEventName,
+          daemonContext
+        )
+        break
+      default:
+        response = {}
+    }
+
+    return { response }
+  } finally {
+    onDispatchLifecycle?.({
+      phase: "end",
+      requestId: lifecycleRequestId,
+      canonicalEvent,
+      hookEventName,
+      cwd,
+      sessionId: typeof payload.session_id === "string" ? payload.session_id : null,
+      hooks: [...new Set(requestedHooks)],
+      startedAt: lifecycleStartedAt,
+    })
   }
-
-  return { response }
 }

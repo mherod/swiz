@@ -1,4 +1,5 @@
 import type { EventMetric } from "../lib/dashboard-helpers.ts"
+import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
 import { CacheList } from "./cache-list.tsx"
 import { EventTable } from "./event-table.tsx"
 import type { ToolStat } from "./session-browser.tsx"
@@ -15,6 +16,7 @@ export function MetricsRail({
   scope,
   cacheStatus,
   activeSession,
+  activeHookDispatches,
   loadedMessageCount,
   sessionToolStats,
 }: {
@@ -22,6 +24,7 @@ export function MetricsRail({
   scope: "global" | "project"
   cacheStatus: Record<string, number> | null
   activeSession: SessionHealth | null
+  activeHookDispatches: ActiveHookDispatch[]
   loadedMessageCount: number
   sessionToolStats: ToolStat[]
 }) {
@@ -31,6 +34,7 @@ export function MetricsRail({
       <CacheList cache={cacheStatus ?? {}} />
       <SessionHealthCard
         activeSession={activeSession}
+        activeHookDispatches={activeHookDispatches}
         loadedMessageCount={loadedMessageCount}
         sessionToolStats={sessionToolStats}
       />

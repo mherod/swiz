@@ -24,6 +24,16 @@ export interface AgentProcessesResponse {
   providers?: Record<string, number[]>
 }
 
+export interface ActiveHookDispatch {
+  requestId: string
+  canonicalEvent: string
+  hookEventName: string
+  cwd: string
+  sessionId: string | null
+  hooks: string[]
+  startedAt: number
+}
+
 interface InitialSelectionDeps {
   projects: ProjectSessions[]
   selectSession: (cwd: string, sessionId: string) => void
@@ -60,6 +70,7 @@ interface OverviewPollingDeps {
   onWatches: (watches: WatchesResponse) => void
   onProjects: (projects: ProjectSessions[]) => void
   onAgentProcesses: (providers: Record<string, number[]>) => void
+  onActiveDispatches: (dispatches: ActiveHookDispatch[]) => void
   onError: (message: string) => void
   onLastUpdated: (time: string) => void
   onInitialLoad: (projects: ProjectSessions[]) => void
@@ -72,19 +83,24 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps) {
   useEffect(() => {
     async function refresh() {
       try {
-        const [m, cs, w, pr, ap] = await Promise.all([
+        const project = getQueryParam("project")
+        const session = getQueryParam("session")
+        const [m, cs, w, pr, ap, ad] = await Promise.all([
           fetchJson<MetricsResponse>("/metrics"),
           fetchJson<Record<string, number>>("/cache/status"),
           fetchJson<WatchesResponse>("/ci-watches"),
           postJson<{ projects: ProjectSessions[] }>("/sessions/projects", {
             limitProjects: 10,
             limitSessionsPerProject: 10,
-            selectedProjectCwd: getQueryParam("project"),
-            selectedSessionId: getQueryParam("session"),
+            selectedProjectCwd: project,
+            selectedSessionId: session,
           }),
           fetchJson<AgentProcessesResponse>("/process/agents"),
+          fetchJson<{ active?: ActiveHookDispatch[] }>(
+            `/dispatch/active?cwd=${encodeURIComponent(project ?? "")}&sessionId=${encodeURIComponent(session ?? "")}`
+          ),
         ])
-        const snapshot = JSON.stringify({ m, cs, w, pr, ap })
+        const snapshot = JSON.stringify({ m, cs, w, pr, ap, ad })
         if (snapshot === prevSnapshotRef.current) return
         prevSnapshotRef.current = snapshot
 
@@ -94,6 +110,7 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps) {
         deps.onWatches(w)
         deps.onProjects(loadedProjects)
         deps.onAgentProcesses(ap.providers ?? {})
+        deps.onActiveDispatches(ad.active ?? [])
         deps.onError("")
         deps.onLastUpdated(new Date().toLocaleTimeString())
 

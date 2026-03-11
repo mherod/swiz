@@ -86,6 +86,16 @@ interface SessionPreview {
   dispatches?: number
 }
 
+export interface ActiveHookDispatch {
+  requestId: string
+  canonicalEvent: string
+  hookEventName: string
+  cwd: string
+  sessionId: string | null
+  hooks: string[]
+  startedAt: number
+}
+
 export interface CiWatchRun {
   databaseId: number
   status?: string | null
@@ -1392,6 +1402,8 @@ export const daemonCommand: Command = {
     const sessionActivity = new Map<string, { lastSeen: number; dispatches: number }>()
     /** Per-session tool calls captured from hook dispatch payloads. */
     const sessionToolCalls = new Map<string, CapturedToolCall[]>()
+    /** In-flight hook dispatches currently being processed by daemon /dispatch. */
+    const activeHookDispatches = new Map<string, ActiveHookDispatch>()
     let lastTranscriptMemoryPruneAt = 0
     const getProjectMetrics = (cwd: string): DaemonMetrics => {
       let m = projectMetrics.get(cwd)
@@ -1523,6 +1535,7 @@ export const daemonCommand: Command = {
       registerProjectWatchers,
       sessionActivity,
       sessionToolCalls,
+      activeHookDispatches,
       projectMetrics,
       ghCache,
       eligibilityCache,

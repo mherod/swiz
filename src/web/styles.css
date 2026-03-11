@@ -1480,6 +1480,47 @@ tbody tr:hover {
   font-size: 0.72rem;
 }
 
+.panel-health-hook-activity {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(116, 138, 172, 0.25);
+}
+
+.panel-health-hook-title {
+  margin: 0;
+  color: #c9d6ec;
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.panel-health-hook-meta {
+  margin: 4px 0 0;
+  color: #9db2d4;
+  font-size: 0.7rem;
+}
+
+.panel-health-hook-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.panel-health-hook-item {
+  font-size: 0.68rem;
+  color: #c7d5ee;
+  background: rgba(67, 86, 121, 0.34);
+  border: 1px solid rgba(121, 145, 191, 0.35);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation: none;

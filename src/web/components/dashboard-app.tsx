@@ -7,6 +7,7 @@ import {
   toSortedEvents,
 } from "../lib/dashboard-helpers.ts"
 import {
+  type ActiveHookDispatch,
   applyInitialSelection,
   type MetricsResponse,
   useDashboardOverviewPolling,
@@ -188,6 +189,7 @@ export function DashboardApp() {
   >([])
   const [killingPid, setKillingPid] = useState<number | null>(null)
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
+  const [activeHookDispatches, setActiveHookDispatches] = useState<ActiveHookDispatch[]>([])
   const [error, setError] = useState("")
   const [lastUpdated, setLastUpdated] = useState("starting")
 
@@ -374,6 +376,7 @@ export function DashboardApp() {
       setAgentProcessProviders(providers)
       addOptimisticAgentProcessProviders({ type: "sync", providers })
     },
+    onActiveDispatches: setActiveHookDispatches,
     onError: setError,
     onLastUpdated: setLastUpdated,
     onInitialLoad: (loadedProjects) =>
@@ -472,6 +475,7 @@ export function DashboardApp() {
         scope={optimisticProjectCwd ? "project" : "global"}
         cacheStatus={cacheStatus}
         activeSession={activeSession}
+        activeHookDispatches={activeHookDispatches}
         loadedMessageCount={sessionMessages.length}
         sessionToolStats={sessionToolStats}
       />

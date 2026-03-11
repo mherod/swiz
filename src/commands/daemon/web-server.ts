@@ -2,6 +2,7 @@ import { dirname, extname, join } from "node:path"
 import { executeDispatch } from "../../dispatch/execute.ts"
 import { deleteSessionData, resolveSessionDeletionTargets } from "../../session-data-delete.ts"
 import {
+  type ActiveHookDispatch,
   type CachedSnapshot,
   type CiWatchRegistry,
   type CooldownRegistry,
@@ -116,6 +117,7 @@ export interface DaemonWebServerContext {
   registerProjectWatchers: (cwd: string) => void
   sessionActivity: Map<string, { lastSeen: number; dispatches: number }>
   sessionToolCalls: Map<string, CapturedToolCall[]>
+  activeHookDispatches: Map<string, ActiveHookDispatch>
   projectMetrics: Map<string, DaemonMetrics>
   ghCache: GhQueryCache
   eligibilityCache: HookEligibilityCache
@@ -219,6 +221,7 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
     registerProjectWatchers,
     sessionActivity,
     sessionToolCalls,
+    activeHookDispatches,
     projectMetrics,
     ghCache,
     eligibilityCache,
@@ -284,6 +287,21 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
             return index?.summary ?? null
           },
           manifestProvider: async (cwd) => manifestCache.get(cwd),
+          onDispatchLifecycle: (update) => {
+            if (update.phase === "start") {
+              activeHookDispatches.set(update.requestId, {
+                requestId: update.requestId,
+                canonicalEvent: update.canonicalEvent,
+                hookEventName: update.hookEventName,
+                cwd: update.cwd,
+                sessionId: update.sessionId,
+                hooks: update.hooks,
+                startedAt: update.startedAt,
+              })
+              return
+            }
+            activeHookDispatches.delete(update.requestId)
+          },
         })
         const durationMs = performance.now() - start
         recordDispatch(globalMetrics, canonicalEvent, durationMs)
@@ -337,6 +355,16 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
           /* ignore parse errors */
         }
         return Response.json(result.response)
+      }
+
+      if (url.pathname === "/dispatch/active" && req.method === "GET") {
+        const cwd = url.searchParams.get("cwd")
+        const sessionId = url.searchParams.get("sessionId")
+        const active = [...activeHookDispatches.values()]
+          .filter((entry) => (cwd ? entry.cwd === cwd : true))
+          .filter((entry) => (sessionId ? entry.sessionId === sessionId : true))
+          .sort((a, b) => b.startedAt - a.startedAt)
+        return Response.json({ active })
       }
 
       if (url.pathname === "/metrics" && req.method === "GET") {
