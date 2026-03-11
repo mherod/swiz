@@ -50,8 +50,7 @@ body {
   background:
     radial-gradient(1300px 640px at 8% -20%, rgba(64, 112, 255, 0.34), transparent 55%),
     radial-gradient(920px 520px at 95% 0%, rgba(3, 217, 255, 0.16), transparent 45%),
-    radial-gradient(900px 540px at 50% 120%, rgba(4, 26, 90, 0.55), transparent 60%),
-    #060b1c;
+    radial-gradient(900px 540px at 50% 120%, rgba(4, 26, 90, 0.55), transparent 60%), #060b1c;
   color: var(--text-main);
   position: relative;
 }
@@ -452,7 +451,9 @@ tbody tr:hover {
   display: grid;
   gap: 4px;
   cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
 }
 
 .project-btn:hover,
@@ -591,7 +592,7 @@ tbody tr:hover {
 
 @media (prefers-reduced-motion: reduce) {
   * {
-    animation: none !important;
-    transition: none !important;
+    animation: none;
+    transition: none;
   }
 }
