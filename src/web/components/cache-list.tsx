@@ -31,20 +31,40 @@ interface CacheSummary {
 }
 
 export function CacheList({ cache = {} }: { cache?: CacheSummary }) {
+  const cacheEntries = [
+    { label: "Snapshots", value: cache.snapshotCacheSize ?? 0 },
+    { label: "GitHub", value: cache.ghCacheSize ?? 0 },
+    { label: "Eligibility", value: cache.eligibilityCacheSize ?? 0 },
+    { label: "Transcripts", value: cache.transcriptIndexSize ?? 0 },
+    { label: "Cooldown", value: cache.cooldownRegistrySize ?? 0 },
+    { label: "Git state", value: cache.gitStateCacheSize ?? 0 },
+    { label: "Settings", value: cache.projectSettingsCacheSize ?? 0 },
+    { label: "Manifest", value: cache.manifestCacheSize ?? 0 },
+  ]
+  const totalEntries = cacheEntries.reduce((sum, item) => sum + item.value, 0)
+  const warmCaches = cacheEntries.filter((item) => getCacheState(item.value) !== "cold").length
+
   return (
     <section className="card panel-cache">
       <h2 className="section-title">Caches</h2>
       <p className="section-subtitle">Current cache warmth and entry counts</p>
-      <ul className="cache-list" aria-label="Daemon cache size breakdown">
-        <CacheRow label="Snapshots" value={cache.snapshotCacheSize ?? 0} />
-        <CacheRow label="GitHub" value={cache.ghCacheSize ?? 0} />
-        <CacheRow label="Eligibility" value={cache.eligibilityCacheSize ?? 0} />
-        <CacheRow label="Transcripts" value={cache.transcriptIndexSize ?? 0} />
-        <CacheRow label="Cooldown" value={cache.cooldownRegistrySize ?? 0} />
-        <CacheRow label="Git state" value={cache.gitStateCacheSize ?? 0} />
-        <CacheRow label="Settings" value={cache.projectSettingsCacheSize ?? 0} />
-        <CacheRow label="Manifest" value={cache.manifestCacheSize ?? 0} />
-      </ul>
+      <div className="metric-kpis">
+        <span className="metric-kpi">
+          <strong>{totalEntries}</strong> total entries
+        </span>
+        <span className="metric-kpi">
+          <strong>{warmCaches}</strong> warm or hot caches
+        </span>
+      </div>
+      <p className="metric-note">Higher warm cache count usually means faster reads.</p>
+      <details className="metric-details">
+        <summary>Show cache breakdown</summary>
+        <ul className="cache-list" aria-label="Daemon cache size breakdown">
+          {cacheEntries.map((item) => (
+            <CacheRow key={item.label} label={item.label} value={item.value} />
+          ))}
+        </ul>
+      </details>
     </section>
   )
 }

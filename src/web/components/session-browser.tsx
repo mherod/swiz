@@ -32,38 +32,102 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleString([], { dateStyle: "short", timeStyle: "short" })
 }
 
+function formatCompactTime(ts: number): string {
+  return new Date(ts).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+function formatRelativeTime(ts: number): string {
+  const deltaMs = Date.now() - ts
+  const minute = 60_000
+  const hour = 60 * minute
+  const day = 24 * hour
+  if (deltaMs < minute) return "just now"
+  if (deltaMs < hour) return `${Math.floor(deltaMs / minute)}m ago`
+  if (deltaMs < day) return `${Math.floor(deltaMs / hour)}h ago`
+  return `${Math.floor(deltaMs / day)}d ago`
+}
+
+function shortSessionId(id: string): string {
+  if (id.length <= 14) return id
+  return `${id.slice(0, 8)}...${id.slice(-4)}`
+}
+
 import { Markdown } from "./markdown.tsx"
 
 const COLLAPSE_LINE_THRESHOLD = 20
+const COLLAPSE_CHAR_THRESHOLD = 900
+
+function summarizeText(text: string): string {
+  if (text.length <= COLLAPSE_CHAR_THRESHOLD) return text
+  const candidate = text.slice(0, COLLAPSE_CHAR_THRESHOLD)
+  const cutIndex = Math.max(candidate.lastIndexOf(" "), candidate.lastIndexOf("\n"))
+  return `${candidate.slice(0, cutIndex > 0 ? cutIndex : candidate.length).trimEnd()}…`
+}
+
+function isMarkdownLike(text: string): boolean {
+  return /(^|\n)\s*(#{1,6}\s|[-*]\s|>\s|```)|`[^`]+`|\[[^\]]+\]\([^)]+\)/m.test(text)
+}
+
+function looksLikeLogBlob(text: string): boolean {
+  const hasErrorWords = /(error|exception|stack|trace|invalid|failed)/i.test(text)
+  const hasSignatureNoise = /[{}[\]():;]/.test(text)
+  const lines = text.split("\n").length
+  return hasErrorWords && hasSignatureNoise && (lines > 8 || text.length > 420)
+}
+
+function normalizeAssistantText(text: string): string {
+  if (isMarkdownLike(text)) return text
+  if (text.length < 300) return text
+  const newlineCount = (text.match(/\n/g) ?? []).length
+  if (newlineCount > 8) return text
+  return text
+    .replace(/\. (?=[A-Z][a-z]{2,}\b)/g, ".\n\n")
+    .replace(/\) (?=[A-Z][a-z]{2,}\b)/g, ")\n\n")
+    .replace(/: (?=[A-Z][a-z]{2,}\b)/g, ":\n")
+}
 
 function MessageBody({ text, role }: { text: string; role: "user" | "assistant" }) {
-  const lines = text.split("\n")
+  const preparedText = role === "assistant" ? normalizeAssistantText(text) : text
+  const lines = preparedText.split("\n")
+  const shouldCollapse =
+    lines.length > COLLAPSE_LINE_THRESHOLD || preparedText.length > COLLAPSE_CHAR_THRESHOLD
+  const renderAsLog = role === "assistant" && looksLikeLogBlob(preparedText)
   if (role === "assistant") {
-    if (lines.length <= COLLAPSE_LINE_THRESHOLD) {
-      return <Markdown text={text} />
+    if (!shouldCollapse) {
+      if (renderAsLog) return <pre className="message-log">{preparedText}</pre>
+      return <Markdown text={preparedText} />
     }
-    const preview = lines.slice(0, COLLAPSE_LINE_THRESHOLD).join("\n")
-    const remaining = lines.length - COLLAPSE_LINE_THRESHOLD
+    const preview = summarizeText(preparedText)
+    const remaining = Math.max(preparedText.length - preview.length, 0)
     return (
       <details className="message-collapsible">
         <summary>
-          <Markdown text={preview} />
-          <span className="message-expand-hint">{remaining} more lines</span>
+          {renderAsLog ? <pre className="message-log">{preview}</pre> : <Markdown text={preview} />}
+          <span className="message-expand-hint">{remaining} more chars</span>
         </summary>
-        <Markdown text={text} />
+        {renderAsLog ? (
+          <pre className="message-log">{preparedText}</pre>
+        ) : (
+          <Markdown text={preparedText} />
+        )}
       </details>
     )
   }
-  if (lines.length <= COLLAPSE_LINE_THRESHOLD) {
+  if (!shouldCollapse) {
     return <pre className="message-text">{text}</pre>
   }
-  const preview = lines.slice(0, COLLAPSE_LINE_THRESHOLD).join("\n")
-  const remaining = lines.length - COLLAPSE_LINE_THRESHOLD
+  const preview = summarizeText(text)
+  const remaining = Math.max(text.length - preview.length, 0)
   return (
     <details className="message-collapsible">
       <summary>
         <pre className="message-text">{preview}</pre>
-        <span className="message-expand-hint">{remaining} more lines</span>
+        <span className="message-expand-hint">{remaining} more chars</span>
       </summary>
       <pre className="message-text">{text}</pre>
     </details>
@@ -98,10 +162,18 @@ export function SessionNav({
         return (b.lastMessageAt ?? b.mtime) - (a.lastMessageAt ?? a.mtime)
       })
     : null
+  const activeThresholdMs = 30 * 60 * 1000
+  const activeSessions = sortedSessions?.filter(
+    (session) => Date.now() - (session.lastMessageAt ?? session.mtime) <= activeThresholdMs
+  )
+  const recentSessions = sortedSessions?.filter(
+    (session) => Date.now() - (session.lastMessageAt ?? session.mtime) > activeThresholdMs
+  )
 
   return (
     <nav className="card bento-nav">
       <h2 className="section-title">Projects</h2>
+      <p className="section-subtitle">Project and session switcher</p>
       <ul className="project-list" aria-label="Active and recent project directories">
         {sortedProjects.map((project) => (
           <li key={project.cwd}>
@@ -117,34 +189,61 @@ export function SessionNav({
           </li>
         ))}
       </ul>
-      <h2 className="section-title" style={{ marginTop: 8 }}>
-        Sessions
-      </h2>
+      <h2 className="section-title nav-section-title">Sessions</h2>
       <ul className="session-list" aria-label="Sessions for selected project">
         {sortedSessions ? (
-          sortedSessions.map((session) => (
-            <li key={session.id}>
-              <button
-                type="button"
-                className={`session-btn ${session.id === selectedSessionId ? "selected" : ""}`}
-                aria-pressed={session.id === selectedSessionId}
-                onClick={() => onSelectSession(selectedProject!.cwd, session.id)}
-              >
-                <span className="session-id">
-                  {session.id}
-                  {session.dispatches ? (
-                    <span className="session-dispatches">{session.dispatches}</span>
-                  ) : null}
-                </span>
-                <span className="session-meta">
-                  {session.provider ?? "unknown"} &bull;{" "}
-                  {session.startedAt
-                    ? `${formatTime(session.startedAt)} → ${formatTime(session.lastMessageAt ?? session.mtime)}`
-                    : formatTime(session.mtime)}
-                </span>
-              </button>
-            </li>
-          ))
+          <>
+            {activeSessions && activeSessions.length > 0 ? (
+              <li className="session-group-label">Active now</li>
+            ) : null}
+            {activeSessions?.map((session) => (
+              <li key={session.id}>
+                <button
+                  type="button"
+                  className={`session-btn ${session.id === selectedSessionId ? "selected" : ""}`}
+                  aria-pressed={session.id === selectedSessionId}
+                  onClick={() => onSelectSession(selectedProject!.cwd, session.id)}
+                >
+                  <span className="session-id" title={session.id}>
+                    {(session.provider ?? "unknown").toLowerCase()} ·{" "}
+                    {formatRelativeTime(session.lastMessageAt ?? session.mtime)}
+                    {session.dispatches ? (
+                      <span className="session-dispatches">{session.dispatches}</span>
+                    ) : null}
+                  </span>
+                  <span className="session-meta">
+                    {shortSessionId(session.id)} ·{" "}
+                    {formatCompactTime(session.lastMessageAt ?? session.mtime)}
+                  </span>
+                </button>
+              </li>
+            ))}
+            {recentSessions && recentSessions.length > 0 ? (
+              <li className="session-group-label">Recent</li>
+            ) : null}
+            {recentSessions?.map((session) => (
+              <li key={session.id}>
+                <button
+                  type="button"
+                  className={`session-btn ${session.id === selectedSessionId ? "selected" : ""}`}
+                  aria-pressed={session.id === selectedSessionId}
+                  onClick={() => onSelectSession(selectedProject!.cwd, session.id)}
+                >
+                  <span className="session-id" title={session.id}>
+                    {(session.provider ?? "unknown").toLowerCase()} ·{" "}
+                    {formatRelativeTime(session.lastMessageAt ?? session.mtime)}
+                    {session.dispatches ? (
+                      <span className="session-dispatches">{session.dispatches}</span>
+                    ) : null}
+                  </span>
+                  <span className="session-meta">
+                    {shortSessionId(session.id)} ·{" "}
+                    {formatCompactTime(session.lastMessageAt ?? session.mtime)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </>
         ) : (
           <li className="empty">Select a project.</li>
         )}
@@ -200,6 +299,7 @@ export function SessionMessages({ messages, loading, newKeys, msgKey, toolStats 
   return (
     <section className="card bento-messages">
       <h2 className="section-title">Transcript</h2>
+      <p className="section-subtitle">Conversation history for selected session</p>
       {toolStats && toolStats.length > 0 && <ToolStatsBar stats={toolStats} />}
       {loading ? (
         <p className="empty">Loading...</p>
