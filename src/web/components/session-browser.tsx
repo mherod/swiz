@@ -101,6 +101,51 @@ function shortSessionId(id: string): string {
   return `${id.slice(0, 8)}...${id.slice(-4)}`
 }
 
+type ProjectStateLabel = "planning" | "developing" | "reviewing" | "addressing-feedback"
+
+function extractProjectState(statusLine?: string): ProjectStateLabel | null {
+  if (!statusLine) return null
+  const match = statusLine.match(
+    /\bstate:\s*(planning|developing|reviewing|addressing-feedback)\b/i
+  )
+  return (match?.[1]?.toLowerCase() as ProjectStateLabel | undefined) ?? null
+}
+
+function formatProjectStateLabel(state: ProjectStateLabel): string {
+  return state === "addressing-feedback" ? "addressing feedback" : state
+}
+
+type StatusChipTone = "neutral" | "info" | "warn" | "success" | "state"
+
+interface ParsedStatusToken {
+  label: string
+  tone: StatusChipTone
+}
+
+function parseProjectStatusLine(statusLine?: string): ParsedStatusToken[] {
+  if (!statusLine) return []
+  const parts = statusLine
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean)
+  const parsed: ParsedStatusToken[] = parts.map((part): ParsedStatusToken => {
+    const lower = part.toLowerCase()
+    if (lower.startsWith("state:")) return { label: part.replace(/^state:\s*/i, ""), tone: "state" }
+    if (lower.includes("changes requested")) return { label: part, tone: "warn" }
+    if (lower.includes("approved")) return { label: part, tone: "success" }
+    if (/\b\d+\s+issues?\b/.test(lower) || /\b\d+\s+prs?\b/.test(lower)) {
+      return { label: part, tone: "info" }
+    }
+    return { label: part, tone: "neutral" }
+  })
+  return parsed.filter((token) => {
+    if (token.tone !== "neutral") return true
+    // Drop dense git shorthand tokens like "± main ~10 ?1 $3".
+    if (/[±~?$]/.test(token.label)) return false
+    return token.label.length <= 32
+  })
+}
+
 function providerProcessPids(
   provider: string | undefined,
   activeAgentPidsByProvider: Record<string, number[]>
@@ -144,6 +189,13 @@ function dedupeSessionsById(sessions: SessionPreview[]): SessionPreview[] {
 
 const COLLAPSE_LINE_THRESHOLD = 20
 const COLLAPSE_CHAR_THRESHOLD = 900
+
+function buildCollapseHint(text: string): string {
+  const lineCount = text.split("\n").length
+  const charCount = text.length
+  const charLabel = charCount >= 1000 ? `${(charCount / 1000).toFixed(1)}k` : `${charCount}`
+  return `Expand · ${lineCount} lines · ${charLabel} chars`
+}
 
 function summarizeText(text: string): string {
   if (text.length <= COLLAPSE_CHAR_THRESHOLD) return text
@@ -335,7 +387,7 @@ function MessageBody({ text, role }: { text: string; role: "user" | "assistant" 
       )
     }
     const preview = summarizeText(preparedText)
-    const remaining = Math.max(preparedText.length - preview.length, 0)
+    const hint = buildCollapseHint(preparedText)
     return (
       <>
         {preparedText ? (
@@ -346,7 +398,7 @@ function MessageBody({ text, role }: { text: string; role: "user" | "assistant" 
               ) : (
                 <Markdown text={preview} />
               )}
-              <span className="message-expand-hint">{remaining} more chars</span>
+              <span className="message-expand-hint">{hint}</span>
             </summary>
             {renderAsLog ? (
               <pre className="message-log">{preparedText}</pre>
@@ -376,13 +428,13 @@ function MessageBody({ text, role }: { text: string; role: "user" | "assistant" 
     )
   }
   const preview = summarizeText(textForCollapse)
-  const remaining = Math.max(textForCollapse.length - preview.length, 0)
+  const hint = buildCollapseHint(textForCollapse)
   return (
     <>
       <details className="message-collapsible">
         <summary>
           <pre className="message-text">{preview}</pre>
-          <span className="message-expand-hint">{remaining} more chars</span>
+          <span className="message-expand-hint">{hint}</span>
         </summary>
         <pre className="message-text">{textForCollapse}</pre>
       </details>
@@ -524,24 +576,44 @@ export function SessionNav({
         </div>
         <p className="section-subtitle">Project and session switcher</p>
         <ul className="project-list" aria-label="Active and recent project directories">
-          {sortedProjects.map((project) => (
-            <li key={project.cwd}>
-              <button
-                type="button"
-                className={cn("project-btn", project.cwd === selectedProjectCwd && "selected")}
-                aria-pressed={project.cwd === selectedProjectCwd}
-                onClick={() => onSelectProject(project.cwd)}
-              >
-                <span className="project-name">{project.name}</span>
-                {project.statusLine ? (
-                  <span className="project-status-line" title={project.statusLine}>
-                    {project.statusLine}
+          {sortedProjects.map((project) => {
+            const projectState = extractProjectState(project.statusLine)
+            return (
+              <li key={project.cwd}>
+                <button
+                  type="button"
+                  className={cn("project-btn", project.cwd === selectedProjectCwd && "selected")}
+                  aria-pressed={project.cwd === selectedProjectCwd}
+                  onClick={() => onSelectProject(project.cwd)}
+                >
+                  <span className="project-name">
+                    {project.name}
+                    {projectState ? (
+                      <span className={cn("project-state-chip", `project-state-${projectState}`)}>
+                        {formatProjectStateLabel(projectState)}
+                      </span>
+                    ) : null}
                   </span>
-                ) : null}
-                <span className="project-meta">{project.sessionCount} sessions</span>
-              </button>
-            </li>
-          ))}
+                  {project.statusLine ? (
+                    <span className="project-status-line" title={project.statusLine}>
+                      {parseProjectStatusLine(project.statusLine).map((token) => (
+                        <span
+                          key={`${project.cwd}-${token.label}`}
+                          className={cn("project-status-chip", `project-status-${token.tone}`)}
+                        >
+                          {token.label}
+                        </span>
+                      ))}
+                    </span>
+                  ) : null}
+                  <span className="project-meta">
+                    {project.sessionCount} sessions · active{" "}
+                    {formatRelativeTime(project.lastSeenAt)}
+                  </span>
+                </button>
+              </li>
+            )
+          })}
         </ul>
       </section>
       <section className="nav-block nav-block-sessions">
@@ -577,21 +649,26 @@ export interface ToolStat {
   count: number
 }
 
+function isInternalToolName(name: string): boolean {
+  return name.trim().toLowerCase() === "structuredoutput"
+}
+
 function ToolStatsBar({ stats }: { stats: ToolStat[] }) {
-  if (stats.length === 0) return null
-  const total = stats.reduce((sum, s) => sum + s.count, 0)
+  const visibleStats = stats.filter((stat) => !isInternalToolName(stat.name))
+  if (visibleStats.length === 0) return null
+  const total = visibleStats.reduce((sum, s) => sum + s.count, 0)
   return (
     <div className="tool-stats-bar">
       <span className="tool-stats-total">{total} tool calls</span>
       <div className="tool-stats-pills">
-        {stats.slice(0, 8).map((s) => (
+        {visibleStats.slice(0, 8).map((s) => (
           <span key={s.name} className="tool-stat-pill">
             <span className="tool-stat-name">{s.name}</span>
             <span className="tool-stat-count">{s.count}</span>
           </span>
         ))}
-        {stats.length > 8 && (
-          <span className="tool-stat-pill tool-stat-more">+{stats.length - 8} more</span>
+        {visibleStats.length > 8 && (
+          <span className="tool-stat-pill tool-stat-more">+{visibleStats.length - 8} more</span>
         )}
       </div>
     </div>

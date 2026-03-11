@@ -4,6 +4,8 @@ interface HeaderProps {
   totalDispatches: number
   projects: number
   activeWatches: number
+  activeHooks: number
+  selectedProjectName: string | null
 }
 
 export function Header({
@@ -12,6 +14,8 @@ export function Header({
   totalDispatches,
   projects,
   activeWatches,
+  activeHooks,
+  selectedProjectName,
 }: HeaderProps) {
   return (
     <header className="bento-title">
@@ -27,6 +31,14 @@ export function Header({
         {uptime} uptime · {totalDispatches} dispatches · {projects} active projects ·{" "}
         {activeWatches} CI watches
       </p>
+      <div className="header-chips">
+        <span className="header-chip">
+          <strong>{activeHooks}</strong> active hooks
+        </span>
+        <span className="header-chip">
+          project: <strong>{selectedProjectName ?? "none"}</strong>
+        </span>
+      </div>
     </header>
   )
 }

@@ -516,13 +516,91 @@ tbody tr:hover {
   text-wrap: pretty;
 }
 
+.project-state-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 145, 198, 0.42);
+  background: rgba(63, 80, 120, 0.28);
+  color: #d7e4ff;
+  padding: 1px 8px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  line-height: 1.45;
+}
+
+.project-state-planning {
+  border-color: rgba(214, 181, 102, 0.46);
+  background: rgba(122, 89, 24, 0.36);
+  color: #f7d89b;
+}
+
+.project-state-developing {
+  border-color: rgba(92, 177, 232, 0.52);
+  background: rgba(39, 83, 127, 0.38);
+  color: #b8e5ff;
+}
+
+.project-state-reviewing {
+  border-color: rgba(143, 131, 240, 0.52);
+  background: rgba(78, 56, 136, 0.34);
+  color: #d4caff;
+}
+
+.project-state-addressing-feedback {
+  border-color: rgba(236, 138, 138, 0.56);
+  background: rgba(124, 44, 44, 0.36);
+  color: #ffcbcb;
+}
+
 .project-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   color: #9eb1d7;
-  font-size: 0.86rem;
+  font-size: 0.8rem;
   line-height: 1.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.project-status-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(108, 134, 194, 0.36);
+  background: rgba(64, 82, 124, 0.22);
+  color: #c9daf9;
+  padding: 1px 7px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.45;
+}
+
+.project-status-info {
+  border-color: rgba(108, 170, 232, 0.44);
+  background: rgba(43, 90, 133, 0.3);
+  color: #bde2ff;
+}
+
+.project-status-warn {
+  border-color: rgba(232, 140, 120, 0.48);
+  background: rgba(126, 55, 43, 0.34);
+  color: #ffd1c5;
+}
+
+.project-status-success {
+  border-color: rgba(123, 213, 146, 0.48);
+  background: rgba(45, 109, 64, 0.33);
+  color: #c3f4d0;
+}
+
+.project-status-state {
+  border-color: rgba(156, 151, 244, 0.5);
+  background: rgba(74, 61, 136, 0.34);
+  color: #ddd7ff;
 }
 
 .session-dispatches {
@@ -624,7 +702,7 @@ tbody tr:hover {
 .project-meta,
 .session-meta {
   color: #98a2b4;
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
 }
@@ -1519,6 +1597,93 @@ tbody tr:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.panel-settings {
+  gap: 8px;
+}
+
+.settings-form {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: #b8c8ea;
+}
+
+.settings-input,
+.settings-select {
+  width: 100%;
+  border: 1px solid rgba(109, 136, 196, 0.42);
+  border-radius: 8px;
+  background: rgba(29, 34, 44, 0.72);
+  color: #dfe8fb;
+  padding: 7px 8px;
+  font-size: 0.8rem;
+}
+
+.settings-input:focus-visible,
+.settings-select:focus-visible {
+  outline: none;
+  border-color: rgba(126, 170, 255, 0.72);
+  box-shadow: 0 0 0 2px rgba(97, 144, 240, 0.2);
+}
+
+.settings-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #c4d3ef;
+  font-size: 0.76rem;
+}
+
+.settings-checkbox input {
+  accent-color: #77b7ff;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-save-btn {
+  border: 1px solid rgba(118, 153, 229, 0.42);
+  border-radius: 8px;
+  background: rgba(79, 111, 186, 0.22);
+  color: #d9e6ff;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.settings-save-btn:hover,
+.settings-save-btn:focus-visible {
+  background: rgba(89, 126, 206, 0.3);
+  border-color: rgba(136, 176, 255, 0.68);
+  outline: none;
+}
+
+.settings-save-btn:disabled {
+  opacity: 0.56;
+  cursor: default;
+}
+
+.settings-status-ok {
+  color: #9ce0af;
+  font-size: 0.72rem;
+}
+
+.settings-status-error {
+  margin: 0;
+  color: #ffb8b8;
+  font-size: 0.72rem;
+  line-height: 1.45;
 }
 
 @media (prefers-reduced-motion: reduce) {

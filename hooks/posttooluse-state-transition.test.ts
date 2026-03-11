@@ -253,7 +253,20 @@ describe("posttooluse-state-transition no-upstream commit behavior", () => {
     }
   })
 
-  test("team mode: git commit on default branch does not auto-transition reviewing", async () => {
+  test("git commit on default branch transitions planning -> developing", async () => {
+    const repo = await createRepo()
+    try {
+      await writeProjectState(repo, "planning")
+
+      const exitCode = await runHook(repo, 'git commit -m "test"')
+      expect(exitCode).toBe(0)
+      expect(await readProjectState(repo)).toBe("developing")
+    } finally {
+      await rm(repo, { recursive: true, force: true })
+    }
+  })
+
+  test("team mode: git commit on default branch transitions reviewing -> developing", async () => {
     const repo = await createRepo()
     const fakeBin = await createFakeGhBin("mherod", ["teammate"])
     try {
@@ -265,7 +278,7 @@ describe("posttooluse-state-transition no-upstream commit behavior", () => {
         PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
       })
       expect(exitCode).toBe(0)
-      expect(await readProjectState(repo)).toBe("reviewing")
+      expect(await readProjectState(repo)).toBe("developing")
     } finally {
       await Promise.all([
         rm(repo, { recursive: true, force: true }),
@@ -430,6 +443,33 @@ describe("posttooluse-state-transition foreign-author checkout behavior", () => 
       const exitCode = await runHook(repo, "git checkout main")
       expect(exitCode).toBe(0)
       // Default-branch rule fires first → developing (not reviewing)
+      expect(await readProjectState(repo)).toBe("developing")
+    } finally {
+      await rm(repo, { recursive: true, force: true })
+    }
+  })
+
+  test("git checkout default branch transitions planning -> developing", async () => {
+    const repo = await createRepo()
+    try {
+      await writeProjectState(repo, "planning")
+      const exitCode = await runHook(repo, "git checkout main")
+      expect(exitCode).toBe(0)
+      expect(await readProjectState(repo)).toBe("developing")
+    } finally {
+      await rm(repo, { recursive: true, force: true })
+    }
+  })
+
+  test("git switch default branch transitions reviewing -> developing", async () => {
+    const repo = await createRepo()
+    try {
+      runGit(repo, ["checkout", "-b", "feature/switch-test"])
+      await writeProjectState(repo, "reviewing")
+      runGit(repo, ["switch", "main"])
+
+      const exitCode = await runHook(repo, "git switch main")
+      expect(exitCode).toBe(0)
       expect(await readProjectState(repo)).toBe("developing")
     } finally {
       await rm(repo, { recursive: true, force: true })

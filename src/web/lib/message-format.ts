@@ -57,14 +57,19 @@ export function normalizeAssistantText(text: string): string {
 
 export function splitAssistantMessage(text: string): AssistantMessageParts {
   const thoughts: string[] = []
-  const visibleText = text
-    .replace(/<thought>([\s\S]*?)(?:<\/thought>|$)/gi, (_, inner: string) => {
-      const cleaned = inner.trim()
-      if (cleaned) thoughts.push(cleaned)
-      return ""
-    })
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
+  const visibleText = stripRolePrefix(
+    sanitizeInternalNoise(
+      text
+        .replace(/<thought>([\s\S]*?)(?:<\/thought>|$)/gi, (_, inner: string) => {
+          const cleaned = inner.trim()
+          if (cleaned) thoughts.push(cleaned)
+          return ""
+        })
+        .replace(/\n{3,}/g, "\n\n")
+        .trim()
+    ),
+    "assistant"
+  )
 
   const thoughtText = thoughts.join("\n\n").trim()
   return {
@@ -88,7 +93,7 @@ export function splitUserMessage(text: string): UserMessageParts {
   const marker = "<hook_context>"
   const markerIndex = compactText.indexOf(marker)
   if (markerIndex < 0) {
-    const visibleText = compactText.trim()
+    const visibleText = stripRolePrefix(sanitizeInternalNoise(compactText.trim()), "user")
     return {
       visibleText,
       hookContext: null,
@@ -98,7 +103,10 @@ export function splitUserMessage(text: string): UserMessageParts {
     }
   }
 
-  const visibleText = compactText.slice(0, markerIndex).trim()
+  const visibleText = stripRolePrefix(
+    sanitizeInternalNoise(compactText.slice(0, markerIndex).trim()),
+    "user"
+  )
   const rawContext = compactText.slice(markerIndex + marker.length).trim()
   const hookContext = parseHookContext(rawContext)
 
@@ -157,7 +165,12 @@ function extractUncommittedChangesBlock(text: string): {
   cleanedText: string
   block: ParsedUserMetadataBlock | null
 } {
-  if (!text.trimStart().startsWith("Uncommitted changes detected:")) {
+  const hasGitActionSignal =
+    /Uncommitted changes detected:/i.test(text) ||
+    /ACTION REQUIRED:/i.test(text) ||
+    /Commit your changes:/i.test(text) ||
+    /Push your committed changes/i.test(text)
+  if (!hasGitActionSignal) {
     return { cleanedText: text, block: null }
   }
 
@@ -169,11 +182,18 @@ function extractUncommittedChangesBlock(text: string): {
 
   const details: Array<{ label: string; value: string }> = []
   const notes: string[] = []
-  const first = lines[0]
+  const first = lines.find(
+    (line) =>
+      /Uncommitted changes detected:/i.test(line) ||
+      /modified \(\d+ file\(s\)\)/i.test(line) ||
+      /ACTION REQUIRED:/i.test(line)
+  )
   if (first) {
     details.push({
       label: "changes",
-      value: compactMetadataValue(first.replace(/^Uncommitted changes detected:\s*/i, "")),
+      value: compactMetadataValue(
+        first.replace(/^Uncommitted changes detected:\s*/i, "").replace(/^ACTION REQUIRED:\s*/i, "")
+      ),
     })
   }
 
@@ -184,21 +204,34 @@ function extractUncommittedChangesBlock(text: string): {
     )
   }
 
-  const commitCommand = lines.find((line) => line.startsWith("git commit -m"))
+  const commitCommand = lines.find((line) => /\bgit\s+commit\b/.test(line))
   if (commitCommand) {
     details.push({ label: "commit", value: compactMetadataValue(commitCommand) })
   }
-  const pushCommand = lines.find((line) => line.startsWith("git push "))
+  const pushCommand = lines.find((line) => /\bgit\s+push\b/.test(line))
   if (pushCommand) {
     details.push({ label: "push", value: compactMetadataValue(pushCommand) })
   }
 
-  const filePaths = lines
-    .filter((line) => line.startsWith("src/"))
-    .slice(0, 4)
-    .map((line) => line.trim())
-  if (filePaths.length > 0) {
-    for (const filePath of filePaths) {
+  const pathRegex = /\b([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx|json|md|yml|yaml|sh|css|html))\b/g
+  const filePathSet = new Set<string>()
+  for (const line of lines) {
+    const matches = line.match(pathRegex) ?? []
+    for (const match of matches) {
+      if (match.includes("/")) filePathSet.add(match)
+      if (filePathSet.size >= 6) break
+    }
+    if (filePathSet.size >= 6) break
+  }
+  const filePaths = [...filePathSet]
+  const declaredFileCountRaw = first?.match(/(\d+)\s*file\(s\)/i)?.[1]
+  const declaredFileCount = declaredFileCountRaw ? Number.parseInt(declaredFileCountRaw, 10) : null
+  const cappedFilePaths =
+    declaredFileCount && declaredFileCount > 0
+      ? filePaths.slice(0, Math.min(filePaths.length, declaredFileCount))
+      : filePaths
+  if (cappedFilePaths.length > 0) {
+    for (const filePath of cappedFilePaths) {
       details.push({ label: "file", value: filePath })
     }
   }
@@ -498,6 +531,18 @@ function parseObjective(text: string): ParsedObjective | null {
     title: "Parsed objective",
     bullets: [genericObjective.charAt(0).toUpperCase() + genericObjective.slice(1)],
   }
+}
+
+function sanitizeInternalNoise(text: string): string {
+  return text
+    .replace(/(^|\n)\s*StructuredOutput\s*(?=\n|$)/gi, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+}
+
+function stripRolePrefix(text: string, role: "user" | "assistant"): string {
+  const prefix = role === "user" ? /^User:\s*/i : /^Assistant:\s*/i
+  return text.replace(prefix, "").trim()
 }
 
 function tryParseJson(text: string): string | null {

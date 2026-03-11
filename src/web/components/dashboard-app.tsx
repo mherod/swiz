@@ -444,6 +444,8 @@ export function DashboardApp() {
         totalDispatches={m.totalDispatches ?? 0}
         projects={projectCount}
         activeWatches={watchCount}
+        activeHooks={activeHookDispatches.length}
+        selectedProjectName={activeProject?.name ?? null}
       />
       <SessionNav
         projects={visibleProjects}
@@ -474,6 +476,7 @@ export function DashboardApp() {
         events={projectEvents.length > 0 ? projectEvents : toSortedEvents(m.byEvent)}
         scope={optimisticProjectCwd ? "project" : "global"}
         cacheStatus={cacheStatus}
+        selectedProjectCwd={optimisticProjectCwd}
         activeSession={activeSession}
         activeHookDispatches={activeHookDispatches}
         loadedMessageCount={sessionMessages.length}

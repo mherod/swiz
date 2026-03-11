@@ -1,6 +1,7 @@
 import { dirname, extname, join } from "node:path"
 import { executeDispatch } from "../../dispatch/execute.ts"
 import { deleteSessionData, resolveSessionDeletionTargets } from "../../session-data-delete.ts"
+import { readSwizSettings, writeProjectSettings, writeSwizSettings } from "../../settings.ts"
 import {
   type ActiveHookDispatch,
   type CachedSnapshot,
@@ -668,7 +669,107 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
         registerProjectWatchers(cwd)
         touchProject(cwd)
         const cached = await projectSettingsCache.get(cwd)
-        return Response.json(cached)
+        const globalSettings = await readSwizSettings()
+        return Response.json({
+          ...cached,
+          globalSettings: {
+            prMergeMode: globalSettings.prMergeMode,
+          },
+        })
+      }
+
+      if (url.pathname === "/settings/project/update" && req.method === "POST") {
+        const body = (await req.json().catch(() => null)) as {
+          cwd?: string
+          updates?: {
+            collaborationMode?: "auto" | "solo" | "team" | "relaxed-collab"
+            prMergeMode?: boolean
+            strictNoDirectMain?: boolean
+          }
+        } | null
+        const cwd = body?.cwd
+        const updates = body?.updates
+        if (
+          typeof cwd !== "string" ||
+          cwd.length === 0 ||
+          !updates ||
+          typeof updates !== "object"
+        ) {
+          return Response.json(
+            { error: "Missing required fields: cwd (string), updates (object)" },
+            { status: 400 }
+          )
+        }
+
+        const normalizedUpdates: {
+          collaborationMode?: "auto" | "solo" | "team" | "relaxed-collab"
+          prMergeMode?: boolean
+          strictNoDirectMain?: boolean
+        } = {}
+
+        if ("collaborationMode" in updates) {
+          const mode = updates.collaborationMode
+          if (mode !== "auto" && mode !== "solo" && mode !== "team" && mode !== "relaxed-collab") {
+            return Response.json(
+              {
+                error: "collaborationMode must be one of: auto, solo, team, relaxed-collab",
+              },
+              { status: 400 }
+            )
+          }
+          normalizedUpdates.collaborationMode = mode
+        }
+
+        if ("prMergeMode" in updates) {
+          if (typeof updates.prMergeMode !== "boolean") {
+            return Response.json({ error: "prMergeMode must be a boolean" }, { status: 400 })
+          }
+          normalizedUpdates.prMergeMode = updates.prMergeMode
+        }
+
+        if ("strictNoDirectMain" in updates) {
+          if (typeof updates.strictNoDirectMain !== "boolean") {
+            return Response.json({ error: "strictNoDirectMain must be a boolean" }, { status: 400 })
+          }
+          normalizedUpdates.strictNoDirectMain = updates.strictNoDirectMain
+        }
+
+        if (Object.keys(normalizedUpdates).length === 0) {
+          return Response.json({ error: "No supported updates provided" }, { status: 400 })
+        }
+
+        registerProjectWatchers(cwd)
+        touchProject(cwd)
+        const projectUpdates: {
+          collaborationMode?: "auto" | "solo" | "team" | "relaxed-collab"
+          strictNoDirectMain?: boolean
+        } = {}
+        if (normalizedUpdates.collaborationMode !== undefined) {
+          projectUpdates.collaborationMode = normalizedUpdates.collaborationMode
+        }
+        if (normalizedUpdates.strictNoDirectMain !== undefined) {
+          projectUpdates.strictNoDirectMain = normalizedUpdates.strictNoDirectMain
+        }
+        if (Object.keys(projectUpdates).length > 0) {
+          await writeProjectSettings(cwd, projectUpdates)
+        }
+        if (normalizedUpdates.prMergeMode !== undefined) {
+          const globalSettings = await readSwizSettings()
+          await writeSwizSettings({
+            ...globalSettings,
+            prMergeMode: normalizedUpdates.prMergeMode,
+          })
+        }
+        projectSettingsCache.invalidateProject(cwd)
+        manifestCache.invalidateProject(cwd)
+        const cached = await projectSettingsCache.get(cwd)
+        const globalSettings = await readSwizSettings()
+        return Response.json({
+          ...cached,
+          globalSettings: {
+            prMergeMode: globalSettings.prMergeMode,
+          },
+        })
       }
 
       const sessionRouteResponse = await handleSessionRoutes(req, url, {

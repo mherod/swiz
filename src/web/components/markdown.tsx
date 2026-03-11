@@ -15,20 +15,48 @@ function renderInline(text: string): string {
   return out
 }
 
+function normalizeMarkdownSource(src: string): string {
+  return src
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .flatMap((line) => {
+      const normalizedLine = line
+        // Common bullet variants emitted by models.
+        .replace(/^(\s*)[•●▪◦‣]\s+/, "$1- ")
+        .replace(/^(\s*)[–—−]\s+/, "$1- ")
+        // Ordered lists often use ")" in assistant output.
+        .replace(/^(\s*)(\d+)\)\s+/, "$1$2. ")
+      const inlineBulletParts = normalizedLine.split(/\s-\s+/)
+      const looksLikeInlineList =
+        inlineBulletParts.length >= 3 &&
+        /(\*\*|`)/.test(normalizedLine) &&
+        !/^\s*[-*]\s+/.test(normalizedLine)
+      if (!looksLikeInlineList) return [normalizedLine]
+
+      const [head, ...tail] = inlineBulletParts
+      const expanded = [head?.trimEnd() ?? "", ...tail.map((part) => `- ${part.trim()}`)].filter(
+        Boolean
+      )
+      return expanded
+    })
+    .join("\n")
+}
+
 function renderMarkdown(src: string): string {
-  const lines = src.split("\n")
+  const lines = normalizeMarkdownSource(src).split("\n")
   const html: string[] = []
   let i = 0
 
   while (i < lines.length) {
     const line = lines[i]!
+    const trimmed = line.trim()
 
     // fenced code block
-    if (line.startsWith("```")) {
-      const lang = line.slice(3).trim()
+    if (/^\s*```/.test(line)) {
+      const lang = line.replace(/^\s*```/, "").trim()
       const codeLines: string[] = []
       i++
-      while (i < lines.length && !lines[i]!.startsWith("```")) {
+      while (i < lines.length && !/^\s*```/.test(lines[i]!)) {
         codeLines.push(escapeHtml(lines[i]!))
         i++
       }
@@ -39,7 +67,7 @@ function renderMarkdown(src: string): string {
     }
 
     // headings
-    const headingMatch = line.match(/^(#{1,4})\s+(.+)$/)
+    const headingMatch = line.match(/^\s*(#{1,4})\s+(.+)$/)
     if (headingMatch) {
       const level = headingMatch[1]!.length + 2 // h3-h6 (offset since h1/h2 used by page)
       const capped = Math.min(level, 6)
@@ -49,10 +77,10 @@ function renderMarkdown(src: string): string {
     }
 
     // unordered list
-    if (/^[-*]\s/.test(line)) {
+    if (/^\s*[-*]\s+/.test(line)) {
       html.push('<ul class="md-list">')
-      while (i < lines.length && /^[-*]\s/.test(lines[i]!)) {
-        html.push(`<li>${renderInline(lines[i]!.replace(/^[-*]\s/, ""))}</li>`)
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i]!)) {
+        html.push(`<li>${renderInline(lines[i]!.replace(/^\s*[-*]\s+/, ""))}</li>`)
         i++
       }
       html.push("</ul>")
@@ -60,10 +88,10 @@ function renderMarkdown(src: string): string {
     }
 
     // ordered list
-    if (/^\d+\.\s/.test(line)) {
+    if (/^\s*\d+[.]\s+/.test(line)) {
       html.push('<ol class="md-list">')
-      while (i < lines.length && /^\d+\.\s/.test(lines[i]!)) {
-        html.push(`<li>${renderInline(lines[i]!.replace(/^\d+\.\s/, ""))}</li>`)
+      while (i < lines.length && /^\s*\d+[.]\s+/.test(lines[i]!)) {
+        html.push(`<li>${renderInline(lines[i]!.replace(/^\s*\d+[.]\s+/, ""))}</li>`)
         i++
       }
       html.push("</ol>")
@@ -71,14 +99,29 @@ function renderMarkdown(src: string): string {
     }
 
     // blank line
-    if (line.trim() === "") {
+    if (trimmed === "") {
       i++
       continue
     }
 
-    // paragraph
-    html.push(`<p>${renderInline(line)}</p>`)
+    // paragraph (join wrapped lines until next block)
+    const paragraphLines: string[] = [trimmed]
     i++
+    while (i < lines.length) {
+      const next = lines[i]!
+      if (
+        next.trim() === "" ||
+        /^\s*```/.test(next) ||
+        /^\s*(#{1,4})\s+/.test(next) ||
+        /^\s*[-*]\s+/.test(next) ||
+        /^\s*\d+[.]\s+/.test(next)
+      ) {
+        break
+      }
+      paragraphLines.push(next.trim())
+      i++
+    }
+    html.push(`<p>${renderInline(paragraphLines.join(" "))}</p>`)
   }
 
   return html.join("\n")

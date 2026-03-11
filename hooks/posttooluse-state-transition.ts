@@ -10,8 +10,8 @@
 // Transitions (async — require runtime checks):
 //   git commit + branch has CHANGES_REQUESTED PR reviews : reviewing → addressing-feedback
 //   git commit + branch has no upstream tracking         : planning|reviewing|addressing-feedback → developing
-//   git commit + on default branch (solo repo)           : reviewing|addressing-feedback → developing
-//   git checkout <default-branch>                        : reviewing | addressing-feedback → developing
+//   git commit + on default branch                        : non-developing → developing
+//   git checkout|switch <default-branch>                 : non-developing → developing
 //   git checkout -b <new-branch> (from default branch)  : any → developing
 //   git checkout <branch> (HEAD authored by other user)  : any → reviewing
 //   gh pr checkout <number> (HEAD authored by other user): any → reviewing
@@ -19,7 +19,6 @@
 // Only transitions if current state matches the expected source state(s),
 // so this is safe to run regardless of workflow or whether PRs are used.
 
-import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
 import { readProjectState, writeProjectState } from "../src/settings.ts"
 import { getOpenPrForBranch, git, hasGhCli, isGitHubRemote, isGitRepo } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
@@ -69,6 +68,12 @@ function isReviewingLikeState(state: ProjectState): boolean {
 function extractCheckoutBranch(command: string): string | null {
   // Match: git checkout <branch> — not a flag, not -b/-B/-c/-C
   const match = command.match(/\bgit\s+checkout\s+(?!-[bcBC](?:\s|$))([^\s;|&-][^\s;|&]*)/)
+  return match?.[1] ?? null
+}
+
+/** Extract target branch from `git switch <branch>` (non -c/-C form). */
+function extractSwitchBranch(command: string): string | null {
+  const match = command.match(/\bgit\s+switch\s+(?!-[cC](?:\s|$))([^\s;|&-][^\s;|&]*)/)
   return match?.[1] ?? null
 }
 
@@ -163,16 +168,13 @@ async function transitionToDevelopingOnMissingUpstream(
   }
 }
 
-async function transitionToDevelopingOnSoloDefaultBranchCommit(cwd: string): Promise<boolean> {
+async function transitionToDevelopingOnDefaultBranchCommit(cwd: string): Promise<boolean> {
   try {
     const branch = (await git(["branch", "--show-current"], cwd)).trim()
     if (!branch) return false
 
     const defaultBranch = await getDefaultBranch(cwd)
     if (!isDefaultBranch(branch, defaultBranch)) return false
-
-    const collaboration = await detectProjectCollaborationPolicy(cwd)
-    if (collaboration.isCollaborative) return false
 
     await writeProjectState(cwd, "developing")
     return true
@@ -200,26 +202,32 @@ async function handleAsyncTransitions(
   if (isCommit && isNoUpstreamTransitionState) {
     const upstreamStatus = await transitionToDevelopingOnMissingUpstream(cwd)
     if (upstreamStatus === "transitioned") return true
-    if (upstreamStatus === "abort") return false
 
-    // ── git commit on default branch (solo repo): reviewing|addressing-feedback → developing ──
-    if (await transitionToDevelopingOnSoloDefaultBranchCommit(cwd)) return true
+    // ── git commit on default branch: non-developing → developing ──
+    if (await transitionToDevelopingOnDefaultBranchCommit(cwd)) return true
   }
 
-  // ── git checkout <default-branch>: reviewing|addressing-feedback → developing ──
-  if (GIT_CHECKOUT_RE.test(command) && !GIT_CHECKOUT_NEW_BRANCH_RE.test(command)) {
-    if (isReviewingLike) {
-      const targetBranch = extractCheckoutBranch(command)
-      if (targetBranch) {
-        try {
-          const defaultBranch = await getDefaultBranch(cwd)
-          if (isDefaultBranch(targetBranch, defaultBranch)) {
-            await writeProjectState(cwd, "developing")
-            return true
-          }
-        } catch {
-          // skip
+  // ── git commit on default branch: non-developing → developing ──
+  if (isCommit && state !== "developing") {
+    if (await transitionToDevelopingOnDefaultBranchCommit(cwd)) return true
+  }
+
+  // ── git checkout|switch <default-branch>: non-developing → developing ──
+  if (
+    (GIT_CHECKOUT_RE.test(command) || /\bgit\s+switch\b/.test(command)) &&
+    !GIT_CHECKOUT_NEW_BRANCH_RE.test(command) &&
+    state !== "developing"
+  ) {
+    const targetBranch = extractCheckoutBranch(command) ?? extractSwitchBranch(command)
+    if (targetBranch) {
+      try {
+        const defaultBranch = await getDefaultBranch(cwd)
+        if (isDefaultBranch(targetBranch, defaultBranch)) {
+          await writeProjectState(cwd, "developing")
+          return true
         }
+      } catch {
+        // skip
       }
     }
   }
