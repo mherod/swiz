@@ -291,10 +291,13 @@ async function updateStatus(
   sessionId: string,
   taskId: string,
   newStatus: Task["status"],
-  evidence?: string,
-  verifyText?: string,
-  filterCwd?: string
+  options: {
+    evidence?: string
+    verifyText?: string
+    filterCwd?: string
+  } = {}
 ) {
+  const { evidence, verifyText, filterCwd } = options
   const { sessionId: effectiveSessionId, task } = await resolveTaskById(
     taskId,
     sessionId,
@@ -367,14 +370,10 @@ async function completeAll(targetSessionId: string, filterCwd?: string, evidence
     `\n  Completing ${incomplete.length} task(s) across ${new Set(incomplete.map((i) => i.sessionId)).size} session(s)...\n`
   )
   for (const { task } of incomplete) {
-    await updateStatus(
-      targetSessionId,
-      task.id,
-      "completed",
-      resolvedEvidence,
-      undefined,
-      filterCwd
-    )
+    await updateStatus(targetSessionId, task.id, "completed", {
+      evidence: resolvedEvidence,
+      filterCwd,
+    })
   }
 }
 
@@ -567,6 +566,32 @@ async function resolveSession(args: string[]): Promise<string> {
   return sessions[0]!
 }
 
+async function printPreviousSessionIncompleteHint(sessionId: string): Promise<void> {
+  const tasks = await readTasks(sessionId)
+  if (tasks.length === 0) return
+
+  const hasIncomplete = tasks.some((t) => t.status === "pending" || t.status === "in_progress")
+  if (hasIncomplete) return
+
+  const sessions = await getSessions(process.cwd())
+  for (const prevSessionId of sessions.slice(1)) {
+    const prev = await readTasks(prevSessionId)
+    const prevIncomplete = prev.filter((t) => t.status === "pending" || t.status === "in_progress")
+    if (prevIncomplete.length === 0) continue
+
+    console.log(
+      `  ${DIM}Incomplete tasks in previous session: ${prevSessionId.slice(0, 8)}...${RESET}`
+    )
+    for (const task of prevIncomplete) {
+      console.log(
+        `    ${DIM}swiz tasks complete ${task.id} --session ${prevSessionId} --evidence "note:done"${RESET}`
+      )
+    }
+    console.log()
+    break
+  }
+}
+
 // ─── Command ──────────────────────────────────────────────────────────────────
 
 export const tasksCommand: Command = {
@@ -652,33 +677,7 @@ export const tasksCommand: Command = {
       )
 
       if (!args.includes("--session") && !allProjects) {
-        const tasks = await readTasks(sessionId)
-        const hasIncomplete = tasks.some(
-          (t) => t.status === "pending" || t.status === "in_progress"
-        )
-        if (!hasIncomplete && tasks.length > 0) {
-          const cwdFilter = process.cwd()
-          const sessions = await getSessions(cwdFilter)
-          for (let i = 1; i < sessions.length; i++) {
-            const prevSessionId = sessions[i]!
-            const prev = await readTasks(prevSessionId)
-            const prevIncomplete = prev.filter(
-              (t) => t.status === "pending" || t.status === "in_progress"
-            )
-            if (prevIncomplete.length > 0) {
-              console.log(
-                `  ${DIM}Incomplete tasks in previous session: ${prevSessionId.slice(0, 8)}...${RESET}`
-              )
-              for (const t of prevIncomplete) {
-                console.log(
-                  `    ${DIM}swiz tasks complete ${t.id} --session ${prevSessionId} --evidence "note:done"${RESET}`
-                )
-              }
-              console.log()
-              break
-            }
-          }
-        }
+        await printPreviousSessionIncompleteHint(sessionId)
       }
       return
     }
@@ -751,7 +750,11 @@ export const tasksCommand: Command = {
           verify = task.subject
         }
 
-        await updateStatus(sessionId, taskId, "completed", evidence, verify, filterCwd)
+        await updateStatus(sessionId, taskId, "completed", {
+          evidence,
+          verifyText: verify,
+          filterCwd,
+        })
         if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
         break
       }
@@ -800,7 +803,11 @@ export const tasksCommand: Command = {
           subject: subjectFlag,
         })
 
-        await updateStatus(sessionId, taskId, newStatus, evidence, verify, filterCwd)
+        await updateStatus(sessionId, taskId, newStatus, {
+          evidence,
+          verifyText: verify,
+          filterCwd,
+        })
         if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
         break
       }
