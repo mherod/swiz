@@ -28,6 +28,12 @@ export interface SessionMessage {
   toolCalls?: ToolCallSummary[]
 }
 
+interface GroupedSessionMessage {
+  message: SessionMessage
+  count: number
+  originalIndices: number[]
+}
+
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleString([], { dateStyle: "short", timeStyle: "short" })
 }
@@ -156,6 +162,35 @@ function formatAssistantJsonBlocks(text: string): string {
   const prefix = withNormalizedFences.slice(0, start).trimEnd()
   if (!prefix) return `\`\`\`json\n${parsed}\n\`\`\``
   return `${prefix}\n\n\`\`\`json\n${parsed}\n\`\`\``
+}
+
+function canonicalGroupKey(message: SessionMessage): string {
+  if (message.role !== "assistant") return `${message.role}|${message.text}`
+  const normalized = message.text
+    .replace(/after\s+\d+h\d+m\d+s\.?/gi, "after <duration>")
+    .replace(/\b\d+m\d+s\b/gi, "<duration>")
+    .replace(/\s+/g, " ")
+    .trim()
+  return `${message.role}|${normalized}`
+}
+
+function groupMessages(messages: SessionMessage[]): GroupedSessionMessage[] {
+  const grouped: GroupedSessionMessage[] = []
+  for (let i = 0; i < messages.length; i++) {
+    const current = messages[i]!
+    const last = grouped[grouped.length - 1]
+    if (last && canonicalGroupKey(last.message) === canonicalGroupKey(current)) {
+      last.count += 1
+      last.originalIndices.push(i)
+      continue
+    }
+    grouped.push({
+      message: current,
+      count: 1,
+      originalIndices: [i],
+    })
+  }
+  return grouped
 }
 
 function MessageBody({ text, role }: { text: string; role: "user" | "assistant" }) {
@@ -397,6 +432,7 @@ export function SessionMessages({ messages, loading, newKeys, msgKey, toolStats 
     if (!a.timestamp || !b.timestamp) return 0
     return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   })
+  const grouped = groupMessages(sorted)
 
   return (
     <section className="card bento-messages">
@@ -409,19 +445,24 @@ export function SessionMessages({ messages, loading, newKeys, msgKey, toolStats 
         <p className="empty">No messages for this session.</p>
       ) : (
         <ul className="messages-list" aria-label="Last 30 transcript messages">
-          {sorted.map((message, i) => {
+          {grouped.map(({ message, count, originalIndices }, i) => {
             const role = message.role === "assistant" ? "Assistant" : "User"
             const timestamp = message.timestamp
               ? formatTime(new Date(message.timestamp).getTime())
               : "Unknown time"
-            const origIdx = messages.indexOf(message)
-            const key = msgKey ? msgKey(message, origIdx) : `${message.timestamp}-${i}`
-            const isNew = newKeys?.has(key) ?? false
+            const groupKeys = msgKey
+              ? originalIndices.map((idx) => msgKey(sorted[idx]!, idx))
+              : [`${message.timestamp}-${i}`]
+            const key = groupKeys[0]!
+            const isNew = groupKeys.some((groupKey) => newKeys?.has(groupKey) ?? false)
             return (
               <li key={key} className={`message-row ${message.role}${isNew ? " message-new" : ""}`}>
                 <div className="message-meta">
                   <span className="message-role">{role}</span>
-                  <span>{timestamp}</span>
+                  <span className="message-meta-right">
+                    {count > 1 ? <span className="message-repeat-badge">x{count}</span> : null}
+                    <span>{timestamp}</span>
+                  </span>
                 </div>
                 {message.text && <MessageBody text={message.text} role={message.role} />}
                 {message.toolCalls && message.toolCalls.length > 0 && (

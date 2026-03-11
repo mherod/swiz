@@ -530,6 +530,27 @@ tbody tr:hover {
   margin-bottom: 6px;
 }
 
+.message-meta-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.message-repeat-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2ch;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(118, 169, 255, 0.16);
+  border: 1px solid rgba(118, 169, 255, 0.3);
+  color: #a8c7ff;
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
 .message-role {
   font-weight: 600;
   letter-spacing: 0.02em;
