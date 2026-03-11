@@ -142,11 +142,84 @@ function extractInlineContextBlocks(text: string): {
   cleanedText = attachedFiles.cleanedText
   if (attachedFiles.block) metadataBlocks.push(attachedFiles.block)
 
+  const inlineTagged = extractInlineTaggedMetadataBlocks(cleanedText)
+  cleanedText = inlineTagged.cleanedText
+  metadataBlocks.push(...inlineTagged.blocks)
+
   const domContext = extractDomInspectionBlocks(cleanedText)
   cleanedText = domContext.cleanedText
   metadataBlocks.push(...domContext.blocks)
 
   return { cleanedText, metadataBlocks }
+}
+
+const INLINE_METADATA_TAGS = [
+  "user_query",
+  "agent_transcripts",
+  "open_and_recently_viewed_files",
+  "user_info",
+  "git_status",
+  "system_reminder",
+] as const
+
+function extractInlineTaggedMetadataBlocks(text: string): {
+  cleanedText: string
+  blocks: ParsedUserMetadataBlock[]
+} {
+  let cleanedText = text
+  const blocks: ParsedUserMetadataBlock[] = []
+
+  for (const tagName of INLINE_METADATA_TAGS) {
+    const extracted = extractNamedInlineTagBlocks(cleanedText, tagName)
+    cleanedText = extracted.cleanedText
+    blocks.push(...extracted.blocks)
+  }
+
+  return { cleanedText, blocks }
+}
+
+function extractNamedInlineTagBlocks(
+  text: string,
+  tagName: string
+): { cleanedText: string; blocks: ParsedUserMetadataBlock[] } {
+  const escapedTag = tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const tagRe = new RegExp(
+    `<${escapedTag}>\\s*([\\s\\S]*?)(?:\\s*<\\/${escapedTag}>|(?=<[a-z_]+(?:\\s|>))|$)`,
+    "gi"
+  )
+  const blocks: ParsedUserMetadataBlock[] = []
+  let cleanedText = text
+  for (const match of text.matchAll(tagRe)) {
+    const full = match[0]
+    if (!full) continue
+    const parsed = parseInlineTaggedMetadataBlock(tagName, (match[1] ?? "").trim())
+    if (parsed) blocks.push(parsed)
+    cleanedText = cleanedText.replace(full, "").trim()
+  }
+
+  return { cleanedText, blocks }
+}
+
+function parseInlineTaggedMetadataBlock(
+  tagName: string,
+  raw: string
+): ParsedUserMetadataBlock | null {
+  if (tagName === "user_query") return parseInlineUserQueryBlock(raw)
+  return parseGenericMetadataBlock(tagName, raw)
+}
+
+function parseInlineUserQueryBlock(raw: string): ParsedUserMetadataBlock | null {
+  const normalized = raw
+    .replace(/```[\s\S]*?```/g, (block) => compactMetadataValue(block.replace(/\s+/g, " "), 180))
+    .replace(/\s+/g, " ")
+    .trim()
+  if (!normalized) return null
+  return {
+    title: "Embedded user query",
+    details: [],
+    notes: [compactMetadataValue(normalized, 220)],
+    kind: "tagged",
+  }
 }
 
 function extractLeadingSlashCommandBlock(text: string): {
@@ -246,6 +319,49 @@ function extractUncommittedChangesBlock(text: string): {
   }
 }
 
+function buildDomInspectionBlockFromMatch(
+  match: RegExpMatchArray,
+  index: number
+): ParsedUserMetadataBlock | null {
+  const domPathRaw = match[1] ?? ""
+  const positionRaw = match[2] ?? ""
+  const componentRaw = match[3] ?? ""
+  const elementRaw = match[4] ?? ""
+
+  const details: Array<{ label: string; value: string }> = []
+  const domPath = compactMetadataValue(domPathRaw, 220)
+  if (domPath) details.push({ label: "dom path", value: domPath })
+
+  const position = compactMetadataValue(positionRaw, 180)
+  if (position) details.push({ label: "position", value: position })
+
+  const component = compactMetadataValue(componentRaw, 120)
+  if (component) details.push({ label: "react component", value: component })
+
+  const htmlElement = compactHtmlElementValue(elementRaw)
+  if (htmlElement) details.push({ label: "html element", value: htmlElement })
+  if (details.length === 0) return null
+
+  return {
+    title: index > 0 ? `Element context ${index + 1}` : "Element context",
+    details,
+    notes: [],
+    kind: "elementContext",
+  }
+}
+
+function stripRanges(text: string, ranges: Array<{ start: number; end: number }>): string {
+  if (ranges.length === 0) return text
+  let cleanedText = ""
+  let cursor = 0
+  for (const range of ranges) {
+    cleanedText += text.slice(cursor, range.start)
+    cursor = range.end
+  }
+  cleanedText += text.slice(cursor)
+  return cleanedText.trim()
+}
+
 function extractDomInspectionBlocks(text: string): {
   cleanedText: string
   blocks: ParsedUserMetadataBlock[]
@@ -256,45 +372,16 @@ function extractDomInspectionBlocks(text: string): {
   const consumedRanges: Array<{ start: number; end: number }> = []
   for (const match of text.matchAll(entryRe)) {
     const start = match.index
-    if (start == null) continue
-    const [raw, domPathRaw, positionRaw, componentRaw, elementRaw] = match
-    if (!raw) continue
-
-    const details: Array<{ label: string; value: string }> = []
-    const domPath = compactMetadataValue(domPathRaw ?? "", 220)
-    if (domPath) details.push({ label: "dom path", value: domPath })
-
-    const position = compactMetadataValue(positionRaw ?? "", 180)
-    if (position) details.push({ label: "position", value: position })
-
-    const component = compactMetadataValue(componentRaw ?? "", 120)
-    if (component) details.push({ label: "react component", value: component })
-
-    const htmlElement = compactHtmlElementValue(elementRaw ?? "")
-    if (htmlElement) details.push({ label: "html element", value: htmlElement })
-
-    if (details.length > 0) {
-      blocks.push({
-        title: blocks.length > 0 ? `Element context ${blocks.length + 1}` : "Element context",
-        details,
-        notes: [],
-        kind: "elementContext",
-      })
-      consumedRanges.push({ start, end: start + raw.length })
-    }
+    const raw = match[0]
+    if (start == null || !raw) continue
+    const block = buildDomInspectionBlockFromMatch(match, blocks.length)
+    if (!block) continue
+    blocks.push(block)
+    consumedRanges.push({ start, end: start + raw.length })
   }
 
   if (blocks.length === 0) return { cleanedText: text, blocks: [] }
-
-  let cleanedText = ""
-  let cursor = 0
-  for (const range of consumedRanges) {
-    cleanedText += text.slice(cursor, range.start)
-    cursor = range.end
-  }
-  cleanedText += text.slice(cursor)
-
-  return { cleanedText: cleanedText.trim(), blocks }
+  return { cleanedText: stripRanges(text, consumedRanges), blocks }
 }
 
 function extractAttachedFilesBlock(text: string): {
@@ -330,6 +417,31 @@ function extractAttachedFilesBlock(text: string): {
   }
 }
 
+function parseCodeSelectionBlock(
+  attrsRaw: string,
+  codeRaw: string,
+  index: number
+): ParsedUserMetadataBlock | null {
+  const path = /path="([^"]+)"/i.exec(attrsRaw)?.[1]?.trim() ?? null
+  const lines = /lines="([^"]+)"/i.exec(attrsRaw)?.[1]?.trim() ?? null
+
+  const details: Array<{ label: string; value: string }> = []
+  if (path) details.push({ label: "path", value: compactPathValue(path) })
+  if (lines) details.push({ label: "lines", value: lines })
+
+  const notes: string[] = []
+  const preview = compactCodeSelectionPreview(codeRaw)
+  if (preview) notes.push(preview)
+
+  if (details.length === 0 && notes.length === 0) return null
+  return {
+    title: index > 0 ? `Code selection ${index + 1}` : "Code selection",
+    details,
+    notes,
+    kind: "tagged",
+  }
+}
+
 function extractCodeSelectionBlocks(text: string): {
   cleanedText: string
   blocks: ParsedUserMetadataBlock[]
@@ -340,27 +452,9 @@ function extractCodeSelectionBlocks(text: string): {
 
   for (const match of text.matchAll(blockRe)) {
     const full = match[0]
-    const attrsRaw = match[1] ?? ""
-    const codeRaw = (match[2] ?? "").trim()
-    const path = /path="([^"]+)"/i.exec(attrsRaw)?.[1]?.trim() ?? null
-    const lines = /lines="([^"]+)"/i.exec(attrsRaw)?.[1]?.trim() ?? null
-
-    const details: Array<{ label: string; value: string }> = []
-    if (path) details.push({ label: "path", value: compactPathValue(path) })
-    if (lines) details.push({ label: "lines", value: lines })
-    const notes: string[] = []
-    const preview = compactCodeSelectionPreview(codeRaw)
-    if (preview) notes.push(preview)
-
-    if (details.length > 0 || notes.length > 0) {
-      blocks.push({
-        title: blocks.length > 0 ? `Code selection ${blocks.length + 1}` : "Code selection",
-        details,
-        notes,
-        kind: "tagged",
-      })
-    }
-
+    if (!full) continue
+    const block = parseCodeSelectionBlock(match[1] ?? "", (match[2] ?? "").trim(), blocks.length)
+    if (block) blocks.push(block)
     cleanedText = cleanedText.replace(full, "").trim()
   }
 
@@ -380,19 +474,6 @@ function compactPathValue(path: string): string {
   if (path.length <= 120) return path
   const keep = 55
   return `${path.slice(0, keep)}…${path.slice(-keep)}`
-}
-
-function extractLineValue(
-  text: string,
-  label: string
-): { cleanedText: string; value: string | null } {
-  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  const regex = new RegExp(`${escaped}\\s*(.+)(?:\\n|$)`, "i")
-  const match = regex.exec(text)
-  if (!match?.[1]) return { cleanedText: text, value: null }
-  const value = compactMetadataValue(match[1].trim())
-  const cleanedText = text.replace(match[0], "").trim()
-  return { cleanedText, value: value.length > 0 ? value : null }
 }
 
 function compactMetadataValue(value: string, max = 120): string {
