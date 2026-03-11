@@ -1871,32 +1871,44 @@ export const daemonCommand: Command = {
           }
 
           const start = performance.now()
-          const proc = Bun.spawn(["bun", Bun.main, "dispatch", "prPoll"], {
-            cwd,
-            stdout: "pipe",
-            stderr: "pipe",
-          })
-          const [stdout, stderr] = await Promise.all([
-            new Response(proc.stdout).text(),
-            new Response(proc.stderr).text(),
-          ])
-          await proc.exited
-          const durationMs = performance.now() - start
-          recordDispatch(globalMetrics, "prPoll", durationMs)
+          try {
+            const payloadStr = JSON.stringify({ cwd })
+            const result = await executeDispatch({
+              canonicalEvent: "prPoll",
+              hookEventName: "prPoll",
+              payloadStr,
+              daemonContext: true,
+              transcriptSummaryProvider: async (path) => {
+                const index = await transcriptIndex.get(path)
+                return index?.summary ?? null
+              },
+              manifestProvider: async (projectCwd) => manifestCache.get(projectCwd),
+            })
+            const durationMs = performance.now() - start
+            recordDispatch(globalMetrics, "prPoll", durationMs)
 
-          if (cwd) {
             touchProject(cwd)
             recordDispatch(getProjectMetrics(cwd), "prPoll", durationMs)
             registerProjectWatchers(cwd)
-          }
 
-          return Response.json({
-            success: proc.exitCode === 0,
-            stdout,
-            stderr,
-            durationMs,
-            exitCode: proc.exitCode,
-          })
+            return Response.json({
+              success: true,
+              response: result.response,
+              durationMs,
+              exitCode: 0,
+            })
+          } catch (error) {
+            const durationMs = performance.now() - start
+            return Response.json(
+              {
+                success: false,
+                stderr: error instanceof Error ? error.message : String(error),
+                durationMs,
+                exitCode: 1,
+              },
+              { status: 500 }
+            )
+          }
         }
 
         if (url.pathname === "/settings/project" && req.method === "POST") {

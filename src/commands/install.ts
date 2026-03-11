@@ -498,11 +498,14 @@ const PR_POLL_PLIST = getLaunchAgentPlistPath(PR_POLL_LABEL)
 function buildPrPollPlist(bunBin: string, indexPath: string): string {
   const logPath = swizPrPollLogPath()
   const errorLogPath = swizPrPollErrorLogPath()
+  const projectCwd = process.cwd()
+  const shellQuotedCwd = projectCwd.replaceAll("'", "'\"'\"'")
 
-  // Try daemon /pr-poll first, fallback to standalone if curl fails
-  const payload = `{"cwd":"${process.env.HOME}"}`
-  const curlCmd = `curl -sSf -X POST "http://localhost:7943/pr-poll" -d '${payload}' -H 'Content-Type: application/json'`
-  const fallbackCmd = `'${bunBin}' '${indexPath}' dispatch prPoll`
+  // Route prPoll through daemon dispatch first; fallback to standalone dispatch.
+  const payload = JSON.stringify({ cwd: projectCwd })
+  const dispatchUrl = "http://localhost:7943/dispatch?event=prPoll&hookEventName=prPoll"
+  const curlCmd = `curl -sSf -X POST "${dispatchUrl}" -d '${payload}' -H 'Content-Type: application/json'`
+  const fallbackCmd = `cd '${shellQuotedCwd}' && '${bunBin}' '${indexPath}' dispatch prPoll`
 
   const cmd = `${curlCmd} > /dev/null 2>>${errorLogPath} || ${fallbackCmd} >>${logPath} 2>>${errorLogPath}`
 
