@@ -90,9 +90,13 @@ export function SessionNav({
   const sortedProjects = [...projects].sort((a, b) => b.lastSeenAt - a.lastSeenAt)
   const selectedProject = sortedProjects.find((p) => p.cwd === selectedProjectCwd) ?? null
   const sortedSessions = selectedProject
-    ? [...selectedProject.sessions].sort(
-        (a, b) => (b.lastMessageAt ?? b.mtime) - (a.lastMessageAt ?? a.mtime)
-      )
+    ? [...selectedProject.sessions].sort((a, b) => {
+        const aDisp = a.dispatches ?? 0
+        const bDisp = b.dispatches ?? 0
+        if (aDisp > 0 && bDisp === 0) return -1
+        if (bDisp > 0 && aDisp === 0) return 1
+        return (b.lastMessageAt ?? b.mtime) - (a.lastMessageAt ?? a.mtime)
+      })
     : null
 
   return (
