@@ -82,25 +82,28 @@ async function isGitProcessActiveForRepo(): Promise<boolean> {
   const nonAncestorPids = gitPids.filter((pid) => pid !== process.pid && !ancestors.has(pid))
   if (nonAncestorPids.length === 0) return false
 
-  // Check if any remaining git process has its CWD inside our repo.
-  const lsofProc = Bun.spawn(["lsof", "-p", nonAncestorPids.join(","), "-d", "cwd", "-Fn"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  let lsofKilled = false
-  const killTimer = setTimeout(() => {
-    lsofKilled = true
-    lsofProc.kill()
-  }, 2000)
-  const lsofOut = await new Response(lsofProc.stdout).text()
-  await lsofProc.exited
-  clearTimeout(killTimer)
+  // Check each remaining pid individually so one slow/unresponsive process
+  // does not force a global timeout classification.
+  for (const pid of nonAncestorPids) {
+    const lsofProc = Bun.spawn(["lsof", "-p", String(pid), "-d", "cwd", "-Fn"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    let lsofKilled = false
+    const killTimer = setTimeout(() => {
+      lsofKilled = true
+      lsofProc.kill()
+    }, 500)
+    const lsofOut = await new Response(lsofProc.stdout).text()
+    await lsofProc.exited
+    clearTimeout(killTimer)
 
-  if (lsofKilled) return true // Timed out — assume active to be safe.
+    if (lsofKilled) continue
 
-  for (const line of lsofOut.split("\n")) {
-    if (line.startsWith("n") && line.slice(1).startsWith(repoRoot)) {
-      return true
+    for (const line of lsofOut.split("\n")) {
+      if (line.startsWith("n") && line.slice(1).startsWith(repoRoot)) {
+        return true
+      }
     }
   }
   return false
