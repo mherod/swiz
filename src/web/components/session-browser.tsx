@@ -29,10 +29,28 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleString([], { dateStyle: "short", timeStyle: "short" })
 }
 
+import { Markdown } from "./markdown.tsx"
+
 const COLLAPSE_LINE_THRESHOLD = 20
 
-function MessageBody({ text }: { text: string }) {
+function MessageBody({ text, role }: { text: string; role: "user" | "assistant" }) {
   const lines = text.split("\n")
+  if (role === "assistant") {
+    if (lines.length <= COLLAPSE_LINE_THRESHOLD) {
+      return <Markdown text={text} />
+    }
+    const preview = lines.slice(0, COLLAPSE_LINE_THRESHOLD).join("\n")
+    const remaining = lines.length - COLLAPSE_LINE_THRESHOLD
+    return (
+      <details className="message-collapsible">
+        <summary>
+          <Markdown text={preview} />
+          <span className="message-expand-hint">{remaining} more lines</span>
+        </summary>
+        <Markdown text={text} />
+      </details>
+    )
+  }
   if (lines.length <= COLLAPSE_LINE_THRESHOLD) {
     return <pre className="message-text">{text}</pre>
   }
@@ -156,7 +174,7 @@ export function SessionMessages({ messages, loading, newKeys, msgKey }: Messages
                   <span className="message-role">{role}</span>
                   <span>{timestamp}</span>
                 </div>
-                {message.text && <MessageBody text={message.text} />}
+                {message.text && <MessageBody text={message.text} role={message.role} />}
                 {message.toolCalls && message.toolCalls.length > 0 && (
                   <ul className="tool-calls">
                     {message.toolCalls.map((tc) => (

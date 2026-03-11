@@ -559,6 +559,77 @@ tbody tr:hover {
   box-shadow: 0 0 12px rgba(118, 169, 255, 0.15);
 }
 
+/* ── Markdown body ── */
+
+.md-body {
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text-main);
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.md-body p {
+  margin: 0.35em 0;
+}
+
+.md-body .md-heading {
+  font-family: "Bricolage Grotesque", sans-serif;
+  color: var(--accent);
+  margin: 0.6em 0 0.25em;
+  font-size: 0.85rem;
+}
+
+.md-body h3.md-heading {
+  font-size: 0.9rem;
+}
+
+.md-body .md-code {
+  background: rgba(118, 169, 255, 0.08);
+  border: 1px solid rgba(118, 169, 255, 0.18);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+}
+
+.md-body .md-codeblock {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0.4em 0;
+  overflow-x: auto;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.md-body .md-codeblock code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.md-body .md-list {
+  margin: 0.3em 0;
+  padding-left: 1.4em;
+}
+
+.md-body .md-list li {
+  margin: 0.15em 0;
+}
+
+.md-body strong {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.md-body em {
+  font-style: italic;
+  color: var(--text-muted);
+}
+
 /* ── Entry animation ── */
 
 @keyframes riseIn {

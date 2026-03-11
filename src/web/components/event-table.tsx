@@ -9,12 +9,18 @@ function countWidth(maxCount: number, eventCount: number): number {
   return Math.round((eventCount / maxCount) * 100)
 }
 
-export function EventTable({ events = [] }: { events?: EventMetric[] }) {
+export function EventTable({
+  events = [],
+  scope = "global",
+}: {
+  events?: EventMetric[]
+  scope?: "global" | "project"
+}) {
   const maxCount = events.reduce((max, event) => Math.max(max, event.count), 0)
 
   return (
     <section className="card panel-events">
-      <h2 className="section-title">Dispatches</h2>
+      <h2 className="section-title">Dispatches{scope === "project" ? " (project)" : ""}</h2>
       <table aria-label="Dispatch metrics by hook event">
         <caption className="sr-only">Dispatch counts and average durations by event</caption>
         <thead>

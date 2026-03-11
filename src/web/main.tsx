@@ -78,6 +78,9 @@ function App() {
   const [sessionMessages, setSessionMessages] = useState<SessionMessage[]>([])
   const [newMessageKeys, setNewMessageKeys] = useState<Set<string>>(new Set())
   const [messagesLoading, setMessagesLoading] = useState(false)
+  const [projectEvents, setProjectEvents] = useState<
+    Array<{ name: string; count: number; avgMs: number }>
+  >([])
   const [error, setError] = useState("")
   const [lastUpdated, setLastUpdated] = useState("starting")
   const prevSnapshotRef = useRef("")
@@ -185,6 +188,25 @@ function App() {
   }, [loadMessages])
 
   useEffect(() => {
+    if (!selectedProjectCwd) {
+      setProjectEvents([])
+      return
+    }
+    const cwd = selectedProjectCwd
+    async function fetchProjectMetrics() {
+      try {
+        const pm = await fetchJson<MetricsResponse>(`/metrics?project=${encodeURIComponent(cwd)}`)
+        setProjectEvents(toSortedEvents(pm.byEvent))
+      } catch {
+        setProjectEvents([])
+      }
+    }
+    void fetchProjectMetrics()
+    const id = setInterval(() => void fetchProjectMetrics(), 5000)
+    return () => clearInterval(id)
+  }, [selectedProjectCwd])
+
+  useEffect(() => {
     if (!selectedProjectCwd || !selectedSessionId) return
     const cwd = selectedProjectCwd
     const sid = selectedSessionId
@@ -249,7 +271,10 @@ function App() {
         projects={projectCount}
         activeWatches={watchCount}
       />
-      <EventTable events={toSortedEvents(m.byEvent)} />
+      <EventTable
+        events={projectEvents.length > 0 ? projectEvents : toSortedEvents(m.byEvent)}
+        scope={selectedProjectCwd ? "project" : "global"}
+      />
       <CacheList cache={cacheStatus ?? {}} />
       <SessionNav
         projects={projects}
