@@ -37,6 +37,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # IntelliJ based IDEs
 .idea
 
+# Playwright MCP artifacts
+.playwright-mcp
+
 # Finder (MacOS) folder config
 .DS_Store
 
