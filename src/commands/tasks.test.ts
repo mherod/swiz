@@ -752,3 +752,177 @@ describe("tasks command regressions (#242)", () => {
     expect(taskB.status).toBe("pending")
   })
 })
+
+describe("native task recovery paths (#271)", () => {
+  it("complete creates placeholder stub when --subject is omitted", async () => {
+    const home = join(TMP, "issue-271-home-complete-placeholder")
+    const repoCwd = join(TMP, "issue-271-repo-complete-placeholder")
+    const sessionId = "44444444-aaaa-bbbb-cccc-000000000001"
+    const taskId = "42"
+    const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
+
+    await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+    await mkdir(repoCwd, { recursive: true })
+
+    const prevHome = process.env.HOME
+    const prevCwd = process.cwd()
+    process.env.HOME = home
+    process.chdir(repoCwd)
+    try {
+      await expect(
+        tasksCommand.run([
+          "complete",
+          taskId,
+          "--session",
+          sessionId.slice(0, 8),
+          "--state",
+          "developing",
+          "--evidence",
+          "note:completed from recovery",
+        ])
+      ).resolves.toBeUndefined()
+    } finally {
+      process.chdir(prevCwd)
+      if (prevHome === undefined) delete process.env.HOME
+      else process.env.HOME = prevHome
+    }
+
+    const recovered = JSON.parse(await readFile(taskPath, "utf8")) as {
+      subject: string
+      status: string
+      completionEvidence?: string
+    }
+    expect(recovered.subject).toBe(`Task #${taskId}`)
+    expect(recovered.status).toBe("completed")
+    expect(recovered.completionEvidence).toBe("note:completed from recovery")
+  })
+
+  it("evidence creates stub from --subject for missing task", async () => {
+    const home = join(TMP, "issue-271-home-evidence")
+    const repoCwd = join(TMP, "issue-271-repo-evidence")
+    const sessionId = "55555555-aaaa-bbbb-cccc-000000000001"
+    const taskId = "77"
+    const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
+
+    await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+    await mkdir(repoCwd, { recursive: true })
+
+    const prevHome = process.env.HOME
+    const prevCwd = process.cwd()
+    process.env.HOME = home
+    process.chdir(repoCwd)
+    try {
+      await expect(
+        tasksCommand.run([
+          "evidence",
+          taskId,
+          "note:evidence added",
+          "--session",
+          sessionId.slice(0, 8),
+          "--subject",
+          "Recovered native task",
+        ])
+      ).resolves.toBeUndefined()
+    } finally {
+      process.chdir(prevCwd)
+      if (prevHome === undefined) delete process.env.HOME
+      else process.env.HOME = prevHome
+    }
+
+    const recovered = JSON.parse(await readFile(taskPath, "utf8")) as {
+      subject: string
+      completionEvidence?: string
+    }
+    expect(recovered.subject).toBe("Recovered native task")
+    expect(recovered.completionEvidence).toBe("note:evidence added")
+  })
+
+  it("status creates stub from --subject for missing task", async () => {
+    const home = join(TMP, "issue-271-home-status")
+    const repoCwd = join(TMP, "issue-271-repo-status")
+    const sessionId = "66666666-aaaa-bbbb-cccc-000000000001"
+    const taskId = "88"
+    const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
+
+    await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+    await mkdir(repoCwd, { recursive: true })
+
+    const prevHome = process.env.HOME
+    const prevCwd = process.cwd()
+    process.env.HOME = home
+    process.chdir(repoCwd)
+    try {
+      await expect(
+        tasksCommand.run([
+          "status",
+          taskId,
+          "completed",
+          "--session",
+          sessionId.slice(0, 8),
+          "--subject",
+          "Recovered status task",
+          "--state",
+          "developing",
+          "--evidence",
+          "note:status recovered",
+        ])
+      ).resolves.toBeUndefined()
+    } finally {
+      process.chdir(prevCwd)
+      if (prevHome === undefined) delete process.env.HOME
+      else process.env.HOME = prevHome
+    }
+
+    const recovered = JSON.parse(await readFile(taskPath, "utf8")) as {
+      subject: string
+      status: string
+    }
+    expect(recovered.subject).toBe("Recovered status task")
+    expect(recovered.status).toBe("completed")
+  })
+
+  it("update creates stub from --subject for missing task", async () => {
+    const home = join(TMP, "issue-271-home-update")
+    const repoCwd = join(TMP, "issue-271-repo-update")
+    const sessionId = "77777777-aaaa-bbbb-cccc-000000000001"
+    const taskId = "99"
+    const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
+
+    await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+    await mkdir(repoCwd, { recursive: true })
+
+    const prevHome = process.env.HOME
+    const prevCwd = process.cwd()
+    process.env.HOME = home
+    process.chdir(repoCwd)
+    try {
+      await expect(
+        tasksCommand.run([
+          "update",
+          taskId,
+          "--session",
+          sessionId.slice(0, 8),
+          "--subject",
+          "Recovered update task",
+          "--description",
+          "Recovered description",
+          "--status",
+          "pending",
+        ])
+      ).resolves.toBeUndefined()
+    } finally {
+      process.chdir(prevCwd)
+      if (prevHome === undefined) delete process.env.HOME
+      else process.env.HOME = prevHome
+    }
+
+    const recovered = JSON.parse(await readFile(taskPath, "utf8")) as {
+      subject: string
+      description: string
+      status: string
+    }
+    expect(recovered.subject).toBe("Recovered update task")
+    expect(recovered.description).toBe("Recovered description")
+    expect(recovered.status).toBe("pending")
+  })
+})

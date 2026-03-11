@@ -224,6 +224,69 @@ async function createTask(sessionId: string, subject: string, description: strin
   console.log(`     ${subject}\n`)
 }
 
+interface EnsureFileBackedTaskOptions {
+  sessionId: string
+  taskId: string
+  filterCwd?: string
+  subject?: string
+  description?: string
+  activeForm?: string
+  status?: Task["status"]
+  allowPlaceholderSubject?: boolean
+}
+
+async function ensureFileBackedTask({
+  sessionId,
+  taskId,
+  filterCwd,
+  subject,
+  description,
+  activeForm,
+  status = "in_progress",
+  allowPlaceholderSubject = false,
+}: EnsureFileBackedTaskOptions): Promise<boolean> {
+  try {
+    await resolveTaskById(taskId, sessionId, filterCwd)
+    return false
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes("not found")) {
+      throw error
+    }
+  }
+
+  const recoveredSubject = subject ?? (allowPlaceholderSubject ? `Task #${taskId}` : null)
+  if (!recoveredSubject) return false
+
+  const stubTask: Task = {
+    id: taskId,
+    subject: recoveredSubject,
+    description: description ?? recoveredSubject,
+    activeForm,
+    status,
+    statusChangedAt: new Date().toISOString(),
+    elapsedMs: 0,
+    blocks: [],
+    blockedBy: [],
+  }
+  await writeTask(sessionId, stubTask, process.cwd())
+  await writeAudit(sessionId, {
+    timestamp: new Date().toISOString(),
+    taskId,
+    action: "create",
+    newStatus: stubTask.status,
+    subject: recoveredSubject,
+  })
+
+  if (!subject && allowPlaceholderSubject) {
+    console.log(
+      `  ℹ️  Task #${taskId} not in file store — created stub (using task ID as placeholder)`
+    )
+  } else {
+    console.log(`  ℹ️  Task #${taskId} not in file store — created stub from --subject`)
+  }
+  return true
+}
+
 async function updateStatus(
   sessionId: string,
   taskId: string,
@@ -674,46 +737,13 @@ export const tasksCommand: Command = {
         let verify = extractFlag(rest, "--verify")
         const sessionId = await resolveSession(sessionArgs)
 
-        // If the task doesn't exist in the file store (e.g. created by the native TaskCreate
-        // tool which writes to its own internal store, not to ~/.claude/tasks/), create a stub
-        // task with the given ID so it can be completed normally. If --subject is provided use
-        // it; otherwise fall back to the task ID as a placeholder subject. This bridges the
-        // post-compaction and cross-session gap where native tool tasks have no file counterpart.
-        let taskExistsInStore = true
-        try {
-          await resolveTaskById(taskId, sessionId, filterCwd)
-        } catch (e) {
-          if (e instanceof Error && e.message.includes("not found")) {
-            taskExistsInStore = false
-          } else {
-            throw e
-          }
-        }
-
-        if (!taskExistsInStore) {
-          const subject = subjectFlag ?? `Task #${taskId}`
-          // Write a stub task file with the requested ID directly so updateStatus can find it
-          const stubTask: Task = {
-            id: taskId,
-            subject,
-            description: subject,
-            status: "in_progress",
-            statusChangedAt: new Date().toISOString(),
-            elapsedMs: 0,
-            blocks: [],
-            blockedBy: [],
-          }
-          await writeTask(sessionId, stubTask, process.cwd())
-          await writeAudit(sessionId, {
-            timestamp: new Date().toISOString(),
-            taskId,
-            action: "create",
-            newStatus: "in_progress",
-            subject,
-          })
-          const note = subjectFlag ? "from --subject" : "using task ID as placeholder"
-          console.log(`  ℹ️  Task #${taskId} not in file store — created stub (${note})`)
-        }
+        await ensureFileBackedTask({
+          sessionId,
+          taskId,
+          filterCwd,
+          subject: subjectFlag,
+          allowPlaceholderSubject: true,
+        })
 
         // Auto-verify: if no explicit --verify was provided, extract and use task subject
         if (!verify) {
@@ -737,41 +767,12 @@ export const tasksCommand: Command = {
         const subjectFlag = extractFlag(rest, "--subject")
         const sessionId = await resolveSession(sessionArgs)
 
-        // Same stub-creation logic as complete and status: if the task has no file
-        // counterpart (e.g. created by the native TaskCreate tool post-compaction) and
-        // --subject is provided, write a stub so submitEvidence can find it.
-        let evidenceTaskExistsInStore = true
-        try {
-          await resolveTaskById(taskId, sessionId, filterCwd)
-        } catch (e) {
-          if (e instanceof Error && e.message.includes("not found") && subjectFlag) {
-            evidenceTaskExistsInStore = false
-          } else {
-            throw e
-          }
-        }
-
-        if (!evidenceTaskExistsInStore && subjectFlag) {
-          const stubTask: Task = {
-            id: taskId,
-            subject: subjectFlag,
-            description: subjectFlag,
-            status: "in_progress",
-            statusChangedAt: new Date().toISOString(),
-            elapsedMs: 0,
-            blocks: [],
-            blockedBy: [],
-          }
-          await writeTask(sessionId, stubTask, process.cwd())
-          await writeAudit(sessionId, {
-            timestamp: new Date().toISOString(),
-            taskId,
-            action: "create",
-            newStatus: "in_progress",
-            subject: subjectFlag,
-          })
-          console.log(`  ℹ️  Task #${taskId} not in file store — created stub from --subject`)
-        }
+        await ensureFileBackedTask({
+          sessionId,
+          taskId,
+          filterCwd,
+          subject: subjectFlag,
+        })
 
         await submitEvidence(sessionId, taskId, evidenceText, filterCwd)
         break
@@ -792,41 +793,12 @@ export const tasksCommand: Command = {
         const subjectFlag = extractFlag(rest, "--subject")
         const sessionId = await resolveSession(sessionArgs)
 
-        // Same stub-creation logic as the complete subcommand: if the task has no file
-        // counterpart (e.g. created by the native TaskCreate tool post-compaction) and
-        // --subject is provided, write a stub so updateStatus can find it.
-        let statusTaskExistsInStore = true
-        try {
-          await resolveTaskById(taskId, sessionId, filterCwd)
-        } catch (e) {
-          if (e instanceof Error && e.message.includes("not found") && subjectFlag) {
-            statusTaskExistsInStore = false
-          } else {
-            throw e
-          }
-        }
-
-        if (!statusTaskExistsInStore && subjectFlag) {
-          const stubTask: Task = {
-            id: taskId,
-            subject: subjectFlag,
-            description: subjectFlag,
-            status: "in_progress",
-            statusChangedAt: new Date().toISOString(),
-            elapsedMs: 0,
-            blocks: [],
-            blockedBy: [],
-          }
-          await writeTask(sessionId, stubTask, process.cwd())
-          await writeAudit(sessionId, {
-            timestamp: new Date().toISOString(),
-            taskId,
-            action: "create",
-            newStatus: "in_progress",
-            subject: subjectFlag,
-          })
-          console.log(`  ℹ️  Task #${taskId} not in file store — created stub from --subject`)
-        }
+        await ensureFileBackedTask({
+          sessionId,
+          taskId,
+          filterCwd,
+          subject: subjectFlag,
+        })
 
         await updateStatus(sessionId, taskId, newStatus, evidence, verify, filterCwd)
         if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
@@ -895,39 +867,16 @@ export const tasksCommand: Command = {
         const sessionId = await resolveSession(flagArgs)
 
         for (const taskId of taskIds) {
-          // Stub creation for native-tool tasks with no file counterpart.
-          let updateTaskExistsInStore = true
-          try {
-            await resolveTaskById(taskId, sessionId, filterCwd)
-          } catch (e) {
-            if (e instanceof Error && e.message.includes("not found") && newSubject) {
-              updateTaskExistsInStore = false
-            } else {
-              throw e
-            }
-          }
-
-          if (!updateTaskExistsInStore && newSubject) {
-            const stubTask: Task = {
-              id: taskId,
-              subject: newSubject,
-              description: newDescription ?? newSubject,
-              activeForm: newActiveForm,
-              status: newStatus ?? "in_progress",
-              statusChangedAt: new Date().toISOString(),
-              elapsedMs: 0,
-              blocks: [],
-              blockedBy: [],
-            }
-            await writeTask(sessionId, stubTask, process.cwd())
-            await writeAudit(sessionId, {
-              timestamp: new Date().toISOString(),
-              taskId,
-              action: "create",
-              newStatus: stubTask.status,
-              subject: newSubject,
-            })
-            console.log(`  ℹ️  Task #${taskId} not in file store — created stub from --subject`)
+          const createdStub = await ensureFileBackedTask({
+            sessionId,
+            taskId,
+            filterCwd,
+            subject: newSubject,
+            description: newDescription,
+            activeForm: newActiveForm,
+            status: newStatus ?? "in_progress",
+          })
+          if (createdStub) {
             continue
           }
 
