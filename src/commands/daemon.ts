@@ -1007,7 +1007,8 @@ async function scanSession(session: Pick<Session, "path" | "format">): Promise<S
 
 async function listProjectSessions(
   cwd: string,
-  limit = 20
+  limit = 20,
+  liveActivity?: Map<string, number>
 ): Promise<{ sessionCount: number; sessions: SessionPreview[] }> {
   const all = await findAllProviderSessions(cwd)
   const candidates = all.slice(0, limit * 2)
@@ -1016,7 +1017,13 @@ async function listProjectSessions(
   for (let i = 0; i < candidates.length; i++) {
     if (scans[i]!.hasMessages) withMessages.push({ session: candidates[i]!, scan: scans[i]! })
   }
-  withMessages.sort((a, b) => b.scan.lastMessageAt - a.scan.lastMessageAt)
+  const effectiveLastMessage = (s: Session, scan: SessionScanResult): number => {
+    const live = liveActivity?.get(s.id) ?? 0
+    return Math.max(scan.lastMessageAt, live)
+  }
+  withMessages.sort(
+    (a, b) => effectiveLastMessage(b.session, b.scan) - effectiveLastMessage(a.session, a.scan)
+  )
   return {
     sessionCount: withMessages.length,
     sessions: withMessages.slice(0, limit).map(({ session, scan }) => ({
@@ -1025,7 +1032,7 @@ async function listProjectSessions(
       format: session.format,
       mtime: session.mtime,
       startedAt: scan.startedAt || undefined,
-      lastMessageAt: scan.lastMessageAt || undefined,
+      lastMessageAt: effectiveLastMessage(session, scan) || undefined,
     })),
   }
 }
@@ -1262,6 +1269,8 @@ export const daemonCommand: Command = {
     const globalMetrics = createMetrics()
     const projectMetrics = new Map<string, DaemonMetrics>()
     const projectLastSeen = new Map<string, number>()
+    /** Tracks the latest dispatch timestamp per session ID (from hook events). */
+    const sessionActivity = new Map<string, number>()
     const getProjectMetrics = (cwd: string): DaemonMetrics => {
       let m = projectMetrics.get(cwd)
       if (!m) {
@@ -1397,11 +1406,17 @@ export const daemonCommand: Command = {
           const durationMs = performance.now() - start
           recordDispatch(globalMetrics, canonicalEvent, durationMs)
           try {
-            const parsed = JSON.parse(payloadStr) as { cwd?: string }
+            const parsed = JSON.parse(payloadStr) as {
+              cwd?: string
+              session_id?: string
+            }
             if (parsed.cwd) {
               touchProject(parsed.cwd)
               recordDispatch(getProjectMetrics(parsed.cwd), canonicalEvent, durationMs)
               registerProjectWatchers(parsed.cwd)
+            }
+            if (parsed.session_id) {
+              sessionActivity.set(parsed.session_id, Date.now())
             }
           } catch {
             /* ignore parse errors */
@@ -1603,7 +1618,11 @@ export const daemonCommand: Command = {
 
           const allProjects = await Promise.all(
             ordered.map(async ({ cwd, lastSeenAt }) => {
-              const sessions = await listProjectSessions(cwd, limitSessionsPerProject)
+              const sessions = await listProjectSessions(
+                cwd,
+                limitSessionsPerProject,
+                sessionActivity
+              )
               return {
                 cwd,
                 name: basename(cwd),
