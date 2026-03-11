@@ -1024,8 +1024,8 @@ async function listProjectSessions(
       provider: session.provider,
       format: session.format,
       mtime: session.mtime,
-      startedAt: scan.startedAt,
-      lastMessageAt: scan.lastMessageAt,
+      startedAt: scan.startedAt || undefined,
+      lastMessageAt: scan.lastMessageAt || undefined,
     })),
   }
 }
