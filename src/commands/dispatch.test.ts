@@ -7,7 +7,8 @@ import { join } from "node:path"
 
 async function dispatch(
   event: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  options: { env?: Record<string, string | undefined> } = {}
 ): Promise<{
   stdout: string
   stderr: string
@@ -27,6 +28,7 @@ async function dispatch(
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      env: { ...process.env, ...options.env },
     }
   )
   proc.stdin.write(JSON.stringify(payload))
@@ -127,6 +129,80 @@ describe("dispatch routing", () => {
     expect(stdout.trim()).toBe("")
     expect(stderr).toContain("Timed out waiting 2s for stdin JSON payload to be received")
   })
+
+  test("uses daemon mode only after a healthy probe succeeds", async () => {
+    let healthHits = 0
+    let dispatchHits = 0
+
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const url = new URL(req.url)
+        if (url.pathname === "/health") {
+          healthHits += 1
+          return new Response("ok")
+        }
+        if (url.pathname === "/dispatch" && req.method === "POST") {
+          dispatchHits += 1
+          return Response.json({ via: "daemon" })
+        }
+        return new Response("Not Found", { status: 404 })
+      },
+    })
+
+    try {
+      const result = await dispatch(
+        "unknownEvent",
+        {},
+        { env: { SWIZ_DAEMON_PORT: String(server.port) } }
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.parsed).toEqual({ via: "daemon" })
+      expect(healthHits).toBe(1)
+      expect(dispatchHits).toBe(1)
+    } finally {
+      server.stop()
+    }
+  })
+
+  test("falls back to local mode when the daemon health probe times out", async () => {
+    let healthHits = 0
+    let dispatchHits = 0
+
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const url = new URL(req.url)
+        if (url.pathname === "/health") {
+          healthHits += 1
+          await Bun.sleep(1_000)
+          return new Response("ok")
+        }
+        if (url.pathname === "/dispatch" && req.method === "POST") {
+          dispatchHits += 1
+          return Response.json({ via: "daemon" })
+        }
+        return new Response("Not Found", { status: 404 })
+      },
+    })
+
+    try {
+      const result = await dispatch(
+        "unknownEvent",
+        {},
+        { env: { SWIZ_DAEMON_PORT: String(server.port) } }
+      )
+
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe("")
+      expect(result.parsed).toBeNull()
+      expect(healthHits).toBe(1)
+      expect(dispatchHits).toBe(0)
+    } finally {
+      server.stop()
+    }
+  }, 15_000)
 })
 
 describe("dispatch replay", () => {

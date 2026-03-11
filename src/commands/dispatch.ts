@@ -20,7 +20,34 @@ import { manifest } from "../manifest.ts"
 import type { Command } from "../types.ts"
 
 const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
+const DAEMON_HEALTH_TIMEOUT_MS = 350
 const DAEMON_TIMEOUT_MS = 5_000
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function isDaemonHealthy(): Promise<boolean> {
+  const url = `http://127.0.0.1:${DAEMON_PORT}/health`
+
+  try {
+    const resp = await fetchWithTimeout(url, { method: "GET" }, DAEMON_HEALTH_TIMEOUT_MS)
+    return resp.ok
+  } catch {
+    return false
+  }
+}
 
 /**
  * Try to forward the dispatch request to the daemon.
@@ -33,21 +60,20 @@ async function tryDaemonDispatch(
   payloadStr: string
 ): Promise<Record<string, unknown> | null> {
   if (process.env.SWIZ_NO_DAEMON === "1") return null
+  if (!(await isDaemonHealthy())) return null
 
   const url = `http://127.0.0.1:${DAEMON_PORT}/dispatch?event=${encodeURIComponent(canonicalEvent)}&hookEventName=${encodeURIComponent(hookEventName)}`
 
   try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), DAEMON_TIMEOUT_MS)
-
-    const resp = await fetch(url, {
-      method: "POST",
-      body: payloadStr,
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-    })
-
-    clearTimeout(timer)
+    const resp = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        body: payloadStr,
+        headers: { "Content-Type": "application/json" },
+      },
+      DAEMON_TIMEOUT_MS
+    )
 
     if (!resp.ok) return null
 

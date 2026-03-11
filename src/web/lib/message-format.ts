@@ -4,9 +4,15 @@ interface ParsedHookContext {
   notes: string[]
 }
 
+export interface ParsedObjective {
+  title: string
+  bullets: string[]
+}
+
 export interface UserMessageParts {
   visibleText: string
   hookContext: ParsedHookContext | null
+  parsedObjective: ParsedObjective | null
 }
 
 export interface AssistantMessageParts {
@@ -51,14 +57,27 @@ export function splitUserMessage(text: string): UserMessageParts {
   const marker = "<hook_context>"
   const markerIndex = text.indexOf(marker)
   if (markerIndex < 0) {
-    return { visibleText: text.trim(), hookContext: null }
+    const visibleText = text.trim()
+    return {
+      visibleText,
+      hookContext: null,
+      parsedObjective: parseObjective(visibleText),
+    }
   }
 
   const visibleText = text.slice(0, markerIndex).trim()
   const rawContext = text.slice(markerIndex + marker.length).trim()
-  if (!rawContext) {
-    return { visibleText, hookContext: null }
+  const hookContext = parseHookContext(rawContext)
+
+  return {
+    visibleText,
+    hookContext,
+    parsedObjective: parseObjective(visibleText),
   }
+}
+
+function parseHookContext(rawContext: string): ParsedHookContext | null {
+  if (!rawContext) return null
 
   let source: string | null = null
   let remaining = rawContext
@@ -96,9 +115,39 @@ export function splitUserMessage(text: string): UserMessageParts {
     notes.push(remaining)
   }
 
+  return { source, details, notes }
+}
+
+function parseObjective(text: string): ParsedObjective | null {
+  const normalized = text.replace(/\s+/g, " ").trim()
+  if (!normalized) return null
+
+  const hasObjectiveLead = /^your task is to\b/i.test(normalized)
+  if (!hasObjectiveLead) return null
+
+  const hasInvestigationPattern =
+    /deep investigation of the codebase/i.test(normalized) &&
+    /relevant files/i.test(normalized) &&
+    /code locations/i.test(normalized) &&
+    /architectural mental map/i.test(normalized)
+
+  if (hasInvestigationPattern) {
+    return {
+      title: "Deep codebase investigation",
+      bullets: [
+        "Identify all relevant files and modules.",
+        "Pinpoint exact code locations tied to the objective.",
+        "Build an architecture mental map of how components connect.",
+        "Summarize implementation insights that guide the solution.",
+      ],
+    }
+  }
+
+  const genericObjective = /^your task is to\s+(.+?)(?:[.?!]|$)/i.exec(normalized)?.[1]?.trim()
+  if (!genericObjective) return null
   return {
-    visibleText,
-    hookContext: { source, details, notes },
+    title: "Parsed objective",
+    bullets: [genericObjective.charAt(0).toUpperCase() + genericObjective.slice(1)],
   }
 }
 

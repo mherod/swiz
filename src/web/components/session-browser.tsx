@@ -101,6 +101,34 @@ function shortSessionId(id: string): string {
   return `${id.slice(0, 8)}...${id.slice(-4)}`
 }
 
+function mergeSessionPreview(base: SessionPreview, incoming: SessionPreview): SessionPreview {
+  return {
+    ...base,
+    provider: base.provider || incoming.provider,
+    format: base.format || incoming.format,
+    startedAt:
+      typeof base.startedAt === "number" && typeof incoming.startedAt === "number"
+        ? Math.min(base.startedAt, incoming.startedAt)
+        : (base.startedAt ?? incoming.startedAt),
+    lastMessageAt: Math.max(base.lastMessageAt ?? 0, incoming.lastMessageAt ?? 0) || undefined,
+    mtime: Math.max(base.mtime, incoming.mtime),
+    dispatches: Math.max(base.dispatches ?? 0, incoming.dispatches ?? 0) || undefined,
+  }
+}
+
+function dedupeSessionsById(sessions: SessionPreview[]): SessionPreview[] {
+  const byId = new Map<string, SessionPreview>()
+  for (const session of sessions) {
+    const existing = byId.get(session.id)
+    if (!existing) {
+      byId.set(session.id, session)
+      continue
+    }
+    byId.set(session.id, mergeSessionPreview(existing, session))
+  }
+  return [...byId.values()]
+}
+
 const COLLAPSE_LINE_THRESHOLD = 20
 const COLLAPSE_CHAR_THRESHOLD = 900
 
@@ -152,6 +180,7 @@ function MessageBody({ text, role }: { text: string; role: "user" | "assistant" 
   const assistantVisible = assistantParts?.visibleText ?? text
   const userParts = role === "user" ? splitUserMessage(text) : null
   const userVisible = userParts?.visibleText ?? text
+  const parsedObjective = userParts?.parsedObjective
   const assistantWithJson =
     role === "assistant" ? formatAssistantJsonBlocks(assistantVisible) : text
   const preparedText =
@@ -218,6 +247,19 @@ function MessageBody({ text, role }: { text: string; role: "user" | "assistant" 
     return (
       <>
         <pre className="message-text">{textForCollapse}</pre>
+        {parsedObjective ? (
+          <div className="hook-context-box">
+            <p className="hook-context-title">{parsedObjective.title}</p>
+            <ul className="hook-context-list">
+              {parsedObjective.bullets.map((bullet) => (
+                <li key={bullet} className="hook-context-item">
+                  <span className="hook-context-label">goal</span>
+                  <span className="hook-context-note">{bullet}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         {hookContext ? (
           <div className="hook-context-box">
             <p className="hook-context-title">
@@ -254,6 +296,19 @@ function MessageBody({ text, role }: { text: string; role: "user" | "assistant" 
         </summary>
         <pre className="message-text">{textForCollapse}</pre>
       </details>
+      {parsedObjective ? (
+        <div className="hook-context-box">
+          <p className="hook-context-title">{parsedObjective.title}</p>
+          <ul className="hook-context-list">
+            {parsedObjective.bullets.map((bullet) => (
+              <li key={bullet} className="hook-context-item">
+                <span className="hook-context-label">goal</span>
+                <span className="hook-context-note">{bullet}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {hookContext ? (
         <div className="hook-context-box">
           <p className="hook-context-title">
@@ -300,7 +355,7 @@ export function SessionNav({
   const sortedProjects = [...projects].sort((a, b) => b.lastSeenAt - a.lastSeenAt)
   const selectedProject = sortedProjects.find((p) => p.cwd === selectedProjectCwd) ?? null
   const sortedSessions = selectedProject
-    ? [...selectedProject.sessions].sort((a, b) => {
+    ? dedupeSessionsById(selectedProject.sessions).sort((a, b) => {
         const aDisp = a.dispatches ?? 0
         const bDisp = b.dispatches ?? 0
         if (aDisp > 0 && bDisp === 0) return -1

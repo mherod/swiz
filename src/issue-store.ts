@@ -53,19 +53,21 @@ export class IssueStore {
     const path = dbPath ?? getDefaultDbPath()
     mkdirSync(dirname(path), { recursive: true })
     this.db = new Database(path)
-    this.db.exec("PRAGMA journal_mode=WAL")
+    this.db.run("PRAGMA journal_mode=WAL")
     this.migrate()
   }
 
   private migrate(): void {
-    this.db.exec(`
+    this.db.run(`
       CREATE TABLE IF NOT EXISTS issues (
         repo TEXT NOT NULL,
         number INTEGER NOT NULL,
         data TEXT NOT NULL,
         synced_at INTEGER NOT NULL,
         PRIMARY KEY (repo, number)
-      );
+      )
+    `)
+    this.db.run(`
       CREATE TABLE IF NOT EXISTS pending_mutations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         repo TEXT NOT NULL,
@@ -73,7 +75,7 @@ export class IssueStore {
         created_at INTEGER NOT NULL,
         last_attempt INTEGER,
         attempts INTEGER DEFAULT 0
-      );
+      )
     `)
   }
 
