@@ -56,6 +56,16 @@
       }
     },
     {
+      "includes": ["**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useHookAtTopLevel": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["scripts/**", "push/scripts/**"],
       "linter": {
         "rules": {
