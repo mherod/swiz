@@ -28,6 +28,44 @@ import {
   type ToolStat,
 } from "./session-browser.tsx"
 
+type AgentProcessOptimisticAction =
+  | { type: "sync"; providers: Record<string, number[]> }
+  | { type: "removePid"; pid: number }
+
+type ProjectsOptimisticAction =
+  | { type: "sync"; projects: ProjectSessions[] }
+  | { type: "removeSession"; cwd: string; sessionId: string }
+
+function removePidFromProviders(
+  providers: Record<string, number[]>,
+  pid: number
+): Record<string, number[]> {
+  const next: Record<string, number[]> = {}
+  for (const [provider, pids] of Object.entries(providers)) {
+    const filtered = pids.filter((candidate) => candidate !== pid)
+    if (filtered.length > 0) next[provider] = filtered
+  }
+  return next
+}
+
+function removeSessionFromProjects(
+  projects: ProjectSessions[],
+  cwd: string,
+  sessionId: string
+): ProjectSessions[] {
+  return projects
+    .map((project) => {
+      if (project.cwd !== cwd) return project
+      const nextSessions = project.sessions.filter((session) => session.id !== sessionId)
+      return {
+        ...project,
+        sessions: nextSessions,
+        sessionCount: Math.max(project.sessionCount - 1, 0),
+      }
+    })
+    .filter((project) => project.sessions.length > 0)
+}
+
 export function DashboardApp() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [cacheStatus, setCacheStatus] = useState<Record<string, number> | null>(null)
@@ -48,7 +86,22 @@ export function DashboardApp() {
     selectedSessionId,
     (_current, next: string | null) => next
   )
+  const [optimisticProjects, addOptimisticProjects] = useOptimistic(
+    projects,
+    (current, action: ProjectsOptimisticAction) => {
+      if (action.type === "sync") return action.projects
+      return removeSessionFromProjects(current, action.cwd, action.sessionId)
+    }
+  )
+  const [optimisticAgentProcessProviders, addOptimisticAgentProcessProviders] = useOptimistic(
+    agentProcessProviders,
+    (current, action: AgentProcessOptimisticAction) => {
+      if (action.type === "sync") return action.providers
+      return removePidFromProviders(current, action.pid)
+    }
+  )
   const [, startSelectionTransition] = useTransition()
+  const [, startMutationTransition] = useTransition()
   const [sessionMessages, setSessionMessages] = useState<SessionMessage[]>([])
   const [sessionToolStats, setSessionToolStats] = useState<ToolStat[]>([])
   const [sessionTasks, setSessionTasks] = useState<SessionTask[]>([])
@@ -113,7 +166,7 @@ export function DashboardApp() {
 
   const handleSelectProject = useCallback(
     (cwd: string) => {
-      const project = projects.find((p) => p.cwd === cwd)
+      const project = optimisticProjects.find((p) => p.cwd === cwd)
       const firstSession = project?.sessions[0]
       if (firstSession) {
         setSelectedProjectCwd(cwd)
@@ -139,7 +192,7 @@ export function DashboardApp() {
       }
     },
     [
-      projects,
+      optimisticProjects,
       loadMessages,
       loadTasks,
       loadProjectTasks,
@@ -166,67 +219,64 @@ export function DashboardApp() {
     [loadMessages, loadTasks, loadProjectTasks, addOptimisticProjectCwd, addOptimisticSessionId]
   )
 
-  const handleKillAgentPid = useCallback(async (pid: number) => {
-    setKillingPid(pid)
-    try {
-      await postJson<{ ok: boolean; pid: number }>("/process/agents/kill", { pid })
-      setAgentProcessProviders((previous) => {
-        const next: Record<string, number[]> = {}
-        for (const [provider, pids] of Object.entries(previous)) {
-          const filtered = pids.filter((candidate) => candidate !== pid)
-          if (filtered.length > 0) next[provider] = filtered
+  const handleKillAgentPid = useCallback(
+    (pid: number) => {
+      setKillingPid(pid)
+      startMutationTransition(async () => {
+        addOptimisticAgentProcessProviders({ type: "removePid", pid })
+        try {
+          await postJson<{ ok: boolean; pid: number }>("/process/agents/kill", { pid })
+          setAgentProcessProviders((previous) => removePidFromProviders(previous, pid))
+        } finally {
+          setKillingPid(null)
         }
-        return next
       })
-    } finally {
-      setKillingPid(null)
-    }
-  }, [])
+    },
+    [addOptimisticAgentProcessProviders]
+  )
 
   const handleDeleteSession = useCallback(
-    async (cwd: string, sessionId: string) => {
+    (cwd: string, sessionId: string) => {
       setDeletingSessionId(sessionId)
-      try {
-        await postJson<{ ok: boolean; deletedCount: number; sessionIds: string[] }>(
-          "/sessions/delete",
-          {
-            cwd,
-            sessionId,
+      startMutationTransition(async () => {
+        addOptimisticProjects({ type: "removeSession", cwd, sessionId })
+        try {
+          await postJson<{ ok: boolean; deletedCount: number; sessionIds: string[] }>(
+            "/sessions/delete",
+            {
+              cwd,
+              sessionId,
+            }
+          )
+          setProjects((previous) => removeSessionFromProjects(previous, cwd, sessionId))
+          if (selectedSessionId === sessionId) {
+            setSelectedSessionId(null)
+            addOptimisticSessionId(null)
+            setSessionMessages([])
+            setSessionTasks([])
+            setSessionTaskSummary(null)
+            setQueryParams({ session: null })
           }
-        )
-        setProjects((previous) =>
-          previous
-            .map((project) => {
-              if (project.cwd !== cwd) return project
-              const nextSessions = project.sessions.filter((session) => session.id !== sessionId)
-              return {
-                ...project,
-                sessions: nextSessions,
-                sessionCount: Math.max(project.sessionCount - 1, 0),
-              }
-            })
-            .filter((project) => project.sessions.length > 0)
-        )
-        if (selectedSessionId === sessionId) {
-          setSelectedSessionId(null)
-          setSessionMessages([])
-          setSessionTasks([])
-          setSessionTaskSummary(null)
-          setQueryParams({ session: null })
+        } finally {
+          setDeletingSessionId(null)
         }
-      } finally {
-        setDeletingSessionId(null)
-      }
+      })
     },
-    [selectedSessionId]
+    [addOptimisticProjects, addOptimisticSessionId, selectedSessionId]
   )
 
   useDashboardOverviewPolling({
     onMetrics: setMetrics,
     onCacheStatus: setCacheStatus,
     onWatches: setWatches,
-    onProjects: setProjects,
-    onAgentProcesses: setAgentProcessProviders,
+    onProjects: (loadedProjects) => {
+      setProjects(loadedProjects)
+      addOptimisticProjects({ type: "sync", projects: loadedProjects })
+    },
+    onAgentProcesses: (providers) => {
+      setAgentProcessProviders(providers)
+      addOptimisticAgentProcessProviders({ type: "sync", providers })
+    },
     onError: setError,
     onLastUpdated: setLastUpdated,
     onInitialLoad: (loadedProjects) =>
@@ -259,10 +309,10 @@ export function DashboardApp() {
   })
 
   const m = metrics ?? {}
-  const projectCount = projects.filter(hasProjectMessages).length
+  const projectCount = optimisticProjects.filter(hasProjectMessages).length
   const watchCount = (watches?.active ?? []).length
   const activeProject = optimisticProjectCwd
-    ? projects.find((project) => project.cwd === optimisticProjectCwd)
+    ? optimisticProjects.find((project) => project.cwd === optimisticProjectCwd)
     : null
   const activeSession = optimisticSessionId
     ? (activeProject?.sessions.find((session) => session.id === optimisticSessionId) ?? null)
@@ -292,8 +342,8 @@ export function DashboardApp() {
         activeWatches={watchCount}
       />
       <SessionNav
-        projects={projects}
-        activeAgentPidsByProvider={agentProcessProviders}
+        projects={optimisticProjects}
+        activeAgentPidsByProvider={optimisticAgentProcessProviders}
         killingPid={killingPid}
         deletingSessionId={deletingSessionId}
         selectedProjectCwd={optimisticProjectCwd}

@@ -394,160 +394,135 @@ export function SessionNav({
   const recentSessions = sortedSessions?.filter(
     (session) => Date.now() - (session.lastMessageAt ?? session.mtime) > activeThresholdMs
   )
+  const selectedProjectCwdSafe = selectedProject?.cwd ?? null
+
+  const renderSessionRow = (session: SessionPreview) => {
+    const processPids = providerProcessPids(session.provider, activeAgentPidsByProvider)
+    const processLabel = formatProcessPidLabel(processPids)
+    const primaryPid = processPids[0]
+    const isDeleting = deletingSessionId === session.id
+    const isKilling = primaryPid != null && killingPid === primaryPid
+    const hasLiveProcess = processPids.length > 0
+    const actionLabel =
+      hasLiveProcess && primaryPid
+        ? isKilling
+          ? "Killing..."
+          : `Kill ${primaryPid}`
+        : isDeleting
+          ? "Deleting..."
+          : "Delete"
+    const actionDisabled = hasLiveProcess ? isKilling : isDeleting
+
+    return (
+      <li key={session.id} className="session-row">
+        <button
+          type="button"
+          className={cn("session-btn", session.id === selectedSessionId && "selected")}
+          aria-pressed={session.id === selectedSessionId}
+          onClick={() => {
+            if (!selectedProjectCwdSafe) return
+            onSelectSession(selectedProjectCwdSafe, session.id)
+          }}
+        >
+          <span className="session-id" title={session.id}>
+            {(session.provider ?? "unknown").toLowerCase()} ·{" "}
+            {formatRelativeTime(session.lastMessageAt ?? session.mtime)}
+            {processPids.length > 0 ? (
+              <span className="agent-process-chip" title={`PIDs: ${processPids.join(", ")}`}>
+                <span className="agent-process-dot" aria-hidden="true" />
+                {processLabel}
+              </span>
+            ) : null}
+            {session.dispatches ? (
+              <span className="session-dispatches">{session.dispatches}</span>
+            ) : null}
+          </span>
+          <span className="session-meta">
+            {shortSessionId(session.id)} ·{" "}
+            {formatCompactTime(session.lastMessageAt ?? session.mtime)}
+          </span>
+        </button>
+        <div className="session-actions">
+          <button
+            type="button"
+            className={cn(
+              "session-action-btn",
+              hasLiveProcess ? "session-action-kill" : "session-action-delete"
+            )}
+            onClick={() => {
+              if (hasLiveProcess && primaryPid) {
+                void onKillAgentPid(primaryPid)
+                return
+              }
+              if (!selectedProjectCwdSafe) return
+              if (!confirm(`Delete session ${shortSessionId(session.id)} data?`)) return
+              void onDeleteSession(selectedProjectCwdSafe, session.id)
+            }}
+            disabled={actionDisabled}
+            title={
+              hasLiveProcess
+                ? `Terminate active process${primaryPid ? ` ${primaryPid}` : ""} first`
+                : undefined
+            }
+          >
+            {actionLabel}
+          </button>
+        </div>
+      </li>
+    )
+  }
 
   return (
     <nav className="card bento-nav">
-      <h2 className="section-title">Projects</h2>
-      <p className="section-subtitle">Project and session switcher</p>
-      <ul className="project-list" aria-label="Active and recent project directories">
-        {sortedProjects.map((project) => (
-          <li key={project.cwd}>
-            <button
-              type="button"
-              className={cn("project-btn", project.cwd === selectedProjectCwd && "selected")}
-              aria-pressed={project.cwd === selectedProjectCwd}
-              onClick={() => onSelectProject(project.cwd)}
-            >
-              <span className="project-name">{project.name}</span>
-              {project.statusLine ? (
-                <span className="project-status-line" title={project.statusLine}>
-                  {project.statusLine}
-                </span>
+      <section className="nav-block">
+        <div className="nav-block-header">
+          <h2 className="section-title">Projects</h2>
+          <span className="nav-count-badge">{sortedProjects.length}</span>
+        </div>
+        <p className="section-subtitle">Project and session switcher</p>
+        <ul className="project-list" aria-label="Active and recent project directories">
+          {sortedProjects.map((project) => (
+            <li key={project.cwd}>
+              <button
+                type="button"
+                className={cn("project-btn", project.cwd === selectedProjectCwd && "selected")}
+                aria-pressed={project.cwd === selectedProjectCwd}
+                onClick={() => onSelectProject(project.cwd)}
+              >
+                <span className="project-name">{project.name}</span>
+                {project.statusLine ? (
+                  <span className="project-status-line" title={project.statusLine}>
+                    {project.statusLine}
+                  </span>
+                ) : null}
+                <span className="project-meta">{project.sessionCount} sessions</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section className="nav-block nav-block-sessions">
+        <div className="nav-block-header">
+          <h2 className="section-title nav-section-title">Sessions</h2>
+          <span className="nav-count-badge">{sortedSessions?.length ?? 0}</span>
+        </div>
+        <ul className="session-list" aria-label="Sessions for selected project">
+          {sortedSessions ? (
+            <>
+              {activeSessions && activeSessions.length > 0 ? (
+                <li className="session-group-label">Active now</li>
               ) : null}
-              <span className="project-meta">{project.sessionCount} sessions</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-      <h2 className="section-title nav-section-title">Sessions</h2>
-      <ul className="session-list" aria-label="Sessions for selected project">
-        {sortedSessions ? (
-          <>
-            {activeSessions && activeSessions.length > 0 ? (
-              <li className="session-group-label">Active now</li>
-            ) : null}
-            {activeSessions?.map((session) => {
-              const processPids = providerProcessPids(session.provider, activeAgentPidsByProvider)
-              const processLabel = formatProcessPidLabel(processPids)
-              const primaryPid = processPids[0]
-              return (
-                <li key={session.id} className="session-row">
-                  <button
-                    type="button"
-                    className={cn("session-btn", session.id === selectedSessionId && "selected")}
-                    aria-pressed={session.id === selectedSessionId}
-                    onClick={() => onSelectSession(selectedProject!.cwd, session.id)}
-                  >
-                    <span className="session-id" title={session.id}>
-                      {(session.provider ?? "unknown").toLowerCase()} ·{" "}
-                      {formatRelativeTime(session.lastMessageAt ?? session.mtime)}
-                      {processPids.length > 0 ? (
-                        <span
-                          className="agent-process-chip"
-                          title={`PIDs: ${processPids.join(", ")}`}
-                        >
-                          <span className="agent-process-dot" aria-hidden="true" />
-                          {processLabel}
-                        </span>
-                      ) : null}
-                      {session.dispatches ? (
-                        <span className="session-dispatches">{session.dispatches}</span>
-                      ) : null}
-                    </span>
-                    <span className="session-meta">
-                      {shortSessionId(session.id)} ·{" "}
-                      {formatCompactTime(session.lastMessageAt ?? session.mtime)}
-                    </span>
-                  </button>
-                  {primaryPid ? (
-                    <button
-                      type="button"
-                      className="session-kill-btn"
-                      onClick={() => void onKillAgentPid(primaryPid)}
-                      disabled={killingPid === primaryPid}
-                    >
-                      {killingPid === primaryPid ? "Killing..." : `Kill ${primaryPid}`}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="session-delete-btn"
-                    onClick={() => {
-                      if (!confirm(`Delete session ${shortSessionId(session.id)} data?`)) return
-                      void onDeleteSession(selectedProject!.cwd, session.id)
-                    }}
-                    disabled={deletingSessionId === session.id}
-                  >
-                    {deletingSessionId === session.id ? "Deleting..." : "Delete"}
-                  </button>
-                </li>
-              )
-            })}
-            {recentSessions && recentSessions.length > 0 ? (
-              <li className="session-group-label">Recent</li>
-            ) : null}
-            {recentSessions?.map((session) => {
-              const processPids = providerProcessPids(session.provider, activeAgentPidsByProvider)
-              const processLabel = formatProcessPidLabel(processPids)
-              const primaryPid = processPids[0]
-              return (
-                <li key={session.id} className="session-row">
-                  <button
-                    type="button"
-                    className={cn("session-btn", session.id === selectedSessionId && "selected")}
-                    aria-pressed={session.id === selectedSessionId}
-                    onClick={() => onSelectSession(selectedProject!.cwd, session.id)}
-                  >
-                    <span className="session-id" title={session.id}>
-                      {(session.provider ?? "unknown").toLowerCase()} ·{" "}
-                      {formatRelativeTime(session.lastMessageAt ?? session.mtime)}
-                      {processPids.length > 0 ? (
-                        <span
-                          className="agent-process-chip"
-                          title={`PIDs: ${processPids.join(", ")}`}
-                        >
-                          <span className="agent-process-dot" aria-hidden="true" />
-                          {processLabel}
-                        </span>
-                      ) : null}
-                      {session.dispatches ? (
-                        <span className="session-dispatches">{session.dispatches}</span>
-                      ) : null}
-                    </span>
-                    <span className="session-meta">
-                      {shortSessionId(session.id)} ·{" "}
-                      {formatCompactTime(session.lastMessageAt ?? session.mtime)}
-                    </span>
-                  </button>
-                  {primaryPid ? (
-                    <button
-                      type="button"
-                      className="session-kill-btn"
-                      onClick={() => void onKillAgentPid(primaryPid)}
-                      disabled={killingPid === primaryPid}
-                    >
-                      {killingPid === primaryPid ? "Killing..." : `Kill ${primaryPid}`}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="session-delete-btn"
-                    onClick={() => {
-                      if (!confirm(`Delete session ${shortSessionId(session.id)} data?`)) return
-                      void onDeleteSession(selectedProject!.cwd, session.id)
-                    }}
-                    disabled={deletingSessionId === session.id}
-                  >
-                    {deletingSessionId === session.id ? "Deleting..." : "Delete"}
-                  </button>
-                </li>
-              )
-            })}
-          </>
-        ) : (
-          <li className="empty">Select a project.</li>
-        )}
-      </ul>
+              {activeSessions?.map(renderSessionRow)}
+              {recentSessions && recentSessions.length > 0 ? (
+                <li className="session-group-label">Recent</li>
+              ) : null}
+              {recentSessions?.map(renderSessionRow)}
+            </>
+          ) : (
+            <li className="empty">Select a project.</li>
+          )}
+        </ul>
+      </section>
     </nav>
   )
 }

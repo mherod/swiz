@@ -391,6 +391,22 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
         if (matchedSessions.length === 0) {
           return Response.json({ error: `Session ${sessionId} not found` }, { status: 404 })
         }
+        const activeProcesses = await getActiveAgentProcesses()
+        const blockedProviders = new Map<string, number[]>()
+        for (const session of matchedSessions) {
+          const provider = (session.provider ?? "unknown").toLowerCase()
+          const providerPids = activeProcesses.providers[provider] ?? []
+          if (providerPids.length > 0) blockedProviders.set(provider, providerPids)
+        }
+        if (blockedProviders.size > 0) {
+          return Response.json(
+            {
+              error: "Cannot delete session while provider process is active",
+              providers: Object.fromEntries(blockedProviders),
+            },
+            { status: 409 }
+          )
+        }
         const sessionPaths = [...new Set(matchedSessions.map((session) => session.path))]
         const sessionIds = [...new Set(matchedSessions.map((session) => session.id))]
         const failedPaths: string[] = []

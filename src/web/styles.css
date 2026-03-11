@@ -390,10 +390,45 @@ tbody tr:hover {
   grid-area: nav;
   overflow-y: auto;
   max-height: 34dvh;
+  gap: 10px;
+}
+
+.nav-block {
+  border: 1px solid rgba(109, 136, 196, 0.22);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(31, 36, 45, 0.58);
+}
+
+.nav-block + .nav-block {
+  margin-top: 8px;
+}
+
+.nav-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.nav-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(116, 157, 247, 0.38);
+  background: rgba(75, 106, 178, 0.25);
+  color: #bdd4ff;
+  padding: 1px 8px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 .nav-section-title {
-  margin-top: 12px;
+  margin-top: 0;
 }
 
 .project-list,
@@ -407,14 +442,14 @@ tbody tr:hover {
 .project-list,
 .session-list {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 .session-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 6px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
 }
 
 .project-btn,
@@ -422,9 +457,9 @@ tbody tr:hover {
   width: 100%;
   border: 1px solid rgba(93, 113, 154, 0.34);
   background: rgba(36, 40, 49, 0.76);
-  border-radius: 12px;
+  border-radius: 10px;
   color: var(--text-main);
-  padding: 9px 11px;
+  padding: 9px 10px;
   text-align: left;
   display: grid;
   gap: 2px;
@@ -451,6 +486,13 @@ tbody tr:hover {
   box-shadow:
     inset 0 0 0 1px rgba(122, 165, 255, 0.22),
     0 0 0 1px rgba(122, 165, 255, 0.08);
+}
+
+.session-actions {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 8px;
+  align-items: center;
 }
 
 .project-name,
@@ -516,52 +558,43 @@ tbody tr:hover {
   border-top: 1px solid rgba(118, 153, 229, 0.16);
 }
 
-.session-kill-btn {
-  border: 1px solid rgba(236, 119, 119, 0.45);
-  background: rgba(109, 33, 33, 0.42);
-  color: #ffb7b7;
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 0.62rem;
+.session-action-btn {
+  border-radius: 10px;
+  padding: 7px 11px;
+  font-size: 0.65rem;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
   white-space: nowrap;
 }
 
-.session-kill-btn:hover,
-.session-kill-btn:focus-visible {
+.session-action-kill {
+  border: 1px solid rgba(236, 119, 119, 0.45);
+  background: rgba(109, 33, 33, 0.42);
+  color: #ffb7b7;
+}
+
+.session-action-kill:hover,
+.session-action-kill:focus-visible {
   border-color: rgba(255, 125, 125, 0.75);
   background: rgba(139, 41, 41, 0.5);
   outline: none;
 }
 
-.session-kill-btn:disabled {
-  opacity: 0.62;
-  cursor: wait;
-}
-
-.session-delete-btn {
+.session-action-delete {
   border: 1px solid rgba(200, 153, 74, 0.45);
   background: rgba(118, 86, 24, 0.35);
   color: #f6d598;
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 0.62rem;
-  font-weight: 700;
-  line-height: 1;
-  cursor: pointer;
-  white-space: nowrap;
 }
 
-.session-delete-btn:hover,
-.session-delete-btn:focus-visible {
+.session-action-delete:hover,
+.session-action-delete:focus-visible {
   border-color: rgba(233, 184, 95, 0.78);
   background: rgba(148, 105, 28, 0.48);
   outline: none;
 }
 
-.session-delete-btn:disabled {
+.session-action-btn:disabled {
   opacity: 0.62;
   cursor: wait;
 }
@@ -570,6 +603,17 @@ tbody tr:hover {
 .session-meta {
   color: #98a2b4;
   font-size: 0.66rem;
+}
+
+@media (max-width: 420px) {
+  .session-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .session-actions {
+    grid-auto-flow: row;
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* ── Messages ── */
