@@ -44,11 +44,15 @@ const WEB_TSX_TRANSPILER = new Bun.Transpiler({
   loader: "tsx",
   autoImportJSX: true,
 })
+const WEB_TS_TRANSPILER = new Bun.Transpiler({
+  loader: "ts",
+})
 
 const WEB_MIME_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".ts": "text/javascript; charset=utf-8",
   ".tsx": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
@@ -895,9 +899,13 @@ async function serveWebAsset(pathname: string): Promise<Response | null> {
   const file = Bun.file(filePath)
   if (!(await file.exists())) return null
 
-  if (extname(filePath) === ".tsx") {
+  const extension = extname(filePath)
+  if (extension === ".tsx" || extension === ".ts") {
     const source = await file.text()
-    const code = WEB_TSX_TRANSPILER.transformSync(source)
+    const code =
+      extension === ".tsx"
+        ? WEB_TSX_TRANSPILER.transformSync(source)
+        : WEB_TS_TRANSPILER.transformSync(source)
     return new Response(code, {
       headers: {
         "cache-control": "no-cache",
@@ -1383,6 +1391,11 @@ export const daemonCommand: Command = {
             const asset = await serveWebAsset("/")
             if (asset) return asset
           }
+          if (url.pathname === "/favicon.ico") {
+            const asset = await serveWebAsset("/web/favicon.ico")
+            if (asset) return asset
+            return new Response(null, { status: 204 })
+          }
           if (url.pathname === "/web" || url.pathname.startsWith("/web/")) {
             const asset = await serveWebAsset(
               url.pathname === "/web" ? "/web/index.html" : url.pathname
@@ -1594,6 +1607,44 @@ export const daemonCommand: Command = {
             .listActive()
             .filter((entry) => (cwd ? entry.cwd === cwd : true))
           return Response.json({ active })
+        }
+
+        if (url.pathname === "/pr-poll" && req.method === "POST") {
+          const body = (await req.json().catch(() => null)) as {
+            cwd?: string
+          } | null
+          const cwd = body?.cwd
+          if (typeof cwd !== "string" || cwd.length === 0) {
+            return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
+          }
+
+          const start = performance.now()
+          const proc = Bun.spawn(["bun", Bun.main, "dispatch", "prPoll"], {
+            cwd,
+            stdout: "pipe",
+            stderr: "pipe",
+          })
+          const [stdout, stderr] = await Promise.all([
+            new Response(proc.stdout).text(),
+            new Response(proc.stderr).text(),
+          ])
+          await proc.exited
+          const durationMs = performance.now() - start
+          recordDispatch(globalMetrics, "prPoll", durationMs)
+
+          if (cwd) {
+            touchProject(cwd)
+            recordDispatch(getProjectMetrics(cwd), "prPoll", durationMs)
+            registerProjectWatchers(cwd)
+          }
+
+          return Response.json({
+            success: proc.exitCode === 0,
+            stdout,
+            stderr,
+            durationMs,
+            exitCode: proc.exitCode,
+          })
         }
 
         if (url.pathname === "/settings/project" && req.method === "POST") {

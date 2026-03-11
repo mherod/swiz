@@ -243,3 +243,4 @@ alwaysApply: false
 - **DON'T**: Treat a `pretooluse-repeated-lint-test` block on the first `bun test` of a new session as a real violation — the hook has no session-boundary detection and reads prior-session runs from the full JSONL. Fix: make any Edit between runs to clear the gate. Issue #174.
 - **DON'T**: Declare commit or push success before reading tool output confirming it. Verify from evidence (git status clean, commit SHA captured, push output showing remote updated) before claiming complete.
 - **DON'T**: Work on auto-continue findings without a filed issue. `stop-personal-repo-issues.ts` actionable issues take priority.
+- **DO**: Route LaunchAgent `prPoll` via daemon first, then fallback: `curl -sSf -X POST ... || bun index.ts dispatch ...`.

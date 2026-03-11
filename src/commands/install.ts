@@ -499,7 +499,14 @@ const PR_POLL_PLIST = join(
 function buildPrPollPlist(bunBin: string, indexPath: string): string {
   const logPath = swizPrPollLogPath()
   const errorLogPath = swizPrPollErrorLogPath()
-  const cmd = `echo '{}' | '${bunBin}' '${indexPath}' dispatch prPoll 2>>${logPath}`
+
+  // Try daemon /pr-poll first, fallback to standalone if curl fails
+  const payload = `{"cwd":"${process.env.HOME}"}`
+  const curlCmd = `curl -sSf -X POST "http://localhost:7943/pr-poll" -d '${payload}' -H 'Content-Type: application/json'`
+  const fallbackCmd = `'${bunBin}' '${indexPath}' dispatch prPoll`
+
+  const cmd = `${curlCmd} > /dev/null 2>>${errorLogPath} || ${fallbackCmd} >>${logPath} 2>>${errorLogPath}`
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
