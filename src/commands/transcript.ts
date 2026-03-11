@@ -1,4 +1,6 @@
 import { join, resolve } from "node:path"
+import { format } from "date-fns"
+import { orderBy } from "lodash-es"
 import { promptAgent } from "../agent.ts"
 import { AGENTS, type AgentDef } from "../agents.ts"
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
@@ -133,7 +135,7 @@ function formatTimestamp(iso: string): string {
   try {
     const d = new Date(iso)
     if (Number.isNaN(d.getTime())) return ""
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    return format(d, "HH:mm")
   } catch {
     return ""
   }
@@ -363,7 +365,7 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
   }
 
   // Sort valid events by timestamp, breaking ties by file index
-  validEvents.sort((a, b) => a.ts - b.ts || a._idx - b._idx)
+  const sortedValidEvents = orderBy(validEvents, [(ev) => ev.ts, (ev) => ev._idx], ["asc", "asc"])
 
   // Normalize every malformed record before sorting: guarantee string iso and finite numeric
   // _idx/_seq so the comparator never receives unexpected runtime types regardless of how
@@ -379,28 +381,29 @@ function parseDebugEvents(lines: string[]): DebugEvent[] {
   //   1. _idx — file position (loop var i, structurally unique)
   //   2. iso  — lexicographic fallback; String() guards against non-string runtime values
   //   3. _seq — insertion order into malformed[] (unique within array, set at ev creation)
-  malformedEvents.sort((a, b) => {
-    const byIdx = (a._idx ?? 0) - (b._idx ?? 0)
-    if (byIdx !== 0) return byIdx
-    const byIso = String(a.iso ?? "").localeCompare(String(b.iso ?? ""))
-    if (byIso !== 0) return byIso
-    return (a._seq ?? 0) - (b._seq ?? 0)
-  })
+  const sortedMalformedEvents = orderBy(
+    malformedEvents,
+    [(ev) => ev._idx ?? 0, (ev) => String(ev.iso ?? ""), (ev) => ev._seq ?? 0],
+    ["asc", "asc", "asc"]
+  )
 
   // Two-pass merge: insert each malformed event immediately after the last valid event
   // whose _idx precedes it in the file. This places parse errors at their structural
   // position in the output rather than at an ambiguous inherited timestamp bucket.
   const result: Tagged[] = []
   let vi = 0
-  for (const malformed of malformedEvents) {
-    while (vi < validEvents.length && (validEvents[vi]?._idx ?? Infinity) < malformed._idx) {
-      result.push(validEvents[vi]!)
+  for (const malformed of sortedMalformedEvents) {
+    while (
+      vi < sortedValidEvents.length &&
+      (sortedValidEvents[vi]?._idx ?? Infinity) < malformed._idx
+    ) {
+      result.push(sortedValidEvents[vi]!)
       vi++
     }
     result.push(malformed)
   }
-  while (vi < validEvents.length) {
-    result.push(validEvents[vi]!)
+  while (vi < sortedValidEvents.length) {
+    result.push(sortedValidEvents[vi]!)
     vi++
   }
 
@@ -612,11 +615,7 @@ function pickSession(sessions: Session[], sessionQuery: string | null): Session 
 function renderSessionList(sessions: Session[], targetDir: string): void {
   console.log(`\n  Transcripts for ${targetDir}\n`)
   for (const session of sessions) {
-    const date = new Date(session.mtime)
-    const label = date.toLocaleString([], {
-      dateStyle: "short",
-      timeStyle: "short",
-    })
+    const label = format(new Date(session.mtime), "Pp")
     console.log(`  ${session.id}  ${DIM}${label}${RESET}`)
   }
   console.log()

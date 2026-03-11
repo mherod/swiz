@@ -669,3 +669,73 @@ describe("cleanup Gemini backup artifact detection", () => {
     expect(output).toMatch(/~\/.gemini/)
   })
 })
+
+describe("cleanup old task files", () => {
+  const TASK_FILE_HOME = join(tmpdir(), `swiz-cleanup-task-files-${process.pid}`)
+  const TASK_FILE_ENCODED_HOME = TASK_FILE_HOME.replace(/[/.]/g, "-")
+  const SWIZ_ROOT = join(import.meta.dir, "../..")
+  const env = { ...process.env, HOME: TASK_FILE_HOME }
+  const PROJECT_NAME = `${TASK_FILE_ENCODED_HOME}-Development-task-file-project`
+  const SESSION_ID = "00000000-0000-0000-0000-cccccccccccc"
+
+  beforeAll(async () => {
+    await mkdir(join(TASK_FILE_HOME, "Development", "task-file-project"), { recursive: true })
+    const sessionDir = join(TASK_FILE_HOME, ".claude", "projects", PROJECT_NAME, SESSION_ID)
+    await mkdir(sessionDir, { recursive: true })
+    await Bun.write(join(sessionDir, "session.jsonl"), '{"type":"system"}\n')
+
+    const taskDir = join(TASK_FILE_HOME, ".claude", "tasks", SESSION_ID)
+    await mkdir(taskDir, { recursive: true })
+    await writeFile(
+      join(taskDir, "1.json"),
+      JSON.stringify({
+        id: "1",
+        subject: "Old completed task",
+        status: "completed",
+        statusChangedAt: "2025-01-01T00:00:00.000Z",
+        completionTimestamp: "2025-01-01T00:00:00.000Z",
+      })
+    )
+    await writeFile(
+      join(taskDir, "2.json"),
+      JSON.stringify({
+        id: "2",
+        subject: "Recent completed task",
+        status: "completed",
+        statusChangedAt: new Date().toISOString(),
+      })
+    )
+    await writeFile(
+      join(taskDir, "3.json"),
+      JSON.stringify({
+        id: "3",
+        subject: "Old pending task should stay",
+        status: "pending",
+        statusChangedAt: "2025-01-01T00:00:00.000Z",
+      })
+    )
+  })
+
+  afterAll(async () => {
+    const proc = Bun.spawn(["rm", "-rf", TASK_FILE_HOME], { stdout: "pipe", stderr: "pipe" })
+    await proc.exited
+  })
+
+  test("dry-run reports old task files when --task-older-than is provided", async () => {
+    const proc = Bun.spawn(
+      ["bun", "run", "index.ts", "cleanup", "--dry-run", "--task-older-than", "30d"],
+      {
+        cwd: SWIZ_ROOT,
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      }
+    )
+    const output = await new Response(proc.stdout).text()
+    await proc.exited
+
+    expect(proc.exitCode).toBe(0)
+    expect(output).toMatch(/old completed\/cancelled task files/)
+    expect(output).toMatch(/1 old task files/)
+  })
+})

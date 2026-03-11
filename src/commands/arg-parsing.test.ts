@@ -146,6 +146,8 @@ describe("parseCleanupArgs", () => {
     const result = parseCleanupArgs([])
     expect(result.olderThanMs).toBe(30 * DAY_MS)
     expect(result.olderThanLabel).toBe("30 days")
+    expect(result.taskOlderThanMs).toBeNull()
+    expect(result.taskOlderThanLabel).toBeNull()
     expect(result.dryRun).toBe(false)
     expect(result.projectFilter).toBeUndefined()
   })
@@ -203,6 +205,18 @@ describe("parseCleanupArgs", () => {
   test("parses --project with value", () => {
     const result = parseCleanupArgs(["--project", "my-project"])
     expect(result.projectFilter).toBe("my-project")
+  })
+
+  test("parses --task-older-than with days", () => {
+    const result = parseCleanupArgs(["--task-older-than", "14d"])
+    expect(result.taskOlderThanMs).toBe(14 * DAY_MS)
+    expect(result.taskOlderThanLabel).toBe("14 days")
+  })
+
+  test("parses --task-older-than with hours", () => {
+    const result = parseCleanupArgs(["--task-older-than", "72h"])
+    expect(result.taskOlderThanMs).toBe(72 * HOUR_MS)
+    expect(result.taskOlderThanLabel).toBe("72 hours")
   })
 
   test("ignores --project without value", () => {

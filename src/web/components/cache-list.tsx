@@ -1,3 +1,5 @@
+import { cn } from "../lib/cn.ts"
+
 type CacheState = "cold" | "warm" | "hot"
 
 function getCacheState(value: number): CacheState {
@@ -12,7 +14,7 @@ function CacheRow({ label, value }: { label: string; value: number }) {
     <li className="cache-row">
       <span className="cache-label">{label}</span>
       <span className="cache-value-wrap">
-        <span className={`cache-badge cache-${state}`}>{state}</span>
+        <span className={cn("cache-badge", `cache-${state}`)}>{state}</span>
         <strong className="cache-count">{value}</strong>
       </span>
     </li>

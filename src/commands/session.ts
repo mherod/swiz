@@ -1,3 +1,4 @@
+import { format } from "date-fns"
 import { BOLD, DIM, RESET } from "../ansi.ts"
 import { findAllProviderSessions } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
@@ -24,8 +25,7 @@ export const sessionCommand: Command = {
     if (listOnly) {
       console.log(`\n  ${BOLD}Sessions${RESET} ${DIM}(${targetDir})${RESET}\n`)
       for (const s of sessions) {
-        const d = new Date(s.mtime)
-        const label = d.toLocaleString([], { dateStyle: "short", timeStyle: "short" })
+        const label = format(new Date(s.mtime), "Pp")
         console.log(`  ${s.id}  ${DIM}${label}${RESET}`)
       }
       console.log()

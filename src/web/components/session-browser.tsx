@@ -1,3 +1,13 @@
+import { useMemo, useState } from "react"
+import { cn } from "../lib/cn.ts"
+import {
+  formatAssistantJsonBlocks,
+  normalizeAssistantText,
+  splitAssistantMessage,
+  splitUserMessage,
+} from "../lib/message-format.ts"
+import { Markdown } from "./markdown.tsx"
+
 export interface SessionPreview {
   id: string
   provider?: string
@@ -44,6 +54,10 @@ export interface SessionTaskSummary {
   cancelled: number
 }
 
+export interface ProjectTask extends SessionTask {
+  sessionId: string
+}
+
 interface GroupedSessionMessage {
   message: SessionMessage
   count: number
@@ -86,8 +100,6 @@ function shortSessionId(id: string): string {
   return `${id.slice(0, 8)}...${id.slice(-4)}`
 }
 
-import { Markdown } from "./markdown.tsx"
-
 const COLLAPSE_LINE_THRESHOLD = 20
 const COLLAPSE_CHAR_THRESHOLD = 900
 
@@ -98,93 +110,11 @@ function summarizeText(text: string): string {
   return `${candidate.slice(0, cutIndex > 0 ? cutIndex : candidate.length).trimEnd()}…`
 }
 
-function isMarkdownLike(text: string): boolean {
-  return /(^|\n)\s*(#{1,6}\s|[-*]\s|>\s|```)|`[^`]+`|\[[^\]]+\]\([^)]+\)/m.test(text)
-}
-
 function looksLikeLogBlob(text: string): boolean {
   const hasErrorWords = /(error|exception|stack|trace|invalid|failed)/i.test(text)
   const hasSignatureNoise = /[{}[\]():;]/.test(text)
   const lines = text.split("\n").length
   return hasErrorWords && hasSignatureNoise && (lines > 8 || text.length > 420)
-}
-
-function normalizeAssistantText(text: string): string {
-  if (isMarkdownLike(text)) return text
-  if (text.length < 300) return text
-  const newlineCount = (text.match(/\n/g) ?? []).length
-  if (newlineCount > 8) return text
-  return text
-    .replace(/\. (?=[A-Z][a-z]{2,}\b)/g, ".\n\n")
-    .replace(/\) (?=[A-Z][a-z]{2,}\b)/g, ")\n\n")
-    .replace(/: (?=[A-Z][a-z]{2,}\b)/g, ":\n")
-}
-
-interface AssistantMessageParts {
-  visibleText: string
-  thoughtText: string | null
-}
-
-function splitAssistantMessage(text: string): AssistantMessageParts {
-  const thoughts: string[] = []
-  const visibleText = text
-    .replace(/<thought>([\s\S]*?)(?:<\/thought>|$)/gi, (_, inner: string) => {
-      const cleaned = inner.trim()
-      if (cleaned) thoughts.push(cleaned)
-      return ""
-    })
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
-
-  const thoughtText = thoughts.join("\n\n").trim()
-  return {
-    visibleText,
-    thoughtText: thoughtText.length > 0 ? thoughtText : null,
-  }
-}
-
-function tryParseJson(text: string): string | null {
-  const candidate = text.trim()
-  if (!(candidate.startsWith("{") || candidate.startsWith("["))) return null
-  try {
-    const parsed = JSON.parse(candidate)
-    return JSON.stringify(parsed, null, 2)
-  } catch {
-    return null
-  }
-}
-
-function normalizeInlineFencedCode(text: string): string {
-  if (!text.includes("```")) return text
-  const normalized = text.replace(
-    /```([a-zA-Z0-9_-]*)\s*([\s\S]*?)```/g,
-    (_match: string, lang: string, code: string) => `\n\`\`\`${lang}\n${code.trim()}\n\`\`\`\n`
-  )
-  return normalized.replace(/\n{3,}/g, "\n\n").trim()
-}
-
-function formatAssistantJsonBlocks(text: string): string {
-  if (!text) return text
-  const withNormalizedFences = normalizeInlineFencedCode(text)
-  if (withNormalizedFences.includes("```")) return withNormalizedFences
-
-  const wholeJson = tryParseJson(withNormalizedFences)
-  if (wholeJson) return `\`\`\`json\n${wholeJson}\n\`\`\``
-
-  // Common case: prose prefix followed by a JSON payload (for example API errors).
-  const firstBrace = withNormalizedFences.indexOf("{")
-  const firstBracket = withNormalizedFences.indexOf("[")
-  const startCandidates = [firstBrace, firstBracket].filter((idx) => idx >= 0)
-  if (startCandidates.length === 0) return withNormalizedFences
-  const start = Math.min(...startCandidates)
-
-  const jsonLike = withNormalizedFences.slice(start).trim()
-  const parsed = tryParseJson(jsonLike)
-  if (!parsed) return withNormalizedFences
-
-  const prefix = withNormalizedFences.slice(0, start).trimEnd()
-  if (!prefix) return `\`\`\`json\n${parsed}\n\`\`\``
-  return `${prefix}\n\n\`\`\`json\n${parsed}\n\`\`\``
 }
 
 function canonicalGroupKey(message: SessionMessage): string {
@@ -219,9 +149,12 @@ function groupMessages(messages: SessionMessage[]): GroupedSessionMessage[] {
 function MessageBody({ text, role }: { text: string; role: "user" | "assistant" }) {
   const assistantParts = role === "assistant" ? splitAssistantMessage(text) : null
   const assistantVisible = assistantParts?.visibleText ?? text
+  const userParts = role === "user" ? splitUserMessage(text) : null
+  const userVisible = userParts?.visibleText ?? text
   const assistantWithJson =
     role === "assistant" ? formatAssistantJsonBlocks(assistantVisible) : text
-  const preparedText = role === "assistant" ? normalizeAssistantText(assistantWithJson) : text
+  const preparedText =
+    role === "assistant" ? normalizeAssistantText(assistantWithJson) : userVisible
   const lines = preparedText.split("\n")
   const shouldCollapse =
     lines.length > COLLAPSE_LINE_THRESHOLD || preparedText.length > COLLAPSE_CHAR_THRESHOLD
@@ -278,19 +211,71 @@ function MessageBody({ text, role }: { text: string; role: "user" | "assistant" 
       </>
     )
   }
+  const hookContext = userParts?.hookContext
+  const textForCollapse = userVisible
   if (!shouldCollapse) {
-    return <pre className="message-text">{text}</pre>
+    return (
+      <>
+        <pre className="message-text">{textForCollapse}</pre>
+        {hookContext ? (
+          <div className="hook-context-box">
+            <p className="hook-context-title">
+              Hook context{hookContext.source ? ` (${hookContext.source})` : ""}
+            </p>
+            {hookContext.details.length > 0 ? (
+              <ul className="hook-context-list">
+                {hookContext.details.map((item) => (
+                  <li key={`${item.label}:${item.value}`} className="hook-context-item">
+                    <span className="hook-context-label">{item.label}</span>
+                    <code className="hook-context-value">{item.value}</code>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {hookContext.notes.map((note) => (
+              <p key={note} className="hook-context-note">
+                {note}
+              </p>
+            ))}
+          </div>
+        ) : null}
+      </>
+    )
   }
-  const preview = summarizeText(text)
-  const remaining = Math.max(text.length - preview.length, 0)
+  const preview = summarizeText(textForCollapse)
+  const remaining = Math.max(textForCollapse.length - preview.length, 0)
   return (
-    <details className="message-collapsible">
-      <summary>
-        <pre className="message-text">{preview}</pre>
-        <span className="message-expand-hint">{remaining} more chars</span>
-      </summary>
-      <pre className="message-text">{text}</pre>
-    </details>
+    <>
+      <details className="message-collapsible">
+        <summary>
+          <pre className="message-text">{preview}</pre>
+          <span className="message-expand-hint">{remaining} more chars</span>
+        </summary>
+        <pre className="message-text">{textForCollapse}</pre>
+      </details>
+      {hookContext ? (
+        <div className="hook-context-box">
+          <p className="hook-context-title">
+            Hook context{hookContext.source ? ` (${hookContext.source})` : ""}
+          </p>
+          {hookContext.details.length > 0 ? (
+            <ul className="hook-context-list">
+              {hookContext.details.map((item) => (
+                <li key={`${item.label}:${item.value}`} className="hook-context-item">
+                  <span className="hook-context-label">{item.label}</span>
+                  <code className="hook-context-value">{item.value}</code>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {hookContext.notes.map((note) => (
+            <p key={note} className="hook-context-note">
+              {note}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </>
   )
 }
 
@@ -339,7 +324,7 @@ export function SessionNav({
           <li key={project.cwd}>
             <button
               type="button"
-              className={`project-btn ${project.cwd === selectedProjectCwd ? "selected" : ""}`}
+              className={cn("project-btn", project.cwd === selectedProjectCwd && "selected")}
               aria-pressed={project.cwd === selectedProjectCwd}
               onClick={() => onSelectProject(project.cwd)}
             >
@@ -360,7 +345,7 @@ export function SessionNav({
               <li key={session.id}>
                 <button
                   type="button"
-                  className={`session-btn ${session.id === selectedSessionId ? "selected" : ""}`}
+                  className={cn("session-btn", session.id === selectedSessionId && "selected")}
                   aria-pressed={session.id === selectedSessionId}
                   onClick={() => onSelectSession(selectedProject!.cwd, session.id)}
                 >
@@ -385,7 +370,7 @@ export function SessionNav({
               <li key={session.id}>
                 <button
                   type="button"
-                  className={`session-btn ${session.id === selectedSessionId ? "selected" : ""}`}
+                  className={cn("session-btn", session.id === selectedSessionId && "selected")}
                   aria-pressed={session.id === selectedSessionId}
                   onClick={() => onSelectSession(selectedProject!.cwd, session.id)}
                 >
@@ -451,11 +436,14 @@ interface MessagesProps {
   tasks?: SessionTask[]
   taskSummary?: SessionTaskSummary | null
   tasksLoading?: boolean
+  projectTasks?: ProjectTask[]
+  projectTaskSummary?: SessionTaskSummary | null
+  projectTasksLoading?: boolean
 }
 
 function TaskStatusBadge({ status }: { status: SessionTask["status"] }) {
   const label = status.replace("_", " ")
-  return <span className={`task-status task-status-${status}`}>{label}</span>
+  return <span className={cn("task-status", `task-status-${status}`)}>{label}</span>
 }
 
 function SessionTasksSection({
@@ -505,6 +493,108 @@ function SessionTasksSection({
   )
 }
 
+function ProjectTasksSection({
+  tasks,
+  summary,
+  loading,
+}: {
+  tasks: ProjectTask[]
+  summary: SessionTaskSummary | null
+  loading: boolean
+}) {
+  const [visibility, setVisibility] = useState<"open" | "all">("open")
+  const [expanded, setExpanded] = useState(false)
+  const previewLimit = 16
+  const openTasks = useMemo(
+    () => tasks.filter((task) => task.status === "pending" || task.status === "in_progress"),
+    [tasks]
+  )
+  const scopedTasks = visibility === "open" ? openTasks : tasks
+  const visibleTasks = expanded ? scopedTasks : scopedTasks.slice(0, previewLimit)
+  const hiddenCount = Math.max(scopedTasks.length - visibleTasks.length, 0)
+
+  return (
+    <section className="session-tasks-section" aria-label="All tasks for selected project">
+      <h3 className="session-tasks-title">Project tasks</h3>
+      {summary ? (
+        <p className="session-tasks-summary">
+          {summary.total} total · {summary.open} open · {summary.completed} completed ·{" "}
+          {summary.cancelled} cancelled
+        </p>
+      ) : null}
+      <div className="session-task-controls">
+        <button
+          type="button"
+          className={cn("task-filter-btn", visibility === "open" && "active")}
+          onClick={() => {
+            setVisibility("open")
+            setExpanded(false)
+          }}
+          aria-pressed={visibility === "open"}
+        >
+          Open only ({openTasks.length} shown)
+        </button>
+        <button
+          type="button"
+          className={cn("task-filter-btn", visibility === "all" && "active")}
+          onClick={() => {
+            setVisibility("all")
+            setExpanded(false)
+          }}
+          aria-pressed={visibility === "all"}
+        >
+          All ({tasks.length} loaded)
+        </button>
+      </div>
+      {summary && tasks.length < summary.total ? (
+        <p className="session-tasks-summary">
+          Showing latest {tasks.length} of {summary.total} tasks.
+        </p>
+      ) : null}
+      {loading ? (
+        <p className="empty">Loading project tasks...</p>
+      ) : scopedTasks.length === 0 ? (
+        visibility === "open" ? (
+          <p className="empty">No open tasks in this project.</p>
+        ) : (
+          <p className="empty">No tasks recorded for this project.</p>
+        )
+      ) : (
+        <>
+          <ul className="session-task-list">
+            {visibleTasks.map((task) => {
+              const taskTime = task.statusChangedAt ?? task.completionTimestamp
+              return (
+                <li key={`${task.sessionId}:${task.id}`} className="session-task-row">
+                  <div className="session-task-meta">
+                    <span className="session-task-id">
+                      {task.sessionId.slice(0, 8)}... · #{task.id}
+                    </span>
+                    <TaskStatusBadge status={task.status} />
+                  </div>
+                  <p className="session-task-subject">{task.subject}</p>
+                  {taskTime ? (
+                    <p className="session-task-time">{formatTime(new Date(taskTime).getTime())}</p>
+                  ) : null}
+                </li>
+              )
+            })}
+          </ul>
+          {hiddenCount > 0 ? (
+            <button
+              type="button"
+              className="task-show-more-btn"
+              onClick={() => setExpanded((value) => !value)}
+            >
+              {expanded ? "Show fewer tasks" : `Show ${hiddenCount} more tasks`}
+            </button>
+          ) : null}
+        </>
+      )}
+    </section>
+  )
+}
+
 export function SessionMessages({
   messages,
   loading,
@@ -514,6 +604,9 @@ export function SessionMessages({
   tasks = [],
   taskSummary = null,
   tasksLoading = false,
+  projectTasks = [],
+  projectTaskSummary = null,
+  projectTasksLoading = false,
 }: MessagesProps) {
   const sorted = [...messages].sort((a, b) => {
     if (!a.timestamp || !b.timestamp) return 0
@@ -525,6 +618,11 @@ export function SessionMessages({
     <section className="card bento-messages">
       <h2 className="section-title">Transcript</h2>
       <p className="section-subtitle">Conversation history for selected session</p>
+      <ProjectTasksSection
+        tasks={projectTasks}
+        summary={projectTaskSummary}
+        loading={projectTasksLoading}
+      />
       <SessionTasksSection tasks={tasks} summary={taskSummary} loading={tasksLoading} />
       {toolStats && toolStats.length > 0 && <ToolStatsBar stats={toolStats} />}
       {loading ? (
@@ -544,7 +642,7 @@ export function SessionMessages({
             const key = groupKeys[0]!
             const isNew = groupKeys.some((groupKey) => newKeys?.has(groupKey) ?? false)
             return (
-              <li key={key} className={`message-row ${message.role}${isNew ? " message-new" : ""}`}>
+              <li key={key} className={cn("message-row", message.role, isNew && "message-new")}>
                 <div className="message-meta">
                   <span className="message-role">{role}</span>
                   <span className="message-meta-right">

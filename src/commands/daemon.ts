@@ -1,5 +1,5 @@
 import { type FSWatcher, watch } from "node:fs"
-import { basename, dirname, extname, join } from "node:path"
+import { dirname, extname, join } from "node:path"
 import { stderrLog } from "../debug.ts"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import { executeDispatch } from "../dispatch/execute.ts"
@@ -19,6 +19,7 @@ import {
 } from "../settings.ts"
 import { getWorkflowIntent } from "../state-machine.ts"
 import { readTasks, type Task as StoredTask } from "../tasks/task-repository.ts"
+import { getSessions } from "../tasks/task-resolver.ts"
 import { parseTranscriptSummary, type TranscriptSummary } from "../transcript-summary.ts"
 import {
   extractText,
@@ -28,6 +29,7 @@ import {
   type Session,
 } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
+import { handleSessionRoutes } from "./daemon/session-routes.ts"
 import {
   computeWarmStatusLineSnapshot,
   getGhCachePath,
@@ -40,6 +42,8 @@ const PLIST_PATH = join(process.env.HOME ?? "", "Library/LaunchAgents", `${LABEL
 const GITHUB_REFRESH_WINDOW_MS = 20_000
 const CI_WATCH_POLL_MS = 30_000
 const CI_WATCH_TIMEOUT_MS = 60 * 60 * 1000
+const TRANSCRIPT_MEMORY_RETENTION_MS = 12 * 60 * 60 * 1000
+const TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS = 5 * 60 * 1000
 const WEB_ROOT = join(dirname(Bun.main), "src", "web")
 const WEB_TSX_TRANSPILER = new Bun.Transpiler({
   loader: "tsx",
@@ -590,6 +594,7 @@ export class TranscriptIndexCache {
 
       const cached = this.entries.get(transcriptPath)
       if (cached && cached.mtimeMs === mtimeMs) {
+        cached.computedAt = Date.now()
         return cached
       }
 
@@ -646,6 +651,12 @@ export class TranscriptIndexCache {
 
   get size(): number {
     return this.entries.size
+  }
+
+  pruneOlderThan(cutoffMs: number): void {
+    for (const [path, entry] of this.entries) {
+      if (entry.computedAt < cutoffMs) this.entries.delete(path)
+    }
   }
 }
 
@@ -1116,6 +1127,13 @@ class SessionDataCache {
       return null
     }
   }
+
+  pruneOlderThan(cutoffMs: number): void {
+    for (const [sessionPath, entry] of this.entries) {
+      const activityMs = Math.max(entry.lastMessageAt, entry.mtimeMs)
+      if (activityMs < cutoffMs) this.entries.delete(sessionPath)
+    }
+  }
 }
 
 const sessionDataCache = new SessionDataCache()
@@ -1210,6 +1228,10 @@ interface SessionTaskPreview {
   completionEvidence: string | null
 }
 
+interface ProjectTaskPreview extends SessionTaskPreview {
+  sessionId: string
+}
+
 async function getSessionData(cwd: string, sessionId: string, limit = 30): Promise<SessionData> {
   const sessions = await findAllProviderSessions(cwd)
   const session = sessions.find(
@@ -1267,6 +1289,51 @@ async function getSessionTasks(
       completionTimestamp: task.completionTimestamp ?? null,
       completionEvidence: task.completionEvidence ?? null,
     })),
+    summary,
+  }
+}
+
+async function getProjectTasks(
+  cwd: string,
+  limit = 100
+): Promise<{ tasks: ProjectTaskPreview[]; summary: SessionTaskSummary }> {
+  const sessions = await getSessions(cwd)
+  const allTasks: ProjectTaskPreview[] = []
+  for (const sessionId of sessions) {
+    const sessionTasks = await readTasks(sessionId)
+    for (const task of sessionTasks) {
+      allTasks.push({
+        sessionId,
+        id: task.id,
+        subject: task.subject,
+        status: task.status,
+        statusChangedAt: task.statusChangedAt ?? null,
+        completionTimestamp: task.completionTimestamp ?? null,
+        completionEvidence: task.completionEvidence ?? null,
+      })
+    }
+  }
+
+  const summary: SessionTaskSummary = {
+    total: allTasks.length,
+    open: allTasks.filter((task) => task.status === "pending" || task.status === "in_progress")
+      .length,
+    completed: allTasks.filter((task) => task.status === "completed").length,
+    cancelled: allTasks.filter((task) => task.status === "cancelled").length,
+  }
+
+  const sorted = [...allTasks].sort((a, b) => {
+    const rankDiff = taskStatusRank(a.status) - taskStatusRank(b.status)
+    if (rankDiff !== 0) return rankDiff
+    const aTs = a.statusChangedAt ?? a.completionTimestamp ?? ""
+    const bTs = b.statusChangedAt ?? b.completionTimestamp ?? ""
+    if (aTs !== bTs) return bTs.localeCompare(aTs)
+    if (a.sessionId !== b.sessionId) return b.sessionId.localeCompare(a.sessionId)
+    return b.id.localeCompare(a.id)
+  })
+
+  return {
+    tasks: sorted.slice(0, limit),
     summary,
   }
 }
@@ -1465,6 +1532,7 @@ export const daemonCommand: Command = {
     const projectLastSeen = new Map<string, number>()
     /** Tracks the latest dispatch timestamp per session ID (from hook events). */
     const sessionActivity = new Map<string, { lastSeen: number; dispatches: number }>()
+    let lastTranscriptMemoryPruneAt = 0
     const getProjectMetrics = (cwd: string): DaemonMetrics => {
       let m = projectMetrics.get(cwd)
       if (!m) {
@@ -1475,6 +1543,17 @@ export const daemonCommand: Command = {
     }
     const touchProject = (cwd: string) => {
       projectLastSeen.set(cwd, Date.now())
+    }
+    const pruneTranscriptMemory = () => {
+      const now = Date.now()
+      if (now - lastTranscriptMemoryPruneAt < TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS) return
+      lastTranscriptMemoryPruneAt = now
+      const cutoffMs = now - TRANSCRIPT_MEMORY_RETENTION_MS
+      sessionDataCache.pruneOlderThan(cutoffMs)
+      transcriptIndex.pruneOlderThan(cutoffMs)
+      for (const [sessionId, activity] of sessionActivity) {
+        if (activity.lastSeen < cutoffMs) sessionActivity.delete(sessionId)
+      }
     }
     touchProject(process.cwd())
 
@@ -1585,6 +1664,7 @@ export const daemonCommand: Command = {
         },
       },
       async fetch(req) {
+        pruneTranscriptMemory()
         const url = new URL(req.url)
 
         if (url.pathname === "/dispatch" && req.method === "POST") {
@@ -1636,8 +1716,10 @@ export const daemonCommand: Command = {
           const projectParam = url.searchParams.get("project")
           if (projectParam) {
             const pm = projectMetrics.get(projectParam)
-            if (!pm) return Response.json({ error: "No metrics for project" }, { status: 404 })
-            return Response.json({ ...serializeMetrics(pm), project: projectParam })
+            return Response.json({
+              ...(pm ? serializeMetrics(pm) : serializeMetrics(createMetrics())),
+              project: projectParam,
+            })
           }
           const projects: Record<string, ReturnType<typeof serializeMetrics>> = {}
           for (const [cwd, m] of projectMetrics) {
@@ -1844,86 +1926,19 @@ export const daemonCommand: Command = {
           return Response.json(cached)
         }
 
-        if (url.pathname === "/sessions/projects" && req.method === "POST") {
-          const body = (await req.json().catch(() => null)) as {
-            limitProjects?: number
-            limitSessionsPerProject?: number
-            selectedProjectCwd?: string
-            selectedSessionId?: string
-          } | null
-          const limitProjects = Math.max(1, Math.min(30, body?.limitProjects ?? 8))
-          const limitSessionsPerProject = Math.max(
-            1,
-            Math.min(30, body?.limitSessionsPerProject ?? 8)
-          )
-          const projectCwds = [
+        const sessionRouteResponse = await handleSessionRoutes(req, url, {
+          touchProject,
+          getKnownProjects: () => [
             ...new Set([process.cwd(), ...registeredProjects, ...projectMetrics.keys()]),
-          ]
-          const ordered = projectCwds
-            .map((cwd) => ({ cwd, lastSeenAt: projectLastSeen.get(cwd) ?? 0 }))
-            .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
-            .slice(0, limitProjects)
-
-          const allProjects = await Promise.all(
-            ordered.map(async ({ cwd, lastSeenAt }) => {
-              const sessions = await listProjectSessions(
-                cwd,
-                limitSessionsPerProject,
-                sessionActivity,
-                body?.selectedProjectCwd === cwd ? body?.selectedSessionId : undefined
-              )
-              return {
-                cwd,
-                name: basename(cwd),
-                lastSeenAt,
-                sessionCount: sessions.sessionCount,
-                sessions: sessions.sessions,
-              }
-            })
-          )
-          const projects = allProjects.filter((p) => p.sessionCount > 0)
-          return Response.json({ projects })
-        }
-
-        if (url.pathname === "/sessions/messages" && req.method === "POST") {
-          const body = (await req.json().catch(() => null)) as {
-            cwd?: string
-            sessionId?: string
-            limit?: number
-          } | null
-          const cwd = body?.cwd
-          const sessionId = body?.sessionId
-          if (typeof cwd !== "string" || cwd.length === 0 || typeof sessionId !== "string") {
-            return Response.json(
-              { error: "Missing required fields: cwd (string), sessionId (string)" },
-              { status: 400 }
-            )
-          }
-          touchProject(cwd)
-          const limit = Math.max(1, Math.min(100, body?.limit ?? 30))
-          const data = await getSessionData(cwd, sessionId, limit)
-          return Response.json({ messages: data.messages, toolStats: data.toolStats })
-        }
-
-        if (url.pathname === "/sessions/tasks" && req.method === "POST") {
-          const body = (await req.json().catch(() => null)) as {
-            cwd?: string
-            sessionId?: string
-            limit?: number
-          } | null
-          const cwd = body?.cwd
-          const sessionId = body?.sessionId
-          if (typeof cwd !== "string" || cwd.length === 0 || typeof sessionId !== "string") {
-            return Response.json(
-              { error: "Missing required fields: cwd (string), sessionId (string)" },
-              { status: 400 }
-            )
-          }
-          touchProject(cwd)
-          const limit = Math.max(1, Math.min(100, body?.limit ?? 20))
-          const data = await getSessionTasks(sessionId, limit)
-          return Response.json(data)
-        }
+          ],
+          getProjectLastSeen: (cwd) => projectLastSeen.get(cwd) ?? 0,
+          listProjectSessions: (cwd, limit, pinnedSessionId) =>
+            listProjectSessions(cwd, limit, sessionActivity, pinnedSessionId),
+          getSessionData,
+          getSessionTasks,
+          getProjectTasks,
+        })
+        if (sessionRouteResponse) return sessionRouteResponse
 
         if (url.pathname === "/cache/status" && req.method === "GET") {
           return Response.json({

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useOptimistic, useRef, useState, useTransition } from "react"
 import {
   getQueryParam,
   hasProjectMessages,
@@ -11,6 +11,7 @@ import { Header } from "./header.tsx"
 import { MetricsRail } from "./metrics-rail.tsx"
 import {
   type ProjectSessions,
+  type ProjectTask,
   type SessionMessage,
   SessionMessages,
   SessionNav,
@@ -40,10 +41,22 @@ export function DashboardApp() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() =>
     getQueryParam("session")
   )
+  const [optimisticProjectCwd, addOptimisticProjectCwd] = useOptimistic(
+    selectedProjectCwd,
+    (_current, next: string | null) => next
+  )
+  const [optimisticSessionId, addOptimisticSessionId] = useOptimistic(
+    selectedSessionId,
+    (_current, next: string | null) => next
+  )
+  const [, startSelectionTransition] = useTransition()
   const [sessionMessages, setSessionMessages] = useState<SessionMessage[]>([])
   const [sessionToolStats, setSessionToolStats] = useState<ToolStat[]>([])
   const [sessionTasks, setSessionTasks] = useState<SessionTask[]>([])
   const [sessionTaskSummary, setSessionTaskSummary] = useState<SessionTaskSummary | null>(null)
+  const [projectTasks, setProjectTasks] = useState<ProjectTask[]>([])
+  const [projectTaskSummary, setProjectTaskSummary] = useState<SessionTaskSummary | null>(null)
+  const [projectTasksLoading, setProjectTasksLoading] = useState(false)
   const [sessionTasksLoading, setSessionTasksLoading] = useState(false)
   const [newMessageKeys, setNewMessageKeys] = useState<Set<string>>(new Set())
   const [messagesLoading, setMessagesLoading] = useState(false)
@@ -60,9 +73,6 @@ export function DashboardApp() {
 
   const loadMessages = useCallback(async (cwd: string, sessionId: string) => {
     setMessagesLoading(true)
-    setSelectedProjectCwd(cwd)
-    setSelectedSessionId(sessionId)
-    setQueryParams({ project: cwd, session: sessionId })
     try {
       const result = await postJson<{ messages: SessionMessage[]; toolStats?: ToolStat[] }>(
         "/sessions/messages",
@@ -74,6 +84,9 @@ export function DashboardApp() {
       setNewMessageKeys(new Set())
       setSessionMessages(msgs)
       setSessionToolStats(result.toolStats ?? [])
+      setSelectedProjectCwd(cwd)
+      setSelectedSessionId(sessionId)
+      setQueryParams({ project: cwd, session: sessionId })
     } finally {
       setMessagesLoading(false)
     }
@@ -93,31 +106,67 @@ export function DashboardApp() {
     }
   }, [])
 
+  const loadProjectTasks = useCallback(async (cwd: string) => {
+    setProjectTasksLoading(true)
+    try {
+      const result = await postJson<{ tasks: ProjectTask[]; summary?: SessionTaskSummary }>(
+        "/projects/tasks",
+        { cwd, limit: 80 }
+      )
+      setProjectTasks(result.tasks ?? [])
+      setProjectTaskSummary(result.summary ?? null)
+    } finally {
+      setProjectTasksLoading(false)
+    }
+  }, [])
+
   const handleSelectProject = useCallback(
     (cwd: string) => {
-      setSelectedProjectCwd(cwd)
       const project = projects.find((p) => p.cwd === cwd)
       const firstSession = project?.sessions[0]
       if (firstSession) {
-        void loadMessages(cwd, firstSession.id)
-        void loadTasks(cwd, firstSession.id)
+        startSelectionTransition(() => {
+          addOptimisticProjectCwd(cwd)
+          addOptimisticSessionId(firstSession.id)
+          void Promise.all([
+            loadMessages(cwd, firstSession.id),
+            loadTasks(cwd, firstSession.id),
+            loadProjectTasks(cwd),
+          ]).catch(() => {})
+        })
       } else {
+        setSelectedProjectCwd(cwd)
         setSelectedSessionId(null)
         setSessionMessages([])
         setSessionTasks([])
         setSessionTaskSummary(null)
+        void loadProjectTasks(cwd)
         setQueryParams({ project: cwd, session: null })
       }
     },
-    [projects, loadMessages, loadTasks]
+    [
+      projects,
+      loadMessages,
+      loadTasks,
+      loadProjectTasks,
+      addOptimisticProjectCwd,
+      addOptimisticSessionId,
+    ]
   )
 
   const handleSelectSession = useCallback(
     (cwd: string, sessionId: string) => {
-      void loadMessages(cwd, sessionId)
-      void loadTasks(cwd, sessionId)
+      startSelectionTransition(() => {
+        addOptimisticProjectCwd(cwd)
+        addOptimisticSessionId(sessionId)
+        void Promise.all([
+          loadMessages(cwd, sessionId),
+          loadTasks(cwd, sessionId),
+          loadProjectTasks(cwd),
+        ]).catch(() => {})
+      })
     },
-    [loadMessages, loadTasks]
+    [loadMessages, loadTasks, loadProjectTasks, addOptimisticProjectCwd, addOptimisticSessionId]
   )
 
   useEffect(() => {
@@ -155,6 +204,7 @@ export function DashboardApp() {
             if (match) {
               void loadMessages(paramProject, paramSession)
               void loadTasks(paramProject, paramSession)
+              void loadProjectTasks(paramProject)
               return
             }
           }
@@ -164,8 +214,10 @@ export function DashboardApp() {
             if (newestSession) {
               void loadMessages(newest.cwd, newestSession.id)
               void loadTasks(newest.cwd, newestSession.id)
+              void loadProjectTasks(newest.cwd)
             } else {
               setSelectedProjectCwd(newest.cwd)
+              void loadProjectTasks(newest.cwd)
             }
           }
         }
@@ -177,7 +229,7 @@ export function DashboardApp() {
     void refresh()
     const id = setInterval(() => void refresh(), 5000)
     return () => clearInterval(id)
-  }, [loadMessages, loadTasks])
+  }, [loadMessages, loadTasks, loadProjectTasks])
 
   useEffect(() => {
     if (!selectedProjectCwd) {
@@ -205,7 +257,7 @@ export function DashboardApp() {
 
     async function pollSessionData() {
       try {
-        const [messagesResult, tasksResult] = await Promise.all([
+        const [messagesResult, tasksResult, projectTasksResult] = await Promise.all([
           postJson<{ messages: SessionMessage[]; toolStats?: ToolStat[] }>("/sessions/messages", {
             cwd,
             sessionId: sid,
@@ -215,6 +267,10 @@ export function DashboardApp() {
             cwd,
             sessionId: sid,
             limit: 20,
+          }),
+          postJson<{ tasks: ProjectTask[]; summary?: SessionTaskSummary }>("/projects/tasks", {
+            cwd,
+            limit: 80,
           }),
         ])
         const msgs = messagesResult.messages ?? []
@@ -240,6 +296,8 @@ export function DashboardApp() {
 
         setSessionTasks(tasksResult.tasks ?? [])
         setSessionTaskSummary(tasksResult.summary ?? null)
+        setProjectTasks(projectTasksResult.tasks ?? [])
+        setProjectTaskSummary(projectTasksResult.summary ?? null)
       } catch {
         /* ignore polling errors */
       }
@@ -252,11 +310,11 @@ export function DashboardApp() {
   const m = metrics ?? {}
   const projectCount = projects.filter(hasProjectMessages).length
   const watchCount = (watches?.active ?? []).length
-  const activeProject = selectedProjectCwd
-    ? projects.find((project) => project.cwd === selectedProjectCwd)
+  const activeProject = optimisticProjectCwd
+    ? projects.find((project) => project.cwd === optimisticProjectCwd)
     : null
-  const activeSession = selectedSessionId
-    ? (activeProject?.sessions.find((session) => session.id === selectedSessionId) ?? null)
+  const activeSession = optimisticSessionId
+    ? (activeProject?.sessions.find((session) => session.id === optimisticSessionId) ?? null)
     : null
 
   if (error) {
@@ -284,8 +342,8 @@ export function DashboardApp() {
       />
       <SessionNav
         projects={projects}
-        selectedProjectCwd={selectedProjectCwd}
-        selectedSessionId={selectedSessionId}
+        selectedProjectCwd={optimisticProjectCwd}
+        selectedSessionId={optimisticSessionId}
         onSelectProject={handleSelectProject}
         onSelectSession={handleSelectSession}
       />
@@ -298,10 +356,13 @@ export function DashboardApp() {
         tasks={sessionTasks}
         taskSummary={sessionTaskSummary}
         tasksLoading={sessionTasksLoading}
+        projectTasks={projectTasks}
+        projectTaskSummary={projectTaskSummary}
+        projectTasksLoading={projectTasksLoading}
       />
       <MetricsRail
         events={projectEvents.length > 0 ? projectEvents : toSortedEvents(m.byEvent)}
-        scope={selectedProjectCwd ? "project" : "global"}
+        scope={optimisticProjectCwd ? "project" : "global"}
         cacheStatus={cacheStatus}
         activeSession={activeSession}
         loadedMessageCount={sessionMessages.length}

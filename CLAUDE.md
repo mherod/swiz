@@ -169,7 +169,7 @@ alwaysApply: false
 - During cooldown use `swiz push-wait origin <branch>` instead of raw `git push`.
 - Never bypass mandatory hooks: no `--no-verify`; pre-push runs `bun test`; CI jobs `lint -> typecheck -> test` must pass.
 - Always verify CI with `gh run view --json`; `gh run watch` alone is insufficient.
-- DO NOT block the session waiting for CI. Pre-push hooks run the full test suite locally; if those pass, move on. Check CI asynchronously — use `gh run view` once after a reasonable interval, or wait for daemon CI notifications (issue #266). Never loop `gh run watch` or `timeout` polls for 20+ minutes.
+- DO NOT block the session waiting for CI. If pre-push hooks pass, continue; check once with `gh run view` later (or daemon notifications).
 - For workflow jobs using `github.base_ref`, run only on `pull_request`/`pull_request_target`, never `push`; `github.base_ref` is empty on push and breaks `git diff origin/BASE_REF...HEAD`.
 
 - Push-command parsing in hooks: token-parse to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
@@ -186,6 +186,8 @@ alwaysApply: false
 - Endpoints: `/health`, `/dispatch` (POST), `/status-line/snapshot` (POST), `/metrics` (GET), `/ci-watch` (POST), `/ci-watches` (GET).
 - `swiz daemon status` fetches `/metrics`. Metrics are in-memory only; tracked globally and per-project.
 - LaunchAgent: `~/Library/LaunchAgents/com.swiz.daemon.plist`; `swiz daemon --install` / `--uninstall`.
+- **DO**: In daemon-served `src/web/**` modules, use browser-resolvable imports only (`./`, `../`, `/web/...`). **DON'T** use bare package imports unless daemon adds import-map/bundling support.
+- **DO**: After web-import changes, restart daemon (`lsof -ti tcp:7943 | xargs -r kill && bun run index.ts daemon --port 7943`) and diagnose from newest console entries for the current URL only.
 ## Settings Configuration
 - Use separate state files for mutable runtime data (e.g., `.swiz/context-stats.json`); never mix runtime observations into user-authored config (`.swiz/config.json`).
 - Use 3-tier setting resolution: `project > user > default`.
@@ -240,7 +242,7 @@ alwaysApply: false
 - **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop. Use `/push` for unpushed commits.
 - **DON'T**: Rely on `git status` alone for unpush detection—it doesn't show upstream divergence. Always use `git log origin/main..HEAD --oneline` to list unpushed commits.
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` in env overrides — prevents real backend calls on machines with Codex/Gemini installed. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
-- **DON'T**: Treat a `pretooluse-repeated-lint-test` block on the first `bun test` of a new session as a real violation — the hook has no session-boundary detection and reads prior-session runs from the full JSONL. Fix: make any Edit between runs to clear the gate. Issue #174.
+- **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as real violations in a new session. Workaround: make any Edit between runs (issue #174).
 - **DON'T**: Declare commit or push success before reading tool output confirming it. Verify from evidence (git status clean, commit SHA captured, push output showing remote updated) before claiming complete.
 - **DON'T**: Work on auto-continue findings without a filed issue. `stop-personal-repo-issues.ts` actionable issues take priority.
 - **DO**: Route LaunchAgent `prPoll` via daemon first, then fallback: `curl -sSf -X POST ... || bun index.ts dispatch ...`.

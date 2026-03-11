@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises"
+import { readdir, readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { getHomeDir } from "../home.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
@@ -216,6 +216,14 @@ interface SessionInfo {
   taskDirSizeBytes: number
 }
 
+interface OldTaskFileInfo {
+  sessionId: string
+  taskId: string
+  status: "completed" | "cancelled"
+  path: string
+  sizeBytes: number
+}
+
 function sessionBytes(sessions: SessionInfo[]): number {
   return sessions.reduce((sum, session) => sum + session.sizeBytes + session.taskDirSizeBytes, 0)
 }
@@ -239,6 +247,99 @@ function partitionByCutoff(
 
 function backupLabel(scope: "Claude" | "Gemini", count: number): string {
   return `${scope} backup ${count === 1 ? "file" : "files"}`
+}
+
+function parseTaskAgeMs(task: {
+  statusChangedAt?: string
+  completionTimestamp?: string
+}): number | null {
+  const candidates = [task.completionTimestamp, task.statusChangedAt]
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    const ms = Date.parse(candidate)
+    if (!Number.isNaN(ms)) return ms
+  }
+  return null
+}
+
+async function findOldTaskFiles(
+  tasksDir: string,
+  cutoffMs: number,
+  allowedSessionIds?: Set<string>
+): Promise<OldTaskFileInfo[]> {
+  const oldTaskFiles: OldTaskFileInfo[] = []
+  let sessionEntries: string[] = []
+  try {
+    sessionEntries = await readdir(tasksDir)
+  } catch {
+    return oldTaskFiles
+  }
+
+  for (const sessionId of sessionEntries) {
+    if (!UUID_RE.test(sessionId)) continue
+    if (allowedSessionIds && !allowedSessionIds.has(sessionId)) continue
+    const sessionDir = join(tasksDir, sessionId)
+    let sessionDirStat: Awaited<ReturnType<typeof stat>>
+    try {
+      sessionDirStat = await stat(sessionDir)
+    } catch {
+      continue
+    }
+    if (!sessionDirStat.isDirectory()) continue
+
+    let files: string[] = []
+    try {
+      files = await readdir(sessionDir)
+    } catch {
+      continue
+    }
+
+    for (const file of files) {
+      if (!file.endsWith(".json") || file.startsWith(".") || file === "compact-snapshot.json") {
+        continue
+      }
+      const filePath = join(sessionDir, file)
+      let fileStat: Awaited<ReturnType<typeof stat>>
+      try {
+        fileStat = await stat(filePath)
+      } catch {
+        continue
+      }
+      if (!fileStat.isFile()) continue
+
+      let task:
+        | {
+            id?: string
+            status?: string
+            statusChangedAt?: string
+            completionTimestamp?: string
+          }
+        | undefined
+      try {
+        task = JSON.parse(await readFile(filePath, "utf-8")) as {
+          id?: string
+          status?: string
+          statusChangedAt?: string
+          completionTimestamp?: string
+        }
+      } catch {
+        continue
+      }
+      if (task.status !== "completed" && task.status !== "cancelled") continue
+      const taskMs = parseTaskAgeMs(task) ?? fileStat.mtimeMs
+      if (taskMs >= cutoffMs) continue
+
+      oldTaskFiles.push({
+        sessionId,
+        taskId: task.id ?? file.slice(0, -5),
+        status: task.status,
+        path: filePath,
+        sizeBytes: fileStat.size,
+      })
+    }
+  }
+
+  return oldTaskFiles
 }
 
 async function findSessions(
@@ -328,6 +429,8 @@ async function findSessions(
 export interface CleanupArgs {
   olderThanMs: number
   olderThanLabel: string
+  taskOlderThanMs: number | null
+  taskOlderThanLabel: string | null
   dryRun: boolean
   projectFilter: string | undefined
 }
@@ -351,6 +454,7 @@ function parseOlderThan(value: string): { ms: number; label: string } {
 
 export function parseCleanupArgs(args: string[]): CleanupArgs {
   let olderThan = parseOlderThan("30")
+  let taskOlderThan: { ms: number; label: string } | null = null
   let dryRun = false
   let projectFilter: string | undefined
 
@@ -363,13 +467,23 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
     } else if (arg === "--older-than" && next) {
       olderThan = parseOlderThan(next)
       i++
+    } else if (arg === "--task-older-than" && next) {
+      taskOlderThan = parseOlderThan(next)
+      i++
     } else if (arg === "--project" && next) {
       projectFilter = next
       i++
     }
   }
 
-  return { olderThanMs: olderThan.ms, olderThanLabel: olderThan.label, dryRun, projectFilter }
+  return {
+    olderThanMs: olderThan.ms,
+    olderThanLabel: olderThan.label,
+    taskOlderThanMs: taskOlderThan?.ms ?? null,
+    taskOlderThanLabel: taskOlderThan?.label ?? null,
+    dryRun,
+    projectFilter,
+  }
 }
 
 // ─── Command ─────────────────────────────────────────────────────────────────
@@ -377,7 +491,8 @@ export function parseCleanupArgs(args: string[]): CleanupArgs {
 export const cleanupCommand: Command = {
   name: "cleanup",
   description: "Remove old Claude Code session data and Gemini backup artifacts",
-  usage: "swiz cleanup [--older-than <time>] [--dry-run] [--project <name>]",
+  usage:
+    "swiz cleanup [--older-than <time>] [--task-older-than <time>] [--dry-run] [--project <name>]",
   options: [
     {
       flags: "--older-than <time>",
@@ -389,13 +504,26 @@ export const cleanupCommand: Command = {
       flags: "--project <name>",
       description: "Limit Claude cleanup to a specific project directory name",
     },
+    {
+      flags: "--task-older-than <time>",
+      description:
+        "Also remove completed/cancelled task files older than this time (days/hours). Example: 30d, 168h",
+    },
   ],
 
   async run(args: string[]) {
-    const { olderThanMs, olderThanLabel, dryRun, projectFilter } = parseCleanupArgs(args)
+    const {
+      olderThanMs,
+      olderThanLabel,
+      taskOlderThanMs,
+      taskOlderThanLabel,
+      dryRun,
+      projectFilter,
+    } = parseCleanupArgs(args)
     const { projectsDir, tasksDir } = getDefaultTaskRoots()
 
     const cutoffMs = Date.now() - olderThanMs
+    const taskCutoffMs = taskOlderThanMs ? Date.now() - taskOlderThanMs : null
 
     // Discover project dirs
     let projectNames: string[]
@@ -444,6 +572,21 @@ export const cleanupCommand: Command = {
         results[i]!.keep = []
       }
     }
+
+    const scopedSessionIds = new Set<string>()
+    for (const result of results) {
+      for (const session of result.keep) scopedSessionIds.add(session.sessionId)
+      for (const session of result.old) scopedSessionIds.add(session.sessionId)
+    }
+    const oldTaskFiles =
+      taskCutoffMs === null
+        ? []
+        : await findOldTaskFiles(
+            tasksDir,
+            taskCutoffMs,
+            projectFilter ? scopedSessionIds : undefined
+          )
+    const oldTaskBytes = oldTaskFiles.reduce((sum, task) => sum + task.sizeBytes, 0)
 
     // Scan tasksDir for orphans (task directories without matching session in projects)
     if (!projectFilter) {
@@ -558,9 +701,26 @@ export const cleanupCommand: Command = {
       console.log()
     }
 
-    if (totalOldCount === 0 && claudeBackups.fileCount === 0 && geminiBackups.fileCount === 0) {
+    if (taskCutoffMs !== null) {
+      const taskLabel = taskOlderThanLabel ?? "specified window"
+      console.log(`  ${BOLD}~/.claude/tasks/ (old completed/cancelled task files)${RESET}`)
+      const taskCountLabel = oldTaskFiles.length === 1 ? "file" : "files"
+      const taskPart =
+        oldTaskFiles.length > 0
+          ? `${YELLOW}${oldTaskFiles.length} task ${taskCountLabel}${RESET} (${formatBytes(oldTaskBytes)})`
+          : `${DIM}0 task files${RESET}`
+      console.log(`    ${taskPart} older than ${taskLabel}`)
+      console.log()
+    }
+
+    if (
+      totalOldCount === 0 &&
+      oldTaskFiles.length === 0 &&
+      claudeBackups.fileCount === 0 &&
+      geminiBackups.fileCount === 0
+    ) {
       console.log(
-        `  ${GREEN}No sessions older than ${olderThanLabel} and no Claude or Gemini backups found.${RESET}`
+        `  ${GREEN}No sessions older than ${olderThanLabel}, no old task files, and no Claude or Gemini backups found.${RESET}`
       )
       return
     }
@@ -577,9 +737,11 @@ export const cleanupCommand: Command = {
       geminiBackups.fileCount > 0
         ? ` + ${geminiBackups.fileCount} ${backupLabel("Gemini", geminiBackups.fileCount)}`
         : ""
-    const totalBytes = totalOldBytes + claudeBackups.sizeBytes + geminiBackups.sizeBytes
+    const oldTaskPart = oldTaskFiles.length > 0 ? ` + ${oldTaskFiles.length} old task files` : ""
+    const totalBytes =
+      totalOldBytes + oldTaskBytes + claudeBackups.sizeBytes + geminiBackups.sizeBytes
     console.log(
-      `  Total: ${BOLD}${totalOldCount} sessions${RESET}${taskSuffix}${claudePart}${geminiPart} trashable, ~${formatBytes(totalBytes)}`
+      `  Total: ${BOLD}${totalOldCount} sessions${RESET}${taskSuffix}${oldTaskPart}${claudePart}${geminiPart} trashable, ~${formatBytes(totalBytes)}`
     )
     console.log()
 
@@ -590,7 +752,7 @@ export const cleanupCommand: Command = {
 
     // Trash sessions and their matching task directories
     console.log(
-      `  Moving ${totalOldCount} session(s)${taskSuffix}${claudePart}${geminiPart} to Trash...`
+      `  Moving ${totalOldCount} session(s)${taskSuffix}${oldTaskPart}${claudePart}${geminiPart} to Trash...`
     )
     let succeeded = 0
     let failed = 0
@@ -599,6 +761,8 @@ export const cleanupCommand: Command = {
     let claudeFailed = 0
     let geminiFilesRemoved = 0
     let geminiFailed = 0
+    let oldTaskFilesRemoved = 0
+    let oldTaskFilesFailed = 0
 
     for (const { old } of results) {
       for (const session of old) {
@@ -639,6 +803,14 @@ export const cleanupCommand: Command = {
       }
     }
 
+    for (const taskFile of oldTaskFiles) {
+      if (await trashDir(taskFile.path)) {
+        oldTaskFilesRemoved++
+      } else {
+        oldTaskFilesFailed++
+      }
+    }
+
     console.log()
     const taskDirNote = taskDirsRemoved > 0 ? ` + ${taskDirsRemoved} task dir(s)` : ""
     const claudeNote =
@@ -649,16 +821,26 @@ export const cleanupCommand: Command = {
       geminiFilesRemoved > 0
         ? ` + ${geminiFilesRemoved} ${backupLabel("Gemini", geminiFilesRemoved)}`
         : ""
+    const oldTaskNote =
+      oldTaskFilesRemoved > 0
+        ? ` + ${oldTaskFilesRemoved} old task ${oldTaskFilesRemoved === 1 ? "file" : "files"}`
+        : ""
     console.log(
-      `  ${GREEN}${BOLD}Done.${RESET} ${succeeded} session(s)${taskDirNote}${claudeNote}${geminiNote} moved to Trash (~${formatBytes(totalBytes)} reclaimed).`
+      `  ${GREEN}${BOLD}Done.${RESET} ${succeeded} session(s)${taskDirNote}${oldTaskNote}${claudeNote}${geminiNote} moved to Trash (~${formatBytes(totalBytes)} reclaimed).`
     )
-    if (failed > 0 || claudeFailed > 0 || geminiFailed > 0) {
+    if (failed > 0 || oldTaskFilesFailed > 0 || claudeFailed > 0 || geminiFailed > 0) {
       const failedSessions = failed > 0 ? `${failed} session(s)` : ""
+      const failedTaskFiles =
+        oldTaskFilesFailed > 0
+          ? `${oldTaskFilesFailed} old task ${oldTaskFilesFailed === 1 ? "file" : "files"}`
+          : ""
       const failedClaude =
         claudeFailed > 0 ? `${claudeFailed} ${backupLabel("Claude", claudeFailed)}` : ""
       const failedGemini =
         geminiFailed > 0 ? `${geminiFailed} ${backupLabel("Gemini", geminiFailed)}` : ""
-      const failedJoined = [failedSessions, failedClaude, failedGemini].filter((s) => s).join(" + ")
+      const failedJoined = [failedSessions, failedTaskFiles, failedClaude, failedGemini]
+        .filter((s) => s)
+        .join(" + ")
       console.log(
         `  ${YELLOW}${failedJoined} could not be trashed — is the \`trash\` CLI installed?${RESET}`
       )

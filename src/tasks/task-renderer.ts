@@ -3,6 +3,7 @@
  * Owns: DateFormat, formatDate, timeAgo, renderTask, listTasks, listAllSessionsTasks.
  */
 
+import { format, formatDistanceToNow } from "date-fns"
 import { BOLD, DIM, RESET, YELLOW } from "../ansi.ts"
 import { formatDuration } from "../format-duration.ts"
 import { readTasks, STATUS_STYLE, type Task } from "./task-repository.ts"
@@ -14,29 +15,15 @@ export type { Task }
 
 export type DateFormat = "relative" | "absolute"
 
-export function formatDate(date: Date, format: DateFormat): string {
-  if (format === "absolute") {
-    return date.toLocaleString("en-GB", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
+export function formatDate(date: Date, dateFormat: DateFormat): string {
+  if (dateFormat === "absolute") {
+    return format(date, "d MMM yyyy, HH:mm")
   }
   return timeAgo(date)
 }
 
 export function timeAgo(date: Date): string {
-  const ms = Date.now() - date.getTime()
-  const mins = Math.floor(ms / 60000)
-  if (mins < 1) return "just now"
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(ms / 3600000)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(ms / 86400000)
-  if (days < 7) return `${days}d ago`
-  return date.toLocaleDateString()
+  return formatDistanceToNow(date, { addSuffix: true })
 }
 
 // ─── Task rendering ──────────────────────────────────────────────────────────

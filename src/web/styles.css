@@ -754,6 +754,40 @@ tbody tr:hover {
   gap: 6px;
 }
 
+.session-task-controls {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.task-filter-btn {
+  border: 1px solid rgba(118, 153, 229, 0.32);
+  border-radius: 999px;
+  background: rgba(67, 88, 138, 0.12);
+  color: #b8c8ea;
+  font-size: 0.67rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.task-filter-btn.active {
+  color: #e2ecff;
+  border-color: rgba(123, 166, 255, 0.72);
+  background: rgba(96, 140, 241, 0.28);
+}
+
+.task-show-more-btn {
+  margin-top: 8px;
+  border: 1px solid rgba(118, 153, 229, 0.36);
+  border-radius: 8px;
+  background: rgba(67, 88, 138, 0.12);
+  color: #c4d7ff;
+  font-size: 0.68rem;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
 .session-task-row {
   border: 1px solid rgba(86, 112, 166, 0.24);
   border-radius: 10px;
@@ -828,6 +862,59 @@ tbody tr:hover {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.hook-context-box {
+  margin-top: 8px;
+  border: 1px solid rgba(132, 146, 173, 0.3);
+  background: rgba(45, 52, 66, 0.72);
+  border-radius: 8px;
+  padding: 7px 8px;
+}
+
+.hook-context-title {
+  margin: 0 0 6px;
+  color: #b9c9ea;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hook-context-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.hook-context-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.hook-context-label {
+  color: #90a4c8;
+  font-size: 0.66rem;
+}
+
+.hook-context-value {
+  color: #d9e4ff;
+  font-size: 0.66rem;
+  background: rgba(53, 71, 107, 0.55);
+  border: 1px solid rgba(113, 141, 199, 0.35);
+  border-radius: 6px;
+  padding: 1px 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hook-context-note {
+  margin: 6px 0 0;
+  color: #c4d0e8;
+  font-size: 0.72rem;
+  line-height: 1.4;
 }
 
 .metric-kpis {
