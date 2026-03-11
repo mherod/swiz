@@ -94,6 +94,38 @@ function applyPendingSessionDeletions(
     .filter((project) => project.sessions.length > 0)
 }
 
+function sessionRecency(session: ProjectSessions["sessions"][number]): number {
+  return session.lastMessageAt ?? session.startedAt ?? session.mtime ?? 0
+}
+
+function getNextSessionCandidate(
+  projects: ProjectSessions[],
+  deletedCwd: string,
+  deletedSessionId: string
+): { cwd: string; sessionId: string } | null {
+  const project = projects.find((candidate) => candidate.cwd === deletedCwd)
+  const sameProjectSessions =
+    project?.sessions.filter((session) => session.id !== deletedSessionId) ?? []
+  const nextInProject = sameProjectSessions
+    .slice()
+    .sort((a, b) => sessionRecency(b) - sessionRecency(a))[0]
+  if (nextInProject) {
+    return { cwd: deletedCwd, sessionId: nextInProject.id }
+  }
+
+  const fallback = projects
+    .flatMap((candidateProject) =>
+      candidateProject.sessions
+        .filter(
+          (session) => !(candidateProject.cwd === deletedCwd && session.id === deletedSessionId)
+        )
+        .map((session) => ({ cwd: candidateProject.cwd, session }))
+    )
+    .sort((a, b) => sessionRecency(b.session) - sessionRecency(a.session))[0]
+
+  return fallback ? { cwd: fallback.cwd, sessionId: fallback.session.id } : null
+}
+
 export function DashboardApp() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [cacheStatus, setCacheStatus] = useState<Record<string, number> | null>(null)
@@ -289,14 +321,24 @@ export function DashboardApp() {
               sessionId,
             }
           )
-          setProjects((previous) => removeSessionFromProjects(previous, cwd, sessionId))
+          const currentVisibleProjects = applyPendingSessionDeletions(
+            optimisticProjects,
+            optimisticPendingSessionDeletions
+          )
+          const nextProjects = removeSessionFromProjects(currentVisibleProjects, cwd, sessionId)
+          setProjects(nextProjects)
           if (selectedSessionId === sessionId) {
-            setSelectedSessionId(null)
-            addOptimisticSessionId(null)
-            setSessionMessages([])
-            setSessionTasks([])
-            setSessionTaskSummary(null)
-            setQueryParams({ session: null })
+            const nextCandidate = getNextSessionCandidate(nextProjects, cwd, sessionId)
+            if (nextCandidate) {
+              handleSelectSession(nextCandidate.cwd, nextCandidate.sessionId)
+            } else {
+              setSelectedSessionId(null)
+              addOptimisticSessionId(null)
+              setSessionMessages([])
+              setSessionTasks([])
+              setSessionTaskSummary(null)
+              setQueryParams({ session: null })
+            }
           }
         } finally {
           setPendingSessionDeletions((previous) => {
@@ -313,6 +355,9 @@ export function DashboardApp() {
       addOptimisticPendingSessionDeletions,
       addOptimisticProjects,
       addOptimisticSessionId,
+      handleSelectSession,
+      optimisticPendingSessionDeletions,
+      optimisticProjects,
       selectedSessionId,
     ]
   )

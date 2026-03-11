@@ -24,6 +24,7 @@ export interface ParsedUserMetadataBlock {
   title: string
   details: Array<{ label: string; value: string }>
   notes: string[]
+  kind?: "gitAction" | "elementContext" | "slashCommand" | "tagged"
 }
 
 export interface UserMessageParts {
@@ -76,15 +77,18 @@ export function splitUserMessage(text: string): UserMessageParts {
   const {
     cleanedText,
     blockContent: attachedSkillsRaw,
-    metadataBlocks,
+    metadataBlocks: taggedMetadataBlocks,
   } = extractUserMetadataBlocks(text)
   const normalizedText = unwrapLeadingTag(cleanedText, "user_query")
+  const { cleanedText: compactText, metadataBlocks: inlineMetadataBlocks } =
+    extractInlineContextBlocks(normalizedText)
   const attachedSkills = parseManuallyAttachedSkills(attachedSkillsRaw)
+  const metadataBlocks = [...taggedMetadataBlocks, ...inlineMetadataBlocks]
 
   const marker = "<hook_context>"
-  const markerIndex = normalizedText.indexOf(marker)
+  const markerIndex = compactText.indexOf(marker)
   if (markerIndex < 0) {
-    const visibleText = normalizedText.trim()
+    const visibleText = compactText.trim()
     return {
       visibleText,
       hookContext: null,
@@ -94,8 +98,8 @@ export function splitUserMessage(text: string): UserMessageParts {
     }
   }
 
-  const visibleText = normalizedText.slice(0, markerIndex).trim()
-  const rawContext = normalizedText.slice(markerIndex + marker.length).trim()
+  const visibleText = compactText.slice(0, markerIndex).trim()
+  const rawContext = compactText.slice(markerIndex + marker.length).trim()
   const hookContext = parseHookContext(rawContext)
 
   return {
@@ -105,6 +109,190 @@ export function splitUserMessage(text: string): UserMessageParts {
     attachedSkills,
     metadataBlocks,
   }
+}
+
+function extractInlineContextBlocks(text: string): {
+  cleanedText: string
+  metadataBlocks: ParsedUserMetadataBlock[]
+} {
+  let cleanedText = text
+  const metadataBlocks: ParsedUserMetadataBlock[] = []
+
+  const slashCommand = extractLeadingSlashCommandBlock(cleanedText)
+  cleanedText = slashCommand.cleanedText
+  if (slashCommand.block) metadataBlocks.push(slashCommand.block)
+
+  const uncommitted = extractUncommittedChangesBlock(cleanedText)
+  cleanedText = uncommitted.cleanedText
+  if (uncommitted.block) metadataBlocks.push(uncommitted.block)
+
+  const domContext = extractDomInspectionBlock(cleanedText)
+  cleanedText = domContext.cleanedText
+  if (domContext.block) metadataBlocks.push(domContext.block)
+
+  return { cleanedText, metadataBlocks }
+}
+
+function extractLeadingSlashCommandBlock(text: string): {
+  cleanedText: string
+  block: ParsedUserMetadataBlock | null
+} {
+  const match = /^\s*(\/[a-z0-9_-]+)\b/i.exec(text)
+  const command = match?.[1]
+  if (!command) return { cleanedText: text, block: null }
+
+  const cleanedText = text.slice(match[0].length).trim()
+  return {
+    cleanedText,
+    block: {
+      title: "Slash command",
+      details: [{ label: "name", value: command }],
+      notes: [],
+      kind: "slashCommand",
+    },
+  }
+}
+
+function extractUncommittedChangesBlock(text: string): {
+  cleanedText: string
+  block: ParsedUserMetadataBlock | null
+} {
+  if (!text.trimStart().startsWith("Uncommitted changes detected:")) {
+    return { cleanedText: text, block: null }
+  }
+
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  if (lines.length === 0) return { cleanedText: text, block: null }
+
+  const details: Array<{ label: string; value: string }> = []
+  const notes: string[] = []
+  const first = lines[0]
+  if (first) {
+    details.push({
+      label: "changes",
+      value: compactMetadataValue(first.replace(/^Uncommitted changes detected:\s*/i, "")),
+    })
+  }
+
+  const actionRequiredLine = lines.find((line) => line.startsWith("ACTION REQUIRED:"))
+  if (actionRequiredLine) {
+    notes.push(
+      compactMetadataValue(actionRequiredLine.replace(/^ACTION REQUIRED:\s*/i, "").trim(), 180)
+    )
+  }
+
+  const commitCommand = lines.find((line) => line.startsWith("git commit -m"))
+  if (commitCommand) {
+    details.push({ label: "commit", value: compactMetadataValue(commitCommand) })
+  }
+  const pushCommand = lines.find((line) => line.startsWith("git push "))
+  if (pushCommand) {
+    details.push({ label: "push", value: compactMetadataValue(pushCommand) })
+  }
+
+  const filePaths = lines
+    .filter((line) => line.startsWith("src/"))
+    .slice(0, 4)
+    .map((line) => line.trim())
+  if (filePaths.length > 0) {
+    for (const filePath of filePaths) {
+      details.push({ label: "file", value: filePath })
+    }
+  }
+
+  const cleanedText = ""
+  return {
+    cleanedText,
+    block: {
+      title: "Git action required",
+      details,
+      notes,
+      kind: "gitAction",
+    },
+  }
+}
+
+function extractDomInspectionBlock(text: string): {
+  cleanedText: string
+  block: ParsedUserMetadataBlock | null
+} {
+  const labels = ["DOM Path:", "Position:", "React Component:", "HTML Element:"]
+  if (!labels.every((label) => text.includes(label))) {
+    return { cleanedText: text, block: null }
+  }
+
+  const details: Array<{ label: string; value: string }> = []
+  const extracted = extractLineValue(text, "DOM Path:")
+  if (extracted.value) details.push({ label: "dom path", value: extracted.value })
+  const extractedPosition = extractLineValue(extracted.cleanedText, "Position:")
+  if (extractedPosition.value) details.push({ label: "position", value: extractedPosition.value })
+  const extractedComponent = extractLineValue(extractedPosition.cleanedText, "React Component:")
+  if (extractedComponent.value) {
+    details.push({ label: "react component", value: extractedComponent.value })
+  }
+  const extractedElement = extractLineValue(extractedComponent.cleanedText, "HTML Element:")
+  if (extractedElement.value) {
+    details.push({ label: "html element", value: compactHtmlElementValue(extractedElement.value) })
+  }
+
+  return {
+    cleanedText: extractedElement.cleanedText.trim(),
+    block: details.length
+      ? {
+          title: "Element context",
+          details,
+          notes: [],
+          kind: "elementContext",
+        }
+      : null,
+  }
+}
+
+function extractLineValue(
+  text: string,
+  label: string
+): { cleanedText: string; value: string | null } {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const regex = new RegExp(`${escaped}\\s*(.+)(?:\\n|$)`, "i")
+  const match = regex.exec(text)
+  if (!match?.[1]) return { cleanedText: text, value: null }
+  const value = compactMetadataValue(match[1].trim())
+  const cleanedText = text.replace(match[0], "").trim()
+  return { cleanedText, value: value.length > 0 ? value : null }
+}
+
+function compactMetadataValue(value: string, max = 120): string {
+  const normalized = value.replace(/\s+/g, " ").trim()
+  if (normalized.length <= max) return normalized
+  return `${normalized.slice(0, max - 1).trimEnd()}…`
+}
+
+function compactHtmlElementValue(value: string): string {
+  const normalized = compactMetadataValue(value, 180)
+  const parsed = parseHtmlTagSignature(normalized)
+  if (!parsed) return compactMetadataValue(normalized, 80)
+
+  const selectors = [
+    parsed.id ? `#${parsed.id}` : "",
+    parsed.className ? `.${parsed.className}` : "",
+  ].join("")
+  const tag = parsed.tag.toLowerCase()
+  return selectors ? `<${tag}${selectors}>` : `<${tag}>`
+}
+
+function parseHtmlTagSignature(
+  value: string
+): { tag: string; id: string | null; className: string | null } | null {
+  const tagMatch = /<([a-z0-9-]+)\b([^>]*)>/i.exec(value)
+  if (!tagMatch?.[1]) return null
+
+  const attrs = tagMatch[2] ?? ""
+  const classToken = /class\s*=\s*"([^"]+)"/i.exec(attrs)?.[1]?.trim().split(/\s+/)[0] ?? null
+  const idToken = /id\s*=\s*"([^"]+)"/i.exec(attrs)?.[1]?.trim() ?? null
+  return { tag: tagMatch[1], id: idToken, className: classToken }
 }
 
 function unwrapLeadingTag(text: string, tagName: string): string {
@@ -177,7 +365,10 @@ function parseGenericMetadataBlock(tagName: string, raw: string): ParsedUserMeta
   for (const line of lines) {
     const kv = /^([^:]{1,40}):\s*(.+)$/.exec(line)
     if (kv?.[1] && kv[2]) {
-      details.push({ label: kv[1].trim().toLowerCase(), value: kv[2].trim() })
+      details.push({
+        label: kv[1].trim().toLowerCase(),
+        value: compactMetadataValue(kv[2].trim()),
+      })
       continue
     }
     notes.push(line)
@@ -192,6 +383,7 @@ function parseGenericMetadataBlock(tagName: string, raw: string): ParsedUserMeta
     title: tagName.replace(/_/g, " "),
     details: details.slice(0, 6),
     notes: visibleNotes,
+    kind: "tagged",
   }
 }
 

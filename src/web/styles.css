@@ -1128,6 +1128,60 @@ tbody tr:hover {
   line-height: 1.4;
 }
 
+.hook-context-collapsible {
+  padding: 0;
+  overflow: hidden;
+}
+
+.hook-context-summary {
+  cursor: pointer;
+  list-style: none;
+  margin: 0;
+  padding: 7px 8px;
+  color: #b9c9ea;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
+.hook-context-summary::-webkit-details-marker {
+  display: none;
+}
+
+.hook-context-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  color: #90a4c8;
+  transition: transform 0.15s ease;
+}
+
+.hook-context-collapsible[open] .hook-context-summary::before {
+  transform: rotate(90deg);
+}
+
+.hook-context-collapsible[open] .hook-context-list,
+.hook-context-collapsible[open] .hook-context-note {
+  margin-left: 8px;
+  margin-right: 8px;
+  margin-bottom: 7px;
+}
+
+.hook-context-priority {
+  border-color: rgba(225, 137, 71, 0.55);
+  background: rgba(90, 53, 29, 0.5);
+}
+
+.hook-context-priority .hook-context-summary {
+  color: #ffd7b7;
+}
+
+.hook-context-technical {
+  border-color: rgba(110, 145, 199, 0.45);
+  background: rgba(41, 56, 84, 0.48);
+}
+
 .metric-kpis {
   display: flex;
   flex-wrap: wrap;

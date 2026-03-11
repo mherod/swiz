@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { type ReactNode, useMemo, useState } from "react"
 import { cn } from "../lib/cn.ts"
 import {
   formatAssistantJsonBlocks,
@@ -188,6 +188,114 @@ function groupMessages(messages: SessionMessage[]): GroupedSessionMessage[] {
   return grouped
 }
 
+function compactPath(path: string, maxLength = 56): string {
+  if (path.length <= maxLength) return path
+  const keep = Math.max(10, Math.floor((maxLength - 1) / 2))
+  return `${path.slice(0, keep)}…${path.slice(-keep)}`
+}
+
+function renderUserContextBlocks(
+  parsedObjective: ReturnType<typeof splitUserMessage>["parsedObjective"] | undefined,
+  hookContext: ReturnType<typeof splitUserMessage>["hookContext"] | undefined,
+  attachedSkills: ReturnType<typeof splitUserMessage>["attachedSkills"] | undefined,
+  metadataBlocks: ReturnType<typeof splitUserMessage>["metadataBlocks"] | undefined
+): ReactNode {
+  const blocks = metadataBlocks ?? []
+  const hasContext =
+    Boolean(parsedObjective) || Boolean(hookContext) || Boolean(attachedSkills) || blocks.length > 0
+  return (
+    <>
+      {parsedObjective ? (
+        <div className="hook-context-box">
+          <p className="hook-context-title">{parsedObjective.title}</p>
+          <ul className="hook-context-list">
+            {parsedObjective.bullets.map((bullet) => (
+              <li key={bullet} className="hook-context-item">
+                <span className="hook-context-label">goal</span>
+                <span className="hook-context-note">{bullet}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {hookContext ? (
+        <div className="hook-context-box">
+          <p className="hook-context-title">
+            Hook context{hookContext.source ? ` (${hookContext.source})` : ""}
+          </p>
+          {hookContext.details.length > 0 ? (
+            <ul className="hook-context-list">
+              {hookContext.details.map((item) => (
+                <li key={`${item.label}:${item.value}`} className="hook-context-item">
+                  <span className="hook-context-label">{item.label}</span>
+                  <code className="hook-context-value">{item.value}</code>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {hookContext.notes.map((note) => (
+            <p key={note} className="hook-context-note">
+              {note}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {attachedSkills ? (
+        <details className="hook-context-box hook-context-collapsible">
+          <summary className="hook-context-summary">{attachedSkills.title}</summary>
+          {attachedSkills.skills.length > 0 ? (
+            <ul className="hook-context-list">
+              {attachedSkills.skills.map((skill) => (
+                <li key={`${skill.name}:${skill.path ?? ""}`} className="hook-context-item">
+                  <span className="hook-context-label">{skill.name}</span>
+                  {skill.path ? (
+                    <code className="hook-context-value" title={skill.path}>
+                      {compactPath(skill.path)}
+                    </code>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {attachedSkills.notes.map((note) => (
+            <p key={note} className="hook-context-note">
+              {note}
+            </p>
+          ))}
+        </details>
+      ) : null}
+      {blocks.map((block) => (
+        <details
+          key={block.title}
+          className={cn(
+            "hook-context-box hook-context-collapsible",
+            block.kind === "gitAction" ? "hook-context-priority" : null,
+            block.kind === "elementContext" ? "hook-context-technical" : null
+          )}
+        >
+          <summary className="hook-context-summary">{block.title}</summary>
+          {block.details.length > 0 ? (
+            <ul className="hook-context-list">
+              {block.details.map((item) => (
+                <li key={`${item.label}:${item.value}`} className="hook-context-item">
+                  <span className="hook-context-label">{item.label}</span>
+                  <code className="hook-context-value">{item.value}</code>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {block.notes.map((note) => (
+            <p key={note} className="hook-context-note">
+              {note}
+            </p>
+          ))}
+        </details>
+      ))}
+      {hasContext ? <span className="sr-only">Parsed message context available.</span> : null}
+    </>
+  )
+}
+
 function MessageBody({ text, role }: { text: string; role: "user" | "assistant" }) {
   const assistantParts = role === "assistant" ? splitAssistantMessage(text) : null
   const assistantVisible = assistantParts?.visibleText ?? text
@@ -258,85 +366,12 @@ function MessageBody({ text, role }: { text: string; role: "user" | "assistant" 
   }
   const hookContext = userParts?.hookContext
   const textForCollapse = userVisible
+  const hasOnlyContext = textForCollapse.trim().length === 0
   if (!shouldCollapse) {
     return (
       <>
-        <pre className="message-text">{textForCollapse}</pre>
-        {parsedObjective ? (
-          <div className="hook-context-box">
-            <p className="hook-context-title">{parsedObjective.title}</p>
-            <ul className="hook-context-list">
-              {parsedObjective.bullets.map((bullet) => (
-                <li key={bullet} className="hook-context-item">
-                  <span className="hook-context-label">goal</span>
-                  <span className="hook-context-note">{bullet}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        {hookContext ? (
-          <div className="hook-context-box">
-            <p className="hook-context-title">
-              Hook context{hookContext.source ? ` (${hookContext.source})` : ""}
-            </p>
-            {hookContext.details.length > 0 ? (
-              <ul className="hook-context-list">
-                {hookContext.details.map((item) => (
-                  <li key={`${item.label}:${item.value}`} className="hook-context-item">
-                    <span className="hook-context-label">{item.label}</span>
-                    <code className="hook-context-value">{item.value}</code>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {hookContext.notes.map((note) => (
-              <p key={note} className="hook-context-note">
-                {note}
-              </p>
-            ))}
-          </div>
-        ) : null}
-        {attachedSkills ? (
-          <div className="hook-context-box">
-            <p className="hook-context-title">{attachedSkills.title}</p>
-            {attachedSkills.skills.length > 0 ? (
-              <ul className="hook-context-list">
-                {attachedSkills.skills.map((skill) => (
-                  <li key={`${skill.name}:${skill.path ?? ""}`} className="hook-context-item">
-                    <span className="hook-context-label">{skill.name}</span>
-                    {skill.path ? <code className="hook-context-value">{skill.path}</code> : null}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {attachedSkills.notes.map((note) => (
-              <p key={note} className="hook-context-note">
-                {note}
-              </p>
-            ))}
-          </div>
-        ) : null}
-        {metadataBlocks.map((block) => (
-          <div key={block.title} className="hook-context-box">
-            <p className="hook-context-title">{block.title}</p>
-            {block.details.length > 0 ? (
-              <ul className="hook-context-list">
-                {block.details.map((item) => (
-                  <li key={`${item.label}:${item.value}`} className="hook-context-item">
-                    <span className="hook-context-label">{item.label}</span>
-                    <code className="hook-context-value">{item.value}</code>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {block.notes.map((note) => (
-              <p key={note} className="hook-context-note">
-                {note}
-              </p>
-            ))}
-          </div>
-        ))}
+        {!hasOnlyContext ? <pre className="message-text">{textForCollapse}</pre> : null}
+        {renderUserContextBlocks(parsedObjective, hookContext, attachedSkills, metadataBlocks)}
       </>
     )
   }
@@ -351,81 +386,7 @@ function MessageBody({ text, role }: { text: string; role: "user" | "assistant" 
         </summary>
         <pre className="message-text">{textForCollapse}</pre>
       </details>
-      {parsedObjective ? (
-        <div className="hook-context-box">
-          <p className="hook-context-title">{parsedObjective.title}</p>
-          <ul className="hook-context-list">
-            {parsedObjective.bullets.map((bullet) => (
-              <li key={bullet} className="hook-context-item">
-                <span className="hook-context-label">goal</span>
-                <span className="hook-context-note">{bullet}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {hookContext ? (
-        <div className="hook-context-box">
-          <p className="hook-context-title">
-            Hook context{hookContext.source ? ` (${hookContext.source})` : ""}
-          </p>
-          {hookContext.details.length > 0 ? (
-            <ul className="hook-context-list">
-              {hookContext.details.map((item) => (
-                <li key={`${item.label}:${item.value}`} className="hook-context-item">
-                  <span className="hook-context-label">{item.label}</span>
-                  <code className="hook-context-value">{item.value}</code>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {hookContext.notes.map((note) => (
-            <p key={note} className="hook-context-note">
-              {note}
-            </p>
-          ))}
-        </div>
-      ) : null}
-      {attachedSkills ? (
-        <div className="hook-context-box">
-          <p className="hook-context-title">{attachedSkills.title}</p>
-          {attachedSkills.skills.length > 0 ? (
-            <ul className="hook-context-list">
-              {attachedSkills.skills.map((skill) => (
-                <li key={`${skill.name}:${skill.path ?? ""}`} className="hook-context-item">
-                  <span className="hook-context-label">{skill.name}</span>
-                  {skill.path ? <code className="hook-context-value">{skill.path}</code> : null}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {attachedSkills.notes.map((note) => (
-            <p key={note} className="hook-context-note">
-              {note}
-            </p>
-          ))}
-        </div>
-      ) : null}
-      {metadataBlocks.map((block) => (
-        <div key={block.title} className="hook-context-box">
-          <p className="hook-context-title">{block.title}</p>
-          {block.details.length > 0 ? (
-            <ul className="hook-context-list">
-              {block.details.map((item) => (
-                <li key={`${item.label}:${item.value}`} className="hook-context-item">
-                  <span className="hook-context-label">{item.label}</span>
-                  <code className="hook-context-value">{item.value}</code>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {block.notes.map((note) => (
-            <p key={note} className="hook-context-note">
-              {note}
-            </p>
-          ))}
-        </div>
-      ))}
+      {renderUserContextBlocks(parsedObjective, hookContext, attachedSkills, metadataBlocks)}
     </>
   )
 }
