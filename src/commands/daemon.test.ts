@@ -6,6 +6,7 @@ import {
   CiWatchRegistry,
   CooldownRegistry,
   createMetrics,
+  DaemonWorkerRuntime,
   FileWatcherRegistry,
   GhQueryCache, // daemon gh cache
   GitStateCache,
@@ -109,6 +110,89 @@ describe("CiWatchRegistry", () => {
     expect(notifications).toEqual(["success:99"])
     expect(registry.listActive()).toHaveLength(0)
     registry.close()
+  })
+})
+
+describe("DaemonWorkerRuntime", () => {
+  it("uses worker transport when available", async () => {
+    let requests = 0
+    const runtime = new DaemonWorkerRuntime({
+      enabled: true,
+      transportFactory: () => ({
+        request: async (_payloadStr: string) => {
+          requests += 1
+          return {
+            cwd: "/repo",
+            sessionId: "session-1",
+            toolName: "Shell",
+            toolInput: { command: "ls" },
+          }
+        },
+        close: () => {},
+      }),
+    })
+
+    const result = await runtime.parseDispatchPayload('{"cwd":"/repo"}')
+    expect(result).toEqual({
+      cwd: "/repo",
+      sessionId: "session-1",
+      toolName: "Shell",
+      toolInput: { command: "ls" },
+    })
+    expect(requests).toBe(1)
+    runtime.close()
+  })
+
+  it("falls back to in-thread parse when worker startup fails", async () => {
+    const runtime = new DaemonWorkerRuntime({
+      enabled: true,
+      transportFactory: () => {
+        throw new Error("worker unavailable")
+      },
+    })
+
+    const result = await runtime.parseDispatchPayload(
+      JSON.stringify({
+        cwd: "/repo",
+        session_id: "abc",
+        tool_name: "Shell",
+        tool_input: { command: "echo hi" },
+      })
+    )
+    expect(result).toEqual({
+      cwd: "/repo",
+      sessionId: "abc",
+      toolName: "Shell",
+      toolInput: { command: "echo hi" },
+    })
+  })
+
+  it("falls back to in-thread parse when worker request errors", async () => {
+    const runtime = new DaemonWorkerRuntime({
+      enabled: true,
+      transportFactory: () => ({
+        request: async () => {
+          throw new Error("postMessage failed")
+        },
+        close: () => {},
+      }),
+    })
+
+    const result = await runtime.parseDispatchPayload(
+      JSON.stringify({
+        cwd: "/repo",
+        session_id: "abc",
+        toolName: "ReadFile",
+        toolInput: { path: "/tmp/file.ts" },
+      })
+    )
+    expect(result).toEqual({
+      cwd: "/repo",
+      sessionId: "abc",
+      toolName: "ReadFile",
+      toolInput: { path: "/tmp/file.ts" },
+    })
+    runtime.close()
   })
 })
 

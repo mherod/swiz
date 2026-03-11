@@ -49,6 +49,7 @@ import {
   transcriptWatchPathsForProject,
 } from "./daemon/utils.ts"
 import { startDaemonWebServer } from "./daemon/web-server.ts"
+import { DaemonWorkerRuntime } from "./daemon/worker-runtime.ts"
 import {
   computeWarmStatusLineSnapshot,
   getGhCachePath,
@@ -1048,6 +1049,8 @@ class SessionDataCache {
 
 const sessionDataCache = new SessionDataCache()
 
+export { DaemonWorkerRuntime } from "./daemon/worker-runtime.ts"
+
 async function scanSession(session: Pick<Session, "path" | "format">): Promise<SessionScanResult> {
   const empty = { hasMessages: false, startedAt: 0, lastMessageAt: 0 }
   const cached = await sessionDataCache.get(session)
@@ -1445,6 +1448,7 @@ export const daemonCommand: Command = {
     const transcriptIndex = new TranscriptIndexCache()
     const cooldownRegistry = new CooldownRegistry()
     const ciWatchRegistry = new CiWatchRegistry()
+    const workerRuntime = new DaemonWorkerRuntime()
     const gitStateCache = new GitStateCache()
     const projectSettingsCache = new ProjectSettingsCache()
     const manifestCache = new ManifestCache(projectSettingsCache)
@@ -1522,6 +1526,7 @@ export const daemonCommand: Command = {
     process.on("exit", () => {
       watchers.close()
       ciWatchRegistry.close()
+      workerRuntime.close()
     })
 
     const server = startDaemonWebServer({
@@ -1548,6 +1553,7 @@ export const daemonCommand: Command = {
       resolveSnapshot,
       watchers,
       snapshots,
+      workerRuntime,
     })
 
     console.log(`Daemon listening on ${server.url}`)

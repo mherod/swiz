@@ -27,6 +27,7 @@ import {
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
 import { handleSessionRoutes } from "./session-routes.ts"
 import { type CapturedToolCall, captureSessionToolCall, stripAnsi } from "./utils.ts"
+import type { DaemonWorkerRuntime } from "./worker-runtime.ts"
 
 export const WEB_ROOT = join(dirname(Bun.main), "src", "web")
 export const WEB_TSX_TRANSPILER = new Bun.Transpiler({
@@ -134,6 +135,7 @@ export interface DaemonWebServerContext {
   ) => Promise<WarmStatusLineSnapshot>
   watchers: FileWatcherRegistry
   snapshots: Map<string, CachedSnapshot>
+  workerRuntime: DaemonWorkerRuntime
 }
 
 interface AgentProcessSnapshot {
@@ -235,6 +237,7 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
     resolveSnapshot,
     watchers,
     snapshots,
+    workerRuntime,
   } = ctx
 
   const notFound = () => new Response("Not Found", { status: 404 })
@@ -306,54 +309,31 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
         })
         const durationMs = performance.now() - start
         recordDispatch(globalMetrics, canonicalEvent, durationMs)
-        try {
-          const parsed = JSON.parse(payloadStr) as {
-            cwd?: string
-            session_id?: string
-            tool_name?: string
-            toolName?: string
-            tool_input?: Record<string, unknown>
-            toolInput?: Record<string, unknown>
-          }
+        const parsed = await workerRuntime.parseDispatchPayload(payloadStr)
+        if (parsed) {
           const nowMs = Date.now()
           if (parsed.cwd) {
             touchProject(parsed.cwd)
             recordDispatch(getProjectMetrics(parsed.cwd), canonicalEvent, durationMs)
             registerProjectWatchers(parsed.cwd)
           }
-          if (parsed.session_id) {
-            const prev = sessionActivity.get(parsed.session_id)
-            sessionActivity.set(parsed.session_id, {
+          if (parsed.sessionId) {
+            const prev = sessionActivity.get(parsed.sessionId)
+            sessionActivity.set(parsed.sessionId, {
               lastSeen: nowMs,
               dispatches: (prev?.dispatches ?? 0) + 1,
             })
 
-            if (canonicalEvent === "preToolUse") {
-              const toolName =
-                typeof parsed.tool_name === "string"
-                  ? parsed.tool_name
-                  : typeof parsed.toolName === "string"
-                    ? parsed.toolName
-                    : null
-              if (toolName) {
-                const toolInput =
-                  parsed.tool_input && typeof parsed.tool_input === "object"
-                    ? parsed.tool_input
-                    : parsed.toolInput && typeof parsed.toolInput === "object"
-                      ? parsed.toolInput
-                      : undefined
-                captureSessionToolCall(
-                  sessionToolCalls,
-                  parsed.session_id,
-                  toolName,
-                  toolInput,
-                  nowMs
-                )
-              }
+            if (canonicalEvent === "preToolUse" && parsed.toolName) {
+              captureSessionToolCall(
+                sessionToolCalls,
+                parsed.sessionId,
+                parsed.toolName,
+                parsed.toolInput,
+                nowMs
+              )
             }
           }
-        } catch {
-          /* ignore parse errors */
         }
         return Response.json(result.response)
       }
