@@ -1,5 +1,5 @@
 import { type FSWatcher, watch } from "node:fs"
-import { dirname, join } from "node:path"
+import { basename, dirname, extname, join } from "node:path"
 import { stderrLog } from "../debug.ts"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import { executeDispatch } from "../dispatch/execute.ts"
@@ -19,6 +19,13 @@ import {
 } from "../settings.ts"
 import { getWorkflowIntent } from "../state-machine.ts"
 import { parseTranscriptSummary, type TranscriptSummary } from "../transcript-summary.ts"
+import {
+  extractText,
+  findAllProviderSessions,
+  isHookFeedback,
+  parseTranscriptEntries,
+  type Session,
+} from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 import {
   computeWarmStatusLineSnapshot,
@@ -32,6 +39,19 @@ const PLIST_PATH = join(process.env.HOME ?? "", "Library/LaunchAgents", `${LABEL
 const GITHUB_REFRESH_WINDOW_MS = 20_000
 const CI_WATCH_POLL_MS = 30_000
 const CI_WATCH_TIMEOUT_MS = 60 * 60 * 1000
+const WEB_ROOT = join(dirname(Bun.main), "src", "web")
+const WEB_TSX_TRANSPILER = new Bun.Transpiler({
+  loader: "tsx",
+})
+
+const WEB_MIME_TYPES: Record<string, string> = {
+  ".css": "text/css; charset=utf-8",
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".tsx": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+}
 
 interface SnapshotFingerprint {
   git: string
@@ -45,6 +65,19 @@ interface SnapshotFingerprint {
 interface CachedSnapshot {
   snapshot: WarmStatusLineSnapshot
   fingerprint: SnapshotFingerprint
+}
+
+interface SessionPreview {
+  id: string
+  provider?: Session["provider"]
+  format?: Session["format"]
+  mtime: number
+}
+
+interface SessionMessage {
+  role: "user" | "assistant"
+  timestamp: string | null
+  text: string
 }
 
 export interface CiWatchRun {
@@ -841,6 +874,107 @@ export function hasSnapshotInvalidated(
   )
 }
 
+function resolveWebAssetPath(pathname: string): string | null {
+  const relativeRaw = pathname === "/" ? "index.html" : pathname.replace(/^\/web\/?/, "")
+  const relative = relativeRaw.replace(/^\/+/, "")
+  if (!relative || relative.includes("..")) return null
+  return join(WEB_ROOT, relative)
+}
+
+async function serveWebAsset(pathname: string): Promise<Response | null> {
+  const filePath = resolveWebAssetPath(pathname)
+  if (!filePath) {
+    return new Response("Bad Request", { status: 400 })
+  }
+
+  const file = Bun.file(filePath)
+  if (!(await file.exists())) return null
+
+  if (extname(filePath) === ".tsx") {
+    const source = await file.text()
+    const code = WEB_TSX_TRANSPILER.transformSync(source)
+    return new Response(code, {
+      headers: {
+        "cache-control": "no-cache",
+        "content-type": "text/javascript; charset=utf-8",
+      },
+    })
+  }
+
+  const contentType = WEB_MIME_TYPES[extname(filePath)] ?? "application/octet-stream"
+  return new Response(file, {
+    headers: {
+      "cache-control": "no-cache",
+      "content-type": contentType,
+    },
+  })
+}
+
+function summarizeToolUses(content: unknown): string {
+  if (!Array.isArray(content)) return ""
+  const labels = content
+    .filter(
+      (block): block is { type: string; name?: string } => !!block && typeof block === "object"
+    )
+    .filter((block) => block.type === "tool_use" && typeof block.name === "string")
+    .map((block) => block.name!)
+  if (labels.length === 0) return ""
+  return `[Tools: ${labels.join(", ")}]`
+}
+
+function extractMessageText(content: unknown): string {
+  const text = extractText(content as string | { type: string; text?: string }[] | undefined).trim()
+  const tools = summarizeToolUses(content)
+  if (text && tools) return `${text}\n${tools}`
+  return text || tools
+}
+
+async function listProjectSessions(
+  cwd: string,
+  limit = 20
+): Promise<{ sessionCount: number; sessions: SessionPreview[] }> {
+  const all = await findAllProviderSessions(cwd)
+  return {
+    sessionCount: all.length,
+    sessions: all.slice(0, limit).map((session) => ({
+      id: session.id,
+      provider: session.provider,
+      format: session.format,
+      mtime: session.mtime,
+    })),
+  }
+}
+
+async function getSessionMessages(
+  cwd: string,
+  sessionId: string,
+  limit = 30
+): Promise<SessionMessage[]> {
+  const sessions = await findAllProviderSessions(cwd)
+  const session = sessions.find(
+    (candidate) => candidate.id === sessionId || candidate.id.startsWith(sessionId)
+  )
+  if (!session) return []
+  const file = Bun.file(session.path)
+  if (!(await file.exists())) return []
+  const text = await file.text()
+  const entries = parseTranscriptEntries(text, session.format)
+  const messages: SessionMessage[] = []
+  for (const entry of entries) {
+    if (entry.type !== "user" && entry.type !== "assistant") continue
+    const content = entry.message?.content
+    if (entry.type === "user" && isHookFeedback(content)) continue
+    const extracted = extractMessageText(content)
+    if (!extracted) continue
+    messages.push({
+      role: entry.type,
+      timestamp: entry.timestamp ?? null,
+      text: extracted,
+    })
+  }
+  return messages.slice(-limit)
+}
+
 async function safeMtime(path: string | null): Promise<number> {
   if (!path) return 0
   try {
@@ -1032,6 +1166,7 @@ export const daemonCommand: Command = {
 
     const globalMetrics = createMetrics()
     const projectMetrics = new Map<string, DaemonMetrics>()
+    const projectLastSeen = new Map<string, number>()
     const getProjectMetrics = (cwd: string): DaemonMetrics => {
       let m = projectMetrics.get(cwd)
       if (!m) {
@@ -1040,6 +1175,10 @@ export const daemonCommand: Command = {
       }
       return m
     }
+    const touchProject = (cwd: string) => {
+      projectLastSeen.set(cwd, Date.now())
+    }
+    touchProject(process.cwd())
 
     const watchers = new FileWatcherRegistry()
     const ghCache = new GhQueryCache()
@@ -1127,6 +1266,19 @@ export const daemonCommand: Command = {
       async fetch(req) {
         const url = new URL(req.url)
 
+        if (req.method === "GET") {
+          if (url.pathname === "/") {
+            const asset = await serveWebAsset("/")
+            if (asset) return asset
+          }
+          if (url.pathname === "/web" || url.pathname.startsWith("/web/")) {
+            const asset = await serveWebAsset(
+              url.pathname === "/web" ? "/web/index.html" : url.pathname
+            )
+            if (asset) return asset
+          }
+        }
+
         if (url.pathname === "/dispatch" && req.method === "POST") {
           const canonicalEvent = url.searchParams.get("event")
           const hookEventName = url.searchParams.get("hookEventName") ?? canonicalEvent
@@ -1152,6 +1304,7 @@ export const daemonCommand: Command = {
           try {
             const parsed = JSON.parse(payloadStr) as { cwd?: string }
             if (parsed.cwd) {
+              touchProject(parsed.cwd)
               recordDispatch(getProjectMetrics(parsed.cwd), canonicalEvent, durationMs)
               registerProjectWatchers(parsed.cwd)
             }
@@ -1190,6 +1343,7 @@ export const daemonCommand: Command = {
             )
           }
           registerProjectWatchers(cwd)
+          touchProject(cwd)
           const ttlMs = typeof body?.ttlMs === "number" ? body.ttlMs : GH_QUERY_TTL_MS
           const { hit, value } = await ghCache.get(args, cwd, ttlMs)
           return Response.json({ hit, value })
@@ -1204,6 +1358,7 @@ export const daemonCommand: Command = {
             return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
           }
           registerProjectWatchers(cwd)
+          touchProject(cwd)
           const snapshot = await eligibilityCache.compute(cwd)
           return Response.json(snapshot)
         }
@@ -1279,6 +1434,7 @@ export const daemonCommand: Command = {
             return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
           }
           registerProjectWatchers(cwd)
+          touchProject(cwd)
           const state = await gitStateCache.get(cwd)
           if (!state) {
             return Response.json({ error: "Not a git repository or no branch" }, { status: 404 })
@@ -1305,6 +1461,7 @@ export const daemonCommand: Command = {
             )
           }
           registerProjectWatchers(cwd)
+          touchProject(cwd)
           const started = ciWatchRegistry.start(cwd, sha)
           return Response.json(started)
         }
@@ -1326,8 +1483,62 @@ export const daemonCommand: Command = {
             return Response.json({ error: "Missing required field: cwd" }, { status: 400 })
           }
           registerProjectWatchers(cwd)
+          touchProject(cwd)
           const cached = await projectSettingsCache.get(cwd)
           return Response.json(cached)
+        }
+
+        if (url.pathname === "/sessions/projects" && req.method === "POST") {
+          const body = (await req.json().catch(() => null)) as {
+            limitProjects?: number
+            limitSessionsPerProject?: number
+          } | null
+          const limitProjects = Math.max(1, Math.min(30, body?.limitProjects ?? 8))
+          const limitSessionsPerProject = Math.max(
+            1,
+            Math.min(30, body?.limitSessionsPerProject ?? 8)
+          )
+          const projectCwds = [
+            ...new Set([process.cwd(), ...registeredProjects, ...projectMetrics.keys()]),
+          ]
+          const ordered = projectCwds
+            .map((cwd) => ({ cwd, lastSeenAt: projectLastSeen.get(cwd) ?? 0 }))
+            .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+            .slice(0, limitProjects)
+
+          const projects = await Promise.all(
+            ordered.map(async ({ cwd, lastSeenAt }) => {
+              const sessions = await listProjectSessions(cwd, limitSessionsPerProject)
+              return {
+                cwd,
+                name: basename(cwd),
+                lastSeenAt,
+                sessionCount: sessions.sessionCount,
+                sessions: sessions.sessions,
+              }
+            })
+          )
+          return Response.json({ projects })
+        }
+
+        if (url.pathname === "/sessions/messages" && req.method === "POST") {
+          const body = (await req.json().catch(() => null)) as {
+            cwd?: string
+            sessionId?: string
+            limit?: number
+          } | null
+          const cwd = body?.cwd
+          const sessionId = body?.sessionId
+          if (typeof cwd !== "string" || cwd.length === 0 || typeof sessionId !== "string") {
+            return Response.json(
+              { error: "Missing required fields: cwd (string), sessionId (string)" },
+              { status: 400 }
+            )
+          }
+          touchProject(cwd)
+          const limit = Math.max(1, Math.min(100, body?.limit ?? 30))
+          const messages = await getSessionMessages(cwd, sessionId, limit)
+          return Response.json({ messages })
         }
 
         if (url.pathname === "/cache/status" && req.method === "GET") {
