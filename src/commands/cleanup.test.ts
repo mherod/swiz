@@ -677,6 +677,7 @@ describe("cleanup old task files", () => {
   const env = { ...process.env, HOME: TASK_FILE_HOME }
   const PROJECT_NAME = `${TASK_FILE_ENCODED_HOME}-Development-task-file-project`
   const SESSION_ID = "00000000-0000-0000-0000-cccccccccccc"
+  const NON_UUID_SESSION_ID = "session-legacy-123"
 
   beforeAll(async () => {
     await mkdir(join(TASK_FILE_HOME, "Development", "task-file-project"), { recursive: true })
@@ -714,6 +715,19 @@ describe("cleanup old task files", () => {
         statusChangedAt: "2025-01-01T00:00:00.000Z",
       })
     )
+
+    // Non-UUID session directories still exist in the wild and should be pruned too.
+    const nonUuidTaskDir = join(TASK_FILE_HOME, ".claude", "tasks", NON_UUID_SESSION_ID)
+    await mkdir(nonUuidTaskDir, { recursive: true })
+    await writeFile(
+      join(nonUuidTaskDir, "1.json"),
+      JSON.stringify({
+        id: "1",
+        subject: "Old active task in non-uuid session",
+        status: "in_progress",
+        statusChangedAt: "2025-01-01T00:00:00.000Z",
+      })
+    )
   })
 
   afterAll(async () => {
@@ -721,7 +735,7 @@ describe("cleanup old task files", () => {
     await proc.exited
   })
 
-  test("dry-run reports old task files when --task-older-than is provided", async () => {
+  test("dry-run reports old task files across task statuses", async () => {
     const proc = Bun.spawn(
       ["bun", "run", "index.ts", "cleanup", "--dry-run", "--task-older-than", "30d"],
       {
@@ -735,7 +749,7 @@ describe("cleanup old task files", () => {
     await proc.exited
 
     expect(proc.exitCode).toBe(0)
-    expect(output).toMatch(/old completed\/cancelled task files/)
-    expect(output).toMatch(/1 old task files/)
+    expect(output).toMatch(/old task files/)
+    expect(output).toMatch(/3 old task files/)
   })
 })

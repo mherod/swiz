@@ -1,6 +1,14 @@
 import { readdir, readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { getHomeDir } from "../home.ts"
+import {
+  getLaunchAgentPlistPath,
+  isLaunchAgentLoaded,
+  launchAgentExists,
+  loadLaunchAgent,
+  SWIZ_DAEMON_LABEL,
+  unloadLaunchAgent,
+} from "../launch-agents.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
 import { getDefaultTaskRoots } from "../task-roots.ts"
 import type { Command } from "../types.ts"
@@ -10,6 +18,7 @@ const CLAUDE_DIR = join(HOME, ".claude")
 const GEMINI_DIR = join(HOME, ".gemini")
 const GEMINI_SETTINGS_BAK = join(GEMINI_DIR, "settings.json.bak")
 const GEMINI_TMP_DIR = join(GEMINI_DIR, "tmp")
+const DAEMON_LABEL = SWIZ_DAEMON_LABEL
 
 // ─── Path decoding ────────────────────────────────────────────────────────────
 
@@ -120,6 +129,20 @@ async function trashDir(path: string): Promise<boolean> {
   return proc.exitCode === 0
 }
 
+type DaemonStopState = "not-installed" | "not-running" | "stopped" | "failed"
+
+async function stopDaemonForCleanup(): Promise<DaemonStopState> {
+  const plistPath = getLaunchAgentPlistPath(DAEMON_LABEL)
+  if (!(await launchAgentExists(DAEMON_LABEL))) return "not-installed"
+  if (!(await isLaunchAgentLoaded(DAEMON_LABEL))) return "not-running"
+  return (await unloadLaunchAgent(plistPath)) === 0 ? "stopped" : "failed"
+}
+
+async function restartDaemonAfterCleanup(): Promise<boolean> {
+  if (!(await launchAgentExists(DAEMON_LABEL))) return false
+  return (await loadLaunchAgent(getLaunchAgentPlistPath(DAEMON_LABEL))) === 0
+}
+
 // ─── Claude backup detection ──────────────────────────────────────────────────
 
 interface ClaudeBackupInfo {
@@ -219,7 +242,7 @@ interface SessionInfo {
 interface OldTaskFileInfo {
   sessionId: string
   taskId: string
-  status: "completed" | "cancelled"
+  status: string
   path: string
   sizeBytes: number
 }
@@ -276,7 +299,6 @@ async function findOldTaskFiles(
   }
 
   for (const sessionId of sessionEntries) {
-    if (!UUID_RE.test(sessionId)) continue
     if (allowedSessionIds && !allowedSessionIds.has(sessionId)) continue
     const sessionDir = join(tasksDir, sessionId)
     let sessionDirStat: Awaited<ReturnType<typeof stat>>
@@ -325,7 +347,7 @@ async function findOldTaskFiles(
       } catch {
         continue
       }
-      if (task.status !== "completed" && task.status !== "cancelled") continue
+      if (!task.status) continue
       const taskMs = parseTaskAgeMs(task) ?? fileStat.mtimeMs
       if (taskMs >= cutoffMs) continue
 
@@ -703,7 +725,7 @@ export const cleanupCommand: Command = {
 
     if (taskCutoffMs !== null) {
       const taskLabel = taskOlderThanLabel ?? "specified window"
-      console.log(`  ${BOLD}~/.claude/tasks/ (old completed/cancelled task files)${RESET}`)
+      console.log(`  ${BOLD}~/.claude/tasks/ (old task files)${RESET}`)
       const taskCountLabel = oldTaskFiles.length === 1 ? "file" : "files"
       const taskPart =
         oldTaskFiles.length > 0
@@ -750,100 +772,120 @@ export const cleanupCommand: Command = {
       return
     }
 
-    // Trash sessions and their matching task directories
-    console.log(
-      `  Moving ${totalOldCount} session(s)${taskSuffix}${oldTaskPart}${claudePart}${geminiPart} to Trash...`
-    )
-    let succeeded = 0
-    let failed = 0
-    let taskDirsRemoved = 0
-    let claudeFilesRemoved = 0
-    let claudeFailed = 0
-    let geminiFilesRemoved = 0
-    let geminiFailed = 0
-    let oldTaskFilesRemoved = 0
-    let oldTaskFilesFailed = 0
+    const daemonStopState = await stopDaemonForCleanup()
+    if (daemonStopState === "stopped") {
+      console.log(`  ${DIM}Stopped ${DAEMON_LABEL} before cleanup.${RESET}`)
+    } else if (daemonStopState === "failed") {
+      console.log(`  ${YELLOW}Warning: failed to stop ${DAEMON_LABEL}; continuing cleanup.${RESET}`)
+    }
 
-    for (const { old } of results) {
-      for (const session of old) {
-        let sessionPartSucceeded = false
-        if (session.paths.length === 0) {
-          // orphan with only task data
-          sessionPartSucceeded = true
-        } else {
-          for (const p of session.paths) {
-            if (await trashDir(p)) sessionPartSucceeded = true
-            else failed++
+    // Trash sessions and their matching task directories
+    try {
+      console.log(
+        `  Moving ${totalOldCount} session(s)${taskSuffix}${oldTaskPart}${claudePart}${geminiPart} to Trash...`
+      )
+      let succeeded = 0
+      let failed = 0
+      let taskDirsRemoved = 0
+      let claudeFilesRemoved = 0
+      let claudeFailed = 0
+      let geminiFilesRemoved = 0
+      let geminiFailed = 0
+      let oldTaskFilesRemoved = 0
+      let oldTaskFilesFailed = 0
+
+      for (const { old } of results) {
+        for (const session of old) {
+          let sessionPartSucceeded = false
+          if (session.paths.length === 0) {
+            // orphan with only task data
+            sessionPartSucceeded = true
+          } else {
+            for (const p of session.paths) {
+              if (await trashDir(p)) sessionPartSucceeded = true
+              else failed++
+            }
+          }
+
+          if (sessionPartSucceeded) succeeded++
+
+          if (session.taskDirPath && (await trashDir(session.taskDirPath))) {
+            taskDirsRemoved++
           }
         }
+      }
 
-        if (sessionPartSucceeded) succeeded++
-
-        if (session.taskDirPath && (await trashDir(session.taskDirPath))) {
-          taskDirsRemoved++
+      // Trash Claude backup artifacts
+      for (const backupFile of claudeBackups.files) {
+        if (await trashDir(backupFile)) {
+          claudeFilesRemoved++
+        } else {
+          claudeFailed++
         }
       }
-    }
 
-    // Trash Claude backup artifacts
-    for (const backupFile of claudeBackups.files) {
-      if (await trashDir(backupFile)) {
-        claudeFilesRemoved++
-      } else {
-        claudeFailed++
+      // Trash Gemini backup artifacts
+      for (const backupFile of geminiBackups.files) {
+        if (await trashDir(backupFile)) {
+          geminiFilesRemoved++
+        } else {
+          geminiFailed++
+        }
       }
-    }
 
-    // Trash Gemini backup artifacts
-    for (const backupFile of geminiBackups.files) {
-      if (await trashDir(backupFile)) {
-        geminiFilesRemoved++
-      } else {
-        geminiFailed++
+      for (const taskFile of oldTaskFiles) {
+        if (await trashDir(taskFile.path)) {
+          oldTaskFilesRemoved++
+        } else {
+          oldTaskFilesFailed++
+        }
       }
-    }
 
-    for (const taskFile of oldTaskFiles) {
-      if (await trashDir(taskFile.path)) {
-        oldTaskFilesRemoved++
-      } else {
-        oldTaskFilesFailed++
-      }
-    }
-
-    console.log()
-    const taskDirNote = taskDirsRemoved > 0 ? ` + ${taskDirsRemoved} task dir(s)` : ""
-    const claudeNote =
-      claudeFilesRemoved > 0
-        ? ` + ${claudeFilesRemoved} ${backupLabel("Claude", claudeFilesRemoved)}`
-        : ""
-    const geminiNote =
-      geminiFilesRemoved > 0
-        ? ` + ${geminiFilesRemoved} ${backupLabel("Gemini", geminiFilesRemoved)}`
-        : ""
-    const oldTaskNote =
-      oldTaskFilesRemoved > 0
-        ? ` + ${oldTaskFilesRemoved} old task ${oldTaskFilesRemoved === 1 ? "file" : "files"}`
-        : ""
-    console.log(
-      `  ${GREEN}${BOLD}Done.${RESET} ${succeeded} session(s)${taskDirNote}${oldTaskNote}${claudeNote}${geminiNote} moved to Trash (~${formatBytes(totalBytes)} reclaimed).`
-    )
-    if (failed > 0 || oldTaskFilesFailed > 0 || claudeFailed > 0 || geminiFailed > 0) {
-      const failedSessions = failed > 0 ? `${failed} session(s)` : ""
-      const failedTaskFiles =
-        oldTaskFilesFailed > 0
-          ? `${oldTaskFilesFailed} old task ${oldTaskFilesFailed === 1 ? "file" : "files"}`
+      console.log()
+      const taskDirNote = taskDirsRemoved > 0 ? ` + ${taskDirsRemoved} task dir(s)` : ""
+      const claudeNote =
+        claudeFilesRemoved > 0
+          ? ` + ${claudeFilesRemoved} ${backupLabel("Claude", claudeFilesRemoved)}`
           : ""
-      const failedClaude =
-        claudeFailed > 0 ? `${claudeFailed} ${backupLabel("Claude", claudeFailed)}` : ""
-      const failedGemini =
-        geminiFailed > 0 ? `${geminiFailed} ${backupLabel("Gemini", geminiFailed)}` : ""
-      const failedJoined = [failedSessions, failedTaskFiles, failedClaude, failedGemini]
-        .filter((s) => s)
-        .join(" + ")
+      const geminiNote =
+        geminiFilesRemoved > 0
+          ? ` + ${geminiFilesRemoved} ${backupLabel("Gemini", geminiFilesRemoved)}`
+          : ""
+      const oldTaskNote =
+        oldTaskFilesRemoved > 0
+          ? ` + ${oldTaskFilesRemoved} old task ${oldTaskFilesRemoved === 1 ? "file" : "files"}`
+          : ""
       console.log(
-        `  ${YELLOW}${failedJoined} could not be trashed — is the \`trash\` CLI installed?${RESET}`
+        `  ${GREEN}${BOLD}Done.${RESET} ${succeeded} session(s)${taskDirNote}${oldTaskNote}${claudeNote}${geminiNote} moved to Trash (~${formatBytes(totalBytes)} reclaimed).`
       )
+      if (failed > 0 || oldTaskFilesFailed > 0 || claudeFailed > 0 || geminiFailed > 0) {
+        const failedSessions = failed > 0 ? `${failed} session(s)` : ""
+        const failedTaskFiles =
+          oldTaskFilesFailed > 0
+            ? `${oldTaskFilesFailed} old task ${oldTaskFilesFailed === 1 ? "file" : "files"}`
+            : ""
+        const failedClaude =
+          claudeFailed > 0 ? `${claudeFailed} ${backupLabel("Claude", claudeFailed)}` : ""
+        const failedGemini =
+          geminiFailed > 0 ? `${geminiFailed} ${backupLabel("Gemini", geminiFailed)}` : ""
+        const failedJoined = [failedSessions, failedTaskFiles, failedClaude, failedGemini]
+          .filter((s) => s)
+          .join(" + ")
+        console.log(
+          `  ${YELLOW}${failedJoined} could not be trashed — is the \`trash\` CLI installed?${RESET}`
+        )
+      }
+    } finally {
+      if (daemonStopState === "stopped") {
+        const restarted = await restartDaemonAfterCleanup()
+        if (restarted) {
+          console.log(`  ${DIM}Restarted ${DAEMON_LABEL} after cleanup.${RESET}`)
+        } else {
+          console.log(
+            `  ${YELLOW}Warning: failed to restart ${DAEMON_LABEL}; run 'swiz daemon --install' if needed.${RESET}`
+          )
+        }
+      }
     }
   },
 }

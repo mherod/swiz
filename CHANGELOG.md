@@ -24,6 +24,9 @@
   route table for more direct request handling.
 - Improved stop-flow guidance by surfacing clearer human-required actions when
   maintenance or release steps are still pending.
+- Consolidated LaunchAgent management into `src/launch-agents.ts` so daemon
+  install/uninstall, prPoll installation, and cleanup daemon stop/restart all
+  share one implementation for plist path resolution and `launchctl` actions.
 
 ## 2026-03-09
 

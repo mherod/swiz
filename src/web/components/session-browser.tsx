@@ -446,6 +446,26 @@ function TaskStatusBadge({ status }: { status: SessionTask["status"] }) {
   return <span className={cn("task-status", `task-status-${status}`)}>{label}</span>
 }
 
+function TaskChecklistMark({ status }: { status: SessionTask["status"] }) {
+  const mark =
+    status === "completed"
+      ? "☑"
+      : status === "cancelled"
+        ? "☒"
+        : status === "in_progress"
+          ? "◐"
+          : "☐"
+  return (
+    <span
+      className={cn("task-checkmark", `task-checkmark-${status}`)}
+      aria-hidden="true"
+      title={status.replace("_", " ")}
+    >
+      {mark}
+    </span>
+  )
+}
+
 function SessionTasksSection({
   tasks,
   summary,
@@ -477,7 +497,10 @@ function SessionTasksSection({
                   <span className="session-task-id">#{task.id}</span>
                   <TaskStatusBadge status={task.status} />
                 </div>
-                <p className="session-task-subject">{task.subject}</p>
+                <p className={cn("session-task-subject", `session-task-subject-${task.status}`)}>
+                  <TaskChecklistMark status={task.status} />
+                  <span>{task.subject}</span>
+                </p>
                 {taskTime ? (
                   <p className="session-task-time">{formatTime(new Date(taskTime).getTime())}</p>
                 ) : null}
@@ -502,6 +525,7 @@ function ProjectTasksSection({
   summary: SessionTaskSummary | null
   loading: boolean
 }) {
+  const [collapsed, setCollapsed] = useState(true)
   const [visibility, setVisibility] = useState<"open" | "all">("open")
   const [expanded, setExpanded] = useState(false)
   const previewLimit = 16
@@ -515,80 +539,104 @@ function ProjectTasksSection({
 
   return (
     <section className="session-tasks-section" aria-label="All tasks for selected project">
-      <h3 className="session-tasks-title">Project tasks</h3>
+      <div className="session-tasks-heading">
+        <h3 className="session-tasks-title">Project tasks</h3>
+        <button
+          type="button"
+          className="task-collapse-btn"
+          onClick={() => setCollapsed((value) => !value)}
+          aria-expanded={!collapsed}
+        >
+          {collapsed ? "Expand" : "Collapse"}
+        </button>
+      </div>
       {summary ? (
         <p className="session-tasks-summary">
           {summary.total} total · {summary.open} open · {summary.completed} completed ·{" "}
           {summary.cancelled} cancelled
         </p>
       ) : null}
-      <div className="session-task-controls">
-        <button
-          type="button"
-          className={cn("task-filter-btn", visibility === "open" && "active")}
-          onClick={() => {
-            setVisibility("open")
-            setExpanded(false)
-          }}
-          aria-pressed={visibility === "open"}
-        >
-          Open only ({openTasks.length} shown)
-        </button>
-        <button
-          type="button"
-          className={cn("task-filter-btn", visibility === "all" && "active")}
-          onClick={() => {
-            setVisibility("all")
-            setExpanded(false)
-          }}
-          aria-pressed={visibility === "all"}
-        >
-          All ({tasks.length} loaded)
-        </button>
-      </div>
-      {summary && tasks.length < summary.total ? (
-        <p className="session-tasks-summary">
-          Showing latest {tasks.length} of {summary.total} tasks.
-        </p>
-      ) : null}
-      {loading ? (
-        <p className="empty">Loading project tasks...</p>
-      ) : scopedTasks.length === 0 ? (
-        visibility === "open" ? (
-          <p className="empty">No open tasks in this project.</p>
-        ) : (
-          <p className="empty">No tasks recorded for this project.</p>
-        )
-      ) : (
+      {collapsed ? null : (
         <>
-          <ul className="session-task-list">
-            {visibleTasks.map((task) => {
-              const taskTime = task.statusChangedAt ?? task.completionTimestamp
-              return (
-                <li key={`${task.sessionId}:${task.id}`} className="session-task-row">
-                  <div className="session-task-meta">
-                    <span className="session-task-id">
-                      {task.sessionId.slice(0, 8)}... · #{task.id}
-                    </span>
-                    <TaskStatusBadge status={task.status} />
-                  </div>
-                  <p className="session-task-subject">{task.subject}</p>
-                  {taskTime ? (
-                    <p className="session-task-time">{formatTime(new Date(taskTime).getTime())}</p>
-                  ) : null}
-                </li>
-              )
-            })}
-          </ul>
-          {hiddenCount > 0 ? (
+          <div className="session-task-controls">
             <button
               type="button"
-              className="task-show-more-btn"
-              onClick={() => setExpanded((value) => !value)}
+              className={cn("task-filter-btn", visibility === "open" && "active")}
+              onClick={() => {
+                setVisibility("open")
+                setExpanded(false)
+              }}
+              aria-pressed={visibility === "open"}
             >
-              {expanded ? "Show fewer tasks" : `Show ${hiddenCount} more tasks`}
+              Open only ({openTasks.length} shown)
             </button>
+            <button
+              type="button"
+              className={cn("task-filter-btn", visibility === "all" && "active")}
+              onClick={() => {
+                setVisibility("all")
+                setExpanded(false)
+              }}
+              aria-pressed={visibility === "all"}
+            >
+              All ({tasks.length} loaded)
+            </button>
+          </div>
+          {summary && tasks.length < summary.total ? (
+            <p className="session-tasks-summary">
+              Showing latest {tasks.length} of {summary.total} tasks.
+            </p>
           ) : null}
+          {loading ? (
+            <p className="empty">Loading project tasks...</p>
+          ) : scopedTasks.length === 0 ? (
+            visibility === "open" ? (
+              <p className="empty">No open tasks in this project.</p>
+            ) : (
+              <p className="empty">No tasks recorded for this project.</p>
+            )
+          ) : (
+            <>
+              <ul className="session-task-list">
+                {visibleTasks.map((task) => {
+                  const taskTime = task.statusChangedAt ?? task.completionTimestamp
+                  return (
+                    <li key={`${task.sessionId}:${task.id}`} className="session-task-row">
+                      <div className="session-task-meta">
+                        <span className="session-task-id">
+                          {task.sessionId.slice(0, 8)}... · #{task.id}
+                        </span>
+                        <TaskStatusBadge status={task.status} />
+                      </div>
+                      <p
+                        className={cn(
+                          "session-task-subject",
+                          `session-task-subject-${task.status}`
+                        )}
+                      >
+                        <TaskChecklistMark status={task.status} />
+                        <span>{task.subject}</span>
+                      </p>
+                      {taskTime ? (
+                        <p className="session-task-time">
+                          {formatTime(new Date(taskTime).getTime())}
+                        </p>
+                      ) : null}
+                    </li>
+                  )
+                })}
+              </ul>
+              {hiddenCount > 0 ? (
+                <button
+                  type="button"
+                  className="task-show-more-btn"
+                  onClick={() => setExpanded((value) => !value)}
+                >
+                  {expanded ? "Show fewer tasks" : `Show ${hiddenCount} more tasks`}
+                </button>
+              ) : null}
+            </>
+          )}
         </>
       )}
     </section>

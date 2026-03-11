@@ -492,7 +492,7 @@ Remove old Claude Code session data from `~/.claude/projects/` and Gemini backup
 ```bash
 swiz cleanup                                # remove sessions older than 30 days (+ Gemini backups)
 swiz cleanup --older-than 7d               # remove sessions older than 7 days (+ Gemini backups)
-swiz cleanup --task-older-than 30d         # also remove old completed/cancelled task files
+swiz cleanup --task-older-than 30d         # also remove old task files (any status)
 swiz cleanup --dry-run                     # preview what would be removed
 swiz cleanup --project myrepo              # limit Claude cleanup to a specific project
 ```
@@ -504,7 +504,7 @@ swiz cleanup --project myrepo              # limit Claude cleanup to a specific 
 | Flag | Description |
 |------|-------------|
 | `--older-than <time>` | Remove Claude sessions older than this time: days (`30`, `7d`) or hours (`48h`). Default: 30 (Gemini backups removed regardless of age) |
-| `--task-older-than <time>` | Also remove completed/cancelled task files older than this time (days/hours). Disabled by default. |
+| `--task-older-than <time>` | Also remove task files older than this time (days/hours), regardless of status. Disabled by default. |
 | `--dry-run` | Show what would be removed without deleting |
 | `--project <name>` | Limit Claude cleanup to a specific project directory name |
 

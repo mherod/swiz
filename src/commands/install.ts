@@ -1,8 +1,12 @@
-import { join } from "node:path"
 import { orderBy } from "lodash-es"
 import { AGENTS, type AgentDef, getAgentByFlag, translateEvent } from "../agents.ts"
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
-import { getHomeDirOrNull } from "../home.ts"
+import {
+  getLaunchAgentPlistPath,
+  loadLaunchAgentSync,
+  SWIZ_PR_POLL_LABEL,
+  unloadLaunchAgentSync,
+} from "../launch-agents.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import { loadAllPlugins, pluginErrorHint, pluginResultsToJson } from "../plugins.ts"
 import { readProjectSettings } from "../settings.ts"
@@ -488,13 +492,8 @@ async function installStatusLine(dryRun: boolean): Promise<void> {
 
 // ─── PR poll LaunchAgent ─────────────────────────────────────────────────────
 
-const PR_POLL_LABEL = "com.swiz.prpoll"
-const PR_POLL_PLIST = join(
-  getHomeDirOrNull() ?? "",
-  "Library",
-  "LaunchAgents",
-  `${PR_POLL_LABEL}.plist`
-)
+const PR_POLL_LABEL = SWIZ_PR_POLL_LABEL
+const PR_POLL_PLIST = getLaunchAgentPlistPath(PR_POLL_LABEL)
 
 function buildPrPollPlist(bunBin: string, indexPath: string): string {
   const logPath = swizPrPollLogPath()
@@ -556,9 +555,9 @@ async function installPrPoll(dryRun: boolean): Promise<void> {
   }
 
   await Bun.write(PR_POLL_PLIST, plistContent)
-  Bun.spawnSync(["launchctl", "unload", PR_POLL_PLIST])
-  const load = Bun.spawnSync(["launchctl", "load", PR_POLL_PLIST])
-  if (load.exitCode !== 0) {
+  unloadLaunchAgentSync(PR_POLL_PLIST)
+  const loadExitCode = loadLaunchAgentSync(PR_POLL_PLIST)
+  if (loadExitCode !== 0) {
     console.log(
       `  ${YELLOW}⚠${RESET} prPoll LaunchAgent written but launchctl load failed — reload manually:\n` +
         `    launchctl load ${PR_POLL_PLIST}\n`

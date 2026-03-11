@@ -740,6 +740,24 @@ tbody tr:hover {
   color: #93b4ff;
 }
 
+.session-tasks-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.task-collapse-btn {
+  border: 1px solid rgba(118, 153, 229, 0.34);
+  border-radius: 999px;
+  background: rgba(67, 88, 138, 0.12);
+  color: #c4d7ff;
+  font-size: 0.66rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
 .session-tasks-summary {
   margin: 4px 0 10px;
   color: var(--text-muted);
@@ -847,6 +865,43 @@ tbody tr:hover {
   color: #d9dee9;
   font-size: 0.82rem;
   line-height: 1.42;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.task-checkmark {
+  flex: 0 0 auto;
+  font-size: 0.84rem;
+  line-height: 1.3;
+}
+
+.task-checkmark-in_progress {
+  color: #6dddf0;
+}
+
+.task-checkmark-pending {
+  color: #f4ce7a;
+}
+
+.task-checkmark-completed {
+  color: #88de98;
+}
+
+.task-checkmark-cancelled {
+  color: #ef9d9d;
+}
+
+.session-task-subject-completed,
+.session-task-subject-cancelled {
+  color: #9fb0cb;
+}
+
+.session-task-subject-completed span:last-child,
+.session-task-subject-cancelled span:last-child {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: rgba(159, 176, 203, 0.75);
 }
 
 .session-task-time {

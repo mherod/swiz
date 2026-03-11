@@ -5,6 +5,12 @@ import { detectProjectStack } from "../detect-frameworks.ts"
 import { executeDispatch } from "../dispatch/execute.ts"
 import { resolvePrMergeActive, SWIZ_NOTIFY_HOOK_FILES } from "../dispatch/filters.ts"
 import { type GitBranchStatus, getGitBranchStatus, ghJson } from "../git-helpers.ts"
+import {
+  getLaunchAgentPlistPath,
+  loadLaunchAgent,
+  SWIZ_DAEMON_LABEL,
+  unloadLaunchAgent,
+} from "../launch-agents.ts"
 import { evalCondition, manifest } from "../manifest.ts"
 import {
   getEffectiveSwizSettings,
@@ -37,8 +43,6 @@ import {
 } from "./status-line.ts"
 
 const DAEMON_PORT = 7_943
-const LABEL = "com.swiz.daemon"
-const PLIST_PATH = join(process.env.HOME ?? "", "Library/LaunchAgents", `${LABEL}.plist`)
 const GITHUB_REFRESH_WINDOW_MS = 20_000
 const CI_WATCH_POLL_MS = 30_000
 const CI_WATCH_TIMEOUT_MS = 60 * 60 * 1000
@@ -1374,7 +1378,7 @@ function buildPlist(port: number): string {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${LABEL}</string>
+  <string>${SWIZ_DAEMON_LABEL}</string>
 
   <key>ProgramArguments</key>
   <array>
@@ -1418,37 +1422,31 @@ function buildPlist(port: number): string {
 
 async function install(port: number) {
   const plist = buildPlist(port)
-  await Bun.write(PLIST_PATH, plist)
-  console.log(`Wrote ${PLIST_PATH}`)
+  const plistPath = getLaunchAgentPlistPath(SWIZ_DAEMON_LABEL)
+  await Bun.write(plistPath, plist)
+  console.log(`Wrote ${plistPath}`)
 
-  const load = Bun.spawn(["launchctl", "load", PLIST_PATH], {
-    stdout: "inherit",
-    stderr: "inherit",
-  })
-  await load.exited
-  if (load.exitCode !== 0) {
+  const loadExitCode = await loadLaunchAgent(plistPath)
+  if (loadExitCode !== 0) {
     throw new Error("launchctl load failed")
   }
-  console.log(`Loaded ${LABEL}`)
+  console.log(`Loaded ${SWIZ_DAEMON_LABEL}`)
 }
 
 async function uninstall() {
-  const load = Bun.spawn(["launchctl", "unload", PLIST_PATH], {
-    stdout: "inherit",
-    stderr: "inherit",
-  })
-  await load.exited
+  const plistPath = getLaunchAgentPlistPath(SWIZ_DAEMON_LABEL)
+  await unloadLaunchAgent(plistPath)
 
-  const file = Bun.file(PLIST_PATH)
+  const file = Bun.file(plistPath)
   if (await file.exists()) {
-    const rm = Bun.spawn(["trash", PLIST_PATH], {
+    const rm = Bun.spawn(["trash", plistPath], {
       stdout: "inherit",
       stderr: "inherit",
     })
     await rm.exited
-    console.log(`Removed ${PLIST_PATH}`)
+    console.log(`Removed ${plistPath}`)
   }
-  console.log(`Unloaded ${LABEL}`)
+  console.log(`Unloaded ${SWIZ_DAEMON_LABEL}`)
 }
 
 async function fetchDaemonStatus(port: number): Promise<void> {
