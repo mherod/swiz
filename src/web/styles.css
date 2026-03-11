@@ -47,8 +47,9 @@
 
 body {
   margin: 0;
-  height: 100vh;
-  overflow: hidden;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
   background:
     radial-gradient(1300px 640px at 8% -20%, rgba(64, 112, 255, 0.34), transparent 55%),
     radial-gradient(920px 520px at 95% 0%, rgba(3, 217, 255, 0.16), transparent 45%),
@@ -68,11 +69,13 @@ body::before {
 }
 
 #app {
-  height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
   display: flex;
   justify-content: center;
   align-items: stretch;
   padding: 14px;
+  overflow-x: hidden;
 }
 
 /* ── Bento grid ── */
@@ -82,12 +85,18 @@ body::before {
   max-width: 1400px;
   display: grid;
   gap: var(--gap);
-  grid-template-columns: 1fr 1fr 1fr 1.2fr 2fr;
-  grid-template-rows: auto 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto;
   grid-template-areas:
-    "title  stat1  stat2  stat3  stat4"
-    "events cache  nav    msgs   msgs"
-    "events cache  nav    msgs   msgs";
+    "title"
+    "stat1"
+    "stat2"
+    "stat3"
+    "stat4"
+    "events"
+    "cache"
+    "nav"
+    "msgs";
   min-height: 0;
 }
 
@@ -104,6 +113,7 @@ body::before {
     inset 0 1px 0 rgba(195, 213, 255, 0.05);
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
@@ -116,6 +126,13 @@ body::before {
   letter-spacing: 0.06em;
   color: #8ea5d9;
   font-weight: 700;
+}
+
+.section-subtitle {
+  margin: -4px 0 10px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
 }
 
 /* ── Title cell ── */
@@ -226,6 +243,11 @@ body::before {
 .panel-events {
   grid-area: events;
   overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.panel-events table {
+  table-layout: fixed;
 }
 
 table {
@@ -237,7 +259,7 @@ th,
 td {
   text-align: left;
   border-bottom: 1px solid var(--line);
-  padding: 5px 4px;
+  padding: 7px 4px;
   font-size: 0.82rem;
 }
 
@@ -252,13 +274,37 @@ th {
 .event-name {
   font-weight: 600;
   color: #dce5ff;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-cell {
+  width: 35%;
+}
+
+.count-col {
+  width: 38%;
+}
+
+.avg-col {
+  width: 27%;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .count-cell {
   display: grid;
-  grid-template-columns: auto minmax(40px, 1fr);
+  grid-template-columns: auto minmax(56px, 1fr);
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+}
+
+.count-cell > span:first-child {
+  min-width: 2ch;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .count-bar {
@@ -289,6 +335,7 @@ tbody tr:hover {
 .panel-cache {
   grid-area: cache;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .cache-list {
@@ -302,14 +349,28 @@ tbody tr:hover {
   justify-content: space-between;
   gap: 6px;
   border-bottom: 1px solid var(--line);
-  padding: 5px 0;
+  padding: 7px 0;
   font-size: 0.82rem;
+}
+
+.cache-label {
+  color: #dce5ff;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cache-value-wrap {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
+}
+
+.cache-count {
+  min-width: 2ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .cache-badge {
@@ -740,38 +801,59 @@ tbody tr:hover {
 
 /* ── Responsive ── */
 
-@media (max-width: 1100px) {
+@media (min-width: 640px) {
   .bento {
-    grid-template-columns: 1fr 1fr 1fr;
-    grid-template-rows: auto auto 1fr 1fr;
-    grid-template-areas:
-      "title  stat1  stat2"
-      "stat3  stat4  nav"
-      "events cache  nav"
-      "msgs   msgs   msgs";
-  }
-}
-
-@media (max-width: 640px) {
-  body {
-    height: auto;
-    overflow: auto;
-  }
-
-  #app {
-    height: auto;
-  }
-
-  .bento {
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto auto auto minmax(0, 1fr) minmax(0, 1fr) auto;
     grid-template-areas:
       "title  title"
       "stat1  stat2"
       "stat3  stat4"
-      "events cache"
-      "nav    nav"
-      "msgs   msgs";
+      "events msgs"
+      "cache  msgs"
+      "nav    nav";
+  }
+}
+
+@media (min-width: 768px) {
+  .bento {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "title  stat1  stat2"
+      "stat3  stat4  nav"
+      "events msgs   nav"
+      "cache  msgs   nav";
+  }
+}
+
+@media (min-width: 1024px) {
+  body {
+    overflow: hidden;
+  }
+
+  #app {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  body {
+    min-height: 100dvh;
+  }
+
+  .bento {
+    grid-template-columns: minmax(260px, 1.85fr) minmax(220px, 1.45fr) minmax(180px, 1fr) minmax(
+        220px,
+        1.2fr
+      ) minmax(
+        0,
+        2.4fr
+      );
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "title  stat1  stat2  stat3  stat4"
+      "events cache  nav    msgs   msgs"
+      "events cache  nav    msgs   msgs";
   }
 }
 

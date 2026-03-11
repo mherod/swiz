@@ -10,10 +10,10 @@ function CacheRow({ label, value }: { label: string; value: number }) {
   const state = getCacheState(value)
   return (
     <li className="cache-row">
-      <span>{label}</span>
+      <span className="cache-label">{label}</span>
       <span className="cache-value-wrap">
         <span className={`cache-badge cache-${state}`}>{state}</span>
-        <strong>{value}</strong>
+        <strong className="cache-count">{value}</strong>
       </span>
     </li>
   )
@@ -34,6 +34,7 @@ export function CacheList({ cache = {} }: { cache?: CacheSummary }) {
   return (
     <section className="card panel-cache">
       <h2 className="section-title">Caches</h2>
+      <p className="section-subtitle">Current cache warmth and entry counts</p>
       <ul className="cache-list" aria-label="Daemon cache size breakdown">
         <CacheRow label="Snapshots" value={cache.snapshotCacheSize ?? 0} />
         <CacheRow label="GitHub" value={cache.ghCacheSize ?? 0} />

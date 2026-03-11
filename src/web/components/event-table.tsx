@@ -21,6 +21,7 @@ export function EventTable({
   return (
     <section className="card panel-events">
       <h2 className="section-title">Dispatches{scope === "project" ? " (project)" : ""}</h2>
+      <p className="section-subtitle">Dispatch counts and average durations by event</p>
       <table aria-label="Dispatch metrics by hook event">
         <caption className="sr-only">Dispatch counts and average durations by event</caption>
         <thead>
@@ -40,10 +41,10 @@ export function EventTable({
           ) : (
             events.map((event) => (
               <tr key={event.name}>
-                <td>
+                <td className="event-cell">
                   <span className="event-name">{event.name}</span>
                 </td>
-                <td>
+                <td className="count-col">
                   <div className="count-cell">
                     <span>{event.count}</span>
                     <span className="count-bar">
@@ -51,7 +52,7 @@ export function EventTable({
                     </span>
                   </div>
                 </td>
-                <td>{event.avgMs} ms</td>
+                <td className="avg-col">{event.avgMs} ms</td>
               </tr>
             ))
           )}
