@@ -592,6 +592,347 @@ async function printPreviousSessionIncompleteHint(sessionId: string): Promise<vo
   }
 }
 
+function isListInvocation(subcommand: string | undefined): boolean {
+  return (
+    !subcommand ||
+    subcommand === "--session" ||
+    subcommand === "--all-projects" ||
+    subcommand === "--all-sessions" ||
+    subcommand === "--recovered" ||
+    subcommand === "--date-format"
+  )
+}
+
+function resolveFilterCwd(args: string[]): string | undefined {
+  return args.includes("--all-projects") ? undefined : process.cwd()
+}
+
+async function runListTasks(args: string[]): Promise<void> {
+  const allProjects = args.includes("--all-projects")
+  const allSessions = args.includes("--all-sessions")
+  const recovered = args.includes("--recovered")
+  const filterCwd = resolveFilterCwd(args)
+  const dateFormat = parseDateFormat(extractFlag(args, "--date-format"))
+
+  if (allSessions || recovered) {
+    await listAllSessionsTasks(filterCwd, dateFormat, recovered)
+    return
+  }
+
+  const sessionId = await resolveSession(args)
+  const orphanIds = await getOrphanSessionIds()
+  await listTasks(
+    sessionId,
+    allProjects ? "all projects" : "current project",
+    dateFormat,
+    orphanIds.has(sessionId)
+  )
+
+  if (!args.includes("--session") && !allProjects) {
+    await printPreviousSessionIncompleteHint(sessionId)
+  }
+}
+
+async function runCreateTask(rest: string[]): Promise<void> {
+  const [subject, description, ...sessionArgs] = rest
+  if (!subject || !description) {
+    throw new Error('Usage: swiz tasks create "<subject>" "<description>" --state <state>')
+  }
+  const stateFlag = extractFlag(rest, "--state")
+  if (!stateFlag) {
+    throw new Error(
+      `--state <state> is required.\n` +
+        `It sets the session's active working phase (not the task's todo status).\n` +
+        `Valid phases: ${PROJECT_STATES.join(" | ")}\n` +
+        `Example: swiz tasks create "<subject>" "<description>" --state developing`
+    )
+  }
+  const sessionId = await resolveSession(sessionArgs)
+  await createTask(sessionId, subject, description)
+  await applyStateUpdate(stateFlag, process.cwd())
+}
+
+async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void> {
+  const [taskId, ...sessionArgs] = rest
+  if (!taskId) {
+    throw new Error(
+      "Usage: swiz tasks complete <task-id> --evidence TEXT --state <state> [--verify TEXT] [--subject TEXT] [--dry-run]"
+    )
+  }
+  const dryRun = rest.includes("--dry-run")
+  const evidence = extractFlag(rest, "--evidence")
+  const stateFlag = extractFlag(rest, "--state")
+  const subjectFlag = extractFlag(rest, "--subject")
+
+  // --dry-run: validate the task exists without performing any mutations.
+  if (dryRun) {
+    const sessionId = await resolveSession(sessionArgs)
+    try {
+      const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
+      console.log(`  ✅ #${taskId}: found — "${task.subject}" (${task.status})`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.log(`  ❌ #${taskId}: ${msg}`)
+      process.exitCode = 1
+    }
+    return
+  }
+
+  let verify = extractFlag(rest, "--verify")
+  const sessionId = await resolveSession(sessionArgs)
+
+  await ensureFileBackedTask({
+    sessionId,
+    taskId,
+    filterCwd,
+    subject: subjectFlag,
+    allowPlaceholderSubject: true,
+  })
+
+  // Auto-verify: if no explicit --verify was provided, extract and use task subject
+  if (!verify) {
+    const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
+    verify = task.subject
+  }
+
+  await updateStatus(sessionId, taskId, "completed", {
+    evidence,
+    verifyText: verify,
+    filterCwd,
+  })
+  if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
+}
+
+async function runEvidenceTask(rest: string[], filterCwd?: string): Promise<void> {
+  const [taskId, evidenceText, ...sessionArgs] = rest
+  if (!taskId || !evidenceText) {
+    throw new Error(
+      'Usage: swiz tasks evidence <task-id> "<evidence>" [--subject TEXT]\n' +
+        "Prefixes: commit:, pr:, file:, test:, note:"
+    )
+  }
+  const subjectFlag = extractFlag(rest, "--subject")
+  const sessionId = await resolveSession(sessionArgs)
+
+  await ensureFileBackedTask({
+    sessionId,
+    taskId,
+    filterCwd,
+    subject: subjectFlag,
+  })
+
+  await submitEvidence(sessionId, taskId, evidenceText, filterCwd)
+}
+
+async function runStatusTask(rest: string[], filterCwd?: string): Promise<void> {
+  const [taskId, nextStatus, ...sessionArgs] = rest
+  const newStatus = nextStatus as Task["status"] | undefined
+  const valid: Task["status"][] = ["pending", "in_progress", "completed", "cancelled"]
+  if (!taskId || !newStatus || !valid.includes(newStatus)) {
+    throw new Error(
+      `Usage: swiz tasks status <task-id> <${valid.join("|")}> --state <state> [--evidence TEXT] [--verify TEXT] [--subject TEXT]`
+    )
+  }
+  const evidence = extractFlag(rest, "--evidence")
+  const verify = extractFlag(rest, "--verify")
+  const stateFlag = extractFlag(rest, "--state")
+  const subjectFlag = extractFlag(rest, "--subject")
+  const sessionId = await resolveSession(sessionArgs)
+
+  await ensureFileBackedTask({
+    sessionId,
+    taskId,
+    filterCwd,
+    subject: subjectFlag,
+  })
+
+  await updateStatus(sessionId, taskId, newStatus, {
+    evidence,
+    verifyText: verify,
+    filterCwd,
+  })
+  if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
+}
+
+const UPDATE_USAGE =
+  "Usage: swiz tasks update <task-id>... [--subject TEXT] [--description TEXT]\n" +
+  "                         [--active-form TEXT] [--status STATUS] [--state STATE]\n" +
+  "                         [--session ID]\n\n" +
+  "Accepts one or more space-separated task IDs; the same field changes are applied\n" +
+  "to every listed task in sequence.\n\n" +
+  "Mutable fields:\n" +
+  "  --subject TEXT       Replace the task subject (one-line imperative title)\n" +
+  "  --description TEXT   Replace the task description\n" +
+  "  --active-form TEXT   Replace the in-progress spinner label\n" +
+  "  --status STATUS      Change status: pending | in_progress | completed | cancelled\n" +
+  "  --state STATE        Update the session working phase\n\n" +
+  "At least one of --subject, --description, --active-form, or --status is required.\n" +
+  'To add evidence to a completed task, use: swiz tasks evidence <task-id> "<evidence>"'
+
+interface ParsedUpdateArgs {
+  taskIds: string[]
+  flagArgs: string[]
+}
+
+interface UpdateFieldChanges {
+  newSubject?: string
+  newDescription?: string
+  newActiveForm?: string
+  newStatus?: Task["status"]
+  stateFlag?: string
+}
+
+function parseUpdateArgs(rest: string[]): ParsedUpdateArgs {
+  const firstFlagIdx = rest.findIndex((t) => t.startsWith("--"))
+  const taskIds = (firstFlagIdx === -1 ? rest : rest.slice(0, firstFlagIdx)).filter(Boolean)
+  const flagArgs = firstFlagIdx === -1 ? [] : rest.slice(firstFlagIdx)
+  return { taskIds, flagArgs }
+}
+
+function assertKnownUpdateFlags(flagArgs: string[]): void {
+  const knownFlags = new Set([
+    "--subject",
+    "--description",
+    "--active-form",
+    "--status",
+    "--state",
+    "--session",
+  ])
+  const flagNames = flagArgs.filter((t) => t.startsWith("--"))
+  const unknownFlags = flagNames.filter((t) => !knownFlags.has(t))
+  if (unknownFlags.length > 0) {
+    throw new Error(`Unknown flag(s): ${unknownFlags.join(", ")}\n\n${UPDATE_USAGE}`)
+  }
+}
+
+function readUpdateFieldChanges(flagArgs: string[]): UpdateFieldChanges {
+  const newSubject = extractFlag(flagArgs, "--subject")
+  const newDescription = extractFlag(flagArgs, "--description")
+  const newActiveForm = extractFlag(flagArgs, "--active-form")
+  const newStatusRaw = extractFlag(flagArgs, "--status")
+  const stateFlag = extractFlag(flagArgs, "--state")
+  const newStatus = newStatusRaw as Task["status"] | undefined
+  const valid: Task["status"][] = ["pending", "in_progress", "completed", "cancelled"]
+
+  if (newStatus && !valid.includes(newStatus)) {
+    throw new Error(`--status "${newStatusRaw}" is not valid. Must be one of: ${valid.join(" | ")}`)
+  }
+  if (!newSubject && !newDescription && !newActiveForm && !newStatus) {
+    throw new Error(
+      "At least one of --subject, --description, --active-form, or --status is required.\n\n" +
+        UPDATE_USAGE
+    )
+  }
+
+  return { newSubject, newDescription, newActiveForm, newStatus, stateFlag }
+}
+
+async function writeTaskUpdate(
+  sessionId: string,
+  taskId: string,
+  task: Task,
+  newStatus?: Task["status"]
+): Promise<void> {
+  if (newStatus) {
+    const oldStatus = task.status
+    if (oldStatus === "in_progress" && task.statusChangedAt) {
+      const elapsed = Date.now() - new Date(task.statusChangedAt).getTime()
+      task.elapsedMs = (task.elapsedMs ?? 0) + Math.max(0, elapsed)
+    }
+    task.status = newStatus
+    task.statusChangedAt = new Date().toISOString()
+    await writeTask(sessionId, task, process.cwd())
+    await writeAudit(sessionId, {
+      timestamp: new Date().toISOString(),
+      taskId,
+      action: "status_change",
+      oldStatus,
+      newStatus,
+      subject: task.subject,
+    })
+    const { emoji, color } = STATUS_STYLE[newStatus]
+    console.log(`\n  ${emoji} #${taskId}: ${oldStatus} → ${color}${newStatus}${RESET}`)
+    console.log(`     ${task.subject}`)
+    return
+  }
+
+  await writeTask(sessionId, task, process.cwd())
+  await writeAudit(sessionId, {
+    timestamp: new Date().toISOString(),
+    taskId,
+    action: "status_change",
+    oldStatus: task.status,
+    newStatus: task.status,
+    subject: task.subject,
+  })
+  console.log(`\n  ✏️  #${taskId}: updated`)
+  console.log(`     ${task.subject}`)
+}
+
+async function updateSingleTask(
+  sessionId: string,
+  taskId: string,
+  filterCwd: string | undefined,
+  changes: UpdateFieldChanges
+): Promise<void> {
+  const createdStub = await ensureFileBackedTask({
+    sessionId,
+    taskId,
+    filterCwd,
+    subject: changes.newSubject,
+    description: changes.newDescription,
+    activeForm: changes.newActiveForm,
+    status: changes.newStatus ?? "in_progress",
+  })
+  if (createdStub) return
+
+  const { sessionId: effectiveSessionId, task } = await resolveTaskById(
+    taskId,
+    sessionId,
+    filterCwd
+  )
+  if (changes.newSubject) task.subject = changes.newSubject
+  if (changes.newDescription) task.description = changes.newDescription
+  if (changes.newActiveForm) task.activeForm = changes.newActiveForm
+  await writeTaskUpdate(effectiveSessionId, taskId, task, changes.newStatus)
+}
+
+async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> {
+  const { taskIds, flagArgs } = parseUpdateArgs(rest)
+
+  if (taskIds.length === 0 || taskIds[0] === "--help" || taskIds[0] === "-h") {
+    console.log(UPDATE_USAGE)
+    return
+  }
+
+  assertKnownUpdateFlags(flagArgs)
+  const changes = readUpdateFieldChanges(flagArgs)
+  const sessionId = await resolveSession(flagArgs)
+
+  for (const taskId of taskIds) {
+    await updateSingleTask(sessionId, taskId, filterCwd, changes)
+  }
+
+  if (changes.stateFlag) await applyStateUpdate(changes.stateFlag, process.cwd())
+}
+
+const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) => Promise<void>> = {
+  create: (rest) => runCreateTask(rest),
+  complete: (rest, filterCwd) => runCompleteTask(rest, filterCwd),
+  evidence: (rest, filterCwd) => runEvidenceTask(rest, filterCwd),
+  status: (rest, filterCwd) => runStatusTask(rest, filterCwd),
+  update: (rest, filterCwd) => runUpdateTask(rest, filterCwd),
+  "complete-all": async (rest, filterCwd) => {
+    const sessionId = await resolveSession(rest)
+    const evidence = extractFlag(rest, "--evidence")
+    await completeAll(sessionId, filterCwd, evidence ?? undefined)
+  },
+  adopt: async (rest) => {
+    const sessionId = await resolveSession(rest)
+    await adoptOrphanedTasks(sessionId, process.cwd())
+  },
+}
+
 // ─── Command ──────────────────────────────────────────────────────────────────
 
 export const tasksCommand: Command = {
@@ -648,306 +989,16 @@ export const tasksCommand: Command = {
   async run(args) {
     const [subcommand] = args
 
-    if (
-      !subcommand ||
-      subcommand === "--session" ||
-      subcommand === "--all-projects" ||
-      subcommand === "--all-sessions" ||
-      subcommand === "--recovered" ||
-      subcommand === "--date-format"
-    ) {
-      const allProjects = args.includes("--all-projects")
-      const allSessions = args.includes("--all-sessions")
-      const recovered = args.includes("--recovered")
-      const filterCwd = allProjects ? undefined : process.cwd()
-      const dateFormat = parseDateFormat(extractFlag(args, "--date-format"))
-
-      if (allSessions || recovered) {
-        await listAllSessionsTasks(filterCwd, dateFormat, recovered)
-        return
-      }
-
-      const sessionId = await resolveSession(args)
-      const orphanIds = await getOrphanSessionIds()
-      await listTasks(
-        sessionId,
-        allProjects ? "all projects" : "current project",
-        dateFormat,
-        orphanIds.has(sessionId)
-      )
-
-      if (!args.includes("--session") && !allProjects) {
-        await printPreviousSessionIncompleteHint(sessionId)
-      }
+    if (isListInvocation(subcommand)) {
+      await runListTasks(args)
       return
     }
 
     const rest = args.slice(1)
-    const allProjects = args.includes("--all-projects")
-    const filterCwd = allProjects ? undefined : process.cwd()
-
-    switch (subcommand) {
-      case "create": {
-        const [subject, description, ...sessionArgs] = rest
-        if (!subject || !description) {
-          throw new Error('Usage: swiz tasks create "<subject>" "<description>" --state <state>')
-        }
-        const stateFlag = extractFlag(rest, "--state")
-        if (!stateFlag) {
-          throw new Error(
-            `--state <state> is required.\n` +
-              `It sets the session's active working phase (not the task's todo status).\n` +
-              `Valid phases: ${PROJECT_STATES.join(" | ")}\n` +
-              `Example: swiz tasks create "<subject>" "<description>" --state developing`
-          )
-        }
-        const sessionId = await resolveSession(sessionArgs)
-        await createTask(sessionId, subject, description)
-        await applyStateUpdate(stateFlag, process.cwd())
-        break
-      }
-
-      case "complete": {
-        const [taskId, ...sessionArgs] = rest
-        if (!taskId) {
-          throw new Error(
-            "Usage: swiz tasks complete <task-id> --evidence TEXT --state <state> [--verify TEXT] [--subject TEXT] [--dry-run]"
-          )
-        }
-        const dryRun = rest.includes("--dry-run")
-        const evidence = extractFlag(rest, "--evidence")
-        const stateFlag = extractFlag(rest, "--state")
-        const subjectFlag = extractFlag(rest, "--subject")
-
-        // --dry-run: validate the task exists without performing any mutations.
-        if (dryRun) {
-          const sessionId = await resolveSession(sessionArgs)
-          try {
-            const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
-            console.log(`  ✅ #${taskId}: found — "${task.subject}" (${task.status})`)
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e)
-            console.log(`  ❌ #${taskId}: ${msg}`)
-            process.exitCode = 1
-          }
-          break
-        }
-
-        let verify = extractFlag(rest, "--verify")
-        const sessionId = await resolveSession(sessionArgs)
-
-        await ensureFileBackedTask({
-          sessionId,
-          taskId,
-          filterCwd,
-          subject: subjectFlag,
-          allowPlaceholderSubject: true,
-        })
-
-        // Auto-verify: if no explicit --verify was provided, extract and use task subject
-        if (!verify) {
-          const { task } = await resolveTaskById(taskId, sessionId, filterCwd)
-          verify = task.subject
-        }
-
-        await updateStatus(sessionId, taskId, "completed", {
-          evidence,
-          verifyText: verify,
-          filterCwd,
-        })
-        if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
-        break
-      }
-
-      case "evidence": {
-        const [taskId, evidenceText, ...sessionArgs] = rest
-        if (!taskId || !evidenceText) {
-          throw new Error(
-            'Usage: swiz tasks evidence <task-id> "<evidence>" [--subject TEXT]\n' +
-              "Prefixes: commit:, pr:, file:, test:, note:"
-          )
-        }
-        const subjectFlag = extractFlag(rest, "--subject")
-        const sessionId = await resolveSession(sessionArgs)
-
-        await ensureFileBackedTask({
-          sessionId,
-          taskId,
-          filterCwd,
-          subject: subjectFlag,
-        })
-
-        await submitEvidence(sessionId, taskId, evidenceText, filterCwd)
-        break
-      }
-
-      case "status": {
-        const [taskId, nextStatus, ...sessionArgs] = rest
-        const newStatus = nextStatus as Task["status"] | undefined
-        const valid: Task["status"][] = ["pending", "in_progress", "completed", "cancelled"]
-        if (!taskId || !newStatus || !valid.includes(newStatus)) {
-          throw new Error(
-            `Usage: swiz tasks status <task-id> <${valid.join("|")}> --state <state> [--evidence TEXT] [--verify TEXT] [--subject TEXT]`
-          )
-        }
-        const evidence = extractFlag(rest, "--evidence")
-        const verify = extractFlag(rest, "--verify")
-        const stateFlag = extractFlag(rest, "--state")
-        const subjectFlag = extractFlag(rest, "--subject")
-        const sessionId = await resolveSession(sessionArgs)
-
-        await ensureFileBackedTask({
-          sessionId,
-          taskId,
-          filterCwd,
-          subject: subjectFlag,
-        })
-
-        await updateStatus(sessionId, taskId, newStatus, {
-          evidence,
-          verifyText: verify,
-          filterCwd,
-        })
-        if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
-        break
-      }
-
-      case "update": {
-        const UPDATE_USAGE =
-          "Usage: swiz tasks update <task-id>... [--subject TEXT] [--description TEXT]\n" +
-          "                         [--active-form TEXT] [--status STATUS] [--state STATE]\n" +
-          "                         [--session ID]\n\n" +
-          "Accepts one or more space-separated task IDs; the same field changes are applied\n" +
-          "to every listed task in sequence.\n\n" +
-          "Mutable fields:\n" +
-          "  --subject TEXT       Replace the task subject (one-line imperative title)\n" +
-          "  --description TEXT   Replace the task description\n" +
-          "  --active-form TEXT   Replace the in-progress spinner label\n" +
-          "  --status STATUS      Change status: pending | in_progress | completed | cancelled\n" +
-          "  --state STATE        Update the session working phase\n\n" +
-          "At least one of --subject, --description, --active-form, or --status is required.\n" +
-          'To add evidence to a completed task, use: swiz tasks evidence <task-id> "<evidence>"'
-
-        // Split rest into task IDs (leading non-flag tokens) and flag tokens
-        const firstFlagIdx = rest.findIndex((t) => t.startsWith("--"))
-        const taskIds = (firstFlagIdx === -1 ? rest : rest.slice(0, firstFlagIdx)).filter(Boolean)
-        const flagArgs = firstFlagIdx === -1 ? [] : rest.slice(firstFlagIdx)
-
-        if (taskIds.length === 0 || taskIds[0] === "--help" || taskIds[0] === "-h") {
-          console.log(UPDATE_USAGE)
-          break
-        }
-
-        const KNOWN_UPDATE_FLAGS = new Set([
-          "--subject",
-          "--description",
-          "--active-form",
-          "--status",
-          "--state",
-          "--session",
-        ])
-        // Reject unknown --flags (flag values — the tokens after each flag — are not flag names)
-        const flagNames = flagArgs.filter((t) => t.startsWith("--"))
-        const unknownFlags = flagNames.filter((t) => !KNOWN_UPDATE_FLAGS.has(t))
-        if (unknownFlags.length > 0) {
-          throw new Error(`Unknown flag(s): ${unknownFlags.join(", ")}\n\n${UPDATE_USAGE}`)
-        }
-
-        const newSubject = extractFlag(flagArgs, "--subject")
-        const newDescription = extractFlag(flagArgs, "--description")
-        const newActiveForm = extractFlag(flagArgs, "--active-form")
-        const newStatusRaw = extractFlag(flagArgs, "--status")
-        const stateFlag = extractFlag(flagArgs, "--state")
-        const newStatus = newStatusRaw as Task["status"] | undefined
-        const valid: Task["status"][] = ["pending", "in_progress", "completed", "cancelled"]
-        if (newStatus && !valid.includes(newStatus)) {
-          throw new Error(
-            `--status "${newStatusRaw}" is not valid. Must be one of: ${valid.join(" | ")}`
-          )
-        }
-        if (!newSubject && !newDescription && !newActiveForm && !newStatus) {
-          throw new Error(
-            "At least one of --subject, --description, --active-form, or --status is required.\n\n" +
-              UPDATE_USAGE
-          )
-        }
-        const sessionId = await resolveSession(flagArgs)
-
-        for (const taskId of taskIds) {
-          const createdStub = await ensureFileBackedTask({
-            sessionId,
-            taskId,
-            filterCwd,
-            subject: newSubject,
-            description: newDescription,
-            activeForm: newActiveForm,
-            status: newStatus ?? "in_progress",
-          })
-          if (createdStub) {
-            continue
-          }
-
-          const { sessionId: effectiveSessionId, task } = await resolveTaskById(
-            taskId,
-            sessionId,
-            filterCwd
-          )
-          if (newSubject) task.subject = newSubject
-          if (newDescription) task.description = newDescription
-          if (newActiveForm) task.activeForm = newActiveForm
-          if (newStatus) {
-            const oldStatus = task.status
-            if (oldStatus === "in_progress" && task.statusChangedAt) {
-              const elapsed = Date.now() - new Date(task.statusChangedAt).getTime()
-              task.elapsedMs = (task.elapsedMs ?? 0) + Math.max(0, elapsed)
-            }
-            task.status = newStatus
-            task.statusChangedAt = new Date().toISOString()
-            await writeTask(effectiveSessionId, task, process.cwd())
-            await writeAudit(effectiveSessionId, {
-              timestamp: new Date().toISOString(),
-              taskId,
-              action: "status_change",
-              oldStatus,
-              newStatus,
-              subject: task.subject,
-            })
-            const { emoji, color } = STATUS_STYLE[newStatus]
-            console.log(`\n  ${emoji} #${taskId}: ${oldStatus} → ${color}${newStatus}${RESET}`)
-            console.log(`     ${task.subject}`)
-          } else {
-            await writeTask(effectiveSessionId, task, process.cwd())
-            await writeAudit(effectiveSessionId, {
-              timestamp: new Date().toISOString(),
-              taskId,
-              action: "status_change",
-              oldStatus: task.status,
-              newStatus: task.status,
-              subject: task.subject,
-            })
-            console.log(`\n  ✏️  #${taskId}: updated`)
-            console.log(`     ${task.subject}`)
-          }
-        }
-        if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
-        break
-      }
-
-      case "complete-all": {
-        const sessionId = await resolveSession(rest)
-        const evidence = extractFlag(rest, "--evidence")
-        await completeAll(sessionId, filterCwd, evidence ?? undefined)
-        break
-      }
-
-      case "adopt": {
-        const sessionId = await resolveSession(rest)
-        await adoptOrphanedTasks(sessionId, process.cwd())
-        break
-      }
-
-      default:
-        throw new Error(`Unknown subcommand: ${subcommand}\nRun "swiz help tasks" for usage.`)
+    const handler = subcommand ? SUBCOMMAND_HANDLERS[subcommand] : undefined
+    if (!handler) {
+      throw new Error(`Unknown subcommand: ${subcommand}\nRun "swiz help tasks" for usage.`)
     }
+    await handler(rest, resolveFilterCwd(args))
   },
 }
