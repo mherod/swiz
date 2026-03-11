@@ -1,8 +1,6 @@
-import { stat } from "node:fs/promises"
 import { dirname, extname, join } from "node:path"
 import { executeDispatch } from "../../dispatch/execute.ts"
-import { getDefaultTaskRoots } from "../../task-roots.ts"
-import { findAllProviderSessions } from "../../transcript-utils.ts"
+import { deleteSessionData, resolveSessionDeletionTargets } from "../../session-data-delete.ts"
 import {
   type CachedSnapshot,
   type CiWatchRegistry,
@@ -184,12 +182,6 @@ async function getActiveAgentProcesses(): Promise<AgentProcessSnapshot> {
     snapshot[provider] = [...pids].sort((a, b) => a - b)
   }
   return { providers: snapshot }
-}
-
-async function trashPath(path: string): Promise<boolean> {
-  const proc = Bun.spawn(["trash", path], { stdout: "pipe", stderr: "pipe" })
-  await proc.exited
-  return proc.exitCode === 0
 }
 
 export function startDaemonWebServer(ctx: DaemonWebServerContext) {
@@ -384,16 +376,13 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
             { status: 400 }
           )
         }
-        const allSessions = await findAllProviderSessions(cwd)
-        const matchedSessions = allSessions.filter(
-          (session) => session.id === sessionId || session.id.startsWith(sessionId)
-        )
-        if (matchedSessions.length === 0) {
+        const targets = await resolveSessionDeletionTargets(cwd, sessionId)
+        if (targets.matchedSessions.length === 0) {
           return Response.json({ error: `Session ${sessionId} not found` }, { status: 404 })
         }
         const activeProcesses = await getActiveAgentProcesses()
         const blockedProviders = new Map<string, number[]>()
-        for (const session of matchedSessions) {
+        for (const session of targets.matchedSessions) {
           const provider = (session.provider ?? "unknown").toLowerCase()
           const providerPids = activeProcesses.providers[provider] ?? []
           if (providerPids.length > 0) blockedProviders.set(provider, providerPids)
@@ -407,28 +396,7 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
             { status: 409 }
           )
         }
-        const sessionPaths = [...new Set(matchedSessions.map((session) => session.path))]
-        const sessionIds = [...new Set(matchedSessions.map((session) => session.id))]
-        const failedPaths: string[] = []
-        let deletedCount = 0
-        for (const path of sessionPaths) {
-          if (await trashPath(path)) deletedCount++
-          else failedPaths.push(path)
-        }
-
-        const { tasksDir } = getDefaultTaskRoots()
-        for (const id of sessionIds) {
-          const taskDir = join(tasksDir, id)
-          try {
-            const info = await stat(taskDir)
-            if (info.isDirectory()) {
-              if (await trashPath(taskDir)) deletedCount++
-              else failedPaths.push(taskDir)
-            }
-          } catch {
-            // no task directory for this session
-          }
-        }
+        const { deletedCount, failedPaths, sessionIds } = await deleteSessionData(targets)
         if (failedPaths.length > 0) {
           return Response.json(
             {

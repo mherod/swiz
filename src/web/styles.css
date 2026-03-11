@@ -55,6 +55,9 @@ body {
     radial-gradient(900px 480px at 92% -5%, rgba(74, 220, 255, 0.14), transparent 48%),
     radial-gradient(860px 480px at 52% 112%, rgba(49, 69, 120, 0.28), transparent 60%), #1f2126;
   color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-optical-sizing: auto;
 }
 
 body::before {
@@ -116,18 +119,22 @@ body::before {
 .section-title {
   margin: 0 0 6px;
   font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
-  font-size: 0.82rem;
+  font-size: clamp(0.95rem, 1.3vw, 1.1rem);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #8aa8ff;
   font-weight: 700;
+  line-height: 1.35;
+  text-wrap: balance;
 }
 
 .section-subtitle {
   margin: 0 0 12px;
   color: var(--text-muted);
-  font-size: 0.72rem;
-  line-height: 1.35;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  text-wrap: pretty;
+  max-width: 42ch;
 }
 
 /* ── Title cell ── */
@@ -422,9 +429,10 @@ tbody tr:hover {
   background: rgba(75, 106, 178, 0.25);
   color: #bdd4ff;
   padding: 1px 8px;
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   font-weight: 700;
   line-height: 1.5;
+  font-variant-numeric: tabular-nums;
 }
 
 .nav-section-title {
@@ -464,7 +472,8 @@ tbody tr:hover {
   display: grid;
   gap: 2px;
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
   transition:
     border-color 120ms ease,
     background 120ms ease;
@@ -499,23 +508,25 @@ tbody tr:hover {
 .session-id {
   font-weight: 700;
   letter-spacing: -0.01em;
-  font-size: 0.78rem;
+  font-size: 0.98rem;
+  line-height: 1.45;
   display: flex;
   align-items: center;
   gap: 6px;
+  text-wrap: pretty;
 }
 
 .project-status-line {
   color: #9eb1d7;
-  font-size: 0.64rem;
-  line-height: 1.35;
+  font-size: 0.86rem;
+  line-height: 1.5;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .session-dispatches {
-  font-size: 0.6rem;
+  font-size: 0.72rem;
   font-weight: 700;
   background: linear-gradient(90deg, #6794ff, #5ed7ff);
   color: #10131a;
@@ -524,6 +535,7 @@ tbody tr:hover {
   line-height: 1.4;
   min-width: 16px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .agent-process-chip {
@@ -536,8 +548,9 @@ tbody tr:hover {
   color: #a5ebc8;
   padding: 0 6px;
   line-height: 1.35;
-  font-size: 0.6rem;
+  font-size: 0.75rem;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 .agent-process-dot {
@@ -551,21 +564,30 @@ tbody tr:hover {
 .session-group-label {
   margin: 8px 2px 0;
   color: #8fa8df;
-  font-size: 0.66rem;
+  font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  line-height: 1.5;
   padding-top: 8px;
   border-top: 1px solid rgba(118, 153, 229, 0.16);
 }
 
 .session-action-btn {
   border-radius: 10px;
-  padding: 7px 11px;
-  font-size: 0.65rem;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
-  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.session-action-icon {
+  font-size: 0.9rem;
+  line-height: 1;
 }
 
 .session-action-kill {
@@ -602,7 +624,9 @@ tbody tr:hover {
 .project-meta,
 .session-meta {
   color: #98a2b4;
-  font-size: 0.66rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 420px) {

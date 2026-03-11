@@ -403,15 +403,15 @@ export function SessionNav({
     const isDeleting = deletingSessionId === session.id
     const isKilling = primaryPid != null && killingPid === primaryPid
     const hasLiveProcess = processPids.length > 0
-    const actionLabel =
-      hasLiveProcess && primaryPid
-        ? isKilling
-          ? "Killing..."
-          : `Kill ${primaryPid}`
-        : isDeleting
-          ? "Deleting..."
-          : "Delete"
+    const actionLabel = hasLiveProcess ? "Kill process" : "Delete session"
     const actionDisabled = hasLiveProcess ? isKilling : isDeleting
+    const actionIcon = hasLiveProcess ? (isKilling ? "…" : "✕") : isDeleting ? "…" : "🗑"
+    const actionTitle =
+      hasLiveProcess && primaryPid
+        ? `${actionLabel} ${primaryPid}`
+        : hasLiveProcess
+          ? actionLabel
+          : "Delete session transcript and tasks"
 
     return (
       <li key={session.id} className="session-row">
@@ -459,13 +459,13 @@ export function SessionNav({
               void onDeleteSession(selectedProjectCwdSafe, session.id)
             }}
             disabled={actionDisabled}
-            title={
-              hasLiveProcess
-                ? `Terminate active process${primaryPid ? ` ${primaryPid}` : ""} first`
-                : undefined
-            }
+            title={actionTitle}
+            aria-label={actionTitle}
           >
-            {actionLabel}
+            <span className="session-action-icon" aria-hidden="true">
+              {actionIcon}
+            </span>
+            <span className="sr-only">{actionLabel}</span>
           </button>
         </div>
       </li>
