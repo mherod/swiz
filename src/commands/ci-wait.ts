@@ -1,7 +1,7 @@
 import { stderrLog } from "../debug.ts"
 import type { Command } from "../types.ts"
 
-// ─── Polling utilities ─────────────────────────────────────────────────────
+// ─── Utilities ────────────────────────────────────────────────────────────
 
 /**
  * Expand a short or full SHA to its full 40-character form using `git rev-parse`.
@@ -9,7 +9,7 @@ import type { Command } from "../types.ts"
  * This is necessary because `gh run list --commit` only matches full SHAs.
  */
 export async function expandSha(sha: string): Promise<string> {
-  if (sha.length === 40) return sha // already full SHA
+  if (sha.length === 40) return sha
   try {
     const proc = Bun.spawn(["git", "rev-parse", sha], { stdout: "pipe", stderr: "pipe" })
     const [output] = await Promise.all([
@@ -24,11 +24,12 @@ export async function expandSha(sha: string): Promise<string> {
   }
 }
 
-async function getCiRunConclusion(commitSha: string): Promise<string | null> {
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+async function findRunId(fullSha: string): Promise<number | null> {
   try {
-    const fullSha = await expandSha(commitSha)
     const proc = Bun.spawn(
-      ["gh", "run", "list", "--commit", fullSha, "--json", "databaseId,conclusion,status"],
+      ["gh", "run", "list", "--commit", fullSha, "--json", "databaseId", "--jq", ".[0].databaseId"],
       { stdout: "pipe", stderr: "pipe" }
     )
     const [output] = await Promise.all([
@@ -36,20 +37,15 @@ async function getCiRunConclusion(commitSha: string): Promise<string | null> {
       new Response(proc.stderr).text(),
     ])
     await proc.exited
-
     if (proc.exitCode !== 0) return null
-
-    const runs = JSON.parse(output)
-    if (!Array.isArray(runs) || runs.length === 0) return null
-
-    const run = runs[0]
-    return run.conclusion || null // Returns "success", "failure", or empty string if still running
+    const id = parseInt(output.trim(), 10)
+    return Number.isNaN(id) ? null : id
   } catch {
     return null
   }
 }
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+// ─── Core: discover run then stream via gh run watch ──────────────────────
 
 export async function waitForCiCompletion(
   commitSha: string,
@@ -57,41 +53,57 @@ export async function waitForCiCompletion(
 ): Promise<{ conclusion: string; elapsed: number }> {
   const startTime = Date.now()
   const timeoutMs = timeoutSeconds * 1000
-  const pollInterval = 2000
-  let lastLogged = 0
-  let foundAnyRun = false
+  const discoveryPollMs = 5_000
 
-  while (true) {
+  const fullSha = await expandSha(commitSha)
+
+  // Phase 1: Discover the run ID
+  let runId: number | null = null
+  while (runId === null) {
     const elapsed = Date.now() - startTime
-
-    if (elapsed - lastLogged >= 10000) {
-      console.log(`⏳ Waiting for CI... (${Math.round(elapsed / 1000)}s)`)
-      lastLogged = elapsed
-    }
-
     if (elapsed > timeoutMs) {
-      if (foundAnyRun) {
-        throw new Error(
-          `CI run still running after ${timeoutSeconds}s timeout (run exists but has not completed)`
-        )
-      }
-      throw new Error(
-        `No CI run found for commit ${commitSha} within ${timeoutSeconds}s timeout (run may not have been created yet)`
-      )
+      throw new Error(`No CI run found for commit ${commitSha} within ${timeoutSeconds}s timeout`)
     }
-
-    const conclusion = await getCiRunConclusion(commitSha)
-
-    if (conclusion !== null) {
-      foundAnyRun = true
+    runId = await findRunId(fullSha)
+    if (runId === null) {
+      console.log(`⏳ Waiting for CI run to appear... (${Math.round(elapsed / 1000)}s)`)
+      await sleep(discoveryPollMs)
     }
-
-    if (conclusion && conclusion.length > 0) {
-      return { conclusion, elapsed }
-    }
-
-    await sleep(pollInterval)
   }
+
+  console.log(`Found CI run ${runId} — streaming output:\n`)
+
+  // Phase 2: Stream live output via gh run watch (stdout/stderr inherited)
+  const watchProc = Bun.spawn(["gh", "run", "watch", String(runId), "--exit-status"], {
+    stdout: "inherit",
+    stderr: "inherit",
+  })
+
+  // Apply timeout: kill gh run watch if it exceeds the remaining budget
+  const remainingMs = timeoutMs - (Date.now() - startTime)
+  const killTimer = setTimeout(
+    () => {
+      watchProc.kill()
+    },
+    Math.max(remainingMs, 0)
+  )
+
+  await watchProc.exited
+  clearTimeout(killTimer)
+
+  const elapsed = Date.now() - startTime
+
+  if (watchProc.exitCode === 0) {
+    return { conclusion: "success", elapsed }
+  }
+
+  // gh run watch --exit-status exits non-zero on failure
+  // Check if it was killed by our timeout
+  if (Date.now() - startTime >= timeoutMs) {
+    throw new Error(`CI run ${runId} still running after ${timeoutSeconds}s timeout`)
+  }
+
+  return { conclusion: "failure", elapsed }
 }
 
 // ─── Arg parsing ──────────────────────────────────────────────────────────
@@ -103,7 +115,7 @@ export interface CiWaitArgs {
 
 export function parseCiWaitArgs(args: string[]): CiWaitArgs {
   let commitSha = ""
-  let timeout = 300 // 5 minutes default
+  let timeout = 300
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -132,7 +144,7 @@ export function parseCiWaitArgs(args: string[]): CiWaitArgs {
 
 export const ciWaitCommand: Command = {
   name: "ci-wait",
-  description: "Poll GitHub Actions run status for a commit until completion",
+  description: "Wait for GitHub Actions CI run and stream live output",
   usage: "swiz ci-wait <commit-sha> [--timeout <seconds>]",
   options: [{ flags: "--timeout, -t <seconds>", description: "Timeout in seconds (default: 300)" }],
   async run(args) {
@@ -143,30 +155,18 @@ export const ciWaitCommand: Command = {
       const { conclusion, elapsed } = await waitForCiCompletion(commitSha, timeout)
 
       const elapsedSeconds = Math.round(elapsed / 1000)
-      console.log(`✓ CI completed in ${elapsedSeconds}s: conclusion = ${conclusion}`)
+      console.log(`\n✓ CI completed in ${elapsedSeconds}s: ${conclusion}`)
 
-      // Set exit code based on conclusion
       if (conclusion === "success") {
         process.exitCode = 0
-      } else if (conclusion === "failure") {
-        stderrLog("CI failure status reporting with exit codes", "✗ CI run failed")
-        process.exitCode = 1
       } else {
-        stderrLog(
-          "CI failure status reporting with exit codes",
-          `✗ Unexpected conclusion: ${conclusion}`
-        )
-        process.exitCode = 2
+        stderrLog("CI failure status reporting with exit codes", `✗ CI run: ${conclusion}`)
+        process.exitCode = 1
       }
     } catch (err) {
       const errMsg = String(err)
       stderrLog("CI failure status reporting with exit codes", `✗ Error: ${errMsg}`)
-      // Exit code 1 for timeout or CI failure; 2 for unexpected errors
-      if (errMsg.includes("timeout")) {
-        process.exitCode = 1
-      } else {
-        process.exitCode = 2
-      }
+      process.exitCode = errMsg.includes("timeout") ? 1 : 2
     }
   },
 }
