@@ -82,6 +82,56 @@ describe("classifyHookOutput", () => {
     })
   })
 
+  describe("json extraction from polluted stdout", () => {
+    it("extracts JSON after non-JSON prefix text", () => {
+      const result = classifyHookOutput({
+        timedOut: false,
+        trimmed: 'Loaded cached credentials.\n{"decision":"block","reason":"test"}',
+        exitCode: 0,
+      })
+      expect(result.status).toBe<HookStatus>("ok")
+      expect(result.parsed).toEqual({ decision: "block", reason: "test" })
+    })
+
+    it("extracts JSON after multiple prefix lines", () => {
+      const result = classifyHookOutput({
+        timedOut: false,
+        trimmed: 'line1\nline2\nline3\n{"ok":true}',
+        exitCode: 0,
+      })
+      expect(result.status).toBe<HookStatus>("ok")
+      expect(result.parsed).toEqual({ ok: true })
+    })
+
+    it("returns invalid-json when no valid JSON exists anywhere", () => {
+      const result = classifyHookOutput({
+        timedOut: false,
+        trimmed: "just plain text with no braces",
+        exitCode: 0,
+      })
+      expect(result.status).toBe<HookStatus>("invalid-json")
+    })
+
+    it("returns invalid-json when prefix has brace but no valid JSON follows", () => {
+      const result = classifyHookOutput({
+        timedOut: false,
+        trimmed: "some text {not valid json",
+        exitCode: 0,
+      })
+      expect(result.status).toBe<HookStatus>("invalid-json")
+    })
+
+    it("prefers full-string parse over extraction", () => {
+      const result = classifyHookOutput({
+        timedOut: false,
+        trimmed: '{"full":"object"}',
+        exitCode: 0,
+      })
+      expect(result.status).toBe<HookStatus>("ok")
+      expect(result.parsed).toEqual({ full: "object" })
+    })
+  })
+
   describe("status taxonomy completeness", () => {
     const allClassifiable: HookStatus[] = ["ok", "no-output", "timeout", "invalid-json", "error"]
     it("classifyHookOutput can produce all raw statuses", () => {
