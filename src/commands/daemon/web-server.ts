@@ -1,5 +1,8 @@
+import { stat } from "node:fs/promises"
 import { dirname, extname, join } from "node:path"
 import { executeDispatch } from "../../dispatch/execute.ts"
+import { getDefaultTaskRoots } from "../../task-roots.ts"
+import { findAllProviderSessions } from "../../transcript-utils.ts"
 import {
   type CachedSnapshot,
   type CiWatchRegistry,
@@ -130,6 +133,63 @@ export interface DaemonWebServerContext {
   ) => Promise<WarmStatusLineSnapshot>
   watchers: FileWatcherRegistry
   snapshots: Map<string, CachedSnapshot>
+}
+
+interface AgentProcessSnapshot {
+  providers: Record<string, number[]>
+}
+
+async function getActiveAgentProcesses(): Promise<AgentProcessSnapshot> {
+  const proc = Bun.spawn(["ps", "-Ao", "pid,command"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [stdout] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  if (proc.exitCode !== 0) return { providers: {} }
+
+  const providers = new Map<string, Set<number>>()
+  const addProviderPid = (provider: string, pid: number) => {
+    const existing = providers.get(provider) ?? new Set<number>()
+    existing.add(pid)
+    providers.set(provider, existing)
+  }
+
+  const rows = stdout.split("\n")
+  for (const row of rows) {
+    const trimmed = row.trim()
+    if (!trimmed) continue
+    const match = /^(\d+)\s+(.+)$/.exec(trimmed)
+    if (!match) continue
+    const pid = Number(match[1])
+    const command = (match[2] ?? "").toLowerCase()
+    if (!pid || !command) continue
+
+    if (command.includes("claude-agent-sdk/cli.js")) {
+      addProviderPid("claude", pid)
+    }
+    if (command.includes("/codex") || command.includes(" codex ")) {
+      addProviderPid("codex", pid)
+    }
+    if (command.includes("gemini")) {
+      addProviderPid("gemini", pid)
+    }
+  }
+
+  const snapshot: Record<string, number[]> = {}
+  for (const [provider, pids] of providers) {
+    snapshot[provider] = [...pids].sort((a, b) => a - b)
+  }
+  return { providers: snapshot }
+}
+
+async function trashPath(path: string): Promise<boolean> {
+  const proc = Bun.spawn(["trash", path], { stdout: "pipe", stderr: "pipe" })
+  await proc.exited
+  return proc.exitCode === 0
 }
 
 export function startDaemonWebServer(ctx: DaemonWebServerContext) {
@@ -278,6 +338,91 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
           projects[cwd] = serializeMetrics(m)
         }
         return Response.json({ ...serializeMetrics(globalMetrics), projects })
+      }
+
+      if (url.pathname === "/process/agents" && req.method === "GET") {
+        const snapshot = await getActiveAgentProcesses()
+        return Response.json(snapshot)
+      }
+
+      if (url.pathname === "/process/agents/kill" && req.method === "POST") {
+        const body = (await req.json().catch(() => null)) as {
+          pid?: number
+        } | null
+        const pid = body?.pid
+        if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 1) {
+          return Response.json(
+            { error: "Missing required field: pid (positive integer)" },
+            { status: 400 }
+          )
+        }
+        const killProc = Bun.spawn(["kill", "-TERM", String(pid)], {
+          stdout: "pipe",
+          stderr: "pipe",
+        })
+        const stderr = await new Response(killProc.stderr).text()
+        await killProc.exited
+        if (killProc.exitCode !== 0) {
+          return Response.json(
+            { error: stderr.trim() || `Failed to terminate pid ${pid}` },
+            { status: 500 }
+          )
+        }
+        return Response.json({ ok: true, pid })
+      }
+
+      if (url.pathname === "/sessions/delete" && req.method === "POST") {
+        const body = (await req.json().catch(() => null)) as {
+          cwd?: string
+          sessionId?: string
+        } | null
+        const cwd = body?.cwd
+        const sessionId = body?.sessionId
+        if (typeof cwd !== "string" || cwd.length === 0 || typeof sessionId !== "string") {
+          return Response.json(
+            { error: "Missing required fields: cwd (string), sessionId (string)" },
+            { status: 400 }
+          )
+        }
+        const allSessions = await findAllProviderSessions(cwd)
+        const matchedSessions = allSessions.filter(
+          (session) => session.id === sessionId || session.id.startsWith(sessionId)
+        )
+        if (matchedSessions.length === 0) {
+          return Response.json({ error: `Session ${sessionId} not found` }, { status: 404 })
+        }
+        const sessionPaths = [...new Set(matchedSessions.map((session) => session.path))]
+        const sessionIds = [...new Set(matchedSessions.map((session) => session.id))]
+        const failedPaths: string[] = []
+        let deletedCount = 0
+        for (const path of sessionPaths) {
+          if (await trashPath(path)) deletedCount++
+          else failedPaths.push(path)
+        }
+
+        const { tasksDir } = getDefaultTaskRoots()
+        for (const id of sessionIds) {
+          const taskDir = join(tasksDir, id)
+          try {
+            const info = await stat(taskDir)
+            if (info.isDirectory()) {
+              if (await trashPath(taskDir)) deletedCount++
+              else failedPaths.push(taskDir)
+            }
+          } catch {
+            // no task directory for this session
+          }
+        }
+        if (failedPaths.length > 0) {
+          return Response.json(
+            {
+              error: "Failed to delete one or more session paths",
+              failedPaths,
+            },
+            { status: 500 }
+          )
+        }
+        return Response.json({ ok: true, deletedCount, sessionIds })
       }
 
       if (url.pathname === "/gh-query" && req.method === "POST") {

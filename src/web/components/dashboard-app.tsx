@@ -33,6 +33,7 @@ export function DashboardApp() {
   const [cacheStatus, setCacheStatus] = useState<Record<string, number> | null>(null)
   const [watches, setWatches] = useState<WatchesResponse | null>(null)
   const [projects, setProjects] = useState<ProjectSessions[]>([])
+  const [agentProcessProviders, setAgentProcessProviders] = useState<Record<string, number[]>>({})
   const [selectedProjectCwd, setSelectedProjectCwd] = useState<string | null>(() =>
     getQueryParam("project")
   )
@@ -61,6 +62,8 @@ export function DashboardApp() {
   const [projectEvents, setProjectEvents] = useState<
     Array<{ name: string; count: number; avgMs: number }>
   >([])
+  const [killingPid, setKillingPid] = useState<number | null>(null)
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [lastUpdated, setLastUpdated] = useState("starting")
 
@@ -163,11 +166,67 @@ export function DashboardApp() {
     [loadMessages, loadTasks, loadProjectTasks, addOptimisticProjectCwd, addOptimisticSessionId]
   )
 
+  const handleKillAgentPid = useCallback(async (pid: number) => {
+    setKillingPid(pid)
+    try {
+      await postJson<{ ok: boolean; pid: number }>("/process/agents/kill", { pid })
+      setAgentProcessProviders((previous) => {
+        const next: Record<string, number[]> = {}
+        for (const [provider, pids] of Object.entries(previous)) {
+          const filtered = pids.filter((candidate) => candidate !== pid)
+          if (filtered.length > 0) next[provider] = filtered
+        }
+        return next
+      })
+    } finally {
+      setKillingPid(null)
+    }
+  }, [])
+
+  const handleDeleteSession = useCallback(
+    async (cwd: string, sessionId: string) => {
+      setDeletingSessionId(sessionId)
+      try {
+        await postJson<{ ok: boolean; deletedCount: number; sessionIds: string[] }>(
+          "/sessions/delete",
+          {
+            cwd,
+            sessionId,
+          }
+        )
+        setProjects((previous) =>
+          previous
+            .map((project) => {
+              if (project.cwd !== cwd) return project
+              const nextSessions = project.sessions.filter((session) => session.id !== sessionId)
+              return {
+                ...project,
+                sessions: nextSessions,
+                sessionCount: Math.max(project.sessionCount - 1, 0),
+              }
+            })
+            .filter((project) => project.sessions.length > 0)
+        )
+        if (selectedSessionId === sessionId) {
+          setSelectedSessionId(null)
+          setSessionMessages([])
+          setSessionTasks([])
+          setSessionTaskSummary(null)
+          setQueryParams({ session: null })
+        }
+      } finally {
+        setDeletingSessionId(null)
+      }
+    },
+    [selectedSessionId]
+  )
+
   useDashboardOverviewPolling({
     onMetrics: setMetrics,
     onCacheStatus: setCacheStatus,
     onWatches: setWatches,
     onProjects: setProjects,
+    onAgentProcesses: setAgentProcessProviders,
     onError: setError,
     onLastUpdated: setLastUpdated,
     onInitialLoad: (loadedProjects) =>
@@ -234,10 +293,15 @@ export function DashboardApp() {
       />
       <SessionNav
         projects={projects}
+        activeAgentPidsByProvider={agentProcessProviders}
+        killingPid={killingPid}
+        deletingSessionId={deletingSessionId}
         selectedProjectCwd={optimisticProjectCwd}
         selectedSessionId={optimisticSessionId}
         onSelectProject={handleSelectProject}
         onSelectSession={handleSelectSession}
+        onKillAgentPid={handleKillAgentPid}
+        onDeleteSession={handleDeleteSession}
       />
       <SessionMessages
         messages={sessionMessages}

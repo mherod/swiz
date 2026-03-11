@@ -20,6 +20,10 @@ export interface WatchesResponse {
   active?: unknown[]
 }
 
+export interface AgentProcessesResponse {
+  providers?: Record<string, number[]>
+}
+
 interface InitialSelectionDeps {
   projects: ProjectSessions[]
   selectSession: (cwd: string, sessionId: string) => void
@@ -55,6 +59,7 @@ interface OverviewPollingDeps {
   onCacheStatus: (status: Record<string, number>) => void
   onWatches: (watches: WatchesResponse) => void
   onProjects: (projects: ProjectSessions[]) => void
+  onAgentProcesses: (providers: Record<string, number[]>) => void
   onError: (message: string) => void
   onLastUpdated: (time: string) => void
   onInitialLoad: (projects: ProjectSessions[]) => void
@@ -67,7 +72,7 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps) {
   useEffect(() => {
     async function refresh() {
       try {
-        const [m, cs, w, pr] = await Promise.all([
+        const [m, cs, w, pr, ap] = await Promise.all([
           fetchJson<MetricsResponse>("/metrics"),
           fetchJson<Record<string, number>>("/cache/status"),
           fetchJson<WatchesResponse>("/ci-watches"),
@@ -77,8 +82,9 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps) {
             selectedProjectCwd: getQueryParam("project"),
             selectedSessionId: getQueryParam("session"),
           }),
+          fetchJson<AgentProcessesResponse>("/process/agents"),
         ])
-        const snapshot = JSON.stringify({ m, cs, w, pr })
+        const snapshot = JSON.stringify({ m, cs, w, pr, ap })
         if (snapshot === prevSnapshotRef.current) return
         prevSnapshotRef.current = snapshot
 
@@ -87,6 +93,7 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps) {
         deps.onCacheStatus(cs)
         deps.onWatches(w)
         deps.onProjects(loadedProjects)
+        deps.onAgentProcesses(ap.providers ?? {})
         deps.onError("")
         deps.onLastUpdated(new Date().toLocaleTimeString())
 

@@ -410,6 +410,13 @@ tbody tr:hover {
   gap: 6px;
 }
 
+.session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
 .project-btn,
 .session-btn {
   width: 100%;
@@ -477,6 +484,28 @@ tbody tr:hover {
   text-align: center;
 }
 
+.agent-process-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  border: 1px solid rgba(76, 201, 151, 0.44);
+  background: rgba(31, 117, 88, 0.22);
+  color: #a5ebc8;
+  padding: 0 6px;
+  line-height: 1.35;
+  font-size: 0.6rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.agent-process-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #3adf8f;
+  box-shadow: 0 0 10px rgba(58, 223, 143, 0.7);
+}
+
 .session-group-label {
   margin: 8px 2px 0;
   color: #8fa8df;
@@ -485,6 +514,56 @@ tbody tr:hover {
   letter-spacing: 0.05em;
   padding-top: 8px;
   border-top: 1px solid rgba(118, 153, 229, 0.16);
+}
+
+.session-kill-btn {
+  border: 1px solid rgba(236, 119, 119, 0.45);
+  background: rgba(109, 33, 33, 0.42);
+  color: #ffb7b7;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.session-kill-btn:hover,
+.session-kill-btn:focus-visible {
+  border-color: rgba(255, 125, 125, 0.75);
+  background: rgba(139, 41, 41, 0.5);
+  outline: none;
+}
+
+.session-kill-btn:disabled {
+  opacity: 0.62;
+  cursor: wait;
+}
+
+.session-delete-btn {
+  border: 1px solid rgba(200, 153, 74, 0.45);
+  background: rgba(118, 86, 24, 0.35);
+  color: #f6d598;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.session-delete-btn:hover,
+.session-delete-btn:focus-visible {
+  border-color: rgba(233, 184, 95, 0.78);
+  background: rgba(148, 105, 28, 0.48);
+  outline: none;
+}
+
+.session-delete-btn:disabled {
+  opacity: 0.62;
+  cursor: wait;
 }
 
 .project-meta,
