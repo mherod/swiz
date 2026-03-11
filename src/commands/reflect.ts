@@ -54,81 +54,141 @@ function parsePositiveInt(value: string, flag: string): number {
   return parsed
 }
 
+interface ReflectArgState {
+  count: number
+  targetDir: string
+  sessionQuery: string | null
+  model?: string
+  timeoutMs: number
+  json: boolean
+  printPrompt: boolean
+  countSpecified: boolean
+  provider?: AiProviderId
+}
+
+type ReflectValueOption = {
+  names: string[]
+  missingMessage: string
+  apply: (state: ReflectArgState, value: string, flag: string) => void
+}
+
+function parseProvider(value: string): AiProviderId {
+  if (value === "gemini" || value === "codex" || value === "claude") return value
+  throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${value}`)
+}
+
+function applyPositionalCount(state: ReflectArgState, rawCount: string): void {
+  if (state.countSpecified) throw new Error("Count already specified")
+  state.count = parsePositiveInt(rawCount, "count")
+  state.countSpecified = true
+}
+
+const VALUE_OPTIONS: ReflectValueOption[] = [
+  {
+    names: ["--dir", "-d"],
+    missingMessage: "Missing value for --dir",
+    apply: (state, value) => {
+      state.targetDir = resolve(value)
+    },
+  },
+  {
+    names: ["--session", "-s"],
+    missingMessage: "Missing value for --session",
+    apply: (state, value) => {
+      state.sessionQuery = value
+    },
+  },
+  {
+    names: ["--model", "-m"],
+    missingMessage: "Missing value for --model",
+    apply: (state, value) => {
+      state.model = value
+    },
+  },
+  {
+    names: ["--timeout", "-t"],
+    missingMessage: "Missing value for --timeout",
+    apply: (state, value) => {
+      state.timeoutMs = parsePositiveInt(value, "--timeout")
+    },
+  },
+  {
+    names: ["--count", "-n"],
+    missingMessage: "Missing value for --count",
+    apply: (state, value, flag) => {
+      if (state.countSpecified) throw new Error("Count already specified")
+      state.count = parsePositiveInt(value, flag)
+      state.countSpecified = true
+    },
+  },
+  {
+    names: ["--provider"],
+    missingMessage: "Missing value for --provider",
+    apply: (state, value) => {
+      state.provider = parseProvider(value)
+    },
+  },
+]
+
+function applyValueOption(arg: string, next: string | undefined, state: ReflectArgState): boolean {
+  const option = VALUE_OPTIONS.find((entry) => entry.names.includes(arg))
+  if (!option) return false
+  if (!next) throw new Error(option.missingMessage)
+  option.apply(state, next, arg)
+  return true
+}
+
 export function parseReflectArgs(args: string[]): ReflectArgs {
-  let count = DEFAULT_MISTAKE_COUNT
-  let targetDir = process.cwd()
-  let sessionQuery: string | null = null
-  let model: string | undefined
-  let timeoutMs = DEFAULT_TIMEOUT_MS
-  let json = false
-  let printPrompt = false
-  let countSpecified = false
-  let provider: AiProviderId | undefined
+  const state: ReflectArgState = {
+    count: DEFAULT_MISTAKE_COUNT,
+    targetDir: process.cwd(),
+    sessionQuery: null,
+    model: undefined,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    json: false,
+    printPrompt: false,
+    countSpecified: false,
+    provider: undefined,
+  }
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (!arg) continue
     const next = args[i + 1]
 
-    if (arg === "--dir" || arg === "-d") {
-      if (!next) throw new Error("Missing value for --dir")
-      targetDir = resolve(next)
+    if (applyValueOption(arg, next, state)) {
       i++
       continue
     }
-    if (arg === "--session" || arg === "-s") {
-      if (!next) throw new Error("Missing value for --session")
-      sessionQuery = next
-      i++
-      continue
-    }
-    if (arg === "--model" || arg === "-m") {
-      if (!next) throw new Error("Missing value for --model")
-      model = next
-      i++
-      continue
-    }
-    if (arg === "--timeout" || arg === "-t") {
-      if (!next) throw new Error("Missing value for --timeout")
-      timeoutMs = parsePositiveInt(next, "--timeout")
-      i++
-      continue
-    }
-    if (arg === "--count" || arg === "-n") {
-      if (!next) throw new Error(`Missing value for ${arg}`)
-      if (countSpecified) throw new Error("Count already specified")
-      count = parsePositiveInt(next, arg)
-      countSpecified = true
-      i++
-      continue
-    }
+
     if (arg === "--json" || arg === "-j") {
-      json = true
+      state.json = true
       continue
     }
+
     if (arg === "--print-prompt" || arg === "-p") {
-      printPrompt = true
+      state.printPrompt = true
       continue
     }
-    if (arg === "--provider") {
-      if (!next) throw new Error("Missing value for --provider")
-      if (next !== "gemini" && next !== "codex" && next !== "claude") {
-        throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${next}`)
-      }
-      provider = next
-      i++
-      continue
-    }
+
     if (!arg.startsWith("-")) {
-      if (countSpecified) throw new Error("Count already specified")
-      count = parsePositiveInt(arg, "count")
-      countSpecified = true
+      applyPositionalCount(state, arg)
       continue
     }
+
     throw new Error(`Unknown argument: ${arg}`)
   }
 
-  return { count, targetDir, sessionQuery, model, timeoutMs, json, printPrompt, provider }
+  return {
+    count: state.count,
+    targetDir: state.targetDir,
+    sessionQuery: state.sessionQuery,
+    model: state.model,
+    timeoutMs: state.timeoutMs,
+    json: state.json,
+    printPrompt: state.printPrompt,
+    provider: state.provider,
+  }
 }
 
 function truncateTranscript(text: string, maxChars: number): { text: string; truncated: boolean } {

@@ -333,96 +333,97 @@ function collectCommands(hooks: Record<string, unknown>): Set<string> {
 
 // ─── Per-agent install ───────────────────────────────────────────────────────
 
-async function installAgent(agent: AgentDef, dryRun: boolean) {
-  if (!agent.hooksConfigurable) {
-    console.log(`  ${BOLD}${agent.name}${RESET} → ${YELLOW}hooks not yet user-configurable${RESET}`)
-    console.log(`  ${DIM}${agent.name} has hooks infrastructure (AfterAgent, AfterToolUse) but no`)
-    console.log(
-      `  settings file format for user hooks. Tool mappings are tracked for when this ships.${RESET}\n`
-    )
-    return
-  }
+function logUnconfigurableAgent(agent: AgentDef): void {
+  console.log(`  ${BOLD}${agent.name}${RESET} → ${YELLOW}hooks not yet user-configurable${RESET}`)
+  console.log(`  ${DIM}${agent.name} has hooks infrastructure (AfterAgent, AfterToolUse) but no`)
+  console.log(
+    `  settings file format for user hooks. Tool mappings are tracked for when this ships.${RESET}\n`
+  )
+}
 
-  console.log(`  ${BOLD}${agent.name}${RESET} → ${agent.settingsPath}\n`)
-
-  const existing = await readJsonFile(agent.settingsPath)
-  const oldText = (await readFileText(agent.settingsPath)).trimEnd()
-
-  // For wrapped configs (Cursor), hooks live inside the wrapper
-  const oldHooksRaw = agent.wrapsHooks
+function extractOldHooks(
+  existing: Record<string, unknown>,
+  agent: AgentDef
+): Record<string, unknown> {
+  const raw = agent.wrapsHooks
     ? (((existing as Record<string, unknown>).hooks as Record<string, unknown>) ?? {})
     : ((existing[agent.hooksKey] as Record<string, unknown>) ?? {})
-  const oldHooks = typeof oldHooksRaw === "object" && !Array.isArray(oldHooksRaw) ? oldHooksRaw : {}
+  return typeof raw === "object" && !Array.isArray(raw) ? raw : {}
+}
 
-  const config = mergeConfig(agent, oldHooks)
+function buildProposedAgentSettings(
+  existing: Record<string, unknown>,
+  agent: AgentDef,
+  config: Record<string, unknown[]>
+): string {
+  const proposed = agent.wrapsHooks
+    ? { ...agent.wrapsHooks, hooks: config }
+    : { ...existing, [agent.hooksKey]: config }
+  return JSON.stringify(proposed, null, 2)
+}
 
-  let proposed: Record<string, unknown>
-  let newText: string
+function reportDryRunAgentInstall(
+  agent: AgentDef,
+  oldHooks: Record<string, unknown>,
+  config: Record<string, unknown[]>,
+  oldText: string,
+  newText: string
+): void {
+  const oldCmds = collectCommands(oldHooks)
+  const allNewCmds = collectCommands(config)
+  const swizCmds = new Set([...allNewCmds].filter((c) => isSwizCommand(c)))
+  const userCmds = new Set([...oldCmds].filter((c) => !isManagedSwizCommand(c)))
+  const legacyCmds = orderBy(
+    [...oldCmds].filter((c) => LEGACY_HOOK_DIRS.some((d) => c.includes(d))),
+    [(command) => command],
+    ["asc"]
+  )
 
-  if (agent.wrapsHooks) {
-    proposed = { ...agent.wrapsHooks, hooks: config }
-    newText = JSON.stringify(proposed, null, 2)
-  } else {
-    proposed = { ...existing, [agent.hooksKey]: config }
-    newText = JSON.stringify(proposed, null, 2)
+  const added = orderBy(
+    [...swizCmds].filter((c) => !oldCmds.has(c)),
+    [(command) => command],
+    ["asc"]
+  )
+  const removed = orderBy(
+    [...oldCmds].filter((c) => isSwizCommand(c) && !swizCmds.has(c)),
+    [(command) => command],
+    ["asc"]
+  )
+  const kept = orderBy(
+    [...swizCmds].filter((c) => oldCmds.has(c)),
+    [(command) => command],
+    ["asc"]
+  )
+
+  if (added.length) {
+    console.log(`    ${GREEN}+ ${added.length} hook(s) added:${RESET}`)
+    for (const c of added) console.log(`      ${GREEN}+ ${c}${RESET}`)
+    console.log()
+  }
+  if (removed.length) {
+    console.log(`    ${RED}- ${removed.length} hook(s) removed:${RESET}`)
+    for (const c of removed) console.log(`      ${RED}- ${c}${RESET}`)
+    console.log()
+  }
+  if (legacyCmds.length) {
+    console.log(`    ${YELLOW}↻ ${legacyCmds.length} legacy hook(s) replaced by swiz:${RESET}`)
+    for (const c of legacyCmds) console.log(`      ${YELLOW}↻ ${c}${RESET}`)
+    console.log()
+  }
+  if (kept.length) {
+    console.log(`    ${DIM}  ${kept.length} swiz hook(s) unchanged${RESET}\n`)
+  }
+  if (userCmds.size) {
+    console.log(`    ${CYAN}  ${userCmds.size} user hook(s) preserved${RESET}\n`)
+  }
+  if (!oldText && newText) {
+    console.log(`    ${GREEN}+ new file (${newText.split("\n").length} lines)${RESET}\n`)
   }
 
-  if (dryRun) {
-    const oldCmds = collectCommands(oldHooks)
-    const allNewCmds = collectCommands(config)
-    const swizCmds = new Set([...allNewCmds].filter((c) => isSwizCommand(c)))
-    const userCmds = new Set([...oldCmds].filter((c) => !isManagedSwizCommand(c)))
-    const legacyCmds = orderBy(
-      [...oldCmds].filter((c) => LEGACY_HOOK_DIRS.some((d) => c.includes(d))),
-      [(command) => command],
-      ["asc"]
-    )
+  console.log(formatUnifiedDiff(agent.settingsPath, oldText, newText))
+}
 
-    const added = orderBy(
-      [...swizCmds].filter((c) => !oldCmds.has(c)),
-      [(command) => command],
-      ["asc"]
-    )
-    const removed = orderBy(
-      [...oldCmds].filter((c) => isSwizCommand(c) && !swizCmds.has(c)),
-      [(command) => command],
-      ["asc"]
-    )
-    const kept = orderBy(
-      [...swizCmds].filter((c) => oldCmds.has(c)),
-      [(command) => command],
-      ["asc"]
-    )
-
-    if (added.length) {
-      console.log(`    ${GREEN}+ ${added.length} hook(s) added:${RESET}`)
-      for (const c of added) console.log(`      ${GREEN}+ ${c}${RESET}`)
-      console.log()
-    }
-    if (removed.length) {
-      console.log(`    ${RED}- ${removed.length} hook(s) removed:${RESET}`)
-      for (const c of removed) console.log(`      ${RED}- ${c}${RESET}`)
-      console.log()
-    }
-    if (legacyCmds.length) {
-      console.log(`    ${YELLOW}↻ ${legacyCmds.length} legacy hook(s) replaced by swiz:${RESET}`)
-      for (const c of legacyCmds) console.log(`      ${YELLOW}↻ ${c}${RESET}`)
-      console.log()
-    }
-    if (kept.length) {
-      console.log(`    ${DIM}  ${kept.length} swiz hook(s) unchanged${RESET}\n`)
-    }
-    if (userCmds.size) {
-      console.log(`    ${CYAN}  ${userCmds.size} user hook(s) preserved${RESET}\n`)
-    }
-    if (!oldText && newText) {
-      console.log(`    ${GREEN}+ new file (${newText.split("\n").length} lines)${RESET}\n`)
-    }
-
-    console.log(formatUnifiedDiff(agent.settingsPath, oldText, newText))
-    return
-  }
-
+async function writeAgentSettings(agent: AgentDef, newText: string): Promise<void> {
   await backup(agent.settingsPath)
   await Bun.write(agent.settingsPath, `${newText}\n`)
 
@@ -433,12 +434,34 @@ async function installAgent(agent: AgentDef, dryRun: boolean) {
 
   if (persisted) {
     console.log(`    ✓ written (backup at ${agent.settingsPath}.bak)\n`)
-  } else {
-    console.log(`    ✓ written, but ${YELLOW}reverted by running ${agent.name} process${RESET}`)
-    console.log(
-      `    ${DIM}Close all ${agent.name} sessions first, then re-run swiz install.${RESET}\n`
-    )
+    return
   }
+
+  console.log(`    ✓ written, but ${YELLOW}reverted by running ${agent.name} process${RESET}`)
+  console.log(
+    `    ${DIM}Close all ${agent.name} sessions first, then re-run swiz install.${RESET}\n`
+  )
+}
+
+async function installAgent(agent: AgentDef, dryRun: boolean) {
+  if (!agent.hooksConfigurable) {
+    logUnconfigurableAgent(agent)
+    return
+  }
+
+  console.log(`  ${BOLD}${agent.name}${RESET} → ${agent.settingsPath}\n`)
+
+  const existing = await readJsonFile(agent.settingsPath)
+  const oldText = (await readFileText(agent.settingsPath)).trimEnd()
+  const oldHooks = extractOldHooks(existing, agent)
+  const config = mergeConfig(agent, oldHooks)
+  const newText = buildProposedAgentSettings(existing, agent, config)
+
+  if (dryRun) {
+    reportDryRunAgentInstall(agent, oldHooks, config, oldText, newText)
+    return
+  }
+  await writeAgentSettings(agent, newText)
 }
 
 // ─── Command ────────────────────────────────────────────────────────────────
@@ -606,6 +629,94 @@ async function installMergeTool(dryRun: boolean): Promise<void> {
 
 // ─── Command ────────────────────────────────────────────────────────────────
 
+interface InstallRunOptions {
+  jsonOutput: boolean
+  dryRun: boolean
+  mergeTool: boolean
+  statusLine: boolean
+  prPoll: boolean
+  targets: AgentDef[]
+}
+
+function parseInstallRunOptions(args: string[]): InstallRunOptions {
+  const jsonOutput = args.includes("--json")
+  return {
+    jsonOutput,
+    dryRun: jsonOutput || args.includes("--dry-run"),
+    mergeTool: args.includes("--merge-tool"),
+    statusLine: args.includes("--status-line"),
+    prPoll: args.includes("--pr-poll"),
+    targets: getAgentByFlag(args),
+  }
+}
+
+function hasAnyAgentFlag(args: string[]): boolean {
+  return args.some((arg) => AGENTS.some((agent) => `--${agent.id}` === arg))
+}
+
+function shouldInstallHooks(args: string[], opts: InstallRunOptions): boolean {
+  return !opts.mergeTool || hasAnyAgentFlag(args)
+}
+
+async function runOptionalInstallSteps(opts: InstallRunOptions): Promise<void> {
+  if (opts.mergeTool) await installMergeTool(opts.dryRun)
+  if (opts.statusLine) await installStatusLine(opts.dryRun)
+  if (opts.prPoll) await installPrPoll(opts.dryRun)
+}
+
+function logPluginResults(
+  pluginResults: Awaited<ReturnType<typeof loadAllPlugins>>,
+  jsonOutput: boolean
+): boolean {
+  if (jsonOutput) {
+    console.log(JSON.stringify(pluginResultsToJson(pluginResults), null, 2))
+    return true
+  }
+
+  console.log(`  Plugins:`)
+  for (const result of pluginResults) {
+    if (result.errorCode) {
+      console.log(`    ${YELLOW}⚠ ${result.name}${RESET} (${pluginErrorHint(result.errorCode)})`)
+      continue
+    }
+
+    const hookCount = result.hooks.reduce((n, g) => n + g.hooks.length, 0)
+    console.log(`    ${GREEN}✓${RESET} ${result.name} (${hookCount} hook(s))`)
+  }
+  console.log()
+  return false
+}
+
+async function processPluginOutput(cwd: string, jsonOutput: boolean): Promise<boolean> {
+  const projectSettings = await readProjectSettings(cwd)
+  if (projectSettings?.plugins?.length) {
+    const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
+    return logPluginResults(pluginResults, jsonOutput)
+  }
+
+  if (jsonOutput) {
+    console.log("[]")
+    return true
+  }
+
+  return false
+}
+
+async function installHooksForTargets(args: string[], opts: InstallRunOptions): Promise<boolean> {
+  if (!shouldInstallHooks(args, opts)) return false
+
+  console.log(`  Hooks: ${HOOKS_DIR}`)
+  console.log(`  Agents: ${opts.targets.map((a) => a.name).join(", ")}\n`)
+
+  const shouldReturn = await processPluginOutput(process.cwd(), opts.jsonOutput)
+  if (shouldReturn) return true
+
+  for (const agent of opts.targets) {
+    await installAgent(agent, opts.dryRun)
+  }
+  return false
+}
+
 export const installCommand: Command = {
   name: "install",
   description: "Install swiz hooks into agent settings",
@@ -623,12 +734,7 @@ export const installCommand: Command = {
     { flags: "(no flags)", description: "Install for all detected agents" },
   ],
   async run(args) {
-    const jsonOutput = args.includes("--json")
-    const dryRun = jsonOutput || args.includes("--dry-run")
-    const mergeTool = args.includes("--merge-tool")
-    const statusLine = args.includes("--status-line")
-    const prPoll = args.includes("--pr-poll")
-    const targets = getAgentByFlag(args)
+    const opts = parseInstallRunOptions(args)
 
     if (!checkBunAvailable()) {
       throw new Error(
@@ -638,59 +744,10 @@ export const installCommand: Command = {
       )
     }
 
-    console.log(`\n  swiz install${dryRun ? " (dry run)" : ""}\n`)
-
-    if (mergeTool) {
-      await installMergeTool(dryRun)
-    }
-
-    if (statusLine) {
-      await installStatusLine(dryRun)
-    }
-
-    if (prPoll) {
-      await installPrPoll(dryRun)
-    }
-
-    // Skip hook installation if only --merge-tool was requested
-    if (!mergeTool || args.some((a) => AGENTS.some((ag) => `--${ag.id}` === a))) {
-      console.log(`  Hooks: ${HOOKS_DIR}`)
-      console.log(`  Agents: ${targets.map((a) => a.name).join(", ")}\n`)
-
-      // Report loaded plugins (dry-run or not)
-      const cwd = process.cwd()
-      const projectSettings = await readProjectSettings(cwd)
-      if (projectSettings?.plugins?.length) {
-        const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
-
-        if (jsonOutput) {
-          console.log(JSON.stringify(pluginResultsToJson(pluginResults), null, 2))
-          return
-        }
-
-        console.log(`  Plugins:`)
-        for (const result of pluginResults) {
-          if (result.errorCode) {
-            console.log(
-              `    ${YELLOW}⚠ ${result.name}${RESET} (${pluginErrorHint(result.errorCode)})`
-            )
-          } else {
-            const hookCount = result.hooks.reduce((n, g) => n + g.hooks.length, 0)
-            console.log(`    ${GREEN}✓${RESET} ${result.name} (${hookCount} hook(s))`)
-          }
-        }
-        console.log()
-      } else if (jsonOutput) {
-        console.log("[]")
-        return
-      }
-
-      for (const agent of targets) {
-        await installAgent(agent, dryRun)
-      }
-    }
-
-    if (dryRun) {
+    console.log(`\n  swiz install${opts.dryRun ? " (dry run)" : ""}\n`)
+    await runOptionalInstallSteps(opts)
+    if (await installHooksForTargets(args, opts)) return
+    if (opts.dryRun) {
       console.log("  No changes written.\n")
     }
   },

@@ -174,6 +174,46 @@ function remapToolList(
   return { result, unmapped }
 }
 
+function remapPossiblyQuotedTool(
+  raw: string,
+  remap: (tool: string) => string
+): { mappedRaw: string; unmapped?: string } {
+  const trimmed = raw.trim()
+  const quoted =
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  const quoteChar = quoted ? trimmed[0] : ""
+  const unquoted = quoted ? trimmed.slice(1, -1) : trimmed
+  const mapped = remap(unquoted)
+  return {
+    mappedRaw: quoteChar ? `${quoteChar}${mapped}${quoteChar}` : mapped,
+    unmapped: mapped === unquoted ? unquoted : undefined,
+  }
+}
+
+function remapAllowedToolsBlock(
+  frontmatterLines: string[],
+  startIndex: number,
+  remap: (tool: string) => string
+): { lines: string[]; nextIndex: number; unmapped: string[] } {
+  const lines: string[] = []
+  const unmapped: string[] = []
+  let index = startIndex
+
+  while (index < frontmatterLines.length) {
+    const listLine = frontmatterLines[index]!
+    const itemMatch = listLine.match(/^(\s*-\s*)(.+)$/)
+    if (!itemMatch) break
+
+    const { mappedRaw, unmapped: unmatchedTool } = remapPossiblyQuotedTool(itemMatch[2]!, remap)
+    if (unmatchedTool) unmapped.push(unmatchedTool)
+    lines.push(`${itemMatch[1]}${mappedRaw}`)
+    index++
+  }
+
+  return { lines, nextIndex: index, unmapped }
+}
+
 function remapAllowedToolsFrontmatter(
   content: string,
   remap: (tool: string) => string
@@ -204,25 +244,10 @@ function remapAllowedToolsFrontmatter(
     }
 
     remappedLines.push(line)
-    let j = i + 1
-    while (j < frontmatterLines.length) {
-      const listLine = frontmatterLines[j]!
-      const itemMatch = listLine.match(/^(\s*-\s*)(.+)$/)
-      if (!itemMatch) break
-
-      const raw = itemMatch[2]!.trim()
-      const quoted =
-        (raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))
-      const quoteChar = quoted ? raw[0] : ""
-      const unquoted = quoted ? raw.slice(1, -1) : raw
-      const mapped = remap(unquoted)
-      if (mapped === unquoted) unmapped.push(unquoted)
-      const mappedRaw = quoteChar ? `${quoteChar}${mapped}${quoteChar}` : mapped
-      remappedLines.push(`${itemMatch[1]}${mappedRaw}`)
-      j++
-    }
-
-    i = j - 1
+    const blockResult = remapAllowedToolsBlock(frontmatterLines, i + 1, remap)
+    remappedLines.push(...blockResult.lines)
+    unmapped.push(...blockResult.unmapped)
+    i = blockResult.nextIndex - 1
   }
 
   const remappedFrontmatter = `---\n${remappedLines.join("\n")}\n---${frontmatterMatch[2] ?? ""}`

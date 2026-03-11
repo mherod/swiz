@@ -187,32 +187,36 @@ async function showEvent(allSettings: LoadedSettings[], eventName: string, cwd: 
   console.log()
 }
 
+function* iterCommandHooks(allSettings: LoadedSettings[]): Generator<HookEntry> {
+  const candidates = allSettings.flatMap(({ hooks }) =>
+    Object.values(hooks).flatMap((matchers) => matchers.flatMap((group) => group.hooks))
+  )
+  for (const hook of candidates) {
+    if (hook.type !== "command" && hook.type !== undefined) continue
+    if (!hook.command) continue
+    yield hook
+  }
+}
+
 async function showScript(allSettings: LoadedSettings[], scriptQuery: string) {
-  for (const { hooks } of allSettings) {
-    for (const matchers of Object.values(hooks)) {
-      for (const group of matchers) {
-        for (const hook of group.hooks) {
-          if (hook.type !== "command" && hook.type !== undefined) continue
-          if (!hook.command) continue
-          const name = shortName(hook.command)
-          if (!name.includes(scriptQuery)) continue
+  for (const hook of iterCommandHooks(allSettings)) {
+    const command = hook.command!
+    const name = shortName(command)
+    if (!name.includes(scriptQuery)) continue
 
-          const scriptPath = resolveScriptPath(hook.command)
-          if (!scriptPath) {
-            console.log(`  Inline command: ${hook.command}\n`)
-            return
-          }
-
-          const file = Bun.file(scriptPath)
-          if (!(await file.exists())) {
-            throw new Error(`Script not found: ${scriptPath}`)
-          }
-
-          console.log(await file.text())
-          return
-        }
-      }
+    const scriptPath = resolveScriptPath(command)
+    if (!scriptPath) {
+      console.log(`  Inline command: ${command}\n`)
+      return
     }
+
+    const file = Bun.file(scriptPath)
+    if (!(await file.exists())) {
+      throw new Error(`Script not found: ${scriptPath}`)
+    }
+
+    console.log(await file.text())
+    return
   }
 
   throw new Error(`No hook script matching: ${scriptQuery}`)

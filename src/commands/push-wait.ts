@@ -96,6 +96,14 @@ export interface PushWaitArgs {
   cwd?: string
 }
 
+function parsePositiveTimeout(raw: string): number {
+  const timeout = parseInt(raw, 10)
+  if (Number.isNaN(timeout) || timeout <= 0) {
+    throw new Error("Timeout must be a positive number")
+  }
+  return timeout
+}
+
 export function parsePushWaitArgs(args: string[]): PushWaitArgs {
   let remote = "origin"
   let branch = ""
@@ -110,23 +118,27 @@ export function parsePushWaitArgs(args: string[]): PushWaitArgs {
     const next = args[i + 1]
 
     if ((arg === "--timeout" || arg === "-t") && next) {
-      timeout = parseInt(next, 10)
-      if (Number.isNaN(timeout) || timeout <= 0) {
-        throw new Error("Timeout must be a positive number")
-      }
+      timeout = parsePositiveTimeout(next)
       i++
-    } else if (arg === "--cwd" && next) {
+      continue
+    }
+
+    if (arg === "--cwd" && next) {
       cwd = next
       i++
-    } else if (arg.startsWith("-")) {
-      extraArgs.push(arg)
-    } else {
-      positional.push(arg)
+      continue
     }
+
+    if (arg.startsWith("-")) {
+      extraArgs.push(arg)
+      continue
+    }
+
+    positional.push(arg)
   }
 
-  if (positional.length >= 1 && positional[0]) remote = positional[0]
-  if (positional.length >= 2 && positional[1]) branch = positional[1]
+  remote = positional[0] || remote
+  branch = positional[1] || branch
 
   return { remote, branch, timeout, extraArgs, cwd }
 }

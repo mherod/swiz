@@ -195,29 +195,33 @@ async function resolveSessionId(query: string | null, targetDir: string): Promis
   throw new Error(`No session matching: ${query}\nAvailable sessions:\n${available}`)
 }
 
-function printSettings(
-  effective: EffectiveSwizSettings & { disabledHooks?: string[] },
-  path: string | null,
-  fileExists: boolean,
-  sessionId: string | null,
-  ambitionSource?: "global" | "project" | "session",
-  strictNoDirectMainSource?: "global" | "project",
-  projectPolicyInfo?: {
-    configPath: string
-    profile: string | null
-    trivialMaxFiles: number
-    trivialMaxLines: number
-    defaultBranch: string
-    defaultBranchSource: "project" | "auto"
-    memoryLineThreshold: number
-    memoryLineSource: "project" | "user" | "default"
-    memoryWordThreshold: number
-    memoryWordSource: "project" | "user" | "default"
-    source: "project" | "default"
-    disabledHooks?: string[]
-  },
+interface ProjectPolicyInfo {
+  configPath: string
+  profile: string | null
+  trivialMaxFiles: number
+  trivialMaxLines: number
+  defaultBranch: string
+  defaultBranchSource: "project" | "auto"
+  memoryLineThreshold: number
+  memoryLineSource: "project" | "user" | "default"
+  memoryWordThreshold: number
+  memoryWordSource: "project" | "user" | "default"
+  source: "project" | "default"
+  disabledHooks?: string[]
+}
+
+interface PrintSettingsOptions {
+  effective: EffectiveSwizSettings & { disabledHooks?: string[] }
+  path: string | null
+  fileExists: boolean
+  sessionId: string | null
+  ambitionSource?: "global" | "project" | "session"
+  strictNoDirectMainSource?: "global" | "project"
+  projectPolicyInfo?: ProjectPolicyInfo
   detectedStacks?: string[]
-): void {
+}
+
+function printHeader(path: string | null, fileExists: boolean, sessionId: string | null): void {
   console.log("\n  swiz settings\n")
   if (!path) {
     console.log("  config: unavailable (HOME not set)")
@@ -226,6 +230,13 @@ function printSettings(
     console.log(`  config: ${path} (${sourceLabel})`)
   }
   if (sessionId) console.log(`  scope: session ${sessionId}`)
+}
+
+function printGlobalSettings(
+  effective: EffectiveSwizSettings & { disabledHooks?: string[] },
+  ambitionSource: "global" | "project" | "session" | undefined,
+  strictNoDirectMainSource: "global" | "project" | undefined
+): void {
   const scopeLabel = effective.source === "session" ? "session override" : "global/default"
   const ambitionScopeLabel =
     ambitionSource === "session"
@@ -233,6 +244,16 @@ function printSettings(
       : ambitionSource === "project"
         ? "project override"
         : "global/default"
+  const strictNoDirectMainScopeLabel =
+    strictNoDirectMainSource === "project" ? "project override" : "global"
+  const ageGateLabel =
+    effective.prAgeGateMinutes > 0 ? `${effective.prAgeGateMinutes} minutes` : "disabled"
+  const cooldownLabel =
+    effective.pushCooldownMinutes > 0 ? `${effective.pushCooldownMinutes} minutes` : "disabled"
+  const voiceLabel = effective.narratorVoice || "system default"
+  const speedLabel =
+    effective.narratorSpeed > 0 ? `${effective.narratorSpeed} wpm` : "system default"
+
   console.log(
     `  auto-continue:   ${effective.autoContinue ? "enabled" : "disabled"} (${scopeLabel})`
   )
@@ -241,11 +262,7 @@ function printSettings(
   console.log(
     `  collaboration:   ${effective.collaborationMode} (${effective.collaborationMode === "auto" ? "default" : scopeLabel})`
   )
-  const ageGateLabel =
-    effective.prAgeGateMinutes > 0 ? `${effective.prAgeGateMinutes} minutes` : "disabled"
   console.log(`  pr-age-gate:     ${ageGateLabel} (global)`)
-  const cooldownLabel =
-    effective.pushCooldownMinutes > 0 ? `${effective.pushCooldownMinutes} minutes` : "disabled"
   console.log(`  push-cooldown:   ${cooldownLabel} (global)`)
   console.log(`  pr-merge-mode:   ${effective.prMergeMode ? "enabled" : "disabled"} (global)`)
   console.log(`  push-gate:       ${effective.pushGate ? "enabled" : "disabled"} (global)`)
@@ -267,15 +284,10 @@ function printSettings(
   console.log(
     `  changes-requested-gate:  ${effective.changesRequestedGate ? "enabled" : "disabled"} (global)`
   )
-  const strictNoDirectMainScopeLabel =
-    strictNoDirectMainSource === "project" ? "project override" : "global"
   console.log(
     `  strict-no-direct-main:   ${effective.strictNoDirectMain ? "enabled" : "disabled"} (${strictNoDirectMainScopeLabel})`
   )
-  const voiceLabel = effective.narratorVoice || "system default"
   console.log(`  narrator-voice:  ${voiceLabel} (global)`)
-  const speedLabel =
-    effective.narratorSpeed > 0 ? `${effective.narratorSpeed} wpm` : "system default"
   console.log(`  narrator-speed:  ${speedLabel} (global)`)
   console.log(`  memory-line-threshold: ${effective.memoryLineThreshold} (global)`)
   console.log(`  memory-word-threshold: ${effective.memoryWordThreshold} (global)`)
@@ -285,37 +297,44 @@ function printSettings(
   if (globalDisabled.length > 0) {
     console.log(`  disabled-hooks:  ${globalDisabled.join(", ")} (global)`)
   }
+}
 
-  if (projectPolicyInfo) {
-    console.log("\n  project policy")
-    console.log(`  config: ${projectPolicyInfo.configPath} (${projectPolicyInfo.source})`)
-    const profileLabel = projectPolicyInfo.profile ?? "none"
-    console.log(`  profile:         ${profileLabel} (${projectPolicyInfo.source})`)
-    console.log(
-      `  trivial-max-files: ${projectPolicyInfo.trivialMaxFiles} (${projectPolicyInfo.source})`
-    )
-    console.log(
-      `  trivial-max-lines: ${projectPolicyInfo.trivialMaxLines} (${projectPolicyInfo.source})`
-    )
-    console.log(
-      `  default-branch: ${projectPolicyInfo.defaultBranch} (${projectPolicyInfo.defaultBranchSource})`
-    )
-    console.log(
-      `  memory-line-threshold: ${projectPolicyInfo.memoryLineThreshold} (${projectPolicyInfo.memoryLineSource})`
-    )
-    console.log(
-      `  memory-word-threshold: ${projectPolicyInfo.memoryWordThreshold} (${projectPolicyInfo.memoryWordSource})`
-    )
-    const projectDisabled = projectPolicyInfo.disabledHooks ?? []
-    if (projectDisabled.length > 0) {
-      console.log(`  disabled-hooks:  ${projectDisabled.join(", ")} (project)`)
-    }
-    if (detectedStacks !== undefined) {
-      const stacksLabel = detectedStacks.length > 0 ? detectedStacks.join(", ") : "none detected"
-      console.log(`  detected-stacks: ${stacksLabel}`)
-    }
+function printProjectPolicy(projectPolicyInfo: ProjectPolicyInfo, detectedStacks?: string[]): void {
+  console.log("\n  project policy")
+  console.log(`  config: ${projectPolicyInfo.configPath} (${projectPolicyInfo.source})`)
+  const profileLabel = projectPolicyInfo.profile ?? "none"
+  console.log(`  profile:         ${profileLabel} (${projectPolicyInfo.source})`)
+  console.log(
+    `  trivial-max-files: ${projectPolicyInfo.trivialMaxFiles} (${projectPolicyInfo.source})`
+  )
+  console.log(
+    `  trivial-max-lines: ${projectPolicyInfo.trivialMaxLines} (${projectPolicyInfo.source})`
+  )
+  console.log(
+    `  default-branch: ${projectPolicyInfo.defaultBranch} (${projectPolicyInfo.defaultBranchSource})`
+  )
+  console.log(
+    `  memory-line-threshold: ${projectPolicyInfo.memoryLineThreshold} (${projectPolicyInfo.memoryLineSource})`
+  )
+  console.log(
+    `  memory-word-threshold: ${projectPolicyInfo.memoryWordThreshold} (${projectPolicyInfo.memoryWordSource})`
+  )
+  const projectDisabled = projectPolicyInfo.disabledHooks ?? []
+  if (projectDisabled.length > 0) {
+    console.log(`  disabled-hooks:  ${projectDisabled.join(", ")} (project)`)
   }
+  if (detectedStacks !== undefined) {
+    const stacksLabel = detectedStacks.length > 0 ? detectedStacks.join(", ") : "none detected"
+    console.log(`  detected-stacks: ${stacksLabel}`)
+  }
+}
 
+function printSettings(opts: PrintSettingsOptions): void {
+  printHeader(opts.path, opts.fileExists, opts.sessionId)
+  printGlobalSettings(opts.effective, opts.ambitionSource, opts.strictNoDirectMainSource)
+  if (opts.projectPolicyInfo) {
+    printProjectPolicy(opts.projectPolicyInfo, opts.detectedStacks)
+  }
   console.log("")
 }
 
@@ -369,16 +388,16 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
     disabledHooks: projectSettings?.disabledHooks,
   }
 
-  printSettings(
-    { ...effective, disabledHooks: settings.disabledHooks },
+  printSettings({
+    effective: { ...effective, disabledHooks: settings.disabledHooks },
     path,
     fileExists,
     sessionId,
     ambitionSource,
     strictNoDirectMainSource,
     projectPolicyInfo,
-    detectProjectStack(parsed.targetDir)
-  )
+    detectedStacks: detectProjectStack(parsed.targetDir),
+  })
 }
 
 /**
