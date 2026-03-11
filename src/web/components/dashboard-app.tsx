@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useOptimistic, useRef, useState, useTransition } from "react"
+import { useCallback, useOptimistic, useState, useTransition } from "react"
 import {
   getQueryParam,
   hasProjectMessages,
@@ -6,7 +6,15 @@ import {
   setQueryParams,
   toSortedEvents,
 } from "../lib/dashboard-helpers.ts"
-import { fetchJson, postJson } from "../lib/http.ts"
+import {
+  applyInitialSelection,
+  type MetricsResponse,
+  useDashboardOverviewPolling,
+  useProjectMetricsPolling,
+  useSessionPolling,
+  type WatchesResponse,
+} from "../lib/dashboard-hooks.ts"
+import { postJson } from "../lib/http.ts"
 import { Header } from "./header.tsx"
 import { MetricsRail } from "./metrics-rail.tsx"
 import {
@@ -19,16 +27,6 @@ import {
   type SessionTaskSummary,
   type ToolStat,
 } from "./session-browser.tsx"
-
-interface MetricsResponse {
-  uptimeHuman?: string
-  totalDispatches?: number
-  byEvent?: Record<string, { count?: number; avgMs?: number }>
-}
-
-interface WatchesResponse {
-  active?: unknown[]
-}
 
 export function DashboardApp() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
@@ -66,11 +64,6 @@ export function DashboardApp() {
   const [error, setError] = useState("")
   const [lastUpdated, setLastUpdated] = useState("starting")
 
-  const prevSnapshotRef = useRef("")
-  const initialLoadDone = useRef(false)
-  const knownKeysRef = useRef<Set<string>>(new Set())
-  const messagesPrevSnapshotRef = useRef("")
-
   const loadMessages = useCallback(async (cwd: string, sessionId: string) => {
     setMessagesLoading(true)
     try {
@@ -79,14 +72,9 @@ export function DashboardApp() {
         { cwd, sessionId, limit: 30 }
       )
       const msgs = result.messages ?? []
-      knownKeysRef.current = new Set(msgs.map(msgKey))
-      messagesPrevSnapshotRef.current = JSON.stringify(msgs)
       setNewMessageKeys(new Set())
       setSessionMessages(msgs)
       setSessionToolStats(result.toolStats ?? [])
-      setSelectedProjectCwd(cwd)
-      setSelectedSessionId(sessionId)
-      setQueryParams({ project: cwd, session: sessionId })
     } finally {
       setMessagesLoading(false)
     }
@@ -125,6 +113,9 @@ export function DashboardApp() {
       const project = projects.find((p) => p.cwd === cwd)
       const firstSession = project?.sessions[0]
       if (firstSession) {
+        setSelectedProjectCwd(cwd)
+        setSelectedSessionId(firstSession.id)
+        setQueryParams({ project: cwd, session: firstSession.id })
         startSelectionTransition(() => {
           addOptimisticProjectCwd(cwd)
           addOptimisticSessionId(firstSession.id)
@@ -157,6 +148,9 @@ export function DashboardApp() {
   const handleSelectSession = useCallback(
     (cwd: string, sessionId: string) => {
       startSelectionTransition(() => {
+        setSelectedProjectCwd(cwd)
+        setSelectedSessionId(sessionId)
+        setQueryParams({ project: cwd, session: sessionId })
         addOptimisticProjectCwd(cwd)
         addOptimisticSessionId(sessionId)
         void Promise.all([
@@ -169,143 +163,41 @@ export function DashboardApp() {
     [loadMessages, loadTasks, loadProjectTasks, addOptimisticProjectCwd, addOptimisticSessionId]
   )
 
-  useEffect(() => {
-    async function refresh() {
-      try {
-        const [m, cs, w, pr] = await Promise.all([
-          fetchJson<MetricsResponse>("/metrics"),
-          fetchJson<Record<string, number>>("/cache/status"),
-          fetchJson<WatchesResponse>("/ci-watches"),
-          postJson<{ projects: ProjectSessions[] }>("/sessions/projects", {
-            limitProjects: 10,
-            limitSessionsPerProject: 10,
-            selectedProjectCwd: getQueryParam("project"),
-            selectedSessionId: getQueryParam("session"),
-          }),
-        ])
-        const snapshot = JSON.stringify({ m, cs, w, pr })
-        if (snapshot === prevSnapshotRef.current) return
-        prevSnapshotRef.current = snapshot
+  useDashboardOverviewPolling({
+    onMetrics: setMetrics,
+    onCacheStatus: setCacheStatus,
+    onWatches: setWatches,
+    onProjects: setProjects,
+    onError: setError,
+    onLastUpdated: setLastUpdated,
+    onInitialLoad: (loadedProjects) =>
+      applyInitialSelection({
+        projects: loadedProjects,
+        selectSession: handleSelectSession,
+        selectProjectOnly: setSelectedProjectCwd,
+        loadProjectTasks,
+      }),
+  })
 
-        setMetrics(m)
-        setCacheStatus(cs)
-        setWatches(w)
-        const loadedProjects = pr.projects ?? []
-        setProjects(loadedProjects)
-        setError("")
-        setLastUpdated(new Date().toLocaleTimeString())
+  useProjectMetricsPolling(selectedProjectCwd, setProjectEvents)
 
-        if (!initialLoadDone.current && loadedProjects.length > 0) {
-          initialLoadDone.current = true
-          const paramProject = getQueryParam("project")
-          const paramSession = getQueryParam("session")
-          if (paramProject && paramSession) {
-            const match = loadedProjects.find((p) => p.cwd === paramProject)
-            if (match) {
-              void loadMessages(paramProject, paramSession)
-              void loadTasks(paramProject, paramSession)
-              void loadProjectTasks(paramProject)
-              return
-            }
-          }
-          const newest = [...loadedProjects].sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0]
-          if (newest) {
-            const newestSession = [...newest.sessions].sort((a, b) => b.mtime - a.mtime)[0]
-            if (newestSession) {
-              void loadMessages(newest.cwd, newestSession.id)
-              void loadTasks(newest.cwd, newestSession.id)
-              void loadProjectTasks(newest.cwd)
-            } else {
-              setSelectedProjectCwd(newest.cwd)
-              void loadProjectTasks(newest.cwd)
-            }
-          }
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown fetch failure")
-      }
-    }
-
-    void refresh()
-    const id = setInterval(() => void refresh(), 5000)
-    return () => clearInterval(id)
-  }, [loadMessages, loadTasks, loadProjectTasks])
-
-  useEffect(() => {
-    if (!selectedProjectCwd) {
-      setProjectEvents([])
-      return
-    }
-    const cwd = selectedProjectCwd
-    async function fetchProjectMetrics() {
-      try {
-        const pm = await fetchJson<MetricsResponse>(`/metrics?project=${encodeURIComponent(cwd)}`)
-        setProjectEvents(toSortedEvents(pm.byEvent))
-      } catch {
-        setProjectEvents([])
-      }
-    }
-    void fetchProjectMetrics()
-    const id = setInterval(() => void fetchProjectMetrics(), 5000)
-    return () => clearInterval(id)
-  }, [selectedProjectCwd])
-
-  useEffect(() => {
-    if (!selectedProjectCwd || !selectedSessionId) return
-    const cwd = selectedProjectCwd
-    const sid = selectedSessionId
-
-    async function pollSessionData() {
-      try {
-        const [messagesResult, tasksResult, projectTasksResult] = await Promise.all([
-          postJson<{ messages: SessionMessage[]; toolStats?: ToolStat[] }>("/sessions/messages", {
-            cwd,
-            sessionId: sid,
-            limit: 30,
-          }),
-          postJson<{ tasks: SessionTask[]; summary?: SessionTaskSummary }>("/sessions/tasks", {
-            cwd,
-            sessionId: sid,
-            limit: 20,
-          }),
-          postJson<{ tasks: ProjectTask[]; summary?: SessionTaskSummary }>("/projects/tasks", {
-            cwd,
-            limit: 80,
-          }),
-        ])
-        const msgs = messagesResult.messages ?? []
-        const snap = JSON.stringify(msgs)
-        let fresh = new Set<string>()
-        if (snap !== messagesPrevSnapshotRef.current) {
-          messagesPrevSnapshotRef.current = snap
-
-          fresh = new Set<string>()
-          for (let i = 0; i < msgs.length; i++) {
-            const m = msgs[i]!
-            const key = msgKey(m, i)
-            if (!knownKeysRef.current.has(key)) fresh.add(key)
-          }
-          knownKeysRef.current = new Set(msgs.map(msgKey))
-          setNewMessageKeys(fresh)
-          setSessionMessages(msgs)
-          setSessionToolStats(messagesResult.toolStats ?? [])
-          if (fresh.size > 0) {
-            setTimeout(() => setNewMessageKeys(new Set()), 500)
-          }
-        }
-
-        setSessionTasks(tasksResult.tasks ?? [])
-        setSessionTaskSummary(tasksResult.summary ?? null)
-        setProjectTasks(projectTasksResult.tasks ?? [])
-        setProjectTaskSummary(projectTasksResult.summary ?? null)
-      } catch {
-        /* ignore polling errors */
-      }
-    }
-
-    const id = setInterval(() => void pollSessionData(), 2000)
-    return () => clearInterval(id)
-  }, [selectedProjectCwd, selectedSessionId])
+  useSessionPolling({
+    selectedProjectCwd,
+    selectedSessionId,
+    onMessages: (messages, toolStats) => {
+      setSessionMessages(messages)
+      setSessionToolStats(toolStats)
+    },
+    onTasks: (tasks, summary) => {
+      setSessionTasks(tasks)
+      setSessionTaskSummary(summary)
+    },
+    onProjectTasks: (tasks, summary) => {
+      setProjectTasks(tasks)
+      setProjectTaskSummary(summary)
+    },
+    onNewMessageKeys: setNewMessageKeys,
+  })
 
   const m = metrics ?? {}
   const projectCount = projects.filter(hasProjectMessages).length
