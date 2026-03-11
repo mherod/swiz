@@ -82,13 +82,38 @@ function renderSession(
   `
 }
 
+const COLLAPSE_LINE_THRESHOLD = 20
+
+function renderMessageBody(text: string): string {
+  const escaped = escapeHtml(text)
+  const lines = escaped.split("\n")
+  if (lines.length <= COLLAPSE_LINE_THRESHOLD) {
+    return `<pre class="message-text">${escaped}</pre>`
+  }
+  const preview = lines.slice(0, COLLAPSE_LINE_THRESHOLD).join("\n")
+  const remaining = lines.length - COLLAPSE_LINE_THRESHOLD
+  return `
+    <details class="message-collapsible">
+      <summary>
+        <pre class="message-text">${preview}</pre>
+        <span class="message-expand-hint">${remaining} more lines</span>
+      </summary>
+      <pre class="message-text">${escaped}</pre>
+    </details>
+  `
+}
+
 function renderMessages(messages: SessionMessage[]): string {
   if (messages.length === 0) {
     return `<p class="empty">No transcript messages found for this session.</p>`
   }
   return `
     <ul class="messages-list" aria-label="Last 30 transcript messages">
-      ${messages
+      ${[...messages]
+        .sort((a, b) => {
+          if (!a.timestamp || !b.timestamp) return 0
+          return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        })
         .map((message) => {
           const role = message.role === "assistant" ? "Assistant" : "User"
           const timestamp = message.timestamp
@@ -100,7 +125,7 @@ function renderMessages(messages: SessionMessage[]): string {
               <span class="message-role">${role}</span>
               <span>${timestamp}</span>
             </div>
-            <pre class="message-text">${escapeHtml(message.text)}</pre>
+            ${renderMessageBody(message.text)}
           </li>
         `
         })
@@ -116,7 +141,12 @@ export function SessionBrowser({
   messages,
   messagesLoading,
 }: SessionBrowserProps): string {
-  const selectedProject = projects.find((project) => project.cwd === selectedProjectCwd) ?? null
+  const sortedProjects = [...projects].sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+  const selectedProject =
+    sortedProjects.find((project) => project.cwd === selectedProjectCwd) ?? null
+  const sortedSessions = selectedProject
+    ? [...selectedProject.sessions].sort((a, b) => b.mtime - a.mtime)
+    : null
   return `
     <section class="card section sessions-panel">
       <div class="section-title-row">
@@ -127,15 +157,15 @@ export function SessionBrowser({
         <aside class="sessions-sidebar">
           <h3>Projects</h3>
           <ul class="project-list" aria-label="Active and recent project directories">
-            ${projects.map((project) => renderProject(project, selectedProjectCwd)).join("")}
+            ${sortedProjects.map((project) => renderProject(project, selectedProjectCwd)).join("")}
           </ul>
           <h3>Sessions</h3>
           <ul class="session-list" aria-label="Sessions for selected project">
             ${
-              selectedProject
-                ? selectedProject.sessions
+              sortedSessions
+                ? sortedSessions
                     .map((session) =>
-                      renderSession(session, selectedSessionId, selectedProject.cwd)
+                      renderSession(session, selectedSessionId, selectedProject!.cwd)
                     )
                     .join("")
                 : `<li class="empty">Select a project to see sessions.</li>`

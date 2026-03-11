@@ -538,6 +538,37 @@ tbody tr:hover {
   color: #dfe8ff;
 }
 
+.message-collapsible {
+  position: relative;
+}
+
+.message-collapsible > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.message-collapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+.message-collapsible > summary > .message-text {
+  mask-image: linear-gradient(to bottom, #fff 60%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #fff 60%, transparent 100%);
+}
+
+.message-collapsible[open] > summary {
+  display: none;
+}
+
+.message-expand-hint {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
 @keyframes riseIn {
   from {
     opacity: 0;

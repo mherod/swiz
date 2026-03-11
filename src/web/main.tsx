@@ -30,10 +30,11 @@ interface AppState {
   messagesLoading: boolean
   error: string
   lastUpdated: string
-  isLoading: boolean
 }
 
-const app = document.querySelector("#app")
+const app = document.querySelector<HTMLElement>("#app")
+let lastRenderedHtml = ""
+
 const state: AppState = {
   metrics: null,
   cacheStatus: null,
@@ -45,7 +46,6 @@ const state: AppState = {
   messagesLoading: false,
   error: "",
   lastUpdated: "starting",
-  isLoading: true,
 }
 
 function toSortedEvents(
@@ -129,8 +129,10 @@ function syncProjectSelection(
 
 function render(): void {
   if (!app) return
+
+  let html: string
   if (state.error) {
-    app.innerHTML = `
+    html = `
       ${Header({
         lastUpdated: state.lastUpdated,
         uptime: "unknown",
@@ -141,45 +143,68 @@ function render(): void {
         <p>${state.error}</p>
       </section>
     `
-    return
+  } else {
+    const metrics = state.metrics ?? {}
+    const projects = Object.keys(metrics.projects ?? {}).length
+    const watches = (state.watches?.active ?? []).length
+
+    html = `
+      <p class="sr-only" aria-live="polite" aria-atomic="true">
+        Dashboard updated at ${state.lastUpdated}.
+      </p>
+      ${Header({
+        lastUpdated: state.lastUpdated,
+        uptime: metrics.uptimeHuman ?? "starting",
+        totalDispatches: metrics.totalDispatches ?? 0,
+      })}
+      ${StatGrid({
+        uptime: metrics.uptimeHuman ?? "starting",
+        totalDispatches: metrics.totalDispatches ?? 0,
+        projects,
+        activeWatches: watches,
+      })}
+      <section class="grid">
+        ${EventTable(toSortedEvents(metrics.byEvent))}
+        ${CacheList(state.cacheStatus ?? {})}
+      </section>
+      ${SessionBrowser({
+        projects: state.projects,
+        selectedProjectCwd: state.selectedProjectCwd,
+        selectedSessionId: state.selectedSessionId,
+        messages: state.sessionMessages,
+        messagesLoading: state.messagesLoading,
+      })}
+    `
   }
 
-  const metrics = state.metrics ?? {}
-  const projects = Object.keys(metrics.projects ?? {}).length
-  const watches = (state.watches?.active ?? []).length
+  if (html === lastRenderedHtml) return
+  lastRenderedHtml = html
+  const isFirstRender = !app.hasChildNodes()
+  app.innerHTML = html
+  if (!isFirstRender) {
+    app.style.animation = "none"
+    for (const child of Array.from(app.children) as HTMLElement[]) {
+      child.style.animation = "none"
+    }
+  }
+}
 
-  app.innerHTML = `
-    <p class="sr-only" aria-live="polite" aria-atomic="true">
-      ${state.isLoading ? "Refreshing daemon dashboard." : `Dashboard updated at ${state.lastUpdated}.`}
-    </p>
-    ${Header({
-      lastUpdated: state.lastUpdated,
-      uptime: metrics.uptimeHuman ?? "starting",
-      totalDispatches: metrics.totalDispatches ?? 0,
-    })}
-    ${StatGrid({
-      uptime: metrics.uptimeHuman ?? "starting",
-      totalDispatches: metrics.totalDispatches ?? 0,
-      projects,
-      activeWatches: watches,
-    })}
-    <section class="grid">
-      ${EventTable(toSortedEvents(metrics.byEvent))}
-      ${CacheList(state.cacheStatus ?? {})}
-    </section>
-    ${SessionBrowser({
-      projects: state.projects,
-      selectedProjectCwd: state.selectedProjectCwd,
-      selectedSessionId: state.selectedSessionId,
-      messages: state.sessionMessages,
-      messagesLoading: state.messagesLoading,
-    })}
-  `
+function stateSnapshot(): string {
+  return JSON.stringify({
+    m: state.metrics,
+    c: state.cacheStatus,
+    w: state.watches,
+    p: state.projects,
+    e: state.error,
+    sp: state.selectedProjectCwd,
+    ss: state.selectedSessionId,
+    sm: state.sessionMessages,
+    ml: state.messagesLoading,
+  })
 }
 
 async function refresh(): Promise<void> {
-  state.isLoading = true
-  render()
+  const before = stateSnapshot()
   try {
     const [metrics, cacheStatus, watches, projectsResponse] = await Promise.all([
       fetchJson<MetricsResponse>("/metrics"),
@@ -195,7 +220,6 @@ async function refresh(): Promise<void> {
     state.watches = watches
     state.projects = projectsResponse.projects ?? []
     state.error = ""
-    state.lastUpdated = new Date().toLocaleTimeString()
     const nextSelection = syncProjectSelection(state.projects)
     if (nextSelection) {
       await loadSessionMessages(nextSelection.cwd, nextSelection.sessionId)
@@ -203,10 +227,11 @@ async function refresh(): Promise<void> {
     }
   } catch (error) {
     state.error = error instanceof Error ? error.message : "Unknown fetch failure"
-  } finally {
-    state.isLoading = false
   }
-  render()
+  if (stateSnapshot() !== before) {
+    state.lastUpdated = new Date().toLocaleTimeString()
+    render()
+  }
 }
 
 if (app) {
