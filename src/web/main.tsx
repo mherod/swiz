@@ -215,11 +215,10 @@ function App() {
 
     async function pollMessages() {
       try {
-        const result = await postJson<{ messages: SessionMessage[] }>("/sessions/messages", {
-          cwd,
-          sessionId: sid,
-          limit: 30,
-        })
+        const result = await postJson<{ messages: SessionMessage[]; toolStats?: ToolStat[] }>(
+          "/sessions/messages",
+          { cwd, sessionId: sid, limit: 30 }
+        )
         const msgs = result.messages ?? []
         const snap = JSON.stringify(msgs)
         if (snap === messagesPrevSnapshotRef.current) return
@@ -234,6 +233,7 @@ function App() {
         knownKeysRef.current = new Set(msgs.map(msgKey))
         setNewMessageKeys(fresh)
         setSessionMessages(msgs)
+        setSessionToolStats(result.toolStats ?? [])
         if (fresh.size > 0) {
           setTimeout(() => setNewMessageKeys(new Set()), 500)
         }
@@ -290,6 +290,7 @@ function App() {
         loading={messagesLoading}
         newKeys={newMessageKeys}
         msgKey={msgKey}
+        toolStats={sessionToolStats}
       />
     </div>
   )
