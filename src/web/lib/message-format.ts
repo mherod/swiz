@@ -134,9 +134,17 @@ function extractInlineContextBlocks(text: string): {
   cleanedText = uncommitted.cleanedText
   if (uncommitted.block) metadataBlocks.push(uncommitted.block)
 
-  const domContext = extractDomInspectionBlock(cleanedText)
+  const codeSelections = extractCodeSelectionBlocks(cleanedText)
+  cleanedText = codeSelections.cleanedText
+  metadataBlocks.push(...codeSelections.blocks)
+
+  const attachedFiles = extractAttachedFilesBlock(cleanedText)
+  cleanedText = attachedFiles.cleanedText
+  if (attachedFiles.block) metadataBlocks.push(attachedFiles.block)
+
+  const domContext = extractDomInspectionBlocks(cleanedText)
   cleanedText = domContext.cleanedText
-  if (domContext.block) metadataBlocks.push(domContext.block)
+  metadataBlocks.push(...domContext.blocks)
 
   return { cleanedText, metadataBlocks }
 }
@@ -161,33 +169,32 @@ function extractLeadingSlashCommandBlock(text: string): {
   }
 }
 
-function extractUncommittedChangesBlock(text: string): {
-  cleanedText: string
-  block: ParsedUserMetadataBlock | null
-} {
-  const hasGitActionSignal =
-    /Uncommitted changes detected:/i.test(text) ||
-    /ACTION REQUIRED:/i.test(text) ||
-    /Commit your changes:/i.test(text) ||
-    /Push your committed changes/i.test(text)
-  if (!hasGitActionSignal) {
-    return { cleanedText: text, block: null }
+const GIT_ACTION_SIGNAL_RE =
+  /Uncommitted changes detected:|ACTION REQUIRED:|Commit your changes:|Push your committed changes/i
+const GIT_FIRST_LINE_RE =
+  /Uncommitted changes detected:|modified \(\d+ file\(s\)\)|ACTION REQUIRED:/i
+const FILE_PATH_RE = /\b([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx|json|md|yml|yaml|sh|css|html))\b/g
+
+function extractGitFilePaths(lines: string[], declaredCount: number | null): string[] {
+  const filePathSet = new Set<string>()
+  for (const line of lines) {
+    for (const match of line.match(FILE_PATH_RE) ?? []) {
+      if (match.includes("/")) filePathSet.add(match)
+      if (filePathSet.size >= 6) break
+    }
+    if (filePathSet.size >= 6) break
   }
+  const paths = [...filePathSet]
+  return declaredCount && declaredCount > 0 ? paths.slice(0, declaredCount) : paths
+}
 
-  const lines = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-  if (lines.length === 0) return { cleanedText: text, block: null }
-
+function buildGitActionDetails(
+  lines: string[],
+  first: string | undefined
+): { details: Array<{ label: string; value: string }>; notes: string[] } {
   const details: Array<{ label: string; value: string }> = []
   const notes: string[] = []
-  const first = lines.find(
-    (line) =>
-      /Uncommitted changes detected:/i.test(line) ||
-      /modified \(\d+ file\(s\)\)/i.test(line) ||
-      /ACTION REQUIRED:/i.test(line)
-  )
+
   if (first) {
     details.push({
       label: "changes",
@@ -197,91 +204,182 @@ function extractUncommittedChangesBlock(text: string): {
     })
   }
 
-  const actionRequiredLine = lines.find((line) => line.startsWith("ACTION REQUIRED:"))
-  if (actionRequiredLine) {
-    notes.push(
-      compactMetadataValue(actionRequiredLine.replace(/^ACTION REQUIRED:\s*/i, "").trim(), 180)
-    )
+  const actionLine = lines.find((l) => l.startsWith("ACTION REQUIRED:"))
+  if (actionLine) {
+    notes.push(compactMetadataValue(actionLine.replace(/^ACTION REQUIRED:\s*/i, "").trim(), 180))
   }
 
-  const commitCommand = lines.find((line) => /\bgit\s+commit\b/.test(line))
-  if (commitCommand) {
-    details.push({ label: "commit", value: compactMetadataValue(commitCommand) })
-  }
-  const pushCommand = lines.find((line) => /\bgit\s+push\b/.test(line))
-  if (pushCommand) {
-    details.push({ label: "push", value: compactMetadataValue(pushCommand) })
-  }
+  const commitCmd = lines.find((l) => /\bgit\s+commit\b/.test(l))
+  if (commitCmd) details.push({ label: "commit", value: compactMetadataValue(commitCmd) })
 
-  const pathRegex = /\b([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx|json|md|yml|yaml|sh|css|html))\b/g
-  const filePathSet = new Set<string>()
-  for (const line of lines) {
-    const matches = line.match(pathRegex) ?? []
-    for (const match of matches) {
-      if (match.includes("/")) filePathSet.add(match)
-      if (filePathSet.size >= 6) break
-    }
-    if (filePathSet.size >= 6) break
-  }
-  const filePaths = [...filePathSet]
-  const declaredFileCountRaw = first?.match(/(\d+)\s*file\(s\)/i)?.[1]
-  const declaredFileCount = declaredFileCountRaw ? Number.parseInt(declaredFileCountRaw, 10) : null
-  const cappedFilePaths =
-    declaredFileCount && declaredFileCount > 0
-      ? filePaths.slice(0, Math.min(filePaths.length, declaredFileCount))
-      : filePaths
-  if (cappedFilePaths.length > 0) {
-    for (const filePath of cappedFilePaths) {
-      details.push({ label: "file", value: filePath })
-    }
-  }
+  const pushCmd = lines.find((l) => /\bgit\s+push\b/.test(l))
+  if (pushCmd) details.push({ label: "push", value: compactMetadataValue(pushCmd) })
 
-  const cleanedText = ""
+  const declaredCount = first?.match(/(\d+)\s*file\(s\)/i)?.[1]
+  const filePaths = extractGitFilePaths(
+    lines,
+    declaredCount ? Number.parseInt(declaredCount, 10) : null
+  )
+  for (const filePath of filePaths) details.push({ label: "file", value: filePath })
+
+  return { details, notes }
+}
+
+function extractUncommittedChangesBlock(text: string): {
+  cleanedText: string
+  block: ParsedUserMetadataBlock | null
+} {
+  if (!GIT_ACTION_SIGNAL_RE.test(text)) return { cleanedText: text, block: null }
+
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+  if (lines.length === 0) return { cleanedText: text, block: null }
+
+  const first = lines.find((l) => GIT_FIRST_LINE_RE.test(l))
+  const { details, notes } = buildGitActionDetails(lines, first)
+
   return {
-    cleanedText,
+    cleanedText: "",
+    block: { title: "Git action required", details, notes, kind: "gitAction" },
+  }
+}
+
+function extractDomInspectionBlocks(text: string): {
+  cleanedText: string
+  blocks: ParsedUserMetadataBlock[]
+} {
+  const entryRe =
+    /DOM Path:\s*(.+?)\nPosition:\s*(.+?)\nReact Component:\s*(.+?)\nHTML Element:\s*(.+?)(?=(?:\nDOM Path:|\s*$))/gis
+  const blocks: ParsedUserMetadataBlock[] = []
+  const consumedRanges: Array<{ start: number; end: number }> = []
+  for (const match of text.matchAll(entryRe)) {
+    const start = match.index
+    if (start == null) continue
+    const [raw, domPathRaw, positionRaw, componentRaw, elementRaw] = match
+    if (!raw) continue
+
+    const details: Array<{ label: string; value: string }> = []
+    const domPath = compactMetadataValue(domPathRaw ?? "", 220)
+    if (domPath) details.push({ label: "dom path", value: domPath })
+
+    const position = compactMetadataValue(positionRaw ?? "", 180)
+    if (position) details.push({ label: "position", value: position })
+
+    const component = compactMetadataValue(componentRaw ?? "", 120)
+    if (component) details.push({ label: "react component", value: component })
+
+    const htmlElement = compactHtmlElementValue(elementRaw ?? "")
+    if (htmlElement) details.push({ label: "html element", value: htmlElement })
+
+    if (details.length > 0) {
+      blocks.push({
+        title: blocks.length > 0 ? `Element context ${blocks.length + 1}` : "Element context",
+        details,
+        notes: [],
+        kind: "elementContext",
+      })
+      consumedRanges.push({ start, end: start + raw.length })
+    }
+  }
+
+  if (blocks.length === 0) return { cleanedText: text, blocks: [] }
+
+  let cleanedText = ""
+  let cursor = 0
+  for (const range of consumedRanges) {
+    cleanedText += text.slice(cursor, range.start)
+    cursor = range.end
+  }
+  cleanedText += text.slice(cursor)
+
+  return { cleanedText: cleanedText.trim(), blocks }
+}
+
+function extractAttachedFilesBlock(text: string): {
+  cleanedText: string
+  block: ParsedUserMetadataBlock | null
+} {
+  const tagRe = /<attached_files>\s*([\s\S]*?)(?:<\/attached_files>|(?=<[a-z_]+(?:\s|>))|$)/i
+  const match = tagRe.exec(text)
+  if (!match) return { cleanedText: text, block: null }
+
+  const details: Array<{ label: string; value: string }> = []
+  const raw = (match[1] ?? "").trim()
+  if (raw.length > 0) {
+    const entries = raw
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 6)
+    for (const entry of entries)
+      details.push({ label: "file", value: compactMetadataValue(entry, 180) })
+  } else {
+    details.push({ label: "count", value: "0" })
+  }
+
+  return {
+    cleanedText: text.replace(match[0], "").trim(),
     block: {
-      title: "Git action required",
+      title: "Attached files",
       details,
-      notes,
-      kind: "gitAction",
+      notes: [],
+      kind: "tagged",
     },
   }
 }
 
-function extractDomInspectionBlock(text: string): {
+function extractCodeSelectionBlocks(text: string): {
   cleanedText: string
-  block: ParsedUserMetadataBlock | null
+  blocks: ParsedUserMetadataBlock[]
 } {
-  const labels = ["DOM Path:", "Position:", "React Component:", "HTML Element:"]
-  if (!labels.every((label) => text.includes(label))) {
-    return { cleanedText: text, block: null }
+  const blockRe = /<code_selection([^>]*)>([\s\S]*?)<\/code_selection>/gi
+  const blocks: ParsedUserMetadataBlock[] = []
+  let cleanedText = text
+
+  for (const match of text.matchAll(blockRe)) {
+    const full = match[0]
+    const attrsRaw = match[1] ?? ""
+    const codeRaw = (match[2] ?? "").trim()
+    const path = /path="([^"]+)"/i.exec(attrsRaw)?.[1]?.trim() ?? null
+    const lines = /lines="([^"]+)"/i.exec(attrsRaw)?.[1]?.trim() ?? null
+
+    const details: Array<{ label: string; value: string }> = []
+    if (path) details.push({ label: "path", value: compactPathValue(path) })
+    if (lines) details.push({ label: "lines", value: lines })
+    const notes: string[] = []
+    const preview = compactCodeSelectionPreview(codeRaw)
+    if (preview) notes.push(preview)
+
+    if (details.length > 0 || notes.length > 0) {
+      blocks.push({
+        title: blocks.length > 0 ? `Code selection ${blocks.length + 1}` : "Code selection",
+        details,
+        notes,
+        kind: "tagged",
+      })
+    }
+
+    cleanedText = cleanedText.replace(full, "").trim()
   }
 
-  const details: Array<{ label: string; value: string }> = []
-  const extracted = extractLineValue(text, "DOM Path:")
-  if (extracted.value) details.push({ label: "dom path", value: extracted.value })
-  const extractedPosition = extractLineValue(extracted.cleanedText, "Position:")
-  if (extractedPosition.value) details.push({ label: "position", value: extractedPosition.value })
-  const extractedComponent = extractLineValue(extractedPosition.cleanedText, "React Component:")
-  if (extractedComponent.value) {
-    details.push({ label: "react component", value: extractedComponent.value })
-  }
-  const extractedElement = extractLineValue(extractedComponent.cleanedText, "HTML Element:")
-  if (extractedElement.value) {
-    details.push({ label: "html element", value: compactHtmlElementValue(extractedElement.value) })
-  }
+  return { cleanedText, blocks }
+}
 
-  return {
-    cleanedText: extractedElement.cleanedText.trim(),
-    block: details.length
-      ? {
-          title: "Element context",
-          details,
-          notes: [],
-          kind: "elementContext",
-        }
-      : null,
-  }
+function compactCodeSelectionPreview(value: string): string {
+  if (!value) return ""
+  const singleLine = value
+    .replace(/^\s*\d+\|\s*/gm, "")
+    .replace(/\s+/g, " ")
+    .trim()
+  return compactMetadataValue(singleLine, 180)
+}
+
+function compactPathValue(path: string): string {
+  if (path.length <= 120) return path
+  const keep = 55
+  return `${path.slice(0, keep)}…${path.slice(-keep)}`
 }
 
 function extractLineValue(
