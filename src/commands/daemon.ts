@@ -1378,31 +1378,36 @@ export const daemonCommand: Command = {
       ciWatchRegistry.close()
     })
 
+    const notFound = () => new Response("Not Found", { status: 404 })
     const server = Bun.serve({
       port,
       routes: {
+        // Static response route: Bun caches this for zero-allocation dispatch.
         "/health": new Response("ok"),
+        "/": async (req) => {
+          if (req.method !== "GET") return notFound()
+          const asset = await serveWebAsset("/")
+          return asset ?? notFound()
+        },
+        "/web": async (req) => {
+          if (req.method !== "GET") return notFound()
+          const asset = await serveWebAsset("/web/index.html")
+          return asset ?? notFound()
+        },
+        "/web/*": async (req) => {
+          if (req.method !== "GET") return notFound()
+          const pathname = new URL(req.url).pathname
+          const asset = await serveWebAsset(pathname)
+          return asset ?? notFound()
+        },
+        "/favicon.ico": async (req) => {
+          if (req.method !== "GET") return notFound()
+          const asset = await serveWebAsset("/web/favicon.ico")
+          return asset ?? new Response(null, { status: 204 })
+        },
       },
       async fetch(req) {
         const url = new URL(req.url)
-
-        if (req.method === "GET") {
-          if (url.pathname === "/") {
-            const asset = await serveWebAsset("/")
-            if (asset) return asset
-          }
-          if (url.pathname === "/favicon.ico") {
-            const asset = await serveWebAsset("/web/favicon.ico")
-            if (asset) return asset
-            return new Response(null, { status: 204 })
-          }
-          if (url.pathname === "/web" || url.pathname.startsWith("/web/")) {
-            const asset = await serveWebAsset(
-              url.pathname === "/web" ? "/web/index.html" : url.pathname
-            )
-            if (asset) return asset
-          }
-        }
 
         if (url.pathname === "/dispatch" && req.method === "POST") {
           const canonicalEvent = url.searchParams.get("event")
