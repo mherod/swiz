@@ -11,9 +11,10 @@
     "test:vitest": "vitest",
     "test:bun": "bun test --concurrent --timeout=10000",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check .",
+    "lint": "biome check . && eslint .",
+    "lint:eslint": "eslint .",
     "format": "biome format --write .",
-    "lint:fix": "biome check --write .",
+    "lint:fix": "biome check --write . && eslint . --fix && biome format --write .",
     "prepare": "lefthook install"
   },
   "dependencies": {
@@ -37,8 +38,11 @@
     "@types/react-dom": "^19.2.3",
     "@vitest/coverage-v8": "^4.0.18",
     "@vitest/ui": "^4.0.18",
+    "eslint": "^10.0.3",
+    "globals": "^17.4.0",
     "lefthook": "^2.1.1",
     "lint-staged": "^16.2.7",
+    "typescript-eslint": "^8.57.0",
     "vitest": "^4.0.18"
   },
   "peerDependencies": {
