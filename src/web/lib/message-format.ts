@@ -155,12 +155,15 @@ function extractInlineContextBlocks(text: string): {
 
 const INLINE_METADATA_TAGS = [
   "user_query",
+  "agent_skills",
   "agent_transcripts",
   "open_and_recently_viewed_files",
   "user_info",
   "git_status",
   "system_reminder",
 ] as const
+
+const INLINE_NESTED_TAGS = new Set<string>(["agent_skills"])
 
 function extractInlineTaggedMetadataBlocks(text: string): {
   cleanedText: string
@@ -183,10 +186,11 @@ function extractNamedInlineTagBlocks(
   tagName: string
 ): { cleanedText: string; blocks: ParsedUserMetadataBlock[] } {
   const escapedTag = tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  const tagRe = new RegExp(
-    `<${escapedTag}>\\s*([\\s\\S]*?)(?:\\s*<\\/${escapedTag}>|(?=<[a-z_]+(?:\\s|>))|$)`,
-    "gi"
-  )
+  const allowsNested = INLINE_NESTED_TAGS.has(tagName)
+  const pattern = allowsNested
+    ? `<${escapedTag}>\\s*([\\s\\S]*?)(?:\\s*<\\/${escapedTag}>|$)`
+    : `<${escapedTag}>\\s*([\\s\\S]*?)(?:\\s*<\\/${escapedTag}>|(?=<[a-z_]+(?:\\s|>))|$)`
+  const tagRe = new RegExp(pattern, "gi")
   const blocks: ParsedUserMetadataBlock[] = []
   let cleanedText = text
   for (const match of text.matchAll(tagRe)) {
@@ -205,6 +209,7 @@ function parseInlineTaggedMetadataBlock(
   raw: string
 ): ParsedUserMetadataBlock | null {
   if (tagName === "user_query") return parseInlineUserQueryBlock(raw)
+  if (tagName === "agent_skills") return parseAgentSkillsBlock(raw)
   return parseGenericMetadataBlock(tagName, raw)
 }
 
@@ -220,6 +225,55 @@ function parseInlineUserQueryBlock(raw: string): ParsedUserMetadataBlock | null 
     notes: [compactMetadataValue(normalized, 220)],
     kind: "tagged",
   }
+}
+
+function parseAgentSkillsBlock(raw: string): ParsedUserMetadataBlock | null {
+  const skillRe = /<agent_skill\b([^>]*)>([\s\S]*?)<\/agent_skill>/gi
+  const skills: Array<{ path: string | null; description: string }> = []
+  for (const match of raw.matchAll(skillRe)) {
+    const attrs = match[1] ?? ""
+    const description = compactMetadataValue((match[2] ?? "").replace(/\s+/g, " ").trim(), 120)
+    if (!description) continue
+    const path = /fullPath="([^"]+)"/i.exec(attrs)?.[1]?.trim() ?? null
+    skills.push({ path, description })
+    if (skills.length >= 200) break
+  }
+
+  if (skills.length === 0) {
+    const normalized = compactMetadataValue(raw.replace(/\s+/g, " ").trim(), 220)
+    if (!normalized) return null
+    return {
+      title: "Agent skills",
+      details: [],
+      notes: [normalized],
+      kind: "tagged",
+    }
+  }
+
+  const details: Array<{ label: string; value: string }> = [
+    { label: "count", value: `${skills.length}` },
+  ]
+  for (const skill of skills.slice(0, 6)) {
+    const label = skill.path ? "skill" : "desc"
+    const value = skill.path ? compactSkillPath(skill.path) : skill.description
+    details.push({ label, value })
+  }
+
+  const notes: string[] = []
+  if (skills.length > 6) notes.push(`${skills.length - 6} more skills`)
+  return {
+    title: "Agent skills",
+    details,
+    notes,
+    kind: "tagged",
+  }
+}
+
+function compactSkillPath(path: string): string {
+  const parts = path.split("/").filter(Boolean)
+  if (parts.length < 2) return compactMetadataValue(path, 120)
+  const skillName = parts[parts.length - 2] ?? path
+  return compactMetadataValue(skillName, 80)
 }
 
 function extractLeadingSlashCommandBlock(text: string): {
@@ -392,19 +446,19 @@ function extractAttachedFilesBlock(text: string): {
   const match = tagRe.exec(text)
   if (!match) return { cleanedText: text, block: null }
 
-  const details: Array<{ label: string; value: string }> = []
   const raw = (match[1] ?? "").trim()
-  if (raw.length > 0) {
-    const entries = raw
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .slice(0, 6)
-    for (const entry of entries)
-      details.push({ label: "file", value: compactMetadataValue(entry, 180) })
-  } else {
-    details.push({ label: "count", value: "0" })
+  const entries = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 6)
+  if (entries.length === 0) {
+    return { cleanedText: text.replace(match[0], "").trim(), block: null }
   }
+
+  const details: Array<{ label: string; value: string }> = []
+  for (const entry of entries)
+    details.push({ label: "file", value: compactMetadataValue(entry, 180) })
 
   return {
     cleanedText: text.replace(match[0], "").trim(),

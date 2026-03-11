@@ -255,6 +255,12 @@ function renderUserContextBlocks(
   const blocks = metadataBlocks ?? []
   const hasContext =
     Boolean(parsedObjective) || Boolean(hookContext) || Boolean(attachedSkills) || blocks.length > 0
+  const shouldUnwrapSinglePriorityBlock =
+    !parsedObjective &&
+    !hookContext &&
+    !attachedSkills &&
+    blocks.length === 1 &&
+    blocks[0]?.kind === "gitAction"
   return (
     <>
       {parsedObjective ? (
@@ -316,33 +322,61 @@ function renderUserContextBlocks(
           ))}
         </details>
       ) : null}
-      {blocks.map((block) => (
-        <details
-          key={block.title}
-          className={cn(
-            "hook-context-box hook-context-collapsible",
-            block.kind === "gitAction" ? "hook-context-priority" : null,
-            block.kind === "elementContext" ? "hook-context-technical" : null
-          )}
-        >
-          <summary className="hook-context-summary">{block.title}</summary>
-          {block.details.length > 0 ? (
-            <ul className="hook-context-list">
-              {block.details.map((item) => (
-                <li key={`${item.label}:${item.value}`} className="hook-context-item">
-                  <span className="hook-context-label">{item.label}</span>
-                  <code className="hook-context-value">{item.value}</code>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {block.notes.map((note) => (
-            <p key={note} className="hook-context-note">
-              {note}
-            </p>
-          ))}
-        </details>
-      ))}
+      {blocks.map((block) =>
+        shouldUnwrapSinglePriorityBlock ? (
+          <div
+            key={block.title}
+            className={cn(
+              "hook-context-box",
+              block.kind === "gitAction" ? "hook-context-priority" : null,
+              block.kind === "elementContext" ? "hook-context-technical" : null
+            )}
+          >
+            <p className="hook-context-title">{block.title}</p>
+            {block.details.length > 0 ? (
+              <ul className="hook-context-list">
+                {block.details.map((item) => (
+                  <li key={`${item.label}:${item.value}`} className="hook-context-item">
+                    <span className="hook-context-label">{item.label}</span>
+                    <code className="hook-context-value">{item.value}</code>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {block.notes.map((note) => (
+              <p key={note} className="hook-context-note">
+                {note}
+              </p>
+            ))}
+          </div>
+        ) : (
+          <details
+            key={block.title}
+            className={cn(
+              "hook-context-box hook-context-collapsible",
+              block.kind === "gitAction" ? "hook-context-priority" : null,
+              block.kind === "elementContext" ? "hook-context-technical" : null
+            )}
+          >
+            <summary className="hook-context-summary">{block.title}</summary>
+            {block.details.length > 0 ? (
+              <ul className="hook-context-list">
+                {block.details.map((item) => (
+                  <li key={`${item.label}:${item.value}`} className="hook-context-item">
+                    <span className="hook-context-label">{item.label}</span>
+                    <code className="hook-context-value">{item.value}</code>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {block.notes.map((note) => (
+              <p key={note} className="hook-context-note">
+                {note}
+              </p>
+            ))}
+          </details>
+        )
+      )}
       {hasContext ? <span className="sr-only">Parsed message context available.</span> : null}
     </>
   )
