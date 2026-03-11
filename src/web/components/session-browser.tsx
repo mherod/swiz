@@ -136,6 +136,34 @@ export function SessionNav({
   )
 }
 
+/* ── Tool stats bar ── */
+
+export interface ToolStat {
+  name: string
+  count: number
+}
+
+function ToolStatsBar({ stats }: { stats: ToolStat[] }) {
+  if (stats.length === 0) return null
+  const total = stats.reduce((sum, s) => sum + s.count, 0)
+  return (
+    <div className="tool-stats-bar">
+      <span className="tool-stats-total">{total} tool calls</span>
+      <div className="tool-stats-pills">
+        {stats.slice(0, 8).map((s) => (
+          <span key={s.name} className="tool-stat-pill">
+            <span className="tool-stat-name">{s.name}</span>
+            <span className="tool-stat-count">{s.count}</span>
+          </span>
+        ))}
+        {stats.length > 8 && (
+          <span className="tool-stat-pill tool-stat-more">+{stats.length - 8} more</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* ── Messages card ── */
 
 interface MessagesProps {
@@ -143,9 +171,10 @@ interface MessagesProps {
   loading: boolean
   newKeys?: Set<string>
   msgKey?: (msg: SessionMessage, i: number) => string
+  toolStats?: ToolStat[]
 }
 
-export function SessionMessages({ messages, loading, newKeys, msgKey }: MessagesProps) {
+export function SessionMessages({ messages, loading, newKeys, msgKey, toolStats }: MessagesProps) {
   const sorted = [...messages].sort((a, b) => {
     if (!a.timestamp || !b.timestamp) return 0
     return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
@@ -154,6 +183,7 @@ export function SessionMessages({ messages, loading, newKeys, msgKey }: Messages
   return (
     <section className="card bento-messages">
       <h2 className="section-title">Transcript</h2>
+      {toolStats && toolStats.length > 0 && <ToolStatsBar stats={toolStats} />}
       {loading ? (
         <p className="empty">Loading...</p>
       ) : messages.length === 0 ? (

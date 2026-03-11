@@ -8,6 +8,7 @@ import {
   type SessionMessage,
   SessionMessages,
   SessionNav,
+  type ToolStat,
 } from "./components/session-browser.tsx"
 
 interface MetricsResponse {
@@ -76,6 +77,7 @@ function App() {
     getQueryParam("session")
   )
   const [sessionMessages, setSessionMessages] = useState<SessionMessage[]>([])
+  const [sessionToolStats, setSessionToolStats] = useState<ToolStat[]>([])
   const [newMessageKeys, setNewMessageKeys] = useState<Set<string>>(new Set())
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [projectEvents, setProjectEvents] = useState<
@@ -94,16 +96,16 @@ function App() {
     setSelectedSessionId(sessionId)
     setQueryParams({ project: cwd, session: sessionId })
     try {
-      const result = await postJson<{ messages: SessionMessage[] }>("/sessions/messages", {
-        cwd,
-        sessionId,
-        limit: 30,
-      })
+      const result = await postJson<{ messages: SessionMessage[]; toolStats?: ToolStat[] }>(
+        "/sessions/messages",
+        { cwd, sessionId, limit: 30 }
+      )
       const msgs = result.messages ?? []
       knownKeysRef.current = new Set(msgs.map(msgKey))
       messagesPrevSnapshotRef.current = JSON.stringify(msgs)
       setNewMessageKeys(new Set())
       setSessionMessages(msgs)
+      setSessionToolStats(result.toolStats ?? [])
     } finally {
       setMessagesLoading(false)
     }
