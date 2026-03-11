@@ -1007,27 +1007,32 @@ async function listProjectSessions(
   }
 }
 
-async function getSessionMessages(
-  cwd: string,
-  sessionId: string,
-  limit = 30
-): Promise<SessionMessage[]> {
+interface SessionData {
+  messages: SessionMessage[]
+  toolStats: Array<{ name: string; count: number }>
+}
+
+async function getSessionData(cwd: string, sessionId: string, limit = 30): Promise<SessionData> {
   const sessions = await findAllProviderSessions(cwd)
   const session = sessions.find(
     (candidate) => candidate.id === sessionId || candidate.id.startsWith(sessionId)
   )
-  if (!session) return []
+  if (!session) return { messages: [], toolStats: [] }
   const file = Bun.file(session.path)
-  if (!(await file.exists())) return []
+  if (!(await file.exists())) return { messages: [], toolStats: [] }
   const text = await file.text()
   const entries = parseTranscriptEntries(text, session.format)
   const messages: SessionMessage[] = []
+  const toolCounts = new Map<string, number>()
   for (const entry of entries) {
     if (entry.type !== "user" && entry.type !== "assistant") continue
     const content = entry.message?.content
     if (entry.type === "user" && isHookFeedback(content)) continue
     const extracted = extractMessageText(content)
     const toolCalls = extractToolCalls(content)
+    for (const tc of toolCalls) {
+      toolCounts.set(tc.name, (toolCounts.get(tc.name) ?? 0) + 1)
+    }
     if (!extracted && toolCalls.length === 0) continue
     messages.push({
       role: entry.type,
@@ -1036,7 +1041,10 @@ async function getSessionMessages(
       ...(toolCalls.length > 0 ? { toolCalls } : {}),
     })
   }
-  return messages.slice(-limit)
+  const toolStats = [...toolCounts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+  return { messages: messages.slice(-limit), toolStats }
 }
 
 async function safeMtime(path: string | null): Promise<number> {
@@ -1602,8 +1610,8 @@ export const daemonCommand: Command = {
           }
           touchProject(cwd)
           const limit = Math.max(1, Math.min(100, body?.limit ?? 30))
-          const messages = await getSessionMessages(cwd, sessionId, limit)
-          return Response.json({ messages })
+          const data = await getSessionData(cwd, sessionId, limit)
+          return Response.json({ messages: data.messages, toolStats: data.toolStats })
         }
 
         if (url.pathname === "/cache/status" && req.method === "GET") {
