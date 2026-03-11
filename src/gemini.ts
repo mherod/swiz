@@ -26,10 +26,7 @@ export async function ensureGeminiApiKey(): Promise<void> {
   if (process.env.GEMINI_API_KEY) return
   try {
     // Bun.secrets reads from the system keychain (macOS Keychain, Linux libsecret, etc.)
-    const secret = await Bun.secrets.get({
-      service: "GEMINI_API_KEY",
-      name: "default",
-    })
+    const secret = await Bun.secrets.get({ service: "GEMINI_API_KEY", name: "default" })
     if (secret) {
       process.env.GEMINI_API_KEY = secret
     }
