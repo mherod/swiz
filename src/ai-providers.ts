@@ -303,6 +303,30 @@ export function activeProvider(override?: AiProviderId): AiProviderId | null {
   return null
 }
 
+// ─── Provider fallback ────────────────────────────────────────────────────────
+
+/**
+ * Returns all available provider IDs in priority order (Claude Code → Gemini → Codex).
+ * When an explicit override is set (options.provider or AI_PROVIDER env), returns only that provider.
+ */
+function availableProviders(override?: AiProviderId): AiProviderId[] {
+  if (process.env.AI_TEST_NO_BACKEND === "1") return []
+
+  const requested = override ?? (process.env.AI_PROVIDER as AiProviderId | undefined)
+  if (requested) {
+    // Explicit override — no fallback, same behavior as activeProvider()
+    const primary = activeProvider(requested)
+    return primary ? [primary] : []
+  }
+
+  // Auto-select: return all available providers in priority order
+  const providers: AiProviderId[] = []
+  if (hasClaudeCode()) providers.push("claude")
+  if (hasGeminiApiKey()) providers.push("gemini")
+  if (hasCodexCli()) providers.push("codex")
+  return providers
+}
+
 // ─── Unified generation API ───────────────────────────────────────────────────
 
 /**
@@ -327,13 +351,22 @@ export async function promptText(prompt: string, options?: PromptOptions): Promi
     return String(parsed.next ?? "").trim()
   }
 
-  const provider = activeProvider(options?.provider)
-  if (!provider) {
+  const providers = availableProviders(options?.provider)
+  if (providers.length === 0) {
     throw new Error(
       "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
     )
   }
-  return PROVIDER_REGISTRY[provider].text(prompt, options)
+
+  let lastError: unknown
+  for (const provider of providers) {
+    try {
+      return await PROVIDER_REGISTRY[provider].text(prompt, options)
+    } catch (err) {
+      lastError = err
+    }
+  }
+  throw lastError
 }
 
 /**
@@ -365,13 +398,22 @@ export async function promptStreamText(
     return text
   }
 
-  const provider = activeProvider(options?.provider)
-  if (!provider) {
+  const providers = availableProviders(options?.provider)
+  if (providers.length === 0) {
     throw new Error(
       "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
     )
   }
-  return PROVIDER_REGISTRY[provider].streamText(prompt, options)
+
+  let lastError: unknown
+  for (const provider of providers) {
+    try {
+      return await PROVIDER_REGISTRY[provider].streamText(prompt, options)
+    } catch (err) {
+      lastError = err
+    }
+  }
+  throw lastError
 }
 
 /**
@@ -397,13 +439,23 @@ export async function promptObject<T>(
     return JSON.parse(objectFixture) as T
   }
 
-  const provider = activeProvider(options?.provider)
-  if (!provider) {
+  const providers = availableProviders(options?.provider)
+  if (providers.length === 0) {
     throw new Error(
       "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
     )
   }
-  return PROVIDER_REGISTRY[provider].object(prompt, schema, options) as Promise<T>
+
+  let lastError: unknown
+  for (const provider of providers) {
+    try {
+      return (await PROVIDER_REGISTRY[provider].object(prompt, schema, options)) as T
+    } catch (err) {
+      lastError = err
+      // Fall through to next provider
+    }
+  }
+  throw lastError
 }
 
 // Re-export ensureGeminiApiKey so callers only need this module for startup setup.
