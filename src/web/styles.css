@@ -530,6 +530,27 @@ tbody tr:hover {
   grid-row: 1 / -1;
 }
 
+/* ── New message animation ── */
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 300px;
+  }
+}
+
+.message-new {
+  animation: slideIn 350ms ease both;
+  border-color: rgba(118, 169, 255, 0.5);
+  box-shadow: 0 0 12px rgba(118, 169, 255, 0.15);
+}
+
 /* ── Entry animation ── */
 
 @keyframes riseIn {

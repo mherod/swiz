@@ -60,6 +60,10 @@ function setQueryParams(params: Record<string, string | null>) {
   window.history.replaceState(null, "", url.toString())
 }
 
+function msgKey(msg: SessionMessage, i: number): string {
+  return `${msg.role}-${msg.timestamp ?? "null"}-${i}`
+}
+
 function App() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [cacheStatus, setCacheStatus] = useState<Record<string, number> | null>(null)
@@ -72,11 +76,14 @@ function App() {
     getQueryParam("session")
   )
   const [sessionMessages, setSessionMessages] = useState<SessionMessage[]>([])
+  const [newMessageKeys, setNewMessageKeys] = useState<Set<string>>(new Set())
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [error, setError] = useState("")
   const [lastUpdated, setLastUpdated] = useState("starting")
   const prevSnapshotRef = useRef("")
   const initialLoadDone = useRef(false)
+  const knownKeysRef = useRef<Set<string>>(new Set())
+  const messagesPrevSnapshotRef = useRef("")
 
   const loadMessages = useCallback(async (cwd: string, sessionId: string) => {
     setMessagesLoading(true)
@@ -89,7 +96,11 @@ function App() {
         sessionId,
         limit: 30,
       })
-      setSessionMessages(result.messages ?? [])
+      const msgs = result.messages ?? []
+      knownKeysRef.current = new Set(msgs.map(msgKey))
+      messagesPrevSnapshotRef.current = JSON.stringify(msgs)
+      setNewMessageKeys(new Set())
+      setSessionMessages(msgs)
     } finally {
       setMessagesLoading(false)
     }
@@ -173,6 +184,44 @@ function App() {
     return () => clearInterval(id)
   }, [loadMessages])
 
+  useEffect(() => {
+    if (!selectedProjectCwd || !selectedSessionId) return
+    const cwd = selectedProjectCwd
+    const sid = selectedSessionId
+
+    async function pollMessages() {
+      try {
+        const result = await postJson<{ messages: SessionMessage[] }>("/sessions/messages", {
+          cwd,
+          sessionId: sid,
+          limit: 30,
+        })
+        const msgs = result.messages ?? []
+        const snap = JSON.stringify(msgs)
+        if (snap === messagesPrevSnapshotRef.current) return
+        messagesPrevSnapshotRef.current = snap
+
+        const fresh = new Set<string>()
+        for (let i = 0; i < msgs.length; i++) {
+          const m = msgs[i]!
+          const key = msgKey(m, i)
+          if (!knownKeysRef.current.has(key)) fresh.add(key)
+        }
+        knownKeysRef.current = new Set(msgs.map(msgKey))
+        setNewMessageKeys(fresh)
+        setSessionMessages(msgs)
+        if (fresh.size > 0) {
+          setTimeout(() => setNewMessageKeys(new Set()), 500)
+        }
+      } catch {
+        /* ignore polling errors */
+      }
+    }
+
+    const id = setInterval(() => void pollMessages(), 2000)
+    return () => clearInterval(id)
+  }, [selectedProjectCwd, selectedSessionId])
+
   const m = metrics ?? {}
   const projectCount = Object.keys(m.projects ?? {}).length
   const watchCount = (watches?.active ?? []).length
@@ -209,7 +258,12 @@ function App() {
         onSelectProject={handleSelectProject}
         onSelectSession={handleSelectSession}
       />
-      <SessionMessages messages={sessionMessages} loading={messagesLoading} />
+      <SessionMessages
+        messages={sessionMessages}
+        loading={messagesLoading}
+        newKeys={newMessageKeys}
+        msgKey={msgKey}
+      />
     </div>
   )
 }

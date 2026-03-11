@@ -123,9 +123,11 @@ export function SessionNav({
 interface MessagesProps {
   messages: SessionMessage[]
   loading: boolean
+  newKeys?: Set<string>
+  msgKey?: (msg: SessionMessage, i: number) => string
 }
 
-export function SessionMessages({ messages, loading }: MessagesProps) {
+export function SessionMessages({ messages, loading, newKeys, msgKey }: MessagesProps) {
   const sorted = [...messages].sort((a, b) => {
     if (!a.timestamp || !b.timestamp) return 0
     return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
@@ -145,8 +147,11 @@ export function SessionMessages({ messages, loading }: MessagesProps) {
             const timestamp = message.timestamp
               ? formatTime(new Date(message.timestamp).getTime())
               : "Unknown time"
+            const origIdx = messages.indexOf(message)
+            const key = msgKey ? msgKey(message, origIdx) : `${message.timestamp}-${i}`
+            const isNew = newKeys?.has(key) ?? false
             return (
-              <li key={`${message.timestamp}-${i}`} className={`message-row ${message.role}`}>
+              <li key={key} className={`message-row ${message.role}${isNew ? " message-new" : ""}`}>
                 <div className="message-meta">
                   <span className="message-role">{role}</span>
                   <span>{timestamp}</span>
