@@ -92,15 +92,21 @@ export function DashboardStats({
         <div className="stats-group">
           <h3 className="stats-group-title">Current Session</h3>
           <div className="metric-kpis">
-            <span className="metric-kpi">
-              <strong>{activeSession?.dispatches ?? 0}</strong> dispatches
-            </span>
-            <span className="metric-kpi">
-              <strong>{loadedMessageCount}</strong> messages
-            </span>
-            <span className="metric-kpi">
-              <strong>{totalToolCalls}</strong> tool calls
-            </span>
+            {(activeSession?.dispatches ?? 0) > 0 && (
+              <span className="metric-kpi">
+                <strong>{activeSession?.dispatches}</strong> dispatches
+              </span>
+            )}
+            {loadedMessageCount > 0 && (
+              <span className="metric-kpi">
+                <strong>{loadedMessageCount}</strong> messages
+              </span>
+            )}
+            {totalToolCalls > 0 && (
+              <span className="metric-kpi">
+                <strong>{totalToolCalls}</strong> tool calls
+              </span>
+            )}
           </div>
           {activeDispatch && (
             <div className="stats-active-badge">
@@ -130,15 +136,21 @@ export function DashboardStats({
         <div className="stats-group">
           <h3 className="stats-group-title">Project Performance</h3>
           <div className="metric-kpis">
-            <span className="metric-kpi">
-              <strong>{totalDispatches}</strong> total
-            </span>
-            <span className="metric-kpi">
-              <strong>{avgLatency}ms</strong> avg
-            </span>
-            <span className="metric-kpi">
-              <strong>{hottestEvent}</strong> hottest
-            </span>
+            {totalDispatches > 0 && (
+              <span className="metric-kpi">
+                <strong>{totalDispatches}</strong> total
+              </span>
+            )}
+            {avgLatency > 0 && (
+              <span className="metric-kpi">
+                <strong>{avgLatency}ms</strong> avg
+              </span>
+            )}
+            {hottestEvent !== "n/a" && (
+              <span className="metric-kpi">
+                <strong>{hottestEvent}</strong> hottest
+              </span>
+            )}
           </div>
           <p className="metric-note">Performance metrics for the current project scope.</p>
         </div>
@@ -148,12 +160,16 @@ export function DashboardStats({
         <div className="stats-group">
           <h3 className="stats-group-title">Daemon Caches</h3>
           <div className="metric-kpis">
-            <span className="metric-kpi">
-              <strong>{totalCacheEntries}</strong> entries
-            </span>
-            <span className="metric-kpi">
-              <strong>{warmCaches}</strong> warm
-            </span>
+            {totalCacheEntries > 0 && (
+              <span className="metric-kpi">
+                <strong>{totalCacheEntries}</strong> entries
+              </span>
+            )}
+            {warmCaches > 0 && (
+              <span className="metric-kpi">
+                <strong>{warmCaches}</strong> warm
+              </span>
+            )}
           </div>
           <p className="metric-note">System-wide cache warmth and health.</p>
         </div>
