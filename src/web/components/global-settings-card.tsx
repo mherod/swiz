@@ -127,7 +127,7 @@ export function GlobalSettingsCard() {
             })
         }}
       >
-        <div style={{ display: "grid", gap: "16px", marginBottom: "16px" }}>
+        <div className="settings-fields">
           <div>
             <label className="settings-label">
               <span>Ambition mode</span>
@@ -154,21 +154,12 @@ export function GlobalSettingsCard() {
             </label>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+          <div className="settings-grid-cols-2">
             <label className="settings-label">
               <span>Memory line threshold</span>
               <input
                 type="number"
                 className="settings-input"
-                style={{
-                  width: "100%",
-                  background: "rgba(25, 30, 38, 0.4)",
-                  border: "1px solid rgba(86, 112, 166, 0.28)",
-                  borderRadius: "6px",
-                  color: "#eef4ff",
-                  padding: "6px 8px",
-                  fontSize: "0.85rem",
-                }}
                 value={form.memoryLineThreshold}
                 onChange={(e) => setForm({ ...form, memoryLineThreshold: Number(e.target.value) })}
               />
@@ -178,15 +169,6 @@ export function GlobalSettingsCard() {
               <input
                 type="number"
                 className="settings-input"
-                style={{
-                  width: "100%",
-                  background: "rgba(25, 30, 38, 0.4)",
-                  border: "1px solid rgba(86, 112, 166, 0.28)",
-                  borderRadius: "6px",
-                  color: "#eef4ff",
-                  padding: "6px 8px",
-                  fontSize: "0.85rem",
-                }}
                 value={form.memoryWordThreshold}
                 onChange={(e) => setForm({ ...form, memoryWordThreshold: Number(e.target.value) })}
               />

@@ -201,7 +201,7 @@ export function DashboardApp() {
   )
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
   const [activeHookDispatches, setActiveHookDispatches] = useState<ActiveHookDispatch[]>([])
-  const [activeView, setActiveView] = useState<"dashboard" | "settings">("dashboard")
+  const [activeView, setActiveView] = useState<"dashboard" | "settings">("settings")
   const [error, setError] = useState("")
   const [lastUpdated, setLastUpdated] = useState("starting")
 
@@ -507,10 +507,7 @@ export function DashboardApp() {
         onDeleteSession={handleDeleteSession}
       />
       {activeView === "settings" ? (
-        <div
-          className="bento-settings-page"
-          style={{ display: "grid", gap: "16px", alignContent: "start", overflowY: "auto" }}
-        >
+        <div className="bento-settings-page">
           <GlobalSettingsCard />
           <ProjectSettingsCard cwd={optimisticProjectCwd} />
         </div>
