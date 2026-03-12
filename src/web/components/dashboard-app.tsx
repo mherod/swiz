@@ -441,6 +441,24 @@ export function DashboardApp() {
     [activeProject?.sessions, optimisticSessionId]
   )
 
+  const displayedMessages = useMemo(() => {
+    if (!optimisticSessionId) return sessionMessages
+    const activeDispatch = activeHookDispatches.find((d) => d.sessionId === optimisticSessionId)
+    if (!activeDispatch) return sessionMessages
+
+    const syntheticMessage: SessionMessage = {
+      role: "assistant",
+      timestamp: new Date(activeDispatch.startedAt).toISOString(),
+      text: activeDispatch.toolName
+        ? `Running **${activeDispatch.toolName}**...`
+        : `Running **${activeDispatch.canonicalEvent}**...`,
+      toolCalls: activeDispatch.toolName
+        ? [{ name: activeDispatch.toolName, detail: activeDispatch.toolInputSummary ?? "" }]
+        : [],
+    }
+    return [...sessionMessages, syntheticMessage]
+  }, [sessionMessages, activeHookDispatches, optimisticSessionId])
+
   const metricsEvents = useMemo(
     () => (projectEvents.length > 0 ? projectEvents : toSortedEvents(m.byEvent)),
     [projectEvents, m.byEvent]
@@ -484,7 +502,7 @@ export function DashboardApp() {
         onDeleteSession={handleDeleteSession}
       />
       <SessionMessages
-        messages={sessionMessages}
+        messages={displayedMessages}
         loading={messagesLoading}
         newKeys={newMessageKeys}
         msgKey={msgKey}
@@ -498,7 +516,6 @@ export function DashboardApp() {
       />
       <MetricsRail
         events={metricsEvents}
-        scope={optimisticProjectCwd ? "project" : "global"}
         cacheStatus={cacheStatus}
         selectedProjectCwd={optimisticProjectCwd}
         activeSession={activeSession}

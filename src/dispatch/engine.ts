@@ -21,7 +21,7 @@ import {
   isTaskUpdateTool,
   isWriteTool,
 } from "../tool-matchers.ts"
-import { extractCwd, isWithinCooldown, markHookCooldown } from "./filters.ts"
+import { isWithinCooldown, markHookCooldown } from "./filters.ts"
 
 // ─── Module-level constants ─────────────────────────────────────────────────
 
@@ -107,7 +107,8 @@ export function logSlowHook(
   return true
 }
 
-function logSlowHookSummary(executions: HookExecution[]): void {
+/** Log a summary of all hooks considered slow. Exported for strategies. */
+export function logSlowHookSummary(executions: HookExecution[]): void {
   const slowHooks = executions.filter((e) => e.status === "slow").map((e) => e.file)
   if (slowHooks.length > 0) {
     log(`   ⚠ slow-hook summary (${slowHooks.length}): ${slowHooks.join(", ")}`)
@@ -300,7 +301,8 @@ function finalizeExecution(
   return execution
 }
 
-function writeResponse(response: Record<string, unknown>): void {
+/** Write the final hook response to process.stdout. Exported for strategies. */
+export function writeResponse(response: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify(response)}\n`)
 }
 
@@ -365,8 +367,9 @@ export function flatSyncHooks(groups: HookGroup[]): HookEntry[] {
  * Run a single hook entry concurrently: first check skip conditions, then
  * execute the hook if not skipped. Returns the execution record and parsed
  * response (null when skipped or no valid JSON).
+ * Exported for use in strategy implementations.
  */
-async function runEntry(
+export async function runEntry(
   entry: HookEntry,
   payloadStr: string,
   cwd: string
@@ -382,7 +385,7 @@ async function runEntry(
   return { execution, parsed }
 }
 
-// ─── Dispatch strategies ────────────────────────────────────────────────────
+// ─── Dispatch strategy helpers ───────────────────────────────────────────────
 
 /** Fire async hooks — fire-and-forget in CLI, awaited with timeout in daemon. */
 export async function launchAsyncHooks(
@@ -420,179 +423,4 @@ export async function launchAsyncHooks(
     log(`   awaiting ${promises.length} async hook(s) in daemon context`)
     await Promise.all(promises)
   }
-}
-
-/** PreToolUse: short-circuit on first deny; collect and merge allow-with-reason hints. */
-export async function runPreToolUse(
-  groups: HookGroup[],
-  payloadStr: string,
-  daemonContext?: boolean
-): Promise<Record<string, unknown>> {
-  await launchAsyncHooks(groups, payloadStr, daemonContext)
-  const cwd = extractCwd(payloadStr)
-  const hints: string[] = []
-  const contexts: string[] = []
-  const finalResponse: Record<string, unknown> = {}
-  const executions: HookExecution[] = []
-
-  // Fan out all sync hooks concurrently; scan results in declaration order.
-  const entries = flatSyncHooks(groups)
-  const results = await Promise.all(entries.map((e) => runEntry(e, payloadStr, cwd)))
-
-  for (const { execution, parsed: resp } of results) {
-    if (execution.status === "skipped") {
-      executions.push(execution)
-      continue
-    }
-    if (resp && isDeny(resp)) {
-      log(`   ✗ DENY from ${execution.file}`)
-      execution.status = "deny"
-      executions.push(execution)
-      Object.assign(finalResponse, resp)
-      break
-    }
-    if (resp) {
-      const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
-      const reason = extractAllowReason(resp)
-      const context = extractContext(resp)
-      if (hso?.permissionDecision === "allow" && (reason || context)) {
-        execution.status = "allow-with-reason"
-        executions.push(execution)
-        if (reason) hints.push(reason)
-        if (context) contexts.push(context)
-        const preview = reason ?? context ?? ""
-        log(`   ~ ${execution.file} (hint: ${preview.slice(0, 100)})`)
-        continue
-      }
-    }
-    log(`   ✓ ${execution.file} (${resp ? "allow" : "no output"})`)
-    executions.push(execution)
-  }
-
-  if (!isDeny(finalResponse)) {
-    if (hints.length > 0 || contexts.length > 0) {
-      log(
-        `   result: passed with ${hints.length} hint(s)` +
-          (contexts.length > 0 ? ` and ${contexts.length} context(s)` : "")
-      )
-      Object.assign(finalResponse, {
-        ...(contexts.length > 0 ? { systemMessage: contexts.join("\n\n") } : {}),
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "allow",
-          ...(hints.length > 0 ? { permissionDecisionReason: hints.join("\n\n") } : {}),
-          ...(contexts.length > 0 ? { additionalContext: contexts.join("\n\n") } : {}),
-        },
-      })
-    } else {
-      log(`   result: all passed`)
-    }
-  }
-  logSlowHookSummary(executions)
-  if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
-
-  writeResponse(finalResponse)
-  return finalResponse
-}
-
-/** Stop / PostToolUse: forward first block; stop runs all hooks, postToolUse short-circuits. */
-export async function runBlocking(
-  groups: HookGroup[],
-  payloadStr: string,
-  canonicalEvent?: string,
-  daemonContext?: boolean
-): Promise<Record<string, unknown>> {
-  await launchAsyncHooks(groups, payloadStr, daemonContext)
-  const cwd = extractCwd(payloadStr)
-  const runAllHooks = canonicalEvent === "stop"
-  const finalResponse: Record<string, unknown> = {}
-  const executions: HookExecution[] = []
-
-  // Fan out all sync hooks concurrently; scan results in declaration order.
-  const entries = flatSyncHooks(groups)
-  const results = await Promise.all(entries.map((e) => runEntry(e, payloadStr, cwd)))
-
-  for (const { execution, parsed: resp } of results) {
-    if (execution.status === "skipped") {
-      executions.push(execution)
-      continue
-    }
-    if (resp && isBlock(resp)) {
-      log(`   ✗ BLOCK from ${execution.file}`)
-      execution.status = "block"
-      executions.push(execution)
-      // Keep the first block response exactly as produced.
-      if (!isBlock(finalResponse)) Object.assign(finalResponse, resp)
-      if (!runAllHooks) break
-      continue
-    }
-    log(`   ✓ ${execution.file} (${resp ? "ok" : "no output"})`)
-    executions.push(execution)
-  }
-
-  if (!isBlock(finalResponse)) {
-    log(`   result: all passed`)
-  }
-  logSlowHookSummary(executions)
-  if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
-
-  writeResponse(finalResponse)
-  return finalResponse
-}
-
-/** SessionStart / UserPromptSubmit: run all hooks, merge additionalContext. */
-export async function runContext(
-  groups: HookGroup[],
-  payloadStr: string,
-  eventName: string,
-  daemonContext?: boolean
-): Promise<Record<string, unknown>> {
-  await launchAsyncHooks(groups, payloadStr, daemonContext)
-  const cwd = extractCwd(payloadStr)
-  const contexts: string[] = []
-  const executions: HookExecution[] = []
-
-  // All context hooks are independent — fan out fully, merge results in order.
-  const entries = flatSyncHooks(groups)
-  const results = await Promise.all(entries.map((e) => runEntry(e, payloadStr, cwd)))
-
-  for (const { execution, parsed: resp } of results) {
-    if (execution.status === "skipped") {
-      executions.push(execution)
-      continue
-    }
-    if (!resp) {
-      log(`   ✓ ${execution.file} (no output)`)
-      executions.push(execution)
-      continue
-    }
-    const ctx = extractContext(resp)
-    if (ctx) {
-      execution.status = "allow-with-reason"
-      contexts.push(ctx)
-      log(`   ✓ ${execution.file} (context: ${ctx.slice(0, 100)})`)
-    } else {
-      log(`   ✓ ${execution.file} (no context extracted)`)
-    }
-    executions.push(execution)
-  }
-
-  const finalResponse: Record<string, unknown> = {}
-
-  if (contexts.length === 0) {
-    log(`   result: no contexts to merge`)
-  } else {
-    log(`   result: merged ${contexts.length} context(s), hookEventName=${eventName}`)
-    Object.assign(finalResponse, {
-      hookSpecificOutput: {
-        hookEventName: eventName,
-        additionalContext: contexts.join("\n\n"),
-      },
-    })
-  }
-  logSlowHookSummary(executions)
-  if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })
-
-  writeResponse(finalResponse)
-  return finalResponse
 }

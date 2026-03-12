@@ -20,10 +20,8 @@ import {
   groupMatches,
   log,
   logHeader,
-  runBlocking,
-  runContext,
-  runPreToolUse,
 } from "./index.ts"
+import { STRATEGY_REGISTRY } from "./strategies.ts"
 
 // ─── Helpers (shared with CLI command) ────────────────────────────────────────
 
@@ -47,6 +45,38 @@ function parsePayload(payloadStr: string): {
   } catch {
     return { payload: {}, parseError: true }
   }
+}
+
+export function summarizeToolInput(input: Record<string, unknown> | undefined): string {
+  if (!input) return ""
+  if (typeof input.subject === "string") {
+    return input.subject.length > 60 ? `${input.subject.slice(0, 57)}...` : input.subject
+  }
+  if (typeof input.taskId === "string") {
+    const parts = [`#${input.taskId}`]
+    if (typeof input.status === "string") parts.push(input.status)
+    return parts.join(" -> ")
+  }
+  if (typeof input.skill === "string") {
+    return typeof input.args === "string" ? `${input.skill} ${input.args}` : input.skill
+  }
+
+  const pathVal = (input.path ?? input.file_path) as string | undefined
+  if (typeof pathVal === "string") {
+    return pathVal.split("/").slice(-2).join("/")
+  }
+  if (typeof input.command === "string") {
+    return input.command.length > 80 ? `${input.command.slice(0, 77)}...` : input.command
+  }
+  if (typeof input.pattern === "string") return input.pattern
+  if (typeof input.query === "string") {
+    return input.query.length > 60 ? `${input.query.slice(0, 57)}...` : input.query
+  }
+  if (typeof input.content === "string") return `${input.content.length} chars`
+  if (typeof input.old_string === "string") {
+    return `replacing ${input.old_string.split("\n").length} lines`
+  }
+  return ""
 }
 
 function getHookContext(
@@ -153,6 +183,8 @@ export interface DispatchLifecycleUpdate {
   sessionId: string | null
   hooks: string[]
   startedAt: number
+  toolName?: string
+  toolInputSummary?: string
 }
 
 /**
@@ -227,6 +259,10 @@ export async function executeDispatch(req: DispatchRequest): Promise<DispatchRes
     (payload.request_id as string | undefined) ??
     `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   const lifecycleStartedAt = Date.now()
+
+  const toolInput = (payload.tool_input ?? payload.toolInput) as Record<string, unknown> | undefined
+  const toolInputSummary = toolInput ? summarizeToolInput(toolInput) : undefined
+
   onDispatchLifecycle?.({
     phase: "start",
     requestId: lifecycleRequestId,
@@ -236,6 +272,8 @@ export async function executeDispatch(req: DispatchRequest): Promise<DispatchRes
     sessionId: typeof payload.session_id === "string" ? payload.session_id : null,
     hooks: [...new Set(requestedHooks)],
     startedAt: lifecycleStartedAt,
+    toolName,
+    toolInputSummary,
   })
 
   const enrichedPayloadStr = await enrichPayloadForHooks(
@@ -245,33 +283,17 @@ export async function executeDispatch(req: DispatchRequest): Promise<DispatchRes
     transcriptSummaryProvider
   )
 
-  const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
-  try {
-    let response: Record<string, unknown>
+  const strategyName = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
+  const strategy = STRATEGY_REGISTRY[strategyName]
 
-    switch (strategy) {
-      case "preToolUse":
-        response = await runPreToolUse(filteredGroups, enrichedPayloadStr, daemonContext)
-        break
-      case "blocking":
-        response = await runBlocking(
-          filteredGroups,
-          enrichedPayloadStr,
-          canonicalEvent,
-          daemonContext
-        )
-        break
-      case "context":
-        response = await runContext(
-          filteredGroups,
-          enrichedPayloadStr,
-          hookEventName,
-          daemonContext
-        )
-        break
-      default:
-        response = {}
-    }
+  try {
+    const response = await strategy.execute({
+      filteredGroups,
+      enrichedPayloadStr,
+      canonicalEvent,
+      hookEventName,
+      daemonContext,
+    })
 
     return { response }
   } finally {
@@ -284,6 +306,8 @@ export async function executeDispatch(req: DispatchRequest): Promise<DispatchRes
       sessionId: typeof payload.session_id === "string" ? payload.session_id : null,
       hooks: [...new Set(requestedHooks)],
       startedAt: lifecycleStartedAt,
+      toolName,
+      toolInputSummary,
     })
   }
 }

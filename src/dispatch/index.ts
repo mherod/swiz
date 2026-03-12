@@ -44,10 +44,7 @@ export {
   launchAsyncHooks,
   log,
   logHeader,
-  runBlocking,
-  runContext,
   runHook,
-  runPreToolUse,
   type SkipReason,
   toolMatchesToken,
 } from "./engine.ts"
@@ -73,3 +70,9 @@ export {
   replayPreToolUse,
   type TraceEntry,
 } from "./replay.ts"
+export {
+  runBlocking,
+  runContext,
+  runPreToolUse,
+  STRATEGY_REGISTRY,
+} from "./strategies.ts"

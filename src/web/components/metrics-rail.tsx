@@ -1,10 +1,8 @@
 import type { EventMetric } from "../lib/dashboard-helpers.ts"
 import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
-import { CacheList } from "./cache-list.tsx"
-import { EventTable } from "./event-table.tsx"
+import { DashboardStats } from "./dashboard-stats.tsx"
 import { ProjectSettingsCard } from "./project-settings-card.tsx"
 import type { ToolStat } from "./session-browser.tsx"
-import { SessionHealthCard } from "./session-health-card.tsx"
 
 interface SessionHealth {
   dispatches?: number
@@ -14,7 +12,6 @@ interface SessionHealth {
 
 export function MetricsRail({
   events,
-  scope,
   cacheStatus,
   selectedProjectCwd,
   activeSession,
@@ -23,7 +20,6 @@ export function MetricsRail({
   sessionToolStats,
 }: {
   events: EventMetric[]
-  scope: "global" | "project"
   cacheStatus: Record<string, number> | null
   selectedProjectCwd: string | null
   activeSession: SessionHealth | null
@@ -33,15 +29,15 @@ export function MetricsRail({
 }) {
   return (
     <aside className="bento-metrics-stack" aria-label="Metrics panels">
-      <EventTable events={events} scope={scope} />
-      <CacheList cache={cacheStatus ?? {}} />
-      <ProjectSettingsCard cwd={selectedProjectCwd} />
-      <SessionHealthCard
+      <DashboardStats
+        events={events}
+        cache={cacheStatus ?? {}}
         activeSession={activeSession}
         activeHookDispatches={activeHookDispatches}
         loadedMessageCount={loadedMessageCount}
         sessionToolStats={sessionToolStats}
       />
+      <ProjectSettingsCard cwd={selectedProjectCwd} />
     </aside>
   )
 }
