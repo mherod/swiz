@@ -137,7 +137,12 @@ describe("getMemorySources", () => {
 
 describe("swiz memory CLI", () => {
   it("shows Claude hierarchy when CLAUDECODE=1", async () => {
-    const { stdout } = await runMemory([], { CLAUDECODE: "1" })
+    const tmpHome = join(tmpdir(), `swiz-memory-claude-${Date.now()}`)
+    const claudeDir = join(tmpHome, ".claude")
+    mkdirSync(claudeDir, { recursive: true })
+    writeFileSync(join(claudeDir, "CLAUDE.md"), "# Global Claude rules\n")
+
+    const { stdout } = await runMemory([], { CLAUDECODE: "1", HOME: tmpHome })
     expect(stdout).toContain("Claude Code")
     expect(stdout).toContain("Rule hierarchy")
     expect(stdout).toContain("Project rules")

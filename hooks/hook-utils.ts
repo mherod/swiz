@@ -555,7 +555,8 @@ export async function readSessionTasks(
       // skip unreadable or malformed task files
     }
   }
-  return tasks
+  // Sort tasks by ID to ensure deterministic output
+  return orderBy(tasks, [(t) => t.id], ["asc"])
 }
 
 /**
