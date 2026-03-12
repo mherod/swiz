@@ -782,7 +782,7 @@ function tryParseJson(text: string): string | null {
   const candidate = text.trim()
   if (!(candidate.startsWith("{") || candidate.startsWith("["))) return null
   try {
-    const parsed = JSON.parse(candidate)
+    const parsed = JSON.parse(candidate) as unknown
     return JSON.stringify(parsed, null, 2)
   } catch {
     return null

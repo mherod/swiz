@@ -67,7 +67,10 @@ function readPackageDeps(dir: string): Record<string, string> {
   const pkgPath = join(dir, "package.json")
   if (!existsSync(pkgPath)) return {}
   try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"))
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
     return { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) }
   } catch {
     return {}

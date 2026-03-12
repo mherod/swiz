@@ -118,7 +118,7 @@ async function enrichPayloadForHooks(
     : await computeTranscriptSummary(transcriptPath)
   if (!summary) return fallbackPayloadStr
 
-  const enriched = merge({}, payload, { _transcriptSummary: summary })
+  const enriched = merge({}, payload, { _transcriptSummary: summary }) as Record<string, unknown>
   const enrichedPayloadStr = JSON.stringify(enriched)
   log(`   transcript summary: ${summary.toolCallCount} tools, ${summary.bashCommands.length} cmds`)
   return enrichedPayloadStr

@@ -609,21 +609,26 @@ export class TranscriptIndexCache {
       for (const line of summary.sessionLines) {
         if (!line.trim()) continue
         try {
-          const entry = JSON.parse(line)
+          const entry = JSON.parse(line) as {
+            type?: string
+            message?: { content?: string | unknown[] }
+          }
           if (entry?.type !== "user") continue
           const content = entry?.message?.content
           if (!Array.isArray(content)) continue
-          for (const block of content) {
+          for (const block of content as Array<{
+            type?: string
+            content?: string | unknown[]
+            tool_use_id?: string
+          }>) {
             if (block?.type !== "tool_result") continue
             const blockContent = block.content
             const text =
               typeof blockContent === "string"
                 ? blockContent
                 : Array.isArray(blockContent)
-                  ? blockContent
-                      .map((c: Record<string, unknown>) =>
-                        typeof c === "string" ? c : (c?.text ?? "")
-                      )
+                  ? (blockContent as Array<{ text?: string }>)
+                      .map((c) => (typeof c === "string" ? c : (c?.text ?? "")))
                       .join("")
                   : ""
             if (text.includes("ACTION REQUIRED:")) {

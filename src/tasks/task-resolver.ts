@@ -96,7 +96,7 @@ export async function getSessionIdsByCwdScan(
         for (const line of content.split("\n").slice(0, 10)) {
           if (!line.trim()) continue
           try {
-            const data = JSON.parse(line)
+            const data = JSON.parse(line) as { cwd?: string }
             if (data.cwd === filterCwd) {
               ids.add(sessionId)
               break

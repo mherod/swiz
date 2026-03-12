@@ -811,9 +811,9 @@ function parseCodexToolInput(raw: unknown): Record<string, unknown> {
   }
   if (typeof raw !== "string") return {}
   try {
-    const parsed = JSON.parse(raw)
+    const parsed = JSON.parse(raw) as Record<string, unknown>
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return normalize(parsed as Record<string, unknown>)
+      return normalize(parsed)
     }
   } catch {}
   return {}
@@ -1061,9 +1061,9 @@ function parseJsonObjectAt(text: string, startIndex: number): Record<string, unk
       if (depth !== 0) continue
       const slice = text.slice(startIndex, i + 1)
       try {
-        const parsed = JSON.parse(slice)
+        const parsed = JSON.parse(slice) as Record<string, unknown>
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          return parsed as Record<string, unknown>
+          return parsed
         }
       } catch {
         return null
