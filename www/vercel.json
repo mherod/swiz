@@ -2,8 +2,5 @@
   "public": true,
   "buildCommand": null,
   "outputDirectory": "public",
-  "routes": [
-    { "handle": "filesystem" },
-    { "src": "/(.*)", "status": 200, "dest": "/index.html" }
-  ]
+  "routes": [{ "handle": "filesystem" }, { "src": "/(.*)", "status": 200, "dest": "/index.html" }]
 }
