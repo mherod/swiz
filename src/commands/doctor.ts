@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, readdir, rename, stat } from "node:fs/promises"
+import { chmod, cp, mkdir, readdir, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
 import { suggest } from "../fuzzy.ts"
@@ -237,34 +237,7 @@ function buildOrphanedResult(orphaned: string[]): CheckResult {
   }
 }
 
-interface OrphanFixSuccess {
-  file: string
-  movedPath: string
-}
-interface OrphanFixFailure {
-  file: string
-  error: string
-}
-
-/** Move orphaned hook scripts aside using the .disabled-by-swiz-{timestamp} suffix. */
-async function fixOrphanedHookScripts(
-  orphaned: string[]
-): Promise<{ fixed: OrphanFixSuccess[]; failed: OrphanFixFailure[] }> {
-  const fixed: OrphanFixSuccess[] = []
-  const failed: OrphanFixFailure[] = []
-  const stamp = conflictSuffixTimestamp()
-  for (const file of orphaned) {
-    const src = join(HOOKS_DIR, file)
-    const dst = `${src}.disabled-by-swiz-${stamp}`
-    try {
-      await rename(src, dst)
-      fixed.push({ file, movedPath: dst })
-    } catch (err: unknown) {
-      failed.push({ file, error: err instanceof Error ? err.message : String(err) })
-    }
-  }
-  return { fixed, failed }
-}
+/** Orphaned hook scripts are reported by the check but no longer auto-disabled. */
 
 /** Return config-referenced script paths that do not exist on disk. */
 async function findMissingConfigScriptPaths(): Promise<string[]> {
@@ -426,67 +399,7 @@ function buildSkillConflictResults(conflicts: SkillConflict[]): CheckResult[] {
   }))
 }
 
-interface SkillConflictFixSuccess {
-  name: string
-  originalDir: string
-  movedDir: string
-}
-
-interface SkillConflictFixFailure {
-  name: string
-  originalDir: string
-  error: string
-}
-
-function conflictSuffixTimestamp(): string {
-  const d = new Date()
-  const yyyy = d.getFullYear().toString().padStart(4, "0")
-  const mm = (d.getMonth() + 1).toString().padStart(2, "0")
-  const dd = d.getDate().toString().padStart(2, "0")
-  const hh = d.getHours().toString().padStart(2, "0")
-  const min = d.getMinutes().toString().padStart(2, "0")
-  const ss = d.getSeconds().toString().padStart(2, "0")
-  return `${yyyy}${mm}${dd}${hh}${min}${ss}`
-}
-
-async function nextConflictBackupDir(originalDir: string, stamp: string): Promise<string> {
-  let attempt = 0
-  while (true) {
-    const suffix = attempt === 0 ? stamp : `${stamp}-${attempt}`
-    const candidate = `${originalDir}.disabled-by-swiz-${suffix}`
-    if (!(await Bun.file(candidate).exists())) {
-      return candidate
-    }
-    attempt++
-  }
-}
-
-async function fixSkillConflicts(
-  conflicts: SkillConflict[]
-): Promise<{ fixed: SkillConflictFixSuccess[]; failed: SkillConflictFixFailure[] }> {
-  const fixed: SkillConflictFixSuccess[] = []
-  const failed: SkillConflictFixFailure[] = []
-  const stamp = conflictSuffixTimestamp()
-
-  for (const conflict of conflicts) {
-    for (const entry of conflict.overridden) {
-      const originalDir = dirname(entry.path)
-      const movedDir = await nextConflictBackupDir(originalDir, stamp)
-      try {
-        await rename(originalDir, movedDir)
-        fixed.push({ name: conflict.name, originalDir, movedDir })
-      } catch (err: unknown) {
-        failed.push({
-          name: conflict.name,
-          originalDir,
-          error: err instanceof Error ? err.message : String(err),
-        })
-      }
-    }
-  }
-
-  return { fixed, failed }
-}
+/** Skill conflicts are reported by the check but no longer auto-disabled. */
 
 // ─── Invalid skill entries check ────────────────────────────────────────────
 
@@ -519,7 +432,6 @@ async function findInvalidSkillEntries(
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
       if (entry.name.startsWith(".")) continue // skip hidden/temp dirs (e.g. .unison.*)
-      if (entry.name.includes(".disabled-by-swiz-")) continue
       const entryDir = join(skillDir, entry.name)
       const skillPath = join(entryDir, "SKILL.md")
       const file = Bun.file(skillPath)
@@ -622,11 +534,6 @@ function buildInvalidSkillResults(entries: InvalidSkillEntry[]): CheckResult[] {
   }))
 }
 
-interface InvalidSkillFixSuccess {
-  name: string
-  originalDir: string
-  movedDir: string
-}
 interface InvalidSkillNameFixSuccess {
   name: string
   skillPath: string
@@ -718,27 +625,23 @@ async function fixCategoryValue(entry: InvalidSkillEntry): Promise<boolean> {
   }
 }
 
-/** Rename / repair invalid skill entries.
+/** Repair invalid skill entries in-place.
  *  - missing SKILL.md    → generate a default stub
  *  - name mismatch       → update name: field in place
  *  - missing category    → insert category: uncategorized after description line
- *  - everything else     → move aside with .disabled-by-swiz-{timestamp} suffix */
+ *  - everything else     → reported as unfixable (no auto-disable) */
 async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
-  fixed: InvalidSkillFixSuccess[]
   nameFixed: InvalidSkillNameFixSuccess[]
   generated: InvalidSkillGenerateSuccess[]
   categoryFixed: InvalidSkillCategoryFixSuccess[]
   failed: InvalidSkillFixFailure[]
 }> {
-  const fixed: InvalidSkillFixSuccess[] = []
   const nameFixed: InvalidSkillNameFixSuccess[] = []
   const generated: InvalidSkillGenerateSuccess[] = []
   const categoryFixed: InvalidSkillCategoryFixSuccess[] = []
   const failed: InvalidSkillFixFailure[] = []
-  const stamp = conflictSuffixTimestamp()
   for (const entry of entries) {
     if (entry.reason === MISSING_SKILL_MD_REASON) {
-      // Generate a stub SKILL.md so the directory becomes a valid skill entry
       const skillPath = join(entry.entryDir, "SKILL.md")
       if (await generateSkillMd(entry)) {
         generated.push({ name: entry.name, skillPath })
@@ -752,7 +655,6 @@ async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
       continue
     }
     if (entry.reason.startsWith(NAME_MISMATCH_PREFIX)) {
-      // In-place fix: update the name: field rather than discarding the skill
       const result = await fixSkillNameMismatch(entry)
       if (result !== null) {
         nameFixed.push({
@@ -770,7 +672,6 @@ async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
       continue
     }
     if (entry.reason === MISSING_CATEGORY_REASON) {
-      // In-place fix: insert category field after description line
       const skillPath = join(entry.entryDir, "SKILL.md")
       if (await fixMissingCategory(entry)) {
         categoryFixed.push({ name: entry.name, skillPath })
@@ -784,7 +685,6 @@ async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
       continue
     }
     if (entry.reason.startsWith(INVALID_CATEGORY_REASON_PREFIX)) {
-      // In-place fix: replace invalid category value with the default
       const skillPath = join(entry.entryDir, "SKILL.md")
       if (await fixCategoryValue(entry)) {
         categoryFixed.push({ name: entry.name, skillPath })
@@ -797,19 +697,13 @@ async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
       }
       continue
     }
-    const movedDir = await nextConflictBackupDir(entry.entryDir, stamp)
-    try {
-      await rename(entry.entryDir, movedDir)
-      fixed.push({ name: entry.name, originalDir: entry.entryDir, movedDir })
-    } catch (err: unknown) {
-      failed.push({
-        name: entry.name,
-        originalDir: entry.entryDir,
-        error: err instanceof Error ? err.message : String(err),
-      })
-    }
+    failed.push({
+      name: entry.name,
+      originalDir: entry.entryDir,
+      error: entry.reason,
+    })
   }
-  return { fixed, nameFixed, generated, categoryFixed, failed }
+  return { nameFixed, generated, categoryFixed, failed }
 }
 
 // ─── Installed config script check ──────────────────────────────────────────
@@ -1394,21 +1288,6 @@ export const doctorCommand: Command = {
         }
       }
 
-      if (orphanedScripts.length > 0) {
-        console.log(`  ${BOLD}Auto-fixing orphaned hook scripts...${RESET}\n`)
-        const orphanResult = await fixOrphanedHookScripts(orphanedScripts)
-        for (const item of orphanResult.fixed) {
-          console.log(`  ${GREEN}✓${RESET} ${item.file}: moved aside`)
-          console.log(
-            `    ${DIM}restore: mv "${displayPath(item.movedPath)}" "${join(HOOKS_DIR, item.file)}"${RESET}`
-          )
-        }
-        for (const item of orphanResult.failed) {
-          console.log(`  ${RED}✗${RESET} ${item.file}: could not move (${item.error})`)
-        }
-        if (orphanResult.fixed.length > 0) console.log()
-      }
-
       const missingConfigPaths = await findMissingConfigScriptPaths()
       if (missingConfigPaths.length > 0) {
         console.log(`  ${BOLD}Registering missing config scripts...${RESET}\n`)
@@ -1422,27 +1301,6 @@ export const doctorCommand: Command = {
           )
         }
         if (regResult.registered.length > 0) console.log()
-      }
-
-      if (skillConflicts.length > 0) {
-        console.log(`  ${BOLD}Auto-fixing skill conflicts...${RESET}\n`)
-        const fixedResult = await fixSkillConflicts(skillConflicts)
-        for (const item of fixedResult.fixed) {
-          console.log(
-            `  ${GREEN}✓${RESET} ${item.name}: moved ${displayPath(item.originalDir)} -> ${displayPath(item.movedDir)}`
-          )
-          console.log(
-            `    ${DIM}restore: mv "${displayPath(item.movedDir)}" "${displayPath(item.originalDir)}"${RESET}`
-          )
-        }
-        for (const item of fixedResult.failed) {
-          console.log(
-            `  ${RED}✗${RESET} ${item.name}: could not move ${displayPath(item.originalDir)} (${item.error})`
-          )
-        }
-        if (fixedResult.fixed.length > 0) {
-          console.log()
-        }
       }
 
       if (invalidSkillEntries.length > 0) {
@@ -1463,14 +1321,6 @@ export const doctorCommand: Command = {
             `  ${GREEN}✓${RESET} ${item.name}: added category "${SKILL_PLACEHOLDER_CATEGORY}" to ${displayPath(item.skillPath)}`
           )
         }
-        for (const item of invalidResult.fixed) {
-          console.log(
-            `  ${GREEN}✓${RESET} ${item.name}: moved ${displayPath(item.originalDir)} -> ${displayPath(item.movedDir)}`
-          )
-          console.log(
-            `    ${DIM}restore: mv "${displayPath(item.movedDir)}" "${displayPath(item.originalDir)}"${RESET}`
-          )
-        }
         for (const item of invalidResult.failed) {
           console.log(
             `  ${RED}✗${RESET} ${item.name}: could not fix ${displayPath(item.originalDir)} (${item.error})`
@@ -1479,8 +1329,7 @@ export const doctorCommand: Command = {
         if (
           invalidResult.generated.length > 0 ||
           invalidResult.nameFixed.length > 0 ||
-          invalidResult.categoryFixed.length > 0 ||
-          invalidResult.fixed.length > 0
+          invalidResult.categoryFixed.length > 0
         )
           console.log()
       }

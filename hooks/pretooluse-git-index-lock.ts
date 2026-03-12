@@ -17,106 +17,92 @@ import {
   type ToolHookInput,
 } from "./hook-utils.ts"
 
-const input: ToolHookInput = await Bun.stdin.json()
+// ── Constants ────────────────────────────────────────────────────────────────
 
-// Only applies to shell tools running git commands.
-if (!isShellTool(input.tool_name ?? "")) process.exit(0)
-
-const command: string = (input.tool_input?.command as string) ?? ""
-if (!GIT_ANY_CMD_RE.test(command)) process.exit(0)
-
-const cwd = input.cwd || process.cwd()
 const LOCK_RELATIVE_PATH = `${GIT_DIR_NAME}/${GIT_INDEX_LOCK}`
+const WAIT_TIMEOUT_MS = 5000
+const WAIT_INTERVAL_MS = 500
+const LSOF_TIMEOUT_MS = 500
+const MAX_ANCESTRY_DEPTH = 20
 
-// Find the repo root — handles subdirectories and worktrees.
-const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
-if (!repoRoot) process.exit(0) // Not in a git repo; let git itself report the error.
+// ── Main Execution ───────────────────────────────────────────────────────────
 
-const lockPath = joinGitPath(repoRoot, GIT_INDEX_LOCK)
-if (!(await Bun.file(lockPath).exists())) process.exit(0)
+async function main() {
+  const input: ToolHookInput = await Bun.stdin.json()
 
-// ── Lock exists — check if a relevant git process is still active ────────
+  // Only applies to shell tools running git commands.
+  if (!isShellTool(input.tool_name ?? "")) process.exit(0)
 
-/**
- * Ancestry-aware, repo-scoped process check.
- * Returns true if a git process is actively using this repo's index.
- *
- * Two-stage filter (consistent with stop-git-status.ts):
- *   1. Ancestry: exclude git processes that are ancestors of this process
- *      (e.g., git push → pre-push hook → bun → this hook).
- *   2. Repo scope: exclude git processes whose CWD is outside our repo root.
- */
-async function isGitProcessActiveForRepo(): Promise<boolean> {
-  // Find all git processes.
-  const pgrepProc = Bun.spawn(["pgrep", "-f", "git"], { stdout: "pipe", stderr: "pipe" })
-  const pgrepOut = await new Response(pgrepProc.stdout).text()
-  await pgrepProc.exited
-  if (pgrepProc.exitCode !== 0) return false // No git processes at all.
+  const command: string = (input.tool_input?.command as string) ?? ""
+  if (!GIT_ANY_CMD_RE.test(command)) process.exit(0)
 
-  const gitPids = pgrepOut.trim().split("\n").map(Number).filter(Boolean)
-  if (gitPids.length === 0) return false
+  const cwd = input.cwd || process.cwd()
 
-  // Build ancestry set: walk from this process upward to PID 1.
-  const psProc = Bun.spawn(["ps", "-eo", "pid,ppid"], { stdout: "pipe", stderr: "pipe" })
-  const psOut = await new Response(psProc.stdout).text()
-  await psProc.exited
+  // Find the repo root — handles subdirectories and worktrees.
+  const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
+  if (!repoRoot) process.exit(0) // Not in a git repo; let git itself report the error.
 
-  const parentMap = new Map<number, number>()
-  for (const line of psOut.trim().split("\n").slice(1)) {
-    const parts = line.trim().split(/\s+/)
-    const pid = parseInt(parts[0] ?? "", 10)
-    const ppid = parseInt(parts[1] ?? "", 10)
-    if (!Number.isNaN(pid) && !Number.isNaN(ppid)) parentMap.set(pid, ppid)
+  const lockPath = joinGitPath(repoRoot, GIT_INDEX_LOCK)
+
+  // Quick exit if no lock exists
+  if (!(await Bun.file(lockPath).exists())) process.exit(0)
+
+  // Wait for lock to resolve or git process to finish
+  const { lockExists, gitActive } = await waitForLockResolution(lockPath, repoRoot)
+
+  if (!lockExists) {
+    allowPreToolUse(`\`${LOCK_RELATIVE_PATH}\` resolved automatically — proceeding.`)
   }
 
-  const ancestors = new Set<number>()
-  let cur = process.ppid
-  for (let i = 0; i < 20 && cur > 1; i++) {
-    ancestors.add(cur)
-    const ppid = parentMap.get(cur)
-    if (!ppid || ppid === cur) break
-    cur = ppid
+  if (!gitActive) {
+    await autoRemoveStaleLock(lockPath)
   }
 
-  // Filter out ancestor PIDs and this process itself.
-  const nonAncestorPids = gitPids.filter((pid) => pid !== process.pid && !ancestors.has(pid))
-  if (nonAncestorPids.length === 0) return false
-
-  // Check each remaining pid individually so one slow/unresponsive process
-  // does not force a global timeout classification.
-  for (const pid of nonAncestorPids) {
-    const lsofProc = Bun.spawn(["lsof", "-p", String(pid), "-d", "cwd", "-Fn"], {
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    let lsofKilled = false
-    const killTimer = setTimeout(() => {
-      lsofKilled = true
-      lsofProc.kill()
-    }, 500)
-    const lsofOut = await new Response(lsofProc.stdout).text()
-    await lsofProc.exited
-    clearTimeout(killTimer)
-
-    if (lsofKilled) continue
-
-    for (const line of lsofOut.split("\n")) {
-      if (line.startsWith("n") && line.slice(1).startsWith(repoRoot)) {
-        return true
-      }
-    }
-  }
-  return false
+  // A relevant git process IS active — block to prevent corruption.
+  denyPreToolUse(
+    [
+      `\`${LOCK_RELATIVE_PATH}\` exists and an active git process was detected for this repository.`,
+      "",
+      "This lock will cause your git command to fail with:",
+      `  "fatal: Unable to create '.../${LOCK_RELATIVE_PATH}': File exists."`,
+      "",
+      formatActionPlan(
+        [
+          "Wait for the active git process to finish, then retry.",
+          `If the process is stuck, check with: \`ps aux | grep git\``,
+          `Then remove the lock: \`trash ${lockPath}\``,
+        ],
+        { header: "To resolve:" }
+      ).trimEnd(),
+    ].join("\n")
+  )
 }
 
-// ── Decision ─────────────────────────────────────────────────────────────────
+// ── High-Level Logic ─────────────────────────────────────────────────────────
 
-const gitActive = await isGitProcessActiveForRepo()
+async function waitForLockResolution(lockPath: string, repoRoot: string) {
+  const start = Date.now()
+  let gitActive = true
+  let lockExists = true
 
-if (!gitActive) {
+  while (Date.now() - start < WAIT_TIMEOUT_MS) {
+    lockExists = await Bun.file(lockPath).exists()
+    if (!lockExists) break
+
+    gitActive = await isGitProcessActiveForRepo(repoRoot)
+    if (!gitActive) break
+
+    await new Promise((resolve) => setTimeout(resolve, WAIT_INTERVAL_MS))
+  }
+
+  return { lockExists, gitActive }
+}
+
+async function autoRemoveStaleLock(lockPath: string): Promise<void> {
   // No relevant git process — stale lock. Try to remove it.
   try {
     await unlink(lockPath)
+
     // Verify removal succeeded (race condition: another process may have recreated it).
     if (await Bun.file(lockPath).exists()) {
       denyPreToolUse(
@@ -133,6 +119,7 @@ if (!gitActive) {
         ].join("\n")
       )
     }
+
     allowPreToolUse(
       `Auto-removed stale \`${LOCK_RELATIVE_PATH}\` — no active git process detected.`
     )
@@ -146,21 +133,107 @@ if (!gitActive) {
   }
 }
 
-// A relevant git process IS active — block to prevent corruption.
-denyPreToolUse(
-  [
-    `\`${LOCK_RELATIVE_PATH}\` exists and an active git process was detected for this repository.`,
-    "",
-    "This lock will cause your git command to fail with:",
-    `  "fatal: Unable to create '.../${LOCK_RELATIVE_PATH}': File exists."`,
-    "",
-    formatActionPlan(
-      [
-        "Wait for the active git process to finish, then retry.",
-        `If the process is stuck, check with: \`ps aux | grep git\``,
-        `Then remove the lock: \`trash ${lockPath}\``,
-      ],
-      { header: "To resolve:" }
-    ).trimEnd(),
-  ].join("\n")
-)
+/**
+ * Ancestry-aware, repo-scoped process check.
+ * Returns true if a git process is actively using this repo's index.
+ *
+ * Two-stage filter (consistent with stop-git-status.ts):
+ *   1. Ancestry: exclude git processes that are ancestors of this process
+ *      (e.g., git push → pre-push hook → bun → this hook).
+ *   2. Repo scope: exclude git processes whose CWD is outside our repo root.
+ */
+async function isGitProcessActiveForRepo(repoRoot: string): Promise<boolean> {
+  const gitPids = await getRunningGitPids()
+  if (gitPids.length === 0) return false
+
+  const ancestors = await getAncestorPids()
+
+  // Filter out ancestor PIDs and this process itself.
+  const nonAncestorPids = gitPids.filter((pid) => pid !== process.pid && !ancestors.has(pid))
+  if (nonAncestorPids.length === 0) return false
+
+  // Check each remaining pid individually so one slow/unresponsive process
+  // does not force a global timeout classification.
+  for (const pid of nonAncestorPids) {
+    if (await isPidUsingRepoDir(pid, repoRoot)) {
+      return true
+    }
+  }
+
+  return false
+}
+
+// ── Low-Level Utilities ──────────────────────────────────────────────────────
+
+async function getRunningGitPids(): Promise<number[]> {
+  const proc = Bun.spawn(["pgrep", "-f", "git"], { stdout: "pipe", stderr: "pipe" })
+  const out = await new Response(proc.stdout).text()
+  await proc.exited
+  if (proc.exitCode !== 0) return []
+  return out.trim().split("\n").map(Number).filter(Boolean)
+}
+
+async function getAncestorPids(): Promise<Set<number>> {
+  const proc = Bun.spawn(["ps", "-eo", "pid,ppid"], { stdout: "pipe", stderr: "pipe" })
+  const out = await new Response(proc.stdout).text()
+  await proc.exited
+
+  const parentMap = new Map<number, number>()
+  for (const line of out.trim().split("\n").slice(1)) {
+    const parts = line.trim().split(/\s+/)
+    const pid = parseInt(parts[0] ?? "", 10)
+    const ppid = parseInt(parts[1] ?? "", 10)
+    if (!Number.isNaN(pid) && !Number.isNaN(ppid)) parentMap.set(pid, ppid)
+  }
+
+  const ancestors = new Set<number>()
+  let cur = process.ppid
+  for (let i = 0; i < MAX_ANCESTRY_DEPTH && cur > 1; i++) {
+    ancestors.add(cur)
+    const ppid = parentMap.get(cur)
+    if (!ppid || ppid === cur) break
+    cur = ppid
+  }
+
+  return ancestors
+}
+
+async function isPidUsingRepoDir(pid: number, repoRoot: string): Promise<boolean> {
+  const proc = Bun.spawn(["lsof", "-p", String(pid), "-d", "cwd", "-Fn"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+
+  let killed = false
+  const timer = setTimeout(() => {
+    killed = true
+    proc.kill()
+  }, LSOF_TIMEOUT_MS)
+
+  const out = await new Response(proc.stdout).text()
+  await proc.exited
+  clearTimeout(timer)
+
+  if (killed) return false
+
+  return out.split("\n").some((line) => line.startsWith("n") && line.slice(1).startsWith(repoRoot))
+}
+
+// ── Entry Point ──────────────────────────────────────────────────────────────
+
+if (import.meta.main) {
+  void main().catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err)
+    denyPreToolUse(
+      `STOP. \u26a0\ufe0f pretooluse-git-index-lock encountered an unexpected error.\n\n` +
+        `Error: ${message}\n\n` +
+        formatActionPlan(
+          [
+            "Check that the hook file and its dependencies are intact.",
+            "If the error persists, inspect the hook source at hooks/pretooluse-git-index-lock.ts.",
+          ],
+          { translateToolNames: true }
+        )
+    )
+  })
+}
