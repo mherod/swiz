@@ -1259,10 +1259,15 @@ function buildPlist(port: number): string {
   <true/>
 
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>Crashed</key>
+    <true/>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
 
-  <key>StartInterval</key>
-  <integer>1200</integer>
+  <key>AbandonProcessGroup</key>
+  <true/>
 
   <key>StandardOutPath</key>
   <string>/tmp/swiz-daemon.log</string>
