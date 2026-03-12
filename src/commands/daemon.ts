@@ -95,6 +95,8 @@ export interface ActiveHookDispatch {
   sessionId: string | null
   hooks: string[]
   startedAt: number
+  toolName?: string
+  toolInputSummary?: string
 }
 
 export interface CiWatchRun {
