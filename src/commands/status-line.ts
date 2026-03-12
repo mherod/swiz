@@ -38,12 +38,24 @@ export interface WarmStatusLineSnapshot {
   gitInfo: string
   gitBranch: string
   activeSegments: string[]
+  ciState?: GitHubCiState
+  ciLabel?: string
   issueCount: number | null
   prCount: number | null
   reviewDecision: string
   commentCount: number
   projectState: ProjectState | null
   settingsParts: string[]
+}
+
+export type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
+
+interface GitHubCiRun {
+  status: string
+  conclusion: string
+  workflowName: string
+  createdAt: string
+  event: string
 }
 
 const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT ?? "7943")
@@ -221,6 +233,87 @@ export function formatProjectState(state: ProjectState | null | undefined): stri
       return `\x1b[93m${state}${R}`
     case "addressing-feedback":
       return `\x1b[95m${state}${R}`
+  }
+}
+
+function latestCiRunsByWorkflow(runs: GitHubCiRun[]): GitHubCiRun[] {
+  const latest = new Map<string, GitHubCiRun>()
+  for (const run of runs) {
+    const existing = latest.get(run.workflowName)
+    if (!existing || run.createdAt > existing.createdAt) {
+      latest.set(run.workflowName, run)
+    }
+  }
+  return [...latest.values()]
+}
+
+function normalizeCiLabel(raw: string | null | undefined): string {
+  return (raw ?? "").replaceAll("_", " ")
+}
+
+export function summarizeGitHubCiRuns(
+  runs: GitHubCiRun[] | null | undefined
+): { state: GitHubCiState; label: string } | null {
+  if (!Array.isArray(runs) || runs.length === 0) return null
+
+  const relevant = runs.filter((run) => run.event !== "dynamic" && run.event !== "workflow_run")
+  if (relevant.length === 0) return null
+
+  const latestRuns = latestCiRunsByWorkflow(relevant)
+  const active = latestRuns.filter((run) => run.status === "in_progress" || run.status === "queued")
+  if (active.length > 0) {
+    return {
+      state: "pending",
+      label: active.length === 1 ? "running" : `${active.length} running`,
+    }
+  }
+
+  const failing = latestRuns.filter(
+    (run) =>
+      run.status === "completed" &&
+      (run.conclusion === "failure" ||
+        run.conclusion === "timed_out" ||
+        run.conclusion === "action_required")
+  )
+  if (failing.length > 0) {
+    return {
+      state: "failure",
+      label: failing.length === 1 ? "failed" : `${failing.length} failed`,
+    }
+  }
+
+  if (
+    latestRuns.length > 0 &&
+    latestRuns.every((run) => run.status === "completed" && run.conclusion === "success")
+  ) {
+    return { state: "success", label: "passing" }
+  }
+
+  const latestRun = latestRuns.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+  if (!latestRun) return null
+
+  const label =
+    latestRun.status === "completed"
+      ? normalizeCiLabel(latestRun.conclusion || "completed")
+      : normalizeCiLabel(latestRun.status || "unknown")
+  return { state: "neutral", label }
+}
+
+export function formatGitHubCiSegment(
+  state: GitHubCiState | null | undefined,
+  label: string | null | undefined
+): string {
+  if (!state || state === "none") return ""
+
+  switch (state) {
+    case "success":
+      return `\x1b[92m✓ ${label || "passing"}${R}`
+    case "pending":
+      return `\x1b[93m⏳ ${label || "running"}${R}`
+    case "failure":
+      return `\x1b[91m✗ ${label || "failed"}${R}`
+    case "neutral":
+      return `${DIM}○ ${label || "unknown"}${R}`
   }
 }
 
@@ -434,6 +527,7 @@ export async function computeWarmStatusLineSnapshot(
 
   const needsPr = seg("pr")
   const needsBacklog = seg("backlog")
+  const needsCi = seg("git")
 
   const prViewPromise =
     needsPr && gitResult.branch
@@ -442,8 +536,24 @@ export async function computeWarmStatusLineSnapshot(
           cwd
         )
       : Promise.resolve(null)
+  const ciPromise =
+    needsCi && gitResult.branch
+      ? ghJsonCached<GitHubCiRun[]>(
+          [
+            "run",
+            "list",
+            "--branch",
+            gitResult.branch,
+            "--limit",
+            "10",
+            "--json",
+            "status,conclusion,workflowName,createdAt,event",
+          ],
+          cwd
+        )
+      : Promise.resolve(null)
 
-  const [issueData, prListData, prViewData, projectState] = await Promise.all([
+  const [issueData, prListData, prViewData, ciData, projectState] = await Promise.all([
     needsBacklog
       ? ghJsonCached<unknown[]>(
           ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
@@ -457,14 +567,18 @@ export async function computeWarmStatusLineSnapshot(
         )
       : Promise.resolve(null),
     prViewPromise,
+    ciPromise,
     readProjectState(cwd),
   ])
+  const ciSummary = summarizeGitHubCiRuns(ciData)
 
   return {
     shortCwd,
     gitInfo: gitResult.info,
     gitBranch: gitResult.branch,
     activeSegments,
+    ciState: ciSummary?.state ?? "none",
+    ciLabel: ciSummary?.label ?? "",
     issueCount: Array.isArray(issueData) ? issueData.length : null,
     prCount: Array.isArray(prListData) ? prListData.length : null,
     reviewDecision: prViewData?.reviewDecision ?? "",
@@ -548,6 +662,7 @@ export function renderStatusLineFromSnapshot(
       : ""
 
   const stateSeg = formatProjectState(snapshot.projectState)
+  const ciSeg = formatGitHubCiSegment(snapshot.ciState, snapshot.ciLabel)
   const reviewStatus =
     snapshot.reviewDecision === "CHANGES_REQUESTED"
       ? `\x1b[91m⚠ changes requested${R}`
@@ -565,6 +680,7 @@ export function renderStatusLineFromSnapshot(
   const line1Groups = joinGroups([
     seg("repo") ? `${label("repo")} ${a2}${snapshot.shortCwd}${R}` : "",
     seg("git") && snapshot.gitInfo ? `${label("git")} ${snapshot.gitInfo}` : "",
+    seg("git") && ciSeg ? `${label("ci")} ${ciSeg}` : "",
     seg("pr") && reviewStatus ? `${label("pr")} ${reviewStatus}` : "",
   ])
   const line2Groups = joinGroups([

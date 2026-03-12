@@ -6,12 +6,14 @@ import { DEFAULT_SETTINGS } from "../settings.ts"
 import {
   buildSettingsFlags,
   formatCountSegment,
+  formatGitHubCiSegment,
   formatProjectState,
   getContextStatsPath,
   getGhCachePath,
   ghJsonCached,
   readContextStats,
   renderStatusLineFromSnapshot,
+  summarizeGitHubCiRuns,
   updateContextStats,
 } from "./status-line.ts"
 
@@ -330,6 +332,8 @@ describe("renderStatusLineFromSnapshot", () => {
     gitInfo: "✦ main",
     gitBranch: "main",
     activeSegments: [],
+    ciState: "none" as const,
+    ciLabel: "",
     issueCount: 2,
     prCount: 1,
     reviewDecision: "",
@@ -363,5 +367,71 @@ describe("renderStatusLineFromSnapshot", () => {
     expect(out).toContain("model")
     expect(out).not.toContain("backlog")
     expect(out).not.toContain("state")
+  })
+
+  it("renders the current CI status when present", () => {
+    const out = renderStatusLineFromSnapshot(
+      { model: { display_name: "claude-haiku" } },
+      { ...baseSnapshot, ciState: "pending", ciLabel: "running" },
+      0,
+      0,
+      null,
+      0
+    )
+    expect(out).toContain("ci")
+    expect(out).toContain("running")
+  })
+})
+
+describe("summarizeGitHubCiRuns", () => {
+  const baseRun = {
+    status: "completed",
+    conclusion: "success",
+    workflowName: "CI",
+    createdAt: "2026-03-12T12:00:00Z",
+    event: "push",
+  }
+
+  it("returns null for empty data", () => {
+    expect(summarizeGitHubCiRuns([])).toBeNull()
+  })
+
+  it("reports running when any latest workflow is active", () => {
+    const summary = summarizeGitHubCiRuns([
+      { ...baseRun, status: "in_progress", conclusion: "" },
+      { ...baseRun, workflowName: "Lint", createdAt: "2026-03-12T12:01:00Z" },
+    ])
+    expect(summary).toEqual({ state: "pending", label: "running" })
+  })
+
+  it("reports failed when the latest workflow conclusion failed", () => {
+    const summary = summarizeGitHubCiRuns([{ ...baseRun, conclusion: "failure" }])
+    expect(summary).toEqual({ state: "failure", label: "failed" })
+  })
+
+  it("reports passing when all latest workflows succeeded", () => {
+    const summary = summarizeGitHubCiRuns([
+      baseRun,
+      { ...baseRun, workflowName: "Lint", createdAt: "2026-03-12T12:01:00Z" },
+    ])
+    expect(summary).toEqual({ state: "success", label: "passing" })
+  })
+
+  it("ignores workflow_run and dynamic events", () => {
+    const summary = summarizeGitHubCiRuns([
+      { ...baseRun, event: "workflow_run", conclusion: "failure" },
+      { ...baseRun, event: "dynamic", conclusion: "failure", createdAt: "2026-03-12T12:01:00Z" },
+    ])
+    expect(summary).toBeNull()
+  })
+})
+
+describe("formatGitHubCiSegment", () => {
+  it("returns an empty segment when no CI state is available", () => {
+    expect(formatGitHubCiSegment("none", "")).toBe("")
+  })
+
+  it("renders a passing CI badge", () => {
+    expect(formatGitHubCiSegment("success", "passing")).toContain("passing")
   })
 })
