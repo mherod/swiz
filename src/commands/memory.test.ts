@@ -150,7 +150,12 @@ describe("swiz memory CLI", () => {
   }, 15_000)
 
   it("shows Gemini hierarchy with --gemini flag", async () => {
-    const { stdout } = await runMemory(["--gemini"])
+    const tmpRoot = join(tmpdir(), `swiz-memory-gemini-${Date.now()}`)
+    const projectDir = join(tmpRoot, "project")
+    mkdirSync(projectDir, { recursive: true })
+    writeFileSync(join(projectDir, "GEMINI.md"), "# Project Gemini rules\n")
+
+    const { stdout } = await runMemory(["--gemini", "--dir", projectDir])
     expect(stdout).toContain("Gemini CLI")
     expect(stdout).toContain("GEMINI.md")
   }, 15_000)
@@ -226,7 +231,20 @@ describe("swiz memory CLI", () => {
   })
 
   it("shows all agent hierarchies when no agent is detected", async () => {
-    const { stdout, exitCode } = await runMemory([])
+    const tmpRoot = join(tmpdir(), `swiz-memory-all-agents-${Date.now()}`)
+    const projectDir = join(tmpRoot, "project")
+    const homeDir = join(tmpRoot, "home")
+    mkdirSync(projectDir, { recursive: true })
+    mkdirSync(join(homeDir, ".claude"), { recursive: true })
+    mkdirSync(join(homeDir, ".gemini"), { recursive: true })
+    mkdirSync(join(homeDir, ".codex"), { recursive: true })
+
+    writeFileSync(join(projectDir, "CLAUDE.md"), "# Claude\n")
+    writeFileSync(join(projectDir, ".cursorrules"), "# Cursor\n")
+    writeFileSync(join(projectDir, "GEMINI.md"), "# Gemini\n")
+    writeFileSync(join(projectDir, "AGENTS.md"), "# Codex\n")
+
+    const { stdout, exitCode } = await runMemory(["--dir", projectDir], { HOME: homeDir })
     expect(exitCode).toBe(0)
     expect(stdout).toContain("Agents: ")
     expect(stdout).toContain("Claude Code")
@@ -326,7 +344,12 @@ describe("swiz memory CLI", () => {
   })
 
   it("explicit agent flag overrides env detection", async () => {
-    const { stdout } = await runMemory(["--gemini"], { CLAUDECODE: "1" })
+    const tmpRoot = join(tmpdir(), `swiz-memory-override-${Date.now()}`)
+    const projectDir = join(tmpRoot, "project")
+    mkdirSync(projectDir, { recursive: true })
+    writeFileSync(join(projectDir, "GEMINI.md"), "# Project Gemini rules\n")
+
+    const { stdout } = await runMemory(["--gemini", "--dir", projectDir], { CLAUDECODE: "1" })
     expect(stdout).toContain("Gemini CLI")
     expect(stdout).not.toContain("Claude Code")
   })
