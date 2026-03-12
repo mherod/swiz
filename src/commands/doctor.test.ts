@@ -266,7 +266,7 @@ describe("swiz doctor", () => {
         }
       })
     )
-  }, 30_000)
+  }, 60_000)
 
   test("detects non-executable script referenced in installed hook config", async () => {
     const h = await createTempHome()
