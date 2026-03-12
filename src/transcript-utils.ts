@@ -737,10 +737,31 @@ export function extractToolResultText(block: {
   return `${prefix}${truncated}`
 }
 
+function isToolUseSummaryBlock(block: unknown): block is {
+  type: "tool_use"
+  name: string
+  input?: Record<string, unknown>
+} {
+  return (
+    !!block &&
+    typeof block === "object" &&
+    (block as { type?: unknown }).type === "tool_use" &&
+    typeof (block as { name?: unknown }).name === "string"
+  )
+}
+
+function isToolResultSummaryBlock(block: unknown): block is {
+  type: "tool_result"
+  content?: string | ContentBlock[]
+  is_error?: boolean
+} {
+  return (
+    !!block && typeof block === "object" && (block as { type?: unknown }).type === "tool_result"
+  )
+}
+
 function summarizeToolCalls(content: unknown[]): string {
-  const calls = content
-    .filter((b: any) => b?.type === "tool_use" && b?.name)
-    .map((b: any) => toolCallLabel(b))
+  const calls = content.filter(isToolUseSummaryBlock).map((b) => toolCallLabel(b))
   if (calls.length === 0) return ""
   return `[Tools: ${calls.join(", ")}]`
 }
@@ -1172,8 +1193,8 @@ export function extractPlainTurns(transcriptText: string): PlainTurn[] {
 
       if (entry.type === "user") {
         const resultTexts = content
-          .filter((b: any) => b?.type === "tool_result")
-          .map((b: any) => extractToolResultText(b))
+          .filter(isToolResultSummaryBlock)
+          .map((b) => extractToolResultText(b))
           .filter(Boolean)
         if (resultTexts.length > 0) {
           const resultSummary = resultTexts.map((t) => `[Result: ${t}]`).join("\n")
@@ -1519,8 +1540,8 @@ export function extractTranscriptData(
 
       if (entry.type === "user") {
         const resultTexts = content
-          .filter((b: any) => b?.type === "tool_result")
-          .map((b: any) => extractToolResultText(b))
+          .filter(isToolResultSummaryBlock)
+          .map((b) => extractToolResultText(b))
           .filter(Boolean)
         if (resultTexts.length > 0) {
           const resultSummary = resultTexts.map((t) => `[Result: ${t}]`).join("\n")

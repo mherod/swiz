@@ -10,7 +10,7 @@
         "noNonNullAssertion": "off"
       },
       "suspicious": {
-        "noExplicitAny": "off",
+        "noExplicitAny": "error",
         "noTemplateCurlyInString": "off",
         "noConsole": "error"
       }

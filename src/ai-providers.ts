@@ -232,8 +232,8 @@ async function promptClaudeObject<T>(
 interface ProviderCapabilities {
   text: (prompt: string, options?: PromptOptions) => Promise<string>
   streamText: (prompt: string, options?: PromptStreamOptions) => Promise<string>
-  // ZodType<any> is intentional: generic T is erased at registry level; callers cast via promptObject<T>
-  object: (prompt: string, schema: ZodType<any>, options?: PromptOptions) => Promise<unknown>
+  // ZodType<unknown> is intentional: generic T is erased at registry level; callers cast via promptObject<T>
+  object: (prompt: string, schema: ZodType<unknown>, options?: PromptOptions) => Promise<unknown>
 }
 
 /**

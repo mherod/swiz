@@ -56,7 +56,6 @@ async function uninstallAgent(agent: AgentDef, dryRun: boolean) {
   }
 
   const json = await file.json()
-  const _hooksKey = agent.wrapsHooks ? "hooks" : agent.hooksKey
   const hooks = agent.wrapsHooks ? json.hooks : json[agent.hooksKey]
 
   if (!hooks || typeof hooks !== "object") {
@@ -73,7 +72,6 @@ async function uninstallAgent(agent: AgentDef, dryRun: boolean) {
     proposed = { ...json, [agent.hooksKey]: cleaned }
   }
 
-  const _oldText = JSON.stringify(json, null, 2)
   const newText = JSON.stringify(proposed, null, 2)
 
   const oldCount = countSwizHooks(hooks as Record<string, unknown>)
