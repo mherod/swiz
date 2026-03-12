@@ -71,7 +71,7 @@ export async function promptAgent(prompt: string, options?: PromptAgentOptions):
       onAbort()
     } else {
       signal.addEventListener("abort", onAbort, { once: true })
-      proc.exited.then(() => {
+      void proc.exited.then(() => {
         signal!.removeEventListener("abort", onAbort)
         clearTimeout(timeoutHandle)
       })

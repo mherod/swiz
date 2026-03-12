@@ -191,9 +191,9 @@ export function summarizeToolInput(input: Record<string, unknown> | undefined): 
     return typeof input.args === "string" ? `${input.skill} ${input.args}` : input.skill
   }
 
-  const pathVal = input.path ?? input.file_path
+  const pathVal = input.path ?? input.file_path ?? input.file ?? input.filePath
   if (typeof pathVal === "string") {
-    return pathVal.split("/").slice(-2).join("/")
+    return pathVal
   }
   if (typeof input.command === "string") {
     return input.command.length > 80 ? `${input.command.slice(0, 77)}...` : input.command

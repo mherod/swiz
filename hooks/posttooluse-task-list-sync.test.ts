@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { getSessionTaskPath, getSessionTasksDir } from "./hook-utils.ts"
@@ -37,8 +37,8 @@ function taskPath(id: string): string {
   )
 }
 
-function readTask(id: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(taskPath(id), "utf-8"))
+async function readTask(id: string): Promise<Record<string, unknown>> {
+  return JSON.parse(await Bun.file(taskPath(id)).text())
 }
 
 function makeTaskListResponse(tasks: { id: string; subject: string; status: string }[]): unknown {
@@ -117,7 +117,7 @@ describe("posttooluse-task-list-sync", () => {
     expect(parsed.hookSpecificOutput.hookEventName).toBe("PostToolUse")
     expect(parsed.hookSpecificOutput.additionalContext).toContain("1 created")
 
-    const task = readTask("20")
+    const task = await readTask("20")
     expect(task.id).toBe("20")
     expect(task.subject).toBe("Brand new task")
     expect(task.status).toBe("in_progress")
@@ -160,7 +160,7 @@ describe("posttooluse-task-list-sync", () => {
     const parsed = JSON.parse(stdout)
     expect(parsed.hookSpecificOutput.additionalContext).toContain("1 updated")
 
-    const task = readTask("12")
+    const task = await readTask("12")
     expect(task.status).toBe("completed")
     expect(task.subject).toBe("Status change task")
   })
@@ -182,7 +182,7 @@ describe("posttooluse-task-list-sync", () => {
     const parsed = JSON.parse(stdout)
     expect(parsed.hookSpecificOutput.additionalContext).toContain("1 updated")
 
-    const task = readTask("13")
+    const task = await readTask("13")
     expect(task.subject).toBe("Renamed subject")
     expect(task.status).toBe("pending")
   })
@@ -209,7 +209,7 @@ describe("posttooluse-task-list-sync", () => {
       ]),
     })
     expect(exitCode).toBe(0)
-    const task = readTask("30")
+    const task = await readTask("30")
     expect(task.status).toBe("completed")
     // Extra fields must be preserved
     expect(task.description).toBe("Important details")
@@ -230,7 +230,7 @@ describe("posttooluse-task-list-sync", () => {
     expect(stdout).not.toBe("")
     const parsed = JSON.parse(stdout)
     expect(parsed.hookSpecificOutput.additionalContext).toContain("1 created")
-    const task = readTask("40")
+    const task = await readTask("40")
     expect(task.subject).toBe("String-encoded task")
   })
 

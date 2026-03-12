@@ -172,8 +172,8 @@ async function runAuditor(
     stderr: "pipe",
     env: { ...env, ...envOverrides },
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
   const raw = await new Response(proc.stdout).text()
   await proc.exited
 
@@ -548,8 +548,8 @@ describe("stop-completion-auditor — CI verification enforcement", () => {
       stderr: "pipe",
       env,
     })
-    proc.stdin.write(payload)
-    proc.stdin.end()
+    void proc.stdin.write(payload)
+    void proc.stdin.end()
     const raw = await new Response(proc.stdout).text()
     await proc.exited
 

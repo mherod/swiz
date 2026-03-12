@@ -7,13 +7,12 @@ import {
   allowPreToolUse,
   denyPreToolUse,
   detectPackageManager,
-  detectRuntime,
   isShellTool,
   skillExists,
 } from "./hook-utils.ts"
 import { SHELL_SEGMENT_BOUNDARY, shellSegmentCommandRe } from "./utils/shell-patterns.ts"
 
-const RUNTIME = detectRuntime()
+const RUNTIME: "bun" | "node" = detectPackageManager() === "bun" ? "bun" : "node"
 const PM = detectPackageManager()
 
 interface Rule {

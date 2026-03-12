@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { getSessionTasksDir } from "./hook-utils.ts"
@@ -76,7 +76,7 @@ describe("pretooluse-task-recovery", () => {
       tool_name: "TaskUpdate",
       tool_input: { taskId: "888", status: "completed" },
     })
-    const stub = JSON.parse(readFileSync(stubPath, "utf8"))
+    const stub = JSON.parse(await Bun.file(stubPath).text())
     expect(stub.id).toBe("888")
     expect(stub.status).toBe("in_progress")
     expect(stub.subject).toContain("#888")

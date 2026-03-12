@@ -221,8 +221,8 @@ async function invokeHook(input: {
     stdout: "pipe",
     stderr: "pipe",
   })
-  proc.stdin.write(JSON.stringify(input))
-  proc.stdin.end()
+  void proc.stdin.write(JSON.stringify(input))
+  void proc.stdin.end()
   const stdout = await new Response(proc.stdout).text()
   const stderr = await new Response(proc.stderr).text()
   await proc.exited
@@ -460,8 +460,8 @@ describe("pretooluse-eslint-config-strength: hook handler logic", () => {
       stdout: "pipe",
       stderr: "pipe",
     })
-    proc.stdin.write("NOT VALID JSON")
-    proc.stdin.end()
+    void proc.stdin.write("NOT VALID JSON")
+    void proc.stdin.end()
     const stderr = await new Response(proc.stderr).text()
     await proc.exited
     expect(proc.exitCode).toBe(1)

@@ -59,8 +59,8 @@ async function runHook(stdinPayload: Record<string, unknown>): Promise<HookResul
     stderr: "pipe",
     cwd: join(import.meta.dir, ".."),
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
 
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),

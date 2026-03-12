@@ -648,6 +648,60 @@ tbody tr:hover {
   color: #ddd7ff;
 }
 
+.session-meta {
+  color: #94a2bc;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.session-btn-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.session-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  width: 100%;
+}
+
+.session-provider {
+  font-weight: 700;
+  color: #c9daf9;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+}
+
+.session-time {
+  color: #8c9baf;
+  font-size: 0.8rem;
+  flex-grow: 1;
+}
+
+.session-details {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.session-id-text {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: #7b8ea8;
+  background: rgba(43, 52, 72, 0.5);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(122, 148, 194, 0.2);
+}
+
 .session-dispatches {
   font-size: 0.72rem;
   font-weight: 700;
@@ -792,8 +846,7 @@ tbody tr:hover {
   cursor: wait;
 }
 
-.project-meta,
-.session-meta {
+.project-meta {
   color: #98a2b4;
   font-size: 0.76rem;
   line-height: 1.5;
@@ -832,7 +885,7 @@ tbody tr:hover {
 
 @media (min-width: 1024px) {
   .bento-settings-page {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1370,6 +1423,52 @@ tbody tr:hover {
   background: rgba(41, 56, 84, 0.48);
 }
 
+.hook-context-caveat {
+  border-color: rgba(255, 184, 108, 0.35);
+  background: rgba(45, 33, 20, 0.45);
+}
+
+.hook-context-caveat .hook-context-summary {
+  color: #ffb86c;
+}
+
+.hook-context-local-command {
+  border-color: rgba(138, 226, 138, 0.35);
+  background: rgba(22, 33, 22, 0.45);
+}
+
+.hook-context-local-command .hook-context-summary {
+  color: #8ae28a;
+}
+
+.local-command-header,
+.local-command-caveat-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+}
+
+.caveat-icon {
+  color: #ffb86c;
+  font-weight: bold;
+  font-size: 0.8rem;
+}
+
+.terminal-icon {
+  color: #8ae28a;
+  font-weight: bold;
+  font-family: monospace;
+}
+
+.command-output {
+  color: #c9e2c9 !important;
+  white-space: pre-wrap !important;
+  max-width: 100% !important;
+  display: block;
+  margin-top: 4px;
+}
+
 .metric-kpis {
   display: flex;
   flex-wrap: wrap;
@@ -1843,9 +1942,57 @@ tbody tr:hover {
   gap: 8px;
 }
 
+.settings-header-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-save-status {
+  font-size: 0.75rem;
+  font-weight: 500;
+  height: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.settings-status-saving {
+  color: #90a4c8;
+  animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.settings-status-ok {
+  color: #8ae28a;
+}
+
+.settings-error {
+  color: #ff7e7e;
+}
+
 .settings-form {
   display: grid;
   gap: 8px;
+}
+
+.settings-layout {
+  display: grid;
+  gap: 32px;
+  align-content: start;
+}
+
+@media (min-width: 768px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.settings-column-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #c4d4f2;
+  margin-bottom: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .settings-fields {
@@ -1883,6 +2030,35 @@ tbody tr:hover {
   color: #dfe8fb;
   padding: 7px 8px;
   font-size: 0.8rem;
+}
+
+.settings-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 32px;
+  cursor: pointer;
+}
+
+.select-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.select-icon {
+  position: absolute;
+  right: 8px;
+  pointer-events: none;
+  color: #a8bee8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.select-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .settings-input:focus-visible,

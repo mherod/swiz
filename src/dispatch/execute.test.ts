@@ -175,7 +175,7 @@ describe("daemon /dispatch endpoint", () => {
   })
 
   afterAll(() => {
-    server?.stop()
+    void server?.stop()
   })
 
   it("health endpoint returns ok", async () => {

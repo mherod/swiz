@@ -61,8 +61,8 @@ async function dispatch({
     },
   })
 
-  proc.stdin.write(JSON.stringify(payload))
-  proc.stdin.end()
+  void proc.stdin.write(JSON.stringify(payload))
+  void proc.stdin.end()
 
   const stdout = (await new Response(proc.stdout).text()).trim()
   const stderr = await new Response(proc.stderr).text()

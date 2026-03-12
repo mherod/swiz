@@ -30,9 +30,103 @@ function isInternalToolName(name: string): boolean {
   return name.trim().toLowerCase() === "structuredoutput"
 }
 
+interface ProjectPerformanceStatsProps {
+  totalDispatches: number
+  avgLatency: number
+  hottestEvent: string
+}
+
+function ProjectPerformanceStats({
+  totalDispatches,
+  avgLatency,
+  hottestEvent,
+}: ProjectPerformanceStatsProps) {
+  return (
+    <>
+      <div className="metric-kpis">
+        {totalDispatches > 0 && (
+          <span className="metric-kpi">
+            <strong>{totalDispatches}</strong> total
+          </span>
+        )}
+        {avgLatency > 0 && (
+          <span className="metric-kpi">
+            <strong>{avgLatency}ms</strong> avg
+          </span>
+        )}
+        {hottestEvent !== "n/a" && (
+          <span className="metric-kpi">
+            <strong>{hottestEvent}</strong> hottest
+          </span>
+        )}
+      </div>
+      <p className="metric-note">Performance metrics for the current project scope.</p>
+    </>
+  )
+}
+
+interface CurrentSessionStatsProps {
+  activeSession: SessionHealth | null
+  loadedMessageCount: number
+  totalToolCalls: number
+  activeDispatch: ActiveHookDispatch | null
+  activeRuntimeSeconds: number
+}
+
+function CurrentSessionStats({
+  activeSession,
+  loadedMessageCount,
+  totalToolCalls,
+  activeDispatch,
+  activeRuntimeSeconds,
+}: CurrentSessionStatsProps) {
+  return (
+    <>
+      <div className="metric-kpis">
+        {(activeSession?.dispatches ?? 0) > 0 && (
+          <span className="metric-kpi">
+            <strong>{activeSession?.dispatches}</strong> dispatches
+          </span>
+        )}
+        {loadedMessageCount > 0 && (
+          <span className="metric-kpi">
+            <strong>{loadedMessageCount}</strong> messages
+          </span>
+        )}
+        {totalToolCalls > 0 && (
+          <span className="metric-kpi">
+            <strong>{totalToolCalls}</strong> tool calls
+          </span>
+        )}
+      </div>
+      {activeDispatch && (
+        <div className="stats-active-badge">
+          <span className="session-active-pulse" />
+          <span className="stats-active-text">
+            {activeDispatch.toolName ? (
+              <>
+                Running <strong>{activeDispatch.toolName}</strong>
+              </>
+            ) : (
+              <>
+                Processing <strong>{activeDispatch.canonicalEvent}</strong>
+              </>
+            )}
+            <span className="stats-active-time"> · {activeRuntimeSeconds}s</span>
+          </span>
+        </div>
+      )}
+      <p className="metric-note">
+        Last activity:{" "}
+        {formatLastActivity(activeSession?.lastMessageAt ?? activeSession?.mtime ?? null)}
+      </p>
+    </>
+  )
+}
+
 export function DashboardStats({
   events = [],
-  cache = {},
+  cache: _cache = {},
   activeSession,
   activeHookDispatches,
   loadedMessageCount,
@@ -59,20 +153,6 @@ export function DashboardStats({
   )
   const hottestEvent = events[0]?.name ?? "n/a"
 
-  // Cache logic
-  const cacheEntries = [
-    { label: "Snapshots", value: cache.snapshotCacheSize ?? 0 },
-    { label: "GitHub", value: cache.ghCacheSize ?? 0 },
-    { label: "Eligibility", value: cache.eligibilityCacheSize ?? 0 },
-    { label: "Transcripts", value: cache.transcriptIndexSize ?? 0 },
-    { label: "Cooldown", value: cache.cooldownRegistrySize ?? 0 },
-    { label: "Git state", value: cache.gitStateCacheSize ?? 0 },
-    { label: "Settings", value: cache.projectSettingsCacheSize ?? 0 },
-    { label: "Manifest", value: cache.manifestCacheSize ?? 0 },
-  ]
-  const totalCacheEntries = cacheEntries.reduce((sum, item) => sum + item.value, 0)
-  const warmCaches = cacheEntries.filter((item) => item.value > 0).length
-
   // Session logic
   const visibleToolStats = sessionToolStats.filter((stat) => !isInternalToolName(stat.name))
   const activeDispatch = activeHookDispatches[0] ?? null
@@ -82,98 +162,30 @@ export function DashboardStats({
     : 0
 
   return (
-    <section className="card panel-dashboard-stats">
-      <div className="stats-header">
-        <h2 className="section-title">Dashboard Overview</h2>
-        <p className="section-subtitle">Real-time session, performance and system metrics</p>
-      </div>
-
+    <div className="panel-dashboard-stats">
       <div className="stats-grid">
         <div className="stats-group">
           <h3 className="stats-group-title">Current Session</h3>
-          <div className="metric-kpis">
-            {(activeSession?.dispatches ?? 0) > 0 && (
-              <span className="metric-kpi">
-                <strong>{activeSession?.dispatches}</strong> dispatches
-              </span>
-            )}
-            {loadedMessageCount > 0 && (
-              <span className="metric-kpi">
-                <strong>{loadedMessageCount}</strong> messages
-              </span>
-            )}
-            {totalToolCalls > 0 && (
-              <span className="metric-kpi">
-                <strong>{totalToolCalls}</strong> tool calls
-              </span>
-            )}
-          </div>
-          {activeDispatch && (
-            <div className="stats-active-badge">
-              <span className="session-active-pulse" />
-              <span className="stats-active-text">
-                {activeDispatch.toolName ? (
-                  <>
-                    Running <strong>{activeDispatch.toolName}</strong>
-                  </>
-                ) : (
-                  <>
-                    Processing <strong>{activeDispatch.canonicalEvent}</strong>
-                  </>
-                )}
-                <span className="stats-active-time"> · {activeRuntimeSeconds}s</span>
-              </span>
-            </div>
-          )}
-          <p className="metric-note">
-            Last activity:{" "}
-            {formatLastActivity(activeSession?.lastMessageAt ?? activeSession?.mtime ?? null)}
-          </p>
+          <CurrentSessionStats
+            activeSession={activeSession}
+            loadedMessageCount={loadedMessageCount}
+            totalToolCalls={totalToolCalls}
+            activeDispatch={activeDispatch}
+            activeRuntimeSeconds={activeRuntimeSeconds}
+          />
         </div>
 
         <div className="stats-divider" />
 
         <div className="stats-group">
           <h3 className="stats-group-title">Project Performance</h3>
-          <div className="metric-kpis">
-            {totalDispatches > 0 && (
-              <span className="metric-kpi">
-                <strong>{totalDispatches}</strong> total
-              </span>
-            )}
-            {avgLatency > 0 && (
-              <span className="metric-kpi">
-                <strong>{avgLatency}ms</strong> avg
-              </span>
-            )}
-            {hottestEvent !== "n/a" && (
-              <span className="metric-kpi">
-                <strong>{hottestEvent}</strong> hottest
-              </span>
-            )}
-          </div>
-          <p className="metric-note">Performance metrics for the current project scope.</p>
-        </div>
-
-        <div className="stats-divider" />
-
-        <div className="stats-group">
-          <h3 className="stats-group-title">Daemon Caches</h3>
-          <div className="metric-kpis">
-            {totalCacheEntries > 0 && (
-              <span className="metric-kpi">
-                <strong>{totalCacheEntries}</strong> entries
-              </span>
-            )}
-            {warmCaches > 0 && (
-              <span className="metric-kpi">
-                <strong>{warmCaches}</strong> warm
-              </span>
-            )}
-          </div>
-          <p className="metric-note">System-wide cache warmth and health.</p>
+          <ProjectPerformanceStats
+            totalDispatches={totalDispatches}
+            avgLatency={avgLatency}
+            hottestEvent={hottestEvent}
+          />
         </div>
       </div>
-    </section>
+    </div>
   )
 }

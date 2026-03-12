@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, writeFileSync } from "node:fs"
 import { extractCwd, hookCooldownPath, isWithinCooldown, markHookCooldown } from "./dispatch.ts"
 
 // Each test uses a unique cwd derived from the test name and PID to avoid
@@ -92,7 +92,7 @@ describe("markHookCooldown", () => {
     const before = Date.now()
     await markHookCooldown(TEST_HOOK, cwd)
     const after = Date.now()
-    const written = parseInt(readFileSync(sentinelPath, "utf8").trim(), 10)
+    const written = parseInt((await Bun.file(sentinelPath).text()).trim(), 10)
     expect(written).toBeGreaterThanOrEqual(before)
     expect(written).toBeLessThanOrEqual(after)
   })

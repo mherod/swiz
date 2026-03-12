@@ -52,7 +52,7 @@ async function run() {
   const [commandName, ...rest] = process.argv.slice(2)
 
   if (!commandName || commandName === "--help" || commandName === "-h") {
-    help.run([])
+    void help.run([])
     return
   }
 
@@ -70,7 +70,7 @@ async function run() {
   }
 
   if (rest[0] === "--help" || rest[0] === "-h") {
-    help.run([commandName])
+    void help.run([commandName])
     return
   }
 

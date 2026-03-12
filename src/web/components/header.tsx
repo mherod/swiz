@@ -8,6 +8,8 @@ interface HeaderProps {
   selectedProjectName: string | null
   activeView?: "dashboard" | "settings"
   onSelectView?: (view: "dashboard" | "settings") => void
+  cacheStatus?: Record<string, number> | null
+  activeAgentProcessProviders?: Record<string, number[]>
 }
 
 export function Header({
@@ -20,7 +22,30 @@ export function Header({
   selectedProjectName,
   activeView = "dashboard",
   onSelectView,
+  cacheStatus,
+  activeAgentProcessProviders = {},
 }: HeaderProps) {
+  // Cache logic
+  const cacheEntries = cacheStatus
+    ? [
+        { label: "Snapshots", value: cacheStatus.snapshotCacheSize ?? 0 },
+        { label: "GitHub", value: cacheStatus.ghCacheSize ?? 0 },
+        { label: "Eligibility", value: cacheStatus.eligibilityCacheSize ?? 0 },
+        { label: "Transcripts", value: cacheStatus.transcriptIndexSize ?? 0 },
+        { label: "Cooldown", value: cacheStatus.cooldownRegistrySize ?? 0 },
+        { label: "Git state", value: cacheStatus.gitStateCacheSize ?? 0 },
+        { label: "Settings", value: cacheStatus.projectSettingsCacheSize ?? 0 },
+        { label: "Manifest", value: cacheStatus.manifestCacheSize ?? 0 },
+      ]
+    : []
+  const totalCacheEntries = cacheEntries.reduce((sum, item) => sum + item.value, 0)
+  const warmCaches = cacheEntries.filter((item) => item.value > 0).length
+
+  const totalRunningAgents = Object.values(activeAgentProcessProviders).reduce(
+    (sum, pids) => sum + pids.length,
+    0
+  )
+
   return (
     <header className="bento-title">
       <div
@@ -94,8 +119,17 @@ export function Header({
           <strong>{activeHooks}</strong> active hooks
         </span>
         <span className="header-chip">
+          <strong>{totalRunningAgents}</strong> running agents
+        </span>
+        <span className="header-chip">
           project: <strong>{selectedProjectName ?? "none"}</strong>
         </span>
+        {totalCacheEntries > 0 && (
+          <span className="header-chip">
+            daemon caches: <strong>{warmCaches}</strong> warm / <strong>{totalCacheEntries}</strong>{" "}
+            total
+          </span>
+        )}
       </div>
     </header>
   )

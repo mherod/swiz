@@ -14,8 +14,8 @@ async function runHook(
     stdout: "pipe",
     stderr: "pipe",
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
 
@@ -339,8 +339,8 @@ describe("pretooluse-banned-commands", () => {
         stdout: "pipe",
         stderr: "pipe",
       })
-      proc.stdin.write(payload)
-      proc.stdin.end()
+      void proc.stdin.write(payload)
+      void proc.stdin.end()
       const out = await new Response(proc.stdout).text()
       await proc.exited
       expect(out.trim()).toBe("")

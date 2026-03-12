@@ -293,11 +293,9 @@ export function hasAiProvider(): boolean {
  *
  * Throws if an explicit override requests a provider that is not available.
  */
-export function activeProvider(override?: AiProviderId): AiProviderId | null {
-  if (process.env.AI_TEST_NO_BACKEND === "1") return null
-
-  const requested = override ?? (process.env.AI_PROVIDER as AiProviderId | undefined)
-
+function handleExplicitlyRequestedProvider(
+  requested: AiProviderId | undefined
+): AiProviderId | null {
   if (requested === "gemini") {
     if (!hasGeminiApiKey()) {
       throw new Error(
@@ -324,6 +322,18 @@ export function activeProvider(override?: AiProviderId): AiProviderId | null {
   }
   if (requested !== undefined) {
     throw new Error(`Unknown AI provider "${requested}". Valid values: gemini, codex, claude.`)
+  }
+  return null
+}
+
+export function activeProvider(override?: AiProviderId): AiProviderId | null {
+  if (process.env.AI_TEST_NO_BACKEND === "1") return null
+
+  const requested = override ?? (process.env.AI_PROVIDER as AiProviderId | undefined)
+
+  const explicitProvider = handleExplicitlyRequestedProvider(requested)
+  if (explicitProvider) {
+    return explicitProvider
   }
 
   // Auto-select
@@ -365,22 +375,10 @@ function availableProviders(override?: AiProviderId): AiProviderId[] {
  * Throws if no provider is available or the request fails.
  */
 export async function promptText(prompt: string, options?: PromptOptions): Promise<string> {
-  // Test seam: AI_TEST_TEXT_RESPONSE is a cross-provider fixture
-  if (process.env.AI_TEST_TEXT_RESPONSE !== undefined) {
-    return process.env.AI_TEST_TEXT_RESPONSE.trim()
+  const testFixture = await handleTestFixturesText(prompt, options)
+  if (testFixture !== undefined) {
+    return testFixture
   }
-  // Backward-compatible Gemini test fixtures used by existing hook tests
-  if (process.env.GEMINI_TEST_TEXT_RESPONSE !== undefined) {
-    return process.env.GEMINI_TEST_TEXT_RESPONSE.trim()
-  }
-  if (process.env.GEMINI_TEST_STREAM_RESPONSE !== undefined) {
-    return process.env.GEMINI_TEST_STREAM_RESPONSE.trim()
-  }
-  if (process.env.GEMINI_TEST_RESPONSE !== undefined) {
-    const parsed = JSON.parse(process.env.GEMINI_TEST_RESPONSE) as { next?: string }
-    return String(parsed.next ?? "").trim()
-  }
-
   const providers = availableProviders(options?.provider)
   if (providers.length === 0) {
     throw new Error(
@@ -402,20 +400,37 @@ export async function promptText(prompt: string, options?: PromptOptions): Promi
   throw lastError
 }
 
-/**
- * Send a single-turn prompt and stream text deltas through `onTextPart`.
- * Returns the complete trimmed text when the stream ends.
- * Dispatches to Gemini (preferred) or Codex CLI based on availability.
- */
-export async function promptStreamText(
+async function handleTestFixturesText(
+  prompt: string,
+  _options?: PromptOptions
+): Promise<string | undefined> {
+  if (process.env.AI_TEST_THROW === "1" || process.env.GEMINI_TEST_THROW === "1") {
+    throw new Error("Simulated AI backend error (AI_TEST_THROW=1)")
+  }
+
+  const captureFile = process.env.AI_TEST_CAPTURE_FILE ?? process.env.GEMINI_TEST_CAPTURE_FILE
+  if (captureFile) await Bun.write(captureFile, prompt)
+
+  const textFixture =
+    process.env.AI_TEST_TEXT_RESPONSE ??
+    process.env.GEMINI_TEST_TEXT_RESPONSE ??
+    process.env.GEMINI_TEST_RESPONSE
+  if (textFixture !== undefined) {
+    return textFixture.trim()
+  }
+
+  return undefined
+}
+
+async function handleTestFixturesStreamText(
   prompt: string,
   options?: PromptStreamOptions
-): Promise<string> {
+): Promise<string | undefined> {
   // Test seam
   if (process.env.AI_TEST_TEXT_RESPONSE !== undefined) {
     const text = process.env.AI_TEST_TEXT_RESPONSE.trim()
     options?.onTextPart?.(text)
-    return text
+    return Promise.resolve(text)
   }
   // Backward-compatible Gemini test fixtures used by existing hook tests.
   // GEMINI_TEST_RESPONSE is treated as raw text here (not { next } format).
@@ -428,7 +443,23 @@ export async function promptStreamText(
     if (captureFile) await Bun.write(captureFile, prompt)
     const text = geminiTextFixture.trim()
     options?.onTextPart?.(text)
-    return text
+    return Promise.resolve(text)
+  }
+  return Promise.resolve(undefined)
+}
+
+/**
+ * Send a single-turn prompt and stream text deltas through `onTextPart`.
+ * Returns the complete trimmed text when the stream ends.
+ * Dispatches to Gemini (preferred) or Codex CLI based on availability.
+ */
+export async function promptStreamText(
+  prompt: string,
+  options?: PromptStreamOptions
+): Promise<string> {
+  const testFixture = await handleTestFixturesStreamText(prompt, options)
+  if (testFixture !== undefined) {
+    return testFixture
   }
 
   const providers = availableProviders(options?.provider)
@@ -452,16 +483,11 @@ export async function promptStreamText(
   throw lastError
 }
 
-/**
- * Send a single-turn prompt and return a structured object validated against the Zod schema.
- * Dispatches to Gemini (preferred) or Codex CLI based on availability.
- * Throws if no provider is available, the request fails, or validation fails.
- */
-export async function promptObject<T>(
+async function handleTestFixturesObject<T>(
   prompt: string,
-  schema: ZodType<T>,
-  options?: PromptOptions
-): Promise<T> {
+  _schema: ZodType<T>,
+  _options?: PromptOptions
+): Promise<T | undefined> {
   // Test seams (cross-provider fixtures):
   if (process.env.AI_TEST_THROW === "1" || process.env.GEMINI_TEST_THROW === "1") {
     throw new Error("Simulated AI backend error (AI_TEST_THROW=1)")
@@ -473,6 +499,23 @@ export async function promptObject<T>(
   const objectFixture = process.env.AI_TEST_RESPONSE ?? process.env.GEMINI_TEST_RESPONSE
   if (objectFixture !== undefined) {
     return JSON.parse(objectFixture) as T
+  }
+  return undefined
+}
+
+/**
+ * Send a single-turn prompt and return a structured object validated against the Zod schema.
+ * Dispatches to Gemini (preferred) or Codex CLI based on availability.
+ * Throws if no provider is available, the request fails, or validation fails.
+ */
+export async function promptObject<T>(
+  prompt: string,
+  schema: ZodType<T>,
+  options?: PromptOptions
+): Promise<T> {
+  const testFixture = await handleTestFixturesObject(prompt, schema, options)
+  if (testFixture !== undefined) {
+    return testFixture
   }
 
   const providers = availableProviders(options?.provider)

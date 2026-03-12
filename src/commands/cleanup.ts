@@ -298,66 +298,92 @@ async function findOldTaskFiles(
     return oldTaskFiles
   }
 
-  for (const sessionId of sessionEntries) {
-    if (allowedSessionIds && !allowedSessionIds.has(sessionId)) continue
-    const sessionDir = join(tasksDir, sessionId)
-    let sessionDirStat: Awaited<ReturnType<typeof stat>>
-    try {
-      sessionDirStat = await stat(sessionDir)
-    } catch {
-      continue
+  async function processTaskFile(
+    sessionId: string,
+    sessionDir: string,
+    file: string,
+    cutoffMs: number
+  ): Promise<OldTaskFileInfo | null> {
+    if (!file.endsWith(".json") || file.startsWith(".") || file === "compact-snapshot.json") {
+      return null
     }
-    if (!sessionDirStat.isDirectory()) continue
-
-    let files: string[] = []
+    const filePath = join(sessionDir, file)
+    let fileStat: Awaited<ReturnType<typeof stat>>
     try {
-      files = await readdir(sessionDir)
+      fileStat = await stat(filePath)
     } catch {
-      continue
+      return null
     }
+    if (!fileStat.isFile()) return null
 
-    for (const file of files) {
-      if (!file.endsWith(".json") || file.startsWith(".") || file === "compact-snapshot.json") {
-        continue
-      }
-      const filePath = join(sessionDir, file)
-      let fileStat: Awaited<ReturnType<typeof stat>>
-      try {
-        fileStat = await stat(filePath)
-      } catch {
-        continue
-      }
-      if (!fileStat.isFile()) continue
-
-      let task:
-        | {
-            id?: string
-            status?: string
-            statusChangedAt?: string
-            completionTimestamp?: string
-          }
-        | undefined
-      try {
-        task = JSON.parse(await readFile(filePath, "utf-8")) as {
+    let task:
+      | {
           id?: string
           status?: string
           statusChangedAt?: string
           completionTimestamp?: string
         }
-      } catch {
-        continue
+      | undefined
+    try {
+      task = JSON.parse(await readFile(filePath, "utf-8")) as {
+        id?: string
+        status?: string
+        statusChangedAt?: string
+        completionTimestamp?: string
       }
-      if (!task.status) continue
-      const taskMs = parseTaskAgeMs(task) ?? fileStat.mtimeMs
-      if (taskMs >= cutoffMs) continue
+    } catch {
+      return null
+    }
+    if (!task.status) return null
+    const taskMs = parseTaskAgeMs(task) ?? fileStat.mtimeMs
+    if (taskMs >= cutoffMs) return null
 
-      oldTaskFiles.push({
-        sessionId,
-        taskId: task.id ?? file.slice(0, -5),
-        status: task.status,
-        path: filePath,
-        sizeBytes: fileStat.size,
-      })
+    return {
+      sessionId,
+      taskId: task.id ?? file.slice(0, -5),
+      status: task.status,
+      path: filePath,
+      sizeBytes: fileStat.size,
+    }
+  }
+
+  async function processSessionDir(
+    sessionId: string,
+    tasksDir: string,
+    cutoffMs: number
+  ): Promise<OldTaskFileInfo[]> {
+    const oldTaskFiles: OldTaskFileInfo[] = []
+    const sessionDir = join(tasksDir, sessionId)
+    let sessionDirStat: Awaited<ReturnType<typeof stat>>
+    try {
+      sessionDirStat = await stat(sessionDir)
+    } catch {
+      return oldTaskFiles
+    }
+    if (!sessionDirStat.isDirectory()) return oldTaskFiles
+
+    let files: string[] = []
+    try {
+      files = await readdir(sessionDir)
+    } catch {
+      return oldTaskFiles
+    }
+
+    for (const file of files) {
+      const taskFile = await processTaskFile(sessionId, sessionDir, file, cutoffMs)
+      if (taskFile) {
+        oldTaskFiles.push(taskFile)
+      }
+    }
+    return oldTaskFiles
+  }
+
+  for (const sessionId of sessionEntries) {
+    if (allowedSessionIds && !allowedSessionIds.has(sessionId)) continue
+
+    const sessionTasks = await processSessionDir(sessionId, tasksDir, cutoffMs)
+    if (sessionTasks.length > 0) {
+      oldTaskFiles.push(...sessionTasks)
     }
   }
 

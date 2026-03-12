@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**94 hooks. 11 event types. Every agent. Zero compromises.**
+**95 hooks. 11 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -124,7 +124,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (46)
+### PreToolUse (47)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -167,6 +167,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-pr-age-gate.ts` | Blocks `gh pr merge` if the PR has been open for less than the configured grace period (default: 10 minutes; configurable via `swiz settings set pr-age-gate <minutes>`; set to 0 to disable). Enforces a minimum visibility period so team members have time to review. Redirects the agent to other work instead of waiting. |
 | `pretooluse-repeated-lint-test.ts` | Blocks consecutive same-kind `bun test` / `bun run lint` / `bun run build` calls when no file edit (Edit, Write, or NotebookEdit) occurred between them. Also handles parallel tool-call dispatch correctly by tracking the JSONL source line. Prevents the wasteful pattern of re-running the same command with different output filters instead of reading the full output. When blocking, the denial message includes a concrete transcript file reference (path and source line index) so agents can locate the prior output directly; if the output could not be extracted, guidance is softened accordingly. |
 | `pretooluse-no-secrets.ts` | Blocks Edit/Write/NotebookEdit operations when the proposed content contains likely secret material — private keys, API tokens (AWS, GitHub, Slack, OpenAI, Stripe), or generic credential assignments. Eager counterpart to `stop-secret-scanner.ts`: prevents secrets from landing on disk rather than catching them at commit time. Test files are excluded to allow fixture credentials. |
+| `pretooluse-bun-file-api-enforce.ts` | Blocks `readFileSync` / `writeFileSync` calls when the file already uses Bun APIs (`Bun.file`, `Bun.write`, etc.) or has a bun shebang. Enforces using `Bun.file(path).text()` and `Bun.write()` instead of node:fs sync APIs in Bun-native files. |
 | `pretooluse-debug-statements.ts` | Blocks Edit/Write/NotebookEdit when the write introduces net-new debug output calls (`console.log`, `console.debug`, `console.trace`, `debugger`, Python `print()`, Ruby `binding.pry`). Uses a delta check (new count vs old count) to avoid false positives when editing files that already contain debug statements. Mirrors the allowlists of `stop-debug-statements.ts`: test files, hook/command infrastructure, generated files, and ESLint config files are exempt. |
 | `pretooluse-todo-tracker.ts` | Blocks Edit/Write/NotebookEdit when the write introduces net-new TODO/FIXME/HACK/XXX/WORKAROUND debt markers in comment contexts. Uses a delta check (new count vs old count) to avoid false positives when editing files that already contain such markers. Excludes regex literals, non-comment contexts, hook source files, test files, and generated files — mirroring `stop-todo-tracker.ts` semantics. The stop hook remains as a backstop for bypassed paths. |
 | `pretooluse-large-files.ts` | Blocks Edit/Write operations that would create or update a file exceeding the configured large-file size threshold (default 500KB) when the path is not covered by a Git LFS rule in `.gitattributes`. Reads `.gitattributes` from disk so uncommitted LFS rules added in the same session are respected. For Edit, projects the result of old→new replacement before measuring. For NotebookEdit, size is not determinable pre-write and is skipped. Threshold is configurable via `swiz settings set large-file-size-kb <value>` at global or project scope. |

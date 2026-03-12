@@ -104,8 +104,8 @@ async function runHook(repoDir: string, opts: RunOptions = {}): Promise<HookResu
       GH_MOCK_ISSUES: JSON.stringify(issues),
     },
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  await proc.stdin.write(payload)
+  await proc.stdin.end()
 
   const raw = await new Response(proc.stdout).text()
   await proc.exited
@@ -212,8 +212,8 @@ describe("E2E stop-personal-repo-issues: early-exit guards", () => {
       stderr: "pipe",
       env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ""}` },
     })
-    proc.stdin.write(JSON.stringify({ cwd: dir, session_id: "test" }))
-    proc.stdin.end()
+    void proc.stdin.write(JSON.stringify({ cwd: dir, session_id: "test" }))
+    void proc.stdin.end()
     const raw = await new Response(proc.stdout).text()
     await proc.exited
     expect(raw.trim()).toBe("")

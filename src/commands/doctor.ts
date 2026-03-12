@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, readdir, stat } from "node:fs/promises"
+import { chmod, cp, mkdir, readdir, rename, rm, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { AGENTS, type AgentDef, CONFIGURABLE_AGENTS, translateEvent } from "../agents.ts"
 import { suggest } from "../fuzzy.ts"
@@ -432,6 +432,7 @@ async function findInvalidSkillEntries(
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
       if (entry.name.startsWith(".")) continue // skip hidden/temp dirs (e.g. .unison.*)
+      if (DISABLED_BY_SWIZ_RE.test(entry.name)) continue // skip disabled skill dirs
       const entryDir = join(skillDir, entry.name)
       const skillPath = join(entryDir, "SKILL.md")
       const file = Bun.file(skillPath)
@@ -552,11 +553,18 @@ interface InvalidSkillFixFailure {
   originalDir: string
   error: string
 }
+interface DisabledSkillRestore {
+  name: string
+  oldDir: string
+  newDir: string
+}
 
 const NAME_MISMATCH_PREFIX = 'frontmatter name "'
 const MISSING_SKILL_MD_REASON = "missing SKILL.md"
 const MISSING_CATEGORY_REASON = "missing category field"
 const INVALID_CATEGORY_REASON_PREFIX = 'unknown category "'
+/** Matches directories renamed by swiz to disable a skill, e.g. "my-skill.disabled-by-swiz-20260312143027". */
+const DISABLED_BY_SWIZ_RE = /\.disabled-by-swiz-\d{14}$/
 /** Default description injected by swiz doctor --fix into generated SKILL.md stubs. */
 const SKILL_PLACEHOLDER_DESCRIPTION = "Add a description for this skill."
 /** Default category used by swiz doctor --fix when no category field is present or it is invalid. */
@@ -625,10 +633,60 @@ async function fixCategoryValue(entry: InvalidSkillEntry): Promise<boolean> {
   }
 }
 
+/** Scan all skill dirs for .disabled-by-swiz-* directories that need restoring. */
+async function findDisabledSkillDirs(): Promise<DisabledSkillRestore[]> {
+  const restores: DisabledSkillRestore[] = []
+  for (const skillDir of SKILL_PRECEDENCE) {
+    let entries: import("node:fs").Dirent[]
+    try {
+      entries = await readdir(skillDir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      if (!DISABLED_BY_SWIZ_RE.test(entry.name)) continue
+      const baseName = entry.name.replace(DISABLED_BY_SWIZ_RE, "")
+      restores.push({
+        name: baseName,
+        oldDir: join(skillDir, entry.name),
+        newDir: join(skillDir, baseName),
+      })
+    }
+  }
+  return restores
+}
+
+/** Restore a disabled skill directory: rename dir back and fix frontmatter name.
+ *  If the target directory already exists, the disabled directory is removed
+ *  (the existing non-disabled version is kept). */
+async function restoreDisabledSkillDir(restore: DisabledSkillRestore): Promise<boolean> {
+  try {
+    // If target already exists, just remove the disabled directory
+    const targetExists = await Bun.file(join(restore.newDir, "SKILL.md")).exists()
+    if (targetExists) {
+      await rm(restore.oldDir, { recursive: true, force: true })
+      return true
+    }
+    await rename(restore.oldDir, restore.newDir)
+    const skillPath = join(restore.newDir, "SKILL.md")
+    const file = Bun.file(skillPath)
+    if (await file.exists()) {
+      const content = await file.text()
+      const updated = content.replace(/^(name:\s*)["']?[^"'\n]+["']?/m, `$1${restore.name}`)
+      await Bun.write(skillPath, updated)
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** Repair invalid skill entries in-place.
  *  - missing SKILL.md    → generate a default stub
  *  - name mismatch       → update name: field in place
  *  - missing category    → insert category: uncategorized after description line
+ *  - disabled dirs       → rename back to base name and fix frontmatter
  *  - everything else     → reported as unfixable (no auto-disable) */
 async function fixInvalidSkillEntries(entries: InvalidSkillEntry[]): Promise<{
   nameFixed: InvalidSkillNameFixSuccess[]
@@ -1338,6 +1396,24 @@ export const doctorCommand: Command = {
           invalidResult.categoryFixed.length > 0
         )
           console.log()
+      }
+
+      // Restore .disabled-by-swiz-* directories (separate from invalid entry fixes)
+      const disabledDirs = await findDisabledSkillDirs()
+      if (disabledDirs.length > 0) {
+        console.log(`  ${BOLD}Restoring disabled skill directories...${RESET}\n`)
+        for (const restore of disabledDirs) {
+          if (await restoreDisabledSkillDir(restore)) {
+            console.log(
+              `  ${GREEN}✓${RESET} ${restore.name}: restored from ${displayPath(restore.oldDir)}`
+            )
+          } else {
+            console.log(
+              `  ${RED}✗${RESET} ${restore.name}: could not restore ${displayPath(restore.oldDir)}`
+            )
+          }
+        }
+        console.log()
       }
 
       if (pluginCacheInfos.length > 0) {

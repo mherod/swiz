@@ -948,15 +948,15 @@ describe("detectPackageManager()", () => {
 })
 
 describe("detectRuntime()", () => {
-  it("returns 'bun' or 'node'", () => {
-    const result = detectRuntime()
+  it("returns 'bun' or 'node'", async () => {
+    const result = await detectRuntime()
     expect(result === "bun" || result === "node").toBe(true)
   })
 })
 
 describe("detectPkgRunner()", () => {
-  it("returns a known runner command", () => {
-    const result = detectPkgRunner()
+  it("returns a known runner command", async () => {
+    const result = await detectPkgRunner()
     expect(["bunx", "pnpm dlx", "yarn dlx", "npx"].includes(result)).toBe(true)
   })
 })

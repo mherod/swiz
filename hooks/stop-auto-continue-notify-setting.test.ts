@@ -73,8 +73,8 @@ async function runStopHook(opts: {
     },
   })
 
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
   await new Response(proc.stdout).text()
   await new Response(proc.stderr).text()
   await proc.exited

@@ -4,7 +4,7 @@
 // layer (src/) and the hook layer (hooks/). Extracted from hooks/hook-utils.ts
 // to remove the src-to-hooks coupling (issue #85).
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { resolveSpawnCwd } from "./cwd.ts"
@@ -133,15 +133,13 @@ function ghFallbackCachePath(args: string[], cwd: string): string {
   return join(GH_FALLBACK_CACHE_DIR, `${key}.json`)
 }
 
-function readGhFallbackCache<T>(
+async function readGhFallbackCache<T>(
   args: string[],
   cwd: string,
   includeStale = false
-): { value: T; stale: boolean } | null {
+): Promise<{ value: T; stale: boolean } | null> {
   try {
-    const parsed = JSON.parse(
-      readFileSync(ghFallbackCachePath(args, cwd), "utf8")
-    ) as GhFallbackCacheEntry
+    const parsed = (await Bun.file(ghFallbackCachePath(args, cwd)).json()) as GhFallbackCacheEntry
     if (typeof parsed !== "object" || parsed === null) return null
     const expiresAt = Number((parsed as { expiresAt?: unknown }).expiresAt)
     if (!Number.isFinite(expiresAt)) return null
@@ -153,14 +151,19 @@ function readGhFallbackCache<T>(
   }
 }
 
-function writeGhFallbackCache(args: string[], cwd: string, ttlMs: number, value: unknown): void {
+async function writeGhFallbackCache(
+  args: string[],
+  cwd: string,
+  ttlMs: number,
+  value: unknown
+): Promise<void> {
   try {
     ensureGhFallbackCacheDir()
     const payload: GhFallbackCacheEntry = {
       expiresAt: Date.now() + Math.max(0, ttlMs),
       value,
     }
-    writeFileSync(ghFallbackCachePath(args, cwd), JSON.stringify(payload))
+    await Bun.write(ghFallbackCachePath(args, cwd), JSON.stringify(payload))
   } catch {
     // Best-effort file cache.
   }
@@ -188,8 +191,8 @@ export async function ghJsonViaDaemon<T>(
   const ttlMs = options.ttlMs ?? GH_FALLBACK_CACHE_TTL_MS
   if (shouldBypassDaemon) {
     const direct = await ghJson<T>(args, cwd)
-    if (direct !== null) writeGhFallbackCache(args, cwd, ttlMs, direct)
-    if (direct === null) return readGhFallbackCache<T>(args, cwd, true)?.value ?? null
+    if (direct !== null) await writeGhFallbackCache(args, cwd, ttlMs, direct)
+    if (direct === null) return (await readGhFallbackCache<T>(args, cwd, true))?.value ?? null
     return direct
   }
 
@@ -203,21 +206,21 @@ export async function ghJsonViaDaemon<T>(
     if (!resp.ok) {
       const direct = await ghJson<T>(args, cwd)
       if (direct !== null) {
-        writeGhFallbackCache(args, cwd, ttlMs, direct)
+        await writeGhFallbackCache(args, cwd, ttlMs, direct)
         return direct
       }
-      return readGhFallbackCache<T>(args, cwd, true)?.value ?? null
+      return (await readGhFallbackCache<T>(args, cwd, true))?.value ?? null
     }
     const data = (await resp.json()) as { hit: boolean; value: T | null }
-    if (data.value !== null) writeGhFallbackCache(args, cwd, ttlMs, data.value)
+    if (data.value !== null) await writeGhFallbackCache(args, cwd, ttlMs, data.value)
     return data.value
   } catch {
     const direct = await ghJson<T>(args, cwd)
     if (direct !== null) {
-      writeGhFallbackCache(args, cwd, ttlMs, direct)
+      await writeGhFallbackCache(args, cwd, ttlMs, direct)
       return direct
     }
-    return readGhFallbackCache<T>(args, cwd, true)?.value ?? null
+    return (await readGhFallbackCache<T>(args, cwd, true))?.value ?? null
   }
 }
 
@@ -335,7 +338,9 @@ export function getCanonicalPathHash(cwd: string): string {
  * Walk up from `cwd` to find the `.git` directory (or file for worktrees).
  * Returns `{ gitDir, workTree }` or `null` if not inside a git repo.
  */
-export function resolveGitPaths(cwd: string): { gitDir: string; workTree: string } | null {
+export async function resolveGitPaths(
+  cwd: string
+): Promise<{ gitDir: string; workTree: string } | null> {
   let dir = cwd
   while (true) {
     const candidate = joinGitPath(dir)
@@ -343,7 +348,7 @@ export function resolveGitPaths(cwd: string): { gitDir: string; workTree: string
       try {
         const st = statSync(candidate)
         if (st.isDirectory()) return { gitDir: candidate, workTree: dir }
-        const content = readFileSync(candidate, "utf8").trim()
+        const content = (await Bun.file(candidate).text()).trim()
         if (content.startsWith("gitdir: ")) {
           return { gitDir: content.slice("gitdir: ".length).trim(), workTree: dir }
         }
@@ -367,23 +372,26 @@ export function resolveGitPaths(cwd: string): { gitDir: string; workTree: string
  * committed or shared via `.gitignore`. Silently no-ops when `cwd` is not
  * inside a git repository or any I/O operation fails.
  */
-export function ensureGitExclude(cwd: string, entry: string): void {
+export async function ensureGitExclude(cwd: string, entry: string): Promise<void> {
   try {
-    const paths = resolveGitPaths(cwd)
+    const paths = await resolveGitPaths(cwd)
     if (!paths) return
     const infoDir = join(paths.gitDir, "info")
     const excludePath = join(infoDir, "exclude")
     mkdirSync(infoDir, { recursive: true })
     let existing = ""
     try {
-      existing = readFileSync(excludePath, "utf8")
+      const file = Bun.file(excludePath)
+      if (await file.exists()) {
+        existing = await file.text()
+      }
     } catch {
-      // File does not exist yet — start with empty string
+      // File does not exist yet or cannot be read — start with empty string
     }
     const lines = existing.split("\n")
     if (lines.some((l) => l.trim() === entry.trim())) return
     const appended = existing.endsWith("\n") || existing === "" ? existing : `${existing}\n`
-    writeFileSync(excludePath, `${appended}${entry}\n`)
+    await Bun.write(excludePath, `${appended}${entry}\n`)
   } catch {
     // Non-fatal: silently ignore all failures
   }
@@ -410,7 +418,7 @@ export interface GitBranchStatus {
  * is not inside a git repository or no branch can be determined.
  */
 export async function getGitBranchStatus(cwd: string): Promise<GitBranchStatus | null> {
-  const gitPaths = resolveGitPaths(cwd)
+  const gitPaths = await resolveGitPaths(cwd)
   if (!gitPaths) return null
 
   let branch = ""

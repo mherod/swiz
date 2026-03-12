@@ -183,8 +183,8 @@ describe("pretooluse-no-as-any — CLI subprocess (import.meta.main guard)", () 
       stdout: "pipe",
       stderr: "pipe",
     })
-    proc.stdin.write(JSON.stringify(payload))
-    proc.stdin.end()
+    void proc.stdin.write(JSON.stringify(payload))
+    void proc.stdin.end()
     const stdout = await new Response(proc.stdout).text()
     await proc.exited
     return { stdout, exitCode: proc.exitCode ?? -1 }
@@ -274,8 +274,8 @@ describe("pretooluse-no-as-any — CLI failure paths", () => {
       stdout: "pipe",
       stderr: "pipe",
     })
-    proc.stdin.write(input)
-    proc.stdin.end()
+    await proc.stdin.write(input)
+    await proc.stdin.end()
     // Drain both streams concurrently to avoid pipe-buffer deadlock
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -354,7 +354,7 @@ describe("concurrent stdout+stderr drain — pipe-buffer stress", () => {
       stdout: "pipe",
       stderr: "pipe",
     })
-    proc.stdin.end()
+    await proc.stdin.end()
     // Must drain concurrently — sequential reads would deadlock above pipe-buffer size
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -455,7 +455,7 @@ describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
         stdout: "pipe",
         stderr: "pipe",
       })
-      proc.stdin.end()
+      await proc.stdin.end()
 
       // Await exit BEFORE reading any stream — the definitive eager-buffer proof.
       await proc.exited
@@ -483,7 +483,7 @@ describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
         stdout: "pipe",
         stderr: "pipe",
       })
-      proc.stdin.end()
+      await proc.stdin.end()
 
       let capturedStdout = ""
       let capturedStderr = ""
@@ -515,7 +515,7 @@ describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
       stdout: "pipe",
       stderr: "pipe",
     })
-    proc.stdin.end()
+    await proc.stdin.end()
 
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -602,8 +602,8 @@ describe("pretooluse-no-as-any — NFKC homoglyph bypass", () => {
       stdout: "pipe",
       stderr: "pipe",
     })
-    proc.stdin.write(JSON.stringify(payload))
-    proc.stdin.end()
+    void proc.stdin.write(JSON.stringify(payload))
+    void proc.stdin.end()
     const stdout = await new Response(proc.stdout).text()
     await proc.exited
     return { stdout, exitCode: proc.exitCode ?? -1 }

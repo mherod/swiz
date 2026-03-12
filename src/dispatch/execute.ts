@@ -49,34 +49,91 @@ function parsePayload(payloadStr: string): {
 
 export function summarizeToolInput(input: Record<string, unknown> | undefined): string {
   if (!input) return ""
-  if (typeof input.subject === "string") {
-    return input.subject.length > 60 ? `${input.subject.slice(0, 57)}...` : input.subject
-  }
-  if (typeof input.taskId === "string") {
-    const parts = [`#${input.taskId}`]
-    if (typeof input.status === "string") parts.push(input.status)
-    return parts.join(" -> ")
-  }
-  if (typeof input.skill === "string") {
-    return typeof input.args === "string" ? `${input.skill} ${input.args}` : input.skill
+  const safeInput = input
+
+  function getSubjectSummary(): string | undefined {
+    if (typeof safeInput.subject === "string") {
+      return safeInput.subject.length > 60
+        ? `${safeInput.subject.slice(0, 57)}...`
+        : safeInput.subject
+    }
+    return undefined
   }
 
-  const pathVal = (input.path ?? input.file_path) as string | undefined
-  if (typeof pathVal === "string") {
-    return pathVal.split("/").slice(-2).join("/")
+  function getTaskSummary(): string | undefined {
+    if (typeof safeInput.taskId === "string") {
+      const parts = [`#${safeInput.taskId}`]
+      if (typeof safeInput.status === "string") parts.push(safeInput.status)
+      return parts.join(" -> ")
+    }
+    return undefined
   }
-  if (typeof input.command === "string") {
-    return input.command.length > 80 ? `${input.command.slice(0, 77)}...` : input.command
+
+  function getSkillSummary(): string | undefined {
+    if (typeof safeInput.skill === "string") {
+      return typeof safeInput.args === "string"
+        ? `${safeInput.skill} ${safeInput.args}`
+        : safeInput.skill
+    }
+    return undefined
   }
-  if (typeof input.pattern === "string") return input.pattern
-  if (typeof input.query === "string") {
-    return input.query.length > 60 ? `${input.query.slice(0, 57)}...` : input.query
+
+  function getPathSummary(): string | undefined {
+    const pathVal = (safeInput.path ??
+      safeInput.file_path ??
+      safeInput.file ??
+      safeInput.filePath) as string | undefined
+    if (typeof pathVal === "string") {
+      return pathVal
+    }
+    return undefined
   }
-  if (typeof input.content === "string") return `${input.content.length} chars`
-  if (typeof input.old_string === "string") {
-    return `replacing ${input.old_string.split("\n").length} lines`
+
+  function getCommandSummary(): string | undefined {
+    if (typeof safeInput.command === "string") {
+      return safeInput.command.length > 80
+        ? `${safeInput.command.slice(0, 77)}...`
+        : safeInput.command
+    }
+    return undefined
   }
-  return ""
+
+  function getPatternSummary(): string | undefined {
+    if (typeof safeInput.pattern === "string") return safeInput.pattern
+    return undefined
+  }
+
+  function getQuerySummary(): string | undefined {
+    if (typeof safeInput.query === "string") {
+      return safeInput.query.length > 60 ? `${safeInput.query.slice(0, 57)}...` : safeInput.query
+    }
+    return undefined
+  }
+
+  function getContentSummary(): string | undefined {
+    if (typeof safeInput.content === "string") return `${safeInput.content.length} chars`
+    return undefined
+  }
+
+  function getOldStringSummary(): string | undefined {
+    if (typeof safeInput.old_string === "string") {
+      return `replacing ${safeInput.old_string.split("\n").length} lines`
+    }
+    return undefined
+  }
+
+  return (
+    getSubjectSummary() ??
+    getTaskSummary() ??
+    getSkillSummary() ??
+    getPathSummary() ??
+    getCommandSummary() ??
+    getPatternSummary() ??
+    getQuerySummary() ??
+    getContentSummary() ??
+    getOldStringSummary() ??
+    ""
+  )
 }
 
 function getHookContext(

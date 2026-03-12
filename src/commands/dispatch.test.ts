@@ -31,8 +31,8 @@ async function dispatch(
       env: { ...process.env, ...options.env },
     }
   )
-  proc.stdin.write(JSON.stringify(payload))
-  proc.stdin.end()
+  void proc.stdin.write(JSON.stringify(payload))
+  void proc.stdin.end()
   const stdout = await new Response(proc.stdout).text()
   const stderr = await new Response(proc.stderr).text()
   await proc.exited
@@ -162,7 +162,7 @@ describe("dispatch routing", () => {
       expect(healthHits).toBe(1)
       expect(dispatchHits).toBe(1)
     } finally {
-      server.stop()
+      void server.stop()
     }
   })
 
@@ -200,7 +200,7 @@ describe("dispatch routing", () => {
       expect(healthHits).toBe(1)
       expect(dispatchHits).toBe(0)
     } finally {
-      server.stop()
+      void server.stop()
     }
   }, 15_000)
 })
@@ -221,8 +221,8 @@ describe("dispatch replay", () => {
         AI_TEST_NO_BACKEND: "1",
       },
     })
-    proc.stdin.write(JSON.stringify(payload))
-    proc.stdin.end()
+    void proc.stdin.write(JSON.stringify(payload))
+    void proc.stdin.end()
     const stdout = await new Response(proc.stdout).text()
     const stderr = await new Response(proc.stderr).text()
     await proc.exited
@@ -289,7 +289,7 @@ describe("dispatch replay", () => {
       stdout: "pipe",
       stderr: "pipe",
     })
-    proc.stdin.end()
+    void proc.stdin.end()
     await new Response(proc.stdout).text()
     const stderr = await new Response(proc.stderr).text()
     await proc.exited

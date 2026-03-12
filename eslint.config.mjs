@@ -18,6 +18,10 @@ export default tseslint.config(
     files: ["**/*.{js,mjs,cjs,ts,tsx,jsx}"],
     languageOptions: {
       parser: tseslint.parser,
+      parserOptions: {
+        project: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
       globals: {
         ...globals.node,
         ...globals.browser,
@@ -36,6 +40,11 @@ export default tseslint.config(
           varsIgnorePattern: "^_",
           caughtErrorsIgnorePattern: "^_",
         },
+      ],
+      "@typescript-eslint/no-floating-promises": ["error", { ignoreVoid: true }],
+      "@typescript-eslint/no-misused-promises": [
+        "error",
+        { checksVoidReturn: { arguments: false, attributes: false } },
       ],
       "max-len": [
         COMPLEXITY_WARN,

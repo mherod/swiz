@@ -6,7 +6,7 @@
  * ~/.swiz/pr-poll-state.json so the poller never replays old notifications.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 import { getPrPollStatePath } from "./settings.ts"
 
@@ -30,11 +30,11 @@ export interface PrNotification {
   updated_at: string
 }
 
-export function readPrPollState(home: string): PrPollState {
+export async function readPrPollState(home: string): Promise<PrPollState> {
   const path = getPrPollStatePath(home)
   try {
     if (!path) throw new Error("no home")
-    const raw = readFileSync(path, "utf8")
+    const raw = await Bun.file(path).text()
     const parsed = JSON.parse(raw) as Partial<PrPollState>
     if (parsed.lastPolledAt) return { lastPolledAt: parsed.lastPolledAt }
   } catch {
@@ -60,7 +60,7 @@ export function writePrPollState(home: string, state: PrPollState): void {
  * Requires `gh` CLI authenticated.
  */
 export async function fetchNewPrNotifications(home: string): Promise<PrNotification[]> {
-  const state = readPrPollState(home)
+  const state = await readPrPollState(home)
   const since = encodeURIComponent(state.lastPolledAt)
 
   const proc = Bun.spawn(

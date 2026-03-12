@@ -877,7 +877,7 @@ export async function writeProjectState(cwd: string, state: ProjectState): Promi
   history.push({ from: previousState, to: state, timestamp: new Date().toISOString() })
 
   await Bun.write(path, `${JSON.stringify({ state, stateHistory: history }, null, 2)}\n`)
-  ensureGitExclude(cwd, ".swiz/")
+  await ensureGitExclude(cwd, ".swiz/")
 }
 
 export async function writeProjectSettings(
@@ -896,7 +896,7 @@ export async function writeProjectSettings(
     }
   }
   await Bun.write(path, JSON.stringify({ ...existing, ...updates }, null, 2))
-  ensureGitExclude(cwd, ".swiz/")
+  await ensureGitExclude(cwd, ".swiz/")
   return path
 }
 

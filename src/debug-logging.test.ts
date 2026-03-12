@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { readdirSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import { describe, expect, it } from "vitest"
 
@@ -110,14 +110,14 @@ describe("debugLog enforcement", () => {
     expect(sourceFiles.length).toBeGreaterThan(5)
   })
 
-  it("no non-allowlisted file uses console.error or console.warn", () => {
+  it("no non-allowlisted file uses console.error or console.warn", async () => {
     const violations: string[] = []
 
     for (const filePath of sourceFiles) {
       const rel = relative(SRC_ROOT, filePath)
       if (STDERR_ALLOWLIST.has(rel)) continue
 
-      const content = readFileSync(filePath, "utf8")
+      const content = await Bun.file(filePath).text()
       const lines = content.split("\n")
 
       for (let i = 0; i < lines.length; i++) {
@@ -140,14 +140,14 @@ describe("debugLog enforcement", () => {
     ).toEqual([])
   })
 
-  it("no non-allowlisted file uses console.log or console.info", () => {
+  it("no non-allowlisted file uses console.log or console.info", async () => {
     const violations: string[] = []
 
     for (const filePath of sourceFiles) {
       const rel = relative(SRC_ROOT, filePath)
       if (STDOUT_ALLOWLIST.has(rel)) continue
 
-      const content = readFileSync(filePath, "utf8")
+      const content = await Bun.file(filePath).text()
       const lines = content.split("\n")
 
       for (let i = 0; i < lines.length; i++) {
@@ -170,7 +170,7 @@ describe("debugLog enforcement", () => {
     ).toEqual([])
   })
 
-  it("all non-allowlisted files that import debugLog use src/debug.ts", () => {
+  it("all non-allowlisted files that import debugLog use src/debug.ts", async () => {
     const wrongImports: string[] = []
 
     for (const filePath of sourceFiles) {
@@ -178,7 +178,7 @@ describe("debugLog enforcement", () => {
       if (STDERR_ALLOWLIST.has(rel)) continue
       if (rel === "src/debug.ts") continue
 
-      const content = readFileSync(filePath, "utf8")
+      const content = await Bun.file(filePath).text()
 
       // Check for local debugLog definitions (should import from debug.ts)
       if (/(?:const|let|var)\s+debugLog\b/.test(content)) {
@@ -218,7 +218,7 @@ describe("debugLog enforcement", () => {
     ).toEqual([])
   })
 
-  it("STDERR_ALLOWLIST files use stderrLog instead of bare console.error", () => {
+  it("STDERR_ALLOWLIST files use stderrLog instead of bare console.error", async () => {
     // src/debug.ts is exempt — it defines stderrLog itself using console.error
     const EXEMPT = new Set(["src/debug.ts"])
     const violations: string[] = []
@@ -226,7 +226,7 @@ describe("debugLog enforcement", () => {
     for (const rel of STDERR_ALLOWLIST.keys()) {
       if (EXEMPT.has(rel)) continue
       const full = join(SRC_ROOT, rel)
-      const content = readFileSync(full, "utf8")
+      const content = await Bun.file(full).text()
       const lines = content.split("\n")
 
       for (let i = 0; i < lines.length; i++) {
@@ -248,7 +248,7 @@ describe("debugLog enforcement", () => {
     ).toEqual([])
   })
 
-  it("stdout-only files must not import or call stderrLog", () => {
+  it("stdout-only files must not import or call stderrLog", async () => {
     // Stdout-only files are discovered DYNAMICALLY at test time by diffing the two
     // allowlists: any file in STDOUT_ALLOWLIST but NOT in STDERR_ALLOWLIST is
     // stdout-only. No static list is maintained — adding a new file to STDOUT_ALLOWLIST
@@ -264,7 +264,7 @@ describe("debugLog enforcement", () => {
       if (STDERR_ALLOWLIST.has(rel)) continue // dual-listed files are allowed stderrLog
 
       const full = join(SRC_ROOT, rel)
-      const content = readFileSync(full, "utf8")
+      const content = await Bun.file(full).text()
       const lines = content.split("\n")
 
       for (let i = 0; i < lines.length; i++) {

@@ -129,4 +129,4 @@ async function main(): Promise<void> {
   emitContext("PostToolUse", successContext, input.cwd)
 }
 
-if (import.meta.main) main()
+if (import.meta.main) void main()

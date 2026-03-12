@@ -43,28 +43,28 @@ describe("help.ts", () => {
   describe("help command with no arguments", () => {
     it("shows swiz header", () => {
       const help = createHelpCommand(commands)
-      help.run([])
+      void help.run([])
 
       expect(logOutput.some((line) => line.includes("swiz - CLI toolkit"))).toBe(true)
     })
 
     it("shows usage information", () => {
       const help = createHelpCommand(commands)
-      help.run([])
+      void help.run([])
 
       expect(logOutput.some((line) => line.includes("Usage: swiz <command>"))).toBe(true)
     })
 
     it("shows Commands header", () => {
       const help = createHelpCommand(commands)
-      help.run([])
+      void help.run([])
 
       expect(logOutput.some((line) => line.includes("Commands:"))).toBe(true)
     })
 
     it("shows empty list when no commands registered", () => {
       const help = createHelpCommand(commands)
-      help.run([])
+      void help.run([])
 
       // Should output header but no command listings
       expect(logOutput.length).toBeGreaterThan(0)
@@ -79,7 +79,7 @@ describe("help.ts", () => {
       commands.set("test", cmd)
 
       const help = createHelpCommand(commands)
-      help.run([])
+      void help.run([])
 
       expect(logOutput.some((line) => line.includes("test"))).toBe(true)
       expect(logOutput.some((line) => line.includes("Test command"))).toBe(true)
@@ -101,7 +101,7 @@ describe("help.ts", () => {
       commands.set("second", cmd2)
 
       const help = createHelpCommand(commands)
-      help.run([])
+      void help.run([])
 
       expect(logOutput.some((line) => line.includes("first"))).toBe(true)
       expect(logOutput.some((line) => line.includes("second"))).toBe(true)
@@ -117,7 +117,7 @@ describe("help.ts", () => {
       commands.set("short", cmd)
 
       const help = createHelpCommand(commands)
-      help.run([])
+      void help.run([])
 
       const output = logOutput.join("\n")
       // padEnd(16) means the description should start after 16 chars
@@ -138,21 +138,21 @@ describe("help.ts", () => {
 
     it("shows specific command help", () => {
       const help = createHelpCommand(commands)
-      help.run(["test-cmd"])
+      void help.run(["test-cmd"])
 
       expect(logOutput.some((line) => line.includes("test-cmd"))).toBe(true)
     })
 
     it("shows command description", () => {
       const help = createHelpCommand(commands)
-      help.run(["test-cmd"])
+      void help.run(["test-cmd"])
 
       expect(logOutput.some((line) => line.includes("Test command description"))).toBe(true)
     })
 
     it("shows command usage when available", () => {
       const help = createHelpCommand(commands)
-      help.run(["test-cmd"])
+      void help.run(["test-cmd"])
 
       expect(logOutput.some((line) => line.includes("Usage:"))).toBe(true)
       expect(logOutput.some((line) => line.includes("test-cmd [options]"))).toBe(true)
@@ -168,7 +168,7 @@ describe("help.ts", () => {
       commands.set("no-usage", cmd)
 
       const help = createHelpCommand(commands)
-      help.run(["no-usage"])
+      void help.run(["no-usage"])
 
       const usageLines = logOutput.filter((line) => line.includes("Usage:"))
       // Should not have usage line
@@ -193,7 +193,7 @@ describe("help.ts", () => {
       const help = createHelpCommand(commands)
 
       // Empty string is falsy, so should show all commands
-      help.run([""])
+      void help.run([""])
 
       expect(logOutput.some((line) => line.includes("swiz - CLI toolkit"))).toBe(true)
     })
@@ -207,7 +207,7 @@ describe("help.ts", () => {
       commands.set("test", cmd)
 
       const help = createHelpCommand(commands)
-      help.run(["test", "extra", "args"])
+      void help.run(["test", "extra", "args"])
 
       expect(logOutput.some((line) => line.includes("test"))).toBe(true)
     })
@@ -216,7 +216,7 @@ describe("help.ts", () => {
       const help = createHelpCommand(commands)
 
       // Empty args shows all commands
-      help.run([])
+      void help.run([])
 
       expect(logOutput.length).toBeGreaterThan(0)
     })
@@ -232,7 +232,7 @@ describe("help.ts", () => {
       const help = createHelpCommand(commands)
 
       // Should find TestCmd but not testcmd
-      help.run(["TestCmd"])
+      void help.run(["TestCmd"])
       expect(logOutput.some((line) => line.includes("TestCmd"))).toBe(true)
 
       logOutput = []
@@ -243,7 +243,7 @@ describe("help.ts", () => {
   describe("console output formatting", () => {
     it("outputs lines to console.log", () => {
       const help = createHelpCommand(commands)
-      help.run([])
+      void help.run([])
 
       expect(console.log).toHaveBeenCalled()
       expect(logOutput.length).toBeGreaterThan(0)
@@ -251,7 +251,7 @@ describe("help.ts", () => {
 
     it("includes blank lines for spacing", () => {
       const help = createHelpCommand(commands)
-      help.run([])
+      void help.run([])
 
       const blankLines = logOutput.filter((line) => line === "")
       expect(blankLines.length).toBeGreaterThan(0)
@@ -265,7 +265,7 @@ describe("help.ts", () => {
       ])
 
       const help = createHelpCommand(commands2)
-      help.run([])
+      void help.run([])
 
       // All lines should include their respective commands
       const output = logOutput.join("\n")

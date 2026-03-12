@@ -748,7 +748,7 @@ if (typeof response === "string") {
           )
         }
         // Record gone + file found + no failure → inject recovered content as context.
-        emitContext(
+        void emitContext(
           "PostToolUse",
           `Task \`${taskId}\` output recovered from file (record had expired).\n` +
             `Output preview:\n${recovered.slice(0, 500)}`,
@@ -786,4 +786,4 @@ if (!output.includes("To https://") && !PUSH_SHA_RE.test(output)) process.exit(0
 const ciContext = await buildCiContext(output, input.cwd ?? process.cwd())
 if (!ciContext) process.exit(0)
 
-emitContext("PostToolUse", ciContext, input.cwd ?? process.cwd())
+void emitContext("PostToolUse", ciContext, input.cwd ?? process.cwd())

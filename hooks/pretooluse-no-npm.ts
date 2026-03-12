@@ -125,42 +125,48 @@ function isImplausibleInvocation(invoked: string): boolean {
   return false
 }
 
-const input = await Bun.stdin.json()
-if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+async function main() {
+  const input = await Bun.stdin.json()
+  if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 
-const command: string = input?.tool_input?.command ?? ""
+  const command: string = input?.tool_input?.command ?? ""
 
-// No PM signal found — can't enforce, allow everything
-if (!PM) process.exit(0)
+  // No PM signal found — can't enforce, allow everything
+  if (!PM) process.exit(0)
 
-const target = CMD[PM]
-const PACKAGE_MANAGER_INVOKE_RE = new RegExp(
-  `${SHELL_SEGMENT_BOUNDARY}\\s*(npm|npx|yarn|pnpm|pnpx|bunx?)\\s*(\\S*)(.*?)(?=[|;&]|$)`
-)
+  const target = CMD[PM]
+  const PACKAGE_MANAGER_INVOKE_RE = new RegExp(
+    `${SHELL_SEGMENT_BOUNDARY}\\s*(npm|npx|yarn|pnpm|pnpx|bunx?)\\s*(\\S*)(.*?)(?=[|;&]|$)`
+  )
 
-// Extract the package manager being invoked
-const m = command.match(PACKAGE_MANAGER_INVOKE_RE)
-if (!m) process.exit(0)
+  // Extract the package manager being invoked
+  const m = command.match(PACKAGE_MANAGER_INVOKE_RE)
+  if (!m) process.exit(0)
 
-const invoked = (m[1] ?? "").toLowerCase()
-const subcmd = m[2]?.toLowerCase() ?? ""
-const rest = m[3]?.trim() ?? ""
+  const invoked = (m[1] ?? "").toLowerCase()
+  const subcmd = m[2]?.toLowerCase() ?? ""
+  const rest = m[3]?.trim() ?? ""
 
-// Only redirect when the invoked PM is actually implausible for this project.
-if (!isImplausibleInvocation(invoked)) process.exit(0)
+  // Only redirect when the invoked PM is actually implausible for this project.
+  if (!isImplausibleInvocation(invoked)) process.exit(0)
 
-// Package runners: npx/pnpx/bunx/yarn dlx
-if (invoked === "npx" || invoked === "pnpx" || invoked === "bunx") {
-  deny(`${invoked} <pkg>`, target.dlx)
+  // Package runners: npx/pnpx/bunx/yarn dlx
+  if (invoked === "npx" || invoked === "pnpx" || invoked === "bunx") {
+    deny(`${invoked} <pkg>`, target.dlx)
+  }
+
+  // Map the subcmd to the equivalent in the project PM
+  const kind = classifySubcmd(subcmd, rest)
+  if (kind) {
+    const fromPM = invoked as PackageManager
+    const fromCmd = CMD[fromPM]?.[kind] ?? `${invoked} ${subcmd}`
+    deny(fromCmd, target[kind])
+  }
+
+  // Catch-all for implausible invocations with unknown subcommands.
+  deny(`${invoked} ${subcmd}`, `${PM} ${subcmd}`)
 }
 
-// Map the subcmd to the equivalent in the project PM
-const kind = classifySubcmd(subcmd, rest)
-if (kind) {
-  const fromPM = invoked as PackageManager
-  const fromCmd = CMD[fromPM]?.[kind] ?? `${invoked} ${subcmd}`
-  deny(fromCmd, target[kind])
+if (import.meta.main) {
+  void main()
 }
-
-// Catch-all for implausible invocations with unknown subcommands.
-deny(`${invoked} ${subcmd}`, `${PM} ${subcmd}`)

@@ -33,8 +33,8 @@ async function runHook(cwd: string): Promise<HookResult> {
     stderr: "pipe",
     cwd: process.cwd(),
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
 
   const [stdout] = await Promise.all([
     new Response(proc.stdout).text(),

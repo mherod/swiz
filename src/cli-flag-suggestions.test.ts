@@ -14,7 +14,7 @@ async function runSwiz(
     stderr: "pipe",
     env: { ...process.env, ...(home ? { HOME: home } : {}) },
   })
-  proc.stdin.end()
+  void proc.stdin.end()
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),

@@ -38,8 +38,8 @@ async function runHook(opts: {
     cwd: process.cwd(),
     env: { ...process.env },
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
   const stdout = await new Response(proc.stdout).text()
   await proc.exited
   return { stdout, exitCode: proc.exitCode ?? 0 }
@@ -183,8 +183,8 @@ describe("pretooluse-large-files — non-file-edit tools", () => {
       cwd: process.cwd(),
       env: { ...process.env },
     })
-    proc.stdin.write(payload)
-    proc.stdin.end()
+    void proc.stdin.write(payload)
+    void proc.stdin.end()
     const stdout = await new Response(proc.stdout).text()
     await proc.exited
     const parsed = JSON.parse(stdout)
@@ -205,8 +205,8 @@ describe("pretooluse-large-files — non-file-edit tools", () => {
       cwd: process.cwd(),
       env: { ...process.env },
     })
-    proc.stdin.write(payload)
-    proc.stdin.end()
+    void proc.stdin.write(payload)
+    void proc.stdin.end()
     const stdout = await new Response(proc.stdout).text()
     await proc.exited
     const parsed = JSON.parse(stdout)

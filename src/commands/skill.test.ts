@@ -139,7 +139,7 @@ async function runSkillCmd(
     stderr: "pipe",
     env: { ...process.env, HOME: skillsDir, ...envOverrides },
   })
-  proc.stdin.end()
+  void proc.stdin.end()
   const stdout = await new Response(proc.stdout).text()
   const stderr = await new Response(proc.stderr).text()
   await proc.exited

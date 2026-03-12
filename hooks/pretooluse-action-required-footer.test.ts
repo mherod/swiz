@@ -49,8 +49,8 @@ async function runHook(
     cwd: opts.cwd ?? process.cwd(),
     env: { ...process.env, ...opts.env },
   })
-  proc.stdin.write(JSON.stringify(payload))
-  proc.stdin.end()
+  void proc.stdin.write(JSON.stringify(payload))
+  void proc.stdin.end()
   const raw = await new Response(proc.stdout).text()
   await proc.exited
 

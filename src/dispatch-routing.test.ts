@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+// Bun.file() used for reading source files
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { AGENTS, CONFIGURABLE_AGENTS } from "./agents.ts"
@@ -122,20 +122,20 @@ describe("dispatch routing validation", () => {
 describe("mutation replay wiring", () => {
   const SRC = join(import.meta.dirname ?? ".", "..")
 
-  it("cli.ts imports and calls tryReplayPendingMutations", () => {
-    const src = readFileSync(join(SRC, "src", "cli.ts"), "utf8")
+  it("cli.ts imports and calls tryReplayPendingMutations", async () => {
+    const src = await Bun.file(join(SRC, "src", "cli.ts")).text()
     expect(src).toContain("tryReplayPendingMutations")
     expect(src).toMatch(/await\s+tryReplayPendingMutations\(/)
   })
 
-  it("dispatch execute.ts imports and calls tryReplayPendingMutations", () => {
-    const src = readFileSync(join(SRC, "src", "dispatch", "execute.ts"), "utf8")
+  it("dispatch execute.ts imports and calls tryReplayPendingMutations", async () => {
+    const src = await Bun.file(join(SRC, "src", "dispatch", "execute.ts")).text()
     expect(src).toContain("tryReplayPendingMutations")
     expect(src).toMatch(/await\s+tryReplayPendingMutations\(/)
   })
 
-  it("stop-personal-repo-issues.ts calls replayPendingMutations", () => {
-    const src = readFileSync(join(SRC, "hooks", "stop-personal-repo-issues.ts"), "utf8")
+  it("stop-personal-repo-issues.ts calls replayPendingMutations", async () => {
+    const src = await Bun.file(join(SRC, "hooks", "stop-personal-repo-issues.ts")).text()
     expect(src).toContain("replayPendingMutations")
     expect(src).toMatch(/await\s+replayPendingMutations\(/)
   })

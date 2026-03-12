@@ -718,6 +718,14 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
             collaborationMode?: "auto" | "solo" | "team" | "relaxed-collab"
             prMergeMode?: boolean
             strictNoDirectMain?: boolean
+            trivialMaxFiles?: number | null
+            trivialMaxLines?: number | null
+            defaultBranch?: string | null
+            memoryLineThreshold?: number | null
+            memoryWordThreshold?: number | null
+            largeFileSizeKb?: number | null
+            ambitionMode?: "standard" | "aggressive" | "creative" | "reflective" | "inherit" | null
+            taskDurationWarningMinutes?: number | null
           }
         } | null
         const cwd = body?.cwd
@@ -734,11 +742,7 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
           )
         }
 
-        const normalizedUpdates: {
-          collaborationMode?: "auto" | "solo" | "team" | "relaxed-collab"
-          prMergeMode?: boolean
-          strictNoDirectMain?: boolean
-        } = {}
+        const normalizedUpdates: Record<string, unknown> = {}
 
         if ("collaborationMode" in updates) {
           const mode = updates.collaborationMode
@@ -767,21 +771,34 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
           normalizedUpdates.strictNoDirectMain = updates.strictNoDirectMain
         }
 
+        const optionalKeys = [
+          "trivialMaxFiles",
+          "trivialMaxLines",
+          "defaultBranch",
+          "memoryLineThreshold",
+          "memoryWordThreshold",
+          "largeFileSizeKb",
+          "taskDurationWarningMinutes",
+          "ambitionMode",
+        ] as const
+
+        for (const key of optionalKeys) {
+          if (key in updates) {
+            normalizedUpdates[key] = updates[key]
+          }
+        }
+
         if (Object.keys(normalizedUpdates).length === 0) {
           return Response.json({ error: "No supported updates provided" }, { status: 400 })
         }
 
         registerProjectWatchers(cwd)
         touchProject(cwd)
-        const projectUpdates: {
-          collaborationMode?: "auto" | "solo" | "team" | "relaxed-collab"
-          strictNoDirectMain?: boolean
-        } = {}
-        if (normalizedUpdates.collaborationMode !== undefined) {
-          projectUpdates.collaborationMode = normalizedUpdates.collaborationMode
-        }
-        if (normalizedUpdates.strictNoDirectMain !== undefined) {
-          projectUpdates.strictNoDirectMain = normalizedUpdates.strictNoDirectMain
+        const projectUpdates: Record<string, unknown> = {}
+        for (const key of Object.keys(normalizedUpdates)) {
+          if (key !== "prMergeMode") {
+            projectUpdates[key] = normalizedUpdates[key]
+          }
         }
         if (Object.keys(projectUpdates).length > 0) {
           await writeProjectSettings(cwd, projectUpdates)
@@ -790,7 +807,7 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
           const globalSettings = await readSwizSettings()
           await writeSwizSettings({
             ...globalSettings,
-            prMergeMode: normalizedUpdates.prMergeMode,
+            prMergeMode: normalizedUpdates.prMergeMode as boolean,
           })
         }
         projectSettingsCache.invalidateProject(cwd)

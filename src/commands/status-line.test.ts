@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_SETTINGS } from "../settings.ts"
@@ -272,7 +272,7 @@ describe("ghJsonCached", () => {
     await ghJsonCached<unknown[]>(args, dir)
 
     // Cache file must now exist with the correct key
-    const raw = readFileSync(getGhCachePath(dir), "utf8")
+    const raw = await Bun.file(getGhCachePath(dir)).text()
     const store = JSON.parse(raw) as Record<string, { value: unknown; expiresAt: number }>
     const key = args.join("\x00")
     expect(store[key]).toBeDefined()
@@ -298,7 +298,7 @@ describe("ghJsonCached", () => {
     const newArgs = ["pr", "view", "main", "--json", "reviewDecision,comments"]
     await ghJsonCached(newArgs, dir)
 
-    const raw = readFileSync(getGhCachePath(dir), "utf8")
+    const raw = await Bun.file(getGhCachePath(dir)).text()
     const after = JSON.parse(raw) as Record<string, unknown>
     // Stale entry must be evicted
     expect(after[staleKey]).toBeUndefined()

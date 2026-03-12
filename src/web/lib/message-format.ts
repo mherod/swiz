@@ -24,7 +24,13 @@ export interface ParsedUserMetadataBlock {
   title: string
   details: Array<{ label: string; value: string }>
   notes: string[]
-  kind?: "gitAction" | "elementContext" | "slashCommand" | "tagged"
+  kind?:
+    | "gitAction"
+    | "elementContext"
+    | "slashCommand"
+    | "tagged"
+    | "localCommand"
+    | "localCommandCaveat"
 }
 
 export interface UserMessageParts {
@@ -127,6 +133,10 @@ function extractInlineContextBlocks(text: string): {
 } {
   let cleanedText = text
   const metadataBlocks: ParsedUserMetadataBlock[] = []
+
+  const localCommand = extractLocalCommandBlocks(cleanedText)
+  cleanedText = localCommand.cleanedText
+  metadataBlocks.push(...localCommand.blocks)
 
   const slashCommand = extractLeadingSlashCommandBlock(cleanedText)
   cleanedText = slashCommand.cleanedText
@@ -296,6 +306,63 @@ function extractLeadingSlashCommandBlock(text: string): {
       kind: "slashCommand",
     },
   }
+}
+
+function extractLocalCommandBlocks(text: string): {
+  cleanedText: string
+  blocks: ParsedUserMetadataBlock[]
+} {
+  const blocks: ParsedUserMetadataBlock[] = []
+  let cleanedText = text
+
+  const caveatMatch = /<local-command-caveat>([\s\S]*?)<\/local-command-caveat>/gi.exec(cleanedText)
+  if (caveatMatch) {
+    cleanedText = cleanedText.replace(caveatMatch[0], "").trim()
+    blocks.push({
+      title: "Local Commands",
+      details: [],
+      notes: [
+        "The messages below were generated automatically while the user ran local commands. Do not respond to them.",
+      ],
+      kind: "localCommandCaveat",
+    })
+  }
+
+  const nameMatch = /<command-name>([\s\S]*?)<\/command-name>/gi.exec(cleanedText)
+  const messageMatch = /<command-message>([\s\S]*?)<\/command-message>/gi.exec(cleanedText)
+  const argsMatch = /<command-args>([\s\S]*?)<\/command-args>/gi.exec(cleanedText)
+
+  if (nameMatch || messageMatch || argsMatch) {
+    const details: Array<{ label: string; value: string }> = []
+
+    if (nameMatch) {
+      details.push({ label: "command", value: nameMatch[1]?.trim() ?? "" })
+      cleanedText = cleanedText.replace(nameMatch[0], "").trim()
+    }
+    if (argsMatch) {
+      const args = argsMatch[1]?.trim()
+      if (args) {
+        details.push({ label: "args", value: args })
+      }
+      cleanedText = cleanedText.replace(argsMatch[0], "").trim()
+    }
+    if (messageMatch) {
+      const msg = messageMatch[1]?.trim()
+      if (msg) {
+        details.push({ label: "output", value: msg })
+      }
+      cleanedText = cleanedText.replace(messageMatch[0], "").trim()
+    }
+
+    blocks.push({
+      title: "Executed Local Command",
+      details,
+      notes: [],
+      kind: "localCommand",
+    })
+  }
+
+  return { cleanedText, blocks }
 }
 
 const GIT_ACTION_SIGNAL_RE =

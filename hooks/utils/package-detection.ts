@@ -84,13 +84,13 @@ export function detectPackageManager(): PackageManager | null {
   return null
 }
 
-export function detectRuntime(): Runtime {
+export async function detectRuntime(): Promise<Runtime> {
   const pm = detectPackageManager()
   return pm === "bun" ? "bun" : "node"
 }
 
 /** The "run package" command for the detected PM (e.g. bunx, pnpm dlx, npx) */
-export function detectPkgRunner(): string {
+export async function detectPkgRunner(): Promise<string> {
   const pm = detectPackageManager()
   switch (pm) {
     case "bun":

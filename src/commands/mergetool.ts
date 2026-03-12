@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, unlinkSync } from "node:fs"
+import { existsSync, unlinkSync } from "node:fs"
 import { basename, dirname, resolve } from "node:path"
 import { detectAgentCli, promptAgent } from "../agent.ts"
 import { type AiProviderId, hasAiProvider, promptText } from "../ai-providers.ts"
@@ -113,13 +113,13 @@ async function listSiblingTrackedFiles(repoRoot: string, relativePath: string): 
     .slice(0, 20)
 }
 
-function maybeCollectImports(filePath: string): string[] {
+async function maybeCollectImports(filePath: string): Promise<string[]> {
   const ext = basename(filePath).split(".").pop()?.toLowerCase()
   if (!ext || !CODE_EXTENSIONS.has(ext)) return []
 
   // This is best-effort context; failures are intentionally ignored.
   try {
-    return readFileSync(filePath, "utf8")
+    return (await Bun.file(filePath).text())
       .split("\n")
       .filter((line) => /^\s*import\s/.test(line))
       .slice(0, 15)
@@ -151,7 +151,7 @@ async function gatherRepoContext(mergedPath: string): Promise<string> {
     for (const sibling of siblings) lines.push(`  ${sibling}`)
   }
 
-  const imports = maybeCollectImports(mergedPath)
+  const imports = await maybeCollectImports(mergedPath)
   if (imports.length > 0) {
     lines.push(`\nImports in the file:`)
     for (const importLine of imports) lines.push(`  ${importLine}`)
@@ -268,7 +268,7 @@ async function writeResolvedContent(mergedPath: string, content: string): Promis
   try {
     await Bun.write(tmpPath, content)
 
-    const writtenContent = readFileSync(tmpPath, "utf8")
+    const writtenContent = await Bun.file(tmpPath).text()
     if (writtenContent !== content) {
       throw new Error("Temp file verification failed — content mismatch")
     }
@@ -295,10 +295,10 @@ export const mergetoolCommand: Command = {
     validatePaths(parsed)
 
     // Read all input files
-    const baseContent = readFileSync(parsed.base, "utf8")
-    const localContent = readFileSync(parsed.local, "utf8")
-    const remoteContent = readFileSync(parsed.remote, "utf8")
-    const mergedContent = readFileSync(parsed.merged, "utf8")
+    const baseContent = await Bun.file(parsed.base).text()
+    const localContent = await Bun.file(parsed.local).text()
+    const remoteContent = await Bun.file(parsed.remote).text()
+    const mergedContent = await Bun.file(parsed.merged).text()
 
     // Gather repository context
     stderrLog("Interactive merge progress indicators", "→ Gathering repository context...")

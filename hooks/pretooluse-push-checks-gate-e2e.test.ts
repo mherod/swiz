@@ -8,7 +8,7 @@
  * This proves the gate works against real transcript parsing, not just the
  * unit-level regex helpers.
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { useTempDir } from "./test-utils.ts"
@@ -93,8 +93,8 @@ async function runGate(opts: { pushCommand: string; transcriptPath: string }): P
     stdout: "pipe",
     stderr: "pipe",
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
 
@@ -395,7 +395,6 @@ describe("E2E: push-checks-gate transcript resilience", () => {
     ]
     await writeFile(transcriptPath, lines.join("\n"))
 
-    // Non-Bash tools must not satisfy the gate even if their input contains the strings
     const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
     expect(result.blocked).toBe(false)
     expect(result.advisory).toBe(true)
@@ -471,16 +470,12 @@ describe("E2E: push-checks-gate escaped/multiline/truncated JSON payload hardeni
       '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"git pu', // truncated
     ]
     await writeFile(transcriptPath, lines.join("\n"))
-
-    // Should allow — valid checks found; truncated line is silently skipped
     const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
     expect(result.blocked).toBe(false)
   })
-
   test("assistant message with multiple tool_use blocks in one content array", async () => {
     const dir = await makeTempDir("-multi-block")
     const transcriptPath = join(dir, "transcript.jsonl")
-
     // Claude sometimes emits multiple tool calls in a single assistant message
     const entry = JSON.stringify({
       type: "assistant",
@@ -497,30 +492,24 @@ describe("E2E: push-checks-gate escaped/multiline/truncated JSON payload hardeni
       },
     })
     await writeFile(transcriptPath, `${entry}\n`)
-
     const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
     expect(result.blocked).toBe(false)
   })
-
   test("unicode and special characters in commands do not confuse the parser", async () => {
     const dir = await makeTempDir("-unicode")
     const transcriptPath = join(dir, "transcript.jsonl")
-
     const lines = [
       // Surrounding noise with unicode, but the checks are present
       bashEntry("echo '🚀 deploying…'; git branch --show-current"),
       bashEntry("gh pr list --state open --head main  # ✅"),
     ]
     await writeFile(transcriptPath, lines.join("\n"))
-
     const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
     expect(result.blocked).toBe(false)
   })
-
   test("--show-current-upstream does NOT satisfy the branch gate", async () => {
     const dir = await makeTempDir("-substring")
     const transcriptPath = join(dir, "transcript.jsonl")
-
     // 'git branch --show-current-upstream' contains '--show-current' as a prefix.
     // \b alone would match here because '-' is \W, creating a false positive.
     // The (?!\S) lookahead in BRANCH_CHECK_RE prevents this: '--show-current'
@@ -530,10 +519,172 @@ describe("E2E: push-checks-gate escaped/multiline/truncated JSON payload hardeni
       bashEntry("gh pr list --state open --head main"),
     ]
     await writeFile(transcriptPath, lines.join("\n"))
-
     const result = await runGate({ pushCommand: "git push origin main", transcriptPath })
     expect(result.blocked).toBe(false)
     expect(result.advisory).toBe(true)
     expect(result.reason).toContain("git branch --show-current")
+  })
+})
+const IS_BUN = !!process.versions.bun
+
+describe("Bun eager-buffering behavior — pipe-drain correctness", () => {
+  const DEADLOCK_VOLUME = 3 * 65_536
+
+  const SCRIPT = [
+    `process.stderr.write("E".repeat(${DEADLOCK_VOLUME}));`,
+    `process.stdout.write("O".repeat(${DEADLOCK_VOLUME}));`,
+  ].join(" ")
+
+  it.skipIf(!IS_BUN)(
+    "await proc.exited before reading completes immediately (proves eager buffering)",
+    async () => {
+      const proc = Bun.spawn(["bun", "-e", SCRIPT], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      void proc.stdin.end()
+
+      await proc.exited
+
+      const stdout = await new Response(proc.stdout).text()
+      const stderr = await new Response(proc.stderr).text()
+
+      expect(stdout).toHaveLength(DEADLOCK_VOLUME)
+      expect(stderr).toHaveLength(DEADLOCK_VOLUME)
+      expect(proc.exitCode).toBe(0)
+    }
+  )
+
+  it.skipIf(!IS_BUN)(
+    "sequential reads complete without deadlock in Bun (cross-runtime unsafe pattern)",
+    async () => {
+      const proc = Bun.spawn(["bun", "-e", SCRIPT], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      void proc.stdin.end()
+
+      let capturedStdout = ""
+      let capturedStderr = ""
+
+      const result = await Promise.race([
+        (async () => {
+          capturedStdout = await new Response(proc.stdout).text()
+          capturedStderr = await new Response(proc.stderr).text()
+          await proc.exited
+          return "completed" as const
+        })(),
+        new Promise<"timed-out">((resolve) => setTimeout(() => resolve("timed-out"), 3_000)),
+      ])
+
+      expect(result).toBe("completed")
+      // Sequential reads return full data when Bun's eager buffering is active
+      expect(capturedStdout).toHaveLength(DEADLOCK_VOLUME)
+      expect(capturedStderr).toHaveLength(DEADLOCK_VOLUME)
+    },
+    8_000
+  )
+
+  it("concurrent Promise.all drain works — the cross-runtime safe pattern", async () => {
+    const proc = Bun.spawn(["bun", "-e", SCRIPT], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    void proc.stdin.end()
+
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+
+    expect(stdout).toHaveLength(DEADLOCK_VOLUME)
+    expect(stderr).toHaveLength(DEADLOCK_VOLUME)
+    expect(proc.exitCode).toBe(0)
+  })
+})
+
+describe("Promise.all drain enforcement — cross-runtime portability guard", () => {
+  it("hook source files must use Promise.all for concurrent stdout/stderr drain", async () => {
+    // Collect all non-test *.ts files in the hooks directory.
+    const hookFiles: string[] = []
+    for await (const f of new Bun.Glob("*.ts").scan({ cwd: import.meta.dir, absolute: true })) {
+      if (!f.endsWith(".test.ts")) hookFiles.push(f)
+    }
+
+    // Detect sequential drain: two separate awaits on proc.stdout and proc.stderr
+    // (in either order) within ~500 chars, without a Promise.all wrapping them.
+    const SEQ_DRAIN_RE =
+      /await new Response\(proc\.(stdout|stderr)\)\.text\(\)([\s\S]{1,500}?)await new Response\(proc\.(stdout|stderr)\)\.text\(\)/g
+
+    for (const file of hookFiles) {
+      const src = await Bun.file(file).text()
+      for (const m of src.matchAll(SEQ_DRAIN_RE)) {
+        const [, first, , second] = m
+        if (first === second) continue // same stream twice — not a cross-drain pattern
+        // Check that a Promise.all wraps the pair (look up to 300 chars before the match)
+        const before = src.slice(Math.max(0, (m.index ?? 0) - 300), m.index)
+        if (!before.includes("Promise.all(")) {
+          const relPath = file.slice(import.meta.dir.length + 1)
+          throw new Error(
+            `${relPath}: sequential ${first}/${second} drain detected outside Promise.all. ` +
+              `Replace with:\n\n` +
+              `  const [stdout, stderr] = await Promise.all([\n` +
+              `    new Response(proc.stdout).text(),\n` +
+              `    new Response(proc.stderr).text(),\n` +
+              `  ])`
+          )
+        }
+      }
+    }
+  })
+
+  // Tripwire: runs ONLY outside Bun. Immediately fails to prevent misuse of
+  // the Bun-specific sequential drain patterns documented in this file.
+  it.skipIf(IS_BUN)(
+    "NON-BUN RUNTIME DETECTED: sequential drain deadlocks here — enforce Promise.all",
+    () => {
+      throw new Error(
+        "This test suite is running outside Bun. " +
+          "Sequential proc.stdout / proc.stderr drain will deadlock when output exceeds " +
+          "the OS pipe buffer (macOS/Linux: 65 536 bytes). " +
+          "Always use Promise.all for concurrent drain in cross-runtime code."
+      )
+    }
+  )
+})
+
+describe("pretooluse-no-as-any — NFKC homoglyph bypass", () => {
+  const HOOK_PATH = join(import.meta.dir, "pretooluse-no-as-any.ts")
+
+  async function runHookPayload(payload: object): Promise<{ stdout: string; exitCode: number }> {
+    const proc = Bun.spawn(["bun", HOOK_PATH], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    void proc.stdin.write(JSON.stringify(payload))
+    void proc.stdin.end()
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+    return { stdout, exitCode: proc.exitCode ?? -1 }
+  }
+
+  it("blocks fullwidth 'as any' bypass (NFKC → 'as any')", async () => {
+    // U+FF41 FULLWIDTH LATIN SMALL LETTER A, U+FF53 FULLWIDTH LATIN SMALL LETTER S
+    const fwAs = String.fromCodePoint(0xff41) + String.fromCodePoint(0xff53)
+    const { stdout } = await runHookPayload({
+      tool_name: "Edit",
+      tool_input: {
+        file_path: "src/x.ts",
+        old_string: "const x = 1",
+        new_string: `const x = getValue() ${fwAs} any`,
+      },
+    })
+    const parsed = JSON.parse(stdout)
+    expect(parsed.hookSpecificOutput.permissionDecision).toBe("deny")
   })
 })

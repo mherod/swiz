@@ -68,8 +68,8 @@ async function runHook(dir: string): Promise<{ blocked: boolean; reason?: string
     stderr: "pipe",
     cwd: dir,
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
   const raw = await new Response(proc.stdout).text()
   await proc.exited
 

@@ -707,4 +707,4 @@ async function main(): Promise<void> {
   denyPreToolUse(blockMessage)
 }
 
-if (import.meta.main) await main()
+if (import.meta.main) void main()

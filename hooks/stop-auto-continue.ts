@@ -761,7 +761,7 @@ export async function checkReviewingState(
   state: string | null
 ): Promise<string | null> {
   if (state !== "reviewing" && state !== "addressing-feedback") return null
-  if (!isGitRepo(cwd)) return null
+  if (!(await isGitRepo(cwd))) return null
 
   // 1. Merge conflicts — highest priority, always resolvable locally
   try {
@@ -780,7 +780,7 @@ export async function checkReviewingState(
   }
 
   // 2–4. PR-level checks — only when gh is available and a PR exists
-  if (!hasGhCli() || !isGitHubRemote(cwd)) return null
+  if (!hasGhCli() || !(await isGitHubRemote(cwd))) return null
 
   let branch: string
   try {
@@ -1065,4 +1065,4 @@ async function main(): Promise<void> {
 }
 
 // Guard: only run main() when this file is the entry point, not when imported for testing.
-if (import.meta.main) main()
+if (import.meta.main) void main()

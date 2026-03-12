@@ -1,5 +1,6 @@
 import { type ReactNode, useMemo, useState } from "react"
 import { cn } from "../lib/cn.ts"
+import type { EventMetric } from "../lib/dashboard-helpers.ts"
 import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
 import {
   formatAssistantJsonBlocks,
@@ -7,6 +8,7 @@ import {
   splitAssistantMessage,
   splitUserMessage,
 } from "../lib/message-format.ts"
+import { DashboardStats } from "./dashboard-stats.tsx"
 import { Markdown, renderInline } from "./markdown.tsx"
 
 export interface SessionPreview {
@@ -75,15 +77,6 @@ function formatTime(ts: number): string {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  })
-}
-
-function formatCompactTime(ts: number): string {
-  return new Date(ts).toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
   })
 }
 
@@ -324,55 +317,89 @@ function renderUserContextBlocks(
           ))}
         </details>
       ) : null}
-      {blocks.map((block) =>
+      {blocks.map((block, idx) =>
         shouldUnwrapSinglePriorityBlock ? (
           <div
-            key={block.title}
+            key={`${block.title}-${idx}`}
             className={cn(
               "hook-context-box",
               block.kind === "gitAction" ? "hook-context-priority" : null,
-              block.kind === "elementContext" ? "hook-context-technical" : null
+              block.kind === "elementContext" ? "hook-context-technical" : null,
+              block.kind === "localCommandCaveat" ? "hook-context-caveat" : null,
+              block.kind === "localCommand" ? "hook-context-local-command" : null
             )}
           >
-            <p className="hook-context-title">{block.title}</p>
+            {block.kind === "localCommandCaveat" ? (
+              <div className="local-command-caveat-header">
+                <span className="caveat-icon">ⓘ</span>
+                <p className="hook-context-title">{block.title}</p>
+              </div>
+            ) : block.kind === "localCommand" ? (
+              <div className="local-command-header">
+                <span className="terminal-icon">›_</span>
+                <p className="hook-context-title">{block.title}</p>
+              </div>
+            ) : (
+              <p className="hook-context-title">{block.title}</p>
+            )}
             {block.details.length > 0 ? (
               <ul className="hook-context-list">
                 {block.details.map((item) => (
                   <li key={`${item.label}:${item.value}`} className="hook-context-item">
                     <span className="hook-context-label">{item.label}</span>
-                    <code className="hook-context-value">{item.value}</code>
+                    <code
+                      className={cn(
+                        "hook-context-value",
+                        block.kind === "localCommand" && item.label === "output" && "command-output"
+                      )}
+                    >
+                      {item.value}
+                    </code>
                   </li>
                 ))}
               </ul>
             ) : null}
             {block.notes.map((note) => (
-              <p key={note} className="hook-context-note">
+              <p key={`${block.title}:${note}`} className="hook-context-note">
                 {note}
               </p>
             ))}
           </div>
         ) : (
           <details
-            key={block.title}
+            key={`${block.title}-${idx}`}
             className={cn(
               "hook-context-box hook-context-collapsible",
               block.kind === "gitAction" ? "hook-context-priority" : null,
-              block.kind === "elementContext" ? "hook-context-technical" : null
+              block.kind === "elementContext" ? "hook-context-technical" : null,
+              block.kind === "localCommandCaveat" ? "hook-context-caveat" : null,
+              block.kind === "localCommand" ? "hook-context-local-command" : null
             )}
           >
-            <summary className="hook-context-summary">{block.title}</summary>
+            <summary className="hook-context-summary">
+              {block.kind === "localCommandCaveat" && <span className="caveat-icon">ⓘ </span>}
+              {block.kind === "localCommand" && <span className="terminal-icon">›_ </span>}
+              {block.title}
+            </summary>
             {block.details.length > 0 ? (
               <ul className="hook-context-list">
                 {block.details.map((item) => (
                   <li key={`${item.label}:${item.value}`} className="hook-context-item">
                     <span className="hook-context-label">{item.label}</span>
-                    <code className="hook-context-value">{item.value}</code>
+                    <code
+                      className={cn(
+                        "hook-context-value",
+                        block.kind === "localCommand" && item.label === "output" && "command-output"
+                      )}
+                    >
+                      {item.value}
+                    </code>
                   </li>
                 ))}
               </ul>
             ) : null}
             {block.notes.map((note) => (
-              <p key={note} className="hook-context-note">
+              <p key={`${block.title}:${note}`} className="hook-context-note">
                 {note}
               </p>
             ))}
@@ -509,7 +536,7 @@ export function SessionNav({
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
 
   const sortedProjects = useMemo(
-    () => [...projects].sort((a, b) => b.lastSeenAt - a.lastSeenAt),
+    () => [...projects].sort((a, b) => a.name.localeCompare(b.name)),
     [projects]
   )
   const selectedProject = useMemo(
@@ -579,47 +606,59 @@ export function SessionNav({
             onSelectSession(selectedProjectCwdSafe, session.id)
           }}
         >
-          <span className="session-id" title={session.id}>
-            {(session.provider ?? "unknown").toLowerCase()} ·{" "}
-            {formatRelativeTime(session.lastMessageAt ?? session.mtime)}
-            {processPids.length > 0 ? (
-              <span className="agent-process-chip" title={`PIDs: ${processPids.join(", ")}`}>
-                <span className="agent-process-dot" aria-hidden="true" />
-                {processLabel}
+          <div className="session-btn-content">
+            <div className="session-header">
+              <span className="session-provider">
+                {(session.provider ?? "unknown").toLowerCase()}
               </span>
-            ) : null}
-            {session.dispatches ? (
-              <span className="session-dispatches">{session.dispatches}</span>
-            ) : null}
-          </span>
-          <span className="session-meta">
-            {session.activeDispatch ? (
-              <span className="session-active-dispatch" title={session.activeDispatch.requestId}>
-                <span className="session-active-pulse" />
-                {session.activeDispatch.toolName ? (
-                  <>
-                    running <strong>{session.activeDispatch.toolName}</strong>
-                    {session.activeDispatch.toolInputSummary ? (
-                      <span className="session-active-detail">
-                        {" "}
-                        ({session.activeDispatch.toolInputSummary})
-                      </span>
-                    ) : null}
-                  </>
+              <span className="session-time">
+                {formatRelativeTime(session.lastMessageAt ?? session.mtime)}
+              </span>
+              {session.dispatches ? (
+                <span className="session-dispatches" title={`${session.dispatches} dispatches`}>
+                  {session.dispatches}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="session-details">
+              {processPids.length > 0 ? (
+                <span className="agent-process-chip" title={`PIDs: ${processPids.join(", ")}`}>
+                  <span className="agent-process-dot" aria-hidden="true" />
+                  {processLabel}
+                </span>
+              ) : null}
+
+              <span className="session-meta">
+                {session.activeDispatch ? (
+                  <span
+                    className="session-active-dispatch"
+                    title={session.activeDispatch.requestId}
+                  >
+                    <span className="session-active-pulse" />
+                    {session.activeDispatch.toolName ? (
+                      <>
+                        <span>{session.activeDispatch.toolName}</span>
+                        {session.activeDispatch.toolInputSummary ? (
+                          <span className="session-active-detail">
+                            {" "}
+                            ({session.activeDispatch.toolInputSummary})
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span>{session.activeDispatch.canonicalEvent}</span>
+                    )}
+                    <span className="session-active-time"> · {activeRuntimeSeconds}s</span>
+                  </span>
                 ) : (
-                  <>
-                    running <strong>{session.activeDispatch.canonicalEvent}</strong>
-                  </>
+                  <span className="session-id-text" title={session.id}>
+                    {shortSessionId(session.id)}
+                  </span>
                 )}
-                <span className="session-active-time"> · {activeRuntimeSeconds}s</span>
               </span>
-            ) : (
-              <>
-                {shortSessionId(session.id)} ·{" "}
-                {formatCompactTime(session.lastMessageAt ?? session.mtime)}
-              </>
-            )}
-          </span>
+            </div>
+          </div>
         </button>
         <div className="session-actions">
           {confirmingDeleteId === session.id && !hasLiveProcess ? (
@@ -785,6 +824,12 @@ function ToolStatsBar({ stats }: { stats: ToolStat[] }) {
 
 /* ── Messages card ── */
 
+interface SessionHealth {
+  dispatches?: number
+  lastMessageAt?: number
+  mtime: number
+}
+
 interface MessagesProps {
   messages: SessionMessage[]
   loading: boolean
@@ -797,6 +842,10 @@ interface MessagesProps {
   projectTasks?: ProjectTask[]
   projectTaskSummary?: SessionTaskSummary | null
   projectTasksLoading?: boolean
+  events?: EventMetric[]
+  cacheStatus?: Record<string, number> | null
+  activeSession?: SessionHealth | null
+  activeHookDispatches?: ActiveHookDispatch[]
 }
 
 function TaskStatusBadge({ status }: { status: SessionTask["status"] }) {
@@ -1013,6 +1062,10 @@ export function SessionMessages({
   projectTasks = [],
   projectTaskSummary = null,
   projectTasksLoading = false,
+  events,
+  cacheStatus,
+  activeSession,
+  activeHookDispatches,
 }: MessagesProps) {
   const sorted = useMemo(
     () =>
@@ -1026,8 +1079,22 @@ export function SessionMessages({
 
   return (
     <section className="card bento-messages">
-      <h2 className="section-title">Transcript</h2>
-      <p className="section-subtitle">Conversation history for selected session</p>
+      <div className="messages-header-row">
+        <div>
+          <h2 className="section-title">Transcript</h2>
+          <p className="section-subtitle">Conversation history for selected session</p>
+        </div>
+      </div>
+      {(events || cacheStatus || activeSession || activeHookDispatches) && (
+        <DashboardStats
+          events={events}
+          cache={cacheStatus ?? undefined}
+          activeSession={activeSession ?? null}
+          activeHookDispatches={activeHookDispatches ?? []}
+          loadedMessageCount={messages.length}
+          sessionToolStats={toolStats ?? []}
+        />
+      )}
       <ProjectTasksSection
         tasks={projectTasks}
         summary={projectTaskSummary}

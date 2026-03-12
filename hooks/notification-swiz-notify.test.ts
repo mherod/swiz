@@ -10,8 +10,8 @@ async function runHook(
     stderr: "pipe",
     env: { ...process.env, SWIZ_NOTIFY_BIN: "/nonexistent/swiz-notify", ...env },
   })
-  proc.stdin.write(JSON.stringify(payload))
-  proc.stdin.end()
+  void proc.stdin.write(JSON.stringify(payload))
+  void proc.stdin.end()
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -43,8 +43,8 @@ describe("notification-swiz-notify", () => {
       stderr: "pipe",
       env: { ...process.env, SWIZ_NOTIFY_BIN: "/nonexistent/swiz-notify" },
     })
-    proc.stdin.write("not json")
-    proc.stdin.end()
+    void proc.stdin.write("not json")
+    void proc.stdin.end()
     await proc.exited
     expect(proc.exitCode).toBe(0)
   })

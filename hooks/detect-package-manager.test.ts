@@ -26,8 +26,8 @@ async function npmDecisionInDir(
     stderr: "pipe",
     cwd: dir,
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
   if (!out.trim()) return { decision: undefined, reason: undefined }
@@ -48,8 +48,8 @@ async function pnpmDecisionInDir(dir: string): Promise<string | undefined> {
     stderr: "pipe",
     cwd: dir,
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
   if (!out.trim()) return undefined

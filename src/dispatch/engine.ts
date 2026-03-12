@@ -154,16 +154,20 @@ export function classifyHookOutput({
 // ─── Cross-agent matcher ────────────────────────────────────────────────────
 
 export function toolMatchesToken(toolName: string, token: string): boolean {
-  if (toolName === token) return true
-  if (isShellTool(toolName) && isShellTool(token)) return true
-  if (isEditTool(toolName) && isEditTool(token)) return true
-  if (isWriteTool(toolName) && isWriteTool(token)) return true
-  if (isNotebookTool(toolName) && isNotebookTool(token)) return true
-  // Task tools: specific families first, then broad "Task" family
-  if (isTaskCreateTool(toolName) && isTaskCreateTool(token)) return true
-  if (isTaskUpdateTool(toolName) && isTaskUpdateTool(token)) return true
-  if (isTaskListTool(toolName) && isTaskListTool(token)) return true
-  if (isTaskGetTool(toolName) && isTaskGetTool(token)) return true
+  const toolMatchers = [
+    isShellTool,
+    isEditTool,
+    isWriteTool,
+    isNotebookTool,
+    isTaskCreateTool,
+    isTaskUpdateTool,
+    isTaskListTool,
+    isTaskGetTool,
+  ]
+  for (const matcher of toolMatchers) {
+    if (matcher(toolName) && matcher(token)) return true
+  }
+
   // Broad "Task" family: only when token or toolName is the umbrella "Task"
   if (token === "Task" && isTaskTool(toolName)) return true
   if (toolName === "Task" && isTaskTool(token)) return true
@@ -204,8 +208,8 @@ export async function runHook(
     stderr: "pipe",
   })
 
-  proc.stdin.write(payloadStr)
-  proc.stdin.end()
+  void proc.stdin.write(payloadStr)
+  void proc.stdin.end()
 
   let timedOut = false
   const timer = setTimeout(() => {
@@ -297,7 +301,7 @@ function finalizeExecution(
   if (execution.status === "ok" && logSlowHook(execution.file, execution.durationMs)) {
     execution.status = "slow"
   }
-  if (hook.cooldownSeconds) markHookCooldown(hook.file, cwd)
+  if (hook.cooldownSeconds) void markHookCooldown(hook.file, cwd)
   return execution
 }
 

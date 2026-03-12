@@ -21,8 +21,8 @@ async function runHook(
     stderr: "pipe",
     env: { ...process.env, ...envOverrides },
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
   await proc.exited
   return proc.exitCode ?? 1
 }
