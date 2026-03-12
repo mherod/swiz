@@ -1353,15 +1353,11 @@ export const doctorCommand: Command = {
       }
     } else if (
       staleConfigs.length > 0 ||
-      skillConflicts.length > 0 ||
-      orphanedScripts.length > 0 ||
       invalidSkillEntries.length > 0 ||
       pluginCacheInfos.length > 0
     ) {
       const fixables = [
         staleConfigs.length > 0 ? "stale configs" : null,
-        orphanedScripts.length > 0 ? "orphaned scripts" : null,
-        skillConflicts.length > 0 ? "skill conflicts" : null,
         invalidSkillEntries.length > 0 ? "invalid skill entries" : null,
         pluginCacheInfos.length > 0 ? "stale plugin cache" : null,
       ]

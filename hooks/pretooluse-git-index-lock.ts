@@ -6,6 +6,7 @@
 // Only blocks when a genuine git process is still running or cleanup fails.
 
 import { unlink } from "node:fs/promises"
+import { compact } from "lodash-es"
 import { GIT_DIR_NAME, GIT_INDEX_LOCK, joinGitPath } from "../src/git-helpers.ts"
 import {
   allowPreToolUse,
@@ -14,8 +15,8 @@ import {
   GIT_ANY_CMD_RE,
   git,
   isShellTool,
-  type ToolHookInput,
 } from "./hook-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -28,7 +29,7 @@ const MAX_ANCESTRY_DEPTH = 20
 // ── Main Execution ───────────────────────────────────────────────────────────
 
 async function main() {
-  const input: ToolHookInput = await Bun.stdin.json()
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
 
   // Only applies to shell tools running git commands.
   if (!isShellTool(input.tool_name ?? "")) process.exit(0)
@@ -170,7 +171,7 @@ async function getRunningGitPids(): Promise<number[]> {
   const out = await new Response(proc.stdout).text()
   await proc.exited
   if (proc.exitCode !== 0) return []
-  return out.trim().split("\n").map(Number).filter(Boolean)
+  return compact(out.trim().split("\n").map(Number))
 }
 
 async function getAncestorPids(): Promise<Set<number>> {

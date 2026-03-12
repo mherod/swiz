@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test"
-import { mkdir, readdir, writeFile } from "node:fs/promises"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "../../hooks/test-utils.ts"
 import { AGENTS } from "../agents.ts"
@@ -379,30 +379,25 @@ describe("swiz doctor", () => {
     expect(result.stdout).toContain("precedence=")
   }, 30_000)
 
-  test("doctor --fix moves lower-precedence duplicate skills aside safely", async () => {
+  test("doctor --fix reports skill conflicts but does not auto-disable them", async () => {
     const home = await createTempHome()
     const skillName = `doctor-fix-dup-${Date.now()}`
     await createSkill(home, ".gemini/skills", skillName)
     await createSkill(home, ".codex/skills", skillName)
 
     const fixRun = await runDoctor(home, ["--fix"])
-    expect(fixRun.stdout).toContain("Auto-fixing skill conflicts")
+    expect(fixRun.stdout).toContain("Skill conflicts detected")
+    // Both skills should remain in place — no auto-disable
     expect(await Bun.file(join(home, ".gemini", "skills", skillName, "SKILL.md")).exists()).toBe(
       true
     )
     expect(await Bun.file(join(home, ".codex", "skills", skillName, "SKILL.md")).exists()).toBe(
-      false
+      true
     )
 
-    const codexSkillsDir = join(home, ".codex", "skills")
-    const movedDirs = (await readdir(codexSkillsDir, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .filter((name) => name.startsWith(`${skillName}.disabled-by-swiz-`))
-    expect(movedDirs.length).toBe(1)
-
+    // Conflict still reported on subsequent run (not resolved)
     const afterFix = await runDoctor(home)
-    expect(afterFix.stdout).not.toContain(`Skill conflict: ${skillName}`)
+    expect(afterFix.stdout).toContain(`Skill conflict: ${skillName}`)
   }, 30_000)
 
   // ── Skill validation: concurrent batch of read-only checks ──────────
@@ -640,7 +635,7 @@ describe("swiz doctor", () => {
     expect(content).toContain("#!/usr/bin/env bun")
   }, 30_000)
 
-  test("doctor --fix moves invalid skill entry aside", async () => {
+  test("doctor --fix reports unfixable invalid skill entries but does not auto-disable", async () => {
     const home = await createTempHome()
     const skillsDir = join(home, ".claude", "skills")
     const skillName = `invalid-skill-${Date.now()}`
@@ -650,13 +645,9 @@ describe("swiz doctor", () => {
 
     const fixRun = await runDoctor(home, ["--fix"])
     expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
-    expect(await Bun.file(join(skillDir, "SKILL.md")).exists()).toBe(false)
-
-    const movedDirs = (await readdir(skillsDir, { withFileTypes: true }))
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-      .filter((n) => n.startsWith(`${skillName}.disabled-by-swiz-`))
-    expect(movedDirs.length).toBe(1)
+    // Empty SKILL.md can't be auto-fixed — but directory stays in place
+    expect(await Bun.file(join(skillDir, "SKILL.md")).exists()).toBe(true)
+    expect(fixRun.stdout).toContain("could not auto-fix")
   }, 30_000)
 
   test("doctor --fix generates default SKILL.md for skill directory missing one", async () => {
