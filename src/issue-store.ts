@@ -183,39 +183,72 @@ export interface ReplayResult {
 export async function replayPendingMutations(
   repo: string,
   cwd: string,
-  store?: IssueStore
+  store?: IssueStore,
+  concurrency = 5
 ): Promise<ReplayResult> {
   const s = store ?? getIssueStore()
   const pending = s.getPendingMutations(repo)
   const result: ReplayResult = { replayed: 0, failed: 0, discarded: 0 }
 
+  if (pending.length === 0) return result
+
+  // 1. Group by issue number to maintain per-issue ordering
+  const mutationsByIssue = new Map<number, PendingMutation[]>()
   for (const row of pending) {
-    const mutation: MutationPayload = JSON.parse(row.mutation)
-
-    if (row.attempts >= MAX_ATTEMPTS) {
-      s.removeMutation(row.id)
-      result.discarded++
-      debugLog(
-        `[swiz] REPLAY_DISCARDED repo=${repo} issue=#${mutation.number} type=${mutation.type} attempts=${row.attempts}`
-      )
-      continue
-    }
-
-    const ok = await executeMutation(mutation, cwd, repo)
-
-    if (ok) {
-      s.removeMutation(row.id)
-      if (mutation.type === "close" || mutation.type === "resolve") {
-        s.removeIssue(repo, mutation.number)
-      }
-      result.replayed++
-    } else {
-      s.markAttempted(row.id)
-      result.failed++
-    }
+    const payload: MutationPayload = JSON.parse(row.mutation)
+    const list = mutationsByIssue.get(payload.number) ?? []
+    list.push(row)
+    mutationsByIssue.set(payload.number, list)
   }
 
+  // 2. Define per-issue worker task
+  const issueTasks = Array.from(mutationsByIssue.values()).map((rows) => async () => {
+    for (const row of rows) {
+      const mutation: MutationPayload = JSON.parse(row.mutation)
+
+      if (row.attempts >= MAX_ATTEMPTS) {
+        s.removeMutation(row.id)
+        result.discarded++
+        debugLog(
+          `[swiz] REPLAY_DISCARDED repo=${repo} issue=#${mutation.number} type=${mutation.type} attempts=${row.attempts}`
+        )
+        continue
+      }
+
+      const ok = await executeMutation(mutation, cwd, repo)
+
+      if (ok) {
+        s.removeMutation(row.id)
+        if (mutation.type === "close" || mutation.type === "resolve") {
+          s.removeIssue(repo, mutation.number)
+        }
+        result.replayed++
+      } else {
+        s.markAttempted(row.id)
+        result.failed++
+        // Stop sequential execution for THIS issue on first failure to preserve order
+        break
+      }
+    }
+  })
+
+  // 3. Run with concurrency limit
+  await runWithLimit(concurrency, issueTasks)
+
   return result
+}
+
+/** Simple concurrency-limited promise pool. */
+async function runWithLimit(concurrency: number, tasks: (() => Promise<void>)[]): Promise<void> {
+  let nextTaskIndex = 0
+  async function worker() {
+    while (nextTaskIndex < tasks.length) {
+      const task = tasks[nextTaskIndex++]
+      if (task) await task()
+    }
+  }
+  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, worker)
+  await Promise.all(workers)
 }
 
 /** Execute a single mutation against live GitHub. Returns true on success. */
