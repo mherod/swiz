@@ -16,6 +16,7 @@ import {
   type WatchesResponse,
 } from "../lib/dashboard-hooks.ts"
 import { postJson } from "../lib/http.ts"
+import { GlobalSettingsCard } from "./global-settings-card.tsx"
 import { Header } from "./header.tsx"
 import { MetricsRail } from "./metrics-rail.tsx"
 import { ProjectSettingsCard } from "./project-settings-card.tsx"
@@ -506,7 +507,11 @@ export function DashboardApp() {
         onDeleteSession={handleDeleteSession}
       />
       {activeView === "settings" ? (
-        <div className="bento-settings-page">
+        <div
+          className="bento-settings-page"
+          style={{ display: "grid", gap: "16px", alignContent: "start", overflowY: "auto" }}
+        >
+          <GlobalSettingsCard />
           <ProjectSettingsCard cwd={optimisticProjectCwd} />
         </div>
       ) : (

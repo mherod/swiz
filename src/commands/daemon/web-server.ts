@@ -1,7 +1,12 @@
 import { dirname, extname, join } from "node:path"
 import { executeDispatch } from "../../dispatch/execute.ts"
 import { deleteSessionData, resolveSessionDeletionTargets } from "../../session-data-delete.ts"
-import { readSwizSettings, writeProjectSettings, writeSwizSettings } from "../../settings.ts"
+import {
+  readSwizSettings,
+  settingsStore,
+  writeProjectSettings,
+  writeSwizSettings,
+} from "../../settings.ts"
 import {
   type ActiveHookDispatch,
   type CachedSnapshot,
@@ -638,6 +643,52 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
             { status: 500 }
           )
         }
+      }
+
+      if (url.pathname === "/settings/global" && req.method === "GET") {
+        const globalSettings = await readSwizSettings()
+        return Response.json({ settings: globalSettings })
+      }
+
+      if (url.pathname === "/settings/global/update" && req.method === "POST") {
+        const body = (await req.json().catch(() => null)) as {
+          updates?: Record<string, unknown>
+        } | null
+        const updates = body?.updates
+        if (!updates || typeof updates !== "object") {
+          return Response.json(
+            { error: "Missing required field: updates (object)" },
+            { status: 400 }
+          )
+        }
+
+        const validKeys = [
+          "autoContinue",
+          "critiquesEnabled",
+          "prMergeMode",
+          "pushGate",
+          "sandboxedEdits",
+          "speak",
+          "gitStatusGate",
+          "ambitionMode",
+          "memoryWordThreshold",
+          "memoryLineThreshold",
+        ]
+
+        let updatedAny = false
+        for (const key of validKeys) {
+          if (key in updates) {
+            await settingsStore.setGlobal(key, updates[key])
+            updatedAny = true
+          }
+        }
+
+        if (!updatedAny) {
+          return Response.json({ error: "No supported updates provided" }, { status: 400 })
+        }
+
+        const globalSettings = await readSwizSettings()
+        return Response.json({ success: true, settings: globalSettings })
       }
 
       if (url.pathname === "/settings/project" && req.method === "POST") {
