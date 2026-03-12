@@ -4,7 +4,7 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
-function renderInline(text: string): string {
+export function renderInline(text: string): string {
   let out = escapeHtml(text)
   const placeholders: string[] = []
 

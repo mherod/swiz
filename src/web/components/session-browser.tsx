@@ -7,7 +7,7 @@ import {
   splitAssistantMessage,
   splitUserMessage,
 } from "../lib/message-format.ts"
-import { Markdown } from "./markdown.tsx"
+import { Markdown, renderInline } from "./markdown.tsx"
 
 export interface SessionPreview {
   id: string
@@ -1043,7 +1043,13 @@ export function SessionMessages({
                     {message.toolCalls.map((tc) => (
                       <li key={`${tc.name}-${tc.detail}`} className="tool-call">
                         <span className="tool-name">{tc.name}</span>
-                        {tc.detail && <span className="tool-detail">{tc.detail}</span>}
+                        {tc.detail && (
+                          <span
+                            className="tool-detail"
+                            // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped via renderInline
+                            dangerouslySetInnerHTML={{ __html: renderInline(tc.detail) }}
+                          />
+                        )}
                       </li>
                     ))}
                   </ul>
