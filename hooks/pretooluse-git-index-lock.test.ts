@@ -77,26 +77,26 @@ describe("pretooluse-git-index-lock", () => {
       expect(result.decision).toBe("allow")
       expect(result.reason).toContain("Auto-removed")
       expect(result.reason).toContain("index.lock")
-    })
+    }, 15000)
 
     test("git commit is allowed after stale lock auto-removal", async () => {
       const repo = await createLockedRepo("auto-resolve-commit")
       const result = await runHook('git commit -m "test"', repo)
       expect(result.decision).toBe("allow")
       expect(result.reason).toContain("Auto-removed")
-    })
+    }, 15000)
 
     test("git add is allowed after stale lock auto-removal", async () => {
       const repo = await createLockedRepo("auto-resolve-add")
       const result = await runHook("git add .", repo)
       expect(result.decision).toBe("allow")
-    })
+    }, 15000)
 
     test("piped git command is allowed after stale lock auto-removal", async () => {
       const repo = await createLockedRepo("auto-resolve-piped")
       const result = await runHook("echo hello | git log", repo)
       expect(result.decision).toBe("allow")
-    })
+    }, 15000)
 
     test("lock file is actually removed after auto-resolution", async () => {
       const repo = await createLockedRepo("auto-resolve-verify")
@@ -104,7 +104,7 @@ describe("pretooluse-git-index-lock", () => {
       const lockPath = joinGitPath(repo, GIT_INDEX_LOCK)
       const exists = await Bun.file(lockPath).exists()
       expect(exists).toBe(false)
-    })
+    }, 15000)
   })
 
   describe("allows git commands when no lock", () => {

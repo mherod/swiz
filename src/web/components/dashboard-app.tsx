@@ -187,7 +187,16 @@ export function DashboardApp() {
   const [projectEvents, setProjectEvents] = useState<
     Array<{ name: string; count: number; avgMs: number }>
   >([])
-  const [killingPid, setKillingPid] = useState<number | null>(null)
+  const [killingPids] = useState<Set<number>>(new Set())
+  const [optimisticKillingPids, addOptimisticKillingPid] = useOptimistic(
+    killingPids,
+    (current, action: { type: "add" | "remove"; pid: number }) => {
+      const next = new Set(current)
+      if (action.type === "add") next.add(action.pid)
+      else next.delete(action.pid)
+      return next
+    }
+  )
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
   const [activeHookDispatches, setActiveHookDispatches] = useState<ActiveHookDispatch[]>([])
   const [error, setError] = useState("")
@@ -294,18 +303,17 @@ export function DashboardApp() {
 
   const handleKillAgentPid = useCallback(
     (pid: number) => {
-      setKillingPid(pid)
       startMutationTransition(async () => {
-        addOptimisticAgentProcessProviders({ type: "removePid", pid })
+        addOptimisticKillingPid({ type: "add", pid })
         try {
           await postJson<{ ok: boolean; pid: number }>("/process/agents/kill", { pid })
           setAgentProcessProviders((previous) => removePidFromProviders(previous, pid))
-        } finally {
-          setKillingPid(null)
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err))
         }
       })
     },
-    [addOptimisticAgentProcessProviders]
+    [addOptimisticKillingPid]
   )
 
   const handleDeleteSession = useCallback(
@@ -466,7 +474,7 @@ export function DashboardApp() {
       <SessionNav
         projects={visibleProjects}
         activeAgentPidsByProvider={optimisticAgentProcessProviders}
-        killingPid={killingPid}
+        killingPids={optimisticKillingPids}
         deletingSessionId={deletingSessionId}
         selectedProjectCwd={optimisticProjectCwd}
         selectedSessionId={optimisticSessionId}

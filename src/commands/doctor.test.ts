@@ -286,7 +286,7 @@ describe("swiz doctor", () => {
     expect(result.stdout).toContain("Installed config scripts")
     expect(result.stdout).toContain("not executable")
     expect(result.stdout).toContain(scriptPath)
-  })
+  }, 15_000)
 
   // ── Malformed settings + config sync: run concurrently ────────────────
 

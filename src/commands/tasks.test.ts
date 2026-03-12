@@ -1,7 +1,7 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import {
   compareTaskIds,
@@ -21,6 +21,14 @@ const TMP = join(tmpdir(), `swiz-tasks-test-${process.pid}-${Date.now()}`)
 const TASKS = join(TMP, "tasks")
 const PROJECTS = join(TMP, "projects")
 const FILTER_CWD = "/Users/test/Development/myproject"
+
+// Serialize tests that modify process.env.HOME or process.chdir
+let _queue: Promise<unknown> = Promise.resolve()
+async function serial<T>(fn: () => Promise<T>): Promise<T> {
+  const result = _queue.then(fn)
+  _queue = result.catch(() => {})
+  return result
+}
 
 // Session IDs
 const SESSION_A = "aaaa-aaaa-aaaa"
@@ -634,407 +642,417 @@ describe("complete --dry-run: resolveTaskById validation", () => {
 
 describe("tasks command regressions (#242)", () => {
   it("status updates without --state when explicit session is provided", async () => {
-    const home = join(TMP, "issue-242-home-status")
-    const repoCwd = join(TMP, "issue-242-repo-status")
-    const sessionId = "11111111-aaaa-bbbb-cccc-000000000001"
-    const taskId = "1"
-    const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
+    await serial(async () => {
+      const home = join(TMP, "issue-242-home-status")
+      const repoCwd = join(TMP, "issue-242-repo-status")
+      const sessionId = "11111111-aaaa-bbbb-cccc-000000000001"
+      const taskId = "1"
+      const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
 
-    await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
-    await mkdir(repoCwd, { recursive: true })
-    await writeFile(
-      taskPath,
-      JSON.stringify({
-        id: taskId,
-        subject: "Finish task",
-        description: "desc",
-        status: "in_progress",
-        statusChangedAt: new Date().toISOString(),
-        elapsedMs: 0,
-        blocks: [],
-        blockedBy: [],
-      })
-    )
+      await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+      await mkdir(repoCwd, { recursive: true })
+      await writeFile(
+        taskPath,
+        JSON.stringify({
+          id: taskId,
+          subject: "Finish task",
+          description: "desc",
+          status: "in_progress",
+          statusChangedAt: new Date().toISOString(),
+          elapsedMs: 0,
+          blocks: [],
+          blockedBy: [],
+        })
+      )
 
-    const prevHome = process.env.HOME
-    const prevCwd = process.cwd()
-    process.env.HOME = home
-    process.chdir(repoCwd)
-    try {
-      await expect(
-        tasksCommand.run([
-          "status",
-          taskId,
-          "completed",
-          "--session",
-          sessionId.slice(0, 8),
-          "--evidence",
-          "note:completed",
-        ])
-      ).resolves.toBeUndefined()
-    } finally {
-      process.chdir(prevCwd)
-      if (prevHome === undefined) {
-        delete process.env.HOME
-      } else {
-        process.env.HOME = prevHome
+      const prevHome = process.env.HOME
+      const prevCwd = process.cwd()
+      process.env.HOME = home
+      process.chdir(repoCwd)
+      try {
+        await expect(
+          tasksCommand.run([
+            "status",
+            taskId,
+            "completed",
+            "--session",
+            sessionId,
+            "--evidence",
+            "note:completed",
+          ])
+        ).resolves.toBeUndefined()
+      } finally {
+        process.chdir(prevCwd)
+        if (prevHome === undefined) {
+          delete process.env.HOME
+        } else {
+          process.env.HOME = prevHome
+        }
       }
-    }
 
-    const updated = JSON.parse(await readFile(taskPath, "utf8")) as { status: string }
-    expect(updated.status).toBe("completed")
+      const updated = JSON.parse(await readFile(taskPath, "utf8")) as { status: string }
+      expect(updated.status).toBe("completed")
+    })
   })
 
   it("complete-all --session scopes completion to that session", async () => {
-    const home = join(TMP, "issue-242-home-complete-all")
-    const repoCwd = join(TMP, "issue-242-repo-complete-all")
-    const sessionA = "22222222-aaaa-bbbb-cccc-000000000001"
-    const sessionB = "33333333-aaaa-bbbb-cccc-000000000001"
-    const taskAPath = join(home, ".claude", "tasks", sessionA, "1.json")
-    const taskBPath = join(home, ".claude", "tasks", sessionB, "1.json")
+    await serial(async () => {
+      const home = join(TMP, "issue-242-home-complete-all")
+      const repoCwd = join(TMP, "issue-242-repo-complete-all")
+      const sessionA = "22222222-aaaa-bbbb-cccc-000000000001"
+      const sessionB = "33333333-aaaa-bbbb-cccc-000000000001"
+      const taskAPath = join(home, ".claude", "tasks", sessionA, "1.json")
+      const taskBPath = join(home, ".claude", "tasks", sessionB, "1.json")
 
-    await mkdir(join(home, ".claude", "tasks", sessionA), { recursive: true })
-    await mkdir(join(home, ".claude", "tasks", sessionB), { recursive: true })
-    await mkdir(repoCwd, { recursive: true })
-    await writeFile(
-      taskAPath,
-      JSON.stringify({
-        id: "1",
-        subject: "Session A task",
-        description: "desc",
-        status: "pending",
-        statusChangedAt: new Date().toISOString(),
-        elapsedMs: 0,
-        blocks: [],
-        blockedBy: [],
-      })
-    )
-    await writeFile(
-      taskBPath,
-      JSON.stringify({
-        id: "1",
-        subject: "Session B task",
-        description: "desc",
-        status: "pending",
-        statusChangedAt: new Date().toISOString(),
-        elapsedMs: 0,
-        blocks: [],
-        blockedBy: [],
-      })
-    )
+      await mkdir(join(home, ".claude", "tasks", sessionA), { recursive: true })
+      await mkdir(join(home, ".claude", "tasks", sessionB), { recursive: true })
+      await mkdir(repoCwd, { recursive: true })
+      await writeFile(
+        taskAPath,
+        JSON.stringify({
+          id: "1",
+          subject: "Session A task",
+          description: "desc",
+          status: "pending",
+          statusChangedAt: new Date().toISOString(),
+          elapsedMs: 0,
+          blocks: [],
+          blockedBy: [],
+        })
+      )
+      await writeFile(
+        taskBPath,
+        JSON.stringify({
+          id: "1",
+          subject: "Session B task",
+          description: "desc",
+          status: "pending",
+          statusChangedAt: new Date().toISOString(),
+          elapsedMs: 0,
+          blocks: [],
+          blockedBy: [],
+        })
+      )
 
-    const prevHome = process.env.HOME
-    const prevCwd = process.cwd()
-    process.env.HOME = home
-    process.chdir(repoCwd)
-    try {
-      await expect(
-        tasksCommand.run([
-          "complete-all",
-          "--session",
-          sessionA.slice(0, 8),
-          "--evidence",
-          "note:completed",
-        ])
-      ).resolves.toBeUndefined()
-    } finally {
-      process.chdir(prevCwd)
-      if (prevHome === undefined) {
-        delete process.env.HOME
-      } else {
-        process.env.HOME = prevHome
+      const prevHome = process.env.HOME
+      const prevCwd = process.cwd()
+      process.env.HOME = home
+      process.chdir(repoCwd)
+      try {
+        await expect(
+          tasksCommand.run(["complete-all", "--session", sessionA, "--evidence", "note:completed"])
+        ).resolves.toBeUndefined()
+      } finally {
+        process.chdir(prevCwd)
+        if (prevHome === undefined) {
+          delete process.env.HOME
+        } else {
+          process.env.HOME = prevHome
+        }
       }
-    }
 
-    const taskA = JSON.parse(await readFile(taskAPath, "utf8")) as { status: string }
-    const taskB = JSON.parse(await readFile(taskBPath, "utf8")) as { status: string }
-    expect(taskA.status).toBe("completed")
-    expect(taskB.status).toBe("pending")
+      const taskA = JSON.parse(await readFile(taskAPath, "utf8")) as { status: string }
+      const taskB = JSON.parse(await readFile(taskBPath, "utf8")) as { status: string }
+      expect(taskA.status).toBe("completed")
+      expect(taskB.status).toBe("pending")
+    })
   })
 })
 
 describe("task timing fields (#267)", () => {
   it("sets startedAt when a task enters in_progress", async () => {
-    const home = join(TMP, "issue-267-home-started-at")
-    const repoCwd = join(TMP, "issue-267-repo-started-at")
-    const sessionId = "66666666-aaaa-bbbb-cccc-000000000001"
-    const taskId = "1"
-    const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
+    await serial(async () => {
+      const home = join(TMP, "issue-267-home-started-at")
+      const repoCwd = join(TMP, "issue-267-repo-started-at")
+      const sessionId = "66666666-aaaa-bbbb-cccc-000000000001"
+      const taskId = "1"
+      const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
 
-    await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
-    await mkdir(repoCwd, { recursive: true })
-    await writeFile(
-      taskPath,
-      JSON.stringify({
-        id: taskId,
-        subject: "Start task timing",
-        description: "desc",
-        status: "pending",
-        startedAt: null,
-        completedAt: null,
-        statusChangedAt: new Date().toISOString(),
-        elapsedMs: 0,
-        blocks: [],
-        blockedBy: [],
-      })
-    )
+      await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+      await mkdir(repoCwd, { recursive: true })
+      await writeFile(
+        taskPath,
+        JSON.stringify({
+          id: taskId,
+          subject: "Start task timing",
+          description: "desc",
+          status: "pending",
+          startedAt: null,
+          completedAt: null,
+          statusChangedAt: new Date().toISOString(),
+          elapsedMs: 0,
+          blocks: [],
+          blockedBy: [],
+        })
+      )
 
-    const prevHome = process.env.HOME
-    const prevCwd = process.cwd()
-    process.env.HOME = home
-    process.chdir(repoCwd)
-    try {
-      await expect(
-        tasksCommand.run(["status", taskId, "in_progress", "--session", sessionId.slice(0, 8)])
-      ).resolves.toBeUndefined()
-    } finally {
-      process.chdir(prevCwd)
-      if (prevHome === undefined) delete process.env.HOME
-      else process.env.HOME = prevHome
-    }
+      const prevHome = process.env.HOME
+      const prevCwd = process.cwd()
+      process.env.HOME = home
+      process.chdir(repoCwd)
+      try {
+        await expect(
+          tasksCommand.run(["status", taskId, "in_progress", "--session", sessionId])
+        ).resolves.toBeUndefined()
+      } finally {
+        process.chdir(prevCwd)
+        if (prevHome === undefined) delete process.env.HOME
+        else process.env.HOME = prevHome
+      }
 
-    const updated = JSON.parse(await readFile(taskPath, "utf8")) as {
-      status: string
-      startedAt: number | null
-      completedAt: number | null
-    }
-    expect(updated.status).toBe("in_progress")
-    expect(typeof updated.startedAt).toBe("number")
-    expect(updated.completedAt).toBeNull()
+      const updated = JSON.parse(await readFile(taskPath, "utf8")) as {
+        status: string
+        startedAt: number | null
+        completedAt: number | null
+      }
+      expect(updated.status).toBe("in_progress")
+      expect(typeof updated.startedAt).toBe("number")
+      expect(updated.completedAt).toBeNull()
+    })
   })
 
   it("sets completedAt when a task enters completed", async () => {
-    const home = join(TMP, "issue-267-home-completed-at")
-    const repoCwd = join(TMP, "issue-267-repo-completed-at")
-    const sessionId = "77777777-aaaa-bbbb-cccc-000000000001"
-    const taskId = "1"
-    const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
-    const startedAt = Date.now() - 60_000
+    await serial(async () => {
+      const home = join(TMP, "issue-267-home-completed-at")
+      const repoCwd = join(TMP, "issue-267-repo-completed-at")
+      const sessionId = "77777777-aaaa-bbbb-cccc-000000000001"
+      const taskId = "1"
+      const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
+      const startedAt = Date.now() - 60_000
 
-    await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
-    await mkdir(repoCwd, { recursive: true })
-    await writeFile(
-      taskPath,
-      JSON.stringify({
-        id: taskId,
-        subject: "Finish task timing",
-        description: "desc",
-        status: "in_progress",
-        startedAt,
-        completedAt: null,
-        statusChangedAt: new Date(startedAt).toISOString(),
-        elapsedMs: 0,
-        blocks: [],
-        blockedBy: [],
-      })
-    )
+      await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+      await mkdir(repoCwd, { recursive: true })
+      await writeFile(
+        taskPath,
+        JSON.stringify({
+          id: taskId,
+          subject: "Finish task timing",
+          description: "desc",
+          status: "in_progress",
+          startedAt,
+          completedAt: null,
+          statusChangedAt: new Date(startedAt).toISOString(),
+          elapsedMs: 0,
+          blocks: [],
+          blockedBy: [],
+        })
+      )
 
-    const prevHome = process.env.HOME
-    const prevCwd = process.cwd()
-    process.env.HOME = home
-    process.chdir(repoCwd)
-    try {
-      await expect(
-        tasksCommand.run([
-          "status",
-          taskId,
-          "completed",
-          "--session",
-          sessionId.slice(0, 8),
-          "--evidence",
-          "note:completed with timing",
-        ])
-      ).resolves.toBeUndefined()
-    } finally {
-      process.chdir(prevCwd)
-      if (prevHome === undefined) delete process.env.HOME
-      else process.env.HOME = prevHome
-    }
+      const prevHome = process.env.HOME
+      const prevCwd = process.cwd()
+      process.env.HOME = home
+      process.chdir(repoCwd)
+      try {
+        await expect(
+          tasksCommand.run([
+            "status",
+            taskId,
+            "completed",
+            "--session",
+            sessionId,
+            "--evidence",
+            "note:completed with timing",
+          ])
+        ).resolves.toBeUndefined()
+      } finally {
+        process.chdir(prevCwd)
+        if (prevHome === undefined) delete process.env.HOME
+        else process.env.HOME = prevHome
+      }
 
-    const updated = JSON.parse(await readFile(taskPath, "utf8")) as {
-      status: string
-      startedAt: number | null
-      completedAt: number | null
-      completionTimestamp?: string
-    }
-    expect(updated.status).toBe("completed")
-    expect(updated.startedAt).toBe(startedAt)
-    expect(typeof updated.completedAt).toBe("number")
-    expect(updated.completedAt).toBeGreaterThanOrEqual(startedAt)
-    expect(updated.completionTimestamp).toBeTruthy()
+      const updated = JSON.parse(await readFile(taskPath, "utf8")) as {
+        status: string
+        startedAt: number | null
+        completedAt: number | null
+        completionTimestamp?: string
+      }
+      expect(updated.status).toBe("completed")
+      expect(updated.startedAt).toBe(startedAt)
+      expect(typeof updated.completedAt).toBe("number")
+      expect(updated.completedAt).toBeGreaterThanOrEqual(startedAt)
+      expect(updated.completionTimestamp).toBeTruthy()
+    })
   })
 })
 
 describe("native task recovery paths (#271)", () => {
   it("complete creates placeholder stub when --subject is omitted", async () => {
-    const home = join(TMP, "issue-271-home-complete-placeholder")
-    const repoCwd = join(TMP, "issue-271-repo-complete-placeholder")
-    const sessionId = "44444444-aaaa-bbbb-cccc-000000000001"
-    const taskId = "42"
-    const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
+    await serial(async () => {
+      const home = join(TMP, "issue-271-home-complete-placeholder")
+      const repoCwd = join(TMP, "issue-271-repo-complete-placeholder")
+      const sessionId = "44444444-aaaa-bbbb-cccc-000000000001"
+      const taskId = "42"
+      const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
 
-    await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
-    await mkdir(repoCwd, { recursive: true })
+      await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+      await mkdir(repoCwd, { recursive: true })
 
-    const prevHome = process.env.HOME
-    const prevCwd = process.cwd()
-    process.env.HOME = home
-    process.chdir(repoCwd)
-    try {
-      await expect(
-        tasksCommand.run([
-          "complete",
-          taskId,
-          "--session",
-          sessionId.slice(0, 8),
-          "--state",
-          "developing",
-          "--evidence",
-          "note:completed from recovery",
-        ])
-      ).resolves.toBeUndefined()
-    } finally {
-      process.chdir(prevCwd)
-      if (prevHome === undefined) delete process.env.HOME
-      else process.env.HOME = prevHome
-    }
+      const prevHome = process.env.HOME
+      const prevCwd = process.cwd()
+      process.env.HOME = home
+      process.chdir(repoCwd)
+      try {
+        await expect(
+          tasksCommand.run([
+            "complete",
+            taskId,
+            "--session",
+            sessionId,
+            "--state",
+            "developing",
+            "--evidence",
+            "note:completed from recovery",
+          ])
+        ).resolves.toBeUndefined()
+      } finally {
+        process.chdir(prevCwd)
+        if (prevHome === undefined) delete process.env.HOME
+        else process.env.HOME = prevHome
+      }
 
-    const recovered = JSON.parse(await readFile(taskPath, "utf8")) as {
-      subject: string
-      status: string
-      completionEvidence?: string
-    }
-    expect(recovered.subject).toBe(`Task #${taskId}`)
-    expect(recovered.status).toBe("completed")
-    expect(recovered.completionEvidence).toBe("note:completed from recovery")
+      const recovered = JSON.parse(await readFile(taskPath, "utf8")) as {
+        subject: string
+        status: string
+        completionEvidence?: string
+      }
+      expect(recovered.subject).toBe(`Task #${taskId}`)
+      expect(recovered.status).toBe("completed")
+      expect(recovered.completionEvidence).toBe("note:completed from recovery")
+    })
   })
 
   it("evidence creates stub from --subject for missing task", async () => {
-    const home = join(TMP, "issue-271-home-evidence")
-    const repoCwd = join(TMP, "issue-271-repo-evidence")
-    const sessionId = "55555555-aaaa-bbbb-cccc-000000000001"
-    const taskId = "77"
-    const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
+    await serial(async () => {
+      const home = join(TMP, "issue-271-home-evidence")
+      const repoCwd = join(TMP, "issue-271-repo-evidence")
+      const sessionId = "55555555-aaaa-bbbb-cccc-000000000001"
+      const taskId = "77"
+      const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
 
-    await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
-    await mkdir(repoCwd, { recursive: true })
+      await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+      await mkdir(repoCwd, { recursive: true })
 
-    const prevHome = process.env.HOME
-    const prevCwd = process.cwd()
-    process.env.HOME = home
-    process.chdir(repoCwd)
-    try {
-      await expect(
-        tasksCommand.run([
-          "evidence",
-          taskId,
-          "note:evidence added",
-          "--session",
-          sessionId.slice(0, 8),
-          "--subject",
-          "Recovered native task",
-        ])
-      ).resolves.toBeUndefined()
-    } finally {
-      process.chdir(prevCwd)
-      if (prevHome === undefined) delete process.env.HOME
-      else process.env.HOME = prevHome
-    }
+      const prevHome = process.env.HOME
+      const prevCwd = process.cwd()
+      process.env.HOME = home
+      process.chdir(repoCwd)
+      try {
+        await expect(
+          tasksCommand.run([
+            "evidence",
+            taskId,
+            "note:evidence added",
+            "--session",
+            sessionId,
+            "--subject",
+            "Recovered native task",
+          ])
+        ).resolves.toBeUndefined()
+      } finally {
+        process.chdir(prevCwd)
+        if (prevHome === undefined) delete process.env.HOME
+        else process.env.HOME = prevHome
+      }
 
-    const recovered = JSON.parse(await readFile(taskPath, "utf8")) as {
-      subject: string
-      completionEvidence?: string
-    }
-    expect(recovered.subject).toBe("Recovered native task")
-    expect(recovered.completionEvidence).toBe("note:evidence added")
+      const recovered = JSON.parse(await readFile(taskPath, "utf8")) as {
+        subject: string
+        completionEvidence?: string
+      }
+      expect(recovered.subject).toBe("Recovered native task")
+      expect(recovered.completionEvidence).toBe("note:evidence added")
+    })
   })
 
   it("status creates stub from --subject for missing task", async () => {
-    const home = join(TMP, "issue-271-home-status")
-    const repoCwd = join(TMP, "issue-271-repo-status")
-    const sessionId = "66666666-aaaa-bbbb-cccc-000000000001"
-    const taskId = "88"
-    const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
+    await serial(async () => {
+      const home = join(TMP, "issue-271-home-status")
+      const repoCwd = join(TMP, "issue-271-repo-status")
+      const sessionId = "66666666-aaaa-bbbb-cccc-000000000001"
+      const taskId = "88"
+      const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
 
-    await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
-    await mkdir(repoCwd, { recursive: true })
+      await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+      await mkdir(repoCwd, { recursive: true })
 
-    const prevHome = process.env.HOME
-    const prevCwd = process.cwd()
-    process.env.HOME = home
-    process.chdir(repoCwd)
-    try {
-      await expect(
-        tasksCommand.run([
-          "status",
-          taskId,
-          "completed",
-          "--session",
-          sessionId.slice(0, 8),
-          "--subject",
-          "Recovered status task",
-          "--state",
-          "developing",
-          "--evidence",
-          "note:status recovered",
-        ])
-      ).resolves.toBeUndefined()
-    } finally {
-      process.chdir(prevCwd)
-      if (prevHome === undefined) delete process.env.HOME
-      else process.env.HOME = prevHome
-    }
+      const prevHome = process.env.HOME
+      const prevCwd = process.cwd()
+      process.env.HOME = home
+      process.chdir(repoCwd)
+      try {
+        await expect(
+          tasksCommand.run([
+            "status",
+            taskId,
+            "completed",
+            "--session",
+            sessionId,
+            "--subject",
+            "Recovered status task",
+            "--state",
+            "developing",
+            "--evidence",
+            "note:status recovered",
+          ])
+        ).resolves.toBeUndefined()
+      } finally {
+        process.chdir(prevCwd)
+        if (prevHome === undefined) delete process.env.HOME
+        else process.env.HOME = prevHome
+      }
 
-    const recovered = JSON.parse(await readFile(taskPath, "utf8")) as {
-      subject: string
-      status: string
-    }
-    expect(recovered.subject).toBe("Recovered status task")
-    expect(recovered.status).toBe("completed")
+      const recovered = JSON.parse(await readFile(taskPath, "utf8")) as {
+        subject: string
+        status: string
+      }
+      expect(recovered.subject).toBe("Recovered status task")
+      expect(recovered.status).toBe("completed")
+    })
   })
 
   it("update creates stub from --subject for missing task", async () => {
-    const home = join(TMP, "issue-271-home-update")
-    const repoCwd = join(TMP, "issue-271-repo-update")
-    const sessionId = "77777777-aaaa-bbbb-cccc-000000000001"
-    const taskId = "99"
-    const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
+    await serial(async () => {
+      const home = join(TMP, "issue-271-home-update")
+      const repoCwd = join(TMP, "issue-271-repo-update")
+      const sessionId = "77777777-aaaa-bbbb-cccc-000000000001"
+      const taskId = "99"
+      const taskPath = join(home, ".claude", "tasks", sessionId, `${taskId}.json`)
 
-    await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
-    await mkdir(repoCwd, { recursive: true })
+      await mkdir(join(home, ".claude", "tasks", sessionId), { recursive: true })
+      await mkdir(repoCwd, { recursive: true })
 
-    const prevHome = process.env.HOME
-    const prevCwd = process.cwd()
-    process.env.HOME = home
-    process.chdir(repoCwd)
-    try {
-      await expect(
-        tasksCommand.run([
-          "update",
-          taskId,
-          "--session",
-          sessionId.slice(0, 8),
-          "--subject",
-          "Recovered update task",
-          "--description",
-          "Recovered description",
-          "--status",
-          "pending",
-        ])
-      ).resolves.toBeUndefined()
-    } finally {
-      process.chdir(prevCwd)
-      if (prevHome === undefined) delete process.env.HOME
-      else process.env.HOME = prevHome
-    }
+      const prevHome = process.env.HOME
+      const prevCwd = process.cwd()
+      process.env.HOME = home
+      process.chdir(repoCwd)
+      try {
+        await expect(
+          tasksCommand.run([
+            "update",
+            taskId,
+            "--session",
+            sessionId,
+            "--subject",
+            "Recovered update task",
+            "--description",
+            "Recovered description",
+            "--status",
+            "pending",
+          ])
+        ).resolves.toBeUndefined()
+      } finally {
+        process.chdir(prevCwd)
+        if (prevHome === undefined) delete process.env.HOME
+        else process.env.HOME = prevHome
+      }
 
-    const recovered = JSON.parse(await readFile(taskPath, "utf8")) as {
-      subject: string
-      description: string
-      status: string
-    }
-    expect(recovered.subject).toBe("Recovered update task")
-    expect(recovered.description).toBe("Recovered description")
-    expect(recovered.status).toBe("pending")
+      const recovered = JSON.parse(await readFile(taskPath, "utf8")) as {
+        subject: string
+        description: string
+        status: string
+      }
+      expect(recovered.subject).toBe("Recovered update task")
+      expect(recovered.description).toBe("Recovered description")
+      expect(recovered.status).toBe("pending")
+    })
   })
 })

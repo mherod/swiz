@@ -482,7 +482,7 @@ function MessageBody({ text, role }: { text: string; role: "user" | "assistant" 
 interface SessionNavProps {
   projects: ProjectSessions[]
   activeAgentPidsByProvider: Record<string, number[]>
-  killingPid: number | null
+  killingPids: Set<number>
   deletingSessionId: string | null
   selectedProjectCwd: string | null
   selectedSessionId: string | null
@@ -495,7 +495,7 @@ interface SessionNavProps {
 export function SessionNav({
   projects,
   activeAgentPidsByProvider,
-  killingPid,
+  killingPids,
   deletingSessionId,
   selectedProjectCwd,
   selectedSessionId,
@@ -548,8 +548,8 @@ export function SessionNav({
     const processLabel = formatProcessPidLabel(processPids)
     const primaryPid = processPids[0]
     const isDeleting = deletingSessionId === session.id
-    const isKilling = primaryPid != null && killingPid === primaryPid
-    const hasLiveProcess = processPids.length > 0
+    const isKilling = processPids.some((pid) => killingPids.has(pid))
+    const hasLiveProcess = processPids.length > 0 || isKilling
     const actionLabel = hasLiveProcess ? "Kill process" : "Delete session"
     const actionDisabled = hasLiveProcess ? isKilling : isDeleting
     const actionIcon = hasLiveProcess ? (isKilling ? "…" : "✕") : isDeleting ? "…" : "🗑"

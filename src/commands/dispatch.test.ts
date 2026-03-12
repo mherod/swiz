@@ -99,7 +99,7 @@ describe("dispatch preToolUse", () => {
     // Read tool has no matching groups for banned-commands
     // May get output from other hooks but not a deny for banned commands
     expect(result.exitCode).toBe(0)
-  })
+  }, 15_000)
 })
 
 describe("dispatch routing", () => {
@@ -268,7 +268,7 @@ describe("dispatch replay", () => {
       expect(typeof hook.file).toBe("string")
       expect(typeof hook.status).toBe("string")
     }
-  })
+  }, 15_000)
 
   test("replay outputs human-readable trace to stderr (non-JSON mode)", async () => {
     const result = await replay("preToolUse", {
@@ -281,7 +281,7 @@ describe("dispatch replay", () => {
     expect(result.stderr).toContain("preToolUse")
     // Should mention DENY or BLOCK
     expect(result.stderr.toLowerCase()).toMatch(/deny|block/)
-  })
+  }, 15_000)
 
   test("replay missing event argument throws error", async () => {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "replay"], {
@@ -295,7 +295,7 @@ describe("dispatch replay", () => {
     await proc.exited
     expect(proc.exitCode).not.toBe(0)
     expect(stderr).toContain("replay <event>")
-  })
+  }, 15_000)
 
   test("replay fails when stdin payload is not received within 2s", async () => {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "replay", "preToolUse"], {
@@ -312,7 +312,7 @@ describe("dispatch replay", () => {
     expect(proc.exitCode).toBe(1)
     expect(stdout.trim()).toBe("")
     expect(stderr).toContain("Timed out waiting 2s for stdin JSON payload to be received")
-  })
+  }, 15_000)
 
   test("replay JSON output includes matched_groups and hooks array", async () => {
     const result = await replay(

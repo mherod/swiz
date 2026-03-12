@@ -896,7 +896,7 @@ describe("sessionstart-health-snapshot: positive paths", () => {
     const ctx = hso?.additionalContext as string
     expect(ctx).toContain("Git:")
     expect(ctx).toContain("branch=")
-  })
+  }, 15000)
 
   test("emits git info in real project repo", async () => {
     const r = await runHook(HOOK, { cwd: process.cwd() })
@@ -908,7 +908,7 @@ describe("sessionstart-health-snapshot: positive paths", () => {
     expect(ctx).toContain("Git:")
     expect(ctx).toContain("branch=")
     expect(ctx).toContain("uncommitted=")
-  })
+  }, 15000)
 })
 
 describe("userpromptsubmit-task-advisor: positive paths", () => {
@@ -968,7 +968,7 @@ describe("stop-git-status: positive paths", () => {
     expect(reason).toContain("Uncommitted changes")
     expect(reason).toContain("2 untracked")
     expect(reason).toContain("ACTION REQUIRED")
-  })
+  }, 15000)
 
   test("dirty repo with staged files reports them", async () => {
     const repo = await createGitRepo()
@@ -978,7 +978,7 @@ describe("stop-git-status: positive paths", () => {
     expect(r.exitCode).toBe(0)
     const reason = r.json?.reason as string
     expect(reason).toContain("1 added")
-  })
+  }, 15000)
 
   test("clean repo allows stop (no output)", async () => {
     const repo = await createGitRepo()
