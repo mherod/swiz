@@ -98,6 +98,13 @@ body::before {
   min-height: 0;
 }
 
+.bento.bento-view-settings {
+  grid-template-areas:
+    "title"
+    "nav"
+    "settings";
+}
+
 /* ── Card base ── */
 
 .card {
@@ -770,6 +777,14 @@ tbody tr:hover {
 
 .bento-messages {
   grid-area: msgs;
+  overflow-y: auto;
+  min-height: 52dvh;
+}
+
+/* ── Settings Page ── */
+
+.bento-settings-page {
+  grid-area: settings;
   overflow-y: auto;
   min-height: 52dvh;
 }
@@ -1641,6 +1656,14 @@ tbody tr:hover {
       "metrics metrics";
   }
 
+  .bento.bento-view-settings {
+    grid-template-areas:
+      "title  title"
+      "nav    nav"
+      "settings settings"
+      "settings settings";
+  }
+
   .bento-nav {
     max-height: 30dvh;
   }
@@ -1658,6 +1681,13 @@ tbody tr:hover {
       "title  title"
       "nav    msgs"
       "metrics metrics";
+  }
+
+  .bento.bento-view-settings {
+    grid-template-areas:
+      "title  title"
+      "nav    settings"
+      "nav    settings";
   }
 
   .bento-nav {
@@ -1689,6 +1719,14 @@ tbody tr:hover {
     grid-template-areas:
       "title  title  title"
       "nav    msgs   metrics";
+  }
+
+  .bento.bento-view-settings {
+    grid-template-columns: minmax(270px, 320px) minmax(0, 1fr) minmax(280px, 340px);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      "title  title  title"
+      "nav    settings settings";
   }
 
   .bento-metrics-stack {

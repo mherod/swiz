@@ -18,6 +18,7 @@ import {
 import { postJson } from "../lib/http.ts"
 import { Header } from "./header.tsx"
 import { MetricsRail } from "./metrics-rail.tsx"
+import { ProjectSettingsCard } from "./project-settings-card.tsx"
 import {
   type ProjectSessions,
   type ProjectTask,
@@ -199,6 +200,7 @@ export function DashboardApp() {
   )
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
   const [activeHookDispatches, setActiveHookDispatches] = useState<ActiveHookDispatch[]>([])
+  const [activeView, setActiveView] = useState<"dashboard" | "settings">("dashboard")
   const [error, setError] = useState("")
   const [lastUpdated, setLastUpdated] = useState("starting")
 
@@ -476,7 +478,7 @@ export function DashboardApp() {
   }
 
   return (
-    <div className="bento">
+    <div className={`bento ${activeView === "settings" ? "bento-view-settings" : ""}`}>
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         Dashboard updated at {lastUpdated}.
       </p>
@@ -488,6 +490,8 @@ export function DashboardApp() {
         activeWatches={watchCount}
         activeHooks={activeHookDispatches.length}
         selectedProjectName={activeProject?.name ?? null}
+        activeView={activeView}
+        onSelectView={setActiveView}
       />
       <SessionNav
         projects={visibleProjects}
@@ -501,28 +505,35 @@ export function DashboardApp() {
         onKillAgentPid={handleKillAgentPid}
         onDeleteSession={handleDeleteSession}
       />
-      <SessionMessages
-        messages={displayedMessages}
-        loading={messagesLoading}
-        newKeys={newMessageKeys}
-        msgKey={msgKey}
-        toolStats={sessionToolStats}
-        tasks={sessionTasks}
-        taskSummary={sessionTaskSummary}
-        tasksLoading={sessionTasksLoading}
-        projectTasks={projectTasks}
-        projectTaskSummary={projectTaskSummary}
-        projectTasksLoading={projectTasksLoading}
-      />
-      <MetricsRail
-        events={metricsEvents}
-        cacheStatus={cacheStatus}
-        selectedProjectCwd={optimisticProjectCwd}
-        activeSession={activeSession}
-        activeHookDispatches={activeHookDispatches}
-        loadedMessageCount={sessionMessages.length}
-        sessionToolStats={sessionToolStats}
-      />
+      {activeView === "settings" ? (
+        <div className="bento-settings-page">
+          <ProjectSettingsCard cwd={optimisticProjectCwd} />
+        </div>
+      ) : (
+        <>
+          <SessionMessages
+            messages={displayedMessages}
+            loading={messagesLoading}
+            newKeys={newMessageKeys}
+            msgKey={msgKey}
+            toolStats={sessionToolStats}
+            tasks={sessionTasks}
+            taskSummary={sessionTaskSummary}
+            tasksLoading={sessionTasksLoading}
+            projectTasks={projectTasks}
+            projectTaskSummary={projectTaskSummary}
+            projectTasksLoading={projectTasksLoading}
+          />
+          <MetricsRail
+            events={metricsEvents}
+            cacheStatus={cacheStatus}
+            activeSession={activeSession}
+            activeHookDispatches={activeHookDispatches}
+            loadedMessageCount={sessionMessages.length}
+            sessionToolStats={sessionToolStats}
+          />
+        </>
+      )}
     </div>
   )
 }

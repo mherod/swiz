@@ -6,6 +6,8 @@ interface HeaderProps {
   activeWatches: number
   activeHooks: number
   selectedProjectName: string | null
+  activeView?: "dashboard" | "settings"
+  onSelectView?: (view: "dashboard" | "settings") => void
 }
 
 export function Header({
@@ -16,15 +18,71 @@ export function Header({
   activeWatches,
   activeHooks,
   selectedProjectName,
+  activeView = "dashboard",
+  onSelectView,
 }: HeaderProps) {
   return (
     <header className="bento-title">
-      <div className="title-row">
-        <h1 className="topbar-title">swiz daemon</h1>
-        <output className="status-pill">
-          <span className="status-dot" aria-hidden="true" />
-          <span>Live</span>
-        </output>
+      <div
+        className="title-row"
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <h1 className="topbar-title">swiz daemon</h1>
+          <output className="status-pill">
+            <span className="status-dot" aria-hidden="true" />
+            <span>Live</span>
+          </output>
+        </div>
+
+        {onSelectView && (
+          <div
+            className="view-toggle"
+            style={{
+              display: "flex",
+              background: "rgba(35, 58, 104, 0.25)",
+              borderRadius: "6px",
+              padding: "2px",
+              border: "1px solid rgba(110, 147, 223, 0.38)",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => onSelectView("dashboard")}
+              style={{
+                background:
+                  activeView === "dashboard" ? "rgba(110, 147, 223, 0.38)" : "transparent",
+                color: activeView === "dashboard" ? "#fff" : "#a8bee8",
+                border: "none",
+                padding: "4px 12px",
+                borderRadius: "4px",
+                fontSize: "0.75rem",
+                cursor: "pointer",
+                fontWeight: activeView === "dashboard" ? "600" : "400",
+                transition: "all 0.15s ease",
+              }}
+            >
+              Dashboard
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectView("settings")}
+              style={{
+                background: activeView === "settings" ? "rgba(110, 147, 223, 0.38)" : "transparent",
+                color: activeView === "settings" ? "#fff" : "#a8bee8",
+                border: "none",
+                padding: "4px 12px",
+                borderRadius: "4px",
+                fontSize: "0.75rem",
+                cursor: "pointer",
+                fontWeight: activeView === "settings" ? "600" : "400",
+                transition: "all 0.15s ease",
+              }}
+            >
+              Project Settings
+            </button>
+          </div>
+        )}
       </div>
       <span className="topbar-meta">Updated {lastUpdated}</span>
       <p className="topbar-summary">
