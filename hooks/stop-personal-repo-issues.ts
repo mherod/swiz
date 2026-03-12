@@ -400,20 +400,25 @@ export async function getActionableIssues(cwd: string, filterUser?: string): Pro
 }
 
 async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise<PR[]> {
-  const prs = await ghJson<PR[]>(
-    [
-      "pr",
-      "list",
-      "--state",
-      "open",
-      "--author",
-      currentUser,
-      "--json",
-      "number,title,url,reviewDecision,mergeable,createdAt",
-    ],
-    cwd
-  )
-  return (prs ?? []).filter(
+  const jsonFields = "number,title,url,reviewDecision,mergeable,createdAt"
+  const [authoredPrs, reviewerPrs] = await Promise.all([
+    ghJson<PR[]>(
+      ["pr", "list", "--state", "open", "--author", currentUser, "--json", jsonFields],
+      cwd
+    ),
+    ghJson<PR[]>(
+      ["pr", "list", "--state", "open", "--reviewer", currentUser, "--json", jsonFields],
+      cwd
+    ),
+  ])
+
+  // Merge both lists, deduplicating by PR number
+  const byNumber = new Map<number, PR>()
+  for (const pr of [...(authoredPrs ?? []), ...(reviewerPrs ?? [])]) {
+    byNumber.set(pr.number, pr)
+  }
+
+  return [...byNumber.values()].filter(
     (p) =>
       p.reviewDecision === "CHANGES_REQUESTED" ||
       p.reviewDecision === "REVIEW_REQUIRED" ||
