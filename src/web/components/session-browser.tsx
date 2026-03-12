@@ -506,6 +506,8 @@ export function SessionNav({
   onKillAgentPid,
   onDeleteSession,
 }: SessionNavProps) {
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
+
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => b.lastSeenAt - a.lastSeenAt),
     [projects]
@@ -620,30 +622,51 @@ export function SessionNav({
           </span>
         </button>
         <div className="session-actions">
-          <button
-            type="button"
-            className={cn(
-              "session-action-btn",
-              hasLiveProcess ? "session-action-kill" : "session-action-delete"
-            )}
-            onClick={() => {
-              if (hasLiveProcess && primaryPid) {
-                void onKillAgentPid(primaryPid)
-                return
-              }
-              if (!selectedProjectCwdSafe) return
-              if (!confirm(`Delete session ${shortSessionId(session.id)} data?`)) return
-              void onDeleteSession(selectedProjectCwdSafe, session.id)
-            }}
-            disabled={actionDisabled}
-            title={actionTitle}
-            aria-label={actionTitle}
-          >
-            <span className="session-action-icon" aria-hidden="true">
-              {actionIcon}
-            </span>
-            <span className="sr-only">{actionLabel}</span>
-          </button>
+          {confirmingDeleteId === session.id && !hasLiveProcess ? (
+            // biome-ignore lint/a11y/noStaticElementInteractions: dismissal via mouse leave
+            <div
+              className="session-action-confirm"
+              onMouseLeave={() => setConfirmingDeleteId(null)}
+            >
+              <span className="session-action-confirm-text">Delete?</span>
+              <button
+                type="button"
+                className="session-action-btn session-action-delete session-action-delete-confirm"
+                onClick={() => {
+                  if (!selectedProjectCwdSafe) return
+                  setConfirmingDeleteId(null)
+                  void onDeleteSession(selectedProjectCwdSafe, session.id)
+                }}
+                title="Confirm delete"
+              >
+                Yes
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className={cn(
+                "session-action-btn",
+                hasLiveProcess ? "session-action-kill" : "session-action-delete"
+              )}
+              onClick={() => {
+                if (hasLiveProcess && primaryPid) {
+                  void onKillAgentPid(primaryPid)
+                  return
+                }
+                if (!selectedProjectCwdSafe) return
+                setConfirmingDeleteId(session.id)
+              }}
+              disabled={actionDisabled}
+              title={actionTitle}
+              aria-label={actionTitle}
+            >
+              <span className="session-action-icon" aria-hidden="true">
+                {actionIcon}
+              </span>
+              <span className="sr-only">{actionLabel}</span>
+            </button>
+          )}
         </div>
       </li>
     )
