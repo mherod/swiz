@@ -41,7 +41,9 @@ export interface AssistantMessageParts {
 }
 
 function isMarkdownLike(text: string): boolean {
-  return /(^|\n)\s*(#{1,6}\s|[-*]\s|>\s|```)|`[^`]+`|\[[^\]]+\]\([^)]+\)/m.test(text)
+  return /(^|\n)\s*(#{1,6}\s|[-*]\s|>\s|```)|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|#\d+\b/m.test(
+    text
+  )
 }
 
 export function normalizeAssistantText(text: string): string {

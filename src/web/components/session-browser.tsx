@@ -1,5 +1,6 @@
 import { type ReactNode, useMemo, useState } from "react"
 import { cn } from "../lib/cn.ts"
+import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
 import {
   formatAssistantJsonBlocks,
   normalizeAssistantText,
@@ -16,6 +17,7 @@ export interface SessionPreview {
   startedAt?: number
   lastMessageAt?: number
   dispatches?: number
+  activeDispatch?: ActiveHookDispatch
 }
 
 export interface ProjectSessions {
@@ -560,6 +562,10 @@ export function SessionNav({
           ? actionLabel
           : "Delete session transcript and tasks"
 
+    const activeRuntimeSeconds = session.activeDispatch
+      ? Math.max(0, Math.round((Date.now() - session.activeDispatch.startedAt) / 1000))
+      : 0
+
     return (
       <li key={session.id} className="session-row">
         <button
@@ -585,8 +591,32 @@ export function SessionNav({
             ) : null}
           </span>
           <span className="session-meta">
-            {shortSessionId(session.id)} ·{" "}
-            {formatCompactTime(session.lastMessageAt ?? session.mtime)}
+            {session.activeDispatch ? (
+              <span className="session-active-dispatch" title={session.activeDispatch.requestId}>
+                <span className="session-active-pulse" />
+                {session.activeDispatch.toolName ? (
+                  <>
+                    running <strong>{session.activeDispatch.toolName}</strong>
+                    {session.activeDispatch.toolInputSummary ? (
+                      <span className="session-active-detail">
+                        {" "}
+                        ({session.activeDispatch.toolInputSummary})
+                      </span>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    running <strong>{session.activeDispatch.canonicalEvent}</strong>
+                  </>
+                )}
+                <span className="session-active-time"> · {activeRuntimeSeconds}s</span>
+              </span>
+            ) : (
+              <>
+                {shortSessionId(session.id)} ·{" "}
+                {formatCompactTime(session.lastMessageAt ?? session.mtime)}
+              </>
+            )}
           </span>
         </button>
         <div className="session-actions">

@@ -616,6 +616,54 @@ tbody tr:hover {
   font-variant-numeric: tabular-nums;
 }
 
+.session-active-dispatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.session-active-pulse {
+  width: 8px;
+  height: 8px;
+  background-color: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 rgba(119, 183, 255, 0.4);
+  animation: session-pulse 2s infinite;
+}
+
+@keyframes session-pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(119, 183, 255, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(119, 183, 255, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(119, 183, 255, 0);
+  }
+}
+
+.session-active-detail {
+  font-weight: 400;
+  opacity: 0.8;
+  font-size: 0.9em;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-active-time {
+  opacity: 0.6;
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+}
+
 .agent-process-chip {
   display: inline-flex;
   align-items: center;
@@ -1334,6 +1382,68 @@ tbody tr:hover {
   margin-top: 8px;
 }
 
+.panel-dashboard-stats {
+  gap: 16px;
+}
+
+.stats-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stats-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stats-group-title {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #a3afc4;
+  font-weight: 600;
+}
+
+.stats-divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(46, 64, 101, 0) 0%,
+    rgba(46, 64, 101, 0.6) 20%,
+    rgba(46, 64, 101, 0.6) 80%,
+    rgba(46, 64, 101, 0) 100%
+  );
+  margin: 4px 0;
+}
+
+.stats-active-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: rgba(119, 183, 255, 0.08);
+  border: 1px solid rgba(119, 183, 255, 0.2);
+  border-radius: 8px;
+  margin: 4px 0;
+}
+
+.stats-active-text {
+  font-size: 0.75rem;
+  color: #77b7ff;
+}
+
+.stats-active-text strong {
+  color: #fff;
+}
+
+.stats-active-time {
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Error ── */
 
 .bento-error {
@@ -1435,6 +1545,45 @@ tbody tr:hover {
 .md-body em {
   font-style: italic;
   color: var(--text-muted);
+}
+
+.md-body .md-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+  transition:
+    color 150ms ease,
+    text-decoration-color 150ms ease;
+  text-decoration-color: transparent;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.md-body .md-link:hover,
+.md-body .md-link:focus-visible {
+  color: #a8cdff;
+  text-decoration: underline;
+  text-decoration-color: rgba(168, 205, 255, 0.6);
+  outline: none;
+}
+
+.md-body .md-issue {
+  background: rgba(119, 183, 255, 0.08);
+  border: 1px solid rgba(119, 183, 255, 0.2);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #8bbfffc2;
+}
+
+.md-body .md-issue:hover,
+.md-body .md-issue:focus-visible {
+  color: #b5d5ff;
+  background: rgba(119, 183, 255, 0.15);
+  border-color: rgba(119, 183, 255, 0.4);
+  text-decoration: none;
 }
 
 /* ── Entry animation ── */
@@ -1576,6 +1725,12 @@ tbody tr:hover {
   margin: 4px 0 0;
   color: #9db2d4;
   font-size: 0.7rem;
+}
+
+.panel-health-hook-detail {
+  font-weight: 400;
+  opacity: 0.8;
+  font-size: 0.9em;
 }
 
 .panel-health-hook-list {

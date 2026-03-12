@@ -6,12 +6,40 @@ function escapeHtml(s: string): string {
 
 function renderInline(text: string): string {
   let out = escapeHtml(text)
-  // inline code (must come before bold/italic to avoid conflicts)
-  out = out.replace(/`([^`]+)`/g, '<code class="md-code">$1</code>')
-  // bold
+  const placeholders: string[] = []
+
+  // 1. Code blocks
+  out = out.replace(/`([^`]+)`/g, (_, code) => {
+    placeholders.push(`<code class="md-code">${code}</code>`)
+    return `__PLACEHOLDER_${placeholders.length - 1}__`
+  })
+
+  // 2. Markdown links (process inner text for bold/italic, but NO issues)
+  out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, linkText, url) => {
+    let inner = linkText
+    inner = inner.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    inner = inner.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>")
+    placeholders.push(
+      `<a href="${url}" class="md-link" target="_blank" rel="noreferrer">${inner}</a>`
+    )
+    return `__PLACEHOLDER_${placeholders.length - 1}__`
+  })
+
+  // 3. Issues
+  out = out.replace(
+    /(^|\s)#(\d+)\b/g,
+    '$1<a href="https://github.com/mherod/swiz/issues/$2" class="md-link md-issue" target="_blank" rel="noreferrer">#$2</a>'
+  )
+
+  // 4. Bold / Italic
   out = out.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-  // italic
   out = out.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>")
+
+  // 5. Restore placeholders
+  while (/__PLACEHOLDER_/.test(out)) {
+    out = out.replace(/__PLACEHOLDER_(\d+)__/g, (_, i) => placeholders[Number(i)]!)
+  }
+
   return out
 }
 
