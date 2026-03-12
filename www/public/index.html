@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>swiz</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #09090b;
+      color: #fafafa;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .container {
+      max-width: 40rem;
+      width: 100%;
+    }
+    header {
+      margin-bottom: 3rem;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #fafafa;
+    }
+    h1 span {
+      font-weight: 400;
+      color: #71717a;
+    }
+    .description {
+      margin-top: 0.75rem;
+      font-size: 0.9rem;
+      line-height: 1.6;
+      color: #a1a1aa;
+      max-width: 32rem;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: #27272a;
+      border: 1px solid #27272a;
+      border-radius: 0.5rem;
+      overflow: hidden;
+      margin-bottom: 2rem;
+    }
+    .stat {
+      background: #09090b;
+      padding: 1.25rem 1.5rem;
+    }
+    .stat-value {
+      font-size: 1.75rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-label {
+      font-size: 0.75rem;
+      color: #71717a;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-top: 0.25rem;
+    }
+    .section {
+      margin-bottom: 2rem;
+    }
+    .section-title {
+      font-size: 0.75rem;
+      color: #71717a;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 0.75rem;
+    }
+    .agent-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1px;
+      background: #27272a;
+      border: 1px solid #27272a;
+      border-radius: 0.5rem;
+      overflow: hidden;
+    }
+    .agent {
+      background: #09090b;
+      padding: 1rem 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .agent-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #22c55e;
+      flex-shrink: 0;
+    }
+    .agent-name {
+      font-size: 0.85rem;
+      color: #e4e4e7;
+    }
+    .pipeline {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      overflow-x: auto;
+    }
+    .pipeline-step {
+      padding: 0.6rem 1rem;
+      background: #18181b;
+      border: 1px solid #27272a;
+      font-size: 0.8rem;
+      color: #a1a1aa;
+      white-space: nowrap;
+    }
+    .pipeline-step:first-child { border-radius: 0.5rem 0 0 0.5rem; }
+    .pipeline-step:last-child { border-radius: 0 0.5rem 0.5rem 0; }
+    .pipeline-arrow {
+      color: #3f3f46;
+      padding: 0 0.25rem;
+      font-size: 0.75rem;
+      flex-shrink: 0;
+    }
+    .install {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 0.5rem;
+      padding: 1rem 1.25rem;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 0.85rem;
+      color: #d4d4d8;
+      margin-bottom: 2rem;
+    }
+    .install .prompt { color: #52525b; }
+    footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .footer-tagline {
+      font-size: 0.8rem;
+      color: #3f3f46;
+    }
+    .footer-links {
+      display: flex;
+      gap: 1.25rem;
+    }
+    .footer-links a {
+      font-size: 0.8rem;
+      color: #52525b;
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .footer-links a:hover { color: #a1a1aa; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>swiz <span>— hooks for AI coding agents</span></h1>
+      <p class="description">
+        One manifest of TypeScript hook scripts installed across every agent.
+        Hooks enforce discipline at every stage of the agent loop.
+      </p>
+    </header>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-value">95</div>
+        <div class="stat-label">Hooks</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">11</div>
+        <div class="stat-label">Events</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">4</div>
+        <div class="stat-label">Agents</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Pipeline</div>
+      <div class="pipeline">
+        <div class="pipeline-step">prompt</div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-step">pre-tool</div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-step">post-tool</div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-step">stop</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Agents</div>
+      <div class="agent-grid">
+        <div class="agent">
+          <div class="agent-dot"></div>
+          <div class="agent-name">Claude Code</div>
+        </div>
+        <div class="agent">
+          <div class="agent-dot"></div>
+          <div class="agent-name">Cursor</div>
+        </div>
+        <div class="agent">
+          <div class="agent-dot"></div>
+          <div class="agent-name">Gemini CLI</div>
+        </div>
+        <div class="agent">
+          <div class="agent-dot"></div>
+          <div class="agent-name">Codex CLI</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="install">
+      <span class="prompt">$</span> bun install && bun link
+    </div>
+
+    <footer>
+      <div class="footer-tagline">Zero compromises.</div>
+      <div class="footer-links">
+        <a href="https://github.com/mherod/swiz">GitHub</a>
+        <a href="https://github.com/mherod/swiz#readme">Docs</a>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>
