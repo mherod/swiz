@@ -45,35 +45,122 @@ interface NormalizedTask {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function parseToolResponse(raw: ExtendedToolHookInput["tool_response"]): NormalizedTask[] {
-  if (!raw) return []
+function parseNormalizedTask(t: Record<string, unknown>): NormalizedTask | null {
+  const id = t.id !== undefined && t.id !== null ? String(t.id) : ""
+  const subject = typeof t.subject === "string" ? t.subject : ""
+  const status = typeof t.status === "string" ? t.status : "pending"
+  if (!id || !subject) return null
+  return { id, subject, status }
+}
 
+function parseRawTasks(raw: ExtendedToolHookInput["tool_response"]): unknown[] | null {
+  if (!raw) return null
   let parsed: unknown = raw
   if (typeof raw === "string") {
     try {
       parsed = JSON.parse(raw)
     } catch {
-      return []
+      return null
     }
   }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null
+  const items = (parsed as Record<string, unknown>).tasks
+  return Array.isArray(items) ? items : null
+}
 
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return []
-
-  const obj = parsed as Record<string, unknown>
-  const items = Array.isArray(obj.tasks) ? obj.tasks : null
+function parseToolResponse(raw: ExtendedToolHookInput["tool_response"]): NormalizedTask[] {
+  const items = parseRawTasks(raw)
   if (!items) return []
-
   const result: NormalizedTask[] = []
   for (const item of items) {
     if (typeof item !== "object" || item === null) continue
-    const t = item as Record<string, unknown>
-    const id = t.id !== undefined && t.id !== null ? String(t.id) : ""
-    const subject = typeof t.subject === "string" ? t.subject : ""
-    const status = typeof t.status === "string" ? t.status : "pending"
-    if (!id || !subject) continue
-    result.push({ id, subject, status })
+    const normalized = parseNormalizedTask(item as Record<string, unknown>)
+    if (normalized) result.push(normalized)
   }
   return result
+}
+
+function buildNewTaskRecord(task: NormalizedTask, nowIso: string, nowMs: number): SessionTask {
+  return {
+    id: task.id,
+    subject: task.subject,
+    status: task.status,
+    statusChangedAt: nowIso,
+    elapsedMs: 0,
+    startedAt: task.status === "in_progress" ? nowMs : null,
+    completedAt: task.status === "completed" ? nowMs : null,
+    ...(task.status === "completed" ? { completionTimestamp: nowIso } : {}),
+  }
+}
+
+function updateExistingTask(existing: SessionTask, task: NormalizedTask): SessionTask {
+  const merged: SessionTask = { ...existing, subject: task.subject, status: task.status }
+  const nowIso = new Date().toISOString()
+  const nowMs = Date.now()
+  if (existing.status === "in_progress") {
+    merged.elapsedMs = getTaskCurrentDurationMs(existing, nowMs)
+  }
+  merged.statusChangedAt = nowIso
+  if (task.status === "in_progress") merged.startedAt = nowMs
+  if (task.status === "completed") {
+    merged.completedAt = nowMs
+    if (!merged.completionTimestamp) merged.completionTimestamp = nowIso
+  }
+  return merged
+}
+
+interface SyncCounts {
+  created: number
+  updated: number
+  skipped: number
+}
+
+async function reconcileTasks(
+  tasks: NormalizedTask[],
+  home: string,
+  sessionId: string
+): Promise<SyncCounts> {
+  const counts: SyncCounts = { created: 0, updated: 0, skipped: 0 }
+
+  for (const task of tasks) {
+    const taskPath = getSessionTaskPath(sessionId, task.id, home)
+    if (!taskPath) continue
+
+    const file = Bun.file(taskPath)
+    const exists = await file.exists()
+
+    if (!exists) {
+      const taskRecord = buildNewTaskRecord(task, new Date().toISOString(), Date.now())
+      try {
+        await Bun.write(taskPath, JSON.stringify(taskRecord, null, 2))
+        counts.created++
+      } catch {}
+      continue
+    }
+
+    let existing: SessionTask
+    try {
+      existing = (await file.json()) as SessionTask
+    } catch {
+      counts.skipped++
+      continue
+    }
+
+    if (existing.subject === task.subject && existing.status === task.status) {
+      counts.skipped++
+      continue
+    }
+
+    const merged = updateExistingTask(existing, task)
+    try {
+      await Bun.write(taskPath, JSON.stringify(merged, null, 2))
+      counts.updated++
+    } catch {
+      counts.skipped++
+    }
+  }
+
+  return counts
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -97,86 +184,7 @@ async function main(): Promise<void> {
     return
   }
 
-  let created = 0
-  let updated = 0
-  let skipped = 0
-
-  for (const task of tasks) {
-    const taskPath = getSessionTaskPath(sessionId, task.id, home)
-    if (!taskPath) continue
-
-    const file = Bun.file(taskPath)
-    const exists = await file.exists()
-
-    if (!exists) {
-      const nowIso = new Date().toISOString()
-      const nowMs = Date.now()
-      // Write new task file
-      const taskRecord: SessionTask = {
-        id: task.id,
-        subject: task.subject,
-        status: task.status,
-        statusChangedAt: nowIso,
-        elapsedMs: 0,
-        startedAt: task.status === "in_progress" ? nowMs : null,
-        completedAt: task.status === "completed" ? nowMs : null,
-        ...(task.status === "completed" ? { completionTimestamp: nowIso } : {}),
-      }
-      try {
-        await Bun.write(taskPath, JSON.stringify(taskRecord, null, 2))
-        created++
-      } catch {
-        // Skip on write failure — non-blocking
-      }
-      continue
-    }
-
-    // Reconcile existing file — only update changed fields
-    let existing: SessionTask
-    try {
-      existing = (await file.json()) as SessionTask
-    } catch {
-      skipped++
-      continue
-    }
-
-    const subjectChanged = existing.subject !== task.subject
-    const statusChanged = existing.status !== task.status
-
-    if (!subjectChanged && !statusChanged) {
-      skipped++
-      continue
-    }
-
-    const merged: SessionTask = {
-      ...existing,
-      subject: task.subject,
-      status: task.status,
-    }
-
-    if (statusChanged) {
-      const nowIso = new Date().toISOString()
-      const nowMs = Date.now()
-      if (existing.status === "in_progress") {
-        merged.elapsedMs = getTaskCurrentDurationMs(existing, nowMs)
-      }
-      merged.statusChangedAt = nowIso
-      if (task.status === "in_progress") {
-        merged.startedAt = nowMs
-      }
-      if (task.status === "completed") {
-        merged.completedAt = nowMs
-        if (!merged.completionTimestamp) merged.completionTimestamp = nowIso
-      }
-    }
-
-    try {
-      await Bun.write(taskPath, JSON.stringify(merged, null, 2))
-      updated++
-    } catch {
-      skipped++
-    }
-  }
+  const { created, updated, skipped } = await reconcileTasks(tasks, home, sessionId)
 
   if (created === 0 && updated === 0) return
 

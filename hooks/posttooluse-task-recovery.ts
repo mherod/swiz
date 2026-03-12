@@ -47,32 +47,10 @@ interface ExtendedToolInput extends ToolHookInput {
   }
 }
 
-async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ExtendedToolInput
-  const sessionId = resolveSafeSessionId(input.session_id)
-  if (!sessionId) return
-
-  const toolName = input.tool_name ?? ""
-  if (!isTaskTool(toolName)) return
-
-  // Only act on tools that reference an existing task by ID
-  const taskId = String(input.tool_input?.taskId ?? "")
-  if (!taskId) return
-
-  // TaskCreate doesn't reference existing IDs — skip it
-  if (toolName === "TaskCreate") return
-
-  const home = homedir()
-  const tasksDir = getSessionTasksDir(sessionId, home)
-  const taskPath = getSessionTaskPath(sessionId, taskId, home)
-  if (!tasksDir || !taskPath) return
-  const taskExists = await Bun.file(taskPath).exists()
-  if (taskExists) return
-
-  // ── Auto-recovery ──────────────────────────────────────────────────────────
-  // The task is missing. Apply the requested status immediately by writing
-  // the file directly rather than asking the agent to recreate it.
-
+function buildRecoveryTask(
+  taskId: string,
+  input: ExtendedToolInput
+): { task: TaskFile; status: string; subject: string } {
   const requestedStatus = input.tool_input?.status ?? "completed"
   const requestedSubject =
     input.tool_input?.subject ?? `Recovered task #${taskId} (lost during compaction)`
@@ -81,7 +59,6 @@ async function main(): Promise<void> {
     `This task was automatically recovered by posttooluse-task-recovery after task #${taskId} was not found on disk. The requested status '${requestedStatus}' has been applied.`
   const requestedActiveForm = input.tool_input?.activeForm
 
-  // Only valid statuses
   const validStatuses = ["pending", "in_progress", "completed"]
   const status = validStatuses.includes(requestedStatus) ? requestedStatus : "completed"
   const nowIso = new Date().toISOString()
@@ -102,28 +79,50 @@ async function main(): Promise<void> {
     ...(status === "completed" ? { completionTimestamp: nowIso } : {}),
   }
 
+  return { task, status, subject: requestedSubject }
+}
+
+function buildRecoveryErrorContext(taskId: string, subject: string, status: string): string {
+  const taskCreateName = toolNameForCurrentAgent("TaskCreate")
+  const taskUpdateName = toolNameForCurrentAgent("TaskUpdate")
+  return [
+    `Task #${taskId} not found on disk — auto-recovery write failed.`,
+    `Recovery steps:`,
+    `1. Use ${taskCreateName} to recreate task #${taskId} with subject: "${subject}"`,
+    `2. Mark it ${status} with ${taskUpdateName} immediately.`,
+    "Do NOT ignore this — untracked work causes stop hook failures.",
+  ].join(" ")
+}
+
+async function main(): Promise<void> {
+  const input = (await Bun.stdin.json()) as ExtendedToolInput
+  const sessionId = resolveSafeSessionId(input.session_id)
+  if (!sessionId) return
+
+  const toolName = input.tool_name ?? ""
+  if (!isTaskTool(toolName) || toolName === "TaskCreate") return
+
+  const taskId = String(input.tool_input?.taskId ?? "")
+  if (!taskId) return
+
+  const home = homedir()
+  const tasksDir = getSessionTasksDir(sessionId, home)
+  const taskPath = getSessionTaskPath(sessionId, taskId, home)
+  if (!tasksDir || !taskPath) return
+  if (await Bun.file(taskPath).exists()) return
+
+  const { task, status, subject } = buildRecoveryTask(taskId, input)
+
   try {
     await mkdir(tasksDir, { recursive: true })
     await Bun.write(taskPath, JSON.stringify(task, null, 2))
   } catch {
-    const taskCreateName = toolNameForCurrentAgent("TaskCreate")
-    const taskUpdateName = toolNameForCurrentAgent("TaskUpdate")
-    // If write fails, fall back to advisory text so the agent knows to act
-    const context = [
-      `Task #${taskId} not found on disk — auto-recovery write failed.`,
-      `Recovery steps:`,
-      `1. Use ${taskCreateName} to recreate task #${taskId} with subject: "${requestedSubject}"`,
-      `2. Mark it ${status} with ${taskUpdateName} immediately.`,
-      "Do NOT ignore this — untracked work causes stop hook failures.",
-    ].join(" ")
-
-    emitContext("PostToolUse", context, input.cwd)
+    emitContext("PostToolUse", buildRecoveryErrorContext(taskId, subject, status), input.cwd)
   }
 
-  // Confirm success to the agent — no further action needed
   const successContext =
     `Task #${taskId} was missing (lost during context compaction) — automatically recovered. ` +
-    `A replacement task file has been written with status '${status}' and subject: "${requestedSubject}". ` +
+    `A replacement task file has been written with status '${status}' and subject: "${subject}". ` +
     `No further recovery action is needed. Continue with the next step.`
 
   emitContext("PostToolUse", successContext, input.cwd)

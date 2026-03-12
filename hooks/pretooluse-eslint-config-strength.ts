@@ -19,6 +19,25 @@ export function countEnforcements(content: string): { warnings: number; errors: 
   return { warnings, errors }
 }
 
+function denyConfigWeakening(kind: string, oldCount: number, newCount: number): never {
+  const reason = [
+    "ESLint config strength is sacred. Rules cannot be weakened.",
+    "",
+    `${kind} count decreased from ${oldCount} to ${newCount}.`,
+    "",
+    "You cannot remove or downgrade ESLint rules. Configuration can only:",
+    "  • Add new rules",
+    "  • Escalate rules from 'warn' to 'error'",
+    "  • Add rule options to be stricter",
+    "  • Keep existing rules at their current level",
+    "",
+    "Weakening ESLint config creates a slippery slope where standards gradually erode.",
+    "Once a rule is in place, it stays in place. The codebase quality bar never lowers.",
+  ].join("\n")
+
+  denyPreToolUse(reason)
+}
+
 async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
@@ -39,44 +58,12 @@ async function main() {
   const oldCounts = countEnforcements(oldString)
   const newCounts = countEnforcements(newString)
 
-  // Check if warning count decreased
   if (newCounts.warnings < oldCounts.warnings) {
-    const reason = [
-      "ESLint config strength is sacred. Rules cannot be weakened.",
-      "",
-      `Warning count decreased from ${oldCounts.warnings} to ${newCounts.warnings}.`,
-      "",
-      "You cannot remove or downgrade ESLint rules. Configuration can only:",
-      "  • Add new rules",
-      "  • Escalate rules from 'warn' to 'error'",
-      "  • Add rule options to be stricter",
-      "  • Keep existing rules at their current level",
-      "",
-      "Weakening ESLint config creates a slippery slope where standards gradually erode.",
-      "Once a rule is in place, it stays in place. The codebase quality bar never lowers.",
-    ].join("\n")
-
-    denyPreToolUse(reason)
+    denyConfigWeakening("Warning", oldCounts.warnings, newCounts.warnings)
   }
 
-  // Check if error count decreased (off is weaker than error/warning)
   if (newCounts.errors < oldCounts.errors) {
-    const reason = [
-      "ESLint config strength is sacred. Rules cannot be weakened.",
-      "",
-      `Enforcement count decreased from ${oldCounts.errors} to ${newCounts.errors}.`,
-      "",
-      "You cannot disable or downgrade ESLint rules. Configuration can only:",
-      "  • Add new rules",
-      "  • Escalate rules from 'warn' to 'error'",
-      "  • Add rule options to be stricter",
-      "  • Keep existing rules at their current level",
-      "",
-      "Weakening ESLint config creates a slippery slope where standards gradually erode.",
-      "Once a rule is in place, it stays in place. The codebase quality bar never lowers.",
-    ].join("\n")
-
-    denyPreToolUse(reason)
+    denyConfigWeakening("Enforcement", oldCounts.errors, newCounts.errors)
   }
 
   allowPreToolUse("")

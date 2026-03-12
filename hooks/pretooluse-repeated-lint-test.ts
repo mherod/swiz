@@ -299,21 +299,40 @@ export interface TranscriptEvent {
   sourceLineIdx: number
 }
 
+function extractEventsFromBlock(
+  block: Record<string, unknown>,
+  blockedIds: Set<string>,
+  lineIdx: number
+): TranscriptEvent[] {
+  const events: TranscriptEvent[] = []
+  if (block?.type !== "tool_use") return events
+  if (blockedIds.has(String(block.id ?? ""))) return events
+  const name = String(block.name ?? "")
+  const inp = block.input as Record<string, unknown> | undefined
+
+  if (isShellTool(name)) {
+    const cmd = String(inp?.command ?? "").normalize("NFKC")
+    const kind = classifyCommand(cmd)
+    if (kind) {
+      events.push({ kind, fingerprint: commandFingerprint(cmd) ?? kind, sourceLineIdx: lineIdx })
+      if (bashMutatesWorkspace(cmd)) events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
+    } else if (bashMutatesWorkspace(cmd)) {
+      events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
+    }
+  } else if (isCodeChangeTool(name)) {
+    events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
+  }
+  return events
+}
+
 export async function parseTranscriptEvents(
   transcriptPath: string,
   cachedSessionLines?: string[]
 ): Promise<TranscriptEvent[]> {
   const events: TranscriptEvent[] = []
-
-  // Prefer pre-computed session lines injected by dispatch (_transcriptSummary.sessionLines).
-  // readSessionLines handles compaction-boundary detection: only lines from
-  // after the last {"type":"system"} entry (i.e. the current session) are
-  // returned, preventing prior-session bun test calls from triggering the gate.
   const lines = cachedSessionLines ?? (await readSessionLines(transcriptPath))
   if (lines.length === 0) return events
 
-  // Pre-pass: identify tool_use IDs whose executions were denied by a PreToolUse
-  // hook. These never actually ran, so they must not count as prior runs.
   const blockedIds = collectBlockedToolUseIds(lines)
 
   let lineIdx = 0
@@ -324,39 +343,12 @@ export async function parseTranscriptEvents(
       if (entry?.type !== "assistant") continue
       const content = entry?.message?.content
       if (!Array.isArray(content)) continue
-
       for (const block of content) {
-        if (block?.type !== "tool_use") continue
-        // Skip tool_use entries that were denied by a PreToolUse hook — they
-        // never executed and should not trigger the consecutive-run gate.
-        if (blockedIds.has(String(block.id ?? ""))) continue
-        const name = String(block.name ?? "")
-        const inp = block.input as Record<string, unknown> | undefined
-
-        if (isShellTool(name)) {
-          const cmd = String(inp?.command ?? "").normalize("NFKC")
-          const kind = classifyCommand(cmd)
-          if (kind) {
-            const fingerprint = commandFingerprint(cmd) ?? kind
-            events.push({ kind, fingerprint, sourceLineIdx: lineIdx })
-            // A classified command (lint/test/build) may ALSO mutate the workspace
-            // via a pipe or redirect in the same invocation — e.g.
-            //   `bun run lint 2>&1 | tee output.txt`  (tee detected)
-            //   `bun run build > dist-manifest.json`   (redirect detected)
-            // Emit an any_edit event too so the gate does not block the next run.
-            if (bashMutatesWorkspace(cmd)) events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
-          } else if (bashMutatesWorkspace(cmd))
-            events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
-        } else if (isCodeChangeTool(name)) {
-          // Any file-modifying tool counts as "intervening work" — covers all agents:
-          // Edit/Write/NotebookEdit (Claude Code), StrReplace/EditNotebook (Cursor),
-          // replace/write_file/apply_patch (Codex), and future tool types.
-          events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
-        }
+        events.push(
+          ...extractEventsFromBlock(block as Record<string, unknown>, blockedIds, lineIdx)
+        )
       }
-    } catch {
-      // Ignore malformed lines
-    }
+    } catch {}
     lineIdx++
   }
 

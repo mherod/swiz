@@ -14,6 +14,48 @@ import {
 } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
+function emitCreationCountdown(total: number, threshold: number, taskCreateName: string): void {
+  const remaining = threshold - total
+  if (remaining <= 0) return
+  if (remaining <= 1) {
+    emit(
+      `${taskCreateName} required in ${remaining} tool call(s) — tools will be blocked until tasks are defined.`
+    )
+  } else if (remaining <= 3) {
+    emit(
+      `${taskCreateName} required in ${remaining} tool calls. Plan your tasks now to avoid interruption.`
+    )
+  } else if (total >= 2) {
+    emit(`${total}/${threshold} tool calls before ${taskCreateName} is required.`)
+  }
+}
+
+function emitStalenessWarning(
+  callsSinceTask: number,
+  staleRemaining: number,
+  toolName: string
+): void {
+  if (staleRemaining <= 0) {
+    if (isEditTool(toolName) || isWriteTool(toolName)) {
+      emit(
+        `Tasks need attention — it's been ${callsSinceTask} tool calls since the last task update. ` +
+          `Review progress: mark completed tasks done, update in-progress tasks with current status, ` +
+          `or create new tasks for the work underway.`
+      )
+    }
+    return
+  }
+  if (staleRemaining <= 2) {
+    emit(
+      `Task update required in ${staleRemaining} tool call(s) — tools will be blocked until tasks are reviewed.`
+    )
+  } else if (staleRemaining <= 4) {
+    emit(
+      `Task update due in ${staleRemaining} tool calls. Review progress — mark completed tasks done or create new ones.`
+    )
+  }
+}
+
 async function main(): Promise<void> {
   const hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
   const input = toolHookInputSchema.parse(hookRaw)
@@ -30,48 +72,13 @@ async function main(): Promise<void> {
   const CREATION_THRESHOLD = 5
   const STALENESS_THRESHOLD = 10
 
-  // --- No tasks ever created: countdown to mandatory creation ---
   if (callsSinceTask >= total) {
-    const remaining = CREATION_THRESHOLD - total
-    if (remaining <= 0) return // PreToolUse will block
-    if (remaining <= 1) {
-      emit(
-        `${taskCreateName} required in ${remaining} tool call(s) — tools will be blocked until tasks are defined.`
-      )
-    } else if (remaining <= 3) {
-      emit(
-        `${taskCreateName} required in ${remaining} tool calls. Plan your tasks now to avoid interruption.`
-      )
-    } else if (total >= 2) {
-      emit(`${total}/${CREATION_THRESHOLD} tool calls before ${taskCreateName} is required.`)
-    }
+    emitCreationCountdown(total, CREATION_THRESHOLD, taskCreateName)
     return
   }
 
-  // --- Tasks exist: countdown to staleness enforcement ---
   const staleRemaining = STALENESS_THRESHOLD - callsSinceTask
-  if (staleRemaining <= 0) {
-    // Edit/Write tools with large content may have been exempted from the
-    // pre-tool hard block — provide stale-task guidance post-completion.
-    const completedTool = (input.tool_name ?? "") as string
-    if (isEditTool(completedTool) || isWriteTool(completedTool)) {
-      emit(
-        `Tasks need attention — it's been ${callsSinceTask} tool calls since the last task update. ` +
-          `Review progress: mark completed tasks done, update in-progress tasks with current status, ` +
-          `or create new tasks for the work underway.`
-      )
-    }
-    return // For non-Edit/Write tools, PreToolUse will block
-  }
-  if (staleRemaining <= 2) {
-    emit(
-      `Task update required in ${staleRemaining} tool call(s) — tools will be blocked until tasks are reviewed.`
-    )
-  } else if (staleRemaining <= 4) {
-    emit(
-      `Task update due in ${staleRemaining} tool calls. Review progress — mark completed tasks done or create new ones.`
-    )
-  }
+  emitStalenessWarning(callsSinceTask, staleRemaining, (input.tool_name ?? "") as string)
 }
 
 function emit(context: string): never {

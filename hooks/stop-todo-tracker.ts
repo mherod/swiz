@@ -17,6 +17,24 @@ const TODO_RE = /\b(TODO|FIXME|HACK|XXX|WORKAROUND)\b/i
 const COMMENT_RE = /(\/[/*]|#\s)/
 const REGEX_LITERAL_RE = /^\s*\/[^/]/ // line content starts with regex literal
 
+function isExcludedFile(f: string): boolean {
+  return !SOURCE_EXT_RE.test(f) || EXCLUDE_PATH_RE.test(f) || GENERATED_FILE_RE.test(f)
+}
+
+function scanDiffForTodos(diff: string): string[] {
+  const todos: string[] = []
+  for (const line of diff.split("\n")) {
+    if (!line.startsWith("+") || line.startsWith("+++")) continue
+    const content = line.slice(1)
+    if (!TODO_RE.test(content)) continue
+    if (REGEX_LITERAL_RE.test(content)) continue
+    if (!COMMENT_RE.test(content)) continue
+    todos.push(line.slice(0, 150))
+    if (todos.length >= 15) break
+  }
+  return todos
+}
+
 async function main(): Promise<void> {
   const input = stopHookInputSchema.parse(await Bun.stdin.json())
   const cwd = input.cwd ?? process.cwd()
@@ -33,32 +51,14 @@ async function main(): Promise<void> {
   const changedRaw = await git(["diff", "--name-only", range], cwd)
   if (!changedRaw) return
 
-  const sourceFiles = changedRaw
-    .split("\n")
-    .filter((f) => SOURCE_EXT_RE.test(f) && !EXCLUDE_PATH_RE.test(f) && !GENERATED_FILE_RE.test(f))
+  const sourceFiles = changedRaw.split("\n").filter((f) => !isExcludedFile(f))
 
   if (sourceFiles.length === 0) return
 
   const diff = await git(["diff", range, "--", ...sourceFiles], cwd)
   if (!diff) return
 
-  const todos: string[] = []
-
-  for (const line of diff.split("\n")) {
-    if (!line.startsWith("+") || line.startsWith("+++")) continue
-    const content = line.slice(1) // strip leading +
-
-    if (!TODO_RE.test(content)) continue
-
-    // Exclude regex literals (pattern strings in hook implementations)
-    if (REGEX_LITERAL_RE.test(content)) continue
-
-    // Require the keyword to appear inside a comment context (// /* or # )
-    if (!COMMENT_RE.test(content)) continue
-
-    todos.push(line.slice(0, 150))
-    if (todos.length >= 15) break
-  }
+  const todos = scanDiffForTodos(diff)
 
   if (todos.length === 0) return
 
@@ -76,4 +76,4 @@ async function main(): Promise<void> {
   blockStop(reason, { includeUpdateMemoryAdvice: false })
 }
 
-if (import.meta.main) main()
+if (import.meta.main) void main()

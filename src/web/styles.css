@@ -1461,10 +1461,10 @@ tbody tr:hover {
   font-family: monospace;
 }
 
-.command-output {
-  color: #c9e2c9 !important;
-  white-space: pre-wrap !important;
-  max-width: 100% !important;
+.hook-context-value.command-output {
+  color: #c9e2c9;
+  white-space: pre-wrap;
+  max-width: 100%;
   display: block;
   margin-top: 4px;
 }

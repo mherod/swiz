@@ -177,8 +177,8 @@ beforeAll(async () => {
         stdout: "pipe",
         stderr: "pipe",
       })
-      proc.stdin.write(payload)
-      proc.stdin.end()
+      void proc.stdin.write(payload)
+      void proc.stdin.end()
       const rawOutput = await new Response(proc.stdout).text()
       await proc.exited
 
@@ -367,8 +367,8 @@ describe("pretooluse-no-ts-ignore: JSDoc block comment differential (coverage pr
           stdout: "pipe",
           stderr: "pipe",
         })
-        p.stdin.write(payload)
-        p.stdin.end()
+        await p.stdin.write(payload)
+        await p.stdin.end()
         const raw = await new Response(p.stdout).text()
         await p.exited
         let blocked = false

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { useTempDir } from "../../hooks/test-utils.ts"
+import { projectKeyFromCwd } from "../transcript-utils.ts"
 
 const { create: createTempHome } = useTempDir("swiz-transcript-gemini-test-")
 
@@ -98,6 +99,46 @@ async function createGeminiSession(
   )
 }
 
+async function createClaudeSession(
+  home: string,
+  projectDir: string,
+  sessionId: string
+): Promise<void> {
+  const transcriptDir = join(home, ".claude", "projects", projectKeyFromCwd(projectDir))
+  await mkdir(transcriptDir, { recursive: true })
+  const transcriptPath = join(transcriptDir, `${sessionId}.jsonl`)
+  const lines = [
+    JSON.stringify({
+      type: "user",
+      sessionId,
+      timestamp: "2026-03-05T10:00:00.000Z",
+      message: {
+        role: "user",
+        content: "Hello from Claude user",
+      },
+    }),
+    JSON.stringify({
+      type: "assistant",
+      sessionId,
+      timestamp: "2026-03-05T10:00:01.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Hello from Claude assistant" }],
+      },
+    }),
+    JSON.stringify({
+      type: "user",
+      sessionId,
+      timestamp: "2026-03-05T10:00:02.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", content: "tool output should be hidden" }],
+      },
+    }),
+  ]
+  await writeFile(transcriptPath, `${lines.join("\n")}\n`)
+}
+
 async function createAntigravitySession(
   home: string,
   projectDir: string,
@@ -191,6 +232,25 @@ describe("Provider transcript/session command support", () => {
     expect(out).toContain("Hi from Gemini assistant")
   })
 
+  test("swiz transcript --user-only shows only Gemini user messages", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-proj")
+    const sessionId = "abcdef12-1111-2222-3333-666666666666"
+    await mkdir(projectDir, { recursive: true })
+    await createGeminiSession(home, projectDir, sessionId)
+
+    const result = await runSwiz(
+      ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--user-only"],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain("USER")
+    expect(out).toContain("Hello from Gemini session")
+    expect(out).not.toContain("ASSISTANT")
+    expect(out).not.toContain("Hi from Gemini assistant")
+  })
+
   test("swiz transcript --session preserves full long shell command labels", async () => {
     const home = await createTempHome()
     const projectDir = join(home, "workspace", "demo-proj")
@@ -252,6 +312,34 @@ describe("Provider transcript/session command support", () => {
     expect(out).toContain("ASSISTANT")
     expect(out).toContain("Hello from Codex session")
     expect(out).toContain("Hi from Codex assistant")
+  })
+
+  test("swiz transcript --user-only skips assistant replies and tool-result-only user entries", async () => {
+    const home = await createTempHome()
+    const projectDir = join(home, "workspace", "demo-claude")
+    const sessionId = "claude-user-only-12345678"
+    await mkdir(projectDir, { recursive: true })
+    await createClaudeSession(home, projectDir, sessionId)
+
+    const result = await runSwiz(
+      [
+        "transcript",
+        "--session",
+        sessionId.slice(0, 8),
+        "--dir",
+        projectDir,
+        "--user-only",
+        "--claude",
+      ],
+      home
+    )
+    expect(result.exitCode).toBe(0)
+    const out = stripAnsi(result.stdout)
+    expect(out).toContain("USER")
+    expect(out).toContain("Hello from Claude user")
+    expect(out).not.toContain("ASSISTANT")
+    expect(out).not.toContain("Hello from Claude assistant")
+    expect(out).not.toContain("tool output should be hidden")
   })
 
   test("swiz transcript --include-debug renders matching debug log lines", async () => {

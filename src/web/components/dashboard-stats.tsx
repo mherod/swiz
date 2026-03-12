@@ -73,6 +73,62 @@ interface CurrentSessionStatsProps {
   activeRuntimeSeconds: number
 }
 
+function SessionKpis({
+  activeSession,
+  loadedMessageCount,
+  totalToolCalls,
+}: {
+  activeSession: CurrentSessionStatsProps["activeSession"]
+  loadedMessageCount: number
+  totalToolCalls: number
+}) {
+  return (
+    <div className="metric-kpis">
+      {(activeSession?.dispatches ?? 0) > 0 && (
+        <span className="metric-kpi">
+          <strong>{activeSession?.dispatches}</strong> dispatches
+        </span>
+      )}
+      {loadedMessageCount > 0 && (
+        <span className="metric-kpi">
+          <strong>{loadedMessageCount}</strong> messages
+        </span>
+      )}
+      {totalToolCalls > 0 && (
+        <span className="metric-kpi">
+          <strong>{totalToolCalls}</strong> tool calls
+        </span>
+      )}
+    </div>
+  )
+}
+
+function ActiveDispatchBadge({
+  activeDispatch,
+  activeRuntimeSeconds,
+}: {
+  activeDispatch: ActiveHookDispatch
+  activeRuntimeSeconds: number
+}) {
+  return (
+    <div className="stats-active-badge">
+      <span className="session-active-pulse" />
+      <span className="stats-active-text">
+        {activeDispatch.toolName ? (
+          <>
+            Running <strong>{activeDispatch.toolName}</strong>
+          </>
+        ) : (
+          <>
+            Processing <strong>{activeDispatch.canonicalEvent}</strong>
+          </>
+        )}
+        <span className="stats-active-time"> · {activeRuntimeSeconds}s</span>
+      </span>
+    </div>
+  )
+}
+
 function CurrentSessionStats({
   activeSession,
   loadedMessageCount,
@@ -82,39 +138,16 @@ function CurrentSessionStats({
 }: CurrentSessionStatsProps) {
   return (
     <>
-      <div className="metric-kpis">
-        {(activeSession?.dispatches ?? 0) > 0 && (
-          <span className="metric-kpi">
-            <strong>{activeSession?.dispatches}</strong> dispatches
-          </span>
-        )}
-        {loadedMessageCount > 0 && (
-          <span className="metric-kpi">
-            <strong>{loadedMessageCount}</strong> messages
-          </span>
-        )}
-        {totalToolCalls > 0 && (
-          <span className="metric-kpi">
-            <strong>{totalToolCalls}</strong> tool calls
-          </span>
-        )}
-      </div>
+      <SessionKpis
+        activeSession={activeSession}
+        loadedMessageCount={loadedMessageCount}
+        totalToolCalls={totalToolCalls}
+      />
       {activeDispatch && (
-        <div className="stats-active-badge">
-          <span className="session-active-pulse" />
-          <span className="stats-active-text">
-            {activeDispatch.toolName ? (
-              <>
-                Running <strong>{activeDispatch.toolName}</strong>
-              </>
-            ) : (
-              <>
-                Processing <strong>{activeDispatch.canonicalEvent}</strong>
-              </>
-            )}
-            <span className="stats-active-time"> · {activeRuntimeSeconds}s</span>
-          </span>
-        </div>
+        <ActiveDispatchBadge
+          activeDispatch={activeDispatch}
+          activeRuntimeSeconds={activeRuntimeSeconds}
+        />
       )}
       <p className="metric-note">
         Last activity:{" "}

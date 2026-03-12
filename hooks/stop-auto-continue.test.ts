@@ -101,8 +101,8 @@ async function runHook({
       ...extraEnv,
     },
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
 
   const [rawOutput, stderr] = await Promise.all([
     new Response(proc.stdout).text(),

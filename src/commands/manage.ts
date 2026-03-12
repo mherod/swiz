@@ -129,6 +129,62 @@ function parseEnvAssignment(value: string): { key: string; val: string } {
   return { key: value.slice(0, idx), val: value.slice(idx + 1) }
 }
 
+interface ManageParseState {
+  name?: string
+  command?: string
+  project: boolean
+  actionArgs: string[]
+  env: Record<string, string>
+  selectedAgentFlags: Set<AgentId>
+}
+
+function consumeManageFlag(
+  token: string,
+  next: string | undefined,
+  state: ManageParseState
+): number {
+  if (token === "--project") {
+    state.project = true
+    return 0
+  }
+
+  const byFlag = GLOBAL_AGENTS.find((a) => a.flag === token)
+  if (byFlag) {
+    state.selectedAgentFlags.add(byFlag.id)
+    return 0
+  }
+
+  if (token === "--command") {
+    if (!next) throw new Error(`Missing value for --command\n${usage()}`)
+    state.command = next
+    return 1
+  }
+
+  if (token === "--arg") {
+    if (!next) throw new Error(`Missing value for --arg\n${usage()}`)
+    state.actionArgs.push(next)
+    return 1
+  }
+
+  if (token === "--env") {
+    if (!next) throw new Error(`Missing value for --env\n${usage()}`)
+    const { key, val } = parseEnvAssignment(next)
+    state.env[key] = val
+    return 1
+  }
+
+  if (token.startsWith("--")) {
+    throw new Error(`Unknown option: ${token}\n${usage()}`)
+  }
+
+  if (!state.name) {
+    state.name = token
+    return 0
+  }
+
+  throw new Error(`Unexpected argument: ${token}\n${usage()}`)
+}
+
 export function parseManageArgs(args: string[]): ParsedManageArgs {
   if (args[0] !== "mcp") {
     throw new Error(`Unknown manage subject: ${args[0] ?? "(none)"}\n${usage()}`)
@@ -146,87 +202,41 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
   }
 
   const action = actionToken as ManageAction
-  let name: string | undefined
-  let command: string | undefined
-  let project = false
-  const actionArgs: string[] = []
-  const env: Record<string, string> = {}
-  const selectedAgentFlags = new Set<AgentId>()
+  const state: ManageParseState = {
+    project: false,
+    actionArgs: [],
+    env: {},
+    selectedAgentFlags: new Set(),
+  }
 
   for (let i = 2; i < args.length; i++) {
     const token = args[i]
     if (!token) continue
-
-    if (token === "--project") {
-      project = true
-      continue
-    }
-
-    const byFlag = GLOBAL_AGENTS.find((a) => a.flag === token)
-    if (byFlag) {
-      selectedAgentFlags.add(byFlag.id)
-      continue
-    }
-
-    if (token === "--command") {
-      const value = args[i + 1]
-      if (!value) throw new Error(`Missing value for --command\n${usage()}`)
-      command = value
-      i++
-      continue
-    }
-
-    if (token === "--arg") {
-      const value = args[i + 1]
-      if (!value) throw new Error(`Missing value for --arg\n${usage()}`)
-      actionArgs.push(value)
-      i++
-      continue
-    }
-
-    if (token === "--env") {
-      const value = args[i + 1]
-      if (!value) throw new Error(`Missing value for --env\n${usage()}`)
-      const { key, val } = parseEnvAssignment(value)
-      env[key] = val
-      i++
-      continue
-    }
-
-    if (token.startsWith("--")) {
-      throw new Error(`Unknown option: ${token}\n${usage()}`)
-    }
-
-    if (!name) {
-      name = token
-      continue
-    }
-
-    throw new Error(`Unexpected extra argument: ${token}\n${usage()}`)
+    i += consumeManageFlag(token, args[i + 1], state)
   }
 
-  if ((action === "add" || action === "remove" || action === "show") && !name) {
+  if ((action === "add" || action === "remove" || action === "show") && !state.name) {
     throw new Error(`"${action}" requires a server name\n${usage()}`)
   }
-  if (action === "add" && !command) {
+  if (action === "add" && !state.command) {
     throw new Error(`"add" requires --command <cmd>\n${usage()}`)
   }
 
-  const agents = agentList(project)
+  const agents = agentList(state.project)
   const targetAgents =
-    selectedAgentFlags.size > 0
-      ? agents.filter((a) => selectedAgentFlags.has(a.id)).map((a) => a.id)
+    state.selectedAgentFlags.size > 0
+      ? agents.filter((a) => state.selectedAgentFlags.has(a.id)).map((a) => a.id)
       : agents.map((a) => a.id)
 
   return {
     subject: "mcp",
     action,
-    name,
-    command,
-    args: actionArgs,
-    env,
+    name: state.name,
+    command: state.command,
+    args: state.actionArgs,
+    env: state.env,
     targetAgents,
-    project,
+    project: state.project,
   }
 }
 

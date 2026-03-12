@@ -55,7 +55,7 @@ function buildIssueBody(opts: {
   )
 }
 
-function parseArgs(args: string[]): {
+interface ParsedArgs {
   filePath: string | null
   line: number | null
   snippet: string | null
@@ -63,60 +63,62 @@ function parseArgs(args: string[]): {
   title: string | null
   successCriteria: string[]
   context: string | null
-} {
-  let filePath: string | null = null
-  let line: number | null = null
-  let snippet: string | null = null
-  let repo: string | null = null
-  let title: string | null = null
-  const successCriteria: string[] = []
-  let context: string | null = null
+}
 
-  for (let i = 0; i < args.length; i++) {
-    const flag = args[i]
-    const next = args[i + 1]
-    switch (flag) {
-      case "--file":
-      case "-f":
-        filePath = next ?? null
-        i++
-        break
-      case "--line":
-      case "-l":
-        line = next != null ? parseInt(next, 10) : null
-        i++
-        break
-      case "--snippet":
-      case "-s":
-        snippet = next ?? null
-        i++
-        break
-      case "--repo":
-      case "-r":
-        repo = next ?? null
-        i++
-        break
-      case "--title":
-      case "-t":
-        title = next ?? null
-        i++
-        break
-      case "--success-criteria":
-      case "--criteria":
-      case "-c":
-        if (next) {
-          successCriteria.push(next)
-          i++
-        }
-        break
-      case "--context":
-        context = next ?? null
-        i++
-        break
-    }
+function parseFlag(flag: string | undefined, next: string | undefined, state: ParsedArgs): number {
+  switch (flag) {
+    case "--file":
+    case "-f":
+      state.filePath = next ?? null
+      return 1
+    case "--line":
+    case "-l":
+      state.line = next != null ? parseInt(next, 10) : null
+      return 1
+    case "--snippet":
+    case "-s":
+      state.snippet = next ?? null
+      return 1
+    case "--repo":
+    case "-r":
+      state.repo = next ?? null
+      return 1
+    case "--title":
+    case "-t":
+      state.title = next ?? null
+      return 1
+    case "--success-criteria":
+    case "--criteria":
+    case "-c":
+      if (next) {
+        state.successCriteria.push(next)
+        return 1
+      }
+      return 0
+    case "--context":
+      state.context = next ?? null
+      return 1
+    default:
+      return 0
+  }
+}
+
+function parseArgs(args: string[]): ParsedArgs {
+  const state: ParsedArgs = {
+    filePath: null,
+    line: null,
+    snippet: null,
+    repo: null,
+    title: null,
+    successCriteria: [],
+    context: null,
   }
 
-  return { filePath, line, snippet, repo, title, successCriteria, context }
+  for (let i = 0; i < args.length; i++) {
+    i += parseFlag(args[i], args[i + 1], state)
+  }
+
+  return state
 }
 
 export const crossRepoIssueCommand: Command = {

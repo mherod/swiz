@@ -72,8 +72,8 @@ async function runHook(transcriptContent: string): Promise<HookResult> {
     stderr: "pipe",
     env: { ...process.env, HOME: fakeHome },
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
 

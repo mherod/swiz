@@ -218,19 +218,37 @@ interface Turn {
   role: "user" | "assistant"
 }
 
-function collectTurns(entries: TranscriptEntry[]): Turn[] {
+function cloneUserEntryWithPlainText(entry: TranscriptEntry, text: string): TranscriptEntry {
+  return {
+    ...entry,
+    message: {
+      ...entry.message,
+      role: "user",
+      content: text,
+    },
+  }
+}
+
+function collectTurns(entries: TranscriptEntry[], userOnly = false): Turn[] {
   const turns: Turn[] = []
   for (const entry of entries) {
     if (entry.type !== "user" && entry.type !== "assistant") continue
     const msg = entry.message
     if (!msg) continue
 
+    const text = extractText(msg.content).trim()
+
     // Skip hook feedback injected as user messages
     if (
       entry.type === "user" &&
-      typeof msg.content === "string" &&
-      (msg.content.startsWith("Stop hook feedback:") || msg.content.startsWith("<command-message>"))
+      (text.startsWith("Stop hook feedback:") || text.startsWith("<command-message>"))
     ) {
+      continue
+    }
+
+    if (userOnly) {
+      if (entry.type !== "user" || !text) continue
+      turns.push({ entry: cloneUserEntryWithPlainText(entry, text), role: "user" })
       continue
     }
 
@@ -240,7 +258,7 @@ function collectTurns(entries: TranscriptEntry[]): Turn[] {
       if (!hasVisibleAssistantContent(blocks)) continue
     } else {
       const content = msg.content
-      if (!hasToolResults(content) && !extractText(content).trim()) continue
+      if (!hasToolResults(content) && !text) continue
     }
 
     turns.push({ entry, role: entry.type as "user" | "assistant" })
@@ -250,7 +268,7 @@ function collectTurns(entries: TranscriptEntry[]): Turn[] {
 
 // ─── Turn loading ─────────────────────────────────────────────────────────────
 
-async function loadTurns(session: Session): Promise<Turn[]> {
+async function loadTurns(session: Session, userOnly = false): Promise<Turn[]> {
   if (isUnsupportedTranscriptFormat(session.format)) {
     throw new Error(getUnsupportedTranscriptFormatMessage(session))
   }
@@ -260,7 +278,7 @@ async function loadTurns(session: Session): Promise<Turn[]> {
     throw new Error(`Transcript not found: ${session.path}`)
   }
   const text = await file.text()
-  return collectTurns(parseTranscriptEntries(text, session.format))
+  return collectTurns(parseTranscriptEntries(text, session.format), userOnly)
 }
 
 interface DebugLog {
@@ -524,6 +542,7 @@ export interface TranscriptArgs {
   tailCount: number | undefined
   autoReply: boolean
   includeDebug: boolean
+  userOnly: boolean
   allAgents: boolean
   explicitAgents: AgentDef[]
 }
@@ -536,6 +555,7 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
   let tailCount: number | undefined
   let autoReply = false
   let includeDebug = false
+  let userOnly = false
   let allAgents = false
 
   for (let i = 0; i < args.length; i++) {
@@ -560,6 +580,8 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
       autoReply = true
     } else if (arg === "--include-debug") {
       includeDebug = true
+    } else if (arg === "--user-only") {
+      userOnly = true
     } else if (arg === "--all") {
       allAgents = true
     }
@@ -574,6 +596,7 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
     tailCount,
     autoReply,
     includeDebug,
+    userOnly,
     allAgents,
     explicitAgents,
   }
@@ -627,7 +650,7 @@ export const transcriptCommand: Command = {
   name: "transcript",
   description: "Display Agent-User chat history for the current project",
   usage:
-    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--auto-reply] [--include-debug] [--all|--claude|--cursor|--gemini|--codex]",
+    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--auto-reply] [--include-debug] [--user-only] [--all|--claude|--cursor|--gemini|--codex]",
   options: [
     { flags: "--session, -s <id>", description: "Show a specific session (prefix match)" },
     { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
@@ -635,6 +658,10 @@ export const transcriptCommand: Command = {
     { flags: "--head, -H <n>", description: "Show only the first N conversation turns" },
     { flags: "--tail, -T <n>", description: "Show only the last N conversation turns" },
     { flags: "--auto-reply", description: "Generate an AI-suggested follow-up message" },
+    {
+      flags: "--user-only",
+      description: "Show only user prompts/messages for the selected session",
+    },
     {
       flags: "--include-debug",
       description:
@@ -659,6 +686,7 @@ export const transcriptCommand: Command = {
       tailCount,
       autoReply,
       includeDebug,
+      userOnly,
       allAgents,
       explicitAgents,
     } = parseTranscriptArgs(args)
@@ -668,6 +696,9 @@ export const transcriptCommand: Command = {
     }
     if (explicitAgents.length > 1) {
       throw new Error("Specify at most one agent: --claude, --cursor, --gemini, or --codex.")
+    }
+    if (userOnly && includeDebug) {
+      throw new Error("`--user-only` cannot be combined with `--include-debug`.")
     }
 
     const detectedAgent = detectCurrentAgent()
@@ -700,7 +731,7 @@ export const transcriptCommand: Command = {
 
     const session = pickSession(sessions, sessionQuery)
 
-    let turns = await loadTurns(session)
+    let turns = await loadTurns(session, userOnly)
     turns = applyHeadTail(turns, headCount, tailCount)
 
     let debugEvents: DebugEvent[] | undefined

@@ -56,6 +56,62 @@ function depsChanged(
   return false
 }
 
+function hasDependencyBlocks(parsed: Record<string, unknown>): boolean {
+  return DEP_FIELDS.some(
+    (f) => parsed[f] && typeof parsed[f] === "object" && Object.keys(parsed[f] as object).length > 0
+  )
+}
+
+async function checkWriteTool(input: Record<string, unknown>): Promise<void> {
+  const toolInput = input.tool_input as Record<string, string> | undefined
+  const content: string = toolInput?.content ?? ""
+  if (!content) process.exit(0)
+  const parsed = JSON.parse(content)
+  if (hasDependencyBlocks(parsed)) {
+    denyPreToolUse(
+      `Do not directly write dependency blocks in package.json. ` +
+        `Use the package manager (\`${ADD_CMD}\`) instead to keep the lockfile in sync.`
+    )
+  }
+}
+
+async function checkEditTool(input: Record<string, unknown>, filePath: string): Promise<void> {
+  const toolInput = input.tool_input as Record<string, string> | undefined
+  const oldString: string = toolInput?.old_string ?? ""
+  const newString: string = toolInput?.new_string ?? ""
+  if (!oldString && !newString) process.exit(0)
+
+  let currentContent: string
+  try {
+    currentContent = await Bun.file(filePath).text()
+  } catch {
+    process.exit(0)
+  }
+
+  const projectedContent = currentContent.replace(oldString, newString)
+
+  let currentParsed: Record<string, unknown>
+  try {
+    currentParsed = JSON.parse(currentContent)
+  } catch {
+    process.exit(0)
+  }
+
+  let projectedParsed: Record<string, unknown>
+  try {
+    projectedParsed = JSON.parse(projectedContent)
+  } catch {
+    process.exit(0)
+  }
+
+  if (depsChanged(depsSnapshot(currentParsed), depsSnapshot(projectedParsed))) {
+    denyPreToolUse(
+      `Do not directly edit dependency blocks in package.json. ` +
+        `Use the package manager (\`${ADD_CMD}\`) instead to keep the lockfile in sync.`
+    )
+  }
+}
+
 async function main() {
   const input = await Bun.stdin.json().catch(() => null)
   if (!input) process.exit(0)
@@ -68,63 +124,11 @@ async function main() {
 
   try {
     if (isWriteTool(toolName)) {
-      // Write: parse the full content directly
-      const content: string = input.tool_input?.content ?? ""
-      if (!content) process.exit(0)
-      const parsed = JSON.parse(content)
-      const hasDeps = DEP_FIELDS.some(
-        (f) => parsed[f] && typeof parsed[f] === "object" && Object.keys(parsed[f]).length > 0
-      )
-      if (hasDeps) {
-        denyPreToolUse(
-          `Do not directly write dependency blocks in package.json. ` +
-            `Use the package manager (\`${ADD_CMD}\`) instead to keep the lockfile in sync.`
-        )
-      }
+      await checkWriteTool(input)
     } else if (isEditTool(toolName)) {
-      // Edit: compute projected content from current file + replacement
-      const oldString: string = input.tool_input?.old_string ?? ""
-      const newString: string = input.tool_input?.new_string ?? ""
-      if (!oldString && !newString) process.exit(0)
-
-      let currentContent: string
-      try {
-        currentContent = await Bun.file(filePath).text()
-      } catch {
-        // File doesn't exist — nothing to project against
-        process.exit(0)
-      }
-
-      const projectedContent = currentContent.replace(oldString, newString)
-
-      let currentParsed: Record<string, unknown>
-      let projectedParsed: Record<string, unknown>
-      try {
-        currentParsed = JSON.parse(currentContent)
-      } catch {
-        // Current file is malformed JSON — fail open
-        process.exit(0)
-      }
-      try {
-        projectedParsed = JSON.parse(projectedContent)
-      } catch {
-        // Projected content is malformed — fail open
-        process.exit(0)
-      }
-
-      const beforeDeps = depsSnapshot(currentParsed)
-      const afterDeps = depsSnapshot(projectedParsed)
-
-      if (depsChanged(beforeDeps, afterDeps)) {
-        denyPreToolUse(
-          `Do not directly edit dependency blocks in package.json. ` +
-            `Use the package manager (\`${ADD_CMD}\`) instead to keep the lockfile in sync.`
-        )
-      }
+      await checkEditTool(input, filePath)
     }
-  } catch {
-    // On any unexpected error, fail open
-  }
+  } catch {}
 }
 
 if (import.meta.main) main().catch(() => process.exit(0))

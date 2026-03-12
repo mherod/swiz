@@ -15,6 +15,74 @@ const LOCKFILE_MAP: Record<string, string> = {
   "npm-shrinkwrap.json": "npm install",
 }
 
+interface LockfileInfo {
+  lockfile: string
+  installCmd: string
+}
+
+async function detectLockfile(cwd: string, pkgDir: string): Promise<LockfileInfo | null> {
+  for (const [lf, cmd] of Object.entries(LOCKFILE_MAP)) {
+    const lfPath = pkgDir === "." ? lf : join(pkgDir, lf)
+    if (await Bun.file(join(cwd, lfPath)).exists()) {
+      return { lockfile: lfPath, installCmd: cmd }
+    }
+  }
+  return null
+}
+
+async function rootLockfileCovers(cwd: string, changedFiles: Set<string>): Promise<boolean> {
+  for (const rootLf of Object.keys(LOCKFILE_MAP)) {
+    if ((await Bun.file(join(cwd, rootLf)).exists()) && changedFiles.has(rootLf)) {
+      return true
+    }
+  }
+  return false
+}
+
+function depsActuallyChanged(pkgDiff: string): boolean {
+  const lines = pkgDiff.split("\n")
+  const depsChanged = lines.some(
+    (line) =>
+      line.startsWith("+") &&
+      !line.startsWith("+++") &&
+      /(dependencies|devDependencies|peerDependencies|optionalDependencies)/.test(line)
+  )
+  const depLineAdded = lines.some(
+    (line) => line.startsWith("+") && !line.startsWith("+++") && /^\+\s+"[^"]+": "[^"]+"/.test(line)
+  )
+  return depsChanged || depLineAdded
+}
+
+async function findDriftedPackages(
+  cwd: string,
+  changedFiles: Set<string>,
+  changedPkgs: string[],
+  range: string
+): Promise<string[]> {
+  const drifted: string[] = []
+
+  for (const pkgFile of changedPkgs) {
+    const pkgDir = dirname(pkgFile)
+
+    const lockfileInfo = await detectLockfile(cwd, pkgDir)
+    if (!lockfileInfo) continue
+    const { lockfile, installCmd } = lockfileInfo
+
+    if (changedFiles.has(lockfile)) continue
+
+    if (pkgDir !== "." && (await rootLockfileCovers(cwd, changedFiles))) continue
+
+    const pkgDiff = await git(["diff", range, "--", pkgFile], cwd)
+    if (!pkgDiff) continue
+
+    if (depsActuallyChanged(pkgDiff)) {
+      drifted.push(`${pkgFile} (lockfile: ${lockfile}) — run: ${installCmd}`)
+    }
+  }
+
+  return drifted
+}
+
 async function main(): Promise<void> {
   const input = stopHookInputSchema.parse(await Bun.stdin.json())
   const cwd = input.cwd ?? process.cwd()
@@ -42,62 +110,7 @@ async function main(): Promise<void> {
 
   if (changedPkgs.length === 0) return
 
-  const drifted: string[] = []
-
-  for (const pkgFile of changedPkgs) {
-    const pkgDir = dirname(pkgFile)
-
-    // Detect which lockfile should exist alongside this package.json
-    let lockfile = ""
-    let installCmd = ""
-    for (const [lf, cmd] of Object.entries(LOCKFILE_MAP)) {
-      const lfPath = pkgDir === "." ? lf : join(pkgDir, lf)
-      if (await Bun.file(join(cwd, lfPath)).exists()) {
-        lockfile = lfPath
-        installCmd = cmd
-        break
-      }
-    }
-    if (!lockfile) continue
-
-    // Check if lockfile was also changed
-    if (changedFiles.has(lockfile)) continue
-
-    // In monorepos, check if root lockfile covers this sub-package
-    if (pkgDir !== ".") {
-      let rootCovers = false
-      for (const rootLf of Object.keys(LOCKFILE_MAP)) {
-        if ((await Bun.file(join(cwd, rootLf)).exists()) && changedFiles.has(rootLf)) {
-          rootCovers = true
-          break
-        }
-      }
-      if (rootCovers) continue
-    }
-
-    // Check if deps actually changed (not just scripts/version)
-    const pkgDiff = await git(["diff", range, "--", pkgFile], cwd)
-    if (!pkgDiff) continue
-
-    const depsChanged = pkgDiff
-      .split("\n")
-      .some(
-        (line) =>
-          line.startsWith("+") &&
-          !line.startsWith("+++") &&
-          /(dependencies|devDependencies|peerDependencies|optionalDependencies)/.test(line)
-      )
-    const depLineAdded = pkgDiff
-      .split("\n")
-      .some(
-        (line) =>
-          line.startsWith("+") && !line.startsWith("+++") && /^\+\s+"[^"]+": "[^"]+"/.test(line)
-      )
-
-    if (depsChanged || depLineAdded) {
-      drifted.push(`${pkgFile} (lockfile: ${lockfile}) — run: ${installCmd}`)
-    }
-  }
+  const drifted = await findDriftedPackages(cwd, changedFiles, changedPkgs, range)
 
   if (drifted.length === 0) return
 

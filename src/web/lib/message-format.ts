@@ -239,16 +239,25 @@ function parseInlineUserQueryBlock(raw: string): ParsedUserMetadataBlock | null 
   }
 }
 
+function extractSkillFromMatch(
+  match: RegExpMatchArray
+): { path: string | null; description: string } | null {
+  const attrs = match[1] ?? ""
+  const description = compactMetadataValue((match[2] ?? "").replace(/\s+/g, " ").trim(), 120)
+  if (!description) return null
+  const path = /fullPath="([^"]+)"/i.exec(attrs)?.[1]?.trim() ?? null
+  return { path, description }
+}
+
 function parseAgentSkillsBlock(raw: string): ParsedUserMetadataBlock | null {
   const skillRe = /<agent_skill\b([^>]*)>([\s\S]*?)<\/agent_skill>/gi
   const skills: Array<{ path: string | null; description: string }> = []
   for (const match of raw.matchAll(skillRe)) {
-    const attrs = match[1] ?? ""
-    const description = compactMetadataValue((match[2] ?? "").replace(/\s+/g, " ").trim(), 120)
-    if (!description) continue
-    const path = /fullPath="([^"]+)"/i.exec(attrs)?.[1]?.trim() ?? null
-    skills.push({ path, description })
-    if (skills.length >= 200) break
+    const skill = extractSkillFromMatch(match)
+    if (skill) {
+      skills.push(skill)
+      if (skills.length >= 200) break
+    }
   }
 
   if (skills.length === 0) {

@@ -313,6 +313,13 @@ async function backup(path: string): Promise<boolean> {
 
 // ─── Hook command collection ─────────────────────────────────────────────────
 
+function collectNestedHooks(hooks: unknown[], cmds: Set<string>): void {
+  for (const h of hooks) {
+    const hh = h as Record<string, unknown>
+    if (hh.command) cmds.add(String(hh.command))
+  }
+}
+
 function collectCommands(hooks: Record<string, unknown>): Set<string> {
   const cmds = new Set<string>()
   for (const entries of Object.values(hooks)) {
@@ -320,12 +327,7 @@ function collectCommands(hooks: Record<string, unknown>): Set<string> {
     for (const entry of entries) {
       const e = entry as Record<string, unknown>
       if (e.command) cmds.add(String(e.command))
-      if (Array.isArray(e.hooks)) {
-        for (const h of e.hooks) {
-          const hh = h as Record<string, unknown>
-          if (hh.command) cmds.add(String(hh.command))
-        }
-      }
+      if (Array.isArray(e.hooks)) collectNestedHooks(e.hooks, cmds)
     }
   }
   return cmds

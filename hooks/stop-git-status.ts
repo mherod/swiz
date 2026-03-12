@@ -144,6 +144,175 @@ function selectTaskSubject(hasUncommitted: boolean, ahead: number, behind: numbe
   return "Push branch to remote"
 }
 
+function buildReason(
+  gitStatus: {
+    total: number
+    modified: number
+    added: number
+    deleted: number
+    untracked: number
+    lines: string[]
+    branch: string
+    upstream: string | null
+    ahead: number
+    behind: number
+  },
+  branch: string,
+  upstream: string,
+  hasUncommitted: boolean,
+  hasRemote: boolean,
+  ahead: number,
+  behind: number
+): string {
+  let reason = hasUncommitted
+    ? buildUncommittedReason(gitStatus, branch, upstream, behind)
+    : describeRemoteState(branch, upstream, ahead, behind)
+
+  const steps: string[] = []
+
+  if (hasUncommitted) {
+    steps.push(
+      skillAdvice(
+        "commit",
+        "Commit your changes with /commit",
+        [
+          "Commit your changes:",
+          "  git add .",
+          '  git commit -m "<type>(<scope>): <summary>"',
+          "",
+          "Commit message types: feat, fix, refactor, docs, style, test, chore",
+          "Keep summary under 50 characters. Use present tense. No Co-Authored-By trailers.",
+        ].join("\n")
+      )
+    )
+  }
+
+  if (behind > 0) {
+    steps.push(
+      skillAdvice(
+        "resolve-conflicts",
+        "Pull and rebase: git pull --rebase --autostash (use /resolve-conflicts if conflicts arise)",
+        "Pull and rebase: git pull --rebase --autostash"
+      )
+    )
+  }
+
+  const willNeedPush = ahead > 0 || (hasUncommitted && hasRemote)
+  if (willNeedPush) {
+    const pushLabel =
+      ahead > 0
+        ? `Push ${ahead} commit(s) to '${upstream}'`
+        : `Push your committed changes to '${upstream}'`
+    steps.push(
+      skillAdvice(
+        "push",
+        `${pushLabel} with /push`,
+        [
+          `${pushLabel}:`,
+          `  git push origin ${branch}`,
+          "",
+          "Before pushing — run the collaboration guard:",
+          "  Solo repo → direct push to main is permitted.",
+          "  Org repo or other contributors active → use a feature branch and PR instead.",
+        ].join("\n")
+      )
+    )
+  }
+
+  reason += formatActionPlan(steps)
+  return reason
+}
+
+function buildTaskDesc(
+  cwd: string,
+  hasUncommitted: boolean,
+  branch: string,
+  upstream: string,
+  behind: number,
+  ahead: number
+): string {
+  return [
+    hasUncommitted && `Git repository has uncommitted changes at ${cwd}.`,
+    behind > 0 && `Branch '${branch}' is ${behind} commit(s) behind '${upstream}'.`,
+    ahead > 0 && `Branch has ${ahead} unpushed commit(s) ahead of '${upstream}'.`,
+    "Complete the action plan before stopping.",
+  ]
+    .filter(Boolean)
+    .join(" ")
+}
+
+interface ParentMap {
+  get(pid: number): number | undefined
+}
+
+function buildParentMap(psAllOut: string): ParentMap {
+  const parentMap = new Map<number, number>()
+  for (const line of psAllOut.trim().split("\n").slice(1)) {
+    const parts = line.trim().split(/\s+/)
+    const pid = parseInt(parts[0] ?? "", 10)
+    const ppid = parseInt(parts[1] ?? "", 10)
+    if (!Number.isNaN(pid) && !Number.isNaN(ppid)) parentMap.set(pid, ppid)
+  }
+  return parentMap
+}
+
+function collectAncestors(parentMap: ParentMap, startPpid: number): Set<number> {
+  const ancestors = new Set<number>()
+  let cur = startPpid
+  for (let i = 0; i < 20 && cur > 1; i++) {
+    ancestors.add(cur)
+    const ppid = parentMap.get(cur)
+    if (!ppid || ppid === cur) break
+    cur = ppid
+  }
+  return ancestors
+}
+
+function checkLsofForRepoPush(lsofOut: string, gitRoot: string): boolean {
+  if (!gitRoot) return false
+  for (const line of lsofOut.split("\n")) {
+    if (line.startsWith("n") && line.slice(1).startsWith(gitRoot)) {
+      return true
+    }
+  }
+  return false
+}
+
+async function detectBackgroundPush(cwd: string): Promise<boolean> {
+  const pgrepProc = Bun.spawn(["pgrep", "-f", "git push"], { stdout: "pipe", stderr: "pipe" })
+  const pgrepOut = await new Response(pgrepProc.stdout).text()
+  await pgrepProc.exited
+  if (pgrepProc.exitCode !== 0) return false
+
+  const pushPids = pgrepOut.trim().split("\n").map(Number).filter(Boolean)
+
+  const psAllProc = Bun.spawn(["ps", "-eo", "pid,ppid"], { stdout: "pipe", stderr: "pipe" })
+  const psAllOut = await new Response(psAllProc.stdout).text()
+  await psAllProc.exited
+
+  const parentMap = buildParentMap(psAllOut)
+  const ancestors = collectAncestors(parentMap, process.ppid)
+  const gitRoot = await git(["rev-parse", "--show-toplevel"], cwd)
+
+  const nonAncestorPids = pushPids.filter((pid) => !ancestors.has(pid))
+  if (nonAncestorPids.length === 0) return false
+
+  const lsofProc = Bun.spawn(["lsof", "-p", nonAncestorPids.join(","), "-d", "cwd", "-Fn"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  let lsofKilled = false
+  const killTimer = setTimeout(() => {
+    lsofKilled = true
+    lsofProc.kill()
+  }, 2000)
+  const lsofOut = await new Response(lsofProc.stdout).text()
+  await lsofProc.exited
+  clearTimeout(killTimer)
+
+  return !lsofKilled && checkLsofForRepoPush(lsofOut, gitRoot)
+}
+
 async function main(): Promise<void> {
   const input = stopHookInputSchema.parse(await Bun.stdin.json())
   const cwd = input.cwd ?? process.cwd()
@@ -183,153 +352,23 @@ async function main(): Promise<void> {
 
   // In-flight push guard: if a background `git push` is currently running in THIS
   // repository, defer the unpushed-commits block rather than emitting a false positive.
-  // Only applies when the sole issue is unpushed commits (no uncommitted changes,
-  // not behind). Once the push exits the next stop attempt will re-evaluate correctly.
-  //
-  // Two-stage filter:
-  //   1. Ancestry-aware: exclude git push processes that are ancestors of this process
-  //      (e.g., the pre-push hook running bun test during push verification).
-  //   2. Repo-aware: exclude git push processes whose CWD is outside our git repo root,
-  //      so a push in an unrelated repo doesn't trigger a false positive here.
   if (!hasUncommitted && ahead > 0 && behind === 0) {
-    const pgrepProc = Bun.spawn(["pgrep", "-f", "git push"], { stdout: "pipe", stderr: "pipe" })
-    const pgrepOut = await new Response(pgrepProc.stdout).text()
-    await pgrepProc.exited
-    if (pgrepProc.exitCode === 0) {
-      const pushPids = pgrepOut.trim().split("\n").map(Number).filter(Boolean)
-
-      // Build the full PID→PPID map with one `ps -eo pid,ppid` call, then walk
-      // ancestry in-memory. This replaces up to 20 individual `ps -p <pid>` spawns
-      // (each ~20–50 ms) with a single subprocess invocation (~50 ms total).
-      const psAllProc = Bun.spawn(["ps", "-eo", "pid,ppid"], {
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      const psAllOut = await new Response(psAllProc.stdout).text()
-      await psAllProc.exited
-
-      const parentMap = new Map<number, number>()
-      for (const line of psAllOut.trim().split("\n").slice(1)) {
-        const parts = line.trim().split(/\s+/)
-        const pid = parseInt(parts[0] ?? "", 10)
-        const ppid = parseInt(parts[1] ?? "", 10)
-        if (!Number.isNaN(pid) && !Number.isNaN(ppid)) parentMap.set(pid, ppid)
-      }
-
-      const ancestors = new Set<number>()
-      let cur = process.ppid
-      for (let i = 0; i < 20 && cur > 1; i++) {
-        ancestors.add(cur)
-        const ppid = parentMap.get(cur)
-        if (!ppid || ppid === cur) break
-        cur = ppid
-      }
-
-      // Get our git root so we only react to pushes within this repo
-      const gitRoot = await git(["rev-parse", "--show-toplevel"], cwd)
-
-      // Batch all non-ancestor PIDs into a single lsof call (replaces sequential per-PID fan-out).
-      // lsof -p p1,p2,... -d cwd -Fn prints "p<pid>" then "n<cwd>" for each process.
-      const nonAncestorPids = pushPids.filter((pid) => !ancestors.has(pid))
-      let hasBackgroundPush = false
-      if (nonAncestorPids.length > 0) {
-        const lsofProc = Bun.spawn(["lsof", "-p", nonAncestorPids.join(","), "-d", "cwd", "-Fn"], {
-          stdout: "pipe",
-          stderr: "pipe",
-        })
-        let lsofKilled = false
-        const killTimer = setTimeout(() => {
-          lsofKilled = true
-          lsofProc.kill()
-        }, 2000)
-        const lsofOut = await new Response(lsofProc.stdout).text()
-        await lsofProc.exited
-        clearTimeout(killTimer)
-        if (!lsofKilled && gitRoot) {
-          // Each "n<path>" line following a "p<pid>" header is a CWD entry
-          for (const line of lsofOut.split("\n")) {
-            if (line.startsWith("n") && line.slice(1).startsWith(gitRoot)) {
-              hasBackgroundPush = true
-              break
-            }
-          }
-        }
-      }
-
-      if (hasBackgroundPush) {
-        blockStop(
-          "A `git push` is currently running in the background.\n\n" +
-            "Wait for it to complete before stopping. " +
-            "Check the background task output with `TaskOutput <task-id>` to verify it succeeded, " +
-            "then try stopping again."
-        )
-      }
+    if (await detectBackgroundPush(cwd)) {
+      blockStop(
+        "A `git push` is currently running in the background.\n\n" +
+          "Wait for it to complete before stopping. " +
+          "Check the background task output with `TaskOutput <task-id>` to verify it succeeded, " +
+          "then try stopping again."
+      )
     }
   }
 
   // ── Build the reason ──────────────────────────────────────────────────
 
-  const steps: string[] = []
-
-  let reason = hasUncommitted
-    ? buildUncommittedReason(gitStatus, branch, upstream, behind)
-    : describeRemoteState(branch, upstream, ahead, behind)
-
-  if (hasUncommitted) {
-    steps.push(
-      skillAdvice(
-        "commit",
-        "Commit your changes with /commit",
-        [
-          "Commit your changes:",
-          "  git add .",
-          '  git commit -m "<type>(<scope>): <summary>"',
-          "",
-          "Commit message types: feat, fix, refactor, docs, style, test, chore",
-          "Keep summary under 50 characters. Use present tense. No Co-Authored-By trailers.",
-        ].join("\n")
-      )
-    )
-  }
-
-  if (behind > 0) {
-    steps.push(
-      skillAdvice(
-        "resolve-conflicts",
-        "Pull and rebase: git pull --rebase --autostash (use /resolve-conflicts if conflicts arise)",
-        "Pull and rebase: git pull --rebase --autostash"
-      )
-    )
-  }
-
-  // Show a push step when: already ahead, or has uncommitted changes and a remote
-  // (committing will create at least one new commit to push)
   const willNeedPush = ahead > 0 || (hasUncommitted && hasRemote)
-  if (willNeedPush) {
-    const pushLabel =
-      ahead > 0
-        ? `Push ${ahead} commit(s) to '${upstream}'`
-        : `Push your committed changes to '${upstream}'`
-    steps.push(
-      skillAdvice(
-        "push",
-        `${pushLabel} with /push`,
-        [
-          `${pushLabel}:`,
-          `  git push origin ${branch}`,
-          "",
-          "Before pushing — run the collaboration guard:",
-          "  Solo repo → direct push to main is permitted.",
-          "  Org repo or other contributors active → use a feature branch and PR instead.",
-        ].join("\n")
-      )
-    )
-  }
-
-  reason += formatActionPlan(steps)
+  const reason = buildReason(gitStatus, branch, upstream, hasUncommitted, hasRemote, ahead, behind)
 
   // ── Mark push as prompted (for cooldown on subsequent stop attempts) ─────
-  // Record once so future stops within PUSH_COOLDOWN_MS skip re-blocking for push.
   if (willNeedPush) {
     await markPushPrompted(input.session_id)
   }
@@ -337,17 +376,8 @@ async function main(): Promise<void> {
   // ── Task creation ─────────────────────────────────────────────────────
 
   const taskSubject = selectTaskSubject(hasUncommitted, ahead, behind)
-  const taskDesc = [
-    hasUncommitted && `Git repository has uncommitted changes at ${cwd}.`,
-    behind > 0 && `Branch '${branch}' is ${behind} commit(s) behind '${upstream}'.`,
-    ahead > 0 && `Branch has ${ahead} unpushed commit(s) ahead of '${upstream}'.`,
-    "Complete the action plan before stopping.",
-  ]
-    .filter(Boolean)
-    .join(" ")
+  const taskDesc = buildTaskDesc(cwd, hasUncommitted, branch, upstream, behind, ahead)
 
-  // Use a single sentinel so the task is created once per session regardless
-  // of which state (uncommitted / ahead / behind) triggered the block.
   await createSessionTask(input.session_id, "stop-git-workflow-task-created", taskSubject, taskDesc)
 
   blockStop(reason)

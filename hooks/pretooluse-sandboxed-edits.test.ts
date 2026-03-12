@@ -96,8 +96,8 @@ async function runHook(
     // No cwd override — run from project root so the relative HOOK path resolves.
     // The agent's session cwd is passed via the stdin JSON payload instead.
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
 
   const stdout = await new Response(proc.stdout).text()
   await proc.exited

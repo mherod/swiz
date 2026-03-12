@@ -12,6 +12,7 @@ describe("parseTranscriptArgs", () => {
     expect(result.tailCount).toBeUndefined()
     expect(result.autoReply).toBe(false)
     expect(result.includeDebug).toBe(false)
+    expect(result.userOnly).toBe(false)
     expect(result.allAgents).toBe(false)
     expect(result.explicitAgents).toHaveLength(0)
   })
@@ -97,6 +98,11 @@ describe("parseTranscriptArgs", () => {
     expect(result.includeDebug).toBe(true)
   })
 
+  test("parses --user-only flag", () => {
+    const result = parseTranscriptArgs(["--user-only"])
+    expect(result.userOnly).toBe(true)
+  })
+
   test("parses --all flag", () => {
     const result = parseTranscriptArgs(["--all"])
     expect(result.allAgents).toBe(true)
@@ -117,12 +123,14 @@ describe("parseTranscriptArgs", () => {
       "5",
       "--auto-reply",
       "--include-debug",
+      "--user-only",
     ])
     expect(result.sessionQuery).toBe("sess1")
     expect(result.listOnly).toBe(true)
     expect(result.headCount).toBe(5)
     expect(result.autoReply).toBe(true)
     expect(result.includeDebug).toBe(true)
+    expect(result.userOnly).toBe(true)
   })
 
   test("does not consume flag as value for previous option", () => {

@@ -43,52 +43,57 @@ export interface IdeaArgs {
   provider?: AiProviderId
 }
 
+interface IdeaParseState {
+  targetDir: string
+  model?: string
+  timeoutMs: number
+  provider?: AiProviderId
+}
+
+function consumeArg(arg: string, next: string | undefined, state: IdeaParseState): number {
+  if (arg === "--dir" || arg === "-d") {
+    if (!next) throw new Error("Missing value for --dir")
+    state.targetDir = resolve(next)
+    return 1
+  }
+  if (arg === "--model" || arg === "-m") {
+    if (!next) throw new Error("Missing value for --model")
+    state.model = next
+    return 1
+  }
+  if (arg === "--timeout" || arg === "-t") {
+    if (!next) throw new Error("Missing value for --timeout")
+    const parsed = Number.parseInt(next, 10)
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error(`--timeout must be a positive integer, got: ${next}`)
+    }
+    state.timeoutMs = parsed
+    return 1
+  }
+  if (arg === "--provider" || arg === "-p") {
+    if (!next) throw new Error("Missing value for --provider")
+    if (next !== "gemini" && next !== "codex" && next !== "claude") {
+      throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${next}`)
+    }
+    state.provider = next
+    return 1
+  }
+  throw new Error(`Unknown argument: ${arg}`)
+}
+
 export function parseIdeaArgs(args: string[]): IdeaArgs {
-  let targetDir = process.cwd()
-  let model: string | undefined
-  let timeoutMs = DEFAULT_TIMEOUT_MS
-  let provider: AiProviderId | undefined
+  const state: IdeaParseState = {
+    targetDir: process.cwd(),
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+  }
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (!arg) continue
-    const next = args[i + 1]
-
-    if (arg === "--dir" || arg === "-d") {
-      if (!next) throw new Error("Missing value for --dir")
-      targetDir = resolve(next)
-      i++
-      continue
-    }
-    if (arg === "--model" || arg === "-m") {
-      if (!next) throw new Error("Missing value for --model")
-      model = next
-      i++
-      continue
-    }
-    if (arg === "--timeout" || arg === "-t") {
-      if (!next) throw new Error("Missing value for --timeout")
-      const parsed = Number.parseInt(next, 10)
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        throw new Error(`--timeout must be a positive integer, got: ${next}`)
-      }
-      timeoutMs = parsed
-      i++
-      continue
-    }
-    if (arg === "--provider" || arg === "-p") {
-      if (!next) throw new Error("Missing value for --provider")
-      if (next !== "gemini" && next !== "codex" && next !== "claude") {
-        throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${next}`)
-      }
-      provider = next
-      i++
-      continue
-    }
-    throw new Error(`Unknown argument: ${arg}`)
+    i += consumeArg(arg, args[i + 1], state)
   }
 
-  return { targetDir, model, timeoutMs, provider }
+  return state
 }
 
 async function readReadmeContent(targetDir: string): Promise<string | null> {

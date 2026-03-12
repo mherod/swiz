@@ -52,47 +52,22 @@ async function isPushGateEnabled(): Promise<boolean> {
   }
 }
 
-async function main() {
-  if (!(await isPushGateEnabled())) process.exit(0)
+const NO_PUSH_RE = /\bdo(?:n't| not)\s+push\b/i
+const PUSH_APPROVAL_PATTERNS = [
+  /\bgo ahead and push\b/i,
+  /\bpush now\b/i,
+  /^\/push(?:\s|$)/m,
+  /\bplease push\b/i,
+]
 
-  const input: ToolHookInput = await Bun.stdin.json()
-  if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+interface PushCheckResult {
+  blockingLine: string
+  approvedAfter: boolean
+}
 
-  const command: string = (input?.tool_input?.command as string) ?? ""
-  if (!GIT_PUSH_RE.test(command)) process.exit(0)
-
-  const transcriptPath: string = input?.transcript_path ?? ""
-  if (!transcriptPath) process.exit(0)
-
-  // ── Pattern definitions ───────────────────────────────────────────────────────
-
-  // Instruction to block on
-  const NO_PUSH_RE = /\bdo(?:n't| not)\s+push\b/i
-
-  // Approval signals — any of these appearing AFTER the blocking instruction
-  // count as explicit authorisation to push.
-  //
-  // IMPORTANT: Skill content (e.g. the /push skill header "Get committed changes
-  // pushed to remote") must NOT appear here. Skill content loads into the
-  // transcript whenever the agent invokes a skill — that is not the same as the
-  // user explicitly authorising a push. Only phrases that require deliberate
-  // human typing or a system stop-hook action plan are accepted.
-  const PUSH_APPROVAL_PATTERNS = [
-    // Explicit user approval phrases that cannot be produced by skill loading
-    // or system-generated stop-hook action plans.
-    /\bgo ahead and push\b/i,
-    /\bpush now\b/i,
-    // /push on its own line (user typed the skill invocation directly) —
-    // require whitespace or end-of-line so "/push-something" paths don't match.
-    /^\/push(?:\s|$)/m,
-    /\bplease push\b/i,
-  ]
-
-  // ── Single ordered pass through transcript ────────────────────────────────────
-  // Track the last "do not push" instruction and whether approval follows it.
-
-  let blockingLine = "" // text of the most-recent blocking instruction
-  let approvedAfter = false // true if an approval signal appears after the block
+async function scanTranscriptForPushBlock(transcriptPath: string): Promise<PushCheckResult> {
+  let blockingLine = ""
+  let approvedAfter = false
 
   try {
     for (const line of await readSessionLines(transcriptPath)) {
@@ -106,11 +81,7 @@ async function main() {
         for (const block of content) {
           if (block?.type !== "text") continue
           const txt: string = block?.text ?? ""
-
-          // Only treat user-role text as a potential "do not push" directive.
-          // Assistant text (the agent's own reasoning) must never trigger a block.
           if (role === "user" && NO_PUSH_RE.test(txt)) {
-            // Found a blocking instruction — record it and reset approval flag
             blockingLine =
               txt
                 .split("\n")
@@ -122,8 +93,6 @@ async function main() {
             blockingLine &&
             PUSH_APPROVAL_PATTERNS.some((re) => re.test(txt))
           ) {
-            // Approval appeared after the blocking instruction — user role only.
-            // Assistant text (agent reasoning) must never self-approve a push.
             approvedAfter = true
           }
         }
@@ -131,7 +100,22 @@ async function main() {
     }
   } catch {}
 
-  // No blocking instruction found, or it was superseded by explicit approval
+  return { blockingLine, approvedAfter }
+}
+
+async function main() {
+  if (!(await isPushGateEnabled())) process.exit(0)
+
+  const input: ToolHookInput = await Bun.stdin.json()
+  if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+
+  const command: string = (input?.tool_input?.command as string) ?? ""
+  if (!GIT_PUSH_RE.test(command)) process.exit(0)
+
+  const transcriptPath: string = input?.transcript_path ?? ""
+  if (!transcriptPath) process.exit(0)
+
+  const { blockingLine, approvedAfter } = await scanTranscriptForPushBlock(transcriptPath)
   if (!blockingLine || approvedAfter) process.exit(0)
 
   denyPreToolUse(

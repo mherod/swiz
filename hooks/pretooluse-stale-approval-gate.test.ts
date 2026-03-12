@@ -21,8 +21,8 @@ async function runHook(command: string, cwd = "/tmp"): Promise<HookResult> {
     stdout: "pipe",
     stderr: "pipe",
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
 
   const rawOutput = await new Response(proc.stdout).text()
   await proc.exited
@@ -97,8 +97,8 @@ describe("pretooluse-stale-approval-gate", () => {
         stdout: "pipe",
         stderr: "pipe",
       })
-      proc.stdin.write(payload)
-      proc.stdin.end()
+      void proc.stdin.write(payload)
+      void proc.stdin.end()
 
       const rawOutput = await new Response(proc.stdout).text()
       await proc.exited
@@ -121,8 +121,8 @@ describe("pretooluse-stale-approval-gate", () => {
         stdout: "pipe",
         stderr: "pipe",
       })
-      proc.stdin.write(payload)
-      proc.stdin.end()
+      void proc.stdin.write(payload)
+      void proc.stdin.end()
 
       const rawOutput = await new Response(proc.stdout).text()
       await proc.exited

@@ -50,8 +50,8 @@ async function runHook(opts: {
     stdout: "pipe",
     stderr: "pipe",
   })
-  proc.stdin.write(payload)
-  proc.stdin.end()
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
   const out = await new Response(proc.stdout).text()
   await proc.exited
 
@@ -376,8 +376,8 @@ describe("CI check advisory — prHooksActive modes", () => {
       stdout: "pipe",
       stderr: "pipe",
     })
-    proc.stdin.write(payload)
-    proc.stdin.end()
+    void proc.stdin.write(payload)
+    void proc.stdin.end()
     const out = await new Response(proc.stdout).text()
     await proc.exited
     if (!out.trim()) return { blocked: false, reason: "", advisory: false }

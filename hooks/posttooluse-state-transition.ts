@@ -184,80 +184,97 @@ async function transitionToDevelopingOnDefaultBranchCommit(cwd: string): Promise
   }
 }
 
-async function handleAsyncTransitions(
+async function handleCommitTransitions(
   command: string,
   cwd: string,
   state: ProjectState
 ): Promise<boolean> {
   const isCommit = GIT_COMMIT_RE.test(command)
-  const isReviewingLike = isReviewingLikeState(state)
-  const isNoUpstreamTransitionState = state === "planning" || isReviewingLike
+  if (!isCommit) return false
 
-  // ── git commit: reviewing → addressing-feedback if PR has CHANGES_REQUESTED ──
-  if (isCommit && state === "reviewing") {
+  const isReviewingLike = isReviewingLikeState(state)
+  const isNoUpstreamState = state === "planning" || isReviewingLike
+
+  if (state === "reviewing") {
     if (await transitionToAddressingFeedbackOnChangesRequested(cwd)) return true
   }
 
-  // ── git commit + no valid upstream tracking: planning|reviewing|addressing-feedback → developing ──
-  if (isCommit && isNoUpstreamTransitionState) {
+  if (isNoUpstreamState) {
     const upstreamStatus = await transitionToDevelopingOnMissingUpstream(cwd)
     if (upstreamStatus === "transitioned") return true
-
-    // ── git commit on default branch: non-developing → developing ──
     if (await transitionToDevelopingOnDefaultBranchCommit(cwd)) return true
   }
 
-  // ── git commit on default branch: non-developing → developing ──
-  if (isCommit && state !== "developing") {
+  if (state !== "developing") {
     if (await transitionToDevelopingOnDefaultBranchCommit(cwd)) return true
   }
 
-  // ── git checkout|switch <default-branch>: non-developing → developing ──
-  if (
+  return false
+}
+
+async function handleCheckoutToDeveloping(
+  command: string,
+  cwd: string,
+  state: ProjectState
+): Promise<boolean> {
+  if (state === "developing") return false
+  const isCheckout =
     (GIT_CHECKOUT_RE.test(command) || /\bgit\s+switch\b/.test(command)) &&
-    !GIT_CHECKOUT_NEW_BRANCH_RE.test(command) &&
-    state !== "developing"
-  ) {
-    const targetBranch = extractCheckoutBranch(command) ?? extractSwitchBranch(command)
-    if (targetBranch) {
-      try {
-        const defaultBranch = await getDefaultBranch(cwd)
-        if (isDefaultBranch(targetBranch, defaultBranch)) {
-          await writeProjectState(cwd, "developing")
-          return true
-        }
-      } catch {
-        // skip
-      }
-    }
-  }
+    !GIT_CHECKOUT_NEW_BRANCH_RE.test(command)
+  if (!isCheckout) return false
 
-  // ── git checkout / gh pr checkout: any → reviewing if HEAD authored by other user ──
-  // Runs after the default-branch rule above so developing takes priority over reviewing
-  // when checking out the default branch.
-  const isPlainCheckout = GIT_CHECKOUT_RE.test(command) && !GIT_CHECKOUT_NEW_BRANCH_RE.test(command)
-  const isPrCheckout = GH_PR_CHECKOUT_RE.test(command)
-  if ((isPlainCheckout || isPrCheckout) && state !== "reviewing") {
-    if (await isHeadAuthoredByOther(cwd)) {
-      await writeProjectState(cwd, "reviewing")
+  const targetBranch = extractCheckoutBranch(command) ?? extractSwitchBranch(command)
+  if (!targetBranch) return false
+
+  try {
+    const defaultBranch = await getDefaultBranch(cwd)
+    if (isDefaultBranch(targetBranch, defaultBranch)) {
+      await writeProjectState(cwd, "developing")
       return true
     }
-  }
+  } catch {}
+  return false
+}
 
-  // ── git checkout -b / git switch -c: any → developing (only from default branch) ──
-  if (GIT_CHECKOUT_NEW_BRANCH_RE.test(command)) {
-    try {
-      const sourceBranch = await resolveCheckoutSourceBranch(command, cwd)
-      const defaultBranch = await getDefaultBranch(cwd)
-      if (sourceBranch && isDefaultBranch(sourceBranch, defaultBranch)) {
-        await writeProjectState(cwd, "developing")
-        return true
-      }
-    } catch {
-      // skip
+async function handleCheckoutToReviewing(
+  command: string,
+  cwd: string,
+  state: ProjectState
+): Promise<boolean> {
+  if (state === "reviewing") return false
+  const isPlainCheckout = GIT_CHECKOUT_RE.test(command) && !GIT_CHECKOUT_NEW_BRANCH_RE.test(command)
+  const isPrCheckout = GH_PR_CHECKOUT_RE.test(command)
+  if (!(isPlainCheckout || isPrCheckout)) return false
+
+  if (await isHeadAuthoredByOther(cwd)) {
+    await writeProjectState(cwd, "reviewing")
+    return true
+  }
+  return false
+}
+
+async function handleNewBranchCheckout(command: string, cwd: string): Promise<boolean> {
+  if (!GIT_CHECKOUT_NEW_BRANCH_RE.test(command)) return false
+  try {
+    const sourceBranch = await resolveCheckoutSourceBranch(command, cwd)
+    const defaultBranch = await getDefaultBranch(cwd)
+    if (sourceBranch && isDefaultBranch(sourceBranch, defaultBranch)) {
+      await writeProjectState(cwd, "developing")
+      return true
     }
-  }
+  } catch {}
+  return false
+}
 
+async function handleAsyncTransitions(
+  command: string,
+  cwd: string,
+  state: ProjectState
+): Promise<boolean> {
+  if (await handleCommitTransitions(command, cwd, state)) return true
+  if (await handleCheckoutToDeveloping(command, cwd, state)) return true
+  if (await handleCheckoutToReviewing(command, cwd, state)) return true
+  if (await handleNewBranchCheckout(command, cwd)) return true
   return false
 }
 

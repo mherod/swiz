@@ -61,6 +61,24 @@ async function isLfsTracked(filePath: string, cwd: string): Promise<boolean> {
   return false
 }
 
+async function getProjectedContent(
+  toolName: string,
+  filePath: string,
+  toolInput: { old_string?: string; new_string?: string; content?: string }
+): Promise<string> {
+  let currentContent = ""
+  try {
+    currentContent = await Bun.file(filePath).text()
+  } catch {
+    currentContent = ""
+  }
+
+  if (isEditTool(toolName)) {
+    return currentContent.replace(toolInput.old_string ?? "", toolInput.new_string ?? "")
+  }
+  return toolInput.content ?? ""
+}
+
 async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
@@ -68,66 +86,41 @@ async function main() {
   const filePath = input.tool_input?.file_path ?? ""
   const cwd = input.cwd ?? process.cwd()
 
-  // Only guard Edit and Write (NotebookEdit: final size not determinable)
   if (!isEditTool(toolName) && !isWriteTool(toolName)) {
     allowPreToolUse("")
   }
 
   const sizeLimitKb = await resolveSizeLimitKb(cwd)
   const sizeLimitBytes = sizeLimitKb * 1024
-
-  // Read current file content for size projection
-  let currentContent = ""
-  try {
-    currentContent = await Bun.file(filePath).text()
-  } catch {
-    // File doesn't exist yet (Write to new file)
-    currentContent = ""
-  }
-
-  // Project content after the edit
-  let projectedContent: string
-  if (isEditTool(toolName)) {
-    const oldString = input.tool_input?.old_string ?? ""
-    const newString = input.tool_input?.new_string ?? ""
-    projectedContent = currentContent.replace(oldString, newString)
-  } else {
-    // Write: use the new content directly
-    projectedContent = input.tool_input?.content ?? ""
-  }
-
+  const projectedContent = await getProjectedContent(toolName, filePath, input.tool_input ?? {})
   const projectedBytes = new TextEncoder().encode(projectedContent).length
 
   if (projectedBytes <= sizeLimitBytes) {
     allowPreToolUse("")
   }
 
-  // File would exceed limit — check if it's LFS-tracked
   if (await isLfsTracked(filePath, cwd)) {
     allowPreToolUse("")
   }
 
   const projectedKb = Math.round(projectedBytes / 1024)
-  const currentBytes = new TextEncoder().encode(currentContent).length
-  const currentKb = Math.round(currentBytes / 1024)
 
-  const reason = [
-    `Large file write blocked: result would be ${projectedKb}KB (limit: ${sizeLimitKb}KB).`,
-    "",
-    `Current size: ${currentKb}KB`,
-    `Projected size: ${projectedKb}KB`,
-    `Limit: ${sizeLimitKb}KB`,
-    "",
-    "Options:",
-    '  1. Track this file with Git LFS: git lfs track "<pattern>" && git add .gitattributes',
-    "  2. Split large content across multiple smaller files",
-    "  3. Store large binary assets outside the repository (cloud storage, CDN)",
-    "",
-    "If this file should be LFS-tracked, add the pattern to .gitattributes first,",
-    "then retry the write.",
-  ].join("\n")
-
-  denyPreToolUse(reason)
+  denyPreToolUse(
+    [
+      `Large file write blocked: result would be ${projectedKb}KB (limit: ${sizeLimitKb}KB).`,
+      "",
+      `Projected size: ${projectedKb}KB`,
+      `Limit: ${sizeLimitKb}KB`,
+      "",
+      "Options:",
+      '  1. Track this file with Git LFS: git lfs track "<pattern>" && git add .gitattributes',
+      "  2. Split large content across multiple smaller files",
+      "  3. Store large binary assets outside the repository (cloud storage, CDN)",
+      "",
+      "If this file should be LFS-tracked, add the pattern to .gitattributes first,",
+      "then retry the write.",
+    ].join("\n")
+  )
 }
 
 if (import.meta.main) {

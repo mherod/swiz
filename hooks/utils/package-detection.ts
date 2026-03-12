@@ -9,72 +9,76 @@ export type Runtime = "bun" | "node"
 
 let _pmCache: PackageManager | null | undefined
 
+const VALID_PMS = new Set(["bun", "pnpm", "yarn", "npm"] as const)
+
+function detectFromPkgJson(dir: string): PackageManager | null {
+  const pkgJsonPath = join(dir, "package.json")
+  if (!existsSync(pkgJsonPath)) return null
+  try {
+    const content = readFileSync(pkgJsonPath, "utf-8")
+    const pkg = JSON.parse(content)
+    if (pkg.packageManager && typeof pkg.packageManager === "string") {
+      const pmName = pkg.packageManager.split("@")[0]
+      if (VALID_PMS.has(pmName)) return pmName as PackageManager
+    }
+  } catch {
+    // Invalid JSON, continue to other methods
+  }
+  return null
+}
+
+function detectFromNpmrc(dir: string): boolean {
+  const npmrcPath = join(dir, ".npmrc")
+  if (!existsSync(npmrcPath)) return false
+  try {
+    const content = readFileSync(npmrcPath, "utf-8")
+    return (
+      /^\s*node-linker\s*=\s*hoisted/m.test(content) ||
+      /^\s*shamefully-hoist\s*=\s*true/m.test(content) ||
+      /^\s*strict-peer-dependencies\s*=\s*false/m.test(content)
+    )
+  } catch {
+    return false
+  }
+}
+
+function detectFromLockfiles(dir: string): PackageManager | null {
+  if (existsSync(join(dir, "bun.lockb")) || existsSync(join(dir, "bun.lock"))) return "bun"
+  if (existsSync(join(dir, "pnpm-lock.yaml")) || existsSync(join(dir, "shrinkwrap.yaml")))
+    return "pnpm"
+  if (
+    existsSync(join(dir, "yarn.lock")) ||
+    existsSync(join(dir, ".pnp.cjs")) ||
+    existsSync(join(dir, ".pnp.js"))
+  )
+    return "yarn"
+  if (existsSync(join(dir, "package-lock.json")) || existsSync(join(dir, "npm-shrinkwrap.json")))
+    return "npm"
+  return null
+}
+
 export function detectPackageManager(): PackageManager | null {
   if (_pmCache !== undefined) return _pmCache
 
   let dir = process.cwd()
   while (true) {
-    // Primary: Check for packageManager field in package.json (Node.js standard)
-    const pkgJsonPath = join(dir, "package.json")
-    if (existsSync(pkgJsonPath)) {
-      try {
-        const content = readFileSync(pkgJsonPath, "utf-8")
-        const pkg = JSON.parse(content)
-        if (pkg.packageManager && typeof pkg.packageManager === "string") {
-          // Format: "pnpm@10.29.3" → extract "pnpm"
-          const pmName = pkg.packageManager.split("@")[0] as PackageManager
-          if (pmName === "bun" || pmName === "pnpm" || pmName === "yarn" || pmName === "npm") {
-            _pmCache = pmName
-            return _pmCache
-          }
-        }
-      } catch {
-        // If package.json is invalid JSON, continue to other detection methods
-      }
-    }
-
-    // Secondary: Check for pnpm-specific config hints in .npmrc
-    const npmrcPath = join(dir, ".npmrc")
-    if (existsSync(npmrcPath)) {
-      try {
-        const content = readFileSync(npmrcPath, "utf-8")
-        if (
-          /^\s*node-linker\s*=\s*hoisted/m.test(content) ||
-          /^\s*shamefully-hoist\s*=\s*true/m.test(content) ||
-          /^\s*strict-peer-dependencies\s*=\s*false/m.test(content)
-        ) {
-          _pmCache = "pnpm"
-          return _pmCache
-        }
-      } catch {
-        // If .npmrc is unreadable, continue to lock file detection
-      }
-    }
-
-    // Tertiary: Check for lockfile signals
-    if (existsSync(join(dir, "bun.lockb")) || existsSync(join(dir, "bun.lock"))) {
-      _pmCache = "bun"
+    const fromPkg = detectFromPkgJson(dir)
+    if (fromPkg) {
+      _pmCache = fromPkg
       return _pmCache
     }
-    if (existsSync(join(dir, "pnpm-lock.yaml")) || existsSync(join(dir, "shrinkwrap.yaml"))) {
+
+    if (detectFromNpmrc(dir)) {
       _pmCache = "pnpm"
       return _pmCache
     }
-    if (
-      existsSync(join(dir, "yarn.lock")) ||
-      existsSync(join(dir, ".pnp.cjs")) ||
-      existsSync(join(dir, ".pnp.js"))
-    ) {
-      _pmCache = "yarn"
+
+    const fromLockfile = detectFromLockfiles(dir)
+    if (fromLockfile) {
+      _pmCache = fromLockfile
       return _pmCache
     }
-    if (
-      existsSync(join(dir, "package-lock.json")) ||
-      existsSync(join(dir, "npm-shrinkwrap.json"))
-    ) {
-      _pmCache = "npm"
-      return _pmCache
-    }
+
     const parent = dirname(dir)
     if (parent === dir) break
     dir = parent

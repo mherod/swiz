@@ -31,51 +31,42 @@ import {
   RUBY_DEBUG_RE,
 } from "./stop-debug-statements.ts"
 
-function countDebugPatterns(content: string): number {
-  let count = 0
-  for (const line of content.split("\n")) {
-    // Skip lines that are pure comments (// console.log etc.)
-    if (JS_COMMENT_RE.test(line)) continue
-    // Skip ESLint rule references ("no-debugger", "no-console")
-    if (ESLINT_DEBUGGER_RULE_RE.test(line)) continue
-    // Skip Python noqa / debug-ok annotations
-    if (PY_EXCLUDE_RE.test(line)) continue
+function isDebugLine(line: string): boolean {
+  if (JS_COMMENT_RE.test(line)) return false
+  if (ESLINT_DEBUGGER_RULE_RE.test(line)) return false
+  if (PY_EXCLUDE_RE.test(line)) return false
+  return (
+    JS_DEBUG_RE.test(line) ||
+    DEBUGGER_RE.test(line) ||
+    PY_PRINT_RE.test(line) ||
+    RUBY_DEBUG_RE.test(line)
+  )
+}
 
-    if (
-      JS_DEBUG_RE.test(line) ||
-      DEBUGGER_RE.test(line) ||
-      PY_PRINT_RE.test(line) ||
-      RUBY_DEBUG_RE.test(line)
-    ) {
-      count++
-    }
-  }
-  return count
+function countDebugPatterns(content: string): number {
+  return content.split("\n").filter(isDebugLine).length
 }
 
 export { countDebugPatterns }
 
-async function main() {
-  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
-
-  const filePath = input.tool_input?.file_path ?? ""
-
-  // Only check source files
-  if (!SOURCE_EXT_RE.test(filePath)) {
-    allowPreToolUse("")
-  }
-
-  // Skip allowlisted paths
-  if (
+function shouldSkipFile(filePath: string): boolean {
+  if (!SOURCE_EXT_RE.test(filePath)) return true
+  return (
     TEST_FILE_RE.test(filePath) ||
     INFRA_FILE_RE.test(filePath) ||
     GENERATED_FILE_RE.test(filePath) ||
     CONFIG_FILE_RE.test(filePath)
-  ) {
+  )
+}
+
+async function main() {
+  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
+  const filePath = input.tool_input?.file_path ?? ""
+
+  if (shouldSkipFile(filePath)) {
     allowPreToolUse("")
   }
 
-  // NFKC normalization handled by fileEditHookInputSchema.transform()
   const oldString = input.tool_input?.old_string ?? ""
   const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
 

@@ -30,6 +30,40 @@ import { toolHookInputSchema } from "./schemas.ts"
 
 const SUBJECT_RE = /\b(commit|push)\b/i
 
+function shouldCompleteTask(
+  task: { status: string; subject: string },
+  isCommit: boolean,
+  isPush: boolean
+): boolean {
+  if (task.status === "completed" || task.status === "cancelled" || task.status === "deleted")
+    return false
+  if (!SUBJECT_RE.test(task.subject)) return false
+  const subjectLower = task.subject.toLowerCase()
+  return (isPush && subjectLower.includes("push")) || (isCommit && subjectLower.includes("commit"))
+}
+
+async function completeTasks(
+  tasksDir: string,
+  tasks: Array<{ id: string; status: string; subject: string }>,
+  isCommit: boolean,
+  isPush: boolean
+): Promise<void> {
+  for (const task of tasks) {
+    if (!shouldCompleteTask(task, isCommit, isPush)) continue
+    task.status = "completed"
+    await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
+  }
+}
+
+async function buildPushContext(sessionId: string): Promise<string> {
+  const taskCreateName = toolNameForCurrentAgent("TaskCreate")
+  const settings = await readSwizSettings()
+  const effective = getEffectiveSwizSettings(settings, sessionId)
+  return effective.prMergeMode
+    ? `git push succeeded. Use ${taskCreateName} to create a "Wait for CI and verify pass" task, then mark it in_progress and monitor CI before stopping.`
+    : `git push succeeded. Use ${taskCreateName} to create an "Open PR for this branch" task, then mark it in_progress and open the pull request before stopping.`
+}
+
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())
   const sessionId = resolveSafeSessionId(input.session_id)
@@ -46,33 +80,10 @@ async function main(): Promise<void> {
   if (!tasksDir) return
   const tasks = await readSessionTasks(sessionId, home)
 
-  // Auto-complete matching commit/push tasks
-  for (const task of tasks) {
-    if (task.status === "completed" || task.status === "cancelled" || task.status === "deleted") {
-      continue
-    }
-    if (!SUBJECT_RE.test(task.subject)) continue
+  await completeTasks(tasksDir, tasks, isCommit, isPush)
 
-    const subjectLower = task.subject.toLowerCase()
-    if (isPush && subjectLower.includes("push")) {
-      task.status = "completed"
-      await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
-    } else if (isCommit && subjectLower.includes("commit")) {
-      task.status = "completed"
-      await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
-    }
-  }
-
-  // After a push: emit additionalContext so the agent advances the workflow in-memory.
-  // File writes cannot affect Claude's in-memory task list — only this output channel can.
   if (isPush) {
-    const taskCreateName = toolNameForCurrentAgent("TaskCreate")
-    const settings = await readSwizSettings()
-    const effective = getEffectiveSwizSettings(settings, sessionId)
-    const pushContext = effective.prMergeMode
-      ? `git push succeeded. Use ${taskCreateName} to create a "Wait for CI and verify pass" task, then mark it in_progress and monitor CI before stopping.`
-      : `git push succeeded. Use ${taskCreateName} to create an "Open PR for this branch" task, then mark it in_progress and open the pull request before stopping.`
-    emitContext("PostToolUse", pushContext, input.cwd ?? process.cwd())
+    emitContext("PostToolUse", await buildPushContext(sessionId), input.cwd ?? process.cwd())
   }
 }
 

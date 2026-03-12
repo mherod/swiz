@@ -27,6 +27,24 @@ interface ToolInput {
   content?: string
 }
 
+async function computeProjectedContent(
+  toolName: string,
+  filePath: string,
+  toolInput: ToolInput
+): Promise<string> {
+  let currentContent = ""
+  try {
+    currentContent = await Bun.file(filePath).text()
+  } catch {
+    currentContent = ""
+  }
+
+  if (isEditTool(toolName)) {
+    return currentContent.replace(toolInput.old_string ?? "", toolInput.new_string ?? "")
+  }
+  return toolInput.content ?? ""
+}
+
 async function main() {
   const input = (await Bun.stdin.json()) as {
     tool_name?: string
@@ -37,46 +55,28 @@ async function main() {
   const toolName = input.tool_name ?? ""
   const filePath = input.tool_input?.file_path ?? ""
 
-  // Only guard CLAUDE.md files
   if (!filePath.endsWith("CLAUDE.md")) {
     process.exit(0)
   }
 
-  // Only guard Edit and Write tools
   if (!isEditTool(toolName) && !isWriteTool(toolName)) {
     process.exit(0)
   }
 
   try {
-    // Resolve threshold from settings: project > global > default (5000)
     const cwd = input.cwd ?? process.cwd()
     const { wordThreshold } = await resolveThresholds(cwd)
-
-    // Read the current file content
-    let currentContent = ""
-    try {
-      currentContent = await Bun.file(filePath).text()
-    } catch {
-      // File doesn't exist yet (Write to new file) - use empty content
-      currentContent = ""
-    }
-
-    // Calculate projected content after edit
-    let projectedContent = currentContent
-    if (isEditTool(toolName)) {
-      // Edit: replace old_string with new_string
-      const oldString = input.tool_input?.old_string ?? ""
-      const newString = input.tool_input?.new_string ?? ""
-      projectedContent = currentContent.replace(oldString, newString)
-    } else {
-      // Write: use the new content directly
-      projectedContent = input.tool_input?.content ?? ""
-    }
-
-    // Count words in projected content
+    const projectedContent = await computeProjectedContent(
+      toolName,
+      filePath,
+      input.tool_input ?? {}
+    )
     const projectedWordCount = countMarkdownWords(projectedContent)
 
     if (projectedWordCount > wordThreshold) {
+      const currentContent = await Bun.file(filePath)
+        .text()
+        .catch(() => "")
       const currentWordCount = countMarkdownWords(currentContent)
       const skill = skillAdvice(
         "compact-memory",
@@ -102,7 +102,6 @@ async function main() {
 
     allowPreToolUse("")
   } catch {
-    // On any error, allow the edit (fail open) rather than blocking
     allowPreToolUse("")
   }
 }

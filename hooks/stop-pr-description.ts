@@ -28,6 +28,27 @@ function blockPrDescription(reason: string): never {
   return blockStop(reason, { includeUpdateMemoryAdvice: false })
 }
 
+function hasSummaryPlaceholder(body: string): boolean {
+  const lines = body.split("\n")
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (!line) continue
+    if (/^## Summary/.test(line)) {
+      for (let j = i + 1; j < lines.length; j++) {
+        const nextLine = lines[j]
+        if (!nextLine || nextLine.trim() === "") continue
+        return nextLine.trim().startsWith("<")
+      }
+    }
+  }
+  return false
+}
+
+function hasPlaceholderPattern(body: string): boolean {
+  const bodyLower = body.toLowerCase()
+  return PLACEHOLDER_PATTERNS.some((p) => bodyLower.includes(p.toLowerCase()))
+}
+
 async function main(): Promise<void> {
   const input = stopHookInputSchema.parse(await Bun.stdin.json())
   const cwd = input.cwd ?? process.cwd()
@@ -73,36 +94,19 @@ async function main(): Promise<void> {
     blockPrDescription(`PR #${pr.number} ('${pr.title}') has an empty description.\n\n${prAdvice}`)
   }
 
-  // Check for ## Summary immediately followed by a placeholder
-  const lines = body.split("\n")
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (!line) continue
-    if (/^## Summary/.test(line)) {
-      // Check next non-blank line
-      for (let j = i + 1; j < lines.length; j++) {
-        const nextLine = lines[j]
-        if (!nextLine || nextLine.trim() === "") continue
-        if (nextLine.trim().startsWith("<")) {
-          blockPrDescription(
-            `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n` +
-              "Replace the '<...>' placeholder under '## Summary' with actual content before stopping."
-          )
-        }
-        break
-      }
-      break
-    }
+  // Check for ## Summary placeholder
+  if (hasSummaryPlaceholder(body)) {
+    blockPrDescription(
+      `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n` +
+        "Replace the '<...>' placeholder under '## Summary' with actual content before stopping."
+    )
   }
 
   // Check for placeholder patterns
-  const bodyLower = body.toLowerCase()
-  for (const pattern of PLACEHOLDER_PATTERNS) {
-    if (bodyLower.includes(pattern.toLowerCase())) {
-      blockPrDescription(
-        `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n${prAdvice}`
-      )
-    }
+  if (hasPlaceholderPattern(body)) {
+    blockPrDescription(
+      `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n${prAdvice}`
+    )
   }
 
   // Minimum length
