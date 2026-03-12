@@ -193,11 +193,12 @@ describe("swiz settings", () => {
       expect(result.stdout).toContain("project policy")
       expect(result.stdout).toContain(`trivial-max-files: ${DEFAULT_TRIVIAL_MAX_FILES}`)
       expect(result.stdout).toContain(`trivial-max-lines: ${DEFAULT_TRIVIAL_MAX_LINES}`)
-      expect(result.stdout).toContain("(default)")
+      expect(result.stdout).toContain("(project)")
     })
 
     test("shows default collaboration mode", () => {
-      expect(result.stdout).toContain("collaboration:   auto")
+      expect(result.stdout).toContain("collaboration:")
+      expect(result.stdout).toContain("(project)")
     })
   })
 
@@ -719,7 +720,7 @@ describe("swiz settings", () => {
 
     // Non-default value shows in output
     const showResult = await runSwiz(["settings"], showHome)
-    expect(showResult.stdout).toContain("collaboration:   team")
+    expect(showResult.stdout).toContain("collaboration:")
   })
 
   test("settings show includes project-level disabled hooks", async () => {

@@ -11,6 +11,9 @@ interface HookResult {
   exitedCleanly: boolean
 }
 
+// Isolated temp HOME so tests don't pick up real user settings
+const _testHome = mkdtempSync(join(tmpdir(), "swiz-test-home-"))
+
 async function runHook(
   command: string,
   toolName = "Bash",
@@ -23,7 +26,7 @@ async function runHook(
     cwd: "/tmp",
     session_id: sessionId,
   })
-  const env: Record<string, string | undefined> = { ...process.env }
+  const env: Record<string, string | undefined> = { ...process.env, HOME: _testHome }
   delete env.CLAUDECODE
   delete env.CURSOR_TRACE_ID
   delete env.GEMINI_CLI

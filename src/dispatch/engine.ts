@@ -171,6 +171,8 @@ export function toolMatchesToken(toolName: string, token: string): boolean {
   // Broad "Task" family: only when token or toolName is the umbrella "Task"
   if (token === "Task" && isTaskTool(toolName)) return true
   if (toolName === "Task" && isTaskTool(token)) return true
+  // Unknown tools only match exact
+  if (toolName === token) return true
   return false
 }
 
