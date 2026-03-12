@@ -355,7 +355,7 @@ function extractJsonCandidate(text: string): string {
 
 function parseReflectionFromJsonText(text: string, count: number): SessionReflection {
   const candidate = extractJsonCandidate(text)
-  const parsed = JSON.parse(candidate)
+  const parsed = JSON.parse(candidate) as unknown
   return SessionReflectionSchema(count).parse(parsed)
 }
 

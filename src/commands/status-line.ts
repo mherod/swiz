@@ -380,7 +380,7 @@ export function getContextStatsPath(cwd: string): string {
 export async function readContextStats(cwd: string): Promise<ContextStats | null> {
   try {
     const raw = await readFile(getContextStatsPath(cwd), "utf8")
-    const obj = JSON.parse(raw)
+    const obj = JSON.parse(raw) as { minPct?: number; maxPct?: number } | null
     if (
       typeof obj?.minPct === "number" &&
       typeof obj?.maxPct === "number" &&

@@ -226,7 +226,7 @@ async function readCodexSessionMeta(
 
     let parsed: unknown
     try {
-      parsed = JSON.parse(trimmed)
+      parsed = JSON.parse(trimmed) as unknown
     } catch {
       continue
     }
@@ -826,7 +826,7 @@ function parseCodexJsonlEntries(text: string): TranscriptEntry[] {
   for (const line of text.split("\n").filter(Boolean)) {
     let parsed: unknown
     try {
-      parsed = JSON.parse(line)
+      parsed = JSON.parse(line) as unknown
     } catch {
       continue
     }
@@ -950,7 +950,7 @@ function extractGeminiText(content: unknown): string {
 function parseGeminiEntries(text: string): TranscriptEntry[] {
   let parsed: unknown
   try {
-    parsed = JSON.parse(text)
+    parsed = JSON.parse(text) as unknown
   } catch {
     return []
   }

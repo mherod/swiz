@@ -46,7 +46,7 @@ export function extractSessionLines(jsonlText: string): string[] {
     const raw = allLines[i]
     if (!raw?.trim()) continue
     try {
-      const parsed = JSON.parse(raw)
+      const parsed = JSON.parse(raw) as { type?: string }
       if (parsed?.type === "system") {
         sessionStartIdx = i + 1
         break
@@ -74,7 +74,16 @@ export function parseTranscriptSummary(jsonlText: string): TranscriptSummary {
   for (const line of sessionLines) {
     if (!line.trim()) continue
     try {
-      const entry = JSON.parse(line)
+      const entry = JSON.parse(line) as {
+        type?: string
+        message?: {
+          content?: Array<{
+            type?: string
+            name?: string
+            input?: { command?: string; skill?: string }
+          }>
+        }
+      }
       if (entry?.type !== "assistant") continue
       const content = entry?.message?.content
       if (!Array.isArray(content)) continue
