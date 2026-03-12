@@ -200,24 +200,32 @@ async function getAncestorPids(): Promise<Set<number>> {
 }
 
 async function isPidUsingRepoDir(pid: number, repoRoot: string): Promise<boolean> {
-  const proc = Bun.spawn(["lsof", "-p", String(pid), "-d", "cwd", "-Fn"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+  try {
+    const proc = Bun.spawn(["lsof", "-p", String(pid), "-d", "cwd", "-Fn"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
 
-  let killed = false
-  const timer = setTimeout(() => {
-    killed = true
-    proc.kill()
-  }, LSOF_TIMEOUT_MS)
+    let killed = false
+    const timer = setTimeout(() => {
+      killed = true
+      proc.kill()
+    }, LSOF_TIMEOUT_MS)
 
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  clearTimeout(timer)
+    const out = await new Response(proc.stdout).text()
+    await proc.exited
+    clearTimeout(timer)
 
-  if (killed) return false
+    if (killed) return false
 
-  return out.split("\n").some((line) => line.startsWith("n") && line.slice(1).startsWith(repoRoot))
+    return out
+      .split("\n")
+      .some((line) => line.startsWith("n") && line.slice(1).startsWith(repoRoot))
+  } catch {
+    // If lsof fails or is not in PATH, we cannot safely determine the process's working directory.
+    // Assume it might be using this repo to prevent concurrent index modification.
+    return true
+  }
 }
 
 // ── Entry Point ──────────────────────────────────────────────────────────────

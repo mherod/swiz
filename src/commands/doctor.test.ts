@@ -647,7 +647,7 @@ describe("swiz doctor", () => {
     expect(fixRun.stdout).toContain("Auto-fixing invalid skill entries")
     // Empty SKILL.md can't be auto-fixed — but directory stays in place
     expect(await Bun.file(join(skillDir, "SKILL.md")).exists()).toBe(true)
-    expect(fixRun.stdout).toContain("could not auto-fix")
+    expect(fixRun.stdout).toContain("could not fix")
   }, 30_000)
 
   test("doctor --fix generates default SKILL.md for skill directory missing one", async () => {

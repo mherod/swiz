@@ -1303,6 +1303,12 @@ export const doctorCommand: Command = {
         if (regResult.registered.length > 0) console.log()
       }
 
+      if (skillConflicts.length > 0) {
+        console.log(
+          `  ${YELLOW}Skill conflicts detected — resolve manually by removing duplicate skill directories.${RESET}\n`
+        )
+      }
+
       if (invalidSkillEntries.length > 0) {
         console.log(`  ${BOLD}Auto-fixing invalid skill entries...${RESET}\n`)
         const invalidResult = await fixInvalidSkillEntries(invalidSkillEntries)
