@@ -301,6 +301,8 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
                 sessionId: update.sessionId,
                 hooks: update.hooks,
                 startedAt: update.startedAt,
+                toolName: update.toolName,
+                toolInputSummary: update.toolInputSummary,
               })
               return
             }
