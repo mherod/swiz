@@ -1,4 +1,4 @@
-import { useCallback, useOptimistic, useState, useTransition } from "react"
+import { useCallback, useMemo, useOptimistic, useState, useTransition } from "react"
 import {
   getQueryParam,
   hasProjectMessages,
@@ -409,18 +409,34 @@ export function DashboardApp() {
   })
 
   const m = metrics ?? {}
-  const visibleProjects = applyPendingSessionDeletions(
-    optimisticProjects,
-    optimisticPendingSessionDeletions
+  const visibleProjects = useMemo(
+    () => applyPendingSessionDeletions(optimisticProjects, optimisticPendingSessionDeletions),
+    [optimisticProjects, optimisticPendingSessionDeletions]
   )
-  const projectCount = visibleProjects.filter(hasProjectMessages).length
-  const watchCount = (watches?.active ?? []).length
-  const activeProject = optimisticProjectCwd
-    ? visibleProjects.find((project) => project.cwd === optimisticProjectCwd)
-    : null
-  const activeSession = optimisticSessionId
-    ? (activeProject?.sessions.find((session) => session.id === optimisticSessionId) ?? null)
-    : null
+  const projectCount = useMemo(
+    () => visibleProjects.filter(hasProjectMessages).length,
+    [visibleProjects]
+  )
+  const watchCount = useMemo(() => (watches?.active ?? []).length, [watches?.active])
+  const activeProject = useMemo(
+    () =>
+      optimisticProjectCwd
+        ? visibleProjects.find((project) => project.cwd === optimisticProjectCwd)
+        : null,
+    [visibleProjects, optimisticProjectCwd]
+  )
+  const activeSession = useMemo(
+    () =>
+      optimisticSessionId
+        ? (activeProject?.sessions.find((session) => session.id === optimisticSessionId) ?? null)
+        : null,
+    [activeProject?.sessions, optimisticSessionId]
+  )
+
+  const metricsEvents = useMemo(
+    () => (projectEvents.length > 0 ? projectEvents : toSortedEvents(m.byEvent)),
+    [projectEvents, m.byEvent]
+  )
 
   if (error) {
     return (
@@ -473,7 +489,7 @@ export function DashboardApp() {
         projectTasksLoading={projectTasksLoading}
       />
       <MetricsRail
-        events={projectEvents.length > 0 ? projectEvents : toSortedEvents(m.byEvent)}
+        events={metricsEvents}
         scope={optimisticProjectCwd ? "project" : "global"}
         cacheStatus={cacheStatus}
         selectedProjectCwd={optimisticProjectCwd}

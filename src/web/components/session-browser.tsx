@@ -504,24 +504,42 @@ export function SessionNav({
   onKillAgentPid,
   onDeleteSession,
 }: SessionNavProps) {
-  const sortedProjects = [...projects].sort((a, b) => b.lastSeenAt - a.lastSeenAt)
-  const selectedProject = sortedProjects.find((p) => p.cwd === selectedProjectCwd) ?? null
-  const sortedSessions = selectedProject
-    ? dedupeSessionsById(selectedProject.sessions).sort((a, b) => {
-        const aDisp = a.dispatches ?? 0
-        const bDisp = b.dispatches ?? 0
-        if (aDisp > 0 && bDisp === 0) return -1
-        if (bDisp > 0 && aDisp === 0) return 1
-        return (b.lastMessageAt ?? b.mtime) - (a.lastMessageAt ?? a.mtime)
-      })
-    : null
+  const sortedProjects = useMemo(
+    () => [...projects].sort((a, b) => b.lastSeenAt - a.lastSeenAt),
+    [projects]
+  )
+  const selectedProject = useMemo(
+    () => sortedProjects.find((p) => p.cwd === selectedProjectCwd) ?? null,
+    [sortedProjects, selectedProjectCwd]
+  )
+  const sortedSessions = useMemo(
+    () =>
+      selectedProject
+        ? dedupeSessionsById(selectedProject.sessions).sort((a, b) => {
+            const aDisp = a.dispatches ?? 0
+            const bDisp = b.dispatches ?? 0
+            if (aDisp > 0 && bDisp === 0) return -1
+            if (bDisp > 0 && aDisp === 0) return 1
+            return (b.lastMessageAt ?? b.mtime) - (a.lastMessageAt ?? a.mtime)
+          })
+        : null,
+    [selectedProject]
+  )
   // Keep "Active now" focused on truly recent activity.
   const activeThresholdMs = 6 * 60 * 1000
-  const activeSessions = sortedSessions?.filter(
-    (session) => Date.now() - (session.lastMessageAt ?? session.mtime) <= activeThresholdMs
+  const activeSessions = useMemo(
+    () =>
+      sortedSessions?.filter(
+        (session) => Date.now() - (session.lastMessageAt ?? session.mtime) <= activeThresholdMs
+      ),
+    [sortedSessions]
   )
-  const recentSessions = sortedSessions?.filter(
-    (session) => Date.now() - (session.lastMessageAt ?? session.mtime) > activeThresholdMs
+  const recentSessions = useMemo(
+    () =>
+      sortedSessions?.filter(
+        (session) => Date.now() - (session.lastMessageAt ?? session.mtime) > activeThresholdMs
+      ),
+    [sortedSessions]
   )
   const selectedProjectCwdSafe = selectedProject?.cwd ?? null
 
@@ -688,9 +706,12 @@ function isInternalToolName(name: string): boolean {
 }
 
 function ToolStatsBar({ stats }: { stats: ToolStat[] }) {
-  const visibleStats = stats.filter((stat) => !isInternalToolName(stat.name))
+  const visibleStats = useMemo(
+    () => stats.filter((stat) => !isInternalToolName(stat.name)),
+    [stats]
+  )
+  const total = useMemo(() => visibleStats.reduce((sum, s) => sum + s.count, 0), [visibleStats])
   if (visibleStats.length === 0) return null
-  const total = visibleStats.reduce((sum, s) => sum + s.count, 0)
   return (
     <div className="tool-stats-bar">
       <span className="tool-stats-total">{total} tool calls</span>
@@ -940,11 +961,15 @@ export function SessionMessages({
   projectTaskSummary = null,
   projectTasksLoading = false,
 }: MessagesProps) {
-  const sorted = [...messages].sort((a, b) => {
-    if (!a.timestamp || !b.timestamp) return 0
-    return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-  })
-  const grouped = groupMessages(sorted)
+  const sorted = useMemo(
+    () =>
+      [...messages].sort((a, b) => {
+        if (!a.timestamp || !b.timestamp) return 0
+        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      }),
+    [messages]
+  )
+  const grouped = useMemo(() => groupMessages(sorted), [sorted])
 
   return (
     <section className="card bento-messages">
