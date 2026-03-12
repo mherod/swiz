@@ -124,6 +124,10 @@ export function ProjectSettingsCard({ cwd }: { cwd: string | null }) {
         >
           <label className="settings-label">
             <span>Collaboration mode</span>
+            <p className="settings-desc">
+              Determines how code is integrated. "Auto" falls back to PR merge mode. "Solo" pushes
+              directly to main. "Team" and "Relaxed-collab" require PRs.
+            </p>
             <select
               className="settings-select"
               value={form.collaborationMode}
@@ -147,8 +151,12 @@ export function ProjectSettingsCard({ cwd }: { cwd: string | null }) {
                 setForm((prev) => ({ ...prev, prMergeMode: event.target.checked }))
               }}
             />
-            <span>PR merge mode</span>
+            <span>PR merge mode (Global fallback)</span>
           </label>
+          <p className="settings-desc">
+            When Collaboration Mode is set to "Auto", this global toggle determines if pull requests
+            are required.
+          </p>
 
           <label className="settings-checkbox">
             <input
@@ -160,6 +168,10 @@ export function ProjectSettingsCard({ cwd }: { cwd: string | null }) {
             />
             <span>Strict merge to main mode</span>
           </label>
+          <p className="settings-desc" style={{ marginBottom: "16px" }}>
+            Enforces feature-branch workflows by blocking direct pushes to the main branch locally,
+            even in solo repositories.
+          </p>
 
           <div className="settings-actions">
             <button className="settings-save-btn" type="submit" disabled={saveDisabled}>
