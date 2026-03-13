@@ -177,7 +177,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 
 | Hook | What it does |
 |------|-------------|
-| `posttooluse-git-status.ts` | Injects current git status context after every tool use. The agent always knows what state the working tree is in. |
+| `posttooluse-git-status.ts` | Injects current git status context after every tool use — branch, upstream tracking ref (including no-upstream and gone-upstream states), uncommitted file count, and ahead/behind/diverged relationship. Rich enough that the agent rarely needs follow-up `git status` or `git branch` calls. |
 | `posttooluse-git-task-autocomplete.ts` | After a successful `git commit` or `git push`, automatically marks any matching "Commit" or "Push" tasks as completed. After a push, reminds the agent to create a CI-wait task. |
 | `posttooluse-json-validation.ts` | Re-validates JSON files after any edit or write. Catches any JSON that got corrupted during a tool call. |
 | `posttooluse-test-pairing.ts` | Detects when source files were edited without corresponding test updates and reminds the agent. Tests aren't optional. |

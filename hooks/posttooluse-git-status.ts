@@ -4,6 +4,41 @@
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import { emitContext, getGitStatusV2, isGitRepo } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
+import type { GitStatusV2 } from "./utils/git-utils.ts"
+
+/**
+ * Build the context line from git status data.
+ * Exported for unit testing.
+ */
+export function buildGitContextLine(gitStatus: GitStatusV2, collabMode: string = "auto"): string {
+  const { branch, total: uncommitted, ahead, behind, upstream, upstreamGone } = gitStatus
+
+  let status = `[git] branch: ${branch}`
+
+  if (upstreamGone) {
+    status += ` | upstream: ${upstream} (gone)`
+  } else if (upstream) {
+    status += ` | upstream: ${upstream}`
+  } else {
+    status += ` | no upstream`
+  }
+
+  status += ` | uncommitted files: ${uncommitted}`
+
+  if (ahead > 0 && behind > 0) {
+    status += ` | diverged: ${ahead} ahead, ${behind} behind`
+  } else if (ahead > 0) {
+    status += ` | ${ahead} unpushed commit(s)`
+  } else if (behind > 0) {
+    status += ` | ${behind} behind remote`
+  }
+
+  if (collabMode !== "auto") {
+    status += ` | collab: ${collabMode}`
+  }
+
+  return status
+}
 
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())
@@ -18,22 +53,7 @@ async function main(): Promise<void> {
   if (!gitStatus) return
 
   const effective = getEffectiveSwizSettings(settings, input.session_id)
-  const collabMode = effective.collaborationMode
-  const { branch, total: uncommitted, ahead, behind } = gitStatus
-
-  let status = `[git] branch: ${branch} | uncommitted files: ${uncommitted}`
-
-  if (ahead > 0 && behind > 0) {
-    status += ` | diverged: ${ahead} ahead, ${behind} behind`
-  } else if (ahead > 0) {
-    status += ` | ${ahead} unpushed commit(s)`
-  } else if (behind > 0) {
-    status += ` | ${behind} behind remote`
-  }
-
-  if (collabMode !== "auto") {
-    status += ` | collab: ${collabMode}`
-  }
+  const status = buildGitContextLine(gitStatus, effective.collaborationMode)
 
   await emitContext("PostToolUse", status, cwd)
 }
