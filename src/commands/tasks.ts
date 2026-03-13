@@ -1,4 +1,5 @@
 import { DIM, RESET } from "../ansi.ts"
+import { detectCurrentAgent } from "../detect.ts"
 import { PROJECT_STATES } from "../settings.ts"
 import { type DateFormat, listAllSessionsTasks, listTasks } from "../tasks/task-renderer.ts"
 import type { Task } from "../tasks/task-repository.ts"
@@ -103,6 +104,13 @@ async function printPreviousSessionIncompleteHint(sessionId: string): Promise<vo
     for (const task of prevIncomplete) {
       console.log(
         `    ${DIM}swiz tasks complete ${task.id} --session ${prevSessionId} --evidence "note:done"${RESET}`
+      )
+    }
+    const agent = detectCurrentAgent()
+    const nativeTool = agent?.toolAliases.Task
+    if (nativeTool) {
+      console.log(
+        `  ${DIM}hint: prefer native ${nativeTool} tool over shell commands when available${RESET}`
       )
     }
     console.log()

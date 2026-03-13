@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
@@ -1101,6 +1101,198 @@ describe("native task recovery paths (#271)", () => {
       expect(recovered.subject).toBe("Recovered update task")
       expect(recovered.description).toBe("Recovered description")
       expect(recovered.status).toBe("pending")
+    })
+  })
+})
+
+// ─── printPreviousSessionIncompleteHint — native tool hint (#290) ────────────
+
+describe("printPreviousSessionIncompleteHint native tool hint (#290)", () => {
+  it("shows native tool hint when running inside an agent", async () => {
+    await serial(async () => {
+      const home = join(TMP, "issue-290-hint-agent")
+      const repoCwdRaw = join(TMP, "issue-290-repo-agent")
+      const currentSession = "11111111-2222-3333-4444-aaaaaaaaaaaa"
+      const prevSession = "11111111-2222-3333-4444-bbbbbbbbbbbb"
+
+      await mkdir(repoCwdRaw, { recursive: true })
+
+      // chdir first to get the canonical cwd (macOS resolves /var → /private/var)
+      const prevCwd = process.cwd()
+      process.chdir(repoCwdRaw)
+      const repoCwd = process.cwd()
+
+      const projKey = projectKeyFromCwd(repoCwd)
+      await mkdir(join(home, ".claude", "projects", projKey), { recursive: true })
+      await writeFile(
+        join(home, ".claude", "projects", projKey, `${currentSession}.jsonl`),
+        `${JSON.stringify({ type: "user", cwd: repoCwd })}\n`
+      )
+      await writeFile(
+        join(home, ".claude", "projects", projKey, `${prevSession}.jsonl`),
+        `${JSON.stringify({ type: "user", cwd: repoCwd })}\n`
+      )
+
+      // Previous session: has incomplete task (created first → older mtime)
+      await mkdir(join(home, ".claude", "tasks", prevSession), { recursive: true })
+      await writeFile(
+        join(home, ".claude", "tasks", prevSession, "1.json"),
+        JSON.stringify({
+          id: "1",
+          subject: "Incomplete task",
+          description: "",
+          status: "in_progress",
+          blocks: [],
+          blockedBy: [],
+        })
+      )
+      const oldTime = new Date(Date.now() - 60_000)
+      await utimes(join(home, ".claude", "tasks", prevSession), oldTime, oldTime)
+
+      // Current session: all tasks completed (created second → newer mtime)
+      await mkdir(join(home, ".claude", "tasks", currentSession), { recursive: true })
+      await writeFile(
+        join(home, ".claude", "tasks", currentSession, "1.json"),
+        JSON.stringify({
+          id: "1",
+          subject: "Done task",
+          description: "",
+          status: "completed",
+          blocks: [],
+          blockedBy: [],
+        })
+      )
+
+      const prevHome = process.env.HOME
+      const prevGemini = process.env.GEMINI_CLI
+      const prevClaudeCode = process.env.CLAUDECODE
+      process.env.HOME = home
+      process.env.GEMINI_CLI = "1"
+      delete process.env.CLAUDECODE
+
+      const logs: string[] = []
+      const origLog = console.log
+      console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "))
+
+      try {
+        await tasksCommand.run([])
+      } finally {
+        console.log = origLog
+        process.chdir(prevCwd)
+        if (prevHome === undefined) delete process.env.HOME
+        else process.env.HOME = prevHome
+        if (prevGemini === undefined) delete process.env.GEMINI_CLI
+        else process.env.GEMINI_CLI = prevGemini
+        if (prevClaudeCode === undefined) delete process.env.CLAUDECODE
+        else process.env.CLAUDECODE = prevClaudeCode
+      }
+
+      const output = logs.join("\n")
+      expect(output).toContain("write_todos")
+      expect(output).toContain("hint:")
+    })
+  })
+
+  it("does not show native tool hint outside an agent", async () => {
+    await serial(async () => {
+      const home = join(TMP, "issue-290-hint-noagent")
+      const repoCwdRaw = join(TMP, "issue-290-repo-noagent")
+      const currentSession = "22222222-3333-4444-5555-aaaaaaaaaaaa"
+      const prevSession = "22222222-3333-4444-5555-bbbbbbbbbbbb"
+
+      await mkdir(repoCwdRaw, { recursive: true })
+
+      // chdir first to get the canonical cwd (macOS resolves /var → /private/var)
+      const prevCwd = process.cwd()
+      process.chdir(repoCwdRaw)
+      const repoCwd = process.cwd()
+
+      const projKey = projectKeyFromCwd(repoCwd)
+      await mkdir(join(home, ".claude", "projects", projKey), { recursive: true })
+      await writeFile(
+        join(home, ".claude", "projects", projKey, `${currentSession}.jsonl`),
+        `${JSON.stringify({ type: "user", cwd: repoCwd })}\n`
+      )
+      await writeFile(
+        join(home, ".claude", "projects", projKey, `${prevSession}.jsonl`),
+        `${JSON.stringify({ type: "user", cwd: repoCwd })}\n`
+      )
+
+      // Previous session: has incomplete task (older mtime)
+      await mkdir(join(home, ".claude", "tasks", prevSession), { recursive: true })
+      await writeFile(
+        join(home, ".claude", "tasks", prevSession, "1.json"),
+        JSON.stringify({
+          id: "1",
+          subject: "Incomplete task",
+          description: "",
+          status: "in_progress",
+          blocks: [],
+          blockedBy: [],
+        })
+      )
+      const oldTime = new Date(Date.now() - 60_000)
+      await utimes(join(home, ".claude", "tasks", prevSession), oldTime, oldTime)
+
+      // Current session: all tasks completed (newer mtime)
+      await mkdir(join(home, ".claude", "tasks", currentSession), { recursive: true })
+      await writeFile(
+        join(home, ".claude", "tasks", currentSession, "1.json"),
+        JSON.stringify({
+          id: "1",
+          subject: "Done task",
+          description: "",
+          status: "completed",
+          blocks: [],
+          blockedBy: [],
+        })
+      )
+
+      const prevHome = process.env.HOME
+      // Clear all agent env vars
+      const prevClaudeCode = process.env.CLAUDECODE
+      const prevGemini = process.env.GEMINI_CLI
+      const prevGeminiDir = process.env.GEMINI_PROJECT_DIR
+      const prevCursorTrace = process.env.CURSOR_TRACE_ID
+      const prevCodexManaged = process.env.CODEX_MANAGED_BY_NPM
+      const prevCodexThread = process.env.CODEX_THREAD_ID
+      delete process.env.CLAUDECODE
+      delete process.env.GEMINI_CLI
+      delete process.env.GEMINI_PROJECT_DIR
+      delete process.env.CURSOR_TRACE_ID
+      delete process.env.CODEX_MANAGED_BY_NPM
+      delete process.env.CODEX_THREAD_ID
+      process.env.HOME = home
+
+      const logs: string[] = []
+      const origLog = console.log
+      console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "))
+
+      try {
+        await tasksCommand.run([])
+      } finally {
+        console.log = origLog
+        process.chdir(prevCwd)
+        if (prevHome === undefined) delete process.env.HOME
+        else process.env.HOME = prevHome
+        if (prevClaudeCode === undefined) delete process.env.CLAUDECODE
+        else process.env.CLAUDECODE = prevClaudeCode
+        if (prevGemini === undefined) delete process.env.GEMINI_CLI
+        else process.env.GEMINI_CLI = prevGemini
+        if (prevGeminiDir === undefined) delete process.env.GEMINI_PROJECT_DIR
+        else process.env.GEMINI_PROJECT_DIR = prevGeminiDir
+        if (prevCursorTrace === undefined) delete process.env.CURSOR_TRACE_ID
+        else process.env.CURSOR_TRACE_ID = prevCursorTrace
+        if (prevCodexManaged === undefined) delete process.env.CODEX_MANAGED_BY_NPM
+        else process.env.CODEX_MANAGED_BY_NPM = prevCodexManaged
+        if (prevCodexThread === undefined) delete process.env.CODEX_THREAD_ID
+        else process.env.CODEX_THREAD_ID = prevCodexThread
+      }
+
+      const output = logs.join("\n")
+      // Should still show the incomplete hint but NOT the native tool hint
+      expect(output).toContain("Incomplete tasks")
+      expect(output).not.toContain("hint:")
     })
   })
 })
