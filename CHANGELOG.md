@@ -1,5 +1,49 @@
 # Changelog
 
+## 2026-03-13
+
+### New Features
+
+- Added live agent process tracking to the dashboard — sessions now
+  show "Active now" based on verified running processes rather than
+  message recency alone. (#274)
+- Added global settings configuration to the dashboard, allowing
+  management of Ambition mode, auto-continue, PR merge mode, and
+  memory thresholds directly from the web UI.
+- Added project settings page with collaboration mode, PR merge
+  mode, and strict main-branch controls.
+- Added project status dashboard with Vercel configuration at
+  swiz.dev.
+- Added GitHub CI status display to the status line, showing
+  per-workflow run summaries with caching.
+- Added session process controls and inline delete confirmation
+  to the dashboard.
+- Added task timing metadata with elapsed duration tracking.
+
+### Bug Fixes
+
+- Fixed stop-hook cooldown being too long (5 minutes instead of
+  30 seconds), causing the hook to appear non-functional. (#277)
+- Fixed daemon LaunchAgent restart behaviour — now auto-restarts
+  on crashes without requiring manual intervention.
+- Fixed dashboard rendering performance by memoising expensive
+  computations and reducing redundant array operations. (#279)
+- Fixed zero-value metrics being shown in dashboard stats.
+- Fixed repeated transcript messages not being grouped correctly.
+
+### Improvements
+
+- Improved `swiz tasks` and `swiz status` latency by using the
+  session metadata index for O(1) lookups instead of scanning
+  transcript files. (#276)
+- Improved issue mutation replay performance by parallelising
+  pending mutations with per-issue ordering. (#280)
+- Improved daemon cache efficiency by bounding caches with LRU
+  eviction and exposing cache hit/miss metrics.
+- Improved framework and provider detection speed by converting
+  blocking file I/O to async operations.
+- Added swiz-buzz brand logo to the dashboard header.
+
 ## 2026-03-11
 
 ### New Features
