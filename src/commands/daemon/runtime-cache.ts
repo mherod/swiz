@@ -1,7 +1,7 @@
 import { type FSWatcher, watch } from "node:fs"
 import { LRUCache } from "lru-cache"
 import { detectProjectStack } from "../../detect-frameworks.ts"
-import { resolvePrMergeActive, SWIZ_NOTIFY_HOOK_FILES } from "../../dispatch/filters.ts"
+import { resolvePrMergeActive } from "../../dispatch/filters.ts"
 import { type GitBranchStatus, getGitBranchStatus, ghJson } from "../../git-helpers.ts"
 import { evalCondition, type HookGroup, manifest } from "../../manifest.ts"
 import {
@@ -248,10 +248,6 @@ async function computeEligibility(cwd: string): Promise<EligibilitySnapshot> {
     ...(settings.disabledHooks ?? []),
     ...(projectSettings?.disabledHooks ?? []),
   ])
-  if (!effective.swizNotifyHooks) {
-    for (const file of SWIZ_NOTIFY_HOOK_FILES) disabledSet.add(file)
-  }
-
   const detectedStacks = cwd ? await detectProjectStack(cwd) : []
   const prMergeActive = resolvePrMergeActive(effective.collaborationMode, effective.prMergeMode)
 

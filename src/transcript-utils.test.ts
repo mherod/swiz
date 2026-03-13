@@ -1070,16 +1070,16 @@ describe("transcript-utils.ts", () => {
 
     it("extracts destination from basic install command", () => {
       const paths = extractEditedFilePaths(
-        makeBashEntry("install macos/.build/debug/swiz-notify /usr/local/bin/swiz-notify")
+        makeBashEntry("install build/debug/my-tool /usr/local/bin/my-tool")
       )
-      expect(paths.has("/usr/local/bin/swiz-notify")).toBe(true)
+      expect(paths.has("/usr/local/bin/my-tool")).toBe(true)
     })
 
     it("extracts source from install command", () => {
       const paths = extractEditedFilePaths(
-        makeBashEntry("install macos/.build/debug/swiz-notify /usr/local/bin/swiz-notify")
+        makeBashEntry("install build/debug/my-tool /usr/local/bin/my-tool")
       )
-      expect(paths.has("macos/.build/debug/swiz-notify")).toBe(true)
+      expect(paths.has("build/debug/my-tool")).toBe(true)
     })
 
     it("extracts paths from install with mode flag", () => {

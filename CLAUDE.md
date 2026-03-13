@@ -82,15 +82,6 @@ alwaysApply: false
 - Pattern: `pretooluse-update-memory-enforcement.ts` requires transcript evidence of reading `update-memory/SKILL.md` and writing a `.md` file (for example `CLAUDE.md`) before unblocking.
 - Memory-reminder text must include explicit trigger cause.
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Sandbox enforcement hooks (`pretooluse-protect-sandbox`, `pretooluse-sandboxed-edits`) delegate to it. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, { crossRepo: true, hostname })`.
-## macOS Notifications (SwizNotify)
-- Binary lives at `macos/Sources/SwizNotify/` (Swift); builds to `macos/SwizNotify.app/Contents/MacOS/swiz-notify`.
-- Build: `swift build --package-path macos` (dev) or `make -C macos` (release + .app assembly).
-- Hooks resolve binary via `resolveBinary()` in `hooks/notification-swiz-notify.ts`: env override → dev path → `/usr/local/bin/swiz-notify`.
-- Invoke from TypeScript via `src/ambition-notify.ts` (or similar helper in `src/`). DO NOT put notification helpers in `hooks/` — swiz manifest enforcement auto-disables unregistered files there.
-- CLI: `swiz-notify --title "…" [--body "…"] [--sound <name>] [--action <id> <title>] [--text-action <id> <title> <placeholder>] [--timeout <sec>]`.
-- Stdout: `<id>` on button tap, `<id>:<userText>` on text-input reply, empty on dismiss/timeout.
-- **Notification feedback queue**: write results to `~/.swiz/notification-feedback.jsonl` with `{ ts, actionId, userText?, targetCwd }`. Inject at next `userPromptSubmit` via `emitContext`. Always include `targetCwd` — notifications are system-global and may arrive in a session running a different project. Filter by `targetCwd` in the hook.
-- **Scheduled polling**: use `swiz dispatch <event>` + LaunchAgent plist; `swiz install` generates `~/Library/LaunchAgents/com.swiz.<event>.plist`. Use full paths in plist — launchd has a minimal PATH.
 ## Task Data
 - Task storage: `~/.claude/tasks/<session-id>/<id>.json`; audit log: `~/.claude/tasks/<session-id>/.audit-log.jsonl`.
 - Session-to-project mapping resolves from `~/.claude/projects/` transcript `cwd` fields.

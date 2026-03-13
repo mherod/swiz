@@ -4,7 +4,6 @@
 // Uses the Gemini API (promptGemini) for transcript analysis.
 // Only skips for trivial sessions (< MIN_TOOL_CALLS) or when no API key is available.
 
-import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { uniq } from "lodash-es"
@@ -662,57 +661,6 @@ function terminate(action: "skip" | "block", ...args: string[]): never {
   process.exit(0)
 }
 
-// ─── Ambition mode notification ──────────────────────────────────────────────
-
-/**
- * Resolve the swiz-notify binary path, preferring the co-located .app bundle.
- * Returns null if the binary is not available.
- */
-function resolveNotifyBinary(): string | null {
-  const envOverride = process.env.SWIZ_NOTIFY_BIN
-  if (envOverride && existsSync(envOverride)) return envOverride
-
-  const devPath = join(
-    import.meta.dir,
-    "..",
-    "macos",
-    "SwizNotify.app",
-    "Contents",
-    "MacOS",
-    "swiz-notify"
-  )
-  if (existsSync(devPath)) return devPath
-
-  const installed = "/usr/local/bin/swiz-notify"
-  if (existsSync(installed)) return installed
-
-  return null
-}
-
-/**
- * Spawn `src/ambition-notify.ts` as a detached background process.
- * The process will show a mode-steering notification and update the
- * ambition-mode setting if the user taps a button. Never awaited —
- * fire-and-forget so it never delays the stop hook decision.
- */
-function spawnAmbitionNotification(currentMode: AmbitionMode, nextStep: string, cwd: string): void {
-  const binary = resolveNotifyBinary()
-  if (!binary) return
-
-  const helperScript = join(import.meta.dir, "..", "src", "ambition-notify.ts")
-  if (!existsSync(helperScript)) return
-
-  try {
-    Bun.spawn(["bun", helperScript, binary, currentMode, nextStep, cwd], {
-      stdin: "ignore",
-      stdout: "ignore",
-      stderr: "ignore",
-    })
-  } catch {
-    // Ignore: bun may not be in PATH (e.g. restricted test environments)
-  }
-}
-
 // ─── Filler suggestion ───────────────────────────────────────────────────────
 
 /**
@@ -1044,15 +992,6 @@ async function main(): Promise<void> {
         .join("\n")
     : ""
   const critiqueLine = critiqueLines ? `${critiqueLines}\n\n` : ""
-
-  // ── Passive mode-steering notification (fire-and-forget) ───────────────────
-  // Spawn ambition-notify as a detached background process so the user can
-  // tap a button to change ambitionMode while the agent continues working.
-  // This never blocks or delays the stop hook decision.
-  // Honor the global swiz-notify hooks toggle as a true notification kill switch.
-  if (effective.swizNotifyHooks) {
-    void spawnAmbitionNotification(effective.ambitionMode, response.next, cwd)
-  }
 
   // Runtime gate: if issues need refinement, inject a direct directive
   // regardless of what the AI suggested. This ensures refinement guidance

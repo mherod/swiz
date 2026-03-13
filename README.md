@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**95 hooks. 11 event types. Every agent. Zero compromises.**
+**91 hooks. 11 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -84,17 +84,9 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 ## Bundled Hooks
 
-79 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
+91 hook scripts across 10 event types. All TypeScript. All sharing utilities from `hooks/hook-utils.ts`.
 
-The bundled hooks cover seven events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, UserPromptSubmit, and Notification. Three additional events — **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all three; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
-
-### Notification (1)
-
-Notification hooks fire when Claude Code would deliver a system notification — permission prompts, idle alerts, and similar events. Unlike blocking hooks, notification hooks are read-only observers; they can react but cannot veto.
-
-| Hook | What it does |
-|------|-------------|
-| `notification-swiz-notify.ts` | Delivers Claude Code notification events as rich native macOS system notifications via `swiz-notify`. Maps `permission_prompt` to an alert sound, `idle_prompt` to a ping, and falls back gracefully when the binary is not installed. |
+The bundled hooks cover six events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, and UserPromptSubmit. Four additional events — **Notification**, **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all four; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
 
 ### Stop (21)
 
@@ -178,7 +170,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-claude-word-limit.ts` | Blocks `git push` when CLAUDE.md exceeds 5000 words, enforcing the limit at release time. Provides actionable error showing current word count, overage, and required reduction. Integrates with word-counting utility in hook-utils. |
 | `posttooluse-speak-narrator.ts` | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async. |
 
-### PostToolUse (18)
+### PostToolUse (17)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -195,7 +187,6 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-task-recovery.ts` | After a TaskUpdate or TaskGet, re-checks the session task list and recovers any tasks that were lost during context compaction. |
 | `posttooluse-task-list-sync.ts` | After TaskList, synchronizes the internal task model (tool_response) into the file-based task store. Idempotent — only writes when subject or status have changed. Emits a sync summary when tasks are created or updated. |
 | `posttooluse-task-evidence.ts` | After a TaskUpdate with `metadata.evidence`, writes `completionEvidence` to the task JSON file. Bridges the gap between built-in TaskUpdate and CI enforcement that checks task files for evidence. |
-| `posttooluse-task-notify.ts` | Delivers a native macOS notification on TaskCreate and status-changing TaskUpdates (in_progress, completed, cancelled). Gives ambient awareness of task lifecycle without interrupting the agent loop. Runs async. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS. Incremental — only speaks text added since the last invocation. Runs async so it never slows the agent down. |
 | `posttooluse-memory-size.ts` | Checks CLAUDE.md and memory files after edits — if they exceed line/word thresholds, advises compaction using the /compact-memory skill. Keeps guidance files lean. |
 | `posttooluse-task-output.ts` | Parses TaskOutput results: blocks on non-zero exits with actionable error context; on successful git push, injects the CI run ID and watch commands so the agent can verify CI without extra plumbing. |
@@ -220,22 +211,13 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `precompact-task-snapshot.ts` | Snapshots all current-session task IDs and statuses to disk before context compaction rewrites the transcript. The sessionstart-compact-context hook reads this snapshot on resume to verify and recreate any missing task files. |
 | `precompact-speak.ts` | Speaks "Just a moment while I gather my thoughts" before context compaction begins, giving audible feedback that the agent is about to pause for compaction. |
 
-### UserPromptSubmit (4)
+### UserPromptSubmit (3)
 
 | Hook | What it does |
 |------|-------------|
 | `userpromptsubmit-git-context.ts` | Injects current git branch and status into every prompt. The agent always knows where it is in the repo. |
-| `userpromptsubmit-notification-feedback.ts` | Reads `~/.swiz/notification-feedback.jsonl`, filters entries matching the current working directory, injects them as context, and removes consumed entries from the file. |
 | `userpromptsubmit-task-advisor.ts` | Surfaces active tasks before each prompt so the agent stays focused on what it was supposed to be doing. |
 | `posttooluse-speak-narrator.ts` | Catches up on any unspoken assistant text when the user submits a prompt. Ensures narration stays current even during idle periods. Runs async. |
-
-### PrPoll (1)
-
-Dispatched by a macOS LaunchAgent every 5 minutes — not triggered by agent hook systems. Install with `swiz install --pr-poll`.
-
-| Hook | What it does |
-|------|-------------|
-| `prpoll-notify.ts` | Fetches new GitHub PR notifications since the last poll and delivers a native macOS notification per item via swiz-notify. Tracks state in `~/.swiz/pr-poll-state.json`. |
 
 ## Plugin Marketplace
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { filterDisabledHooks, SWIZ_NOTIFY_HOOK_FILES } from "./dispatch.ts"
+import { filterDisabledHooks } from "./dispatch.ts"
 
 describe("filterDisabledHooks", () => {
   const makeGroups = (files: string[]) => [
@@ -77,23 +77,5 @@ describe("filterDisabledHooks", () => {
 
     const result = filterDisabledHooks(groups, combinedSet)
     expect(result[0]?.hooks.map((h) => h.file)).toEqual(["stop-git-status.ts"])
-  })
-
-  it("swiz-notify hook set includes pre/post notification hooks", () => {
-    expect(SWIZ_NOTIFY_HOOK_FILES.has("posttooluse-task-notify.ts")).toBe(true)
-    expect(SWIZ_NOTIFY_HOOK_FILES.has("notification-swiz-notify.ts")).toBe(true)
-    expect(SWIZ_NOTIFY_HOOK_FILES.has("prpoll-notify.ts")).toBe(true)
-  })
-
-  it("filters swiz-notify hooks when included in disabled set", () => {
-    const groups = [
-      {
-        event: "postToolUse",
-        hooks: [{ file: "posttooluse-task-notify.ts" }, { file: "posttooluse-git-status.ts" }],
-      },
-    ]
-    const result = filterDisabledHooks(groups, new Set(SWIZ_NOTIFY_HOOK_FILES))
-    expect(result).toHaveLength(1)
-    expect(result[0]?.hooks.map((h) => h.file)).toEqual(["posttooluse-git-status.ts"])
   })
 })

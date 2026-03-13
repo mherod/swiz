@@ -179,7 +179,6 @@ describe("swiz settings", () => {
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toContain("auto-continue:   enabled")
       expect(result.stdout).toContain("pr-merge-mode:   enabled")
-      expect(result.stdout).toContain("swiz-notify-hooks: disabled")
       expect(result.stdout).toContain("update-memory-footer: disabled")
       expect(result.stdout).toContain("(defaults)")
     })
@@ -214,7 +213,6 @@ describe("swiz settings", () => {
       { args: ["disable", "pr-merge-mode"], key: "prMergeMode", expected: false },
       { args: ["disable", "changes-requested-gate"], key: "changesRequestedGate", expected: false },
       { args: ["disable", "pr-review-gate"], key: "changesRequestedGate", expected: false },
-      { args: ["enable", "swiz-notify-hooks"], key: "swizNotifyHooks", expected: true },
       {
         args: ["disable", "personal-repo-issues-gate"],
         key: "personalRepoIssuesGate",
@@ -612,7 +610,6 @@ describe("swiz settings", () => {
     expect(result.stdout).toContain("auto-continue:   disabled")
     expect(result.stdout).toContain("pr-merge-mode:   enabled")
     expect(result.stdout).toContain("speak:           enabled")
-    expect(result.stdout).toContain("swiz-notify-hooks: disabled")
     expect(result.stdout).toContain("narrator-voice:  system default")
     expect(result.stdout).toContain("narrator-speed:  system default")
   })
@@ -915,7 +912,6 @@ describe("SETTINGS_REGISTRY", () => {
       "pushGate",
       "sandboxedEdits",
       "speak",
-      "swizNotifyHooks",
       "updateMemoryFooter",
       "gitStatusGate",
       "nonDefaultBranchGate",

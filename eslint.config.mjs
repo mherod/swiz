@@ -8,7 +8,6 @@ export default tseslint.config(
     ignores: [
       "node_modules/**",
       ".swiz/**",
-      "macos/.build/**",
       "coverage/**",
       "dist/**",
       "**/*.d.ts",

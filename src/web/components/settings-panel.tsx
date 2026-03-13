@@ -15,7 +15,6 @@ interface GlobalSettingsForm {
   memoryLineThreshold: number
   pushCooldownMinutes: number
   prAgeGateMinutes: number
-  swizNotifyHooks: boolean
   updateMemoryFooter: boolean
   nonDefaultBranchGate: boolean
   githubCiGate: boolean
@@ -38,7 +37,6 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   memoryLineThreshold: 1000,
   pushCooldownMinutes: 10,
   prAgeGateMinutes: 15,
-  swizNotifyHooks: true,
   updateMemoryFooter: true,
   nonDefaultBranchGate: true,
   githubCiGate: true,
@@ -108,7 +106,6 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     memoryLineThreshold: Number(settings.memoryLineThreshold) || 1000,
     pushCooldownMinutes: Number(settings.pushCooldownMinutes) || 10,
     prAgeGateMinutes: Number(settings.prAgeGateMinutes) || 15,
-    swizNotifyHooks: settings.swizNotifyHooks !== false,
     updateMemoryFooter: settings.updateMemoryFooter !== false,
     nonDefaultBranchGate: settings.nonDefaultBranchGate !== false,
     githubCiGate: settings.githubCiGate !== false,
@@ -520,23 +517,6 @@ export function SettingsPanel({ cwd }: { cwd: string | null }) {
                 </label>
                 <p className="settings-desc">
                   Block session completion when uncommitted or unpushed git changes are detected.
-                </p>
-              </div>
-
-              <div>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={globalForm.swizNotifyHooks}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, swizNotifyHooks: e.target.checked })
-                    }
-                  />
-                  <span>Swiz notify hooks</span>
-                </label>
-                <p className="settings-desc">
-                  Enable macOS notifications via swiz-notify for background hooks and completion
-                  events.
                 </p>
               </div>
 

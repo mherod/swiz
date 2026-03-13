@@ -1,4 +1,3 @@
-import { dirname, join } from "node:path"
 import { ghJson } from "../../git-helpers.ts"
 
 const CI_WATCH_POLL_MS = 30_000
@@ -32,37 +31,6 @@ function ciWatchKey(cwd: string, sha: string): string {
   return `${cwd}\x00${sha}`
 }
 
-async function resolveNotifyBinary(): Promise<string | null> {
-  const envBin = process.env.SWIZ_NOTIFY_BIN
-  if (envBin?.trim()) return envBin
-  const repoRoot = dirname(Bun.main)
-  const devPath = join(repoRoot, "macos", "SwizNotify.app", "Contents", "MacOS", "swiz-notify")
-  if (await Bun.file(devPath).exists()) return devPath
-  const installed = "/usr/local/bin/swiz-notify"
-  if (await Bun.file(installed).exists()) return installed
-  return null
-}
-
-async function defaultCiCompletionNotify(
-  watch: CiWatchStatus & { conclusion: string }
-): Promise<void> {
-  const binary = await resolveNotifyBinary()
-  if (!binary) return
-  const sound = watch.conclusion === "success" ? "Hero" : "Bottle"
-  const title = watch.conclusion === "success" ? "swiz CI passed" : "swiz CI failed"
-  const body = watch.runUrl
-    ? `${watch.sha.slice(0, 8)} • ${watch.runUrl}`
-    : `${watch.sha.slice(0, 8)} • run ${watch.runId ?? "unknown"}`
-  const proc = Bun.spawn(
-    [binary, "--title", title, "--body", body, "--sound", sound, "--timeout", "20"],
-    {
-      stdout: "ignore",
-      stderr: "ignore",
-    }
-  )
-  await proc.exited
-}
-
 async function defaultCiRunFetcher(cwd: string, sha: string): Promise<CiWatchRun | null> {
   const runs = await ghJson<CiWatchRun[]>(
     ["run", "list", "--commit", sha, "--json", "databaseId,status,conclusion,url", "--limit", "1"],
@@ -90,7 +58,7 @@ export class CiWatchRegistry {
     this.pollMs = opts.pollMs ?? CI_WATCH_POLL_MS
     this.timeoutMs = opts.timeoutMs ?? CI_WATCH_TIMEOUT_MS
     this.fetchRun = opts.fetchRun ?? defaultCiRunFetcher
-    this.notify = opts.notify ?? defaultCiCompletionNotify
+    this.notify = opts.notify ?? (async () => {})
   }
 
   listActive(): CiWatchStatus[] {

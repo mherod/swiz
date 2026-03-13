@@ -268,7 +268,6 @@ function printGlobalSettings(
   console.log(`  push-gate:       ${effective.pushGate ? "enabled" : "disabled"} (global)`)
   console.log(`  sandboxed-edits: ${effective.sandboxedEdits ? "enabled" : "disabled"} (global)`)
   console.log(`  speak:           ${effective.speak ? "enabled" : "disabled"} (global)`)
-  console.log(`  swiz-notify-hooks: ${effective.swizNotifyHooks ? "enabled" : "disabled"} (global)`)
   console.log(
     `  update-memory-footer: ${effective.updateMemoryFooter ? "enabled" : "disabled"} (global)`
   )

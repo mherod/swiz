@@ -200,11 +200,10 @@ describe("buildSettingsFlags", () => {
     const flags = buildSettingsFlags({
       ...DEFAULT_SETTINGS,
       critiquesEnabled: false,
-      swizNotifyHooks: true,
       source: "global",
     })
     const normalized = flags.map(stripAnsi).join(" ")
-    expect(normalized).toContain("+2 cfg")
+    expect(normalized).toContain("+1 cfg")
   })
 
   it("does not show catch-all when all uncovered settings are default", () => {

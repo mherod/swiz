@@ -61,7 +61,6 @@ export {
   isWithinCooldown,
   markHookCooldown,
   resolvePrMergeActive,
-  SWIZ_NOTIFY_HOOK_FILES,
 } from "./filters.ts"
 export {
   formatTrace,

@@ -192,7 +192,6 @@ export {
   runContext,
   runHook,
   runPreToolUse,
-  SWIZ_NOTIFY_HOOK_FILES,
   type TraceEntry,
   toolMatchesToken,
 } from "../dispatch/index.ts"

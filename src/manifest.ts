@@ -250,7 +250,7 @@ export const manifest: HookGroup[] = [
   {
     event: "postToolUse",
     matcher: "TaskUpdate|TaskCreate",
-    hooks: [{ file: "posttooluse-task-notify.ts", timeout: 5, async: true }],
+    hooks: [],
   },
   {
     event: "postToolUse",
@@ -306,14 +306,13 @@ export const manifest: HookGroup[] = [
     event: "userPromptSubmit",
     hooks: [
       { file: "userpromptsubmit-git-context.ts", timeout: 5 },
-      { file: "userpromptsubmit-notification-feedback.ts", timeout: 5 },
       { file: "userpromptsubmit-task-advisor.ts", timeout: 5 },
       { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
     ],
   },
   {
     event: "notification",
-    hooks: [{ file: "notification-swiz-notify.ts", async: true, timeout: 10 }],
+    hooks: [],
   },
   {
     event: "subagentStart",
@@ -330,7 +329,7 @@ export const manifest: HookGroup[] = [
   {
     event: "prPoll",
     scheduled: true,
-    hooks: [{ file: "prpoll-notify.ts", timeout: 30 }],
+    hooks: [],
   },
 ]
 

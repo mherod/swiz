@@ -29,12 +29,6 @@ const PR_MERGE_MODE_DISABLED_HOOKS = new Set([
   "stop-github-ci.ts",
 ])
 
-export const SWIZ_NOTIFY_HOOK_FILES = new Set([
-  "posttooluse-task-notify.ts",
-  "notification-swiz-notify.ts",
-  "prpoll-notify.ts",
-])
-
 // ─── Per-hook cooldown ──────────────────────────────────────────────────────
 
 export function hookCooldownPath(hookFile: string, cwd: string): string {
@@ -200,10 +194,6 @@ export async function applyHookSettingFilters(
     ...(settings.disabledHooks ?? []),
     ...(projectSettings?.disabledHooks ?? []),
   ])
-  if (!effective.swizNotifyHooks) {
-    for (const file of SWIZ_NOTIFY_HOOK_FILES) disabledSet.add(file)
-  }
-
   const detectedStacks = cwd ? await detectProjectStack(cwd) : []
   const filtered = filterPrMergeModeHooks(
     groups,
