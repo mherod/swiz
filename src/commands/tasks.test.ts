@@ -247,6 +247,27 @@ describe("validateEvidence", () => {
     expect(error).toContain("requires a hex SHA")
   })
 
+  it("accepts pr: with a numeric PR number", () => {
+    expect(validateEvidence("pr:#42 -- note:squash merged")).toBeNull()
+    expect(validateEvidence("pr:123 -- note:merged")).toBeNull()
+  })
+
+  it("accepts pr: with a GitHub pull URL", () => {
+    expect(validateEvidence("pr:https://github.com/owner/repo/pull/42 -- note:merged")).toBeNull()
+  })
+
+  it("rejects pr: with non-numeric non-URL value", () => {
+    const error = validateEvidence("pr:some-branch-name")
+    expect(error).not.toBeNull()
+    expect(error).toContain("Invalid PR reference")
+  })
+
+  it("rejects bare pr: with no value", () => {
+    const error = validateEvidence("pr:")
+    expect(error).not.toBeNull()
+    expect(error).toContain("requires a PR number")
+  })
+
   it("rejects evidence without a recognized prefix", () => {
     const error = validateEvidence("just some text")
     expect(error).not.toBeNull()
@@ -289,6 +310,9 @@ describe("validateEvidence", () => {
     expect(validateEvidence("commit:25ec5c7 -- ci_green:")).toBeNull()
     // paired with run ID → valid
     expect(validateEvidence("ci_green: -- run 23048000800")).toBeNull()
+    // run ID with trailing non-numeric text → rejected
+    expect(validateEvidence("ci_green: -- run 23048000800abc")).not.toBeNull()
+    expect(validateEvidence("ci_green: -- run 23048000800 extra")).not.toBeNull()
   })
 
   it("accepts multi-segment evidence where all segments use recognized prefixes", () => {

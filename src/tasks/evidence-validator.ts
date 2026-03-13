@@ -12,7 +12,7 @@ export const EVIDENCE_PREFIXES = ["commit:", "pr:", "file:", "test:", "note:", "
 export const EVIDENCE_SEGMENT_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: "note", re: /^note\s*:\s*\S.{4,}/i },
   { name: "conclusion", re: /^conclusion\s*:\s*\S+/i },
-  { name: "run", re: /^run\s+\d{10,}/i },
+  { name: "run", re: /^run\s+\d{10,}$/i },
   { name: "commit", re: /^(?:commit\s*:\s*)?[0-9a-f]{7,40}$/i },
   { name: "ci_green", re: /^ci[\s_]green(?:\s*:\s*\S*)?$/i },
   { name: "pr", re: /^pr[:#]\s*\d+/i },
@@ -41,6 +41,9 @@ export const REQUIRED_EVIDENCE_FIELDS = 1
 
 const COMMIT_PREFIX_RE = /^commit\s*:\s*/i
 const HEX_SHA_RE = /^[0-9a-f]{7,40}$/i
+const PR_PREFIX_RE = /^pr\s*:\s*/i
+const PR_NUMBER_RE = /^#?\d+$/
+const PR_URL_RE = /^https?:\/\/github\.com\/.+\/pull\/\d+/i
 
 /** Split evidence on delimiters, check each segment independently, return matched field names. */
 export function countEvidenceFields(evidence: string): string[] {
@@ -127,6 +130,24 @@ export function validateEvidence(evidence: string): string | null {
             `  --evidence "commit:abc123f"`
           )
         }
+      }
+    }
+  }
+
+  // pr: requires a positive integer PR number (with optional # prefix) or a GitHub pull URL.
+  for (const seg of segments) {
+    const prMatch = PR_PREFIX_RE.exec(seg)
+    if (prMatch) {
+      const value = seg.slice(prMatch[0].length).trim()
+      if (value.length === 0) {
+        return `pr: requires a PR number or GitHub pull URL.\n` + `  --evidence "pr:#42"`
+      }
+      if (!PR_NUMBER_RE.test(value) && !PR_URL_RE.test(value)) {
+        return (
+          `Invalid PR reference: "${value}"\n` +
+          `pr: evidence must be a PR number or GitHub pull URL.\n` +
+          `  --evidence "pr:#42" or --evidence "pr:https://github.com/owner/repo/pull/42"`
+        )
       }
     }
   }
