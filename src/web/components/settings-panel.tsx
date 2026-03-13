@@ -134,24 +134,162 @@ function projectSettingsToForm(response: CachedProjectSettingsResponse): Project
   }
 }
 
-export function SettingsPanel({ cwd }: { cwd: string | null }) {
-  // Global State
+// --- Shared field components ---
+
+function CheckboxField(props: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  label: string
+  desc: string
+}) {
+  return (
+    <div>
+      <label className="settings-checkbox">
+        <input
+          type="checkbox"
+          checked={props.checked}
+          onChange={(e) => props.onChange(e.target.checked)}
+        />
+        <span>{props.label}</span>
+      </label>
+      <p className="settings-desc">{props.desc}</p>
+    </div>
+  )
+}
+
+// --- Toggle definitions (data-driven to keep JSX compact) ---
+
+const GLOBAL_TOGGLES: Array<{
+  key: keyof GlobalSettingsForm
+  label: string
+  desc: string
+}> = [
+  {
+    key: "autoContinue",
+    label: "Auto-continue",
+    desc: "Automatically trigger follow-up execution runs for pending tasks without user prompts.",
+  },
+  {
+    key: "critiquesEnabled",
+    label: "Critiques",
+    desc: "Enable automated multi-agent code critiques during review phases.",
+  },
+  {
+    key: "prMergeMode",
+    label: "PR merge mode",
+    desc: 'Require Pull Requests for merging code. Disabling allows direct pushes when collaboration mode is "auto".',
+  },
+  {
+    key: "pushGate",
+    label: "Push gate",
+    desc: "Prevent git push commands unless explicitly allowed or required by a skill.",
+  },
+  {
+    key: "sandboxedEdits",
+    label: "Sandboxed edits",
+    desc: "Restrict file write operations to the current project directory only.",
+  },
+  {
+    key: "gitStatusGate",
+    label: "Git status gate",
+    desc: "Block session completion when uncommitted or unpushed git changes are detected.",
+  },
+  {
+    key: "updateMemoryFooter",
+    label: "Update memory footer",
+    desc: "Require updating CLAUDE.md memory when the session completes successfully.",
+  },
+  {
+    key: "nonDefaultBranchGate",
+    label: "Non-default branch gate",
+    desc: "Block completion on the default branch to encourage feature branch workflows.",
+  },
+  {
+    key: "githubCiGate",
+    label: "GitHub CI gate",
+    desc: "Block completion if GitHub Actions CI checks are failing.",
+  },
+  {
+    key: "changesRequestedGate",
+    label: "Changes requested gate",
+    desc: "Block completion if the PR has a Changes Requested review state.",
+  },
+  {
+    key: "personalRepoIssuesGate",
+    label: "Personal repo issues gate",
+    desc: "Suggest working on open issues in personal repositories upon completion.",
+  },
+  {
+    key: "speak",
+    label: "Speak",
+    desc: "Enable text-to-speech audio narration of certain notifications and events.",
+  },
+]
+
+// --- Save logic (extracted to stay within per-function complexity limits) ---
+
+async function saveSettingsToServer(opts: {
+  cwd: string | null
+  globalDirty: boolean
+  globalForm: GlobalSettingsForm
+  globalBaseline: GlobalSettingsForm
+  onGlobalSaved: (form: GlobalSettingsForm) => void
+  setGlobalSaving: (v: boolean) => void
+  projectDirty: boolean
+  projectForm: ProjectSettingsForm
+  projectBaseline: ProjectSettingsForm
+  onProjectSaved: (form: ProjectSettingsForm) => void
+  setProjectSaving: (v: boolean) => void
+}): Promise<void> {
+  const promises: Promise<void>[] = []
+
+  if (opts.globalDirty) {
+    opts.setGlobalSaving(true)
+    const updates: Record<string, unknown> = {}
+    for (const key of Object.keys(opts.globalForm) as Array<keyof GlobalSettingsForm>) {
+      if (opts.globalForm[key] !== opts.globalBaseline[key]) updates[key] = opts.globalForm[key]
+    }
+    promises.push(
+      postJson<{ success: boolean; settings: Record<string, unknown> }>("/settings/global/update", {
+        updates,
+      })
+        .then((r) => opts.onGlobalSaved(globalSettingsToForm(r.settings)))
+        .finally(() => opts.setGlobalSaving(false))
+    )
+  }
+
+  if (opts.projectDirty && opts.cwd) {
+    opts.setProjectSaving(true)
+    const updates: Record<string, unknown> = {}
+    for (const key of Object.keys(opts.projectForm) as Array<keyof ProjectSettingsForm>) {
+      if (opts.projectForm[key] !== opts.projectBaseline[key]) {
+        updates[key] = opts.projectForm[key] === "" ? null : opts.projectForm[key]
+      }
+    }
+    promises.push(
+      postJson<CachedProjectSettingsResponse>("/settings/project/update", {
+        cwd: opts.cwd,
+        updates,
+      })
+        .then((r) => opts.onProjectSaved(projectSettingsToForm(r)))
+        .finally(() => opts.setProjectSaving(false))
+    )
+  }
+
+  await Promise.all(promises)
+}
+
+// --- Data-fetching hook ---
+
+function useSettingsFetch(cwd: string | null) {
   const [globalForm, setGlobalForm] = useState<GlobalSettingsForm>(DEFAULT_GLOBAL_FORM)
   const [globalBaseline, setGlobalBaseline] = useState<GlobalSettingsForm>(DEFAULT_GLOBAL_FORM)
   const [globalLoading, setGlobalLoading] = useState(false)
-  const [globalSaving, setGlobalSaving] = useState(false)
-
-  // Project State
   const [projectForm, setProjectForm] = useState<ProjectSettingsForm>(DEFAULT_PROJECT_FORM)
   const [projectBaseline, setProjectBaseline] = useState<ProjectSettingsForm>(DEFAULT_PROJECT_FORM)
   const [projectLoading, setProjectLoading] = useState(false)
-  const [projectSaving, setProjectSaving] = useState(false)
-
-  // Status/Error
   const [error, setError] = useState("")
-  const [status, setStatus] = useState("")
 
-  // Fetch Global Settings
   useEffect(() => {
     let cancelled = false
     setGlobalLoading(true)
@@ -178,7 +316,6 @@ export function SettingsPanel({ cwd }: { cwd: string | null }) {
     }
   }, [])
 
-  // Fetch Project Settings
   useEffect(() => {
     if (!cwd) {
       setProjectForm(DEFAULT_PROJECT_FORM)
@@ -206,93 +343,386 @@ export function SettingsPanel({ cwd }: { cwd: string | null }) {
     }
   }, [cwd])
 
+  return {
+    globalForm,
+    setGlobalForm,
+    globalBaseline,
+    setGlobalBaseline,
+    globalLoading,
+    projectForm,
+    setProjectForm,
+    projectBaseline,
+    setProjectBaseline,
+    projectLoading,
+    error,
+    setError,
+  }
+}
+
+function NumberField(props: {
+  label: string
+  value: number | string
+  onChange: (e: { target: { value: string } }) => void
+  placeholder?: string
+  type?: string
+}) {
+  return (
+    <label className="settings-label">
+      <span>{props.label}</span>
+      <input
+        type={props.type ?? "number"}
+        className="settings-input"
+        value={props.value}
+        onChange={props.onChange}
+        placeholder={props.placeholder}
+      />
+    </label>
+  )
+}
+
+function ProjectFieldsGrid({
+  form,
+  set,
+  optNum,
+}: {
+  form: ProjectSettingsForm
+  set: (patch: Partial<ProjectSettingsForm>) => void
+  optNum: (key: keyof ProjectSettingsForm) => (e: { target: { value: string } }) => void
+}) {
+  return (
+    <div className="settings-grid-cols-2">
+      <NumberField
+        label="Default branch"
+        value={form.defaultBranch as string}
+        type="text"
+        onChange={(e) => set({ defaultBranch: e.target.value })}
+      />
+      <NumberField
+        label="Task duration warning (min)"
+        value={form.taskDurationWarningMinutes}
+        onChange={optNum("taskDurationWarningMinutes")}
+        placeholder="Inherit global"
+      />
+      <NumberField
+        label="Trivial max files"
+        value={form.trivialMaxFiles}
+        onChange={(e) => set({ trivialMaxFiles: Number(e.target.value) })}
+      />
+      <NumberField
+        label="Trivial max lines"
+        value={form.trivialMaxLines}
+        onChange={(e) => set({ trivialMaxLines: Number(e.target.value) })}
+      />
+      <NumberField
+        label="Memory line threshold"
+        value={form.memoryLineThreshold}
+        onChange={optNum("memoryLineThreshold")}
+        placeholder="Inherit global"
+      />
+      <NumberField
+        label="Memory word threshold"
+        value={form.memoryWordThreshold}
+        onChange={optNum("memoryWordThreshold")}
+        placeholder="Inherit global"
+      />
+      <NumberField
+        label="Large file size (KB)"
+        value={form.largeFileSizeKb}
+        onChange={optNum("largeFileSizeKb")}
+        placeholder="Inherit global"
+      />
+    </div>
+  )
+}
+
+// --- Column components ---
+
+function GlobalSettingsColumn({
+  form,
+  setForm,
+}: {
+  form: GlobalSettingsForm
+  setForm: (fn: GlobalSettingsForm | ((prev: GlobalSettingsForm) => GlobalSettingsForm)) => void
+}) {
+  const set = (patch: Partial<GlobalSettingsForm>) => setForm((f) => ({ ...f, ...patch }))
+  const num = (key: keyof GlobalSettingsForm) => (e: { target: { value: string } }) =>
+    set({ [key]: Number(e.target.value) })
+
+  return (
+    <div className="settings-column">
+      <h3 className="settings-column-title">Global Settings</h3>
+      <div className="settings-fields">
+        <label className="settings-label" htmlFor="global-ambition-mode">
+          <span>Ambition mode</span>
+          <p className="settings-desc">
+            Agent's operational tempo. "standard" focuses on prompt completion. "aggressive" acts
+            autonomously. "creative" focuses on exploratory design. "reflective" prioritizes
+            analysis.
+          </p>
+          <Select
+            id="global-ambition-mode"
+            value={form.ambitionMode}
+            onChange={(e) =>
+              set({ ambitionMode: e.target.value as GlobalSettingsForm["ambitionMode"] })
+            }
+            options={[
+              { label: "standard", value: "standard" },
+              { label: "aggressive", value: "aggressive" },
+              { label: "creative", value: "creative" },
+              { label: "reflective", value: "reflective" },
+            ]}
+          />
+        </label>
+
+        <div className="settings-grid-cols-2">
+          <label className="settings-label">
+            <span>Memory line threshold</span>
+            <input
+              type="number"
+              className="settings-input"
+              value={form.memoryLineThreshold}
+              onChange={num("memoryLineThreshold")}
+            />
+          </label>
+          <label className="settings-label">
+            <span>Memory word threshold</span>
+            <input
+              type="number"
+              className="settings-input"
+              value={form.memoryWordThreshold}
+              onChange={num("memoryWordThreshold")}
+            />
+          </label>
+          <label className="settings-label">
+            <span>Task duration warning (min)</span>
+            <input
+              type="number"
+              className="settings-input"
+              value={form.taskDurationWarningMinutes}
+              onChange={num("taskDurationWarningMinutes")}
+            />
+          </label>
+          <label className="settings-label">
+            <span>Large file size (KB)</span>
+            <input
+              type="number"
+              className="settings-input"
+              value={form.largeFileSizeKb}
+              onChange={num("largeFileSizeKb")}
+            />
+          </label>
+          <label className="settings-label">
+            <span>Push cooldown (min)</span>
+            <input
+              type="number"
+              className="settings-input"
+              value={form.pushCooldownMinutes}
+              onChange={num("pushCooldownMinutes")}
+            />
+          </label>
+          <label className="settings-label">
+            <span>PR age gate (min)</span>
+            <input
+              type="number"
+              className="settings-input"
+              value={form.prAgeGateMinutes}
+              onChange={num("prAgeGateMinutes")}
+            />
+          </label>
+        </div>
+
+        {GLOBAL_TOGGLES.map(({ key, label, desc }) => (
+          <CheckboxField
+            key={key}
+            checked={form[key] as boolean}
+            onChange={(v) => set({ [key]: v })}
+            label={label}
+            desc={desc}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ProjectSettingsColumn({
+  cwd,
+  form,
+  setForm,
+  loading,
+  baseline,
+}: {
+  cwd: string | null
+  form: ProjectSettingsForm
+  setForm: (fn: ProjectSettingsForm | ((prev: ProjectSettingsForm) => ProjectSettingsForm)) => void
+  loading: boolean
+  baseline: ProjectSettingsForm
+}) {
+  const set = (patch: Partial<ProjectSettingsForm>) => setForm((f) => ({ ...f, ...patch }))
+  const optNum = (key: keyof ProjectSettingsForm) => (e: { target: { value: string } }) =>
+    set({ [key]: e.target.value === "" ? "" : Number(e.target.value) })
+
+  return (
+    <div className="settings-column">
+      <h3 className="settings-column-title">Project Settings</h3>
+
+      {!cwd ? (
+        <p className="metric-note" style={{ marginTop: "1rem" }}>
+          Select a project to edit project-specific settings.
+        </p>
+      ) : loading && !baseline.collaborationMode ? (
+        <p className="metric-note" style={{ marginTop: "1rem" }}>
+          Loading project settings...
+        </p>
+      ) : (
+        <div className="settings-fields">
+          <label className="settings-label" htmlFor="project-ambition-mode">
+            <span>Ambition mode override</span>
+            <p className="settings-desc">
+              Project-specific override for the agent's operational tempo. "inherit" uses the global
+              setting.
+            </p>
+            <Select
+              id="project-ambition-mode"
+              value={form.ambitionMode}
+              onChange={(e) =>
+                set({ ambitionMode: e.target.value as ProjectSettingsForm["ambitionMode"] })
+              }
+              options={[
+                { label: "inherit (global)", value: "inherit" },
+                { label: "standard", value: "standard" },
+                { label: "aggressive", value: "aggressive" },
+                { label: "creative", value: "creative" },
+                { label: "reflective", value: "reflective" },
+              ]}
+            />
+          </label>
+
+          <label className="settings-label" htmlFor="project-collaboration-mode">
+            <span>Collaboration mode</span>
+            <p className="settings-desc">
+              Determines how code is integrated. "Auto" falls back to PR merge mode. "Solo" pushes
+              directly to main. "Team" and "Relaxed-collab" require PRs.
+            </p>
+            <Select
+              id="project-collaboration-mode"
+              value={form.collaborationMode}
+              onChange={(e) =>
+                set({
+                  collaborationMode: e.target.value as ProjectSettingsForm["collaborationMode"],
+                })
+              }
+              options={[
+                { label: "auto", value: "auto" },
+                { label: "solo", value: "solo" },
+                { label: "team", value: "team" },
+                { label: "relaxed-collab", value: "relaxed-collab" },
+              ]}
+            />
+          </label>
+
+          <ProjectFieldsGrid form={form} set={set} optNum={optNum} />
+
+          <CheckboxField
+            checked={form.prMergeMode}
+            onChange={(v) => set({ prMergeMode: v })}
+            label="PR merge mode (Global fallback)"
+            desc={
+              'When Collaboration Mode is set to "Auto", this global toggle determines if pull requests are required.'
+            }
+          />
+          <CheckboxField
+            checked={form.strictNoDirectMain}
+            onChange={(v) => set({ strictNoDirectMain: v })}
+            label="Strict merge to main mode"
+            desc="Enforces feature-branch workflows by blocking direct pushes to the main branch locally, even in solo repositories."
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetch>) {
+  const [globalSaving, setGlobalSaving] = useState(false)
+  const [projectSaving, setProjectSaving] = useState(false)
+  const [status, setStatus] = useState("")
+  const { globalForm, globalBaseline, projectForm, projectBaseline } = data
+  const { setGlobalForm, setGlobalBaseline, setProjectForm, setProjectBaseline, setError } = data
+
   const globalDirty = useMemo(
     () => JSON.stringify(globalForm) !== JSON.stringify(globalBaseline),
     [globalForm, globalBaseline]
   )
-
   const projectDirty = useMemo(
     () => JSON.stringify(projectForm) !== JSON.stringify(projectBaseline),
     [projectForm, projectBaseline]
   )
 
-  const isDirty = globalDirty || projectDirty
-  const isSaving = globalSaving || projectSaving
-
   const performSave = useCallback(async () => {
     setError("")
     setStatus("Saving...")
-
-    const promises: Promise<void>[] = []
-
-    if (globalDirty) {
-      setGlobalSaving(true)
-      const updates: Record<string, unknown> = {}
-      for (const key of Object.keys(globalForm) as Array<keyof GlobalSettingsForm>) {
-        if (globalForm[key] !== globalBaseline[key]) {
-          updates[key] = globalForm[key]
-        }
-      }
-
-      const globalPromise = postJson<{ success: boolean; settings: Record<string, unknown> }>(
-        "/settings/global/update",
-        { updates }
-      )
-        .then((result) => {
-          const next = globalSettingsToForm(result.settings)
-          setGlobalForm(next)
-          setGlobalBaseline(next)
-        })
-        .finally(() => {
-          setGlobalSaving(false)
-        })
-
-      promises.push(globalPromise)
-    }
-
-    if (projectDirty && cwd) {
-      setProjectSaving(true)
-      const projectUpdates: Record<string, unknown> = {}
-      for (const key of Object.keys(projectForm) as Array<keyof ProjectSettingsForm>) {
-        if (projectForm[key] !== projectBaseline[key]) {
-          projectUpdates[key] = projectForm[key] === "" ? null : projectForm[key]
-        }
-      }
-
-      const projectPromise = postJson<CachedProjectSettingsResponse>("/settings/project/update", {
-        cwd,
-        updates: projectUpdates,
-      })
-        .then((result) => {
-          const next = projectSettingsToForm(result)
-          setProjectForm(next)
-          setProjectBaseline(next)
-        })
-        .finally(() => {
-          setProjectSaving(false)
-        })
-
-      promises.push(projectPromise)
-    }
-
     try {
-      await Promise.all(promises)
+      await saveSettingsToServer({
+        cwd,
+        globalDirty,
+        globalForm,
+        globalBaseline,
+        onGlobalSaved: (f) => {
+          setGlobalForm(f)
+          setGlobalBaseline(f)
+        },
+        setGlobalSaving,
+        projectDirty,
+        projectForm,
+        projectBaseline,
+        onProjectSaved: (f) => {
+          setProjectForm(f)
+          setProjectBaseline(f)
+        },
+        setProjectSaving,
+      })
       setStatus("Settings saved successfully")
       setTimeout(() => setStatus(""), 2000)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings")
     }
-  }, [cwd, globalBaseline, globalDirty, globalForm, projectBaseline, projectDirty, projectForm])
+  }, [
+    cwd,
+    globalBaseline,
+    globalDirty,
+    globalForm,
+    projectBaseline,
+    projectDirty,
+    projectForm,
+    setError,
+    setGlobalBaseline,
+    setGlobalForm,
+    setProjectBaseline,
+    setProjectForm,
+  ])
+
+  const isDirty = globalDirty || projectDirty
+  const isSaving = globalSaving || projectSaving
 
   useEffect(() => {
     if (!isDirty || isSaving || (projectDirty && !cwd)) return
-
     const timer = setTimeout(() => {
       void performSave()
     }, 500)
-
     return () => clearTimeout(timer)
   }, [cwd, isDirty, isSaving, performSave, projectDirty])
+
+  return { globalDirty, projectDirty, isSaving, status }
+}
+
+// --- Main panel (composed from extracted hooks + columns) ---
+
+export function SettingsPanel({ cwd }: { cwd: string | null }) {
+  const data = useSettingsFetch(cwd)
+  const { isSaving, status } = useAutoSave(cwd, data)
+  const { globalForm, setGlobalForm, globalBaseline, globalLoading } = data
+  const { projectForm, setProjectForm, projectBaseline, projectLoading, error } = data
 
   if (globalLoading && !globalBaseline.ambitionMode) {
     return (
@@ -322,501 +752,14 @@ export function SettingsPanel({ cwd }: { cwd: string | null }) {
 
       <div className="settings-form">
         <div className="settings-layout">
-          {/* Global Column */}
-          <div className="settings-column">
-            <h3 className="settings-column-title">Global Settings</h3>
-
-            <div className="settings-fields">
-              <label className="settings-label" htmlFor="global-ambition-mode">
-                <span>Ambition mode</span>
-                <p className="settings-desc">
-                  Agent's operational tempo. "standard" focuses on prompt completion. "aggressive"
-                  acts autonomously. "creative" focuses on exploratory design. "reflective"
-                  prioritizes analysis.
-                </p>
-                <Select
-                  id="global-ambition-mode"
-                  value={globalForm.ambitionMode}
-                  onChange={(e) =>
-                    setGlobalForm({
-                      ...globalForm,
-                      ambitionMode: e.target.value as GlobalSettingsForm["ambitionMode"],
-                    })
-                  }
-                  options={[
-                    { label: "standard", value: "standard" },
-                    { label: "aggressive", value: "aggressive" },
-                    { label: "creative", value: "creative" },
-                    { label: "reflective", value: "reflective" },
-                  ]}
-                />
-              </label>
-
-              <div className="settings-grid-cols-2">
-                <label className="settings-label">
-                  <span>Memory line threshold</span>
-                  <input
-                    type="number"
-                    className="settings-input"
-                    value={globalForm.memoryLineThreshold}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, memoryLineThreshold: Number(e.target.value) })
-                    }
-                  />
-                </label>
-                <label className="settings-label">
-                  <span>Memory word threshold</span>
-                  <input
-                    type="number"
-                    className="settings-input"
-                    value={globalForm.memoryWordThreshold}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, memoryWordThreshold: Number(e.target.value) })
-                    }
-                  />
-                </label>
-                <label className="settings-label">
-                  <span>Task duration warning (min)</span>
-                  <input
-                    type="number"
-                    className="settings-input"
-                    value={globalForm.taskDurationWarningMinutes}
-                    onChange={(e) =>
-                      setGlobalForm({
-                        ...globalForm,
-                        taskDurationWarningMinutes: Number(e.target.value),
-                      })
-                    }
-                  />
-                </label>
-                <label className="settings-label">
-                  <span>Large file size (KB)</span>
-                  <input
-                    type="number"
-                    className="settings-input"
-                    value={globalForm.largeFileSizeKb}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, largeFileSizeKb: Number(e.target.value) })
-                    }
-                  />
-                </label>
-                <label className="settings-label">
-                  <span>Push cooldown (min)</span>
-                  <input
-                    type="number"
-                    className="settings-input"
-                    value={globalForm.pushCooldownMinutes}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, pushCooldownMinutes: Number(e.target.value) })
-                    }
-                  />
-                </label>
-                <label className="settings-label">
-                  <span>PR age gate (min)</span>
-                  <input
-                    type="number"
-                    className="settings-input"
-                    value={globalForm.prAgeGateMinutes}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, prAgeGateMinutes: Number(e.target.value) })
-                    }
-                  />
-                </label>
-              </div>
-
-              <div>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={globalForm.autoContinue}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, autoContinue: e.target.checked })
-                    }
-                  />
-                  <span>Auto-continue</span>
-                </label>
-                <p className="settings-desc">
-                  Automatically trigger follow-up execution runs for pending tasks without user
-                  prompts.
-                </p>
-              </div>
-
-              <div>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={globalForm.critiquesEnabled}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, critiquesEnabled: e.target.checked })
-                    }
-                  />
-                  <span>Critiques</span>
-                </label>
-                <p className="settings-desc">
-                  Enable automated multi-agent code critiques during review phases.
-                </p>
-              </div>
-
-              <div>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={globalForm.prMergeMode}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, prMergeMode: e.target.checked })
-                    }
-                  />
-                  <span>PR merge mode</span>
-                </label>
-                <p className="settings-desc">
-                  Require Pull Requests for merging code. Disabling allows direct pushes when
-                  collaboration mode is "auto".
-                </p>
-              </div>
-
-              <div>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={globalForm.pushGate}
-                    onChange={(e) => setGlobalForm({ ...globalForm, pushGate: e.target.checked })}
-                  />
-                  <span>Push gate</span>
-                </label>
-                <p className="settings-desc">
-                  Prevent git push commands unless explicitly allowed or required by a skill.
-                </p>
-              </div>
-
-              <div>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={globalForm.sandboxedEdits}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, sandboxedEdits: e.target.checked })
-                    }
-                  />
-                  <span>Sandboxed edits</span>
-                </label>
-                <p className="settings-desc">
-                  Restrict file write operations to the current project directory only.
-                </p>
-              </div>
-
-              <div>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={globalForm.gitStatusGate}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, gitStatusGate: e.target.checked })
-                    }
-                  />
-                  <span>Git status gate</span>
-                </label>
-                <p className="settings-desc">
-                  Block session completion when uncommitted or unpushed git changes are detected.
-                </p>
-              </div>
-
-              <div>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={globalForm.updateMemoryFooter}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, updateMemoryFooter: e.target.checked })
-                    }
-                  />
-                  <span>Update memory footer</span>
-                </label>
-                <p className="settings-desc">
-                  Require updating CLAUDE.md memory when the session completes successfully.
-                </p>
-              </div>
-
-              <div>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={globalForm.nonDefaultBranchGate}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, nonDefaultBranchGate: e.target.checked })
-                    }
-                  />
-                  <span>Non-default branch gate</span>
-                </label>
-                <p className="settings-desc">
-                  Block completion on the default branch to encourage feature branch workflows.
-                </p>
-              </div>
-
-              <div>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={globalForm.githubCiGate}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, githubCiGate: e.target.checked })
-                    }
-                  />
-                  <span>GitHub CI gate</span>
-                </label>
-                <p className="settings-desc">
-                  Block completion if GitHub Actions CI checks are failing.
-                </p>
-              </div>
-
-              <div>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={globalForm.changesRequestedGate}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, changesRequestedGate: e.target.checked })
-                    }
-                  />
-                  <span>Changes requested gate</span>
-                </label>
-                <p className="settings-desc">
-                  Block completion if the PR has a Changes Requested review state.
-                </p>
-              </div>
-
-              <div>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={globalForm.personalRepoIssuesGate}
-                    onChange={(e) =>
-                      setGlobalForm({ ...globalForm, personalRepoIssuesGate: e.target.checked })
-                    }
-                  />
-                  <span>Personal repo issues gate</span>
-                </label>
-                <p className="settings-desc">
-                  Suggest working on open issues in personal repositories upon completion.
-                </p>
-              </div>
-
-              <div>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={globalForm.speak}
-                    onChange={(e) => setGlobalForm({ ...globalForm, speak: e.target.checked })}
-                  />
-                  <span>Speak</span>
-                </label>
-                <p className="settings-desc">
-                  Enable text-to-speech audio narration of certain notifications and events.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Project Column */}
-          <div className="settings-column">
-            <h3 className="settings-column-title">Project Settings</h3>
-
-            {!cwd ? (
-              <p className="metric-note" style={{ marginTop: "1rem" }}>
-                Select a project to edit project-specific settings.
-              </p>
-            ) : projectLoading && !projectBaseline.collaborationMode ? (
-              <p className="metric-note" style={{ marginTop: "1rem" }}>
-                Loading project settings...
-              </p>
-            ) : (
-              <div className="settings-fields">
-                <label className="settings-label" htmlFor="project-ambition-mode">
-                  <span>Ambition mode override</span>
-                  <p className="settings-desc">
-                    Project-specific override for the agent's operational tempo. "inherit" uses the
-                    global setting.
-                  </p>
-                  <Select
-                    id="project-ambition-mode"
-                    value={projectForm.ambitionMode}
-                    onChange={(event) => {
-                      const value = event.target.value as ProjectSettingsForm["ambitionMode"]
-                      setProjectForm((prev) => ({ ...prev, ambitionMode: value }))
-                    }}
-                    options={[
-                      { label: "inherit (global)", value: "inherit" },
-                      { label: "standard", value: "standard" },
-                      { label: "aggressive", value: "aggressive" },
-                      { label: "creative", value: "creative" },
-                      { label: "reflective", value: "reflective" },
-                    ]}
-                  />
-                </label>
-
-                <label className="settings-label" htmlFor="project-collaboration-mode">
-                  <span>Collaboration mode</span>
-                  <p className="settings-desc">
-                    Determines how code is integrated. "Auto" falls back to PR merge mode. "Solo"
-                    pushes directly to main. "Team" and "Relaxed-collab" require PRs.
-                  </p>
-                  <Select
-                    id="project-collaboration-mode"
-                    value={projectForm.collaborationMode}
-                    onChange={(event) => {
-                      const value = event.target.value as ProjectSettingsForm["collaborationMode"]
-                      setProjectForm((prev) => ({ ...prev, collaborationMode: value }))
-                    }}
-                    options={[
-                      { label: "auto", value: "auto" },
-                      { label: "solo", value: "solo" },
-                      { label: "team", value: "team" },
-                      { label: "relaxed-collab", value: "relaxed-collab" },
-                    ]}
-                  />
-                </label>
-
-                <div className="settings-grid-cols-2">
-                  <label className="settings-label">
-                    <span>Default branch</span>
-                    <input
-                      type="text"
-                      className="settings-input"
-                      value={projectForm.defaultBranch}
-                      onChange={(e) =>
-                        setProjectForm((prev) => ({ ...prev, defaultBranch: e.target.value }))
-                      }
-                    />
-                  </label>
-                  <label className="settings-label">
-                    <span>Task duration warning (min)</span>
-                    <input
-                      type="number"
-                      className="settings-input"
-                      value={projectForm.taskDurationWarningMinutes}
-                      onChange={(e) =>
-                        setProjectForm((prev) => ({
-                          ...prev,
-                          taskDurationWarningMinutes:
-                            e.target.value === "" ? "" : Number(e.target.value),
-                        }))
-                      }
-                      placeholder="Inherit global"
-                    />
-                  </label>
-                  <label className="settings-label">
-                    <span>Trivial max files</span>
-                    <input
-                      type="number"
-                      className="settings-input"
-                      value={projectForm.trivialMaxFiles}
-                      onChange={(e) =>
-                        setProjectForm((prev) => ({
-                          ...prev,
-                          trivialMaxFiles: Number(e.target.value),
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="settings-label">
-                    <span>Trivial max lines</span>
-                    <input
-                      type="number"
-                      className="settings-input"
-                      value={projectForm.trivialMaxLines}
-                      onChange={(e) =>
-                        setProjectForm((prev) => ({
-                          ...prev,
-                          trivialMaxLines: Number(e.target.value),
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="settings-label">
-                    <span>Memory line threshold</span>
-                    <input
-                      type="number"
-                      className="settings-input"
-                      value={projectForm.memoryLineThreshold}
-                      onChange={(e) =>
-                        setProjectForm((prev) => ({
-                          ...prev,
-                          memoryLineThreshold: e.target.value === "" ? "" : Number(e.target.value),
-                        }))
-                      }
-                      placeholder="Inherit global"
-                    />
-                  </label>
-                  <label className="settings-label">
-                    <span>Memory word threshold</span>
-                    <input
-                      type="number"
-                      className="settings-input"
-                      value={projectForm.memoryWordThreshold}
-                      onChange={(e) =>
-                        setProjectForm((prev) => ({
-                          ...prev,
-                          memoryWordThreshold: e.target.value === "" ? "" : Number(e.target.value),
-                        }))
-                      }
-                      placeholder="Inherit global"
-                    />
-                  </label>
-                  <label className="settings-label">
-                    <span>Large file size (KB)</span>
-                    <input
-                      type="number"
-                      className="settings-input"
-                      value={projectForm.largeFileSizeKb}
-                      onChange={(e) =>
-                        setProjectForm((prev) => ({
-                          ...prev,
-                          largeFileSizeKb: e.target.value === "" ? "" : Number(e.target.value),
-                        }))
-                      }
-                      placeholder="Inherit global"
-                    />
-                  </label>
-                </div>
-
-                <div>
-                  <label className="settings-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={projectForm.prMergeMode}
-                      onChange={(event) => {
-                        setProjectForm((prev) => ({ ...prev, prMergeMode: event.target.checked }))
-                      }}
-                    />
-                    <span>PR merge mode (Global fallback)</span>
-                  </label>
-                  <p className="settings-desc">
-                    When Collaboration Mode is set to "Auto", this global toggle determines if pull
-                    requests are required.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="settings-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={projectForm.strictNoDirectMain}
-                      onChange={(event) => {
-                        setProjectForm((prev) => ({
-                          ...prev,
-                          strictNoDirectMain: event.target.checked,
-                        }))
-                      }}
-                    />
-                    <span>Strict merge to main mode</span>
-                  </label>
-                  <p className="settings-desc">
-                    Enforces feature-branch workflows by blocking direct pushes to the main branch
-                    locally, even in solo repositories.
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
+          <GlobalSettingsColumn form={globalForm} setForm={setGlobalForm} />
+          <ProjectSettingsColumn
+            cwd={cwd}
+            form={projectForm}
+            setForm={setProjectForm}
+            loading={projectLoading}
+            baseline={projectBaseline}
+          />
         </div>
       </div>
     </section>
