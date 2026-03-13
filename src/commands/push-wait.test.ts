@@ -94,68 +94,68 @@ describe("parsePushWaitArgs", () => {
 // ─── getRemainingCooldownMs ──────────────────────────────────────────────
 
 describe("getRemainingCooldownMs", () => {
-  it("returns 0 when sentinel does not exist", () => {
-    expect(getRemainingCooldownMs("/tmp/nonexistent-sentinel-file.timestamp")).toBe(0)
+  it("returns 0 when sentinel does not exist", async () => {
+    expect(await getRemainingCooldownMs("/tmp/nonexistent-sentinel-file.timestamp")).toBe(0)
   })
 
-  it("returns 0 when sentinel is empty", () => {
+  it("returns 0 when sentinel is empty", async () => {
     const p = uniqueSentinel("-empty")
     writeFileSync(p, "")
-    expect(getRemainingCooldownMs(p)).toBe(0)
+    expect(await getRemainingCooldownMs(p)).toBe(0)
   })
 
-  it("returns 0 when sentinel contains non-numeric text", () => {
+  it("returns 0 when sentinel contains non-numeric text", async () => {
     const p = uniqueSentinel("-garbage")
     writeFileSync(p, "not-a-number")
-    expect(getRemainingCooldownMs(p)).toBe(0)
+    expect(await getRemainingCooldownMs(p)).toBe(0)
   })
 
-  it("returns 0 when sentinel contains whitespace only", () => {
+  it("returns 0 when sentinel contains whitespace only", async () => {
     const p = uniqueSentinel("-ws")
     writeFileSync(p, "   \n  ")
-    expect(getRemainingCooldownMs(p)).toBe(0)
+    expect(await getRemainingCooldownMs(p)).toBe(0)
   })
 
-  it("returns 0 when cooldown has fully expired", () => {
+  it("returns 0 when cooldown has fully expired", async () => {
     const p = uniqueSentinel("-expired")
     writeSentinel(p, Date.now() - COOLDOWN_MS - 1000)
-    expect(getRemainingCooldownMs(p)).toBe(0)
+    expect(await getRemainingCooldownMs(p)).toBe(0)
   })
 
-  it("returns 0 when cooldown expired exactly", () => {
+  it("returns 0 when cooldown expired exactly", async () => {
     const p = uniqueSentinel("-exact")
     writeSentinel(p, Date.now() - COOLDOWN_MS)
-    expect(getRemainingCooldownMs(p)).toBe(0)
+    expect(await getRemainingCooldownMs(p)).toBe(0)
   })
 
-  it("returns positive ms when cooldown is active", () => {
+  it("returns positive ms when cooldown is active", async () => {
     const p = uniqueSentinel("-active")
     writeSentinel(p, Date.now() - 10_000) // 10s ago, 50s remaining
-    const remaining = getRemainingCooldownMs(p)
+    const remaining = await getRemainingCooldownMs(p)
     expect(remaining).toBeGreaterThan(0)
     expect(remaining).toBeLessThanOrEqual(COOLDOWN_MS - 10_000 + 100) // +100ms tolerance
   })
 
-  it("returns near-full cooldown for very recent push", () => {
+  it("returns near-full cooldown for very recent push", async () => {
     const p = uniqueSentinel("-recent")
     writeSentinel(p, Date.now() - 100) // 100ms ago
-    const remaining = getRemainingCooldownMs(p)
+    const remaining = await getRemainingCooldownMs(p)
     expect(remaining).toBeGreaterThan(COOLDOWN_MS - 1000) // at least 59s
   })
 
-  it("returns 0 for timestamp far in the past", () => {
+  it("returns 0 for timestamp far in the past", async () => {
     const p = uniqueSentinel("-ancient")
     writeSentinel(p, 0) // epoch
-    expect(getRemainingCooldownMs(p)).toBe(0)
+    expect(await getRemainingCooldownMs(p)).toBe(0)
   })
 
-  it("returns 0 for future timestamp (clock skew)", () => {
+  it("returns 0 for future timestamp (clock skew)", async () => {
     const p = uniqueSentinel("-future")
     // A future timestamp means elapsed is negative, so remaining > COOLDOWN_MS.
     // But since the push "hasn't happened yet" from our perspective, remaining
     // will exceed COOLDOWN_MS. This is the correct safe behaviour — it decays.
     writeSentinel(p, Date.now() + 10_000)
-    const remaining = getRemainingCooldownMs(p)
+    const remaining = await getRemainingCooldownMs(p)
     expect(remaining).toBeGreaterThan(COOLDOWN_MS)
   })
 })

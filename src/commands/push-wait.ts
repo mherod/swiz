@@ -30,14 +30,11 @@ export function getRepoKey(cwd: string): string {
   return getCanonicalPathHash(repoRoot)
 }
 
-export function getRemainingCooldownMs(sentinelPath: string): number {
+export async function getRemainingCooldownMs(sentinelPath: string): Promise<number> {
   try {
     const file = Bun.file(sentinelPath)
-    // Bun.file().size is 0 for non-existent files
-    if (file.size === 0) return 0
-    // Use spawnSync to read file synchronously (needed inside setInterval)
-    const proc = Bun.spawnSync(["cat", sentinelPath], { stdout: "pipe", stderr: "pipe" })
-    const raw = new TextDecoder().decode(proc.stdout).trim()
+    if (!(await file.exists())) return 0
+    const raw = (await file.text()).trim()
     if (raw === "") return 0
     const lastPush = parseInt(raw, 10)
     if (Number.isNaN(lastPush)) return 0
@@ -63,40 +60,32 @@ export async function waitForCooldown(opts: WaitForCooldownOptions): Promise<{ w
   const timeoutMs = timeoutSeconds * 1000
 
   // Check immediately — cooldown may already be clear
-  const initial = getRemainingCooldownMs(sentinelPath)
+  const initial = await getRemainingCooldownMs(sentinelPath)
   if (initial === 0) {
     return { waitedMs: 0 }
   }
 
   log(`⏳ Push cooldown active — ${Math.ceil(initial / 1000)}s remaining`)
 
-  return new Promise((resolve, reject) => {
-    const timer = setInterval(() => {
-      const elapsed = Date.now() - startTime
+  while (true) {
+    await Bun.sleep(pollInterval)
+    const elapsed = Date.now() - startTime
 
-      // Timeout check — deterministic exit
-      if (elapsed > timeoutMs) {
-        clearInterval(timer)
-        const remaining = getRemainingCooldownMs(sentinelPath)
-        reject(
-          new Error(
-            `Cooldown did not expire within ${timeoutSeconds}s timeout` +
-              (remaining > 0 ? ` (${Math.ceil(remaining / 1000)}s still remaining)` : "")
-          )
-        )
-        return
-      }
+    if (elapsed > timeoutMs) {
+      const remaining = await getRemainingCooldownMs(sentinelPath)
+      throw new Error(
+        `Cooldown did not expire within ${timeoutSeconds}s timeout` +
+          (remaining > 0 ? ` (${Math.ceil(remaining / 1000)}s still remaining)` : "")
+      )
+    }
 
-      const remaining = getRemainingCooldownMs(sentinelPath)
-      if (remaining === 0) {
-        clearInterval(timer)
-        log(`✓ Cooldown expired after ${Math.round(elapsed / 1000)}s`)
-        resolve({ waitedMs: elapsed })
-      } else {
-        log(`⏳ Cooldown: ${Math.ceil(remaining / 1000)}s remaining...`)
-      }
-    }, pollInterval)
-  })
+    const remaining = await getRemainingCooldownMs(sentinelPath)
+    if (remaining === 0) {
+      log(`✓ Cooldown expired after ${Math.round(elapsed / 1000)}s`)
+      return { waitedMs: elapsed }
+    }
+    log(`⏳ Cooldown: ${Math.ceil(remaining / 1000)}s remaining...`)
+  }
 }
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────
