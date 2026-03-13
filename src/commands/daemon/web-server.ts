@@ -1,4 +1,5 @@
 import { dirname, extname, join } from "node:path"
+import type { LRUCache } from "lru-cache"
 import { executeDispatch } from "../../dispatch/execute.ts"
 import { deleteSessionData, resolveSessionDeletionTargets } from "../../session-data-delete.ts"
 import {
@@ -139,7 +140,7 @@ export interface DaemonWebServerContext {
     sessionId: string | null | undefined
   ) => Promise<WarmStatusLineSnapshot>
   watchers: FileWatcherRegistry
-  snapshots: Map<string, CachedSnapshot>
+  snapshots: LRUCache<string, CachedSnapshot> | Map<string, CachedSnapshot>
   workerRuntime: DaemonWorkerRuntime
 }
 
@@ -357,18 +358,33 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
 
       if (url.pathname === "/metrics" && req.method === "GET") {
         const projectParam = url.searchParams.get("project")
+        const cacheMetrics = {
+          ghQuery: { size: ghCache.size, hits: ghCache.hits, misses: ghCache.misses },
+          transcriptIndex: {
+            size: transcriptIndex.size,
+            hits: transcriptIndex.hits,
+            misses: transcriptIndex.misses,
+          },
+          eligibility: { size: eligibilityCache.size },
+          cooldown: { size: cooldownRegistry.size },
+          gitState: { size: gitStateCache.size },
+          projectSettings: { size: projectSettingsCache.size },
+          manifest: { size: manifestCache.size },
+          snapshots: { size: snapshots.size },
+        }
         if (projectParam) {
           const pm = projectMetrics.get(projectParam)
           return Response.json({
             ...(pm ? serializeMetrics(pm) : serializeMetrics(createMetrics())),
             project: projectParam,
+            caches: cacheMetrics,
           })
         }
         const projects: Record<string, ReturnType<typeof serializeMetrics>> = {}
         for (const [cwd, m] of projectMetrics) {
           projects[cwd] = serializeMetrics(m)
         }
-        return Response.json({ ...serializeMetrics(globalMetrics), projects })
+        return Response.json({ ...serializeMetrics(globalMetrics), projects, caches: cacheMetrics })
       }
 
       if (url.pathname === "/process/agents" && req.method === "GET") {

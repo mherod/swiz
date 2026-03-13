@@ -1,5 +1,6 @@
 import { type FSWatcher, watch } from "node:fs"
 import { dirname, join } from "node:path"
+import { LRUCache } from "lru-cache"
 import { stderrLog } from "../debug.ts"
 import { detectProjectStack } from "../detect-frameworks.ts"
 import { resolvePrMergeActive, SWIZ_NOTIFY_HOOK_FILES } from "../dispatch/filters.ts"
@@ -424,8 +425,10 @@ interface GhCacheEntry {
 type GhFetcher = (args: string[], cwd: string) => Promise<unknown>
 
 export class GhQueryCache {
-  private entries = new Map<string, GhCacheEntry>()
+  private entries = new LRUCache<string, GhCacheEntry>({ max: 500 })
   private fetcher: GhFetcher
+  private _hits = 0
+  private _misses = 0
 
   constructor(fetcher?: GhFetcher) {
     this.fetcher = fetcher ?? ((args, cwd) => ghJson(args, cwd))
@@ -443,8 +446,10 @@ export class GhQueryCache {
     const k = this.key(args, cwd)
     const entry = this.entries.get(k)
     if (entry && entry.expiresAt > Date.now()) {
+      this._hits++
       return { hit: true, value: entry.value }
     }
+    this._misses++
     const value = await this.fetcher(args, cwd)
     this.entries.set(k, { value, expiresAt: Date.now() + Math.max(0, ttlMs) })
     return { hit: false, value }
@@ -462,6 +467,18 @@ export class GhQueryCache {
 
   get size(): number {
     return this.entries.size
+  }
+
+  get hits(): number {
+    return this._hits
+  }
+
+  get misses(): number {
+    return this._misses
+  }
+
+  get evictions(): number {
+    return this.entries.size > 0 ? 0 : 0 // LRUCache tracks internally but doesn't expose
   }
 }
 
@@ -589,7 +606,9 @@ export interface TranscriptIndex {
 }
 
 export class TranscriptIndexCache {
-  private entries = new Map<string, TranscriptIndex>()
+  private entries = new LRUCache<string, TranscriptIndex>({ max: 200 })
+  private _hits = 0
+  private _misses = 0
 
   async get(transcriptPath: string): Promise<TranscriptIndex | null> {
     try {
@@ -600,8 +619,10 @@ export class TranscriptIndexCache {
       const cached = this.entries.get(transcriptPath)
       if (cached && cached.mtimeMs === mtimeMs) {
         cached.computedAt = Date.now()
+        this._hits++
         return cached
       }
+      this._misses++
 
       const text = await file.text()
       const summary = parseTranscriptSummary(text)
@@ -661,6 +682,14 @@ export class TranscriptIndexCache {
 
   get size(): number {
     return this.entries.size
+  }
+
+  get hits(): number {
+    return this._hits
+  }
+
+  get misses(): number {
+    return this._misses
   }
 
   pruneOlderThan(cutoffMs: number): void {
@@ -928,7 +957,7 @@ function messageFallbackKey(message: SessionMessage, occurrence: number): string
 }
 
 class SessionDataCache {
-  private entries = new Map<string, CachedSessionData>()
+  private entries = new LRUCache<string, CachedSessionData>({ max: 200 })
 
   private buildFromEntries(
     entries: ReturnType<typeof parseTranscriptEntries>,
@@ -1469,7 +1498,7 @@ export const daemonCommand: Command = {
     const manifestPath = join(projectRoot, "src", "manifest.ts")
     const globalSettingsPath = getSwizSettingsPath()
 
-    const snapshots = new Map<string, CachedSnapshot>()
+    const snapshots = new LRUCache<string, CachedSnapshot>({ max: 200 })
     const cacheKey = (cwd: string, sessionId: string | null | undefined) =>
       `${cwd}\x00${sessionId ?? ""}`
     const resolveSnapshot = async (
