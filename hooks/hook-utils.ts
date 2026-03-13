@@ -19,7 +19,6 @@ if (!Bun.which("bun")) {
 // manager and runtime. Cached per process so hooks don't stat the filesystem
 // on every import.
 
-import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { orderBy } from "lodash-es"
 import { translateMatcher } from "../src/agents.ts"
@@ -40,6 +39,7 @@ import {
   GIT_SYNC_RE,
   GIT_WRITE_RE,
   READ_CMD_RE,
+  SETUP_CMD_RE,
 } from "./utils/git-utils.ts"
 import { shellTokenCommandRe } from "./utils/shell-patterns.ts"
 
@@ -215,10 +215,10 @@ export function denyPostToolUse(reason: string): never {
   process.exit(0)
 }
 
-/** Read current project state line synchronously, e.g. "State: developing → [reviewing, planning]". */
-function readStateLineSyncMaybe(cwd: string): string | null {
+/** Read current project state line, e.g. "State: developing → [reviewing, planning]". */
+async function readStateMaybe(cwd: string): Promise<string | null> {
   try {
-    const raw = readFileSync(getStatePath(cwd), "utf-8")
+    const raw = await Bun.file(getStatePath(cwd)).text()
     const result = stateDataSchema.safeParse(JSON.parse(raw))
     if (!result.success) return null
     const allowed = STATE_TRANSITIONS[result.data.state]
@@ -230,9 +230,12 @@ function readStateLineSyncMaybe(cwd: string): string | null {
 
 /** Emit additional context for a hook event. Works across all agents.
  *  For PostToolUse events, appends current project state + allowed transitions when a state is set. */
-export function emitContext(eventName: string, context: string, cwd?: string): never {
-  const stateLine =
-    eventName === "PostToolUse" ? readStateLineSyncMaybe(cwd ?? process.cwd()) : null
+export async function emitContext(
+  eventName: string,
+  context: string,
+  cwd?: string
+): Promise<never> {
+  const stateLine = eventName === "PostToolUse" ? await readStateMaybe(cwd ?? process.cwd()) : null
   const fullContext = stateLine ? `${context} ${stateLine}` : context
   console.log(
     JSON.stringify({
@@ -293,24 +296,19 @@ function updateMemoryAdvice(reason: string): string {
   )
 }
 
-let _updateMemoryFooterEnabledCache: boolean | undefined
+const _updateMemoryFooterEnabledCache: boolean = await (async () => {
+  const settingsPath = getSwizSettingsPath()
+  if (!settingsPath) return false
+  try {
+    if (!(await Bun.file(settingsPath).exists())) return false
+    const parsed = (await Bun.file(settingsPath).json()) as Record<string, unknown>
+    return parsed.updateMemoryFooter === true
+  } catch {
+    return false
+  }
+})()
 
 function isUpdateMemoryFooterEnabled(): boolean {
-  if (_updateMemoryFooterEnabledCache !== undefined) return _updateMemoryFooterEnabledCache
-
-  const settingsPath = getSwizSettingsPath()
-  if (!settingsPath || !existsSync(settingsPath)) {
-    _updateMemoryFooterEnabledCache = false
-    return _updateMemoryFooterEnabledCache
-  }
-
-  try {
-    const parsed = JSON.parse(readFileSync(settingsPath, "utf-8")) as Record<string, unknown>
-    _updateMemoryFooterEnabledCache = parsed.updateMemoryFooter === true
-  } catch {
-    _updateMemoryFooterEnabledCache = false
-  }
-
   return _updateMemoryFooterEnabledCache
 }
 
@@ -872,6 +870,7 @@ export {
   READ_CMD_RE,
   type RemoteInfo,
   recentHeadRange,
+  SETUP_CMD_RE,
   SOURCE_EXT_RE,
   SWIZ_ISSUE_RE,
   TEST_FILE_RE,
@@ -897,7 +896,8 @@ export function isTaskTrackingExemptShellCommand(command: string): boolean {
     READ_CMD_RE.test(command) ||
     GIT_SYNC_RE.test(command) ||
     GH_CMD_RE.test(command) ||
-    SWIZ_CMD_RE.test(command)
+    SWIZ_CMD_RE.test(command) ||
+    SETUP_CMD_RE.test(command)
   )
 }
 

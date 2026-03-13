@@ -449,6 +449,11 @@ export function hasGitPushForceFlag(command: string): boolean {
 /** Matches `ls`, `rg`, or `grep` — pure read commands. */
 export const READ_CMD_RE = shellStatementCommandRe("(ls|rg|grep)\\b")
 
+/** Matches setup, install, lint, build, format, and typecheck commands — safe to run without tasks. */
+export const SETUP_CMD_RE = shellStatementCommandRe(
+  "(bun|pnpm|npm|yarn|npx)\\s+(?:run\\s+)?(install|add|i|ci|lint|lint-staged|build|format|typecheck|type-check|check|biome|eslint|prettier|tsc)\\b"
+)
+
 /** Matches any `gh` CLI invocation. */
 export const GH_CMD_RE = shellStatementCommandRe("gh\\b")
 

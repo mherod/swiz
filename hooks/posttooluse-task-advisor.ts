@@ -18,15 +18,15 @@ function emitCreationCountdown(total: number, threshold: number, taskCreateName:
   const remaining = threshold - total
   if (remaining <= 0) return
   if (remaining <= 1) {
-    emit(
+    void emit(
       `${taskCreateName} required in ${remaining} tool call(s) — tools will be blocked until tasks are defined.`
     )
   } else if (remaining <= 3) {
-    emit(
+    void emit(
       `${taskCreateName} required in ${remaining} tool calls. Plan your tasks now to avoid interruption.`
     )
   } else if (total >= 2) {
-    emit(`${total}/${threshold} tool calls before ${taskCreateName} is required.`)
+    void emit(`${total}/${threshold} tool calls before ${taskCreateName} is required.`)
   }
 }
 
@@ -37,7 +37,7 @@ function emitStalenessWarning(
 ): void {
   if (staleRemaining <= 0) {
     if (isEditTool(toolName) || isWriteTool(toolName)) {
-      emit(
+      void emit(
         `Tasks need attention — it's been ${callsSinceTask} tool calls since the last task update. ` +
           `Review progress: mark completed tasks done, update in-progress tasks with current status, ` +
           `or create new tasks for the work underway.`
@@ -46,11 +46,11 @@ function emitStalenessWarning(
     return
   }
   if (staleRemaining <= 2) {
-    emit(
+    void emit(
       `Task update required in ${staleRemaining} tool call(s) — tools will be blocked until tasks are reviewed.`
     )
   } else if (staleRemaining <= 4) {
-    emit(
+    void emit(
       `Task update due in ${staleRemaining} tool calls. Review progress — mark completed tasks done or create new ones.`
     )
   }
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   emitStalenessWarning(callsSinceTask, staleRemaining, (input.tool_name ?? "") as string)
 }
 
-function emit(context: string): never {
+async function emit(context: string): Promise<never> {
   return emitContext("PostToolUse", context)
 }
 

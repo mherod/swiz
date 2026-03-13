@@ -1095,6 +1095,82 @@ describe("isTaskTrackingExemptShellCommand — swiz command exemption", () => {
   })
 })
 
+// ─── isTaskTrackingExemptShellCommand — setup/build commands ────────────────
+
+describe("isTaskTrackingExemptShellCommand — setup/build command exemption", () => {
+  it("exempts 'bun install'", () => {
+    expect(isTaskTrackingExemptShellCommand("bun install")).toBe(true)
+  })
+
+  it("exempts 'pnpm install'", () => {
+    expect(isTaskTrackingExemptShellCommand("pnpm install")).toBe(true)
+  })
+
+  it("exempts 'npm install'", () => {
+    expect(isTaskTrackingExemptShellCommand("npm install")).toBe(true)
+  })
+
+  it("exempts 'yarn install'", () => {
+    expect(isTaskTrackingExemptShellCommand("yarn install")).toBe(true)
+  })
+
+  it("exempts 'npm ci'", () => {
+    expect(isTaskTrackingExemptShellCommand("npm ci")).toBe(true)
+  })
+
+  it("exempts 'bun add lodash'", () => {
+    expect(isTaskTrackingExemptShellCommand("bun add lodash")).toBe(true)
+  })
+
+  it("exempts 'pnpm lint'", () => {
+    expect(isTaskTrackingExemptShellCommand("pnpm lint")).toBe(true)
+  })
+
+  it("exempts 'npm run lint'", () => {
+    expect(isTaskTrackingExemptShellCommand("npm run lint")).toBe(true)
+  })
+
+  it("exempts 'bun build'", () => {
+    expect(isTaskTrackingExemptShellCommand("bun build")).toBe(true)
+  })
+
+  it("exempts 'pnpm typecheck'", () => {
+    expect(isTaskTrackingExemptShellCommand("pnpm typecheck")).toBe(true)
+  })
+
+  it("exempts 'npx tsc'", () => {
+    expect(isTaskTrackingExemptShellCommand("npx tsc")).toBe(true)
+  })
+
+  it("exempts 'pnpm format'", () => {
+    expect(isTaskTrackingExemptShellCommand("pnpm format")).toBe(true)
+  })
+
+  it("exempts 'npx biome check .'", () => {
+    expect(isTaskTrackingExemptShellCommand("npx biome check .")).toBe(true)
+  })
+
+  it("exempts 'npx eslint src/'", () => {
+    expect(isTaskTrackingExemptShellCommand("npx eslint src/")).toBe(true)
+  })
+
+  it("exempts 'npx prettier --check .'", () => {
+    expect(isTaskTrackingExemptShellCommand("npx prettier --check .")).toBe(true)
+  })
+
+  it("exempts setup command after && operator", () => {
+    expect(isTaskTrackingExemptShellCommand("echo done && bun install")).toBe(true)
+  })
+
+  it("does not exempt 'bun run dev'", () => {
+    expect(isTaskTrackingExemptShellCommand("bun run dev")).toBe(false)
+  })
+
+  it("does not exempt 'node script.js'", () => {
+    expect(isTaskTrackingExemptShellCommand("node script.js")).toBe(false)
+  })
+})
+
 // ─── isSwizCommand ──────────────────────────────────────────────────────────
 
 describe("isSwizCommand", () => {
