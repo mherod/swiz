@@ -352,6 +352,9 @@ export const GH_PR_CREATE_RE = shellStatementCommandRe("gh\\s+pr\\s+create\\b")
 /** Matches `git checkout` anywhere in a shell command string. */
 export const GIT_CHECKOUT_RE = shellStatementCommandRe("git\\s+checkout\\b")
 
+/** Matches `git switch` anywhere in a shell command string. */
+export const GIT_SWITCH_RE = shellStatementCommandRe("git\\s+switch\\b")
+
 /** Matches `gh pr checkout` anywhere in a shell command string. */
 export const GH_PR_CHECKOUT_RE = shellStatementCommandRe("gh\\s+pr\\s+checkout\\b")
 
@@ -476,9 +479,9 @@ export function hasGitPushForceFlag(command: string): boolean {
 /** Matches `ls`, `rg`, or `grep` — pure read commands. */
 export const READ_CMD_RE = shellStatementCommandRe("(ls|rg|grep)\\b")
 
-/** Matches setup, install, lint, build, format, and typecheck commands — safe to run without tasks. */
+/** Matches setup, install, lint, build, format, test, and typecheck commands — safe to run without tasks. */
 export const SETUP_CMD_RE = shellStatementCommandRe(
-  "(bun|pnpm|npm|yarn|npx)\\s+(?:run\\s+)?(install|add|i|ci|lint|lint-staged|build|format|typecheck|type-check|check|biome|eslint|prettier|tsc)\\b"
+  "(bun|pnpm|npm|yarn|npx)\\s+(?:run\\s+)?(install|add|i|ci|lint|lint-staged|build|format|test|typecheck|type-check|check|biome|eslint|prettier|tsc)\\b"
 )
 
 /** Matches any `gh` CLI invocation. */

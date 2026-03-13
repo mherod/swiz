@@ -35,7 +35,10 @@ import { backfillTaskTimingFields } from "../src/tasks/task-timing.ts"
 import { sessionTaskSentinelPath } from "../src/temp-paths.ts"
 import {
   GH_CMD_RE,
+  GIT_CHECKOUT_RE,
+  GIT_COMMIT_RE,
   GIT_READ_RE,
+  GIT_SWITCH_RE,
   GIT_SYNC_RE,
   GIT_WRITE_RE,
   READ_CMD_RE,
@@ -858,6 +861,7 @@ export {
   GIT_MERGE_RE,
   GIT_PUSH_RE,
   GIT_READ_RE,
+  GIT_SWITCH_RE,
   GIT_SYNC_RE,
   GIT_WRITE_RE,
   getCurrentGitHubUser,
@@ -901,6 +905,9 @@ export function isTaskTrackingExemptShellCommand(command: string): boolean {
     (GIT_READ_RE.test(command) && !GIT_WRITE_RE.test(command)) ||
     READ_CMD_RE.test(command) ||
     GIT_SYNC_RE.test(command) ||
+    GIT_COMMIT_RE.test(command) ||
+    GIT_CHECKOUT_RE.test(command) ||
+    GIT_SWITCH_RE.test(command) ||
     GH_CMD_RE.test(command) ||
     SWIZ_CMD_RE.test(command) ||
     SETUP_CMD_RE.test(command)

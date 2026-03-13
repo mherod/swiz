@@ -468,10 +468,10 @@ describe("pretooluse-require-tasks", () => {
       expect(result.decision).toBeUndefined()
     })
 
-    test("still denies git commit without tasks", async () => {
+    test("allows git commit without tasks", async () => {
       const homeDir = await createTempHome()
       const result = await runHook({ homeDir, command: 'git commit -m "wip"' })
-      expect(result.decision).toBe("deny")
+      expect(result.decision).toBeUndefined()
     })
 
     test("allows git push without tasks (push/pull/fetch are exempt)", async () => {
@@ -480,10 +480,34 @@ describe("pretooluse-require-tasks", () => {
       expect(result.decision).toBeUndefined()
     })
 
-    test("still denies git checkout without tasks", async () => {
+    test("allows git checkout without tasks", async () => {
       const homeDir = await createTempHome()
       const result = await runHook({ homeDir, command: "git checkout -b new-branch" })
-      expect(result.decision).toBe("deny")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows git switch without tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "git switch feature-branch" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows bun test without tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "bun test --concurrent" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows pnpm test without tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "pnpm test" })
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("allows bun run lint without tasks", async () => {
+      const homeDir = await createTempHome()
+      const result = await runHook({ homeDir, command: "bun run lint" })
+      expect(result.decision).toBeUndefined()
     })
 
     test("still denies non-exempt commands without tasks", async () => {
