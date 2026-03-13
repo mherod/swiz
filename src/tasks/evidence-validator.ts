@@ -1,6 +1,6 @@
 // ─── Validation & evidence ───────────────────────────────────────────────────
 
-export const EVIDENCE_PREFIXES = ["commit:", "pr:", "file:", "test:", "note:"]
+export const EVIDENCE_PREFIXES = ["commit:", "pr:", "file:", "test:", "note:", "ci_green:"]
 
 /**
  * Segment-anchored evidence patterns.
@@ -14,7 +14,7 @@ export const EVIDENCE_SEGMENT_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: "conclusion", re: /^conclusion\s*:\s*\S+/i },
   { name: "run", re: /^run\s+\d{3,}/i },
   { name: "commit", re: /^(?:commit\s*:\s*)?[0-9a-f]{7,40}$/i },
-  { name: "ci_green", re: /^ci[\s_]green$/i },
+  { name: "ci_green", re: /^ci[\s_]green(?:\s*:\s*\S*)?$/i },
   { name: "pr", re: /^pr[:#]\s*\d+/i },
   { name: "file", re: /^file\s*:\s*\S+/i },
   { name: "test", re: /^test\s*:\s*\S+/i },

@@ -267,6 +267,11 @@ describe("validateEvidence", () => {
     expect(error).toContain("Invalid evidence prefix")
   })
 
+  it("accepts ci_green: as a valid evidence prefix", () => {
+    expect(validateEvidence("ci_green:")).toBeNull()
+    expect(validateEvidence("ci_green: ")).toBeNull()
+  })
+
   it("accepts multi-segment evidence where all segments use recognized prefixes", () => {
     expect(validateEvidence("commit:abc1234 -- note:all jobs passed")).toBeNull()
     expect(validateEvidence("pr:#42 -- note:squash merged")).toBeNull()
