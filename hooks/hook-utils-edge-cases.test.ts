@@ -1090,8 +1090,8 @@ describe("isTaskTrackingExemptShellCommand — swiz command exemption", () => {
     expect(isTaskTrackingExemptShellCommand("git add .")).toBe(false)
   })
 
-  it("does not exempt 'bun test'", () => {
-    expect(isTaskTrackingExemptShellCommand("bun test")).toBe(false)
+  it("exempts 'bun test'", () => {
+    expect(isTaskTrackingExemptShellCommand("bun test")).toBe(true)
   })
 })
 
