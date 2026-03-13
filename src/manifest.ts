@@ -168,6 +168,7 @@ export const manifest: HookGroup[] = [
     hooks: [
       { file: "pretooluse-require-tasks.ts", timeout: 5 },
       { file: "pretooluse-state-gate.ts", timeout: 5 },
+      { file: "pretooluse-block-preexisting-dismissals.ts", timeout: 5 },
     ],
   },
   {

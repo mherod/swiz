@@ -1,0 +1,440 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** Build a JSONL entry for a shell tool_use + its tool_result. */
+function shellCommandEntry(command: string): string {
+  return JSON.stringify({
+    type: "assistant",
+    message: {
+      content: [
+        {
+          type: "tool_use",
+          name: "Bash",
+          input: { command },
+        },
+      ],
+    },
+  })
+}
+
+function toolResultEntry(text: string): string {
+  return JSON.stringify({
+    type: "tool_result",
+    content: [{ type: "text", text }],
+  })
+}
+
+function assistantTextEntry(text: string): string {
+  return JSON.stringify({
+    type: "assistant",
+    message: {
+      content: [{ type: "text", text }],
+    },
+  })
+}
+
+function editToolEntry(file: string, oldStr: string, newStr: string): string {
+  return JSON.stringify({
+    type: "assistant",
+    message: {
+      content: [
+        {
+          type: "tool_use",
+          name: "Edit",
+          input: { file_path: file, old_string: oldStr, new_string: newStr },
+        },
+      ],
+    },
+  })
+}
+
+function makeTranscript(...entries: string[]): string {
+  return entries.join("\n")
+}
+
+interface HookResult {
+  blocked: boolean
+  reason: string
+}
+
+async function runHook(opts: {
+  toolName?: string
+  command?: string
+  transcriptContent: string
+}): Promise<HookResult> {
+  const tPath = join(tmpDir, `t-${Math.random().toString(36).slice(2)}.jsonl`)
+  await Bun.write(tPath, opts.transcriptContent)
+
+  const toolName = opts.toolName ?? "Bash"
+  const toolInput =
+    toolName === "Bash"
+      ? { command: opts.command ?? "echo hello" }
+      : { file_path: "/tmp/test.ts", old_string: "a", new_string: "b" }
+
+  const payload = JSON.stringify({
+    tool_name: toolName,
+    tool_input: toolInput,
+    transcript_path: tPath,
+    session_id: "test",
+    cwd: tmpDir,
+  })
+
+  const proc = Bun.spawn(["bun", "hooks/pretooluse-block-preexisting-dismissals.ts"], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
+  const out = await new Response(proc.stdout).text()
+  await proc.exited
+
+  if (!out.trim()) return { blocked: false, reason: "" }
+  const parsed = JSON.parse(out.trim())
+  const hso = parsed?.hookSpecificOutput
+  const decision = hso?.permissionDecision ?? parsed?.decision
+  return {
+    blocked: decision === "deny",
+    reason: hso?.permissionDecisionReason ?? parsed?.reason ?? "",
+  }
+}
+
+// ─── Temp dir lifecycle ──────────────────────────────────────────────────────
+
+let tmpDir: string
+
+beforeAll(async () => {
+  tmpDir = await mkdtemp(join(tmpdir(), "preexisting-dismissals-test-"))
+  // Init a git repo so isGitRepo check passes
+  const proc = Bun.spawn(["git", "init"], { cwd: tmpDir, stdout: "pipe", stderr: "pipe" })
+  await proc.exited
+})
+
+afterAll(async () => {
+  await rm(tmpDir, { recursive: true })
+})
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+describe("pretooluse-block-preexisting-dismissals", () => {
+  describe("passthrough — no diagnostic output", () => {
+    test("empty transcript allows tool calls", async () => {
+      const result = await runHook({ transcriptContent: "" })
+      expect(result.blocked).toBe(false)
+    })
+
+    test("transcript without diagnostic output allows tool calls", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("git status"),
+        toolResultEntry("On branch main\nnothing to commit"),
+        assistantTextEntry("The working tree is clean. These are pre-existing files.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(false)
+    })
+  })
+
+  describe("passthrough — no dismissal claim", () => {
+    test("diagnostic output without dismissal allows tool calls", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 error: Unused variable 'x'\n✖ 1 problem"),
+        assistantTextEntry("I see a lint error. Let me fix it.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(false)
+    })
+  })
+
+  describe("block — dismissal after diagnostic output", () => {
+    test("'pre-existing' claim after lint errors blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 warning: Unused variable\n✖ 1 problem"),
+        assistantTextEntry("This warning is pre-existing and unrelated to our changes.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+      expect(result.reason).toContain("pre-existing")
+    })
+
+    test("'existed before' claim after test failures blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun test --concurrent"),
+        toolResultEntry("FAIL src/utils.test.ts\n  ✗ should validate input"),
+        assistantTextEntry("This test failure existed before our refactoring.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+      expect(result.reason).toContain("existed before")
+    })
+
+    test("'unrelated to this refactor' claim blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run typecheck"),
+        toolResultEntry("src/api.ts(15,3): error TS2322: Type 'string' is not assignable"),
+        assistantTextEntry("This type error is unrelated to this refactor.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("'not introduced by' claim blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/x.ts:5:1 error: Missing return type\n✖ 1 problem"),
+        assistantTextEntry("This error was not introduced by our changes.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("'no new errors' claim blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/x.ts:5:1 warning: Unused import\n✖ 1 problem"),
+        assistantTextEntry("There are no new errors from our changes.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("'already present' claim blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run typecheck"),
+        toolResultEntry("error TS2345: Argument of type 'number' is not assignable"),
+        assistantTextEntry("This type error was already present before our work.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("'outside the scope' claim blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/old.ts:100:1 warning: complexity\n✖ 1 problem"),
+        assistantTextEntry("This warning is outside the scope of our current changes.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("block message includes diagnostic snippet", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 warning: Unused variable 'x'\n✖ 1 problem"),
+        assistantTextEntry("That warning is pre-existing.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+      expect(result.reason).toContain("warning")
+    })
+
+    test("blocks Edit tool calls too, not just Bash", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 error: Missing semicolon\n✖ 1 problem"),
+        assistantTextEntry("This error is pre-existing in the codebase.")
+      )
+      const result = await runHook({
+        toolName: "Edit",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(true)
+    })
+  })
+
+  describe("gate clears — fix applied after dismissal", () => {
+    test("edit tool call after dismissal clears the gate", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 warning: Unused variable\n✖ 1 problem"),
+        assistantTextEntry("This warning is pre-existing."),
+        editToolEntry("src/foo.ts", "const x = 1", "")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(false)
+    })
+  })
+
+  describe("gate clears — scoped verification after dismissal", () => {
+    test("lint on specific file after dismissal clears the gate", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 warning: Unused variable\n✖ 1 problem"),
+        assistantTextEntry("This warning is pre-existing."),
+        shellCommandEntry("bun run lint --only src/changed.ts")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(false)
+    })
+  })
+
+  describe("gate clears — baseline evidence after dismissal", () => {
+    test("git diff after dismissal clears the gate", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 warning: Unused variable\n✖ 1 problem"),
+        assistantTextEntry("This warning is pre-existing."),
+        shellCommandEntry("git diff main -- src/foo.ts")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(false)
+    })
+
+    test("git log after dismissal clears the gate", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 warning: Unused variable\n✖ 1 problem"),
+        assistantTextEntry("This warning is pre-existing."),
+        shellCommandEntry("git log --oneline -5 src/foo.ts")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(false)
+    })
+  })
+
+  describe("passthrough — diagnostic command itself is not blocked", () => {
+    test("running lint after dismissal is not blocked (it is proof)", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 warning: Unused variable\n✖ 1 problem"),
+        assistantTextEntry("This warning is pre-existing.")
+      )
+      const result = await runHook({
+        command: "bun run lint",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(false)
+    })
+
+    test("running test after dismissal is not blocked", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun test --concurrent"),
+        toolResultEntry("FAIL src/a.test.ts\n  ✗ broken test"),
+        assistantTextEntry("This failure is pre-existing.")
+      )
+      const result = await runHook({
+        command: "bun test --concurrent",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(false)
+    })
+
+    test("running typecheck after dismissal is not blocked", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run typecheck"),
+        toolResultEntry("error TS2345: Argument of type 'number'"),
+        assistantTextEntry("This error was already existing.")
+      )
+      const result = await runHook({
+        command: "bun run typecheck",
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(false)
+    })
+  })
+
+  describe("false positive avoidance", () => {
+    test("'pre-existing' in unrelated assistant text without diagnostics is not blocked", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("git status"),
+        toolResultEntry("On branch main\nnothing to commit"),
+        assistantTextEntry("The pre-existing documentation covers this topic well.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(false)
+    })
+
+    test("new diagnostic output after dismissed one resets the cycle", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 warning: Unused variable\n✖ 1 problem"),
+        assistantTextEntry("This is pre-existing."),
+        // New clean diagnostic output resets the cycle
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("All checks passed! No errors.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      // No diagnostic issues in the latest output, so no block
+      expect(result.blocked).toBe(false)
+    })
+
+    test("dismissal followed by new diagnostic errors re-triggers on new dismissal", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/a.ts:1:1 warning: unused\n✖ 1 problem"),
+        assistantTextEntry("Pre-existing warning."),
+        editToolEntry("src/a.ts", "const x", ""),
+        // New run with new errors
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/b.ts:5:1 error: Missing return\n✖ 1 problem"),
+        assistantTextEntry("This error is not introduced by our changes.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("non-git directory is not blocked", async () => {
+      const nonGitDir = await mkdtemp(join(tmpdir(), "nongit-"))
+      const tPath = join(nonGitDir, "transcript.jsonl")
+      await Bun.write(
+        tPath,
+        makeTranscript(
+          shellCommandEntry("bun run lint"),
+          toolResultEntry("error: something failed"),
+          assistantTextEntry("This is pre-existing.")
+        )
+      )
+
+      const payload = JSON.stringify({
+        tool_name: "Bash",
+        tool_input: { command: "echo hello" },
+        transcript_path: tPath,
+        session_id: "test",
+        cwd: nonGitDir,
+      })
+
+      const proc = Bun.spawn(["bun", "hooks/pretooluse-block-preexisting-dismissals.ts"], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      void proc.stdin.write(payload)
+      void proc.stdin.end()
+      const out = await new Response(proc.stdout).text()
+      await proc.exited
+
+      expect(out.trim()).toBe("")
+      await rm(nonGitDir, { recursive: true })
+    })
+  })
+
+  describe("predates claim variant", () => {
+    test("'predates this change' blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/x.ts:5:1 warning: complexity\n✖ 1 problem"),
+        assistantTextEntry("This warning predates this change.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+  })
+
+  describe("not caused by claim variant", () => {
+    test("'not caused by our changes' blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run typecheck"),
+        toolResultEntry("error TS2322: Type 'string' is not assignable"),
+        assistantTextEntry("This type error is not caused by our changes.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+  })
+})
