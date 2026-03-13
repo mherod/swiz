@@ -109,6 +109,28 @@ export function validateEvidence(evidence: string): string | null {
     }
   }
 
+  // commit: requires a valid 7–40 char hex SHA after the prefix.
+  // Accepts space-separated SHA lists (e.g. "commit:abc123f def456a").
+  for (const seg of segments) {
+    const commitMatch = COMMIT_PREFIX_RE.exec(seg)
+    if (commitMatch) {
+      const value = seg.slice(commitMatch[0].length).trim()
+      if (value.length === 0) {
+        return `commit: requires a hex SHA value.\n` + `  --evidence "commit:abc123f"`
+      }
+      const tokens = value.split(/\s+/)
+      for (const token of tokens) {
+        if (!HEX_SHA_RE.test(token)) {
+          return (
+            `Invalid commit SHA: "${token}"\n` +
+            `commit: evidence must be a 7–40 character hex SHA.\n` +
+            `  --evidence "commit:abc123f"`
+          )
+        }
+      }
+    }
+  }
+
   const matched = countEvidenceFields(evidence)
   if (matched.length < REQUIRED_EVIDENCE_FIELDS) {
     const found = matched.length > 0 ? matched.join(", ") : "none"

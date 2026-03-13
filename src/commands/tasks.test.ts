@@ -235,6 +235,18 @@ describe("validateEvidence", () => {
     expect(validateEvidence("commit:abc123f def456a 1234567")).toBeNull()
   })
 
+  it("rejects commit: with non-hex value", () => {
+    const error = validateEvidence("commit:not-a-sha")
+    expect(error).not.toBeNull()
+    expect(error).toContain("Invalid commit SHA")
+  })
+
+  it("rejects bare commit: with no SHA", () => {
+    const error = validateEvidence("commit:")
+    expect(error).not.toBeNull()
+    expect(error).toContain("requires a hex SHA")
+  })
+
   it("rejects evidence without a recognized prefix", () => {
     const error = validateEvidence("just some text")
     expect(error).not.toBeNull()
