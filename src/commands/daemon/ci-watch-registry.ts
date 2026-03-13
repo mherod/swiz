@@ -32,21 +32,21 @@ function ciWatchKey(cwd: string, sha: string): string {
   return `${cwd}\x00${sha}`
 }
 
-function resolveNotifyBinary(): string | null {
+async function resolveNotifyBinary(): Promise<string | null> {
   const envBin = process.env.SWIZ_NOTIFY_BIN
   if (envBin?.trim()) return envBin
   const repoRoot = dirname(Bun.main)
   const devPath = join(repoRoot, "macos", "SwizNotify.app", "Contents", "MacOS", "swiz-notify")
-  if (Bun.file(devPath).size > 0) return devPath
+  if (await Bun.file(devPath).exists()) return devPath
   const installed = "/usr/local/bin/swiz-notify"
-  if (Bun.file(installed).size > 0) return installed
+  if (await Bun.file(installed).exists()) return installed
   return null
 }
 
 async function defaultCiCompletionNotify(
   watch: CiWatchStatus & { conclusion: string }
 ): Promise<void> {
-  const binary = resolveNotifyBinary()
+  const binary = await resolveNotifyBinary()
   if (!binary) return
   const sound = watch.conclusion === "success" ? "Hero" : "Bottle"
   const title = watch.conclusion === "success" ? "swiz CI passed" : "swiz CI failed"
