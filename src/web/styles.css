@@ -448,6 +448,41 @@ tbody tr:hover {
   margin-top: 0;
 }
 
+.nav-guidance {
+  margin-bottom: 10px;
+}
+
+.nav-inline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nav-inline-header .section-title {
+  margin: 0;
+}
+
+.nav-inline-header-sessions {
+  margin-top: 12px;
+}
+
+.nav-inline-project {
+  margin: 6px 2px 0;
+  color: #a0b2d5;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.nav-inline-status {
+  margin: 6px 0 2px;
+}
+
+.nav-empty-inline {
+  margin: 8px 2px 0;
+}
+
 .project-list,
 .session-list,
 .messages-list {
@@ -460,6 +495,10 @@ tbody tr:hover {
 .session-list {
   display: grid;
   gap: 8px;
+}
+
+.session-list {
+  align-content: start;
 }
 
 .session-row {
@@ -479,7 +518,7 @@ tbody tr:hover {
   padding: 9px 10px;
   text-align: left;
   display: grid;
-  gap: 2px;
+  gap: 4px;
   cursor: pointer;
   font-size: 0.95rem;
   line-height: 1.5;
@@ -561,6 +600,37 @@ tbody tr:hover {
   align-items: center;
   gap: 6px;
   text-wrap: pretty;
+}
+
+.selected-project-summary {
+  margin-bottom: 10px;
+  border: 1px solid rgba(118, 153, 229, 0.24);
+  border-radius: 10px;
+  background: rgba(37, 45, 59, 0.44);
+  padding: 8px 10px;
+}
+
+.selected-project-name {
+  margin: 0;
+  color: #dce8ff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.selected-project-meta {
+  margin: 2px 0 0;
+  color: #9eb1d6;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.selected-project-status {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .project-state-chip {
@@ -790,6 +860,9 @@ tbody tr:hover {
 
 .session-group-label {
   margin: 8px 2px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: #8fa8df;
   font-size: 0.78rem;
   text-transform: uppercase;
@@ -797,6 +870,52 @@ tbody tr:hover {
   line-height: 1.5;
   padding-top: 8px;
   border-top: 1px solid rgba(118, 153, 229, 0.16);
+}
+
+.session-group-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(116, 157, 247, 0.34);
+  background: rgba(75, 106, 178, 0.2);
+  color: #bcd5ff;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-group-shell {
+  list-style: none;
+}
+
+.session-group-collapsible > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.session-group-collapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+.session-group-collapsible > summary::before {
+  content: "▸";
+  color: #8fa8df;
+  margin-right: 6px;
+  transition: transform 120ms ease;
+}
+
+.session-group-collapsible[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.session-group-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
 }
 
 .session-action-btn {

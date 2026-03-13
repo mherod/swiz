@@ -163,6 +163,7 @@ function parseProjectStatusLine(statusLine?: string): ParsedStatusToken[] {
     return { label: part, tone: "neutral" }
   })
   return parsed.filter((token) => {
+    if (token.tone === "state") return false
     if (token.tone !== "neutral") return true
     // Drop dense git shorthand tokens like "± main ~10 ?1 $3".
     if (/[±~?$]/.test(token.label)) return false
@@ -776,6 +777,9 @@ export function SessionNav({
     [sortedSessions]
   )
   const selectedProjectCwdSafe = selectedProject?.cwd ?? null
+  const selectedProjectStatus = selectedProject
+    ? parseProjectStatusLine(selectedProject.statusLine).slice(0, 2)
+    : []
 
   const renderSessionRow = (session: SessionPreview) => {
     const processPids = providerProcessPids(session.provider, activeAgentPidsByProvider)
@@ -916,75 +920,93 @@ export function SessionNav({
 
   return (
     <nav className="card bento-nav">
-      <section className="nav-block">
-        <div className="nav-block-header">
-          <h2 className="section-title">Projects</h2>
-          <span className="nav-count-badge">{sortedProjects.length}</span>
-        </div>
-        <p className="section-subtitle">Project and session switcher</p>
-        <ul className="project-list" aria-label="Active and recent project directories">
-          {sortedProjects.map((project) => {
-            const projectState = extractProjectState(project.statusLine)
-            return (
-              <li key={project.cwd}>
-                <button
-                  type="button"
-                  className={cn("project-btn", project.cwd === selectedProjectCwd && "selected")}
-                  aria-pressed={project.cwd === selectedProjectCwd}
-                  onClick={() => onSelectProject(project.cwd)}
-                >
-                  <span className="project-name">
-                    {project.name}
-                    {projectState ? (
-                      <span className={cn("project-state-chip", `project-state-${projectState}`)}>
-                        {formatProjectStateLabel(projectState)}
-                      </span>
-                    ) : null}
-                  </span>
-                  {project.statusLine ? (
-                    <span className="project-status-line" title={project.statusLine}>
-                      {parseProjectStatusLine(project.statusLine).map((token) => (
-                        <span
-                          key={`${project.cwd}-${token.label}`}
-                          className={cn("project-status-chip", `project-status-${token.tone}`)}
-                        >
-                          {token.label}
-                        </span>
-                      ))}
+      <div className="nav-inline-header">
+        <h2 className="section-title">Projects</h2>
+        <span className="nav-count-badge">{sortedProjects.length}</span>
+      </div>
+      <ul className="project-list" aria-label="Active and recent project directories">
+        {sortedProjects.map((project) => {
+          const projectState = extractProjectState(project.statusLine)
+          const projectStatus = parseProjectStatusLine(project.statusLine).slice(0, 1)
+          return (
+            <li key={project.cwd}>
+              <button
+                type="button"
+                className={cn("project-btn", project.cwd === selectedProjectCwd && "selected")}
+                aria-pressed={project.cwd === selectedProjectCwd}
+                onClick={() => onSelectProject(project.cwd)}
+              >
+                <span className="project-name">
+                  {project.name}
+                  {projectState ? (
+                    <span className={cn("project-state-chip", `project-state-${projectState}`)}>
+                      {formatProjectStateLabel(projectState)}
                     </span>
                   ) : null}
-                  <span className="project-meta">
-                    {project.sessionCount} sessions · active{" "}
-                    {formatRelativeTime(project.lastSeenAt)}
+                </span>
+                <span className="project-meta">
+                  {project.sessionCount} sessions · {formatRelativeTime(project.lastSeenAt)}
+                </span>
+                {projectStatus.length > 0 ? (
+                  <span className="project-status-line" title={project.statusLine}>
+                    {projectStatus.map((token) => (
+                      <span
+                        key={`${project.cwd}-${token.label}`}
+                        className={cn("project-status-chip", `project-status-${token.tone}`)}
+                      >
+                        {token.label}
+                      </span>
+                    ))}
                   </span>
-                </button>
+                ) : null}
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      {selectedProject ? (
+        <>
+          <div className="nav-inline-header nav-inline-header-sessions">
+            <h2 className="section-title nav-section-title">Sessions</h2>
+            <span className="nav-count-badge">{sortedSessions?.length ?? 0}</span>
+          </div>
+          <p className="nav-inline-project">
+            {selectedProject.name} · {activeSessions?.length ?? 0} active ·{" "}
+            {recentSessions?.length ?? 0} recent
+          </p>
+          {selectedProjectStatus.length > 0 ? (
+            <div
+              className="project-status-line nav-inline-status"
+              title={selectedProject.statusLine}
+            >
+              {selectedProjectStatus.map((token) => (
+                <span
+                  key={`${selectedProject.cwd}-selected-${token.label}`}
+                  className={cn("project-status-chip", `project-status-${token.tone}`)}
+                >
+                  {token.label}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <ul className="session-list" aria-label="Sessions for selected project">
+            {activeSessions && activeSessions.length > 0 ? (
+              <li className="session-group-label">
+                Active <span className="session-group-count">{activeSessions.length}</span>
               </li>
-            )
-          })}
-        </ul>
-      </section>
-      <section className="nav-block nav-block-sessions">
-        <div className="nav-block-header">
-          <h2 className="section-title nav-section-title">Sessions</h2>
-          <span className="nav-count-badge">{sortedSessions?.length ?? 0}</span>
-        </div>
-        <ul className="session-list" aria-label="Sessions for selected project">
-          {sortedSessions ? (
-            <>
-              {activeSessions && activeSessions.length > 0 ? (
-                <li className="session-group-label">Active now</li>
-              ) : null}
-              {activeSessions?.map(renderSessionRow)}
-              {recentSessions && recentSessions.length > 0 ? (
-                <li className="session-group-label">Recent</li>
-              ) : null}
-              {recentSessions?.map(renderSessionRow)}
-            </>
-          ) : (
-            <li className="empty">Select a project.</li>
-          )}
-        </ul>
-      </section>
+            ) : null}
+            {activeSessions?.map(renderSessionRow)}
+            {recentSessions && recentSessions.length > 0 ? (
+              <li className="session-group-label">
+                Recent <span className="session-group-count">{recentSessions.length}</span>
+              </li>
+            ) : null}
+            {recentSessions?.map(renderSessionRow)}
+          </ul>
+        </>
+      ) : (
+        <p className="empty nav-empty-inline">Select a project to view sessions.</p>
+      )}
     </nav>
   )
 }
