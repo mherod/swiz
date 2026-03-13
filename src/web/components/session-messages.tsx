@@ -106,8 +106,8 @@ export function SessionMessages({
   const grouped = useMemo(() => groupMessages(sorted), [sorted])
 
   return (
-    <section className="card bento-messages">
-      <div className="messages-header-row">
+    <section className="card bento-messages flex flex-col h-full max-h-full overflow-hidden">
+      <div className="messages-header-row flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 shrink-0">
         <div>
           <h2 className="section-title">Transcript</h2>
           <p className="section-subtitle">Conversation history for selected session</p>
@@ -131,11 +131,14 @@ export function SessionMessages({
       <SessionTasksSection tasks={tasks} summary={taskSummary} loading={tasksLoading} />
       {toolStats && toolStats.length > 0 && <ToolStatsBar stats={toolStats} />}
       {loading ? (
-        <p className="empty">Loading...</p>
+        <p className="empty p-8 text-center text-zinc-500">Loading...</p>
       ) : messages.length === 0 ? (
-        <p className="empty">No messages for this session.</p>
+        <p className="empty p-8 text-center text-zinc-500">No messages for this session.</p>
       ) : (
-        <ul className="messages-list" aria-label="Last 30 transcript messages">
+        <ul
+          className="messages-list overflow-y-auto flex-1 pb-16"
+          aria-label="Last 30 transcript messages"
+        >
           {grouped.map(({ message, count, originalIndices }, i) => {
             const role = message.role === "assistant" ? "Assistant" : "User"
             const timestamp = message.timestamp
