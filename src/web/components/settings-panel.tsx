@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { postJson } from "../lib/http.ts"
 import { Select } from "./select.tsx"
 
@@ -647,6 +647,8 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
   const [globalSaving, setGlobalSaving] = useState(false)
   const [projectSaving, setProjectSaving] = useState(false)
   const [status, setStatus] = useState("")
+  const savingRef = useRef(false)
+  const retryRef = useRef(false)
   const { globalForm, globalBaseline, projectForm, projectBaseline } = data
   const { setGlobalForm, setGlobalBaseline, setProjectForm, setProjectBaseline, setError } = data
 
@@ -660,6 +662,11 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
   )
 
   const performSave = useCallback(async () => {
+    if (savingRef.current) {
+      retryRef.current = true
+      return
+    }
+    savingRef.current = true
     setError("")
     setStatus("Saving...")
     try {
@@ -685,7 +692,14 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
       setStatus("Settings saved successfully")
       setTimeout(() => setStatus(""), 2000)
     } catch (err) {
+      setStatus("")
       setError(err instanceof Error ? err.message : "Failed to save settings")
+    } finally {
+      savingRef.current = false
+      if (retryRef.current) {
+        retryRef.current = false
+        void performSave()
+      }
     }
   }, [
     cwd,
