@@ -25,6 +25,10 @@ const STDERR_ALLOWLIST = new Map<string, string>([
     "src/commands/daemon.ts",
     "daemon status subcommand — reports unreachable daemon or error responses",
   ],
+  [
+    "src/commands/daemon/daemon-admin.ts",
+    "daemon admin — reports unreachable daemon or error HTTP responses",
+  ],
   ["src/commands/push-ci.ts", "push-ci failure reporting (CI conclusion !== 'success')"],
   [
     "src/commands/mergetool.ts",
@@ -51,6 +55,8 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/continue.ts",
   // daemon — prints LaunchAgent install/uninstall status and server URL
   "src/commands/daemon.ts",
+  // daemon-admin — prints install/uninstall status and metrics output
+  "src/commands/daemon/daemon-admin.ts",
   "src/commands/dispatch.ts",
   // Dispatch engine structured JSON output to stdout (extracted from dispatch.ts)
   "src/dispatch/engine.ts",
