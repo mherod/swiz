@@ -146,10 +146,11 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "preToolUse",
-    matcher: "TaskUpdate",
+    matcher: "TaskUpdate|update_plan",
     hooks: [
       { file: "pretooluse-taskupdate-schema.ts", timeout: 5 },
       { file: "pretooluse-require-task-evidence.ts", timeout: 5 },
+      { file: "pretooluse-dirty-worktree-gate.ts", timeout: 5, cooldownSeconds: 60 },
     ],
   },
   {

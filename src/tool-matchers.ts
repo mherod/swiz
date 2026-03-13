@@ -38,7 +38,7 @@ export const TASK_TOOLS = new Set([
   "update_plan",
 ])
 export const TASK_CREATE_TOOLS = new Set(["TaskCreate", "TodoWrite", "write_todos", "update_plan"])
-export const TASK_UPDATE_TOOLS = new Set(["TaskUpdate"])
+export const TASK_UPDATE_TOOLS = new Set(["TaskUpdate", "update_plan"])
 export const TASK_LIST_TOOLS = new Set(["TaskList"])
 export const TASK_GET_TOOLS = new Set(["TaskGet"])
 export const SEARCH_TOOLS = new Set([

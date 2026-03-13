@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**92 hooks. 11 event types. Every agent. Zero compromises.**
+**93 hooks. 11 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -116,7 +116,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (48)
+### PreToolUse (49)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -155,6 +155,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-no-push-when-instructed.ts` | Blocks `git push` when the transcript contains an explicit "do not push" instruction (e.g. from the `/commit` skill) without a subsequent push-approval signal. Push requires explicit user authorisation. |
 | `pretooluse-taskupdate-schema.ts` | Blocks TaskUpdate calls that include unsupported fields (e.g. `notes`). Lists the allowed schema fields and redirects to `swiz tasks complete --evidence` for task completion with structured evidence. |
 | `pretooluse-require-task-evidence.ts` | Blocks `TaskUpdate status=completed` unless the description contains at least 1 structured evidence field (note, conclusion, run ID, commit SHA, ci_green, pr, no_ci). Prevents hollow task completion that leaves no machine-readable verification record. |
+| `pretooluse-dirty-worktree-gate.ts` | Blocks task updates when the worktree has more than 15 dirty files. Forces a commit boundary before the task plan can be reshaped further. Covers Claude `TaskUpdate` and Codex `update_plan`. |
 | `pretooluse-task-recovery.ts` | Before TaskUpdate or TaskGet, checks whether the referenced task ID exists on disk. If it's missing (lost during context compaction), creates a stub file so the tool call succeeds transparently — the agent never sees "Task not found". |
 | `pretooluse-pr-age-gate.ts` | Blocks `gh pr merge` if the PR has been open for less than the configured grace period (default: 10 minutes; configurable via `swiz settings set pr-age-gate <minutes>`; set to 0 to disable). Enforces a minimum visibility period so team members have time to review. Redirects the agent to other work instead of waiting. |
 | `pretooluse-repeated-lint-test.ts` | Blocks consecutive same-kind `bun test` / `bun run lint` / `bun run build` calls when no file edit (Edit, Write, or NotebookEdit) occurred between them. Also handles parallel tool-call dispatch correctly by tracking the JSONL source line. Prevents the wasteful pattern of re-running the same command with different output filters instead of reading the full output. When blocking, the denial message includes a concrete transcript file reference (path and source line index) so agents can locate the prior output directly; if the output could not be extracted, guidance is softened accordingly. |
