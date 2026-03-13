@@ -123,7 +123,7 @@ export const manifest: HookGroup[] = [
       { file: "stop-github-ci.ts", timeout: 45 },
       { file: "stop-todo-tracker.ts", timeout: 10 },
       { file: "stop-non-default-branch.ts", timeout: 10 },
-      { file: "stop-personal-repo-issues.ts", timeout: 10, cooldownSeconds: 300 },
+      { file: "stop-personal-repo-issues.ts", timeout: 10, cooldownSeconds: 30 },
       { file: "stop-upstream-branch-count.ts", timeout: 10, cooldownSeconds: 7200 },
       { file: "stop-memory-size.ts", timeout: 10 },
       { file: "stop-auto-continue.ts", timeout: 120 },

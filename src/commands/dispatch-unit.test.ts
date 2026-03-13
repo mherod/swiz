@@ -438,11 +438,11 @@ describe("dispatch.ts unit tests", () => {
       })
     })
 
-    it("stop-personal-repo-issues has a 5-minute cooldown", () => {
+    it("stop-personal-repo-issues has a 30-second cooldown", () => {
       const stopGroup = manifest.find((g) => g.event === "stop")
       const hook = stopGroup?.hooks.find((h) => h.file === "stop-personal-repo-issues.ts")
       expect(hook).toBeDefined()
-      expect(hook?.cooldownSeconds).toBe(300)
+      expect(hook?.cooldownSeconds).toBe(30)
     })
   })
 
