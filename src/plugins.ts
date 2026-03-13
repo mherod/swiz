@@ -149,35 +149,43 @@ export interface PluginErrorDetail {
  * Handles Error instances, plain strings, objects with circular refs,
  * and applies a length bound to message and stack.
  */
+function extractErrorCode(err: Error): string | undefined {
+  return "code" in err && (err as { code?: unknown }).code != null
+    ? String((err as { code?: unknown }).code)
+    : undefined
+}
+
+function isAnyTruncated(
+  msg: { truncated: boolean },
+  stk?: { truncated: boolean },
+  causeStr?: { truncated: boolean }
+): boolean {
+  return msg.truncated || (stk?.truncated ?? false) || (causeStr?.truncated ?? false)
+}
+
+function structuredErrorFromError(err: Error, maxLen: number): PluginErrorDetail {
+  const msg = truncate(err.message, maxLen)
+  const stk = err.stack ? truncate(err.stack, maxLen) : undefined
+  const causeStr = err.cause != null ? safeStringify(err.cause, maxLen) : undefined
+  const code = extractErrorCode(err)
+
+  return {
+    name: err.name !== "Error" ? err.name : undefined,
+    message: msg.text,
+    ...(code != null ? { code } : {}),
+    ...(causeStr != null ? { cause: causeStr.text } : {}),
+    ...(stk != null ? { stack: stk.text } : {}),
+    truncated: isAnyTruncated(msg, stk, causeStr),
+  }
+}
+
 function structuredError(value: unknown, maxLen = 1024): PluginErrorDetail {
   if (value === null || value === undefined) {
     return { message: "unknown error", truncated: false }
   }
-
-  if (value instanceof Error) {
-    const msg = truncate(value.message, maxLen)
-    const stk = value.stack ? truncate(value.stack, maxLen) : undefined
-    const causeStr = value.cause != null ? safeStringify(value.cause, maxLen) : undefined
-
-    return {
-      name: value.name !== "Error" ? value.name : undefined,
-      message: msg.text,
-      ...("code" in value && (value as { code?: unknown }).code != null
-        ? { code: String((value as { code?: unknown }).code) }
-        : {}),
-      ...(causeStr != null ? { cause: causeStr.text } : {}),
-      ...(stk != null ? { stack: stk.text } : {}),
-      truncated: msg.truncated || (stk?.truncated ?? false) || (causeStr?.truncated ?? false),
-    }
-  }
-
-  if (typeof value === "string") {
-    const t = truncate(value, maxLen)
-    return { message: t.text, truncated: t.truncated }
-  }
-
-  const s = safeStringify(value, maxLen)
-  return { message: s.text, truncated: s.truncated }
+  if (value instanceof Error) return structuredErrorFromError(value, maxLen)
+  const t = typeof value === "string" ? truncate(value, maxLen) : safeStringify(value, maxLen)
+  return { message: t.text, truncated: t.truncated }
 }
 
 /** JSON.stringify with circular-ref safety and length bound. */

@@ -135,6 +135,39 @@ const PM_INVOKE_RE = new RegExp(
 
 const PACKAGE_RUNNERS = new Set(["npx", "pnpx", "bunx"])
 
+interface ParsedInvocation {
+  invoked: string
+  subcmd: string
+  rest: string
+}
+
+function parseInvocation(command: string): ParsedInvocation | null {
+  const m = command.match(PM_INVOKE_RE)
+  if (!m) return null
+  return {
+    invoked: (m[1] ?? "").toLowerCase(),
+    subcmd: m[2]?.toLowerCase() ?? "",
+    rest: m[3]?.trim() ?? "",
+  }
+}
+
+function denyImplausible(parsed: ParsedInvocation, pm: PackageManager): void {
+  const { invoked, subcmd, rest } = parsed
+  const target = CMD[pm]
+
+  if (PACKAGE_RUNNERS.has(invoked)) {
+    deny(`${invoked} <pkg>`, target.dlx, pm)
+  }
+
+  const kind = classifySubcmd(subcmd, rest)
+  if (kind) {
+    const fromCmd = CMD[invoked as PackageManager]?.[kind] ?? `${invoked} ${subcmd}`
+    deny(fromCmd, target[kind], pm)
+  }
+
+  deny(`${invoked} ${subcmd}`, `${pm} ${subcmd}`, pm)
+}
+
 async function main() {
   const input = await Bun.stdin.json()
   if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
@@ -142,28 +175,11 @@ async function main() {
   if (!PM) process.exit(0)
 
   const command: string = input?.tool_input?.command ?? ""
-  const m = command.match(PM_INVOKE_RE)
-  if (!m) process.exit(0)
+  const parsed = parseInvocation(command)
+  if (!parsed) process.exit(0)
+  if (!isImplausibleInvocation(parsed.invoked, PM)) process.exit(0)
 
-  const invoked = (m[1] ?? "").toLowerCase()
-  if (!isImplausibleInvocation(invoked, PM)) process.exit(0)
-
-  const subcmd = m[2]?.toLowerCase() ?? ""
-  const rest = m[3]?.trim() ?? ""
-  const target = CMD[PM]
-
-  if (PACKAGE_RUNNERS.has(invoked)) {
-    deny(`${invoked} <pkg>`, target.dlx, PM)
-  }
-
-  const kind = classifySubcmd(subcmd, rest)
-  if (kind) {
-    const fromPM = invoked as PackageManager
-    const fromCmd = CMD[fromPM]?.[kind] ?? `${invoked} ${subcmd}`
-    deny(fromCmd, target[kind], PM)
-  }
-
-  deny(`${invoked} ${subcmd}`, `${PM} ${subcmd}`, PM)
+  denyImplausible(parsed, PM)
 }
 
 if (import.meta.main) {

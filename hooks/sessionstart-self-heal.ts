@@ -81,7 +81,7 @@ async function main(): Promise<void> {
     ? "swiz install: initial agent config written."
     : "swiz self-healed: manifest changed, agent configs updated."
 
-  emitContext("SessionStart", message)
+  await emitContext("SessionStart", message)
 }
 
 if (import.meta.main) void main()

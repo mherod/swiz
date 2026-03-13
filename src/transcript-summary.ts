@@ -62,62 +62,78 @@ export function extractSessionLines(jsonlText: string): string[] {
  * Parse a transcript JSONL string in a single pass and extract all derived
  * facts that hooks need. Returns a TranscriptSummary.
  */
-export function parseTranscriptSummary(jsonlText: string): TranscriptSummary {
-  const toolNames: string[] = []
-  const bashCommands: string[] = []
-  const skillInvocations: string[] = []
-  let hasGitPush = false
+interface ToolBlock {
+  type?: string
+  name?: string
+  input?: { command?: string; skill?: string }
+}
 
-  // Compute session-boundary-aware lines once; reuse for both parsing and storage.
+function parseAssistantToolBlocks(line: string): ToolBlock[] {
+  try {
+    const entry = JSON.parse(line) as {
+      type?: string
+      message?: { content?: ToolBlock[] }
+    }
+    if (entry?.type !== "assistant") return []
+    const content = entry?.message?.content
+    return Array.isArray(content) ? content : []
+  } catch {
+    return []
+  }
+}
+
+interface SummaryAccumulator {
+  toolNames: string[]
+  bashCommands: string[]
+  skillInvocations: string[]
+  hasGitPush: boolean
+}
+
+function extractToolName(block: ToolBlock): string {
+  return block?.name ?? ""
+}
+
+function extractShellCommand(block: ToolBlock, name: string): string {
+  return isShellTool(name) ? (block?.input?.command ?? "") : ""
+}
+
+function processToolBlock(block: ToolBlock, acc: SummaryAccumulator): void {
+  if (block?.type !== "tool_use") return
+  const name = extractToolName(block)
+  if (!name) return
+  acc.toolNames.push(name)
+
+  const cmd = extractShellCommand(block, name)
+  if (cmd) {
+    acc.bashCommands.push(normalizeCommand(cmd))
+    if (!acc.hasGitPush && GIT_PUSH_PATTERN.test(cmd)) acc.hasGitPush = true
+  }
+
+  if (name === "Skill") {
+    const skill = block?.input?.skill ?? ""
+    if (skill) acc.skillInvocations.push(skill)
+  }
+}
+
+export function parseTranscriptSummary(jsonlText: string): TranscriptSummary {
+  const acc: SummaryAccumulator = {
+    toolNames: [],
+    bashCommands: [],
+    skillInvocations: [],
+    hasGitPush: false,
+  }
   const sessionLines = extractSessionLines(jsonlText)
 
   for (const line of sessionLines) {
     if (!line.trim()) continue
-    try {
-      const entry = JSON.parse(line) as {
-        type?: string
-        message?: {
-          content?: Array<{
-            type?: string
-            name?: string
-            input?: { command?: string; skill?: string }
-          }>
-        }
-      }
-      if (entry?.type !== "assistant") continue
-      const content = entry?.message?.content
-      if (!Array.isArray(content)) continue
-      for (const block of content) {
-        if (block?.type !== "tool_use") continue
-        const name: string = block?.name ?? ""
-        if (name) toolNames.push(name)
-
-        // Extract bash commands
-        if (isShellTool(name)) {
-          const cmd: string = block?.input?.command ?? ""
-          if (cmd) {
-            bashCommands.push(normalizeCommand(cmd))
-            if (!hasGitPush && GIT_PUSH_PATTERN.test(cmd)) hasGitPush = true
-          }
-        }
-
-        // Extract skill invocations
-        if (name === "Skill") {
-          const skill: string = block?.input?.skill ?? ""
-          if (skill) skillInvocations.push(skill)
-        }
-      }
-    } catch {
-      // Skip malformed lines
+    for (const block of parseAssistantToolBlocks(line)) {
+      processToolBlock(block, acc)
     }
   }
 
   return {
-    toolNames,
-    toolCallCount: toolNames.length,
-    bashCommands,
-    skillInvocations,
-    hasGitPush,
+    ...acc,
+    toolCallCount: acc.toolNames.length,
     sessionLines,
   }
 }

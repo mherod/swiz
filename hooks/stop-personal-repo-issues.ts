@@ -536,34 +536,28 @@ function buildIssueSection(ctx: StopContext): string[] {
   return lines
 }
 
+function appendSection(lines: string[], section: string[]): void {
+  if (lines.length > 0 && lines[lines.length - 1] !== "") lines.push("")
+  lines.push(...section)
+}
+
 function buildStopReasonLines(ctx: StopContext): string[] {
   const reasonLines: string[] = [
     "STOP: We have detected open issues and PRs that need your attention.",
     "",
   ]
-  const feedbackPRCount = ctx.changesRequestedPRs.length + ctx.reviewRequiredPRs.length
-  const conflictCount = ctx.conflictingPRs.length
-  const refinementCount = ctx.sortedRefinement.length
-  const issueCount = ctx.sortedIssues.length
 
-  if (feedbackPRCount > 0) {
-    if (reasonLines.length > 0 && reasonLines[reasonLines.length - 1] !== "") reasonLines.push("")
-    reasonLines.push(...buildFeedbackPRSection(ctx))
+  if (ctx.changesRequestedPRs.length + ctx.reviewRequiredPRs.length > 0) {
+    appendSection(reasonLines, buildFeedbackPRSection(ctx))
   }
-
-  if (conflictCount > 0) {
-    if (reasonLines.length > 0 && reasonLines[reasonLines.length - 1] !== "") reasonLines.push("")
-    reasonLines.push(...buildConflictSection(ctx))
+  if (ctx.conflictingPRs.length > 0) {
+    appendSection(reasonLines, buildConflictSection(ctx))
   }
-
-  if (refinementCount > 0) {
-    if (reasonLines.length > 0 && reasonLines[reasonLines.length - 1] !== "") reasonLines.push("")
-    reasonLines.push(...buildRefinementSection(ctx))
+  if (ctx.sortedRefinement.length > 0) {
+    appendSection(reasonLines, buildRefinementSection(ctx))
   }
-
-  if (issueCount > 0) {
-    if (reasonLines.length > 0 && reasonLines[reasonLines.length - 1] !== "") reasonLines.push("")
-    reasonLines.push(...buildIssueSection(ctx))
+  if (ctx.sortedIssues.length > 0) {
+    appendSection(reasonLines, buildIssueSection(ctx))
   }
 
   return reasonLines
@@ -700,66 +694,106 @@ async function gatherStopContext(
   }
 }
 
+interface RepoContext {
+  cwd: string
+  sessionId: string | null
+  rawSessionId: string | undefined
+  currentUser: string
+  isPersonalRepo: boolean
+}
+
+async function resolveRepoContext(input: {
+  cwd?: string
+  session_id?: string
+}): Promise<RepoContext | null> {
+  const cwd = input.cwd ?? process.cwd()
+  const sessionId = sanitizeSessionId(input.session_id)
+
+  if (!(await isGitRepo(cwd))) return null
+  if (!hasGhCli()) return null
+
+  const [settings, hasRemote, inCooldown] = await Promise.all([
+    readSwizSettings(),
+    isGitHubRemote(cwd),
+    isInCooldown(sessionId, cwd),
+  ])
+  const effective = getEffectiveSwizSettings(settings, input.session_id)
+  if (!effective.personalRepoIssuesGate) return null
+  if (!hasRemote) return null
+  if (inCooldown) return null
+
+  const ownership = await detectRepoOwnership(cwd)
+  if (!ownership.repoOwner || !ownership.currentUser) return null
+
+  return {
+    cwd,
+    sessionId,
+    rawSessionId: input.session_id,
+    currentUser: ownership.currentUser,
+    isPersonalRepo: ownership.isPersonalRepo,
+  }
+}
+
+function buildStopContext(
+  ctx: RepoContext,
+  prs: PR[],
+  gathered: Awaited<ReturnType<typeof gatherStopContext>>
+): StopContext | null {
+  const changesRequestedPRs = prs.filter((p) => p.reviewDecision === "CHANGES_REQUESTED")
+  const conflictingPRs = prs.filter((p) => p.mergeable === "CONFLICTING")
+  const reviewRequiredPRs = prs.filter((p) => p.reviewDecision === "REVIEW_REQUIRED")
+
+  const total =
+    gathered.sortedIssues.length +
+    gathered.sortedRefinement.length +
+    changesRequestedPRs.length +
+    reviewRequiredPRs.length +
+    conflictingPRs.length
+  if (total === 0) return null
+
+  return {
+    cwd: ctx.cwd,
+    sessionId: ctx.sessionId,
+    isPersonalRepo: ctx.isPersonalRepo,
+    changesRequestedPRs,
+    reviewRequiredPRs,
+    conflictingPRs,
+    sortedRefinement: gathered.sortedRefinement,
+    sortedIssues: gathered.sortedIssues,
+    firstRefinementNum: gathered.sortedRefinement[0]?.number,
+    firstIssueNum: gathered.sortedIssues[0]?.number,
+  }
+}
+
 async function main(): Promise<void> {
   try {
     const input = stopHookInputSchema.parse(await Bun.stdin.json())
-    const cwd = input.cwd ?? process.cwd()
-    const sessionId = sanitizeSessionId(input.session_id)
+    const ctx = await resolveRepoContext(input)
+    if (!ctx) return
 
-    if (!(await isGitRepo(cwd))) return
-    if (!hasGhCli()) return
+    const prs = await getOpenPRsWithFeedback(ctx.cwd, ctx.currentUser)
+    const hasChangesRequested = prs.some((p) => p.reviewDecision === "CHANGES_REQUESTED")
+    const gathered = await gatherStopContext(
+      ctx.cwd,
+      ctx.sessionId,
+      ctx.isPersonalRepo,
+      ctx.currentUser,
+      hasChangesRequested
+    )
 
-    const [settings, hasRemote, inCooldown] = await Promise.all([
-      readSwizSettings(),
-      isGitHubRemote(cwd),
-      isInCooldown(sessionId, cwd),
-    ])
-    const effective = getEffectiveSwizSettings(settings, input.session_id)
-    if (!effective.personalRepoIssuesGate) return
-    if (!hasRemote) return
-    if (inCooldown) return
+    const stopCtx = buildStopContext(ctx, prs, gathered)
+    if (!stopCtx) return
 
-    const ownership = await detectRepoOwnership(cwd)
-    if (!ownership.repoOwner || !ownership.currentUser) return
-    const { currentUser, isPersonalRepo } = ownership
-
-    const prs = await getOpenPRsWithFeedback(cwd, currentUser)
-    const changesRequestedPRs = prs.filter((p) => p.reviewDecision === "CHANGES_REQUESTED")
-    const conflictingPRs = prs.filter((p) => p.mergeable === "CONFLICTING")
-    const reviewRequiredPRs = prs.filter((p) => p.reviewDecision === "REVIEW_REQUIRED")
-    const hasChangesRequested = changesRequestedPRs.length > 0
-
-    const { sortedRefinement, sortedIssues, firstRefinementNum, firstIssueNum } =
-      await gatherStopContext(cwd, sessionId, isPersonalRepo, currentUser, hasChangesRequested)
-
-    const issueCount = sortedIssues.length
-    const refinementCount = sortedRefinement.length
-    const feedbackPRCount = changesRequestedPRs.length + reviewRequiredPRs.length
-    const conflictCount = conflictingPRs.length
-
-    if (issueCount === 0 && feedbackPRCount === 0 && conflictCount === 0 && refinementCount === 0)
-      return
-
-    const context: StopContext = {
-      cwd,
-      sessionId,
-      isPersonalRepo,
-      changesRequestedPRs,
-      reviewRequiredPRs,
-      conflictingPRs,
-      sortedRefinement,
-      sortedIssues,
-      firstRefinementNum,
-      firstIssueNum,
-    }
-    const reasonLines = buildStopReasonLines(context)
-    const planSteps = buildStopPlanSteps(context)
+    const reasonLines = buildStopReasonLines(stopCtx)
+    const planSteps = buildStopPlanSteps(stopCtx)
     reasonLines.push(formatActionPlan(planSteps, { translateToolNames: true }))
 
-    if (issueCount > 0 || feedbackPRCount > 0 || conflictCount > 0) {
-      await updateCooldown(sessionId, cwd)
-    }
-    // Open-issue reminders are actionable work triage, not workflow-memory misses.
+    const hasActionable =
+      stopCtx.sortedIssues.length > 0 ||
+      stopCtx.changesRequestedPRs.length + stopCtx.reviewRequiredPRs.length > 0 ||
+      stopCtx.conflictingPRs.length > 0
+    if (hasActionable) await updateCooldown(ctx.sessionId, ctx.cwd)
+
     blockStop(reasonLines.join("\n"), { includeUpdateMemoryAdvice: false })
   } catch {
     // On error, allow stop (fail open)

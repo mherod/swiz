@@ -256,6 +256,269 @@ type RunnerResult = {
   matchedFailureLines: string[]
 }
 
+const uniqueLines = (items: Array<string | null | undefined>): string[] => [
+  ...new Set(items.map((item) => item?.trim()).filter((item): item is string => Boolean(item))),
+]
+
+const PASS_RESULT = (runner: string): RunnerResult => ({
+  runner,
+  failCount: 0,
+  isComplete: true,
+  firstFailLine: null,
+  matchedFailureLines: [],
+})
+
+function detectBun(clean: string, lines: string[]): RunnerResult | null {
+  const failMatch = clean.match(BUN_FAIL_RE)
+  if (failMatch) {
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.includes("✗")))
+    return {
+      runner: "bun",
+      failCount: parseInt(failMatch[1]!, 10),
+      isComplete: BUN_COMPLETE_RE.test(clean),
+      firstFailLine: matchedFailureLines[0] ?? lines.find((l) => l.includes("error:")) ?? null,
+      matchedFailureLines,
+    }
+  }
+  return BUN_COMPLETE_RE.test(clean) ? PASS_RESULT("bun") : null
+}
+
+function detectJest(clean: string, lines: string[]): RunnerResult | null {
+  const failMatch = clean.match(JEST_FAIL_RE)
+  if (failMatch) {
+    const isComplete = JEST_COMPLETE_RE.test(clean)
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.startsWith("FAIL ")))
+    return {
+      runner: "jest",
+      failCount: isComplete ? parseInt(failMatch[1]!, 10) : null,
+      isComplete,
+      firstFailLine: matchedFailureLines[0] ?? lines.find((l) => l.includes("●")) ?? null,
+      matchedFailureLines,
+    }
+  }
+  return JEST_COMPLETE_RE.test(clean) ? PASS_RESULT("jest") : null
+}
+
+function detectVitest(clean: string, lines: string[]): RunnerResult | null {
+  const failMatch = clean.match(VITEST_FAIL_RE)
+  if (failMatch) {
+    const isComplete = VITEST_COMPLETE_RE.test(clean)
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.match(/^\s*FAIL\s+/)))
+    return {
+      runner: "vitest",
+      failCount: isComplete ? parseInt(failMatch[1]!, 10) : null,
+      isComplete,
+      firstFailLine:
+        matchedFailureLines[0] ?? lines.find((l) => l.includes("AssertionError")) ?? null,
+      matchedFailureLines,
+    }
+  }
+  return VITEST_COMPLETE_RE.test(clean) ? PASS_RESULT("vitest") : null
+}
+
+function detectPytest(clean: string, lines: string[]): RunnerResult | null {
+  if (PYTEST_FAIL_RE.test(clean)) {
+    const isComplete = PYTEST_COMPLETE_RE.test(clean)
+    const summaryMatch = clean.match(PYTEST_SUMMARY_RE)
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.startsWith("FAILED ")))
+    return {
+      runner: "pytest",
+      failCount: isComplete && summaryMatch ? parseInt(summaryMatch[1]!, 10) : null,
+      isComplete,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
+    }
+  }
+  return PYTEST_COMPLETE_RE.test(clean) ? PASS_RESULT("pytest") : null
+}
+
+function detectCargo(clean: string, lines: string[]): RunnerResult | null {
+  const failMatch = clean.match(CARGO_FAIL_RE)
+  if (failMatch) {
+    const matchedFailureLines = uniqueLines(
+      lines.filter((l) => l.startsWith("---- ") || l.includes(" ... FAILED"))
+    )
+    return {
+      runner: "cargo",
+      failCount: parseInt(failMatch[1]!, 10),
+      isComplete: true,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
+    }
+  }
+  return CARGO_COMPLETE_RE.test(clean) ? PASS_RESULT("cargo") : null
+}
+
+function detectGoTest(clean: string, lines: string[]): RunnerResult | null {
+  if (GOTEST_FAIL_RE.test(clean)) {
+    const isComplete = GOTEST_COMPLETE_RE.test(clean)
+    const failCount = (clean.match(/^--- FAIL:/gm) ?? []).length
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.startsWith("--- FAIL:")))
+    return {
+      runner: "go test",
+      failCount: isComplete && failCount > 0 ? failCount : null,
+      isComplete,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
+    }
+  }
+  return GOTEST_OK_RE.test(clean) ? PASS_RESULT("go test") : null
+}
+
+function detectMaven(clean: string, lines: string[]): RunnerResult | null {
+  const failMatch = clean.match(MAVEN_FAIL_RE)
+  if (!failMatch) return null
+  const total = parseInt(failMatch[1]!, 10) + parseInt(failMatch[2]!, 10)
+  const isComplete = MAVEN_COMPLETE_RE.test(clean)
+  const matchedFailureLines = uniqueLines(
+    lines.filter((l) => l.includes("<<< FAILURE!") || l.includes("<<< ERROR!"))
+  )
+  return {
+    runner: "maven",
+    failCount: isComplete ? total : null,
+    isComplete,
+    firstFailLine: matchedFailureLines[0] ?? null,
+    matchedFailureLines,
+  }
+}
+
+function detectGradle(clean: string, lines: string[]): RunnerResult | null {
+  if (GRADLE_FAIL_RE.test(clean)) {
+    const summaryMatch = clean.match(GRADLE_SUMMARY_RE)
+    const isComplete = GRADLE_COMPLETE_RE.test(clean)
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.match(/^\S.*> \S.* FAILED$/)))
+    return {
+      runner: "gradle",
+      failCount: isComplete && summaryMatch ? parseInt(summaryMatch[1]!, 10) : null,
+      isComplete,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
+    }
+  }
+  if (GRADLE_COMPLETE_RE.test(clean)) {
+    const summaryMatch = clean.match(GRADLE_SUMMARY_RE)
+    return {
+      runner: "gradle",
+      failCount: summaryMatch ? parseInt(summaryMatch[1]!, 10) : 0,
+      isComplete: true,
+      firstFailLine: null,
+      matchedFailureLines: [],
+    }
+  }
+  return null
+}
+
+function detectRspec(clean: string, lines: string[]): RunnerResult | null {
+  const failMatch = clean.match(RSPEC_FAIL_RE)
+  if (failMatch) {
+    const isComplete = RSPEC_COMPLETE_RE.test(clean)
+    const failureCount = parseInt(failMatch[1]!, 10)
+    const matchedFailureLines = uniqueLines(
+      lines.filter((l) => l.trim().match(/^\d+\)/) || l.includes("Failure/Error:"))
+    )
+    return {
+      runner: "rspec",
+      failCount: isComplete ? failureCount : null,
+      isComplete,
+      firstFailLine: failureCount > 0 ? (matchedFailureLines[0] ?? null) : null,
+      matchedFailureLines: failureCount > 0 ? matchedFailureLines : [],
+    }
+  }
+  if (clean.includes("Failure/Error:")) {
+    const matchedFailureLines = uniqueLines(lines.filter((l) => l.includes("Failure/Error:")))
+    return {
+      runner: "rspec",
+      failCount: null,
+      isComplete: false,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
+    }
+  }
+  return null
+}
+
+function detectDotnet(clean: string, lines: string[]): RunnerResult | null {
+  const summaryMatch = clean.match(DOTNET_COMPLETE_RE)
+  if (!DOTNET_FAIL_RE.test(clean) && !summaryMatch) return null
+  const matchedFailureLines = uniqueLines(lines.filter((l) => l.trim().startsWith("Failed ")))
+  const failCount = summaryMatch ? parseInt(summaryMatch[1]!, 10) : null
+  return {
+    runner: "dotnet",
+    failCount,
+    isComplete: summaryMatch !== null,
+    firstFailLine: failCount === 0 ? null : (matchedFailureLines[0] ?? null),
+    matchedFailureLines: failCount === 0 ? [] : matchedFailureLines,
+  }
+}
+
+function detectPhpunit(clean: string, lines: string[]): RunnerResult | null {
+  if (PHPUNIT_FAIL_RE.test(clean)) {
+    const isComplete = PHPUNIT_COMPLETE_RE.test(clean)
+    const countMatch = clean.match(PHPUNIT_COUNT_RE)
+    const matchedFailureLines = uniqueLines(
+      lines.filter((l) => l.trim().match(/^\d+\)/) || l.includes("Error: "))
+    )
+    return {
+      runner: "phpunit",
+      failCount: isComplete && countMatch ? parseInt(countMatch[1]!, 10) : null,
+      isComplete,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
+    }
+  }
+  return PHPUNIT_COMPLETE_RE.test(clean) ? PASS_RESULT("phpunit") : null
+}
+
+const RUNNER_DETECTORS: Array<(clean: string, lines: string[]) => RunnerResult | null> = [
+  detectBun,
+  detectJest,
+  detectVitest,
+  detectPytest,
+  detectCargo,
+  detectGoTest,
+  detectMaven,
+  detectGradle,
+  detectRspec,
+  detectDotnet,
+  detectPhpunit,
+]
+
+const PRESENCE_CHECKS: Array<{ runner: string; re: RegExp; errorHint: string }> = [
+  { runner: "bun", re: BUN_PRESENCE_RE, errorHint: "error:" },
+  { runner: "jest", re: JEST_PRESENCE_RE, errorHint: "Error:" },
+  { runner: "vitest", re: VITEST_PRESENCE_RE, errorHint: "Error:" },
+  { runner: "pytest", re: PYTEST_PRESENCE_RE, errorHint: "ERROR " },
+  { runner: "cargo", re: CARGO_PRESENCE_RE, errorHint: "error[" },
+  { runner: "go test", re: GOTEST_PRESENCE_RE, errorHint: "Error" },
+  { runner: "maven", re: MAVEN_PRESENCE_RE, errorHint: "ERROR" },
+  { runner: "gradle", re: GRADLE_PRESENCE_RE, errorHint: "FAILED" },
+  { runner: "rspec", re: RSPEC_PRESENCE_RE, errorHint: "Error:" },
+  { runner: "dotnet", re: DOTNET_PRESENCE_RE, errorHint: "Error" },
+  { runner: "phpunit", re: PHPUNIT_PRESENCE_RE, errorHint: "Error" },
+]
+
+function collectPresenceFallbacks(
+  clean: string,
+  lines: string[],
+  detected: Set<string>
+): RunnerResult[] {
+  const results: RunnerResult[] = []
+  for (const { runner, re, errorHint } of PRESENCE_CHECKS) {
+    if (detected.has(runner) || !re.test(clean)) continue
+    const matchedFailureLines = uniqueLines(
+      lines.filter((l) => l.toLowerCase().includes(errorHint.toLowerCase()))
+    )
+    results.push({
+      runner,
+      failCount: null,
+      isComplete: false,
+      firstFailLine: matchedFailureLines[0] ?? null,
+      matchedFailureLines,
+    })
+  }
+  return results
+}
+
 /**
  * Collect RunnerResult entries for every test runner whose FAIL_RE matches `clean`.
  * All runners are checked — no early return — so composite multi-runner output is
@@ -263,291 +526,12 @@ type RunnerResult = {
  */
 function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
   const results: RunnerResult[] = []
-  const uniqueLines = (items: Array<string | null | undefined>): string[] => [
-    ...new Set(items.map((item) => item?.trim()).filter((item): item is string => Boolean(item))),
-  ]
-
-  // Bun
-  const bunFailMatch = clean.match(BUN_FAIL_RE)
-  if (bunFailMatch) {
-    const isComplete = BUN_COMPLETE_RE.test(clean)
-    // Bun may print a running fail tally before the final completion line.
-    // Keep that concrete lower-bound count even when output is truncated.
-    const failCount = parseInt(bunFailMatch[1]!, 10)
-    const matchedFailureLines = uniqueLines(lines.filter((l) => l.includes("✗")))
-    results.push({
-      runner: "bun",
-      failCount,
-      isComplete,
-      firstFailLine: matchedFailureLines[0] ?? lines.find((l) => l.includes("error:")) ?? null,
-      matchedFailureLines,
-    })
-  } else if (BUN_COMPLETE_RE.test(clean)) {
-    // Completed Bun run with no fail summary means zero test failures.
-    results.push({
-      runner: "bun",
-      failCount: 0,
-      isComplete: true,
-      firstFailLine: null,
-      matchedFailureLines: [],
-    })
+  for (const detect of RUNNER_DETECTORS) {
+    const result = detect(clean, lines)
+    if (result) results.push(result)
   }
-
-  // Jest
-  const jestFailMatch = clean.match(JEST_FAIL_RE)
-  if (jestFailMatch) {
-    const isComplete = JEST_COMPLETE_RE.test(clean)
-    const matchedFailureLines = uniqueLines(lines.filter((l) => l.startsWith("FAIL ")))
-    results.push({
-      runner: "jest",
-      failCount: isComplete ? parseInt(jestFailMatch[1]!, 10) : null,
-      isComplete,
-      firstFailLine: matchedFailureLines[0] ?? lines.find((l) => l.includes("●")) ?? null,
-      matchedFailureLines,
-    })
-  } else if (JEST_COMPLETE_RE.test(clean)) {
-    results.push({
-      runner: "jest",
-      failCount: 0,
-      isComplete: true,
-      firstFailLine: null,
-      matchedFailureLines: [],
-    })
-  }
-
-  // Vitest
-  const vitestFailMatch = clean.match(VITEST_FAIL_RE)
-  if (vitestFailMatch) {
-    const isComplete = VITEST_COMPLETE_RE.test(clean)
-    const matchedFailureLines = uniqueLines(lines.filter((l) => l.match(/^\s*FAIL\s+/)))
-    results.push({
-      runner: "vitest",
-      failCount: isComplete ? parseInt(vitestFailMatch[1]!, 10) : null,
-      isComplete,
-      firstFailLine:
-        matchedFailureLines[0] ?? lines.find((l) => l.includes("AssertionError")) ?? null,
-      matchedFailureLines,
-    })
-  } else if (VITEST_COMPLETE_RE.test(clean)) {
-    results.push({
-      runner: "vitest",
-      failCount: 0,
-      isComplete: true,
-      firstFailLine: null,
-      matchedFailureLines: [],
-    })
-  }
-
-  // pytest
-  if (PYTEST_FAIL_RE.test(clean)) {
-    const isComplete = PYTEST_COMPLETE_RE.test(clean)
-    const summaryMatch = clean.match(PYTEST_SUMMARY_RE)
-    const matchedFailureLines = uniqueLines(lines.filter((l) => l.startsWith("FAILED ")))
-    results.push({
-      runner: "pytest",
-      failCount: isComplete && summaryMatch ? parseInt(summaryMatch[1]!, 10) : null,
-      isComplete,
-      firstFailLine: matchedFailureLines[0] ?? null,
-      matchedFailureLines,
-    })
-  } else if (PYTEST_COMPLETE_RE.test(clean)) {
-    results.push({
-      runner: "pytest",
-      failCount: 0,
-      isComplete: true,
-      firstFailLine: null,
-      matchedFailureLines: [],
-    })
-  }
-
-  // cargo test — FAIL_RE and COMPLETE_RE are on the same line, so match = complete
-  const cargoFailMatch = clean.match(CARGO_FAIL_RE)
-  if (cargoFailMatch) {
-    const matchedFailureLines = uniqueLines(
-      lines.filter((l) => l.startsWith("---- ") || l.includes(" ... FAILED"))
-    )
-    results.push({
-      runner: "cargo",
-      failCount: parseInt(cargoFailMatch[1]!, 10),
-      isComplete: true,
-      firstFailLine: matchedFailureLines[0] ?? null,
-      matchedFailureLines,
-    })
-  } else if (CARGO_COMPLETE_RE.test(clean)) {
-    results.push({
-      runner: "cargo",
-      failCount: 0,
-      isComplete: true,
-      firstFailLine: null,
-      matchedFailureLines: [],
-    })
-  }
-
-  // go test — count "--- FAIL:" lines
-  if (GOTEST_FAIL_RE.test(clean)) {
-    const isComplete = GOTEST_COMPLETE_RE.test(clean)
-    const failCount = (clean.match(/^--- FAIL:/gm) ?? []).length
-    const matchedFailureLines = uniqueLines(lines.filter((l) => l.startsWith("--- FAIL:")))
-    results.push({
-      runner: "go test",
-      failCount: isComplete && failCount > 0 ? failCount : null,
-      isComplete,
-      firstFailLine: matchedFailureLines[0] ?? null,
-      matchedFailureLines,
-    })
-  } else if (GOTEST_OK_RE.test(clean)) {
-    results.push({
-      runner: "go test",
-      failCount: 0,
-      isComplete: true,
-      firstFailLine: null,
-      matchedFailureLines: [],
-    })
-  }
-
-  // Maven Surefire/Failsafe
-  const mavenFailMatch = clean.match(MAVEN_FAIL_RE)
-  if (mavenFailMatch) {
-    const failures = parseInt(mavenFailMatch[1]!, 10)
-    const errors = parseInt(mavenFailMatch[2]!, 10)
-    const total = failures + errors
-    const isComplete = MAVEN_COMPLETE_RE.test(clean)
-    const matchedFailureLines = uniqueLines(
-      lines.filter((l) => l.includes("<<< FAILURE!") || l.includes("<<< ERROR!"))
-    )
-    results.push({
-      runner: "maven",
-      failCount: isComplete ? total : null,
-      isComplete,
-      firstFailLine: matchedFailureLines[0] ?? null,
-      matchedFailureLines,
-    })
-  }
-
-  // Gradle
-  if (GRADLE_FAIL_RE.test(clean)) {
-    const summaryMatch = clean.match(GRADLE_SUMMARY_RE)
-    const isComplete = GRADLE_COMPLETE_RE.test(clean)
-    const matchedFailureLines = uniqueLines(lines.filter((l) => l.match(/^\S.*> \S.* FAILED$/)))
-    results.push({
-      runner: "gradle",
-      failCount: isComplete && summaryMatch ? parseInt(summaryMatch[1]!, 10) : null,
-      isComplete,
-      firstFailLine: matchedFailureLines[0] ?? null,
-      matchedFailureLines,
-    })
-  } else if (GRADLE_COMPLETE_RE.test(clean)) {
-    const summaryMatch = clean.match(GRADLE_SUMMARY_RE)
-    results.push({
-      runner: "gradle",
-      failCount: summaryMatch ? parseInt(summaryMatch[1]!, 10) : 0,
-      isComplete: true,
-      firstFailLine: null,
-      matchedFailureLines: [],
-    })
-  }
-
-  // RSpec
-  const rspecFailMatch = clean.match(RSPEC_FAIL_RE)
-  if (rspecFailMatch) {
-    const isComplete = RSPEC_COMPLETE_RE.test(clean)
-    const failureCount = parseInt(rspecFailMatch[1]!, 10)
-    const matchedFailureLines = uniqueLines(
-      lines.filter((l) => l.trim().match(/^\d+\)/) || l.includes("Failure/Error:"))
-    )
-    results.push({
-      runner: "rspec",
-      failCount: isComplete ? failureCount : null,
-      isComplete,
-      firstFailLine: failureCount > 0 ? (matchedFailureLines[0] ?? null) : null,
-      matchedFailureLines: failureCount > 0 ? matchedFailureLines : [],
-    })
-  } else if (clean.includes("Failure/Error:")) {
-    // RSpec truncated: failure body visible but no summary line yet
-    const matchedFailureLines = uniqueLines(lines.filter((l) => l.includes("Failure/Error:")))
-    results.push({
-      runner: "rspec",
-      failCount: null,
-      isComplete: false,
-      firstFailLine: matchedFailureLines[0] ?? null,
-      matchedFailureLines,
-    })
-  }
-
-  // dotnet
-  const dotnetSummaryMatch = clean.match(DOTNET_COMPLETE_RE)
-  if (DOTNET_FAIL_RE.test(clean) || dotnetSummaryMatch) {
-    const matchedFailureLines = uniqueLines(lines.filter((l) => l.trim().startsWith("Failed ")))
-    results.push({
-      runner: "dotnet",
-      failCount: dotnetSummaryMatch ? parseInt(dotnetSummaryMatch[1]!, 10) : null,
-      isComplete: dotnetSummaryMatch !== null,
-      firstFailLine:
-        dotnetSummaryMatch && parseInt(dotnetSummaryMatch[1]!, 10) === 0
-          ? null
-          : (matchedFailureLines[0] ?? null),
-      matchedFailureLines:
-        dotnetSummaryMatch && parseInt(dotnetSummaryMatch[1]!, 10) === 0 ? [] : matchedFailureLines,
-    })
-  }
-
-  // PHPUnit
-  if (PHPUNIT_FAIL_RE.test(clean)) {
-    const isComplete = PHPUNIT_COMPLETE_RE.test(clean)
-    const countMatch = clean.match(PHPUNIT_COUNT_RE)
-    const matchedFailureLines = uniqueLines(
-      lines.filter((l) => l.trim().match(/^\d+\)/) || l.includes("Error: "))
-    )
-    results.push({
-      runner: "phpunit",
-      failCount: isComplete && countMatch ? parseInt(countMatch[1]!, 10) : null,
-      isComplete,
-      firstFailLine: matchedFailureLines[0] ?? null,
-      matchedFailureLines,
-    })
-  } else if (PHPUNIT_COMPLETE_RE.test(clean)) {
-    results.push({
-      runner: "phpunit",
-      failCount: 0,
-      isComplete: true,
-      firstFailLine: null,
-      matchedFailureLines: [],
-    })
-  }
-
-  // ─── Fallback: runner presence without FAIL_RE match ───────────────────────
-  // When a runner's output is present but no FAIL_RE matched (e.g., compile error
-  // before tests run), attribute the non-zero exit to that runner rather than
-  // falling through to the generic handler.
   const detected = new Set(results.map((r) => r.runner))
-  const presenceChecks: Array<{ runner: string; re: RegExp; errorHint: string }> = [
-    { runner: "bun", re: BUN_PRESENCE_RE, errorHint: "error:" },
-    { runner: "jest", re: JEST_PRESENCE_RE, errorHint: "Error:" },
-    { runner: "vitest", re: VITEST_PRESENCE_RE, errorHint: "Error:" },
-    { runner: "pytest", re: PYTEST_PRESENCE_RE, errorHint: "ERROR " },
-    { runner: "cargo", re: CARGO_PRESENCE_RE, errorHint: "error[" },
-    { runner: "go test", re: GOTEST_PRESENCE_RE, errorHint: "Error" },
-    { runner: "maven", re: MAVEN_PRESENCE_RE, errorHint: "ERROR" },
-    { runner: "gradle", re: GRADLE_PRESENCE_RE, errorHint: "FAILED" },
-    { runner: "rspec", re: RSPEC_PRESENCE_RE, errorHint: "Error:" },
-    { runner: "dotnet", re: DOTNET_PRESENCE_RE, errorHint: "Error" },
-    { runner: "phpunit", re: PHPUNIT_PRESENCE_RE, errorHint: "Error" },
-  ]
-  for (const { runner, re, errorHint } of presenceChecks) {
-    if (!detected.has(runner) && re.test(clean)) {
-      const matchedFailureLines = uniqueLines(
-        lines.filter((l) => l.toLowerCase().includes(errorHint.toLowerCase()))
-      )
-      results.push({
-        runner,
-        failCount: null,
-        isComplete: false,
-        firstFailLine: matchedFailureLines[0] ?? null,
-        matchedFailureLines,
-      })
-    }
-  }
-
+  results.push(...collectPresenceFallbacks(clean, lines, detected))
   return results
 }
 
@@ -737,25 +721,22 @@ if (typeof response === "string") {
   const notFoundMatch = response.match(TASK_NOT_FOUND_RE)
   if (notFoundMatch) {
     const taskId = String(input.tool_input?.task_id ?? notFoundMatch[1] ?? "")
-    if (taskId) {
-      const recovered = await tryReadOutputFile(taskId, input.cwd ?? process.cwd())
-      if (recovered) {
-        const failureReason = detectFailure(recovered, null)
-        if (failureReason) {
-          // Record gone + file found + failure detected → block with recovered failure detail.
-          denyPostToolUse(
-            `Task \`${taskId}\` output (recovered from file — record had expired):\n\n${failureReason}`
-          )
-        }
-        // Record gone + file found + no failure → inject recovered content as context.
-        await emitContext(
-          "PostToolUse",
-          `Task \`${taskId}\` output recovered from file (record had expired).\n` +
-            `Output preview:\n${recovered.slice(0, 500)}`,
-          input.cwd ?? process.cwd()
+    const recovered = taskId ? await tryReadOutputFile(taskId, input.cwd ?? process.cwd()) : null
+    if (recovered) {
+      const failureReason = detectFailure(recovered, null)
+      if (failureReason) {
+        // Record gone + file found + failure detected → block with recovered failure detail.
+        denyPostToolUse(
+          `Task \`${taskId}\` output (recovered from file — record had expired):\n\n${failureReason}`
         )
       }
-      // Record gone + file missing → fall through to denyPostToolUse below.
+      // Record gone + file found + no failure → inject recovered content as context.
+      await emitContext(
+        "PostToolUse",
+        `Task \`${taskId}\` output recovered from file (record had expired).\n` +
+          `Output preview:\n${recovered.slice(0, 500)}`,
+        input.cwd ?? process.cwd()
+      )
     }
     // Record gone + taskId empty OR record gone + file missing → block with actionable message.
     denyPostToolUse(

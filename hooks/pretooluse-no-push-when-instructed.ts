@@ -65,52 +65,74 @@ interface PushCheckResult {
   approvedAfter: boolean
 }
 
+const CONVERSATION_ROLES = new Set(["user", "assistant"])
+
+function extractTextBlocks(entry: Record<string, unknown>): Array<{ role: string; text: string }> {
+  const role: string = (entry?.type as string) ?? ""
+  if (!CONVERSATION_ROLES.has(role)) return []
+  const content = (entry as { message?: { content?: unknown[] } })?.message?.content
+  if (!Array.isArray(content)) return []
+  const results: Array<{ role: string; text: string }> = []
+  for (const block of content) {
+    const b = block as Record<string, unknown>
+    if (b?.type === "text" && typeof b?.text === "string") {
+      results.push({ role, text: b.text })
+    }
+  }
+  return results
+}
+
+function extractBlockingSnippet(text: string): string {
+  return (
+    text
+      .split("\n")
+      .find((l) => NO_PUSH_RE.test(l))
+      ?.trim() ?? text.slice(0, 120)
+  )
+}
+
+function processTranscriptEntry(entry: Record<string, unknown>, state: PushCheckResult): void {
+  for (const { role, text } of extractTextBlocks(entry)) {
+    if (role !== "user") continue
+    if (NO_PUSH_RE.test(text)) {
+      state.blockingLine = extractBlockingSnippet(text)
+      state.approvedAfter = false
+    } else if (state.blockingLine && PUSH_APPROVAL_PATTERNS.some((re) => re.test(text))) {
+      state.approvedAfter = true
+    }
+  }
+}
+
 async function scanTranscriptForPushBlock(transcriptPath: string): Promise<PushCheckResult> {
-  let blockingLine = ""
-  let approvedAfter = false
+  const state: PushCheckResult = { blockingLine: "", approvedAfter: false }
 
   try {
     for (const line of await readSessionLines(transcriptPath)) {
       if (!line.trim()) continue
+      let entry: Record<string, unknown>
       try {
-        const entry = JSON.parse(line)
-        const role: string = entry?.type ?? ""
-        if (role !== "user" && role !== "assistant") continue
-        const content = entry?.message?.content
-        if (!Array.isArray(content)) continue
-        for (const block of content) {
-          if (block?.type !== "text") continue
-          const txt: string = block?.text ?? ""
-          if (role === "user" && NO_PUSH_RE.test(txt)) {
-            blockingLine =
-              txt
-                .split("\n")
-                .find((l) => NO_PUSH_RE.test(l))
-                ?.trim() ?? txt.slice(0, 120)
-            approvedAfter = false
-          } else if (
-            role === "user" &&
-            blockingLine &&
-            PUSH_APPROVAL_PATTERNS.some((re) => re.test(txt))
-          ) {
-            approvedAfter = true
-          }
-        }
-      } catch {}
+        entry = JSON.parse(line)
+      } catch {
+        continue
+      }
+      processTranscriptEntry(entry, state)
     }
   } catch {}
 
-  return { blockingLine, approvedAfter }
+  return state
+}
+
+function isPushCommand(input: ToolHookInput): boolean {
+  if (!isShellTool(input?.tool_name ?? "")) return false
+  const command: string = (input?.tool_input?.command as string) ?? ""
+  return GIT_PUSH_RE.test(command)
 }
 
 async function main() {
   if (!(await isPushGateEnabled())) process.exit(0)
 
   const input: ToolHookInput = await Bun.stdin.json()
-  if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
-
-  const command: string = (input?.tool_input?.command as string) ?? ""
-  if (!GIT_PUSH_RE.test(command)) process.exit(0)
+  if (!isPushCommand(input)) process.exit(0)
 
   const transcriptPath: string = input?.transcript_path ?? ""
   if (!transcriptPath) process.exit(0)

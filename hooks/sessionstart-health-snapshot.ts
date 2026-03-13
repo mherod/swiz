@@ -47,6 +47,49 @@ async function checkPluginEnv(): Promise<string[]> {
   return warnings
 }
 
+async function collectGitStatus(cwd: string): Promise<string> {
+  const branch = await git(["branch", "--show-current"], cwd)
+  const porcelain = await git(["status", "--porcelain"], cwd)
+  const uncommitted = porcelain ? porcelain.split("\n").length : 0
+  const ahead = (await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd)) || "?"
+  return `Git: branch=${branch}, uncommitted=${uncommitted}, unpushed=${ahead}.`
+}
+
+async function collectPrInfo(cwd: string): Promise<string | null> {
+  const prs = await ghJson<Array<{ reviewDecision?: string }>>(
+    ["pr", "list", "--state", "open", "--limit", "5", "--json", "number,title,reviewDecision"],
+    cwd
+  )
+  if (!prs?.length) return null
+  const changesReq = prs.filter((p) => p.reviewDecision === "CHANGES_REQUESTED").length
+  let info = `PRs: ${prs.length} open`
+  if (changesReq > 0) info += `, ${changesReq} need changes`
+  return `${info}.`
+}
+
+async function collectCiInfo(branch: string, cwd: string): Promise<string | null> {
+  const runs = await ghJson<Array<{ status: string; conclusion: string; workflowName: string }>>(
+    ["run", "list", "--branch", branch, "--limit", "1", "--json", "status,conclusion,workflowName"],
+    cwd
+  )
+  const run = runs?.[0]
+  if (!run) return null
+  const detail = run.status === "completed" ? run.conclusion : run.status
+  return `CI (${run.workflowName}): ${detail}.`
+}
+
+async function collectGitHubParts(cwd: string, branch: string): Promise<string[]> {
+  if (!hasGhCli()) return []
+  const parts: string[] = []
+  const prInfo = await collectPrInfo(cwd)
+  if (prInfo) parts.push(prInfo)
+  if (branch) {
+    const ciInfo = await collectCiInfo(branch, cwd)
+    if (ciInfo) parts.push(ciInfo)
+  }
+  return parts
+}
+
 async function main(): Promise<void> {
   const input = sessionHookInputSchema.parse(await Bun.stdin.json())
   const cwd = input.cwd
@@ -54,81 +97,27 @@ async function main(): Promise<void> {
 
   const parts: string[] = []
 
-  // Plugin environment health — runs regardless of git context
   const pluginWarnings = await checkPluginEnv()
   if (pluginWarnings.length > 0) {
     parts.push(`[ENV] ${pluginWarnings.join(" | ")}`)
   }
 
-  // Project state machine — always included when a state is set
   const stateInfo = await readSessionStartStateInfo(cwd)
   if (stateInfo) {
     parts.push(`State: ${stateInfo.state} → [${stateInfo.transitions.join(", ")}]`)
   }
 
   if (!(await isGitRepo(cwd)) || !(await isGitHubRemote(cwd))) {
-    if (parts.length > 0) {
-      emitContext("SessionStart", parts.join(" "), cwd)
-    }
+    if (parts.length > 0) await emitContext("SessionStart", parts.join(" "), cwd)
     return
   }
 
-  // Git status summary
+  parts.push(await collectGitStatus(cwd))
+
   const branch = await git(["branch", "--show-current"], cwd)
-  const porcelain = await git(["status", "--porcelain"], cwd)
-  const uncommitted = porcelain ? porcelain.split("\n").length : 0
-  const ahead = (await git(["rev-list", "--count", "@{upstream}..HEAD"], cwd)) || "?"
+  parts.push(...(await collectGitHubParts(cwd, branch)))
 
-  parts.push(`Git: branch=${branch}, uncommitted=${uncommitted}, unpushed=${ahead}.`)
-
-  // Open PRs (fast, limit output)
-  if (hasGhCli()) {
-    const prs = await ghJson<Array<{ reviewDecision?: string }>>(
-      ["pr", "list", "--state", "open", "--limit", "5", "--json", "number,title,reviewDecision"],
-      cwd
-    )
-    if (prs?.length) {
-      const changesReq = prs.filter((p) => p.reviewDecision === "CHANGES_REQUESTED").length
-      let prInfo = `PRs: ${prs.length} open`
-      if (changesReq > 0) prInfo += `, ${changesReq} need changes`
-      parts.push(`${prInfo}.`)
-    }
-
-    // Latest CI on current branch
-    if (branch) {
-      const runs = await ghJson<
-        Array<{
-          status: string
-          conclusion: string
-          workflowName: string
-        }>
-      >(
-        [
-          "run",
-          "list",
-          "--branch",
-          branch,
-          "--limit",
-          "1",
-          "--json",
-          "status,conclusion,workflowName",
-        ],
-        cwd
-      )
-      const run = runs?.[0]
-      if (run) {
-        if (run.status === "completed") {
-          parts.push(`CI (${run.workflowName}): ${run.conclusion}.`)
-        } else {
-          parts.push(`CI (${run.workflowName}): ${run.status}.`)
-        }
-      }
-    }
-  }
-
-  if (parts.length === 0) return
-
-  emitContext("SessionStart", parts.join(" "), cwd)
+  if (parts.length > 0) await emitContext("SessionStart", parts.join(" "), cwd)
 }
 
 if (import.meta.main) void main()

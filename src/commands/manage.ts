@@ -185,23 +185,28 @@ function consumeManageFlag(
   throw new Error(`Unexpected argument: ${token}\n${usage()}`)
 }
 
+const VALID_MCP_ACTIONS = new Set<ManageAction>(["list", "show", "add", "remove", "validate"])
+const ACTIONS_REQUIRING_NAME = new Set<ManageAction>(["add", "remove", "show"])
+
+function validateManageAction(token: string): ManageAction {
+  if (!VALID_MCP_ACTIONS.has(token as ManageAction)) {
+    throw new Error(`Unknown mcp action: ${token}\n${usage()}`)
+  }
+  return token as ManageAction
+}
+
+function resolveTargetAgents(state: ManageParseState): AgentId[] {
+  const agents = agentList(state.project)
+  return state.selectedAgentFlags.size > 0
+    ? agents.filter((a) => state.selectedAgentFlags.has(a.id)).map((a) => a.id)
+    : agents.map((a) => a.id)
+}
+
 export function parseManageArgs(args: string[]): ParsedManageArgs {
-  if (args[0] !== "mcp") {
+  if (args[0] !== "mcp")
     throw new Error(`Unknown manage subject: ${args[0] ?? "(none)"}\n${usage()}`)
-  }
 
-  const actionToken = (args[1] ?? "list").toLowerCase()
-  if (
-    actionToken !== "list" &&
-    actionToken !== "show" &&
-    actionToken !== "add" &&
-    actionToken !== "remove" &&
-    actionToken !== "validate"
-  ) {
-    throw new Error(`Unknown mcp action: ${actionToken}\n${usage()}`)
-  }
-
-  const action = actionToken as ManageAction
+  const action = validateManageAction((args[1] ?? "list").toLowerCase())
   const state: ManageParseState = {
     project: false,
     actionArgs: [],
@@ -215,18 +220,10 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
     i += consumeManageFlag(token, args[i + 1], state)
   }
 
-  if ((action === "add" || action === "remove" || action === "show") && !state.name) {
+  if (ACTIONS_REQUIRING_NAME.has(action) && !state.name)
     throw new Error(`"${action}" requires a server name\n${usage()}`)
-  }
-  if (action === "add" && !state.command) {
+  if (action === "add" && !state.command)
     throw new Error(`"add" requires --command <cmd>\n${usage()}`)
-  }
-
-  const agents = agentList(state.project)
-  const targetAgents =
-    state.selectedAgentFlags.size > 0
-      ? agents.filter((a) => state.selectedAgentFlags.has(a.id)).map((a) => a.id)
-      : agents.map((a) => a.id)
 
   return {
     subject: "mcp",
@@ -235,7 +232,7 @@ export function parseManageArgs(args: string[]): ParsedManageArgs {
     command: state.command,
     args: state.actionArgs,
     env: state.env,
-    targetAgents,
+    targetAgents: resolveTargetAgents(state),
     project: state.project,
   }
 }
@@ -262,6 +259,16 @@ function getAgentConfig(agentId: AgentId, project: boolean): AgentConfig {
   return agent
 }
 
+function validateServerEnv(name: string, env: unknown, issues: string[]): void {
+  if (!env || typeof env !== "object" || Array.isArray(env)) {
+    issues.push(`Server "${name}" has invalid env (must be object of strings)`)
+    return
+  }
+  for (const [envKey, envVal] of Object.entries(env as Record<string, unknown>)) {
+    if (typeof envVal !== "string") issues.push(`Server "${name}" env "${envKey}" must be a string`)
+  }
+}
+
 function validateServerShape(name: string, server: unknown, issues: string[]): void {
   if (!server || typeof server !== "object" || Array.isArray(server)) {
     issues.push(`Server "${name}" is not an object`)
@@ -277,17 +284,7 @@ function validateServerShape(name: string, server: unknown, issues: string[]): v
   ) {
     issues.push(`Server "${name}" has invalid args (must be string[])`)
   }
-  if (value.env !== undefined) {
-    if (!value.env || typeof value.env !== "object" || Array.isArray(value.env)) {
-      issues.push(`Server "${name}" has invalid env (must be object of strings)`)
-    } else {
-      for (const [envKey, envVal] of Object.entries(value.env as Record<string, unknown>)) {
-        if (typeof envVal !== "string") {
-          issues.push(`Server "${name}" env "${envKey}" must be a string`)
-        }
-      }
-    }
-  }
+  if (value.env !== undefined) validateServerEnv(name, value.env, issues)
 }
 
 function validateServerBinary(name: string, server: McpServerDef, issues: string[]): void {

@@ -98,7 +98,7 @@ async function main(): Promise<void> {
     compactionChecklist,
   ].join("\n\n")
 
-  emitContext("PostToolUse", context, cwd)
+  await emitContext("PostToolUse", context, cwd)
 }
 
 if (import.meta.main) void main()

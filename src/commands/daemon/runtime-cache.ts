@@ -239,6 +239,28 @@ export class HookEligibilityCache {
   }
 }
 
+async function resolveWorkflowIntent(cwd: string): Promise<string | null> {
+  try {
+    const state = await readProjectState(cwd)
+    return state ? getWorkflowIntent(state) : null
+  } catch {
+    return null
+  }
+}
+
+async function evalHookConditions(
+  groups: Array<{ hooks: Array<{ condition?: string; file: string }> }>,
+  results: Record<string, boolean>
+): Promise<void> {
+  for (const group of groups) {
+    for (const hook of group.hooks) {
+      if (hook.condition && !(hook.file in results)) {
+        results[hook.file] = await evalCondition(hook.condition)
+      }
+    }
+  }
+}
+
 async function computeEligibility(cwd: string): Promise<EligibilitySnapshot> {
   const settings = await readSwizSettings()
   const projectSettings = cwd ? await readProjectSettings(cwd) : null
@@ -250,32 +272,13 @@ async function computeEligibility(cwd: string): Promise<EligibilitySnapshot> {
   ])
   const detectedStacks = cwd ? await detectProjectStack(cwd) : []
   const prMergeActive = resolvePrMergeActive(effective.collaborationMode, effective.prMergeMode)
-
-  let workflowIntent: string | null = null
-  try {
-    const state = await readProjectState(cwd)
-    if (state) workflowIntent = getWorkflowIntent(state)
-  } catch {
-    // no-op
-  }
+  const workflowIntent = await resolveWorkflowIntent(cwd)
 
   const conditionResults: Record<string, boolean> = {}
-  for (const group of manifest) {
-    for (const hook of group.hooks) {
-      if (hook.condition && !(hook.file in conditionResults)) {
-        conditionResults[hook.file] = await evalCondition(hook.condition)
-      }
-    }
-  }
+  await evalHookConditions(manifest, conditionResults)
   if (projectSettings?.hooks?.length) {
     const { resolved } = resolveProjectHooks(projectSettings.hooks, cwd)
-    for (const group of resolved) {
-      for (const hook of group.hooks) {
-        if (hook.condition && !(hook.file in conditionResults)) {
-          conditionResults[hook.file] = await evalCondition(hook.condition)
-        }
-      }
-    }
+    await evalHookConditions(resolved, conditionResults)
   }
 
   return {
@@ -293,6 +296,44 @@ export interface TranscriptIndex {
   blockedToolUseIds: string[]
   mtimeMs: number
   computedAt: number
+}
+
+function extractToolResultText(block: { content?: string | unknown[] }): string {
+  const blockContent = block.content
+  if (typeof blockContent === "string") return blockContent
+  if (!Array.isArray(blockContent)) return ""
+  return (blockContent as Array<{ text?: string }>)
+    .map((c) => (typeof c === "string" ? c : (c?.text ?? "")))
+    .join("")
+}
+
+type ToolResultBlock = { type?: string; content?: string | unknown[]; tool_use_id?: string }
+
+function collectBlockedIdsFromEntry(line: string, blockedIds: string[]): void {
+  const entry = JSON.parse(line) as {
+    type?: string
+    message?: { content?: string | unknown[] }
+  }
+  if (entry?.type !== "user") return
+  const content = entry?.message?.content
+  if (!Array.isArray(content)) return
+  for (const block of content as ToolResultBlock[]) {
+    if (block?.type !== "tool_result") continue
+    if (extractToolResultText(block).includes("ACTION REQUIRED:")) {
+      blockedIds.push(String(block.tool_use_id ?? ""))
+    }
+  }
+}
+
+function extractBlockedToolUseIds(sessionLines: string[]): string[] {
+  const blockedIds: string[] = []
+  for (const line of sessionLines) {
+    if (!line.trim()) continue
+    try {
+      collectBlockedIdsFromEntry(line, blockedIds)
+    } catch {}
+  }
+  return blockedIds
 }
 
 export class TranscriptIndexCache {
@@ -314,38 +355,7 @@ export class TranscriptIndexCache {
       this._misses++
       const text = await file.text()
       const summary = parseTranscriptSummary(text)
-      const blockedIds: string[] = []
-      for (const line of summary.sessionLines) {
-        if (!line.trim()) continue
-        try {
-          const entry = JSON.parse(line) as {
-            type?: string
-            message?: { content?: string | unknown[] }
-          }
-          if (entry?.type !== "user") continue
-          const content = entry?.message?.content
-          if (!Array.isArray(content)) continue
-          for (const block of content as Array<{
-            type?: string
-            content?: string | unknown[]
-            tool_use_id?: string
-          }>) {
-            if (block?.type !== "tool_result") continue
-            const blockContent = block.content
-            const text =
-              typeof blockContent === "string"
-                ? blockContent
-                : Array.isArray(blockContent)
-                  ? (blockContent as Array<{ text?: string }>)
-                      .map((c) => (typeof c === "string" ? c : (c?.text ?? "")))
-                      .join("")
-                  : ""
-            if (text.includes("ACTION REQUIRED:")) blockedIds.push(String(block.tool_use_id ?? ""))
-          }
-        } catch {
-          // ignore malformed lines
-        }
-      }
+      const blockedIds = extractBlockedToolUseIds(summary.sessionLines)
       const index: TranscriptIndex = {
         summary,
         blockedToolUseIds: blockedIds,

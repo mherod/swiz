@@ -342,41 +342,41 @@ describe("renderStatusLineFromSnapshot", () => {
   }
 
   it("renders a stable three-line output shape from warm snapshots", () => {
-    const out = renderStatusLineFromSnapshot(
-      { model: { display_name: "claude-sonnet" } },
-      baseSnapshot,
-      50,
-      1200,
-      { minPct: 40, maxPct: 80 },
-      0
-    )
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-sonnet" } },
+      snapshot: baseSnapshot,
+      ctxPct: 50,
+      ctxTokens: 1200,
+      ctxStats: { minPct: 40, maxPct: 80 },
+      timeOffset: 0,
+    })
     const lines = out.split("\n")
     expect(lines.length).toBe(3)
   })
 
   it("respects segment gating semantics from snapshot activeSegments", () => {
-    const out = renderStatusLineFromSnapshot(
-      { model: { display_name: "claude-haiku" } },
-      { ...baseSnapshot, activeSegments: ["model"] },
-      0,
-      0,
-      null,
-      0
-    )
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: { ...baseSnapshot, activeSegments: ["model"] },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
     expect(out).toContain("model")
     expect(out).not.toContain("backlog")
     expect(out).not.toContain("state")
   })
 
   it("renders the current CI status when present", () => {
-    const out = renderStatusLineFromSnapshot(
-      { model: { display_name: "claude-haiku" } },
-      { ...baseSnapshot, ciState: "pending", ciLabel: "running" },
-      0,
-      0,
-      null,
-      0
-    )
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: { ...baseSnapshot, ciState: "pending", ciLabel: "running" },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
     expect(out).toContain("ci")
     expect(out).toContain("running")
   })

@@ -74,7 +74,7 @@ if (!remoteHead) {
 }
 
 if (localHead === remoteHead) {
-  emitContext(
+  await emitContext(
     "PostToolUse",
     `Push verified: HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`,
     cwd
@@ -88,7 +88,7 @@ for (const delayMs of RETRY_DELAYS_MS) {
   await Bun.sleep(delayMs)
   const refreshed = await getRemoteHead()
   if (refreshed === localHead) {
-    emitContext(
+    await emitContext(
       "PostToolUse",
       `Push verified (after ${delayMs}ms retry): HEAD ${localHead.slice(0, 8)} is confirmed on the remote tracking branch.`,
       cwd

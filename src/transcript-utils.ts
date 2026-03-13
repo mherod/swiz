@@ -177,12 +177,51 @@ async function readGeminiSessionId(sessionPath: string): Promise<string | null> 
   return null
 }
 
+async function collectGeminiChatSessions(chatsDir: string, sessions: Session[]): Promise<void> {
+  let chatEntries: import("node:fs").Dirent[]
+  try {
+    chatEntries = await readdir(chatsDir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const chatEntry of chatEntries) {
+    if (!chatEntry.isFile()) continue
+    if (!chatEntry.name.startsWith("session-") || !chatEntry.name.endsWith(".json")) continue
+    const sessionPath = join(chatsDir, chatEntry.name)
+    try {
+      const s = await stat(sessionPath)
+      const id = (await readGeminiSessionId(sessionPath)) ?? chatEntry.name.replace(/\.json$/, "")
+      sessions.push({
+        id,
+        path: sessionPath,
+        mtime: s.mtimeMs,
+        provider: "gemini",
+        format: "gemini-json",
+      })
+    } catch {}
+  }
+}
+
+async function matchesBucketTarget(
+  bucketDir: string,
+  geminiHistory: string,
+  bucketName: string,
+  target: string,
+  fallbackName: string
+): Promise<boolean> {
+  const roots = new Set<string>()
+  const tmpRoot = await readProjectRoot(join(bucketDir, ".project_root"))
+  if (tmpRoot) roots.add(tmpRoot)
+  const historyRoot = await readProjectRoot(join(geminiHistory, bucketName, ".project_root"))
+  if (historyRoot) roots.add(historyRoot)
+  return roots.size > 0 ? [...roots].some((root) => root === target) : bucketName === fallbackName
+}
+
 async function findGeminiSessions(targetDir: string, home?: string): Promise<Session[]> {
   home = home ?? getHomeDir()
   const geminiTmp = join(home, ".gemini", "tmp")
   const geminiHistory = join(home, ".gemini", "history")
   const target = resolve(targetDir)
-  const bucketFallbackName = basename(target)
   const sessions: Session[] = []
 
   let buckets: import("node:fs").Dirent[]
@@ -195,45 +234,15 @@ async function findGeminiSessions(targetDir: string, home?: string): Promise<Ses
   for (const bucket of buckets) {
     if (!bucket.isDirectory()) continue
     const bucketDir = join(geminiTmp, bucket.name)
-    const roots = new Set<string>()
-
-    const tmpRoot = await readProjectRoot(join(bucketDir, ".project_root"))
-    if (tmpRoot) roots.add(tmpRoot)
-
-    const historyRoot = await readProjectRoot(join(geminiHistory, bucket.name, ".project_root"))
-    if (historyRoot) roots.add(historyRoot)
-
-    const matchesTarget =
-      roots.size > 0
-        ? [...roots].some((root) => root === target)
-        : bucket.name === bucketFallbackName
-    if (!matchesTarget) continue
-
-    const chatsDir = join(bucketDir, "chats")
-    let chatEntries: import("node:fs").Dirent[]
-    try {
-      chatEntries = await readdir(chatsDir, { withFileTypes: true })
-    } catch {
-      continue
-    }
-
-    for (const chatEntry of chatEntries) {
-      if (!chatEntry.isFile()) continue
-      if (!chatEntry.name.startsWith("session-") || !chatEntry.name.endsWith(".json")) continue
-
-      const sessionPath = join(chatsDir, chatEntry.name)
-      try {
-        const s = await stat(sessionPath)
-        const id = (await readGeminiSessionId(sessionPath)) ?? chatEntry.name.replace(/\.json$/, "")
-        sessions.push({
-          id,
-          path: sessionPath,
-          mtime: s.mtimeMs,
-          provider: "gemini",
-          format: "gemini-json",
-        })
-      } catch {}
-    }
+    const matches = await matchesBucketTarget(
+      bucketDir,
+      geminiHistory,
+      bucket.name,
+      target,
+      basename(target)
+    )
+    if (!matches) continue
+    await collectGeminiChatSessions(join(bucketDir, "chats"), sessions)
   }
 
   return sessions
@@ -268,6 +277,25 @@ function parseCodexIdFromFilename(name: string): string {
   return uuidMatch?.[0] ?? base
 }
 
+const CODEX_META_TYPES = new Set(["session_meta", "turn_context"])
+
+function extractCodexMetaPayload(line: string): Record<string, unknown> | null {
+  const trimmed = line.trim()
+  if (!trimmed) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed) as unknown
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== "object") return null
+  const record = parsed as Record<string, unknown>
+  if (!CODEX_META_TYPES.has(record.type as string)) return null
+  const payload = record.payload
+  if (!payload || typeof payload !== "object") return null
+  return payload as Record<string, unknown>
+}
+
 async function readCodexSessionMeta(
   sessionPath: string
 ): Promise<{ id: string | null; cwd: string | null }> {
@@ -278,35 +306,11 @@ async function readCodexSessionMeta(
   let cwd: string | null = null
 
   for (const line of prefix.split("\n")) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
+    const payload = extractCodexMetaPayload(line)
+    if (!payload) continue
 
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(trimmed) as unknown
-    } catch {
-      continue
-    }
-
-    if (!parsed || typeof parsed !== "object") continue
-    const record = parsed as Record<string, unknown>
-    const type = record.type
-    if (type !== "session_meta" && type !== "turn_context") continue
-
-    const payload = record.payload
-    if (!payload || typeof payload !== "object") continue
-    const payloadRecord = payload as Record<string, unknown>
-
-    const parsedId = payloadRecord.id
-    if (!id && typeof parsedId === "string" && parsedId.trim()) {
-      id = parsedId
-    }
-
-    const parsedCwd = payloadRecord.cwd
-    if (!cwd && typeof parsedCwd === "string" && parsedCwd.trim()) {
-      cwd = parsedCwd
-    }
-
+    if (!id && typeof payload.id === "string" && payload.id.trim()) id = payload.id as string
+    if (!cwd && typeof payload.cwd === "string" && payload.cwd.trim()) cwd = payload.cwd as string
     if (id && cwd) break
   }
 
@@ -431,6 +435,45 @@ function cursorProjectKeyCandidates(targetDir: string): Set<string> {
   return new Set([key, withoutLeadingDashes])
 }
 
+async function collectCursorSessionFiles(sessionDir: string, sessions: Session[]): Promise<void> {
+  let files: import("node:fs").Dirent[]
+  try {
+    files = await readdir(sessionDir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const file of files) {
+    if (!file.isFile() || !file.name.endsWith(".jsonl")) continue
+    const sessionPath = join(sessionDir, file.name)
+    try {
+      const s = await stat(sessionPath)
+      sessions.push({
+        id: file.name.replace(/\.jsonl$/, ""),
+        path: sessionPath,
+        mtime: s.mtimeMs,
+        provider: "cursor",
+        format: "cursor-agent-jsonl",
+      })
+    } catch {}
+  }
+}
+
+async function collectCursorTranscriptSessions(
+  transcriptRoot: string,
+  sessions: Session[]
+): Promise<void> {
+  let transcriptEntries: import("node:fs").Dirent[]
+  try {
+    transcriptEntries = await readdir(transcriptRoot, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of transcriptEntries) {
+    if (!entry.isDirectory()) continue
+    await collectCursorSessionFiles(join(transcriptRoot, entry.name), sessions)
+  }
+}
+
 async function findCursorAgentTranscriptSessions(
   targetDir: string,
   home?: string
@@ -450,40 +493,8 @@ async function findCursorAgentTranscriptSessions(
   for (const projectEntry of projectEntries) {
     if (!projectEntry.isDirectory()) continue
     if (!keyCandidates.has(projectEntry.name)) continue
-
     const transcriptRoot = join(projectsRoot, projectEntry.name, "agent-transcripts")
-    let transcriptEntries: import("node:fs").Dirent[]
-    try {
-      transcriptEntries = await readdir(transcriptRoot, { withFileTypes: true })
-    } catch {
-      continue
-    }
-
-    for (const entry of transcriptEntries) {
-      if (!entry.isDirectory()) continue
-      const sessionDir = join(transcriptRoot, entry.name)
-      let files: import("node:fs").Dirent[]
-      try {
-        files = await readdir(sessionDir, { withFileTypes: true })
-      } catch {
-        continue
-      }
-
-      for (const file of files) {
-        if (!file.isFile() || !file.name.endsWith(".jsonl")) continue
-        const sessionPath = join(sessionDir, file.name)
-        try {
-          const s = await stat(sessionPath)
-          sessions.push({
-            id: file.name.replace(/\.jsonl$/, ""),
-            path: sessionPath,
-            mtime: s.mtimeMs,
-            provider: "cursor",
-            format: "cursor-agent-jsonl",
-          })
-        } catch {}
-      }
-    }
+    await collectCursorTranscriptSessions(transcriptRoot, sessions)
   }
 
   return sessions
@@ -693,38 +704,36 @@ export function isHookFeedback(content: string | ContentBlock[] | undefined): bo
  * A human-required block from any earlier session turn is considered stale once
  * a newer non-hook-feedback assistant turn appears after it.
  */
+function extractContentText(content: unknown): string {
+  if (typeof content === "string") return content
+  if (!Array.isArray(content)) return ""
+  return content
+    .filter((b): b is TextBlock => b.type === "text")
+    .map((b) => b.text ?? "")
+    .join("")
+}
+
+function extractCommandMessage(text: string, sentinel: string): string | null {
+  if (!text.startsWith("<command-message>") || !text.includes(sentinel)) return null
+  return text
+    .replace(/^<command-message>\s*/i, "")
+    .replace(/<\/command-message>\s*$/i, "")
+    .trim()
+}
+
 export function findHumanRequiredBlock(transcriptText: string, limit = 20): string | null {
-  const SENTINEL = "ACTION REQUIRED:"
   const entries: Array<{ type?: string; message?: { role?: string; content?: unknown } }> = []
   for (const entry of parseTranscriptEntries(transcriptText)) {
     entries.push(entry)
   }
   const recent = entries.slice(-limit)
-  // Walk backwards: return the block reason if we find a human-required message
-  // before we find a post-hook assistant turn (which means the agent already acted).
   for (let i = recent.length - 1; i >= 0; i--) {
     const entry = recent[i]!
-    if (entry?.type === "assistant") {
-      // An assistant response after the block means the agent already acted on it.
-      return null
-    }
-    if (entry?.type === "user") {
-      const content = entry?.message?.content
-      const text =
-        typeof content === "string"
-          ? content
-          : Array.isArray(content)
-            ? content
-                .filter((b): b is TextBlock => b.type === "text")
-                .map((b) => b.text ?? "")
-                .join("")
-            : ""
-      if (text.startsWith("<command-message>") && text.includes(SENTINEL)) {
-        return text
-          .replace(/^<command-message>\s*/i, "")
-          .replace(/<\/command-message>\s*$/i, "")
-          .trim()
-      }
+    if (entry.type === "assistant") return null
+    if (entry.type === "user") {
+      const text = extractContentText(entry.message?.content)
+      const result = extractCommandMessage(text, "ACTION REQUIRED:")
+      if (result) return result
     }
   }
   return null
@@ -934,6 +943,75 @@ const codexResponseItemSchema = z.looseObject({
   }),
 })
 
+function classifyCodexLine(
+  parsed: unknown,
+  sessionId: string | undefined,
+  entries: TranscriptEntry[]
+): string | undefined {
+  const sessionMetaResult = codexSessionMetaSchema.safeParse(parsed)
+  if (sessionMetaResult.success) {
+    const id = sessionMetaResult.data.payload.id?.trim()
+    return id || sessionId
+  }
+
+  const eventMsgResult = codexEventMsgSchema.safeParse(parsed)
+  if (eventMsgResult.success) {
+    const message = eventMsgResult.data.payload.message?.trim()
+    if (message) {
+      entries.push({
+        type: "user",
+        sessionId,
+        timestamp: eventMsgResult.data.timestamp,
+        message: { role: "user", content: message },
+      })
+    }
+    return sessionId
+  }
+
+  const responseItemResult = codexResponseItemSchema.safeParse(parsed)
+  if (!responseItemResult.success) return sessionId
+  classifyCodexResponseItem(responseItemResult.data, sessionId, entries)
+  return sessionId
+}
+
+interface CodexResponseData {
+  timestamp?: string
+  payload: { type: string; role?: string; content?: unknown; name?: string; arguments?: unknown }
+}
+
+function classifyCodexResponseItem(
+  data: CodexResponseData,
+  sessionId: string | undefined,
+  entries: TranscriptEntry[]
+): void {
+  const { timestamp, payload } = data
+  if (payload.type === "message" && payload.role === "assistant") {
+    const text = extractCodexMessageText(payload.content, "output_text")
+    if (text) {
+      entries.push({
+        type: "assistant",
+        sessionId,
+        timestamp,
+        message: { role: "assistant", content: [{ type: "text", text }] },
+      })
+    }
+    return
+  }
+  if (payload.type === "function_call" && payload.name) {
+    entries.push({
+      type: "assistant",
+      sessionId,
+      timestamp,
+      message: {
+        role: "assistant",
+        content: [
+          { type: "tool_use", name: payload.name, input: parseCodexToolInput(payload.arguments) },
+        ],
+      },
+    })
+  }
+}
+
 function parseCodexJsonlEntries(text: string): TranscriptEntry[] {
   const entries: TranscriptEntry[] = []
   let sessionId: string | undefined
@@ -945,73 +1023,7 @@ function parseCodexJsonlEntries(text: string): TranscriptEntry[] {
     } catch {
       continue
     }
-
-    // Try session_meta
-    const sessionMetaResult = codexSessionMetaSchema.safeParse(parsed)
-    if (sessionMetaResult.success) {
-      const payload = sessionMetaResult.data.payload
-      if (payload.id?.trim()) {
-        sessionId = payload.id
-      }
-      continue
-    }
-
-    // Try event_msg (user messages)
-    const eventMsgResult = codexEventMsgSchema.safeParse(parsed)
-    if (eventMsgResult.success) {
-      const message = eventMsgResult.data.payload.message?.trim()
-      if (message) {
-        entries.push({
-          type: "user",
-          sessionId,
-          timestamp: eventMsgResult.data.timestamp,
-          message: {
-            role: "user",
-            content: message,
-          },
-        })
-      }
-      continue
-    }
-
-    // Try response_item
-    const responseItemResult = codexResponseItemSchema.safeParse(parsed)
-    if (!responseItemResult.success) continue
-
-    const { timestamp, payload } = responseItemResult.data
-
-    if (payload.type === "message" && payload.role === "assistant") {
-      const text = extractCodexMessageText(payload.content, "output_text")
-      if (!text) continue
-      entries.push({
-        type: "assistant",
-        sessionId,
-        timestamp,
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text }],
-        },
-      })
-      continue
-    }
-
-    if (payload.type === "function_call" && payload.name) {
-      entries.push({
-        type: "assistant",
-        sessionId,
-        timestamp,
-        message: {
-          role: "assistant",
-          content: [
-            {
-              type: "tool_use",
-              name: payload.name,
-              input: parseCodexToolInput(payload.arguments),
-            },
-          ],
-        },
-      })
-    }
+    sessionId = classifyCodexLine(parsed, sessionId, entries)
   }
 
   return entries
@@ -1071,6 +1083,63 @@ const geminiSessionSchema = z.looseObject({
   messages: z.array(z.unknown()),
 })
 
+function parseGeminiToolCallBlocks(toolCalls: unknown): ContentBlock[] {
+  const blocks: ContentBlock[] = []
+  for (const call of Array.isArray(toolCalls) ? toolCalls : []) {
+    const toolResult = geminiToolCallSchema.safeParse(call)
+    if (!toolResult.success) continue
+    const input =
+      toolResult.data.args &&
+      typeof toolResult.data.args === "object" &&
+      !Array.isArray(toolResult.data.args)
+        ? (toolResult.data.args as Record<string, unknown>)
+        : {}
+    blocks.push({ type: "tool_use", name: toolResult.data.name, input })
+  }
+  return blocks
+}
+
+function classifyGeminiRole(m: Record<string, unknown>): string {
+  if (typeof m.type === "string") return m.type
+  if (typeof m.role === "string") return m.role
+  return ""
+}
+
+const GEMINI_ASSISTANT_ROLES = new Set(["gemini", "assistant", "model"])
+
+function classifyGeminiMessage(
+  m: Record<string, unknown>,
+  sessionId: string | undefined,
+  entries: TranscriptEntry[]
+): void {
+  const rawType = classifyGeminiRole(m)
+  const timestamp = typeof m.timestamp === "string" ? m.timestamp : undefined
+
+  if (rawType === "info") return
+
+  if (rawType === "user") {
+    const text = extractGeminiText(m.content)
+    if (text)
+      entries.push({ type: "user", sessionId, timestamp, message: { role: "user", content: text } })
+    return
+  }
+
+  if (GEMINI_ASSISTANT_ROLES.has(rawType)) {
+    const blocks: ContentBlock[] = []
+    const text = extractGeminiText(m.content)
+    if (text) blocks.push({ type: "text", text })
+    blocks.push(...parseGeminiToolCallBlocks(m.toolCalls))
+    if (blocks.length > 0) {
+      entries.push({
+        type: "assistant",
+        sessionId,
+        timestamp,
+        message: { role: "assistant", content: blocks },
+      })
+    }
+  }
+}
+
 function parseGeminiEntries(text: string): TranscriptEntry[] {
   let parsed: unknown
   try {
@@ -1087,66 +1156,13 @@ function parseGeminiEntries(text: string): TranscriptEntry[] {
 
   for (const msg of sessionResult.data.messages) {
     if (!msg || typeof msg !== "object") continue
-    const m = msg as Record<string, unknown>
-    const rawType = typeof m.type === "string" ? m.type : typeof m.role === "string" ? m.role : ""
-    const timestamp = typeof m.timestamp === "string" ? m.timestamp : undefined
-
-    if (rawType === "info") continue
-
-    if (rawType === "user") {
-      const text = extractGeminiText(m.content)
-      if (!text) continue
-      entries.push({
-        type: "user",
-        sessionId,
-        timestamp,
-        message: {
-          role: "user",
-          content: text,
-        },
-      })
-      continue
-    }
-
-    if (rawType === "gemini" || rawType === "assistant" || rawType === "model") {
-      const blocks: ContentBlock[] = []
-      const text = extractGeminiText(m.content)
-      if (text) blocks.push({ type: "text", text })
-
-      if (Array.isArray(m.toolCalls)) {
-        for (const call of m.toolCalls) {
-          const toolResult = geminiToolCallSchema.safeParse(call)
-          if (!toolResult.success) continue
-          const input =
-            toolResult.data.args &&
-            typeof toolResult.data.args === "object" &&
-            !Array.isArray(toolResult.data.args)
-              ? (toolResult.data.args as Record<string, unknown>)
-              : {}
-          blocks.push({ type: "tool_use", name: toolResult.data.name, input })
-        }
-      }
-
-      if (blocks.length === 0) continue
-
-      entries.push({
-        type: "assistant",
-        sessionId,
-        timestamp,
-        message: {
-          role: "assistant",
-          content: blocks,
-        },
-      })
-    }
+    classifyGeminiMessage(msg as Record<string, unknown>, sessionId, entries)
   }
 
   return entries
 }
 
-function parseJsonObjectAt(text: string, startIndex: number): Record<string, unknown> | null {
-  if (text[startIndex] !== "{") return null
-
+function findMatchingBrace(text: string, startIndex: number): number {
   let depth = 0
   let inString = false
   let escaped = false
@@ -1164,9 +1180,7 @@ function parseJsonObjectAt(text: string, startIndex: number): Record<string, unk
         escaped = true
         continue
       }
-      if (ch === '"') {
-        inString = false
-      }
+      if (ch === '"') inString = false
       continue
     }
 
@@ -1174,29 +1188,28 @@ function parseJsonObjectAt(text: string, startIndex: number): Record<string, unk
       inString = true
       continue
     }
-
     if (ch === "{") {
       depth++
       continue
     }
-
     if (ch === "}") {
       depth--
-      if (depth !== 0) continue
-      const slice = text.slice(startIndex, i + 1)
-      try {
-        const parsed = JSON.parse(slice) as Record<string, unknown>
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          return parsed
-        }
-      } catch {
-        return null
-      }
-      return null
+      if (depth === 0) return i
     }
   }
+  return -1
+}
 
-  return null
+function parseJsonObjectAt(text: string, startIndex: number): Record<string, unknown> | null {
+  if (text[startIndex] !== "{") return null
+  const endIndex = findMatchingBrace(text, startIndex)
+  if (endIndex < 0) return null
+  try {
+    const parsed = JSON.parse(text.slice(startIndex, endIndex + 1)) as Record<string, unknown>
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 // ─── Cursor content schemas ───────────────────────────────────────────────────
@@ -1256,6 +1269,25 @@ function normalizeCursorContent(content: unknown): string | ContentBlock[] {
   return blocks
 }
 
+const CURSOR_ROLES = new Set(["user", "assistant", "tool"])
+
+function classifyCursorObject(obj: Record<string, unknown>, entries: TranscriptEntry[]): void {
+  const role = typeof obj.role === "string" ? obj.role : ""
+  if (!CURSOR_ROLES.has(role)) return
+
+  const normalizedContent = normalizeCursorContent(obj.content)
+  if (!normalizedContent) return
+  if (Array.isArray(normalizedContent) && normalizedContent.length === 0) return
+
+  const messageRole = role === "tool" ? "user" : (role as "user" | "assistant")
+  entries.push({
+    type: messageRole,
+    sessionId: typeof obj.id === "string" ? obj.id : undefined,
+    timestamp: typeof obj.timestamp === "string" ? obj.timestamp : undefined,
+    message: { role: messageRole, content: normalizedContent },
+  })
+}
+
 function parseCursorSqliteEntries(text: string): TranscriptEntry[] {
   const entries: TranscriptEntry[] = []
   let searchFrom = 0
@@ -1267,26 +1299,7 @@ function parseCursorSqliteEntries(text: string): TranscriptEntry[] {
 
     const obj = parseJsonObjectAt(text, start)
     if (!obj) continue
-
-    const role = typeof obj.role === "string" ? obj.role : ""
-    if (role !== "user" && role !== "assistant" && role !== "tool") continue
-
-    const normalizedContent = normalizeCursorContent(obj.content)
-    if (!normalizedContent) continue
-    if (Array.isArray(normalizedContent) && normalizedContent.length === 0) continue
-
-    const messageRole = role === "tool" ? "user" : role
-    const sessionId = typeof obj.id === "string" ? obj.id : undefined
-    const timestamp = typeof obj.timestamp === "string" ? obj.timestamp : undefined
-    entries.push({
-      type: messageRole,
-      sessionId,
-      timestamp,
-      message: {
-        role: messageRole,
-        content: normalizedContent,
-      },
-    })
+    classifyCursorObject(obj, entries)
   }
 
   return entries
@@ -1315,45 +1328,47 @@ export function parseTranscriptEntries(
   return parseJsonlEntries(text)
 }
 
+function buildArrayContentText(content: unknown[], entryType: string): string {
+  let text = content
+    .filter(isTextBlockWithText)
+    .map((b) => b.text)
+    .join("\n")
+
+  const toolSummary = summarizeToolCalls(content)
+  if (toolSummary) text = text ? `${text}\n${toolSummary}` : toolSummary
+
+  if (entryType === "user") {
+    const resultTexts = content
+      .filter(isToolResultSummaryBlock)
+      .map((b) => extractToolResultText(b))
+      .filter(Boolean)
+    if (resultTexts.length > 0) {
+      const resultSummary = resultTexts.map((t) => `[Result: ${t}]`).join("\n")
+      text = text ? `${text}\n${resultSummary}` : resultSummary
+    }
+  }
+
+  return text
+}
+
+function extractEntryText(content: unknown, entryType: string): string {
+  if (typeof content === "string") return content
+  if (Array.isArray(content)) return buildArrayContentText(content, entryType)
+  return ""
+}
+
 export function extractPlainTurns(transcriptText: string): PlainTurn[] {
   const turns: PlainTurn[] = []
 
   for (const entry of parseTranscriptEntries(transcriptText)) {
-    if (entry?.type !== "user" && entry?.type !== "assistant") continue
-
-    const content = entry?.message?.content
+    const entryType = entry?.type
+    if (entryType !== "user" && entryType !== "assistant") continue
+    const content = entry.message?.content
     if (!content) continue
+    if (entryType === "user" && isHookFeedback(content)) continue
 
-    if (entry.type === "user" && isHookFeedback(content)) continue
-
-    let text: string
-    if (typeof content === "string") {
-      text = content
-    } else if (Array.isArray(content)) {
-      text = content
-        .filter((b): b is TextBlock => b?.type === "text" && typeof b.text === "string")
-        .map((b) => b.text)
-        .join("\n")
-
-      const toolSummary = summarizeToolCalls(content)
-      if (toolSummary) text = text ? `${text}\n${toolSummary}` : toolSummary
-
-      if (entry.type === "user") {
-        const resultTexts = content
-          .filter(isToolResultSummaryBlock)
-          .map((b) => extractToolResultText(b))
-          .filter(Boolean)
-        if (resultTexts.length > 0) {
-          const resultSummary = resultTexts.map((t) => `[Result: ${t}]`).join("\n")
-          text = text ? `${text}\n${resultSummary}` : resultSummary
-        }
-      }
-    } else {
-      continue
-    }
-
-    text = text.trim()
-    if (text) turns.push({ role: entry.type, text })
+    const text = extractEntryText(content, entryType).trim()
+    if (text) turns.push({ role: entryType, text })
   }
 
   return turns
@@ -1462,93 +1477,44 @@ function shellTokens(args: string): string[] {
   return tokens
 }
 
+// Regexes that extract file paths from group 1
+const SINGLE_GROUP_PATH_REGEXES: RegExp[] = [
+  SHELL_FILE_MOD_RE,
+  REDIRECT_WRITE_RE,
+  SED_INPLACE_RE,
+  TEE_RE,
+  TOUCH_TRUNCATE_INSTALL_RE,
+  CHMOD_CHOWN_RE,
+  INSTALL_CMD_RE,
+  GIT_CHECKOUT_FILES_RE,
+  GIT_RESTORE_RE,
+  PATCH_CMD_RE,
+]
+
+// Regexes that extract file paths from group 1 or group 2 (whichever matched)
+const DUAL_GROUP_PATH_REGEXES: RegExp[] = [INSTALL_TARGET_DIR_RE, CP_MV_TARGET_DIR_RE]
+
+function collectRegexPaths(
+  results: string[],
+  command: string,
+  regex: RegExp,
+  useDualGroup: boolean
+): void {
+  regex.lastIndex = 0
+  for (const m of command.matchAll(regex)) {
+    const raw = useDualGroup ? (m[1] ?? m[2])?.trim() : m[1]?.trim()
+    if (raw) for (const t of shellTokens(raw)) results.push(t)
+  }
+}
+
 function extractPathsFromCommand(command: string): string[] {
   const results: string[] = []
-
-  // Existing file-command extractor (trash, rm, mv, cp, git mv/rm)
-  SHELL_FILE_MOD_RE.lastIndex = 0
-  for (const m of command.matchAll(SHELL_FILE_MOD_RE)) {
-    const args = m[1]?.trim()
-    if (args) for (const t of shellTokens(args)) results.push(t)
+  for (const regex of SINGLE_GROUP_PATH_REGEXES) {
+    collectRegexPaths(results, command, regex, false)
   }
-
-  // Output redirection extractor (echo/cat/heredoc > file, >> file)
-  REDIRECT_WRITE_RE.lastIndex = 0
-  for (const m of command.matchAll(REDIRECT_WRITE_RE)) {
-    const raw = m[1]?.trim()
-    if (raw) for (const t of shellTokens(raw)) results.push(t)
+  for (const regex of DUAL_GROUP_PATH_REGEXES) {
+    collectRegexPaths(results, command, regex, true)
   }
-
-  // sed -i in-place file extractor
-  SED_INPLACE_RE.lastIndex = 0
-  for (const m of command.matchAll(SED_INPLACE_RE)) {
-    const args = m[1]?.trim()
-    if (args) for (const t of shellTokens(args)) results.push(t)
-  }
-
-  // tee command file extractor (cmd | tee [-a] [--] file [file2 ...])
-  TEE_RE.lastIndex = 0
-  for (const m of command.matchAll(TEE_RE)) {
-    const args = m[1]?.trim()
-    if (args) for (const t of shellTokens(args)) results.push(t)
-  }
-
-  // touch / truncate / mkdir / rmdir file extractor
-  TOUCH_TRUNCATE_INSTALL_RE.lastIndex = 0
-  for (const m of command.matchAll(TOUCH_TRUNCATE_INSTALL_RE)) {
-    const args = m[1]?.trim()
-    if (args) for (const t of shellTokens(args)) results.push(t)
-  }
-
-  // chmod / chown file extractor (skip mode/owner spec in group 1, paths in group 2)
-  CHMOD_CHOWN_RE.lastIndex = 0
-  for (const m of command.matchAll(CHMOD_CHOWN_RE)) {
-    const args = m[1]?.trim()
-    if (args) for (const t of shellTokens(args)) results.push(t)
-  }
-
-  // install command file extractor (src... dest — positional args)
-  INSTALL_CMD_RE.lastIndex = 0
-  for (const m of command.matchAll(INSTALL_CMD_RE)) {
-    const args = m[1]?.trim()
-    if (args) for (const t of shellTokens(args)) results.push(t)
-  }
-
-  // install -t / --target-directory destination extractor
-  INSTALL_TARGET_DIR_RE.lastIndex = 0
-  for (const m of command.matchAll(INSTALL_TARGET_DIR_RE)) {
-    const raw = (m[1] ?? m[2])?.trim()
-    if (raw) for (const t of shellTokens(raw)) results.push(t)
-  }
-
-  // cp / mv -t / --target-directory destination extractor
-  CP_MV_TARGET_DIR_RE.lastIndex = 0
-  for (const m of command.matchAll(CP_MV_TARGET_DIR_RE)) {
-    const raw = (m[1] ?? m[2])?.trim()
-    if (raw) for (const t of shellTokens(raw)) results.push(t)
-  }
-
-  // git checkout <tree-ish> -- <file> [file2 ...] extractor
-  GIT_CHECKOUT_FILES_RE.lastIndex = 0
-  for (const m of command.matchAll(GIT_CHECKOUT_FILES_RE)) {
-    const args = m[1]?.trim()
-    if (args) for (const t of shellTokens(args)) results.push(t)
-  }
-
-  // git restore <file> [file2 ...] extractor
-  GIT_RESTORE_RE.lastIndex = 0
-  for (const m of command.matchAll(GIT_RESTORE_RE)) {
-    const args = m[1]?.trim()
-    if (args) for (const t of shellTokens(args)) results.push(t)
-  }
-
-  // patch <file> positional target extractor
-  PATCH_CMD_RE.lastIndex = 0
-  for (const m of command.matchAll(PATCH_CMD_RE)) {
-    const args = m[1]?.trim()
-    if (args) for (const t of shellTokens(args)) results.push(t)
-  }
-
   return results
 }
 
@@ -1575,28 +1541,16 @@ function extractPathsFromCommand(command: string): string[] {
  */
 export function extractEditedFilePaths(jsonlText: string): Set<string> {
   const paths = new Set<string>()
-  const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"])
-  const SHELL_TOOLS = new Set(["Bash", "Shell"])
 
   for (const entry of parseTranscriptEntries(jsonlText)) {
     if (entry?.type !== "assistant") continue
-    const content = entry?.message?.content
+    const content = entry.message?.content
     if (!Array.isArray(content)) continue
 
     for (const block of content) {
       const result = toolUseBlockSchema.safeParse(block)
       if (!result.success) continue
-      const b = result.data
-
-      if (b.name && EDIT_TOOLS.has(b.name)) {
-        const pathVal = b.input?.file_path ?? b.input?.path
-        if (typeof pathVal === "string" && pathVal) paths.add(pathVal)
-      } else if (b.name && SHELL_TOOLS.has(b.name)) {
-        const cmd = b.input?.command
-        if (typeof cmd === "string" && cmd) {
-          for (const p of extractPathsFromCommand(cmd)) paths.add(p)
-        }
-      }
+      collectEditedPath(result.data, paths)
     }
   }
 
@@ -1634,75 +1588,71 @@ export interface TranscriptData {
   toolCallCount: number
 }
 
+const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"])
+const SHELL_TOOLS = new Set(["Bash", "Shell"])
+
+function collectEditToolPath(
+  input: Record<string, unknown> | undefined,
+  editedPaths: Set<string>
+): void {
+  const pathVal = input?.file_path ?? input?.path
+  if (typeof pathVal === "string" && pathVal) editedPaths.add(pathVal)
+}
+
+function collectShellToolPaths(
+  input: Record<string, unknown> | undefined,
+  editedPaths: Set<string>
+): void {
+  const cmd = input?.command
+  if (typeof cmd === "string" && cmd) {
+    for (const p of extractPathsFromCommand(cmd)) editedPaths.add(p)
+  }
+}
+
+function collectEditedPath(
+  b: { name?: string; input?: Record<string, unknown> },
+  editedPaths: Set<string>
+): void {
+  if (!b.name) return
+  if (EDIT_TOOLS.has(b.name)) collectEditToolPath(b.input, editedPaths)
+  else if (SHELL_TOOLS.has(b.name)) collectShellToolPaths(b.input, editedPaths)
+}
+
+function countAndCollectToolBlocks(content: unknown[], editedPaths: Set<string>): number {
+  let count = 0
+  for (const block of content) {
+    const parseResult = toolUseBlockSchema.safeParse(block)
+    if (!parseResult.success) continue
+    count++
+    collectEditedPath(parseResult.data, editedPaths)
+  }
+  return count
+}
+
 export function extractTranscriptData(
   jsonlText: string,
   formatHint?: Session["format"]
 ): TranscriptData {
   const turns: PlainTurn[] = []
   const editedPaths = new Set<string>()
-  const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"])
-  const SHELL_TOOLS = new Set(["Bash", "Shell"])
   let toolCallCount = 0
 
   for (const entry of parseTranscriptEntries(jsonlText, formatHint)) {
-    if (entry?.type !== "user" && entry?.type !== "assistant") continue
+    if (!entry) continue
+    const entryType = entry.type
+    if (entryType !== "user" && entryType !== "assistant") continue
 
-    const content = entry?.message?.content
+    const content = entry.message?.content
 
-    // ── Assistant entries: count tool calls + collect edited paths ──
-    if (entry.type === "assistant") {
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          const parseResult = toolUseBlockSchema.safeParse(block)
-          if (!parseResult.success) continue
-          const b = parseResult.data
-          toolCallCount++
-
-          if (b.name && EDIT_TOOLS.has(b.name)) {
-            const pathVal = b.input?.file_path ?? b.input?.path
-            if (typeof pathVal === "string" && pathVal) editedPaths.add(pathVal)
-          } else if (b.name && SHELL_TOOLS.has(b.name)) {
-            const cmd = b.input?.command
-            if (typeof cmd === "string" && cmd) {
-              for (const p of extractPathsFromCommand(cmd)) editedPaths.add(p)
-            }
-          }
-        }
-      }
+    if (entryType === "assistant" && Array.isArray(content)) {
+      toolCallCount += countAndCollectToolBlocks(content, editedPaths)
     }
 
-    // ── Plain turns for AI context (both user and assistant) ──
     if (!content) continue
-    if (entry.type === "user" && isHookFeedback(content)) continue
+    if (entryType === "user" && isHookFeedback(content)) continue
 
-    let text: string
-    if (typeof content === "string") {
-      text = content
-    } else if (Array.isArray(content)) {
-      text = content
-        .filter(isTextBlockWithText)
-        .map((b) => b.text)
-        .join("\n")
-
-      const toolSummary = summarizeToolCalls(content)
-      if (toolSummary) text = text ? `${text}\n${toolSummary}` : toolSummary
-
-      if (entry.type === "user") {
-        const resultTexts = content
-          .filter(isToolResultSummaryBlock)
-          .map((b) => extractToolResultText(b))
-          .filter(Boolean)
-        if (resultTexts.length > 0) {
-          const resultSummary = resultTexts.map((t) => `[Result: ${t}]`).join("\n")
-          text = text ? `${text}\n${resultSummary}` : resultSummary
-        }
-      }
-    } else {
-      continue
-    }
-
-    text = text.trim()
-    if (text) turns.push({ role: entry.type, text })
+    const text = extractEntryText(content, entryType).trim()
+    if (text) turns.push({ role: entryType, text })
   }
 
   return { turns, editedPaths, toolCallCount }

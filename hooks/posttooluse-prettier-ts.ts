@@ -49,7 +49,7 @@ async function main() {
     await proc.exited
 
     if (proc.exitCode === 0) {
-      emitContext("PostToolUse", `Prettier formatted: ${filePath}`, cwd)
+      await emitContext("PostToolUse", `Prettier formatted: ${filePath}`, cwd)
     }
     // Non-zero exit: skip silently (config issue, parse error, etc.)
   } catch {

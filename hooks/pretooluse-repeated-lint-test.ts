@@ -299,30 +299,36 @@ export interface TranscriptEvent {
   sourceLineIdx: number
 }
 
+function extractShellEvents(cmd: string, lineIdx: number): TranscriptEvent[] {
+  const events: TranscriptEvent[] = []
+  const kind = classifyCommand(cmd)
+  if (kind) {
+    events.push({ kind, fingerprint: commandFingerprint(cmd) ?? kind, sourceLineIdx: lineIdx })
+  }
+  if (kind ? bashMutatesWorkspace(cmd) : bashMutatesWorkspace(cmd)) {
+    events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
+  }
+  return events
+}
+
 function extractEventsFromBlock(
   block: Record<string, unknown>,
   blockedIds: Set<string>,
   lineIdx: number
 ): TranscriptEvent[] {
-  const events: TranscriptEvent[] = []
-  if (block?.type !== "tool_use") return events
-  if (blockedIds.has(String(block.id ?? ""))) return events
+  if (block?.type !== "tool_use") return []
+  if (blockedIds.has(String(block.id ?? ""))) return []
   const name = String(block.name ?? "")
-  const inp = block.input as Record<string, unknown> | undefined
 
   if (isShellTool(name)) {
+    const inp = block.input as Record<string, unknown> | undefined
     const cmd = String(inp?.command ?? "").normalize("NFKC")
-    const kind = classifyCommand(cmd)
-    if (kind) {
-      events.push({ kind, fingerprint: commandFingerprint(cmd) ?? kind, sourceLineIdx: lineIdx })
-      if (bashMutatesWorkspace(cmd)) events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
-    } else if (bashMutatesWorkspace(cmd)) {
-      events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
-    }
-  } else if (isCodeChangeTool(name)) {
-    events.push({ kind: "any_edit", sourceLineIdx: lineIdx })
+    return extractShellEvents(cmd, lineIdx)
   }
-  return events
+  if (isCodeChangeTool(name)) {
+    return [{ kind: "any_edit", sourceLineIdx: lineIdx }]
+  }
+  return []
 }
 
 export async function parseTranscriptEvents(
@@ -360,6 +366,17 @@ export async function parseTranscriptEvents(
 // → tool_result text in the subsequent user message. Parsed errors are appended
 // to the block message so the agent knows exactly what to edit.
 
+function findMatchingToolUseId(content: unknown[], kind: CommandKind): string | null {
+  for (const block of content) {
+    const b = block as Record<string, unknown>
+    if (b?.type !== "tool_use") continue
+    if (!isShellTool(String(b.name ?? ""))) continue
+    const cmd = String((b.input as Record<string, unknown>)?.command ?? "").normalize("NFKC")
+    if (classifyCommand(cmd) === kind) return String(b.id ?? "") || null
+  }
+  return null
+}
+
 /** Extract the tool_use id for the first matching-kind bash call in a JSONL line. */
 export function extractToolUseIdFromLine(line: string, kind: CommandKind): string | null {
   try {
@@ -367,16 +384,40 @@ export function extractToolUseIdFromLine(line: string, kind: CommandKind): strin
     if (entry?.type !== "assistant") return null
     const content = entry?.message?.content
     if (!Array.isArray(content)) return null
-    for (const block of content) {
-      if (block?.type !== "tool_use") continue
-      if (!isShellTool(String(block.name ?? ""))) continue
-      const cmd = String((block.input as Record<string, unknown>)?.command ?? "").normalize("NFKC")
-      if (classifyCommand(cmd) === kind) return String(block.id ?? "") || null
-    }
+    return findMatchingToolUseId(content, kind)
   } catch {
-    // ignore malformed lines
+    return null
   }
-  return null
+}
+
+async function resolveTranscriptLines(
+  transcriptPath: string,
+  cachedLines?: string[]
+): Promise<string[]> {
+  if (cachedLines) return cachedLines.filter((l) => l.trim())
+  try {
+    const text = await Bun.file(transcriptPath).text()
+    return text.split("\n").filter((l) => l.trim())
+  } catch {
+    return []
+  }
+}
+
+function findToolResultText(lines: string[], startIdx: number, toolUseId: string): string {
+  for (let i = startIdx; i < lines.length; i++) {
+    try {
+      const entry = JSON.parse(lines[i]!)
+      if (entry?.type !== "user") continue
+      const content = entry?.message?.content
+      if (!Array.isArray(content)) continue
+      for (const block of content) {
+        if (block?.tool_use_id === toolUseId) {
+          return extractTextFromUnknownContent(block.content)
+        }
+      }
+    } catch {}
+  }
+  return ""
 }
 
 /** Read the tool_result text for a given tool_use_id from subsequent transcript lines. */
@@ -386,40 +427,14 @@ export async function extractPreviousOutput(
   kind: CommandKind,
   cachedLines?: string[]
 ): Promise<string> {
-  let lines: string[]
-  if (cachedLines) {
-    lines = cachedLines.filter((l) => l.trim())
-  } else {
-    let text = ""
-    try {
-      text = await Bun.file(transcriptPath).text()
-    } catch {
-      return ""
-    }
-    lines = text.split("\n").filter((l) => l.trim())
-  }
+  const lines = await resolveTranscriptLines(transcriptPath, cachedLines)
   const priorLine = lines[priorSourceLineIdx]
   if (!priorLine) return ""
 
   const toolUseId = extractToolUseIdFromLine(priorLine, kind)
   if (!toolUseId) return ""
 
-  // Scan lines after the prior assistant message for the matching tool_result.
-  for (let i = priorSourceLineIdx + 1; i < lines.length; i++) {
-    try {
-      const entry = JSON.parse(lines[i]!)
-      if (entry?.type !== "user") continue
-      const content = entry?.message?.content
-      if (!Array.isArray(content)) continue
-      for (const block of content) {
-        if (block?.tool_use_id !== toolUseId) continue
-        return extractTextFromUnknownContent(block.content)
-      }
-    } catch {
-      // ignore malformed lines
-    }
-  }
-  return ""
+  return findToolResultText(lines, priorSourceLineIdx + 1, toolUseId)
 }
 
 /**
@@ -531,51 +546,40 @@ const NARROW_GREP_KEYWORDS =
  * Returns a block message if the command pipes through filters that would
  * discard important build/test context, or null if the command is fine.
  */
+function checkLineLimitFilter(
+  re: RegExp,
+  cmd: string,
+  direction: string,
+  kindLabel: string
+): string | null {
+  const match = cmd.match(re)
+  if (!match) return null
+  const n = parseInt(match[1]!, 10)
+  if (n >= MIN_TAIL_HEAD_LINES) return null
+  return `\`${direction} -${n}\` only shows the ${direction === "tail" ? "last" : "first"} ${n} lines — ${kindLabel} output often needs ${MIN_TAIL_HEAD_LINES}+ lines for meaningful context.`
+}
+
+function checkNarrowGrep(cmd: string): string | null {
+  const grepMatch = cmd.match(GREP_ERROR_ONLY_RE)
+  if (!grepMatch) return null
+  const pattern = grepMatch[1]?.trim() ?? ""
+  if (!NARROW_GREP_KEYWORDS.test(pattern)) return null
+  return `Piping through \`grep/rg\` for only error keywords loses file paths, line numbers, and surrounding context needed to diagnose failures.`
+}
+
 export function detectOverfiltering(cmd: string, kind: CommandKind): string | null {
-  // Only check commands that pipe their output somewhere
   if (!cmd.includes("|")) return null
 
-  const issues: string[] = []
   const kindLabel = kind === "test" ? "test" : kind === "build" ? "build" : kind
-
-  // Check tail -N where N < MIN_TAIL_HEAD_LINES
-  const tailMatch = cmd.match(TAIL_LINES_RE)
-  if (tailMatch) {
-    const n = parseInt(tailMatch[1]!, 10)
-    if (n < MIN_TAIL_HEAD_LINES) {
-      issues.push(
-        `\`tail -${n}\` only shows the last ${n} lines — ${kindLabel} output often needs ${MIN_TAIL_HEAD_LINES}+ lines for meaningful context.`
-      )
-    }
-  }
-
-  // Check head -N where N < MIN_TAIL_HEAD_LINES
-  const headMatch = cmd.match(HEAD_LINES_RE)
-  if (headMatch) {
-    const n = parseInt(headMatch[1]!, 10)
-    if (n < MIN_TAIL_HEAD_LINES) {
-      issues.push(
-        `\`head -${n}\` only shows the first ${n} lines — ${kindLabel} output often needs ${MIN_TAIL_HEAD_LINES}+ lines for meaningful context.`
-      )
-    }
-  }
-
-  // Check for narrow grep/rg patterns (error-only filtering)
-  const grepMatch = cmd.match(GREP_ERROR_ONLY_RE)
-  if (grepMatch) {
-    const pattern = grepMatch[1]?.trim() ?? ""
-    if (NARROW_GREP_KEYWORDS.test(pattern)) {
-      issues.push(
-        `Piping through \`grep/rg\` for only error keywords loses file paths, line numbers, and surrounding context needed to diagnose failures.`
-      )
-    }
-  }
+  const issues = [
+    checkLineLimitFilter(TAIL_LINES_RE, cmd, "tail", kindLabel),
+    checkLineLimitFilter(HEAD_LINES_RE, cmd, "head", kindLabel),
+    checkNarrowGrep(cmd),
+  ].filter((x): x is string => x !== null)
 
   if (issues.length === 0) return null
 
-  // Strip the pipe suffix to suggest the unfiltered command
   const unfiltered = cmd.replace(/\s*\|.*$/, "").trim()
-
   return [
     `**Overly restrictive output filtering on \`${kindLabel}\` command.**`,
     issues.join("\n"),
@@ -589,97 +593,61 @@ export function detectOverfiltering(cmd: string, kind: CommandKind): string | nu
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
-  const toolName = input.tool_name ?? ""
-  const cwd = input.cwd ?? process.cwd()
-  const transcriptPath = input.transcript_path ?? ""
+interface PriorEventMatch {
+  priorEvent: TranscriptEvent
+  currentKind: CommandKind
+}
 
-  if (!isShellTool(toolName)) return
-
-  const command = String((input.tool_input as Record<string, unknown>)?.command ?? "").normalize(
-    "NFKC"
-  )
-
-  const currentKind = classifyCommand(command)
-  if (!currentKind) return
-
-  // --help queries are informational, not repeated runs — never block them.
-  if (isHelpQuery(command)) return
-
-  // ── Proactive overfiltering check ─────────────────────────────────────────
-  // Block build/test/lint commands piped through overly restrictive filters
-  // BEFORE they run — prevents the first wasted run, not just repeats.
-  const overfilterIssue = detectOverfiltering(command, currentKind)
-  if (overfilterIssue) {
-    denyPreToolUse(overfilterIssue)
-  }
-
-  if (!(await isGitRepo(cwd))) return
-  if (!transcriptPath) return
-
-  // Use pre-computed session lines from _transcriptSummary if available (injected
-  // by dispatch.ts). Falls back to readSessionLines() when running standalone.
-  const cachedSessionLines = getTranscriptSummary(
-    input as unknown as Record<string, unknown>
-  )?.sessionLines
-
-  const events = await parseTranscriptEvents(transcriptPath, cachedSessionLines)
-
-  // Claude Code writes the assistant message (including the current tool_use) to
-  // the transcript BEFORE running PreToolUse hooks. So the current call is always
-  // the LAST occurrence of its kind in the transcript. To find the prior call,
-  // we need the second-to-last occurrence.
-  //
-  // Additionally, when the model emits two same-kind commands in a single
-  // assistant message (parallel dispatch), both land in the transcript on the
-  // same JSONL line simultaneously — neither has been executed yet. We require
-  // the "prior" event to come from a different source line so that parallel
-  // dispatches are never misidentified as a prior+current pair.
+function findConsecutiveRepeat(
+  events: TranscriptEvent[],
+  command: string,
+  currentKind: CommandKind
+): PriorEventMatch | null {
   const sameKindEvents = events.filter((e) => e.kind === currentKind)
-
-  // Need at least 2 occurrences: one prior call + the current call (last in transcript)
-  if (sameKindEvents.length < 2) return
+  if (sameKindEvents.length < 2) return null
 
   const currentEvent = sameKindEvents[sameKindEvents.length - 1]!
   const priorEvent = sameKindEvents[sameKindEvents.length - 2]!
 
-  // Parallel dispatch guard: if both are from the same JSONL line, neither has
-  // been executed yet — skip enforcement.
-  if (priorEvent.sourceLineIdx === currentEvent.sourceLineIdx) return
+  // Parallel dispatch guard
+  if (priorEvent.sourceLineIdx === currentEvent.sourceLineIdx) return null
 
-  // Scope-fingerprint guard: if the commands target different paths/scopes,
-  // they are semantically different commands — skip enforcement.
-  // Example: `bun test src/a.test.ts` → `bun test src/b.test.ts` should be allowed.
+  // Scope-fingerprint guard
   const currentFp = commandFingerprint(command) ?? currentKind
-  if (priorEvent.fingerprint && priorEvent.fingerprint !== currentFp) return
+  if (priorEvent.fingerprint && priorEvent.fingerprint !== currentFp) return null
 
+  // Intervening work guard
   const lastPriorRunIdx = events.indexOf(priorEvent)
-
-  // Check if any Edit/Write/Notebook happened between the prior run and current.
-  // If so, the agent was acting on the output (real work) — allow the repeat.
   const hasInterveningWork = events.slice(lastPriorRunIdx + 1).some((e) => e.kind === "any_edit")
+  if (hasInterveningWork) return null
 
-  if (hasInterveningWork) return
+  return { priorEvent, currentKind }
+}
 
-  // Block: consecutive repeat of the same command kind with no intervening work.
-  const label = commandLabel(command, currentKind)
+async function buildBlockMessage(
+  command: string,
+  match: PriorEventMatch,
+  transcriptPath: string,
+  cachedSessionLines?: string[]
+): Promise<string> {
+  const label = commandLabel(command, match.currentKind)
   const firstLine = command.split("\n")[0]?.trim().slice(0, 80) ?? command.trim()
 
-  // Extract specific errors from the previous run to guide remediation.
-  // Reuse cached session lines to avoid a second file read.
   const prevOutput = await extractPreviousOutput(
     transcriptPath,
-    priorEvent.sourceLineIdx,
-    currentKind,
+    match.priorEvent.sourceLineIdx,
+    match.currentKind,
     cachedSessionLines
   )
-  const remediationHints = buildRemediationHints(prevOutput, currentKind)
+  const remediationHints = buildRemediationHints(prevOutput, match.currentKind)
+  const readStep = buildReadOutputStep(
+    label,
+    transcriptPath,
+    match.priorEvent.sourceLineIdx,
+    prevOutput
+  )
 
-  // Build the "read previous output" step with a concrete file reference when available.
-  const readStep = buildReadOutputStep(label, transcriptPath, priorEvent.sourceLineIdx, prevOutput)
-
-  const blockMessage = [
+  return [
     `**Consecutive ${label} blocked.**`,
     [
       `You ran \`${label}\` and immediately tried to run it again without editing any files in between.`,
@@ -695,7 +663,51 @@ async function main(): Promise<void> {
   ]
     .filter(Boolean)
     .join("\n\n")
+}
 
+function resolveCommandAndKind(input: {
+  tool_name?: string
+  tool_input?: unknown
+}): { command: string; currentKind: CommandKind } | null {
+  const toolName = input.tool_name ?? ""
+  if (!isShellTool(toolName)) return null
+
+  const command = String((input.tool_input as Record<string, unknown>)?.command ?? "").normalize(
+    "NFKC"
+  )
+
+  const currentKind = classifyCommand(command)
+  if (!currentKind) return null
+  if (isHelpQuery(command)) return null
+
+  return { command, currentKind }
+}
+
+async function main(): Promise<void> {
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
+  const transcriptPath = input.transcript_path ?? ""
+
+  const parsed = resolveCommandAndKind(input)
+  if (!parsed) return
+
+  const { command, currentKind } = parsed
+
+  const overfilterIssue = detectOverfiltering(command, currentKind)
+  if (overfilterIssue) denyPreToolUse(overfilterIssue)
+
+  if (!(await isGitRepo(cwd))) return
+  if (!transcriptPath) return
+
+  const cachedSessionLines = getTranscriptSummary(
+    input as unknown as Record<string, unknown>
+  )?.sessionLines
+
+  const events = await parseTranscriptEvents(transcriptPath, cachedSessionLines)
+  const match = findConsecutiveRepeat(events, command, currentKind)
+  if (!match) return
+
+  const blockMessage = await buildBlockMessage(command, match, transcriptPath, cachedSessionLines)
   denyPreToolUse(blockMessage)
 }
 

@@ -23,21 +23,25 @@ export function stripAnsi(s: string): string {
  * Read all `tool_use` blocks from assistant messages in a JSONL transcript.
  * Shared by the extract* helpers below.
  */
+function extractToolBlocksFromEntry(line: string): Array<Record<string, unknown>> {
+  try {
+    const entry = JSON.parse(line)
+    if (entry?.type !== "assistant") return []
+    const content = entry?.message?.content
+    if (!Array.isArray(content)) return []
+    return content.filter((block: Record<string, unknown>) => block?.type === "tool_use")
+  } catch {
+    return []
+  }
+}
+
 async function readTranscriptToolBlocks(path: string): Promise<Array<Record<string, unknown>>> {
   try {
     const text = await Bun.file(path).text()
     const blocks: Array<Record<string, unknown>> = []
     for (const line of text.split("\n")) {
       if (!line.trim()) continue
-      try {
-        const entry = JSON.parse(line)
-        if (entry?.type !== "assistant") continue
-        const content = entry?.message?.content
-        if (!Array.isArray(content)) continue
-        for (const block of content) {
-          if (block?.type === "tool_use") blocks.push(block)
-        }
-      } catch {}
+      blocks.push(...extractToolBlocksFromEntry(line))
     }
     return blocks
   } catch {
@@ -94,23 +98,29 @@ export async function extractSkillInvocations(path: string): Promise<string[]> {
  * contains the denial reason. All hook denial messages end with the mandatory
  * `ACTION REQUIRED:` footer, which is the reliable detection signal.
  */
+function extractBlockedIdsFromEntry(line: string): string[] {
+  try {
+    const entry = JSON.parse(line)
+    if (entry?.type !== "user") return []
+    const content = entry?.message?.content
+    if (!Array.isArray(content)) return []
+    const ids: string[] = []
+    for (const block of content) {
+      if (block?.type !== "tool_result") continue
+      const text = extractTextFromUnknownContent(block.content)
+      if (text.includes("ACTION REQUIRED:")) ids.push(String(block.tool_use_id ?? ""))
+    }
+    return ids
+  } catch {
+    return []
+  }
+}
+
 export function collectBlockedToolUseIds(lines: string[]): Set<string> {
   const blocked = new Set<string>()
   for (const line of lines) {
     if (!line.trim()) continue
-    try {
-      const entry = JSON.parse(line)
-      if (entry?.type !== "user") continue
-      const content = entry?.message?.content
-      if (!Array.isArray(content)) continue
-      for (const block of content) {
-        if (block?.type !== "tool_result") continue
-        const text = extractTextFromUnknownContent(block.content)
-        if (text.includes("ACTION REQUIRED:")) blocked.add(String(block.tool_use_id ?? ""))
-      }
-    } catch {
-      // Ignore malformed lines
-    }
+    for (const id of extractBlockedIdsFromEntry(line)) blocked.add(id)
   }
   return blocked
 }

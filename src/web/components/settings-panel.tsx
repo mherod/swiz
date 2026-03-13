@@ -119,22 +119,47 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
   }
 }
 
+const PROJECT_FORM_DEFAULTS: ProjectSettingsForm = {
+  collaborationMode: "auto",
+  prMergeMode: true,
+  strictNoDirectMain: false,
+  trivialMaxFiles: 2,
+  trivialMaxLines: 50,
+  defaultBranch: "main",
+  memoryLineThreshold: "",
+  memoryWordThreshold: "",
+  largeFileSizeKb: "",
+  ambitionMode: "inherit",
+  taskDurationWarningMinutes: "",
+}
+
 function projectSettingsToForm(response: CachedProjectSettingsResponse): ProjectSettingsForm {
-  const settings = response.settings
-  const globalSettings = response.globalSettings
+  const s = response.settings ?? {}
+  const g = response.globalSettings ?? {}
   return {
-    collaborationMode: settings?.collaborationMode ?? "auto",
-    prMergeMode: globalSettings?.prMergeMode ?? true,
-    strictNoDirectMain: settings?.strictNoDirectMain ?? false,
-    trivialMaxFiles: settings?.trivialMaxFiles ?? 2,
-    trivialMaxLines: settings?.trivialMaxLines ?? 50,
-    defaultBranch: settings?.defaultBranch || "main",
-    memoryLineThreshold: settings?.memoryLineThreshold ?? "",
-    memoryWordThreshold: settings?.memoryWordThreshold ?? "",
-    largeFileSizeKb: settings?.largeFileSizeKb ?? "",
-    ambitionMode: settings?.ambitionMode ?? "inherit",
-    taskDurationWarningMinutes: settings?.taskDurationWarningMinutes ?? "",
+    ...PROJECT_FORM_DEFAULTS,
+    ...stripUndefined({
+      collaborationMode: s.collaborationMode,
+      prMergeMode: g.prMergeMode,
+      strictNoDirectMain: s.strictNoDirectMain,
+      trivialMaxFiles: s.trivialMaxFiles,
+      trivialMaxLines: s.trivialMaxLines,
+      defaultBranch: s.defaultBranch || undefined,
+      memoryLineThreshold: s.memoryLineThreshold,
+      memoryWordThreshold: s.memoryWordThreshold,
+      largeFileSizeKb: s.largeFileSizeKb,
+      ambitionMode: s.ambitionMode,
+      taskDurationWarningMinutes: s.taskDurationWarningMinutes,
+    }),
   }
+}
+
+function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const result: Partial<T> = {}
+  for (const key of Object.keys(obj) as Array<keyof T>) {
+    if (obj[key] !== undefined) result[key] = obj[key]
+  }
+  return result
 }
 
 // --- Shared field components ---

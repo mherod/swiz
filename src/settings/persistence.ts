@@ -180,70 +180,108 @@ export function getProjectSettingsPath(cwd: string): string {
   return join(cwd, ".swiz", "config.json")
 }
 
+/** Copy positive-number fields from obj into result. */
+function applyPositiveNumberFields(
+  obj: Record<string, unknown>,
+  result: ProjectSwizSettings,
+  keys: (keyof ProjectSwizSettings)[]
+): void {
+  for (const key of keys) {
+    const val = obj[key]
+    if (typeof val === "number" && val > 0) {
+      ;(result as Record<string, unknown>)[key] = val
+    }
+  }
+}
+
+/** Copy boolean fields from obj into result. */
+function applyBooleanFields(
+  obj: Record<string, unknown>,
+  result: ProjectSwizSettings,
+  keys: (keyof ProjectSwizSettings)[]
+): void {
+  for (const key of keys) {
+    if (typeof obj[key] === "boolean") {
+      ;(result as Record<string, unknown>)[key] = obj[key]
+    }
+  }
+}
+
+/** Copy string-array fields from obj into result. */
+function applyStringArrayFields(
+  obj: Record<string, unknown>,
+  result: ProjectSwizSettings,
+  keys: (keyof ProjectSwizSettings)[]
+): void {
+  for (const key of keys) {
+    if (
+      Array.isArray(obj[key]) &&
+      (obj[key] as unknown[]).every((v: unknown) => typeof v === "string")
+    ) {
+      ;(result as Record<string, unknown>)[key] = obj[key]
+    }
+  }
+}
+
+function parseDefaultBranch(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  const branch = value.trim()
+  return branch && !/\s/.test(branch) ? branch : undefined
+}
+
+function applySchemaFields(obj: Record<string, unknown>, result: ProjectSwizSettings): void {
+  const ambitionMode = ambitionModeSchema.safeParse(obj.ambitionMode)
+  if (ambitionMode.success) result.ambitionMode = ambitionMode.data
+  const collaborationMode = collaborationModeSchema.safeParse(obj.collaborationMode)
+  if (collaborationMode.success) result.collaborationMode = collaborationMode.data
+}
+
+function applyHooksAndCategories(obj: Record<string, unknown>, result: ProjectSwizSettings): void {
+  if (Array.isArray(obj.hooks)) {
+    const validated = normalizeProjectHooks(obj.hooks as unknown[])
+    if (validated.length > 0) result.hooks = validated
+  }
+  const categories = parseStringArray(obj.allowedSkillCategories)
+  if (categories.length > 0) result.allowedSkillCategories = categories
+}
+
 function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const obj = value as Record<string, unknown>
   const result: ProjectSwizSettings = {}
+
   const profile = obj.profile
   if (profile !== undefined) {
     const parsed = z.enum(["solo", "team", "strict"]).safeParse(profile)
     if (!parsed.success) return null
     result.profile = parsed.data
   }
-  if (typeof obj.trivialMaxFiles === "number" && obj.trivialMaxFiles > 0) {
-    result.trivialMaxFiles = obj.trivialMaxFiles
-  }
-  if (typeof obj.trivialMaxLines === "number" && obj.trivialMaxLines > 0) {
-    result.trivialMaxLines = obj.trivialMaxLines
-  }
-  if (typeof obj.defaultBranch === "string") {
-    const branch = obj.defaultBranch.trim()
-    if (branch && !/\s/.test(branch)) result.defaultBranch = branch
-  }
-  if (typeof obj.memoryLineThreshold === "number" && obj.memoryLineThreshold > 0) {
-    result.memoryLineThreshold = obj.memoryLineThreshold
-  }
-  if (typeof obj.memoryWordThreshold === "number" && obj.memoryWordThreshold > 0) {
-    result.memoryWordThreshold = obj.memoryWordThreshold
-  }
-  if (typeof obj.largeFileSizeKb === "number" && obj.largeFileSizeKb > 0) {
-    result.largeFileSizeKb = obj.largeFileSizeKb
-  }
-  const ambitionMode = ambitionModeSchema.safeParse(obj.ambitionMode)
-  if (ambitionMode.success) {
-    result.ambitionMode = ambitionMode.data
-  }
-  const collaborationMode = collaborationModeSchema.safeParse(obj.collaborationMode)
-  if (collaborationMode.success) {
-    result.collaborationMode = collaborationMode.data
-  }
-  if (typeof obj.strictNoDirectMain === "boolean") {
-    result.strictNoDirectMain = obj.strictNoDirectMain
-  }
-  if (typeof obj.taskDurationWarningMinutes === "number" && obj.taskDurationWarningMinutes > 0) {
-    result.taskDurationWarningMinutes = obj.taskDurationWarningMinutes
-  }
-  if (
-    Array.isArray(obj.disabledHooks) &&
-    obj.disabledHooks.every((h: unknown) => typeof h === "string")
-  ) {
-    result.disabledHooks = obj.disabledHooks as string[]
-  }
-  if (Array.isArray(obj.plugins) && obj.plugins.every((p: unknown) => typeof p === "string")) {
-    result.plugins = obj.plugins as string[]
-  }
-  if (Array.isArray(obj.hooks)) {
-    const validated = normalizeProjectHooks(obj.hooks as unknown[])
-    if (validated.length > 0) result.hooks = validated
-  }
-  if (
-    Array.isArray(obj.allowedSkillCategories) &&
-    obj.allowedSkillCategories.length > 0 &&
-    obj.allowedSkillCategories.every((c: unknown) => typeof c === "string" && c.trim().length > 0)
-  ) {
-    result.allowedSkillCategories = (obj.allowedSkillCategories as string[]).map((c) => c.trim())
-  }
+
+  applyPositiveNumberFields(obj, result, [
+    "trivialMaxFiles",
+    "trivialMaxLines",
+    "memoryLineThreshold",
+    "memoryWordThreshold",
+    "largeFileSizeKb",
+    "taskDurationWarningMinutes",
+  ])
+
+  const defaultBranch = parseDefaultBranch(obj.defaultBranch)
+  if (defaultBranch) result.defaultBranch = defaultBranch
+
+  applySchemaFields(obj, result)
+  applyBooleanFields(obj, result, ["strictNoDirectMain"])
+  applyStringArrayFields(obj, result, ["disabledHooks", "plugins"])
+  applyHooksAndCategories(obj, result)
   return result
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0) return []
+  const items = (value as unknown[]).filter(
+    (c): c is string => typeof c === "string" && c.trim().length > 0
+  )
+  return items.length === value.length ? items.map((c) => c.trim()) : []
 }
 
 /** Validate and normalize project-local hook groups from config JSON */

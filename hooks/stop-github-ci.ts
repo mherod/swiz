@@ -69,85 +69,97 @@ export function findFailing(runs: CIRun[]): CIRun[] {
   )
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
-
-  if (!(await isGitRepo(cwd))) return
-
+async function resolveTargetBranch(
+  cwd: string,
+  sessionId: string | undefined
+): Promise<string | null> {
+  if (!(await isGitRepo(cwd))) return null
   const [globalSettings, projectSettings] = await Promise.all([
     readSwizSettings(),
     readProjectSettings(cwd),
   ])
-  const effective = getEffectiveSwizSettings(globalSettings, input.session_id, projectSettings)
-  if (!effective.githubCiGate) return
-
+  const effective = getEffectiveSwizSettings(globalSettings, sessionId, projectSettings)
+  if (!effective.githubCiGate) return null
   const modePolicy = getCollaborationModePolicy(effective.collaborationMode)
-  if (!modePolicy.requirePeerReview) return
-
-  if (!hasGhCli()) return
-  if (!(await isGitHubRemote(cwd))) return
-
+  if (!modePolicy.requirePeerReview) return null
+  if (!hasGhCli()) return null
+  if (!(await isGitHubRemote(cwd))) return null
   const branch = await git(["branch", "--show-current"], cwd)
-  if (!branch) return
+  if (!branch) return null
   const defaultBranch = await getDefaultBranch(cwd)
-  if (isDefaultBranch(branch, defaultBranch)) return
+  if (isDefaultBranch(branch, defaultBranch)) return null
+  return branch
+}
 
+async function pollUntilComplete(branch: string, cwd: string): Promise<CIRun[]> {
   let relevant = await fetchRuns(branch, cwd)
-  if (!relevant.length) return
+  if (!relevant.length) return relevant
+  if (findActive(relevant).length === 0) return relevant
 
-  // If runs are active, poll until they complete or the timeout expires.
-  // This avoids blocking on CI that will finish within seconds.
-  if (findActive(relevant).length > 0) {
-    const deadline = Date.now() + MAX_POLL_MS
-    while (Date.now() < deadline && findActive(relevant).length > 0) {
-      await Bun.sleep(POLL_INTERVAL_MS)
-      relevant = await fetchRuns(branch, cwd)
-    }
+  const deadline = Date.now() + MAX_POLL_MS
+  while (Date.now() < deadline && findActive(relevant).length > 0) {
+    await Bun.sleep(POLL_INTERVAL_MS)
+    relevant = await fetchRuns(branch, cwd)
   }
+  return relevant
+}
 
-  const failing = findFailing(relevant)
-  if (failing.length > 0) {
-    const names = failing.map((r) => `${r.workflowName} (${r.conclusion})`).join(", ")
-    let reason = `GitHub CI is failing on branch '${branch}'.\n\n`
-    reason += `Failing checks (${failing.length}): ${names}\n\n`
-    reason += "To view failure logs:\n"
-    for (const r of failing) reason += `  gh run view ${r.databaseId} --log-failed\n`
-    reason +=
-      "\n" +
-      skillAdvice(
-        "ci-status",
-        "Use the /ci-status skill to analyze failures and fix them before stopping.",
-        [
-          `Analyze and fix CI failures before stopping:`,
-          `  1. View failure details: gh run view <run-id> --log-failed`,
-          `  2. Fix the failing code (type errors, test failures, lint issues)`,
-          `  3. Run checks locally: bun run typecheck && bun run lint && bun test`,
-          `  4. Commit and push the fix`,
-          `  5. Wait for CI to go green: gh run watch <run-id> --exit-status`,
-        ].join("\n")
-      )
-    blockStop(reason)
-  }
-
-  const stillActive = findActive(relevant)
-  if (stillActive.length > 0) {
-    const names = stillActive.map((r) => `${r.workflowName} (${r.status})`).join(", ")
-    let reason = `GitHub CI is still running on branch '${branch}' after waiting ${MAX_POLL_MS / 1000}s.\n\n`
-    reason += `Active checks (${stillActive.length}): ${names}\n\n`
-    reason += skillAdvice(
+function buildFailingReason(branch: string, failing: CIRun[]): string {
+  const names = failing.map((r) => `${r.workflowName} (${r.conclusion})`).join(", ")
+  let reason = `GitHub CI is failing on branch '${branch}'.\n\n`
+  reason += `Failing checks (${failing.length}): ${names}\n\n`
+  reason += "To view failure logs:\n"
+  for (const r of failing) reason += `  gh run view ${r.databaseId} --log-failed\n`
+  reason +=
+    "\n" +
+    skillAdvice(
       "ci-status",
-      "Wait for CI to complete, then check results with the /ci-status skill.",
+      "Use the /ci-status skill to analyze failures and fix them before stopping.",
       [
-        `Wait for CI to complete, then check results:`,
-        `  gh run list --branch ${branch}`,
-        `  gh run watch <run-id> --exit-status`,
-        ``,
-        `Once complete: if passing → stop. If failing → fix before stopping.`,
+        `Analyze and fix CI failures before stopping:`,
+        `  1. View failure details: gh run view <run-id> --log-failed`,
+        `  2. Fix the failing code (type errors, test failures, lint issues)`,
+        `  3. Run checks locally: bun run typecheck && bun run lint && bun test`,
+        `  4. Commit and push the fix`,
+        `  5. Wait for CI to go green: gh run watch <run-id> --exit-status`,
       ].join("\n")
     )
-    blockStop(reason)
-  }
+  return reason
+}
+
+function buildActiveReason(branch: string, active: CIRun[]): string {
+  const names = active.map((r) => `${r.workflowName} (${r.status})`).join(", ")
+  let reason = `GitHub CI is still running on branch '${branch}' after waiting ${MAX_POLL_MS / 1000}s.\n\n`
+  reason += `Active checks (${active.length}): ${names}\n\n`
+  reason += skillAdvice(
+    "ci-status",
+    "Wait for CI to complete, then check results with the /ci-status skill.",
+    [
+      `Wait for CI to complete, then check results:`,
+      `  gh run list --branch ${branch}`,
+      `  gh run watch <run-id> --exit-status`,
+      ``,
+      `Once complete: if passing → stop. If failing → fix before stopping.`,
+    ].join("\n")
+  )
+  return reason
+}
+
+async function main(): Promise<void> {
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
+
+  const branch = await resolveTargetBranch(cwd, input.session_id)
+  if (!branch) return
+
+  const relevant = await pollUntilComplete(branch, cwd)
+  if (!relevant.length) return
+
+  const failing = findFailing(relevant)
+  if (failing.length > 0) blockStop(buildFailingReason(branch, failing))
+
+  const stillActive = findActive(relevant)
+  if (stillActive.length > 0) blockStop(buildActiveReason(branch, stillActive))
 }
 
 if (import.meta.main) void main()

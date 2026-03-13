@@ -96,86 +96,86 @@ async function findMemoryFiles(dir: string, maxDepth = 4): Promise<string[]> {
   return results
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
+async function resolveFileStats(
+  filePath: string,
+  index: MemoryIndex
+): Promise<{ mtime: number; size: number; lines: number; words: number } | null> {
+  let fileInfo: { mtime: number; size: number }
+  try {
+    const s = await stat(filePath)
+    fileInfo = { mtime: s.mtimeMs, size: s.size }
+  } catch {
+    return null
+  }
 
-  // Only enforce inside git repos with a CLAUDE.md or .swiz config
-  if (!(await isGitRepo(cwd))) return
+  const cached = index[filePath]
+  if (cached && cached.mtime === fileInfo.mtime && cached.size === fileInfo.size) {
+    return { ...fileInfo, lines: cached.lines, words: cached.words }
+  }
 
-  const { lineThreshold, wordThreshold } = await resolveThresholds(cwd)
+  const file = Bun.file(filePath)
+  if (!(await file.exists())) return null
+  const content = await file.text()
+  const stats = countStats(content)
+  return { ...fileInfo, ...stats }
+}
 
-  // Scan HOME/.claude hierarchy plus the project cwd
-  const home = getHomeDirWithFallback("")
-  const searchRoots = [cwd, join(home, ".claude")].filter(Boolean)
-
-  const checkedFiles = new Set<string>()
+async function collectUniqueMemoryFiles(searchRoots: string[]): Promise<string[]> {
+  const seen = new Set<string>()
   const allFiles: string[] = []
   for (const root of searchRoots) {
-    const found = await findMemoryFiles(root)
-    for (const f of found) {
-      if (!checkedFiles.has(f)) {
-        checkedFiles.add(f)
+    for (const f of await findMemoryFiles(root)) {
+      if (!seen.has(f)) {
+        seen.add(f)
         allFiles.push(f)
       }
     }
   }
+  return allFiles
+}
 
-  // Load the incremental index and build updated stats, reading only changed files.
-  const index = await loadIndex(cwd)
+async function scanMemoryFiles(
+  allFiles: string[],
+  index: MemoryIndex,
+  thresholds: { lineThreshold: number; wordThreshold: number }
+): Promise<{ updatedIndex: MemoryIndex; violations: MemoryViolation[] }> {
   const updatedIndex: MemoryIndex = {}
   const violations: MemoryViolation[] = []
 
   for (const filePath of allFiles) {
-    let fileInfo: { mtime: number; size: number }
-    try {
-      const s = await stat(filePath)
-      fileInfo = { mtime: s.mtimeMs, size: s.size }
-    } catch {
-      // File disappeared between discovery and stat — skip it.
-      continue
+    const stats = await resolveFileStats(filePath, index)
+    if (!stats) continue
+
+    updatedIndex[filePath] = {
+      mtime: stats.mtime,
+      size: stats.size,
+      lines: stats.lines,
+      words: stats.words,
     }
-
-    const cached = index[filePath]
-    let lines: number
-    let words: number
-
-    if (cached && cached.mtime === fileInfo.mtime && cached.size === fileInfo.size) {
-      // Cache hit: file unchanged — reuse stored stats.
-      ;({ lines, words } = cached)
-    } else {
-      // Cache miss: file is new or modified — read and recompute.
-      const file = Bun.file(filePath)
-      if (!(await file.exists())) continue
-      const content = await file.text()
-      ;({ lines, words } = countStats(content))
-    }
-
-    updatedIndex[filePath] = { mtime: fileInfo.mtime, size: fileInfo.size, lines, words }
 
     const fileViolations = getMemoryThresholdViolations(
-      { lines, words },
-      { lineThreshold, wordThreshold }
+      { lines: stats.lines, words: stats.words },
+      thresholds
     )
-
     if (fileViolations.length > 0) {
       violations.push({
         filePath,
         basename: filePath.split("/").pop() ?? filePath,
-        lines,
-        words,
+        lines: stats.lines,
+        words: stats.words,
         violations: fileViolations,
       })
     }
   }
+  return { updatedIndex, violations }
+}
 
-  // Persist the updated index (only entries for currently-discovered files).
-  await saveIndex(cwd, updatedIndex)
-
-  if (violations.length === 0) return
-
+function buildMemoryViolationReason(
+  violations: MemoryViolation[],
+  lineThreshold: number,
+  wordThreshold: number
+): string {
   const summary = violations.map((v) => `  ${v.filePath}: ${v.violations.join(", ")}`).join("\n")
-
   const perFileCommands = violations.map((v) => `  swiz compact-memory ${v.filePath}`).join("\n")
 
   const compactAdvice = skillAdvice(
@@ -188,15 +188,32 @@ async function main(): Promise<void> {
     compactAdvice,
     ...compactionChecklistSteps("Re-check each file with `wc -l <file>` and `wc -w <file>`."),
   ]
-  const actionPlan = formatActionPlan(steps)
-
-  const reason =
+  return (
     `Memory file(s) exceed size thresholds:\n\n${summary}\n\n` +
     `Thresholds: ${lineThreshold} lines, ${wordThreshold} words.\n\n` +
     `Compact the listed file(s) before stopping.\n` +
-    actionPlan
+    formatActionPlan(steps)
+  )
+}
 
-  blockStop(reason)
+async function main(): Promise<void> {
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
+
+  if (!(await isGitRepo(cwd))) return
+
+  const thresholds = await resolveThresholds(cwd)
+  const home = getHomeDirWithFallback("")
+  const allFiles = await collectUniqueMemoryFiles([cwd, join(home, ".claude")].filter(Boolean))
+
+  const index = await loadIndex(cwd)
+  const { updatedIndex, violations } = await scanMemoryFiles(allFiles, index, thresholds)
+  await saveIndex(cwd, updatedIndex)
+
+  if (violations.length === 0) return
+  blockStop(
+    buildMemoryViolationReason(violations, thresholds.lineThreshold, thresholds.wordThreshold)
+  )
 }
 
 if (import.meta.main) void main()

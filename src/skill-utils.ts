@@ -82,6 +82,39 @@ function parseAllowedToolsValue(value: string): string[] {
  * Extract required tools from SKILL.md frontmatter `allowed-tools`.
  * Supports both inline and YAML-list forms.
  */
+function parseYamlBlockItems(
+  lines: string[],
+  startIdx: number
+): { tools: string[]; endIdx: number } {
+  const tools: string[] = []
+  let j = startIdx
+  while (j < lines.length) {
+    const item = (lines[j] ?? "").match(/^\s*-\s*(.+)\s*$/)
+    if (!item?.[1]) break
+    const normalized = normalizeToolSpec(item[1])
+    if (normalized) tools.push(normalized)
+    j++
+  }
+  return { tools, endIdx: j }
+}
+
+function processAllowedToolsLine(
+  line: string,
+  lines: string[],
+  i: number,
+  tools: string[]
+): number {
+  const inline = line.match(/^allowed-tools\s*:\s*(.+)\s*$/)
+  if (inline?.[1]) {
+    tools.push(...parseAllowedToolsValue(inline[1]))
+    return i
+  }
+  if (!line.match(/^allowed-tools\s*:\s*$/)) return i
+  const block = parseYamlBlockItems(lines, i + 1)
+  tools.push(...block.tools)
+  return block.endIdx - 1
+}
+
 export function extractMandatedSkillTools(content: string): string[] {
   const match = content.match(/^---\n([\s\S]*?)\n---(?:[ \t]*\n?)/)
   if (!match?.[1]) return []
@@ -90,25 +123,7 @@ export function extractMandatedSkillTools(content: string): string[] {
   const tools: string[] = []
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? ""
-    const inline = line.match(/^allowed-tools\s*:\s*(.+)\s*$/)
-    if (inline?.[1]) {
-      tools.push(...parseAllowedToolsValue(inline[1]))
-      continue
-    }
-
-    const block = line.match(/^allowed-tools\s*:\s*$/)
-    if (!block) continue
-
-    let j = i + 1
-    while (j < lines.length) {
-      const item = (lines[j] ?? "").match(/^\s*-\s*(.+)\s*$/)
-      if (!item?.[1]) break
-      const normalized = normalizeToolSpec(item[1])
-      if (normalized) tools.push(normalized)
-      j++
-    }
-    i = j - 1
+    i = processAllowedToolsLine(lines[i] ?? "", lines, i, tools)
   }
 
   return uniq(tools)

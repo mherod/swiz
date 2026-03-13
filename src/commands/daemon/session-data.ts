@@ -7,6 +7,7 @@ import {
   isHookFeedback,
   parseTranscriptEntries,
   type Session,
+  type TranscriptEntry,
 } from "../../transcript-utils.ts"
 import {
   buildProjectTasksView,
@@ -67,33 +68,75 @@ class SessionDataCache {
     fileMtimeMs: number,
     prev?: CachedSessionData
   ): CachedSessionData {
-    const messages: SessionMessage[] = []
-    const toolCounts = new Map<string, number>()
-    const fallbackTimestamps = new Map<string, string>()
-    const seenSignatures = new Map<string, number>()
-    const pendingFallback: Array<{ messageIndex: number; key: string }> = []
+    const extraction = SessionDataCache.extractMessages(entries)
+    const { messages, toolCounts, pendingFallback } = extraction
+    let { startedAt, lastMessageAt } = extraction
 
-    let startedAt = 0
-    let lastMessageAt = 0
+    const fallbackTimestamps = new Map<string, string>()
     let lastAssignedFallbackMs = prev?.lastAssignedFallbackMs ?? 0
 
-    for (const entry of entries) {
-      if (entry.type !== "user" && entry.type !== "assistant") continue
-      const content = entry.message?.content
-      if (entry.type === "user" && isHookFeedback(content)) continue
+    const fallbackResult = SessionDataCache.assignFallbackTimestamps({
+      pendingFallback,
+      messages,
+      fallbackTimestamps,
+      fileMtimeMs,
+      initialSeed: lastAssignedFallbackMs,
+      prev,
+    })
+    startedAt = fallbackResult.startedAt || startedAt
+    lastMessageAt = Math.max(lastMessageAt, fallbackResult.lastMessageAt)
+    lastAssignedFallbackMs = fallbackResult.seed
 
-      const extracted = extractMessageText(content)
-      const toolCalls = extractToolCalls(content)
-      for (const tc of toolCalls) {
-        toolCounts.set(tc.name, (toolCounts.get(tc.name) ?? 0) + 1)
-      }
-      if (!extracted && toolCalls.length === 0) continue
+    const toolStats = [...toolCounts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
 
-      const message: SessionMessage = {
+    return {
+      mtimeMs: fileMtimeMs,
+      size: 0,
+      startedAt,
+      lastMessageAt,
+      messages,
+      toolStats,
+      fallbackTimestamps,
+      lastAssignedFallbackMs,
+    }
+  }
+
+  private static buildMessage(
+    entry: TranscriptEntry
+  ): { message: SessionMessage; toolCalls: Array<{ name: string; detail: string }> } | null {
+    if (entry.type !== "user" && entry.type !== "assistant") return null
+    const content = entry.message?.content
+    if (entry.type === "user" && isHookFeedback(content)) return null
+    const extracted = extractMessageText(content)
+    const toolCalls = extractToolCalls(content)
+    if (!extracted && toolCalls.length === 0) return null
+    return {
+      message: {
         role: entry.type,
         timestamp: entry.timestamp ?? null,
         text: extracted,
         ...(toolCalls.length > 0 ? { toolCalls } : {}),
+      },
+      toolCalls,
+    }
+  }
+
+  private static extractMessages(entries: ReturnType<typeof parseTranscriptEntries>) {
+    const messages: SessionMessage[] = []
+    const toolCounts = new Map<string, number>()
+    const seenSignatures = new Map<string, number>()
+    const pendingFallback: Array<{ messageIndex: number; key: string }> = []
+    let startedAt = 0
+    let lastMessageAt = 0
+
+    for (const entry of entries) {
+      const built = SessionDataCache.buildMessage(entry)
+      if (!built) continue
+      const { message, toolCalls } = built
+      for (const tc of toolCalls) {
+        toolCounts.set(tc.name, (toolCounts.get(tc.name) ?? 0) + 1)
       }
       messages.push(message)
 
@@ -112,10 +155,22 @@ class SessionDataCache {
         key: messageFallbackKey(message, seen),
       })
     }
+    return { messages, toolCounts, pendingFallback, startedAt, lastMessageAt }
+  }
 
-    // Assign stable synthetic timestamps for transcripts that don't include per-message times.
-    // Existing keys preserve prior assigned times; new keys get monotonic timestamps.
-    let seed = Math.max(lastAssignedFallbackMs, fileMtimeMs - pendingFallback.length * 1000)
+  private static assignFallbackTimestamps(opts: {
+    pendingFallback: Array<{ messageIndex: number; key: string }>
+    messages: SessionMessage[]
+    fallbackTimestamps: Map<string, string>
+    fileMtimeMs: number
+    initialSeed: number
+    prev?: CachedSessionData
+  }) {
+    const { pendingFallback, messages, fallbackTimestamps, fileMtimeMs, initialSeed, prev } = opts
+    let seed = Math.max(initialSeed, fileMtimeMs - pendingFallback.length * 1000)
+    let startedAt = 0
+    let lastMessageAt = 0
+
     for (let i = 0; i < pendingFallback.length; i++) {
       const target = pendingFallback[i]!
       const priorIso = prev?.fallbackTimestamps.get(target.key) ?? null
@@ -131,22 +186,8 @@ class SessionDataCache {
       if (startedAt === 0 || assignedMs < startedAt) startedAt = assignedMs
       if (assignedMs > lastMessageAt) lastMessageAt = assignedMs
     }
-    lastAssignedFallbackMs = seed
 
-    const toolStats = [...toolCounts.entries()]
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-
-    return {
-      mtimeMs: fileMtimeMs,
-      size: 0,
-      startedAt,
-      lastMessageAt,
-      messages,
-      toolStats,
-      fallbackTimestamps,
-      lastAssignedFallbackMs,
-    }
+    return { seed, startedAt, lastMessageAt }
   }
 
   async get(session: Pick<Session, "path" | "format">): Promise<CachedSessionData | null> {

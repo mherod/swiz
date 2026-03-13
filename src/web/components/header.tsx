@@ -12,6 +12,59 @@ interface HeaderProps {
   activeAgentProcessProviders?: Record<string, number[]>
 }
 
+const CACHE_LABELS: Array<{ label: string; key: string }> = [
+  { label: "Snapshots", key: "snapshotCacheSize" },
+  { label: "GitHub", key: "ghCacheSize" },
+  { label: "Eligibility", key: "eligibilityCacheSize" },
+  { label: "Transcripts", key: "transcriptIndexSize" },
+  { label: "Cooldown", key: "cooldownRegistrySize" },
+  { label: "Git state", key: "gitStateCacheSize" },
+  { label: "Settings", key: "projectSettingsCacheSize" },
+  { label: "Manifest", key: "manifestCacheSize" },
+]
+
+function buildCacheEntries(cacheStatus: Record<string, number> | null | undefined) {
+  if (!cacheStatus) return { totalCacheEntries: 0, warmCaches: 0 }
+  let total = 0
+  let warm = 0
+  for (const { key } of CACHE_LABELS) {
+    const v = cacheStatus[key] ?? 0
+    total += v
+    if (v > 0) warm++
+  }
+  return { totalCacheEntries: total, warmCaches: warm }
+}
+
+function ViewToggleButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        background: active ? "rgba(110, 147, 223, 0.38)" : "transparent",
+        color: active ? "#fff" : "#a8bee8",
+        border: "none",
+        padding: "4px 12px",
+        borderRadius: "4px",
+        fontSize: "0.75rem",
+        cursor: "pointer",
+        fontWeight: active ? "600" : "400",
+        transition: "all 0.15s ease",
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
 export function Header({
   lastUpdated,
   uptime,
@@ -25,21 +78,7 @@ export function Header({
   cacheStatus,
   activeAgentProcessProviders = {},
 }: HeaderProps) {
-  // Cache logic
-  const cacheEntries = cacheStatus
-    ? [
-        { label: "Snapshots", value: cacheStatus.snapshotCacheSize ?? 0 },
-        { label: "GitHub", value: cacheStatus.ghCacheSize ?? 0 },
-        { label: "Eligibility", value: cacheStatus.eligibilityCacheSize ?? 0 },
-        { label: "Transcripts", value: cacheStatus.transcriptIndexSize ?? 0 },
-        { label: "Cooldown", value: cacheStatus.cooldownRegistrySize ?? 0 },
-        { label: "Git state", value: cacheStatus.gitStateCacheSize ?? 0 },
-        { label: "Settings", value: cacheStatus.projectSettingsCacheSize ?? 0 },
-        { label: "Manifest", value: cacheStatus.manifestCacheSize ?? 0 },
-      ]
-    : []
-  const totalCacheEntries = cacheEntries.reduce((sum, item) => sum + item.value, 0)
-  const warmCaches = cacheEntries.filter((item) => item.value > 0).length
+  const { totalCacheEntries, warmCaches } = buildCacheEntries(cacheStatus)
 
   const totalRunningAgents = Object.values(activeAgentProcessProviders).reduce(
     (sum, pids) => sum + pids.length,
@@ -75,41 +114,16 @@ export function Header({
               border: "1px solid rgba(110, 147, 223, 0.38)",
             }}
           >
-            <button
-              type="button"
+            <ViewToggleButton
+              label="Dashboard"
+              active={activeView === "dashboard"}
               onClick={() => onSelectView("dashboard")}
-              style={{
-                background:
-                  activeView === "dashboard" ? "rgba(110, 147, 223, 0.38)" : "transparent",
-                color: activeView === "dashboard" ? "#fff" : "#a8bee8",
-                border: "none",
-                padding: "4px 12px",
-                borderRadius: "4px",
-                fontSize: "0.75rem",
-                cursor: "pointer",
-                fontWeight: activeView === "dashboard" ? "600" : "400",
-                transition: "all 0.15s ease",
-              }}
-            >
-              Dashboard
-            </button>
-            <button
-              type="button"
+            />
+            <ViewToggleButton
+              label="Project Settings"
+              active={activeView === "settings"}
               onClick={() => onSelectView("settings")}
-              style={{
-                background: activeView === "settings" ? "rgba(110, 147, 223, 0.38)" : "transparent",
-                color: activeView === "settings" ? "#fff" : "#a8bee8",
-                border: "none",
-                padding: "4px 12px",
-                borderRadius: "4px",
-                fontSize: "0.75rem",
-                cursor: "pointer",
-                fontWeight: activeView === "settings" ? "600" : "400",
-                transition: "all 0.15s ease",
-              }}
-            >
-              Project Settings
-            </button>
+            />
           </div>
         )}
       </div>

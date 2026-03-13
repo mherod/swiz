@@ -244,6 +244,23 @@ export interface DispatchLifecycleUpdate {
   toolInputSummary?: string
 }
 
+function logPayloadDiagnostics(
+  payloadStr: string,
+  payload: Record<string, unknown>,
+  canonicalEvent: string
+): void {
+  if (payloadStr.length === 0) {
+    log(`   ⚠ EMPTY STDIN — no payload received from agent`)
+    return
+  }
+  const keys = orderBy(Object.keys(payload), [(key) => key], ["asc"])
+  log(`   keys: ${keys.join(", ")}`)
+  if (!payload.session_id) log(`   ⚠ missing session_id`)
+  if (!TOOL_NAME_OPTIONAL_EVENTS.has(canonicalEvent) && !payload.tool_name && !payload.toolName) {
+    log(`   ⚠ missing tool_name`)
+  }
+}
+
 /**
  * Execute the full dispatch flow for a single hook event.
  *
@@ -255,116 +272,119 @@ export interface DispatchLifecycleUpdate {
  * backward compatibility). When called from the daemon, stdout is not
  * connected to the agent — only the returned response matters.
  */
-export async function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
-  const {
-    canonicalEvent,
-    hookEventName,
-    payloadStr,
-    daemonContext,
-    transcriptSummaryProvider,
-    manifestProvider,
-    onDispatchLifecycle,
-  } = req
+interface DispatchContext {
+  canonicalEvent: string
+  hookEventName: string
+  payload: Record<string, unknown>
+  parseError: boolean
+  payloadStr: string
+  cwd: string
+  toolName: string | undefined
+  trigger: string | undefined
+}
 
+function buildDispatchContext(req: DispatchRequest): DispatchContext {
+  const { canonicalEvent, hookEventName, payloadStr } = req
   const { payload, parseError } = parsePayload(payloadStr)
-
   backfillPayloadDefaults(payload)
   const { toolName, trigger } = getHookContext(canonicalEvent, payload)
 
   logHeader(canonicalEvent, hookEventName, toolName, trigger)
   log(`   payload: ${payloadStr.length} bytes${parseError ? " ⚠ INVALID JSON" : ""}`)
-
-  const finalPayloadStr = parseError ? payloadStr : JSON.stringify(payload)
-
-  if (payloadStr.length === 0) {
-    log(`   ⚠ EMPTY STDIN — no payload received from agent`)
-  } else {
-    const keys = orderBy(Object.keys(payload), [(key) => key], ["asc"])
-    log(`   keys: ${keys.join(", ")}`)
-    if (!payload.session_id) log(`   ⚠ missing session_id`)
-    if (!TOOL_NAME_OPTIONAL_EVENTS.has(canonicalEvent) && !payload.tool_name && !payload.toolName) {
-      log(`   ⚠ missing tool_name`)
-    }
-  }
+  logPayloadDiagnostics(payloadStr, payload, canonicalEvent)
 
   const cwd = (payload.cwd as string) ?? process.cwd()
-  await tryReplayPendingMutations(cwd)
+  return { canonicalEvent, hookEventName, payload, parseError, payloadStr, cwd, toolName, trigger }
+}
 
+async function resolveFilteredGroups(
+  ctx: DispatchContext,
+  manifestProvider?: DispatchRequest["manifestProvider"]
+): Promise<HookGroup[]> {
   const combinedManifest = manifestProvider
-    ? await manifestProvider(cwd)
-    : await loadCombinedManifest(cwd)
+    ? await manifestProvider(ctx.cwd)
+    : await loadCombinedManifest(ctx.cwd)
 
   const matchingGroups = combinedManifest.filter(
-    (g) => g.event === canonicalEvent && groupMatches(g, toolName, trigger)
+    (g) => g.event === ctx.canonicalEvent && groupMatches(g, ctx.toolName, ctx.trigger)
   )
-  const filteredGroups = await applyHookSettingFilters(matchingGroups, payload)
+  const filteredGroups = await applyHookSettingFilters(matchingGroups, ctx.payload)
 
   log(
-    `   matched ${matchingGroups.length} group(s) from ${combinedManifest.filter((g) => g.event === canonicalEvent).length} total`
+    `   matched ${matchingGroups.length} group(s) from ${combinedManifest.filter((g) => g.event === ctx.canonicalEvent).length} total`
   )
   const skippedHooks = countHooks(matchingGroups) - countHooks(filteredGroups)
   if (skippedHooks > 0) {
     log(`   skipped ${skippedHooks} PR-merge hook(s) (pr-merge-mode disabled)`)
   }
+  return filteredGroups
+}
 
-  if (filteredGroups.length === 0) {
-    return { response: {} }
-  }
-
+function buildLifecycleEvent(
+  phase: "start" | "end",
+  ctx: DispatchContext,
+  filteredGroups: HookGroup[],
+  requestId: string,
+  startedAt: number
+): Parameters<NonNullable<DispatchRequest["onDispatchLifecycle"]>>[0] {
   const requestedHooks = filteredGroups.flatMap((group) => group.hooks.map((hook) => hook.file))
+  const toolInput = (ctx.payload.tool_input ?? ctx.payload.toolInput) as
+    | Record<string, unknown>
+    | undefined
+  return {
+    phase,
+    requestId,
+    canonicalEvent: ctx.canonicalEvent,
+    hookEventName: ctx.hookEventName,
+    cwd: ctx.cwd,
+    sessionId: typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : null,
+    hooks: [...new Set(requestedHooks)],
+    startedAt,
+    toolName: ctx.toolName,
+    toolInputSummary: toolInput ? summarizeToolInput(toolInput) : undefined,
+  }
+}
+
+export async function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
+  const ctx = buildDispatchContext(req)
+  const finalPayloadStr = ctx.parseError ? ctx.payloadStr : JSON.stringify(ctx.payload)
+
+  await tryReplayPendingMutations(ctx.cwd)
+
+  const filteredGroups = await resolveFilteredGroups(ctx, req.manifestProvider)
+  if (filteredGroups.length === 0) return { response: {} }
+
   const lifecycleRequestId =
-    (payload.request_id as string | undefined) ??
+    (ctx.payload.request_id as string | undefined) ??
     `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   const lifecycleStartedAt = Date.now()
 
-  const toolInput = (payload.tool_input ?? payload.toolInput) as Record<string, unknown> | undefined
-  const toolInputSummary = toolInput ? summarizeToolInput(toolInput) : undefined
-
-  onDispatchLifecycle?.({
-    phase: "start",
-    requestId: lifecycleRequestId,
-    canonicalEvent,
-    hookEventName,
-    cwd,
-    sessionId: typeof payload.session_id === "string" ? payload.session_id : null,
-    hooks: [...new Set(requestedHooks)],
-    startedAt: lifecycleStartedAt,
-    toolName,
-    toolInputSummary,
-  })
-
-  const enrichedPayloadStr = await enrichPayloadForHooks(
-    payload,
-    parseError,
-    finalPayloadStr,
-    transcriptSummaryProvider
+  req.onDispatchLifecycle?.(
+    buildLifecycleEvent("start", ctx, filteredGroups, lifecycleRequestId, lifecycleStartedAt)
   )
 
-  const strategyName = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
+  const enrichedPayloadStr = await enrichPayloadForHooks(
+    ctx.payload,
+    ctx.parseError,
+    finalPayloadStr,
+    req.transcriptSummaryProvider
+  )
+
+  const strategyName = DISPATCH_ROUTES[ctx.canonicalEvent] ?? "blocking"
   const strategy = STRATEGY_REGISTRY[strategyName]
 
   try {
     const response = await strategy.execute({
       filteredGroups,
       enrichedPayloadStr,
-      canonicalEvent,
-      hookEventName,
-      daemonContext,
+      canonicalEvent: ctx.canonicalEvent,
+      hookEventName: ctx.hookEventName,
+      daemonContext: req.daemonContext,
     })
-
     return { response }
   } finally {
-    onDispatchLifecycle?.({
-      phase: "end",
-      requestId: lifecycleRequestId,
-      canonicalEvent,
-      hookEventName,
-      cwd,
-      sessionId: typeof payload.session_id === "string" ? payload.session_id : null,
-      hooks: [...new Set(requestedHooks)],
-      startedAt: lifecycleStartedAt,
-      toolName,
-      toolInputSummary,
-    })
+    req.onDispatchLifecycle?.(
+      buildLifecycleEvent("end", ctx, filteredGroups, lifecycleRequestId, lifecycleStartedAt)
+    )
   }
 }

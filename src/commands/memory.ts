@@ -226,6 +226,126 @@ function resolveThresholdSets(
   }
 }
 
+// ─── Run helpers ─────────────────────────────────────────────────────────────
+
+function resolveTargetAgents(allAgents: boolean, explicitAgent: AgentDef | undefined): AgentDef[] {
+  if (allAgents) return AGENTS
+  if (explicitAgent) return [explicitAgent]
+  const detected = detectCurrentAgent()
+  return detected ? [detected] : AGENTS
+}
+
+function printMemoryHeader(targetAgents: AgentDef[], targetDir: string, showingAll: boolean): void {
+  console.log(`\n  ${BOLD}swiz memory${RESET}`)
+  console.log(
+    showingAll ? `  Agents: ${CYAN}all${RESET}` : `  Agent: ${CYAN}${targetAgents[0]!.name}${RESET}`
+  )
+  console.log(`  Target: ${targetDir}\n`)
+}
+
+function printAgentHeader(
+  agent: AgentDef,
+  showingAll: boolean,
+  renderedCount: number,
+  existingCount: number,
+  thresholds: ReturnType<typeof resolveMemoryThresholds>
+): void {
+  if (showingAll) {
+    if (renderedCount > 0) console.log()
+    console.log(`  ${BOLD}${agent.name}${RESET}`)
+  } else {
+    console.log(`  ${BOLD}Rule hierarchy${RESET} ${DIM}(${existingCount} files present)${RESET}\n`)
+  }
+  const tLine = thresholds.memoryLineThreshold
+  const tWord = thresholds.memoryWordThreshold
+  const suffix = showingAll ? "" : "\n"
+  console.log(`  ${DIM}Thresholds: ${tLine} lines · ${tWord} words${RESET}${suffix}`)
+}
+
+type ThresholdSets = {
+  project: ReturnType<typeof resolveMemoryThresholds>
+  global: ReturnType<typeof resolveMemoryThresholds>
+}
+
+async function renderSourceList(
+  agent: AgentDef,
+  existing: MemorySource[],
+  showingAll: boolean,
+  view: boolean,
+  thresholdSets: ThresholdSets
+): Promise<Array<SourceCheckResult & { agentName: string }>> {
+  const results: Array<SourceCheckResult & { agentName: string }> = []
+  const globalHome = getProviderAdapter(agent)?.getHomeDir() ?? ""
+  for (const [si, source] of existing.entries()) {
+    const isGlobal = globalHome.length > 0 && source.path.startsWith(globalHome)
+    const t = isGlobal ? thresholdSets.global : thresholdSets.project
+    const result = await printSource(
+      source,
+      si,
+      { lines: t.memoryLineThreshold, words: t.memoryWordThreshold },
+      { compact: showingAll }
+    )
+    if (view) await printSourceContent(source)
+    if (result.exceeded) results.push({ ...result, agentName: agent.name })
+  }
+  return results
+}
+
+async function renderAgentSources(
+  targetAgents: AgentDef[],
+  targetDir: string,
+  showingAll: boolean,
+  view: boolean,
+  thresholdSets: ThresholdSets
+): Promise<Array<SourceCheckResult & { agentName: string }>> {
+  const exceededFiles: Array<SourceCheckResult & { agentName: string }> = []
+  let renderedAgentCount = 0
+
+  for (const [agentIndex, agent] of targetAgents.entries()) {
+    const sources = getMemorySources(agent, targetDir)
+    const existing = sources.filter((s) => isPresentMemoryFile(s.path))
+    if (existing.length === 0) {
+      if (!showingAll) {
+        const msg = sources.length === 0 ? "sources defined" : "files found"
+        console.log(`  ${YELLOW}No memory ${msg} for ${agent.name}${RESET}\n`)
+      }
+      continue
+    }
+
+    printAgentHeader(agent, showingAll, renderedAgentCount, existing.length, thresholdSets.project)
+    const results = await renderSourceList(agent, existing, showingAll, view, thresholdSets)
+    exceededFiles.push(...results)
+    renderedAgentCount++
+    if (!showingAll && agentIndex < targetAgents.length - 1) console.log()
+  }
+
+  return exceededFiles
+}
+
+function throwStrictError(
+  exceededFiles: Array<SourceCheckResult & { agentName: string }>,
+  projectThresholds: ReturnType<typeof resolveMemoryThresholds>
+): never {
+  const fileList = exceededFiles.map((f) => `  - ${f.agentName}: ${f.label} (${f.path})`).join("\n")
+  const compactAdvice = skillAdvice(
+    "compact-memory",
+    "Use the /compact-memory skill to reduce each file below thresholds.",
+    manualCompactionFallback("each file")
+  )
+  const compactionChecklist = formatActionPlan(
+    compactionChecklistSteps("Re-check each file after edits with `wc -l` and `wc -w`."),
+    { header: "Compaction checklist:" }
+  ).trimEnd()
+  throw new Error(
+    [
+      `Memory file(s) exceed size thresholds:\n${fileList}`,
+      `\nThresholds: ${projectThresholds.memoryLineThreshold} lines, ${projectThresholds.memoryWordThreshold} words`,
+      `\n${compactAdvice}`,
+      `\n${compactionChecklist}`,
+    ].join("\n")
+  )
+}
+
 // ─── Command ─────────────────────────────────────────────────────────────────
 
 export const memoryCommand: Command = {
@@ -249,123 +369,25 @@ export const memoryCommand: Command = {
   ],
   async run(args: string[]) {
     const { targetDir, strict, view, allAgents, explicitAgent } = parseMemoryArgs(args)
-    const detectedAgent = detectCurrentAgent()
-    const targetAgents = allAgents
-      ? AGENTS
-      : explicitAgent
-        ? [explicitAgent]
-        : detectedAgent
-          ? [detectedAgent]
-          : AGENTS
+    const targetAgents = resolveTargetAgents(allAgents, explicitAgent)
     const showingAllAgents = targetAgents.length > 1
 
-    console.log(`\n  ${BOLD}swiz memory${RESET}`)
-    if (showingAllAgents) {
-      console.log(`  Agents: ${CYAN}all${RESET}`)
-    } else {
-      console.log(`  Agent: ${CYAN}${targetAgents[0]!.name}${RESET}`)
-    }
-    console.log(`  Target: ${targetDir}\n`)
+    printMemoryHeader(targetAgents, targetDir, showingAllAgents)
 
-    // Read thresholds from project and user settings
     const projectSettings = await readProjectSettings(targetDir)
     const userSettings = await readSwizSettings({ strict: false })
     const thresholdSets = resolveThresholdSets(projectSettings, userSettings)
-    const projectThresholds = thresholdSets.project
-    const globalThresholds = thresholdSets.global
 
-    const exceededFiles: Array<SourceCheckResult & { agentName: string }> = []
-
-    let renderedAgentCount = 0
-    for (const [agentIndex, agent] of targetAgents.entries()) {
-      const sources = getMemorySources(agent, targetDir)
-      if (sources.length === 0) {
-        if (showingAllAgents) continue
-        console.log(`  ${YELLOW}No memory sources defined for ${agent.name}${RESET}\n`)
-        continue
-      }
-
-      const existingSources = sources.filter((source) => isPresentMemoryFile(source.path))
-      if (existingSources.length === 0) {
-        if (showingAllAgents) continue
-        console.log(`  ${YELLOW}No memory files found for ${agent.name}${RESET}\n`)
-        continue
-      }
-
-      if (showingAllAgents) {
-        if (renderedAgentCount > 0) {
-          console.log()
-        }
-        console.log(`  ${BOLD}${agent.name}${RESET}`)
-        console.log(
-          `  ${DIM}Thresholds: ${projectThresholds.memoryLineThreshold} lines · ${projectThresholds.memoryWordThreshold} words${RESET}`
-        )
-      }
-
-      if (!showingAllAgents) {
-        console.log(
-          `  ${BOLD}Rule hierarchy${RESET} ${DIM}(${existingSources.length} files present)${RESET}\n`
-        )
-        console.log(
-          `  ${DIM}Thresholds: ${projectThresholds.memoryLineThreshold} lines · ${projectThresholds.memoryWordThreshold} words${RESET}\n`
-        )
-      }
-
-      const globalHome = getProviderAdapter(agent)?.getHomeDir() ?? ""
-      for (const [sourceIndex, source] of existingSources.entries()) {
-        // Use global thresholds for sources in the global home directory
-        const isGlobal = globalHome.length > 0 && source.path.startsWith(globalHome)
-        const thresholds = isGlobal ? globalThresholds : projectThresholds
-
-        const result = await printSource(
-          source,
-          sourceIndex,
-          {
-            lines: thresholds.memoryLineThreshold,
-            words: thresholds.memoryWordThreshold,
-          },
-          { compact: showingAllAgents }
-        )
-
-        if (view) {
-          await printSourceContent(source)
-        }
-
-        if (result.exceeded) {
-          exceededFiles.push({ ...result, agentName: agent.name })
-        }
-      }
-
-      renderedAgentCount++
-
-      if (!showingAllAgents && agentIndex < targetAgents.length - 1) {
-        console.log()
-      }
-    }
+    const exceededFiles = await renderAgentSources(
+      targetAgents,
+      targetDir,
+      showingAllAgents,
+      view,
+      thresholdSets
+    )
 
     if (strict && exceededFiles.length > 0) {
-      const fileList = exceededFiles
-        .map((f) => `  - ${f.agentName}: ${f.label} (${f.path})`)
-        .join("\n")
-
-      const compactAdvice = skillAdvice(
-        "compact-memory",
-        "Use the /compact-memory skill to reduce each file below thresholds.",
-        manualCompactionFallback("each file")
-      )
-      const compactionChecklist = formatActionPlan(
-        compactionChecklistSteps("Re-check each file after edits with `wc -l` and `wc -w`."),
-        { header: "Compaction checklist:" }
-      ).trimEnd()
-
-      const guidance = [
-        `Memory file(s) exceed size thresholds:\n${fileList}`,
-        `\nThresholds: ${projectThresholds.memoryLineThreshold} lines, ${projectThresholds.memoryWordThreshold} words`,
-        `\n${compactAdvice}`,
-        `\n${compactionChecklist}`,
-      ].join("\n")
-
-      throw new Error(guidance)
+      throwStrictError(exceededFiles, thresholdSets.project)
     }
   },
 }

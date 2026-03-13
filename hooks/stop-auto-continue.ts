@@ -84,34 +84,36 @@ function inferTranscriptFormatFromPath(path: string): Session["format"] | undefi
   return undefined
 }
 
-async function resolveTranscriptText(
-  transcriptPath: string | undefined,
-  cwd: string
-): Promise<TranscriptResolution> {
-  let unreadableInputTranscript = false
-  let inputTranscriptUnparseable = false
-
-  if (transcriptPath?.trim()) {
-    const hintedFormat = inferTranscriptFormatFromPath(transcriptPath)
-    try {
-      const raw = await Bun.file(transcriptPath).text()
-      const hintedTurns = extractTranscriptData(raw, hintedFormat).turns.length
-      const fallbackTurns = hintedFormat ? extractTranscriptData(raw).turns.length : 0
-      if (hintedTurns > 0 || fallbackTurns > 0) {
-        return {
+async function tryInputTranscript(
+  transcriptPath: string
+): Promise<
+  { resolution: TranscriptResolution; status: "ok" } | { status: "unreadable" | "unparseable" }
+> {
+  const hintedFormat = inferTranscriptFormatFromPath(transcriptPath)
+  try {
+    const raw = await Bun.file(transcriptPath).text()
+    const hintedTurns = extractTranscriptData(raw, hintedFormat).turns.length
+    const fallbackTurns = hintedFormat ? extractTranscriptData(raw).turns.length : 0
+    if (hintedTurns > 0 || fallbackTurns > 0) {
+      return {
+        status: "ok",
+        resolution: {
           raw,
           sourceDescription: `stop hook input transcript_path (${transcriptPath})`,
           formatHint: hintedTurns > 0 ? hintedFormat : undefined,
-        }
+        },
       }
-      inputTranscriptUnparseable = true
-    } catch {
-      unreadableInputTranscript = true
     }
+    return { status: "unparseable" }
+  } catch {
+    return { status: "unreadable" }
   }
+}
 
-  const sessions = await findAllProviderSessions(cwd)
-  let firstReadable: TranscriptResolution | null = null
+async function findFallbackTranscript(
+  sessions: Session[]
+): Promise<{ first: TranscriptResolution | null; match: TranscriptResolution | null }> {
+  let first: TranscriptResolution | null = null
   for (const session of sessions) {
     if (isUnsupportedTranscriptFormat(session.format)) continue
     try {
@@ -121,40 +123,67 @@ async function resolveTranscriptText(
         formatHint: session.format,
         sourceDescription: `${session.provider ?? "unknown"} session ${session.id} (${session.path})`,
       }
-      if (!firstReadable) firstReadable = resolution
+      if (!first) first = resolution
       if (extractTranscriptData(raw, session.format).turns.length > 0) {
-        return resolution
+        return { first, match: resolution }
       }
     } catch {
       // Try the next candidate.
     }
   }
+  return { first, match: null }
+}
 
-  if (firstReadable) {
-    return {
-      ...firstReadable,
-      failureReason: inputTranscriptUnparseable
-        ? `Input transcript ${transcriptPath} had no parseable turns; using best readable fallback transcript.`
-        : undefined,
-    }
-  }
-
+function buildTranscriptFailureReason(
+  sessions: Session[],
+  transcriptPath: string | undefined,
+  inputStatus: "unreadable" | "unparseable" | null,
+  cwd: string
+): string {
   const unsupported = sessions.find((session) => isUnsupportedTranscriptFormat(session.format))
   const unsupportedMessage = unsupported ? getUnsupportedTranscriptFormatMessage(unsupported) : ""
-  const inputFailure = unreadableInputTranscript
-    ? `Input transcript ${transcriptPath} could not be read.`
-    : inputTranscriptUnparseable
-      ? `Input transcript ${transcriptPath} had no parseable turns.`
-      : ""
+  const inputFailure =
+    inputStatus === "unreadable"
+      ? `Input transcript ${transcriptPath} could not be read.`
+      : inputStatus === "unparseable"
+        ? `Input transcript ${transcriptPath} had no parseable turns.`
+        : ""
   const failureReasonBase = unsupportedMessage
     ? `${unsupportedMessage} No readable fallback transcript was found for cwd ${cwd}.`
     : `No readable transcript was found from stop hook input or cwd fallback sessions for ${cwd}.`
-  const failureReason = [inputFailure, failureReasonBase].filter(Boolean).join(" ")
+  return [inputFailure, failureReasonBase].filter(Boolean).join(" ")
+}
+
+async function resolveTranscriptText(
+  transcriptPath: string | undefined,
+  cwd: string
+): Promise<TranscriptResolution> {
+  let inputStatus: "unreadable" | "unparseable" | null = null
+
+  if (transcriptPath?.trim()) {
+    const result = await tryInputTranscript(transcriptPath)
+    if (result.status === "ok") return result.resolution
+    inputStatus = result.status
+  }
+
+  const sessions = await findAllProviderSessions(cwd)
+  const { first, match } = await findFallbackTranscript(sessions)
+  if (match) return match
+
+  if (first) {
+    return {
+      ...first,
+      failureReason:
+        inputStatus === "unparseable"
+          ? `Input transcript ${transcriptPath} had no parseable turns; using best readable fallback transcript.`
+          : undefined,
+    }
+  }
 
   return {
     raw: null,
     sourceDescription: "none",
-    failureReason,
+    failureReason: buildTranscriptFailureReason(sessions, transcriptPath, inputStatus, cwd),
   }
 }
 
@@ -475,48 +504,82 @@ async function checkRefinementNeeds(cwd: string): Promise<string> {
 
 // ─── Prompt construction ────────────────────────────────────────────────────
 
-function buildPrompt(
-  taskSection: string,
-  userMessagesSection: string,
-  projectStatus: string,
-  context: string,
-  ambitionMode: AmbitionMode = "standard",
-  cwd?: string,
-  docsOnly = false,
-  repoFiles = ""
+const PROMPT_ROLE =
+  `YOUR ROLE: You are a read-only transcript analyzer. ` +
+  `DO NOT use any tools, read any files, or take any actions whatsoever. ` +
+  `Your only job is to read the conversation transcript below and output a JSON object. ` +
+  `Do not call tools. Do not read files. Do not perform work. Just analyze the text and respond.\n\n` +
+  `OUTPUT FORMAT: Reply with a valid JSON object containing these fields:\n` +
+  `{\n` +
+  `  "processCritique": "<one sentence on HOW work was done>",\n` +
+  `  "productCritique": "<one sentence on WHAT was built or missed>",\n` +
+  `  "next": "<one imperative sentence>",\n` +
+  `  "reflections": ["<directive>", ...]\n` +
+  `}\n\n`
+
+const PROMPT_CRITIQUES =
+  `CRITIQUE RULES:\n` +
+  `Write two separate critiques — keep each under 160 chars, no markup, no bullet points, no line breaks.\n\n` +
+  `PROCESS CRITIQUE ("processCritique"): Call out the most significant failure in HOW the work was executed. ` +
+  `Address the assistant directly — always say "You", never "the assistant"; if referencing the user say "I". ` +
+  `Focus on: wrong order of operations, steps skipped, assumptions not validated, verification missed, ` +
+  `tools used incorrectly, work done without reading the relevant code first. ` +
+  `Be specific — name the actual failure ` +
+  `(e.g., "You applied the fix without first reproducing the bug" or ` +
+  `"You skipped reading the existing implementation before modifying it"). ` +
+  `If the process was genuinely sound, say so briefly — but be skeptical.\n\n` +
+  `PRODUCT CRITIQUE ("productCritique"): Call out the most significant gap in WHAT was built or what was missed. ` +
+  `Focus on: features left incomplete, user needs not addressed, edge cases ignored in the implementation, ` +
+  `wrong problem solved, scope too narrow or too broad, output that doesn't actually serve the user's goal. ` +
+  `Be specific — name the actual gap ` +
+  `(e.g., "The fix handles the happy path but leaves the error case broken" or ` +
+  `"You solved a surface symptom but the root cause is still unaddressed"). ` +
+  `If the product outcome was genuinely complete, say so briefly — but be skeptical.\n\n`
+
+function buildNextStepRules(
+  repoFiles: string,
+  docsOnly: boolean,
+  ambitionMode: AmbitionMode
 ): string {
-  const statusSection = projectStatus
-    ? `=== PROJECT STATUS ===\n${projectStatus}\n=== END OF PROJECT STATUS ===\n\n`
+  const repoFilesBlock = repoFiles
+    ? `VERIFIED EXISTING FILES (output of git ls-files hooks/ src/ — these files definitively exist in the repo):\n${repoFiles}\n` +
+      `IMPORTANT: Only report a feature as unimplemented if you cannot find its file path in the list above. ` +
+      `Transcript discussion about a feature is NOT evidence of absence — check the file list first. ` +
+      `If a file appears in the list, treat the feature as implemented regardless of what the transcript says.\n\n`
     : ""
+
+  const rule1 = docsOnly
+    ? `(1) SKIP — this session only edited documentation files (no source code was modified). ` +
+      `    Rule (1) does not apply: documentation updates describe already-shipped behavior; ` +
+      `    they are never evidence of missing implementations. Proceed to rule (2). `
+    : `(1) If any feature, capability, or behaviour was described or started but is not yet fully implemented in code, implement it. `
+
+  const AMBITION_MODES: Record<string, string> = {
+    aggressive:
+      `AGGRESSIVE MODE: Ignore polish and incremental improvements. ` +
+      `Identify the single biggest missing capability in the current feature area — ` +
+      `the one that would deliver the most user-facing value — and name it explicitly as the target. ` +
+      `Treat any partially-built system as incomplete; name the completion target. ` +
+      `Do not suggest fixes or improvements to existing functionality. ` +
+      `Only suggest implementing something that does not exist yet. `,
+    creative:
+      `CREATIVE MODE: Treat this as product-roadmap drafting grounded in the session context. ` +
+      `Suggest an immediately actionable issue description that closes a concrete user-facing functionality gap. ` +
+      `Prioritize what users will newly be able to do after implementation, not internal maintenance tasks. ` +
+      `Output one imperative sentence starting with "Create issue:". ` +
+      `In that sentence include, separated by semicolons: ` +
+      `(a) a clear issue title, ` +
+      `(b) the user-facing gap to close, ` +
+      `(c) concrete implementation scope, and ` +
+      `(d) a verification/acceptance check. `,
+    reflective:
+      `REFLECTIVE MODE: Treat "reflections" as first-class output and derive "next" from them. ` +
+      `Extract concrete, high-signal directives from the transcript into "reflections". ` +
+      `Then make "next" an imperative code action that directly applies the strongest reflection immediately. ` +
+      `If there is tension between a generic plan and a reflection, prefer the reflection-driven action. `,
+  }
+
   return (
-    `YOUR ROLE: You are a read-only transcript analyzer. ` +
-    `DO NOT use any tools, read any files, or take any actions whatsoever. ` +
-    `Your only job is to read the conversation transcript below and output a JSON object. ` +
-    `Do not call tools. Do not read files. Do not perform work. Just analyze the text and respond.\n\n` +
-    `OUTPUT FORMAT: Reply with a valid JSON object containing these fields:\n` +
-    `{\n` +
-    `  "processCritique": "<one sentence on HOW work was done>",\n` +
-    `  "productCritique": "<one sentence on WHAT was built or missed>",\n` +
-    `  "next": "<one imperative sentence>",\n` +
-    `  "reflections": ["<directive>", ...]\n` +
-    `}\n\n` +
-    `CRITIQUE RULES:\n` +
-    `Write two separate critiques — keep each under 160 chars, no markup, no bullet points, no line breaks.\n\n` +
-    `PROCESS CRITIQUE ("processCritique"): Call out the most significant failure in HOW the work was executed. ` +
-    `Address the assistant directly — always say "You", never "the assistant"; if referencing the user say "I". ` +
-    `Focus on: wrong order of operations, steps skipped, assumptions not validated, verification missed, ` +
-    `tools used incorrectly, work done without reading the relevant code first. ` +
-    `Be specific — name the actual failure ` +
-    `(e.g., "You applied the fix without first reproducing the bug" or ` +
-    `"You skipped reading the existing implementation before modifying it"). ` +
-    `If the process was genuinely sound, say so briefly — but be skeptical.\n\n` +
-    `PRODUCT CRITIQUE ("productCritique"): Call out the most significant gap in WHAT was built or what was missed. ` +
-    `Focus on: features left incomplete, user needs not addressed, edge cases ignored in the implementation, ` +
-    `wrong problem solved, scope too narrow or too broad, output that doesn't actually serve the user's goal. ` +
-    `Be specific — name the actual gap ` +
-    `(e.g., "The fix handles the happy path but leaves the error case broken" or ` +
-    `"You solved a surface symptom but the root cause is still unaddressed"). ` +
-    `If the product outcome was genuinely complete, say so briefly — but be skeptical.\n\n` +
     `NEXT STEP RULES:\n` +
     `Based solely on the transcript text provided, identify the boldest, highest-impact CODE action ` +
     `the assistant should execute next — autonomously, without asking the user any questions ` +
@@ -526,17 +589,8 @@ function buildPrompt(
     `The SESSION TASKS COMPLETED list reveals the work trajectory — ` +
     `use it to understand what has already been achieved and what direction the session was heading. ` +
     `PRIORITY ORDER: ` +
-    (repoFiles
-      ? `VERIFIED EXISTING FILES (output of git ls-files hooks/ src/ — these files definitively exist in the repo):\n${repoFiles}\n` +
-        `IMPORTANT: Only report a feature as unimplemented if you cannot find its file path in the list above. ` +
-        `Transcript discussion about a feature is NOT evidence of absence — check the file list first. ` +
-        `If a file appears in the list, treat the feature as implemented regardless of what the transcript says.\n\n`
-      : "") +
-    (docsOnly
-      ? `(1) SKIP — this session only edited documentation files (no source code was modified). ` +
-        `    Rule (1) does not apply: documentation updates describe already-shipped behavior; ` +
-        `    they are never evidence of missing implementations. Proceed to rule (2). `
-      : `(1) If any feature, capability, or behaviour was described or started but is not yet fully implemented in code, implement it. `) +
+    repoFilesBlock +
+    rule1 +
     `(2) If any errors, failures, bugs, or broken functionality were identified but NOT resolved, fix them. ` +
     `(3) If a PROJECT STATUS section reports stale artifacts (e.g., CHANGELOG.md), ` +
     skillAdvice("changelog", `use the /changelog skill to update them. `, `update them. `) +
@@ -550,29 +604,12 @@ function buildPrompt(
     `or unhandled real-world case in the code changed this session — and implement it. ` +
     `Be ambitious: extend the feature, handle the obvious next case, fill the gap that would block a real user. ` +
     `NEVER conclude that work is complete or that nothing remains. ` +
-    (ambitionMode === "aggressive"
-      ? `AGGRESSIVE MODE: Ignore polish and incremental improvements. ` +
-        `Identify the single biggest missing capability in the current feature area — ` +
-        `the one that would deliver the most user-facing value — and name it explicitly as the target. ` +
-        `Treat any partially-built system as incomplete; name the completion target. ` +
-        `Do not suggest fixes or improvements to existing functionality. ` +
-        `Only suggest implementing something that does not exist yet. `
-      : ambitionMode === "creative"
-        ? `CREATIVE MODE: Treat this as product-roadmap drafting grounded in the session context. ` +
-          `Suggest an immediately actionable issue description that closes a concrete user-facing functionality gap. ` +
-          `Prioritize what users will newly be able to do after implementation, not internal maintenance tasks. ` +
-          `Output one imperative sentence starting with "Create issue:". ` +
-          `In that sentence include, separated by semicolons: ` +
-          `(a) a clear issue title, ` +
-          `(b) the user-facing gap to close, ` +
-          `(c) concrete implementation scope, and ` +
-          `(d) a verification/acceptance check. `
-        : ambitionMode === "reflective"
-          ? `REFLECTIVE MODE: Treat "reflections" as first-class output and derive "next" from them. ` +
-            `Extract concrete, high-signal directives from the transcript into "reflections". ` +
-            `Then make "next" an imperative code action that directly applies the strongest reflection immediately. ` +
-            `If there is tension between a generic plan and a reflection, prefer the reflection-driven action. `
-          : "") +
+    (AMBITION_MODES[ambitionMode] ?? "")
+  )
+}
+
+function buildProhibitionsBlock(cwd?: string): string {
+  return (
     `ABSOLUTE PROHIBITIONS — never suggest any of these regardless of session content:\n` +
     `  - git commit, git add, git push, or any git workflow step\n` +
     `  - writing, adding, or improving tests (unless the transcript explicitly shows a specific behavioral bug ` +
@@ -591,20 +628,54 @@ function buildPrompt(
         `      ${buildIssueGuidance(null, { crossRepo: true }).split("\n").join("\n      ")}\n`
       : "") +
     `Start with an imperative verb that names a code action (Implement, Add, Fix, Build, Extend, Wire up, etc.). ` +
-    `The step must be something the assistant can do right now by editing source files.\n\n` +
-    `REFLECTIONS RULES:\n` +
-    `Extract user preferences and conventions confirmed during the session. ` +
-    `Only include items where the user explicitly stated a preference ` +
-    `(e.g., "always use X", "never do Y", "we use X for Y", "prefer X over Y"). ` +
-    `Format each as "DO: <preference>" or "DON'T: <preference>". ` +
-    `Return an empty array if no clear preferences were expressed. ` +
-    `Be conservative — better to miss a pattern than to fabricate one. ` +
-    skillAdvice(
-      "update-memory",
-      `If the session produced learnings worth persisting, suggest using the /update-memory skill as the next step and explicitly include "Cause to capture: <specific cause>" naming the exact ignored instruction, blocked workflow gap, or failure mode that should be recorded.`,
-      `If the session produced learnings worth persisting, suggest updating the project's CLAUDE.md or MEMORY.md as the next step and explicitly include "Cause to capture: <specific cause>" naming the exact ignored instruction, blocked workflow gap, or failure mode that should be recorded.`
-    ) +
-    `\n\n` +
+    `The step must be something the assistant can do right now by editing source files.\n\n`
+  )
+}
+
+const PROMPT_REFLECTIONS_RULES =
+  `REFLECTIONS RULES:\n` +
+  `Extract user preferences and conventions confirmed during the session. ` +
+  `Only include items where the user explicitly stated a preference ` +
+  `(e.g., "always use X", "never do Y", "we use X for Y", "prefer X over Y"). ` +
+  `Format each as "DO: <preference>" or "DON'T: <preference>". ` +
+  `Return an empty array if no clear preferences were expressed. ` +
+  `Be conservative — better to miss a pattern than to fabricate one. ` +
+  skillAdvice(
+    "update-memory",
+    `If the session produced learnings worth persisting, suggest using the /update-memory skill as the next step and explicitly include "Cause to capture: <specific cause>" naming the exact ignored instruction, blocked workflow gap, or failure mode that should be recorded.`,
+    `If the session produced learnings worth persisting, suggest updating the project's CLAUDE.md or MEMORY.md as the next step and explicitly include "Cause to capture: <specific cause>" naming the exact ignored instruction, blocked workflow gap, or failure mode that should be recorded.`
+  ) +
+  `\n\n`
+
+function buildPrompt(opts: {
+  taskSection: string
+  userMessagesSection: string
+  projectStatus: string
+  context: string
+  ambitionMode?: AmbitionMode
+  cwd?: string
+  docsOnly?: boolean
+  repoFiles?: string
+}): string {
+  const {
+    taskSection,
+    userMessagesSection,
+    projectStatus,
+    context,
+    ambitionMode = "standard",
+    cwd,
+    docsOnly = false,
+    repoFiles = "",
+  } = opts
+  const statusSection = projectStatus
+    ? `=== PROJECT STATUS ===\n${projectStatus}\n=== END OF PROJECT STATUS ===\n\n`
+    : ""
+  return (
+    PROMPT_ROLE +
+    PROMPT_CRITIQUES +
+    buildNextStepRules(repoFiles, docsOnly, ambitionMode) +
+    buildProhibitionsBlock(cwd) +
+    PROMPT_REFLECTIONS_RULES +
     taskSection +
     userMessagesSection +
     statusSection +
@@ -696,6 +767,54 @@ interface ReviewingPr {
   statusCheckRollup: Array<{ state?: string; conclusion?: string; name?: string }>
 }
 
+const FAILING_STATES = new Set(["FAILURE", "ERROR"])
+const FAILING_CONCLUSIONS = new Set(["failure", "timed_out", "cancelled"])
+const PENDING_STATES = new Set(["PENDING", "EXPECTED"])
+
+function checkPrReviewState(pr: ReviewingPr): string | null {
+  const changesRequested = (pr.reviews ?? []).filter((r) => r.state === "CHANGES_REQUESTED")
+  if (changesRequested.length > 0) {
+    const reviewers = uniq(changesRequested.map((r) => r.author?.login).filter(Boolean))
+    const who = reviewers.length > 0 ? ` from ${reviewers.join(", ")}` : ""
+    return `Address CHANGES_REQUESTED review feedback${who} on PR #${pr.number} before merging.`
+  }
+
+  const unresolvedThreads = (pr.reviewThreads ?? []).filter((t) => !t.isResolved)
+  if (unresolvedThreads.length > 0) {
+    const count = unresolvedThreads.length
+    return `Resolve ${count} unresolved review thread${count > 1 ? "s" : ""} on PR #${pr.number} before merging.`
+  }
+
+  return null
+}
+
+function checkPrCiState(pr: ReviewingPr): string | null {
+  const checks = pr.statusCheckRollup ?? []
+  const failingChecks = checks.filter(
+    (c) => FAILING_STATES.has(c.state ?? "") || FAILING_CONCLUSIONS.has(c.conclusion ?? "")
+  )
+  if (failingChecks.length > 0) {
+    const names = failingChecks
+      .map((c) => c.name)
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(", ")
+    const label = names ? ` (${names})` : ""
+    return `Fix failing CI checks${label} on PR #${pr.number} before merging.`
+  }
+
+  const pendingChecks = checks.filter((c) => {
+    const state = c.state ?? ""
+    const conclusion = c.conclusion ?? ""
+    return PENDING_STATES.has(state) || (conclusion === "" && state !== "SUCCESS")
+  })
+  if (pendingChecks.length > 0) {
+    return `Wait for ${pendingChecks.length} pending CI check${pendingChecks.length > 1 ? "s" : ""} on PR #${pr.number} before merging.`
+  }
+
+  return null
+}
+
 /**
  * When the project is in `reviewing` or `addressing-feedback` state, run a
  * deterministic checklist before calling the AI backend. Returns a non-null
@@ -704,6 +823,22 @@ interface ReviewingPr {
  *
  * Priority order: conflicts → CHANGES_REQUESTED → unresolved threads → failing CI.
  */
+async function checkMergeConflicts(cwd: string): Promise<string | null> {
+  try {
+    const conflictFiles = (await git(["diff", "--name-only", "--diff-filter=U"], cwd)).trim()
+    if (!conflictFiles) return null
+    const files = conflictFiles.split("\n").filter(Boolean).slice(0, 5)
+    const fileList = files.map((f) => `\`${f}\``).join(", ")
+    return skillAdvice(
+      "resolve-conflicts",
+      `Resolve merge conflicts in ${fileList} before continuing PR review: use the /resolve-conflicts skill.`,
+      `Resolve merge conflicts in ${fileList} before continuing PR review: run \`git rebase --continue\` after fixing conflicts.`
+    )
+  } catch {
+    return null
+  }
+}
+
 export async function checkReviewingState(
   cwd: string,
   state: string | null
@@ -711,23 +846,9 @@ export async function checkReviewingState(
   if (state !== "reviewing" && state !== "addressing-feedback") return null
   if (!(await isGitRepo(cwd))) return null
 
-  // 1. Merge conflicts — highest priority, always resolvable locally
-  try {
-    const conflictFiles = (await git(["diff", "--name-only", "--diff-filter=U"], cwd)).trim()
-    if (conflictFiles) {
-      const files = conflictFiles.split("\n").filter(Boolean).slice(0, 5)
-      const fileList = files.map((f) => `\`${f}\``).join(", ")
-      return skillAdvice(
-        "resolve-conflicts",
-        `Resolve merge conflicts in ${fileList} before continuing PR review: use the /resolve-conflicts skill.`,
-        `Resolve merge conflicts in ${fileList} before continuing PR review: run \`git rebase --continue\` after fixing conflicts.`
-      )
-    }
-  } catch {
-    // git unavailable or not a git repo — skip conflict check
-  }
+  const conflictDirective = await checkMergeConflicts(cwd)
+  if (conflictDirective) return conflictDirective
 
-  // 2–4. PR-level checks — only when gh is available and a PR exists
   if (!hasGhCli() || !(await isGitHubRemote(cwd))) return null
 
   let branch: string
@@ -745,52 +866,11 @@ export async function checkReviewingState(
   )
   if (!pr) return null
 
-  // 2. CHANGES_REQUESTED reviews — must be addressed before anything else
-  const changesRequested = (pr.reviews ?? []).filter((r) => r.state === "CHANGES_REQUESTED")
-  if (changesRequested.length > 0) {
-    const reviewers = uniq(changesRequested.map((r) => r.author?.login).filter(Boolean))
-    const who = reviewers.length > 0 ? ` from ${reviewers.join(", ")}` : ""
-    return `Address CHANGES_REQUESTED review feedback${who} on PR #${pr.number} before merging.`
-  }
+  const reviewDirective = checkPrReviewState(pr)
+  if (reviewDirective) return reviewDirective
 
-  // 3. Unresolved review threads
-  const unresolvedThreads = (pr.reviewThreads ?? []).filter((t) => !t.isResolved)
-  if (unresolvedThreads.length > 0) {
-    const count = unresolvedThreads.length
-    return `Resolve ${count} unresolved review thread${count > 1 ? "s" : ""} on PR #${pr.number} before merging.`
-  }
-
-  // 4. CI check state
-  const checks = pr.statusCheckRollup ?? []
-  const failingChecks = checks.filter((c) => {
-    const state = c.state ?? ""
-    const conclusion = c.conclusion ?? ""
-    return (
-      state === "FAILURE" ||
-      state === "ERROR" ||
-      conclusion === "failure" ||
-      conclusion === "timed_out" ||
-      conclusion === "cancelled"
-    )
-  })
-  if (failingChecks.length > 0) {
-    const names = failingChecks
-      .map((c) => c.name)
-      .filter(Boolean)
-      .slice(0, 3)
-      .join(", ")
-    const label = names ? ` (${names})` : ""
-    return `Fix failing CI checks${label} on PR #${pr.number} before merging.`
-  }
-
-  const pendingChecks = checks.filter((c) => {
-    const state = c.state ?? ""
-    const conclusion = c.conclusion ?? ""
-    return state === "PENDING" || state === "EXPECTED" || (conclusion === "" && state !== "SUCCESS")
-  })
-  if (pendingChecks.length > 0) {
-    return `Wait for ${pendingChecks.length} pending CI check${pendingChecks.length > 1 ? "s" : ""} on PR #${pr.number} before merging.`
-  }
+  const ciDirective = checkPrCiState(pr)
+  if (ciDirective) return ciDirective
 
   // All checks pass — PR is ready to merge
   return skillAdvice(
@@ -798,6 +878,193 @@ export async function checkReviewingState(
     `PR #${pr.number} is ready to merge — no conflicts, no pending reviews, CI is green. Use the /pr-qa-and-merge skill to merge.`,
     `PR #${pr.number} is ready to merge — no conflicts, no pending reviews, CI is green. Run: gh pr merge ${pr.number} --squash`
   )
+}
+
+// ─── Main helpers ────────────────────────────────────────────────────────────
+
+type StopInput = ReturnType<typeof stopHookInputSchema.parse>
+
+function parseStopInput(hookRaw: unknown): { input: StopInput; cwd: string } {
+  const parsedInput = stopHookInputSchema.safeParse(hookRaw)
+  if (!parsedInput.success) {
+    terminate("block", "Auto-continue received malformed stop-hook input.")
+  }
+  const input = parsedInput.data
+  return { input, cwd: resolveCwd(input.cwd) }
+}
+
+async function handleNoTranscript(
+  transcriptResolution: TranscriptResolution,
+  sessionId: string,
+  cwd: string,
+  inputCwd: string | undefined,
+  ambitionMode: AmbitionMode
+): Promise<void> {
+  const taskContext = await loadTaskContext(sessionId)
+  const refinementStatus = await checkRefinementNeeds(cwd)
+  const statusParts = [await checkChangelogStaleness(cwd), refinementStatus].filter(Boolean)
+  const fallbackPrompt = buildPrompt({
+    taskSection: buildTaskSection(taskContext),
+    userMessagesSection: "",
+    projectStatus: statusParts.join("\n"),
+    context: `Transcript unavailable. Failure reason: ${transcriptResolution.failureReason ?? "unknown transcript read failure"}`,
+    ambitionMode,
+    cwd: inputCwd,
+    docsOnly: false,
+    repoFiles: await git(["ls-files", "hooks/", "src/"], cwd).catch(() => ""),
+  })
+  terminate(
+    "block",
+    "Auto-continue could not analyze this session from transcript data. " +
+      "Continue directly using the internal-agent prompt below:\n\n" +
+      fallbackPrompt
+  )
+}
+
+interface GenerateAiResponseOpts {
+  turns: ReturnType<typeof extractTranscriptData>["turns"]
+  editedPaths: Set<string>
+  docsOnly: boolean
+  taskContext: string
+  refinementStatus: string
+  cwd: string
+  inputCwd: string | undefined
+  ambitionMode: AmbitionMode
+}
+
+async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentResponse> {
+  const {
+    turns,
+    editedPaths,
+    docsOnly,
+    taskContext,
+    refinementStatus,
+    cwd,
+    inputCwd,
+    ambitionMode,
+  } = opts
+  const context = formatTurnsAsContext(turns)
+  const taskSection = buildTaskSection(taskContext)
+  const userMessagesSection = buildUserMessagesSection(turns)
+  const statusParts = [await checkChangelogStaleness(cwd), refinementStatus].filter(Boolean)
+  const repoFiles = docsOnly ? "" : await git(["ls-files", "hooks/", "src/"], cwd).catch(() => "")
+  const prompt = buildPrompt({
+    taskSection,
+    userMessagesSection,
+    projectStatus: statusParts.join("\n"),
+    context,
+    ambitionMode,
+    cwd: inputCwd,
+    docsOnly,
+    repoFiles,
+  })
+
+  try {
+    const parsed = await promptObject(prompt, agentResponseSchema, {
+      timeout: ATTEMPT_TIMEOUT_MS,
+    })
+    return filterAgentResponse(parsed)
+  } catch {
+    const fillerNext = buildFillerSuggestion(editedPaths, docsOnly)
+    if (fillerNext) {
+      return { processCritique: "", productCritique: "", next: fillerNext, reflections: [] }
+    }
+    if (!refinementStatus) {
+      terminate(
+        "block",
+        "Auto-continue could not generate a next-step suggestion: AI backend failed during call.\nReview your recent changes and continue working if there is more to do."
+      )
+    }
+    return { processCritique: "", productCritique: "", next: "", reflections: [] }
+  }
+}
+
+function postProcessResponse(
+  response: AgentResponse,
+  ambitionMode: AmbitionMode,
+  projectState: string | null
+): AgentResponse {
+  const result = { ...response }
+
+  if (ambitionMode === "reflective") {
+    const reflectiveNext = normalizeReflectiveNextStep(result.reflections)
+    if (reflectiveNext) result.next = reflectiveNext
+  }
+
+  const isReviewing = projectState === "reviewing" || projectState === "addressing-feedback"
+  if (result.next && isWorkflowSuggestion(result.next, { skipPrPattern: isReviewing })) {
+    const truncated = result.next.slice(0, 120).replace(/\s+/g, " ").trim()
+    const ellipsis = result.next.length > 120 ? "…" : ""
+    result.next = `${WORKFLOW_FINDING} [Filtered suggestion: "${truncated}${ellipsis}"]`
+  }
+
+  if (ambitionMode === "creative" && result.next) {
+    result.next = normalizeCreativeIssueDescription(result.next)
+  }
+
+  return result
+}
+
+function buildFinalMessage(
+  response: AgentResponse,
+  refinementStatus: string,
+  critiquesEnabled: boolean
+): string {
+  const critiqueLines = critiquesEnabled
+    ? [
+        response.processCritique ? `Process: ${response.processCritique}` : "",
+        response.productCritique ? `Product: ${response.productCritique}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : ""
+  const critiqueLine = critiqueLines ? `${critiqueLines}\n\n` : ""
+  const refinementDirective = refinementStatus ? `\n\nNote: ${refinementStatus}` : ""
+  return `${critiqueLine}Stop blocked — unresolved finding: ${response.next || refinementStatus}${refinementDirective}`
+}
+
+interface SessionContext {
+  transcriptData: ReturnType<typeof extractTranscriptData>
+  docsOnly: boolean
+  taskContext: string
+  refinementStatus: string
+}
+
+async function resolveSessionContext(
+  input: StopInput,
+  cwd: string,
+  ambitionMode: AmbitionMode
+): Promise<SessionContext> {
+  const transcriptResolution = await resolveTranscriptText(input.transcript_path, cwd)
+
+  if (!transcriptResolution.raw) {
+    await handleNoTranscript(
+      transcriptResolution,
+      input.session_id ?? "",
+      cwd,
+      input.cwd,
+      ambitionMode
+    )
+  }
+
+  const transcriptData = extractTranscriptData(
+    transcriptResolution.raw!,
+    transcriptResolution.formatHint
+  )
+  const turns = transcriptData.turns.slice(-CONTEXT_TURNS)
+  if (turns.length === 0) {
+    terminate(
+      "block",
+      "Auto-continue could not analyze this session: transcript has no parseable conversation turns."
+    )
+  }
+
+  return {
+    transcriptData,
+    docsOnly: isDocsOnlySession(transcriptData.editedPaths),
+    taskContext: await loadTaskContext(input.session_id ?? ""),
+    refinementStatus: await checkRefinementNeeds(cwd),
+  }
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
@@ -810,15 +1077,8 @@ async function main(): Promise<void> {
     terminate("block", "Auto-continue could not parse stop-hook input JSON.")
   }
 
-  const parsedInput = stopHookInputSchema.safeParse(hookRaw)
-  if (!parsedInput.success) {
-    terminate("block", "Auto-continue received malformed stop-hook input.")
-  }
-  const input = parsedInput.data
-  const cwd = resolveCwd(input.cwd)
+  const { input, cwd } = parseStopInput(hookRaw)
 
-  // Populate GEMINI_API_KEY from Keychain if not already in env.
-  // Must run before hasGeminiApiKey() so the Keychain fallback is visible.
   await ensureGeminiApiKey()
 
   const settings = await readSwizSettings()
@@ -829,74 +1089,15 @@ async function main(): Promise<void> {
   }
 
   const projectState = await readProjectState(cwd)
+  const { transcriptData, docsOnly, taskContext, refinementStatus } = await resolveSessionContext(
+    input,
+    cwd,
+    effective.ambitionMode
+  )
 
-  const transcriptResolution = await resolveTranscriptText(input.transcript_path, cwd)
-  if (!transcriptResolution.raw) {
-    const taskContext = await loadTaskContext(input.session_id ?? "")
-    const refinementStatus = await checkRefinementNeeds(cwd)
-    const statusParts = [await checkChangelogStaleness(cwd), refinementStatus].filter(Boolean)
-    const projectStatus = statusParts.join("\n")
-    const fallbackPrompt = buildPrompt(
-      buildTaskSection(taskContext),
-      "",
-      projectStatus,
-      `Transcript unavailable. Failure reason: ${transcriptResolution.failureReason ?? "unknown transcript read failure"}`,
-      effective.ambitionMode,
-      input.cwd,
-      false,
-      await git(["ls-files", "hooks/", "src/"], cwd).catch(() => "")
-    )
-    terminate(
-      "block",
-      "Auto-continue could not analyze this session from transcript data. " +
-        "Continue directly using the internal-agent prompt below:\n\n" +
-        fallbackPrompt
-    )
-  }
-  const raw = transcriptResolution.raw
-
-  // Single combined parse: extracts turns, edited paths, and tool-call count
-  // in one pass over the transcript — avoids three redundant full parses.
-  const transcriptData = extractTranscriptData(raw, transcriptResolution.formatHint)
-
-  const turns = transcriptData.turns.slice(-CONTEXT_TURNS)
-  if (turns.length === 0) {
-    terminate(
-      "block",
-      "Auto-continue could not analyze this session: transcript has no parseable conversation turns."
-    )
-  }
-
-  // Deterministic docs-only detection: scan the full transcript for Edit/Write
-  // tool calls and check whether every touched file is a documentation file.
-  // This result is passed into buildPrompt as a hard override for rule (1) so
-  // the LLM cannot misread doc-only diffs as unimplemented features.
-  const editedPaths = transcriptData.editedPaths
-  const docsOnly = isDocsOnlySession(editedPaths)
-
-  const taskContext = await loadTaskContext(input.session_id ?? "")
-
-  // Detect refinement-needed issues early — this drives both the AI prompt
-  // and a direct runtime gate in the block message.
-  const refinementStatus = await checkRefinementNeeds(cwd)
-
-  let response: AgentResponse = {
-    processCritique: "",
-    productCritique: "",
-    next: "",
-    reflections: [],
-  }
-
-  // Reviewing-state checklist: deterministic checks that short-circuit the AI call
-  // when the project is in `reviewing` or `addressing-feedback` state.
   const reviewingDirective = await checkReviewingState(cwd, projectState)
-  if (reviewingDirective) {
-    // Emit the directive directly without calling the AI backend.
-    terminate("block", reviewingDirective)
-  }
+  if (reviewingDirective) terminate("block", reviewingDirective)
 
-  // No backend available — fail closed: block stop so the session cannot end silently
-  // without a suggestion. The user should configure GEMINI_API_KEY or install claude/codex CLI.
   if (!hasAiProvider()) {
     terminate(
       "block",
@@ -904,78 +1105,23 @@ async function main(): Promise<void> {
     )
   }
 
-  {
-    const context = formatTurnsAsContext(turns)
-    const taskSection = buildTaskSection(taskContext)
-    const userMessagesSection = buildUserMessagesSection(turns)
-    const statusParts = [await checkChangelogStaleness(cwd), refinementStatus].filter(Boolean)
-    const projectStatus = statusParts.join("\n")
-    const repoFiles = docsOnly ? "" : await git(["ls-files", "hooks/", "src/"], cwd).catch(() => "")
-    const prompt = buildPrompt(
-      taskSection,
-      userMessagesSection,
-      projectStatus,
-      context,
-      effective.ambitionMode,
-      input.cwd,
-      docsOnly,
-      repoFiles
-    )
+  const turns = transcriptData.turns.slice(-CONTEXT_TURNS)
+  const rawResponse = await generateAiResponse({
+    turns,
+    editedPaths: transcriptData.editedPaths,
+    docsOnly,
+    taskContext,
+    refinementStatus,
+    cwd,
+    inputCwd: input.cwd,
+    ambitionMode: effective.ambitionMode,
+  })
+  const response = postProcessResponse(rawResponse, effective.ambitionMode, projectState)
 
-    try {
-      const parsed = await promptObject(prompt, agentResponseSchema, {
-        timeout: ATTEMPT_TIMEOUT_MS,
-      })
-      response = filterAgentResponse(parsed)
-    } catch {
-      // All providers failed. Use a filler suggestion derived from session context so
-      // the hook always produces actionable output rather than a generic error message.
-      const fillerNext = buildFillerSuggestion(editedPaths, docsOnly)
-      if (fillerNext) {
-        response = { processCritique: "", productCritique: "", next: fillerNext, reflections: [] }
-      } else if (!refinementStatus) {
-        // No filler and no refinement finding — fall back to generic guidance.
-        terminate(
-          "block",
-          "Auto-continue could not generate a next-step suggestion: AI backend failed during call.\nReview your recent changes and continue working if there is more to do."
-        )
-      }
-      // refinementStatus is non-empty → continue to terminate("block", ...) below so the
-      // refinement finding is still delivered even without an AI-generated next step.
-    }
-  }
-
-  // Post-generation filter: reject workflow/git-process suggestions that violate
-  // the ABSOLUTE PROHIBITIONS. The AI backend doesn't always comply with prompt
-  // instructions, so this deterministic check is the backstop.
-  if (effective.ambitionMode === "reflective") {
-    const reflectiveNext = normalizeReflectiveNextStep(response.reflections)
-    if (reflectiveNext) response.next = reflectiveNext
-  }
-
-  // In reviewing/addressing-feedback state, PR-related suggestions are valid next steps
-  // (e.g. "merge the pull request"). Skip the PR pattern check only in those states.
-  const isReviewingState = projectState === "reviewing" || projectState === "addressing-feedback"
-  if (response.next && isWorkflowSuggestion(response.next, { skipPrPattern: isReviewingState })) {
-    const truncated = response.next.slice(0, 120).replace(/\s+/g, " ").trim()
-    const ellipsis = response.next.length > 120 ? "…" : ""
-    response.next = `${WORKFLOW_FINDING} [Filtered suggestion: "${truncated}${ellipsis}"]`
-  }
-
-  if (effective.ambitionMode === "creative" && response.next) {
-    response.next = normalizeCreativeIssueDescription(response.next)
-  }
-
-  // Write reflections to memory (never blocks, never throws)
   if (response.reflections.length > 0) {
     await writeReflections(cwd, response.reflections)
   }
 
-  // Only block when we have something actionable to deliver:
-  //   - a real AI-generated next step (response.next), OR
-  //   - an explicit runtime finding (refinementStatus: open issues needing triage)
-  // Never block with the generic FALLBACK_SUGGESTION — it provides no specific
-  // guidance and causes interactive sessions to spin indefinitely.
   if (!response.next && !refinementStatus) {
     terminate(
       "block",
@@ -983,23 +1129,9 @@ async function main(): Promise<void> {
     )
   }
 
-  const critiqueLines = effective.critiquesEnabled
-    ? [
-        response.processCritique ? `Process: ${response.processCritique}` : "",
-        response.productCritique ? `Product: ${response.productCritique}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n")
-    : ""
-  const critiqueLine = critiqueLines ? `${critiqueLines}\n\n` : ""
-
-  // Runtime gate: if issues need refinement, inject a direct directive
-  // regardless of what the AI suggested. This ensures refinement guidance
-  // is never lost to AI interpretation.
-  const refinementDirective = refinementStatus ? `\n\nNote: ${refinementStatus}` : ""
   terminate(
     "block",
-    `${critiqueLine}Stop blocked — unresolved finding: ${response.next || refinementStatus}${refinementDirective}`
+    buildFinalMessage(response, refinementStatus, effective.critiquesEnabled ?? false)
   )
 }
 

@@ -144,10 +144,314 @@ function cacheSummary(status: Record<string, number> | null): { total: number; w
   return { total, warm }
 }
 
-export function useDashboardState() {
-  const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
+function useSessionDataLoaders() {
+  const [sessionMessages, setSessionMessages] = useState<SessionMessage[]>([])
+  const [sessionToolStats, setSessionToolStats] = useState<ToolStat[]>([])
+  const [sessionTasks, setSessionTasks] = useState<SessionTask[]>([])
+  const [sessionTaskSummary, setSessionTaskSummary] = useState<SessionTaskSummary | null>(null)
+  const [projectTasks, setProjectTasks] = useState<ProjectTask[]>([])
+  const [projectTaskSummary, setProjectTaskSummary] = useState<SessionTaskSummary | null>(null)
+  const [projectTasksLoading, setProjectTasksLoading] = useState(false)
+  const [sessionTasksLoading, setSessionTasksLoading] = useState(false)
+  const [newMessageKeys, setNewMessageKeys] = useState<Set<string>>(new Set())
+  const [messagesLoading, setMessagesLoading] = useState(false)
+
+  const loadMessages = useCallback(async (cwd: string, sessionId: string) => {
+    setMessagesLoading(true)
+    try {
+      const result = await postJson<{
+        messages: SessionMessage[]
+        toolStats?: ToolStat[]
+      }>("/sessions/messages", { cwd, sessionId, limit: 30 })
+      setNewMessageKeys(new Set())
+      setSessionMessages(result.messages ?? [])
+      setSessionToolStats(result.toolStats ?? [])
+    } finally {
+      setMessagesLoading(false)
+    }
+  }, [])
+
+  const loadTasks = useCallback(async (cwd: string, sessionId: string) => {
+    setSessionTasksLoading(true)
+    try {
+      const result = await postJson<{
+        tasks: SessionTask[]
+        summary?: SessionTaskSummary
+      }>("/sessions/tasks", { cwd, sessionId, limit: 20 })
+      setSessionTasks(result.tasks ?? [])
+      setSessionTaskSummary(result.summary ?? null)
+    } finally {
+      setSessionTasksLoading(false)
+    }
+  }, [])
+
+  const loadProjectTasks = useCallback(async (cwd: string) => {
+    setProjectTasksLoading(true)
+    try {
+      const result = await postJson<{
+        tasks: ProjectTask[]
+        summary?: SessionTaskSummary
+      }>("/projects/tasks", { cwd, limit: 80 })
+      setProjectTasks(result.tasks ?? [])
+      setProjectTaskSummary(result.summary ?? null)
+    } finally {
+      setProjectTasksLoading(false)
+    }
+  }, [])
+
+  const clearSession = useCallback(() => {
+    setSessionMessages([])
+    setSessionTasks([])
+    setSessionTaskSummary(null)
+  }, [])
+
+  return {
+    sessionMessages,
+    setSessionMessages,
+    sessionToolStats,
+    setSessionToolStats,
+    sessionTasks,
+    setSessionTasks,
+    sessionTaskSummary,
+    setSessionTaskSummary,
+    projectTasks,
+    setProjectTasks,
+    projectTaskSummary,
+    setProjectTaskSummary,
+    projectTasksLoading,
+    sessionTasksLoading,
+    newMessageKeys,
+    setNewMessageKeys,
+    messagesLoading,
+    loadMessages,
+    loadTasks,
+    loadProjectTasks,
+    clearSession,
+  }
+}
+
+function useCacheStatusWithJitterFilter() {
   const [cacheStatus, setCacheStatus] = useState<Record<string, number> | null>(null)
-  const [watches, setWatches] = useState<WatchesResponse | null>(null)
+  const lastChangeAtRef = useRef(0)
+  const onCacheStatus = useCallback((nextStatus: Record<string, number> | null) => {
+    setCacheStatus((prevStatus) => {
+      if (!prevStatus) {
+        lastChangeAtRef.current = Date.now()
+        return nextStatus
+      }
+      const prev = cacheSummary(prevStatus)
+      const next = cacheSummary(nextStatus)
+      const now = Date.now()
+      const changedRecently = now - lastChangeAtRef.current < 12_000
+      const minorJitter =
+        Math.abs(next.total - prev.total) <= 2 && Math.abs(next.warm - prev.warm) <= 1
+      if (changedRecently && minorJitter) return prevStatus
+      lastChangeAtRef.current = now
+      return nextStatus
+    })
+  }, [])
+  return { cacheStatus, onCacheStatus }
+}
+
+type DashboardActionsInput = ReturnType<typeof useOptimisticDashboardState> & {
+  loaders: ReturnType<typeof useSessionDataLoaders>
+  setError: (msg: string) => void
+  setDeletingSessionId: (id: string | null) => void
+  startSelectionTransition: (fn: () => void) => void
+  startMutationTransition: (fn: () => void) => void
+}
+
+function useSelectionActions(input: DashboardActionsInput) {
+  const {
+    loaders,
+    optimisticProjects,
+    setSelectedProjectCwd,
+    setSelectedSessionId,
+    startSelectionTransition,
+    addOptimisticProjectCwd,
+    addOptimisticSessionId,
+  } = input
+
+  const handleSelectSession = useCallback(
+    (cwd: string, sessionId: string) => {
+      startSelectionTransition(() => {
+        setSelectedProjectCwd(cwd)
+        setSelectedSessionId(sessionId)
+        setQueryParams({ project: cwd, session: sessionId })
+        addOptimisticProjectCwd(cwd)
+        addOptimisticSessionId(sessionId)
+        void Promise.all([
+          loaders.loadMessages(cwd, sessionId),
+          loaders.loadTasks(cwd, sessionId),
+          loaders.loadProjectTasks(cwd),
+        ]).catch(() => {})
+      })
+    },
+    [
+      loaders.loadMessages,
+      loaders.loadTasks,
+      loaders.loadProjectTasks,
+      addOptimisticProjectCwd,
+      addOptimisticSessionId,
+      setSelectedProjectCwd,
+      setSelectedSessionId,
+      startSelectionTransition,
+    ]
+  )
+
+  const handleSelectProject = useCallback(
+    (cwd: string) => {
+      const project = optimisticProjects.find((p) => p.cwd === cwd)
+      const firstSession = project?.sessions[0]
+      if (firstSession) {
+        setSelectedProjectCwd(cwd)
+        setSelectedSessionId(firstSession.id)
+        setQueryParams({ project: cwd, session: firstSession.id })
+        startSelectionTransition(() => {
+          addOptimisticProjectCwd(cwd)
+          addOptimisticSessionId(firstSession.id)
+          void Promise.all([
+            loaders.loadMessages(cwd, firstSession.id),
+            loaders.loadTasks(cwd, firstSession.id),
+            loaders.loadProjectTasks(cwd),
+          ]).catch(() => {})
+        })
+      } else {
+        setSelectedProjectCwd(cwd)
+        setSelectedSessionId(null)
+        loaders.clearSession()
+        void loaders.loadProjectTasks(cwd)
+        setQueryParams({ project: cwd, session: null })
+      }
+    },
+    [
+      optimisticProjects,
+      loaders,
+      addOptimisticProjectCwd,
+      addOptimisticSessionId,
+      setSelectedProjectCwd,
+      setSelectedSessionId,
+      startSelectionTransition,
+    ]
+  )
+
+  return { handleSelectSession, handleSelectProject }
+}
+
+function useMutationActions(
+  input: DashboardActionsInput,
+  handleSelectSession: (cwd: string, sessionId: string) => void
+) {
+  const {
+    loaders,
+    optimisticProjects,
+    optimisticPendingSessionDeletions,
+    selectedSessionId,
+    setSelectedSessionId,
+    setProjects,
+    setAgentProcessProviders,
+    setError,
+    setDeletingSessionId,
+    setPendingSessionDeletions,
+    startMutationTransition,
+    addOptimisticSessionId,
+    addOptimisticProjects,
+    addOptimisticPendingSessionDeletions,
+    addOptimisticKillingPid,
+  } = input
+
+  const handleKillAgentPid = useCallback(
+    (pid: number) => {
+      startMutationTransition(async () => {
+        addOptimisticKillingPid({ type: "add", pid })
+        try {
+          const url = "/process/agents/kill"
+          await postJson<{ ok: boolean; pid: number }>(url, { pid })
+          setAgentProcessProviders((prev) => removePidFromProviders(prev, pid))
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err))
+        }
+      })
+    },
+    [addOptimisticKillingPid, setAgentProcessProviders, setError, startMutationTransition]
+  )
+
+  const handleDeleteSession = useCallback(
+    (cwd: string, sessionId: string) => {
+      setDeletingSessionId(sessionId)
+      const deletionKey = sessionDeletionKey(cwd, sessionId)
+      startMutationTransition(async () => {
+        addOptimisticPendingSessionDeletions({ type: "add", key: deletionKey })
+        addOptimisticProjects({ type: "removeSession", cwd, sessionId })
+        try {
+          await postJson<{
+            ok: boolean
+            deletedCount: number
+            sessionIds: string[]
+          }>("/sessions/delete", { cwd, sessionId })
+          const visible = applyPendingSessionDeletions(
+            optimisticProjects,
+            optimisticPendingSessionDeletions
+          )
+          const next = removeSessionFromProjects(visible, cwd, sessionId)
+          setProjects(() => next)
+          if (selectedSessionId === sessionId) {
+            const candidate = getNextSessionCandidate(next, cwd, sessionId)
+            if (candidate) {
+              handleSelectSession(candidate.cwd, candidate.sessionId)
+            } else {
+              setSelectedSessionId(null)
+              addOptimisticSessionId(null)
+              loaders.clearSession()
+              setQueryParams({ session: null })
+            }
+          }
+        } finally {
+          setPendingSessionDeletions((previous) => {
+            const s = new Set(previous)
+            s.delete(deletionKey)
+            return s
+          })
+          addOptimisticPendingSessionDeletions({
+            type: "remove",
+            key: deletionKey,
+          })
+          setDeletingSessionId(null)
+        }
+      })
+    },
+    [
+      addOptimisticPendingSessionDeletions,
+      addOptimisticProjects,
+      addOptimisticSessionId,
+      handleSelectSession,
+      loaders,
+      optimisticPendingSessionDeletions,
+      optimisticProjects,
+      selectedSessionId,
+      setDeletingSessionId,
+      setPendingSessionDeletions,
+      setProjects,
+      setSelectedSessionId,
+      startMutationTransition,
+    ]
+  )
+
+  return { handleKillAgentPid, handleDeleteSession }
+}
+
+function useDashboardActions(input: DashboardActionsInput) {
+  const { handleSelectSession, handleSelectProject } = useSelectionActions(input)
+  const { handleKillAgentPid, handleDeleteSession } = useMutationActions(input, handleSelectSession)
+  return {
+    handleSelectSession,
+    handleSelectProject,
+    handleKillAgentPid,
+    handleDeleteSession,
+  }
+}
+
+function useOptimisticDashboardState() {
   const [projects, setProjects] = useState<ProjectSessions[]>([])
   const [agentProcessProviders, setAgentProcessProviders] = useState<Record<string, number[]>>({})
   const [selectedProjectCwd, setSelectedProjectCwd] = useState<string | null>(() =>
@@ -189,21 +493,6 @@ export function useDashboardState() {
       return next
     }
   )
-  const [, startSelectionTransition] = useTransition()
-  const [, startMutationTransition] = useTransition()
-  const [sessionMessages, setSessionMessages] = useState<SessionMessage[]>([])
-  const [sessionToolStats, setSessionToolStats] = useState<ToolStat[]>([])
-  const [sessionTasks, setSessionTasks] = useState<SessionTask[]>([])
-  const [sessionTaskSummary, setSessionTaskSummary] = useState<SessionTaskSummary | null>(null)
-  const [projectTasks, setProjectTasks] = useState<ProjectTask[]>([])
-  const [projectTaskSummary, setProjectTaskSummary] = useState<SessionTaskSummary | null>(null)
-  const [projectTasksLoading, setProjectTasksLoading] = useState(false)
-  const [sessionTasksLoading, setSessionTasksLoading] = useState(false)
-  const [newMessageKeys, setNewMessageKeys] = useState<Set<string>>(new Set())
-  const [messagesLoading, setMessagesLoading] = useState(false)
-  const [projectEvents, setProjectEvents] = useState<
-    Array<{ name: string; count: number; avgMs: number }>
-  >([])
   const [killingPids] = useState<Set<number>>(new Set())
   const [optimisticKillingPids, addOptimisticKillingPid] = useOptimistic(
     killingPids,
@@ -214,249 +503,56 @@ export function useDashboardState() {
       return next
     }
   )
-  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
-  const [activeHookDispatches, setActiveHookDispatches] = useState<ActiveHookDispatch[]>([])
-  const [activeView, _setActiveView] = useState<"dashboard" | "settings">(
-    () => (getQueryParam("view") as "dashboard" | "settings") || "dashboard"
-  )
-  const setActiveView = useCallback((view: "dashboard" | "settings") => {
-    _setActiveView(view)
-    setQueryParams({ view })
-  }, [])
-  const [error, setError] = useState("")
-  const [lastUpdated, setLastUpdated] = useState("starting")
-  const lastCacheStatusChangeAtRef = useRef(0)
-
-  const loadMessages = useCallback(async (cwd: string, sessionId: string) => {
-    setMessagesLoading(true)
-    try {
-      const result = await postJson<{ messages: SessionMessage[]; toolStats?: ToolStat[] }>(
-        "/sessions/messages",
-        { cwd, sessionId, limit: 30 }
-      )
-      const msgs = result.messages ?? []
-      setNewMessageKeys(new Set())
-      setSessionMessages(msgs)
-      setSessionToolStats(result.toolStats ?? [])
-    } finally {
-      setMessagesLoading(false)
-    }
-  }, [])
-
-  const loadTasks = useCallback(async (cwd: string, sessionId: string) => {
-    setSessionTasksLoading(true)
-    try {
-      const result = await postJson<{ tasks: SessionTask[]; summary?: SessionTaskSummary }>(
-        "/sessions/tasks",
-        { cwd, sessionId, limit: 20 }
-      )
-      setSessionTasks(result.tasks ?? [])
-      setSessionTaskSummary(result.summary ?? null)
-    } finally {
-      setSessionTasksLoading(false)
-    }
-  }, [])
-
-  const loadProjectTasks = useCallback(async (cwd: string) => {
-    setProjectTasksLoading(true)
-    try {
-      const result = await postJson<{ tasks: ProjectTask[]; summary?: SessionTaskSummary }>(
-        "/projects/tasks",
-        { cwd, limit: 80 }
-      )
-      setProjectTasks(result.tasks ?? [])
-      setProjectTaskSummary(result.summary ?? null)
-    } finally {
-      setProjectTasksLoading(false)
-    }
-  }, [])
-
-  const handleSelectProject = useCallback(
-    (cwd: string) => {
-      const project = optimisticProjects.find((p) => p.cwd === cwd)
-      const firstSession = project?.sessions[0]
-      if (firstSession) {
-        setSelectedProjectCwd(cwd)
-        setSelectedSessionId(firstSession.id)
-        setQueryParams({ project: cwd, session: firstSession.id })
-        startSelectionTransition(() => {
-          addOptimisticProjectCwd(cwd)
-          addOptimisticSessionId(firstSession.id)
-          void Promise.all([
-            loadMessages(cwd, firstSession.id),
-            loadTasks(cwd, firstSession.id),
-            loadProjectTasks(cwd),
-          ]).catch(() => {})
-        })
-      } else {
-        setSelectedProjectCwd(cwd)
-        setSelectedSessionId(null)
-        setSessionMessages([])
-        setSessionTasks([])
-        setSessionTaskSummary(null)
-        void loadProjectTasks(cwd)
-        setQueryParams({ project: cwd, session: null })
-      }
-    },
-    [
-      optimisticProjects,
-      loadMessages,
-      loadTasks,
-      loadProjectTasks,
-      addOptimisticProjectCwd,
-      addOptimisticSessionId,
-    ]
-  )
-
-  const handleSelectSession = useCallback(
-    (cwd: string, sessionId: string) => {
-      startSelectionTransition(() => {
-        setSelectedProjectCwd(cwd)
-        setSelectedSessionId(sessionId)
-        setQueryParams({ project: cwd, session: sessionId })
-        addOptimisticProjectCwd(cwd)
-        addOptimisticSessionId(sessionId)
-        void Promise.all([
-          loadMessages(cwd, sessionId),
-          loadTasks(cwd, sessionId),
-          loadProjectTasks(cwd),
-        ]).catch(() => {})
-      })
-    },
-    [loadMessages, loadTasks, loadProjectTasks, addOptimisticProjectCwd, addOptimisticSessionId]
-  )
-
-  const handleKillAgentPid = useCallback(
-    (pid: number) => {
-      startMutationTransition(async () => {
-        addOptimisticKillingPid({ type: "add", pid })
-        try {
-          await postJson<{ ok: boolean; pid: number }>("/process/agents/kill", { pid })
-          setAgentProcessProviders((previous) => removePidFromProviders(previous, pid))
-        } catch (err) {
-          setError(err instanceof Error ? err.message : String(err))
-        }
-      })
-    },
-    [addOptimisticKillingPid]
-  )
-
-  const handleDeleteSession = useCallback(
-    (cwd: string, sessionId: string) => {
-      setDeletingSessionId(sessionId)
-      const deletionKey = sessionDeletionKey(cwd, sessionId)
-      startMutationTransition(async () => {
-        addOptimisticPendingSessionDeletions({ type: "add", key: deletionKey })
-        addOptimisticProjects({ type: "removeSession", cwd, sessionId })
-        try {
-          await postJson<{ ok: boolean; deletedCount: number; sessionIds: string[] }>(
-            "/sessions/delete",
-            {
-              cwd,
-              sessionId,
-            }
-          )
-          const currentVisibleProjects = applyPendingSessionDeletions(
-            optimisticProjects,
-            optimisticPendingSessionDeletions
-          )
-          const nextProjects = removeSessionFromProjects(currentVisibleProjects, cwd, sessionId)
-          setProjects(nextProjects)
-          if (selectedSessionId === sessionId) {
-            const nextCandidate = getNextSessionCandidate(nextProjects, cwd, sessionId)
-            if (nextCandidate) {
-              handleSelectSession(nextCandidate.cwd, nextCandidate.sessionId)
-            } else {
-              setSelectedSessionId(null)
-              addOptimisticSessionId(null)
-              setSessionMessages([])
-              setSessionTasks([])
-              setSessionTaskSummary(null)
-              setQueryParams({ session: null })
-            }
-          }
-        } finally {
-          setPendingSessionDeletions((previous) => {
-            const next = new Set(previous)
-            next.delete(deletionKey)
-            return next
-          })
-          addOptimisticPendingSessionDeletions({ type: "remove", key: deletionKey })
-          setDeletingSessionId(null)
-        }
-      })
-    },
-    [
-      addOptimisticPendingSessionDeletions,
-      addOptimisticProjects,
-      addOptimisticSessionId,
-      handleSelectSession,
-      optimisticPendingSessionDeletions,
-      optimisticProjects,
-      selectedSessionId,
-    ]
-  )
-
-  useDashboardOverviewPolling({
-    onMetrics: setMetrics,
-    onCacheStatus: (nextStatus) => {
-      setCacheStatus((prevStatus) => {
-        if (!prevStatus) {
-          lastCacheStatusChangeAtRef.current = Date.now()
-          return nextStatus
-        }
-        const prev = cacheSummary(prevStatus)
-        const next = cacheSummary(nextStatus)
-        const now = Date.now()
-        const changedRecently = now - lastCacheStatusChangeAtRef.current < 12_000
-        const minorJitter =
-          Math.abs(next.total - prev.total) <= 2 && Math.abs(next.warm - prev.warm) <= 1
-        if (changedRecently && minorJitter) return prevStatus
-        lastCacheStatusChangeAtRef.current = now
-        return nextStatus
-      })
-    },
-    onWatches: setWatches,
-    onProjects: (loadedProjects) => {
-      setProjects(loadedProjects)
-      addOptimisticProjects({ type: "sync", projects: loadedProjects })
-    },
-    onAgentProcesses: (providers) => {
-      setAgentProcessProviders(providers)
-      addOptimisticAgentProcessProviders({ type: "sync", providers })
-    },
-    onActiveDispatches: setActiveHookDispatches,
-    onError: setError,
-    onLastUpdated: setLastUpdated,
-    onInitialLoad: (loadedProjects) =>
-      applyInitialSelection({
-        projects: loadedProjects,
-        selectSession: handleSelectSession,
-        selectProjectOnly: setSelectedProjectCwd,
-        loadProjectTasks,
-      }),
-  })
-
-  useProjectMetricsPolling(selectedProjectCwd, setProjectEvents)
-
-  useSessionPolling({
+  return {
+    projects,
+    setProjects,
+    agentProcessProviders,
+    setAgentProcessProviders,
     selectedProjectCwd,
+    setSelectedProjectCwd,
     selectedSessionId,
-    onMessages: (messages, toolStats) => {
-      setSessionMessages(messages)
-      setSessionToolStats(toolStats)
-    },
-    onTasks: (tasks, summary) => {
-      setSessionTasks(tasks)
-      setSessionTaskSummary(summary)
-    },
-    onProjectTasks: (tasks, summary) => {
-      setProjectTasks(tasks)
-      setProjectTaskSummary(summary)
-    },
-    onNewMessageKeys: setNewMessageKeys,
-  })
+    setSelectedSessionId,
+    optimisticProjectCwd,
+    addOptimisticProjectCwd,
+    optimisticSessionId,
+    addOptimisticSessionId,
+    optimisticProjects,
+    addOptimisticProjects,
+    optimisticAgentProcessProviders,
+    addOptimisticAgentProcessProviders,
+    pendingSessionDeletions,
+    setPendingSessionDeletions,
+    optimisticPendingSessionDeletions,
+    addOptimisticPendingSessionDeletions,
+    optimisticKillingPids,
+    addOptimisticKillingPid,
+  }
+}
 
+interface DerivedStateInput {
+  optimisticProjects: ProjectSessions[]
+  optimisticPendingSessionDeletions: Set<string>
+  optimisticProjectCwd: string | null
+  optimisticSessionId: string | null
+  watches: WatchesResponse | null
+  metrics: MetricsResponse | null
+  projectEvents: Array<{ name: string; count: number; avgMs: number }>
+  sessionMessages: SessionMessage[]
+  activeHookDispatches: ActiveHookDispatch[]
+}
+
+function useDerivedDashboardState(input: DerivedStateInput) {
+  const {
+    optimisticProjects,
+    optimisticPendingSessionDeletions,
+    optimisticProjectCwd,
+    optimisticSessionId,
+    watches,
+    metrics,
+    projectEvents,
+    sessionMessages,
+    activeHookDispatches,
+  } = input
   const m = metrics ?? {}
   const visibleProjects = useMemo(
     () => applyPendingSessionDeletions(optimisticProjects, optimisticPendingSessionDeletions),
@@ -469,75 +565,155 @@ export function useDashboardState() {
   const watchCount = useMemo(() => (watches?.active ?? []).length, [watches?.active])
   const activeProject = useMemo(
     () =>
-      optimisticProjectCwd
-        ? visibleProjects.find((project) => project.cwd === optimisticProjectCwd)
-        : null,
+      optimisticProjectCwd ? visibleProjects.find((p) => p.cwd === optimisticProjectCwd) : null,
     [visibleProjects, optimisticProjectCwd]
   )
   const activeSession = useMemo(
     () =>
       optimisticSessionId
-        ? (activeProject?.sessions.find((session) => session.id === optimisticSessionId) ?? null)
+        ? (activeProject?.sessions.find((s) => s.id === optimisticSessionId) ?? null)
         : null,
     [activeProject?.sessions, optimisticSessionId]
   )
-
   const displayedMessages = useMemo(() => {
     if (!optimisticSessionId) return sessionMessages
-    const activeDispatch = activeHookDispatches.find((d) => d.sessionId === optimisticSessionId)
-    if (!activeDispatch) return sessionMessages
-
+    const d = activeHookDispatches.find((h) => h.sessionId === optimisticSessionId)
+    if (!d) return sessionMessages
     const syntheticMessage: SessionMessage = {
       role: "assistant",
-      timestamp: new Date(activeDispatch.startedAt).toISOString(),
-      text: activeDispatch.toolName
-        ? `Running **${activeDispatch.toolName}**...`
-        : `Running **${activeDispatch.canonicalEvent}**...`,
-      toolCalls: activeDispatch.toolName
-        ? [{ name: activeDispatch.toolName, detail: activeDispatch.toolInputSummary ?? "" }]
-        : [],
+      timestamp: new Date(d.startedAt).toISOString(),
+      text: d.toolName ? `Running **${d.toolName}**...` : `Running **${d.canonicalEvent}**...`,
+      toolCalls: d.toolName ? [{ name: d.toolName, detail: d.toolInputSummary ?? "" }] : [],
     }
     return [...sessionMessages, syntheticMessage]
   }, [sessionMessages, activeHookDispatches, optimisticSessionId])
-
   const metricsEvents = useMemo(
     () => (projectEvents.length > 0 ? projectEvents : toSortedEvents(m.byEvent)),
     [projectEvents, m.byEvent]
   )
+  return {
+    m,
+    visibleProjects,
+    projectCount,
+    watchCount,
+    activeProject,
+    activeSession,
+    displayedMessages,
+    metricsEvents,
+  }
+}
+
+export function useDashboardState() {
+  const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
+  const { cacheStatus, onCacheStatus } = useCacheStatusWithJitterFilter()
+  const [watches, setWatches] = useState<WatchesResponse | null>(null)
+  const os = useOptimisticDashboardState()
+  const [, startSelectionTransition] = useTransition()
+  const [, startMutationTransition] = useTransition()
+  const loaders = useSessionDataLoaders()
+  const [projectEvents, setProjectEvents] = useState<
+    Array<{ name: string; count: number; avgMs: number }>
+  >([])
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
+  const [activeHookDispatches, setActiveHookDispatches] = useState<ActiveHookDispatch[]>([])
+  const [activeView, _setActiveView] = useState<"dashboard" | "settings">(
+    () => (getQueryParam("view") as "dashboard" | "settings") || "dashboard"
+  )
+  const setActiveView = useCallback((view: "dashboard" | "settings") => {
+    _setActiveView(view)
+    setQueryParams({ view })
+  }, [])
+  const [error, setError] = useState("")
+  const [lastUpdated, setLastUpdated] = useState("starting")
+
+  const actions = useDashboardActions({
+    loaders,
+    ...os,
+    setError,
+    setDeletingSessionId,
+    startSelectionTransition,
+    startMutationTransition,
+  })
+
+  useDashboardOverviewPolling({
+    onMetrics: setMetrics,
+    onCacheStatus,
+    onWatches: setWatches,
+    onProjects: (loaded) => {
+      os.setProjects(loaded)
+      os.addOptimisticProjects({ type: "sync", projects: loaded })
+    },
+    onAgentProcesses: (providers) => {
+      os.setAgentProcessProviders(providers)
+      os.addOptimisticAgentProcessProviders({ type: "sync", providers })
+    },
+    onActiveDispatches: setActiveHookDispatches,
+    onError: setError,
+    onLastUpdated: setLastUpdated,
+    onInitialLoad: (loaded) =>
+      applyInitialSelection({
+        projects: loaded,
+        selectSession: actions.handleSelectSession,
+        selectProjectOnly: os.setSelectedProjectCwd,
+        loadProjectTasks: loaders.loadProjectTasks,
+      }),
+  })
+
+  useProjectMetricsPolling(os.selectedProjectCwd, setProjectEvents)
+
+  useSessionPolling({
+    selectedProjectCwd: os.selectedProjectCwd,
+    selectedSessionId: os.selectedSessionId,
+    onMessages: (messages, toolStats) => {
+      loaders.setSessionMessages(messages)
+      loaders.setSessionToolStats(toolStats)
+    },
+    onTasks: (tasks, summary) => {
+      loaders.setSessionTasks(tasks)
+      loaders.setSessionTaskSummary(summary)
+    },
+    onProjectTasks: (tasks, summary) => {
+      loaders.setProjectTasks(tasks)
+      loaders.setProjectTaskSummary(summary)
+    },
+    onNewMessageKeys: loaders.setNewMessageKeys,
+  })
+
+  const derived = useDerivedDashboardState({
+    optimisticProjects: os.optimisticProjects,
+    optimisticPendingSessionDeletions: os.optimisticPendingSessionDeletions,
+    optimisticProjectCwd: os.optimisticProjectCwd,
+    optimisticSessionId: os.optimisticSessionId,
+    watches,
+    metrics,
+    projectEvents,
+    sessionMessages: loaders.sessionMessages,
+    activeHookDispatches,
+  })
 
   return {
     error,
     lastUpdated,
-    m,
-    projectCount,
-    watchCount,
     activeHookDispatches,
-    activeProject,
     activeView,
     setActiveView,
-    visibleProjects,
-    optimisticAgentProcessProviders,
-    optimisticKillingPids,
     deletingSessionId,
-    optimisticProjectCwd,
-    optimisticSessionId,
-    handleSelectProject,
-    handleSelectSession,
-    handleKillAgentPid,
-    handleDeleteSession,
-    sessionMessages,
-    displayedMessages,
-    messagesLoading,
-    newMessageKeys,
-    sessionToolStats,
-    sessionTasks,
-    sessionTaskSummary,
-    sessionTasksLoading,
-    projectTasks,
-    projectTaskSummary,
-    projectTasksLoading,
-    metricsEvents,
     cacheStatus,
-    activeSession,
+    ...derived,
+    ...actions,
+    optimisticAgentProcessProviders: os.optimisticAgentProcessProviders,
+    optimisticKillingPids: os.optimisticKillingPids,
+    optimisticProjectCwd: os.optimisticProjectCwd,
+    optimisticSessionId: os.optimisticSessionId,
+    sessionMessages: loaders.sessionMessages,
+    messagesLoading: loaders.messagesLoading,
+    newMessageKeys: loaders.newMessageKeys,
+    sessionToolStats: loaders.sessionToolStats,
+    sessionTasks: loaders.sessionTasks,
+    sessionTaskSummary: loaders.sessionTaskSummary,
+    sessionTasksLoading: loaders.sessionTasksLoading,
+    projectTasks: loaders.projectTasks,
+    projectTaskSummary: loaders.projectTaskSummary,
+    projectTasksLoading: loaders.projectTasksLoading,
   }
 }

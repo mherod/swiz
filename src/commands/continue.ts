@@ -45,6 +45,24 @@ export interface ContinueArgs {
   provider?: AiProviderId
 }
 
+const VALID_PROVIDERS = new Set(["gemini", "codex", "claude"])
+
+function validateProvider(value: string): AiProviderId {
+  if (!VALID_PROVIDERS.has(value)) {
+    throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${value}`)
+  }
+  return value as AiProviderId
+}
+
+const CONTINUE_VALUE_FLAGS: Record<string, "dir" | "session" | "provider"> = {
+  "--dir": "dir",
+  "-d": "dir",
+  "--session": "session",
+  "-s": "session",
+  "--provider": "provider",
+  "-p": "provider",
+}
+
 export function parseContinueArgs(args: string[]): ContinueArgs {
   let targetDir = process.cwd()
   let sessionQuery: string | null = null
@@ -54,26 +72,90 @@ export function parseContinueArgs(args: string[]): ContinueArgs {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (!arg) continue
-    const next = args[i + 1]
-    if ((arg === "--dir" || arg === "-d") && next) {
-      targetDir = resolve(next)
-      i++
-    } else if ((arg === "--session" || arg === "-s") && next) {
-      sessionQuery = next
-      i++
-    } else if (arg === "--print") {
+    if (arg === "--print") {
       printOnly = true
-    } else if (arg === "--provider" || arg === "-p") {
-      if (!next) throw new Error("Missing value for --provider")
-      if (next !== "gemini" && next !== "codex" && next !== "claude") {
-        throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${next}`)
-      }
-      provider = next
-      i++
+      continue
     }
+    const field = CONTINUE_VALUE_FLAGS[arg]
+    if (!field) continue
+    const next = args[i + 1]
+    if (!next) throw new Error(`Missing value for ${arg}`)
+    i++
+    if (field === "dir") targetDir = resolve(next)
+    else if (field === "session") sessionQuery = next
+    else provider = validateProvider(next)
   }
 
   return { targetDir, sessionQuery, printOnly, provider }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function resolveSession(targetDir: string, sessionQuery: string | null): Promise<Session> {
+  const sessions = await findAllProviderSessions(targetDir)
+  if (sessions.length === 0) {
+    throw new Error(`No transcripts found for: ${targetDir}`)
+  }
+
+  let session: Session
+  if (sessionQuery) {
+    const match = sessions.find((s) => s.id.startsWith(sessionQuery))
+    if (!match) throw new Error(`No session matching: ${sessionQuery}`)
+    session = match
+  } else {
+    session = sessions.find((s) => !isUnsupportedTranscriptFormat(s.format)) ?? sessions[0]!
+  }
+
+  if (isUnsupportedTranscriptFormat(session.format)) {
+    throw new Error(getUnsupportedTranscriptFormatMessage(session))
+  }
+  return session
+}
+
+function ensureAiBackend(): void {
+  if (!hasAiProvider() && !detectAgentCli()) {
+    throw new Error(
+      "No AI backend found. Set GEMINI_API_KEY, install the codex CLI, or install Cursor Agent."
+    )
+  }
+}
+
+async function readTranscriptText(session: Session): Promise<string> {
+  try {
+    return await Bun.file(session.path).text()
+  } catch {
+    throw new Error(`Could not read transcript: ${session.path}`)
+  }
+}
+
+async function generateSuggestion(raw: string, provider?: AiProviderId): Promise<string> {
+  let suggestion: string
+  try {
+    suggestion = await generateNextStep(raw, provider)
+  } catch (err) {
+    throw new Error(`Failed to generate suggestion: ${String(err)}`)
+  }
+  if (!suggestion) throw new Error("Empty suggestion returned from AI backend.")
+  return suggestion
+}
+
+function buildResumeArgs(
+  session: Session,
+  sessionQuery: string | null,
+  suggestion: string
+): string[] {
+  const canResumeClaudeSession = session.provider === "claude"
+  const shouldResumeById = Boolean(sessionQuery) && canResumeClaudeSession
+  const resumeArgs: string[] = shouldResumeById
+    ? ["claude", "--resume", session.id, suggestion]
+    : ["claude", "--continue", suggestion]
+
+  if (sessionQuery && !canResumeClaudeSession) {
+    console.log(
+      `${DIM}Session ${session.id} is from ${session.provider ?? "another provider"}; using --continue instead of --resume.${RESET}`
+    )
+  }
+  return resumeArgs
 }
 
 // ─── Command ──────────────────────────────────────────────────────────────────
@@ -93,77 +175,23 @@ export const continueCommand: Command = {
   ],
   async run(args) {
     const { targetDir, sessionQuery, printOnly, provider } = parseContinueArgs(args)
+    const session = await resolveSession(targetDir, sessionQuery)
+    ensureAiBackend()
 
-    const sessions = await findAllProviderSessions(targetDir)
-
-    if (sessions.length === 0) {
-      throw new Error(`No transcripts found for: ${targetDir}`)
-    }
-
-    let session: Session
-    if (sessionQuery) {
-      const match = sessions.find((s) => s.id.startsWith(sessionQuery!))
-      if (!match) {
-        throw new Error(`No session matching: ${sessionQuery}`)
-      }
-      session = match
-    } else {
-      session = sessions.find((s) => !isUnsupportedTranscriptFormat(s.format)) ?? sessions[0]!
-    }
-
-    if (isUnsupportedTranscriptFormat(session.format)) {
-      throw new Error(getUnsupportedTranscriptFormatMessage(session))
-    }
-
-    if (!hasAiProvider() && !detectAgentCli()) {
-      throw new Error(
-        "No AI backend found. Set GEMINI_API_KEY, install the codex CLI, or install Cursor Agent."
-      )
-    }
-
-    let raw: string
-    try {
-      raw = await Bun.file(session.path).text()
-    } catch {
-      throw new Error(`Could not read transcript: ${session.path}`)
-    }
-
+    const raw = await readTranscriptText(session)
     const humanRequiredReason = findHumanRequiredBlock(raw)
     if (humanRequiredReason) {
       console.log(humanRequiredReason)
       return
     }
 
-    let suggestion: string
-    try {
-      suggestion = await generateNextStep(raw, provider)
-    } catch (err) {
-      throw new Error(`Failed to generate suggestion: ${String(err)}`)
-    }
-
-    if (!suggestion) {
-      throw new Error("Empty suggestion returned from AI backend.")
-    }
-
+    const suggestion = await generateSuggestion(raw, provider)
     if (printOnly) {
       console.log(suggestion)
       return
     }
 
-    // Claude session IDs can be resumed directly. For non-Claude providers,
-    // continue with a new Claude session using the generated suggestion.
-    const canResumeClaudeSession = session.provider === "claude"
-    const shouldResumeById = Boolean(sessionQuery) && canResumeClaudeSession
-    const resumeArgs: string[] = shouldResumeById
-      ? ["claude", "--resume", session.id, suggestion]
-      : ["claude", "--continue", suggestion]
-
-    if (sessionQuery && !canResumeClaudeSession) {
-      console.log(
-        `${DIM}Session ${session.id} is from ${session.provider ?? "another provider"}; using --continue instead of --resume.${RESET}`
-      )
-    }
-
+    const resumeArgs = buildResumeArgs(session, sessionQuery, suggestion)
     const proc = Bun.spawn(resumeArgs, {
       stdout: "inherit",
       stderr: "inherit",

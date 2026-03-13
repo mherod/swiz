@@ -218,68 +218,62 @@ const IRREGULAR_STEMS = new Map<string, string>([
 
 // ─── Stemmer ────────────────────────────────────────────────────────────────
 
+// Suffix rules table: [suffix, minWordLen, sliceEnd, append]
+// Order matters: longest/most-specific suffixes first.
+type SuffixRule = [suffix: string, minLen: number, sliceEnd: number, append: string]
+
+const SUFFIX_RULES: SuffixRule[] = [
+  // -ing forms: doubled consonant before "ing" → strip 4, keep consonant
+  ...Array.from("tnrlydszbpmk", (ch) => [`${ch}ing`, 6, -4, ch] as SuffixRule),
+  ["ing", 6, -3, ""],
+  // -ation before -tion (implementation → implement)
+  ["ation", 8, -5, ""],
+  ["tion", 6, -4, ""],
+  // -ment: require >= 10 chars to avoid stripping root words (implement, comment)
+  ["ment", 10, -4, ""],
+  ["ated", 6, -2, ""],
+  ["ized", 6, -2, ""],
+  // -ed forms: doubled consonant before "ed" → strip 3, keep consonant
+  ...Array.from("tnrlspzbmk", (ch) => [`${ch}ed`, 6, -3, ch] as SuffixRule),
+  // -ied → -y (verified → verify, modified → modify)
+  ["ied", 6, -3, "y"],
+  ["ed", 5, -2, ""],
+  ["ly", 5, -2, ""],
+  ["er", 5, -2, ""],
+  ["es", 5, -2, ""],
+]
+
+function applySuffixRules(word: string): string {
+  for (const [suffix, minLen, sliceEnd, append] of SUFFIX_RULES) {
+    if (word.length >= minLen && word.endsWith(suffix)) {
+      return word.slice(0, sliceEnd) + append
+    }
+  }
+  if (word.length > 4 && word.endsWith("s") && !word.endsWith("ss")) {
+    return word.slice(0, -1)
+  }
+  return word
+}
+
+function collapseDoubledConsonant(stem: string): string {
+  if (stem.length >= 4 && stem[stem.length - 1] === stem[stem.length - 2]) {
+    const ch = stem[stem.length - 1]!
+    if (ch >= "a" && ch <= "z" && !"aeiou".includes(ch)) {
+      return stem.slice(0, -1)
+    }
+  }
+  return stem
+}
+
 /**
  * Lightweight suffix-stripping stemmer for task-domain English.
  * Reduces inflected forms to a common root so "committing" and "commit",
  * "verifying" and "verify", "formatted" and "format" match.
  */
 export function stemWord(word: string): string {
-  // Check irregular forms first (can't be suffix-stripped)
   const irregular = IRREGULAR_STEMS.get(word)
   if (irregular) return irregular
-
-  let stem = word
-  // Order matters: try longest suffixes first
-
-  // -ing forms: strip suffix, reconstruct final consonant
-  if (word.endsWith("ting") && word.length > 5) stem = `${word.slice(0, -4)}t`
-  else if (word.endsWith("ning") && word.length > 5) stem = `${word.slice(0, -4)}n`
-  else if (word.endsWith("ring") && word.length > 5) stem = `${word.slice(0, -4)}r`
-  else if (word.endsWith("ling") && word.length > 5) stem = `${word.slice(0, -4)}l`
-  else if (word.endsWith("ying") && word.length > 5) stem = `${word.slice(0, -4)}y`
-  else if (word.endsWith("ding") && word.length > 5) stem = `${word.slice(0, -4)}d`
-  else if (word.endsWith("ping") && word.length > 5) stem = `${word.slice(0, -4)}p`
-  else if (word.endsWith("sing") && word.length > 5) stem = `${word.slice(0, -4)}s`
-  else if (word.endsWith("zing") && word.length > 5) stem = `${word.slice(0, -4)}z`
-  else if (word.endsWith("bing") && word.length > 5) stem = `${word.slice(0, -4)}b`
-  else if (word.endsWith("ming") && word.length > 5) stem = `${word.slice(0, -4)}m`
-  else if (word.endsWith("king") && word.length > 5) stem = `${word.slice(0, -4)}k`
-  else if (word.endsWith("ing") && word.length > 5) stem = word.slice(0, -3)
-  // -ation before -tion (implementation → implement)
-  else if (word.endsWith("ation") && word.length > 7) stem = word.slice(0, -5)
-  else if (word.endsWith("tion") && word.length > 5) stem = word.slice(0, -4)
-  // -ment: require > 9 chars to avoid stripping root words (implement, comment)
-  else if (word.endsWith("ment") && word.length > 9) stem = word.slice(0, -4)
-  else if (word.endsWith("ated") && word.length > 5) stem = word.slice(0, -2)
-  else if (word.endsWith("ized") && word.length > 5) stem = word.slice(0, -2)
-  // -ed forms: strip suffix, reconstruct final consonant
-  else if (word.endsWith("ted") && word.length > 5) stem = `${word.slice(0, -3)}t`
-  else if (word.endsWith("ned") && word.length > 5) stem = `${word.slice(0, -3)}n`
-  else if (word.endsWith("red") && word.length > 5) stem = `${word.slice(0, -3)}r`
-  else if (word.endsWith("led") && word.length > 5) stem = `${word.slice(0, -3)}l`
-  else if (word.endsWith("sed") && word.length > 5) stem = `${word.slice(0, -3)}s`
-  else if (word.endsWith("ped") && word.length > 5) stem = `${word.slice(0, -3)}p`
-  else if (word.endsWith("zed") && word.length > 5) stem = `${word.slice(0, -3)}z`
-  else if (word.endsWith("bed") && word.length > 5) stem = `${word.slice(0, -3)}b`
-  else if (word.endsWith("med") && word.length > 5) stem = `${word.slice(0, -3)}m`
-  else if (word.endsWith("ked") && word.length > 5) stem = `${word.slice(0, -3)}k`
-  // -ied → -y (verified → verify, modified → modify)
-  else if (word.endsWith("ied") && word.length > 5) stem = `${word.slice(0, -3)}y`
-  else if (word.endsWith("ed") && word.length > 4) stem = word.slice(0, -2)
-  else if (word.endsWith("ly") && word.length > 4) stem = word.slice(0, -2)
-  else if (word.endsWith("er") && word.length > 4) stem = word.slice(0, -2)
-  else if (word.endsWith("es") && word.length > 4) stem = word.slice(0, -2)
-  else if (word.endsWith("s") && !word.endsWith("ss") && word.length > 4) stem = word.slice(0, -1)
-
-  // Collapse doubled trailing consonants (committ → commit, formatt → format)
-  if (stem.length >= 4 && stem[stem.length - 1] === stem[stem.length - 2]) {
-    const ch = stem[stem.length - 1]!
-    if (ch >= "a" && ch <= "z" && !"aeiou".includes(ch)) {
-      stem = stem.slice(0, -1)
-    }
-  }
-
-  return stem
+  return collapseDoubledConsonant(applySuffixRules(word))
 }
 
 // ─── Fingerprint ────────────────────────────────────────────────────────────

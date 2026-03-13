@@ -37,6 +37,67 @@ function printStateList(): void {
   console.log()
 }
 
+async function handleShowState(cwd: string): Promise<void> {
+  const current = await readProjectState(cwd)
+  if (!current) {
+    console.log("\n  project state: not set (use: swiz state set planning)\n")
+    return
+  }
+  const transitions = STATE_TRANSITIONS[current]
+  const metadata = STATE_METADATA[current]
+  console.log(`\n  project state: ${current}`)
+  console.log(`  workflow intent: ${metadata.intent}`)
+  console.log(`  priority: ${metadata.priority}`)
+
+  const stateData = await readStateData(cwd)
+  const history = stateData?.stateHistory ?? []
+  if (history.length > 0) {
+    const lastEntry = history[history.length - 1]!
+    const age = Date.now() - new Date(lastEntry.timestamp).getTime()
+    console.log(`  current state age: ${formatDuration(age)}`)
+  }
+  console.log(`  allowed transitions: ${transitions.join(", ")}`)
+
+  if (history.length > 1) {
+    const totals = computeStateTotals(history)
+    console.log(`\n  ${DIM}time per state:${RESET}`)
+    for (const [state, ms] of totals) {
+      const marker = state === current ? " ←" : ""
+      console.log(`    ${DIM}${state}: ${formatDuration(ms)}${marker}${RESET}`)
+    }
+  }
+  console.log()
+}
+
+async function handleSetState(cwd: string, target: string | undefined): Promise<void> {
+  if (!target) {
+    throw new Error(`Usage: swiz state set <state>\nValid states: ${PROJECT_STATES.join(", ")}`)
+  }
+  if (!(target in STATE_TRANSITIONS)) {
+    throw new Error(`Unknown state: "${target}"\nValid states: ${PROJECT_STATES.join(", ")}`)
+  }
+
+  const targetState = target as ProjectState
+  const current = await readProjectState(cwd)
+
+  if (current && current !== targetState) {
+    const result = await evaluateTransition({
+      from: current,
+      to: targetState,
+      currentSettings: { collaborationMode: "solo" },
+      cwd,
+      timestamp: new Date().toISOString(),
+    })
+    if (!result.allowed) {
+      throw new Error(result.reason || `Invalid transition: ${current} → ${targetState}`)
+    }
+  }
+
+  await writeProjectState(cwd, targetState)
+  const from = current ? `${current} → ` : ""
+  console.log(`  project state: ${from}${targetState}`)
+}
+
 export const stateCommand: Command = {
   name: "state",
   description: "Show or set the persistent project state",
@@ -50,74 +111,12 @@ export const stateCommand: Command = {
       printStateList()
       return
     }
-
     if (sub === "show") {
-      const current = await readProjectState(cwd)
-      if (!current) {
-        console.log("\n  project state: not set (use: swiz state set planning)\n")
-      } else {
-        const transitions = STATE_TRANSITIONS[current]
-        const metadata = STATE_METADATA[current]
-        console.log(`\n  project state: ${current}`)
-        console.log(`  workflow intent: ${metadata.intent}`)
-        console.log(`  priority: ${metadata.priority}`)
-
-        // Show current state age from history
-        const stateData = await readStateData(cwd)
-        const history = stateData?.stateHistory ?? []
-        if (history.length > 0) {
-          const lastEntry = history[history.length - 1]!
-          const age = Date.now() - new Date(lastEntry.timestamp).getTime()
-          console.log(`  current state age: ${formatDuration(age)}`)
-        }
-
-        console.log(`  allowed transitions: ${transitions.join(", ")}`)
-
-        // Show cumulative time per state
-        if (history.length > 1) {
-          const totals = computeStateTotals(history)
-          console.log(`\n  ${DIM}time per state:${RESET}`)
-          for (const [state, ms] of totals) {
-            const marker = state === current ? " ←" : ""
-            console.log(`    ${DIM}${state}: ${formatDuration(ms)}${marker}${RESET}`)
-          }
-        }
-        console.log()
-      }
+      await handleShowState(cwd)
       return
     }
-
     if (sub === "set") {
-      const target = args[1]
-      if (!target) {
-        throw new Error(`Usage: swiz state set <state>\nValid states: ${PROJECT_STATES.join(", ")}`)
-      }
-      if (!(target in STATE_TRANSITIONS)) {
-        throw new Error(`Unknown state: "${target}"\nValid states: ${PROJECT_STATES.join(", ")}`)
-      }
-
-      const targetState = target as ProjectState
-      const current = await readProjectState(cwd)
-
-      if (current && current !== targetState) {
-        const timestamp = new Date().toISOString()
-        const result = await evaluateTransition({
-          from: current,
-          to: targetState,
-          currentSettings: {
-            collaborationMode: "solo",
-          },
-          cwd,
-          timestamp,
-        })
-        if (!result.allowed) {
-          throw new Error(result.reason || `Invalid transition: ${current} → ${targetState}`)
-        }
-      }
-
-      await writeProjectState(cwd, targetState)
-      const from = current ? `${current} → ` : ""
-      console.log(`  project state: ${from}${targetState}`)
+      await handleSetState(cwd, args[1])
       return
     }
 

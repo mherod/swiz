@@ -229,6 +229,17 @@ function cloneUserEntryWithPlainText(entry: TranscriptEntry, text: string): Tran
   }
 }
 
+function isHookFeedback(text: string): boolean {
+  return text.startsWith("Stop hook feedback:") || text.startsWith("<command-message>")
+}
+
+function hasVisibleContent(entry: TranscriptEntry, text: string): boolean {
+  if (entry.type === "assistant") {
+    return hasVisibleAssistantContent(toContentBlocks(entry.message?.content))
+  }
+  return hasToolResults(entry.message?.content) || text.length > 0
+}
+
 function collectTurns(entries: TranscriptEntry[], userOnly = false): Turn[] {
   const turns: Turn[] = []
   for (const entry of entries) {
@@ -237,14 +248,7 @@ function collectTurns(entries: TranscriptEntry[], userOnly = false): Turn[] {
     if (!msg) continue
 
     const text = extractText(msg.content).trim()
-
-    // Skip hook feedback injected as user messages
-    if (
-      entry.type === "user" &&
-      (text.startsWith("Stop hook feedback:") || text.startsWith("<command-message>"))
-    ) {
-      continue
-    }
+    if (entry.type === "user" && isHookFeedback(text)) continue
 
     if (userOnly) {
       if (entry.type !== "user" || !text) continue
@@ -252,15 +256,7 @@ function collectTurns(entries: TranscriptEntry[], userOnly = false): Turn[] {
       continue
     }
 
-    // Skip turns that would render nothing
-    if (entry.type === "assistant") {
-      const blocks = toContentBlocks(entry.message?.content)
-      if (!hasVisibleAssistantContent(blocks)) continue
-    } else {
-      const content = msg.content
-      if (!hasToolResults(content) && !text) continue
-    }
-
+    if (!hasVisibleContent(entry, text)) continue
     turns.push({ entry, role: entry.type as "user" | "assistant" })
   }
   return turns
@@ -311,121 +307,102 @@ async function loadDebugLog(sessionId: string): Promise<DebugLog | null> {
   return { path, lines }
 }
 
-function parseDebugEvents(lines: string[]): DebugEvent[] {
-  // _seq is the insertion index into the malformed array — used as the final sort tie-breaker
-  // so the comparator is provably total-ordered even when _idx and iso both match.
-  type Tagged = DebugEvent & { _idx: number; _malformed: boolean; _seq: number }
+type TaggedDebugEvent = DebugEvent & { _idx: number; _malformed: boolean; _seq: number }
 
-  const validEvents: Tagged[] = []
-  const malformedEvents: Tagged[] = []
-  const allEvents: Tagged[] = []
-
-  const pushTaggedEvent = (
-    event: Omit<Tagged, "_malformed" | "_seq"> & { malformed?: boolean }
-  ): Tagged => {
-    const tagged: Tagged = {
-      ...event,
-      _malformed: Boolean(event.malformed),
-      _seq: event.malformed ? malformedEvents.length : 0,
-    }
-    if (tagged._malformed) {
-      malformedEvents.push(tagged)
+function classifyDebugLine(
+  line: string,
+  idx: number,
+  validEvents: TaggedDebugEvent[],
+  malformedEvents: TaggedDebugEvent[],
+  allEvents: TaggedDebugEvent[]
+): void {
+  const m = DEBUG_TS_RE.exec(line)
+  if (!m) {
+    const prev = allEvents[allEvents.length - 1]
+    if (prev) {
+      prev.text += `\n${line}`
     } else {
-      validEvents.push(tagged)
-    }
-    allEvents.push(tagged)
-    return tagged
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (line === undefined) continue
-    const m = DEBUG_TS_RE.exec(line)
-    if (!m) {
-      // Continuation line (no ISO prefix): attach to the preceding event so no text is lost.
-      const prev = allEvents[allEvents.length - 1]
-      if (prev) {
-        prev.text += `\n${line}`
-      } else {
-        // Leading continuation before any event — emit a synthetic malformed event (iso:"")
-        // so the line is preserved. formatTimestamp("") returns "" safely (NaN guard in place).
-        pushTaggedEvent({
-          iso: "",
-          ts: 0,
-          text: line,
-          _idx: i,
-          malformed: true,
-        })
-      }
-      continue
-    }
-    const iso = m[1]
-    if (iso === undefined) continue
-    const parsed = new Date(iso).getTime()
-    if (Number.isNaN(parsed)) {
-      // Regex-matched but unparseable timestamp (e.g. month 13): tag as malformed and sort
-      // by file index rather than inheriting a neighbour's timestamp — avoids ambiguity.
-      pushTaggedEvent({
-        iso,
+      const tagged: TaggedDebugEvent = {
+        iso: "",
         ts: 0,
-        text: line.slice(m[0].length),
-        _idx: i,
-        malformed: true,
-      })
-    } else {
-      pushTaggedEvent({
-        iso,
-        ts: parsed,
-        text: line.slice(m[0].length),
-        _idx: i,
-      })
+        text: line,
+        _idx: idx,
+        _malformed: true,
+        _seq: malformedEvents.length,
+      }
+      malformedEvents.push(tagged)
+      allEvents.push(tagged)
     }
+    return
   }
+  const iso = m[1]
+  if (iso === undefined) return
+  const parsed = new Date(iso).getTime()
+  const isMalformed = Number.isNaN(parsed)
+  const tagged: TaggedDebugEvent = {
+    iso,
+    ts: isMalformed ? 0 : parsed,
+    text: line.slice(m[0].length),
+    _idx: idx,
+    _malformed: isMalformed,
+    _seq: isMalformed ? malformedEvents.length : 0,
+  }
+  ;(isMalformed ? malformedEvents : validEvents).push(tagged)
+  allEvents.push(tagged)
+}
 
-  // Sort valid events by timestamp, breaking ties by file index
-  const sortedValidEvents = orderBy(validEvents, [(ev) => ev.ts, (ev) => ev._idx], ["asc", "asc"])
-
-  // Normalize every malformed record before sorting: guarantee string iso and finite numeric
-  // _idx/_seq so the comparator never receives unexpected runtime types regardless of how
-  // the record was constructed (two creation paths: leading continuation and NaN timestamp).
-  for (const ev of malformedEvents) {
+function normalizeMalformedEvents(events: TaggedDebugEvent[]): void {
+  for (const ev of events) {
     if (typeof ev.iso !== "string") ev.iso = ""
     if (typeof ev._idx !== "number" || !Number.isFinite(ev._idx)) ev._idx = 0
     if (typeof ev._seq !== "number" || !Number.isFinite(ev._seq)) ev._seq = 0
   }
+}
 
-  // Three-key comparator — explicit multi-statement form; String() coercion on iso as a
-  // second defence layer in case a future path bypasses the normalization above:
-  //   1. _idx — file position (loop var i, structurally unique)
-  //   2. iso  — lexicographic fallback; String() guards against non-string runtime values
-  //   3. _seq — insertion order into malformed[] (unique within array, set at ev creation)
-  const sortedMalformedEvents = orderBy(
+function mergeValidAndMalformed(
+  sortedValid: TaggedDebugEvent[],
+  sortedMalformed: TaggedDebugEvent[]
+): TaggedDebugEvent[] {
+  const result: TaggedDebugEvent[] = []
+  let vi = 0
+  for (const malformed of sortedMalformed) {
+    while (vi < sortedValid.length && (sortedValid[vi]?._idx ?? Infinity) < malformed._idx) {
+      result.push(sortedValid[vi]!)
+      vi++
+    }
+    result.push(malformed)
+  }
+  while (vi < sortedValid.length) {
+    result.push(sortedValid[vi]!)
+    vi++
+  }
+  return result
+}
+
+function parseDebugEvents(lines: string[]): DebugEvent[] {
+  const validEvents: TaggedDebugEvent[] = []
+  const malformedEvents: TaggedDebugEvent[] = []
+  const allEvents: TaggedDebugEvent[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (line === undefined) continue
+    classifyDebugLine(line, i, validEvents, malformedEvents, allEvents)
+  }
+
+  const sortedValid = orderBy(validEvents, [(ev) => ev.ts, (ev) => ev._idx], ["asc", "asc"])
+  normalizeMalformedEvents(malformedEvents)
+  const sortedMalformed = orderBy(
     malformedEvents,
     [(ev) => ev._idx ?? 0, (ev) => String(ev.iso ?? ""), (ev) => ev._seq ?? 0],
     ["asc", "asc", "asc"]
   )
 
-  // Two-pass merge: insert each malformed event immediately after the last valid event
-  // whose _idx precedes it in the file. This places parse errors at their structural
-  // position in the output rather than at an ambiguous inherited timestamp bucket.
-  const result: Tagged[] = []
-  let vi = 0
-  for (const malformed of sortedMalformedEvents) {
-    while (
-      vi < sortedValidEvents.length &&
-      (sortedValidEvents[vi]?._idx ?? Infinity) < malformed._idx
-    ) {
-      result.push(sortedValidEvents[vi]!)
-      vi++
-    }
-    result.push(malformed)
-  }
-  while (vi < sortedValidEvents.length) {
-    result.push(sortedValidEvents[vi]!)
-    vi++
-  }
-
-  return result.map(({ iso, ts, text }) => ({ iso, ts, text }))
+  return mergeValidAndMalformed(sortedValid, sortedMalformed).map(({ iso, ts, text }) => ({
+    iso,
+    ts,
+    text,
+  }))
 }
 
 function renderDebugLine(event: DebugEvent): void {
@@ -547,57 +524,75 @@ export interface TranscriptArgs {
   explicitAgents: AgentDef[]
 }
 
-export function parseTranscriptArgs(args: string[]): TranscriptArgs {
-  let sessionQuery: string | null = null
-  let targetDir: string = process.cwd()
-  let listOnly = false
-  let headCount: number | undefined
-  let tailCount: number | undefined
-  let autoReply = false
-  let includeDebug = false
-  let userOnly = false
-  let allAgents = false
+function consumeValueArg(
+  args: string[],
+  i: number,
+  longFlag: string,
+  shortFlag: string
+): { value: string; skip: boolean } | null {
+  const arg = args[i]
+  if (arg !== longFlag && arg !== shortFlag) return null
+  const next = args[i + 1]
+  return next ? { value: next, skip: true } : null
+}
 
+const TRANSCRIPT_BOOLEAN_FLAGS: Record<string, string> = {
+  "--list": "listOnly",
+  "-l": "listOnly",
+  "--auto-reply": "autoReply",
+  "--include-debug": "includeDebug",
+  "--user-only": "userOnly",
+  "--all": "allAgents",
+}
+
+type ValueArgDef = [longFlag: string, shortFlag: string]
+
+const TRANSCRIPT_VALUE_ARGS: ValueArgDef[] = [
+  ["--session", "-s"],
+  ["--dir", "-d"],
+  ["--head", "-H"],
+  ["--tail", "-T"],
+]
+
+function parseTranscriptValueArgs(args: string[]): {
+  flags: Record<string, boolean>
+  values: Record<string, string>
+} {
+  const flags: Record<string, boolean> = {}
+  const values: Record<string, string> = {}
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (!arg) continue
-    const next = args[i + 1]
-    if ((arg === "--session" || arg === "-s") && next) {
-      sessionQuery = next
-      i++
-    } else if ((arg === "--dir" || arg === "-d") && next) {
-      targetDir = resolve(next)
-      i++
-    } else if (arg === "--list" || arg === "-l") {
-      listOnly = true
-    } else if ((arg === "--head" || arg === "-H") && next) {
-      headCount = parseInt(next, 10)
-      i++
-    } else if ((arg === "--tail" || arg === "-T") && next) {
-      tailCount = parseInt(next, 10)
-      i++
-    } else if (arg === "--auto-reply") {
-      autoReply = true
-    } else if (arg === "--include-debug") {
-      includeDebug = true
-    } else if (arg === "--user-only") {
-      userOnly = true
-    } else if (arg === "--all") {
-      allAgents = true
+    const flagKey = TRANSCRIPT_BOOLEAN_FLAGS[arg]
+    if (flagKey) {
+      flags[flagKey] = true
+      continue
+    }
+    for (const [longFlag, shortFlag] of TRANSCRIPT_VALUE_ARGS) {
+      const result = consumeValueArg(args, i, longFlag, shortFlag)
+      if (result) {
+        values[longFlag] = result.value
+        i++
+        break
+      }
     }
   }
+  return { flags, values }
+}
 
+export function parseTranscriptArgs(args: string[]): TranscriptArgs {
+  const { flags, values } = parseTranscriptValueArgs(args)
   const explicitAgents = AGENTS.filter((agent) => args.includes(`--${agent.id}`))
   return {
-    sessionQuery,
-    targetDir,
-    listOnly,
-    headCount,
-    tailCount,
-    autoReply,
-    includeDebug,
-    userOnly,
-    allAgents,
+    sessionQuery: values["--session"] ?? null,
+    targetDir: values["--dir"] ? resolve(values["--dir"]) : process.cwd(),
+    listOnly: flags.listOnly ?? false,
+    headCount: values["--head"] ? parseInt(values["--head"], 10) : undefined,
+    tailCount: values["--tail"] ? parseInt(values["--tail"], 10) : undefined,
+    autoReply: flags.autoReply ?? false,
+    includeDebug: flags.includeDebug ?? false,
+    userOnly: flags.userOnly ?? false,
+    allAgents: flags.allAgents ?? false,
     explicitAgents,
   }
 }
@@ -644,6 +639,57 @@ function renderSessionList(sessions: Session[], targetDir: string): void {
   console.log()
 }
 
+function validateTranscriptArgs(parsed: TranscriptArgs): void {
+  if (parsed.allAgents && parsed.explicitAgents.length > 0) {
+    throw new Error("`--all` cannot be combined with an explicit agent flag.")
+  }
+  if (parsed.explicitAgents.length > 1) {
+    throw new Error("Specify at most one agent: --claude, --cursor, --gemini, or --codex.")
+  }
+  if (parsed.userOnly && parsed.includeDebug) {
+    throw new Error("`--user-only` cannot be combined with `--include-debug`.")
+  }
+}
+
+function validateProviders(providers: Set<TranscriptProviderId>, selectedAgents: AgentDef[]): void {
+  if (providers.size === 0) {
+    const agentLabel = selectedAgents[0]?.name ?? "selected agent"
+    throw new Error(
+      `${agentLabel} transcript discovery is not supported yet.\nUse --all or --claude/--gemini/--codex.`
+    )
+  }
+}
+
+async function loadFilteredSessions(
+  targetDir: string,
+  selectedProviders: Set<TranscriptProviderId>
+): Promise<Session[]> {
+  const allProviderSessions = await findAllProviderSessions(targetDir)
+  const sessions = allProviderSessions.filter(
+    (session) => !!session.provider && selectedProviders.has(session.provider)
+  )
+  if (sessions.length === 0) {
+    const checkedProviders = [...selectedProviders].join(", ")
+    throw new Error(
+      `No transcripts found for: ${targetDir}\n(checked providers: ${checkedProviders})`
+    )
+  }
+  return sessions
+}
+
+async function loadOptionalDebug(
+  session: Session,
+  parsed: TranscriptArgs
+): Promise<DebugEvent[] | undefined> {
+  if (!parsed.includeDebug) return undefined
+  const debugFile = await loadDebugLog(session.id)
+  if (!debugFile) {
+    console.log(`\n${DIM}Debug log not found for session: ${session.id}${RESET}`)
+    return undefined
+  }
+  return applyHeadTail(parseDebugEvents(debugFile.lines), parsed.headCount, parsed.tailCount)
+}
+
 // ─── Command ─────────────────────────────────────────────────────────────────
 
 export const transcriptCommand: Command = {
@@ -678,73 +724,32 @@ export const transcriptCommand: Command = {
     { flags: "--codex", description: "Show Codex sessions only" },
   ],
   async run(args) {
-    const {
-      sessionQuery,
-      targetDir,
-      listOnly,
-      headCount,
-      tailCount,
-      autoReply,
-      includeDebug,
-      userOnly,
-      allAgents,
-      explicitAgents,
-    } = parseTranscriptArgs(args)
+    const parsed = parseTranscriptArgs(args)
+    validateTranscriptArgs(parsed)
 
-    if (allAgents && explicitAgents.length > 0) {
-      throw new Error("`--all` cannot be combined with an explicit agent flag.")
-    }
-    if (explicitAgents.length > 1) {
-      throw new Error("Specify at most one agent: --claude, --cursor, --gemini, or --codex.")
-    }
-    if (userOnly && includeDebug) {
-      throw new Error("`--user-only` cannot be combined with `--include-debug`.")
-    }
-
-    const detectedAgent = detectCurrentAgent()
-    const selectedAgents = resolveSelectedAgents(allAgents, explicitAgents, detectedAgent)
-    const selectedProviders = getSelectedProviders(selectedAgents)
-
-    if (selectedProviders.size === 0) {
-      const agentLabel = selectedAgents[0]?.name ?? "selected agent"
-      throw new Error(
-        `${agentLabel} transcript discovery is not supported yet.\nUse --all or --claude/--gemini/--codex.`
-      )
-    }
-
-    const allProviderSessions = await findAllProviderSessions(targetDir)
-    const sessions = allProviderSessions.filter(
-      (session) => !!session.provider && selectedProviders.has(session.provider)
+    const selectedAgents = resolveSelectedAgents(
+      parsed.allAgents,
+      parsed.explicitAgents,
+      detectCurrentAgent()
     )
+    const selectedProviders = getSelectedProviders(selectedAgents)
+    validateProviders(selectedProviders, selectedAgents)
 
-    if (sessions.length === 0) {
-      const checkedProviders = [...selectedProviders].join(", ")
-      throw new Error(
-        `No transcripts found for: ${targetDir}\n(checked providers: ${checkedProviders})`
-      )
-    }
-
-    if (listOnly) {
-      renderSessionList(sessions, targetDir)
+    const sessions = await loadFilteredSessions(parsed.targetDir, selectedProviders)
+    if (parsed.listOnly) {
+      renderSessionList(sessions, parsed.targetDir)
       return
     }
 
-    const session = pickSession(sessions, sessionQuery)
+    const session = pickSession(sessions, parsed.sessionQuery)
+    const turns = applyHeadTail(
+      await loadTurns(session, parsed.userOnly),
+      parsed.headCount,
+      parsed.tailCount
+    )
+    const debugEvents = await loadOptionalDebug(session, parsed)
 
-    let turns = await loadTurns(session, userOnly)
-    turns = applyHeadTail(turns, headCount, tailCount)
-
-    let debugEvents: DebugEvent[] | undefined
-    if (includeDebug) {
-      const debugFile = await loadDebugLog(session.id)
-      if (!debugFile) {
-        console.log(`\n${DIM}Debug log not found for session: ${session.id}${RESET}`)
-      } else {
-        debugEvents = applyHeadTail(parseDebugEvents(debugFile.lines), headCount, tailCount)
-      }
-    }
-
-    if (autoReply) {
+    if (parsed.autoReply) {
       await generateAutoReply(turns)
     } else {
       renderTurns(turns, session.id, debugEvents)

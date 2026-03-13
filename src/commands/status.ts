@@ -176,6 +176,29 @@ async function countOpenTasksForSession(sessionId: string, tasksRoot: string): P
   return open
 }
 
+async function collectIndexedSessionIds(projectsRoot: string, key: string): Promise<Set<string>> {
+  const sessionIdsPath = join(projectsRoot, key)
+  const ids = new Set<string>()
+  try {
+    for (const f of await readdir(sessionIdsPath)) {
+      if (f.endsWith(".jsonl")) ids.add(f.slice(0, -6))
+    }
+  } catch {}
+  return ids
+}
+
+async function collectAllProjectSessionIds(projectsRoot: string): Promise<Set<string>> {
+  const ids = new Set<string>()
+  const projectDirs = await readdir(projectsRoot).catch(() => [] as string[])
+  for (const projectDir of projectDirs) {
+    const files = await readdir(join(projectsRoot, projectDir)).catch(() => [] as string[])
+    for (const f of files) {
+      if (f.endsWith(".jsonl")) ids.add(f.slice(0, -6))
+    }
+  }
+  return ids
+}
+
 async function getOpenTaskCount(cwd: string): Promise<number | null> {
   try {
     const home = getHomeDir()
@@ -183,32 +206,9 @@ async function getOpenTaskCount(cwd: string): Promise<number | null> {
     const { projectKeyFromCwd } = await import("../project-key.ts")
     const key = projectKeyFromCwd(cwd)
 
-    // Collect session IDs from the project transcript index, stripping .jsonl extension.
-    const sessionIdsPath = join(projectsRoot, key)
-    const indexedSessionIds = new Set<string>()
-    try {
-      for (const f of await readdir(sessionIdsPath)) {
-        if (f.endsWith(".jsonl")) indexedSessionIds.add(f.slice(0, -6))
-      }
-    } catch {
-      // Project directory missing — fall through to compaction-gap scan below.
-    }
+    const indexedSessionIds = await collectIndexedSessionIds(projectsRoot, key)
+    const allProjectSessionIds = await collectAllProjectSessionIds(projectsRoot)
 
-    // Collect all session IDs referenced by any project directory (for compaction-gap detection).
-    const allProjectSessionIds = new Set<string>()
-    try {
-      for (const projectDir of await readdir(projectsRoot)) {
-        try {
-          for (const f of await readdir(join(projectsRoot, projectDir))) {
-            if (f.endsWith(".jsonl")) allProjectSessionIds.add(f.slice(0, -6))
-          }
-        } catch {}
-      }
-    } catch {}
-
-    // Union: indexed sessions for this project + task-dir sessions not yet in any project index
-    // (compaction-gap sessions whose transcript hasn't been written yet).
-    // For unindexed sessions, check .session-meta.json cwd to avoid cross-project contamination.
     let taskDirEntries: string[]
     try {
       taskDirEntries = await readdir(tasksRoot)
@@ -219,14 +219,12 @@ async function getOpenTaskCount(cwd: string): Promise<number | null> {
     const { readSessionMeta: readMeta } = await import("../tasks/task-repository.ts")
     for (const s of taskDirEntries) {
       if (allProjectSessionIds.has(s)) continue
-      // Unindexed compaction-gap session: filter by cwd if meta has one.
       const meta = await readMeta(s, tasksRoot)
       if (meta?.cwd !== undefined && meta.cwd !== cwd) continue
       sessionIds.add(s)
     }
 
     if (sessionIds.size === 0) return null
-
     let open = 0
     for (const sessionId of sessionIds) {
       open += await countOpenTasksForSession(sessionId, tasksRoot)
@@ -299,10 +297,30 @@ async function getProjectHealth(cwd: string): Promise<ProjectHealth> {
   }
 }
 
+function renderRemoteLine(aheadBehind: { ahead: number; behind: number } | null): void {
+  if (!aheadBehind) return
+  const { ahead, behind } = aheadBehind
+  if (ahead === 0 && behind === 0) {
+    console.log(`    Remote:    ${GREEN}in sync${RESET}`)
+    return
+  }
+  const parts: string[] = []
+  if (ahead > 0) parts.push(`${YELLOW}${ahead} ahead${RESET}`)
+  if (behind > 0) parts.push(`${RED}${behind} behind${RESET}`)
+  console.log(`    Remote:    ${parts.join(", ")}`)
+}
+
+function formatCiLine(status: string | null, conclusion: string | null): string {
+  if (!status) return `${DIM}no recent run${RESET}`
+  if (status === "completed" && conclusion === "success") return `${GREEN}✓ success${RESET}`
+  if (status === "in_progress" || status === "queued") return `${YELLOW}⏳ ${status}${RESET}`
+  if (conclusion === "failure" || conclusion === "cancelled") return `${RED}✗ ${conclusion}${RESET}`
+  return `${DIM}${status}${conclusion ? ` / ${conclusion}` : ""}${RESET}`
+}
+
 function renderHealthPanel(health: ProjectHealth): void {
   console.log(`  ${BOLD}Project Health${RESET}\n`)
 
-  // State
   if (health.state) {
     const termTag = health.isTerminal ? ` ${DIM}(terminal)${RESET}` : ""
     console.log(`    State:     ${CYAN}${health.state}${RESET}${termTag}`)
@@ -313,53 +331,23 @@ function renderHealthPanel(health: ProjectHealth): void {
     console.log(`    State:     ${DIM}not set${RESET}`)
   }
 
-  // Git
-  const branchStr = health.branch ?? `${DIM}unknown${RESET}`
-  console.log(`    Branch:    ${GREEN}${branchStr}${RESET}`)
-  if (health.uncommittedFiles > 0) {
-    console.log(`    Changes:   ${YELLOW}${health.uncommittedFiles} uncommitted file(s)${RESET}`)
-  } else {
-    console.log(`    Changes:   ${GREEN}clean${RESET}`)
-  }
-  if (health.aheadBehind) {
-    const { ahead, behind } = health.aheadBehind
-    if (ahead === 0 && behind === 0) {
-      console.log(`    Remote:    ${GREEN}in sync${RESET}`)
-    } else {
-      const parts: string[] = []
-      if (ahead > 0) parts.push(`${YELLOW}${ahead} ahead${RESET}`)
-      if (behind > 0) parts.push(`${RED}${behind} behind${RESET}`)
-      console.log(`    Remote:    ${parts.join(", ")}`)
-    }
-  }
+  console.log(`    Branch:    ${GREEN}${health.branch ?? `${DIM}unknown${RESET}`}${RESET}`)
+  const changesLine =
+    health.uncommittedFiles > 0
+      ? `${YELLOW}${health.uncommittedFiles} uncommitted file(s)${RESET}`
+      : `${GREEN}clean${RESET}`
+  console.log(`    Changes:   ${changesLine}`)
+  renderRemoteLine(health.aheadBehind)
 
-  // Tasks
   if (health.openTasks !== null) {
-    if (health.openTasks === 0) {
-      console.log(`    Tasks:     ${GREEN}none open${RESET}`)
-    } else {
-      console.log(`    Tasks:     ${YELLOW}${health.openTasks} open${RESET}`)
-    }
+    const taskLine =
+      health.openTasks === 0
+        ? `${GREEN}none open${RESET}`
+        : `${YELLOW}${health.openTasks} open${RESET}`
+    console.log(`    Tasks:     ${taskLine}`)
   }
 
-  // CI
-  if (health.ciStatus) {
-    const conclusion = health.ciConclusion
-    let ciLine: string
-    if (health.ciStatus === "completed" && conclusion === "success") {
-      ciLine = `${GREEN}✓ success${RESET}`
-    } else if (health.ciStatus === "in_progress" || health.ciStatus === "queued") {
-      ciLine = `${YELLOW}⏳ ${health.ciStatus}${RESET}`
-    } else if (conclusion === "failure" || conclusion === "cancelled") {
-      ciLine = `${RED}✗ ${conclusion}${RESET}`
-    } else {
-      ciLine = `${DIM}${health.ciStatus}${conclusion ? ` / ${conclusion}` : ""}${RESET}`
-    }
-    console.log(`    CI:        ${ciLine}`)
-  } else {
-    console.log(`    CI:        ${DIM}no recent run${RESET}`)
-  }
-
+  console.log(`    CI:        ${formatCiLine(health.ciStatus, health.ciConclusion)}`)
   console.log()
 }
 

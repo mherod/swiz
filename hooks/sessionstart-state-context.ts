@@ -29,7 +29,7 @@ async function main(): Promise<void> {
     parts.push(`State description: ${stateInfo.description}`)
   }
 
-  emitContext("SessionStart", parts.join(" "))
+  await emitContext("SessionStart", parts.join(" "))
 }
 
 if (import.meta.main) await main()

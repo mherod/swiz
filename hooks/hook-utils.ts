@@ -760,6 +760,32 @@ const defaultTaskExecutor: TaskExecutor = async (args) => {
   return proc.exitCode ?? 1
 }
 
+function isValidSessionId(sessionId: string | undefined): sessionId is string {
+  return !!sessionId && sessionId !== "null" && !!sessionId.trim()
+}
+
+function sanitizePathComponent(raw: string): string {
+  return raw.replace(/[^a-zA-Z0-9_-]/g, "")
+}
+
+async function executeWithFallback(executor: TaskExecutor, args: string[]): Promise<number> {
+  try {
+    return await executor(args)
+  } catch (err) {
+    console.error(
+      `[swiz] createSessionTask: executor threw (${err instanceof Error ? err.message : String(err)}), falling back to default`
+    )
+  }
+  try {
+    return await defaultTaskExecutor(args)
+  } catch (defaultErr) {
+    console.error(
+      `[swiz] createSessionTask: default executor also threw (${defaultErr instanceof Error ? defaultErr.message : String(defaultErr)}), giving up`
+    )
+    return 1
+  }
+}
+
 /** Create a session task via `swiz tasks create`. Uses a sentinel file to fire only once per session. */
 export async function createSessionTask(
   sessionId: string | undefined,
@@ -768,17 +794,14 @@ export async function createSessionTask(
   description: string,
   executor: TaskExecutor = defaultTaskExecutor
 ): Promise<void> {
-  if (!sessionId || sessionId === "null" || !sessionId.trim()) return
-  if (!sentinelKey.trim()) return
+  if (!isValidSessionId(sessionId) || !sentinelKey.trim()) return
   const home = getHomeDirOrNull()
   if (!home) return
-  // Sanitize sentinel path components: strip path separators and shell metacharacters
-  const safeSentinel = sentinelKey.replace(/[^a-zA-Z0-9_-]/g, "")
-  const safeSession = sessionId.replace(/[^a-zA-Z0-9_-]/g, "")
+  const safeSentinel = sanitizePathComponent(sentinelKey)
+  const safeSession = sanitizePathComponent(sessionId)
   if (!safeSentinel || !safeSession) return
   const sentinel = sessionTaskSentinelPath(safeSentinel, safeSession)
   if (await Bun.file(sentinel).exists()) return
-  // Defensive: fall back to defaultTaskExecutor if the injected value is not callable.
   if (typeof executor !== "function") {
     console.error(
       `[swiz] createSessionTask: invalid executor (got ${typeof executor}), falling back to default`
@@ -786,26 +809,8 @@ export async function createSessionTask(
     executor = defaultTaskExecutor
   }
   const swiz = Bun.which("swiz") ?? join(home, ".bun", "bin", "swiz")
-  const args = ["swiz", "tasks", "create", subject, description, "--session", sessionId]
-  // Replace argv[0] with the resolved binary path so Bun.spawn can locate it.
-  args[0] = swiz
-  let exitCode: number
-  try {
-    exitCode = await executor(args)
-  } catch (err) {
-    // Injected executor threw — report and retry with the default.
-    console.error(
-      `[swiz] createSessionTask: executor threw (${err instanceof Error ? err.message : String(err)}), falling back to default`
-    )
-    try {
-      exitCode = await defaultTaskExecutor(args)
-    } catch (defaultErr) {
-      console.error(
-        `[swiz] createSessionTask: default executor also threw (${defaultErr instanceof Error ? defaultErr.message : String(defaultErr)}), giving up`
-      )
-      return
-    }
-  }
+  const args = [swiz, "tasks", "create", subject, description, "--session", sessionId]
+  const exitCode = await executeWithFallback(executor, args)
   if (exitCode === 0) {
     try {
       await Bun.write(sentinel, "")

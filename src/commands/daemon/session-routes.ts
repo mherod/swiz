@@ -80,131 +80,137 @@ export function annotateSessionsWithLiveness(
   })
 }
 
+async function handleProjectsList(req: Request, ctx: SessionRoutesContext): Promise<Response> {
+  try {
+    const body = (await req.json().catch(() => null)) as {
+      limitProjects?: number
+      limitSessionsPerProject?: number
+      selectedProjectCwd?: string
+      selectedSessionId?: string
+    } | null
+    const limitProjects = Math.max(1, Math.min(30, body?.limitProjects ?? 8))
+    const limitSessions = Math.max(1, Math.min(30, body?.limitSessionsPerProject ?? 8))
+    const projectCwds = [...new Set(ctx.getKnownProjects())]
+    const ordered = projectCwds
+      .map((cwd) => ({ cwd, lastSeenAt: ctx.getProjectLastSeen(cwd) }))
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+      .slice(0, limitProjects)
+
+    const agentSnapshot = await ctx.getAgentProcessSnapshot()
+
+    const allProjects = await Promise.all(
+      ordered.map(async ({ cwd, lastSeenAt }) => {
+        try {
+          const pinnedSessionId =
+            body?.selectedProjectCwd === cwd ? body?.selectedSessionId : undefined
+          const sessions = await ctx.listProjectSessions(cwd, limitSessions, pinnedSessionId)
+          const firstSession = (sessions.sessions as Array<{ id?: string }>)[0]
+          const statusLine = await ctx.getProjectStatusLine(
+            cwd,
+            pinnedSessionId ?? (typeof firstSession?.id === "string" ? firstSession.id : undefined)
+          )
+          return {
+            cwd,
+            name: cwd.split("/").at(-1) ?? cwd,
+            lastSeenAt,
+            sessionCount: sessions.sessionCount,
+            sessions: annotateSessionsWithLiveness(sessions.sessions, cwd, agentSnapshot),
+            statusLine,
+          }
+        } catch {
+          return null
+        }
+      })
+    )
+    const projects = allProjects.filter(
+      (project): project is NonNullable<typeof project> =>
+        project !== null && project.sessionCount > 0
+    )
+    return Response.json({ projects })
+  } catch (error) {
+    return Response.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to load sessions projects due to an internal error",
+      },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleSessionMessages(req: Request, ctx: SessionRoutesContext): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as {
+    cwd?: string
+    sessionId?: string
+    limit?: number
+  } | null
+  const cwd = body?.cwd
+  const sessionId = body?.sessionId
+  if (typeof cwd !== "string" || cwd.length === 0 || typeof sessionId !== "string") {
+    return Response.json(
+      { error: "Missing required fields: cwd (string), sessionId (string)" },
+      { status: 400 }
+    )
+  }
+  ctx.touchProject(cwd)
+  const limit = Math.max(1, Math.min(100, body?.limit ?? 30))
+  const data = await ctx.getSessionData(cwd, sessionId, limit)
+  return Response.json({ messages: data.messages, toolStats: data.toolStats })
+}
+
+async function handleSessionTasks(req: Request, ctx: SessionRoutesContext): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as {
+    cwd?: string
+    sessionId?: string
+    limit?: number
+  } | null
+  const cwd = body?.cwd
+  const sessionId = body?.sessionId
+  if (typeof cwd !== "string" || cwd.length === 0 || typeof sessionId !== "string") {
+    return Response.json(
+      { error: "Missing required fields: cwd (string), sessionId (string)" },
+      { status: 400 }
+    )
+  }
+  ctx.touchProject(cwd)
+  const limit = Math.max(1, Math.min(100, body?.limit ?? 20))
+  const data = await ctx.getSessionTasks(sessionId, limit)
+  return Response.json(data)
+}
+
+async function handleProjectTasks(req: Request, ctx: SessionRoutesContext): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as {
+    cwd?: string
+    limit?: number
+  } | null
+  const cwd = body?.cwd
+  if (typeof cwd !== "string" || cwd.length === 0) {
+    return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
+  }
+  ctx.touchProject(cwd)
+  const limit = Math.max(1, Math.min(300, body?.limit ?? 120))
+  const data = await ctx.getProjectTasks(cwd, limit)
+  return Response.json(data)
+}
+
 export async function handleSessionRoutes(
   req: Request,
   url: URL,
   ctx: SessionRoutesContext
 ): Promise<Response | null> {
   if (url.pathname === "/sessions/projects" && req.method === "POST") {
-    try {
-      const body = (await req.json().catch(() => null)) as {
-        limitProjects?: number
-        limitSessionsPerProject?: number
-        selectedProjectCwd?: string
-        selectedSessionId?: string
-      } | null
-      const limitProjects = Math.max(1, Math.min(30, body?.limitProjects ?? 8))
-      const limitSessionsPerProject = Math.max(1, Math.min(30, body?.limitSessionsPerProject ?? 8))
-      const projectCwds = [...new Set(ctx.getKnownProjects())]
-      const ordered = projectCwds
-        .map((cwd) => ({ cwd, lastSeenAt: ctx.getProjectLastSeen(cwd) }))
-        .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
-        .slice(0, limitProjects)
-
-      const agentSnapshot = await ctx.getAgentProcessSnapshot()
-
-      const allProjects = await Promise.all(
-        ordered.map(async ({ cwd, lastSeenAt }) => {
-          try {
-            const pinnedSessionId =
-              body?.selectedProjectCwd === cwd ? body?.selectedSessionId : undefined
-            const sessions = await ctx.listProjectSessions(
-              cwd,
-              limitSessionsPerProject,
-              pinnedSessionId
-            )
-            const firstSession = (sessions.sessions as Array<{ id?: string }>)[0]
-            const statusLine = await ctx.getProjectStatusLine(
-              cwd,
-              pinnedSessionId ??
-                (typeof firstSession?.id === "string" ? firstSession.id : undefined)
-            )
-            return {
-              cwd,
-              name: cwd.split("/").at(-1) ?? cwd,
-              lastSeenAt,
-              sessionCount: sessions.sessionCount,
-              sessions: annotateSessionsWithLiveness(sessions.sessions, cwd, agentSnapshot),
-              statusLine,
-            }
-          } catch {
-            // Ignore a single project failure so one bad transcript cannot break the dashboard.
-            return null
-          }
-        })
-      )
-      const projects = allProjects.filter(
-        (project): project is NonNullable<typeof project> =>
-          project !== null && project.sessionCount > 0
-      )
-      return Response.json({ projects })
-    } catch (error) {
-      return Response.json(
-        {
-          error:
-            error instanceof Error
-              ? error.message
-              : "Failed to load sessions projects due to an internal error",
-        },
-        { status: 500 }
-      )
-    }
+    return handleProjectsList(req, ctx)
   }
-
   if (url.pathname === "/sessions/messages" && req.method === "POST") {
-    const body = (await req.json().catch(() => null)) as {
-      cwd?: string
-      sessionId?: string
-      limit?: number
-    } | null
-    const cwd = body?.cwd
-    const sessionId = body?.sessionId
-    if (typeof cwd !== "string" || cwd.length === 0 || typeof sessionId !== "string") {
-      return Response.json(
-        { error: "Missing required fields: cwd (string), sessionId (string)" },
-        { status: 400 }
-      )
-    }
-    ctx.touchProject(cwd)
-    const limit = Math.max(1, Math.min(100, body?.limit ?? 30))
-    const data = await ctx.getSessionData(cwd, sessionId, limit)
-    return Response.json({ messages: data.messages, toolStats: data.toolStats })
+    return handleSessionMessages(req, ctx)
   }
-
   if (url.pathname === "/sessions/tasks" && req.method === "POST") {
-    const body = (await req.json().catch(() => null)) as {
-      cwd?: string
-      sessionId?: string
-      limit?: number
-    } | null
-    const cwd = body?.cwd
-    const sessionId = body?.sessionId
-    if (typeof cwd !== "string" || cwd.length === 0 || typeof sessionId !== "string") {
-      return Response.json(
-        { error: "Missing required fields: cwd (string), sessionId (string)" },
-        { status: 400 }
-      )
-    }
-    ctx.touchProject(cwd)
-    const limit = Math.max(1, Math.min(100, body?.limit ?? 20))
-    const data = await ctx.getSessionTasks(sessionId, limit)
-    return Response.json(data)
+    return handleSessionTasks(req, ctx)
   }
-
   if (url.pathname === "/projects/tasks" && req.method === "POST") {
-    const body = (await req.json().catch(() => null)) as {
-      cwd?: string
-      limit?: number
-    } | null
-    const cwd = body?.cwd
-    if (typeof cwd !== "string" || cwd.length === 0) {
-      return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
-    }
-    ctx.touchProject(cwd)
-    const limit = Math.max(1, Math.min(300, body?.limit ?? 120))
-    const data = await ctx.getProjectTasks(cwd, limit)
-    return Response.json(data)
+    return handleProjectTasks(req, ctx)
   }
-
   return null
 }

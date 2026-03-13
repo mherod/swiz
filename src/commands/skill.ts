@@ -335,6 +335,53 @@ export function convertSkillContent(
   return { content: result, unmapped: [...unmappedSet] }
 }
 
+type AgentEntry = (typeof AGENTS)[number]
+
+function resolveAgentPair(
+  from: string,
+  to: string
+): { fromAgent: AgentEntry; toAgent: AgentEntry } {
+  const fromAgent = getAgent(from)
+  const toAgent = getAgent(to)
+  const ids = AGENTS.map((a) => a.id).join(", ")
+  if (!fromAgent) throw new Error(`Unknown agent: ${from}. Valid agent IDs: ${ids}`)
+  if (!toAgent) throw new Error(`Unknown agent: ${to}. Valid agent IDs: ${ids}`)
+  return { fromAgent, toAgent }
+}
+
+async function discoverSkillNames(skillsDir: string): Promise<string[]> {
+  let entries: import("node:fs").Dirent[]
+  try {
+    entries = await readdir(skillsDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const names: string[] = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (await Bun.file(join(skillsDir, entry.name, "SKILL.md")).exists()) names.push(entry.name)
+  }
+  return orderBy(names, [(n) => n], ["asc"])
+}
+
+async function convertSingleSkill(opts: {
+  fromSkillsDir: string
+  name: string
+  targetDir: string
+  from: string
+  to: string
+  dryRun: boolean
+}): Promise<{ unmapped: string[]; warnSuffix: string }> {
+  const original = await Bun.file(join(opts.fromSkillsDir, opts.name, "SKILL.md")).text()
+  const { content, unmapped } = convertSkillContent(original, opts.from, opts.to)
+  const warnSuffix = unmapped.length > 0 ? ` [⚠ unmapped: ${unmapped.join(", ")}]` : ""
+  if (!opts.dryRun) {
+    await mkdir(opts.targetDir, { recursive: true })
+    await Bun.write(join(opts.targetDir, "SKILL.md"), content)
+  }
+  return { unmapped, warnSuffix }
+}
+
 /** Convert all skills from one agent to another. */
 async function convertSkills(options: {
   from: string
@@ -343,97 +390,50 @@ async function convertSkills(options: {
   overwrite: boolean
 }): Promise<void> {
   const { from, to, dryRun, overwrite } = options
-  const fromAgent = getAgent(from)
-  const toAgent = getAgent(to)
-
-  if (!fromAgent) {
-    const ids = AGENTS.map((a) => a.id).join(", ")
-    throw new Error(`Unknown agent: ${from}. Valid agent IDs: ${ids}`)
-  }
-  if (!toAgent) {
-    const ids = AGENTS.map((a) => a.id).join(", ")
-    throw new Error(`Unknown agent: ${to}. Valid agent IDs: ${ids}`)
-  }
-
+  const { fromAgent, toAgent } = resolveAgentPair(from, to)
   const fromSkillsDir = primarySkillDir(from)
   const toSkillsDir = primarySkillDir(to)
+  const orderedSkillNames = await discoverSkillNames(fromSkillsDir)
 
-  let entries: import("node:fs").Dirent[]
-  try {
-    entries = await readdir(fromSkillsDir, { withFileTypes: true })
-  } catch {
-    console.log(`No ${fromAgent.name} skills found at ${displayPath(fromSkillsDir)}.`)
-    return
-  }
-
-  const skillNames: string[] = []
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    const sourceSkillPath = join(fromSkillsDir, entry.name, "SKILL.md")
-    if (!(await Bun.file(sourceSkillPath).exists())) continue
-    skillNames.push(entry.name)
-  }
-  const orderedSkillNames = orderBy(skillNames, [(name) => name], ["asc"])
-
-  if (skillNames.length === 0) {
+  if (orderedSkillNames.length === 0) {
     console.log(`No ${fromAgent.name} skills with SKILL.md found at ${displayPath(fromSkillsDir)}.`)
     return
   }
 
-  if (dryRun) {
-    console.log(
-      `Dry run: converting ${fromAgent.name} → ${toAgent.name} skills (no files will be written).`
-    )
-  } else {
-    console.log(`Converting ${fromAgent.name} → ${toAgent.name} skills.`)
-    await mkdir(toSkillsDir, { recursive: true })
-  }
+  console.log(
+    dryRun
+      ? `Dry run: converting ${fromAgent.name} → ${toAgent.name} skills (no files will be written).`
+      : `Converting ${fromAgent.name} → ${toAgent.name} skills.`
+  )
+  if (!dryRun) await mkdir(toSkillsDir, { recursive: true })
   console.log(`Source: ${displayPath(fromSkillsDir)}`)
   console.log(`Target: ${displayPath(toSkillsDir)}\n`)
 
-  let converted = 0
-  let overwritten = 0
-  let skipped = 0
+  let converted = 0,
+    overwritten = 0,
+    skipped = 0
   const allUnmapped = new Set<string>()
 
   for (const name of orderedSkillNames) {
-    const sourceSkillPath = join(fromSkillsDir, name, "SKILL.md")
     const targetDir = join(toSkillsDir, name)
-    const targetSkillPath = join(targetDir, "SKILL.md")
     const targetExists = existsSync(targetDir)
-
     if (targetExists && !overwrite) {
       skipped++
       console.log(`  - skipped ${name} (already exists)`)
       continue
     }
 
-    const original = await Bun.file(sourceSkillPath).text()
-    const { content, unmapped } = convertSkillContent(original, from, to)
-    for (const u of unmapped) allUnmapped.add(u)
-
-    const warnSuffix = unmapped.length > 0 ? ` [⚠ unmapped: ${unmapped.join(", ")}]` : ""
-
-    if (dryRun) {
-      if (targetExists) {
-        overwritten++
-        console.log(`  - would overwrite ${name}${warnSuffix}`)
-      } else {
-        converted++
-        console.log(`  - would convert ${name}${warnSuffix}`)
-      }
-      continue
-    }
-
-    await mkdir(targetDir, { recursive: true })
-    await Bun.write(targetSkillPath, content)
-    if (targetExists) {
-      overwritten++
-      console.log(`  - overwritten ${name}${warnSuffix}`)
-    } else {
-      converted++
-      console.log(`  - converted ${name}${warnSuffix}`)
-    }
+    const result = await convertSingleSkill({ fromSkillsDir, name, targetDir, from, to, dryRun })
+    for (const u of result.unmapped) allUnmapped.add(u)
+    const kind = logSkillAction(
+      name + result.warnSuffix,
+      targetExists,
+      dryRun,
+      "converted",
+      "convert"
+    )
+    if (kind === "overwrite") overwritten++
+    else converted++
   }
 
   console.log(
@@ -448,6 +448,25 @@ async function convertSkills(options: {
   }
 }
 
+function logSkillAction(
+  name: string,
+  targetExists: boolean,
+  dryRun: boolean,
+  verb: string,
+  dryVerb: string
+): "new" | "overwrite" {
+  const isOverwrite = targetExists
+  const label = dryRun
+    ? isOverwrite
+      ? `would overwrite ${name}`
+      : `would ${dryVerb} ${name}`
+    : isOverwrite
+      ? `overwritten ${name}`
+      : `${verb} ${name}`
+  console.log(`  - ${label}`)
+  return isOverwrite ? "overwrite" : "new"
+}
+
 // Copy-only sync (no tool name remapping). Used by --sync --from <agent> and --sync-gemini alias.
 async function syncSkills(options: {
   from: string
@@ -456,57 +475,28 @@ async function syncSkills(options: {
   overwrite: boolean
 }): Promise<void> {
   const { from, to, dryRun, overwrite } = options
-  const fromAgent = getAgent(from)
-  const toAgent = getAgent(to)
-
-  if (!fromAgent) {
-    const ids = AGENTS.map((a) => a.id).join(", ")
-    throw new Error(`Unknown agent: ${from}. Valid agent IDs: ${ids}`)
-  }
-  if (!toAgent) {
-    const ids = AGENTS.map((a) => a.id).join(", ")
-    throw new Error(`Unknown agent: ${to}. Valid agent IDs: ${ids}`)
-  }
-
+  const { fromAgent, toAgent } = resolveAgentPair(from, to)
   const fromSkillsDir = primarySkillDir(from)
   const toSkillsDir = primarySkillDir(to)
+  const orderedSkillNames = await discoverSkillNames(fromSkillsDir)
 
-  let entries: import("node:fs").Dirent[]
-  try {
-    entries = await readdir(fromSkillsDir, { withFileTypes: true })
-  } catch {
-    console.log(`No ${fromAgent.name} skills found at ${displayPath(fromSkillsDir)}.`)
-    return
-  }
-
-  const skillNames: string[] = []
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    const sourceSkillPath = join(fromSkillsDir, entry.name, "SKILL.md")
-    if (!(await Bun.file(sourceSkillPath).exists())) continue
-    skillNames.push(entry.name)
-  }
-  const orderedSkillNames = orderBy(skillNames, [(name) => name], ["asc"])
-
-  if (skillNames.length === 0) {
+  if (orderedSkillNames.length === 0) {
     console.log(`No ${fromAgent.name} skills with SKILL.md found at ${displayPath(fromSkillsDir)}.`)
     return
   }
 
-  if (dryRun) {
-    console.log(
-      `Dry run: syncing ${fromAgent.name} → ${toAgent.name} skills (no files will be changed).`
-    )
-  } else {
-    console.log(`Syncing ${fromAgent.name} → ${toAgent.name} skills.`)
-    await mkdir(toSkillsDir, { recursive: true })
-  }
+  console.log(
+    dryRun
+      ? `Dry run: syncing ${fromAgent.name} → ${toAgent.name} skills (no files will be changed).`
+      : `Syncing ${fromAgent.name} → ${toAgent.name} skills.`
+  )
+  if (!dryRun) await mkdir(toSkillsDir, { recursive: true })
   console.log(`Source: ${displayPath(fromSkillsDir)}`)
   console.log(`Target: ${displayPath(toSkillsDir)}\n`)
 
-  let copied = 0
-  let overwritten = 0
-  let skipped = 0
+  let copied = 0,
+    overwritten = 0,
+    skipped = 0
 
   for (const name of orderedSkillNames) {
     const sourceDir = join(fromSkillsDir, name)
@@ -518,32 +508,61 @@ async function syncSkills(options: {
       console.log(`  - skipped ${name} (already exists)`)
       continue
     }
-
-    if (dryRun) {
-      if (targetExists) {
-        overwritten++
-        console.log(`  - would overwrite ${name}`)
-      } else {
-        copied++
-        console.log(`  - would copy ${name}`)
-      }
-      continue
-    }
-
-    await cp(sourceDir, targetDir, { recursive: true, force: overwrite })
-    if (targetExists) {
-      overwritten++
-      console.log(`  - overwritten ${name}`)
-    } else {
-      copied++
-      console.log(`  - copied ${name}`)
-    }
+    if (!dryRun) await cp(sourceDir, targetDir, { recursive: true, force: overwrite })
+    const kind = logSkillAction(name, targetExists, dryRun, "copied", "copy")
+    if (kind === "overwrite") overwritten++
+    else copied++
   }
 
   console.log(
     `\nSummary: ${copied} copied, ${overwritten} overwritten, ${skipped} skipped` +
       (!overwrite && skipped > 0 ? " (use --overwrite to replace existing targets)" : "")
   )
+}
+
+function extractFlagValue(args: string[], flag: string): string | null {
+  const idx = args.indexOf(flag)
+  return idx >= 0 ? (args[idx + 1] ?? null) : null
+}
+
+function validateTransferExclusivity(sync: boolean, syncGemini: boolean, convert: boolean): void {
+  if ((sync || syncGemini) && convert)
+    throw new Error("--sync/--sync-gemini and --convert are mutually exclusive.")
+  if (sync && syncGemini) throw new Error("--sync and --sync-gemini are mutually exclusive.")
+}
+
+async function handleConvert(args: string[], dryRun: boolean, overwrite: boolean): Promise<void> {
+  const from = extractFlagValue(args, "--from")
+  const to = extractFlagValue(args, "--to")
+  if (!from) throw new Error("--convert requires --from <agent>.")
+  if (!to) throw new Error("--convert requires --to <agent>.")
+  await convertSkills({ from, to, dryRun, overwrite })
+}
+
+async function handleSync(
+  args: string[],
+  syncGemini: boolean,
+  dryRun: boolean,
+  overwrite: boolean
+): Promise<void> {
+  const positional = args.filter((a) => !a.startsWith("--"))
+  if (positional.length > 0) throw new Error("--sync/--sync-gemini does not accept a skill name.")
+  const from = syncGemini ? "gemini" : extractFlagValue(args, "--from")
+  if (!from) throw new Error("--sync requires --from <agent>.")
+  await syncSkills({ from, to: "claude", dryRun, overwrite })
+}
+
+async function handleSkillTransferArgs(args: string[]): Promise<boolean> {
+  const sync = args.includes("--sync")
+  const syncGemini = args.includes("--sync-gemini")
+  const convert = args.includes("--convert")
+  if (!sync && !syncGemini && !convert) return false
+  validateTransferExclusivity(sync, syncGemini, convert)
+  const dryRun = args.includes("--dry-run")
+  const overwrite = args.includes("--overwrite")
+  if (convert) await handleConvert(args, dryRun, overwrite)
+  else await handleSync(args, syncGemini, dryRun, overwrite)
+  return true
 }
 
 export const skillCommand: Command = {
@@ -580,49 +599,10 @@ export const skillCommand: Command = {
     { flags: "--overwrite", description: "Allow overwriting existing target skills" },
   ],
   async run(args) {
-    const sync = args.includes("--sync")
-    const syncGemini = args.includes("--sync-gemini")
-    const convert = args.includes("--convert")
-    const dryRun = args.includes("--dry-run")
-    const overwrite = args.includes("--overwrite")
+    const handled = await handleSkillTransferArgs(args)
+    if (handled) return
 
-    if ((sync || syncGemini) && convert) {
-      throw new Error("--sync/--sync-gemini and --convert are mutually exclusive.")
-    }
-    if (sync && syncGemini) {
-      throw new Error("--sync and --sync-gemini are mutually exclusive.")
-    }
-
-    if (convert) {
-      const fromIdx = args.indexOf("--from")
-      const toIdx = args.indexOf("--to")
-      if (fromIdx === -1 || !args[fromIdx + 1]) {
-        throw new Error("--convert requires --from <agent>.")
-      }
-      if (toIdx === -1 || !args[toIdx + 1]) {
-        throw new Error("--convert requires --to <agent>.")
-      }
-      const from = args[fromIdx + 1]!
-      const to = args[toIdx + 1]!
-      await convertSkills({ from, to, dryRun, overwrite })
-      return
-    }
-
-    if (sync || syncGemini) {
-      const positional = args.filter((a) => !a.startsWith("--"))
-      if (positional.length > 0) {
-        throw new Error("--sync/--sync-gemini does not accept a skill name.")
-      }
-      const fromIdx = args.indexOf("--from")
-      const from = syncGemini ? "gemini" : (args[fromIdx + 1] ?? null)
-      if (!from) {
-        throw new Error("--sync requires --from <agent>.")
-      }
-      await syncSkills({ from, to: "claude", dryRun, overwrite })
-      return
-    }
-
-    if (dryRun || overwrite) {
+    if (args.includes("--dry-run") || args.includes("--overwrite")) {
       throw new Error(
         "--dry-run and --overwrite are only valid with --sync, --sync-gemini, or --convert."
       )

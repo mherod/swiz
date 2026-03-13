@@ -57,87 +57,69 @@ const TOUCH_CMD_RE = shellSegmentCommandRe("touch(?:\\s|$)")
 const PYTHON_CMD_RE = shellSegmentCommandRe("python3?(?:\\s|$)")
 const NODE_TS_NODE_CMD_RE = shellSegmentCommandRe("(node|ts-node)\\s")
 
-function buildRules(pm: string | null, runtime: "bun" | "node"): Rule[] {
+const DESTRUCTIVE_FIRST_CMDS = new Set(["rm", "rmdir", "unlink", "shred"])
+const DESTRUCTIVE_CHAIN_RE = /(?:\|\s*xargs\s+rm|&&\s*rm\b|;\s*rm\b)/
+const FIND_DELETE_RE = /find\s.*-delete/
+const FIND_EXEC_RM_RE = /find\s.*-exec\s+rm\s/
+
+function isDestructiveDelete(c: string): boolean {
+  const first = c.trimStart().split(/\s+/)[0]
+  if (DESTRUCTIVE_FIRST_CMDS.has(first ?? "")) return true
+  return DESTRUCTIVE_CHAIN_RE.test(c) || FIND_DELETE_RE.test(c) || FIND_EXEC_RM_RE.test(c)
+}
+
+function buildShellToolRules(): Rule[] {
   return [
     {
-      // grep as a command: at start of line or directly after a pipe (not inside quoted strings)
       match: (c) => GREP_CMD_RE.test(c),
       severity: "warn",
-      message: [
-        "Tip: prefer `rg` (ripgrep) over `grep` — it's faster and respects .gitignore.",
-        "  rg 'pattern'  |  rg -l 'pattern'  |  rg --type ts 'pattern'",
-      ].join("\n"),
+      message:
+        "Tip: prefer `rg` (ripgrep) over `grep` — it's faster and respects .gitignore.\n  rg 'pattern'  |  rg -l 'pattern'  |  rg --type ts 'pattern'",
     },
     {
       match: (c) => CD_CMD_RE.test(c),
-      message: [
-        "Do not use `cd`. Changing directory loses workspace context.",
-        "",
-        "Instead, use one of these approaches:",
-        "  • Absolute paths: `git status /path/to/repo`",
-        "  • Tool directory flags: `git -C /repo status`, `pnpm --prefix /path test`",
-        "  • Workspace filters: `pnpm --filter @scope/app test` (for monorepos)",
-        "  • Read tool: Use Read or Glob tools for file operations (no cd needed)",
-      ].join("\n"),
+      message:
+        "Do not use `cd`. Changing directory loses workspace context.\n\nInstead, use one of these approaches:\n  • Absolute paths: `git status /path/to/repo`\n  • Tool directory flags: `git -C /repo status`, `pnpm --prefix /path test`\n  • Workspace filters: `pnpm --filter @scope/app test` (for monorepos)\n  • Read tool: Use Read or Glob tools for file operations (no cd needed)",
     },
     {
       match: (c) => FIND_CMD_RE.test(c),
       severity: "warn",
-      message: [
-        "Tip: prefer `fd` or the Glob tool over `find` — faster and respects .gitignore.",
-        "  fd 'pattern'  |  fd -e ts  |  Glob tool for codebase file discovery",
-      ].join("\n"),
+      message:
+        "Tip: prefer `fd` or the Glob tool over `find` — faster and respects .gitignore.\n  fd 'pattern'  |  fd -e ts  |  Glob tool for codebase file discovery",
     },
     {
       match: (c) => AWK_REDIRECT_RE.test(c) || AWK_TEE_INPLACE_RE.test(c),
-      message: [
-        "Do not use `awk` to write files. It produces unreviewed changes.",
-        "",
-        "Instead, use the Edit tool for file modifications:",
-        "  • Edit tool: precise old_string → new_string replacements (preferred)",
-        "  • For data extraction, `awk '{print $1}' file` and `awk --help` are allowed.",
-      ].join("\n"),
+      message:
+        "Do not use `awk` to write files. It produces unreviewed changes.\n\nInstead, use the Edit tool for file modifications:\n  • Edit tool: precise old_string → new_string replacements (preferred)\n  • For data extraction, `awk '{print $1}' file` and `awk --help` are allowed.",
     },
     {
       match: (c) => SED_INPLACE_RE.test(c) || SED_REDIRECT_RE.test(c),
-      message: [
-        "Do not use `sed` to write or edit files. It is unreliable and produces unreviewed changes.",
-        "",
-        "Instead, use the Edit tool for file modifications:",
-        "  • Edit tool: precise old_string → new_string replacements (preferred)",
-        "  • Write tool: overwrite a file with entirely new content",
-        "",
-        "Read-only sed usage (e.g. `sed -n '...' file` in a pipeline) is allowed.",
-      ].join("\n"),
+      message:
+        "Do not use `sed` to write or edit files. It is unreliable and produces unreviewed changes.\n\nInstead, use the Edit tool for file modifications:\n  • Edit tool: precise old_string → new_string replacements (preferred)\n  • Write tool: overwrite a file with entirely new content\n\nRead-only sed usage (e.g. `sed -n '...' file` in a pipeline) is allowed.",
     },
     {
-      // rm as standalone command (not git rm, cargo rm, etc.) or in pipe chains,
-      // plus find -delete, find -exec rm, unlink, shred, rmdir
-      match: (c) => {
-        const first = c.trimStart().split(/\s+/)[0]
-        if (first === "rm" || first === "rmdir" || first === "unlink" || first === "shred")
-          return true
-        if (/(?:\|\s*xargs\s+rm|&&\s*rm\b|;\s*rm\b)/.test(c)) return true
-        if (/find\s.*-delete/.test(c)) return true
-        if (/find\s.*-exec\s+rm\s/.test(c)) return true
-        return false
-      },
+      match: isDestructiveDelete,
       message: [
         "Do not use destructive deletion commands. Files cannot be recovered.",
-        "",
-        "Use safe deletion instead:",
-        "  • trash <path>         — moves to macOS Trash (recoverable)",
-        "  • mv <path> ~/.Trash/  — manual fallback if trash unavailable",
-        ...(skillExists("delete-safely") ? ["", "See the /delete-safely skill for details."] : []),
-      ].join("\n"),
+        "\nUse safe deletion instead:\n  • trash <path>         — moves to macOS Trash (recoverable)\n  • mv <path> ~/.Trash/  — manual fallback if trash unavailable",
+        ...(skillExists("delete-safely") ? ["\nSee the /delete-safely skill for details."] : []),
+      ].join(""),
     },
+    {
+      match: (c) => TOUCH_CMD_RE.test(c),
+      message:
+        "Do not use `touch` to create files. Use the Write tool instead.\n\nThe Write tool is tracked, reviewable, and works for both empty and populated files:\n  • Write tool: create or overwrite a file with specific content\n  • Edit tool:  modify an existing file with targeted changes",
+    },
+  ]
+}
+
+function buildGitRules(): Rule[] {
+  return [
     {
       match: (c) => /git\s+stash(\s|$)/.test(c),
       message: [
         "Do not use `git stash`. Stashed changes are easy to lose and add hidden state.",
-        "",
-        "Instead:",
-        '  • Commit work-in-progress: `git commit -m "wip: ..."`',
+        '\nInstead:\n  • Commit work-in-progress: `git commit -m "wip: ..."`',
         ...(skillExists("commit")
           ? ["  • Use the /commit skill to preserve your current state"]
           : []),
@@ -146,133 +128,114 @@ function buildRules(pm: string | null, runtime: "bun" | "node"): Rule[] {
     },
     {
       match: (c) => /git\s+restore(\s|$)/.test(c),
-      message: [
-        "Do not use `git restore`. It silently discards uncommitted changes.",
-        "",
-        "Instead:",
-        "  • Use the Edit tool to undo specific changes in a file",
-        "  • Read the file first, then apply targeted corrections",
-        "  • If you want to revert a commit, use `git revert <hash>` (preserves history)",
-      ].join("\n"),
+      message:
+        "Do not use `git restore`. It silently discards uncommitted changes.\n\nInstead:\n  • Use the Edit tool to undo specific changes in a file\n  • Read the file first, then apply targeted corrections\n  • If you want to revert a commit, use `git revert <hash>` (preserves history)",
     },
     {
       match: (c) => /git\s+reset\s+--hard/.test(c),
-      message: [
-        "Do not use `git reset --hard`. It permanently destroys uncommitted changes.",
-        "",
-        "Instead:",
-        "  • `git revert <hash>`  — undo a commit by adding a new inverse commit",
-        "  • `git reset HEAD~1`   — soft reset: keeps changes staged (recoverable)",
-        "  • Edit tool            — undo specific file changes manually",
-      ].join("\n"),
+      message:
+        "Do not use `git reset --hard`. It permanently destroys uncommitted changes.\n\nInstead:\n  • `git revert <hash>`  — undo a commit by adding a new inverse commit\n  • `git reset HEAD~1`   — soft reset: keeps changes staged (recoverable)\n  • Edit tool            — undo specific file changes manually",
     },
     {
       match: (c) => /git\s+clean(\s|$)/.test(c),
-      message: [
-        "Do not use `git clean`. It permanently deletes untracked files.",
-        "",
-        "Instead:",
-        "  • `git clean -n`  — dry run: see what would be deleted first",
-        "  • trash <file>    — move specific files to Trash (recoverable)",
-        "  • Review untracked files with `git status` before deleting anything",
-      ].join("\n"),
+      message:
+        "Do not use `git clean`. It permanently deletes untracked files.\n\nInstead:\n  • `git clean -n`  — dry run: see what would be deleted first\n  • trash <file>    — move specific files to Trash (recoverable)\n  • Review untracked files with `git status` before deleting anything",
     },
     {
       match: (c) => /git\s+checkout\s+(?:\S+\s+)?--\s+\S+/.test(c),
-      message: [
-        "Do not use `git checkout -- <file-or-glob>` or `git checkout <ref-or-hash> -- <file-or-glob>`. They silently discard file changes.",
-        "",
-        "Instead:",
-        "  • Use the Edit tool to undo specific changes in a file",
-        "  • Read the file, identify what to revert, then apply a targeted edit",
-        "  • `git revert <hash>`  — undo an entire commit safely",
-      ].join("\n"),
+      message:
+        "Do not use `git checkout -- <file-or-glob>` or `git checkout <ref-or-hash> -- <file-or-glob>`. They silently discard file changes.\n\nInstead:\n  • Use the Edit tool to undo specific changes in a file\n  • Read the file, identify what to revert, then apply a targeted edit\n  • `git revert <hash>`  — undo an entire commit safely",
     },
-    {
-      match: (c) => TOUCH_CMD_RE.test(c),
-      message: [
-        "Do not use `touch` to create files. Use the Write tool instead.",
-        "",
-        "The Write tool is tracked, reviewable, and works for both empty and populated files:",
-        "  • Write tool: create or overwrite a file with specific content",
-        "  • Edit tool:  modify an existing file with targeted changes",
-      ].join("\n"),
-    },
-    {
-      match: (c) => PYTHON_CMD_RE.test(c),
-      message: [
-        "Do not use `python` or `python3`. The system Python version is unreliable",
-        "across environments.",
-        "",
-        `Use \`${runtime}\` instead — it ships a consistent runtime:`,
-        ...(runtime === "bun"
-          ? [
-              "  • bun script.ts       — run a TypeScript or JavaScript file",
-              "  • bun -e 'code here'  — evaluate an inline expression",
-            ]
-          : [
-              "  • node script.js      — run a JavaScript file",
-              "  • npx ts-node file.ts — run TypeScript (with ts-node)",
-            ]),
-      ].join("\n"),
-    },
-    ...((pm === "bun"
-      ? [
-          {
-            match: (c: string) => NODE_TS_NODE_CMD_RE.test(c),
-            message: [
-              "Do not use `node` or `ts-node`. This project uses bun.",
-              "",
-              "bun is the project-standard runtime — native TypeScript, faster startup:",
-              "  • bun script.ts       — run a TypeScript or JavaScript file",
-              "  • bun -e 'code here'  — evaluate an inline expression",
-              "  • bun run <script>    — run a package.json script",
-              "  • bun test            — run tests",
-            ].join("\n"),
-          },
-        ]
-      : []) as Rule[]),
     {
       match: (c) => /git\s+commit\b.*--no-verify/.test(c) || /git\s+push\b.*--no-verify/.test(c),
-      message: [
-        "Do not use `--no-verify`. It bypasses pre-commit hooks and safety mechanisms.",
-        "",
-        "Address the underlying issue flagged by the hooks instead of circumventing them.",
-      ].join("\n"),
+      message:
+        "Do not use `--no-verify`. It bypasses pre-commit hooks and safety mechanisms.\n\nAddress the underlying issue flagged by the hooks instead of circumventing them.",
     },
     {
-      // --trailer is a flag on the git command itself, not inside a quoted string.
       match: (c) => /git\s+.*--trailer/.test(c),
-      message: [
-        "Do not use `--trailer` with git. AI tools use this to inject co-authorship signatures.",
-        "",
-        "Create commits without trailer attribution.",
-      ].join("\n"),
+      message:
+        "Do not use `--trailer` with git. AI tools use this to inject co-authorship signatures.\n\nCreate commits without trailer attribution.",
     },
     {
-      // Co-authored-by appears *inside* the quoted commit message, so this rule
-      // needs the raw (unstripped) command to see the message body.
       useRawCommand: true,
       match: (c) => {
         const mMatch = c.match(/git\s+commit\s.*-m\s+["']([^"']*)/)
-        if (!mMatch) return false
-        return /Co-authored-by:/i.test(mMatch[1] ?? "")
+        return mMatch ? /Co-authored-by:/i.test(mMatch[1] ?? "") : false
       },
-      message: [
-        "Do not include `Co-authored-by:` in commit messages.",
-        "",
-        "Create commits without co-author attribution.",
-      ].join("\n"),
+      message:
+        "Do not include `Co-authored-by:` in commit messages.\n\nCreate commits without co-author attribution.",
     },
     {
       match: (c) => /gh\s+.*--admin/.test(c),
-      message: [
-        "Do not use `gh --admin`. It bypasses repository protection rules and required checks.",
-        "",
-        "Ensure PRs pass all required checks and obtain proper approvals.",
-      ].join("\n"),
+      message:
+        "Do not use `gh --admin`. It bypasses repository protection rules and required checks.\n\nEnsure PRs pass all required checks and obtain proper approvals.",
     },
   ]
+}
+
+function buildRuntimeRules(pm: string | null, runtime: "bun" | "node"): Rule[] {
+  const rules: Rule[] = [
+    {
+      match: (c) => PYTHON_CMD_RE.test(c),
+      message:
+        `Do not use \`python\` or \`python3\`. The system Python version is unreliable across environments.\n\nUse \`${runtime}\` instead — it ships a consistent runtime:\n` +
+        (runtime === "bun"
+          ? "  • bun script.ts       — run a TypeScript or JavaScript file\n  • bun -e 'code here'  — evaluate an inline expression"
+          : "  • node script.js      — run a JavaScript file\n  • npx ts-node file.ts — run TypeScript (with ts-node)"),
+    },
+  ]
+  if (pm === "bun") {
+    rules.push({
+      match: (c: string) => NODE_TS_NODE_CMD_RE.test(c),
+      message:
+        "Do not use `node` or `ts-node`. This project uses bun.\n\nbun is the project-standard runtime — native TypeScript, faster startup:\n  • bun script.ts       — run a TypeScript or JavaScript file\n  • bun -e 'code here'  — evaluate an inline expression\n  • bun run <script>    — run a package.json script\n  • bun test            — run tests",
+    })
+  }
+  return rules
+}
+
+function buildRules(pm: string | null, runtime: "bun" | "node"): Rule[] {
+  return [...buildShellToolRules(), ...buildGitRules(), ...buildRuntimeRules(pm, runtime)]
+}
+
+const SUPPORTED_BUN_REPORTERS = new Set(["dots", "junit"])
+const BUN_TEST_SEGMENT_RE = new RegExp(`${SHELL_SEGMENT_BOUNDARY}\\s*bun\\s+test\\b([^|;&]*)`, "g")
+const REPORTER_FLAG_RE = /(?:--reporter|-r)(?:=|\s+)(\\?['"]?)([a-z][a-z0-9-]*)\1/g
+
+function checkBunTestReporter(command: string): void {
+  for (const segMatch of command.matchAll(BUN_TEST_SEGMENT_RE)) {
+    const segment = segMatch[1] ?? ""
+    const reporterMatches = [...segment.matchAll(REPORTER_FLAG_RE)]
+    if (reporterMatches.length === 0) continue
+    const reporter = reporterMatches[reporterMatches.length - 1]?.[2]
+    if (reporter && !SUPPORTED_BUN_REPORTERS.has(reporter)) {
+      const corrected = command.replace(
+        /(?:--reporter|-r)(?:=|\s+)\\?['"]?[a-z][a-z0-9-]*\\?['"]?/g,
+        "--reporter=dots"
+      )
+      denyPreToolUse(
+        `Bun only supports 'dots' and 'junit' reporters — '${reporter}' is not valid.\n\n` +
+          `Use this corrected command instead:\n  ${corrected}`
+      )
+    }
+  }
+}
+
+function evaluateRules(rules: Rule[], command: string, strippedCommand: string): string[] {
+  const warnings: string[] = []
+  for (const rule of rules) {
+    // Content-inspection rules (useRawCommand) see the original command so they
+    // can read quoted argument bodies.  All other rules see the stripped command
+    // to avoid false positives on banned tokens embedded in string literals.
+    if (!rule.match(rule.useRawCommand ? command : strippedCommand)) continue
+
+    if (rule.severity === "warn") {
+      warnings.push(rule.message)
+    } else {
+      denyPreToolUse(rule.message)
+    }
+  }
+  return warnings
 }
 
 async function main() {
@@ -291,48 +254,10 @@ async function main() {
   // for reporter correction output which must reference the real command text.
   const strippedCommand = stripQuotedStrings(command)
 
-  const warnings: string[] = []
+  const warnings = evaluateRules(RULES, command, strippedCommand)
 
-  for (const rule of RULES) {
-    // Content-inspection rules (useRawCommand) see the original command so they
-    // can read quoted argument bodies.  All other rules see the stripped command
-    // to avoid false positives on banned tokens embedded in string literals.
-    if (!rule.match(rule.useRawCommand ? command : strippedCommand)) continue
+  checkBunTestReporter(command)
 
-    if (rule.severity === "warn") {
-      warnings.push(rule.message)
-    } else {
-      denyPreToolUse(rule.message)
-    }
-  }
-
-  // Reporter normalization: bun test only supports 'dots' and 'junit'.
-  // Split the command into per-invocation segments at chain operators (|, &, ;)
-  // so we never match --reporter flags outside a bun test invocation.
-  const SUPPORTED_BUN_REPORTERS = new Set(["dots", "junit"])
-  const BUN_TEST_SEGMENT_RE = new RegExp(
-    `${SHELL_SEGMENT_BOUNDARY}\\s*bun\\s+test\\b([^|;&]*)`,
-    "g"
-  )
-  for (const segMatch of command.matchAll(BUN_TEST_SEGMENT_RE)) {
-    const segment = segMatch[1] ?? ""
-    const REPORTER_FLAG_RE = /(?:--reporter|-r)(?:=|\s+)(\\?['"]?)([a-z][a-z0-9-]*)\1/g
-    const reporterMatches = [...segment.matchAll(REPORTER_FLAG_RE)]
-    if (reporterMatches.length === 0) continue
-    const reporter = reporterMatches[reporterMatches.length - 1]?.[2]
-    if (reporter && !SUPPORTED_BUN_REPORTERS.has(reporter)) {
-      const corrected = command.replace(
-        /(?:--reporter|-r)(?:=|\s+)\\?['"]?[a-z][a-z0-9-]*\\?['"]?/g,
-        "--reporter=dots"
-      )
-      denyPreToolUse(
-        `Bun only supports 'dots' and 'junit' reporters — '${reporter}' is not valid.\n\n` +
-          `Use this corrected command instead:\n  ${corrected}`
-      )
-    }
-  }
-
-  // Emit collected warnings as allow-with-hint (doesn't block the command)
   if (warnings.length > 0) {
     allowPreToolUse(warnings.join("\n\n"))
   }

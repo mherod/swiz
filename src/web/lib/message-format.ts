@@ -371,6 +371,53 @@ function extractLeadingSlashCommandBlock(text: string): {
   }
 }
 
+function extractCaveatBlock(
+  text: string
+): { cleanedText: string; block: ParsedUserMetadataBlock } | null {
+  const caveatMatch = /<local-command-caveat>([\s\S]*?)<\/local-command-caveat>/gi.exec(text)
+  if (!caveatMatch) return null
+  return {
+    cleanedText: text.replace(caveatMatch[0], "").trim(),
+    block: {
+      title: "Local Commands",
+      details: [],
+      notes: [
+        "The messages below were generated automatically while the user ran local commands. Do not respond to them.",
+      ],
+      kind: "localCommandCaveat",
+    },
+  }
+}
+
+const COMMAND_DETAIL_TAGS: Array<{ tag: string; label: string; alwaysPush: boolean }> = [
+  { tag: "command-name", label: "command", alwaysPush: true },
+  { tag: "command-args", label: "args", alwaysPush: false },
+  { tag: "command-message", label: "output", alwaysPush: false },
+]
+
+function extractCommandDetailBlock(text: string): {
+  cleanedText: string
+  block: ParsedUserMetadataBlock | null
+} {
+  const details: Array<{ label: string; value: string }> = []
+  let cleanedText = text
+
+  for (const { tag, label, alwaysPush } of COMMAND_DETAIL_TAGS) {
+    const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "gi")
+    const match = re.exec(cleanedText)
+    if (!match) continue
+    const value = match[1]?.trim() ?? ""
+    if (alwaysPush || value) details.push({ label, value })
+    cleanedText = cleanedText.replace(match[0], "").trim()
+  }
+
+  if (details.length === 0) return { cleanedText: text, block: null }
+  return {
+    cleanedText,
+    block: { title: "Executed Local Command", details, notes: [], kind: "localCommand" },
+  }
+}
+
 function extractLocalCommandBlocks(text: string): {
   cleanedText: string
   blocks: ParsedUserMetadataBlock[]
@@ -378,52 +425,15 @@ function extractLocalCommandBlocks(text: string): {
   const blocks: ParsedUserMetadataBlock[] = []
   let cleanedText = text
 
-  const caveatMatch = /<local-command-caveat>([\s\S]*?)<\/local-command-caveat>/gi.exec(cleanedText)
-  if (caveatMatch) {
-    cleanedText = cleanedText.replace(caveatMatch[0], "").trim()
-    blocks.push({
-      title: "Local Commands",
-      details: [],
-      notes: [
-        "The messages below were generated automatically while the user ran local commands. Do not respond to them.",
-      ],
-      kind: "localCommandCaveat",
-    })
+  const caveat = extractCaveatBlock(cleanedText)
+  if (caveat) {
+    cleanedText = caveat.cleanedText
+    blocks.push(caveat.block)
   }
 
-  const nameMatch = /<command-name>([\s\S]*?)<\/command-name>/gi.exec(cleanedText)
-  const messageMatch = /<command-message>([\s\S]*?)<\/command-message>/gi.exec(cleanedText)
-  const argsMatch = /<command-args>([\s\S]*?)<\/command-args>/gi.exec(cleanedText)
-
-  if (nameMatch || messageMatch || argsMatch) {
-    const details: Array<{ label: string; value: string }> = []
-
-    if (nameMatch) {
-      details.push({ label: "command", value: nameMatch[1]?.trim() ?? "" })
-      cleanedText = cleanedText.replace(nameMatch[0], "").trim()
-    }
-    if (argsMatch) {
-      const args = argsMatch[1]?.trim()
-      if (args) {
-        details.push({ label: "args", value: args })
-      }
-      cleanedText = cleanedText.replace(argsMatch[0], "").trim()
-    }
-    if (messageMatch) {
-      const msg = messageMatch[1]?.trim()
-      if (msg) {
-        details.push({ label: "output", value: msg })
-      }
-      cleanedText = cleanedText.replace(messageMatch[0], "").trim()
-    }
-
-    blocks.push({
-      title: "Executed Local Command",
-      details,
-      notes: [],
-      kind: "localCommand",
-    })
-  }
+  const command = extractCommandDetailBlock(cleanedText)
+  cleanedText = command.cleanedText
+  if (command.block) blocks.push(command.block)
 
   return { cleanedText, blocks }
 }
@@ -603,13 +613,18 @@ function extractAttachedFilesBlock(text: string): {
   }
 }
 
+function extractAttr(attrsRaw: string, name: string): string | null {
+  const re = new RegExp(`${name}="([^"]+)"`, "i")
+  return re.exec(attrsRaw)?.[1]?.trim() ?? null
+}
+
 function parseCodeSelectionBlock(
   attrsRaw: string,
   codeRaw: string,
   index: number
 ): ParsedUserMetadataBlock | null {
-  const path = /path="([^"]+)"/i.exec(attrsRaw)?.[1]?.trim() ?? null
-  const lines = /lines="([^"]+)"/i.exec(attrsRaw)?.[1]?.trim() ?? null
+  const path = extractAttr(attrsRaw, "path")
+  const lines = extractAttr(attrsRaw, "lines")
 
   const details: Array<{ label: string; value: string }> = []
   if (path) details.push({ label: "path", value: compactPathValue(path) })
@@ -785,82 +800,88 @@ function parseGenericMetadataBlock(tagName: string, raw: string): ParsedUserMeta
   }
 }
 
-function parseManuallyAttachedSkills(raw: string | null): ParsedAttachedSkills | null {
-  if (!raw) return null
-  const lines = raw
+function processSkillLine(
+  line: string,
+  current: ParsedAttachedSkill | null,
+  skills: ParsedAttachedSkill[]
+): ParsedAttachedSkill | null {
+  const nameMatch = /^Skill Name:\s*(.+)$/i.exec(line)
+  if (nameMatch?.[1]) {
+    if (current) skills.push(current)
+    return { name: nameMatch[1].trim(), path: null }
+  }
+  const pathMatch = /^Path:\s*(.+)$/i.exec(line)
+  if (pathMatch?.[1] && current) {
+    current.path = pathMatch[1].trim()
+  }
+  return current
+}
+
+function filterSkillLines(raw: string): string[] {
+  return raw
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.length > 0)
+    .filter((line) => line.length > 0 && !/^SKILL\.md content:/i.test(line))
+}
+
+function parseManuallyAttachedSkills(raw: string | null): ParsedAttachedSkills | null {
+  if (!raw) return null
+  const lines = filterSkillLines(raw)
   if (lines.length === 0) return null
 
   const skills: ParsedAttachedSkill[] = []
   let current: ParsedAttachedSkill | null = null
 
   for (const line of lines) {
-    const nameMatch = /^Skill Name:\s*(.+)$/i.exec(line)
-    if (nameMatch?.[1]) {
-      if (current) skills.push(current)
-      current = { name: nameMatch[1].trim(), path: null }
-      continue
-    }
-
-    const pathMatch = /^Path:\s*(.+)$/i.exec(line)
-    if (pathMatch?.[1]) {
-      if (current) current.path = pathMatch[1].trim()
-      continue
-    }
-
-    if (/^SKILL\.md content:/i.test(line)) continue
+    current = processSkillLine(line, current, skills)
   }
 
   if (current) skills.push(current)
   if (skills.length === 0) return null
 
-  return {
-    title: `Attached skills${skills.length > 0 ? ` (${skills.length})` : ""}`,
-    skills,
-    notes: [],
+  return { title: `Attached skills (${skills.length})`, skills, notes: [] }
+}
+
+interface HookContextPatternMatch {
+  label: string
+  re: RegExp
+  target: "detail" | "note"
+}
+
+const HOOK_CONTEXT_PATTERNS: HookContextPatternMatch[] = [
+  { label: "branch", re: /branch:\s*([^\s|]+)/i, target: "detail" },
+  { label: "uncommitted", re: /uncommitted files:\s*(\d+)/i, target: "detail" },
+  { label: "recovery", re: /If already done,\s*run:\s*([^\n]+)$/i, target: "detail" },
+]
+
+const HOOK_CONTEXT_NOTE_RE = /Prior session.*?incomplete task\(s\)\./i
+
+function extractSource(text: string): { source: string | null; remaining: string } {
+  const m = /^\[([^\]]+)\]\s*/.exec(text)
+  if (!m?.[1]) return { source: null, remaining: text }
+  return { source: m[1], remaining: text.slice(m[0].length).trim() }
+}
+
+function extractHookDetails(text: string): Array<{ label: string; value: string }> {
+  const details: Array<{ label: string; value: string }> = []
+  for (const { label, re } of HOOK_CONTEXT_PATTERNS) {
+    const m = re.exec(text)
+    if (m?.[1]) details.push({ label, value: m[1].trim() })
   }
+  return details
 }
 
 function parseHookContext(rawContext: string): ParsedHookContext | null {
   if (!rawContext) return null
 
-  let source: string | null = null
-  let remaining = rawContext
-  const sourceMatch = /^\[([^\]]+)\]\s*/.exec(remaining)
-  if (sourceMatch?.[1]) {
-    source = sourceMatch[1]
-    remaining = remaining.slice(sourceMatch[0].length).trim()
-  }
-
-  const details: Array<{ label: string; value: string }> = []
+  const { source, remaining } = extractSource(rawContext)
+  const details = extractHookDetails(remaining)
   const notes: string[] = []
 
-  // Extract common key/value metadata from hook output.
-  const branchMatch = /branch:\s*([^\s|]+)/i.exec(remaining)
-  if (branchMatch?.[1]) {
-    details.push({ label: "branch", value: branchMatch[1].trim() })
-  }
+  const priorTaskMatch = HOOK_CONTEXT_NOTE_RE.exec(remaining)
+  if (priorTaskMatch?.[0]) notes.push(priorTaskMatch[0].trim())
 
-  const dirtyMatch = /uncommitted files:\s*(\d+)/i.exec(remaining)
-  if (dirtyMatch?.[1]) {
-    details.push({ label: "uncommitted", value: dirtyMatch[1].trim() })
-  }
-
-  const priorTaskMatch = /Prior session.*?incomplete task\(s\)\./i.exec(remaining)
-  if (priorTaskMatch?.[0]) {
-    notes.push(priorTaskMatch[0].trim())
-  }
-
-  const recoveryCmdMatch = /If already done,\s*run:\s*([^\n]+)$/i.exec(remaining)
-  if (recoveryCmdMatch?.[1]) {
-    details.push({ label: "recovery", value: recoveryCmdMatch[1].trim() })
-  }
-
-  if (details.length === 0 && notes.length === 0) {
-    notes.push(remaining)
-  }
+  if (details.length === 0 && notes.length === 0) notes.push(remaining)
 
   return { source, details, notes }
 }

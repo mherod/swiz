@@ -122,98 +122,109 @@ async function recreateTaskFile(
   await Bun.write(taskPath, JSON.stringify(task, null, 2))
 }
 
+async function reconcileSnapshotTasks(
+  snapshot: CompactSnapshot,
+  sessionId: string,
+  home: string
+): Promise<{
+  recreated: Array<Pick<SessionTask, "id" | "status" | "subject">>
+  sections: string[]
+}> {
+  const sections: string[] = []
+  const recreated: Array<Pick<SessionTask, "id" | "status" | "subject">> = []
+
+  if (snapshot.tasks.length === 0) return { recreated, sections }
+
+  sections.push(renderSnapshotSummary(snapshot))
+
+  const existingTasks = await readSessionTasks(sessionId, home)
+  const existingIds = new Set(existingTasks.map((t) => t.id))
+  for (const snap of snapshot.tasks) {
+    if (existingIds.has(snap.id)) continue
+    await recreateTaskFile(sessionId, home, snap)
+    recreated.push({ id: snap.id, status: snap.status, subject: snap.subject })
+  }
+
+  if (recreated.length > 0) {
+    const restoredList = formatTaskList(recreated, {
+      limit: TASK_PREVIEW_LIMIT,
+      overflowLabel: "restored task file(s)",
+      subjectMaxLength: TASK_SUBJECT_MAX_CHARS,
+    })
+    sections.push(
+      `Compact snapshot restored ${recreated.length} missing task file(s):\n` +
+        restoredList +
+        `\n\nThese task files were recreated from the pre-compaction snapshot. ` +
+        `Verify their status reflects reality and update as needed.`
+    )
+  }
+
+  return { recreated, sections }
+}
+
+function buildIncompleteTaskSection(tasks: SessionTask[]): string {
+  return (
+    `This session has ${tasks.length} incomplete task(s) that survived compaction:\n` +
+    formatTaskList(tasks, {
+      limit: TASK_PREVIEW_LIMIT,
+      overflowLabel: "incomplete task(s)",
+      subjectMaxLength: TASK_SUBJECT_MAX_CHARS,
+    }) +
+    `\n\nIMPORTANT: Complete or update these tasks using TaskUpdate — do NOT create new tasks ` +
+    `for the same work. The stop hook will block until every task in this session is completed. ` +
+    `If the work described by a task is already done, mark it completed immediately.`
+  )
+}
+
+async function collectPriorSessionSection(cwd: string, sessionId: string): Promise<string | null> {
+  const priorResult = await findPriorSessionTasks(cwd, sessionId)
+  if (!priorResult || priorResult.tasks.length === 0) return null
+  const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
+  const completeHint = formatTaskCompleteCommand("<id>", priorSessionId, "note:done")
+  return (
+    `Prior session (${priorSessionId}) has ${priorTasks.length} incomplete task(s). ` +
+    `If already done, run: ${completeHint}\n` +
+    `Otherwise continue these before creating new tasks:\n` +
+    formatTaskList(priorTasks, {
+      limit: TASK_PREVIEW_LIMIT,
+      overflowLabel: "incomplete task(s)",
+      subjectMaxLength: TASK_SUBJECT_MAX_CHARS,
+    })
+  )
+}
+
 async function main(): Promise<void> {
   const input = sessionHookInputSchema.parse(await Bun.stdin.json())
   const matcher = input.matcher ?? input.trigger ?? ""
-
-  // Only fire on compact/resume events, not fresh sessions
   if (matcher !== "compact" && matcher !== "resume") return
 
-  const sections: string[] = []
-  sections.push(
+  const sections: string[] = [
     "Post-compaction context: Always use rg instead of grep. Use Edit tool, not sed/awk. " +
       "Do not co-author commits. Never disable code checks or quality gates. " +
-      "Run git diff after reaching success."
-  )
+      "Run git diff after reaching success.",
+  ]
 
   const cwd = input.cwd ?? process.cwd()
   const sessionId = input.session_id ?? ""
   const home = getHomeDirWithFallback("")
 
-  // Verify task files against the compact snapshot (if one exists).
-  // The snapshot was written by precompact-task-snapshot.ts immediately before
-  // compaction triggered, so it is the authoritative record of task state at
-  // that moment. Recreate any missing task files so the agent can reference
-  // them by ID without manually re-entering them.
   const snapshot = sessionId ? await readCompactSnapshot(sessionId, home) : null
-  if (snapshot && snapshot.tasks.length > 0) {
-    sections.push(renderSnapshotSummary(snapshot))
+  if (snapshot) {
+    const result = await reconcileSnapshotTasks(snapshot, sessionId, home)
+    sections.push(...result.sections)
   }
 
-  const recreated: Array<Pick<SessionTask, "id" | "status" | "subject">> = []
-  if (snapshot && snapshot.tasks.length > 0) {
-    const existingTasks = await readSessionTasks(sessionId, home)
-    const existingIds = new Set(existingTasks.map((t) => t.id))
-    for (const snap of snapshot.tasks) {
-      if (!existingIds.has(snap.id)) {
-        await recreateTaskFile(sessionId, home, snap)
-        recreated.push({ id: snap.id, status: snap.status, subject: snap.subject })
-      }
-    }
-    if (recreated.length > 0) {
-      const restoredList = formatTaskList(recreated, {
-        limit: TASK_PREVIEW_LIMIT,
-        overflowLabel: "restored task file(s)",
-        subjectMaxLength: TASK_SUBJECT_MAX_CHARS,
-      })
-      sections.push(
-        `Compact snapshot restored ${recreated.length} missing task file(s):\n` +
-          restoredList +
-          `\n\nThese task files were recreated from the pre-compaction snapshot. ` +
-          `Verify their status reflects reality and update as needed.`
-      )
-    }
-  }
-
-  // Surface current session's incomplete tasks — these survive compaction on disk
-  // but the agent loses awareness of them when context resets.
   const currentTasks = await readSessionTasks(sessionId, home)
   const currentIncomplete = currentTasks.filter((t) => isIncompleteTaskStatus(t.status))
   if (currentIncomplete.length > 0) {
-    sections.push(
-      `This session has ${currentIncomplete.length} incomplete task(s) that survived compaction:\n` +
-        formatTaskList(currentIncomplete, {
-          limit: TASK_PREVIEW_LIMIT,
-          overflowLabel: "incomplete task(s)",
-          subjectMaxLength: TASK_SUBJECT_MAX_CHARS,
-        }) +
-        `\n\nIMPORTANT: Complete or update these tasks using TaskUpdate — do NOT create new tasks ` +
-        `for the same work. The stop hook will block until every task in this session is completed. ` +
-        `If the work described by a task is already done, mark it completed immediately.`
-    )
-  }
-
-  // Also check prior sessions for incomplete tasks (if current session has none)
-  if (currentIncomplete.length === 0) {
-    const priorResult = await findPriorSessionTasks(cwd, sessionId)
-    if (priorResult && priorResult.tasks.length > 0) {
-      const { sessionId: priorSessionId, tasks: priorTasks } = priorResult
-      const completeHint = formatTaskCompleteCommand("<id>", priorSessionId, "note:done")
-      sections.push(
-        `Prior session (${priorSessionId}) has ${priorTasks.length} incomplete task(s). ` +
-          `If already done, run: ${completeHint}\n` +
-          `Otherwise continue these before creating new tasks:\n` +
-          formatTaskList(priorTasks, {
-            limit: TASK_PREVIEW_LIMIT,
-            overflowLabel: "incomplete task(s)",
-            subjectMaxLength: TASK_SUBJECT_MAX_CHARS,
-          })
-      )
-    }
+    sections.push(buildIncompleteTaskSection(currentIncomplete))
+  } else {
+    const priorSection = await collectPriorSessionSection(cwd, sessionId)
+    if (priorSection) sections.push(priorSection)
   }
 
   const ctx = joinSectionsWithinBudget(sections, COMPACT_CONTEXT_MAX_CHARS)
-  emitContext("SessionStart", ctx)
+  await emitContext("SessionStart", ctx)
 }
 
 if (import.meta.main) void main()

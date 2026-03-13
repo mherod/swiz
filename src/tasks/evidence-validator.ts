@@ -78,102 +78,111 @@ export function countEvidenceFields(evidence: string): string[] {
   return [...foundKeys]
 }
 
-export function validateEvidence(evidence: string): string | null {
-  if (!EVIDENCE_PREFIXES.some((p) => evidence.startsWith(p))) {
-    return (
-      `Invalid evidence format: "${evidence}"\n` +
-      "Evidence must start with a recognized prefix:\n" +
-      EVIDENCE_PREFIXES.map((p) => `  ${p}<value>`).join("\n") +
-      '\n\nExample: --evidence "commit:abc123f" or --evidence "note:CI green"'
-    )
-  }
+const SEGMENT_SPLIT_RE = /\s*(?:—|--|;|\|)\s*|\s*,\s+/
+const PREFIX_SHAPE_RE = /^(\w{2,20}):/
 
-  // Validate every segment's prefix, not just the first one.
-  const SEGMENT_SPLIT_RE = /\s*(?:—|--|;|\|)\s*|\s*,\s+/
-  const PREFIX_SHAPE_RE = /^(\w{2,20}):/
-  const segments = evidence
+function splitEvidenceSegments(evidence: string): string[] {
+  return evidence
     .split(SEGMENT_SPLIT_RE)
     .map((s) => s.trim())
     .filter(Boolean)
+}
+
+function formatPrefixList(): string {
+  return EVIDENCE_PREFIXES.map((p) => `  ${p}<value>`).join("\n")
+}
+
+function validateSegmentPrefixes(segments: string[]): string | null {
   for (const seg of segments) {
     const m = PREFIX_SHAPE_RE.exec(seg)
-    if (m) {
-      const candidate = `${m[1]}:`
-      const isKnownPrefix = EVIDENCE_PREFIXES.includes(candidate)
-      const matchesPattern = EVIDENCE_SEGMENT_PATTERNS.some(({ re }) => re.test(seg))
-      if (!isKnownPrefix && !matchesPattern) {
-        return (
-          `Invalid evidence prefix "${candidate}" in segment: "${seg}"\n` +
-          "Recognized prefixes:\n" +
-          EVIDENCE_PREFIXES.map((p) => `  ${p}<value>`).join("\n") +
-          '\n\nExample: --evidence "commit:abc123f" or --evidence "note:CI green"'
-        )
-      }
+    if (!m) continue
+    const candidate = `${m[1]}:`
+    const isKnownPrefix = EVIDENCE_PREFIXES.includes(candidate)
+    const matchesPattern = EVIDENCE_SEGMENT_PATTERNS.some(({ re }) => re.test(seg))
+    if (!isKnownPrefix && !matchesPattern) {
+      return `Invalid evidence prefix "${candidate}" in segment: "${seg}"\nRecognized prefixes:\n${formatPrefixList()}\n\nExample: --evidence "commit:abc123f" or --evidence "note:CI green"`
     }
   }
+  return null
+}
 
-  // commit: requires a valid 7–40 char hex SHA after the prefix.
-  // Accepts space-separated SHA lists (e.g. "commit:abc123f def456a").
+function validateCommitSegments(segments: string[]): string | null {
   for (const seg of segments) {
     const commitMatch = COMMIT_PREFIX_RE.exec(seg)
-    if (commitMatch) {
-      const value = seg.slice(commitMatch[0].length).trim()
-      if (value.length === 0) {
-        return `commit: requires a hex SHA value.\n` + `  --evidence "commit:abc123f"`
-      }
-      const tokens = value.split(/\s+/)
-      for (const token of tokens) {
-        if (!HEX_SHA_RE.test(token)) {
-          return (
-            `Invalid commit SHA: "${token}"\n` +
-            `commit: evidence must be a 7–40 character hex SHA.\n` +
-            `  --evidence "commit:abc123f"`
-          )
-        }
+    if (!commitMatch) continue
+    const value = seg.slice(commitMatch[0].length).trim()
+    if (value.length === 0)
+      return `commit: requires a hex SHA value.\n  --evidence "commit:abc123f"`
+    for (const token of value.split(/\s+/)) {
+      if (!HEX_SHA_RE.test(token)) {
+        return `Invalid commit SHA: "${token}"\ncommit: evidence must be a 7–40 character hex SHA.\n  --evidence "commit:abc123f"`
       }
     }
   }
+  return null
+}
 
-  // pr: requires a positive integer PR number (with optional # prefix) or a GitHub pull URL.
+function validatePrSegments(segments: string[]): string | null {
   for (const seg of segments) {
     const prMatch = PR_PREFIX_RE.exec(seg)
-    if (prMatch) {
-      const value = seg.slice(prMatch[0].length).trim()
-      if (value.length === 0) {
-        return `pr: requires a PR number or GitHub pull URL.\n` + `  --evidence "pr:#42"`
-      }
-      if (!PR_NUMBER_RE.test(value) && !PR_URL_RE.test(value)) {
-        return (
-          `Invalid PR reference: "${value}"\n` +
-          `pr: evidence must be a PR number or GitHub pull URL.\n` +
-          `  --evidence "pr:#42" or --evidence "pr:https://github.com/owner/repo/pull/42"`
-        )
-      }
+    if (!prMatch) continue
+    const value = seg.slice(prMatch[0].length).trim()
+    if (value.length === 0)
+      return `pr: requires a PR number or GitHub pull URL.\n  --evidence "pr:#42"`
+    if (!PR_NUMBER_RE.test(value) && !PR_URL_RE.test(value)) {
+      return `Invalid PR reference: "${value}"\npr: evidence must be a PR number or GitHub pull URL.\n  --evidence "pr:#42" or --evidence "pr:https://github.com/owner/repo/pull/42"`
     }
   }
+  return null
+}
+
+function validateEvidencePrefix(evidence: string): string | null {
+  if (!EVIDENCE_PREFIXES.some((p) => evidence.startsWith(p))) {
+    return `Invalid evidence format: "${evidence}"\nEvidence must start with a recognized prefix:\n${formatPrefixList()}\n\nExample: --evidence "commit:abc123f" or --evidence "note:CI green"`
+  }
+  return null
+}
+
+function validateFieldCount(matched: string[]): string | null {
+  if (matched.length >= REQUIRED_EVIDENCE_FIELDS) return null
+  const found = matched.length > 0 ? matched.join(", ") : "none"
+  return (
+    `Evidence must contain at least ${REQUIRED_EVIDENCE_FIELDS} structured field, but found ${matched.length} (${found}).\n\n` +
+    `Structured fields (any ${REQUIRED_EVIDENCE_FIELDS}+ required):\n` +
+    EVIDENCE_SEGMENT_PATTERNS.map(({ name }) => `  • ${name}`).join("\n") +
+    '\n\nExample: --evidence "note:CI green"'
+  )
+}
+
+function validateCiGreenTraceability(matched: string[]): string | null {
+  if (!matched.includes("ci_green")) return null
+  if (matched.includes("commit") || matched.includes("run")) return null
+  return (
+    `"ci_green:" requires a traceable commit SHA or run ID.\n` +
+    `Add a commit: or run field to provide CI proof:\n` +
+    `  --evidence "ci_green: -- commit:abc123f"\n` +
+    `  --evidence "ci_green: -- run 23047344021"`
+  )
+}
+
+export function validateEvidence(evidence: string): string | null {
+  const prefixError = validateEvidencePrefix(evidence)
+  if (prefixError) return prefixError
+
+  const segments = splitEvidenceSegments(evidence)
+
+  const segPrefixError = validateSegmentPrefixes(segments)
+  if (segPrefixError) return segPrefixError
+
+  const commitError = validateCommitSegments(segments)
+  if (commitError) return commitError
+
+  const prError = validatePrSegments(segments)
+  if (prError) return prError
 
   const matched = countEvidenceFields(evidence)
-  if (matched.length < REQUIRED_EVIDENCE_FIELDS) {
-    const found = matched.length > 0 ? matched.join(", ") : "none"
-    return (
-      `Evidence must contain at least ${REQUIRED_EVIDENCE_FIELDS} structured field, but found ${matched.length} (${found}).\n\n` +
-      `Structured fields (any ${REQUIRED_EVIDENCE_FIELDS}+ required):\n` +
-      EVIDENCE_SEGMENT_PATTERNS.map(({ name }) => `  • ${name}`).join("\n") +
-      '\n\nExample: --evidence "note:CI green"'
-    )
-  }
 
-  // ci_green requires a traceable commit SHA or run ID alongside it.
-  if (matched.includes("ci_green") && !matched.includes("commit") && !matched.includes("run")) {
-    return (
-      `"ci_green:" requires a traceable commit SHA or run ID.\n` +
-      `Add a commit: or run field to provide CI proof:\n` +
-      `  --evidence "ci_green: -- commit:abc123f"\n` +
-      `  --evidence "ci_green: -- run 23047344021"`
-    )
-  }
-
-  return null
+  return validateFieldCount(matched) ?? validateCiGreenTraceability(matched)
 }
 
 export function verifyTaskSubject(taskSubject: string, verifyText: string): string | null {

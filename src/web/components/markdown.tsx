@@ -70,86 +70,79 @@ function normalizeMarkdownSource(src: string): string {
     .join("\n")
 }
 
+interface BlockResult {
+  html: string[]
+  consumed: number
+}
+
+function parseFencedCodeBlock(lines: string[], i: number): BlockResult | null {
+  if (!/^\s*```/.test(lines[i]!)) return null
+  const lang = lines[i]!.replace(/^\s*```/, "").trim()
+  const codeLines: string[] = []
+  let j = i + 1
+  while (j < lines.length && !/^\s*```/.test(lines[j]!)) {
+    codeLines.push(escapeHtml(lines[j]!))
+    j++
+  }
+  j++ // skip closing ```
+  const cls = lang ? ` class="language-${escapeHtml(lang)}"` : ""
+  return {
+    html: [`<pre class="md-codeblock"><code${cls}>${codeLines.join("\n")}</code></pre>`],
+    consumed: j - i,
+  }
+}
+
+function parseHeading(line: string): BlockResult | null {
+  const m = line.match(/^\s*(#{1,4})\s+(.+)$/)
+  if (!m) return null
+  const level = Math.min(m[1]!.length + 2, 6)
+  return { html: [`<h${level} class="md-heading">${renderInline(m[2]!)}</h${level}>`], consumed: 1 }
+}
+
+function parseList(lines: string[], i: number, pattern: RegExp, tag: string): BlockResult | null {
+  if (!pattern.test(lines[i]!)) return null
+  const html = [`<${tag} class="md-list">`]
+  let j = i
+  while (j < lines.length && pattern.test(lines[j]!)) {
+    html.push(`<li>${renderInline(lines[j]!.replace(pattern, ""))}</li>`)
+    j++
+  }
+  html.push(`</${tag}>`)
+  return { html, consumed: j - i }
+}
+
+const BLOCK_START_RE = /^\s*```|^\s*#{1,4}\s+|^\s*[-*]\s+|^\s*\d+[.]\s+/
+
+function parseParagraph(lines: string[], i: number): BlockResult {
+  const paragraphLines: string[] = [lines[i]!.trim()]
+  let j = i + 1
+  while (j < lines.length && lines[j]!.trim() !== "" && !BLOCK_START_RE.test(lines[j]!)) {
+    paragraphLines.push(lines[j]!.trim())
+    j++
+  }
+  return { html: [`<p>${renderInline(paragraphLines.join(" "))}</p>`], consumed: j - i }
+}
+
 function renderMarkdown(src: string): string {
   const lines = normalizeMarkdownSource(src).split("\n")
   const html: string[] = []
   let i = 0
 
   while (i < lines.length) {
-    const line = lines[i]!
-    const trimmed = line.trim()
-
-    // fenced code block
-    if (/^\s*```/.test(line)) {
-      const lang = line.replace(/^\s*```/, "").trim()
-      const codeLines: string[] = []
-      i++
-      while (i < lines.length && !/^\s*```/.test(lines[i]!)) {
-        codeLines.push(escapeHtml(lines[i]!))
-        i++
-      }
-      i++ // skip closing ```
-      const cls = lang ? ` class="language-${escapeHtml(lang)}"` : ""
-      html.push(`<pre class="md-codeblock"><code${cls}>${codeLines.join("\n")}</code></pre>`)
-      continue
-    }
-
-    // headings
-    const headingMatch = line.match(/^\s*(#{1,4})\s+(.+)$/)
-    if (headingMatch) {
-      const level = headingMatch[1]!.length + 2 // h3-h6 (offset since h1/h2 used by page)
-      const capped = Math.min(level, 6)
-      html.push(`<h${capped} class="md-heading">${renderInline(headingMatch[2]!)}</h${capped}>`)
+    if (lines[i]!.trim() === "") {
       i++
       continue
     }
 
-    // unordered list
-    if (/^\s*[-*]\s+/.test(line)) {
-      html.push('<ul class="md-list">')
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i]!)) {
-        html.push(`<li>${renderInline(lines[i]!.replace(/^\s*[-*]\s+/, ""))}</li>`)
-        i++
-      }
-      html.push("</ul>")
-      continue
-    }
+    const result =
+      parseFencedCodeBlock(lines, i) ??
+      parseHeading(lines[i]!) ??
+      parseList(lines, i, /^\s*[-*]\s+/, "ul") ??
+      parseList(lines, i, /^\s*\d+[.]\s+/, "ol") ??
+      parseParagraph(lines, i)
 
-    // ordered list
-    if (/^\s*\d+[.]\s+/.test(line)) {
-      html.push('<ol class="md-list">')
-      while (i < lines.length && /^\s*\d+[.]\s+/.test(lines[i]!)) {
-        html.push(`<li>${renderInline(lines[i]!.replace(/^\s*\d+[.]\s+/, ""))}</li>`)
-        i++
-      }
-      html.push("</ol>")
-      continue
-    }
-
-    // blank line
-    if (trimmed === "") {
-      i++
-      continue
-    }
-
-    // paragraph (join wrapped lines until next block)
-    const paragraphLines: string[] = [trimmed]
-    i++
-    while (i < lines.length) {
-      const next = lines[i]!
-      if (
-        next.trim() === "" ||
-        /^\s*```/.test(next) ||
-        /^\s*(#{1,4})\s+/.test(next) ||
-        /^\s*[-*]\s+/.test(next) ||
-        /^\s*\d+[.]\s+/.test(next)
-      ) {
-        break
-      }
-      paragraphLines.push(next.trim())
-      i++
-    }
-    html.push(`<p>${renderInline(paragraphLines.join(" "))}</p>`)
+    html.push(...result.html)
+    i += result.consumed
   }
 
   return html.join("\n")

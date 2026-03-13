@@ -65,6 +65,73 @@ async function getAllProjectSessionIds(
   return ids
 }
 
+/** Check if a transcript file's first 10 lines contain a matching cwd field. */
+async function transcriptMatchesCwd(filePath: string, filterCwd: string): Promise<boolean> {
+  try {
+    const content = await readFile(filePath, "utf-8")
+    for (const line of content.split("\n").slice(0, 10)) {
+      if (!line.trim()) continue
+      try {
+        const data = JSON.parse(line) as { cwd?: string }
+        if (data.cwd === filterCwd) return true
+      } catch {}
+    }
+  } catch {}
+  return false
+}
+
+/** Partition candidates into matched (meta cwd matches) and remaining (no meta cwd). */
+async function partitionByMeta(
+  candidates: string[],
+  filterCwd: string,
+  tasksDir: string
+): Promise<{ matched: Set<string>; remaining: string[] }> {
+  const matched = new Set<string>()
+  const remaining: string[] = []
+  for (const sessionId of candidates) {
+    const meta = await readSessionMeta(sessionId, tasksDir)
+    if (meta?.cwd === filterCwd) {
+      matched.add(sessionId)
+    } else if (!meta?.cwd) {
+      remaining.push(sessionId)
+    }
+  }
+  return { matched, remaining }
+}
+
+/** Scan transcript directories for sessions matching filterCwd. */
+async function scanTranscriptsForCwd(
+  remaining: Set<string>,
+  filterCwd: string,
+  projectsDir: string,
+  ids: Set<string>
+): Promise<void> {
+  let dirs: string[]
+  try {
+    dirs = await readdir(projectsDir)
+  } catch {
+    return
+  }
+  for (const dir of dirs) {
+    if (remaining.size === 0) break
+    let files: string[]
+    try {
+      files = await readdir(join(projectsDir, dir))
+    } catch {
+      continue
+    }
+    for (const f of files) {
+      if (!f.endsWith(".jsonl")) continue
+      const sessionId = f.slice(0, -6)
+      if (!remaining.has(sessionId)) continue
+      if (await transcriptMatchesCwd(join(projectsDir, dir, f), filterCwd)) {
+        ids.add(sessionId)
+        remaining.delete(sessionId)
+      }
+    }
+  }
+}
+
 /**
  * Fallback: resolve sessions whose cwd matches filterCwd.
  * Fast path: check .session-meta.json cwd field first (O(candidates)).
@@ -76,61 +143,9 @@ export async function getSessionIdsByCwdScan(
   projectsDir = createDefaultTaskStore().projectsDir,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Set<string>> {
-  const ids = new Set<string>()
-
-  // Fast path: resolve via session-meta.json cwd field (no transcript scan).
-  const remaining: string[] = []
-  for (const sessionId of candidates) {
-    const meta = await readSessionMeta(sessionId, tasksDir)
-    if (meta?.cwd === filterCwd) {
-      ids.add(sessionId)
-    } else if (!meta?.cwd) {
-      // No meta or meta without cwd — needs transcript scan fallback
-      remaining.push(sessionId)
-    }
-    // meta.cwd exists but doesn't match → skip (different project)
-  }
-
+  const { matched: ids, remaining } = await partitionByMeta(candidates, filterCwd, tasksDir)
   if (remaining.length === 0) return ids
-
-  // Slow path: scan transcript directories only for sessions without meta cwd
-  let dirs: string[]
-  try {
-    dirs = await readdir(projectsDir)
-  } catch {
-    return ids
-  }
-
-  const remainingSet = new Set(remaining)
-  for (const dir of dirs) {
-    if (remainingSet.size === 0) break
-    const projectDir = join(projectsDir, dir)
-    let files: string[]
-    try {
-      files = await readdir(projectDir)
-    } catch {
-      continue
-    }
-    for (const f of files) {
-      if (!f.endsWith(".jsonl")) continue
-      const sessionId = f.slice(0, -6)
-      if (!remainingSet.has(sessionId)) continue
-      try {
-        const content = await readFile(join(projectDir, f), "utf-8")
-        for (const line of content.split("\n").slice(0, 10)) {
-          if (!line.trim()) continue
-          try {
-            const data = JSON.parse(line) as { cwd?: string }
-            if (data.cwd === filterCwd) {
-              ids.add(sessionId)
-              remainingSet.delete(sessionId)
-              break
-            }
-          } catch {}
-        }
-      } catch {}
-    }
-  }
+  await scanTranscriptsForCwd(new Set(remaining), filterCwd, projectsDir, ids)
   return ids
 }
 
@@ -270,11 +285,152 @@ export async function findTaskAcrossSessions(
   return matches
 }
 
+/** List task-dir entries, returning [] on failure. */
+async function safeReadTaskDirEntries(tasksDir: string): Promise<string[]> {
+  try {
+    return await readdir(tasksDir)
+  } catch {
+    return []
+  }
+}
+
+/** Search orphan sessions (no transcript in any project dir) for a task matching the given prefix+ID. */
+async function findInOrphanByPrefix(
+  taskId: string,
+  prefix: string,
+  filterCwd: string | undefined,
+  tasksDir: string,
+  projectsDir: string
+): Promise<{ sessionId: string; task: Task } | null> {
+  if (!filterCwd) return null
+  const allIndexedIds = await getAllProjectSessionIds(projectsDir)
+  const taskDirEntries = await safeReadTaskDirEntries(tasksDir)
+  const orphanSession = taskDirEntries.find(
+    (s) => !allIndexedIds.has(s) && sessionPrefix(s) === prefix
+  )
+  if (!orphanSession) return null
+  const tasks = await readTasks(orphanSession, tasksDir)
+  const task = tasks.find((t) => t.id === taskId)
+  if (!task) return null
+  debugLog(
+    `  ${DIM}Task #${taskId} resolved via compaction-recovery fallback in orphan session ${orphanSession.slice(0, 8)}...${RESET}`
+  )
+  return { sessionId: orphanSession, task }
+}
+
+/** Resolve a prefixed task ID by matching the prefix to a session. */
+async function resolvePrefixedTaskId(opts: {
+  taskId: string
+  prefix: string
+  primarySessionId: string
+  filterCwd: string | undefined
+  tasksDir: string
+  projectsDir: string
+}): Promise<{ sessionId: string; task: Task }> {
+  const { taskId, prefix, primarySessionId, filterCwd, tasksDir, projectsDir } = opts
+  if (sessionPrefix(primarySessionId) === prefix) {
+    const tasks = await readTasks(primarySessionId, tasksDir)
+    const task = tasks.find((t) => t.id === taskId)
+    if (task) return { sessionId: primarySessionId, task }
+  }
+
+  const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
+  const matchingSession = sessions.find((s) => sessionPrefix(s) === prefix)
+  if (matchingSession) {
+    const tasks = await readTasks(matchingSession, tasksDir)
+    const task = tasks.find((t) => t.id === taskId)
+    if (task) {
+      if (matchingSession !== primarySessionId) {
+        debugLog(
+          `  ${DIM}Task #${taskId} resolved via prefix to session ${matchingSession.slice(0, 8)}...${RESET}`
+        )
+      }
+      return { sessionId: matchingSession, task }
+    }
+    const recentHint = await buildRecentTasksHint(matchingSession, tasksDir)
+    throw new Error(
+      `Task #${taskId} not found in session ${matchingSession.slice(0, 8)}... (prefix "${prefix}" matched but task file is missing).` +
+        `\nUse --session ${matchingSession.slice(0, 8)} with a different task ID, or recreate the task.${recentHint}`
+    )
+  }
+
+  const orphanResult = await findInOrphanByPrefix(taskId, prefix, filterCwd, tasksDir, projectsDir)
+  if (orphanResult) return orphanResult
+
+  const sessionsHint = await buildRecentSessionsHint(sessions, tasksDir)
+  throw new Error(
+    `Task #${taskId} not found (no session with prefix "${prefix}" exists in this project).${sessionsHint}`
+  )
+}
+
+/** Search orphan sessions for an unprefixed task ID. */
+async function findInOrphanUnprefixed(
+  taskId: string,
+  filterCwd: string | undefined,
+  tasksDir: string,
+  projectsDir: string
+): Promise<{ sessionId: string; task: Task }[]> {
+  if (!filterCwd) return []
+  const allIndexedIds = await getAllProjectSessionIds(projectsDir)
+  const taskDirEntries = await safeReadTaskDirEntries(tasksDir)
+  for (const s of taskDirEntries) {
+    if (allIndexedIds.has(s)) continue
+    const tasks = await readTasks(s, tasksDir)
+    const task = tasks.find((t) => t.id === taskId)
+    if (task) {
+      debugLog(
+        `  ${DIM}Task #${taskId} found via compaction-recovery fallback in orphan session ${s.slice(0, 8)}...${RESET}`
+      )
+      return [{ sessionId: s, task }]
+    }
+  }
+  return []
+}
+
 /**
  * Centralized task-by-ID resolution. Checks the primary session first,
  * then falls back to scanning all project sessions. Every command that
  * operates on a task by ID must use this single entry point.
  */
+function handleMultipleMatches(
+  taskId: string,
+  matches: { sessionId: string; task: Task }[]
+): { sessionId: string; task: Task } {
+  if (matches.length === 1) {
+    debugLog(
+      `  ${DIM}Task #${taskId} found in session ${matches[0]!.sessionId.slice(0, 8)}... (not current session)${RESET}`
+    )
+    return matches[0]!
+  }
+  const sessionList = matches
+    .map((m) => `  - ${m.sessionId.slice(0, 8)}... [${m.task.status}]: ${m.task.subject}`)
+    .join("\n")
+  throw new Error(
+    `Task #${taskId} exists in ${matches.length} sessions. Use --session <id> to disambiguate:\n${sessionList}`
+  )
+}
+
+async function resolveUnprefixedTask(
+  taskId: string,
+  primarySessionId: string,
+  filterCwd: string | undefined,
+  tasksDir: string,
+  projectsDir: string
+): Promise<{ sessionId: string; task: Task }> {
+  const tasks = await readTasks(primarySessionId, tasksDir)
+  const task = tasks.find((t) => t.id === taskId)
+  if (task) return { sessionId: primarySessionId, task }
+
+  let matches = await findTaskAcrossSessions(taskId, filterCwd, tasksDir, projectsDir)
+  if (matches.length === 0) {
+    matches = await findInOrphanUnprefixed(taskId, filterCwd, tasksDir, projectsDir)
+  }
+  if (matches.length > 0) return handleMultipleMatches(taskId, matches)
+
+  const recentHint = await buildRecentTasksHint(primarySessionId, tasksDir)
+  throw new Error(`Task #${taskId} not found in any session for this project.${recentHint}`)
+}
+
 export async function resolveTaskById(
   taskId: string,
   primarySessionId: string,
@@ -282,125 +438,18 @@ export async function resolveTaskById(
   tasksDir = createDefaultTaskStore().tasksDir,
   projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<{ sessionId: string; task: Task }> {
-  // Prefix-based fast resolution: if the ID has a session prefix, find the
-  // matching session directly — no ambiguity possible.
   const { prefix } = parseTaskId(taskId)
   if (prefix !== null) {
-    // First check if the primary session itself matches the prefix
-    if (sessionPrefix(primarySessionId) === prefix) {
-      const tasks = await readTasks(primarySessionId, tasksDir)
-      const task = tasks.find((t) => t.id === taskId)
-      if (task) return { sessionId: primarySessionId, task }
-    }
-
-    // Search sessions using the same filterCwd scope as unprefixed lookup so
-    // both ID forms share consistent project-scoped semantics.
-    const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
-    const matchingSession = sessions.find((s) => sessionPrefix(s) === prefix)
-    if (matchingSession) {
-      const tasks = await readTasks(matchingSession, tasksDir)
-      const task = tasks.find((t) => t.id === taskId)
-      if (task) {
-        if (matchingSession !== primarySessionId) {
-          debugLog(
-            `  ${DIM}Task #${taskId} resolved via prefix to session ${matchingSession.slice(0, 8)}...${RESET}`
-          )
-        }
-        return { sessionId: matchingSession, task }
-      }
-      // Session matched but the specific task file is absent (deleted or never written).
-      const recentHint = await buildRecentTasksHint(matchingSession, tasksDir)
-      throw new Error(
-        `Task #${taskId} not found in session ${matchingSession.slice(0, 8)}... (prefix "${prefix}" matched but task file is missing).` +
-          `\nUse --session ${matchingSession.slice(0, 8)} with a different task ID, or recreate the task.${recentHint}`
-      )
-    }
-    // Compaction-recovery fallback for prefixed IDs: search orphan sessions only
-    // (those with no transcript in ANY project directory). Same constraint as the
-    // unprefixed path to prevent cross-project contamination.
-    if (filterCwd) {
-      const allIndexedIds = await getAllProjectSessionIds(projectsDir)
-      let taskDirEntries: string[]
-      try {
-        taskDirEntries = await readdir(tasksDir)
-      } catch {
-        taskDirEntries = []
-      }
-      const orphanSession = taskDirEntries.find(
-        (s) => !allIndexedIds.has(s) && sessionPrefix(s) === prefix
-      )
-      if (orphanSession) {
-        const tasks = await readTasks(orphanSession, tasksDir)
-        const task = tasks.find((t) => t.id === taskId)
-        if (task) {
-          debugLog(
-            `  ${DIM}Task #${taskId} resolved via compaction-recovery fallback in orphan session ${orphanSession.slice(0, 8)}...${RESET}`
-          )
-          return { sessionId: orphanSession, task }
-        }
-      }
-    }
-    const sessionsHint = await buildRecentSessionsHint(sessions, tasksDir)
-    throw new Error(
-      `Task #${taskId} not found (no session with prefix "${prefix}" exists in this project).${sessionsHint}`
-    )
+    return resolvePrefixedTaskId({
+      taskId,
+      prefix,
+      primarySessionId,
+      filterCwd,
+      tasksDir,
+      projectsDir,
+    })
   }
-
-  // Unprefixed numeric ID — check primary session first
-  const tasks = await readTasks(primarySessionId, tasksDir)
-  const task = tasks.find((t) => t.id === taskId)
-  if (task) return { sessionId: primarySessionId, task }
-
-  // Fallback: search across all project sessions
-  let matches = await findTaskAcrossSessions(taskId, filterCwd, tasksDir, projectsDir)
-
-  // Compaction-recovery fallback: if no match found within the project scope,
-  // search sessions that have no transcript in ANY project directory. These are
-  // true orphans — sessions whose transcript was never written (compaction gap)
-  // and therefore cannot be attributed to any project. Cross-project contamination
-  // is not a risk here because indexed sessions (belonging to other projects) are
-  // explicitly excluded.
-  if (matches.length === 0 && filterCwd) {
-    const allIndexedIds = await getAllProjectSessionIds(projectsDir)
-    let taskDirEntries: string[]
-    try {
-      taskDirEntries = await readdir(tasksDir)
-    } catch {
-      taskDirEntries = []
-    }
-    for (const s of taskDirEntries) {
-      if (allIndexedIds.has(s)) continue
-      const tasks = await readTasks(s, tasksDir)
-      const task = tasks.find((t) => t.id === taskId)
-      if (task) {
-        debugLog(
-          `  ${DIM}Task #${taskId} found via compaction-recovery fallback in orphan session ${s.slice(0, 8)}...${RESET}`
-        )
-        matches = [{ sessionId: s, task }]
-        break
-      }
-    }
-  }
-
-  if (matches.length === 1) {
-    debugLog(
-      `  ${DIM}Task #${taskId} found in session ${matches[0]!.sessionId.slice(0, 8)}... (not current session)${RESET}`
-    )
-    return matches[0]!
-  }
-
-  if (matches.length > 1) {
-    const sessionList = matches
-      .map((m) => `  - ${m.sessionId.slice(0, 8)}... [${m.task.status}]: ${m.task.subject}`)
-      .join("\n")
-    throw new Error(
-      `Task #${taskId} exists in ${matches.length} sessions. Use --session <id> to disambiguate:\n${sessionList}`
-    )
-  }
-
-  // Append recent task IDs from the primary session to help agents find the right ID.
-  const recentHint = await buildRecentTasksHint(primarySessionId, tasksDir)
-  throw new Error(`Task #${taskId} not found in any session for this project.${recentHint}`)
+  return resolveUnprefixedTask(taskId, primarySessionId, filterCwd, tasksDir, projectsDir)
 }
 
 /**

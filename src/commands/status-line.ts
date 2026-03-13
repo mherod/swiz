@@ -143,26 +143,48 @@ function shortenPath(dir: string): string {
   return basename(dir)
 }
 
+type GitDetailDef = [field: keyof GitBranchStatus, color: string, symbol: string]
+
+const GIT_DETAIL_DEFS: GitDetailDef[] = [
+  ["ahead", "\x1b[94m", "↑"],
+  ["behind", "\x1b[95m", "↓"],
+  ["staged", "\x1b[92m", "+"],
+  ["unstaged", "\x1b[93m", "~"],
+  ["untracked", "\x1b[96m", "?"],
+  ["conflicts", "\x1b[91m", "!"],
+  ["stash", "\x1b[35m", "$"],
+]
+
+function buildGitDetails(status: GitBranchStatus): string[] {
+  const details: string[] = []
+  for (const [field, color, symbol] of GIT_DETAIL_DEFS) {
+    const count = status[field]
+    if (typeof count === "number" && count > 0) details.push(`${color}${symbol}${count}${R}`)
+  }
+  if (details.length === 0 && status.changedFallback > 0) {
+    details.push(`${DIM}${status.changedFallback}~${R}`)
+  }
+  return details
+}
+
+function isDirtyBranch(status: GitBranchStatus): boolean {
+  return (
+    status.staged > 0 ||
+    status.unstaged > 0 ||
+    status.untracked > 0 ||
+    status.conflicts > 0 ||
+    status.changedFallback > 0
+  )
+}
+
 /** Format raw git branch status into ANSI-colored info string for the status line. */
 function formatGitBranchInfo(status: GitBranchStatus): { branch: string; info: string } {
-  const { branch, ahead, behind, staged, unstaged, untracked, conflicts, stash, changedFallback } =
-    status
-  const dirty = staged > 0 || unstaged > 0 || untracked > 0 || conflicts > 0 || changedFallback > 0
-  const branchColor = conflicts > 0 ? "\x1b[91m" : dirty ? "\x1b[93m" : "\x1b[92m"
-  const icon = conflicts > 0 ? "!" : dirty ? "±" : "✦"
-
-  const details: string[] = []
-  if (ahead > 0) details.push(`\x1b[94m↑${ahead}${R}`)
-  if (behind > 0) details.push(`\x1b[95m↓${behind}${R}`)
-  if (staged > 0) details.push(`\x1b[92m+${staged}${R}`)
-  if (unstaged > 0) details.push(`\x1b[93m~${unstaged}${R}`)
-  if (untracked > 0) details.push(`\x1b[96m?${untracked}${R}`)
-  if (conflicts > 0) details.push(`\x1b[91m!${conflicts}${R}`)
-  if (stash > 0) details.push(`\x1b[35m$${stash}${R}`)
-  if (details.length === 0 && changedFallback > 0) details.push(`${DIM}${changedFallback}~${R}`)
+  const dirty = isDirtyBranch(status)
+  const branchColor = status.conflicts > 0 ? "\x1b[91m" : dirty ? "\x1b[93m" : "\x1b[92m"
+  const icon = status.conflicts > 0 ? "!" : dirty ? "±" : "✦"
+  const details = buildGitDetails(status)
   const detailsStr = details.length ? ` ${details.join(" ")}` : ""
-
-  return { branch, info: `${branchColor}${icon} ${branch}${R}${detailsStr}` }
+  return { branch: status.branch, info: `${branchColor}${icon} ${status.branch}${R}${detailsStr}` }
 }
 
 async function getGitBranchAndInfo(cwd: string): Promise<{ branch: string; info: string }> {
@@ -251,52 +273,49 @@ function normalizeCiLabel(raw: string | null | undefined): string {
   return (raw ?? "").replaceAll("_", " ")
 }
 
-export function summarizeGitHubCiRuns(
-  runs: GitHubCiRun[] | null | undefined
-): { state: GitHubCiState; label: string } | null {
-  if (!Array.isArray(runs) || runs.length === 0) return null
+function isActiveCiRun(run: GitHubCiRun): boolean {
+  return run.status === "in_progress" || run.status === "queued"
+}
 
-  const relevant = runs.filter((run) => run.event !== "dynamic" && run.event !== "workflow_run")
-  if (relevant.length === 0) return null
-
-  const latestRuns = latestCiRunsByWorkflow(relevant)
-  const active = latestRuns.filter((run) => run.status === "in_progress" || run.status === "queued")
-  if (active.length > 0) {
-    return {
-      state: "pending",
-      label: active.length === 1 ? "running" : `${active.length} running`,
-    }
-  }
-
-  const failing = latestRuns.filter(
-    (run) =>
-      run.status === "completed" &&
-      (run.conclusion === "failure" ||
-        run.conclusion === "timed_out" ||
-        run.conclusion === "action_required")
+function isFailingCiRun(run: GitHubCiRun): boolean {
+  return (
+    run.status === "completed" &&
+    (run.conclusion === "failure" ||
+      run.conclusion === "timed_out" ||
+      run.conclusion === "action_required")
   )
-  if (failing.length > 0) {
-    return {
-      state: "failure",
-      label: failing.length === 1 ? "failed" : `${failing.length} failed`,
-    }
-  }
+}
 
-  if (
-    latestRuns.length > 0 &&
-    latestRuns.every((run) => run.status === "completed" && run.conclusion === "success")
-  ) {
+function classifyLatestRuns(
+  latestRuns: GitHubCiRun[]
+): { state: GitHubCiState; label: string } | null {
+  const active = latestRuns.filter(isActiveCiRun)
+  if (active.length > 0) {
+    return { state: "pending", label: active.length === 1 ? "running" : `${active.length} running` }
+  }
+  const failing = latestRuns.filter(isFailingCiRun)
+  if (failing.length > 0) {
+    return { state: "failure", label: failing.length === 1 ? "failed" : `${failing.length} failed` }
+  }
+  if (latestRuns.every((run) => run.status === "completed" && run.conclusion === "success")) {
     return { state: "success", label: "passing" }
   }
-
   const latestRun = latestRuns.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
   if (!latestRun) return null
-
   const label =
     latestRun.status === "completed"
       ? normalizeCiLabel(latestRun.conclusion || "completed")
       : normalizeCiLabel(latestRun.status || "unknown")
   return { state: "neutral", label }
+}
+
+export function summarizeGitHubCiRuns(
+  runs: GitHubCiRun[] | null | undefined
+): { state: GitHubCiState; label: string } | null {
+  if (!Array.isArray(runs) || runs.length === 0) return null
+  const relevant = runs.filter((run) => run.event !== "dynamic" && run.event !== "workflow_run")
+  if (relevant.length === 0) return null
+  return classifyLatestRuns(latestCiRunsByWorkflow(relevant))
 }
 
 export function formatGitHubCiSegment(
@@ -332,61 +351,62 @@ const COVERED_SETTING_KEYS = new Set([
 // Keys that cannot be compared with simple equality (arrays, objects, metadata).
 const UNCOUNTABLE_SETTING_KEYS = new Set(["statusLineSegments", "sessions", "source"])
 
-export function buildSettingsFlags(effective: EffectiveSwizSettings | null): string[] {
-  if (!effective) return []
+type BooleanFlagDef = [key: keyof EffectiveSwizSettings, onLabel: string, offLabel: string]
 
-  const settingsParts: string[] = []
-  if (effective.autoContinue !== DEFAULT_SETTINGS.autoContinue) {
-    settingsParts.push(effective.autoContinue ? `\x1b[92m⟳ auto:on${R}` : `\x1b[90m⟳ auto:off${R}`)
-  }
-  if (effective.ambitionMode !== DEFAULT_SETTINGS.ambitionMode) {
-    if (effective.ambitionMode === "aggressive") settingsParts.push(`\x1b[93m⚡ aggressive${R}`)
-    if (effective.ambitionMode === "creative") settingsParts.push(`\x1b[95m✦ creative${R}`)
-    if (effective.ambitionMode === "reflective") settingsParts.push(`\x1b[96m🪞 reflective${R}`)
-  }
-  if (effective.speak !== DEFAULT_SETTINGS.speak) {
-    settingsParts.push(effective.speak ? `\x1b[96m🔊 narrator${R}` : `\x1b[90m🔇 narrator${R}`)
-  }
-  if (effective.collaborationMode !== DEFAULT_SETTINGS.collaborationMode) {
-    if (effective.collaborationMode === "team") settingsParts.push(`\x1b[95m🤝 team${R}`)
-    if (effective.collaborationMode === "solo") settingsParts.push(`\x1b[94m👤 solo${R}`)
-    if (effective.collaborationMode === "relaxed-collab")
-      settingsParts.push(`\x1b[93m🔀 relaxed-collab${R}`)
-  }
-  if (effective.prMergeMode !== DEFAULT_SETTINGS.prMergeMode) {
-    settingsParts.push(
-      effective.prMergeMode ? `\x1b[92m🔀 pr-merge:on${R}` : `\x1b[90m🔀 pr-merge:off${R}`
-    )
-  }
-  if (effective.pushGate !== DEFAULT_SETTINGS.pushGate) {
-    settingsParts.push(
-      effective.pushGate ? `\x1b[93m🚧 push-gate:on${R}` : `\x1b[90m🚧 push-gate:off${R}`
-    )
-  }
-  if (effective.strictNoDirectMain !== DEFAULT_SETTINGS.strictNoDirectMain) {
-    settingsParts.push(
-      effective.strictNoDirectMain
-        ? `\x1b[91m🛡 direct-main:off${R}`
-        : `\x1b[90m🛡 direct-main:on${R}`
-    )
-  }
-  if (effective.sandboxedEdits !== DEFAULT_SETTINGS.sandboxedEdits) {
-    settingsParts.push(
-      effective.sandboxedEdits ? `\x1b[92m🧪 sandbox:on${R}` : `\x1b[93m🧪 sandbox:off${R}`
-    )
-  }
+const BOOLEAN_FLAGS: BooleanFlagDef[] = [
+  ["autoContinue", `\x1b[92m⟳ auto:on${R}`, `\x1b[90m⟳ auto:off${R}`],
+  ["speak", `\x1b[96m🔊 narrator${R}`, `\x1b[90m🔇 narrator${R}`],
+  ["prMergeMode", `\x1b[92m🔀 pr-merge:on${R}`, `\x1b[90m🔀 pr-merge:off${R}`],
+  ["pushGate", `\x1b[93m🚧 push-gate:on${R}`, `\x1b[90m🚧 push-gate:off${R}`],
+  ["strictNoDirectMain", `\x1b[91m🛡 direct-main:off${R}`, `\x1b[90m🛡 direct-main:on${R}`],
+  ["sandboxedEdits", `\x1b[92m🧪 sandbox:on${R}`, `\x1b[93m🧪 sandbox:off${R}`],
+]
 
-  // Catch-all: count uncovered settings that differ from defaults.
-  let extraNonDefault = 0
+const AMBITION_LABELS: Record<string, string> = {
+  aggressive: `\x1b[93m⚡ aggressive${R}`,
+  creative: `\x1b[95m✦ creative${R}`,
+  reflective: `\x1b[96m🪞 reflective${R}`,
+}
+
+const COLLAB_LABELS: Record<string, string> = {
+  team: `\x1b[95m🤝 team${R}`,
+  solo: `\x1b[94m👤 solo${R}`,
+  "relaxed-collab": `\x1b[93m🔀 relaxed-collab${R}`,
+}
+
+function collectBooleanFlags(effective: EffectiveSwizSettings, parts: string[]): void {
+  for (const [key, onLabel, offLabel] of BOOLEAN_FLAGS) {
+    if (effective[key] !== DEFAULT_SETTINGS[key as keyof typeof DEFAULT_SETTINGS]) {
+      parts.push(effective[key] ? onLabel : offLabel)
+    }
+  }
+}
+
+function countExtraNonDefaults(effective: EffectiveSwizSettings): number {
+  let count = 0
   for (const key of Object.keys(DEFAULT_SETTINGS) as Array<keyof typeof DEFAULT_SETTINGS>) {
     if (COVERED_SETTING_KEYS.has(key) || UNCOUNTABLE_SETTING_KEYS.has(key)) continue
-    if (effective[key as keyof EffectiveSwizSettings] !== DEFAULT_SETTINGS[key]) extraNonDefault++
+    if (effective[key as keyof EffectiveSwizSettings] !== DEFAULT_SETTINGS[key]) count++
   }
-  if (extraNonDefault > 0) {
-    settingsParts.push(`\x1b[90m+${extraNonDefault} cfg${R}`)
-  }
+  return count
+}
 
-  return settingsParts
+export function buildSettingsFlags(effective: EffectiveSwizSettings | null): string[] {
+  if (!effective) return []
+  const parts: string[] = []
+
+  const ambitionLabel = AMBITION_LABELS[effective.ambitionMode]
+  if (ambitionLabel) parts.push(ambitionLabel)
+
+  const collabLabel = COLLAB_LABELS[effective.collaborationMode]
+  if (collabLabel) parts.push(collabLabel)
+
+  collectBooleanFlags(effective, parts)
+
+  const extra = countExtraNonDefaults(effective)
+  if (extra > 0) parts.push(`\x1b[90m+${extra} cfg${R}`)
+
+  return parts
 }
 
 function joinGroups(groups: Array<string | null | undefined>): string {
@@ -508,6 +528,98 @@ function activeSegmentsFromEffective(effective: EffectiveSwizSettings | null): s
   return effective?.statusLineSegments ?? []
 }
 
+interface GhFetchNeeds {
+  pr: boolean
+  backlog: boolean
+  ci: boolean
+}
+
+function computeSegmentNeeds(activeSegments: string[]): GhFetchNeeds {
+  const seg = (name: string) => activeSegments.length === 0 || activeSegments.includes(name)
+  return { pr: seg("pr"), backlog: seg("backlog"), ci: seg("git") }
+}
+
+interface GhFetchResults {
+  issueData: unknown[] | null
+  prListData: unknown[] | null
+  prViewData: { reviewDecision?: string; comments?: unknown[] } | null
+  ciData: GitHubCiRun[] | null
+  projectState: ProjectState | null | undefined
+}
+
+async function fetchGhData(
+  cwd: string,
+  branch: string,
+  needs: GhFetchNeeds
+): Promise<GhFetchResults> {
+  const prViewPromise =
+    needs.pr && branch
+      ? ghJsonCached<{ reviewDecision?: string; comments?: unknown[] }>(
+          ["pr", "view", branch, "--json", "reviewDecision,comments"],
+          cwd
+        )
+      : Promise.resolve(null)
+  const ciPromise =
+    needs.ci && branch
+      ? ghJsonCached<GitHubCiRun[]>(
+          [
+            "run",
+            "list",
+            "--branch",
+            branch,
+            "--limit",
+            "10",
+            "--json",
+            "status,conclusion,workflowName,createdAt,event",
+          ],
+          cwd
+        )
+      : Promise.resolve(null)
+
+  const [issueData, prListData, prViewData, ciData, projectState] = await Promise.all([
+    needs.backlog
+      ? ghJsonCached<unknown[]>(
+          ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
+          cwd
+        )
+      : Promise.resolve(null),
+    needs.backlog
+      ? ghJsonCached<unknown[]>(
+          ["pr", "list", "--state", "open", "--json", "number", "--limit", "100"],
+          cwd
+        )
+      : Promise.resolve(null),
+    prViewPromise,
+    ciPromise,
+    readProjectState(cwd),
+  ])
+  return { issueData, prListData, prViewData, ciData, projectState }
+}
+
+function assembleSnapshot(
+  shortCwd: string,
+  gitResult: { branch: string; info: string },
+  activeSegments: string[],
+  gh: GhFetchResults,
+  effective: EffectiveSwizSettings | null
+): WarmStatusLineSnapshot {
+  const ciSummary = summarizeGitHubCiRuns(gh.ciData)
+  return {
+    shortCwd,
+    gitInfo: gitResult.info,
+    gitBranch: gitResult.branch,
+    activeSegments,
+    ciState: ciSummary?.state ?? "none",
+    ciLabel: ciSummary?.label ?? "",
+    issueCount: Array.isArray(gh.issueData) ? gh.issueData.length : null,
+    prCount: Array.isArray(gh.prListData) ? gh.prListData.length : null,
+    reviewDecision: gh.prViewData?.reviewDecision ?? "",
+    commentCount: Array.isArray(gh.prViewData?.comments) ? gh.prViewData.comments.length : 0,
+    projectState: gh.projectState ?? null,
+    settingsParts: buildSettingsFlags(effective),
+  }
+}
+
 export async function computeWarmStatusLineSnapshot(
   cwd: string,
   sessionId: string | null | undefined
@@ -523,69 +635,9 @@ export async function computeWarmStatusLineSnapshot(
     ? getEffectiveSwizSettings(swizSettings, sessionId ?? null, projectSettings)
     : null
   const activeSegments = activeSegmentsFromEffective(effective)
-  const seg = (name: string) => activeSegments.length === 0 || activeSegments.includes(name)
-
-  const needsPr = seg("pr")
-  const needsBacklog = seg("backlog")
-  const needsCi = seg("git")
-
-  const prViewPromise =
-    needsPr && gitResult.branch
-      ? ghJsonCached<{ reviewDecision?: string; comments?: unknown[] }>(
-          ["pr", "view", gitResult.branch, "--json", "reviewDecision,comments"],
-          cwd
-        )
-      : Promise.resolve(null)
-  const ciPromise =
-    needsCi && gitResult.branch
-      ? ghJsonCached<GitHubCiRun[]>(
-          [
-            "run",
-            "list",
-            "--branch",
-            gitResult.branch,
-            "--limit",
-            "10",
-            "--json",
-            "status,conclusion,workflowName,createdAt,event",
-          ],
-          cwd
-        )
-      : Promise.resolve(null)
-
-  const [issueData, prListData, prViewData, ciData, projectState] = await Promise.all([
-    needsBacklog
-      ? ghJsonCached<unknown[]>(
-          ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
-          cwd
-        )
-      : Promise.resolve(null),
-    needsBacklog
-      ? ghJsonCached<unknown[]>(
-          ["pr", "list", "--state", "open", "--json", "number", "--limit", "100"],
-          cwd
-        )
-      : Promise.resolve(null),
-    prViewPromise,
-    ciPromise,
-    readProjectState(cwd),
-  ])
-  const ciSummary = summarizeGitHubCiRuns(ciData)
-
-  return {
-    shortCwd,
-    gitInfo: gitResult.info,
-    gitBranch: gitResult.branch,
-    activeSegments,
-    ciState: ciSummary?.state ?? "none",
-    ciLabel: ciSummary?.label ?? "",
-    issueCount: Array.isArray(issueData) ? issueData.length : null,
-    prCount: Array.isArray(prListData) ? prListData.length : null,
-    reviewDecision: prViewData?.reviewDecision ?? "",
-    commentCount: Array.isArray(prViewData?.comments) ? prViewData.comments.length : 0,
-    projectState,
-    settingsParts: buildSettingsFlags(effective),
-  }
+  const needs = computeSegmentNeeds(activeSegments)
+  const gh = await fetchGhData(cwd, gitResult.branch, needs)
+  return assembleSnapshot(shortCwd, gitResult, activeSegments, gh, effective)
 }
 
 async function readWarmSnapshotFromDaemon(
@@ -614,31 +666,11 @@ async function readWarmSnapshotFromDaemon(
   }
 }
 
-export function renderStatusLineFromSnapshot(
-  input: StatusLineInput,
-  snapshot: WarmStatusLineSnapshot,
+function buildContextSegment(
   ctxPct: number,
   ctxTokens: number,
-  ctxStats: ContextStats | null,
-  timeOffset: number
+  ctxStats: ContextStats | null
 ): string {
-  const model = input.model?.display_name ?? "claude"
-  const agentName = input.agent?.name
-  const vimMode = input.vim?.mode
-  const seg = (name: string) =>
-    snapshot.activeSegments.length === 0 || snapshot.activeSegments.includes(name)
-
-  // Accent colors at fixed phase offsets
-  const a2 = fg256(RAINBOW[(timeOffset + 6) % RL]!)
-  const a4 = fg256(RAINBOW[(timeOffset + 18) % RL]!)
-
-  const rb = (s: string, idx = 0) => rainbowStr(s, idx, timeOffset)
-  const label = (s: string) => `${DIM}${s}${R}`
-
-  const topLeft = rb("┌──")
-  const midLeft = rb("├──")
-  const bottomLeft = rb("└──")
-
   const ctxBar = progressBar(ctxPct, 20, ctxStats)
   const ctxColor = colorForPct(ctxPct)
   const tokenStr = ctxTokens > 0 ? ` ${DIM}${formatTokens(ctxTokens)}${R}` : ""
@@ -648,59 +680,101 @@ export function renderStatusLineFromSnapshot(
     ctxStats && ctxStats.minPct !== ctxStats.maxPct
       ? ` ${DIM}${rangeWarn}(${ctxStats.minPct.toFixed(0)}–${ctxStats.maxPct.toFixed(0)}%)${R}`
       : ""
-  const ctxSeg = `${ctxBar}${ctxColor}${ctxPct.toFixed(0)}%${R}${tokenStr}${rangeSeg}`
+  return `${ctxBar}${ctxColor}${ctxPct.toFixed(0)}%${R}${tokenStr}${rangeSeg}`
+}
 
+function buildBacklogSegment(snapshot: WarmStatusLineSnapshot): string {
   const issueSeg =
     snapshot.issueCount !== null
       ? formatCountSegment(snapshot.issueCount, "issue", "issues", 10, 25)
       : ""
   const prSeg =
     snapshot.prCount !== null ? formatCountSegment(snapshot.prCount, "PR", "PRs", 5, 12) : ""
-  const ghCountSeg =
-    snapshot.issueCount !== null || snapshot.prCount !== null
-      ? [issueSeg, prSeg].filter(Boolean).join("  ")
-      : ""
+  return snapshot.issueCount !== null || snapshot.prCount !== null
+    ? [issueSeg, prSeg].filter(Boolean).join("  ")
+    : ""
+}
 
-  const stateSeg = formatProjectState(snapshot.projectState)
+function buildReviewSegment(snapshot: WarmStatusLineSnapshot): string {
+  if (snapshot.reviewDecision === "CHANGES_REQUESTED") return `\x1b[91m⚠ changes requested${R}`
+  if (snapshot.reviewDecision === "APPROVED") return `\x1b[92m✓ approved${R}`
+  if (snapshot.commentCount > 0) return `${DIM}💬 ${snapshot.commentCount}${R}`
+  return ""
+}
+
+type SegChecker = (name: string) => boolean
+
+function buildLine1(seg: SegChecker, snapshot: WarmStatusLineSnapshot, a2: string): string {
+  const lbl = (s: string) => `${DIM}${s}${R}`
   const ciSeg = formatGitHubCiSegment(snapshot.ciState, snapshot.ciLabel)
-  const reviewStatus =
-    snapshot.reviewDecision === "CHANGES_REQUESTED"
-      ? `\x1b[91m⚠ changes requested${R}`
-      : snapshot.reviewDecision === "APPROVED"
-        ? `\x1b[92m✓ approved${R}`
-        : snapshot.commentCount > 0
-          ? `${DIM}💬 ${snapshot.commentCount}${R}`
-          : ""
+  const reviewStatus = buildReviewSegment(snapshot)
+  return joinGroups([
+    seg("repo") ? `${lbl("repo")} ${a2}${snapshot.shortCwd}${R}` : "",
+    seg("git") && snapshot.gitInfo ? `${lbl("git")} ${snapshot.gitInfo}` : "",
+    seg("git") && ciSeg ? `${lbl("ci")} ${ciSeg}` : "",
+    seg("pr") && reviewStatus ? `${lbl("pr")} ${reviewStatus}` : "",
+  ])
+}
 
+function buildLine3(
+  seg: SegChecker,
+  snapshot: WarmStatusLineSnapshot,
+  a4: string,
+  agentName: string | undefined,
+  vimMode: string | undefined
+): string {
+  const lbl = (s: string) => `${DIM}${s}${R}`
+  const stateSeg = formatProjectState(snapshot.projectState)
+  const ghCountSeg = buildBacklogSegment(snapshot)
   const agentTag = agentName ? `${a4}[${agentName}]${R}` : ""
   const vimTag = vimMode ? formatVimMode(vimMode) : ""
-  const timeSeg = `${DIM}${formatTime()}${R}`
-  const settingsSeg = snapshot.settingsParts.join(" ")
-
-  const line1Groups = joinGroups([
-    seg("repo") ? `${label("repo")} ${a2}${snapshot.shortCwd}${R}` : "",
-    seg("git") && snapshot.gitInfo ? `${label("git")} ${snapshot.gitInfo}` : "",
-    seg("git") && ciSeg ? `${label("ci")} ${ciSeg}` : "",
-    seg("pr") && reviewStatus ? `${label("pr")} ${reviewStatus}` : "",
-  ])
-  const line2Groups = joinGroups([
-    seg("model") ? `${label("model")} ${rb(model)}` : "",
-    seg("ctx") && ctxPct > 0 ? `${label("ctx")} ${ctxSeg}` : "",
-  ])
   const modeSeg = [agentTag, vimTag].filter(Boolean).join(" ")
-  const line3Groups = joinGroups([
-    seg("state") && stateSeg ? `${label("state")} ${stateSeg}` : "",
-    seg("backlog") && ghCountSeg ? `${label("backlog")} ${ghCountSeg}` : "",
-    seg("mode") && modeSeg ? `${label("mode")} ${modeSeg}` : "",
-    seg("flags") && settingsSeg ? `${label("flags")} ${settingsSeg}` : "",
-    seg("time") ? `${label("time")} ${timeSeg}` : "",
+  return joinGroups([
+    seg("state") && stateSeg ? `${lbl("state")} ${stateSeg}` : "",
+    seg("backlog") && ghCountSeg ? `${lbl("backlog")} ${ghCountSeg}` : "",
+    seg("mode") && modeSeg ? `${lbl("mode")} ${modeSeg}` : "",
+    seg("flags") && snapshot.settingsParts.join(" ")
+      ? `${lbl("flags")} ${snapshot.settingsParts.join(" ")}`
+      : "",
+    seg("time") ? `${lbl("time")} ${DIM}${formatTime()}${R}` : "",
   ])
+}
 
-  const line1 = `${topLeft} ${line1Groups || `${DIM}─${R}`}`
-  const line2 = `${midLeft} ${line2Groups || `${DIM}─${R}`}`
-  const line3 = `${bottomLeft} ${line3Groups || `${DIM}─${R}`}`
+export function renderStatusLineFromSnapshot(opts: {
+  input: StatusLineInput
+  snapshot: WarmStatusLineSnapshot
+  ctxPct: number
+  ctxTokens: number
+  ctxStats: ContextStats | null
+  timeOffset: number
+}): string {
+  const { input, snapshot, ctxPct, ctxTokens, ctxStats, timeOffset } = opts
+  const model = input.model?.display_name ?? "claude"
+  const seg: SegChecker = (name) =>
+    snapshot.activeSegments.length === 0 || snapshot.activeSegments.includes(name)
 
-  return `${line1}\n${line2}\n${line3}`
+  const a2 = fg256(RAINBOW[(timeOffset + 6) % RL]!)
+  const a4 = fg256(RAINBOW[(timeOffset + 18) % RL]!)
+  const rb = (s: string, idx = 0) => rainbowStr(s, idx, timeOffset)
+  const lbl = (s: string) => `${DIM}${s}${R}`
+
+  const ctxSeg = buildContextSegment(ctxPct, ctxTokens, ctxStats)
+  const line1Groups = buildLine1(seg, snapshot, a2)
+  const line2Groups = joinGroups([
+    seg("model") ? `${lbl("model")} ${rb(model)}` : "",
+    seg("ctx") && ctxPct > 0 ? `${lbl("ctx")} ${ctxSeg}` : "",
+  ])
+  const line3Groups = buildLine3(seg, snapshot, a4, input.agent?.name, input.vim?.mode)
+
+  const topLeft = rb("┌──")
+  const midLeft = rb("├──")
+  const bottomLeft = rb("└──")
+
+  return [
+    `${topLeft} ${line1Groups || `${DIM}─${R}`}`,
+    `${midLeft} ${line2Groups || `${DIM}─${R}`}`,
+    `${bottomLeft} ${line3Groups || `${DIM}─${R}`}`,
+  ].join("\n")
 }
 
 export const statusLineCommand: Command = {
@@ -723,7 +797,7 @@ export const statusLineCommand: Command = {
       (await computeWarmStatusLineSnapshot(cwd, input.session_id ?? null))
 
     console.log(
-      renderStatusLineFromSnapshot(input, snapshot, ctxPct, ctxTokens, ctxStats, timeOffset)
+      renderStatusLineFromSnapshot({ input, snapshot, ctxPct, ctxTokens, ctxStats, timeOffset })
     )
   },
 }

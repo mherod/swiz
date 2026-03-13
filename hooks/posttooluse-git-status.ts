@@ -35,7 +35,7 @@ async function main(): Promise<void> {
     status += ` | collab: ${collabMode}`
   }
 
-  emitContext("PostToolUse", status, cwd)
+  await emitContext("PostToolUse", status, cwd)
 }
 
 if (import.meta.main) void main()

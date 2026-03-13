@@ -30,6 +30,42 @@ export function timeAgo(date: Date): string {
 // ─── Task rendering ──────────────────────────────────────────────────────────
 
 /** Render a single task to stdout. `sessionTag` is an optional `[shortId]` prefix for cross-session views. */
+function renderTaskDescription(task: Task): void {
+  if (!task.description) return
+  const lines = task.description.split("\n")
+  for (const line of lines.slice(0, 3)) console.log(`     ${DIM}${line}${RESET}`)
+  if (lines.length > 3) console.log(`     ${DIM}...${RESET}`)
+}
+
+function renderTaskTiming(task: Task, dateFormat: DateFormat): void {
+  if (task.statusChangedAt) {
+    console.log(`     ${DIM}📅 ${formatDate(new Date(task.statusChangedAt), dateFormat)}${RESET}`)
+  }
+  if (task.status !== "in_progress" && (task.elapsedMs ?? 0) > 0) {
+    console.log(`     ${DIM}⏱  ${formatDuration(task.elapsedMs!)} elapsed${RESET}`)
+  }
+  const completedAtMs = getTaskCompletedAtMs(task)
+  if (completedAtMs !== null) {
+    console.log(
+      `     ${DIM}✓ Completed: ${formatDate(new Date(completedAtMs), dateFormat)}${RESET}`
+    )
+  }
+}
+
+function renderTaskRelations(task: Task): void {
+  if (task.completionEvidence)
+    console.log(`     ${DIM}✓ Evidence: ${task.completionEvidence}${RESET}`)
+  if (task.blockedBy.length)
+    console.log(`     ${DIM}Blocked by: #${task.blockedBy.join(", #")}${RESET}`)
+  if (task.blocks.length) console.log(`     ${DIM}Blocks: #${task.blocks.join(", #")}${RESET}`)
+}
+
+function renderTaskMetadata(task: Task, dateFormat: DateFormat): void {
+  renderTaskDescription(task)
+  renderTaskTiming(task, dateFormat)
+  renderTaskRelations(task)
+}
+
 export function renderTask(task: Task, sessionTag?: string, dateFormat: DateFormat = "relative") {
   const { emoji, color } = STATUS_STYLE[task.status]
   const tag = sessionTag ? `${DIM}[${sessionTag}]${RESET} ` : ""
@@ -40,33 +76,41 @@ export function renderTask(task: Task, sessionTag?: string, dateFormat: DateForm
   console.log(
     `  ${emoji} ${BOLD}#${task.id}${RESET} ${tag}${color}[${task.status.replace("_", " ").toUpperCase()}]${RESET} ${durationTag}${task.subject}`
   )
-  if (task.description) {
-    const lines = task.description.split("\n").slice(0, 3)
-    for (const line of lines) console.log(`     ${DIM}${line}${RESET}`)
-    if (task.description.split("\n").length > 3) console.log(`     ${DIM}...${RESET}`)
-  }
-  // Show date — statusChangedAt is always present (backfilled from file mtime)
-  if (task.statusChangedAt) {
-    console.log(`     ${DIM}📅 ${formatDate(new Date(task.statusChangedAt), dateFormat)}${RESET}`)
-  }
-  // Show elapsed time for completed tasks after the final status settles.
-  if (task.status !== "in_progress" && (task.elapsedMs ?? 0) > 0) {
-    console.log(`     ${DIM}⏱  ${formatDuration(task.elapsedMs!)} elapsed${RESET}`)
-  }
-  if (task.completionEvidence)
-    console.log(`     ${DIM}✓ Evidence: ${task.completionEvidence}${RESET}`)
-  const completedAtMs = getTaskCompletedAtMs(task)
-  if (completedAtMs !== null)
-    console.log(
-      `     ${DIM}✓ Completed: ${formatDate(new Date(completedAtMs), dateFormat)}${RESET}`
-    )
-  if (task.blockedBy.length)
-    console.log(`     ${DIM}Blocked by: #${task.blockedBy.join(", #")}${RESET}`)
-  if (task.blocks.length) console.log(`     ${DIM}Blocks: #${task.blocks.join(", #")}${RESET}`)
+  renderTaskMetadata(task, dateFormat)
   console.log()
 }
 
 // ─── Session listing ─────────────────────────────────────────────────────────
+
+const STATUS_GROUP_ORDER: Array<{ title: string; status: Task["status"] }> = [
+  { title: "IN PROGRESS", status: "in_progress" },
+  { title: "PENDING", status: "pending" },
+  { title: "COMPLETED", status: "completed" },
+  { title: "CANCELLED", status: "cancelled" },
+]
+
+function renderGroupedTasks(
+  tasks: Task[],
+  sessionTag: string | undefined,
+  dateFormat: DateFormat
+): void {
+  for (const { title, status } of STATUS_GROUP_ORDER) {
+    const group = tasks.filter((t) => t.status === status)
+    if (group.length === 0) continue
+    console.log(`  ${BOLD}${title}${RESET} (${group.length})\n`)
+    for (const task of group) renderTask(task, sessionTag, dateFormat)
+  }
+}
+
+function countTaskStats(tasks: Task[]): { incomplete: number; completed: number } {
+  let incomplete = 0
+  let completed = 0
+  for (const t of tasks) {
+    if (t.status === "pending" || t.status === "in_progress") incomplete++
+    else if (t.status === "completed") completed++
+  }
+  return { incomplete, completed }
+}
 
 export async function listTasks(
   sessionId: string,
@@ -85,23 +129,8 @@ export async function listTasks(
     return
   }
 
-  const groups: [string, Task[]][] = [
-    ["IN PROGRESS", tasks.filter((t: Task) => t.status === "in_progress")],
-    ["PENDING", tasks.filter((t: Task) => t.status === "pending")],
-    ["COMPLETED", tasks.filter((t: Task) => t.status === "completed")],
-    ["CANCELLED", tasks.filter((t: Task) => t.status === "cancelled")],
-  ]
-
-  for (const [title, group] of groups) {
-    if (group.length === 0) continue
-    console.log(`  ${BOLD}${title}${RESET} (${group.length})\n`)
-    for (const task of group) renderTask(task, undefined, dateFormat)
-  }
-
-  const incomplete = tasks.filter(
-    (t: Task) => t.status === "pending" || t.status === "in_progress"
-  ).length
-  const completed = tasks.filter((t: Task) => t.status === "completed").length
+  renderGroupedTasks(tasks, undefined, dateFormat)
+  const { incomplete, completed } = countTaskStats(tasks)
   console.log(
     `  ${BOLD}Summary:${RESET} ${incomplete}/${tasks.length} incomplete, ${completed} completed\n`
   )
@@ -144,23 +173,9 @@ export async function listAllSessionsTasks(
     const recoveredTag = orphanIds.has(sessionId) ? ` ${YELLOW}[recovered]${RESET}` : ""
     console.log(`\n  ${BOLD}Session${RESET} ${DIM}${shortId}...${RESET}${recoveredTag}\n`)
 
-    const groups: [string, Task[]][] = [
-      ["IN PROGRESS", tasks.filter((t: Task) => t.status === "in_progress")],
-      ["PENDING", tasks.filter((t: Task) => t.status === "pending")],
-      ["COMPLETED", tasks.filter((t: Task) => t.status === "completed")],
-      ["CANCELLED", tasks.filter((t: Task) => t.status === "cancelled")],
-    ]
+    renderGroupedTasks(tasks, shortId, dateFormat)
 
-    for (const [title, group] of groups) {
-      if (group.length === 0) continue
-      console.log(`  ${BOLD}${title}${RESET} (${group.length})\n`)
-      for (const task of group) renderTask(task, shortId, dateFormat)
-    }
-
-    const incomplete = tasks.filter(
-      (t: Task) => t.status === "pending" || t.status === "in_progress"
-    ).length
-    const completed = tasks.filter((t: Task) => t.status === "completed").length
+    const { incomplete, completed } = countTaskStats(tasks)
     totalIncomplete += incomplete
     totalCompleted += completed
     console.log(

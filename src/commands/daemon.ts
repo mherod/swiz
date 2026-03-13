@@ -40,6 +40,245 @@ import { computeWarmStatusLineSnapshot, type WarmStatusLineSnapshot } from "./st
 const TRANSCRIPT_MEMORY_RETENTION_MS = 12 * 60 * 60 * 1000
 const TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS = 5 * 60 * 1000
 
+async function handleDaemonSubcommand(args: string[], port: number): Promise<boolean> {
+  if (args.includes("status")) {
+    await fetchDaemonStatus(port)
+    return true
+  }
+  if (args.includes("--install")) {
+    await installDaemonLaunchAgent(port)
+    return true
+  }
+  if (args.includes("--uninstall")) {
+    await uninstallDaemonLaunchAgent()
+    return true
+  }
+
+  if (args.includes("--restart")) {
+    const restarted = await restartDaemon(port, process.pid)
+    if (restarted.mode === "launchagent") {
+      const runningMsg = restarted.hadRunning ? "reloaded" : "loaded"
+      console.log(`swiz daemon ${runningMsg} via launchctl.`)
+      return true
+    }
+    if (!restarted.hadRunning) console.log(`No daemon detected on port ${port}; starting fresh.`)
+    else
+      console.log(
+        `Restarting daemon on port ${port} (stopped ${restarted.stoppedCount} process${restarted.stoppedCount === 1 ? "" : "es"}).`
+      )
+  }
+  return false
+}
+
+function createDaemonState() {
+  const globalMetrics = createMetrics()
+  const projectMetrics = new Map<string, DaemonMetrics>()
+  const projectLastSeen = new Map<string, number>()
+  const sessionActivity = new Map<string, { lastSeen: number; dispatches: number }>()
+  const sessionToolCalls = new Map<string, CapturedToolCall[]>()
+  const activeHookDispatches = new Map<string, ActiveHookDispatch>()
+
+  const getProjectMetrics = (cwd: string): DaemonMetrics => {
+    let m = projectMetrics.get(cwd)
+    if (!m) {
+      m = createMetrics()
+      projectMetrics.set(cwd, m)
+    }
+    return m
+  }
+  const touchProject = (cwd: string) => {
+    projectLastSeen.set(cwd, Date.now())
+  }
+
+  return {
+    globalMetrics,
+    projectMetrics,
+    projectLastSeen,
+    sessionActivity,
+    sessionToolCalls,
+    activeHookDispatches,
+    getProjectMetrics,
+    touchProject,
+  }
+}
+
+function createDaemonCaches() {
+  const watchers = new FileWatcherRegistry()
+  const ghCache = new GhQueryCache()
+  const eligibilityCache = new HookEligibilityCache()
+  const transcriptIndex = new TranscriptIndexCache()
+  const cooldownRegistry = new CooldownRegistry()
+  const ciWatchRegistry = new CiWatchRegistry()
+  const workerRuntime = new DaemonWorkerRuntime()
+  const gitStateCache = new GitStateCache()
+  const projectSettingsCache = new ProjectSettingsCache()
+  const manifestCache = new ManifestCache(projectSettingsCache)
+  const snapshots = new LRUCache<string, CachedSnapshot>({ max: 200 })
+
+  return {
+    watchers,
+    ghCache,
+    eligibilityCache,
+    transcriptIndex,
+    cooldownRegistry,
+    ciWatchRegistry,
+    workerRuntime,
+    gitStateCache,
+    projectSettingsCache,
+    manifestCache,
+    snapshots,
+  }
+}
+
+function buildSnapshotResolver(snapshots: LRUCache<string, CachedSnapshot>) {
+  const cacheKey = (cwd: string, sessionId: string | null | undefined) =>
+    `${cwd}\x00${sessionId ?? ""}`
+
+  return async (
+    cwd: string,
+    sessionId: string | null | undefined
+  ): Promise<WarmStatusLineSnapshot> => {
+    const key = cacheKey(cwd, sessionId)
+    const nextFingerprint = await buildSnapshotFingerprint(cwd)
+    const existing = snapshots.get(key)
+    if (existing && !hasSnapshotInvalidated(existing.fingerprint, nextFingerprint)) {
+      return existing.snapshot
+    }
+    const snapshot = await computeWarmStatusLineSnapshot(cwd, sessionId)
+    snapshots.set(key, { snapshot, fingerprint: nextFingerprint })
+    return snapshot
+  }
+}
+
+function setupWatchers(caches: ReturnType<typeof createDaemonCaches>) {
+  const {
+    watchers,
+    ghCache,
+    eligibilityCache,
+    gitStateCache,
+    projectSettingsCache,
+    manifestCache,
+    transcriptIndex,
+    snapshots,
+  } = caches
+  const projectRoot = dirname(Bun.main)
+
+  const flushSnapshots = () => {
+    snapshots.clear()
+    ghCache.invalidateAll()
+    eligibilityCache.invalidateAll()
+    gitStateCache.invalidateAll()
+    projectSettingsCache.invalidateAll()
+    manifestCache.invalidateAll()
+  }
+
+  watchers.register(join(projectRoot, "src", "manifest.ts"), "manifest", flushSnapshots)
+  watchers.register(join(projectRoot, "hooks/"), "hooks", flushSnapshots)
+  const globalSettingsPath = getSwizSettingsPath()
+  if (globalSettingsPath) {
+    watchers.register(globalSettingsPath, "global-settings", flushSnapshots)
+  }
+
+  const registeredProjects = new Set<string>()
+  const registerProjectWatchers = (cwd: string) => {
+    if (registeredProjects.has(cwd)) return
+    registeredProjects.add(cwd)
+    const projectFlush = () => {
+      for (const key of snapshots.keys()) {
+        if (key.startsWith(cwd)) snapshots.delete(key)
+      }
+      ghCache.invalidateProject(cwd)
+      eligibilityCache.invalidateProject(cwd)
+      gitStateCache.invalidateProject(cwd)
+      projectSettingsCache.invalidateProject(cwd)
+      manifestCache.invalidateProject(cwd)
+      transcriptIndex.invalidateAll()
+      sessionDataCache.invalidateAll()
+    }
+    const projectSettings = getProjectSettingsPath(cwd)
+    if (projectSettings) watchers.register(projectSettings, `project-settings:${cwd}`, projectFlush)
+    watchers.register(join(cwd, ".git/"), `git:${cwd}`, projectFlush)
+    for (const transcriptWatch of transcriptWatchPathsForProject(cwd)) {
+      watchers.register(transcriptWatch.path, transcriptWatch.label, projectFlush)
+    }
+    watchers.start()
+  }
+
+  watchers.start()
+  process.on("exit", () => {
+    watchers.close()
+    caches.ciWatchRegistry.close()
+    caches.workerRuntime.close()
+  })
+
+  return { registeredProjects, registerProjectWatchers }
+}
+
+function createPruner(
+  state: ReturnType<typeof createDaemonState>,
+  caches: ReturnType<typeof createDaemonCaches>
+) {
+  let lastPruneAt = 0
+  return () => {
+    const now = Date.now()
+    if (now - lastPruneAt < TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS) return
+    lastPruneAt = now
+    const cutoffMs = now - TRANSCRIPT_MEMORY_RETENTION_MS
+    sessionDataCache.pruneOlderThan(cutoffMs)
+    caches.transcriptIndex.pruneOlderThan(cutoffMs)
+    for (const [sessionId, activity] of state.sessionActivity) {
+      if (activity.lastSeen < cutoffMs) state.sessionActivity.delete(sessionId)
+    }
+    for (const [sessionId, toolCalls] of state.sessionToolCalls) {
+      const recent = toolCalls.filter((call) => new Date(call.timestamp).getTime() >= cutoffMs)
+      if (recent.length === 0) {
+        state.sessionToolCalls.delete(sessionId)
+        continue
+      }
+      if (recent.length !== toolCalls.length) state.sessionToolCalls.set(sessionId, recent)
+    }
+  }
+}
+
+async function startDaemonProcess(_args: string[], port: number): Promise<void> {
+  const state = createDaemonState()
+  const caches = createDaemonCaches()
+  const { registeredProjects, registerProjectWatchers } = setupWatchers(caches)
+
+  state.touchProject(process.cwd())
+  const pruneTranscriptMemory = createPruner(state, caches)
+  const resolveSnapshot = buildSnapshotResolver(caches.snapshots)
+
+  const server = startDaemonWebServer({
+    port,
+    pruneTranscriptMemory,
+    transcriptIndex: caches.transcriptIndex,
+    manifestCache: caches.manifestCache,
+    globalMetrics: state.globalMetrics,
+    getProjectMetrics: state.getProjectMetrics,
+    touchProject: state.touchProject,
+    registerProjectWatchers,
+    sessionActivity: state.sessionActivity,
+    sessionToolCalls: state.sessionToolCalls,
+    activeHookDispatches: state.activeHookDispatches,
+    projectMetrics: state.projectMetrics,
+    ghCache: caches.ghCache,
+    eligibilityCache: caches.eligibilityCache,
+    cooldownRegistry: caches.cooldownRegistry,
+    gitStateCache: caches.gitStateCache,
+    ciWatchRegistry: caches.ciWatchRegistry,
+    projectSettingsCache: caches.projectSettingsCache,
+    registeredProjects,
+    projectLastSeen: state.projectLastSeen,
+    resolveSnapshot,
+    watchers: caches.watchers,
+    snapshots: caches.snapshots,
+    workerRuntime: caches.workerRuntime,
+  })
+
+  console.log(`Daemon listening on ${server.url}`)
+}
+
 /** CLI command: starts the daemon web server, or manages its LaunchAgent lifecycle. */
 export const daemonCommand: Command = {
   name: "daemon",
@@ -56,186 +295,8 @@ export const daemonCommand: Command = {
     const portIndex = args.indexOf("--port")
     const port = portIndex !== -1 ? Number(args[portIndex + 1]) : DAEMON_PORT
 
-    if (args.includes("status")) {
-      await fetchDaemonStatus(port)
-      return
-    }
+    if (await handleDaemonSubcommand(args, port)) return
 
-    if (args.includes("--install")) {
-      await installDaemonLaunchAgent(port)
-      return
-    }
-
-    if (args.includes("--uninstall")) {
-      await uninstallDaemonLaunchAgent()
-      return
-    }
-
-    if (args.includes("--restart")) {
-      const restarted = await restartDaemon(port, process.pid)
-      if (restarted.mode === "launchagent") {
-        const runningMsg = restarted.hadRunning ? "reloaded" : "loaded"
-        console.log(`swiz daemon ${runningMsg} via launchctl.`)
-        return
-      }
-      if (!restarted.hadRunning) console.log(`No daemon detected on port ${port}; starting fresh.`)
-      else
-        console.log(
-          `Restarting daemon on port ${port} (stopped ${restarted.stoppedCount} process${restarted.stoppedCount === 1 ? "" : "es"}).`
-        )
-    }
-
-    const globalMetrics = createMetrics()
-    const projectMetrics = new Map<string, DaemonMetrics>()
-    const projectLastSeen = new Map<string, number>()
-    const sessionActivity = new Map<string, { lastSeen: number; dispatches: number }>()
-    const sessionToolCalls = new Map<string, CapturedToolCall[]>()
-    const activeHookDispatches = new Map<string, ActiveHookDispatch>()
-    let lastTranscriptMemoryPruneAt = 0
-    const getProjectMetrics = (cwd: string): DaemonMetrics => {
-      let m = projectMetrics.get(cwd)
-      if (!m) {
-        m = createMetrics()
-        projectMetrics.set(cwd, m)
-      }
-      return m
-    }
-    const touchProject = (cwd: string) => {
-      projectLastSeen.set(cwd, Date.now())
-    }
-    const pruneTranscriptMemory = () => {
-      const now = Date.now()
-      if (now - lastTranscriptMemoryPruneAt < TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS) return
-      lastTranscriptMemoryPruneAt = now
-      const cutoffMs = now - TRANSCRIPT_MEMORY_RETENTION_MS
-      sessionDataCache.pruneOlderThan(cutoffMs)
-      transcriptIndex.pruneOlderThan(cutoffMs)
-      for (const [sessionId, activity] of sessionActivity) {
-        if (activity.lastSeen < cutoffMs) sessionActivity.delete(sessionId)
-      }
-      for (const [sessionId, toolCalls] of sessionToolCalls) {
-        const recent = toolCalls.filter((call) => new Date(call.timestamp).getTime() >= cutoffMs)
-        if (recent.length === 0) {
-          sessionToolCalls.delete(sessionId)
-          continue
-        }
-        if (recent.length !== toolCalls.length) {
-          sessionToolCalls.set(sessionId, recent)
-        }
-      }
-    }
-    touchProject(process.cwd())
-
-    const watchers = new FileWatcherRegistry()
-    const ghCache = new GhQueryCache()
-    const eligibilityCache = new HookEligibilityCache()
-    const transcriptIndex = new TranscriptIndexCache()
-    const cooldownRegistry = new CooldownRegistry()
-    const ciWatchRegistry = new CiWatchRegistry()
-    const workerRuntime = new DaemonWorkerRuntime()
-    const gitStateCache = new GitStateCache()
-    const projectSettingsCache = new ProjectSettingsCache()
-    const manifestCache = new ManifestCache(projectSettingsCache)
-    const projectRoot = dirname(Bun.main)
-    const hooksDir = join(projectRoot, "hooks/")
-    const manifestPath = join(projectRoot, "src", "manifest.ts")
-    const globalSettingsPath = getSwizSettingsPath()
-
-    const snapshots = new LRUCache<string, CachedSnapshot>({ max: 200 })
-    const cacheKey = (cwd: string, sessionId: string | null | undefined) =>
-      `${cwd}\x00${sessionId ?? ""}`
-    const resolveSnapshot = async (
-      cwd: string,
-      sessionId: string | null | undefined
-    ): Promise<WarmStatusLineSnapshot> => {
-      const key = cacheKey(cwd, sessionId)
-      const nextFingerprint = await buildSnapshotFingerprint(cwd)
-      const existing = snapshots.get(key)
-      if (existing && !hasSnapshotInvalidated(existing.fingerprint, nextFingerprint)) {
-        return existing.snapshot
-      }
-      const snapshot = await computeWarmStatusLineSnapshot(cwd, sessionId)
-      snapshots.set(key, { snapshot, fingerprint: nextFingerprint })
-      return snapshot
-    }
-
-    // Register watchers for cache invalidation
-    const flushSnapshots = () => {
-      snapshots.clear()
-      ghCache.invalidateAll()
-      eligibilityCache.invalidateAll()
-      gitStateCache.invalidateAll()
-      projectSettingsCache.invalidateAll()
-      manifestCache.invalidateAll()
-    }
-
-    watchers.register(manifestPath, "manifest", flushSnapshots)
-    watchers.register(hooksDir, "hooks", flushSnapshots)
-    if (globalSettingsPath) {
-      watchers.register(globalSettingsPath, "global-settings", flushSnapshots)
-    }
-
-    const registeredProjects = new Set<string>()
-    const registerProjectWatchers = (cwd: string) => {
-      if (registeredProjects.has(cwd)) return
-      registeredProjects.add(cwd)
-      const projectFlush = () => {
-        for (const key of snapshots.keys()) {
-          if (key.startsWith(cwd)) snapshots.delete(key)
-        }
-        ghCache.invalidateProject(cwd)
-        eligibilityCache.invalidateProject(cwd)
-        gitStateCache.invalidateProject(cwd)
-        projectSettingsCache.invalidateProject(cwd)
-        manifestCache.invalidateProject(cwd)
-        transcriptIndex.invalidateAll()
-        sessionDataCache.invalidateAll()
-      }
-      const projectSettings = getProjectSettingsPath(cwd)
-      if (projectSettings)
-        watchers.register(projectSettings, `project-settings:${cwd}`, projectFlush)
-      const gitDir = join(cwd, ".git/")
-      watchers.register(gitDir, `git:${cwd}`, projectFlush)
-      for (const transcriptWatch of transcriptWatchPathsForProject(cwd)) {
-        watchers.register(transcriptWatch.path, transcriptWatch.label, projectFlush)
-      }
-      watchers.start()
-    }
-
-    watchers.start()
-    process.on("exit", () => {
-      watchers.close()
-      ciWatchRegistry.close()
-      workerRuntime.close()
-    })
-
-    const server = startDaemonWebServer({
-      port,
-      pruneTranscriptMemory,
-      transcriptIndex,
-      manifestCache,
-      globalMetrics,
-      getProjectMetrics,
-      touchProject,
-      registerProjectWatchers,
-      sessionActivity,
-      sessionToolCalls,
-      activeHookDispatches,
-      projectMetrics,
-      ghCache,
-      eligibilityCache,
-      cooldownRegistry,
-      gitStateCache,
-      ciWatchRegistry,
-      projectSettingsCache,
-      registeredProjects,
-      projectLastSeen,
-      resolveSnapshot,
-      watchers,
-      snapshots,
-      workerRuntime,
-    })
-
-    console.log(`Daemon listening on ${server.url}`)
+    await startDaemonProcess(args, port)
   },
 }

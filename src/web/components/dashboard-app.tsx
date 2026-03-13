@@ -81,25 +81,23 @@ export function DashboardApp() {
           <SettingsPanel cwd={optimisticProjectCwd} />
         </div>
       ) : (
-        <>
-          <SessionMessages
-            messages={displayedMessages}
-            loading={messagesLoading}
-            newKeys={newMessageKeys}
-            msgKey={msgKey}
-            toolStats={sessionToolStats}
-            tasks={sessionTasks}
-            taskSummary={sessionTaskSummary}
-            tasksLoading={sessionTasksLoading}
-            projectTasks={projectTasks}
-            projectTaskSummary={projectTaskSummary}
-            projectTasksLoading={projectTasksLoading}
-            events={metricsEvents}
-            cacheStatus={cacheStatus}
-            activeSession={activeSession}
-            activeHookDispatches={activeHookDispatches}
-          />
-        </>
+        <SessionMessages
+          messages={displayedMessages}
+          loading={messagesLoading}
+          newKeys={newMessageKeys}
+          msgKey={msgKey}
+          toolStats={sessionToolStats}
+          tasks={sessionTasks}
+          taskSummary={sessionTaskSummary}
+          tasksLoading={sessionTasksLoading}
+          projectTasks={projectTasks}
+          projectTaskSummary={projectTaskSummary}
+          projectTasksLoading={projectTasksLoading}
+          events={metricsEvents}
+          cacheStatus={cacheStatus}
+          activeSession={activeSession}
+          activeHookDispatches={activeHookDispatches}
+        />
       )}
     </div>
   )

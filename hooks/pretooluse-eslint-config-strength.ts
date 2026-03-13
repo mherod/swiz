@@ -38,33 +38,29 @@ function denyConfigWeakening(kind: string, oldCount: number, newCount: number): 
   denyPreToolUse(reason)
 }
 
+function checkForWeakening(oldString: string, newString: string): void {
+  const oldCounts = countEnforcements(oldString)
+  const newCounts = countEnforcements(newString)
+  if (newCounts.warnings < oldCounts.warnings) {
+    denyConfigWeakening("Warning", oldCounts.warnings, newCounts.warnings)
+  }
+  if (newCounts.errors < oldCounts.errors) {
+    denyConfigWeakening("Enforcement", oldCounts.errors, newCounts.errors)
+  }
+}
+
 async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
   const filePath = input.tool_input?.file_path ?? ""
-  if (!isEslintConfigFile(filePath)) {
-    process.exit(0)
-  }
+  if (!isEslintConfigFile(filePath)) process.exit(0)
 
   // NFKC normalization handled by fileEditHookInputSchema.transform()
   const oldString = input.tool_input?.old_string ?? ""
+  if (!oldString) process.exit(0)
+
   const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
-
-  // If no old_string (new file), allow it
-  if (!oldString) {
-    process.exit(0)
-  }
-
-  const oldCounts = countEnforcements(oldString)
-  const newCounts = countEnforcements(newString)
-
-  if (newCounts.warnings < oldCounts.warnings) {
-    denyConfigWeakening("Warning", oldCounts.warnings, newCounts.warnings)
-  }
-
-  if (newCounts.errors < oldCounts.errors) {
-    denyConfigWeakening("Enforcement", oldCounts.errors, newCounts.errors)
-  }
+  checkForWeakening(oldString, newString)
 
   allowPreToolUse("")
 }

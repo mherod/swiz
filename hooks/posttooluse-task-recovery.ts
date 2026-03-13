@@ -47,28 +47,27 @@ interface ExtendedToolInput extends ToolHookInput {
   }
 }
 
+const VALID_RECOVERY_STATUSES = new Set(["pending", "in_progress", "completed"])
+
 function buildRecoveryTask(
   taskId: string,
   input: ExtendedToolInput
 ): { task: TaskFile; status: string; subject: string } {
   const requestedStatus = input.tool_input?.status ?? "completed"
-  const requestedSubject =
-    input.tool_input?.subject ?? `Recovered task #${taskId} (lost during compaction)`
-  const requestedDescription =
+  const subject = input.tool_input?.subject ?? `Recovered task #${taskId} (lost during compaction)`
+  const description =
     input.tool_input?.description ??
     `This task was automatically recovered by posttooluse-task-recovery after task #${taskId} was not found on disk. The requested status '${requestedStatus}' has been applied.`
-  const requestedActiveForm = input.tool_input?.activeForm
 
-  const validStatuses = ["pending", "in_progress", "completed"]
-  const status = validStatuses.includes(requestedStatus) ? requestedStatus : "completed"
+  const status = VALID_RECOVERY_STATUSES.has(requestedStatus) ? requestedStatus : "completed"
   const nowIso = new Date().toISOString()
   const nowMs = Date.now()
 
   const task: TaskFile = {
     id: taskId,
-    subject: requestedSubject,
-    description: requestedDescription,
-    ...(requestedActiveForm ? { activeForm: requestedActiveForm } : {}),
+    subject,
+    description,
+    activeForm: input.tool_input?.activeForm,
     status,
     blocks: [],
     blockedBy: [],
@@ -76,10 +75,10 @@ function buildRecoveryTask(
     elapsedMs: 0,
     startedAt: status === "in_progress" ? nowMs : null,
     completedAt: status === "completed" ? nowMs : null,
-    ...(status === "completed" ? { completionTimestamp: nowIso } : {}),
+    completionTimestamp: status === "completed" ? nowIso : undefined,
   }
 
-  return { task, status, subject: requestedSubject }
+  return { task, status, subject }
 }
 
 function buildRecoveryErrorContext(taskId: string, subject: string, status: string): string {
@@ -117,7 +116,7 @@ async function main(): Promise<void> {
     await mkdir(tasksDir, { recursive: true })
     await Bun.write(taskPath, JSON.stringify(task, null, 2))
   } catch {
-    emitContext("PostToolUse", buildRecoveryErrorContext(taskId, subject, status), input.cwd)
+    await emitContext("PostToolUse", buildRecoveryErrorContext(taskId, subject, status), input.cwd)
   }
 
   const successContext =
@@ -125,7 +124,7 @@ async function main(): Promise<void> {
     `A replacement task file has been written with status '${status}' and subject: "${subject}". ` +
     `No further recovery action is needed. Continue with the next step.`
 
-  emitContext("PostToolUse", successContext, input.cwd)
+  await emitContext("PostToolUse", successContext, input.cwd)
 }
 
 if (import.meta.main) void main()

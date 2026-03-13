@@ -65,42 +65,45 @@ interface ParsedArgs {
   context: string | null
 }
 
+type StringField = "filePath" | "snippet" | "repo" | "title" | "context"
+
+const STRING_FLAGS: Record<string, StringField> = {
+  "--file": "filePath",
+  "-f": "filePath",
+  "--snippet": "snippet",
+  "-s": "snippet",
+  "--repo": "repo",
+  "-r": "repo",
+  "--title": "title",
+  "-t": "title",
+  "--context": "context",
+}
+
+const CRITERIA_FLAGS = new Set(["--success-criteria", "--criteria", "-c"])
+
 function parseFlag(flag: string | undefined, next: string | undefined, state: ParsedArgs): number {
-  switch (flag) {
-    case "--file":
-    case "-f":
-      state.filePath = next ?? null
-      return 1
-    case "--line":
-    case "-l":
-      state.line = next != null ? parseInt(next, 10) : null
-      return 1
-    case "--snippet":
-    case "-s":
-      state.snippet = next ?? null
-      return 1
-    case "--repo":
-    case "-r":
-      state.repo = next ?? null
-      return 1
-    case "--title":
-    case "-t":
-      state.title = next ?? null
-      return 1
-    case "--success-criteria":
-    case "--criteria":
-    case "-c":
-      if (next) {
-        state.successCriteria.push(next)
-        return 1
-      }
-      return 0
-    case "--context":
-      state.context = next ?? null
-      return 1
-    default:
-      return 0
+  if (!flag) return 0
+
+  const stringField = STRING_FLAGS[flag]
+  if (stringField) {
+    state[stringField] = next ?? null
+    return 1
   }
+
+  if (flag === "--line" || flag === "-l") {
+    state.line = next != null ? parseInt(next, 10) : null
+    return 1
+  }
+
+  if (CRITERIA_FLAGS.has(flag)) {
+    if (next) {
+      state.successCriteria.push(next)
+      return 1
+    }
+    return 0
+  }
+
+  return 0
 }
 
 function parseArgs(args: string[]): ParsedArgs {

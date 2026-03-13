@@ -8,6 +8,7 @@ import {
   getEffectiveSwizSettings,
   getProjectSettingsPath,
   getSwizSettingsPath,
+  type ProjectSwizSettings,
   readProjectSettings,
   readSwizSettings,
   resolveMemoryThresholds,
@@ -15,6 +16,7 @@ import {
   SETTINGS_REGISTRY,
   type SettingDef,
   type SettingsScope,
+  type SwizSettings,
   settingsStore,
 } from "../settings.ts"
 import { spawnSpeak } from "../speech.ts"
@@ -102,80 +104,81 @@ function isStringSetting(key: SettingKey): boolean {
   return getSettingDef(key).kind === "string"
 }
 
-function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
-  const positionals: string[] = []
-  let targetDir = process.cwd()
-  let scope: SettingsScope = "global"
-  let sessionQuery: string | null = null
-  let scopeExplicit = false
-  let force = false
+const SCOPE_FLAGS: Record<string, SettingsScope> = {
+  "--global": "global",
+  "-g": "global",
+  "--project": "project",
+  "-p": "project",
+  "--session": "session",
+  "-s": "session",
+}
 
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]
-    if (!arg) continue
-    const next = args[i + 1]
+const VALID_ACTIONS = new Set(["show", "enable", "disable", "set", "disable-hook", "enable-hook"])
 
-    if (arg === "--force" || arg === "-f") {
-      force = true
-      continue
-    }
+interface SettingsArgState {
+  positionals: string[]
+  targetDir: string
+  scope: SettingsScope
+  sessionQuery: string | null
+  force: boolean
+}
 
-    if (arg === "--dir" || arg === "-d") {
-      if (!next || next.startsWith("-")) throw new Error(`Missing value for ${arg}.\n${usage()}`)
-      targetDir = next
-      i++
-      continue
-    }
+function processSettingsArg(args: string[], i: number, state: SettingsArgState): number {
+  const arg = args[i]!
+  const next = args[i + 1]
 
-    if (arg === "--global" || arg === "-g") {
-      scope = "global"
-      scopeExplicit = true
-      continue
-    }
-
-    if (arg === "--project" || arg === "-p") {
-      scope = "project"
-      scopeExplicit = true
-      continue
-    }
-
-    if (arg === "--session" || arg === "-s") {
-      scope = "session"
-      scopeExplicit = true
-      if (next && !next.startsWith("-")) {
-        sessionQuery = next
-        i++
-      }
-      continue
-    }
-
-    positionals.push(arg)
+  if (arg === "--force" || arg === "-f") {
+    state.force = true
+    return i
   }
 
-  // Backwards compat: if no explicit scope flag was given but --session was the old pattern
-  // The new default is "global" which matches old behavior when --session was absent
-  void scopeExplicit
+  if (arg === "--dir" || arg === "-d") {
+    if (!next || next.startsWith("-")) throw new Error(`Missing value for ${arg}.\n${usage()}`)
+    state.targetDir = next
+    return i + 1
+  }
 
-  const rawAction = (positionals[0] ?? "show").toLowerCase()
-  if (
-    rawAction !== "show" &&
-    rawAction !== "enable" &&
-    rawAction !== "disable" &&
-    rawAction !== "set" &&
-    rawAction !== "disable-hook" &&
-    rawAction !== "enable-hook"
-  ) {
-    throw new Error(`Unknown subcommand: ${positionals[0]}\n${usage()}`)
+  const scopeValue = SCOPE_FLAGS[arg]
+  if (scopeValue) {
+    state.scope = scopeValue
+    if (scopeValue === "session" && next && !next.startsWith("-")) {
+      state.sessionQuery = next
+      return i + 1
+    }
+    return i
+  }
+
+  state.positionals.push(arg)
+  return i
+}
+
+function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
+  const state: SettingsArgState = {
+    positionals: [],
+    targetDir: process.cwd(),
+    scope: "global",
+    sessionQuery: null,
+    force: false,
+  }
+
+  for (let i = 0; i < args.length; i++) {
+    if (!args[i]) continue
+    i = processSettingsArg(args, i, state)
+  }
+
+  const rawAction = (state.positionals[0] ?? "show").toLowerCase()
+  if (!VALID_ACTIONS.has(rawAction)) {
+    throw new Error(`Unknown subcommand: ${state.positionals[0]}\n${usage()}`)
   }
 
   return {
     action: rawAction as Action,
-    settingArg: positionals[1],
-    settingValue: positionals[2],
-    targetDir,
-    scope,
-    sessionQuery,
-    force,
+    settingArg: state.positionals[1],
+    settingValue: state.positionals[2],
+    targetDir: state.targetDir,
+    scope: state.scope,
+    sessionQuery: state.sessionQuery,
+    force: state.force,
   }
 }
 
@@ -232,65 +235,68 @@ function printHeader(path: string | null, fileExists: boolean, sessionId: string
   if (sessionId) console.log(`  scope: session ${sessionId}`)
 }
 
+type BoolSettingRow = [label: string, key: keyof EffectiveSwizSettings, scope: string]
+
+function resolveScopeLabel(source: string | undefined, fallback: string): string {
+  if (source === "session") return "session override"
+  if (source === "project") return "project override"
+  return fallback
+}
+
+function printBooleanSettings(rows: BoolSettingRow[], effective: EffectiveSwizSettings): void {
+  for (const [label, key, scope] of rows) {
+    const value = effective[key] ? "enabled" : "disabled"
+    console.log(`  ${label} ${value} (${scope})`)
+  }
+}
+
+const GLOBAL_BOOL_ROWS: BoolSettingRow[] = [
+  ["critiques:      ", "critiquesEnabled", "global"],
+  ["pr-merge-mode:  ", "prMergeMode", "global"],
+  ["push-gate:      ", "pushGate", "global"],
+  ["sandboxed-edits:", "sandboxedEdits", "global"],
+  ["speak:          ", "speak", "global"],
+  ["update-memory-footer:", "updateMemoryFooter", "global"],
+  ["git-status-gate:        ", "gitStatusGate", "global"],
+  ["non-default-branch-gate:", "nonDefaultBranchGate", "global"],
+  ["github-ci-gate:         ", "githubCiGate", "global"],
+  ["changes-requested-gate: ", "changesRequestedGate", "global"],
+  ["issue-close-gate:       ", "issueCloseGate", "global"],
+]
+
 function printGlobalSettings(
   effective: EffectiveSwizSettings & { disabledHooks?: string[] },
   ambitionSource: "global" | "project" | "session" | undefined,
   strictNoDirectMainSource: "global" | "project" | undefined
 ): void {
   const scopeLabel = effective.source === "session" ? "session override" : "global/default"
-  const ambitionScopeLabel =
-    ambitionSource === "session"
-      ? "session override"
-      : ambitionSource === "project"
-        ? "project override"
-        : "global/default"
-  const strictNoDirectMainScopeLabel =
-    strictNoDirectMainSource === "project" ? "project override" : "global"
-  const ageGateLabel =
-    effective.prAgeGateMinutes > 0 ? `${effective.prAgeGateMinutes} minutes` : "disabled"
-  const cooldownLabel =
-    effective.pushCooldownMinutes > 0 ? `${effective.pushCooldownMinutes} minutes` : "disabled"
-  const voiceLabel = effective.narratorVoice || "system default"
-  const speedLabel =
-    effective.narratorSpeed > 0 ? `${effective.narratorSpeed} wpm` : "system default"
+  const ambitionScopeLabel = resolveScopeLabel(ambitionSource, "global/default")
+  const strictLabel = strictNoDirectMainSource === "project" ? "project override" : "global"
 
   console.log(
     `  auto-continue:   ${effective.autoContinue ? "enabled" : "disabled"} (${scopeLabel})`
   )
-  console.log(`  critiques:       ${effective.critiquesEnabled ? "enabled" : "disabled"} (global)`)
   console.log(`  ambition-mode:   ${effective.ambitionMode} (${ambitionScopeLabel})`)
   console.log(
     `  collaboration:   ${effective.collaborationMode} (${effective.collaborationMode === "auto" ? "default" : scopeLabel})`
   )
+
+  printBooleanSettings(GLOBAL_BOOL_ROWS, effective)
+
+  console.log(
+    `  strict-no-direct-main:   ${effective.strictNoDirectMain ? "enabled" : "disabled"} (${strictLabel})`
+  )
+
+  const ageGateLabel =
+    effective.prAgeGateMinutes > 0 ? `${effective.prAgeGateMinutes} minutes` : "disabled"
+  const cooldownLabel =
+    effective.pushCooldownMinutes > 0 ? `${effective.pushCooldownMinutes} minutes` : "disabled"
   console.log(`  pr-age-gate:     ${ageGateLabel} (global)`)
   console.log(`  push-cooldown:   ${cooldownLabel} (global)`)
-  console.log(`  pr-merge-mode:   ${effective.prMergeMode ? "enabled" : "disabled"} (global)`)
-  console.log(`  push-gate:       ${effective.pushGate ? "enabled" : "disabled"} (global)`)
-  console.log(`  sandboxed-edits: ${effective.sandboxedEdits ? "enabled" : "disabled"} (global)`)
-  console.log(`  speak:           ${effective.speak ? "enabled" : "disabled"} (global)`)
+  console.log(`  narrator-voice:  ${effective.narratorVoice || "system default"} (global)`)
   console.log(
-    `  update-memory-footer: ${effective.updateMemoryFooter ? "enabled" : "disabled"} (global)`
+    `  narrator-speed:  ${effective.narratorSpeed > 0 ? `${effective.narratorSpeed} wpm` : "system default"} (global)`
   )
-  console.log(
-    `  git-status-gate:         ${effective.gitStatusGate ? "enabled" : "disabled"} (global)`
-  )
-  console.log(
-    `  non-default-branch-gate: ${effective.nonDefaultBranchGate ? "enabled" : "disabled"} (global)`
-  )
-  console.log(
-    `  github-ci-gate:          ${effective.githubCiGate ? "enabled" : "disabled"} (global)`
-  )
-  console.log(
-    `  changes-requested-gate:  ${effective.changesRequestedGate ? "enabled" : "disabled"} (global)`
-  )
-  console.log(
-    `  issue-close-gate:        ${effective.issueCloseGate ? "enabled" : "disabled"} (global)`
-  )
-  console.log(
-    `  strict-no-direct-main:   ${effective.strictNoDirectMain ? "enabled" : "disabled"} (${strictNoDirectMainScopeLabel})`
-  )
-  console.log(`  narrator-voice:  ${voiceLabel} (global)`)
-  console.log(`  narrator-speed:  ${speedLabel} (global)`)
   console.log(`  memory-line-threshold: ${effective.memoryLineThreshold} (global)`)
   console.log(`  memory-word-threshold: ${effective.memoryWordThreshold} (global)`)
   console.log(`  large-file-size-kb: ${effective.largeFileSizeKb} (global)`)
@@ -340,29 +346,21 @@ function printSettings(opts: PrintSettingsOptions): void {
   console.log("")
 }
 
-async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
-  const sessionId =
-    parsed.scope === "session"
-      ? await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
-      : null
-  const settings = await readSwizSettings({ strict: true })
-  const projectSettings = await readProjectSettings(parsed.targetDir)
-  const effective = getEffectiveSwizSettings(settings, sessionId, projectSettings)
-  const path = getSwizSettingsPath()
-  const fileExists = path ? await Bun.file(path).exists() : false
+function resolveAmbitionSource(
+  sessionId: string | null,
+  settings: SwizSettings,
+  projectSettings: ProjectSwizSettings | null
+): "global" | "project" | "session" {
+  if (sessionId && settings.sessions[sessionId]?.ambitionMode) return "session"
+  if (projectSettings?.ambitionMode) return "project"
+  return "global"
+}
 
-  const sessionAmbition =
-    sessionId && settings.sessions[sessionId]
-      ? settings.sessions[sessionId]?.ambitionMode
-      : undefined
-  const ambitionSource: "global" | "project" | "session" = sessionAmbition
-    ? "session"
-    : projectSettings?.ambitionMode
-      ? "project"
-      : "global"
-  const strictNoDirectMainSource: "global" | "project" =
-    projectSettings?.strictNoDirectMain !== undefined ? "project" : "global"
-
+function buildProjectPolicyInfo(
+  targetDir: string,
+  settings: SwizSettings,
+  projectSettings: ProjectSwizSettings | null
+): ProjectPolicyInfo {
   const policy = resolvePolicy(projectSettings)
   const memoryThresholds = resolveMemoryThresholds(
     projectSettings,
@@ -375,8 +373,8 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
       memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
     }
   )
-  const projectPolicyInfo = {
-    configPath: getProjectSettingsPath(parsed.targetDir),
+  return {
+    configPath: getProjectSettingsPath(targetDir),
     profile: policy.profile,
     trivialMaxFiles: policy.trivialMaxFiles,
     trivialMaxLines: policy.trivialMaxLines,
@@ -389,6 +387,18 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
     source: policy.source,
     disabledHooks: projectSettings?.disabledHooks,
   }
+}
+
+async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
+  const sessionId =
+    parsed.scope === "session"
+      ? await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
+      : null
+  const settings = await readSwizSettings({ strict: true })
+  const projectSettings = await readProjectSettings(parsed.targetDir)
+  const effective = getEffectiveSwizSettings(settings, sessionId, projectSettings)
+  const path = getSwizSettingsPath()
+  const fileExists = path ? await Bun.file(path).exists() : false
 
   const detectedStacks = await detectProjectStack(parsed.targetDir)
   printSettings({
@@ -396,9 +406,10 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
     path,
     fileExists,
     sessionId,
-    ambitionSource,
-    strictNoDirectMainSource,
-    projectPolicyInfo,
+    ambitionSource: resolveAmbitionSource(sessionId, settings, projectSettings),
+    strictNoDirectMainSource:
+      projectSettings?.strictNoDirectMain !== undefined ? "project" : "global",
+    projectPolicyInfo: buildProjectPolicyInfo(parsed.targetDir, settings, projectSettings),
     detectedStacks,
   })
 }
@@ -438,6 +449,25 @@ async function detectStrictNoDirectMainConflicts(targetDir: string): Promise<str
   return conflicts
 }
 
+async function enforceStrictNoDirectMainConflicts(parsed: ParsedSettingsArgs): Promise<void> {
+  const conflicts = await detectStrictNoDirectMainConflicts(parsed.targetDir)
+  if (conflicts.length === 0) return
+  if (!parsed.force) {
+    const conflictList = conflicts.map((c) => `  - ${c}`).join("\n")
+    throw new Error(
+      `Cannot enable strict-no-direct-main: conflicting settings detected:\n\n${conflictList}\n\n` +
+        `Resolve the conflicts above, or use --force to override:\n` +
+        `  swiz settings enable strict-no-direct-main --force\n`
+    )
+  }
+  stderrLog(
+    "settings enable --force prints a warning about conflicting settings",
+    `\n  Warning: enabling strict-no-direct-main with conflicting settings (--force):\n` +
+      conflicts.map((c) => `    - ${c}`).join("\n") +
+      `\n`
+  )
+}
+
 async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise<void> {
   const key = parseSetting(parsed.settingArg)
   if (isNumericSetting(key) || isStringSetting(key)) {
@@ -447,49 +477,15 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
   }
   validateSettingScope(key, parsed.scope, parsed.settingArg ?? key)
 
-  // Conflict check for strictNoDirectMain (only when enabling)
   if (key === "strictNoDirectMain" && enabled) {
-    const conflicts = await detectStrictNoDirectMainConflicts(parsed.targetDir)
-    if (conflicts.length > 0 && !parsed.force) {
-      const conflictList = conflicts.map((c) => `  - ${c}`).join("\n")
-      throw new Error(
-        `Cannot enable strict-no-direct-main: conflicting settings detected:\n\n${conflictList}\n\n` +
-          `Resolve the conflicts above, or use --force to override:\n` +
-          `  swiz settings enable strict-no-direct-main --force\n`
-      )
-    }
-    if (conflicts.length > 0 && parsed.force) {
-      stderrLog(
-        "settings enable --force prints a warning about conflicting settings",
-        `\n  Warning: enabling strict-no-direct-main with conflicting settings (--force):\n` +
-          conflicts.map((c) => `    - ${c}`).join("\n") +
-          `\n`
-      )
-    }
+    await enforceStrictNoDirectMainConflicts(parsed)
   }
 
-  const scopeLabel = parsed.scope
-  let path: string
-
-  if (parsed.scope === "session") {
-    const sessionId = await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
-    path = await settingsStore.setSession(sessionId, key, enabled)
-    console.log(
-      `\n  ${enabled ? "Enabled" : "Disabled"} ${parsed.settingArg ?? key} (session ${sessionId})`
-    )
-  } else if (parsed.scope === "project") {
-    path = await settingsStore.setProject(parsed.targetDir, key, enabled)
-    console.log(`\n  ${enabled ? "Enabled" : "Disabled"} ${parsed.settingArg ?? key} (project)`)
-  } else {
-    path = await settingsStore.setGlobal(key, enabled)
-    console.log(
-      `\n  ${enabled ? "Enabled" : "Disabled"} ${parsed.settingArg ?? key} (${scopeLabel})`
-    )
-  }
-
+  const path = await writeSettingToScope(parsed, key, enabled)
+  const verb = enabled ? "Enabled" : "Disabled"
+  console.log(`\n  ${verb} ${parsed.settingArg ?? key} (${parsed.scope})`)
   console.log(`  Saved: ${path}\n`)
 
-  // Test TTS immediately when enabling speak — use configured voice/speed
   if (enabled && key === "speak") {
     const updatedSettings = await readSwizSettings()
     const speakScriptPath = join(dirname(Bun.main), "hooks", "speak.ts")

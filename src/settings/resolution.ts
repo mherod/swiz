@@ -57,43 +57,45 @@ export function resolvePolicy(project: ProjectSwizSettings | null): ResolvedPoli
   return { trivialMaxFiles, trivialMaxLines, profile: resolvedProfile, source: "project" }
 }
 
+function resolveTieredValue(
+  projectVal: number | undefined,
+  userVal: number | undefined,
+  defaultVal: number
+): { value: number; source: "project" | "user" | "default" } {
+  if (projectVal !== undefined) return { value: projectVal, source: "project" }
+  if (userVal !== undefined) return { value: userVal, source: "user" }
+  return { value: defaultVal, source: "default" }
+}
+
 /** Resolve effective memory thresholds with per-value source tracking. */
 export function resolveMemoryThresholds(
   project: ProjectSwizSettings | null,
   user: { memoryLineThreshold?: number; memoryWordThreshold?: number },
   defaults: { memoryLineThreshold: number; memoryWordThreshold: number }
 ): ResolvedMemoryThresholds {
-  // 3-tier hierarchy: project > user > default
-  const memoryLineThreshold =
-    project?.memoryLineThreshold ?? user.memoryLineThreshold ?? defaults.memoryLineThreshold
-  const memoryLineSource = project?.memoryLineThreshold
-    ? "project"
-    : user.memoryLineThreshold
-      ? "user"
-      : "default"
-
-  const memoryWordThreshold =
-    project?.memoryWordThreshold ?? user.memoryWordThreshold ?? defaults.memoryWordThreshold
-  const memoryWordSource = project?.memoryWordThreshold
-    ? "project"
-    : user.memoryWordThreshold
-      ? "user"
-      : "default"
-
+  const line = resolveTieredValue(
+    project?.memoryLineThreshold,
+    user.memoryLineThreshold,
+    defaults.memoryLineThreshold
+  )
+  const word = resolveTieredValue(
+    project?.memoryWordThreshold,
+    user.memoryWordThreshold,
+    defaults.memoryWordThreshold
+  )
   return {
-    memoryLineThreshold,
-    memoryLineSource,
-    memoryWordThreshold,
-    memoryWordSource,
+    memoryLineThreshold: line.value,
+    memoryLineSource: line.source,
+    memoryWordThreshold: word.value,
+    memoryWordSource: word.source,
   }
 }
 
-export function getEffectiveSwizSettings(
+function buildBaseSettings(
   settings: SwizSettings,
-  sessionId?: string | null,
   projectSettings?: ProjectSwizSettings | null
-): EffectiveSwizSettings {
-  const base: EffectiveSettingsBase = {
+): EffectiveSettingsBase {
+  return {
     autoContinue: settings.autoContinue,
     critiquesEnabled: settings.critiquesEnabled,
     ambitionMode: projectSettings?.ambitionMode ?? settings.ambitionMode,
@@ -121,18 +123,23 @@ export function getEffectiveSwizSettings(
     largeFileSizeKb: projectSettings?.largeFileSizeKb ?? settings.largeFileSizeKb,
     statusLineSegments: settings.statusLineSegments,
   }
+}
+
+export function getEffectiveSwizSettings(
+  settings: SwizSettings,
+  sessionId?: string | null,
+  projectSettings?: ProjectSwizSettings | null
+): EffectiveSwizSettings {
+  const base = buildBaseSettings(settings, projectSettings)
 
   if (sessionId && settings.sessions[sessionId]) {
-    const sessionSettings = settings.sessions[sessionId]!
+    const s = settings.sessions[sessionId]!
     return {
       ...base,
-      autoContinue: sessionSettings.autoContinue,
-      ambitionMode: sessionSettings.ambitionMode ?? base.ambitionMode,
-      collaborationMode: sessionSettings.collaborationMode ?? base.collaborationMode,
-      prMergeMode:
-        typeof sessionSettings.prMergeMode === "boolean"
-          ? sessionSettings.prMergeMode
-          : base.prMergeMode,
+      autoContinue: s.autoContinue,
+      ambitionMode: s.ambitionMode ?? base.ambitionMode,
+      collaborationMode: s.collaborationMode ?? base.collaborationMode,
+      prMergeMode: typeof s.prMergeMode === "boolean" ? s.prMergeMode : base.prMergeMode,
       source: "session",
     }
   }

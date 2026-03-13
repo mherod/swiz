@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   }
   if (!foundTest) return
 
-  emitContext(
+  await emitContext(
     "PostToolUse",
     `Test file exists for this source file: ${foundTest} — check if it needs updating to reflect your changes.`,
     input.cwd

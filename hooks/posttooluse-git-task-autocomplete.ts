@@ -83,7 +83,7 @@ async function main(): Promise<void> {
   await completeTasks(tasksDir, tasks, isCommit, isPush)
 
   if (isPush) {
-    emitContext("PostToolUse", await buildPushContext(sessionId), input.cwd ?? process.cwd())
+    await emitContext("PostToolUse", await buildPushContext(sessionId), input.cwd ?? process.cwd())
   }
 }
 

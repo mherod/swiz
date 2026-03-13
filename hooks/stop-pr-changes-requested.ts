@@ -21,34 +21,43 @@ import {
 } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 
+function isSelfAuthored(pr: { author?: { login?: string } }, currentUser: string | null): boolean {
+  return (
+    Boolean(currentUser) && Boolean(pr.author?.login) && currentUser === (pr.author?.login ?? "")
+  )
+}
+
+async function checkSelfAuthoredNoReviewer(
+  pr: { number: number },
+  repo: string,
+  cwd: string
+): Promise<void> {
+  type PullDetails = {
+    requested_reviewers?: Array<{ login: string }>
+    requested_teams?: Array<{ slug: string }>
+  }
+  const pullDetails = await ghJson<PullDetails>(["api", `repos/${repo}/pulls/${pr.number}`], cwd)
+  const reviewerCount =
+    (pullDetails?.requested_reviewers?.length ?? 0) + (pullDetails?.requested_teams?.length ?? 0)
+  if (reviewerCount > 0) return
+  const reason =
+    `PR #${pr.number} is awaiting first review on a self-authored PR.\n\n` +
+    `You cannot request changes on your own PR. An external reviewer must be assigned by a human.\n\n` +
+    `Actionable next step:\n` +
+    `  gh pr edit ${pr.number} --add-reviewer <github-handle>\n\n` +
+    `Current status:\n` +
+    `  gh pr view ${pr.number}`
+  blockStopHumanRequired(reason)
+}
+
 async function handleNoReviews(
   pr: { number: number; title: string; author?: { login?: string } },
   repo: string,
   cwd: string,
   currentUser: string | null
 ): Promise<void> {
-  const isSelfAuthored =
-    Boolean(currentUser) && Boolean(pr.author?.login) && currentUser === (pr.author?.login ?? "")
-  if (isSelfAuthored) {
-    type PullDetails = {
-      requested_reviewers?: Array<{ login: string }>
-      requested_teams?: Array<{ slug: string }>
-    }
-    const pullDetails = await ghJson<PullDetails>(["api", `repos/${repo}/pulls/${pr.number}`], cwd)
-    const hasRequestedReviewer =
-      (pullDetails?.requested_reviewers?.length ?? 0) +
-        (pullDetails?.requested_teams?.length ?? 0) >
-      0
-    if (!hasRequestedReviewer) {
-      const reason =
-        `PR #${pr.number} is awaiting first review on a self-authored PR.\n\n` +
-        `You cannot request changes on your own PR. An external reviewer must be assigned by a human.\n\n` +
-        `Actionable next step:\n` +
-        `  gh pr edit ${pr.number} --add-reviewer <github-handle>\n\n` +
-        `Current status:\n` +
-        `  gh pr view ${pr.number}`
-      blockStopHumanRequired(reason)
-    }
+  if (isSelfAuthored(pr, currentUser)) {
+    await checkSelfAuthoredNoReviewer(pr, repo, cwd)
   }
 
   const reason =
@@ -142,8 +151,18 @@ type Review = {
 type ReviewComment = { user: { login: string }; body: string; created_at: string; path: string }
 type IssueComment = { user: { login: string }; body: string; created_at: string }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+interface ResolvedPrContext {
+  cwd: string
+  sessionId: string | undefined
+  pr: { number: number; title: string; author?: { login?: string } }
+  repo: string
+  currentUser: string | null
+}
+
+async function resolvePrContext(input: {
+  cwd?: string
+  session_id?: string
+}): Promise<ResolvedPrContext | null> {
   const cwd = input.cwd ?? process.cwd()
 
   const [globalSettings, projectSettings] = await Promise.all([
@@ -151,39 +170,47 @@ async function main(): Promise<void> {
     readProjectSettings(cwd),
   ])
   const effective = getEffectiveSwizSettings(globalSettings, input.session_id, projectSettings)
-  if (!effective.changesRequestedGate) return
+  if (!effective.changesRequestedGate) return null
 
   const modePolicy = getCollaborationModePolicy(effective.collaborationMode)
-  if (!modePolicy.requirePeerReview) return
+  if (!modePolicy.requirePeerReview) return null
 
-  if (!(await isGitRepo(cwd))) return
-  if (!hasGhCli()) return
-  if (!(await isGitHubRemote(cwd))) return
+  if (!(await isGitRepo(cwd))) return null
+  if (!hasGhCli()) return null
+  if (!(await isGitHubRemote(cwd))) return null
 
   const branch = await git(["branch", "--show-current"], cwd)
-  if (!branch) return
+  if (!branch) return null
   const defaultBranch = await getDefaultBranch(cwd)
-  if (isDefaultBranch(branch, defaultBranch)) return
+  if (isDefaultBranch(branch, defaultBranch)) return null
 
   const pr = await getOpenPrForBranch<{
     number: number
     title: string
     author?: { login?: string }
   }>(branch, cwd, "number,title,author")
-  if (!pr) return
+  if (!pr) return null
 
   const repo = await getRepoNameWithOwner(cwd)
-  if (!repo) return
+  if (!repo) return null
   const currentUser = await getCurrentGitHubUser(cwd)
+
+  return { cwd, sessionId: input.session_id, pr, repo, currentUser }
+}
+
+async function main(): Promise<void> {
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const ctx = await resolvePrContext(input)
+  if (!ctx) return
+
+  const { cwd, pr, repo, currentUser } = ctx
 
   const reviews = await ghJson<Review[]>(["api", `repos/${repo}/pulls/${pr.number}/reviews`], cwd)
   if (!reviews) return
 
   const changesRequested = reviews.filter((r) => r.state === "CHANGES_REQUESTED")
   if (changesRequested.length === 0) {
-    if (reviews.length === 0) {
-      await handleNoReviews(pr, repo, cwd, currentUser)
-    }
+    if (reviews.length === 0) await handleNoReviews(pr, repo, cwd, currentUser)
     return
   }
 

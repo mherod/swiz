@@ -112,6 +112,18 @@ async function checkEditTool(
   }
 }
 
+const ADD_COMMANDS: Record<string, string> = {
+  bun: "bun add",
+  pnpm: "pnpm add",
+  yarn: "yarn add",
+  npm: "npm install",
+}
+
+function resolveFilePath(input: Record<string, unknown>): string {
+  const toolInput = input.tool_input as Record<string, string> | undefined
+  return toolInput?.file_path ?? toolInput?.path ?? ""
+}
+
 async function main() {
   const input = await Bun.stdin.json().catch(() => null)
   if (!input) process.exit(0)
@@ -119,24 +131,17 @@ async function main() {
   const toolName: string = input.tool_name ?? ""
   if (!isFileEditTool(toolName)) process.exit(0)
 
-  const filePath: string = input.tool_input?.file_path ?? input.tool_input?.path ?? ""
+  const filePath = resolveFilePath(input)
   if (!filePath.endsWith("package.json") || isNodeModulesPath(filePath)) process.exit(0)
 
   const PM = await detectPackageManager()
-  const ADD_CMD =
-    PM === "bun"
-      ? "bun add"
-      : PM === "pnpm"
-        ? "pnpm add"
-        : PM === "yarn"
-          ? "yarn add"
-          : "npm install"
+  const addCmd = ADD_COMMANDS[PM ?? ""] ?? "npm install"
 
   try {
     if (isWriteTool(toolName)) {
-      await checkWriteTool(input, ADD_CMD)
+      await checkWriteTool(input, addCmd)
     } else if (isEditTool(toolName)) {
-      await checkEditTool(input, filePath, ADD_CMD)
+      await checkEditTool(input, filePath, addCmd)
     }
   } catch {}
 }

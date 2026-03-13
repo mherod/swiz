@@ -102,83 +102,71 @@ interface ResolveResult {
  *   and reports `alreadyClosed: true` otherwise.
  * - Returns a structured result so callers can reconcile task state.
  */
+async function postComment(
+  number: string,
+  body: string,
+  cwd: string,
+  slug: string | null
+): Promise<void> {
+  const proc = Bun.spawn(["gh", "issue", "comment", number, "--body", body], {
+    cwd,
+    stdout: "inherit",
+    stderr: "inherit",
+  })
+  await proc.exited
+  if (proc.exitCode !== 0) {
+    if (slug) {
+      try {
+        getIssueStore().queueMutation(slug, { type: "comment", number: parseInt(number, 10), body })
+      } catch {}
+    }
+    throw new Error(`gh issue comment failed with exit code ${proc.exitCode}`)
+  }
+}
+
+async function closeAndRemove(number: string, cwd: string, slug: string | null): Promise<void> {
+  const proc = Bun.spawn(["gh", "issue", "close", number], {
+    cwd,
+    stdout: "inherit",
+    stderr: "inherit",
+  })
+  await proc.exited
+  if (proc.exitCode !== 0) {
+    if (slug) {
+      try {
+        getIssueStore().queueMutation(slug, { type: "close", number: parseInt(number, 10) })
+      } catch {}
+    }
+    throw new Error(`gh issue close failed with exit code ${proc.exitCode}`)
+  }
+  if (slug) {
+    try {
+      getIssueStore().removeIssue(slug, parseInt(number, 10))
+    } catch {}
+  }
+}
+
 async function resolveIssue(number: string, body?: string): Promise<ResolveResult> {
   const cwd = process.cwd()
   const state = await issueState(number, cwd)
   const alreadyClosed = state !== "OPEN"
-
   const slug = await getRepoSlug(cwd)
 
   let commentPosted = false
   if (body) {
-    const proc = Bun.spawn(["gh", "issue", "comment", number, "--body", body], {
-      cwd,
-      stdout: "inherit",
-      stderr: "inherit",
-    })
-    await proc.exited
-    if (proc.exitCode !== 0) {
-      // Queue comment mutation for offline replay
-      if (slug) {
-        try {
-          getIssueStore().queueMutation(slug, {
-            type: "comment",
-            number: parseInt(number, 10),
-            body,
-          })
-        } catch {
-          // Non-fatal
-        }
-      }
-      throw new Error(`gh issue comment failed with exit code ${proc.exitCode}`)
-    }
+    await postComment(number, body, cwd, slug)
     commentPosted = true
   }
 
   let closedNow = false
   if (!alreadyClosed) {
-    const proc = Bun.spawn(["gh", "issue", "close", number], {
-      cwd,
-      stdout: "inherit",
-      stderr: "inherit",
-    })
-    await proc.exited
-    if (proc.exitCode !== 0) {
-      // Queue close mutation for offline replay
-      if (slug) {
-        try {
-          getIssueStore().queueMutation(slug, { type: "close", number: parseInt(number, 10) })
-        } catch {
-          // Non-fatal
-        }
-      }
-      throw new Error(`gh issue close failed with exit code ${proc.exitCode}`)
-    }
+    await closeAndRemove(number, cwd, slug)
     closedNow = true
-
-    // Remove from cache on successful close
-    if (slug) {
-      try {
-        getIssueStore().removeIssue(slug, parseInt(number, 10))
-      } catch {
-        // Non-fatal
-      }
-    }
-  }
-
-  const result: ResolveResult = {
-    issueNumber: number,
-    finalState: alreadyClosed ? state : "CLOSED",
-    alreadyClosed,
-    commentPosted,
-    closedNow,
   }
 
   if (alreadyClosed) {
     console.log(
-      `  Issue #${number} was already ${state ?? "unknown"}.` +
-        (commentPosted ? " Resolution comment posted." : "") +
-        " No close action taken."
+      `  Issue #${number} was already ${state ?? "unknown"}.${commentPosted ? " Resolution comment posted." : ""} No close action taken.`
     )
   } else {
     console.log(
@@ -186,7 +174,20 @@ async function resolveIssue(number: string, body?: string): Promise<ResolveResul
     )
   }
 
-  return result
+  return {
+    issueNumber: number,
+    finalState: alreadyClosed ? state : "CLOSED",
+    alreadyClosed,
+    commentPosted,
+    closedNow,
+  }
+}
+
+function parseBodyArg(args: string[]): string | undefined {
+  for (let i = 2; i < args.length; i++) {
+    if ((args[i] === "--body" || args[i] === "-b") && args[i + 1]) return args[i + 1]
+  }
+  return undefined
 }
 
 export const issueCommand: Command = {
@@ -210,37 +211,16 @@ export const issueCommand: Command = {
   async run(args) {
     const sub = args[0]
     const number = args[1]
+    if (!sub || !number) throw new Error(`Missing arguments.\n${usage()}`)
 
-    if (!sub || !number) {
-      throw new Error(`Missing arguments.\n${usage()}`)
-    }
+    if (sub === "close") return closeIssue(number)
 
-    if (sub === "close") {
-      return closeIssue(number)
-    }
-
+    const body = parseBodyArg(args)
     if (sub === "comment") {
-      let body: string | undefined
-      for (let i = 2; i < args.length; i++) {
-        if ((args[i] === "--body" || args[i] === "-b") && args[i + 1]) {
-          body = args[i + 1]
-          break
-        }
-      }
-      if (!body) {
-        throw new Error(`--body is required for the comment subcommand.\n${usage()}`)
-      }
+      if (!body) throw new Error(`--body is required for the comment subcommand.\n${usage()}`)
       return commentOnIssue(number, body)
     }
-
     if (sub === "resolve") {
-      let body: string | undefined
-      for (let i = 2; i < args.length; i++) {
-        if ((args[i] === "--body" || args[i] === "-b") && args[i + 1]) {
-          body = args[i + 1]
-          break
-        }
-      }
       await resolveIssue(number, body)
       return
     }

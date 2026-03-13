@@ -39,54 +39,46 @@ interface BranchProtectionReviews {
   dismiss_stale_reviews?: boolean
 }
 
-async function main(): Promise<void> {
-  const input: ToolHookInput = await Bun.stdin.json()
-  if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
-
-  const command = (input?.tool_input?.command as string) ?? ""
-  if (!GIT_COMMIT_RE.test(command)) process.exit(0)
-
-  const cwd = input?.cwd ?? ""
-  if (!cwd) process.exit(0)
-
-  // Fail open: no git, no gh, not GitHub
-  if (!(await isGitRepo(cwd))) process.exit(0)
-  if (!hasGhCli()) process.exit(0)
-  if (!(await isGitHubRemote(cwd))) process.exit(0)
+async function resolveFeatureBranch(cwd: string): Promise<string | null> {
+  if (!(await isGitRepo(cwd))) return null
+  if (!hasGhCli()) return null
+  if (!(await isGitHubRemote(cwd))) return null
 
   const branch = await git(["branch", "--show-current"], cwd)
-  if (!branch) process.exit(0)
+  if (!branch) return null
   const defaultBranch = await getDefaultBranch(cwd)
-  if (isDefaultBranch(branch, defaultBranch)) process.exit(0)
+  if (isDefaultBranch(branch, defaultBranch)) return null
+  return branch
+}
 
-  // Check for an open approved PR on this branch
+async function findApprovedPr(
+  branch: string,
+  cwd: string
+): Promise<{ pr: PrWithReviews; approvals: PrWithReviews["latestReviews"] } | null> {
   const pr = await getOpenPrForBranch<PrWithReviews>(
     branch,
     cwd,
     "number,title,baseRefName,reviewDecision,latestReviews"
   )
-  if (!pr?.number) process.exit(0)
-
-  // Only gate when PR has an approval
-  if (pr.reviewDecision !== "APPROVED") process.exit(0)
-
+  if (!pr?.number) return null
+  if (pr.reviewDecision !== "APPROVED") return null
   const approvals = (pr.latestReviews ?? []).filter((r) => r.state === "APPROVED")
-  if (approvals.length === 0) process.exit(0)
+  if (approvals.length === 0) return null
+  return { pr, approvals }
+}
 
-  // Check branch protection for dismiss_stale_reviews
+async function hasDismissStaleReviews(cwd: string, baseRef: string): Promise<boolean> {
   const repo = await getRepoSlug(cwd)
-  if (!repo) process.exit(0)
-
+  if (!repo) return false
   const protection = await ghJson<BranchProtectionReviews>(
-    ["api", `repos/${repo}/branches/${pr.baseRefName}/protection/required_pull_request_reviews`],
+    ["api", `repos/${repo}/branches/${baseRef}/protection/required_pull_request_reviews`],
     cwd
   )
+  return protection?.dismiss_stale_reviews === true
+}
 
-  // Fail open: no protection or dismiss_stale_reviews not configured
-  if (!protection || !protection.dismiss_stale_reviews) process.exit(0)
-
-  // Build denial message
-  const approverList = approvals
+function formatApproverList(approvals: PrWithReviews["latestReviews"]): string {
+  return approvals
     .map((a) => {
       const who = a.author?.login ?? "unknown"
       const when = a.submittedAt ?? ""
@@ -96,19 +88,49 @@ async function main(): Promise<void> {
       return `@${who} (approved ${when})${body}`
     })
     .join("\n  ")
+}
 
-  denyPreToolUse(
+function buildDenyMessage(
+  pr: { number: number; title: string; baseRefName: string },
+  approverList: string
+): string {
+  return (
     `BLOCKED: This commit would invalidate an existing PR approval.\n\n` +
-      `PR #${pr.number}: ${pr.title}\n` +
-      `Base branch: ${pr.baseRefName} (dismisses stale reviews on new commits)\n\n` +
-      `Current approval(s) that would be lost:\n  ${approverList}\n\n` +
-      formatActionPlan([
-        "Consider whether this commit is necessary before the current approval is consumed.",
-        "If the commit is intentional, retry — this gate has a 5-minute cooldown and will not block again.",
-        "Coordinate with the reviewer if re-approval will be needed after this change.",
-      ]) +
-      `\nThis hook fires once per 5 minutes. After this denial, subsequent commits will proceed.`
+    `PR #${pr.number}: ${pr.title}\n` +
+    `Base branch: ${pr.baseRefName} (dismisses stale reviews on new commits)\n\n` +
+    `Current approval(s) that would be lost:\n  ${approverList}\n\n` +
+    formatActionPlan([
+      "Consider whether this commit is necessary before the current approval is consumed.",
+      "If the commit is intentional, retry — this gate has a 5-minute cooldown and will not block again.",
+      "Coordinate with the reviewer if re-approval will be needed after this change.",
+    ]) +
+    `\nThis hook fires once per 5 minutes. After this denial, subsequent commits will proceed.`
   )
+}
+
+function resolveGitCommitCwd(input: ToolHookInput): string | null {
+  if (!isShellTool(input?.tool_name ?? "")) return null
+  const command = (input?.tool_input?.command as string) ?? ""
+  if (!GIT_COMMIT_RE.test(command)) return null
+  const cwd = input?.cwd ?? ""
+  return cwd || null
+}
+
+async function main(): Promise<void> {
+  const input: ToolHookInput = await Bun.stdin.json()
+  const cwd = resolveGitCommitCwd(input)
+  if (!cwd) process.exit(0)
+
+  const branch = await resolveFeatureBranch(cwd)
+  if (!branch) process.exit(0)
+
+  const result = await findApprovedPr(branch, cwd)
+  if (!result) process.exit(0)
+
+  if (!(await hasDismissStaleReviews(cwd, result.pr.baseRefName))) process.exit(0)
+
+  const approverList = formatApproverList(result.approvals)
+  denyPreToolUse(buildDenyMessage(result.pr, approverList))
 }
 
 if (import.meta.main) main().catch(() => process.exit(0))

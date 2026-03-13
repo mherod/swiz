@@ -33,6 +33,61 @@ export interface HookExecutionStrategy {
  * PreToolUse strategy: short-circuits on first deny; collects and merges
  * allow-with-reason hints.
  */
+type PreToolResult = "deny" | "hint" | "pass"
+
+function classifyAllowHint(
+  resp: Record<string, unknown>,
+  execution: HookExecution,
+  hints: string[],
+  contexts: string[]
+): boolean {
+  const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
+  const reason = extractAllowReason(resp)
+  const context = extractContext(resp)
+  if (hso?.permissionDecision !== "allow" || (!reason && !context)) return false
+  execution.status = "allow-with-reason"
+  if (reason) hints.push(reason)
+  if (context) contexts.push(context)
+  log(`   ~ ${execution.file} (hint: ${(reason ?? context ?? "").slice(0, 100)})`)
+  return true
+}
+
+function classifyPreToolResult(
+  execution: HookExecution,
+  resp: Record<string, unknown> | null,
+  hints: string[],
+  contexts: string[]
+): PreToolResult {
+  if (resp && isDeny(resp)) {
+    execution.status = "deny"
+    log(`   ✗ DENY from ${execution.file}`)
+    return "deny"
+  }
+  if (resp && classifyAllowHint(resp, execution, hints, contexts)) return "hint"
+  log(`   ✓ ${execution.file} (${resp ? "allow" : "no output"})`)
+  return "pass"
+}
+
+function buildPreToolResponse(hints: string[], contexts: string[]): Record<string, unknown> {
+  if (hints.length === 0 && contexts.length === 0) {
+    log(`   result: all passed`)
+    return {}
+  }
+  log(
+    `   result: passed with ${hints.length} hint(s)` +
+      (contexts.length > 0 ? ` and ${contexts.length} context(s)` : "")
+  )
+  return {
+    ...(contexts.length > 0 ? { systemMessage: contexts.join("\n\n") } : {}),
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      ...(hints.length > 0 ? { permissionDecisionReason: hints.join("\n\n") } : {}),
+      ...(contexts.length > 0 ? { additionalContext: contexts.join("\n\n") } : {}),
+    },
+  }
+}
+
 class PreToolUseStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
     const { filteredGroups, enrichedPayloadStr, daemonContext } = ctx
@@ -44,7 +99,6 @@ class PreToolUseStrategy implements HookExecutionStrategy {
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []
 
-    // Fan out all sync hooks concurrently; scan results in declaration order.
     const entries = flatSyncHooks(filteredGroups)
     const results = await Promise.all(entries.map((e) => runEntry(e, enrichedPayloadStr, cwd)))
 
@@ -53,49 +107,16 @@ class PreToolUseStrategy implements HookExecutionStrategy {
         executions.push(execution)
         continue
       }
-      if (resp && isDeny(resp)) {
-        log(`   ✗ DENY from ${execution.file}`)
-        execution.status = "deny"
-        executions.push(execution)
+      const classification = classifyPreToolResult(execution, resp, hints, contexts)
+      executions.push(execution)
+      if (classification === "deny") {
         Object.assign(finalResponse, resp)
         break
       }
-      if (resp) {
-        const hso = resp.hookSpecificOutput as Record<string, unknown> | undefined
-        const reason = extractAllowReason(resp)
-        const context = extractContext(resp)
-        if (hso?.permissionDecision === "allow" && (reason || context)) {
-          execution.status = "allow-with-reason"
-          executions.push(execution)
-          if (reason) hints.push(reason)
-          if (context) contexts.push(context)
-          const preview = reason ?? context ?? ""
-          log(`   ~ ${execution.file} (hint: ${preview.slice(0, 100)})`)
-          continue
-        }
-      }
-      log(`   ✓ ${execution.file} (${resp ? "allow" : "no output"})`)
-      executions.push(execution)
     }
 
     if (!isDeny(finalResponse)) {
-      if (hints.length > 0 || contexts.length > 0) {
-        log(
-          `   result: passed with ${hints.length} hint(s)` +
-            (contexts.length > 0 ? ` and ${contexts.length} context(s)` : "")
-        )
-        Object.assign(finalResponse, {
-          ...(contexts.length > 0 ? { systemMessage: contexts.join("\n\n") } : {}),
-          hookSpecificOutput: {
-            hookEventName: "PreToolUse",
-            permissionDecision: "allow",
-            ...(hints.length > 0 ? { permissionDecisionReason: hints.join("\n\n") } : {}),
-            ...(contexts.length > 0 ? { additionalContext: contexts.join("\n\n") } : {}),
-          },
-        })
-      } else {
-        log(`   result: all passed`)
-      }
+      Object.assign(finalResponse, buildPreToolResponse(hints, contexts))
     }
     logSlowHookSummary(executions)
     if (executions.length > 0) Object.assign(finalResponse, { hookExecutions: executions })

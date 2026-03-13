@@ -38,26 +38,21 @@ function countTodoMarkers(content: string): number {
 
 export { countTodoMarkers }
 
+function isExcludedPath(filePath: string): boolean {
+  if (!SOURCE_EXT_RE.test(filePath)) return true
+  return (
+    EXCLUDE_PATH_RE.test(filePath) ||
+    GENERATED_FILE_RE.test(filePath) ||
+    TEST_FILE_RE.test(filePath)
+  )
+}
+
 async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
   const filePath = input.tool_input?.file_path ?? ""
+  if (isExcludedPath(filePath)) allowPreToolUse("")
 
-  // Only check recognised source files
-  if (!SOURCE_EXT_RE.test(filePath)) {
-    allowPreToolUse("")
-  }
-
-  // Skip excluded paths (hooks/, node_modules, test files, generated files)
-  if (
-    EXCLUDE_PATH_RE.test(filePath) ||
-    GENERATED_FILE_RE.test(filePath) ||
-    TEST_FILE_RE.test(filePath)
-  ) {
-    allowPreToolUse("")
-  }
-
-  // NFKC normalization handled by fileEditHookInputSchema.transform()
   const oldString = input.tool_input?.old_string ?? ""
   const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
 
@@ -65,24 +60,24 @@ async function main() {
   const newCount = countTodoMarkers(newString)
 
   if (newCount > oldCount) {
-    const reason = [
-      "TODO/FIXME/HACK debt markers must not be introduced in source files.",
-      "",
-      `Detected ${newCount - oldCount} new debt marker(s):`,
-      `  Old: ${oldCount} marker(s) | New: ${newCount} marker(s)`,
-      "",
-      formatActionPlan(
-        [
-          "Remove the TODO/FIXME/HACK comment before writing",
-          "If this is real follow-up work, create a GitHub issue instead: gh issue create",
-          "Use the /farm-out-issues skill to convert inline TODOs into tracked issues",
-          "If the marker is already in the file (not new), verify old_string captures it",
-        ],
-        { header: "Your options:" }
-      ).trimEnd(),
-    ].join("\n")
-
-    denyPreToolUse(reason)
+    denyPreToolUse(
+      [
+        "TODO/FIXME/HACK debt markers must not be introduced in source files.",
+        "",
+        `Detected ${newCount - oldCount} new debt marker(s):`,
+        `  Old: ${oldCount} marker(s) | New: ${newCount} marker(s)`,
+        "",
+        formatActionPlan(
+          [
+            "Remove the TODO/FIXME/HACK comment before writing",
+            "If this is real follow-up work, create a GitHub issue instead: gh issue create",
+            "Use the /farm-out-issues skill to convert inline TODOs into tracked issues",
+            "If the marker is already in the file (not new), verify old_string captures it",
+          ],
+          { header: "Your options:" }
+        ).trimEnd(),
+      ].join("\n")
+    )
   }
 
   allowPreToolUse("")

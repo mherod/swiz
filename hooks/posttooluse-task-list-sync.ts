@@ -193,7 +193,7 @@ async function main(): Promise<void> {
   if (updated > 0) parts.push(`${updated} updated`)
   if (skipped > 0) parts.push(`${skipped} skipped`)
 
-  emitContext(
+  await emitContext(
     "PostToolUse",
     `TaskList sync: ${parts.join(", ")} (${tasks.length} task(s) in response).`,
     input.cwd

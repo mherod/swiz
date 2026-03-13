@@ -12,23 +12,15 @@ const GENERIC_SECRET_RE =
 const GENERIC_EXCLUDE_RE =
   /example|placeholder|your[_-]|<.*>|xxxx|test|fake|dummy|not-needed|replace|env\./i
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
+function isSecretLine(line: string): boolean {
+  if (PRIVATE_KEY_RE.test(line)) return true
+  if (TOKEN_RE.test(line)) return true
+  if (GENERIC_SECRET_RE.test(line) && !GENERIC_EXCLUDE_RE.test(line)) return true
+  return false
+}
 
-  if (!(await isGitRepo(cwd))) return
-
-  // Use HEAD~10 as the diff base when available; fall back to the git empty-tree
-  // SHA so the range resolves correctly in repos with fewer than 11 commits.
-  const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-  const base = (await git(["rev-parse", "--verify", "HEAD~10"], cwd)) || GIT_EMPTY_TREE
-  const range = `${base}..HEAD`
-
-  const diff = await git(["diff", range], cwd)
-  if (!diff) return
-
+function scanDiffForSecrets(diff: string, limit = 10): string[] {
   const findings: string[] = []
-
   let currentFile = ""
   for (const line of diff.split("\n")) {
     if (line.startsWith("+++ b/")) {
@@ -37,20 +29,21 @@ async function main(): Promise<void> {
     }
     if (TEST_FILE_RE.test(currentFile)) continue
     if (!line.startsWith("+") || line.startsWith("+++")) continue
-
-    if (PRIVATE_KEY_RE.test(line)) {
-      findings.push(line.slice(0, 120))
-    } else if (TOKEN_RE.test(line)) {
-      findings.push(line.slice(0, 120))
-    } else if (GENERIC_SECRET_RE.test(line) && !GENERIC_EXCLUDE_RE.test(line)) {
-      findings.push(line.slice(0, 120))
-    }
-
-    if (findings.length >= 10) break
+    if (isSecretLine(line)) findings.push(line.slice(0, 120))
+    if (findings.length >= limit) break
   }
+  return findings
+}
 
-  if (findings.length === 0) return
+async function findSecretFindings(cwd: string): Promise<string[]> {
+  const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+  const base = (await git(["rev-parse", "--verify", "HEAD~10"], cwd)) || GIT_EMPTY_TREE
+  const diff = await git(["diff", `${base}..HEAD`], cwd)
+  if (!diff) return []
+  return scanDiffForSecrets(diff)
+}
 
+function formatSecretReason(findings: string[]): string {
   let reason = "Potential secrets detected in recent commits.\n\n"
   reason += "Suspicious lines:\n"
   for (const f of findings) reason += `  ${f}\n`
@@ -60,9 +53,19 @@ async function main(): Promise<void> {
   reason += '  • Placeholder:     api_key = "your_api_key_here"\n'
   reason += '  • Template token:  api_key = "<YOUR_API_KEY>"\n'
   reason += "  • Env variable:    api_key = process.env.API_KEY"
+  return reason
+}
 
-  // Secret-scanning findings are security quality issues, not workflow-memory misses.
-  blockStop(reason, { includeUpdateMemoryAdvice: false })
+async function main(): Promise<void> {
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
+
+  if (!(await isGitRepo(cwd))) return
+
+  const findings = await findSecretFindings(cwd)
+  if (findings.length === 0) return
+
+  blockStop(formatSecretReason(findings), { includeUpdateMemoryAdvice: false })
 }
 
 if (import.meta.main) void main()

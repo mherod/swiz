@@ -53,149 +53,144 @@ function isTestTask(bare: string): boolean {
   )
 }
 
-export function detect(s: string): DetectionResult {
-  // Reject auto-generated placeholder subjects — these have no real work content
-  // and pollute task history with meaningless entries.
-  // Uses shared matcher from hook-utils.ts to stay in sync with swiz tasks
-  // verifyTaskMatch() which exempts the same subjects from verification.
-  if (isPlaceholderSubject(s)) {
-    return {
-      matched: true,
-      intro:
-        "Auto-generated placeholder subjects have no real work content. Use a specific, actionable subject describing what you are actually doing. Examples:",
-      suggestions: [
-        "Verify CI for last pushed commit",
-        "Continue work on open GitHub issue",
-        "Run quality checks before pushing",
-      ],
+function detectPlaceholder(s: string): CompoundMatch | null {
+  if (!isPlaceholderSubject(s)) return null
+  return {
+    matched: true,
+    intro:
+      "Auto-generated placeholder subjects have no real work content. Use a specific, actionable subject describing what you are actually doing. Examples:",
+    suggestions: [
+      "Verify CI for last pushed commit",
+      "Continue work on open GitHub issue",
+      "Run quality checks before pushing",
+    ],
+  }
+}
+
+function detectMultipleIssues(s: string, verb: string | null): CompoundMatch | null {
+  const hashes = s.match(/#\d+/g) ?? []
+  if (hashes.length < 2) return null
+  const suggestions = hashes.map((h: string) => (verb ? `${verb} ${h}` : h))
+  return {
+    matched: true,
+    intro: "Tasks relating to different issues should be tracked separately. Suggested split:",
+    suggestions,
+  }
+}
+
+function detectSuffixExpansion(
+  parts: string[],
+  bare: string,
+  verb: string | null
+): CompoundMatch | null {
+  const trailingAreSuffixes = parts
+    .slice(1)
+    .every((p) => p.trim().length <= 20 && !ACTION_VERBS.test(p.trim()))
+  if (!trailingAreSuffixes || parts.length < 2) return null
+
+  const firstPart = (parts[0] ?? "").trim()
+  const firstTokens = firstPart.split(/\s+/)
+  const maxSuffixLen = Math.max(...parts.slice(1).map((p) => p.trim().length))
+
+  let suffixTokens = 0
+  for (let i = firstTokens.length - 1; i >= 0; i--) {
+    const candidate = firstTokens.slice(i).join(" ")
+    if (candidate.length <= maxSuffixLen) {
+      suffixTokens = firstTokens.length - i
+    } else {
+      break
     }
   }
+  if (suffixTokens === 0) return null
+
+  const stemTokens = firstTokens.slice(0, firstTokens.length - suffixTokens)
+  const stemBare = stemTokens.join(" ").trim()
+  if (!stemBare) return null
+
+  const prefix = verb ? `${verb} ` : ""
+  const suggestions = parts.map((p, i) =>
+    i === 0
+      ? capitalize(`${prefix}${firstPart}`.trim())
+      : capitalize(`${prefix}${stemBare} ${p.trim()}`.trim())
+  )
+
+  const pairing = isTestTask(bare)
+  const intro = pairing
+    ? "This test task covers multiple items. If implementation tasks already exist for each item, update them to include tests rather than creating separate test tasks. Suggested test task names:"
+    : "This is a compound task. Suggested split:"
+
+  return { matched: true, intro, suggestions, ...(pairing ? { pairing: true } : {}) }
+}
+
+function detectSharedObject(parts: string[]): CompoundMatch | null {
+  const lastPart = (parts[parts.length - 1] ?? "").trim()
+  const lastVerbMatch = lastPart.match(ACTION_VERBS)
+  if (!lastVerbMatch) return null
+
+  const lastVerb = lastVerbMatch[0]
+  const sharedObject = lastPart.slice(lastVerb.length).trim()
+  if (!sharedObject) return null
+
+  const leadingAreBareVerbs = parts
+    .slice(0, -1)
+    .every((p) => ACTION_VERBS.test(p.trim()) && p.trim().split(/\s+/).length <= 2)
+  if (!leadingAreBareVerbs) return null
+
+  const suggestions = parts.map((p) => {
+    const t = p.trim()
+    const v = t.match(ACTION_VERBS)?.[0] ?? t
+    const own = t.slice(v.length).trim()
+    return capitalize(`${v} ${own || sharedObject}`.trim())
+  })
+  return { matched: true, intro: "This is a compound task. Suggested split:", suggestions }
+}
+
+function detectCommaList(s: string, bare: string, verb: string | null): CompoundMatch | null {
+  if ((s.match(/,/g) ?? []).length < 2) return null
+
+  const normalized = bare.replace(/,?\s+and\s+/i, ", ").replace(/,\s*$/, "")
+  const parts = normalized.split(/,\s*/)
+
+  const suffixResult = detectSuffixExpansion(parts, bare, verb)
+  if (suffixResult) return suffixResult
+
+  const sharedResult = detectSharedObject(parts)
+  if (sharedResult) return sharedResult
+
+  return {
+    matched: true,
+    intro: "This is a compound task. Suggested split:",
+    suggestions: withVerb(verb, parts),
+  }
+}
+
+function detectAndConjunction(bare: string, verb: string | null): CompoundMatch | null {
+  if (!/ and /i.test(bare)) return null
+  const parts = bare.split(/ and /i)
+  const trailingPartsAreActions = parts.slice(1).every((p) => ACTION_VERBS.test(p.trim()))
+  if (!trailingPartsAreActions) return null
+  return {
+    matched: true,
+    intro: "This is a compound task. Suggested split:",
+    suggestions: withVerb(verb, parts),
+  }
+}
+
+export function detect(s: string): DetectionResult {
+  const placeholder = detectPlaceholder(s)
+  if (placeholder) return placeholder
 
   const verb = extractVerb(s)
   const bare = verb ? s.slice(verb.length).trim() : s
 
-  // Multiple issue hashes — most specific, check first
-  const hashes = s.match(/#\d+/g) ?? []
-  if (hashes.length >= 2) {
-    const suggestions = hashes.map((h: string) => (verb ? `${verb} ${h}` : h))
-    return {
-      matched: true,
-      intro: "Tasks relating to different issues should be tracked separately. Suggested split:",
-      suggestions,
-    }
-  }
+  const issues = detectMultipleIssues(s, verb)
+  if (issues) return issues
 
-  // 2+ commas (3+ items) — check before " and " since lists often end with ", and"
-  if ((s.match(/,/g) ?? []).length >= 2) {
-    // "foo, bar, and baz" → ["foo", "bar", "baz"]
-    const normalized = bare
-      .replace(/,?\s+and\s+/i, ", ") // ", and" or " and" → ", "
-      .replace(/,\s*$/, "") // strip trailing comma
-    const parts = normalized.split(/,\s*/)
+  const commaResult = detectCommaList(s, bare, verb)
+  if (commaResult) return commaResult
 
-    // Detect suffix-only trailing items: short (≤20 chars) and no action verb.
-    // E.g. "Get X for Dec 2025, Jan 2026, Feb 2026" → trailing parts are "Jan 2026", "Feb 2026"
-    // In this case, expand each trailing part by replacing the corresponding suffix
-    // of the first item, giving full-context task names.
-    const trailingAreSuffixes = parts
-      .slice(1)
-      .every((p) => p.trim().length <= 20 && !ACTION_VERBS.test(p.trim()))
-    if (trailingAreSuffixes && parts.length >= 2) {
-      // The first part is the full reference item, e.g. "usage breakdowns from billing console for Dec 2025"
-      // (bare already has the verb stripped). Find the longest trailing suffix of the
-      // first part whose length is ≤ the max trailing-item length, then use everything
-      // before it as the shared stem.
-      const firstPart = (parts[0] ?? "").trim()
-      const firstTokens = firstPart.split(/\s+/)
-      const maxSuffixLen = Math.max(...parts.slice(1).map((p) => p.trim().length))
-
-      // Walk backwards to find how many tokens form the suffix that is being varied
-      let suffixTokens = 0
-      for (let i = firstTokens.length - 1; i >= 0; i--) {
-        const candidate = firstTokens.slice(i).join(" ")
-        if (candidate.length <= maxSuffixLen) {
-          suffixTokens = firstTokens.length - i
-        } else {
-          break
-        }
-      }
-
-      if (suffixTokens > 0) {
-        // stemTokens = everything before the varied suffix (still in bare, no verb)
-        const stemTokens = firstTokens.slice(0, firstTokens.length - suffixTokens)
-        const stemBare = stemTokens.join(" ").trim() // e.g. "usage breakdowns from billing console for"
-        const prefix = verb ? `${verb} ` : ""
-        // First part is already the full item; trailing parts need the stem prepended.
-        // If stemBare is non-empty, return the stem-expanded suggestions.
-        // If stemBare is empty (all tokens are the suffix), fall through to the
-        // shared-object check below before finally falling back to withVerb.
-        if (stemBare) {
-          const suggestions = parts.map((p, i) =>
-            i === 0
-              ? capitalize(`${prefix}${firstPart}`.trim())
-              : capitalize(`${prefix}${stemBare} ${p.trim()}`.trim())
-          )
-
-          // For test tasks, signal pairing so the agent knows to update existing
-          // implementation tasks rather than creating separate test tasks.
-          const pairing = isTestTask(bare)
-          const intro = pairing
-            ? "This test task covers multiple items. If implementation tasks already exist for each item, update them to include tests rather than creating separate test tasks. Suggested test task names:"
-            : "This is a compound task. Suggested split:"
-
-          return { matched: true, intro, suggestions, ...(pairing ? { pairing: true } : {}) }
-        }
-      }
-    }
-
-    // Detect shared trailing object: leading parts are bare action verbs (1-2 words),
-    // and only the last part carries the object. E.g. "Review, approve, and merge the PR"
-    // → append the object from the last item to each bare-verb part.
-    const lastPart = (parts[parts.length - 1] ?? "").trim()
-    const lastVerbMatch = lastPart.match(ACTION_VERBS)
-    if (lastVerbMatch) {
-      const lastVerb = lastVerbMatch[0]
-      const sharedObject = lastPart.slice(lastVerb.length).trim()
-      const leadingAreBareVerbs =
-        sharedObject.length > 0 &&
-        parts
-          .slice(0, -1)
-          .every((p) => ACTION_VERBS.test(p.trim()) && p.trim().split(/\s+/).length <= 2)
-      if (leadingAreBareVerbs) {
-        const suggestions = parts.map((p) => {
-          const t = p.trim()
-          const v = t.match(ACTION_VERBS)?.[0] ?? t
-          const own = t.slice(v.length).trim()
-          return capitalize(`${v} ${own || sharedObject}`.trim())
-        })
-        return { matched: true, intro: "This is a compound task. Suggested split:", suggestions }
-      }
-    }
-
-    return {
-      matched: true,
-      intro: "This is a compound task. Suggested split:",
-      suggestions: withVerb(verb, parts),
-    }
-  }
-
-  // " and " conjunction — split on first occurrence only
-  // Both sides must start with an action verb to be considered independent tasks.
-  // If the second part is just a sub-step or modifier (e.g. "make executable",
-  // "run validation"), it's not a separate concern.
-  if (/ and /i.test(bare)) {
-    const parts = bare.split(/ and /i)
-    // Flag if the second (and any further) parts start with an action verb —
-    // that signals an independent new task, not just a sub-step or modifier.
-    const trailingPartsAreActions = parts.slice(1).every((p) => ACTION_VERBS.test(p.trim()))
-    if (trailingPartsAreActions) {
-      return {
-        matched: true,
-        intro: "This is a compound task. Suggested split:",
-        suggestions: withVerb(verb, parts),
-      }
-    }
-  }
+  const andResult = detectAndConjunction(bare, verb)
+  if (andResult) return andResult
 
   return { matched: false }
 }

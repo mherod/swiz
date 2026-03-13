@@ -117,46 +117,57 @@ export async function detectFrameworks(cwd?: string): Promise<Set<Framework>> {
   return promise
 }
 
+interface ConfigDetection {
+  framework: Framework
+  configBase: string
+  extensions: readonly string[]
+  dep: string
+}
+
+const CONFIG_DETECTIONS: ConfigDetection[] = [
+  { framework: "nextjs", configBase: "next.config", extensions: JS_TS_EXTENSIONS, dep: "next" },
+  { framework: "vite", configBase: "vite.config", extensions: JS_TS_EXTENSIONS, dep: "vite" },
+  {
+    framework: "remix",
+    configBase: "remix.config",
+    extensions: ["js", "ts"],
+    dep: "@remix-run/node",
+  },
+  { framework: "astro", configBase: "astro.config", extensions: JS_TS_EXTENSIONS, dep: "astro" },
+]
+
+const DEP_ONLY_DETECTIONS: Array<{ framework: Framework; dep: string }> = [
+  { framework: "express", dep: "express" },
+  { framework: "fastify", dep: "fastify" },
+  { framework: "nestjs", dep: "@nestjs/core" },
+]
+
+const FILE_DETECTIONS: Array<{ framework: Framework; files: readonly string[] }> = [
+  { framework: "python", files: PYTHON_INDICATOR_FILES },
+  { framework: "go", files: ["go.mod"] },
+  { framework: "rust", files: ["Cargo.toml"] },
+  { framework: "ruby", files: ["Gemfile"] },
+  { framework: "java", files: JAVA_INDICATOR_FILES },
+  { framework: "php", files: ["composer.json"] },
+]
+
 async function detectFrameworksInner(dir: string): Promise<Set<Framework>> {
   const frameworks = new Set<Framework>()
   const deps = await readPackageDeps(dir)
 
-  // ── JS/TS frameworks (config file or package.json dep) ──────────────────
-
-  if ((await hasConfigFile(dir, "next.config", JS_TS_EXTENSIONS)) || hasDependency(deps, "next")) {
-    frameworks.add("nextjs")
+  for (const { framework, configBase, extensions, dep } of CONFIG_DETECTIONS) {
+    if ((await hasConfigFile(dir, configBase, extensions)) || hasDependency(deps, dep)) {
+      frameworks.add(framework)
+    }
   }
 
-  if ((await hasConfigFile(dir, "vite.config", JS_TS_EXTENSIONS)) || hasDependency(deps, "vite")) {
-    frameworks.add("vite")
+  for (const { framework, dep } of DEP_ONLY_DETECTIONS) {
+    if (hasDependency(deps, dep)) frameworks.add(framework)
   }
 
-  if (
-    (await hasConfigFile(dir, "remix.config", ["js", "ts"] as const)) ||
-    hasDependency(deps, "@remix-run/node")
-  ) {
-    frameworks.add("remix")
+  for (const { framework, files } of FILE_DETECTIONS) {
+    if (await hasAnyFile(dir, files)) frameworks.add(framework)
   }
-
-  if (
-    (await hasConfigFile(dir, "astro.config", JS_TS_EXTENSIONS)) ||
-    hasDependency(deps, "astro")
-  ) {
-    frameworks.add("astro")
-  }
-
-  if (hasDependency(deps, "express")) frameworks.add("express")
-  if (hasDependency(deps, "fastify")) frameworks.add("fastify")
-  if (hasDependency(deps, "@nestjs/core")) frameworks.add("nestjs")
-
-  // ── Language ecosystems (indicator files) ────────────────────────────────
-
-  if (await hasAnyFile(dir, PYTHON_INDICATOR_FILES)) frameworks.add("python")
-  if (await fileExists(join(dir, "go.mod"))) frameworks.add("go")
-  if (await fileExists(join(dir, "Cargo.toml"))) frameworks.add("rust")
-  if (await fileExists(join(dir, "Gemfile"))) frameworks.add("ruby")
-  if (await hasAnyFile(dir, JAVA_INDICATOR_FILES)) frameworks.add("java")
-  if (await fileExists(join(dir, "composer.json"))) frameworks.add("php")
 
   return frameworks
 }

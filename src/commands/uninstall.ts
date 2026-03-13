@@ -93,23 +93,23 @@ async function uninstallAgent(agent: AgentDef, dryRun: boolean) {
   console.log(`    ${GREEN}✓${RESET} written (backup at ${agent.settingsPath}.bak)\n`)
 }
 
+function countEntryHooks(entry: Record<string, unknown>): number {
+  let count = isManagedSwizCommand(entry.command) ? 1 : 0
+  if (Array.isArray(entry.hooks)) {
+    for (const h of entry.hooks) {
+      const hh = h as Record<string, unknown>
+      if (isManagedSwizCommand(hh.command)) count++
+    }
+  }
+  return count
+}
+
 function countSwizHooks(hooks: Record<string, unknown>): number {
   let count = 0
   for (const entries of Object.values(hooks)) {
     if (!Array.isArray(entries)) continue
     for (const entry of entries) {
-      const e = entry as Record<string, unknown>
-      if (isManagedSwizCommand(e.command)) {
-        count++
-      }
-      if (Array.isArray(e.hooks)) {
-        for (const h of e.hooks) {
-          const hh = h as Record<string, unknown>
-          if (isManagedSwizCommand(hh.command)) {
-            count++
-          }
-        }
-      }
+      count += countEntryHooks(entry as Record<string, unknown>)
     }
   }
   return count

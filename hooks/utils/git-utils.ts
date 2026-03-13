@@ -129,6 +129,25 @@ export interface ClassifyChangeScopeOptions {
  * Classify a set of changes as trivial, small-fix, docs-only, or non-trivial.
  * Fail-closed: forces non-trivial when stat parsing disagrees with file list.
  */
+function describeScopeCategory(
+  result: Pick<
+    ChangeScopeResult,
+    | "statParsingFailed"
+    | "isDocsOnly"
+    | "isTrivial"
+    | "isSmallFix"
+    | "fileCount"
+    | "totalLinesChanged"
+  >,
+  changedFileCount: number
+): string {
+  if (result.statParsingFailed) return `stat-unparseable (${changedFileCount} files detected)`
+  if (result.isDocsOnly) return "docs-only"
+  if (result.isTrivial) return "trivial"
+  if (result.isSmallFix) return "small-fix"
+  return `${result.fileCount}-files, ${result.totalLinesChanged}-lines`
+}
+
 export function classifyChangeScope(
   stat: GitStatSummary,
   changedFiles: string[],
@@ -153,24 +172,18 @@ export function classifyChangeScope(
 
   const isSmallFix = !statParsingFailed && fileCount <= 2 && totalLinesChanged <= 30
 
-  const scopeDescription = statParsingFailed
-    ? `stat-unparseable (${changedFiles.length} files detected)`
-    : isDocsOnly
-      ? "docs-only"
-      : isTrivial
-        ? "trivial"
-        : isSmallFix
-          ? "small-fix"
-          : `${fileCount}-files, ${totalLinesChanged}-lines`
-
-  return {
+  const result = {
     statParsingFailed,
     isTrivial,
     isSmallFix,
     isDocsOnly,
-    scopeDescription,
     fileCount,
     totalLinesChanged,
+  }
+
+  return {
+    ...result,
+    scopeDescription: describeScopeCategory(result, changedFiles.length),
   }
 }
 
@@ -206,71 +219,85 @@ export interface GitStatusV2 {
  * Parse the raw output of `git status --porcelain=v2 --branch` into a GitStatusV2 object.
  * Exported for unit testing — call `getGitStatusV2(cwd)` in production code.
  */
+interface BranchInfo {
+  branch: string
+  ahead: number
+  behind: number
+  upstream: string | null
+  upstreamAbSeen: boolean
+}
+
+function parseBranchHeader(line: string, info: BranchInfo): boolean {
+  if (line.startsWith("# branch.head ")) {
+    const head = line.slice("# branch.head ".length).trim()
+    info.branch = head === "(detached)" ? "(detached)" : head
+    return true
+  }
+  if (line.startsWith("# branch.upstream ")) {
+    info.upstream = line.slice("# branch.upstream ".length).trim()
+    return true
+  }
+  if (line.startsWith("# branch.ab ")) {
+    info.upstreamAbSeen = true
+    const match = /\+(\d+)\s+-(\d+)/.exec(line)
+    if (match) {
+      info.ahead = Number(match[1])
+      info.behind = Number(match[2])
+    }
+    return true
+  }
+  return false
+}
+
+interface FileCounts {
+  modified: number
+  added: number
+  deleted: number
+  untracked: number
+}
+
+function parseFileEntry(line: string, counts: FileCounts, lines: string[]): void {
+  if (line.startsWith("1 ") || line.startsWith("2 ")) {
+    const xy = line.split(" ")[1] ?? ".."
+    if (xy[0] === "D") counts.deleted++
+    else if (xy[0] === "A") counts.added++
+    else if (xy[0] !== ".") counts.modified++
+    if (xy[1] === "D") counts.deleted++
+    else if (xy[1] !== ".") counts.modified++
+    const path = line.includes("\t") ? line.split("\t").pop()! : line.split(" ").pop()!
+    lines.push(path)
+  } else if (line.startsWith("? ")) {
+    counts.untracked++
+    lines.push(line.slice(2))
+  }
+}
+
 export function parseGitStatusV2Output(out: string): GitStatusV2 | null {
   if (!out) return null
 
-  let branch = "(detached)"
-  let ahead = 0
-  let behind = 0
-  let upstream: string | null = null
-  let upstreamAbSeen = false
-  let modified = 0
-  let added = 0
-  let deleted = 0
-  let untracked = 0
+  const info: BranchInfo = {
+    branch: "(detached)",
+    ahead: 0,
+    behind: 0,
+    upstream: null,
+    upstreamAbSeen: false,
+  }
+  const counts: FileCounts = { modified: 0, added: 0, deleted: 0, untracked: 0 }
   const lines: string[] = []
 
   for (const line of out.split("\n")) {
-    if (line.startsWith("# branch.head ")) {
-      const head = line.slice("# branch.head ".length).trim()
-      branch = head === "(detached)" ? "(detached)" : head
-      continue
-    }
-    if (line.startsWith("# branch.upstream ")) {
-      upstream = line.slice("# branch.upstream ".length).trim()
-      continue
-    }
-    if (line.startsWith("# branch.ab ")) {
-      upstreamAbSeen = true
-      const match = /\+(\d+)\s+-(\d+)/.exec(line)
-      if (match) {
-        ahead = Number(match[1])
-        behind = Number(match[2])
-      }
-      continue
-    }
-    if (line.startsWith("1 ") || line.startsWith("2 ")) {
-      const xy = line.split(" ")[1] ?? ".."
-      if (xy[0] === "D") deleted++
-      else if (xy[0] === "A") added++
-      else if (xy[0] !== ".") modified++
-      if (xy[1] === "D") deleted++
-      else if (xy[1] !== ".") modified++
-      const path = line.includes("\t") ? line.split("\t").pop()! : line.split(" ").pop()!
-      lines.push(path)
-      continue
-    }
-    if (line.startsWith("? ")) {
-      untracked++
-      lines.push(line.slice(2))
-    }
+    if (!parseBranchHeader(line, info)) parseFileEntry(line, counts, lines)
   }
 
-  const total = lines.length
-  // upstream is "gone" when the tracking config names a remote branch that no longer exists.
-  // git status --porcelain=v2 shows branch.upstream (stale name) but omits branch.ab in this case.
-  const upstreamGone = upstream !== null && !upstreamAbSeen
+  const upstreamGone = info.upstream !== null && !info.upstreamAbSeen
   return {
-    branch,
-    total,
-    modified,
-    added,
-    deleted,
-    untracked,
+    branch: info.branch,
+    total: lines.length,
+    ...counts,
     lines,
-    ahead,
-    behind,
-    upstream,
+    ahead: info.ahead,
+    behind: info.behind,
+    upstream: info.upstream,
     upstreamGone,
   }
 }

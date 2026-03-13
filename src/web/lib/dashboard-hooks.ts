@@ -84,49 +84,59 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps) {
   const initialLoadDone = useRef(false)
 
   useEffect(() => {
+    async function fetchAllData() {
+      const project = getQueryParam("project")
+      const session = getQueryParam("session")
+      const [m, cs, w, pr, ap, ad] = await Promise.all([
+        fetchJson<MetricsResponse>("/metrics"),
+        fetchJson<Record<string, number>>("/cache/status"),
+        fetchJson<WatchesResponse>("/ci-watches"),
+        postJson<{ projects: ProjectSessions[] }>("/sessions/projects", {
+          limitProjects: 10,
+          limitSessionsPerProject: 10,
+          selectedProjectCwd: project,
+          selectedSessionId: session,
+        }),
+        fetchJson<AgentProcessesResponse>("/process/agents"),
+        fetchJson<{ active?: ActiveHookDispatch[] }>(
+          `/dispatch/active?cwd=${encodeURIComponent(project ?? "")}&sessionId=${encodeURIComponent(session ?? "")}`
+        ),
+      ])
+      return { m, cs, w, pr, ap, ad }
+    }
+
+    function applyUpdates(data: Awaited<ReturnType<typeof fetchAllData>>) {
+      const { m, cs, w, pr, ap, ad } = data
+      const coreSnapshot = JSON.stringify({ m, w, pr, ap, ad })
+      const cacheSnapshot = JSON.stringify(cs)
+      const coreChanged = coreSnapshot !== prevCoreSnapshotRef.current
+      const cacheChanged = cacheSnapshot !== prevCacheSnapshotRef.current
+      if (!coreChanged && !cacheChanged) return
+      if (cacheChanged) {
+        prevCacheSnapshotRef.current = cacheSnapshot
+        deps.onCacheStatus(cs)
+      }
+      if (!coreChanged) return
+      prevCoreSnapshotRef.current = coreSnapshot
+      const loadedProjects = pr.projects ?? []
+      deps.onMetrics(m)
+      deps.onWatches(w)
+      deps.onProjects(loadedProjects)
+      deps.onAgentProcesses(ap.providers ?? {})
+      deps.onActiveDispatches(ad.active ?? [])
+      deps.onError("")
+      deps.onLastUpdated(new Date().toLocaleTimeString())
+
+      if (!initialLoadDone.current) {
+        initialLoadDone.current = true
+        deps.onInitialLoad(loadedProjects)
+      }
+    }
+
     async function refresh() {
       try {
-        const project = getQueryParam("project")
-        const session = getQueryParam("session")
-        const [m, cs, w, pr, ap, ad] = await Promise.all([
-          fetchJson<MetricsResponse>("/metrics"),
-          fetchJson<Record<string, number>>("/cache/status"),
-          fetchJson<WatchesResponse>("/ci-watches"),
-          postJson<{ projects: ProjectSessions[] }>("/sessions/projects", {
-            limitProjects: 10,
-            limitSessionsPerProject: 10,
-            selectedProjectCwd: project,
-            selectedSessionId: session,
-          }),
-          fetchJson<AgentProcessesResponse>("/process/agents"),
-          fetchJson<{ active?: ActiveHookDispatch[] }>(
-            `/dispatch/active?cwd=${encodeURIComponent(project ?? "")}&sessionId=${encodeURIComponent(session ?? "")}`
-          ),
-        ])
-        const coreSnapshot = JSON.stringify({ m, w, pr, ap, ad })
-        const cacheSnapshot = JSON.stringify(cs)
-        const coreChanged = coreSnapshot !== prevCoreSnapshotRef.current
-        const cacheChanged = cacheSnapshot !== prevCacheSnapshotRef.current
-        if (!coreChanged && !cacheChanged) return
-        if (cacheChanged) {
-          prevCacheSnapshotRef.current = cacheSnapshot
-          deps.onCacheStatus(cs)
-        }
-        if (!coreChanged) return
-        prevCoreSnapshotRef.current = coreSnapshot
-        const loadedProjects = pr.projects ?? []
-        deps.onMetrics(m)
-        deps.onWatches(w)
-        deps.onProjects(loadedProjects)
-        deps.onAgentProcesses(ap.providers ?? {})
-        deps.onActiveDispatches(ad.active ?? [])
-        deps.onError("")
-        deps.onLastUpdated(new Date().toLocaleTimeString())
-
-        if (!initialLoadDone.current) {
-          initialLoadDone.current = true
-          deps.onInitialLoad(loadedProjects)
-        }
+        const data = await fetchAllData()
+        applyUpdates(data)
       } catch (err) {
         deps.onError(err instanceof Error ? err.message : "Unknown fetch failure")
       }

@@ -51,19 +51,30 @@ async function computeProjectedContent(
   return null
 }
 
+function parseInput(input: Record<string, unknown>): {
+  toolName: string
+  filePath: string
+  toolInput: Record<string, unknown>
+} | null {
+  const toolName: string = (input.tool_name as string) ?? ""
+  const ti = (input.tool_input ?? {}) as Record<string, unknown>
+  const filePath: string = (ti.file_path as string) ?? (ti.path as string) ?? ""
+  if (!filePath || !/\.(ts|tsx|js|jsx|mjs)$/.test(filePath)) return null
+  return { toolName, filePath, toolInput: ti }
+}
+
 async function main() {
-  const input = await Bun.stdin.json().catch(() => null)
-  if (!input) process.exit(0)
+  const raw = await Bun.stdin.json().catch(() => null)
+  if (!raw) process.exit(0)
 
-  const toolName: string = input.tool_name ?? ""
-  const filePath: string = input.tool_input?.file_path ?? input.tool_input?.path ?? ""
-  const toolInput: Record<string, unknown> = input.tool_input ?? {}
+  const parsed = parseInput(raw as Record<string, unknown>)
+  if (!parsed) process.exit(0)
 
-  if (!filePath || !/\.(ts|tsx|js|jsx|mjs)$/.test(filePath)) {
-    process.exit(0)
-  }
-
-  const projectedContent = await computeProjectedContent(toolName, filePath, toolInput)
+  const projectedContent = await computeProjectedContent(
+    parsed.toolName,
+    parsed.filePath,
+    parsed.toolInput
+  )
   if (!projectedContent) process.exit(0)
 
   if (usesBunApis(projectedContent) && introducesNodeFsReads(projectedContent)) {

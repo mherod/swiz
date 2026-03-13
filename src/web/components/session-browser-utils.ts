@@ -91,6 +91,15 @@ export function formatProcessPidLabel(pids: number[]): string {
   return `${pids.slice(0, 2).join(",")} +${pids.length - 2}`
 }
 
+function mergeOptionalTimestamp(a: number | undefined, b: number | undefined): number | undefined {
+  if (typeof a === "number" && typeof b === "number") return Math.min(a, b)
+  return a ?? b
+}
+
+function mergeOptionalMax(a: number | undefined, b: number | undefined): number | undefined {
+  return Math.max(a ?? 0, b ?? 0) || undefined
+}
+
 export function mergeSessionPreview(
   base: SessionPreview,
   incoming: SessionPreview
@@ -99,13 +108,10 @@ export function mergeSessionPreview(
     ...base,
     provider: base.provider || incoming.provider,
     format: base.format || incoming.format,
-    startedAt:
-      typeof base.startedAt === "number" && typeof incoming.startedAt === "number"
-        ? Math.min(base.startedAt, incoming.startedAt)
-        : (base.startedAt ?? incoming.startedAt),
-    lastMessageAt: Math.max(base.lastMessageAt ?? 0, incoming.lastMessageAt ?? 0) || undefined,
+    startedAt: mergeOptionalTimestamp(base.startedAt, incoming.startedAt),
+    lastMessageAt: mergeOptionalMax(base.lastMessageAt, incoming.lastMessageAt),
     mtime: Math.max(base.mtime, incoming.mtime),
-    dispatches: Math.max(base.dispatches ?? 0, incoming.dispatches ?? 0) || undefined,
+    dispatches: mergeOptionalMax(base.dispatches, incoming.dispatches),
     processAlive: base.processAlive || incoming.processAlive,
   }
 }
@@ -246,6 +252,15 @@ export function parseToolCallDetail(name: string, detail: string): ParsedToolCal
   }
 }
 
+function matchQuotedOrBareFlag(normalized: string, flag: string): string | null {
+  return (
+    new RegExp(`--${flag}\\s+"([^"]+)"`, "i").exec(normalized)?.[1] ??
+    new RegExp(`--${flag}\\s+'([^']+)'`, "i").exec(normalized)?.[1] ??
+    new RegExp(`--${flag}\\s+([^\\s]+)`, "i").exec(normalized)?.[1] ??
+    null
+  )
+}
+
 export function parseSwizTasksCommand(command: string): ParsedSwizTaskCommand | null {
   const normalized = command.replace(/\s+/g, " ").trim()
   const actionMatch =
@@ -255,21 +270,13 @@ export function parseSwizTasksCommand(command: string): ParsedSwizTaskCommand | 
 
   const taskIdMatch = / tasks (?:complete|update|get)\s+([^\s-][^\s]*)/i.exec(normalized)
   const statusMatch = /--status\s+([^\s]+)/i.exec(normalized)
-  const evidenceMatch =
-    /--evidence\s+"([^"]+)"/i.exec(normalized) ??
-    /--evidence\s+'([^']+)'/i.exec(normalized) ??
-    /--evidence\s+([^\s]+)/i.exec(normalized)
-  const subjectMatch =
-    /--subject\s+"([^"]+)"/i.exec(normalized) ??
-    /--subject\s+'([^']+)'/i.exec(normalized) ??
-    /--subject\s+([^\s]+)/i.exec(normalized)
 
   return {
     action,
     taskId: taskIdMatch?.[1] ?? null,
     status: statusMatch?.[1] ?? null,
-    subject: subjectMatch?.[1] ?? null,
-    evidence: evidenceMatch?.[1] ?? null,
+    subject: matchQuotedOrBareFlag(normalized, "subject"),
+    evidence: matchQuotedOrBareFlag(normalized, "evidence"),
   }
 }
 

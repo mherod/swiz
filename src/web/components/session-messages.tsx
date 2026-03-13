@@ -54,6 +54,230 @@ function ToolStatsBar({ stats }: { stats: ToolStat[] }) {
   )
 }
 
+function SwizTaskCallDisplay({
+  swizTask,
+  command,
+}: {
+  swizTask: {
+    action: string
+    taskId?: string | null
+    status?: string | null
+    subject?: string | null
+    evidence?: string | null
+  }
+  command?: string | null
+}) {
+  const fields: Array<{ label: string; value: string }> = [
+    { label: "action", value: swizTask.action },
+  ]
+  if (swizTask.taskId) fields.push({ label: "task", value: String(swizTask.taskId) })
+  if (swizTask.status) fields.push({ label: "status", value: String(swizTask.status) })
+  if (swizTask.subject) fields.push({ label: "subject", value: String(swizTask.subject) })
+  if (swizTask.evidence) fields.push({ label: "evidence", value: String(swizTask.evidence) })
+  return (
+    <div className="tool-first-party-call">
+      <p className="tool-first-party-title">swiz tasks</p>
+      <ul className="tool-param-list">
+        {fields.map((f) => (
+          <li key={`${f.label}:${f.value}`} className="tool-param-item">
+            <span className="tool-param-label">{f.label}</span>
+            <code className="tool-param-value">{f.value}</code>
+          </li>
+        ))}
+      </ul>
+      <details className="tool-raw-json">
+        <summary>Full command</summary>
+        <pre className="tool-command-block">{command}</pre>
+      </details>
+    </div>
+  )
+}
+
+function SearchToolDisplay({
+  toolName,
+  searchParams,
+}: {
+  toolName: string
+  searchParams: {
+    pattern?: string | null
+    path?: string | null
+    outputMode?: string | null
+    options: Array<{ label: string; value: string }>
+  }
+}) {
+  return (
+    <div className="tool-first-party-call">
+      <p className="tool-first-party-title">{toolName} search</p>
+      {searchParams.pattern ? (
+        <pre className="tool-command-block">{searchParams.pattern}</pre>
+      ) : null}
+      <ul className="tool-param-list">
+        {searchParams.path ? (
+          <li className="tool-param-item">
+            <span className="tool-param-label">path</span>
+            <code className="tool-param-value">{compactPath(searchParams.path, 90)}</code>
+          </li>
+        ) : null}
+        {searchParams.outputMode ? (
+          <li className="tool-param-item">
+            <span className="tool-param-label">output</span>
+            <code className="tool-param-value">{searchParams.outputMode}</code>
+          </li>
+        ) : null}
+        {searchParams.options.map((option) => (
+          <li key={`${option.label}:${option.value}`} className="tool-param-item">
+            <span className="tool-param-label">{option.label}</span>
+            <code className="tool-param-value">{option.value}</code>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function RawJsonDisplay({
+  rawJson,
+  isBash,
+}: {
+  rawJson: string | null | undefined
+  isBash: boolean
+}) {
+  if (isBash || !rawJson) return null
+  const shouldCollapse = rawJson.length > TOOL_RAW_JSON_COLLAPSE_THRESHOLD
+  if (shouldCollapse) {
+    return (
+      <details className="tool-raw-json">
+        <summary>{summarizeRawJson(rawJson, TOOL_RAW_JSON_COLLAPSE_THRESHOLD)}</summary>
+        <pre className="tool-detail-full">{rawJson}</pre>
+      </details>
+    )
+  }
+  return <pre className="tool-detail-full">{rawJson}</pre>
+}
+
+function BashToolBody({ parsedDetail }: { parsedDetail: ReturnType<typeof parseToolCallDetail> }) {
+  const swizTask = parsedDetail.command ? parseSwizTasksCommand(parsedDetail.command) : null
+  if (swizTask) {
+    return <SwizTaskCallDisplay swizTask={swizTask} command={parsedDetail.command} />
+  }
+  return (
+    <>
+      {parsedDetail.command ? (
+        <pre className="tool-command-block">{parsedDetail.command}</pre>
+      ) : null}
+      {parsedDetail.description ? (
+        <p className="tool-call-description">{parsedDetail.description}</p>
+      ) : null}
+    </>
+  )
+}
+
+function CommonFieldsList({ fields }: { fields: Array<{ label: string; value: string }> }) {
+  if (fields.length === 0) return null
+  return (
+    <ul className="tool-param-list">
+      {fields.map((field) => (
+        <li key={`${field.label}:${field.value}`} className="tool-param-item">
+          <span className="tool-param-label">{field.label}</span>
+          <code className="tool-param-value">{field.value}</code>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function VerboseToolCall({ tc }: { tc: { name: string; detail: string } }) {
+  const parsedDetail = parseToolCallDetail(tc.name, tc.detail)
+  const isBash = tc.name.toLowerCase() === "bash"
+  const searchParams = !isBash ? parseSearchToolParams(tc.name, tc.detail) : null
+
+  return (
+    <div className="tool-call tool-call-verbose">
+      <div className="tool-call-body">
+        <div className="tool-call-header">
+          <span className="tool-name">{tc.name}</span>
+        </div>
+        {isBash ? <BashToolBody parsedDetail={parsedDetail} /> : null}
+        <CommonFieldsList fields={parsedDetail.commonFields} />
+        {searchParams ? <SearchToolDisplay toolName={tc.name} searchParams={searchParams} /> : null}
+        <RawJsonDisplay rawJson={parsedDetail.rawJson} isBash={isBash} />
+      </div>
+    </div>
+  )
+}
+
+function SkillPayloadDisplay({
+  adjacentSkillName,
+  parsedSkillPayload,
+}: {
+  adjacentSkillName: string | null | undefined
+  parsedSkillPayload: { baseDir?: string | null; body: string } | null
+}) {
+  if (!parsedSkillPayload) return null
+  const skillBody = parsedSkillPayload.body
+  const collapseSkillBody =
+    skillBody.length > 300 || skillBody.split("\n").length > COLLAPSE_LINE_THRESHOLD
+  const skillPreview = collapseSkillBody ? summarizeText(skillBody) : skillBody
+  return (
+    <div className="skill-payload-box">
+      <div className="skill-payload-header">
+        <span className="skill-payload-label">Skill content</span>
+        <code className="skill-payload-name">{adjacentSkillName}</code>
+      </div>
+      {parsedSkillPayload.baseDir ? (
+        <p className="skill-payload-base">
+          <span className="skill-payload-base-label">base dir</span>
+          <code className="skill-payload-base-path">
+            {compactPath(parsedSkillPayload.baseDir, 90)}
+          </code>
+        </p>
+      ) : null}
+      {collapseSkillBody ? (
+        <details className="tool-raw-json">
+          <summary>{skillPreview}</summary>
+          <pre className="message-text">{skillBody}</pre>
+        </details>
+      ) : (
+        <pre className="message-text">{skillBody}</pre>
+      )}
+    </div>
+  )
+}
+
+function ToolCallsList({
+  toolCalls,
+  verbose,
+}: {
+  toolCalls: Array<{ name: string; detail: string }>
+  verbose: boolean
+}) {
+  if (verbose) {
+    return (
+      <div className="tool-calls tool-calls-verbose">
+        {toolCalls.map((tc) => (
+          <VerboseToolCall key={`${tc.name}-${tc.detail}`} tc={tc} />
+        ))}
+      </div>
+    )
+  }
+  return (
+    <ul className="tool-calls">
+      {toolCalls.map((tc) => (
+        <li key={`${tc.name}-${tc.detail}`} className="tool-call">
+          <span className="tool-name">{tc.name}</span>
+          {tc.detail && (
+            <span
+              className="tool-detail"
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped via renderInline
+              dangerouslySetInnerHTML={{ __html: renderInline(tc.detail) }}
+            />
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 interface SessionHealth {
   dispatches?: number
   lastMessageAt?: number
@@ -78,23 +302,171 @@ interface MessagesProps {
   activeHookDispatches?: ActiveHookDispatch[]
 }
 
-export function SessionMessages({
+interface MessageRowProps {
+  message: SessionMessage
+  count: number
+  isNew: boolean
+  adjacentSkillName: string | null | undefined
+  isToolOnlyAssistant: boolean
+}
+
+function MessageTextContent({
+  message,
+  adjacentSkillName,
+}: {
+  message: SessionMessage
+  adjacentSkillName: string | null | undefined
+}) {
+  if (!message.text) return null
+  const parsedSkillPayload = message.role === "user" ? parseSkillPayload(message.text) : null
+  const showSkill =
+    message.role === "user" && Boolean(adjacentSkillName) && Boolean(parsedSkillPayload)
+  if (showSkill) {
+    return (
+      <SkillPayloadDisplay
+        adjacentSkillName={adjacentSkillName}
+        parsedSkillPayload={parsedSkillPayload}
+      />
+    )
+  }
+  return <MessageBody text={message.text} role={message.role} />
+}
+
+function MessageRow({
+  message,
+  count,
+  isNew,
+  adjacentSkillName,
+  isToolOnlyAssistant,
+}: MessageRowProps) {
+  const role = message.role === "assistant" ? "Assistant" : "User"
+  const timestamp = message.timestamp
+    ? formatTime(new Date(message.timestamp).getTime())
+    : "Unknown time"
+
+  return (
+    <li
+      className={cn(
+        "message-row",
+        message.role,
+        isNew && "message-new",
+        isToolOnlyAssistant && "message-row-tool-only"
+      )}
+    >
+      <div className="message-meta">
+        <span className="message-role">{role}</span>
+        <span className="message-meta-right">
+          {count > 1 ? <span className="message-repeat-badge">x{count}</span> : null}
+          <span>{timestamp}</span>
+        </span>
+      </div>
+      <MessageTextContent message={message} adjacentSkillName={adjacentSkillName} />
+      {message.toolCalls && message.toolCalls.length > 0 && (
+        <ToolCallsList toolCalls={message.toolCalls} verbose={isToolOnlyAssistant} />
+      )}
+    </li>
+  )
+}
+
+function resolveMessageRowProps(
+  grouped: ReturnType<typeof groupMessages>,
+  sorted: SessionMessage[],
+  i: number,
+  msgKey: MessagesProps["msgKey"],
+  newKeys: Set<string> | undefined
+): { key: string } & MessageRowProps {
+  const { message, count, originalIndices } = grouped[i]!
+  const groupKeys = msgKey
+    ? originalIndices.map((idx) => msgKey(sorted[idx]!, idx))
+    : [`${message.timestamp}-${i}`]
+  const key = groupKeys[0]!
+  const isNew = groupKeys.some((groupKey) => newKeys?.has(groupKey) ?? false)
+  const adjacentSkillName =
+    skillNameFromMessage(grouped[i - 1]?.message) ?? skillNameFromMessage(grouped[i + 1]?.message)
+  const isToolOnlyAssistant =
+    message.role === "assistant" &&
+    (message.text ?? "").trim().length === 0 &&
+    (message.toolCalls?.length ?? 0) > 0
+  return {
+    key,
+    message,
+    count,
+    isNew,
+    adjacentSkillName,
+    isToolOnlyAssistant,
+  }
+}
+
+function MessagesContent({
   messages,
   loading,
   newKeys,
   msgKey,
-  toolStats,
-  tasks = [],
-  taskSummary = null,
-  tasksLoading = false,
-  projectTasks = [],
-  projectTaskSummary = null,
-  projectTasksLoading = false,
+  grouped,
+  sorted,
+}: {
+  messages: SessionMessage[]
+  loading: boolean
+  newKeys?: Set<string>
+  msgKey?: MessagesProps["msgKey"]
+  grouped: ReturnType<typeof groupMessages>
+  sorted: SessionMessage[]
+}) {
+  if (loading) {
+    return <p className="empty p-8 text-center text-zinc-500">Loading...</p>
+  }
+  if (messages.length === 0) {
+    return <p className="empty p-8 text-center text-zinc-500">No messages for this session.</p>
+  }
+  return (
+    <ul className="messages-list flex-1 pb-16" aria-label="Last 30 transcript messages">
+      {grouped.map((_, i) => {
+        const { key, ...rowProps } = resolveMessageRowProps(grouped, sorted, i, msgKey, newKeys)
+        return <MessageRow key={key} {...rowProps} />
+      })}
+    </ul>
+  )
+}
+
+function SessionStatsBar({
   events,
   cacheStatus,
   activeSession,
   activeHookDispatches,
-}: MessagesProps) {
+  messages,
+  toolStats,
+}: Pick<
+  MessagesProps,
+  "events" | "cacheStatus" | "activeSession" | "activeHookDispatches" | "messages" | "toolStats"
+>) {
+  const hasStats = events || cacheStatus || activeSession || activeHookDispatches
+  if (!hasStats) return null
+  return (
+    <DashboardStats
+      events={events}
+      cache={cacheStatus ?? undefined}
+      activeSession={activeSession ?? null}
+      activeHookDispatches={activeHookDispatches ?? []}
+      loadedMessageCount={messages.length}
+      sessionToolStats={toolStats ?? []}
+    />
+  )
+}
+
+export function SessionMessages(props: MessagesProps) {
+  const {
+    messages,
+    loading,
+    newKeys,
+    msgKey,
+    toolStats,
+    tasks = [],
+    taskSummary = null,
+    tasksLoading = false,
+    projectTasks = [],
+    projectTaskSummary = null,
+    projectTasksLoading = false,
+  } = props
   const sorted = useMemo(
     () =>
       [...messages].sort((a, b) => {
@@ -113,275 +485,24 @@ export function SessionMessages({
           <p className="section-subtitle">Conversation history for selected session</p>
         </div>
       </div>
-      {(events || cacheStatus || activeSession || activeHookDispatches) && (
-        <DashboardStats
-          events={events}
-          cache={cacheStatus ?? undefined}
-          activeSession={activeSession ?? null}
-          activeHookDispatches={activeHookDispatches ?? []}
-          loadedMessageCount={messages.length}
-          sessionToolStats={toolStats ?? []}
+      <div className="flex-1 overflow-y-auto min-h-0 flex flex-col">
+        <SessionStatsBar {...props} />
+        <ProjectTasksSection
+          tasks={projectTasks}
+          summary={projectTaskSummary}
+          loading={projectTasksLoading}
         />
-      )}
-      <ProjectTasksSection
-        tasks={projectTasks}
-        summary={projectTaskSummary}
-        loading={projectTasksLoading}
-      />
-      <SessionTasksSection tasks={tasks} summary={taskSummary} loading={tasksLoading} />
-      {toolStats && toolStats.length > 0 && <ToolStatsBar stats={toolStats} />}
-      {loading ? (
-        <p className="empty p-8 text-center text-zinc-500">Loading...</p>
-      ) : messages.length === 0 ? (
-        <p className="empty p-8 text-center text-zinc-500">No messages for this session.</p>
-      ) : (
-        <ul
-          className="messages-list overflow-y-auto flex-1 pb-16"
-          aria-label="Last 30 transcript messages"
-        >
-          {grouped.map(({ message, count, originalIndices }, i) => {
-            const role = message.role === "assistant" ? "Assistant" : "User"
-            const timestamp = message.timestamp
-              ? formatTime(new Date(message.timestamp).getTime())
-              : "Unknown time"
-            const groupKeys = msgKey
-              ? originalIndices.map((idx) => msgKey(sorted[idx]!, idx))
-              : [`${message.timestamp}-${i}`]
-            const key = groupKeys[0]!
-            const isNew = groupKeys.some((groupKey) => newKeys?.has(groupKey) ?? false)
-            const adjacentSkillName =
-              skillNameFromMessage(grouped[i - 1]?.message) ??
-              skillNameFromMessage(grouped[i + 1]?.message)
-            const parsedSkillPayload =
-              message.role === "user" ? parseSkillPayload(message.text ?? "") : null
-            const showSkillPayload =
-              message.role === "user" && Boolean(adjacentSkillName) && Boolean(parsedSkillPayload)
-            const skillBody = parsedSkillPayload?.body ?? ""
-            const collapseSkillBody =
-              skillBody.length > 300 || skillBody.split("\n").length > COLLAPSE_LINE_THRESHOLD
-            const skillPreview = collapseSkillBody ? summarizeText(skillBody) : skillBody
-            const isToolOnlyAssistant =
-              message.role === "assistant" &&
-              (message.text ?? "").trim().length === 0 &&
-              (message.toolCalls?.length ?? 0) > 0
-            return (
-              <li
-                key={key}
-                className={cn(
-                  "message-row",
-                  message.role,
-                  isNew && "message-new",
-                  isToolOnlyAssistant && "message-row-tool-only"
-                )}
-              >
-                <div className="message-meta">
-                  <span className="message-role">{role}</span>
-                  <span className="message-meta-right">
-                    {count > 1 ? <span className="message-repeat-badge">x{count}</span> : null}
-                    <span>{timestamp}</span>
-                  </span>
-                </div>
-                {message.text &&
-                  (showSkillPayload ? (
-                    <div className="skill-payload-box">
-                      <div className="skill-payload-header">
-                        <span className="skill-payload-label">Skill content</span>
-                        <code className="skill-payload-name">{adjacentSkillName}</code>
-                      </div>
-                      {parsedSkillPayload?.baseDir ? (
-                        <p className="skill-payload-base">
-                          <span className="skill-payload-base-label">base dir</span>
-                          <code className="skill-payload-base-path">
-                            {compactPath(parsedSkillPayload.baseDir, 90)}
-                          </code>
-                        </p>
-                      ) : null}
-                      {collapseSkillBody ? (
-                        <details className="tool-raw-json">
-                          <summary>{skillPreview}</summary>
-                          <pre className="message-text">{skillBody}</pre>
-                        </details>
-                      ) : (
-                        <pre className="message-text">{skillBody}</pre>
-                      )}
-                    </div>
-                  ) : (
-                    <MessageBody text={message.text} role={message.role} />
-                  ))}
-                {message.toolCalls &&
-                  message.toolCalls.length > 0 &&
-                  (isToolOnlyAssistant ? (
-                    <div className="tool-calls tool-calls-verbose">
-                      {message.toolCalls.map((tc) => (
-                        <div
-                          key={`${tc.name}-${tc.detail}`}
-                          className="tool-call tool-call-verbose"
-                        >
-                          {(() => {
-                            const parsedDetail = parseToolCallDetail(tc.name, tc.detail)
-                            const isBash = tc.name.toLowerCase() === "bash"
-                            const swizTask =
-                              isBash && parsedDetail.command
-                                ? parseSwizTasksCommand(parsedDetail.command)
-                                : null
-                            const searchParams = parseSearchToolParams(tc.name, tc.detail)
-                            const rawJson = parsedDetail.rawJson
-                            const shouldCollapseRawJson =
-                              !isBash &&
-                              typeof rawJson === "string" &&
-                              rawJson.length > TOOL_RAW_JSON_COLLAPSE_THRESHOLD
-                            const rawJsonPreview =
-                              rawJson && shouldCollapseRawJson
-                                ? summarizeRawJson(rawJson, TOOL_RAW_JSON_COLLAPSE_THRESHOLD)
-                                : null
-                            return (
-                              <div className="tool-call-body">
-                                <div className="tool-call-header">
-                                  <span className="tool-name">{tc.name}</span>
-                                </div>
-                                {isBash && swizTask ? (
-                                  <div className="tool-first-party-call">
-                                    <p className="tool-first-party-title">swiz tasks</p>
-                                    <ul className="tool-param-list">
-                                      <li className="tool-param-item">
-                                        <span className="tool-param-label">action</span>
-                                        <code className="tool-param-value">{swizTask.action}</code>
-                                      </li>
-                                      {swizTask.taskId ? (
-                                        <li className="tool-param-item">
-                                          <span className="tool-param-label">task</span>
-                                          <code className="tool-param-value">
-                                            {swizTask.taskId}
-                                          </code>
-                                        </li>
-                                      ) : null}
-                                      {swizTask.status ? (
-                                        <li className="tool-param-item">
-                                          <span className="tool-param-label">status</span>
-                                          <code className="tool-param-value">
-                                            {swizTask.status}
-                                          </code>
-                                        </li>
-                                      ) : null}
-                                      {swizTask.subject ? (
-                                        <li className="tool-param-item">
-                                          <span className="tool-param-label">subject</span>
-                                          <code className="tool-param-value">
-                                            {swizTask.subject}
-                                          </code>
-                                        </li>
-                                      ) : null}
-                                      {swizTask.evidence ? (
-                                        <li className="tool-param-item">
-                                          <span className="tool-param-label">evidence</span>
-                                          <code className="tool-param-value">
-                                            {swizTask.evidence}
-                                          </code>
-                                        </li>
-                                      ) : null}
-                                    </ul>
-                                    <details className="tool-raw-json">
-                                      <summary>Full command</summary>
-                                      <pre className="tool-command-block">
-                                        {parsedDetail.command}
-                                      </pre>
-                                    </details>
-                                  </div>
-                                ) : null}
-                                {isBash && parsedDetail.command && !swizTask ? (
-                                  <pre className="tool-command-block">{parsedDetail.command}</pre>
-                                ) : null}
-                                {isBash && parsedDetail.description ? (
-                                  <p className="tool-call-description">
-                                    {parsedDetail.description}
-                                  </p>
-                                ) : null}
-                                {parsedDetail.commonFields.length > 0 ? (
-                                  <ul className="tool-param-list">
-                                    {parsedDetail.commonFields.map((field) => (
-                                      <li
-                                        key={`${field.label}:${field.value}`}
-                                        className="tool-param-item"
-                                      >
-                                        <span className="tool-param-label">{field.label}</span>
-                                        <code className="tool-param-value">{field.value}</code>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : null}
-                                {!isBash && searchParams ? (
-                                  <div className="tool-first-party-call">
-                                    <p className="tool-first-party-title">{tc.name} search</p>
-                                    {searchParams.pattern ? (
-                                      <pre className="tool-command-block">
-                                        {searchParams.pattern}
-                                      </pre>
-                                    ) : null}
-                                    <ul className="tool-param-list">
-                                      {searchParams.path ? (
-                                        <li className="tool-param-item">
-                                          <span className="tool-param-label">path</span>
-                                          <code className="tool-param-value">
-                                            {compactPath(searchParams.path, 90)}
-                                          </code>
-                                        </li>
-                                      ) : null}
-                                      {searchParams.outputMode ? (
-                                        <li className="tool-param-item">
-                                          <span className="tool-param-label">output</span>
-                                          <code className="tool-param-value">
-                                            {searchParams.outputMode}
-                                          </code>
-                                        </li>
-                                      ) : null}
-                                      {searchParams.options.map((option) => (
-                                        <li
-                                          key={`${option.label}:${option.value}`}
-                                          className="tool-param-item"
-                                        >
-                                          <span className="tool-param-label">{option.label}</span>
-                                          <code className="tool-param-value">{option.value}</code>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                ) : null}
-                                {!isBash && rawJson && shouldCollapseRawJson ? (
-                                  <details className="tool-raw-json">
-                                    <summary>{rawJsonPreview}</summary>
-                                    <pre className="tool-detail-full">{rawJson}</pre>
-                                  </details>
-                                ) : null}
-                                {!isBash && rawJson && !shouldCollapseRawJson ? (
-                                  <pre className="tool-detail-full">{rawJson}</pre>
-                                ) : null}
-                              </div>
-                            )
-                          })()}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <ul className="tool-calls">
-                      {message.toolCalls.map((tc) => (
-                        <li key={`${tc.name}-${tc.detail}`} className="tool-call">
-                          <span className="tool-name">{tc.name}</span>
-                          {tc.detail && (
-                            <span
-                              className="tool-detail"
-                              // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped via renderInline
-                              dangerouslySetInnerHTML={{ __html: renderInline(tc.detail) }}
-                            />
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  ))}
-              </li>
-            )
-          })}
-        </ul>
-      )}
+        <SessionTasksSection tasks={tasks} summary={taskSummary} loading={tasksLoading} />
+        {toolStats && toolStats.length > 0 && <ToolStatsBar stats={toolStats} />}
+        <MessagesContent
+          messages={messages}
+          loading={loading}
+          newKeys={newKeys}
+          msgKey={msgKey}
+          grouped={grouped}
+          sorted={sorted}
+        />
+      </div>
     </section>
   )
 }

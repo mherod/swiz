@@ -120,6 +120,34 @@ async function hasActiveTask(sessionId: string | undefined): Promise<boolean> {
   return tasks.some((task) => task.status === "in_progress")
 }
 
+function updateStateFromToolUse(block: Record<string, unknown>, state: EnforcementState): void {
+  const name = String(block.name)
+  const input = block.input
+  if (!state.skillReadComplete && toolReadsUpdateMemorySkill(name, input)) {
+    state.skillReadComplete = true
+  }
+  if (!state.markdownWriteComplete && toolWritesMarkdown(name, input)) {
+    state.markdownWriteComplete = true
+  }
+}
+
+function extractToolUseBlocks(line: string): Array<Record<string, unknown>> {
+  const entry = JSON.parse(line)
+  if (entry?.type !== "assistant") return []
+  const content = entry?.message?.content
+  if (!Array.isArray(content)) return []
+  return (content as Array<Record<string, unknown>>).filter(
+    (b) => b?.type === "tool_use" && b?.name
+  )
+}
+
+function processTranscriptEntry(line: string, state: EnforcementState): void {
+  for (const block of extractToolUseBlocks(line)) {
+    updateStateFromToolUse(block, state)
+    if (state.skillReadComplete && state.markdownWriteComplete) return
+  }
+}
+
 function scanTranscript(lines: string[], startIndex: number): EnforcementState {
   const state: EnforcementState = {
     skillReadComplete: false,
@@ -129,36 +157,98 @@ function scanTranscript(lines: string[], startIndex: number): EnforcementState {
   for (let i = startIndex + 1; i < lines.length; i++) {
     const line = lines[i]
     if (!line) continue
-
     try {
-      const entry = JSON.parse(line)
-      if (entry?.type !== "assistant") continue
-      const content = entry?.message?.content
-      if (!Array.isArray(content)) continue
-
-      for (const block of content) {
-        if (block?.type !== "tool_use" || !block?.name) continue
-
-        const name = String(block.name)
-        const input = block.input
-
-        if (!state.skillReadComplete && toolReadsUpdateMemorySkill(name, input)) {
-          state.skillReadComplete = true
-        }
-        if (!state.markdownWriteComplete && toolWritesMarkdown(name, input)) {
-          state.markdownWriteComplete = true
-        }
-
-        if (state.skillReadComplete && state.markdownWriteComplete) {
-          return state
-        }
-      }
+      processTranscriptEntry(line, state)
+      if (state.skillReadComplete && state.markdownWriteComplete) return state
     } catch {
       // Ignore malformed transcript lines.
     }
   }
 
   return state
+}
+
+async function hasClaudeMdUpTree(cwd: string): Promise<boolean> {
+  let dir = cwd
+  while (true) {
+    if (await Bun.file(join(dir, "CLAUDE.md")).exists()) return true
+    const parent = dirname(dir)
+    if (parent === dir) return false
+    dir = parent
+  }
+}
+
+function findLastTriggerIndex(lines: string[]): number {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]
+    if (!line) continue
+    if (line.includes(REMINDER_FRAGMENT) && !line.includes(SELF_SENTINEL)) return i
+  }
+  return -1
+}
+
+const POST_COMPACTION_MARKER = "Post-compaction context"
+
+function wasCompactedAfterTrigger(lines: string[], triggerIndex: number): boolean {
+  return lines.slice(triggerIndex + 1).some((l) => l.includes(POST_COMPACTION_MARKER))
+}
+
+function buildDenialReason(toolName: string, missingSkill: boolean): string {
+  if (missingSkill) {
+    return (
+      `${SELF_SENTINEL}: ${toolName} is BLOCKED until you finish the required memory follow-through from an earlier hook response.\n\n` +
+      formatActionPlan(
+        [
+          "Read the /update-memory skill by opening its SKILL.md.",
+          "Write the resulting DO or DON'T rule into a project markdown file such as CLAUDE.md.",
+        ],
+        { header: "To resolve:" }
+      ) +
+      `\nThis gate clears automatically once the transcript shows both steps after the original reminder.`
+    )
+  }
+  return (
+    `${SELF_SENTINEL}: ${toolName} is BLOCKED until you record the required workflow rule in a markdown file.\n\n` +
+    formatActionPlan(
+      ["Write the DO or DON'T rule into a project markdown file such as CLAUDE.md."],
+      { header: "To resolve:" }
+    ) +
+    `\nThis gate clears automatically once the transcript shows that markdown write after the original reminder.`
+  )
+}
+
+async function shouldSkipEnforcement(
+  cwd: string,
+  transcriptPath: string,
+  toolName: string
+): Promise<boolean> {
+  if (!transcriptPath || !toolName) return true
+  if (!(await isGitRepo(cwd))) return true
+  if (!(await hasClaudeMdUpTree(cwd))) return true
+  return false
+}
+
+async function shouldSkipAfterTrigger(
+  lines: string[],
+  triggerIndex: number,
+  cwd: string,
+  sessionId: string | undefined
+): Promise<boolean> {
+  if (wasCompactedAfterTrigger(lines, triggerIndex)) return true
+  if (await isMemoryRecentlyUpdated(cwd)) return true
+  if (await hasActiveTask(sessionId)) return true
+  return false
+}
+
+function isCurrentToolSatisfying(
+  state: EnforcementState,
+  toolName: string,
+  toolInput: unknown
+): boolean {
+  if (state.skillReadComplete && state.markdownWriteComplete) return true
+  if (!state.skillReadComplete && toolReadsUpdateMemorySkill(toolName, toolInput)) return true
+  if (!state.markdownWriteComplete && toolWritesMarkdown(toolName, toolInput)) return true
+  return false
 }
 
 async function main(): Promise<void> {
@@ -168,89 +258,19 @@ async function main(): Promise<void> {
   const toolInput = input.tool_input ?? {}
   const cwd = input.cwd ?? process.cwd()
 
-  if (!transcriptPath || !toolName) return
-
-  // ── GUARD: Only enforce inside a git repo that has a CLAUDE.md ─────────────
-  // Enforcement outside a project directory creates an unrecoverable deadlock:
-  // the unlock steps (reading skills, writing CLAUDE.md) require git context.
-  if (!(await isGitRepo(cwd))) return
-  {
-    let dir = cwd
-    let foundClaudeMd = false
-    while (true) {
-      if (await Bun.file(join(dir, "CLAUDE.md")).exists()) {
-        foundClaudeMd = true
-        break
-      }
-      const parent = dirname(dir)
-      if (parent === dir) break
-      dir = parent
-    }
-    if (!foundClaudeMd) return
-  }
+  if (await shouldSkipEnforcement(cwd, transcriptPath, toolName)) return
 
   const lines = (await readSessionLines(transcriptPath)).filter((line) => line.trim())
   if (lines.length === 0) return
-  let lastTriggerIndex = -1
 
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i]
-    if (!line) continue
-    if (line.includes(REMINDER_FRAGMENT) && !line.includes(SELF_SENTINEL)) {
-      lastTriggerIndex = i
-      break
-    }
-  }
-
+  const lastTriggerIndex = findLastTriggerIndex(lines)
   if (lastTriggerIndex < 0) return
-
-  // Compaction guard: if context was compacted after the trigger, compliance
-  // evidence (Read SKILL.md + Edit .md) was in the archived pre-compact window
-  // and is legitimately no longer visible. Skip enforcement — the agent starts
-  // fresh after compaction and cannot re-satisfy a pre-compaction gate.
-  const POST_COMPACTION_MARKER = "Post-compaction context"
-  const postTriggerLines = lines.slice(lastTriggerIndex + 1)
-  if (postTriggerLines.some((l) => l.includes(POST_COMPACTION_MARKER))) return
-
-  // Cooldown: if a memory file was recently updated, the agent is actively
-  // maintaining memory — skip enforcement to avoid cascading re-triggers.
-  if (await isMemoryRecentlyUpdated(input.cwd ?? process.cwd())) return
-
-  // Active task exemption: if the session has an in_progress task, the agent is
-  // actively working on a feature and the stop hook fired for routine workflow
-  // reasons (uncommitted changes, unpushed commits) — not a novel violation.
-  // Defer enforcement until the task completes naturally.
-  if (await hasActiveTask(input.session_id)) return
+  if (await shouldSkipAfterTrigger(lines, lastTriggerIndex, cwd, input.session_id)) return
 
   const state = scanTranscript(lines, lastTriggerIndex)
-  if (state.skillReadComplete && state.markdownWriteComplete) return
+  if (isCurrentToolSatisfying(state, toolName, toolInput)) return
 
-  if (!state.skillReadComplete && toolReadsUpdateMemorySkill(toolName, toolInput)) return
-  if (!state.markdownWriteComplete && toolWritesMarkdown(toolName, toolInput)) return
-
-  const missingSkill = !state.skillReadComplete
-  const reason = missingSkill
-    ? `${SELF_SENTINEL}: ${toolName} is BLOCKED until you finish the required memory follow-through from an earlier hook response.\n\n` +
-      formatActionPlan(
-        [
-          "Read the /update-memory skill by opening its SKILL.md.",
-          "Write the resulting DO or DON'T rule into a project markdown file such as CLAUDE.md.",
-        ],
-        { header: "To resolve:" }
-      ) +
-      `\n` +
-      `This gate clears automatically once the transcript shows both steps after the original reminder.`
-    : `${SELF_SENTINEL}: ${toolName} is BLOCKED until you record the required workflow rule in a markdown file.\n\n` +
-      formatActionPlan(
-        ["Write the DO or DON'T rule into a project markdown file such as CLAUDE.md."],
-        {
-          header: "To resolve:",
-        }
-      ) +
-      `\n` +
-      `This gate clears automatically once the transcript shows that markdown write after the original reminder.`
-
-  denyPreToolUse(reason)
+  denyPreToolUse(buildDenialReason(toolName, !state.skillReadComplete))
 }
 
 if (import.meta.main) await main()

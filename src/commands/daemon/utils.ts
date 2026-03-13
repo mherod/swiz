@@ -186,36 +186,39 @@ function formatToolInputForDisplay(input: Record<string, unknown> | undefined): 
   }
 }
 
-export function summarizeToolInput(input: Record<string, unknown> | undefined): string {
-  if (!input) return ""
-  if (typeof input.subject === "string") {
-    return input.subject.length > 60 ? `${input.subject.slice(0, 57)}...` : input.subject
-  }
+function truncate(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max - 3)}...` : value
+}
+
+function summarizeTaskInput(input: Record<string, unknown>): string | null {
+  if (typeof input.subject === "string") return truncate(input.subject, 60)
   if (typeof input.taskId === "string") {
     const parts = [`#${input.taskId}`]
     if (typeof input.status === "string") parts.push(input.status)
     return parts.join(" -> ")
   }
+  return null
+}
+
+function summarizeFileOrCommandInput(input: Record<string, unknown>): string | null {
   if (typeof input.skill === "string") {
     return typeof input.args === "string" ? `${input.skill} ${input.args}` : input.skill
   }
-
   const pathVal = input.path ?? input.file_path ?? input.file ?? input.filePath
-  if (typeof pathVal === "string") {
-    return pathVal
-  }
-  if (typeof input.command === "string") {
-    return input.command.length > 80 ? `${input.command.slice(0, 77)}...` : input.command
-  }
+  if (typeof pathVal === "string") return pathVal
+  if (typeof input.command === "string") return truncate(input.command, 80)
   if (typeof input.pattern === "string") return input.pattern
-  if (typeof input.query === "string") {
-    return input.query.length > 60 ? `${input.query.slice(0, 57)}...` : input.query
-  }
+  if (typeof input.query === "string") return truncate(input.query, 60)
   if (typeof input.content === "string") return `${input.content.length} chars`
   if (typeof input.old_string === "string") {
     return `replacing ${input.old_string.split("\n").length} lines`
   }
-  return ""
+  return null
+}
+
+export function summarizeToolInput(input: Record<string, unknown> | undefined): string {
+  if (!input) return ""
+  return summarizeTaskInput(input) ?? summarizeFileOrCommandInput(input) ?? ""
 }
 
 export function captureSessionToolCall(

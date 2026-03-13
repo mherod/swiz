@@ -418,6 +418,79 @@ const REQUIRED_SKILL_FIELDS = ["name", "description"] as const
  * Validates: file existence, non-empty content, frontmatter block, required
  * frontmatter fields (name, description), and category against allowedCategories.
  */
+function validateSkillContent(
+  content: string,
+  dirName: string,
+  skillDir: string,
+  entryDir: string,
+  allowedCategories: ReadonlySet<string>
+): InvalidSkillEntry[] {
+  const issues: InvalidSkillEntry[] = []
+  const base = { name: dirName, skillDir, entryDir }
+  let hasContentIssues = false
+  const missing = REQUIRED_SKILL_FIELDS.filter((f) => !parseFrontmatterField(content, f))
+  if (missing.length > 0) {
+    issues.push({ ...base, reason: `missing required frontmatter field(s): ${missing.join(", ")}` })
+    hasContentIssues = true
+  }
+  const rawName = parseFrontmatterField(content, "name") ?? ""
+  if (rawName) {
+    const unquotedName = rawName.replace(/^["']|["']$/g, "")
+    if (unquotedName !== dirName) {
+      issues.push({
+        ...base,
+        reason: `frontmatter name "${unquotedName}" does not match directory name "${dirName}"`,
+      })
+      hasContentIssues = true
+    }
+  }
+  const description = parseFrontmatterField(content, "description")
+  if (description?.trim() === SKILL_PLACEHOLDER_DESCRIPTION) {
+    issues.push({
+      ...base,
+      reason: `description is the generated placeholder — update SKILL.md with a real description`,
+    })
+    hasContentIssues = true
+  }
+  if (hasContentIssues) return issues
+  const rawCategory = parseFrontmatterField(content, "category")
+  if (!rawCategory) {
+    issues.push({ ...base, reason: MISSING_CATEGORY_REASON })
+    return issues
+  }
+  const cat = rawCategory.trim()
+  if (!allowedCategories.has(cat)) {
+    const suggestion = suggest(cat, allowedCategories)
+    const hint = suggestion ? ` (did you mean: "${suggestion}"?)` : ""
+    issues.push({
+      ...base,
+      reason: `${INVALID_CATEGORY_REASON_PREFIX}${cat}"${hint} — allowed: ${[...allowedCategories].sort().join(", ")}`,
+    })
+  }
+  return issues
+}
+
+async function validateSkillEntry(
+  entry: import("node:fs").Dirent,
+  skillDir: string,
+  allowedCategories: ReadonlySet<string>
+): Promise<InvalidSkillEntry[]> {
+  if (!entry.isDirectory()) return []
+  if (entry.name.startsWith(".")) return []
+  if (DISABLED_BY_SWIZ_RE.test(entry.name)) return []
+  const entryDir = join(skillDir, entry.name)
+  const skillPath = join(entryDir, "SKILL.md")
+  const base = { name: entry.name, skillDir, entryDir }
+  const file = Bun.file(skillPath)
+  if (!(await file.exists())) return [{ ...base, reason: "missing SKILL.md" }]
+  const content = await file.text()
+  if (!content.trim()) return [{ ...base, reason: "empty SKILL.md" }]
+  if (!/^---/m.test(content)) {
+    return [{ ...base, reason: "SKILL.md has no frontmatter block (expected --- delimiters)" }]
+  }
+  return validateSkillContent(content, entry.name, skillDir, entryDir, allowedCategories)
+}
+
 async function findInvalidSkillEntries(
   allowedCategories: ReadonlySet<string>
 ): Promise<InvalidSkillEntry[]> {
@@ -430,88 +503,7 @@ async function findInvalidSkillEntries(
       continue
     }
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      if (entry.name.startsWith(".")) continue // skip hidden/temp dirs (e.g. .unison.*)
-      if (DISABLED_BY_SWIZ_RE.test(entry.name)) continue // skip disabled skill dirs
-      const entryDir = join(skillDir, entry.name)
-      const skillPath = join(entryDir, "SKILL.md")
-      const file = Bun.file(skillPath)
-      if (!(await file.exists())) {
-        invalid.push({ name: entry.name, skillDir, entryDir, reason: "missing SKILL.md" })
-        continue
-      }
-      const content = await file.text()
-      if (!content.trim()) {
-        invalid.push({ name: entry.name, skillDir, entryDir, reason: "empty SKILL.md" })
-        continue
-      }
-      if (!/^---/m.test(content)) {
-        invalid.push({
-          name: entry.name,
-          skillDir,
-          entryDir,
-          reason: "SKILL.md has no frontmatter block (expected --- delimiters)",
-        })
-        continue
-      }
-      // Collect all field-level errors in a single pass (no early exit after this point)
-      let hasContentIssues = false
-      const missing = REQUIRED_SKILL_FIELDS.filter((f) => !parseFrontmatterField(content, f))
-      if (missing.length > 0) {
-        invalid.push({
-          name: entry.name,
-          skillDir,
-          entryDir,
-          reason: `missing required frontmatter field(s): ${missing.join(", ")}`,
-        })
-        hasContentIssues = true
-        // Continue checking fields that do exist — do NOT early-exit here
-      }
-      // Name-match check (only when name field is present)
-      const rawName = parseFrontmatterField(content, "name") ?? ""
-      if (rawName) {
-        // Strip surrounding quotes authors sometimes include: name: "my-skill"
-        const unquotedName = rawName.replace(/^["']|["']$/g, "")
-        if (unquotedName !== entry.name) {
-          invalid.push({
-            name: entry.name,
-            skillDir,
-            entryDir,
-            reason: `frontmatter name "${unquotedName}" does not match directory name "${entry.name}"`,
-          })
-          hasContentIssues = true
-        }
-      }
-      // Placeholder description check (only when description field is present)
-      const description = parseFrontmatterField(content, "description")
-      if (description?.trim() === SKILL_PLACEHOLDER_DESCRIPTION) {
-        invalid.push({
-          name: entry.name,
-          skillDir,
-          entryDir,
-          reason: `description is the generated placeholder — update SKILL.md with a real description`,
-        })
-        hasContentIssues = true
-      }
-      // Category check — only run when no other field-level issues found
-      if (!hasContentIssues) {
-        const rawCategory = parseFrontmatterField(content, "category")
-        if (!rawCategory) {
-          invalid.push({ name: entry.name, skillDir, entryDir, reason: MISSING_CATEGORY_REASON })
-        } else {
-          const cat = rawCategory.trim()
-          if (!allowedCategories.has(cat)) {
-            const suggestion = suggest(cat, allowedCategories)
-            const hint = suggestion ? ` (did you mean: "${suggestion}"?)` : ""
-            invalid.push({
-              name: entry.name,
-              skillDir,
-              entryDir,
-              reason: `${INVALID_CATEGORY_REASON_PREFIX}${cat}"${hint} — allowed: ${[...allowedCategories].sort().join(", ")}`,
-            })
-          }
-        }
-      }
+      invalid.push(...(await validateSkillEntry(entry, skillDir, allowedCategories)))
     }
   }
   invalid.sort((a, b) => a.name.localeCompare(b.name))
@@ -860,8 +852,7 @@ async function collectInstalledConfigScriptPaths(): Promise<string[]> {
 }
 
 /** Verify that all executable script paths (manifest + config) exist and are executable. */
-async function checkInstalledConfigScripts(): Promise<CheckResult> {
-  // Build source map so error messages can attribute each path to manifest or config
+async function buildScriptPathSourceMap(): Promise<Map<string, "manifest" | "config">> {
   const pathSource = new Map<string, "manifest" | "config">()
   for (const group of manifest) {
     for (const hook of group.hooks) {
@@ -871,7 +862,11 @@ async function checkInstalledConfigScripts(): Promise<CheckResult> {
   for (const p of await collectInstalledConfigScriptPaths()) {
     if (!pathSource.has(p)) pathSource.set(p, "config")
   }
+  return pathSource
+}
 
+async function checkInstalledConfigScripts(): Promise<CheckResult> {
+  const pathSource = await buildScriptPathSourceMap()
   const missing: string[] = []
   const notExecutable: string[] = []
 
@@ -883,9 +878,7 @@ async function checkInstalledConfigScripts(): Promise<CheckResult> {
     }
     try {
       const s = await stat(scriptPath)
-      if ((s.mode & 0o100) === 0) {
-        notExecutable.push(label)
-      }
+      if ((s.mode & 0o100) === 0) notExecutable.push(label)
     } catch {
       missing.push(label)
     }
@@ -1078,6 +1071,64 @@ interface PluginCacheInfo {
   staleSkills: string[]
 }
 
+async function listSkillDirs(dir: string): Promise<string[]> {
+  try {
+    const entries = await readdir(dir, { withFileTypes: true })
+    return entries
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort()
+  } catch {
+    return []
+  }
+}
+
+async function findStaleSkills(
+  sourceDir: string,
+  cacheDir: string,
+  shared: string[]
+): Promise<string[]> {
+  const stale: string[] = []
+  for (const skill of shared) {
+    const srcFile = Bun.file(join(sourceDir, skill, "SKILL.md"))
+    const cacheFile = Bun.file(join(cacheDir, skill, "SKILL.md"))
+    try {
+      const [srcText, cacheText] = await Promise.all([srcFile.text(), cacheFile.text()])
+      if (srcText !== cacheText) stale.push(skill)
+    } catch {
+      // If either file is unreadable, skip content comparison
+    }
+  }
+  return stale
+}
+
+async function comparePluginSkills(
+  pluginName: string,
+  cachePath: string,
+  sourcePath: string
+): Promise<PluginCacheInfo | null> {
+  const sourceSkillsDir = join(sourcePath, "skills")
+  const cacheSkillsDir = join(cachePath, "skills")
+  const sourceSkills = await listSkillDirs(sourceSkillsDir)
+  if (sourceSkills.length === 0) return null
+  const cacheSkills = await listSkillDirs(cacheSkillsDir)
+  const cacheSet = new Set(cacheSkills)
+  const sourceSet = new Set(sourceSkills)
+  const missing = sourceSkills.filter((s) => !cacheSet.has(s))
+  const extra = cacheSkills.filter((s) => !sourceSet.has(s))
+  const shared = sourceSkills.filter((s) => cacheSet.has(s))
+  const stale = await findStaleSkills(sourceSkillsDir, cacheSkillsDir, shared)
+  if (missing.length === 0 && extra.length === 0 && stale.length === 0) return null
+  return {
+    pluginName,
+    sourcePath: sourceSkillsDir,
+    cachePath: cacheSkillsDir,
+    missingSkills: missing,
+    extraSkills: extra,
+    staleSkills: stale,
+  }
+}
+
 /**
  * Compare skills in the working-tree plugin source against the installed cache.
  * Returns info about each local plugin whose cached copy is out of sync.
@@ -1117,64 +1168,12 @@ async function checkPluginCacheStaleness(): Promise<PluginCacheInfo[]> {
     const key = `${plugin.name}@${marketplace.name}`
     const entries = installed.plugins[key]
     if (!entries || entries.length === 0) continue
-
-    const cachePath = entries[0]!.installPath
-    const sourcePath = join(SWIZ_ROOT, plugin.source)
-
-    // Compare skills directories
-    const sourceSkillsDir = join(sourcePath, "skills")
-    const cacheSkillsDir = join(cachePath, "skills")
-
-    let sourceSkills: string[]
-    let cacheSkills: string[]
-    try {
-      const sourceEntries = await readdir(sourceSkillsDir, { withFileTypes: true })
-      sourceSkills = sourceEntries
-        .filter((e) => e.isDirectory())
-        .map((e) => e.name)
-        .sort()
-    } catch {
-      continue
-    }
-    try {
-      const cacheEntries = await readdir(cacheSkillsDir, { withFileTypes: true })
-      cacheSkills = cacheEntries
-        .filter((e) => e.isDirectory())
-        .map((e) => e.name)
-        .sort()
-    } catch {
-      cacheSkills = []
-    }
-
-    const cacheSet = new Set(cacheSkills)
-    const sourceSet = new Set(sourceSkills)
-    const missing = sourceSkills.filter((s) => !cacheSet.has(s))
-    const extra = cacheSkills.filter((s) => !sourceSet.has(s))
-
-    // Check content staleness for skills that exist in both
-    const shared = sourceSkills.filter((s) => cacheSet.has(s))
-    const stale: string[] = []
-    for (const skill of shared) {
-      const srcFile = Bun.file(join(sourceSkillsDir, skill, "SKILL.md"))
-      const cacheFile = Bun.file(join(cacheSkillsDir, skill, "SKILL.md"))
-      try {
-        const [srcText, cacheText] = await Promise.all([srcFile.text(), cacheFile.text()])
-        if (srcText !== cacheText) stale.push(skill)
-      } catch {
-        // If either file is unreadable, skip content comparison
-      }
-    }
-
-    if (missing.length > 0 || extra.length > 0 || stale.length > 0) {
-      results.push({
-        pluginName: plugin.name,
-        sourcePath: sourceSkillsDir,
-        cachePath: cacheSkillsDir,
-        missingSkills: missing,
-        extraSkills: extra,
-        staleSkills: stale,
-      })
-    }
+    const info = await comparePluginSkills(
+      plugin.name,
+      entries[0]!.installPath,
+      join(SWIZ_ROOT, plugin.source)
+    )
+    if (info) results.push(info)
   }
 
   return results
@@ -1243,6 +1242,187 @@ async function fixPluginCache(
   return { synced, updated, failed }
 }
 
+// ─── Auto-fix logic ─────────────────────────────────────────────────────────
+
+interface AutoFixContext {
+  fix: boolean
+  results: CheckResult[]
+  skillConflicts: SkillConflict[]
+  invalidSkillEntries: InvalidSkillEntry[]
+  pluginCacheInfos: PluginCacheInfo[]
+}
+
+async function fixStaleConfigs(results: CheckResult[]): Promise<void> {
+  const staleConfigs = results.filter(
+    (r) =>
+      r.name.endsWith("config sync") && r.status === "warn" && r.detail.includes("missing dispatch")
+  )
+  if (staleConfigs.length === 0) return
+  console.log(`  ${BOLD}Auto-fixing stale configs...${RESET}\n`)
+  const proc = Bun.spawn(["bun", "run", join(SWIZ_ROOT, "index.ts"), "install"], {
+    stdout: "inherit",
+    stderr: "inherit",
+  })
+  await proc.exited
+  if (proc.exitCode === 0) {
+    console.log(`  ${GREEN}✓ Configs updated successfully${RESET}\n`)
+  } else {
+    console.log(`  ${RED}✗ Install failed (exit ${proc.exitCode})${RESET}\n`)
+  }
+}
+
+async function fixMissingConfigs(): Promise<void> {
+  const missingConfigPaths = await findMissingConfigScriptPaths()
+  if (missingConfigPaths.length === 0) return
+  console.log(`  ${BOLD}Registering missing config scripts...${RESET}\n`)
+  const regResult = await fixMissingConfigScripts(missingConfigPaths)
+  for (const item of regResult.registered) {
+    console.log(`  ${GREEN}✓${RESET} Registered stub: ${displayPath(item.path)}`)
+  }
+  for (const item of regResult.failed) {
+    console.log(`  ${RED}✗${RESET} Failed to register ${displayPath(item.path)}: ${item.error}`)
+  }
+  if (regResult.registered.length > 0) console.log()
+}
+
+async function fixInvalidSkills(entries: InvalidSkillEntry[]): Promise<void> {
+  if (entries.length === 0) return
+  console.log(`  ${BOLD}Auto-fixing invalid skill entries...${RESET}\n`)
+  const r = await fixInvalidSkillEntries(entries)
+  for (const item of r.generated) {
+    console.log(
+      `  ${GREEN}✓${RESET} ${item.name}: generated default ${displayPath(item.skillPath)}`
+    )
+  }
+  for (const item of r.nameFixed) {
+    console.log(
+      `  ${GREEN}✓${RESET} ${item.name}: updated name "${item.oldName}" → "${item.name}" in ${displayPath(item.skillPath)}`
+    )
+  }
+  for (const item of r.categoryFixed) {
+    console.log(
+      `  ${GREEN}✓${RESET} ${item.name}: added category "${SKILL_PLACEHOLDER_CATEGORY}" to ${displayPath(item.skillPath)}`
+    )
+  }
+  for (const item of r.failed) {
+    console.log(
+      `  ${RED}✗${RESET} ${item.name}: could not fix ${displayPath(item.originalDir)} (${item.error})`
+    )
+  }
+  if (r.generated.length > 0 || r.nameFixed.length > 0 || r.categoryFixed.length > 0) {
+    console.log()
+  }
+}
+
+async function fixDisabledSkills(): Promise<void> {
+  const disabledDirs = await findDisabledSkillDirs()
+  if (disabledDirs.length === 0) return
+  console.log(`  ${BOLD}Restoring disabled skill directories...${RESET}\n`)
+  for (const restore of disabledDirs) {
+    if (await restoreDisabledSkillDir(restore)) {
+      console.log(
+        `  ${GREEN}✓${RESET} ${restore.name}: restored from ${displayPath(restore.oldDir)}`
+      )
+    } else {
+      console.log(
+        `  ${RED}✗${RESET} ${restore.name}: could not restore ${displayPath(restore.oldDir)}`
+      )
+    }
+  }
+  console.log()
+}
+
+async function fixStalePluginCache(infos: PluginCacheInfo[]): Promise<void> {
+  if (infos.length === 0) return
+  console.log(`  ${BOLD}Syncing plugin cache...${RESET}\n`)
+  const r = await fixPluginCache(infos)
+  for (const skill of r.synced) {
+    console.log(`  ${GREEN}✓${RESET} ${skill}: copied to plugin cache`)
+  }
+  for (const skill of r.updated) {
+    console.log(`  ${GREEN}✓${RESET} ${skill}: updated in plugin cache`)
+  }
+  for (const item of r.failed) {
+    console.log(`  ${RED}✗${RESET} ${item.skill}: ${item.error}`)
+  }
+  if (r.synced.length > 0 || r.updated.length > 0) {
+    console.log(`\n  ${DIM}Restart Claude Code to pick up the changes.${RESET}`)
+    console.log()
+  }
+}
+
+async function handleAutoFixes(ctx: AutoFixContext): Promise<void> {
+  const { fix, results, skillConflicts, invalidSkillEntries, pluginCacheInfos } = ctx
+  const hasStaleConfigs = results.some(
+    (r) =>
+      r.name.endsWith("config sync") && r.status === "warn" && r.detail.includes("missing dispatch")
+  )
+  if (fix) {
+    await fixStaleConfigs(results)
+    await fixMissingConfigs()
+    if (skillConflicts.length > 0) {
+      console.log(
+        `  ${YELLOW}Skill conflicts detected — resolve manually by removing duplicate skill directories.${RESET}\n`
+      )
+    }
+    await fixInvalidSkills(invalidSkillEntries)
+    await fixDisabledSkills()
+    await fixStalePluginCache(pluginCacheInfos)
+    return
+  }
+  if (hasStaleConfigs || invalidSkillEntries.length > 0 || pluginCacheInfos.length > 0) {
+    const fixables = [
+      hasStaleConfigs ? "stale configs" : null,
+      invalidSkillEntries.length > 0 ? "invalid skill entries" : null,
+      pluginCacheInfos.length > 0 ? "stale plugin cache" : null,
+    ]
+      .filter(Boolean)
+      .join(" and ")
+    console.log(`  ${YELLOW}${fixables} detected. Run: swiz doctor --fix${RESET}\n`)
+  }
+}
+
+// ─── Check collection ───────────────────────────────────────────────────────
+
+interface DoctorCheckResults {
+  results: CheckResult[]
+  skillConflicts: SkillConflict[]
+  invalidSkillEntries: InvalidSkillEntry[]
+  pluginCacheInfos: PluginCacheInfo[]
+}
+
+async function collectDoctorChecks(fix: boolean): Promise<DoctorCheckResults> {
+  const results: CheckResult[] = []
+  results.push(await checkBun())
+  for (const agent of AGENTS) {
+    results.push(checkAgentBinary(agent))
+    results.push(await checkAgentSettings(agent))
+  }
+  results.push(await checkHookScripts())
+  results.push(await checkManifestHandlerPaths())
+  const orphanedScripts = await findOrphanedHookScripts()
+  results.push(buildOrphanedResult(orphanedScripts))
+  results.push(await checkInstalledConfigScripts())
+  results.push(await checkScriptExecutePermissions(fix))
+  for (const agent of CONFIGURABLE_AGENTS) {
+    results.push(await checkAgentConfigSync(agent))
+  }
+  const skillConflicts = await findSkillConflicts()
+  results.push(...buildSkillConflictResults(skillConflicts))
+  const projectSettings = await readProjectSettings(process.cwd())
+  const allowedCategories = new Set(
+    projectSettings?.allowedSkillCategories ?? DEFAULT_ALLOWED_SKILL_CATEGORIES
+  )
+  const invalidSkillEntries = await findInvalidSkillEntries(allowedCategories)
+  results.push(...buildInvalidSkillResults(invalidSkillEntries))
+  const pluginCacheInfos = await checkPluginCacheStaleness()
+  results.push(...buildPluginCacheResults(pluginCacheInfos))
+  results.push(await checkGhAuth())
+  results.push(await checkTtsBackend())
+  results.push(await checkSwizSettings())
+  return { results, skillConflicts, invalidSkillEntries, pluginCacheInfos }
+}
+
 // ─── Runner ─────────────────────────────────────────────────────────────────
 
 function printResult(result: CheckResult): void {
@@ -1262,51 +1442,8 @@ export const doctorCommand: Command = {
     const fix = args.includes("--fix")
     console.log(`\n  ${BOLD}swiz doctor${RESET}\n`)
 
-    const results: CheckResult[] = []
-
-    // Core runtime
-    results.push(await checkBun())
-
-    // Agent binaries and settings
-    for (const agent of AGENTS) {
-      results.push(checkAgentBinary(agent))
-      results.push(await checkAgentSettings(agent))
-    }
-
-    // Hook scripts
-    results.push(await checkHookScripts())
-    results.push(await checkManifestHandlerPaths())
-    const orphanedScripts = await findOrphanedHookScripts()
-    results.push(buildOrphanedResult(orphanedScripts))
-    results.push(await checkInstalledConfigScripts())
-    results.push(await checkScriptExecutePermissions(fix))
-
-    // Agent config sync (detect stale dispatch entries)
-    for (const agent of CONFIGURABLE_AGENTS) {
-      results.push(await checkAgentConfigSync(agent))
-    }
-
-    const skillConflicts = await findSkillConflicts()
-    results.push(...buildSkillConflictResults(skillConflicts))
-    const projectSettings = await readProjectSettings(process.cwd())
-    const allowedCategories = new Set(
-      projectSettings?.allowedSkillCategories ?? DEFAULT_ALLOWED_SKILL_CATEGORIES
-    )
-    const invalidSkillEntries = await findInvalidSkillEntries(allowedCategories)
-    results.push(...buildInvalidSkillResults(invalidSkillEntries))
-
-    // Plugin cache sync
-    const pluginCacheInfos = await checkPluginCacheStaleness()
-    results.push(...buildPluginCacheResults(pluginCacheInfos))
-
-    // GitHub CLI
-    results.push(await checkGhAuth())
-
-    // TTS
-    results.push(await checkTtsBackend())
-
-    // Swiz settings
-    results.push(await checkSwizSettings())
+    const { results, skillConflicts, invalidSkillEntries, pluginCacheInfos } =
+      await collectDoctorChecks(fix)
 
     for (const result of results) {
       printResult(result)
@@ -1324,129 +1461,13 @@ export const doctorCommand: Command = {
     )
     console.log()
 
-    // Auto-fix stale configs
-    const staleConfigs = results.filter(
-      (r) =>
-        r.name.endsWith("config sync") &&
-        r.status === "warn" &&
-        r.detail.includes("missing dispatch")
-    )
-    if (fix) {
-      if (staleConfigs.length > 0) {
-        console.log(`  ${BOLD}Auto-fixing stale configs...${RESET}\n`)
-        const proc = Bun.spawn(["bun", "run", join(SWIZ_ROOT, "index.ts"), "install"], {
-          stdout: "inherit",
-          stderr: "inherit",
-        })
-        await proc.exited
-        if (proc.exitCode === 0) {
-          console.log(`  ${GREEN}✓ Configs updated successfully${RESET}\n`)
-        } else {
-          console.log(`  ${RED}✗ Install failed (exit ${proc.exitCode})${RESET}\n`)
-        }
-      }
-
-      const missingConfigPaths = await findMissingConfigScriptPaths()
-      if (missingConfigPaths.length > 0) {
-        console.log(`  ${BOLD}Registering missing config scripts...${RESET}\n`)
-        const regResult = await fixMissingConfigScripts(missingConfigPaths)
-        for (const item of regResult.registered) {
-          console.log(`  ${GREEN}✓${RESET} Registered stub: ${displayPath(item.path)}`)
-        }
-        for (const item of regResult.failed) {
-          console.log(
-            `  ${RED}✗${RESET} Failed to register ${displayPath(item.path)}: ${item.error}`
-          )
-        }
-        if (regResult.registered.length > 0) console.log()
-      }
-
-      if (skillConflicts.length > 0) {
-        console.log(
-          `  ${YELLOW}Skill conflicts detected — resolve manually by removing duplicate skill directories.${RESET}\n`
-        )
-      }
-
-      if (invalidSkillEntries.length > 0) {
-        console.log(`  ${BOLD}Auto-fixing invalid skill entries...${RESET}\n`)
-        const invalidResult = await fixInvalidSkillEntries(invalidSkillEntries)
-        for (const item of invalidResult.generated) {
-          console.log(
-            `  ${GREEN}✓${RESET} ${item.name}: generated default ${displayPath(item.skillPath)}`
-          )
-        }
-        for (const item of invalidResult.nameFixed) {
-          console.log(
-            `  ${GREEN}✓${RESET} ${item.name}: updated name "${item.oldName}" → "${item.name}" in ${displayPath(item.skillPath)}`
-          )
-        }
-        for (const item of invalidResult.categoryFixed) {
-          console.log(
-            `  ${GREEN}✓${RESET} ${item.name}: added category "${SKILL_PLACEHOLDER_CATEGORY}" to ${displayPath(item.skillPath)}`
-          )
-        }
-        for (const item of invalidResult.failed) {
-          console.log(
-            `  ${RED}✗${RESET} ${item.name}: could not fix ${displayPath(item.originalDir)} (${item.error})`
-          )
-        }
-        if (
-          invalidResult.generated.length > 0 ||
-          invalidResult.nameFixed.length > 0 ||
-          invalidResult.categoryFixed.length > 0
-        )
-          console.log()
-      }
-
-      // Restore .disabled-by-swiz-* directories (separate from invalid entry fixes)
-      const disabledDirs = await findDisabledSkillDirs()
-      if (disabledDirs.length > 0) {
-        console.log(`  ${BOLD}Restoring disabled skill directories...${RESET}\n`)
-        for (const restore of disabledDirs) {
-          if (await restoreDisabledSkillDir(restore)) {
-            console.log(
-              `  ${GREEN}✓${RESET} ${restore.name}: restored from ${displayPath(restore.oldDir)}`
-            )
-          } else {
-            console.log(
-              `  ${RED}✗${RESET} ${restore.name}: could not restore ${displayPath(restore.oldDir)}`
-            )
-          }
-        }
-        console.log()
-      }
-
-      if (pluginCacheInfos.length > 0) {
-        console.log(`  ${BOLD}Syncing plugin cache...${RESET}\n`)
-        const cacheResult = await fixPluginCache(pluginCacheInfos)
-        for (const skill of cacheResult.synced) {
-          console.log(`  ${GREEN}✓${RESET} ${skill}: copied to plugin cache`)
-        }
-        for (const skill of cacheResult.updated) {
-          console.log(`  ${GREEN}✓${RESET} ${skill}: updated in plugin cache`)
-        }
-        for (const item of cacheResult.failed) {
-          console.log(`  ${RED}✗${RESET} ${item.skill}: ${item.error}`)
-        }
-        if (cacheResult.synced.length > 0 || cacheResult.updated.length > 0) {
-          console.log(`\n  ${DIM}Restart Claude Code to pick up the changes.${RESET}`)
-          console.log()
-        }
-      }
-    } else if (
-      staleConfigs.length > 0 ||
-      invalidSkillEntries.length > 0 ||
-      pluginCacheInfos.length > 0
-    ) {
-      const fixables = [
-        staleConfigs.length > 0 ? "stale configs" : null,
-        invalidSkillEntries.length > 0 ? "invalid skill entries" : null,
-        pluginCacheInfos.length > 0 ? "stale plugin cache" : null,
-      ]
-        .filter(Boolean)
-        .join(" and ")
-      console.log(`  ${YELLOW}${fixables} detected. Run: swiz doctor --fix${RESET}\n`)
-    }
+    await handleAutoFixes({
+      fix,
+      results,
+      skillConflicts,
+      invalidSkillEntries,
+      pluginCacheInfos,
+    })
 
     if (failures.length > 0) {
       throw new Error(

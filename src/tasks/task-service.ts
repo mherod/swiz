@@ -76,6 +76,50 @@ export interface EnsureFileBackedTaskOptions {
   allowPlaceholderSubject?: boolean
 }
 
+function buildStubTask(
+  taskId: string,
+  subject: string,
+  opts: Pick<EnsureFileBackedTaskOptions, "description" | "activeForm" | "status">
+): Task {
+  const status = opts.status ?? "in_progress"
+  return {
+    id: taskId,
+    subject,
+    description: opts.description ?? subject,
+    activeForm: opts.activeForm,
+    status,
+    startedAt: status === "in_progress" ? Date.now() : null,
+    completedAt: status === "completed" ? Date.now() : null,
+    ...(status === "completed" ? { completionTimestamp: new Date().toISOString() } : {}),
+    statusChangedAt: new Date().toISOString(),
+    elapsedMs: 0,
+    blocks: [],
+    blockedBy: [],
+  }
+}
+
+async function isTaskMissing(
+  sessionId: string,
+  taskId: string,
+  filterCwd?: string
+): Promise<boolean> {
+  try {
+    await resolveTaskById(taskId, sessionId, filterCwd)
+    return false
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("not found")) return true
+    throw error
+  }
+}
+
+function resolveSubject(
+  subject: string | undefined,
+  taskId: string,
+  allowPlaceholder: boolean
+): string | null {
+  return subject ?? (allowPlaceholder ? `Task #${taskId}` : null)
+}
+
 export async function ensureFileBackedTask({
   sessionId,
   taskId,
@@ -86,32 +130,12 @@ export async function ensureFileBackedTask({
   status = "in_progress",
   allowPlaceholderSubject = false,
 }: EnsureFileBackedTaskOptions): Promise<boolean> {
-  try {
-    await resolveTaskById(taskId, sessionId, filterCwd)
-    return false
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("not found")) {
-      throw error
-    }
-  }
+  if (!(await isTaskMissing(sessionId, taskId, filterCwd))) return false
 
-  const recoveredSubject = subject ?? (allowPlaceholderSubject ? `Task #${taskId}` : null)
+  const recoveredSubject = resolveSubject(subject, taskId, allowPlaceholderSubject)
   if (!recoveredSubject) return false
 
-  const stubTask: Task = {
-    id: taskId,
-    subject: recoveredSubject,
-    description: description ?? recoveredSubject,
-    activeForm,
-    status,
-    startedAt: status === "in_progress" ? Date.now() : null,
-    completedAt: status === "completed" ? Date.now() : null,
-    ...(status === "completed" ? { completionTimestamp: new Date().toISOString() } : {}),
-    statusChangedAt: new Date().toISOString(),
-    elapsedMs: 0,
-    blocks: [],
-    blockedBy: [],
-  }
+  const stubTask = buildStubTask(taskId, recoveredSubject, { description, activeForm, status })
   await writeTask(sessionId, stubTask, process.cwd())
   await writeAudit(sessionId, {
     timestamp: new Date().toISOString(),
@@ -121,13 +145,9 @@ export async function ensureFileBackedTask({
     subject: recoveredSubject,
   })
 
-  if (!subject && allowPlaceholderSubject) {
-    console.log(
-      `  ℹ️  Task #${taskId} not in file store — created stub (using task ID as placeholder)`
-    )
-  } else {
-    console.log(`  ℹ️  Task #${taskId} not in file store — created stub from --subject`)
-  }
+  const source =
+    !subject && allowPlaceholderSubject ? "using task ID as placeholder" : "from --subject"
+  console.log(`  ℹ️  Task #${taskId} not in file store — created stub (${source})`)
   return true
 }
 

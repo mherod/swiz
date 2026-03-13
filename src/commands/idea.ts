@@ -50,35 +50,51 @@ interface IdeaParseState {
   provider?: AiProviderId
 }
 
+type IdeaArgKey = "--dir" | "-d" | "--model" | "-m" | "--timeout" | "-t" | "--provider" | "-p"
+
+const IDEA_ARG_MAP: Record<IdeaArgKey, (next: string, state: IdeaParseState) => void> = {
+  "--dir": (n, s) => {
+    s.targetDir = resolve(n)
+  },
+  "-d": (n, s) => {
+    s.targetDir = resolve(n)
+  },
+  "--model": (n, s) => {
+    s.model = n
+  },
+  "-m": (n, s) => {
+    s.model = n
+  },
+  "--timeout": (n, s) => {
+    const parsed = Number.parseInt(n, 10)
+    if (!Number.isFinite(parsed) || parsed <= 0)
+      throw new Error(`--timeout must be a positive integer, got: ${n}`)
+    s.timeoutMs = parsed
+  },
+  "-t": (n, s) => {
+    const parsed = Number.parseInt(n, 10)
+    if (!Number.isFinite(parsed) || parsed <= 0)
+      throw new Error(`--timeout must be a positive integer, got: ${n}`)
+    s.timeoutMs = parsed
+  },
+  "--provider": (n, s) => {
+    if (n !== "gemini" && n !== "codex" && n !== "claude")
+      throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${n}`)
+    s.provider = n
+  },
+  "-p": (n, s) => {
+    if (n !== "gemini" && n !== "codex" && n !== "claude")
+      throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${n}`)
+    s.provider = n
+  },
+}
+
 function consumeArg(arg: string, next: string | undefined, state: IdeaParseState): number {
-  if (arg === "--dir" || arg === "-d") {
-    if (!next) throw new Error("Missing value for --dir")
-    state.targetDir = resolve(next)
-    return 1
-  }
-  if (arg === "--model" || arg === "-m") {
-    if (!next) throw new Error("Missing value for --model")
-    state.model = next
-    return 1
-  }
-  if (arg === "--timeout" || arg === "-t") {
-    if (!next) throw new Error("Missing value for --timeout")
-    const parsed = Number.parseInt(next, 10)
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      throw new Error(`--timeout must be a positive integer, got: ${next}`)
-    }
-    state.timeoutMs = parsed
-    return 1
-  }
-  if (arg === "--provider" || arg === "-p") {
-    if (!next) throw new Error("Missing value for --provider")
-    if (next !== "gemini" && next !== "codex" && next !== "claude") {
-      throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${next}`)
-    }
-    state.provider = next
-    return 1
-  }
-  throw new Error(`Unknown argument: ${arg}`)
+  const handler = IDEA_ARG_MAP[arg as IdeaArgKey]
+  if (!handler) throw new Error(`Unknown argument: ${arg}`)
+  if (!next) throw new Error(`Missing value for ${arg}`)
+  handler(next, state)
+  return 1
 }
 
 export function parseIdeaArgs(args: string[]): IdeaArgs {

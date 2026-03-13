@@ -185,7 +185,7 @@ function pushAdviceForMode(
   ].join("\n")
 }
 
-function buildReason(
+function buildReason(opts: {
   gitStatus: {
     total: number
     modified: number
@@ -197,15 +197,16 @@ function buildReason(
     upstream: string | null
     ahead: number
     behind: number
-  },
-  branch: string,
-  upstream: string,
-  hasUncommitted: boolean,
-  hasRemote: boolean,
-  ahead: number,
-  behind: number,
+  }
+  branch: string
+  upstream: string
+  hasUncommitted: boolean
+  hasRemote: boolean
+  ahead: number
+  behind: number
   collabMode: CollaborationMode
-): string {
+}): string {
+  const { gitStatus, branch, upstream, hasUncommitted, hasRemote, ahead, behind, collabMode } = opts
   let reason = hasUncommitted
     ? buildUncommittedReason(gitStatus, branch, upstream, behind)
     : describeRemoteState(branch, upstream, ahead, behind)
@@ -258,14 +259,15 @@ function buildReason(
   return reason
 }
 
-function buildTaskDesc(
-  cwd: string,
-  hasUncommitted: boolean,
-  branch: string,
-  upstream: string,
-  behind: number,
+function buildTaskDesc(opts: {
+  cwd: string
+  hasUncommitted: boolean
+  branch: string
+  upstream: string
+  behind: number
   ahead: number
-): string {
+}): string {
+  const { cwd, hasUncommitted, branch, upstream, behind, ahead } = opts
   return [
     hasUncommitted && `Git repository has uncommitted changes at ${cwd}.`,
     behind > 0 && `Branch '${branch}' is ${behind} commit(s) behind '${upstream}'.`,
@@ -348,47 +350,72 @@ async function detectBackgroundPush(cwd: string): Promise<boolean> {
   return !lsofKilled && checkLsofForRepoPush(lsofOut, gitRoot)
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+interface GitContext {
+  cwd: string
+  sessionId: string | undefined
+  gitStatus: Awaited<ReturnType<typeof getGitStatusV2>> & { branch: string }
+  hasUncommitted: boolean
+  hasRemote: boolean
+  upstream: string
+  collabMode: CollaborationMode
+  pushCooldownMinutes: number
+}
+
+async function resolveGitContext(input: {
+  cwd?: string
+  session_id?: string
+}): Promise<GitContext | null> {
   const cwd = input.cwd ?? process.cwd()
+  if (!(await isGitRepo(cwd))) return null
 
-  if (!(await isGitRepo(cwd))) return
-
-  // Respect the gitStatusGate setting — allow bypassing the hook
   const settings = await readSwizSettings()
   const effective = getEffectiveSwizSettings(settings, input.session_id)
-  if (!effective.gitStatusGate) return
+  if (!effective.gitStatusGate) return null
 
-  // Single subprocess replaces: branch --show-current, status --porcelain,
-  // rev-parse @{upstream}, rev-list x2. Remote URL check is still separate
-  // because porcelain=v2 --branch does not expose the remote fetch URL.
   const [gitStatus, remoteUrl] = await Promise.all([
     getGitStatusV2(cwd),
     git(["remote", "get-url", "origin"], cwd),
   ])
 
-  if (!gitStatus) return
+  if (!gitStatus) return null
   const { branch, ahead, behind } = gitStatus
-  if (!branch || branch === "(detached)") return // detached HEAD — nothing sensible to report
+  if (!branch || branch === "(detached)") return null
 
   const hasUncommitted = gitStatus.total > 0
-  const hasRemote = !!remoteUrl
-  const upstream = gitStatus.upstream ?? `origin/${branch}`
+  if (!hasUncommitted && ahead === 0 && behind === 0) return null
 
-  // Nothing to report
-  if (!hasUncommitted && ahead === 0 && behind === 0) return
+  return {
+    cwd,
+    sessionId: input.session_id,
+    gitStatus: gitStatus as GitContext["gitStatus"],
+    hasUncommitted,
+    hasRemote: !!remoteUrl,
+    upstream: gitStatus.upstream ?? `origin/${branch}`,
+    collabMode: effective.collaborationMode,
+    pushCooldownMinutes: effective.pushCooldownMinutes,
+  }
+}
 
-  // Push-only cooldown: skip push enforcement if we already prompted this session
-  // and the cooldown is still active. Still enforce uncommitted changes.
+async function checkPushCooldownOrInFlight(ctx: GitContext): Promise<boolean> {
+  const {
+    hasUncommitted,
+    gitStatus: { ahead, behind },
+  } = ctx
+
   if (!hasUncommitted && behind === 0 && ahead > 0) {
-    if (await isPushCooldownActive(input.session_id, cwd, branch, effective.pushCooldownMinutes))
-      return
+    if (
+      await isPushCooldownActive(
+        ctx.sessionId,
+        ctx.cwd,
+        ctx.gitStatus.branch,
+        ctx.pushCooldownMinutes
+      )
+    )
+      return true
   }
 
-  // In-flight push guard: if a background `git push` is currently running in THIS
-  // repository, defer the unpushed-commits block rather than emitting a false positive.
   if (!hasUncommitted && ahead > 0 && behind === 0) {
-    if (await detectBackgroundPush(cwd)) {
+    if (await detectBackgroundPush(ctx.cwd)) {
       blockStop(
         "A `git push` is currently running in the background.\n\n" +
           "Wait for it to complete before stopping. " +
@@ -397,11 +424,21 @@ async function main(): Promise<void> {
       )
     }
   }
+  return false
+}
 
-  // ── Build the reason ──────────────────────────────────────────────────
+async function main(): Promise<void> {
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const ctx = await resolveGitContext(input)
+  if (!ctx) return
+
+  if (await checkPushCooldownOrInFlight(ctx)) return
+
+  const { gitStatus, hasUncommitted, hasRemote, upstream, cwd } = ctx
+  const { branch, ahead, behind } = gitStatus
 
   const willNeedPush = ahead > 0 || (hasUncommitted && hasRemote)
-  const reason = buildReason(
+  const reason = buildReason({
     gitStatus,
     branch,
     upstream,
@@ -409,20 +446,14 @@ async function main(): Promise<void> {
     hasRemote,
     ahead,
     behind,
-    effective.collaborationMode
-  )
+    collabMode: ctx.collabMode,
+  })
 
-  // ── Mark push as prompted (for cooldown on subsequent stop attempts) ─────
-  if (willNeedPush) {
-    await markPushPrompted(input.session_id)
-  }
-
-  // ── Task creation ─────────────────────────────────────────────────────
+  if (willNeedPush) await markPushPrompted(ctx.sessionId)
 
   const taskSubject = selectTaskSubject(hasUncommitted, ahead, behind)
-  const taskDesc = buildTaskDesc(cwd, hasUncommitted, branch, upstream, behind, ahead)
-
-  await createSessionTask(input.session_id, "stop-git-workflow-task-created", taskSubject, taskDesc)
+  const taskDesc = buildTaskDesc({ cwd, hasUncommitted, branch, upstream, behind, ahead })
+  await createSessionTask(ctx.sessionId, "stop-git-workflow-task-created", taskSubject, taskDesc)
 
   blockStop(reason)
 }

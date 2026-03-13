@@ -173,28 +173,39 @@ async function writeGhFallbackCache(
  * Try to resolve a gh JSON query via the daemon cache.
  * Falls back to direct ghJson when the daemon is unavailable.
  */
-export async function ghJsonViaDaemon<T>(
+async function ghDirectWithFallbackCache<T>(
   args: string[],
   cwd: string,
-  options: GhQueryOptions = {}
+  ttlMs: number
 ): Promise<T | null> {
+  const direct = await ghJson<T>(args, cwd)
+  if (direct !== null) {
+    await writeGhFallbackCache(args, cwd, ttlMs, direct)
+    return direct
+  }
+  return (await readGhFallbackCache<T>(args, cwd, true))?.value ?? null
+}
+
+function shouldBypassDaemon(): boolean {
   const ghPath = Bun.which("gh") ?? ""
   const mockedGhBinary = ghPath.startsWith(tmpdir()) || ghPath.includes("swiz-test")
-  const shouldBypassDaemon =
+  return (
     process.env.SWIZ_NO_DAEMON === "1" ||
     process.env.BUN_TEST === "1" ||
     process.env.GH_MOCK_ISSUES !== undefined ||
     process.env.GH_MOCK_PRS !== undefined ||
     process.env.GH_MOCK_USER !== undefined ||
     mockedGhBinary
+  )
+}
 
+export async function ghJsonViaDaemon<T>(
+  args: string[],
+  cwd: string,
+  options: GhQueryOptions = {}
+): Promise<T | null> {
   const ttlMs = options.ttlMs ?? GH_FALLBACK_CACHE_TTL_MS
-  if (shouldBypassDaemon) {
-    const direct = await ghJson<T>(args, cwd)
-    if (direct !== null) await writeGhFallbackCache(args, cwd, ttlMs, direct)
-    if (direct === null) return (await readGhFallbackCache<T>(args, cwd, true))?.value ?? null
-    return direct
-  }
+  if (shouldBypassDaemon()) return ghDirectWithFallbackCache<T>(args, cwd, ttlMs)
 
   try {
     const resp = await fetch(`http://127.0.0.1:${DAEMON_PORT}/gh-query`, {
@@ -203,24 +214,12 @@ export async function ghJsonViaDaemon<T>(
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(DAEMON_GH_TIMEOUT_MS),
     })
-    if (!resp.ok) {
-      const direct = await ghJson<T>(args, cwd)
-      if (direct !== null) {
-        await writeGhFallbackCache(args, cwd, ttlMs, direct)
-        return direct
-      }
-      return (await readGhFallbackCache<T>(args, cwd, true))?.value ?? null
-    }
+    if (!resp.ok) return ghDirectWithFallbackCache<T>(args, cwd, ttlMs)
     const data = (await resp.json()) as { hit: boolean; value: T | null }
     if (data.value !== null) await writeGhFallbackCache(args, cwd, ttlMs, data.value)
     return data.value
   } catch {
-    const direct = await ghJson<T>(args, cwd)
-    if (direct !== null) {
-      await writeGhFallbackCache(args, cwd, ttlMs, direct)
-      return direct
-    }
-    return (await readGhFallbackCache<T>(args, cwd, true))?.value ?? null
+    return ghDirectWithFallbackCache<T>(args, cwd, ttlMs)
   }
 }
 
@@ -274,21 +273,21 @@ export interface RemoteInfo {
  *   [git+]ssh://[user@]host/owner/repo[.git]
  *   [user@]host:owner/repo[.git]     (SSH colon / SCP-like notation)
  */
+const REMOTE_URL_PATTERNS: RegExp[] = [
+  // HTTPS: https://host/owner/repo[.git][/]
+  /^https?:\/\/([^/:]+)\/([^/\s]+\/[^/\s]+?)(?:\.git)?(?:\/)?$/,
+  // SSH slash notation: [git+]ssh://[user@]host/owner/repo[.git]
+  /^(?:git\+)?ssh:\/\/(?:[^@/]+@)?([^/]+)\/([^/\s]+\/[^/\s]+?)(?:\.git)?$/,
+  // SSH colon notation: [user@]host:owner/repo[.git]
+  /^(?:[^@\s:]+@)?([^:/\s]+):([^/\s]+\/[^/\s]+?)(?:\.git)?$/,
+]
+
 export function parseRemoteUrl(url: string): RemoteInfo | null {
   if (!url) return null
-
-  // HTTPS: https://host/owner/repo[.git][/]
-  let m = url.match(/^https?:\/\/([^/:]+)\/([^/\s]+\/[^/\s]+?)(?:\.git)?(?:\/)?$/)
-  if (m?.[1] && m?.[2]) return { host: m[1], slug: m[2] }
-
-  // SSH slash notation: [git+]ssh://[user@]host/owner/repo[.git]
-  m = url.match(/^(?:git\+)?ssh:\/\/(?:[^@/]+@)?([^/]+)\/([^/\s]+\/[^/\s]+?)(?:\.git)?$/)
-  if (m?.[1] && m?.[2]) return { host: m[1], slug: m[2] }
-
-  // SSH colon notation: [user@]host:owner/repo[.git]  (SCP-like, e.g. git@github.com:owner/repo)
-  m = url.match(/^(?:[^@\s:]+@)?([^:/\s]+):([^/\s]+\/[^/\s]+?)(?:\.git)?$/)
-  if (m?.[1] && m?.[2]) return { host: m[1], slug: m[2] }
-
+  for (const pattern of REMOTE_URL_PATTERNS) {
+    const m = url.match(pattern)
+    if (m?.[1] && m?.[2]) return { host: m[1], slug: m[2] }
+  }
   return null
 }
 
@@ -417,97 +416,96 @@ export interface GitBranchStatus {
  * Return branch name and working-tree counts for `cwd`, or `null` if `cwd`
  * is not inside a git repository or no branch can be determined.
  */
+function readBranchFromHead(headContent: string): string {
+  const head = headContent.trim()
+  if (head.startsWith("ref: refs/heads/")) return head.slice("ref: refs/heads/".length)
+  if (/^[a-f0-9]{7,40}$/i.test(head)) return `detached@${head.slice(0, 7)}`
+  return ""
+}
+
+interface StatusCounts {
+  ahead: number
+  behind: number
+  staged: number
+  unstaged: number
+  untracked: number
+  conflicts: number
+}
+
+function parseBranchAbLine(line: string, counts: StatusCounts): void {
+  const match = line.match(/\+(\d+)\s+-(\d+)/)
+  if (match) {
+    counts.ahead = Number(match[1] ?? "0")
+    counts.behind = Number(match[2] ?? "0")
+  }
+}
+
+function parseChangedEntry(line: string, counts: StatusCounts): void {
+  const xy = line.split(" ")[1] ?? ".."
+  if (xy[0] && xy[0] !== ".") counts.staged++
+  if (xy[1] && xy[1] !== ".") counts.unstaged++
+}
+
+function parseStatusV2Lines(out: string): StatusCounts {
+  const counts: StatusCounts = {
+    ahead: 0,
+    behind: 0,
+    staged: 0,
+    unstaged: 0,
+    untracked: 0,
+    conflicts: 0,
+  }
+  for (const line of out ? out.split("\n") : []) {
+    if (line.startsWith("# branch.ab ")) parseBranchAbLine(line, counts)
+    else if (line.startsWith("1 ") || line.startsWith("2 ")) parseChangedEntry(line, counts)
+    else if (line.startsWith("u ")) counts.conflicts++
+    else if (line.startsWith("? ")) counts.untracked++
+  }
+  return counts
+}
+
+function gitSpawnSyncLines(args: string[], workTree: string): string {
+  try {
+    const proc = Bun.spawnSync(["git", ...args], {
+      cwd: workTree,
+      stdout: "pipe",
+      stderr: "ignore",
+    })
+    if (proc.exitCode !== 0) return ""
+    return new TextDecoder().decode(proc.stdout).trim()
+  } catch {
+    return ""
+  }
+}
+
 export async function getGitBranchStatus(cwd: string): Promise<GitBranchStatus | null> {
   const gitPaths = await resolveGitPaths(cwd)
   if (!gitPaths) return null
 
   let branch = ""
   try {
-    const head = (await Bun.file(`${gitPaths.gitDir}/HEAD`).text()).trim()
-    if (head.startsWith("ref: refs/heads/")) {
-      branch = head.slice("ref: refs/heads/".length)
-    } else if (/^[a-f0-9]{7,40}$/i.test(head)) {
-      branch = `detached@${head.slice(0, 7)}`
-    }
+    branch = readBranchFromHead(await Bun.file(`${gitPaths.gitDir}/HEAD`).text())
   } catch {
     /* no branch */
   }
   if (!branch) return null
 
-  let ahead = 0
-  let behind = 0
-  let staged = 0
-  let unstaged = 0
-  let untracked = 0
-  let conflicts = 0
-  let stash = 0
-  let parsedStatus = false
+  const statusOut = gitSpawnSyncLines(["status", "--porcelain=2", "--branch"], gitPaths.workTree)
   let changedFallback = 0
+  let counts: StatusCounts
 
-  try {
-    const proc = Bun.spawnSync(["git", "status", "--porcelain=2", "--branch"], {
-      cwd: gitPaths.workTree,
-      stdout: "pipe",
-      stderr: "ignore",
-    })
-    if (proc.exitCode === 0) {
-      const out = new TextDecoder().decode(proc.stdout).trim()
-      for (const line of out ? out.split("\n") : []) {
-        if (line.startsWith("# branch.ab ")) {
-          const match = line.match(/\+(\d+)\s+-(\d+)/)
-          if (match) {
-            ahead = Number(match[1] ?? "0")
-            behind = Number(match[2] ?? "0")
-          }
-          continue
-        }
-        if (line.startsWith("1 ") || line.startsWith("2 ")) {
-          const xy = line.split(" ")[1] ?? ".."
-          if (xy[0] && xy[0] !== ".") staged++
-          if (xy[1] && xy[1] !== ".") unstaged++
-          continue
-        }
-        if (line.startsWith("u ")) {
-          conflicts++
-          continue
-        }
-        if (line.startsWith("? ")) untracked++
-      }
-      parsedStatus = true
-    }
-  } catch {
-    /* parse fallback below */
+  if (statusOut) {
+    counts = parseStatusV2Lines(statusOut)
+  } else {
+    counts = { ahead: 0, behind: 0, staged: 0, unstaged: 0, untracked: 0, conflicts: 0 }
+    const fallbackOut = gitSpawnSyncLines(["status", "--porcelain"], gitPaths.workTree)
+    changedFallback = fallbackOut ? fallbackOut.split("\n").length : 0
   }
 
-  if (!parsedStatus) {
-    try {
-      const proc = Bun.spawnSync(["git", "status", "--porcelain"], {
-        cwd: gitPaths.workTree,
-        stdout: "pipe",
-        stderr: "ignore",
-      })
-      const out = new TextDecoder().decode(proc.stdout).trim()
-      changedFallback = out ? out.split("\n").length : 0
-    } catch {
-      /* assume clean */
-    }
-  }
+  const stashOut = gitSpawnSyncLines(["stash", "list", "--format=%gd"], gitPaths.workTree)
+  const stash = stashOut ? stashOut.split("\n").length : 0
 
-  try {
-    const proc = Bun.spawnSync(["git", "stash", "list", "--format=%gd"], {
-      cwd: gitPaths.workTree,
-      stdout: "pipe",
-      stderr: "ignore",
-    })
-    if (proc.exitCode === 0) {
-      const out = new TextDecoder().decode(proc.stdout).trim()
-      stash = out ? out.split("\n").length : 0
-    }
-  } catch {
-    /* no stash info */
-  }
-
-  return { branch, ahead, behind, staged, unstaged, untracked, conflicts, stash, changedFallback }
+  return { branch, ...counts, stash, changedFallback }
 }
 
 // ─── Branch-policy classification helpers ────────────────────────────────────

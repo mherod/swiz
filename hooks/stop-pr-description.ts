@@ -49,28 +49,57 @@ function hasPlaceholderPattern(body: string): boolean {
   return PLACEHOLDER_PATTERNS.some((p) => bodyLower.includes(p.toLowerCase()))
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
-
-  if (!(await isGitRepo(cwd))) return
-  if (!hasGhCli()) return
-  if (!(await isGitHubRemote(cwd))) return
-
+async function fetchOpenPr(
+  cwd: string
+): Promise<{ number: number; title: string; body: string } | null> {
+  if (!(await isGitRepo(cwd))) return null
+  if (!hasGhCli()) return null
+  if (!(await isGitHubRemote(cwd))) return null
   const branch = await git(["branch", "--show-current"], cwd)
-  if (!branch) return
+  if (!branch) return null
   const defaultBranch = await getDefaultBranch(cwd)
-  if (isDefaultBranch(branch, defaultBranch)) return
-
-  const pr = await getOpenPrForBranch<{ number: number; title: string; body: string }>(
+  if (isDefaultBranch(branch, defaultBranch)) return null
+  return getOpenPrForBranch<{ number: number; title: string; body: string }>(
     branch,
     cwd,
     "number,title,body"
   )
-  if (!pr) return
+}
 
+function validatePrDescription(
+  pr: { number: number; title: string; body: string },
+  prAdvice: string
+): string | null {
   const body = pr.body ?? ""
   const bodyStripped = body.replace(/\s/g, "")
+
+  if (!bodyStripped) {
+    return `PR #${pr.number} ('${pr.title}') has an empty description.\n\n${prAdvice}`
+  }
+  if (hasSummaryPlaceholder(body)) {
+    return (
+      `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n` +
+      "Replace the '<...>' placeholder under '## Summary' with actual content before stopping."
+    )
+  }
+  if (hasPlaceholderPattern(body)) {
+    return `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n${prAdvice}`
+  }
+  if (bodyStripped.length < 20) {
+    return (
+      `PR #${pr.number} ('${pr.title}') description is too short (${bodyStripped.length} chars).\n\n` +
+      prAdvice
+    )
+  }
+  return null
+}
+
+async function main(): Promise<void> {
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
+
+  const pr = await fetchOpenPr(cwd)
+  if (!pr) return
 
   const prAdvice = skillAdvice(
     "refine-pr",
@@ -89,33 +118,8 @@ async function main(): Promise<void> {
     ].join("\n")
   )
 
-  // Empty body
-  if (!bodyStripped) {
-    blockPrDescription(`PR #${pr.number} ('${pr.title}') has an empty description.\n\n${prAdvice}`)
-  }
-
-  // Check for ## Summary placeholder
-  if (hasSummaryPlaceholder(body)) {
-    blockPrDescription(
-      `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n` +
-        "Replace the '<...>' placeholder under '## Summary' with actual content before stopping."
-    )
-  }
-
-  // Check for placeholder patterns
-  if (hasPlaceholderPattern(body)) {
-    blockPrDescription(
-      `PR #${pr.number} ('${pr.title}') still contains template placeholder text.\n\n${prAdvice}`
-    )
-  }
-
-  // Minimum length
-  if (bodyStripped.length < 20) {
-    blockPrDescription(
-      `PR #${pr.number} ('${pr.title}') description is too short (${bodyStripped.length} chars).\n\n` +
-        prAdvice
-    )
-  }
+  const violation = validatePrDescription(pr, prAdvice)
+  if (violation) blockPrDescription(violation)
 }
 
 if (import.meta.main) void main()

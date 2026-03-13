@@ -47,6 +47,15 @@ function stripBlockComment(
   return { out, i }
 }
 
+function handleInterpChar(ch: string, depth: number): { out: string; depthDelta: number } {
+  if (ch === "{") return { out: ch, depthDelta: 1 }
+  if (ch === "}") {
+    if (depth === 1) return { out: " ", depthDelta: -1 }
+    return { out: ch, depthDelta: -1 }
+  }
+  return { out: ch, depthDelta: 0 }
+}
+
 function stripTemplateLiteral(
   src: string,
   i: number,
@@ -74,21 +83,9 @@ function stripTemplateLiteral(
       continue
     }
     if (interpDepth > 0) {
-      if (src[i] === "{") {
-        interpDepth++
-        out += src[i]
-        i++
-        continue
-      }
-      if (src[i] === "}") {
-        interpDepth--
-        if (interpDepth === 0) {
-          out += " "
-          i++
-          continue
-        }
-      }
-      out += src[i]
+      const result = handleInterpChar(src[i]!, interpDepth)
+      out += result.out
+      interpDepth += result.depthDelta
       i++
       continue
     }

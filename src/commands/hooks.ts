@@ -123,6 +123,38 @@ function shortName(command: string): string {
   return command
 }
 
+function collectHookFlags(hook: HookEntry): string[] {
+  const flags: string[] = []
+  if (hook.timeout) flags.push(`${hook.timeout}s`)
+  if (hook.async) flags.push("async")
+  if (hook.type === "agent") flags.push(`agent:${hook.model ?? "default"}`)
+  if (hook.condition) flags.push(`if:${hook.condition}`)
+  return flags
+}
+
+function resolveHookLabel(hook: HookEntry, disabled: Set<string>, flags: string[]): string | null {
+  const hookType = hook.type ?? "command"
+  if (hookType === "command" && hook.command) {
+    const name = shortName(hook.command)
+    if (disabled.has(name)) flags.push("disabled")
+    return name
+  }
+  if (hookType === "agent") return hook.statusMessage ?? "agent hook"
+  if (hookType === "prompt" && hook.prompt) {
+    const preview = hook.prompt.length > 50 ? `${hook.prompt.slice(0, 47)}...` : hook.prompt
+    return `[prompt] ${preview}`
+  }
+  return null
+}
+
+function printHookEntry(hook: HookEntry, matchLabel: string, disabled: Set<string>) {
+  const flags = collectHookFlags(hook)
+  const label = resolveHookLabel(hook, disabled, flags)
+  if (!label) return
+  const flagStr = flags.length ? ` (${flags.join(", ")})` : ""
+  console.log(`    ${matchLabel.padEnd(22)} ${label}${flagStr}`)
+}
+
 async function listEvents(allSettings: LoadedSettings[]) {
   if (allSettings.length === 0) {
     console.log("No hook settings found.")
@@ -154,27 +186,7 @@ async function showEvent(allSettings: LoadedSettings[], eventName: string, cwd: 
     for (const group of matchers) {
       const matchLabel = group.matcher ? `[${group.matcher}]` : "[*]"
       for (const hook of group.hooks) {
-        const flags: string[] = []
-        if (hook.timeout) flags.push(`${hook.timeout}s`)
-        if (hook.async) flags.push("async")
-        if (hook.type === "agent") flags.push(`agent:${hook.model ?? "default"}`)
-        if (hook.condition) flags.push(`if:${hook.condition}`)
-
-        const hookType = hook.type ?? "command"
-        if (hookType === "command" && hook.command) {
-          const name = shortName(hook.command)
-          if (disabled.has(name)) flags.push("disabled")
-          const flagStr = flags.length ? ` (${flags.join(", ")})` : ""
-          console.log(`    ${matchLabel.padEnd(22)} ${name}${flagStr}`)
-        } else if (hookType === "agent") {
-          const flagStr = flags.length ? ` (${flags.join(", ")})` : ""
-          const label = hook.statusMessage ?? "agent hook"
-          console.log(`    ${matchLabel.padEnd(22)} ${label}${flagStr}`)
-        } else if (hookType === "prompt" && hook.prompt) {
-          const flagStr = flags.length ? ` (${flags.join(", ")})` : ""
-          const preview = hook.prompt.length > 50 ? `${hook.prompt.slice(0, 47)}...` : hook.prompt
-          console.log(`    ${matchLabel.padEnd(22)} [prompt] ${preview}${flagStr}`)
-        }
+        printHookEntry(hook, matchLabel, disabled)
       }
     }
   }
@@ -224,57 +236,54 @@ async function showScript(allSettings: LoadedSettings[], scriptQuery: string) {
 
 // ─── Source view ─────────────────────────────────────────────────────────────
 
-async function showSources(jsonOutput = false) {
-  const cwd = process.cwd()
-
-  // Built-in hooks
-  const builtinByEvent = new Map<string, { file: string }[]>()
+function collectBuiltinByEvent(): Map<string, { file: string }[]> {
+  const byEvent = new Map<string, { file: string }[]>()
   for (const group of manifest) {
-    const list = builtinByEvent.get(group.event) ?? []
-    for (const hook of group.hooks) {
-      list.push({ file: hook.file })
-    }
-    builtinByEvent.set(group.event, list)
+    const list = byEvent.get(group.event) ?? []
+    for (const hook of group.hooks) list.push({ file: hook.file })
+    byEvent.set(group.event, list)
   }
+  return byEvent
+}
 
-  // Plugin hooks
-  const projectSettings = await readProjectSettings(cwd)
-  const pluginResults = projectSettings?.plugins?.length
-    ? await loadAllPlugins(projectSettings.plugins, cwd)
-    : []
+type PluginResult = Awaited<ReturnType<typeof loadAllPlugins>>[number]
 
-  if (jsonOutput) {
-    console.log(JSON.stringify(pluginResultsToJson(pluginResults), null, 2))
-    return
-  }
-
-  const failedPlugins = pluginResults.filter((r) => r.errorCode)
-  const pluginByEvent = new Map<string, { file: string; plugin: string }[]>()
+function collectPluginByEvent(
+  pluginResults: PluginResult[]
+): Map<string, { file: string; plugin: string }[]> {
+  const byEvent = new Map<string, { file: string; plugin: string }[]>()
   for (const result of pluginResults) {
     if (result.errorCode) continue
     for (const group of result.hooks) {
-      const list = pluginByEvent.get(group.event) ?? []
-      for (const hook of group.hooks) {
-        list.push({ file: hook.file, plugin: result.name })
-      }
-      pluginByEvent.set(group.event, list)
+      const list = byEvent.get(group.event) ?? []
+      for (const hook of group.hooks) list.push({ file: hook.file, plugin: result.name })
+      byEvent.set(group.event, list)
     }
   }
+  return byEvent
+}
 
-  // Project-local hooks
+function collectLocalByEvent(
+  projectSettings: Awaited<ReturnType<typeof readProjectSettings>>,
+  cwd: string
+): Map<string, { file: string }[]> {
+  const byEvent = new Map<string, { file: string }[]>()
+  if (!projectSettings?.hooks?.length) return byEvent
+  const { resolved } = resolveProjectHooks(projectSettings.hooks, cwd)
+  for (const group of resolved) {
+    const list = byEvent.get(group.event) ?? []
+    for (const hook of group.hooks) list.push({ file: hook.file })
+    byEvent.set(group.event, list)
+  }
+  return byEvent
+}
+
+function printEventSources(
+  builtinByEvent: Map<string, { file: string }[]>,
+  pluginByEvent: Map<string, { file: string; plugin: string }[]>,
+  localByEvent: Map<string, { file: string }[]>
+): void {
   const GREEN_H = "\x1b[32m"
-  const localByEvent = new Map<string, { file: string }[]>()
-  if (projectSettings?.hooks?.length) {
-    const { resolved } = resolveProjectHooks(projectSettings.hooks, cwd)
-    for (const group of resolved) {
-      const list = localByEvent.get(group.event) ?? []
-      for (const hook of group.hooks) {
-        list.push({ file: hook.file })
-      }
-      localByEvent.set(group.event, list)
-    }
-  }
-
   const allEvents = new Set([
     ...builtinByEvent.keys(),
     ...pluginByEvent.keys(),
@@ -287,27 +296,40 @@ async function showSources(jsonOutput = false) {
     const plugins = pluginByEvent.get(event) ?? []
     const locals = localByEvent.get(event) ?? []
     console.log(`  ${event} (${builtins.length + plugins.length + locals.length})`)
-    for (const h of builtins) {
-      const name = h.file.split("/").pop() ?? h.file
-      console.log(`    ${DIM}built-in${RST}  ${name}`)
-    }
-    for (const h of plugins) {
-      const name = h.file.split("/").pop() ?? h.file
-      console.log(`    ${CYAN_H}${h.plugin}${RST}  ${name}`)
-    }
-    for (const h of locals) {
-      const name = h.file.split("/").pop() ?? h.file
-      console.log(`    ${GREEN_H}project${RST}   ${name}`)
-    }
+    for (const h of builtins)
+      console.log(`    ${DIM}built-in${RST}  ${h.file.split("/").pop() ?? h.file}`)
+    for (const h of plugins)
+      console.log(`    ${CYAN_H}${h.plugin}${RST}  ${h.file.split("/").pop() ?? h.file}`)
+    for (const h of locals)
+      console.log(`    ${GREEN_H}project${RST}   ${h.file.split("/").pop() ?? h.file}`)
+  }
+}
+
+function printFailedPlugins(failedPlugins: PluginResult[]): void {
+  if (failedPlugins.length === 0) return
+  const YELLOW_H = "\x1b[33m"
+  console.log(`\n  Failed plugins:\n`)
+  for (const r of failedPlugins) console.log(`    ${YELLOW_H}⚠ ${r.name}${RST}  ${r.errorCode}`)
+}
+
+async function showSources(jsonOutput = false) {
+  const cwd = process.cwd()
+  const projectSettings = await readProjectSettings(cwd)
+  const pluginResults = projectSettings?.plugins?.length
+    ? await loadAllPlugins(projectSettings.plugins, cwd)
+    : []
+
+  if (jsonOutput) {
+    console.log(JSON.stringify(pluginResultsToJson(pluginResults), null, 2))
+    return
   }
 
-  if (failedPlugins.length > 0) {
-    const YELLOW_H = "\x1b[33m"
-    console.log(`\n  Failed plugins:\n`)
-    for (const r of failedPlugins) {
-      console.log(`    ${YELLOW_H}⚠ ${r.name}${RST}  ${r.errorCode}`)
-    }
-  }
+  const builtinByEvent = collectBuiltinByEvent()
+  const pluginByEvent = collectPluginByEvent(pluginResults)
+  const localByEvent = collectLocalByEvent(projectSettings, cwd)
+
+  printEventSources(builtinByEvent, pluginByEvent, localByEvent)
+  printFailedPlugins(pluginResults.filter((r) => r.errorCode))
   console.log()
 }
 
