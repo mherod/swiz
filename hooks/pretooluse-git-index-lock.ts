@@ -21,10 +21,13 @@ import { toolHookInputSchema } from "./schemas.ts"
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const LOCK_RELATIVE_PATH = `${GIT_DIR_NAME}/${GIT_INDEX_LOCK}`
-const WAIT_TIMEOUT_MS = 5000
-const WAIT_INTERVAL_MS = 500
+const WAIT_TIMEOUT_MS = 8000
+const WAIT_INTERVAL_MS = 200
 const LSOF_TIMEOUT_MS = 500
 const MAX_ANCESTRY_DEPTH = 20
+const REMOVE_MAX_RETRIES = 3
+const REMOVE_RETRY_DELAY_MS = 150
+const STALE_LOCK_AGE_MS = 10_000
 
 // ── Main Execution ───────────────────────────────────────────────────────────
 
@@ -59,7 +62,14 @@ async function main() {
     await autoRemoveStaleLock(lockPath)
   }
 
-  // A relevant git process IS active — block to prevent corruption.
+  // Git process appears active, but the lock may be stale if it's old enough.
+  // Attempt removal for aged locks — pgrep false-positives are common.
+  const lockAge = await getLockAgeMs(lockPath)
+  if (lockAge >= STALE_LOCK_AGE_MS) {
+    await autoRemoveStaleLock(lockPath)
+  }
+
+  // A relevant git process IS active and lock is recent — block to prevent corruption.
   denyPreToolUse(
     [
       `\`${LOCK_RELATIVE_PATH}\` exists and an active git process was detected for this repository.`,
@@ -100,37 +110,50 @@ async function waitForLockResolution(lockPath: string, repoRoot: string) {
 }
 
 async function autoRemoveStaleLock(lockPath: string): Promise<void> {
-  // No relevant git process — stale lock. Try to remove it.
-  try {
-    await unlink(lockPath)
+  // Retry removal up to REMOVE_MAX_RETRIES times to handle transient failures.
+  for (let attempt = 1; attempt <= REMOVE_MAX_RETRIES; attempt++) {
+    try {
+      // Lock may have already been removed by another process or a prior attempt.
+      if (!(await Bun.file(lockPath).exists())) {
+        allowPreToolUse(`\`${LOCK_RELATIVE_PATH}\` resolved (attempt ${attempt}) — proceeding.`)
+      }
 
-    // Verify removal succeeded (race condition: another process may have recreated it).
-    if (await Bun.file(lockPath).exists()) {
-      denyPreToolUse(
-        [
-          `\`${LOCK_RELATIVE_PATH}\` reappeared after removal — a concurrent git process may be active.`,
-          "",
-          formatActionPlan(
-            [
-              "Wait a moment and retry your git command.",
-              `If the problem persists, manually check: \`ps aux | grep git\``,
-            ],
-            { header: "To resolve:" }
-          ).trimEnd(),
-        ].join("\n")
-      )
+      await unlink(lockPath)
+
+      // Verify removal succeeded (race condition: another process may have recreated it).
+      if (!(await Bun.file(lockPath).exists())) {
+        allowPreToolUse(
+          `Auto-removed stale \`${LOCK_RELATIVE_PATH}\` on attempt ${attempt} — proceeding.`
+        )
+      }
+
+      // Lock reappeared — retry if attempts remain.
+    } catch {
+      // ENOENT (lock vanished between exists() and unlink()) — that's fine.
+      if (!(await Bun.file(lockPath).exists())) {
+        allowPreToolUse(`\`${LOCK_RELATIVE_PATH}\` disappeared during cleanup — proceeding.`)
+      }
+      // Permission error or similar — retry if attempts remain.
     }
 
-    allowPreToolUse(
-      `Auto-removed stale \`${LOCK_RELATIVE_PATH}\` — no active git process detected.`
-    )
+    if (attempt < REMOVE_MAX_RETRIES) {
+      await new Promise((resolve) => setTimeout(resolve, REMOVE_RETRY_DELAY_MS))
+    }
+  }
+
+  // All retries exhausted — allow anyway and let git report the error if lock persists.
+  allowPreToolUse(
+    `\`${LOCK_RELATIVE_PATH}\` cleanup exhausted ${REMOVE_MAX_RETRIES} retries — proceeding (git will report if lock persists).`
+  )
+}
+
+async function getLockAgeMs(lockPath: string): Promise<number> {
+  try {
+    const file = Bun.file(lockPath)
+    const stat = await file.stat()
+    return Date.now() - stat.mtimeMs
   } catch {
-    // Cleanup failed — maybe the lock disappeared between check and unlink (ENOENT),
-    // or we lack permissions. Either way, allow the command to proceed — if the lock
-    // is truly gone, git will succeed; if it still exists, git will report the error.
-    allowPreToolUse(
-      `\`${LOCK_RELATIVE_PATH}\` cleanup encountered an error but may have resolved — proceeding.`
-    )
+    return 0
   }
 }
 
