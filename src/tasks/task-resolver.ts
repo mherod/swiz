@@ -1,5 +1,6 @@
 /**
  * Task resolution layer — session discovery and cross-session task lookup.
+ * Uses session-meta index for O(1) cwd matching and open-task-count checks.
  * Owns: getSessionIdsForProject, getSessionIdsByCwdScan, getSessions,
  *       findTaskAcrossSessions, resolveTaskById, and hint builders.
  */
@@ -13,6 +14,7 @@ import { createDefaultTaskStore } from "../task-roots.ts"
 import {
   compareTaskIds,
   parseTaskId,
+  readSessionMeta,
   readTasks,
   sessionPrefix,
   type Task,
@@ -63,13 +65,35 @@ async function getAllProjectSessionIds(
   return ids
 }
 
-/** Slow fallback: scan all project transcript directories for sessions whose cwd matches. */
+/**
+ * Fallback: resolve sessions whose cwd matches filterCwd.
+ * Fast path: check .session-meta.json cwd field first (O(candidates)).
+ * Slow path: only for candidates without meta, scan transcript directories.
+ */
 export async function getSessionIdsByCwdScan(
   filterCwd: string,
   candidates: string[],
-  projectsDir = createDefaultTaskStore().projectsDir
+  projectsDir = createDefaultTaskStore().projectsDir,
+  tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<Set<string>> {
   const ids = new Set<string>()
+
+  // Fast path: resolve via session-meta.json cwd field (no transcript scan).
+  const remaining: string[] = []
+  for (const sessionId of candidates) {
+    const meta = await readSessionMeta(sessionId, tasksDir)
+    if (meta?.cwd === filterCwd) {
+      ids.add(sessionId)
+    } else if (!meta?.cwd) {
+      // No meta or meta without cwd — needs transcript scan fallback
+      remaining.push(sessionId)
+    }
+    // meta.cwd exists but doesn't match → skip (different project)
+  }
+
+  if (remaining.length === 0) return ids
+
+  // Slow path: scan transcript directories only for sessions without meta cwd
   let dirs: string[]
   try {
     dirs = await readdir(projectsDir)
@@ -77,8 +101,9 @@ export async function getSessionIdsByCwdScan(
     return ids
   }
 
-  const candidateSet = new Set(candidates)
+  const remainingSet = new Set(remaining)
   for (const dir of dirs) {
+    if (remainingSet.size === 0) break
     const projectDir = join(projectsDir, dir)
     let files: string[]
     try {
@@ -89,8 +114,7 @@ export async function getSessionIdsByCwdScan(
     for (const f of files) {
       if (!f.endsWith(".jsonl")) continue
       const sessionId = f.slice(0, -6)
-      if (!candidateSet.has(sessionId)) continue
-      if (ids.has(sessionId)) continue
+      if (!remainingSet.has(sessionId)) continue
       try {
         const content = await readFile(join(projectDir, f), "utf-8")
         for (const line of content.split("\n").slice(0, 10)) {
@@ -99,6 +123,7 @@ export async function getSessionIdsByCwdScan(
             const data = JSON.parse(line) as { cwd?: string }
             if (data.cwd === filterCwd) {
               ids.add(sessionId)
+              remainingSet.delete(sessionId)
               break
             }
           } catch {}
@@ -135,7 +160,12 @@ export async function getSessions(
       // mismatched project-key encodings, even when the fast path found some.
       const unmatched = entries.filter((s) => !matchedSessionIds!.has(s))
       if (unmatched.length > 0) {
-        const fallbackIds = await getSessionIdsByCwdScan(filterCwd, unmatched, projectsDir)
+        const fallbackIds = await getSessionIdsByCwdScan(
+          filterCwd,
+          unmatched,
+          projectsDir,
+          tasksDir
+        )
         for (const id of fallbackIds) matchedSessionIds.add(id)
       }
 
@@ -399,16 +429,22 @@ export async function getOrphanSessionIds(
 
 /**
  * Collect all incomplete tasks across all project sessions.
- * Used by complete-all to find tasks that may have been orphaned
- * in other session directories after compaction.
+ * Uses session-meta index to skip sessions with no open tasks (O(1) per session).
+ * Falls back to full readTasks when meta is absent.
  */
 export async function collectIncompleteTasks(
-  filterCwd?: string
+  filterCwd?: string,
+  tasksDir = createDefaultTaskStore().tasksDir,
+  projectsDir = createDefaultTaskStore().projectsDir
 ): Promise<{ sessionId: string; task: Task }[]> {
-  const sessions = await getSessions(filterCwd)
+  const sessions = await getSessions(filterCwd, tasksDir, projectsDir)
   const results: { sessionId: string; task: Task }[] = []
   for (const sessionId of sessions) {
-    const tasks = await readTasks(sessionId)
+    // Fast skip: if session meta reports zero open tasks, skip the full read.
+    const meta = await readSessionMeta(sessionId, tasksDir)
+    if (meta && meta.openCount === 0) continue
+
+    const tasks = await readTasks(sessionId, tasksDir)
     for (const task of tasks) {
       if (task.status === "pending" || task.status === "in_progress") {
         results.push({ sessionId, task })

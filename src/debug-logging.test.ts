@@ -81,6 +81,8 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/tasks.ts",
   // task-renderer — formats and prints task lists to user-facing terminal output
   "src/tasks/task-renderer.ts",
+  // task-service — business logic that produces user-facing status output (create/update/adopt confirmations)
+  "src/tasks/task-service.ts",
   "src/commands/transcript.ts",
   "src/commands/uninstall.ts",
   // Usage report — human-readable terminal output
