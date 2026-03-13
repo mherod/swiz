@@ -91,12 +91,11 @@ body::before {
   display: grid;
   gap: var(--gap);
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
   grid-template-areas:
     "title"
     "nav"
-    "msgs"
-    "metrics";
+    "msgs";
   min-height: 0;
 }
 
@@ -2117,12 +2116,11 @@ tbody tr:hover {
 @media (min-width: 640px) {
   .bento {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
     grid-template-areas:
       "title  title"
       "nav    nav"
-      "msgs   msgs"
-      "metrics metrics";
+      "msgs   msgs";
   }
 
   .bento.bento-view-settings {
@@ -2145,11 +2143,10 @@ tbody tr:hover {
 @media (min-width: 768px) {
   .bento {
     grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas:
       "title  title"
-      "nav    msgs"
-      "metrics metrics";
+      "nav    msgs";
   }
 
   .bento.bento-view-settings {
@@ -2183,23 +2180,19 @@ tbody tr:hover {
   }
 
   .bento {
-    grid-template-columns: minmax(270px, 320px) minmax(0, 1fr) minmax(280px, 340px);
+    grid-template-columns: minmax(270px, 320px) minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas:
-      "title  title  title"
-      "nav    msgs   metrics";
+      "title  title"
+      "nav    msgs";
   }
 
   .bento.bento-view-settings {
-    grid-template-columns: minmax(270px, 320px) minmax(0, 1fr) minmax(280px, 340px);
+    grid-template-columns: minmax(270px, 320px) minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas:
-      "title  title  title"
-      "nav    settings settings";
-  }
-
-  .bento-metrics-stack {
-    align-content: start;
+      "title  title"
+      "nav    settings";
   }
 
   .panel-events,

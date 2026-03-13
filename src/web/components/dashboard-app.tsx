@@ -1,7 +1,6 @@
 import { msgKey } from "../lib/dashboard-helpers.ts"
 import { useDashboardState } from "../lib/dashboard-state.ts"
 import { Header } from "./header.tsx"
-import { MetricsRail } from "./metrics-rail.tsx"
 import { SessionMessages, SessionNav } from "./session-browser.tsx"
 import { SettingsPanel } from "./settings-panel.tsx"
 
@@ -39,7 +38,6 @@ export function DashboardApp() {
     metricsEvents,
     cacheStatus,
     activeSession,
-    sessionMessages,
   } = useDashboardState()
 
   return (
@@ -96,14 +94,10 @@ export function DashboardApp() {
             projectTasks={projectTasks}
             projectTaskSummary={projectTaskSummary}
             projectTasksLoading={projectTasksLoading}
-          />
-          <MetricsRail
             events={metricsEvents}
             cacheStatus={cacheStatus}
             activeSession={activeSession}
             activeHookDispatches={activeHookDispatches}
-            loadedMessageCount={sessionMessages.length}
-            sessionToolStats={sessionToolStats}
           />
         </>
       )}
