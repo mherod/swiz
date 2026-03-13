@@ -161,3 +161,17 @@ export async function readSessionLines(transcriptPath: string): Promise<string[]
   }
   return sessionStartIdx > 0 ? allLines.slice(sessionStartIdx) : allLines
 }
+
+/**
+ * Read all lines from a transcript JSONL file, ignoring the session boundary.
+ * Use when a hook needs to detect patterns that span across sessions/compactions.
+ * Returns all non-empty lines.
+ */
+export async function readAllTranscriptLines(transcriptPath: string): Promise<string[]> {
+  try {
+    const text = await Bun.file(transcriptPath).text()
+    return text.split("\n")
+  } catch {
+    return []
+  }
+}

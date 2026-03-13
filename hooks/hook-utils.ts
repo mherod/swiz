@@ -890,6 +890,7 @@ export {
   extractBashCommands,
   extractSkillInvocations,
   extractToolNamesFromTranscript,
+  readAllTranscriptLines,
   readSessionLines,
   stripAnsi,
 } from "./utils/transcript.ts"

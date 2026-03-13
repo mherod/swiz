@@ -52,6 +52,10 @@ function editToolEntry(file: string, oldStr: string, newStr: string): string {
   })
 }
 
+function systemBoundaryEntry(): string {
+  return JSON.stringify({ type: "system", content: "Session resumed after compaction." })
+}
+
 function makeTranscript(...entries: string[]): string {
   return entries.join("\n")
 }
@@ -435,6 +439,55 @@ describe("pretooluse-block-preexisting-dismissals", () => {
       )
       const result = await runHook({ transcriptContent: transcript })
       expect(result.blocked).toBe(true)
+    })
+  })
+
+  describe("cross-session — dismissal before session boundary", () => {
+    test("dismissal in prior session (before system boundary) still blocks", async () => {
+      const transcript = makeTranscript(
+        // Prior session: diagnostic + dismissal
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 warning: Unused variable\n✖ 1 problem"),
+        assistantTextEntry("This warning is pre-existing."),
+        // Session boundary (compaction)
+        systemBoundaryEntry(),
+        // Current session: no clearing action taken
+        assistantTextEntry("Let me continue working on the feature.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+      expect(result.reason).toContain("pre-existing")
+    })
+
+    test("dismissal in prior session cleared by fix in current session allows", async () => {
+      const transcript = makeTranscript(
+        // Prior session: diagnostic + dismissal
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 warning: Unused variable\n✖ 1 problem"),
+        assistantTextEntry("This warning is pre-existing."),
+        // Session boundary (compaction)
+        systemBoundaryEntry(),
+        // Current session: fix applied
+        editToolEntry("src/foo.ts", "const x = 1", "")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(false)
+    })
+
+    test("dismissal in prior session cleared by clean lint in current session allows", async () => {
+      const transcript = makeTranscript(
+        // Prior session: diagnostic + dismissal
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 error: Missing return\n✖ 1 problem"),
+        assistantTextEntry("This error is not introduced by our changes."),
+        // Session boundary (compaction)
+        systemBoundaryEntry(),
+        // Current session: clean lint output resets
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("All checks passed! No errors.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(false)
     })
   })
 })

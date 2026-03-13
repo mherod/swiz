@@ -25,7 +25,7 @@ import {
   isCodeChangeTool,
   isGitRepo,
   isShellTool,
-  readSessionLines,
+  readAllTranscriptLines,
 } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
@@ -202,12 +202,15 @@ function shouldSkipTool(toolName: string, toolInput: Record<string, unknown>): b
   return false
 }
 
-async function getSessionLines(
+async function getAllTranscriptLines(
   raw: Record<string, unknown>,
   transcriptPath: string
 ): Promise<string[]> {
+  // Read full transcript (not just session lines) so cross-session dismissals are detected.
+  // Fall back to session lines from the summary if transcript_path is unavailable.
+  if (transcriptPath) return readAllTranscriptLines(transcriptPath)
   const summary = getTranscriptSummary(raw)
-  return summary?.sessionLines ?? (transcriptPath ? await readSessionLines(transcriptPath) : [])
+  return summary?.sessionLines ?? []
 }
 
 function buildBlockMessage(state: ScanState): string {
@@ -237,10 +240,10 @@ async function main() {
   const toolName = input.tool_name ?? ""
   if (shouldSkipTool(toolName, input.tool_input ?? {})) process.exit(0)
 
-  const sessionLines = await getSessionLines(raw, input.transcript_path ?? "")
-  if (sessionLines.length === 0) process.exit(0)
+  const allLines = await getAllTranscriptLines(raw, input.transcript_path ?? "")
+  if (allLines.length === 0) process.exit(0)
 
-  const state = scanTranscript(sessionLines)
+  const state = scanTranscript(allLines)
   if (!state.hasDiagnosticIssues || !state.dismissalText || state.cleared) process.exit(0)
 
   denyPreToolUse(buildBlockMessage(state))
