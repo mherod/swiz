@@ -935,15 +935,15 @@ describe("skillAdvice() with edge-case inputs", () => {
 // ─── detectRuntime() / detectPkgRunner() / detectPackageManager() ───────────
 
 describe("detectPackageManager()", () => {
-  it("returns a valid PackageManager or null", () => {
-    const result = detectPackageManager()
+  it("returns a valid PackageManager or null", async () => {
+    const result = await detectPackageManager()
     expect(result === null || ["bun", "pnpm", "yarn", "npm"].includes(result)).toBe(true)
   })
 
-  it("returns consistent results (caching)", () => {
+  it("returns consistent results (caching)", async () => {
     const a = detectPackageManager()
     const b = detectPackageManager()
-    expect(a).toBe(b)
+    expect(await a).toBe(await b)
   })
 })
 

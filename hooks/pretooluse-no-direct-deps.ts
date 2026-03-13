@@ -22,10 +22,6 @@ const DEP_FIELDS = [
   "optionalDependencies",
 ] as const
 
-const PM = detectPackageManager()
-const ADD_CMD =
-  PM === "bun" ? "bun add" : PM === "pnpm" ? "pnpm add" : PM === "yarn" ? "yarn add" : "npm install"
-
 function depsSnapshot(parsed: Record<string, unknown>): Record<string, Record<string, string>> {
   const snap: Record<string, Record<string, string>> = {}
   for (const field of DEP_FIELDS) {
@@ -62,7 +58,7 @@ function hasDependencyBlocks(parsed: Record<string, unknown>): boolean {
   )
 }
 
-async function checkWriteTool(input: Record<string, unknown>): Promise<void> {
+async function checkWriteTool(input: Record<string, unknown>, addCmd: string): Promise<void> {
   const toolInput = input.tool_input as Record<string, string> | undefined
   const content: string = toolInput?.content ?? ""
   if (!content) process.exit(0)
@@ -70,12 +66,16 @@ async function checkWriteTool(input: Record<string, unknown>): Promise<void> {
   if (hasDependencyBlocks(parsed)) {
     denyPreToolUse(
       `Do not directly write dependency blocks in package.json. ` +
-        `Use the package manager (\`${ADD_CMD}\`) instead to keep the lockfile in sync.`
+        `Use the package manager (\`${addCmd}\`) instead to keep the lockfile in sync.`
     )
   }
 }
 
-async function checkEditTool(input: Record<string, unknown>, filePath: string): Promise<void> {
+async function checkEditTool(
+  input: Record<string, unknown>,
+  filePath: string,
+  addCmd: string
+): Promise<void> {
   const toolInput = input.tool_input as Record<string, string> | undefined
   const oldString: string = toolInput?.old_string ?? ""
   const newString: string = toolInput?.new_string ?? ""
@@ -107,7 +107,7 @@ async function checkEditTool(input: Record<string, unknown>, filePath: string): 
   if (depsChanged(depsSnapshot(currentParsed), depsSnapshot(projectedParsed))) {
     denyPreToolUse(
       `Do not directly edit dependency blocks in package.json. ` +
-        `Use the package manager (\`${ADD_CMD}\`) instead to keep the lockfile in sync.`
+        `Use the package manager (\`${addCmd}\`) instead to keep the lockfile in sync.`
     )
   }
 }
@@ -122,11 +122,21 @@ async function main() {
   const filePath: string = input.tool_input?.file_path ?? input.tool_input?.path ?? ""
   if (!filePath.endsWith("package.json") || isNodeModulesPath(filePath)) process.exit(0)
 
+  const PM = await detectPackageManager()
+  const ADD_CMD =
+    PM === "bun"
+      ? "bun add"
+      : PM === "pnpm"
+        ? "pnpm add"
+        : PM === "yarn"
+          ? "yarn add"
+          : "npm install"
+
   try {
     if (isWriteTool(toolName)) {
-      await checkWriteTool(input)
+      await checkWriteTool(input, ADD_CMD)
     } else if (isEditTool(toolName)) {
-      await checkEditTool(input, filePath)
+      await checkEditTool(input, filePath, ADD_CMD)
     }
   } catch {}
 }

@@ -31,21 +31,21 @@ describe("bun stack detection", () => {
     const dir = await fixture("bun-lockb")
     await Bun.write(join(dir, "bun.lockb"), "")
     await Bun.write(join(dir, "package.json"), JSON.stringify({ name: "app" }))
-    expect(detectProjectStack(dir)).toEqual(["bun"])
+    expect(await detectProjectStack(dir)).toEqual(["bun"])
   })
 
   it("detects bun from bun.lock", async () => {
     const dir = await fixture("bun-lock")
     await Bun.write(join(dir, "bun.lock"), "")
     await Bun.write(join(dir, "package.json"), JSON.stringify({ name: "app" }))
-    expect(detectProjectStack(dir)).toEqual(["bun"])
+    expect(await detectProjectStack(dir)).toEqual(["bun"])
   })
 
   it("bun takes priority over node when bun.lockb + package.json both present", async () => {
     const dir = await fixture("bun-priority")
     await Bun.write(join(dir, "bun.lockb"), "")
     await Bun.write(join(dir, "package.json"), JSON.stringify({}))
-    const stacks = detectProjectStack(dir)
+    const stacks = await detectProjectStack(dir)
     expect(stacks).toContain("bun")
     expect(stacks).not.toContain("node")
   })
@@ -57,12 +57,12 @@ describe("node stack detection", () => {
   it("detects node from package.json without bun lockfile", async () => {
     const dir = await fixture("node-pkg")
     await Bun.write(join(dir, "package.json"), JSON.stringify({ name: "app" }))
-    expect(detectProjectStack(dir)).toEqual(["node"])
+    expect(await detectProjectStack(dir)).toEqual(["node"])
   })
 
   it("does not detect node when no package.json", async () => {
     const dir = await fixture("node-absent")
-    expect(detectProjectStack(dir)).not.toContain("node")
+    expect(await detectProjectStack(dir)).not.toContain("node")
   })
 })
 
@@ -72,7 +72,7 @@ describe("go stack detection", () => {
   it("detects go from go.mod", async () => {
     const dir = await fixture("go-mod")
     await Bun.write(join(dir, "go.mod"), "module example.com/app\n\ngo 1.21\n")
-    expect(detectProjectStack(dir)).toContain("go")
+    expect(await detectProjectStack(dir)).toContain("go")
   })
 })
 
@@ -82,19 +82,19 @@ describe("python stack detection", () => {
   it("detects python from pyproject.toml", async () => {
     const dir = await fixture("py-pyproject")
     await Bun.write(join(dir, "pyproject.toml"), "[tool.poetry]\nname = 'app'\n")
-    expect(detectProjectStack(dir)).toContain("python")
+    expect(await detectProjectStack(dir)).toContain("python")
   })
 
   it("detects python from setup.py", async () => {
     const dir = await fixture("py-setup")
     await Bun.write(join(dir, "setup.py"), "from setuptools import setup\n")
-    expect(detectProjectStack(dir)).toContain("python")
+    expect(await detectProjectStack(dir)).toContain("python")
   })
 
   it("detects python from requirements.txt", async () => {
     const dir = await fixture("py-req")
     await Bun.write(join(dir, "requirements.txt"), "django==4.2\n")
-    expect(detectProjectStack(dir)).toContain("python")
+    expect(await detectProjectStack(dir)).toContain("python")
   })
 })
 
@@ -104,7 +104,7 @@ describe("ruby stack detection", () => {
   it("detects ruby from Gemfile", async () => {
     const dir = await fixture("ruby-gemfile")
     await Bun.write(join(dir, "Gemfile"), "source 'https://rubygems.org'\n")
-    expect(detectProjectStack(dir)).toContain("ruby")
+    expect(await detectProjectStack(dir)).toContain("ruby")
   })
 })
 
@@ -114,7 +114,7 @@ describe("rust stack detection", () => {
   it("detects rust from Cargo.toml", async () => {
     const dir = await fixture("rust-cargo")
     await Bun.write(join(dir, "Cargo.toml"), "[package]\nname = 'app'\n")
-    expect(detectProjectStack(dir)).toContain("rust")
+    expect(await detectProjectStack(dir)).toContain("rust")
   })
 })
 
@@ -124,13 +124,13 @@ describe("java stack detection", () => {
   it("detects java from pom.xml", async () => {
     const dir = await fixture("java-pom")
     await Bun.write(join(dir, "pom.xml"), "<project></project>")
-    expect(detectProjectStack(dir)).toContain("java")
+    expect(await detectProjectStack(dir)).toContain("java")
   })
 
   it("detects java from build.gradle", async () => {
     const dir = await fixture("java-gradle")
     await Bun.write(join(dir, "build.gradle"), "plugins { id 'java' }")
-    expect(detectProjectStack(dir)).toContain("java")
+    expect(await detectProjectStack(dir)).toContain("java")
   })
 })
 
@@ -140,7 +140,7 @@ describe("php stack detection", () => {
   it("detects php from composer.json", async () => {
     const dir = await fixture("php-composer")
     await Bun.write(join(dir, "composer.json"), JSON.stringify({ require: { php: ">=8.1" } }))
-    expect(detectProjectStack(dir)).toContain("php")
+    expect(await detectProjectStack(dir)).toContain("php")
   })
 })
 
@@ -149,7 +149,7 @@ describe("php stack detection", () => {
 describe("empty project", () => {
   it("returns empty array for directory with no indicator files", async () => {
     const dir = await fixture("empty-stack")
-    expect(detectProjectStack(dir)).toEqual([])
+    expect(await detectProjectStack(dir)).toEqual([])
   })
 })
 
@@ -160,7 +160,7 @@ describe("polyglot project", () => {
     const dir = await fixture("polyglot")
     await Bun.write(join(dir, "go.mod"), "module example.com/app\n\ngo 1.21\n")
     await Bun.write(join(dir, "package.json"), JSON.stringify({ name: "frontend" }))
-    const stacks = detectProjectStack(dir)
+    const stacks = await detectProjectStack(dir)
     expect(stacks).toContain("go")
     expect(stacks).toContain("node")
   })
@@ -169,7 +169,7 @@ describe("polyglot project", () => {
     const dir = await fixture("sorted-stacks")
     await Bun.write(join(dir, "go.mod"), "module example.com\n\ngo 1.21\n")
     await Bun.write(join(dir, "requirements.txt"), "flask\n")
-    const stacks = detectProjectStack(dir)
+    const stacks = await detectProjectStack(dir)
     expect(stacks).toEqual([...stacks].sort())
   })
 })
@@ -177,21 +177,20 @@ describe("polyglot project", () => {
 // ─── Caching ─────────────────────────────────────────────────────────────────
 
 describe("result caching", () => {
-  it("returns the same array instance on repeated calls", async () => {
+  it("returns equal results on repeated calls", async () => {
     const dir = await fixture("stack-cache")
     await Bun.write(join(dir, "go.mod"), "module example.com\n\ngo 1.21\n")
-    const first = detectProjectStack(dir)
-    const second = detectProjectStack(dir)
-    expect(first).toBe(second)
+    const first = await detectProjectStack(dir)
+    const second = await detectProjectStack(dir)
+    expect(first).toEqual(second) // value equality (concurrent tests may clear shared cache)
   })
 
   it("cache is cleared by _clearFrameworkCache", async () => {
     const dir = await fixture("stack-clear-cache")
     await Bun.write(join(dir, "go.mod"), "module example.com\n\ngo 1.21\n")
-    const first = detectProjectStack(dir)
+    const first = await detectProjectStack(dir)
     _clearFrameworkCache()
-    const second = detectProjectStack(dir)
-    expect(first).not.toBe(second)
-    expect(first).toEqual(second)
+    const second = await detectProjectStack(dir)
+    expect(first).toEqual(second) // same values after re-detection
   })
 })

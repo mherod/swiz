@@ -60,7 +60,7 @@ const VALID_FRAMEWORKS = new Set<string>([
   "php",
 ])
 
-export function evalCondition(condition: string | undefined): boolean {
+export async function evalCondition(condition: string | undefined): Promise<boolean> {
   if (!condition) return true
 
   // Framework detection: framework:<name>
@@ -70,7 +70,8 @@ export function evalCondition(condition: string | undefined): boolean {
       debugLog(`[swiz] Unknown framework in condition: "${name}" — running hook anyway`)
       return true
     }
-    return detectFrameworks().has(name as Framework)
+    const frameworks = await detectFrameworks()
+    return frameworks.has(name as Framework)
   }
 
   const envMatch = condition.match(/^env:([^!=]+)(!=|=)?(.*)$/)

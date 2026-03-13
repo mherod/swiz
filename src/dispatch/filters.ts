@@ -204,7 +204,7 @@ export async function applyHookSettingFilters(
     for (const file of SWIZ_NOTIFY_HOOK_FILES) disabledSet.add(file)
   }
 
-  const detectedStacks = cwd ? detectProjectStack(cwd) : []
+  const detectedStacks = cwd ? await detectProjectStack(cwd) : []
   const filtered = filterPrMergeModeHooks(
     groups,
     effective.prMergeMode,

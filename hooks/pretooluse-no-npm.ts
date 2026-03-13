@@ -10,8 +10,6 @@ import {
 } from "./hook-utils.ts"
 import { SHELL_SEGMENT_BOUNDARY } from "./utils/shell-patterns.ts"
 
-const PM = detectPackageManager()
-
 // Equivalent subcommands across package managers
 interface CmdMap {
   install: string
@@ -82,10 +80,9 @@ const CMD: Record<PackageManager, CmdMap> = {
   },
 }
 
-function deny(from: string, to: string): void {
-  const pmLabel = PM ?? "the project's package manager"
+function deny(from: string, to: string, pm: PackageManager): void {
   denyPreToolUse(
-    `Use ${pmLabel} instead. Project signals suggest ${pmLabel} is the expected package manager.\n\n` +
+    `Use ${pm} instead. Project signals suggest ${pm} is the expected package manager.\n\n` +
       `  ${from}  →  ${to}`
   )
 }
@@ -125,11 +122,10 @@ function classifySubcmd(subcmd: string, args: string): keyof CmdMap | null {
  * common lockfile-drift source. bun/pnpm are generally acceptable choices in
  * modern repos and should not be hard-redirected by default.
  */
-function isImplausibleInvocation(invoked: string): boolean {
-  if (!PM) return false
-  if (invoked === "npm" || invoked === "npx") return PM !== "npm"
+function isImplausibleInvocation(invoked: string, pm: PackageManager): boolean {
+  if (invoked === "npm" || invoked === "npx") return pm !== "npm"
   // Yarn is usually implausible in bun/pnpm projects.
-  if (invoked === "yarn") return PM === "bun" || PM === "pnpm"
+  if (invoked === "yarn") return pm === "bun" || pm === "pnpm"
   return false
 }
 
@@ -142,6 +138,7 @@ const PACKAGE_RUNNERS = new Set(["npx", "pnpx", "bunx"])
 async function main() {
   const input = await Bun.stdin.json()
   if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+  const PM = await detectPackageManager()
   if (!PM) process.exit(0)
 
   const command: string = input?.tool_input?.command ?? ""
@@ -149,24 +146,24 @@ async function main() {
   if (!m) process.exit(0)
 
   const invoked = (m[1] ?? "").toLowerCase()
-  if (!isImplausibleInvocation(invoked)) process.exit(0)
+  if (!isImplausibleInvocation(invoked, PM)) process.exit(0)
 
   const subcmd = m[2]?.toLowerCase() ?? ""
   const rest = m[3]?.trim() ?? ""
   const target = CMD[PM]
 
   if (PACKAGE_RUNNERS.has(invoked)) {
-    deny(`${invoked} <pkg>`, target.dlx)
+    deny(`${invoked} <pkg>`, target.dlx, PM)
   }
 
   const kind = classifySubcmd(subcmd, rest)
   if (kind) {
     const fromPM = invoked as PackageManager
     const fromCmd = CMD[fromPM]?.[kind] ?? `${invoked} ${subcmd}`
-    deny(fromCmd, target[kind])
+    deny(fromCmd, target[kind], PM)
   }
 
-  deny(`${invoked} ${subcmd}`, `${PM} ${subcmd}`)
+  deny(`${invoked} ${subcmd}`, `${PM} ${subcmd}`, PM)
 }
 
 if (import.meta.main) {

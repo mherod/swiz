@@ -25,90 +25,90 @@ describe("evalCondition", () => {
   })
 
   describe("undefined / empty condition", () => {
-    it("returns true when condition is undefined", () => {
-      expect(evalCondition(undefined)).toBe(true)
+    it("returns true when condition is undefined", async () => {
+      expect(await evalCondition(undefined)).toBe(true)
     })
 
-    it("returns true when condition is empty string", () => {
-      expect(evalCondition("")).toBe(true)
+    it("returns true when condition is empty string", async () => {
+      expect(await evalCondition("")).toBe(true)
     })
   })
 
   describe("env:<VAR> — presence check", () => {
-    it("returns true when env var is set to a non-empty value", () => {
+    it("returns true when env var is set to a non-empty value", async () => {
       process.env.MY_VAR = "anything"
-      expect(evalCondition("env:MY_VAR")).toBe(true)
+      expect(await evalCondition("env:MY_VAR")).toBe(true)
     })
 
-    it("returns false when env var is unset", () => {
+    it("returns false when env var is unset", async () => {
       delete process.env.MY_VAR
-      expect(evalCondition("env:MY_VAR")).toBe(false)
+      expect(await evalCondition("env:MY_VAR")).toBe(false)
     })
 
-    it("returns false when env var is set to empty string", () => {
+    it("returns false when env var is set to empty string", async () => {
       process.env.MY_VAR = ""
-      expect(evalCondition("env:MY_VAR")).toBe(false)
+      expect(await evalCondition("env:MY_VAR")).toBe(false)
     })
   })
 
   describe("env:<VAR>=<value> — equality check", () => {
-    it("returns true when env var equals expected value", () => {
+    it("returns true when env var equals expected value", async () => {
       process.env.CI = "true"
-      expect(evalCondition("env:CI=true")).toBe(true)
+      expect(await evalCondition("env:CI=true")).toBe(true)
     })
 
-    it("returns false when env var does not equal expected value", () => {
+    it("returns false when env var does not equal expected value", async () => {
       process.env.CI = "false"
-      expect(evalCondition("env:CI=true")).toBe(false)
+      expect(await evalCondition("env:CI=true")).toBe(false)
     })
 
-    it("returns false when env var is unset", () => {
+    it("returns false when env var is unset", async () => {
       delete process.env.CI
-      expect(evalCondition("env:CI=true")).toBe(false)
+      expect(await evalCondition("env:CI=true")).toBe(false)
     })
 
-    it("matches empty string value explicitly", () => {
+    it("matches empty string value explicitly", async () => {
       process.env.MY_VAR = ""
-      expect(evalCondition("env:MY_VAR=")).toBe(true)
+      expect(await evalCondition("env:MY_VAR=")).toBe(true)
     })
   })
 
   describe("env:<VAR>!=<value> — inequality check", () => {
-    it("returns true when env var does not equal value", () => {
+    it("returns true when env var does not equal value", async () => {
       process.env.CI = "false"
-      expect(evalCondition("env:CI!=true")).toBe(true)
+      expect(await evalCondition("env:CI!=true")).toBe(true)
     })
 
-    it("returns false when env var equals the excluded value", () => {
+    it("returns false when env var equals the excluded value", async () => {
       process.env.CI = "true"
-      expect(evalCondition("env:CI!=true")).toBe(false)
+      expect(await evalCondition("env:CI!=true")).toBe(false)
     })
 
-    it("returns true when env var is unset (not equal to value)", () => {
+    it("returns true when env var is unset (not equal to value)", async () => {
       delete process.env.CI
-      expect(evalCondition("env:CI!=true")).toBe(true)
+      expect(await evalCondition("env:CI!=true")).toBe(true)
     })
 
-    it("typical CI-skip pattern: skip hook when CI=true", () => {
+    it("typical CI-skip pattern: skip hook when CI=true", async () => {
       process.env.CI = "true"
       // condition "env:CI!=true" means "run this hook when NOT in CI"
-      expect(evalCondition("env:CI!=true")).toBe(false)
+      expect(await evalCondition("env:CI!=true")).toBe(false)
 
       process.env.CI = ""
-      expect(evalCondition("env:CI!=true")).toBe(true)
+      expect(await evalCondition("env:CI!=true")).toBe(true)
 
       delete process.env.CI
-      expect(evalCondition("env:CI!=true")).toBe(true)
+      expect(await evalCondition("env:CI!=true")).toBe(true)
     })
   })
 
   describe("unknown syntax — fail-open", () => {
-    it("returns true for completely unknown syntax", () => {
-      expect(evalCondition("unknown:WHATEVER")).toBe(true)
+    it("returns true for completely unknown syntax", async () => {
+      expect(await evalCondition("unknown:WHATEVER")).toBe(true)
     })
 
-    it("returns true for random garbage", () => {
-      expect(evalCondition("not-a-condition")).toBe(true)
+    it("returns true for random garbage", async () => {
+      expect(await evalCondition("not-a-condition")).toBe(true)
     })
   })
 
@@ -134,7 +134,7 @@ describe("evalCondition", () => {
       const origCwd = process.cwd()
       process.chdir(dir)
       try {
-        expect(evalCondition("framework:nextjs")).toBe(false)
+        expect(await evalCondition("framework:nextjs")).toBe(false)
       } finally {
         process.chdir(origCwd)
         _clearFrameworkCache()
@@ -148,7 +148,7 @@ describe("evalCondition", () => {
       const origCwd = process.cwd()
       process.chdir(dir)
       try {
-        expect(evalCondition("framework:nextjs")).toBe(true)
+        expect(await evalCondition("framework:nextjs")).toBe(true)
       } finally {
         process.chdir(origCwd)
         _clearFrameworkCache()
@@ -162,15 +162,15 @@ describe("evalCondition", () => {
       const origCwd = process.cwd()
       process.chdir(dir)
       try {
-        expect(evalCondition("framework:go")).toBe(true)
+        expect(await evalCondition("framework:go")).toBe(true)
       } finally {
         process.chdir(origCwd)
         _clearFrameworkCache()
       }
     })
 
-    it("returns true (fail-open) for an unknown framework name", () => {
-      expect(evalCondition("framework:not-a-real-framework")).toBe(true)
+    it("returns true (fail-open) for an unknown framework name", async () => {
+      expect(await evalCondition("framework:not-a-real-framework")).toBe(true)
     })
   })
 })

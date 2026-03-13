@@ -44,7 +44,7 @@ export async function replayPreToolUse(
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
-      if (!evalCondition(hook.condition)) {
+      if (!(await evalCondition(hook.condition))) {
         log(`   ⏭ ${hook.file} [condition false, skipping]`)
         continue
       }
@@ -100,7 +100,7 @@ export async function replayBlocking(
     for (const group of groups) {
       for (const hook of group.hooks) {
         if (hook.async) continue
-        if (!evalCondition(hook.condition)) {
+        if (!(await evalCondition(hook.condition))) {
           log(`   ⏭ ${hook.file} [condition false, skipping]`)
           continue
         }
@@ -138,7 +138,7 @@ export async function replayBlocking(
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
-      if (!evalCondition(hook.condition)) {
+      if (!(await evalCondition(hook.condition))) {
         log(`   ⏭ ${hook.file} [condition false, skipping]`)
         continue
       }
@@ -180,7 +180,7 @@ export async function replayContext(
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) continue
-      if (!evalCondition(hook.condition)) {
+      if (!(await evalCondition(hook.condition))) {
         log(`   ⏭ ${hook.file} [condition false, skipping]`)
         continue
       }

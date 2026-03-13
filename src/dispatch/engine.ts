@@ -280,7 +280,7 @@ async function tryRecordSkippedHook(
   cwd: string,
   executions: HookExecution[]
 ): Promise<boolean> {
-  if (!evalCondition(hook.condition)) {
+  if (!(await evalCondition(hook.condition))) {
     log(`   ⏭ ${hook.file} [condition false, skipping]`)
     executions.push(createSkippedExecution(hook, matcher, "condition-false"))
     return true
@@ -403,7 +403,7 @@ export async function launchAsyncHooks(
   for (const group of groups) {
     for (const hook of group.hooks) {
       if (hook.async) {
-        if (!evalCondition(hook.condition)) {
+        if (!(await evalCondition(hook.condition))) {
           log(`   ⏭ ${hook.file} [condition false, skipping]`)
           continue
         }

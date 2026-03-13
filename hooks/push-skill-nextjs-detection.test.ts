@@ -26,8 +26,9 @@ import { _clearFrameworkCache, detectFrameworks } from "./hook-utils.ts"
 
 // ─── Detection helper (mirrors push skill logic) ───────────────────────────────
 
-function runDetection(dir: string): string {
-  const isNextjs = detectFrameworks(dir).has("nextjs")
+async function runDetection(dir: string): Promise<string> {
+  const frameworks = await detectFrameworks(dir)
+  const isNextjs = frameworks.has("nextjs")
   if (!isNextjs) return "N/A (not a Next.js project)"
   const scriptPath = join(dir, "scripts", "check-route-conflicts.sh")
   if (existsSync(scriptPath)) return "scripts/check-route-conflicts.sh present"
@@ -62,7 +63,7 @@ describe("Next.js detection — next.config.* file detection", () => {
   test("C1: next.config.js present, script ABSENT → reports missing", async () => {
     const dir = await fixture("c1")
     await Bun.write(join(dir, "next.config.js"), "module.exports = {}")
-    expect(runDetection(dir)).toBe(
+    expect(await runDetection(dir)).toBe(
       "scripts/check-route-conflicts.sh missing (Next.js project — this gate is not wired up)"
     )
   })
@@ -72,13 +73,13 @@ describe("Next.js detection — next.config.* file detection", () => {
     await Bun.write(join(dir, "next.config.js"), "module.exports = {}")
     await mkdir(join(dir, "scripts"), { recursive: true })
     await Bun.write(join(dir, "scripts", "check-route-conflicts.sh"), "#!/bin/sh")
-    expect(runDetection(dir)).toBe("scripts/check-route-conflicts.sh present")
+    expect(await runDetection(dir)).toBe("scripts/check-route-conflicts.sh present")
   })
 
   test("C6: next.config.ts present, script ABSENT → reports missing", async () => {
     const dir = await fixture("c6")
     await Bun.write(join(dir, "next.config.ts"), "export default {}")
-    expect(runDetection(dir)).toBe(
+    expect(await runDetection(dir)).toBe(
       "scripts/check-route-conflicts.sh missing (Next.js project — this gate is not wired up)"
     )
   })
@@ -86,7 +87,7 @@ describe("Next.js detection — next.config.* file detection", () => {
   test("next.config.mjs present, script ABSENT → reports missing", async () => {
     const dir = await fixture("c-mjs")
     await Bun.write(join(dir, "next.config.mjs"), "export default {}")
-    expect(runDetection(dir)).toBe(
+    expect(await runDetection(dir)).toBe(
       "scripts/check-route-conflicts.sh missing (Next.js project — this gate is not wired up)"
     )
   })
@@ -94,7 +95,7 @@ describe("Next.js detection — next.config.* file detection", () => {
   test("next.config.cjs present, script ABSENT → reports missing", async () => {
     const dir = await fixture("c-cjs")
     await Bun.write(join(dir, "next.config.cjs"), "module.exports = {}")
-    expect(runDetection(dir)).toBe(
+    expect(await runDetection(dir)).toBe(
       "scripts/check-route-conflicts.sh missing (Next.js project — this gate is not wired up)"
     )
   })
@@ -107,7 +108,7 @@ describe("Next.js detection — package.json dependency detection", () => {
       join(dir, "package.json"),
       JSON.stringify({ dependencies: { next: "14.0.0", react: "18.0.0" } })
     )
-    expect(runDetection(dir)).toBe(
+    expect(await runDetection(dir)).toBe(
       "scripts/check-route-conflicts.sh missing (Next.js project — this gate is not wired up)"
     )
   })
@@ -120,7 +121,7 @@ describe("Next.js detection — package.json dependency detection", () => {
     )
     await mkdir(join(dir, "scripts"), { recursive: true })
     await Bun.write(join(dir, "scripts", "check-route-conflicts.sh"), "#!/bin/sh")
-    expect(runDetection(dir)).toBe("scripts/check-route-conflicts.sh present")
+    expect(await runDetection(dir)).toBe("scripts/check-route-conflicts.sh present")
   })
 })
 
@@ -131,18 +132,18 @@ describe("Non-Next.js project detection", () => {
       join(dir, "package.json"),
       JSON.stringify({ dependencies: { react: "18.0.0" } })
     )
-    expect(runDetection(dir)).toBe("N/A (not a Next.js project)")
+    expect(await runDetection(dir)).toBe("N/A (not a Next.js project)")
   })
 
   test("empty directory → N/A", async () => {
     const dir = await fixture("c-empty")
-    expect(runDetection(dir)).toBe("N/A (not a Next.js project)")
+    expect(await runDetection(dir)).toBe("N/A (not a Next.js project)")
   })
 
   test("package.json with no deps → N/A", async () => {
     const dir = await fixture("c-no-deps")
     await Bun.write(join(dir, "package.json"), JSON.stringify({ name: "my-cli" }))
-    expect(runDetection(dir)).toBe("N/A (not a Next.js project)")
+    expect(await runDetection(dir)).toBe("N/A (not a Next.js project)")
   })
 
   test("CLI project (like swiz) → N/A", async () => {
@@ -154,6 +155,6 @@ describe("Non-Next.js project detection", () => {
         devDependencies: { "@biomejs/biome": "1.0.0", lefthook: "2.0.0" },
       })
     )
-    expect(runDetection(dir)).toBe("N/A (not a Next.js project)")
+    expect(await runDetection(dir)).toBe("N/A (not a Next.js project)")
   })
 })

@@ -56,7 +56,7 @@ async function main(): Promise<void> {
 
   if (!lintScript && !typecheckScript) return
 
-  const pm = detectPackageManager() ?? "npm"
+  const pm = (await detectPackageManager()) ?? "npm"
   const failures: string[] = []
 
   for (const scriptName of [lintScript, typecheckScript]) {

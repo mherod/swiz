@@ -251,8 +251,8 @@ export const ideaCommand: Command = {
     const { targetDir, model, timeoutMs, provider } = parseIdeaArgs(args)
     const [readme, frameworks, stacks] = await Promise.all([
       readReadmeContent(targetDir),
-      Promise.resolve(Array.from(detectFrameworks(targetDir)).sort()),
-      Promise.resolve(detectProjectStack(targetDir)),
+      detectFrameworks(targetDir).then((f) => Array.from(f).sort()),
+      detectProjectStack(targetDir),
     ])
     const commits = readRecentCommitMessages(targetDir, COMMIT_COUNT)
     const prompt = buildPrompt({

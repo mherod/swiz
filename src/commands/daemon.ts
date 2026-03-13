@@ -526,7 +526,7 @@ async function computeEligibility(cwd: string): Promise<EligibilitySnapshot> {
     for (const file of SWIZ_NOTIFY_HOOK_FILES) disabledSet.add(file)
   }
 
-  const detectedStacks = cwd ? detectProjectStack(cwd) : []
+  const detectedStacks = cwd ? await detectProjectStack(cwd) : []
   const prMergeActive = resolvePrMergeActive(effective.collaborationMode, effective.prMergeMode)
 
   // Workflow intent from project state
@@ -545,7 +545,7 @@ async function computeEligibility(cwd: string): Promise<EligibilitySnapshot> {
   for (const group of manifest) {
     for (const hook of group.hooks) {
       if (hook.condition && !(hook.file in conditionResults)) {
-        conditionResults[hook.file] = evalCondition(hook.condition)
+        conditionResults[hook.file] = await evalCondition(hook.condition)
       }
     }
   }
@@ -556,7 +556,7 @@ async function computeEligibility(cwd: string): Promise<EligibilitySnapshot> {
     for (const group of resolved) {
       for (const hook of group.hooks) {
         if (hook.condition && !(hook.file in conditionResults)) {
-          conditionResults[hook.file] = evalCondition(hook.condition)
+          conditionResults[hook.file] = await evalCondition(hook.condition)
         }
       }
     }

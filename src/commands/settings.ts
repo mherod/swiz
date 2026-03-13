@@ -388,6 +388,7 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
     disabledHooks: projectSettings?.disabledHooks,
   }
 
+  const detectedStacks = await detectProjectStack(parsed.targetDir)
   printSettings({
     effective: { ...effective, disabledHooks: settings.disabledHooks },
     path,
@@ -396,7 +397,7 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
     ambitionSource,
     strictNoDirectMainSource,
     projectPolicyInfo,
-    detectedStacks: detectProjectStack(parsed.targetDir),
+    detectedStacks,
   })
 }
 
