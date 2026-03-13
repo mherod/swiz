@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  contentBlockSchema,
   countToolCalls,
   extractEditedFilePaths,
   extractPlainTurns,
@@ -8,12 +9,17 @@ import {
   extractTranscriptData,
   formatTurnsAsContext,
   getUnsupportedTranscriptFormatMessage,
+  isContentBlock,
   isDocsOnlySession,
   isHookFeedback,
+  isTextBlockWithText,
   isUnsupportedTranscriptFormat,
   type PlainTurn,
   parseTranscriptEntries,
   projectKeyFromCwd,
+  textBlockSchema,
+  toolResultBlockSchema,
+  toolUseBlockSchema,
 } from "./transcript-utils.ts"
 
 describe("transcript-utils.ts", () => {
@@ -1662,6 +1668,183 @@ describe("transcript-utils.ts", () => {
       expect(result.editedPaths.size).toBe(1)
       expect(result.editedPaths.has("/repo/src/foo.ts")).toBe(true)
       expect(result.toolCallCount).toBe(2)
+    })
+  })
+
+  describe("Zod content block schemas", () => {
+    describe("textBlockSchema", () => {
+      it("validates a valid text block", () => {
+        const result = textBlockSchema.safeParse({ type: "text", text: "hello" })
+        expect(result.success).toBe(true)
+        if (result.success) {
+          expect(result.data.type).toBe("text")
+          expect(result.data.text).toBe("hello")
+        }
+      })
+
+      it("validates text block without text field", () => {
+        const result = textBlockSchema.safeParse({ type: "text" })
+        expect(result.success).toBe(true)
+      })
+
+      it("rejects non-text type", () => {
+        const result = textBlockSchema.safeParse({ type: "tool_use" })
+        expect(result.success).toBe(false)
+      })
+
+      it("preserves extra fields via looseObject", () => {
+        const result = textBlockSchema.safeParse({ type: "text", text: "hi", extra: "field" })
+        expect(result.success).toBe(true)
+        if (result.success) {
+          expect((result.data as Record<string, unknown>).extra).toBe("field")
+        }
+      })
+    })
+
+    describe("toolUseBlockSchema", () => {
+      it("validates a valid tool_use block", () => {
+        const result = toolUseBlockSchema.safeParse({
+          type: "tool_use",
+          id: "123",
+          name: "Bash",
+          input: { command: "echo hello" },
+        })
+        expect(result.success).toBe(true)
+        if (result.success) {
+          expect(result.data.name).toBe("Bash")
+          expect(result.data.input?.command).toBe("echo hello")
+        }
+      })
+
+      it("validates minimal tool_use block", () => {
+        const result = toolUseBlockSchema.safeParse({ type: "tool_use" })
+        expect(result.success).toBe(true)
+      })
+
+      it("rejects wrong type", () => {
+        const result = toolUseBlockSchema.safeParse({ type: "text", text: "wrong" })
+        expect(result.success).toBe(false)
+      })
+    })
+
+    describe("toolResultBlockSchema", () => {
+      it("validates a valid tool_result block", () => {
+        const result = toolResultBlockSchema.safeParse({
+          type: "tool_result",
+          tool_use_id: "123",
+          content: "output",
+          is_error: false,
+        })
+        expect(result.success).toBe(true)
+      })
+
+      it("validates minimal tool_result block", () => {
+        const result = toolResultBlockSchema.safeParse({ type: "tool_result" })
+        expect(result.success).toBe(true)
+      })
+
+      it("rejects wrong type", () => {
+        const result = toolResultBlockSchema.safeParse({ type: "tool_use" })
+        expect(result.success).toBe(false)
+      })
+    })
+
+    describe("contentBlockSchema (union with catch-all for unknown types)", () => {
+      it("validates text blocks", () => {
+        const result = contentBlockSchema.safeParse({ type: "text", text: "hello" })
+        expect(result.success).toBe(true)
+        if (result.success && result.data.type === "text") {
+          expect(result.data.text).toBe("hello")
+        }
+      })
+
+      it("validates tool_use blocks", () => {
+        const result = contentBlockSchema.safeParse({ type: "tool_use", name: "Bash" })
+        expect(result.success).toBe(true)
+        if (result.success && result.data.type === "tool_use") {
+          expect(result.data.name).toBe("Bash")
+        }
+      })
+
+      it("validates tool_result blocks", () => {
+        const result = contentBlockSchema.safeParse({ type: "tool_result", is_error: true })
+        expect(result.success).toBe(true)
+        if (result.success && result.data.type === "tool_result") {
+          expect(result.data.is_error).toBe(true)
+        }
+      })
+
+      it("validates unknown block types via catch-all", () => {
+        const result = contentBlockSchema.safeParse({ type: "custom_block", value: 42 })
+        expect(result.success).toBe(true)
+        if (result.success) {
+          expect(result.data.type).toBe("custom_block")
+        }
+      })
+
+      it("rejects blocks without type field", () => {
+        const result = contentBlockSchema.safeParse({ text: "no type" })
+        expect(result.success).toBe(false)
+      })
+
+      it("exhaustive switch on union members compiles", () => {
+        const blocks = [
+          { type: "text" as const, text: "hello" },
+          { type: "tool_use" as const, name: "Bash" },
+          { type: "tool_result" as const },
+        ]
+        const types = blocks.map((b) => {
+          const result = contentBlockSchema.safeParse(b)
+          return result.success ? result.data.type : "invalid"
+        })
+        expect(types).toEqual(["text", "tool_use", "tool_result"])
+      })
+    })
+
+    describe("isContentBlock", () => {
+      it("returns true for valid text block", () => {
+        expect(isContentBlock({ type: "text", text: "hello" })).toBe(true)
+      })
+
+      it("returns true for valid tool_use block", () => {
+        expect(isContentBlock({ type: "tool_use", name: "Bash" })).toBe(true)
+      })
+
+      it("returns true for valid tool_result block", () => {
+        expect(isContentBlock({ type: "tool_result" })).toBe(true)
+      })
+
+      it("returns true for unknown block type with type field", () => {
+        expect(isContentBlock({ type: "custom" })).toBe(true)
+      })
+
+      it("returns false for non-objects", () => {
+        expect(isContentBlock("string")).toBe(false)
+        expect(isContentBlock(42)).toBe(false)
+        expect(isContentBlock(null)).toBe(false)
+      })
+
+      it("returns false for objects without type", () => {
+        expect(isContentBlock({ text: "hello" })).toBe(false)
+      })
+    })
+
+    describe("isTextBlockWithText", () => {
+      it("returns true for text block with string text", () => {
+        expect(isTextBlockWithText({ type: "text", text: "hello" })).toBe(true)
+      })
+
+      it("returns false for text block without text", () => {
+        expect(isTextBlockWithText({ type: "text" })).toBe(false)
+      })
+
+      it("returns false for non-text blocks", () => {
+        expect(isTextBlockWithText({ type: "tool_use" })).toBe(false)
+      })
+
+      it("returns false for text block with non-string text", () => {
+        expect(isTextBlockWithText({ type: "text", text: 123 })).toBe(false)
+      })
     })
   })
 })

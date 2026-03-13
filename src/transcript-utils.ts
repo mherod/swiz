@@ -1,30 +1,87 @@
 import { open, readdir, readFile, stat } from "node:fs/promises"
 import { basename, join, resolve } from "node:path"
+import { z } from "zod"
 import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 import { createDefaultTaskStore } from "./task-roots.ts"
 
-// ─── Content block types ─────────────────────────────────────────────────────
+// ─── Content block Zod schemas ────────────────────────────────────────────────
 
-export interface TextBlock {
-  type: "text"
-  text?: string
-}
+/**
+ * Zod schemas for content blocks in transcript messages.
+ * Use `contentBlockSchema.safeParse()` for type-safe validation instead of
+ * manual `typeof` checks and `as { ... }` casts.
+ */
 
-export interface ToolUseBlock {
-  type: "tool_use"
-  id?: string
-  name?: string
-  input?: Record<string, unknown>
-}
+/** Schema for text content blocks: `{ type: "text", text?: string }` */
+export const textBlockSchema = z.looseObject({
+  type: z.literal("text"),
+  text: z.string().optional(),
+})
 
-export interface ToolResultBlock {
+/** Schema for tool_use blocks: `{ type: "tool_use", id?, name?, input? }` */
+export const toolUseBlockSchema = z.looseObject({
+  type: z.literal("tool_use"),
+  id: z.string().optional(),
+  name: z.string().optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+})
+
+/** Schema for tool_result blocks: `{ type: "tool_result", tool_use_id?, content?, is_error? }` */
+export const toolResultBlockSchema: z.ZodType<{
   type: "tool_result"
   tool_use_id?: string
-  content?: string | ContentBlock[]
+  content?: string | unknown[]
   is_error?: boolean
+  [k: string]: unknown
+}> = z.looseObject({
+  type: z.literal("tool_result"),
+  tool_use_id: z.string().optional(),
+  is_error: z.boolean().optional(),
+})
+
+/** Catch-all schema for unknown content block types */
+export const unknownBlockSchema = z.looseObject({
+  type: z.string(),
+})
+
+/**
+ * Content block schema — union of known block types with catch-all fallback.
+ * Validates against known block types (text, tool_use, tool_result) and
+ * falls back to catch-all for unknown types.
+ *
+ * Note: Uses `z.union()` instead of `z.discriminatedUnion()` because the
+ * catch-all schema uses `z.string()` (non-literal) for the type field.
+ *
+ * @example
+ * const result = contentBlockSchema.safeParse(block)
+ * if (result.success && result.data.type === "tool_use") {
+ *   // TypeScript knows result.data has name, input, etc.
+ * }
+ */
+export const contentBlockSchema = z.union([
+  textBlockSchema,
+  toolUseBlockSchema,
+  toolResultBlockSchema,
+  unknownBlockSchema,
+])
+
+/** Type guard: checks if value is a valid content block */
+export function isContentBlock(value: unknown): value is ContentBlock {
+  return contentBlockSchema.safeParse(value).success
 }
 
+/** Type guard: checks if value is a valid text block with a string `text` field */
+export function isTextBlockWithText(value: unknown): value is { type: "text"; text: string } {
+  const result = textBlockSchema.safeParse(value)
+  return result.success && typeof result.data.text === "string"
+}
+
+// ─── Content block TypeScript interfaces (derived from schemas) ───────────────
+
+export type TextBlock = z.infer<typeof textBlockSchema>
+export type ToolUseBlock = z.infer<typeof toolUseBlockSchema>
+export type ToolResultBlock = z.infer<typeof toolResultBlockSchema>
 export type ContentBlock =
   | TextBlock
   | ToolUseBlock
@@ -616,13 +673,7 @@ export function extractTextFromUnknownContent(content: unknown): string {
   if (!Array.isArray(content)) return ""
   return normalizeExtractedText(
     content
-      .filter(
-        (block): block is { type: "text"; text: string } =>
-          !!block &&
-          typeof block === "object" &&
-          (block as { type?: unknown }).type === "text" &&
-          typeof (block as { text?: unknown }).text === "string"
-      )
+      .filter(isTextBlockWithText)
       .map((block) => block.text)
       .join("\n")
   )
@@ -742,12 +793,8 @@ function isToolUseSummaryBlock(block: unknown): block is {
   name: string
   input?: Record<string, unknown>
 } {
-  return (
-    !!block &&
-    typeof block === "object" &&
-    (block as { type?: unknown }).type === "tool_use" &&
-    typeof (block as { name?: unknown }).name === "string"
-  )
+  const result = toolUseBlockSchema.safeParse(block)
+  return result.success && typeof result.data.name === "string"
 }
 
 function isToolResultSummaryBlock(block: unknown): block is {
@@ -755,9 +802,7 @@ function isToolResultSummaryBlock(block: unknown): block is {
   content?: string | ContentBlock[]
   is_error?: boolean
 } {
-  return (
-    !!block && typeof block === "object" && (block as { type?: unknown }).type === "tool_result"
-  )
+  return toolResultBlockSchema.safeParse(block).success
 }
 
 function summarizeToolCalls(content: unknown[]): string {
@@ -766,33 +811,68 @@ function summarizeToolCalls(content: unknown[]): string {
   return `[Tools: ${calls.join(", ")}]`
 }
 
+/**
+ * Schema for JSONL transcript entries from Claude and similar providers.
+ * Validates the basic structure and provides type-safe access to fields.
+ */
+const jsonlEntrySchema = z.looseObject({
+  type: z.string().optional(),
+  role: z.string().optional(),
+  sessionId: z.string().optional(),
+  timestamp: z.string().optional(),
+  cwd: z.string().optional(),
+  message: z
+    .looseObject({
+      role: z.string().optional(),
+      content: z.unknown().optional(),
+    })
+    .optional(),
+})
+
 function parseJsonlEntries(text: string): TranscriptEntry[] {
   const entries: TranscriptEntry[] = []
   for (const line of text.split("\n").filter(Boolean)) {
+    let parsed: unknown
     try {
-      const parsed = JSON.parse(line) as (TranscriptEntry & { role?: string }) | null
-      if (!parsed || typeof parsed !== "object") continue
+      parsed = JSON.parse(line)
+    } catch {
+      continue
+    }
+    const result = jsonlEntrySchema.safeParse(parsed)
+    if (!result.success) continue
 
-      if (typeof parsed.type !== "string" && typeof parsed.role === "string") {
-        const role = parsed.role
-        if (role === "user" || role === "assistant") {
-          parsed.type = role
-        }
+    const entry = result.data
+
+    // Coerce role → type when type is missing
+    if (typeof entry.type !== "string" && typeof entry.role === "string") {
+      const role = entry.role
+      if (role === "user" || role === "assistant") {
+        entry.type = role
       }
-      entries.push(parsed)
-    } catch {}
+    }
+    entries.push(entry as TranscriptEntry)
   }
   return entries
 }
+
+// ─── Zod schemas for provider-specific transcript records ─────────────────────
+
+/**
+ * Schema for Codex message content parts (input_text, output_text).
+ * Replaces manual `as Record<string, unknown>` casts with type-safe validation.
+ */
+const codexContentPartSchema = z.looseObject({
+  type: z.string(),
+  text: z.string().optional(),
+})
 
 function extractCodexMessageText(content: unknown, textType: "input_text" | "output_text"): string {
   if (!Array.isArray(content)) return ""
   const texts = content
     .map((part) => {
-      if (!part || typeof part !== "object") return ""
-      const block = part as Record<string, unknown>
-      if (block.type !== textType) return ""
-      return typeof block.text === "string" ? block.text : ""
+      const result = codexContentPartSchema.safeParse(part)
+      if (!result.success || result.data.type !== textType) return ""
+      return result.data.text ?? ""
     })
     .filter(Boolean)
   return texts.join("\n").trim()
@@ -819,6 +899,41 @@ function parseCodexToolInput(raw: unknown): Record<string, unknown> {
   return {}
 }
 
+// ─── Codex record schemas ─────────────────────────────────────────────────────
+
+/** Schema for Codex session_meta records */
+const codexSessionMetaSchema = z.looseObject({
+  type: z.literal("session_meta"),
+  timestamp: z.string().optional(),
+  payload: z.looseObject({
+    id: z.string().optional(),
+    cwd: z.string().optional(),
+  }),
+})
+
+/** Schema for Codex event_msg records (user messages) */
+const codexEventMsgSchema = z.looseObject({
+  type: z.literal("event_msg"),
+  timestamp: z.string().optional(),
+  payload: z.looseObject({
+    type: z.literal("user_message"),
+    message: z.string().optional(),
+  }),
+})
+
+/** Schema for Codex response_item records (assistant messages and tool calls) */
+const codexResponseItemSchema = z.looseObject({
+  type: z.literal("response_item"),
+  timestamp: z.string().optional(),
+  payload: z.looseObject({
+    type: z.string(),
+    role: z.string().optional(),
+    content: z.unknown().optional(),
+    name: z.string().optional(),
+    arguments: z.unknown().optional(),
+  }),
+})
+
 function parseCodexJsonlEntries(text: string): TranscriptEntry[] {
   const entries: TranscriptEntry[] = []
   let sessionId: string | undefined
@@ -826,33 +941,30 @@ function parseCodexJsonlEntries(text: string): TranscriptEntry[] {
   for (const line of text.split("\n").filter(Boolean)) {
     let parsed: unknown
     try {
-      parsed = JSON.parse(line) as unknown
+      parsed = JSON.parse(line)
     } catch {
       continue
     }
-    if (!parsed || typeof parsed !== "object") continue
 
-    const record = parsed as Record<string, unknown>
-    const timestamp = typeof record.timestamp === "string" ? record.timestamp : undefined
-
-    if (record.type === "session_meta" && record.payload && typeof record.payload === "object") {
-      const payload = record.payload as Record<string, unknown>
-      const parsedId = payload.id
-      if (typeof parsedId === "string" && parsedId.trim()) {
-        sessionId = parsedId
+    // Try session_meta
+    const sessionMetaResult = codexSessionMetaSchema.safeParse(parsed)
+    if (sessionMetaResult.success) {
+      const payload = sessionMetaResult.data.payload
+      if (payload.id?.trim()) {
+        sessionId = payload.id
       }
       continue
     }
 
-    if (record.type === "event_msg" && record.payload && typeof record.payload === "object") {
-      const payload = record.payload as Record<string, unknown>
-      if (payload.type === "user_message" && typeof payload.message === "string") {
-        const message = payload.message.trim()
-        if (!message) continue
+    // Try event_msg (user messages)
+    const eventMsgResult = codexEventMsgSchema.safeParse(parsed)
+    if (eventMsgResult.success) {
+      const message = eventMsgResult.data.payload.message?.trim()
+      if (message) {
         entries.push({
           type: "user",
           sessionId,
-          timestamp,
+          timestamp: eventMsgResult.data.timestamp,
           message: {
             role: "user",
             content: message,
@@ -862,11 +974,12 @@ function parseCodexJsonlEntries(text: string): TranscriptEntry[] {
       continue
     }
 
-    if (record.type !== "response_item" || !record.payload || typeof record.payload !== "object") {
-      continue
-    }
+    // Try response_item
+    const responseItemResult = codexResponseItemSchema.safeParse(parsed)
+    if (!responseItemResult.success) continue
 
-    const payload = record.payload as Record<string, unknown>
+    const { timestamp, payload } = responseItemResult.data
+
     if (payload.type === "message" && payload.role === "assistant") {
       const text = extractCodexMessageText(payload.content, "output_text")
       if (!text) continue
@@ -882,7 +995,7 @@ function parseCodexJsonlEntries(text: string): TranscriptEntry[] {
       continue
     }
 
-    if (payload.type === "function_call" && typeof payload.name === "string" && payload.name) {
+    if (payload.type === "function_call" && payload.name) {
       entries.push({
         type: "assistant",
         sessionId,
@@ -904,6 +1017,13 @@ function parseCodexJsonlEntries(text: string): TranscriptEntry[] {
   return entries
 }
 
+// ─── Gemini content schemas ───────────────────────────────────────────────────
+
+/** Schema for Gemini text content items */
+const geminiTextItemSchema = z.looseObject({
+  text: z.string(),
+})
+
 function extractGeminiText(content: unknown): string {
   if (typeof content === "string") return content.trim()
 
@@ -911,33 +1031,23 @@ function extractGeminiText(content: unknown): string {
     const texts = content
       .map((item) => {
         if (typeof item === "string") return item
-        if (
-          item &&
-          typeof item === "object" &&
-          typeof (item as Record<string, unknown>).text === "string"
-        ) {
-          return (item as Record<string, unknown>).text as string
-        }
-        return ""
+        const result = geminiTextItemSchema.safeParse(item)
+        return result.success ? result.data.text : ""
       })
       .filter(Boolean)
     return texts.join("\n").trim()
   }
 
   if (content && typeof content === "object") {
+    const textResult = geminiTextItemSchema.safeParse(content)
+    if (textResult.success) return textResult.data.text.trim()
+
     const obj = content as Record<string, unknown>
-    if (typeof obj.text === "string") return obj.text.trim()
     if (Array.isArray(obj.parts)) {
       const texts = obj.parts
         .map((part) => {
-          if (
-            part &&
-            typeof part === "object" &&
-            typeof (part as Record<string, unknown>).text === "string"
-          ) {
-            return (part as Record<string, unknown>).text as string
-          }
-          return ""
+          const result = geminiTextItemSchema.safeParse(part)
+          return result.success ? result.data.text : ""
         })
         .filter(Boolean)
       return texts.join("\n").trim()
@@ -947,22 +1057,35 @@ function extractGeminiText(content: unknown): string {
   return ""
 }
 
+// ─── Gemini entry schemas ─────────────────────────────────────────────────────
+
+/** Schema for Gemini tool call records */
+const geminiToolCallSchema = z.looseObject({
+  name: z.string(),
+  args: z.unknown().optional(),
+})
+
+/** Schema for Gemini session envelope */
+const geminiSessionSchema = z.looseObject({
+  sessionId: z.string().optional(),
+  messages: z.array(z.unknown()),
+})
+
 function parseGeminiEntries(text: string): TranscriptEntry[] {
   let parsed: unknown
   try {
-    parsed = JSON.parse(text) as unknown
+    parsed = JSON.parse(text)
   } catch {
     return []
   }
-  if (!parsed || typeof parsed !== "object") return []
 
-  const record = parsed as Record<string, unknown>
-  if (!Array.isArray(record.messages)) return []
+  const sessionResult = geminiSessionSchema.safeParse(parsed)
+  if (!sessionResult.success) return []
 
-  const sessionId = typeof record.sessionId === "string" ? record.sessionId : undefined
+  const sessionId = sessionResult.data.sessionId
   const entries: TranscriptEntry[] = []
 
-  for (const msg of record.messages) {
+  for (const msg of sessionResult.data.messages) {
     if (!msg || typeof msg !== "object") continue
     const m = msg as Record<string, unknown>
     const rawType = typeof m.type === "string" ? m.type : typeof m.role === "string" ? m.role : ""
@@ -992,14 +1115,15 @@ function parseGeminiEntries(text: string): TranscriptEntry[] {
 
       if (Array.isArray(m.toolCalls)) {
         for (const call of m.toolCalls) {
-          if (!call || typeof call !== "object") continue
-          const tool = call as Record<string, unknown>
-          if (typeof tool.name !== "string" || !tool.name) continue
+          const toolResult = geminiToolCallSchema.safeParse(call)
+          if (!toolResult.success) continue
           const input =
-            tool.args && typeof tool.args === "object" && !Array.isArray(tool.args)
-              ? (tool.args as Record<string, unknown>)
+            toolResult.data.args &&
+            typeof toolResult.data.args === "object" &&
+            !Array.isArray(toolResult.data.args)
+              ? (toolResult.data.args as Record<string, unknown>)
               : {}
-          blocks.push({ type: "tool_use", name: tool.name, input })
+          blocks.push({ type: "tool_use", name: toolResult.data.name, input })
         }
       }
 
@@ -1075,31 +1199,54 @@ function parseJsonObjectAt(text: string, startIndex: number): Record<string, unk
   return null
 }
 
+// ─── Cursor content schemas ───────────────────────────────────────────────────
+
+/** Schema for Cursor text content blocks */
+const cursorTextBlockSchema = z.looseObject({
+  type: z.literal("text"),
+  text: z.string(),
+})
+
+/** Schema for Cursor tool-call blocks */
+const cursorToolCallBlockSchema = z.looseObject({
+  type: z.literal("tool-call"),
+  toolName: z.string(),
+  params: z.unknown().optional(),
+})
+
+/** Schema for Cursor tool-result blocks */
+const cursorToolResultBlockSchema = z.looseObject({
+  type: z.literal("tool-result"),
+  result: z.unknown().optional(),
+})
+
 function normalizeCursorContent(content: unknown): string | ContentBlock[] {
   if (typeof content === "string") return content
   if (!Array.isArray(content)) return ""
 
   const blocks: ContentBlock[] = []
   for (const item of content) {
-    if (!item || typeof item !== "object") continue
-    const block = item as Record<string, unknown>
-
-    if (block.type === "text" && typeof block.text === "string") {
-      blocks.push({ type: "text", text: block.text })
+    const textResult = cursorTextBlockSchema.safeParse(item)
+    if (textResult.success) {
+      blocks.push({ type: "text", text: textResult.data.text })
       continue
     }
 
-    if (block.type === "tool-call" && typeof block.toolName === "string") {
+    const toolCallResult = cursorToolCallBlockSchema.safeParse(item)
+    if (toolCallResult.success) {
       const input =
-        block.params && typeof block.params === "object" && !Array.isArray(block.params)
-          ? (block.params as Record<string, unknown>)
+        toolCallResult.data.params &&
+        typeof toolCallResult.data.params === "object" &&
+        !Array.isArray(toolCallResult.data.params)
+          ? (toolCallResult.data.params as Record<string, unknown>)
           : {}
-      blocks.push({ type: "tool_use", name: block.toolName, input })
+      blocks.push({ type: "tool_use", name: toolCallResult.data.toolName, input })
       continue
     }
 
-    if (block.type === "tool-result") {
-      const resultText = extractTextFromUnknownContent(block.result)
+    const toolResultResult = cursorToolResultBlockSchema.safeParse(item)
+    if (toolResultResult.success) {
+      const resultText = extractTextFromUnknownContent(toolResultResult.data.result)
       if (resultText) {
         blocks.push({ type: "tool_result", content: [{ type: "text", text: resultText }] })
       }
@@ -1437,8 +1584,9 @@ export function extractEditedFilePaths(jsonlText: string): Set<string> {
     if (!Array.isArray(content)) continue
 
     for (const block of content) {
-      const b = block as { type?: string; name?: string; input?: Record<string, unknown> }
-      if (b?.type !== "tool_use") continue
+      const result = toolUseBlockSchema.safeParse(block)
+      if (!result.success) continue
+      const b = result.data
 
       if (b.name && EDIT_TOOLS.has(b.name)) {
         const pathVal = b.input?.file_path ?? b.input?.path
@@ -1505,8 +1653,9 @@ export function extractTranscriptData(
     if (entry.type === "assistant") {
       if (Array.isArray(content)) {
         for (const block of content) {
-          const b = block as { type?: string; name?: string; input?: Record<string, unknown> }
-          if (b?.type !== "tool_use") continue
+          const parseResult = toolUseBlockSchema.safeParse(block)
+          if (!parseResult.success) continue
+          const b = parseResult.data
           toolCallCount++
 
           if (b.name && EDIT_TOOLS.has(b.name)) {
@@ -1531,7 +1680,7 @@ export function extractTranscriptData(
       text = content
     } else if (Array.isArray(content)) {
       text = content
-        .filter((b): b is TextBlock => b?.type === "text" && typeof b.text === "string")
+        .filter(isTextBlockWithText)
         .map((b) => b.text)
         .join("\n")
 
