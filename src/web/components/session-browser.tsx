@@ -78,6 +78,26 @@ interface ParsedToolCallDetail {
   rawJson: string | null
 }
 
+interface ParsedSwizTaskCommand {
+  action: string
+  taskId: string | null
+  status: string | null
+  subject: string | null
+  evidence: string | null
+}
+
+interface ParsedSkillPayload {
+  baseDir: string | null
+  body: string
+}
+
+interface ParsedSearchToolParams {
+  pattern: string | null
+  path: string | null
+  outputMode: string | null
+  options: Array<{ label: string; value: string }>
+}
+
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleString([], {
     year: "numeric",
@@ -317,6 +337,107 @@ function parseToolCallDetail(name: string, detail: string): ParsedToolCallDetail
     commonFields,
     rawJson: JSON.stringify(payload, null, 2),
   }
+}
+
+function parseSwizTasksCommand(command: string): ParsedSwizTaskCommand | null {
+  const normalized = command.replace(/\s+/g, " ").trim()
+  const actionMatch =
+    /(?:^| )(?:swiz|bun run index\.ts) tasks (complete|update|create|get|list)\b/i.exec(normalized)
+  const action = actionMatch?.[1]?.toLowerCase()
+  if (!action) return null
+
+  const taskIdMatch = / tasks (?:complete|update|get)\s+([^\s-][^\s]*)/i.exec(normalized)
+  const statusMatch = /--status\s+([^\s]+)/i.exec(normalized)
+  const evidenceMatch =
+    /--evidence\s+"([^"]+)"/i.exec(normalized) ??
+    /--evidence\s+'([^']+)'/i.exec(normalized) ??
+    /--evidence\s+([^\s]+)/i.exec(normalized)
+  const subjectMatch =
+    /--subject\s+"([^"]+)"/i.exec(normalized) ??
+    /--subject\s+'([^']+)'/i.exec(normalized) ??
+    /--subject\s+([^\s]+)/i.exec(normalized)
+
+  return {
+    action,
+    taskId: taskIdMatch?.[1] ?? null,
+    status: statusMatch?.[1] ?? null,
+    subject: subjectMatch?.[1] ?? null,
+    evidence: evidenceMatch?.[1] ?? null,
+  }
+}
+
+function parseSkillToolCallName(detail: string): string | null {
+  const trimmed = detail.trim()
+  if (!trimmed) return null
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>
+    return typeof parsed.skill === "string" && parsed.skill.trim().length > 0
+      ? parsed.skill.trim()
+      : null
+  } catch {
+    return null
+  }
+}
+
+function skillNameFromMessage(message: SessionMessage | undefined): string | null {
+  if (!message?.toolCalls || message.role !== "assistant") return null
+  for (const tc of message.toolCalls) {
+    if (tc.name.toLowerCase() !== "skill") continue
+    const skillName = parseSkillToolCallName(tc.detail)
+    if (skillName) return skillName
+  }
+  return null
+}
+
+function parseSkillPayload(text: string): ParsedSkillPayload | null {
+  if (!/Base directory for this skill:/i.test(text)) return null
+  const lines = text.split("\n")
+  const firstLine = lines[0]?.trim() ?? ""
+  const baseDirMatch = /^Base directory for this skill:\s*(.+)$/i.exec(firstLine)
+  const baseDir = baseDirMatch?.[1]?.trim() ?? null
+  const body = (baseDirMatch ? lines.slice(1).join("\n") : text).trim()
+  return { baseDir, body: body || text.trim() }
+}
+
+function parseJsonObject(detail: string): Record<string, unknown> | null {
+  const trimmed = detail.trim()
+  if (!trimmed) return null
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
+    return parsed as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function parseSearchToolParams(name: string, detail: string): ParsedSearchToolParams | null {
+  const lower = name.toLowerCase()
+  if (lower !== "grep" && lower !== "rg") return null
+  const payload = parseJsonObject(detail)
+  if (!payload) return null
+
+  const pattern = typeof payload.pattern === "string" ? payload.pattern : null
+  const path = typeof payload.path === "string" ? payload.path : null
+  const outputMode = typeof payload.output_mode === "string" ? payload.output_mode : null
+  const optionKeys = [
+    "context",
+    "head_limit",
+    "offset",
+    "glob",
+    "type",
+    "multiline",
+    "-A",
+    "-B",
+    "-C",
+    "-i",
+  ] as const
+  const options: Array<{ label: string; value: string }> = []
+  for (const key of optionKeys) {
+    const value = toToolFieldValue(payload[key])
+    if (value) options.push({ label: key, value })
+  }
+  return { pattern, path, outputMode, options }
 }
 
 function renderUserContextBlocks(
@@ -964,6 +1085,36 @@ function SessionTasksSection({
   summary: SessionTaskSummary | null
   loading: boolean
 }) {
+  const openTasks = useMemo(
+    () => tasks.filter((task) => task.status === "pending" || task.status === "in_progress"),
+    [tasks]
+  )
+  const completedTasks = useMemo(
+    () => tasks.filter((task) => task.status === "completed" || task.status === "cancelled"),
+    [tasks]
+  )
+  const renderTaskRow = (task: SessionTask) => {
+    const taskTime = task.statusChangedAt ?? task.completionTimestamp
+    return (
+      <li key={task.id} className="session-task-row">
+        <div className="session-task-meta">
+          <span className="session-task-id">#{task.id}</span>
+          <TaskStatusBadge status={task.status} />
+        </div>
+        <p className={cn("session-task-subject", `session-task-subject-${task.status}`)}>
+          <TaskChecklistMark status={task.status} />
+          <span>{task.subject}</span>
+        </p>
+        {taskTime ? (
+          <p className="session-task-time">{formatTime(new Date(taskTime).getTime())}</p>
+        ) : null}
+        {task.completionEvidence ? (
+          <p className="session-task-evidence">{task.completionEvidence}</p>
+        ) : null}
+      </li>
+    )
+  }
+
   return (
     <section className="session-tasks-section" aria-label="Current tasks for selected session">
       <h3 className="session-tasks-title">Session tasks</h3>
@@ -977,29 +1128,19 @@ function SessionTasksSection({
       ) : tasks.length === 0 ? (
         <p className="empty">No tasks recorded for this session.</p>
       ) : (
-        <ul className="session-task-list">
-          {tasks.map((task) => {
-            const taskTime = task.statusChangedAt ?? task.completionTimestamp
-            return (
-              <li key={task.id} className="session-task-row">
-                <div className="session-task-meta">
-                  <span className="session-task-id">#{task.id}</span>
-                  <TaskStatusBadge status={task.status} />
-                </div>
-                <p className={cn("session-task-subject", `session-task-subject-${task.status}`)}>
-                  <TaskChecklistMark status={task.status} />
-                  <span>{task.subject}</span>
-                </p>
-                {taskTime ? (
-                  <p className="session-task-time">{formatTime(new Date(taskTime).getTime())}</p>
-                ) : null}
-                {task.completionEvidence ? (
-                  <p className="session-task-evidence">{task.completionEvidence}</p>
-                ) : null}
-              </li>
-            )
-          })}
-        </ul>
+        <>
+          {openTasks.length > 0 ? (
+            <ul className="session-task-list">{openTasks.map(renderTaskRow)}</ul>
+          ) : (
+            <p className="empty">No open tasks in this session.</p>
+          )}
+          {completedTasks.length > 0 ? (
+            <details className="session-completed-tasks">
+              <summary>Show completed ({completedTasks.length})</summary>
+              <ul className="session-task-list">{completedTasks.map(renderTaskRow)}</ul>
+            </details>
+          ) : null}
+        </>
       )}
     </section>
   )
@@ -1200,6 +1341,17 @@ export function SessionMessages({
               : [`${message.timestamp}-${i}`]
             const key = groupKeys[0]!
             const isNew = groupKeys.some((groupKey) => newKeys?.has(groupKey) ?? false)
+            const adjacentSkillName =
+              skillNameFromMessage(grouped[i - 1]?.message) ??
+              skillNameFromMessage(grouped[i + 1]?.message)
+            const parsedSkillPayload =
+              message.role === "user" ? parseSkillPayload(message.text ?? "") : null
+            const showSkillPayload =
+              message.role === "user" && Boolean(adjacentSkillName) && Boolean(parsedSkillPayload)
+            const skillBody = parsedSkillPayload?.body ?? ""
+            const collapseSkillBody =
+              skillBody.length > 300 || skillBody.split("\n").length > COLLAPSE_LINE_THRESHOLD
+            const skillPreview = collapseSkillBody ? summarizeText(skillBody) : skillBody
             const isToolOnlyAssistant =
               message.role === "assistant" &&
               (message.text ?? "").trim().length === 0 &&
@@ -1221,7 +1373,33 @@ export function SessionMessages({
                     <span>{timestamp}</span>
                   </span>
                 </div>
-                {message.text && <MessageBody text={message.text} role={message.role} />}
+                {message.text &&
+                  (showSkillPayload ? (
+                    <div className="skill-payload-box">
+                      <div className="skill-payload-header">
+                        <span className="skill-payload-label">Skill content</span>
+                        <code className="skill-payload-name">{adjacentSkillName}</code>
+                      </div>
+                      {parsedSkillPayload?.baseDir ? (
+                        <p className="skill-payload-base">
+                          <span className="skill-payload-base-label">base dir</span>
+                          <code className="skill-payload-base-path">
+                            {compactPath(parsedSkillPayload.baseDir, 90)}
+                          </code>
+                        </p>
+                      ) : null}
+                      {collapseSkillBody ? (
+                        <details className="tool-raw-json">
+                          <summary>{skillPreview}</summary>
+                          <pre className="message-text">{skillBody}</pre>
+                        </details>
+                      ) : (
+                        <pre className="message-text">{skillBody}</pre>
+                      )}
+                    </div>
+                  ) : (
+                    <MessageBody text={message.text} role={message.role} />
+                  ))}
                 {message.toolCalls &&
                   message.toolCalls.length > 0 &&
                   (isToolOnlyAssistant ? (
@@ -1234,6 +1412,11 @@ export function SessionMessages({
                           {(() => {
                             const parsedDetail = parseToolCallDetail(tc.name, tc.detail)
                             const isBash = tc.name.toLowerCase() === "bash"
+                            const swizTask =
+                              isBash && parsedDetail.command
+                                ? parseSwizTasksCommand(parsedDetail.command)
+                                : null
+                            const searchParams = parseSearchToolParams(tc.name, tc.detail)
                             const rawJson = parsedDetail.rawJson
                             const shouldCollapseRawJson =
                               !isBash &&
@@ -1248,7 +1431,56 @@ export function SessionMessages({
                                 <div className="tool-call-header">
                                   <span className="tool-name">{tc.name}</span>
                                 </div>
-                                {isBash && parsedDetail.command ? (
+                                {isBash && swizTask ? (
+                                  <div className="tool-first-party-call">
+                                    <p className="tool-first-party-title">swiz tasks</p>
+                                    <ul className="tool-param-list">
+                                      <li className="tool-param-item">
+                                        <span className="tool-param-label">action</span>
+                                        <code className="tool-param-value">{swizTask.action}</code>
+                                      </li>
+                                      {swizTask.taskId ? (
+                                        <li className="tool-param-item">
+                                          <span className="tool-param-label">task</span>
+                                          <code className="tool-param-value">
+                                            {swizTask.taskId}
+                                          </code>
+                                        </li>
+                                      ) : null}
+                                      {swizTask.status ? (
+                                        <li className="tool-param-item">
+                                          <span className="tool-param-label">status</span>
+                                          <code className="tool-param-value">
+                                            {swizTask.status}
+                                          </code>
+                                        </li>
+                                      ) : null}
+                                      {swizTask.subject ? (
+                                        <li className="tool-param-item">
+                                          <span className="tool-param-label">subject</span>
+                                          <code className="tool-param-value">
+                                            {swizTask.subject}
+                                          </code>
+                                        </li>
+                                      ) : null}
+                                      {swizTask.evidence ? (
+                                        <li className="tool-param-item">
+                                          <span className="tool-param-label">evidence</span>
+                                          <code className="tool-param-value">
+                                            {swizTask.evidence}
+                                          </code>
+                                        </li>
+                                      ) : null}
+                                    </ul>
+                                    <details className="tool-raw-json">
+                                      <summary>Full command</summary>
+                                      <pre className="tool-command-block">
+                                        {parsedDetail.command}
+                                      </pre>
+                                    </details>
+                                  </div>
+                                ) : null}
+                                {isBash && parsedDetail.command && !swizTask ? (
                                   <pre className="tool-command-block">{parsedDetail.command}</pre>
                                 ) : null}
                                 {isBash && parsedDetail.description ? (
@@ -1268,6 +1500,43 @@ export function SessionMessages({
                                       </li>
                                     ))}
                                   </ul>
+                                ) : null}
+                                {!isBash && searchParams ? (
+                                  <div className="tool-first-party-call">
+                                    <p className="tool-first-party-title">{tc.name} search</p>
+                                    {searchParams.pattern ? (
+                                      <pre className="tool-command-block">
+                                        {searchParams.pattern}
+                                      </pre>
+                                    ) : null}
+                                    <ul className="tool-param-list">
+                                      {searchParams.path ? (
+                                        <li className="tool-param-item">
+                                          <span className="tool-param-label">path</span>
+                                          <code className="tool-param-value">
+                                            {compactPath(searchParams.path, 90)}
+                                          </code>
+                                        </li>
+                                      ) : null}
+                                      {searchParams.outputMode ? (
+                                        <li className="tool-param-item">
+                                          <span className="tool-param-label">output</span>
+                                          <code className="tool-param-value">
+                                            {searchParams.outputMode}
+                                          </code>
+                                        </li>
+                                      ) : null}
+                                      {searchParams.options.map((option) => (
+                                        <li
+                                          key={`${option.label}:${option.value}`}
+                                          className="tool-param-item"
+                                        >
+                                          <span className="tool-param-label">{option.label}</span>
+                                          <code className="tool-param-value">{option.value}</code>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
                                 ) : null}
                                 {!isBash && rawJson && shouldCollapseRawJson ? (
                                   <details className="tool-raw-json">

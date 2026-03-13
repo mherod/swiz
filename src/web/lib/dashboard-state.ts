@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useOptimistic, useState, useTransition } from "react"
+import { useCallback, useMemo, useOptimistic, useRef, useState, useTransition } from "react"
 import type {
   ProjectSessions,
   ProjectTask,
@@ -122,6 +122,28 @@ function getNextSessionCandidate(
   return fallback ? { cwd: fallback.cwd, sessionId: fallback.session.id } : null
 }
 
+function cacheSummary(status: Record<string, number> | null): { total: number; warm: number } {
+  if (!status) return { total: 0, warm: 0 }
+  const keys = [
+    "snapshotCacheSize",
+    "ghCacheSize",
+    "eligibilityCacheSize",
+    "transcriptIndexSize",
+    "cooldownRegistrySize",
+    "gitStateCacheSize",
+    "projectSettingsCacheSize",
+    "manifestCacheSize",
+  ] as const
+  let total = 0
+  let warm = 0
+  for (const key of keys) {
+    const value = status[key] ?? 0
+    total += value
+    if (value > 0) warm += 1
+  }
+  return { total, warm }
+}
+
 export function useDashboardState() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [cacheStatus, setCacheStatus] = useState<Record<string, number> | null>(null)
@@ -203,6 +225,7 @@ export function useDashboardState() {
   }, [])
   const [error, setError] = useState("")
   const [lastUpdated, setLastUpdated] = useState("starting")
+  const lastCacheStatusChangeAtRef = useRef(0)
 
   const loadMessages = useCallback(async (cwd: string, sessionId: string) => {
     setMessagesLoading(true)
@@ -376,7 +399,23 @@ export function useDashboardState() {
 
   useDashboardOverviewPolling({
     onMetrics: setMetrics,
-    onCacheStatus: setCacheStatus,
+    onCacheStatus: (nextStatus) => {
+      setCacheStatus((prevStatus) => {
+        if (!prevStatus) {
+          lastCacheStatusChangeAtRef.current = Date.now()
+          return nextStatus
+        }
+        const prev = cacheSummary(prevStatus)
+        const next = cacheSummary(nextStatus)
+        const now = Date.now()
+        const changedRecently = now - lastCacheStatusChangeAtRef.current < 12_000
+        const minorJitter =
+          Math.abs(next.total - prev.total) <= 2 && Math.abs(next.warm - prev.warm) <= 1
+        if (changedRecently && minorJitter) return prevStatus
+        lastCacheStatusChangeAtRef.current = now
+        return nextStatus
+      })
+    },
     onWatches: setWatches,
     onProjects: (loadedProjects) => {
       setProjects(loadedProjects)

@@ -1144,6 +1144,22 @@ tbody tr:hover {
   font-size: 0.72rem;
 }
 
+.tool-first-party-call {
+  border: 1px solid rgba(126, 182, 255, 0.18);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(8, 18, 34, 0.45);
+}
+
+.tool-first-party-title {
+  margin: 0;
+  color: #8fb9ff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 .tool-param-list {
   list-style: none;
   margin: 8px 0 0;
@@ -1185,6 +1201,54 @@ tbody tr:hover {
   color: #92b6f2;
   font-size: 0.7rem;
   user-select: none;
+}
+
+.skill-payload-box {
+  margin-top: 6px;
+  border: 1px solid rgba(121, 169, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(8, 17, 32, 0.45);
+  padding: 8px;
+}
+
+.skill-payload-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.skill-payload-label {
+  font-size: 0.68rem;
+  color: #8cb4fa;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.skill-payload-name {
+  font-size: 0.68rem;
+  color: #cfe0ff;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.skill-payload-base {
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.skill-payload-base-label {
+  font-size: 0.66rem;
+  color: #87a4d8;
+  text-transform: lowercase;
+}
+
+.skill-payload-base-path {
+  font-size: 0.66rem;
+  color: #b9cdee;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
 }
 
 /* ── Tool stats bar ── */
@@ -1432,6 +1496,26 @@ tbody tr:hover {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.session-completed-tasks {
+  margin-top: 8px;
+}
+
+.session-completed-tasks > summary {
+  cursor: pointer;
+  color: #9cb6e6;
+  font-size: 0.69rem;
+  user-select: none;
+  list-style: none;
+}
+
+.session-completed-tasks > summary::-webkit-details-marker {
+  display: none;
+}
+
+.session-completed-tasks > .session-task-list {
+  margin-top: 8px;
 }
 
 .hook-context-box {

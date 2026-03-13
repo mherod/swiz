@@ -79,7 +79,8 @@ interface OverviewPollingDeps {
 }
 
 export function useDashboardOverviewPolling(deps: OverviewPollingDeps) {
-  const prevSnapshotRef = useRef("")
+  const prevCoreSnapshotRef = useRef("")
+  const prevCacheSnapshotRef = useRef("")
   const initialLoadDone = useRef(false)
 
   useEffect(() => {
@@ -102,13 +103,19 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps) {
             `/dispatch/active?cwd=${encodeURIComponent(project ?? "")}&sessionId=${encodeURIComponent(session ?? "")}`
           ),
         ])
-        const snapshot = JSON.stringify({ m, cs, w, pr, ap, ad })
-        if (snapshot === prevSnapshotRef.current) return
-        prevSnapshotRef.current = snapshot
-
+        const coreSnapshot = JSON.stringify({ m, w, pr, ap, ad })
+        const cacheSnapshot = JSON.stringify(cs)
+        const coreChanged = coreSnapshot !== prevCoreSnapshotRef.current
+        const cacheChanged = cacheSnapshot !== prevCacheSnapshotRef.current
+        if (!coreChanged && !cacheChanged) return
+        if (cacheChanged) {
+          prevCacheSnapshotRef.current = cacheSnapshot
+          deps.onCacheStatus(cs)
+        }
+        if (!coreChanged) return
+        prevCoreSnapshotRef.current = coreSnapshot
         const loadedProjects = pr.projects ?? []
         deps.onMetrics(m)
-        deps.onCacheStatus(cs)
         deps.onWatches(w)
         deps.onProjects(loadedProjects)
         deps.onAgentProcesses(ap.providers ?? {})
