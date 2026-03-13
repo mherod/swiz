@@ -425,6 +425,25 @@ function applyHeadTail<T>(
   return values
 }
 
+// ─── Time filtering ─────────────────────────────────────────────────────────
+
+function filterTurnsByTime(turns: Turn[], cutoffMs: number): Turn[] {
+  return turns.filter((t) => {
+    const ts = t.entry.timestamp
+    if (!ts) return false
+    const ms = new Date(ts).getTime()
+    return Number.isFinite(ms) && ms >= cutoffMs
+  })
+}
+
+function filterDebugEventsByTime(events: DebugEvent[], cutoffMs: number): DebugEvent[] {
+  return events.filter((e) => e.ts >= cutoffMs)
+}
+
+function filterSessionsByTime(sessions: Session[], cutoffMs: number): Session[] {
+  return sessions.filter((s) => s.mtime >= cutoffMs)
+}
+
 // ─── Main rendering ──────────────────────────────────────────────────────────
 
 function renderTurns(turns: Turn[], sessionId: string, debugEvents?: DebugEvent[]): void {
@@ -517,6 +536,7 @@ export interface TranscriptArgs {
   listOnly: boolean
   headCount: number | undefined
   tailCount: number | undefined
+  hours: number | undefined
   autoReply: boolean
   includeDebug: boolean
   userOnly: boolean
@@ -552,6 +572,7 @@ const TRANSCRIPT_VALUE_ARGS: ValueArgDef[] = [
   ["--dir", "-d"],
   ["--head", "-H"],
   ["--tail", "-T"],
+  ["--hours", "-h"],
 ]
 
 function parseTranscriptValueArgs(args: string[]): {
@@ -580,6 +601,15 @@ function parseTranscriptValueArgs(args: string[]): {
   return { flags, values }
 }
 
+function parseHoursValue(raw: string | undefined): number | undefined {
+  if (!raw) return undefined
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(`Invalid --hours value: ${raw}. Must be a positive number.`)
+  }
+  return n
+}
+
 export function parseTranscriptArgs(args: string[]): TranscriptArgs {
   const { flags, values } = parseTranscriptValueArgs(args)
   const explicitAgents = AGENTS.filter((agent) => args.includes(`--${agent.id}`))
@@ -589,6 +619,7 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
     listOnly: flags.listOnly ?? false,
     headCount: values["--head"] ? parseInt(values["--head"], 10) : undefined,
     tailCount: values["--tail"] ? parseInt(values["--tail"], 10) : undefined,
+    hours: parseHoursValue(values["--hours"]),
     autoReply: flags.autoReply ?? false,
     includeDebug: flags.includeDebug ?? false,
     userOnly: flags.userOnly ?? false,
@@ -696,13 +727,17 @@ export const transcriptCommand: Command = {
   name: "transcript",
   description: "Display Agent-User chat history for the current project",
   usage:
-    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--auto-reply] [--include-debug] [--user-only] [--all|--claude|--cursor|--gemini|--codex]",
+    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--hours N] [--auto-reply] [--include-debug] [--user-only] [--all|--claude|--cursor|--gemini|--codex]",
   options: [
     { flags: "--session, -s <id>", description: "Show a specific session (prefix match)" },
     { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
     { flags: "--list, -l", description: "List available sessions without displaying content" },
     { flags: "--head, -H <n>", description: "Show only the first N conversation turns" },
     { flags: "--tail, -T <n>", description: "Show only the last N conversation turns" },
+    {
+      flags: "--hours, -h <n>",
+      description: "Limit output to sessions and turns from the last N hours",
+    },
     { flags: "--auto-reply", description: "Generate an AI-suggested follow-up message" },
     {
       flags: "--user-only",
@@ -735,19 +770,26 @@ export const transcriptCommand: Command = {
     const selectedProviders = getSelectedProviders(selectedAgents)
     validateProviders(selectedProviders, selectedAgents)
 
-    const sessions = await loadFilteredSessions(parsed.targetDir, selectedProviders)
+    const cutoffMs = parsed.hours ? Date.now() - parsed.hours * 3600_000 : undefined
+
+    let sessions = await loadFilteredSessions(parsed.targetDir, selectedProviders)
+    if (cutoffMs) sessions = filterSessionsByTime(sessions, cutoffMs)
+    if (sessions.length === 0 && cutoffMs) {
+      console.log(`\n  ${DIM}No sessions found within the last ${parsed.hours} hour(s).${RESET}\n`)
+      return
+    }
+
     if (parsed.listOnly) {
       renderSessionList(sessions, parsed.targetDir)
       return
     }
 
     const session = pickSession(sessions, parsed.sessionQuery)
-    const turns = applyHeadTail(
-      await loadTurns(session, parsed.userOnly),
-      parsed.headCount,
-      parsed.tailCount
-    )
-    const debugEvents = await loadOptionalDebug(session, parsed)
+    let allTurns = await loadTurns(session, parsed.userOnly)
+    if (cutoffMs) allTurns = filterTurnsByTime(allTurns, cutoffMs)
+    const turns = applyHeadTail(allTurns, parsed.headCount, parsed.tailCount)
+    let debugEvents = await loadOptionalDebug(session, parsed)
+    if (debugEvents && cutoffMs) debugEvents = filterDebugEventsByTime(debugEvents, cutoffMs)
 
     if (parsed.autoReply) {
       await generateAutoReply(turns)

@@ -10,6 +10,7 @@ describe("parseTranscriptArgs", () => {
     expect(result.listOnly).toBe(false)
     expect(result.headCount).toBeUndefined()
     expect(result.tailCount).toBeUndefined()
+    expect(result.hours).toBeUndefined()
     expect(result.autoReply).toBe(false)
     expect(result.includeDebug).toBe(false)
     expect(result.userOnly).toBe(false)
@@ -138,6 +139,35 @@ describe("parseTranscriptArgs", () => {
     const result = parseTranscriptArgs(["--session", "--list"])
     // --list is treated as the value for --session (it's truthy and next)
     expect(result.sessionQuery).toBe("--list")
+  })
+
+  test("parses --hours with value", () => {
+    const result = parseTranscriptArgs(["--hours", "4"])
+    expect(result.hours).toBe(4)
+  })
+
+  test("parses -h shorthand for hours", () => {
+    const result = parseTranscriptArgs(["-h", "12"])
+    expect(result.hours).toBe(12)
+  })
+
+  test("parses fractional --hours", () => {
+    const result = parseTranscriptArgs(["--hours", "0.5"])
+    expect(result.hours).toBe(0.5)
+  })
+
+  test("ignores --hours without value", () => {
+    const result = parseTranscriptArgs(["--hours"])
+    expect(result.hours).toBeUndefined()
+  })
+
+  test("throws on non-positive --hours", () => {
+    expect(() => parseTranscriptArgs(["--hours", "0"])).toThrow("Invalid --hours")
+    expect(() => parseTranscriptArgs(["--hours", "-5"])).toThrow("Invalid --hours")
+  })
+
+  test("throws on non-numeric --hours", () => {
+    expect(() => parseTranscriptArgs(["--hours", "abc"])).toThrow("Invalid --hours")
   })
 
   test("handles unknown flags gracefully", () => {
