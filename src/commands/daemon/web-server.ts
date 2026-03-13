@@ -31,7 +31,7 @@ import {
   type TranscriptIndexCache,
 } from "../daemon.ts"
 import type { WarmStatusLineSnapshot } from "../status-line.ts"
-import { handleSessionRoutes } from "./session-routes.ts"
+import { type AgentProcessSnapshot, handleSessionRoutes } from "./session-routes.ts"
 import { type CapturedToolCall, captureSessionToolCall, stripAnsi } from "./utils.ts"
 import type { DaemonWorkerRuntime } from "./worker-runtime.ts"
 
@@ -145,10 +145,6 @@ export interface DaemonWebServerContext {
   workerRuntime: DaemonWorkerRuntime
 }
 
-interface AgentProcessSnapshot {
-  providers: Record<string, number[]>
-}
-
 function isCursorMacProcess(command: string): boolean {
   return command.includes("cursor.app/contents/macos/cursor")
 }
@@ -178,7 +174,7 @@ async function getActiveAgentProcesses(): Promise<AgentProcessSnapshot> {
     new Response(proc.stderr).text(),
   ])
   await proc.exited
-  if (proc.exitCode !== 0) return { providers: {} }
+  if (proc.exitCode !== 0) return { providers: {}, pidCwds: {} }
 
   const providers = new Map<string, Set<number>>()
   const addProviderPid = (provider: string, pid: number) => {
@@ -212,11 +208,45 @@ async function getActiveAgentProcesses(): Promise<AgentProcessSnapshot> {
     }
   }
 
+  const allPids: number[] = []
+  for (const pids of providers.values()) {
+    for (const pid of pids) allPids.push(pid)
+  }
+
+  const pidCwds: Record<number, string> = {}
+  if (allPids.length > 0) {
+    const lsofProc = Bun.spawn(["lsof", "-p", allPids.join(","), "-d", "cwd", "-Fn"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    let lsofTimedOut = false
+    const killTimer = setTimeout(() => {
+      lsofTimedOut = true
+      lsofProc.kill()
+    }, 3000)
+    const [lsofOut] = await Promise.all([
+      new Response(lsofProc.stdout).text(),
+      new Response(lsofProc.stderr).text(),
+    ])
+    await lsofProc.exited
+    clearTimeout(killTimer)
+    if (!lsofTimedOut) {
+      let currentPid = 0
+      for (const line of lsofOut.split("\n")) {
+        if (line.startsWith("p")) {
+          currentPid = parseInt(line.slice(1), 10)
+        } else if (line.startsWith("n") && currentPid > 0) {
+          pidCwds[currentPid] = line.slice(1)
+        }
+      }
+    }
+  }
+
   const snapshot: Record<string, number[]> = {}
   for (const [provider, pids] of providers) {
     snapshot[provider] = [...pids].sort((a, b) => a - b)
   }
-  return { providers: snapshot }
+  return { providers: snapshot, pidCwds }
 }
 
 export function startDaemonWebServer(ctx: DaemonWebServerContext) {
@@ -868,6 +898,7 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
           getSessionData(cwd, sessionId, limit, sessionToolCalls),
         getSessionTasks,
         getProjectTasks,
+        getAgentProcessSnapshot: () => getActiveAgentProcesses(),
       })
       if (sessionRouteResponse) return sessionRouteResponse
 

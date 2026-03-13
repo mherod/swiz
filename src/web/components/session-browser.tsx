@@ -20,6 +20,8 @@ export interface SessionPreview {
   lastMessageAt?: number
   dispatches?: number
   activeDispatch?: ActiveHookDispatch
+  /** True when a verified agent process is running for this session's provider and project. */
+  processAlive?: boolean
 }
 
 export interface ProjectSessions {
@@ -166,6 +168,7 @@ function mergeSessionPreview(base: SessionPreview, incoming: SessionPreview): Se
     lastMessageAt: Math.max(base.lastMessageAt ?? 0, incoming.lastMessageAt ?? 0) || undefined,
     mtime: Math.max(base.mtime, incoming.mtime),
     dispatches: Math.max(base.dispatches ?? 0, incoming.dispatches ?? 0) || undefined,
+    processAlive: base.processAlive || incoming.processAlive,
   }
 }
 
@@ -556,19 +559,23 @@ export function SessionNav({
         : null,
     [selectedProject]
   )
-  // Keep "Active now" focused on truly recent activity.
+  // "Active now" uses verified process liveness first, with recency as fallback.
   const activeThresholdMs = 6 * 60 * 1000
   const activeSessions = useMemo(
     () =>
       sortedSessions?.filter(
-        (session) => Date.now() - (session.lastMessageAt ?? session.mtime) <= activeThresholdMs
+        (session) =>
+          session.processAlive ||
+          Date.now() - (session.lastMessageAt ?? session.mtime) <= activeThresholdMs
       ),
     [sortedSessions]
   )
   const recentSessions = useMemo(
     () =>
       sortedSessions?.filter(
-        (session) => Date.now() - (session.lastMessageAt ?? session.mtime) > activeThresholdMs
+        (session) =>
+          !session.processAlive &&
+          Date.now() - (session.lastMessageAt ?? session.mtime) > activeThresholdMs
       ),
     [sortedSessions]
   )
@@ -580,7 +587,7 @@ export function SessionNav({
     const primaryPid = processPids[0]
     const isDeleting = deletingSessionId === session.id
     const isKilling = processPids.some((pid) => killingPids.has(pid))
-    const hasLiveProcess = processPids.length > 0 || isKilling
+    const hasLiveProcess = session.processAlive || processPids.length > 0 || isKilling
     const actionLabel = hasLiveProcess ? "Kill process" : "Delete session"
     const actionDisabled = hasLiveProcess ? isKilling : isDeleting
     const actionIcon = hasLiveProcess ? (isKilling ? "…" : "✕") : isDeleting ? "…" : "🗑"

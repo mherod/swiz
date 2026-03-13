@@ -1,3 +1,8 @@
+export interface AgentProcessSnapshot {
+  providers: Record<string, number[]>
+  pidCwds: Record<number, string>
+}
+
 interface SessionRoutesContext {
   touchProject: (cwd: string) => void
   getKnownProjects: () => string[]
@@ -27,6 +32,52 @@ interface SessionRoutesContext {
     tasks: unknown[]
     summary: { total: number; open: number; completed: number; cancelled: number }
   }>
+  getAgentProcessSnapshot: () => Promise<AgentProcessSnapshot>
+}
+
+/** Check if any agent process has a cwd that is within the given project directory. */
+export function hasLiveAgentForProject(
+  projectCwd: string,
+  snapshot: AgentProcessSnapshot
+): boolean {
+  for (const cwd of Object.values(snapshot.pidCwds)) {
+    if (cwd === projectCwd || cwd.startsWith(projectCwd + "/")) return true
+  }
+  return false
+}
+
+/** Get PIDs of agent processes whose cwd is within the given project directory. */
+function getProjectAgentPids(projectCwd: string, snapshot: AgentProcessSnapshot): number[] {
+  const pids: number[] = []
+  for (const [pidStr, cwd] of Object.entries(snapshot.pidCwds)) {
+    if (cwd === projectCwd || cwd.startsWith(projectCwd + "/")) {
+      pids.push(Number(pidStr))
+    }
+  }
+  return pids.sort((a, b) => a - b)
+}
+
+/** Annotate sessions with processAlive based on agent process cwds matching project cwd. */
+export function annotateSessionsWithLiveness(
+  sessions: unknown[],
+  projectCwd: string,
+  snapshot: AgentProcessSnapshot
+): unknown[] {
+  const projectHasLiveAgent = hasLiveAgentForProject(projectCwd, snapshot)
+  if (!projectHasLiveAgent) {
+    return sessions.map((s) => ({ ...(s as Record<string, unknown>), processAlive: false }))
+  }
+  const projectPids = new Set(getProjectAgentPids(projectCwd, snapshot))
+  // Map provider -> whether it has a live PID in this project
+  const liveProviders = new Set<string>()
+  for (const [provider, pids] of Object.entries(snapshot.providers)) {
+    if (pids.some((pid) => projectPids.has(pid))) liveProviders.add(provider)
+  }
+  return sessions.map((s) => {
+    const session = s as Record<string, unknown>
+    const provider = ((session.provider as string) ?? "unknown").toLowerCase()
+    return { ...session, processAlive: liveProviders.has(provider) }
+  })
 }
 
 export async function handleSessionRoutes(
@@ -49,6 +100,8 @@ export async function handleSessionRoutes(
       .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
       .slice(0, limitProjects)
 
+    const agentSnapshot = await ctx.getAgentProcessSnapshot()
+
     const allProjects = await Promise.all(
       ordered.map(async ({ cwd, lastSeenAt }) => {
         const pinnedSessionId =
@@ -68,7 +121,7 @@ export async function handleSessionRoutes(
           name: cwd.split("/").at(-1) ?? cwd,
           lastSeenAt,
           sessionCount: sessions.sessionCount,
-          sessions: sessions.sessions,
+          sessions: annotateSessionsWithLiveness(sessions.sessions, cwd, agentSnapshot),
           statusLine,
         }
       })
