@@ -1125,8 +1125,20 @@ export function SessionMessages({
               : [`${message.timestamp}-${i}`]
             const key = groupKeys[0]!
             const isNew = groupKeys.some((groupKey) => newKeys?.has(groupKey) ?? false)
+            const isToolOnlyAssistant =
+              message.role === "assistant" &&
+              (message.text ?? "").trim().length === 0 &&
+              (message.toolCalls?.length ?? 0) > 0
             return (
-              <li key={key} className={cn("message-row", message.role, isNew && "message-new")}>
+              <li
+                key={key}
+                className={cn(
+                  "message-row",
+                  message.role,
+                  isNew && "message-new",
+                  isToolOnlyAssistant && "message-row-tool-only"
+                )}
+              >
                 <div className="message-meta">
                   <span className="message-role">{role}</span>
                   <span className="message-meta-right">
@@ -1135,22 +1147,37 @@ export function SessionMessages({
                   </span>
                 </div>
                 {message.text && <MessageBody text={message.text} role={message.role} />}
-                {message.toolCalls && message.toolCalls.length > 0 && (
-                  <ul className="tool-calls">
-                    {message.toolCalls.map((tc) => (
-                      <li key={`${tc.name}-${tc.detail}`} className="tool-call">
-                        <span className="tool-name">{tc.name}</span>
-                        {tc.detail && (
-                          <span
-                            className="tool-detail"
-                            // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped via renderInline
-                            dangerouslySetInnerHTML={{ __html: renderInline(tc.detail) }}
-                          />
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                {message.toolCalls &&
+                  message.toolCalls.length > 0 &&
+                  (isToolOnlyAssistant ? (
+                    <ul className="tool-calls tool-calls-verbose">
+                      {message.toolCalls.map((tc) => (
+                        <li key={`${tc.name}-${tc.detail}`} className="tool-call tool-call-verbose">
+                          <details className="tool-call-details" open>
+                            <summary>
+                              <span className="tool-name">{tc.name}</span>
+                            </summary>
+                            {tc.detail ? <pre className="tool-detail-full">{tc.detail}</pre> : null}
+                          </details>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <ul className="tool-calls">
+                      {message.toolCalls.map((tc) => (
+                        <li key={`${tc.name}-${tc.detail}`} className="tool-call">
+                          <span className="tool-name">{tc.name}</span>
+                          {tc.detail && (
+                            <span
+                              className="tool-detail"
+                              // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped via renderInline
+                              dangerouslySetInnerHTML={{ __html: renderInline(tc.detail) }}
+                            />
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  ))}
               </li>
             )
           })}

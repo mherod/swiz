@@ -134,6 +134,10 @@ function extractInlineContextBlocks(text: string): {
   let cleanedText = text
   const metadataBlocks: ParsedUserMetadataBlock[] = []
 
+  const taskNotification = extractTaskNotificationBlocks(cleanedText)
+  cleanedText = taskNotification.cleanedText
+  metadataBlocks.push(...taskNotification.blocks)
+
   const localCommand = extractLocalCommandBlocks(cleanedText)
   cleanedText = localCommand.cleanedText
   metadataBlocks.push(...localCommand.blocks)
@@ -163,6 +167,56 @@ function extractInlineContextBlocks(text: string): {
   metadataBlocks.push(...domContext.blocks)
 
   return { cleanedText, metadataBlocks }
+}
+
+function extractTagValue(text: string, tagName: string): string | null {
+  const escapedTag = tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const match = new RegExp(`<${escapedTag}>\\s*([\\s\\S]*?)\\s*<\\/${escapedTag}>`, "i").exec(text)
+  const value = match?.[1]?.trim()
+  return value && value.length > 0 ? value : null
+}
+
+function stripInlineTaskReplayPrefix(text: string): string {
+  return text
+    .replace(/^\s*User\s+\d{1,2}\/\d{1,2}\/\d{4},\s+\d{1,2}:\d{2}:\d{2}(?:\s+[AP]M)?\s*/i, "")
+    .trim()
+}
+
+function extractTaskNotificationBlocks(text: string): {
+  cleanedText: string
+  blocks: ParsedUserMetadataBlock[]
+} {
+  const blockRe = /<task-notification>\s*([\s\S]*?)(?:<\/task-notification>|$)/gi
+  let cleanedText = text
+  const blocks: ParsedUserMetadataBlock[] = []
+
+  for (const match of text.matchAll(blockRe)) {
+    const full = match[0]
+    if (!full) continue
+    const raw = match[1] ?? ""
+    const details: Array<{ label: string; value: string }> = []
+    const taskId = extractTagValue(raw, "task-id")
+    const toolUseId = extractTagValue(raw, "tool-use-id")
+    const outputFile = extractTagValue(raw, "output-file")
+
+    if (taskId) details.push({ label: "task", value: taskId })
+    if (toolUseId) details.push({ label: "tool call", value: compactMetadataValue(toolUseId, 120) })
+    if (outputFile) details.push({ label: "output", value: compactPathValue(outputFile) })
+
+    if (details.length > 0) {
+      blocks.push({
+        title: blocks.length > 0 ? `Task notification ${blocks.length + 1}` : "Task notification",
+        details,
+        notes: [],
+        kind: "tagged",
+      })
+    }
+
+    cleanedText = cleanedText.replace(full, " ").trim()
+  }
+
+  if (blocks.length === 0) return { cleanedText: text, blocks: [] }
+  return { cleanedText: stripInlineTaskReplayPrefix(cleanedText), blocks }
 }
 
 const INLINE_METADATA_TAGS = [

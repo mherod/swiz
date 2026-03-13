@@ -42,22 +42,17 @@ export function DashboardApp() {
     sessionMessages,
   } = useDashboardState()
 
-  if (error) {
-    return (
-      <div className="bento">
-        <section className="card bento-error" role="alert" aria-live="assertive">
-          <h2>Error</h2>
-          <p>{error}</p>
-        </section>
-      </div>
-    )
-  }
-
   return (
     <div className={`bento ${activeView === "settings" ? "bento-view-settings" : ""}`}>
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         Dashboard updated at {lastUpdated}.
       </p>
+      {error ? (
+        <section className="card bento-error" role="alert" aria-live="assertive">
+          <h2>Error</h2>
+          <p>{error}</p>
+        </section>
+      ) : null}
       <Header
         lastUpdated={lastUpdated}
         uptime={m.uptimeHuman ?? "starting"}

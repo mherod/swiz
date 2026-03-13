@@ -177,6 +177,15 @@ export interface ProjectTaskPreview extends SessionTaskPreview {
 
 const MAX_CAPTURED_TOOL_CALLS_PER_SESSION = 400
 
+function formatToolInputForDisplay(input: Record<string, unknown> | undefined): string {
+  if (!input) return ""
+  try {
+    return JSON.stringify(input, null, 2)
+  } catch {
+    return summarizeToolInput(input)
+  }
+}
+
 export function summarizeToolInput(input: Record<string, unknown> | undefined): string {
   if (!input) return ""
   if (typeof input.subject === "string") {
@@ -293,7 +302,7 @@ export function extractToolCalls(content: unknown): ToolCallSummary[] {
     )
     .map((block) => {
       const name = block.name!
-      return { name, detail: summarizeToolInput(block.input) }
+      return { name, detail: formatToolInputForDisplay(block.input) }
     })
 }
 

@@ -165,88 +165,100 @@ async function getProcessCommand(pid: number): Promise<string | null> {
 }
 
 async function getActiveAgentProcesses(): Promise<AgentProcessSnapshot> {
-  const proc = Bun.spawn(["ps", "-Ao", "pid,command"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [stdout] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  if (proc.exitCode !== 0) return { providers: {}, pidCwds: {} }
-
-  const providers = new Map<string, Set<number>>()
-  const addProviderPid = (provider: string, pid: number) => {
-    const existing = providers.get(provider) ?? new Set<number>()
-    existing.add(pid)
-    providers.set(provider, existing)
-  }
-
-  const rows = stdout.split("\n")
-  for (const row of rows) {
-    const trimmed = row.trim()
-    if (!trimmed) continue
-    const match = /^(\d+)\s+(.+)$/.exec(trimmed)
-    if (!match) continue
-    const pid = Number(match[1])
-    const command = (match[2] ?? "").toLowerCase()
-    const executable = command.split(/\s+/, 1)[0] ?? ""
-    if (!pid || !command) continue
-
-    if (command.includes("claude-agent-sdk/cli.js")) {
-      addProviderPid("claude", pid)
-    }
-    if (command.includes("/codex") || command.includes(" codex ")) {
-      addProviderPid("codex", pid)
-    }
-    if (command.includes("gemini")) {
-      addProviderPid("gemini", pid)
-    }
-    if (isCursorMacProcess(command) || executable === "agent" || executable.endsWith("/agent")) {
-      addProviderPid("cursor", pid)
-    }
-  }
-
-  const allPids: number[] = []
-  for (const pids of providers.values()) {
-    for (const pid of pids) allPids.push(pid)
-  }
-
-  const pidCwds: Record<number, string> = {}
-  if (allPids.length > 0) {
-    const lsofProc = Bun.spawn(["lsof", "-p", allPids.join(","), "-d", "cwd", "-Fn"], {
+  try {
+    const proc = Bun.spawn(["ps", "-Ao", "pid,command"], {
       stdout: "pipe",
       stderr: "pipe",
     })
-    let lsofTimedOut = false
-    const killTimer = setTimeout(() => {
-      lsofTimedOut = true
-      lsofProc.kill()
-    }, 3000)
-    const [lsofOut] = await Promise.all([
-      new Response(lsofProc.stdout).text(),
-      new Response(lsofProc.stderr).text(),
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
     ])
-    await lsofProc.exited
-    clearTimeout(killTimer)
-    if (!lsofTimedOut) {
-      let currentPid = 0
-      for (const line of lsofOut.split("\n")) {
-        if (line.startsWith("p")) {
-          currentPid = parseInt(line.slice(1), 10)
-        } else if (line.startsWith("n") && currentPid > 0) {
-          pidCwds[currentPid] = line.slice(1)
+    await proc.exited
+    if (proc.exitCode !== 0) return { providers: {}, pidCwds: {} }
+
+    const providers = new Map<string, Set<number>>()
+    const addProviderPid = (provider: string, pid: number) => {
+      const existing = providers.get(provider) ?? new Set<number>()
+      existing.add(pid)
+      providers.set(provider, existing)
+    }
+
+    const rows = stdout.split("\n")
+    for (const row of rows) {
+      const trimmed = row.trim()
+      if (!trimmed) continue
+      const match = /^(\d+)\s+(.+)$/.exec(trimmed)
+      if (!match) continue
+      const pid = Number(match[1])
+      const command = (match[2] ?? "").toLowerCase()
+      const executable = command.split(/\s+/, 1)[0] ?? ""
+      if (!pid || !command) continue
+
+      if (command.includes("claude-agent-sdk/cli.js")) {
+        addProviderPid("claude", pid)
+      }
+      if (command.includes("/codex") || command.includes(" codex ")) {
+        addProviderPid("codex", pid)
+      }
+      if (command.includes("gemini")) {
+        addProviderPid("gemini", pid)
+      }
+      if (isCursorMacProcess(command) || executable === "agent" || executable.endsWith("/agent")) {
+        addProviderPid("cursor", pid)
+      }
+    }
+
+    const allPids: number[] = []
+    for (const pids of providers.values()) {
+      for (const pid of pids) allPids.push(pid)
+    }
+
+    const pidCwds: Record<number, string> = {}
+    if (allPids.length > 0) {
+      const chunkSize = 120
+      for (let i = 0; i < allPids.length; i += chunkSize) {
+        const pidChunk = allPids.slice(i, i + chunkSize)
+        const lsofProc = Bun.spawn(["lsof", "-p", pidChunk.join(","), "-d", "cwd", "-Fn"], {
+          stdout: "pipe",
+          stderr: "pipe",
+        })
+        let lsofTimedOut = false
+        const killTimer = setTimeout(() => {
+          lsofTimedOut = true
+          lsofProc.kill()
+        }, 3000)
+        try {
+          const [lsofOut] = await Promise.all([
+            new Response(lsofProc.stdout).text(),
+            new Response(lsofProc.stderr).text(),
+          ])
+          await lsofProc.exited
+          if (!lsofTimedOut) {
+            let currentPid = 0
+            for (const line of lsofOut.split("\n")) {
+              if (line.startsWith("p")) {
+                currentPid = parseInt(line.slice(1), 10)
+              } else if (line.startsWith("n") && currentPid > 0) {
+                pidCwds[currentPid] = line.slice(1)
+              }
+            }
+          }
+        } finally {
+          clearTimeout(killTimer)
         }
       }
     }
-  }
 
-  const snapshot: Record<string, number[]> = {}
-  for (const [provider, pids] of providers) {
-    snapshot[provider] = [...pids].sort((a, b) => a - b)
+    const snapshot: Record<string, number[]> = {}
+    for (const [provider, pids] of providers) {
+      snapshot[provider] = [...pids].sort((a, b) => a - b)
+    }
+    return { providers: snapshot, pidCwds }
+  } catch {
+    // Process inspection should never break dashboard APIs.
+    return { providers: {}, pidCwds: {} }
   }
-  return { providers: snapshot, pidCwds }
 }
 
 export function startDaemonWebServer(ctx: DaemonWebServerContext) {
@@ -432,8 +444,18 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
       }
 
       if (url.pathname === "/process/agents" && req.method === "GET") {
-        const snapshot = await getActiveAgentProcesses()
-        return Response.json(snapshot)
+        try {
+          const snapshot = await getActiveAgentProcesses()
+          return Response.json(snapshot)
+        } catch (error) {
+          return Response.json(
+            {
+              error:
+                error instanceof Error ? error.message : "Failed to inspect active agent processes",
+            },
+            { status: 500 }
+          )
+        }
       }
 
       if (url.pathname === "/process/agents/kill" && req.method === "POST") {

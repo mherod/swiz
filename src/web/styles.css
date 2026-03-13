@@ -1069,6 +1069,53 @@ tbody tr:hover {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
 }
 
+.message-row-tool-only {
+  border-color: rgba(99, 129, 204, 0.36);
+}
+
+.tool-calls-verbose {
+  display: block;
+  margin-top: 6px;
+}
+
+.tool-call-verbose {
+  display: block;
+  margin-bottom: 6px;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.tool-call-details {
+  border: 1px solid rgba(99, 129, 204, 0.28);
+  border-radius: 8px;
+  background: rgba(99, 129, 204, 0.09);
+  padding: 6px 8px;
+}
+
+.tool-call-details > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.tool-call-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-detail-full {
+  margin: 8px 0 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(9, 14, 24, 0.65);
+  border: 1px solid rgba(126, 182, 255, 0.18);
+  color: #c8d6ee;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* ── Tool stats bar ── */
 
 .tool-stats-bar {
