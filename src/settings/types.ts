@@ -154,6 +154,8 @@ export interface SwizSettings {
   githubCiGate: boolean
   changesRequestedGate: boolean
   personalRepoIssuesGate: boolean
+  /** When true, blocks issue close commands unless explicitly allowed. */
+  issueCloseGate: boolean
   /** When true, blocks all direct pushes to the default branch regardless of repo type. */
   strictNoDirectMain: boolean
   taskDurationWarningMinutes: number

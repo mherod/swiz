@@ -20,6 +20,7 @@ interface GlobalSettingsForm {
   githubCiGate: boolean
   changesRequestedGate: boolean
   personalRepoIssuesGate: boolean
+  issueCloseGate: boolean
   taskDurationWarningMinutes: number
   largeFileSizeKb: number
 }
@@ -42,6 +43,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   githubCiGate: true,
   changesRequestedGate: true,
   personalRepoIssuesGate: true,
+  issueCloseGate: false,
   taskDurationWarningMinutes: 45,
   largeFileSizeKb: 200,
 }
@@ -111,6 +113,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     githubCiGate: settings.githubCiGate !== false,
     changesRequestedGate: settings.changesRequestedGate !== false,
     personalRepoIssuesGate: settings.personalRepoIssuesGate !== false,
+    issueCloseGate: !!settings.issueCloseGate,
     taskDurationWarningMinutes: Number(settings.taskDurationWarningMinutes) || 45,
     largeFileSizeKb: Number(settings.largeFileSizeKb) || 200,
   }
@@ -218,6 +221,11 @@ const GLOBAL_TOGGLES: Array<{
     key: "personalRepoIssuesGate",
     label: "Personal repo issues gate",
     desc: "Suggest working on open issues in personal repositories upon completion.",
+  },
+  {
+    key: "issueCloseGate",
+    label: "Issue close gate",
+    desc: "Block issue close commands unless explicitly allowed or required by a skill.",
   },
   {
     key: "speak",

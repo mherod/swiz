@@ -188,6 +188,14 @@ alwaysApply: false
 - Do not hide user/default values.
 - Do not use one shared `source` for multiple settings.
 - Verify before declaring completion: hierarchy, per-value source tracking, display correctness.
+- Adding a new boolean setting (global scope) requires updates to 7 files plus tests:
+  1. `src/settings/types.ts` — add field to `SwizSettings` interface.
+  2. `src/settings/registry.ts` — add `SETTINGS_REGISTRY` entry with `key`, `aliases`, `kind`, `scopes`, `docs`.
+  3. `src/settings/persistence.ts` — add to `DEFAULT_SETTINGS` and `swizSettingsSchema`.
+  4. `src/settings/resolution.ts` — add to `getEffectiveSwizSettings` base object.
+  5. `src/commands/settings.ts` — add display line in `printGlobalSettings`.
+  6. `src/web/components/settings-panel.tsx` — add to `GlobalSettingsForm`, `DEFAULT_GLOBAL_FORM`, `globalSettingsToForm`, and `GLOBAL_TOGGLES`.
+  7. `src/commands/settings.test.ts` — add to every `SwizSettings` object literal and the `expectedKeys` array in the registry test.
 ## CLI Error Handling
 - In `src/commands/`, throw errors instead of `process.exit(1)`.
 - `src/cli.ts` handles command errors via `process.exitCode = 1`.

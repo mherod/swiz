@@ -284,6 +284,9 @@ function printGlobalSettings(
     `  changes-requested-gate:  ${effective.changesRequestedGate ? "enabled" : "disabled"} (global)`
   )
   console.log(
+    `  issue-close-gate:        ${effective.issueCloseGate ? "enabled" : "disabled"} (global)`
+  )
+  console.log(
     `  strict-no-direct-main:   ${effective.strictNoDirectMain ? "enabled" : "disabled"} (${strictNoDirectMainScopeLabel})`
   )
   console.log(`  narrator-voice:  ${voiceLabel} (global)`)

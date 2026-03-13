@@ -119,6 +119,16 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
   },
   {
+    key: "issueCloseGate",
+    aliases: ["issue-close-gate", "issueclosegate", "issue_close_gate", "issue-close"],
+    kind: "boolean",
+    scopes: ["global"],
+    docs: {
+      enableDescription: "Block issue close commands unless explicitly allowed",
+      disableDescription: "Allow issue close commands without restriction",
+    },
+  },
+  {
     key: "strictNoDirectMain",
     aliases: [
       "strict-no-direct-main",

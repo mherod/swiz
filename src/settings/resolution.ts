@@ -112,6 +112,7 @@ export function getEffectiveSwizSettings(
     githubCiGate: settings.githubCiGate,
     changesRequestedGate: settings.changesRequestedGate,
     personalRepoIssuesGate: settings.personalRepoIssuesGate,
+    issueCloseGate: settings.issueCloseGate,
     strictNoDirectMain: projectSettings?.strictNoDirectMain ?? settings.strictNoDirectMain,
     taskDurationWarningMinutes:
       projectSettings?.taskDurationWarningMinutes ?? settings.taskDurationWarningMinutes,

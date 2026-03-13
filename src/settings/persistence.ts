@@ -50,6 +50,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   githubCiGate: true,
   changesRequestedGate: true,
   personalRepoIssuesGate: true,
+  issueCloseGate: false,
   strictNoDirectMain: false,
   taskDurationWarningMinutes: 10,
   memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
@@ -84,6 +85,7 @@ export const swizSettingsSchema = z.object({
   githubCiGate: z.boolean().catch(DEFAULT_SETTINGS.githubCiGate),
   changesRequestedGate: z.boolean().catch(DEFAULT_SETTINGS.changesRequestedGate),
   personalRepoIssuesGate: z.boolean().catch(DEFAULT_SETTINGS.personalRepoIssuesGate),
+  issueCloseGate: z.boolean().catch(DEFAULT_SETTINGS.issueCloseGate),
   strictNoDirectMain: z.boolean().catch(DEFAULT_SETTINGS.strictNoDirectMain),
   taskDurationWarningMinutes: z
     .number()
