@@ -79,7 +79,10 @@ export function parseContinueArgs(args: string[]): ContinueArgs {
     const field = CONTINUE_VALUE_FLAGS[arg]
     if (!field) continue
     const next = args[i + 1]
-    if (!next) throw new Error(`Missing value for ${arg}`)
+    if (!next) {
+      if (field === "provider") throw new Error(`Missing value for ${arg}`)
+      continue
+    }
     i++
     if (field === "dir") targetDir = resolve(next)
     else if (field === "session") sessionQuery = next
