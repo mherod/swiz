@@ -7,7 +7,11 @@
 // the last remote commit is within PUSH_COOLDOWN_MS, skip the push block.
 // Uncommitted changes are always enforced regardless of cooldown.
 
-import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
+import {
+  type CollaborationMode,
+  getEffectiveSwizSettings,
+  readSwizSettings,
+} from "../src/settings.ts"
 import { stopGitPushPromptedFlagPath } from "../src/temp-paths.ts"
 import {
   blockStop,
@@ -144,6 +148,43 @@ function selectTaskSubject(hasUncommitted: boolean, ahead: number, behind: numbe
   return "Push branch to remote"
 }
 
+function pushAdviceForMode(
+  collabMode: CollaborationMode,
+  branch: string,
+  upstream: string,
+  ahead: number
+): string {
+  const pushLabel =
+    ahead > 0
+      ? `Push ${ahead} commit(s) to '${upstream}'`
+      : `Push your committed changes to '${upstream}'`
+
+  if (collabMode === "solo") {
+    return [`${pushLabel}:`, `  git push origin ${branch}`].join("\n")
+  }
+  if (collabMode === "team") {
+    const isMainBranch = branch === "main" || branch === "master"
+    if (isMainBranch) {
+      return [
+        `${pushLabel}:`,
+        `  Create a feature branch first: git checkout -b <type>/<slug>`,
+        `  Then push: git push origin <feature-branch>`,
+        `  Open a PR: gh pr create --base ${branch}`,
+      ].join("\n")
+    }
+    return [`${pushLabel}:`, `  git push origin ${branch}`].join("\n")
+  }
+  // "auto" or "relaxed-collab" — show the generic guidance
+  return [
+    `${pushLabel}:`,
+    `  git push origin ${branch}`,
+    "",
+    "Before pushing — run the collaboration guard:",
+    "  Solo repo → direct push to main is permitted.",
+    "  Org repo or other contributors active → use a feature branch and PR instead.",
+  ].join("\n")
+}
+
 function buildReason(
   gitStatus: {
     total: number
@@ -162,7 +203,8 @@ function buildReason(
   hasUncommitted: boolean,
   hasRemote: boolean,
   ahead: number,
-  behind: number
+  behind: number,
+  collabMode: CollaborationMode
 ): string {
   let reason = hasUncommitted
     ? buildUncommittedReason(gitStatus, branch, upstream, behind)
@@ -207,14 +249,7 @@ function buildReason(
       skillAdvice(
         "push",
         `${pushLabel} with /push`,
-        [
-          `${pushLabel}:`,
-          `  git push origin ${branch}`,
-          "",
-          "Before pushing — run the collaboration guard:",
-          "  Solo repo → direct push to main is permitted.",
-          "  Org repo or other contributors active → use a feature branch and PR instead.",
-        ].join("\n")
+        pushAdviceForMode(collabMode, branch, upstream, ahead)
       )
     )
   }
@@ -366,7 +401,16 @@ async function main(): Promise<void> {
   // ── Build the reason ──────────────────────────────────────────────────
 
   const willNeedPush = ahead > 0 || (hasUncommitted && hasRemote)
-  const reason = buildReason(gitStatus, branch, upstream, hasUncommitted, hasRemote, ahead, behind)
+  const reason = buildReason(
+    gitStatus,
+    branch,
+    upstream,
+    hasUncommitted,
+    hasRemote,
+    ahead,
+    behind,
+    effective.collaborationMode
+  )
 
   // ── Mark push as prompted (for cooldown on subsequent stop attempts) ─────
   if (willNeedPush) {

@@ -34,10 +34,9 @@ describe("pretooluse-bun-test-concurrent", () => {
     expect(result.reason).toContain("--concurrent")
   })
 
-  test("blocks bun test without --concurrent even with other flags", async () => {
+  test("allows bun test with a single test file (--concurrent unnecessary)", async () => {
     const result = await runHook("bun test hooks/foo.test.ts --reporter=dots")
-    expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("hooks/foo.test.ts --reporter=dots")
+    expect(result.decision).toBeUndefined()
   })
 
   test("allows bun test with --concurrent", async () => {
@@ -50,12 +49,11 @@ describe("pretooluse-bun-test-concurrent", () => {
     expect(result.decision).toBeUndefined()
   })
 
-  test("blocks chained invocation when one bun test is missing --concurrent", async () => {
+  test("allows chained single-file bun test without --concurrent", async () => {
     const result = await runHook(
       "bun test --concurrent hooks/a.test.ts && bun test hooks/b.test.ts"
     )
-    expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("hooks/b.test.ts")
+    expect(result.decision).toBeUndefined()
   })
 
   test("ignores non-bash tools", async () => {
@@ -68,47 +66,45 @@ describe("pretooluse-bun-test-concurrent", () => {
     expect(result.decision).toBeUndefined()
   })
 
-  test("inserts --concurrent before stderr redirection", async () => {
+  test("allows single test file with stderr redirection", async () => {
     const result = await runHook("bun test src/commands/state.test.ts 2> /tmp/out.log")
-    expect(result.decision).toBe("deny")
-    expect(result.reason).toContain(
-      "bun test src/commands/state.test.ts --concurrent 2> /tmp/out.log"
-    )
+    expect(result.decision).toBeUndefined()
   })
 
-  test("inserts --concurrent before stdout redirection", async () => {
+  test("allows single test file with stdout redirection", async () => {
     const result = await runHook("bun test src/foo.test.ts > /tmp/out.log")
-    expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("bun test src/foo.test.ts --concurrent > /tmp/out.log")
+    expect(result.decision).toBeUndefined()
   })
 
-  test("inserts --concurrent before append redirection", async () => {
+  test("allows single test file with append redirection", async () => {
     const result = await runHook("bun test src/foo.test.ts >> /tmp/combined.log")
-    expect(result.decision).toBe("deny")
-    expect(result.reason).toContain("bun test src/foo.test.ts --concurrent >> /tmp/combined.log")
+    expect(result.decision).toBeUndefined()
   })
 
-  test("inserts --concurrent before 2>&1 redirection", async () => {
+  test("allows single test file with 2>&1 redirection", async () => {
     const result = await runHook("bun test src/foo.test.ts 2>&1 > /tmp/combined.log")
-    expect(result.decision).toBe("deny")
-    expect(result.reason).toContain(
-      "bun test src/foo.test.ts --concurrent 2>&1 > /tmp/combined.log"
-    )
+    expect(result.decision).toBeUndefined()
   })
 
-  test("handles bun test piped to tee (pipe splits segment)", async () => {
+  test("allows single test file piped to tee", async () => {
     const result = await runHook("bun test src/foo.test.ts | tee /tmp/out.log")
-    expect(result.decision).toBe("deny")
-    // Pipe splits the segment — only the bun test part is captured
-    expect(result.reason).toContain("bun test src/foo.test.ts --concurrent")
-    expect(result.reason).not.toContain("tee")
+    expect(result.decision).toBeUndefined()
   })
 
-  test("handles multiple redirections (stdout + stderr)", async () => {
+  test("allows single test file with multiple redirections", async () => {
     const result = await runHook("bun test src/foo.test.ts > /tmp/out.log 2> /tmp/err.log")
+    expect(result.decision).toBeUndefined()
+  })
+
+  test("blocks multi-file bun test without --concurrent", async () => {
+    const result = await runHook("bun test src/foo.test.ts src/bar.test.ts")
     expect(result.decision).toBe("deny")
-    expect(result.reason).toContain(
-      "bun test src/foo.test.ts --concurrent > /tmp/out.log 2> /tmp/err.log"
-    )
+    expect(result.reason).toContain("--concurrent")
+  })
+
+  test("blocks glob pattern bun test without --concurrent", async () => {
+    const result = await runHook("bun test src/")
+    expect(result.decision).toBe("deny")
+    expect(result.reason).toContain("--concurrent")
   })
 })
