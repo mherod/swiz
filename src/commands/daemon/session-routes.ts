@@ -41,7 +41,7 @@ export function hasLiveAgentForProject(
   snapshot: AgentProcessSnapshot
 ): boolean {
   for (const cwd of Object.values(snapshot.pidCwds)) {
-    if (cwd === projectCwd || cwd.startsWith(projectCwd + "/")) return true
+    if (cwd === projectCwd || cwd.startsWith(`${projectCwd}/`)) return true
   }
   return false
 }
@@ -50,7 +50,7 @@ export function hasLiveAgentForProject(
 function getProjectAgentPids(projectCwd: string, snapshot: AgentProcessSnapshot): number[] {
   const pids: number[] = []
   for (const [pidStr, cwd] of Object.entries(snapshot.pidCwds)) {
-    if (cwd === projectCwd || cwd.startsWith(projectCwd + "/")) {
+    if (cwd === projectCwd || cwd.startsWith(`${projectCwd}/`)) {
       pids.push(Number(pidStr))
     }
   }

@@ -5,13 +5,7 @@ const COMPLEXITY_WARN = "warn"
 
 export default tseslint.config(
   {
-    ignores: [
-      "node_modules/**",
-      ".swiz/**",
-      "coverage/**",
-      "dist/**",
-      "**/*.d.ts",
-    ],
+    ignores: ["node_modules/**", ".swiz/**", "coverage/**", "dist/**", "**/*.d.ts"],
   },
   {
     files: ["**/*.{js,mjs,cjs,ts,tsx,jsx}"],
