@@ -1,4 +1,5 @@
 import { dirname, extname, join } from "node:path"
+import tailwindcss from "bun-plugin-tailwind"
 import type { LRUCache } from "lru-cache"
 import { executeDispatch } from "../../dispatch/execute.ts"
 import { deleteSessionData, resolveSessionDeletionTargets } from "../../session-data-delete.ts"
@@ -84,6 +85,22 @@ export async function serveWebAsset(pathname: string): Promise<Response | null> 
         "content-type": "text/javascript; charset=utf-8",
       },
     })
+  }
+
+  if (extension === ".css") {
+    const result = await Bun.build({
+      entrypoints: [filePath],
+      plugins: [tailwindcss],
+    })
+    const output = result.outputs[0]
+    if (output) {
+      return new Response(output, {
+        headers: {
+          "cache-control": "no-cache",
+          "content-type": "text/css; charset=utf-8",
+        },
+      })
+    }
   }
 
   const contentType = WEB_MIME_TYPES[extname(filePath)] ?? "application/octet-stream"

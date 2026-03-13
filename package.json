@@ -27,6 +27,7 @@
     "lru-cache": "^11.2.6",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "tailwindcss": "^4.2.1",
     "ufo": "^1.6.3",
     "yaml": "^2.8.2",
     "zod": "^4.3.6"
@@ -39,6 +40,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitest/coverage-v8": "^4.0.18",
     "@vitest/ui": "^4.0.18",
+    "bun-plugin-tailwind": "^0.1.2",
     "eslint": "^10.0.3",
     "globals": "^17.4.0",
     "lefthook": "^2.1.1",
