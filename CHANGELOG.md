@@ -33,6 +33,9 @@
 
 ### Improvements
 
+- Refactored `src/commands/tasks.ts` — extracted `EvidenceValidator`
+  and `TaskService` into `src/tasks/` modules, reducing the command
+  file from 1029 to 330 lines of pure CLI parsing. (#282)
 - Improved `swiz tasks` and `swiz status` latency by using the
   session metadata index for O(1) lookups instead of scanning
   transcript files. (#276)

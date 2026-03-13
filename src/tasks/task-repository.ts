@@ -168,17 +168,34 @@ async function updateSessionMeta(dir: string, cwd?: string): Promise<void> {
 }
 
 /**
+ * In-process cache for session metadata. Avoids repeated filesystem reads
+ * within a single CLI invocation. Invalidated per-session by writeTask.
+ */
+const sessionMetaCache = new Map<string, SessionMeta | null>()
+
+/** Cache key for sessionMetaCache. */
+function metaCacheKey(sessionId: string, tasksDir: string): string {
+  return `${tasksDir}\0${sessionId}`
+}
+
+/**
  * Read the session metadata index for a session directory.
  * Returns null when the index does not exist or is unreadable (caller must fall back).
+ * Results are memoized within the process lifetime; writeTask invalidates the entry.
  */
 export async function readSessionMeta(
   sessionId: string,
   tasksDir = createDefaultTaskStore().tasksDir
 ): Promise<SessionMeta | null> {
+  const key = metaCacheKey(sessionId, tasksDir)
+  if (sessionMetaCache.has(key)) return sessionMetaCache.get(key)!
   try {
     const text = await readFile(join(tasksDir, sessionId, SESSION_META_FILE), "utf-8")
-    return JSON.parse(text) as SessionMeta
+    const meta = JSON.parse(text) as SessionMeta
+    sessionMetaCache.set(key, meta)
+    return meta
   } catch {
+    sessionMetaCache.set(key, null)
     return null
   }
 }
@@ -194,6 +211,8 @@ export async function writeTask(
   await writeFile(join(dir, `${task.id}.json`), JSON.stringify(task, null, 2))
   // Update lightweight index so status.ts can read openCount without scanning every task file.
   await updateSessionMeta(dir, cwd)
+  // Invalidate in-process cache so subsequent reads reflect the write.
+  sessionMetaCache.delete(metaCacheKey(sessionId, tasksDir))
 }
 
 export async function writeAudit(
