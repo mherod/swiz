@@ -427,21 +427,37 @@ function applyHeadTail<T>(
 
 // ─── Time filtering ─────────────────────────────────────────────────────────
 
-function filterTurnsByTime(turns: Turn[], cutoffMs: number): Turn[] {
+interface TimeRange {
+  from?: number
+  to?: number
+}
+
+function filterTurnsByTime(turns: Turn[], range: TimeRange): Turn[] {
   return turns.filter((t) => {
     const ts = t.entry.timestamp
     if (!ts) return false
     const ms = new Date(ts).getTime()
-    return Number.isFinite(ms) && ms >= cutoffMs
+    if (!Number.isFinite(ms)) return false
+    if (range.from !== undefined && ms < range.from) return false
+    if (range.to !== undefined && ms > range.to) return false
+    return true
   })
 }
 
-function filterDebugEventsByTime(events: DebugEvent[], cutoffMs: number): DebugEvent[] {
-  return events.filter((e) => e.ts >= cutoffMs)
+function filterDebugEventsByTime(events: DebugEvent[], range: TimeRange): DebugEvent[] {
+  return events.filter((e) => {
+    if (range.from !== undefined && e.ts < range.from) return false
+    if (range.to !== undefined && e.ts > range.to) return false
+    return true
+  })
 }
 
-function filterSessionsByTime(sessions: Session[], cutoffMs: number): Session[] {
-  return sessions.filter((s) => s.mtime >= cutoffMs)
+function filterSessionsByTime(sessions: Session[], range: TimeRange): Session[] {
+  return sessions.filter((s) => {
+    if (range.from !== undefined && s.mtime < range.from) return false
+    if (range.to !== undefined && s.mtime > range.to) return false
+    return true
+  })
 }
 
 // ─── Main rendering ──────────────────────────────────────────────────────────
@@ -537,6 +553,8 @@ export interface TranscriptArgs {
   headCount: number | undefined
   tailCount: number | undefined
   hours: number | undefined
+  since: number | undefined
+  until: number | undefined
   autoReply: boolean
   includeDebug: boolean
   userOnly: boolean
@@ -573,6 +591,8 @@ const TRANSCRIPT_VALUE_ARGS: ValueArgDef[] = [
   ["--head", "-H"],
   ["--tail", "-T"],
   ["--hours", "-h"],
+  ["--since", "-S"],
+  ["--until", "-U"],
 ]
 
 function parseTranscriptValueArgs(args: string[]): {
@@ -610,9 +630,33 @@ function parseHoursValue(raw: string | undefined): number | undefined {
   return n
 }
 
+function parseDateValue(raw: string | undefined, flag: string): number | undefined {
+  if (!raw) return undefined
+  const ms = new Date(raw).getTime()
+  if (!Number.isFinite(ms)) {
+    throw new Error(
+      `Invalid ${flag} value: ${raw}. Must be a valid date (e.g. 2026-03-12 or 2026-03-12T14:00:00).`
+    )
+  }
+  return ms
+}
+
+function parseDateRange(
+  sinceRaw: string | undefined,
+  untilRaw: string | undefined
+): { since: number | undefined; until: number | undefined } {
+  const since = parseDateValue(sinceRaw, "--since")
+  const until = parseDateValue(untilRaw, "--until")
+  if (since !== undefined && until !== undefined && since > until) {
+    throw new Error("--since must be before --until.")
+  }
+  return { since, until }
+}
+
 export function parseTranscriptArgs(args: string[]): TranscriptArgs {
   const { flags, values } = parseTranscriptValueArgs(args)
   const explicitAgents = AGENTS.filter((agent) => args.includes(`--${agent.id}`))
+  const { since, until } = parseDateRange(values["--since"], values["--until"])
   return {
     sessionQuery: values["--session"] ?? null,
     targetDir: values["--dir"] ? resolve(values["--dir"]) : process.cwd(),
@@ -620,6 +664,8 @@ export function parseTranscriptArgs(args: string[]): TranscriptArgs {
     headCount: values["--head"] ? parseInt(values["--head"], 10) : undefined,
     tailCount: values["--tail"] ? parseInt(values["--tail"], 10) : undefined,
     hours: parseHoursValue(values["--hours"]),
+    since,
+    until,
     autoReply: flags.autoReply ?? false,
     includeDebug: flags.includeDebug ?? false,
     userOnly: flags.userOnly ?? false,
@@ -680,6 +726,9 @@ function validateTranscriptArgs(parsed: TranscriptArgs): void {
   if (parsed.userOnly && parsed.includeDebug) {
     throw new Error("`--user-only` cannot be combined with `--include-debug`.")
   }
+  if (parsed.hours !== undefined && (parsed.since !== undefined || parsed.until !== undefined)) {
+    throw new Error("`--hours` cannot be combined with `--since` or `--until`.")
+  }
 }
 
 function validateProviders(providers: Set<TranscriptProviderId>, selectedAgents: AgentDef[]): void {
@@ -727,7 +776,7 @@ export const transcriptCommand: Command = {
   name: "transcript",
   description: "Display Agent-User chat history for the current project",
   usage:
-    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--hours N] [--auto-reply] [--include-debug] [--user-only] [--all|--claude|--cursor|--gemini|--codex]",
+    "swiz transcript [--session <id>] [--dir <path>] [--list] [--head N] [--tail N] [--hours N] [--since DATE] [--until DATE] [--auto-reply] [--include-debug] [--user-only] [--all|--claude|--cursor|--gemini|--codex]",
   options: [
     { flags: "--session, -s <id>", description: "Show a specific session (prefix match)" },
     { flags: "--dir, -d <path>", description: "Target project directory (default: cwd)" },
@@ -737,6 +786,14 @@ export const transcriptCommand: Command = {
     {
       flags: "--hours, -h <n>",
       description: "Limit output to sessions and turns from the last N hours",
+    },
+    {
+      flags: "--since, -S <date>",
+      description: "Show only sessions and turns after this date (e.g. 2026-03-12)",
+    },
+    {
+      flags: "--until, -U <date>",
+      description: "Show only sessions and turns before this date (e.g. 2026-03-13)",
     },
     { flags: "--auto-reply", description: "Generate an AI-suggested follow-up message" },
     {
@@ -770,12 +827,15 @@ export const transcriptCommand: Command = {
     const selectedProviders = getSelectedProviders(selectedAgents)
     validateProviders(selectedProviders, selectedAgents)
 
-    const cutoffMs = parsed.hours ? Date.now() - parsed.hours * 3600_000 : undefined
+    const timeFrom = parsed.hours ? Date.now() - parsed.hours * 3600_000 : parsed.since
+    const timeTo = parsed.until
+    const hasTimeFilter = timeFrom !== undefined || timeTo !== undefined
+    const timeRange: TimeRange = { from: timeFrom, to: timeTo }
 
     let sessions = await loadFilteredSessions(parsed.targetDir, selectedProviders)
-    if (cutoffMs) sessions = filterSessionsByTime(sessions, cutoffMs)
-    if (sessions.length === 0 && cutoffMs) {
-      console.log(`\n  ${DIM}No sessions found within the last ${parsed.hours} hour(s).${RESET}\n`)
+    if (hasTimeFilter) sessions = filterSessionsByTime(sessions, timeRange)
+    if (sessions.length === 0 && hasTimeFilter) {
+      console.log(`\n  ${DIM}No sessions found within the specified time range.${RESET}\n`)
       return
     }
 
@@ -786,10 +846,10 @@ export const transcriptCommand: Command = {
 
     const session = pickSession(sessions, parsed.sessionQuery)
     let allTurns = await loadTurns(session, parsed.userOnly)
-    if (cutoffMs) allTurns = filterTurnsByTime(allTurns, cutoffMs)
+    if (hasTimeFilter) allTurns = filterTurnsByTime(allTurns, timeRange)
     const turns = applyHeadTail(allTurns, parsed.headCount, parsed.tailCount)
     let debugEvents = await loadOptionalDebug(session, parsed)
-    if (debugEvents && cutoffMs) debugEvents = filterDebugEventsByTime(debugEvents, cutoffMs)
+    if (debugEvents && hasTimeFilter) debugEvents = filterDebugEventsByTime(debugEvents, timeRange)
 
     if (parsed.autoReply) {
       await generateAutoReply(turns)

@@ -11,6 +11,8 @@ describe("parseTranscriptArgs", () => {
     expect(result.headCount).toBeUndefined()
     expect(result.tailCount).toBeUndefined()
     expect(result.hours).toBeUndefined()
+    expect(result.since).toBeUndefined()
+    expect(result.until).toBeUndefined()
     expect(result.autoReply).toBe(false)
     expect(result.includeDebug).toBe(false)
     expect(result.userOnly).toBe(false)
@@ -168,6 +170,61 @@ describe("parseTranscriptArgs", () => {
 
   test("throws on non-numeric --hours", () => {
     expect(() => parseTranscriptArgs(["--hours", "abc"])).toThrow("Invalid --hours")
+  })
+
+  test("parses --since with ISO date", () => {
+    const result = parseTranscriptArgs(["--since", "2026-03-12"])
+    expect(result.since).toBe(new Date("2026-03-12").getTime())
+  })
+
+  test("parses -S shorthand for since", () => {
+    const result = parseTranscriptArgs(["-S", "2026-03-12T14:00:00"])
+    expect(result.since).toBe(new Date("2026-03-12T14:00:00").getTime())
+  })
+
+  test("parses --until with ISO date", () => {
+    const result = parseTranscriptArgs(["--until", "2026-03-13"])
+    expect(result.until).toBe(new Date("2026-03-13").getTime())
+  })
+
+  test("parses -U shorthand for until", () => {
+    const result = parseTranscriptArgs(["-U", "2026-03-13T18:00:00"])
+    expect(result.until).toBe(new Date("2026-03-13T18:00:00").getTime())
+  })
+
+  test("ignores --since without value", () => {
+    const result = parseTranscriptArgs(["--since"])
+    expect(result.since).toBeUndefined()
+  })
+
+  test("ignores --until without value", () => {
+    const result = parseTranscriptArgs(["--until"])
+    expect(result.until).toBeUndefined()
+  })
+
+  test("throws on invalid --since date string", () => {
+    expect(() => parseTranscriptArgs(["--since", "not-a-date"])).toThrow("Invalid --since")
+  })
+
+  test("throws on invalid --until date string", () => {
+    expect(() => parseTranscriptArgs(["--until", "nope"])).toThrow("Invalid --until")
+  })
+
+  test("throws when --since is after --until", () => {
+    expect(() => parseTranscriptArgs(["--since", "2026-03-14", "--until", "2026-03-12"])).toThrow(
+      "--since must be before --until"
+    )
+  })
+
+  test("accepts --since equal to --until", () => {
+    const result = parseTranscriptArgs(["--since", "2026-03-12", "--until", "2026-03-12"])
+    expect(result.since).toBe(result.until)
+  })
+
+  test("parses --since and --until together", () => {
+    const result = parseTranscriptArgs(["--since", "2026-03-10", "--until", "2026-03-12"])
+    expect(result.since).toBe(new Date("2026-03-10").getTime())
+    expect(result.until).toBe(new Date("2026-03-12").getTime())
   })
 
   test("handles unknown flags gracefully", () => {
