@@ -53,6 +53,11 @@ export function Header({
         style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <img
+            src="/public/swiz-buzz-flat.svg"
+            alt="swiz"
+            style={{ height: "32px", width: "auto" }}
+          />
           <h1 className="topbar-title">swiz daemon</h1>
           <output className="status-pill">
             <span className="status-dot" aria-hidden="true" />

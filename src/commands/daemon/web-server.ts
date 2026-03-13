@@ -36,6 +36,7 @@ import { type CapturedToolCall, captureSessionToolCall, stripAnsi } from "./util
 import type { DaemonWorkerRuntime } from "./worker-runtime.ts"
 
 export const WEB_ROOT = join(dirname(Bun.main), "src", "web")
+export const PUBLIC_ROOT = join(dirname(Bun.main), "www", "public")
 export const WEB_TSX_TRANSPILER = new Bun.Transpiler({
   loader: "tsx",
   autoImportJSX: true,
@@ -267,6 +268,19 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
         const pathname = new URL(req.url).pathname
         const asset = await serveWebAsset(pathname)
         return asset ?? notFound()
+      },
+      "/public/*": async (req) => {
+        if (req.method !== "GET") return notFound()
+        const pathname = new URL(req.url).pathname
+        const relative = pathname.replace(/^\/public\//, "").replace(/^\/+/, "")
+        if (!relative || relative.includes("..")) return notFound()
+        const filePath = join(PUBLIC_ROOT, relative)
+        const file = Bun.file(filePath)
+        if (!(await file.exists())) return notFound()
+        const contentType = WEB_MIME_TYPES[extname(filePath)] ?? "application/octet-stream"
+        return new Response(file, {
+          headers: { "cache-control": "max-age=3600", "content-type": contentType },
+        })
       },
       "/favicon.ico": async (req) => {
         if (req.method !== "GET") return notFound()
