@@ -46,6 +46,9 @@ export function Header({
     0
   )
 
+  const isActive = totalRunningAgents > 0 || activeHooks > 0
+  const mascotSrc = isActive ? "/public/swiz-buzz-animated.svg" : "/public/swiz-buzz-flat.svg"
+
   return (
     <header className="bento-title">
       <div
@@ -53,11 +56,7 @@ export function Header({
         style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <img
-            src="/public/swiz-buzz-flat.svg"
-            alt="swiz"
-            style={{ height: "32px", width: "auto" }}
-          />
+          <img src={mascotSrc} alt="swiz" style={{ height: "32px", width: "auto" }} />
           <h1 className="topbar-title">swiz daemon</h1>
           <output className="status-pill">
             <span className="status-dot" aria-hidden="true" />

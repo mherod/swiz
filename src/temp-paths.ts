@@ -45,6 +45,10 @@ export function claudeTaskOutputPath(uid: number, cwdKey: string, taskId: string
   return `${TMP_ROOT}/claude-${uid}/${cwdKey}/tasks/${taskId}.output`
 }
 
+export function swizPushResultPath(repoKey: string): string {
+  return `${TMP_ROOT}/swiz-push-result-${repoKey}.json`
+}
+
 export function swizPrPollLogPath(): string {
   return `${TMP_ROOT}/swiz-prpoll.log`
 }

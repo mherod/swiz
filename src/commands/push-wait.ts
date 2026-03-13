@@ -1,6 +1,5 @@
-import { existsSync, readFileSync } from "node:fs"
 import { getCanonicalPathHash } from "../git-helpers.ts"
-import { swizPushCooldownSentinelPath } from "../temp-paths.ts"
+import { swizPushCooldownSentinelPath, swizPushResultPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
 import { startCiWatchViaDaemon } from "./ci-wait.ts"
 
@@ -21,10 +20,24 @@ export function getSentinelPath(cwd: string): string {
   return swizPushCooldownSentinelPath(repoKey)
 }
 
+export function getRepoKey(cwd: string): string {
+  const proc = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const repoRoot = new TextDecoder().decode(proc.stdout).trim() || cwd
+  return getCanonicalPathHash(repoRoot)
+}
+
 export function getRemainingCooldownMs(sentinelPath: string): number {
   try {
-    if (!existsSync(sentinelPath)) return 0
-    const raw = readFileSync(sentinelPath, "utf8").trim()
+    const file = Bun.file(sentinelPath)
+    // Bun.file().size is 0 for non-existent files
+    if (file.size === 0) return 0
+    // Use spawnSync to read file synchronously (needed inside setInterval)
+    const proc = Bun.spawnSync(["cat", sentinelPath], { stdout: "pipe", stderr: "pipe" })
+    const raw = new TextDecoder().decode(proc.stdout).trim()
     if (raw === "") return 0
     const lastPush = parseInt(raw, 10)
     if (Number.isNaN(lastPush)) return 0
@@ -143,6 +156,26 @@ export function parsePushWaitArgs(args: string[]): PushWaitArgs {
   return { remote, branch, timeout, extraArgs, cwd }
 }
 
+// ─── Push result file ───────────────────────────────────────────────────
+
+export interface PushResult {
+  success: boolean
+  commitSha: string
+  branch: string
+  remote: string
+  exitCode: number
+  timestamp: number
+  ciWatchStarted: boolean
+}
+
+async function writePushResult(repoKey: string, result: PushResult): Promise<void> {
+  try {
+    await Bun.write(swizPushResultPath(repoKey), JSON.stringify(result, null, 2))
+  } catch {
+    // Non-fatal — result file is a convenience, not critical path
+  }
+}
+
 // ─── Command ─────────────────────────────────────────────────────────────
 
 export const pushWaitCommand: Command = {
@@ -181,6 +214,7 @@ export const pushWaitCommand: Command = {
       throw new Error("Could not determine HEAD SHA")
     }
 
+    const repoKey = getRepoKey(cwd)
     const sentinelPath = getSentinelPath(cwd)
 
     // Wait for cooldown to clear
@@ -198,12 +232,22 @@ export const pushWaitCommand: Command = {
     await proc.exited
 
     if (proc.exitCode !== 0) {
+      await writePushResult(repoKey, {
+        success: false,
+        commitSha,
+        branch: targetBranch,
+        remote,
+        exitCode: proc.exitCode ?? 1,
+        timestamp: Date.now(),
+        ciWatchStarted: false,
+      })
       throw new Error(`git push failed with exit code ${proc.exitCode}`)
     }
 
     console.log("✓ Push succeeded")
 
     const watch = await startCiWatchViaDaemon(commitSha, cwd)
+    const ciWatchStarted = watch !== null
     if (watch) {
       const mode = watch.deduped ? "already active" : "started"
       console.log(`✓ CI background watch ${mode} for ${commitSha.slice(0, 8)}`)
@@ -212,5 +256,17 @@ export const pushWaitCommand: Command = {
         `⚠ Could not reach daemon for CI watch; run 'swiz daemon' to enable background CI notifications.`
       )
     }
+
+    // Write structured result file so callers can retrieve push outcome
+    // even if the background task record is cleaned up
+    await writePushResult(repoKey, {
+      success: true,
+      commitSha,
+      branch: targetBranch,
+      remote,
+      exitCode: 0,
+      timestamp: Date.now(),
+      ciWatchStarted,
+    })
   },
 }

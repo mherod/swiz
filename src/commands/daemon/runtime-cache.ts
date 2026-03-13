@@ -1,0 +1,551 @@
+import { type FSWatcher, watch } from "node:fs"
+import { LRUCache } from "lru-cache"
+import { detectProjectStack } from "../../detect-frameworks.ts"
+import { resolvePrMergeActive, SWIZ_NOTIFY_HOOK_FILES } from "../../dispatch/filters.ts"
+import { type GitBranchStatus, getGitBranchStatus, ghJson } from "../../git-helpers.ts"
+import { evalCondition, type HookGroup, manifest } from "../../manifest.ts"
+import {
+  getEffectiveSwizSettings,
+  type ProjectSwizSettings,
+  readProjectSettings,
+  readProjectState,
+  readSwizSettings,
+  resolveProjectHooks,
+} from "../../settings.ts"
+import { getWorkflowIntent } from "../../state-machine.ts"
+import { parseTranscriptSummary, type TranscriptSummary } from "../../transcript-summary.ts"
+
+export interface EventMetrics {
+  count: number
+  totalMs: number
+}
+
+export interface DaemonMetrics {
+  startedAt: number
+  dispatches: Map<string, EventMetrics>
+}
+
+export function createMetrics(): DaemonMetrics {
+  return { startedAt: Date.now(), dispatches: new Map() }
+}
+
+export function recordDispatch(metrics: DaemonMetrics, event: string, durationMs: number): void {
+  const existing = metrics.dispatches.get(event)
+  if (existing) {
+    existing.count += 1
+    existing.totalMs += durationMs
+  } else {
+    metrics.dispatches.set(event, { count: 1, totalMs: durationMs })
+  }
+}
+
+export function serializeMetrics(metrics: DaemonMetrics) {
+  const uptimeMs = Date.now() - metrics.startedAt
+  const byEvent: Record<string, { count: number; avgMs: number }> = {}
+  let totalDispatches = 0
+  for (const [event, m] of metrics.dispatches) {
+    byEvent[event] = { count: m.count, avgMs: Math.round(m.totalMs / m.count) }
+    totalDispatches += m.count
+  }
+  return {
+    uptimeMs,
+    uptimeHuman: formatUptime(uptimeMs),
+    totalDispatches,
+    byEvent,
+  }
+}
+
+function formatUptime(ms: number): string {
+  const s = Math.floor(ms / 1000)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (h > 0) return `${h}h ${m}m ${sec}s`
+  if (m > 0) return `${m}m ${sec}s`
+  return `${sec}s`
+}
+
+export interface WatchEntry {
+  path: string
+  label: string
+  callbacks: Set<() => void>
+  watcher: FSWatcher | null
+  lastInvalidation: number | null
+  invalidationCount: number
+}
+
+export class FileWatcherRegistry {
+  private entries = new Map<string, WatchEntry>()
+
+  register(path: string, label: string, callback: () => void): void {
+    let entry = this.entries.get(path)
+    if (!entry) {
+      entry = {
+        path,
+        label,
+        callbacks: new Set(),
+        watcher: null,
+        lastInvalidation: null,
+        invalidationCount: 0,
+      }
+      this.entries.set(path, entry)
+    }
+    entry.callbacks.add(callback)
+  }
+
+  start(): void {
+    for (const entry of this.entries.values()) {
+      if (entry.watcher) continue
+      try {
+        entry.watcher = watch(entry.path, { recursive: entry.path.endsWith("/") }, () => {
+          entry.lastInvalidation = Date.now()
+          entry.invalidationCount += 1
+          for (const cb of entry.callbacks) {
+            try {
+              cb()
+            } catch {
+              // ignore callback errors
+            }
+          }
+        })
+      } catch {
+        // path may not exist yet — that's fine
+      }
+    }
+  }
+
+  close(): void {
+    for (const entry of this.entries.values()) {
+      entry.watcher?.close()
+      entry.watcher = null
+    }
+  }
+
+  status(): Array<{
+    path: string
+    label: string
+    watching: boolean
+    lastInvalidation: number | null
+    invalidationCount: number
+  }> {
+    return [...this.entries.values()].map((e) => ({
+      path: e.path,
+      label: e.label,
+      watching: e.watcher !== null,
+      lastInvalidation: e.lastInvalidation,
+      invalidationCount: e.invalidationCount,
+    }))
+  }
+}
+
+export const GH_QUERY_TTL_MS = 20_000
+
+interface GhCacheEntry {
+  value: unknown
+  expiresAt: number
+}
+
+type GhFetcher = (args: string[], cwd: string) => Promise<unknown>
+
+export class GhQueryCache {
+  private entries = new LRUCache<string, GhCacheEntry>({ max: 500 })
+  private fetcher: GhFetcher
+  private _hits = 0
+  private _misses = 0
+
+  constructor(fetcher?: GhFetcher) {
+    this.fetcher = fetcher ?? ((args, cwd) => ghJson(args, cwd))
+  }
+
+  private key(args: string[], cwd: string): string {
+    return `${cwd}\x00${args.join("\x00")}`
+  }
+
+  async get(
+    args: string[],
+    cwd: string,
+    ttlMs: number = GH_QUERY_TTL_MS
+  ): Promise<{ hit: boolean; value: unknown }> {
+    const k = this.key(args, cwd)
+    const entry = this.entries.get(k)
+    if (entry && entry.expiresAt > Date.now()) {
+      this._hits++
+      return { hit: true, value: entry.value }
+    }
+    this._misses++
+    const value = await this.fetcher(args, cwd)
+    this.entries.set(k, { value, expiresAt: Date.now() + Math.max(0, ttlMs) })
+    return { hit: false, value }
+  }
+
+  invalidateProject(cwd: string): void {
+    for (const k of this.entries.keys()) {
+      if (k.startsWith(cwd)) this.entries.delete(k)
+    }
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+
+  get hits(): number {
+    return this._hits
+  }
+
+  get misses(): number {
+    return this._misses
+  }
+
+  get evictions(): number {
+    return this.entries.size > 0 ? 0 : 0
+  }
+}
+
+export interface EligibilitySnapshot {
+  disabledHooks: string[]
+  detectedStacks: string[]
+  prMergeActive: boolean
+  workflowIntent: string | null
+  conditionResults: Record<string, boolean>
+  computedAt: number
+}
+
+export class HookEligibilityCache {
+  private entries = new Map<string, EligibilitySnapshot>()
+
+  async compute(cwd: string): Promise<EligibilitySnapshot> {
+    const cached = this.entries.get(cwd)
+    if (cached) return cached
+
+    const snapshot = await computeEligibility(cwd)
+    this.entries.set(cwd, snapshot)
+    return snapshot
+  }
+
+  invalidateProject(cwd: string): void {
+    this.entries.delete(cwd)
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+}
+
+async function computeEligibility(cwd: string): Promise<EligibilitySnapshot> {
+  const settings = await readSwizSettings()
+  const projectSettings = cwd ? await readProjectSettings(cwd) : null
+  const effective = getEffectiveSwizSettings(settings, null)
+
+  const disabledSet = new Set([
+    ...(settings.disabledHooks ?? []),
+    ...(projectSettings?.disabledHooks ?? []),
+  ])
+  if (!effective.swizNotifyHooks) {
+    for (const file of SWIZ_NOTIFY_HOOK_FILES) disabledSet.add(file)
+  }
+
+  const detectedStacks = cwd ? await detectProjectStack(cwd) : []
+  const prMergeActive = resolvePrMergeActive(effective.collaborationMode, effective.prMergeMode)
+
+  let workflowIntent: string | null = null
+  try {
+    const state = await readProjectState(cwd)
+    if (state) workflowIntent = getWorkflowIntent(state)
+  } catch {
+    // no-op
+  }
+
+  const conditionResults: Record<string, boolean> = {}
+  for (const group of manifest) {
+    for (const hook of group.hooks) {
+      if (hook.condition && !(hook.file in conditionResults)) {
+        conditionResults[hook.file] = await evalCondition(hook.condition)
+      }
+    }
+  }
+  if (projectSettings?.hooks?.length) {
+    const { resolved } = resolveProjectHooks(projectSettings.hooks, cwd)
+    for (const group of resolved) {
+      for (const hook of group.hooks) {
+        if (hook.condition && !(hook.file in conditionResults)) {
+          conditionResults[hook.file] = await evalCondition(hook.condition)
+        }
+      }
+    }
+  }
+
+  return {
+    disabledHooks: [...disabledSet],
+    detectedStacks,
+    prMergeActive,
+    workflowIntent,
+    conditionResults,
+    computedAt: Date.now(),
+  }
+}
+
+export interface TranscriptIndex {
+  summary: TranscriptSummary
+  blockedToolUseIds: string[]
+  mtimeMs: number
+  computedAt: number
+}
+
+export class TranscriptIndexCache {
+  private entries = new LRUCache<string, TranscriptIndex>({ max: 200 })
+  private _hits = 0
+  private _misses = 0
+
+  async get(transcriptPath: string): Promise<TranscriptIndex | null> {
+    try {
+      const file = Bun.file(transcriptPath)
+      const stat = await file.stat()
+      const mtimeMs = stat.mtimeMs ?? 0
+      const cached = this.entries.get(transcriptPath)
+      if (cached && cached.mtimeMs === mtimeMs) {
+        cached.computedAt = Date.now()
+        this._hits++
+        return cached
+      }
+      this._misses++
+      const text = await file.text()
+      const summary = parseTranscriptSummary(text)
+      const blockedIds: string[] = []
+      for (const line of summary.sessionLines) {
+        if (!line.trim()) continue
+        try {
+          const entry = JSON.parse(line) as {
+            type?: string
+            message?: { content?: string | unknown[] }
+          }
+          if (entry?.type !== "user") continue
+          const content = entry?.message?.content
+          if (!Array.isArray(content)) continue
+          for (const block of content as Array<{
+            type?: string
+            content?: string | unknown[]
+            tool_use_id?: string
+          }>) {
+            if (block?.type !== "tool_result") continue
+            const blockContent = block.content
+            const text =
+              typeof blockContent === "string"
+                ? blockContent
+                : Array.isArray(blockContent)
+                  ? (blockContent as Array<{ text?: string }>)
+                      .map((c) => (typeof c === "string" ? c : (c?.text ?? "")))
+                      .join("")
+                  : ""
+            if (text.includes("ACTION REQUIRED:")) blockedIds.push(String(block.tool_use_id ?? ""))
+          }
+        } catch {
+          // ignore malformed lines
+        }
+      }
+      const index: TranscriptIndex = {
+        summary,
+        blockedToolUseIds: blockedIds,
+        mtimeMs,
+        computedAt: Date.now(),
+      }
+      this.entries.set(transcriptPath, index)
+      return index
+    } catch {
+      return null
+    }
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+
+  get hits(): number {
+    return this._hits
+  }
+
+  get misses(): number {
+    return this._misses
+  }
+
+  pruneOlderThan(cutoffMs: number): void {
+    for (const [path, entry] of this.entries) {
+      if (entry.computedAt < cutoffMs) this.entries.delete(path)
+    }
+  }
+}
+
+export class CooldownRegistry {
+  private entries = new Map<string, number>()
+
+  private key(hookFile: string, cwd: string): string {
+    return `${hookFile}\x00${cwd}`
+  }
+
+  isWithinCooldown(hookFile: string, cooldownSeconds: number, cwd: string): boolean {
+    const lastRun = this.entries.get(this.key(hookFile, cwd))
+    if (lastRun === undefined) return false
+    return Date.now() - lastRun < cooldownSeconds * 1000
+  }
+
+  mark(hookFile: string, cwd: string): void {
+    this.entries.set(this.key(hookFile, cwd), Date.now())
+  }
+
+  checkAndMark(hookFile: string, cooldownSeconds: number, cwd: string): boolean {
+    if (this.isWithinCooldown(hookFile, cooldownSeconds, cwd)) return true
+    this.mark(hookFile, cwd)
+    return false
+  }
+
+  invalidateProject(cwd: string): void {
+    for (const k of this.entries.keys()) {
+      if (k.endsWith(`\x00${cwd}`)) this.entries.delete(k)
+    }
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+}
+
+export interface CachedGitState {
+  status: GitBranchStatus
+  cachedAt: number
+}
+
+export class GitStateCache {
+  private entries = new Map<string, CachedGitState>()
+
+  async get(cwd: string): Promise<CachedGitState | null> {
+    const cached = this.entries.get(cwd)
+    if (cached) return cached
+    const status = await getGitBranchStatus(cwd)
+    if (!status) return null
+    const entry: CachedGitState = { status, cachedAt: Date.now() }
+    this.entries.set(cwd, entry)
+    return entry
+  }
+
+  invalidateProject(cwd: string): void {
+    this.entries.delete(cwd)
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+}
+
+export interface CachedProjectSettings {
+  settings: ProjectSwizSettings | null
+  resolvedHooks: HookGroup[]
+  warnings: string[]
+  cachedAt: number
+}
+
+export class ProjectSettingsCache {
+  private entries = new Map<string, CachedProjectSettings>()
+
+  async get(cwd: string): Promise<CachedProjectSettings> {
+    const cached = this.entries.get(cwd)
+    if (cached) return cached
+    const settings = await readProjectSettings(cwd)
+    let resolvedHooks: HookGroup[] = []
+    let warnings: string[] = []
+    if (settings?.hooks?.length) {
+      const result = resolveProjectHooks(settings.hooks, cwd)
+      resolvedHooks = result.resolved
+      warnings = result.warnings
+    }
+    const entry: CachedProjectSettings = {
+      settings,
+      resolvedHooks,
+      warnings,
+      cachedAt: Date.now(),
+    }
+    this.entries.set(cwd, entry)
+    return entry
+  }
+
+  invalidateProject(cwd: string): void {
+    this.entries.delete(cwd)
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+}
+
+export interface CachedManifest {
+  groups: HookGroup[]
+  cachedAt: number
+}
+
+export class ManifestCache {
+  private entries = new Map<string, CachedManifest>()
+  private projectSettingsCache: ProjectSettingsCache
+
+  constructor(projectSettingsCache: ProjectSettingsCache) {
+    this.projectSettingsCache = projectSettingsCache
+  }
+
+  async get(cwd: string): Promise<HookGroup[]> {
+    const cached = this.entries.get(cwd)
+    if (cached) return cached.groups
+    const groups = await this.build(cwd)
+    this.entries.set(cwd, { groups, cachedAt: Date.now() })
+    return groups
+  }
+
+  private async build(cwd: string): Promise<HookGroup[]> {
+    const { manifest: builtinManifest } = await import("../../manifest.ts")
+    const { loadAllPlugins } = await import("../../plugins.ts")
+    let combined: HookGroup[] = [...builtinManifest]
+    const cachedSettings = await this.projectSettingsCache.get(cwd)
+    const projectSettings = cachedSettings.settings
+    if (projectSettings?.plugins?.length) {
+      const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
+      const pluginHooks = pluginResults.flatMap((r) => r.hooks)
+      if (pluginHooks.length > 0) combined = [...combined, ...pluginHooks]
+    }
+    if (cachedSettings.resolvedHooks.length > 0) {
+      combined = [...combined, ...cachedSettings.resolvedHooks]
+    }
+    return combined
+  }
+
+  invalidateProject(cwd: string): void {
+    this.entries.delete(cwd)
+  }
+
+  invalidateAll(): void {
+    this.entries.clear()
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+}
