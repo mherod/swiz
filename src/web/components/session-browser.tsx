@@ -194,6 +194,7 @@ function dedupeSessionsById(sessions: SessionPreview[]): SessionPreview[] {
 
 const COLLAPSE_LINE_THRESHOLD = 20
 const COLLAPSE_CHAR_THRESHOLD = 900
+const TOOL_RAW_JSON_COLLAPSE_THRESHOLD = 300
 
 function buildCollapseHint(text: string): string {
   const lineCount = text.split("\n").length
@@ -207,6 +208,13 @@ function summarizeText(text: string): string {
   const candidate = text.slice(0, COLLAPSE_CHAR_THRESHOLD)
   const cutIndex = Math.max(candidate.lastIndexOf(" "), candidate.lastIndexOf("\n"))
   return `${candidate.slice(0, cutIndex > 0 ? cutIndex : candidate.length).trimEnd()}…`
+}
+
+function summarizeRawJson(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text
+  const compact = text.replace(/\s+/g, " ").trim()
+  if (compact.length <= maxChars) return compact
+  return `${compact.slice(0, maxChars - 1).trimEnd()}…`
 }
 
 function looksLikeLogBlob(text: string): boolean {
@@ -1226,6 +1234,15 @@ export function SessionMessages({
                           {(() => {
                             const parsedDetail = parseToolCallDetail(tc.name, tc.detail)
                             const isBash = tc.name.toLowerCase() === "bash"
+                            const rawJson = parsedDetail.rawJson
+                            const shouldCollapseRawJson =
+                              !isBash &&
+                              typeof rawJson === "string" &&
+                              rawJson.length > TOOL_RAW_JSON_COLLAPSE_THRESHOLD
+                            const rawJsonPreview =
+                              rawJson && shouldCollapseRawJson
+                                ? summarizeRawJson(rawJson, TOOL_RAW_JSON_COLLAPSE_THRESHOLD)
+                                : null
                             return (
                               <div className="tool-call-body">
                                 <div className="tool-call-header">
@@ -1252,8 +1269,14 @@ export function SessionMessages({
                                     ))}
                                   </ul>
                                 ) : null}
-                                {!isBash && parsedDetail.rawJson ? (
-                                  <pre className="tool-detail-full">{parsedDetail.rawJson}</pre>
+                                {!isBash && rawJson && shouldCollapseRawJson ? (
+                                  <details className="tool-raw-json">
+                                    <summary>{rawJsonPreview}</summary>
+                                    <pre className="tool-detail-full">{rawJson}</pre>
+                                  </details>
+                                ) : null}
+                                {!isBash && rawJson && !shouldCollapseRawJson ? (
+                                  <pre className="tool-detail-full">{rawJson}</pre>
                                 ) : null}
                               </div>
                             )
