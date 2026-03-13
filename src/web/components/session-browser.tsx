@@ -71,6 +71,13 @@ interface GroupedSessionMessage {
   originalIndices: number[]
 }
 
+interface ParsedToolCallDetail {
+  command: string | null
+  description: string | null
+  commonFields: Array<{ label: string; value: string }>
+  rawJson: string | null
+}
+
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleString([], {
     year: "numeric",
@@ -242,6 +249,66 @@ function compactPath(path: string, maxLength = 56): string {
   if (path.length <= maxLength) return path
   const keep = Math.max(10, Math.floor((maxLength - 1) / 2))
   return `${path.slice(0, keep)}…${path.slice(-keep)}`
+}
+
+function toToolFieldValue(value: unknown): string | null {
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  if (value === null) return "null"
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return null
+  }
+}
+
+function parseToolCallDetail(name: string, detail: string): ParsedToolCallDetail {
+  const trimmed = detail.trim()
+  if (!trimmed) {
+    return { command: null, description: null, commonFields: [], rawJson: null }
+  }
+  const parsed = (() => {
+    try {
+      return JSON.parse(trimmed) as unknown
+    } catch {
+      return null
+    }
+  })()
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {
+      command: name.toLowerCase() === "bash" ? trimmed : null,
+      description: null,
+      commonFields: [],
+      rawJson: null,
+    }
+  }
+
+  const payload = parsed as Record<string, unknown>
+  const command = typeof payload.command === "string" ? payload.command : null
+  const description = typeof payload.description === "string" ? payload.description : null
+  const fieldMap = [
+    { key: "task_id", label: "task id" },
+    { key: "tool_use_id", label: "tool use id" },
+    { key: "timeout", label: "timeout" },
+    { key: "block", label: "block" },
+    { key: "cwd", label: "cwd" },
+    { key: "working_directory", label: "working dir" },
+    { key: "path", label: "path" },
+    { key: "sessionId", label: "session" },
+    { key: "pid", label: "pid" },
+    { key: "limit", label: "limit" },
+  ] as const
+  const commonFields: Array<{ label: string; value: string }> = []
+  for (const field of fieldMap) {
+    const value = toToolFieldValue(payload[field.key])
+    if (value) commonFields.push({ label: field.label, value })
+  }
+  return {
+    command,
+    description,
+    commonFields,
+    rawJson: JSON.stringify(payload, null, 2),
+  }
 }
 
 function renderUserContextBlocks(
@@ -1150,18 +1217,50 @@ export function SessionMessages({
                 {message.toolCalls &&
                   message.toolCalls.length > 0 &&
                   (isToolOnlyAssistant ? (
-                    <ul className="tool-calls tool-calls-verbose">
+                    <div className="tool-calls tool-calls-verbose">
                       {message.toolCalls.map((tc) => (
-                        <li key={`${tc.name}-${tc.detail}`} className="tool-call tool-call-verbose">
-                          <details className="tool-call-details" open>
-                            <summary>
-                              <span className="tool-name">{tc.name}</span>
-                            </summary>
-                            {tc.detail ? <pre className="tool-detail-full">{tc.detail}</pre> : null}
-                          </details>
-                        </li>
+                        <div
+                          key={`${tc.name}-${tc.detail}`}
+                          className="tool-call tool-call-verbose"
+                        >
+                          {(() => {
+                            const parsedDetail = parseToolCallDetail(tc.name, tc.detail)
+                            const isBash = tc.name.toLowerCase() === "bash"
+                            return (
+                              <div className="tool-call-body">
+                                <div className="tool-call-header">
+                                  <span className="tool-name">{tc.name}</span>
+                                </div>
+                                {isBash && parsedDetail.command ? (
+                                  <pre className="tool-command-block">{parsedDetail.command}</pre>
+                                ) : null}
+                                {isBash && parsedDetail.description ? (
+                                  <p className="tool-call-description">
+                                    {parsedDetail.description}
+                                  </p>
+                                ) : null}
+                                {parsedDetail.commonFields.length > 0 ? (
+                                  <ul className="tool-param-list">
+                                    {parsedDetail.commonFields.map((field) => (
+                                      <li
+                                        key={`${field.label}:${field.value}`}
+                                        className="tool-param-item"
+                                      >
+                                        <span className="tool-param-label">{field.label}</span>
+                                        <code className="tool-param-value">{field.value}</code>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                                {!isBash && parsedDetail.rawJson ? (
+                                  <pre className="tool-detail-full">{parsedDetail.rawJson}</pre>
+                                ) : null}
+                              </div>
+                            )
+                          })()}
+                        </div>
                       ))}
-                    </ul>
+                    </div>
                   ) : (
                     <ul className="tool-calls">
                       {message.toolCalls.map((tc) => (
