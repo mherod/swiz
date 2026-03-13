@@ -120,6 +120,16 @@ export function validateEvidence(evidence: string): string | null {
     )
   }
 
+  // ci_green requires a traceable commit SHA or run ID alongside it.
+  if (matched.includes("ci_green") && !matched.includes("commit") && !matched.includes("run")) {
+    return (
+      `"ci_green:" requires a traceable commit SHA or run ID.\n` +
+      `Add a commit: or run field to provide CI proof:\n` +
+      `  --evidence "ci_green: -- commit:abc123f"\n` +
+      `  --evidence "ci_green: -- run 23047344021"`
+    )
+  }
+
   return null
 }
 

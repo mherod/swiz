@@ -267,9 +267,16 @@ describe("validateEvidence", () => {
     expect(error).toContain("Invalid evidence prefix")
   })
 
-  it("accepts ci_green: as a valid evidence prefix", () => {
-    expect(validateEvidence("ci_green:")).toBeNull()
-    expect(validateEvidence("ci_green: ")).toBeNull()
+  it("accepts ci_green: only when paired with a commit SHA or run ID", () => {
+    // bare ci_green: is rejected — no traceable CI proof
+    expect(validateEvidence("ci_green:")).not.toBeNull()
+    expect(validateEvidence("ci_green: ")).not.toBeNull()
+    expect(validateEvidence("ci_green: -- note:all passed")).not.toBeNull()
+    // paired with commit → valid
+    expect(validateEvidence("ci_green: -- commit:25ec5c7")).toBeNull()
+    expect(validateEvidence("commit:25ec5c7 -- ci_green:")).toBeNull()
+    // paired with run ID → valid
+    expect(validateEvidence("ci_green: -- run 23048000800")).toBeNull()
   })
 
   it("accepts multi-segment evidence where all segments use recognized prefixes", () => {
