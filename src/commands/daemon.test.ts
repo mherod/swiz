@@ -2,22 +2,22 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { CiWatchRegistry } from "./daemon/ci-watch-registry.ts"
 import {
-  CiWatchRegistry,
   CooldownRegistry,
   createMetrics,
-  DaemonWorkerRuntime,
   FileWatcherRegistry,
-  GhQueryCache, // daemon gh cache
+  GhQueryCache,
   GitStateCache,
   HookEligibilityCache,
-  hasSnapshotInvalidated,
   ManifestCache,
   ProjectSettingsCache,
   recordDispatch,
   serializeMetrics,
   TranscriptIndexCache,
-} from "./daemon.ts"
+} from "./daemon/runtime-cache.ts"
+import { hasSnapshotInvalidated } from "./daemon/snapshot.ts"
+import { DaemonWorkerRuntime } from "./daemon/worker-runtime.ts"
 
 describe("hasSnapshotInvalidated", () => {
   const base = {

@@ -9,10 +9,9 @@ import {
   writeProjectSettings,
   writeSwizSettings,
 } from "../../settings.ts"
+import type { WarmStatusLineSnapshot } from "../status-line.ts"
+import type { CiWatchRegistry } from "./ci-watch-registry.ts"
 import {
-  type ActiveHookDispatch,
-  type CachedSnapshot,
-  type CiWatchRegistry,
   type CooldownRegistry,
   createMetrics,
   type DaemonMetrics,
@@ -20,19 +19,22 @@ import {
   GH_QUERY_TTL_MS,
   type GhQueryCache,
   type GitStateCache,
-  getProjectTasks,
-  getSessionData,
-  getSessionTasks,
   type HookEligibilityCache,
-  listProjectSessions,
   type ManifestCache,
   type ProjectSettingsCache,
   recordDispatch,
   serializeMetrics,
   type TranscriptIndexCache,
-} from "../daemon.ts"
-import type { WarmStatusLineSnapshot } from "../status-line.ts"
+} from "./runtime-cache.ts"
+import {
+  getProjectTasks,
+  getSessionData,
+  getSessionTasks,
+  listProjectSessions,
+} from "./session-data.ts"
 import { type AgentProcessSnapshot, handleSessionRoutes } from "./session-routes.ts"
+import type { CachedSnapshot } from "./snapshot.ts"
+import type { ActiveHookDispatch } from "./types.ts"
 import { type CapturedToolCall, captureSessionToolCall, stripAnsi } from "./utils.ts"
 import type { DaemonWorkerRuntime } from "./worker-runtime.ts"
 
