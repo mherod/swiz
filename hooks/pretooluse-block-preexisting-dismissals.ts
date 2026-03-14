@@ -72,6 +72,8 @@ interface ScanState {
   dismissalLine: string
   /** Whether the gate has been cleared by a proof step. */
   cleared: boolean
+  /** Whether the last tool_use was a diagnostic command (lint/test/typecheck/build). */
+  lastToolWasDiagnostic: boolean
 }
 
 function extractAssistantText(entry: Record<string, unknown>): string {
@@ -131,7 +133,11 @@ function processToolResult(resultText: string, state: ScanState): void {
     state.lastDiagnosticOutput = resultText
     state.hasDiagnosticIssues = true
     resetDismissal(state)
-  } else if (resultText.length > 10) {
+  } else if (resultText.length > 10 && state.lastToolWasDiagnostic) {
+    // Only clear hasDiagnosticIssues when a diagnostic command (lint/test/typecheck)
+    // produces clean output — this is the "re-ran and it passed" case.
+    // Non-diagnostic tool results (task completions, file reads, etc.) must NOT
+    // erase the diagnostic context that the dismissal claim refers to.
     state.hasDiagnosticIssues = false
     resetDismissal(state)
   }
@@ -148,8 +154,16 @@ function processEntry(entry: Record<string, unknown>, state: ScanState): void {
   if (resultText) processToolResult(resultText, state)
 
   const toolUse = extractToolUse(entry)
-  if (toolUse && state.dismissalText && isProofCommand(toolUse.toolName, toolUse.command)) {
-    state.cleared = true
+  if (toolUse) {
+    // Track whether this tool call is a diagnostic command so that its result
+    // can clear hasDiagnosticIssues when clean (but non-diagnostic results won't).
+    state.lastToolWasDiagnostic =
+      isShellTool(toolUse.toolName) &&
+      DIAGNOSTIC_COMMAND_RE.test(stripQuotedStrings(toolUse.command))
+
+    if (state.dismissalText && isProofCommand(toolUse.toolName, toolUse.command)) {
+      state.cleared = true
+    }
   }
 
   const text = extractAssistantText(entry)
@@ -170,6 +184,7 @@ function scanTranscript(lines: string[]): ScanState {
     dismissalText: "",
     dismissalLine: "",
     cleared: false,
+    lastToolWasDiagnostic: false,
   }
 
   for (const line of lines) {
@@ -188,12 +203,22 @@ function scanTranscript(lines: string[]): ScanState {
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
+/** Strip quoted strings from a command to get just the command tokens without argument values. */
+function stripQuotedStrings(command: string): string {
+  // Remove double-quoted strings, single-quoted strings, and backtick strings
+  return command.replace(/"[^"]*"|'[^']*'|`[^`]*`/g, "")
+}
+
 function isExemptShellCommand(command: string): boolean {
-  return (
-    DIAGNOSTIC_COMMAND_RE.test(command) ||
-    SCOPED_VERIFICATION_RE.test(command) ||
-    BASELINE_EVIDENCE_RE.test(command)
-  )
+  // Strip quoted argument values before checking diagnostic patterns.
+  // This prevents false exemptions when arguments (e.g. --evidence "tests pass") contain
+  // diagnostic keywords like "test", "check", etc.
+  const unquoted = stripQuotedStrings(command)
+  if (DIAGNOSTIC_COMMAND_RE.test(unquoted)) return true
+  // Scoped verification and baseline evidence need the full command to match flags/paths
+  if (SCOPED_VERIFICATION_RE.test(command)) return true
+  if (BASELINE_EVIDENCE_RE.test(command)) return true
+  return false
 }
 
 function shouldSkipTool(toolName: string, toolInput: Record<string, unknown>): boolean {

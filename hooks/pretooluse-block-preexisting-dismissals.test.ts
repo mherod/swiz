@@ -52,6 +52,21 @@ function editToolEntry(file: string, oldStr: string, newStr: string): string {
   })
 }
 
+function readToolEntry(file: string): string {
+  return JSON.stringify({
+    type: "assistant",
+    message: {
+      content: [
+        {
+          type: "tool_use",
+          name: "Read",
+          input: { file_path: file },
+        },
+      ],
+    },
+  })
+}
+
 function systemBoundaryEntry(): string {
   return JSON.stringify({ type: "system", content: "Session resumed after compaction." })
 }
@@ -438,6 +453,65 @@ describe("pretooluse-block-preexisting-dismissals", () => {
         assistantTextEntry("This type error is not caused by our changes.")
       )
       const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+  })
+
+  describe("non-diagnostic tool results do not clear state", () => {
+    test("task completion output between dismissal and blocked tool does not clear", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun test --concurrent"),
+        toolResultEntry("5571 pass\n127 fail\nRan 5700 tests across 164 files."),
+        assistantTextEntry("The 127 remaining failures are likely pre-existing."),
+        // Task completion — non-diagnostic tool result must not clear state
+        shellCommandEntry('swiz tasks complete 3 --evidence "note:tests pass"'),
+        toolResultEntry(
+          "✅ #3: in_progress → completed\n  Ensure tests pass\n  Evidence: note:tests pass"
+        )
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+      expect(result.reason).toContain("pre-existing")
+    })
+
+    test("file read output between dismissal and blocked tool does not clear", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 warning: Unused variable\n✖ 1 problem"),
+        assistantTextEntry("This warning is pre-existing."),
+        // Read tool use + result — non-diagnostic, should not clear
+        readToolEntry("src/foo.ts"),
+        toolResultEntry("1→#!/usr/bin/env bun\n2→import { run } from './cli.ts'\n3→\n4→await run()")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+  })
+
+  describe("exempt command — verb-only matching", () => {
+    test("swiz tasks complete with 'test' in evidence is NOT exempt", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun test --concurrent"),
+        toolResultEntry("5571 pass\n127 fail\nRan 5700 tests across 164 files."),
+        assistantTextEntry("These failures are pre-existing.")
+      )
+      const result = await runHook({
+        command: 'swiz tasks complete 3 --evidence "note:tests pass — 127 fail (pre-existing)"',
+        transcriptContent: transcript,
+      })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("git commit with 'test' in message is NOT exempt", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 warning: Unused variable\n✖ 1 problem"),
+        assistantTextEntry("This warning is pre-existing.")
+      )
+      const result = await runHook({
+        command: 'git commit -m "test: add test for feature"',
+        transcriptContent: transcript,
+      })
       expect(result.blocked).toBe(true)
     })
   })
