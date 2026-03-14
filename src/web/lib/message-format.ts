@@ -406,7 +406,8 @@ function extractCommandDetailBlock(text: string): {
     const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "gi")
     const match = re.exec(cleanedText)
     if (!match) continue
-    const value = match[1]?.trim() ?? ""
+    const rawValue = match[1]?.trim() ?? ""
+    const value = label === "output" ? stripAnsiLike(rawValue) : rawValue
     if (alwaysPush || value) details.push({ label, value })
     cleanedText = cleanedText.replace(match[0], "").trim()
   }
@@ -415,6 +416,35 @@ function extractCommandDetailBlock(text: string): {
   return {
     cleanedText,
     block: { title: "Executed Local Command", details, notes: [], kind: "localCommand" },
+  }
+}
+
+function stripAnsiLike(text: string): string {
+  const escRe = new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")
+  return text.replace(escRe, "").replace(/\[\d+(?:;\d+)*m/g, "")
+}
+
+function extractLocalCommandStdoutBlock(text: string): {
+  cleanedText: string
+  block: ParsedUserMetadataBlock | null
+} {
+  const re = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/gi
+  const match = re.exec(text)
+  if (!match) return { cleanedText: text, block: null }
+
+  const rawContent = (match[1] ?? "").trim()
+  const content = stripAnsiLike(rawContent)
+  const cleanedText = text.replace(match[0], "").trim()
+  if (!content) return { cleanedText, block: null }
+
+  return {
+    cleanedText,
+    block: {
+      title: "Command output",
+      details: [{ label: "output", value: compactMetadataValue(content, 200) }],
+      notes: [],
+      kind: "localCommand",
+    },
   }
 }
 
@@ -434,6 +464,10 @@ function extractLocalCommandBlocks(text: string): {
   const command = extractCommandDetailBlock(cleanedText)
   cleanedText = command.cleanedText
   if (command.block) blocks.push(command.block)
+
+  const stdout = extractLocalCommandStdoutBlock(cleanedText)
+  cleanedText = stdout.cleanedText
+  if (stdout.block) blocks.push(stdout.block)
 
   return { cleanedText, blocks }
 }
