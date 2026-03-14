@@ -90,6 +90,7 @@ export interface ProjectSwizSettings {
   memoryLineThreshold?: number
   memoryWordThreshold?: number
   largeFileSizeKb?: number
+  dirtyWorktreeThreshold?: number
   ambitionMode?: AmbitionMode
   /** Per-project collaboration mode override (e.g. team repos require PR flow). */
   collaborationMode?: CollaborationMode
@@ -162,6 +163,8 @@ export interface SwizSettings {
   memoryLineThreshold: number
   memoryWordThreshold: number
   largeFileSizeKb: number
+  /** Dirty-file count threshold for the worktree gate hook. */
+  dirtyWorktreeThreshold: number
   /** Which segments to display in the status line. Defaults to all segments. */
   statusLineSegments: StatusLineSegment[]
   sessions: Record<string, SessionSwizSettings>
@@ -200,6 +203,7 @@ export const projectSettingsSchema = z.object({
   memoryLineThreshold: z.number().int().min(1).optional(),
   memoryWordThreshold: z.number().int().min(1).optional(),
   largeFileSizeKb: z.number().int().min(1).optional(),
+  dirtyWorktreeThreshold: z.number().int().min(1).optional(),
   ambitionMode: ambitionModeSchema.optional(),
   collaborationMode: collaborationModeSchema.optional(),
   strictNoDirectMain: z.boolean().optional(),

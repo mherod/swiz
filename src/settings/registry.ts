@@ -194,6 +194,18 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     docs: { valuePlaceholder: "words" },
   },
   {
+    key: "dirtyWorktreeThreshold",
+    aliases: [
+      "dirty-worktree-threshold",
+      "dirtyworktreethreshold",
+      "dirty_worktree_threshold",
+      "dirty-threshold",
+    ],
+    kind: "numeric",
+    scopes: ["global", "project"],
+    docs: { valuePlaceholder: "files" },
+  },
+  {
     key: "largeFileSizeKb",
     aliases: ["large-file-size-kb", "largefilesizekb", "large_file_size_kb"],
     kind: "numeric",

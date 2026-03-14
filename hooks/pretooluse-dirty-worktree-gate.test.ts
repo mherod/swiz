@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DIRTY_FILE_THRESHOLD } from "./pretooluse-dirty-worktree-gate.ts"
+import { DEFAULT_DIRTY_WORKTREE_THRESHOLD } from "../src/settings.ts"
 
 async function initGitRepo(dir: string): Promise<void> {
   const init = Bun.spawn(["git", "init", dir], { stdout: "pipe", stderr: "pipe" })
@@ -60,8 +60,8 @@ async function runHook(cwd: string): Promise<{ decision?: string; reason?: strin
 }
 
 describe("pretooluse-dirty-worktree-gate", () => {
-  test("exports threshold constant of 15", () => {
-    expect(DIRTY_FILE_THRESHOLD).toBe(15)
+  test("default threshold is 15", () => {
+    expect(DEFAULT_DIRTY_WORKTREE_THRESHOLD).toBe(15)
   })
 
   test("allows task update in non-git directory", async () => {

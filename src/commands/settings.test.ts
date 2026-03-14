@@ -931,6 +931,7 @@ describe("SETTINGS_REGISTRY", () => {
       "ambitionMode",
       "collaborationMode",
       "strictNoDirectMain",
+      "dirtyWorktreeThreshold",
     ]
     const registryKeys = SETTINGS_REGISTRY.map((d) => d.key)
     for (const key of expectedKeys) {
@@ -1098,6 +1099,7 @@ describe("collaborationMode settings", () => {
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
       largeFileSizeKb: 500,
+      dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {},
     }
@@ -1132,6 +1134,7 @@ describe("collaborationMode settings", () => {
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
       largeFileSizeKb: 500,
+      dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {
         "test-session": {
@@ -1172,6 +1175,7 @@ describe("collaborationMode settings", () => {
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
       largeFileSizeKb: 500,
+      dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {
         "test-session": {
@@ -1210,6 +1214,7 @@ describe("collaborationMode settings", () => {
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
       largeFileSizeKb: 500,
+      dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {},
     }
@@ -1244,6 +1249,7 @@ describe("collaborationMode settings", () => {
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
       largeFileSizeKb: 500,
+      dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {},
     }
@@ -1278,6 +1284,7 @@ describe("collaborationMode settings", () => {
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
       largeFileSizeKb: 500,
+      dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {
         "test-session": {
@@ -1548,6 +1555,7 @@ describe("strictNoDirectMain setting", () => {
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
       largeFileSizeKb: 500,
+      dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {},
     }
@@ -1582,6 +1590,7 @@ describe("strictNoDirectMain setting", () => {
       memoryLineThreshold: 1400,
       memoryWordThreshold: 5000,
       largeFileSizeKb: 500,
+      dirtyWorktreeThreshold: 15,
       statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
       sessions: {},
     }

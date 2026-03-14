@@ -15,6 +15,7 @@ export const DEFAULT_MEMORY_WORD_THRESHOLD = 5000
 export const DEFAULT_LARGE_FILE_SIZE_KB = 500
 export const DEFAULT_TASK_DURATION_WARNING_MINUTES = 10
 
+export const DEFAULT_DIRTY_WORKTREE_THRESHOLD = 15
 export const DEFAULT_TRIVIAL_MAX_FILES = 3
 export const DEFAULT_TRIVIAL_MAX_LINES = 20
 
@@ -91,6 +92,28 @@ export function resolveMemoryThresholds(
   }
 }
 
+/** Keys where project settings can override global settings. */
+const PROJECT_OVERRIDABLE_KEYS = [
+  "ambitionMode",
+  "collaborationMode",
+  "strictNoDirectMain",
+  "taskDurationWarningMinutes",
+  "largeFileSizeKb",
+  "dirtyWorktreeThreshold",
+] as const satisfies ReadonlyArray<keyof ProjectSwizSettings & keyof SwizSettings>
+
+/** Resolve fields that support project-level overrides. */
+function resolveProjectOverrides(
+  settings: SwizSettings,
+  projectSettings?: ProjectSwizSettings | null
+): Pick<SwizSettings, (typeof PROJECT_OVERRIDABLE_KEYS)[number]> {
+  const result = {} as Record<string, unknown>
+  for (const key of PROJECT_OVERRIDABLE_KEYS) {
+    result[key] = projectSettings?.[key] ?? settings[key]
+  }
+  return result as Pick<SwizSettings, (typeof PROJECT_OVERRIDABLE_KEYS)[number]>
+}
+
 function buildBaseSettings(
   settings: SwizSettings,
   projectSettings?: ProjectSwizSettings | null
@@ -98,8 +121,6 @@ function buildBaseSettings(
   return {
     autoContinue: settings.autoContinue,
     critiquesEnabled: settings.critiquesEnabled,
-    ambitionMode: projectSettings?.ambitionMode ?? settings.ambitionMode,
-    collaborationMode: projectSettings?.collaborationMode ?? settings.collaborationMode,
     narratorVoice: settings.narratorVoice,
     narratorSpeed: settings.narratorSpeed,
     prAgeGateMinutes: settings.prAgeGateMinutes,
@@ -115,13 +136,10 @@ function buildBaseSettings(
     changesRequestedGate: settings.changesRequestedGate,
     personalRepoIssuesGate: settings.personalRepoIssuesGate,
     issueCloseGate: settings.issueCloseGate,
-    strictNoDirectMain: projectSettings?.strictNoDirectMain ?? settings.strictNoDirectMain,
-    taskDurationWarningMinutes:
-      projectSettings?.taskDurationWarningMinutes ?? settings.taskDurationWarningMinutes,
     memoryLineThreshold: settings.memoryLineThreshold,
     memoryWordThreshold: settings.memoryWordThreshold,
-    largeFileSizeKb: projectSettings?.largeFileSizeKb ?? settings.largeFileSizeKb,
     statusLineSegments: settings.statusLineSegments,
+    ...resolveProjectOverrides(settings, projectSettings),
   }
 }
 

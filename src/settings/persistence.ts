@@ -5,7 +5,11 @@ import { z } from "zod"
 import { ensureGitExclude } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import type { HookDef, HookGroup } from "../manifest.ts"
-import { DEFAULT_MEMORY_LINE_THRESHOLD, DEFAULT_MEMORY_WORD_THRESHOLD } from "./resolution"
+import {
+  DEFAULT_DIRTY_WORKTREE_THRESHOLD,
+  DEFAULT_MEMORY_LINE_THRESHOLD,
+  DEFAULT_MEMORY_WORD_THRESHOLD,
+} from "./resolution"
 import {
   ALL_STATUS_LINE_SEGMENTS,
   ambitionModeSchema,
@@ -56,6 +60,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
   memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
   largeFileSizeKb: 500,
+  dirtyWorktreeThreshold: DEFAULT_DIRTY_WORKTREE_THRESHOLD,
   statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
   sessions: {},
 }
@@ -95,6 +100,7 @@ export const swizSettingsSchema = z.object({
   memoryLineThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.memoryLineThreshold),
   memoryWordThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.memoryWordThreshold),
   largeFileSizeKb: z.number().int().min(1).catch(DEFAULT_SETTINGS.largeFileSizeKb),
+  dirtyWorktreeThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.dirtyWorktreeThreshold),
   statusLineSegments: z
     .array(statusLineSegmentSchema)
     .catch([...ALL_STATUS_LINE_SEGMENTS])
@@ -263,6 +269,7 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
     "memoryLineThreshold",
     "memoryWordThreshold",
     "largeFileSizeKb",
+    "dirtyWorktreeThreshold",
     "taskDurationWarningMinutes",
   ])
 
