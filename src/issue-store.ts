@@ -738,7 +738,7 @@ export async function syncUpstreamState(
 }
 
 /** Detect GraphQL rate-limit errors in gh CLI stderr output. */
-function isGraphQLRateLimited(stderr: string): boolean {
+export function isGraphQLRateLimited(stderr: string): boolean {
   return stderr.includes("API rate limit") && stderr.includes("GraphQL")
 }
 
@@ -748,13 +748,191 @@ interface RestFallbackMapping {
   normalize?: (raw: unknown) => unknown
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null
+}
+
+function getGhFlagValue(args: string[], flag: string): string | null {
+  const index = args.indexOf(flag)
+  if (index === -1 || index + 1 >= args.length) return null
+  return args[index + 1] ?? null
+}
+
+function getRestListState(args: string[]): "open" | "closed" | "all" {
+  const state = getGhFlagValue(args, "--state")
+  if (state === "closed" || state === "all" || state === "open") return state
+  return "open"
+}
+
+function getRestPerPage(args: string[], fallback: number): number {
+  const raw = Number.parseInt(getGhFlagValue(args, "--limit") ?? "", 10)
+  if (!Number.isFinite(raw) || raw < 1) return fallback
+  return Math.min(raw, 100)
+}
+
+function buildRepoListEndpoint(
+  resource: "issues" | "pulls",
+  args: string[],
+  fallbackPerPage = 100
+): string {
+  const params = new URLSearchParams({
+    state: getRestListState(args),
+    per_page: String(getRestPerPage(args, fallbackPerPage)),
+  })
+  return `repos/{owner}/{repo}/${resource}?${params.toString()}`
+}
+
+function normalizeRestUser(user: unknown): { login: string } | null {
+  const record = asRecord(user)
+  const login = typeof record?.login === "string" ? record.login : null
+  return login ? { login } : null
+}
+
+function normalizeRestLabels(
+  labels: unknown
+): Array<{ name: string; color: string; description: string }> {
+  if (!Array.isArray(labels)) return []
+  return labels
+    .map((label) => {
+      const record = asRecord(label)
+      const name = typeof record?.name === "string" ? record.name : null
+      if (!name) return null
+      return {
+        name,
+        color: typeof record?.color === "string" ? record.color : "",
+        description: typeof record?.description === "string" ? record.description : "",
+      }
+    })
+    .filter(
+      (label): label is { name: string; color: string; description: string } => label !== null
+    )
+}
+
+function normalizeRestAssignees(assignees: unknown): Array<{ login: string }> {
+  if (!Array.isArray(assignees)) return []
+  return assignees
+    .map((assignee) => normalizeRestUser(assignee))
+    .filter((assignee): assignee is { login: string } => assignee !== null)
+}
+
+function normalizeRestIssues(raw: unknown): Array<{
+  number: number
+  title: string
+  state: string
+  labels: Array<{ name: string; color: string; description: string }>
+  author: { login: string } | null
+  assignees: Array<{ login: string }>
+  updatedAt: string
+}> {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((entry) => asRecord(entry))
+    .filter(
+      (issue): issue is Record<string, unknown> => issue !== null && !("pull_request" in issue)
+    )
+    .map((issue) => {
+      const number = typeof issue.number === "number" ? issue.number : null
+      const title = typeof issue.title === "string" ? issue.title : null
+      const state = typeof issue.state === "string" ? issue.state : "open"
+      const updatedAt = typeof issue.updated_at === "string" ? issue.updated_at : null
+      if (!number || !title || !updatedAt) return null
+      return {
+        number,
+        title,
+        state,
+        labels: normalizeRestLabels(issue.labels),
+        author: normalizeRestUser(issue.user),
+        assignees: normalizeRestAssignees(issue.assignees),
+        updatedAt,
+      }
+    })
+    .filter(
+      (
+        issue
+      ): issue is {
+        number: number
+        title: string
+        state: string
+        labels: Array<{ name: string; color: string; description: string }>
+        author: { login: string } | null
+        assignees: Array<{ login: string }>
+        updatedAt: string
+      } => issue !== null
+    )
+}
+
+function normalizeRestPullRequests(raw: unknown): Array<{
+  number: number
+  title: string
+  state: string
+  headRefName: string
+  author: { login: string } | null
+  reviewDecision: string
+  statusCheckRollup: unknown[]
+  mergeable: string
+  url: string
+  createdAt: string
+  updatedAt: string
+}> {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((entry) => asRecord(entry))
+    .filter((pr): pr is Record<string, unknown> => pr !== null)
+    .map((pr) => {
+      const number = typeof pr.number === "number" ? pr.number : null
+      const title = typeof pr.title === "string" ? pr.title : null
+      const state = typeof pr.state === "string" ? pr.state : "open"
+      const url = typeof pr.html_url === "string" ? pr.html_url : null
+      const createdAt = typeof pr.created_at === "string" ? pr.created_at : null
+      const updatedAt = typeof pr.updated_at === "string" ? pr.updated_at : null
+      const head = asRecord(pr.head)
+      const headRefName = typeof head?.ref === "string" ? head.ref : null
+      if (!number || !title || !url || !createdAt || !updatedAt || !headRefName) return null
+      return {
+        number,
+        title,
+        state,
+        headRefName,
+        author: normalizeRestUser(pr.user),
+        reviewDecision: "",
+        statusCheckRollup: [] as unknown[],
+        mergeable:
+          typeof pr.mergeable === "string"
+            ? pr.mergeable
+            : pr.mergeable === true
+              ? "MERGEABLE"
+              : pr.mergeable === false
+                ? "CONFLICTING"
+                : "UNKNOWN",
+        url,
+        createdAt,
+        updatedAt,
+      }
+    })
+    .filter(
+      (
+        pr
+      ): pr is {
+        number: number
+        title: string
+        state: string
+        headRefName: string
+        author: { login: string } | null
+        reviewDecision: string
+        statusCheckRollup: unknown[]
+        mergeable: string
+        url: string
+        createdAt: string
+        updatedAt: string
+      } => pr !== null
+    )
+}
+
 /**
  * Lookup table mapping `gh <entity> list` commands to REST API fallbacks.
  * The `normalize` function adapts REST response shapes to match gh CLI output shapes.
  */
 const REST_FALLBACK_MAP: Record<string, RestFallbackMapping> = {
-  "issue:list": { endpoint: "repos/{owner}/{repo}/issues?state=open&per_page=100" },
-  "pr:list": { endpoint: "repos/{owner}/{repo}/pulls?state=open&per_page=100" },
   "run:list": {
     endpoint: "repos/{owner}/{repo}/actions/runs?per_page=20",
     normalize: (raw) => {
@@ -923,6 +1101,18 @@ const REST_FALLBACK_MAP: Record<string, RestFallbackMapping> = {
  * Exported for unit testing.
  */
 export function ghListToRestFallback(args: string[]): RestFallbackMapping | null {
+  if (args[0] === "issue" && args[1] === "list") {
+    return {
+      endpoint: buildRepoListEndpoint("issues", args),
+      normalize: normalizeRestIssues,
+    }
+  }
+  if (args[0] === "pr" && args[1] === "list") {
+    return {
+      endpoint: buildRepoListEndpoint("pulls", args),
+      normalize: normalizeRestPullRequests,
+    }
+  }
   return REST_FALLBACK_MAP[`${args[0]}:${args[1]}`] ?? null
 }
 

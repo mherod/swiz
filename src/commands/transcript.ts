@@ -76,10 +76,7 @@ function formatToolUse(name: string, input: Record<string, unknown>): string {
  * Debug log lines can embed ANSI colour codes (e.g. ESC[33mpendingESC[0m).
  * Uses String.fromCharCode(27) to avoid the no-control-regex Biome lint rule.
  */
-const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
-function stripAnsi(s: string): string {
-  return s.replace(ANSI_RE, "")
-}
+import { stripAnsi } from "../../hooks/utils/transcript.ts"
 
 function getWrapWidth(indentWidth: number, maxWidth = DEFAULT_WRAP_MAX): number {
   const cols = process.stdout.columns ?? DEFAULT_COLUMNS

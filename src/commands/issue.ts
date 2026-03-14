@@ -1,13 +1,8 @@
 import { debugLog } from "../debug.ts"
 import { acquireGhSlot } from "../gh-rate-limit.ts"
 import { getRepoSlug, issueState } from "../git-helpers.ts"
-import { getIssueStore } from "../issue-store.ts"
+import { getIssueStore, isGraphQLRateLimited } from "../issue-store.ts"
 import type { Command } from "../types.ts"
-
-/** Detect GraphQL rate-limit errors in gh CLI stderr output. */
-function isGraphQLRateLimited(stderr: string): boolean {
-  return stderr.includes("API rate limit") && stderr.includes("GraphQL")
-}
 
 /** Close an issue via REST API fallback when GraphQL is rate-limited. */
 async function closeIssueViaRest(slug: string, number: string, cwd: string): Promise<boolean> {

@@ -374,6 +374,7 @@ export function blockStopHumanRequired(reason: string): never {
 // so all hook scripts can keep importing from "./hook-utils.ts" unchanged.
 
 import {
+  getOpenPrForBranch,
   getRepoSlug,
   gh,
   ghJsonViaDaemon,
@@ -389,19 +390,6 @@ import {
  */
 async function ghJson<T>(args: string[], cwd: string): Promise<T | null> {
   return ghJsonViaDaemon<T>(args, cwd, { ttlMs: 300_000 })
-}
-
-async function getOpenPrForBranch<T>(
-  branch: string,
-  cwd: string,
-  jsonFields: string
-): Promise<T | null> {
-  if (!branch) return null
-  const prs = await ghJson<T[]>(
-    ["pr", "list", "--head", branch, "--state", "open", "--json", jsonFields],
-    cwd
-  )
-  return prs?.[0] ?? null
 }
 
 export { getOpenPrForBranch, getRepoSlug, gh, ghJson, git, hasGhCli, isGitHubRemote, isGitRepo }

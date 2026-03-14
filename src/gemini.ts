@@ -9,6 +9,7 @@
 import { generateText, Output, streamText } from "ai"
 import { createGeminiProvider } from "ai-sdk-provider-gemini-cli"
 import type { ZodType } from "zod"
+import { resolveSignal } from "./ai-providers.ts"
 
 const DEFAULT_MODEL = "gemini-flash-latest"
 const GEMINI_STDOUT_NOISE_PATTERNS = [/^Loaded cached credentials\.?$/]
@@ -122,18 +123,7 @@ async function withSuppressedGeminiStdout<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-function resolveSignal(options?: PromptGeminiOptions): {
-  signal: AbortSignal | undefined
-  cleanup: () => void
-} {
-  if (options?.signal) return { signal: options.signal, cleanup: () => {} }
-  if (options?.timeout) {
-    const controller = new AbortController()
-    const handle = setTimeout(() => controller.abort(), options.timeout).unref()
-    return { signal: controller.signal, cleanup: () => clearTimeout(handle) }
-  }
-  return { signal: undefined, cleanup: () => {} }
-}
+// resolveSignal imported from ai-providers.ts
 
 function getGeminiTestResponseForText(): string | undefined {
   return (

@@ -96,7 +96,7 @@ function hasClaudeCode(): boolean {
   return Boolean(Bun.which("claude"))
 }
 
-function resolveSignal(options?: PromptOptions): {
+export function resolveSignal(options?: { signal?: AbortSignal; timeout?: number }): {
   signal: AbortSignal | undefined
   cleanup: () => void
 } {

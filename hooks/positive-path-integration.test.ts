@@ -10,7 +10,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import { getSessionCompactSnapshotPath, getSessionTasksDir } from "./hook-utils.ts"
-import { useTempDir } from "./test-utils.ts"
+import { useTempDir, writeTask } from "./test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
@@ -82,19 +82,7 @@ async function createTranscript(dir: string, toolNames: string[]): Promise<strin
 }
 
 /** Create a task file in the given session directory. */
-async function createTaskFile(
-  homeDir: string,
-  sessionId: string,
-  task: { id: string; subject: string; status: string }
-): Promise<void> {
-  const dir = getSessionTasksDir(sessionId, homeDir)
-  if (!dir) throw new Error("Failed to resolve session tasks directory")
-  await mkdir(dir, { recursive: true })
-  await writeFile(
-    join(dir, `${task.id}.json`),
-    JSON.stringify({ ...task, description: "", blocks: [], blockedBy: [] })
-  )
-}
+const createTaskFile = writeTask
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PreToolUse hooks: positive paths — correct output format

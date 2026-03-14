@@ -2,6 +2,7 @@ import { useMemo } from "react"
 import { formatLastActivity } from "../lib/dashboard-helpers.ts"
 import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
 import type { ToolStat } from "./session-browser.tsx"
+import { isInternalToolName } from "./session-browser-utils.ts"
 
 interface EventMetric {
   name: string
@@ -24,10 +25,6 @@ interface SessionHealth {
   dispatches?: number
   lastMessageAt?: number
   mtime: number
-}
-
-function isInternalToolName(name: string): boolean {
-  return name.trim().toLowerCase() === "structuredoutput"
 }
 
 interface ProjectPerformanceStatsProps {

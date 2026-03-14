@@ -5,78 +5,15 @@
  * 3. Whitespace-only git output lines are filtered correctly
  */
 import { describe, expect, test } from "bun:test"
-import { mkdir, writeFile } from "node:fs/promises"
+import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { parse as parseYaml } from "yaml"
-import { getSessionTasksDir } from "./hook-utils.ts"
-import { useTempDir } from "./test-utils.ts"
+import { runHook, useTempDir, writeTask } from "./test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
 const tmp = useTempDir("swiz-hardening-")
 const createTempHome = () => tmp.create()
-
-async function writeTask(
-  homeDir: string,
-  sessionId: string,
-  task: { id: string; subject: string; status: string }
-) {
-  const dir = getSessionTasksDir(sessionId, homeDir)
-  if (!dir) throw new Error("Failed to resolve session tasks directory")
-  await mkdir(dir, { recursive: true })
-  await writeFile(
-    join(dir, `${task.id}.json`),
-    JSON.stringify({ ...task, description: "", blocks: [], blockedBy: [] })
-  )
-}
-
-interface HookResult {
-  exitCode: number | null
-  stdout: string
-  stderr: string
-  decision?: string
-  reason?: string
-}
-
-/**
- * Run a hook script as a subprocess with controlled env.
- * Returns parsed hookSpecificOutput decision if present.
- */
-async function runHook(
-  script: string,
-  stdinPayload: Record<string, unknown>,
-  envOverrides: Record<string, string | undefined> = {}
-): Promise<HookResult> {
-  const payload = JSON.stringify(stdinPayload)
-  const env: Record<string, string | undefined> = { ...process.env, ...envOverrides }
-
-  const proc = Bun.spawn(["bun", script], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    env,
-  })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
-
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
-  await proc.exited
-
-  let decision: string | undefined
-  let reason: string | undefined
-
-  if (stdout.trim()) {
-    try {
-      const parsed = JSON.parse(stdout.trim())
-      const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
-      decision = (hso?.permissionDecision ?? parsed.decision) as string | undefined
-      reason = (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined
-    } catch {}
-  }
-
-  return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, decision, reason }
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Category 1: Missing HOME env var → early return (no crash)

@@ -1,41 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import { runHook as runHookBase } from "./test-utils.ts"
 
-interface HookResult {
-  exitCode: number | null
-  decision?: string
-  reason?: string
-}
-
-async function runHook(filePath: string): Promise<HookResult> {
-  const payload = JSON.stringify({
+async function runHook(filePath: string) {
+  return runHookBase("hooks/pretooluse-no-lockfile-edit.ts", {
     tool_name: "Edit",
     tool_input: { file_path: filePath },
   })
-
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-no-lockfile-edit.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
-
-  const stdout = await new Response(proc.stdout).text()
-  await proc.exited
-
-  let decision: string | undefined
-  let reason: string | undefined
-
-  if (stdout.trim()) {
-    try {
-      const parsed = JSON.parse(stdout.trim())
-      const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
-      decision = (hso?.permissionDecision ?? parsed.decision) as string | undefined
-      reason = (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined
-    } catch {}
-  }
-
-  return { exitCode: proc.exitCode, decision, reason }
 }
 
 describe("pretooluse-no-lockfile-edit", () => {

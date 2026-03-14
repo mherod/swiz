@@ -24,6 +24,11 @@ pre-commit:
       skip:
         - merge
         - rebase
+    similar:
+      run: command -v resect >/dev/null 2>&1 || exit 0; resect similar . --threshold=0.95
+      skip:
+        - merge
+        - rebase
     memory:
       run: swiz memory --strict
       skip:

@@ -2,25 +2,10 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
-import { findPriorSessionTasks, getSessionTasksDir } from "./hook-utils.ts"
-import { useTempDir } from "./test-utils.ts"
+import { findPriorSessionTasks } from "./hook-utils.ts"
+import { useTempDir, writeTask } from "./test-utils.ts"
 
 const { create: createTempHome } = useTempDir("swiz-prior-tasks-")
-
-/** Write a task JSON file into ~/.claude/tasks/<sessionId>/<id>.json */
-async function writeTask(
-  homeDir: string,
-  sessionId: string,
-  task: { id: string; subject: string; status: string }
-) {
-  const dir = getSessionTasksDir(sessionId, homeDir)
-  if (!dir) throw new Error("Failed to resolve session tasks directory")
-  await mkdir(dir, { recursive: true })
-  await writeFile(
-    join(dir, `${task.id}.json`),
-    JSON.stringify({ ...task, description: "", blocks: [], blockedBy: [] }, null, 2)
-  )
-}
 
 /** Write a stub transcript file into ~/.claude/projects/<projectKey>/<sessionId>.jsonl */
 async function writeTranscript(homeDir: string, cwd: string, sessionId: string) {
