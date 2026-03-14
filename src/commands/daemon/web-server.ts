@@ -745,6 +745,84 @@ async function handlePrPollRoute(req: Request, ctx: DaemonWebServerContext): Pro
   }
 }
 
+interface DashboardPrRecord {
+  number: number
+  title: string
+  state: string | null
+  headRefName: string | null
+  url: string | null
+  createdAt: string | null
+  updatedAt: string | null
+  author: DashboardIssueActor | null
+  reviewDecision: string | null
+  mergeable: string | null
+}
+
+function normalizeDashboardPr(raw: unknown): DashboardPrRecord | null {
+  const pr = asObject(raw)
+  if (!pr) return null
+  const number = typeof pr.number === "number" ? pr.number : null
+  const title = pickString(pr.title)
+  if (!number || !title) return null
+  const authorObject = asObject(pr.author) ?? asObject(pr.user)
+  const authorLogin = pickString(authorObject?.login)
+  return {
+    number,
+    title,
+    state: pickString(pr.state),
+    headRefName: pickString(pr.headRefName),
+    url: pickString(pr.url),
+    createdAt: pickString(pr.createdAt),
+    updatedAt: pickString(pr.updatedAt, pr.updated_at),
+    author: authorLogin ? { login: authorLogin } : null,
+    reviewDecision: pickString(pr.reviewDecision),
+    mergeable: pickString(pr.mergeable),
+  }
+}
+
+async function handleProjectPrsRoute(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as {
+    cwd?: string
+    limit?: number
+  } | null
+  const cwd = body?.cwd
+  if (typeof cwd !== "string" || !cwd) {
+    return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
+  }
+
+  ctx.registerProjectWatchers(cwd)
+  ctx.touchProject(cwd)
+
+  const repo = await getRepoSlug(cwd)
+  if (!repo) return Response.json({ repo: null, pullRequests: [] satisfies DashboardPrRecord[] })
+
+  const limit = Math.max(1, Math.min(30, body?.limit ?? 10))
+  const store = getIssueStore()
+  let prs = store.listPullRequests<unknown>(repo)
+
+  if (prs.length === 0) {
+    await ctx.upstreamSyncRegistry.register(cwd)
+    await ctx.upstreamSyncRegistry.syncNow(cwd)
+    prs = store.listPullRequests<unknown>(repo)
+  }
+
+  if (prs.length === 0) {
+    prs = store.listPullRequests<unknown>(repo, STALE_ISSUES_TTL_MS)
+  }
+
+  const normalizedPrs = prs
+    .map((pr) => normalizeDashboardPr(pr))
+    .filter((pr): pr is DashboardPrRecord => pr !== null)
+    .toSorted((a, b) => {
+      const aMs = a.updatedAt ? Date.parse(a.updatedAt) : 0
+      const bMs = b.updatedAt ? Date.parse(b.updatedAt) : 0
+      return (Number.isFinite(bMs) ? bMs : 0) - (Number.isFinite(aMs) ? aMs : 0)
+    })
+    .slice(0, limit)
+
+  return Response.json({ repo, pullRequests: normalizedPrs })
+}
+
 async function handleProjectIssuesRoute(
   req: Request,
   ctx: DaemonWebServerContext
@@ -1053,6 +1131,7 @@ const TOP_ROUTE_TABLE: Record<string, TopRouteHandler> = {
   "POST /process/agents/kill": (req) => handleProcessKill(req),
   "POST /sessions/delete": (req) => handleSessionDelete(req),
   "POST /projects/issues": (req, _url, ctx) => handleProjectIssuesRoute(req, ctx),
+  "POST /projects/prs": (req, _url, ctx) => handleProjectPrsRoute(req, ctx),
   "POST /pr-poll": (req, _url, ctx) => handlePrPollRoute(req, ctx),
   "GET /cache/status": (_req, _url, ctx) => handleCacheStatus(ctx),
   "POST /status-line/snapshot": (req, _url, ctx) => handleStatusLineSnapshot(req, ctx),

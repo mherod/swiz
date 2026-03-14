@@ -1,5 +1,11 @@
 import { debugLog } from "../../debug.ts"
-import { type IssueStore, syncUpstreamState, type UpstreamSyncResult } from "../../issue-store.ts"
+import {
+  getIssueStore,
+  type IssueStore,
+  replayPendingMutations,
+  syncUpstreamState,
+  type UpstreamSyncResult,
+} from "../../issue-store.ts"
 
 const DEFAULT_SYNC_INTERVAL_MS = 2 * 60 * 1000 // 2 minutes
 const DEFAULT_SYNC_TIMEOUT_MS = 30 * 1000 // 30 seconds
@@ -122,6 +128,13 @@ export class UpstreamSyncRegistry {
       debugLog(
         `[swiz] UPSTREAM_SYNC repo=${entry.repo} issues=${result.issues.upserted} prs=${result.pullRequests.upserted} ci=${result.ciStatuses.upserted} removed_issues=${result.issues.removed} removed_prs=${result.pullRequests.removed}`
       )
+      // Drain any queued offline mutations now that we have a live connection.
+      const store = this.store ?? getIssueStore()
+      const pending = store.pendingCount(entry.repo)
+      if (pending > 0) {
+        debugLog(`[swiz] UPSTREAM_SYNC replaying ${pending} pending mutations for ${entry.repo}`)
+        await replayPendingMutations(entry.repo, entry.cwd, store)
+      }
       return result
     } catch (err) {
       debugLog(

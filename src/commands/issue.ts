@@ -11,7 +11,7 @@ async function closeIssueViaRest(slug: string, number: string, cwd: string): Pro
     ["gh", "api", `repos/${slug}/issues/${number}`, "-X", "PATCH", "-f", "state=closed"],
     { cwd, stdout: "pipe", stderr: "pipe" }
   )
-  await new Response(proc.stdout).text()
+  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
   await proc.exited
   return proc.exitCode === 0
 }
@@ -28,7 +28,7 @@ async function commentViaRest(
     ["gh", "api", `repos/${slug}/issues/${number}/comments`, "-f", `body=${body}`],
     { cwd, stdout: "pipe", stderr: "pipe" }
   )
-  await new Response(proc.stdout).text()
+  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
   await proc.exited
   return proc.exitCode === 0
 }
