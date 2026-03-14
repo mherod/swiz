@@ -11,6 +11,7 @@ import {
   skillExists,
 } from "./hook-utils.ts"
 import {
+  SHELL_BRACE_EXPANSION_WRITE_RE,
   SHELL_HERESTRING_REDIRECT_RE,
   SHELL_PROC_SUB_WRITE_RE,
   SHELL_PROCESS_SUBSTITUTION_INPUT_RE,
@@ -98,7 +99,8 @@ function isShellFileWrite(c: string): boolean {
     SHELL_PROC_SUB_WRITE_RE.test(c) ||
     SHELL_PROCESS_SUBSTITUTION_INPUT_RE.test(c) ||
     SHELL_HERESTRING_REDIRECT_RE.test(c) ||
-    SHELL_HEREDOC_WRITE_RE.test(c)
+    SHELL_HEREDOC_WRITE_RE.test(c) ||
+    SHELL_BRACE_EXPANSION_WRITE_RE.test(c)
   )
 }
 

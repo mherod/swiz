@@ -315,6 +315,24 @@ describe("pretooluse-banned-commands", () => {
       expect(result.reason).toContain("Write tool")
     })
 
+    test("brace group redirect ({cmd;} > file) is blocked", async () => {
+      const result = await runHook("{ echo hello; echo world; } > out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("compact brace group redirect ({cmd1;cmd2} > file) is blocked", async () => {
+      const result = await runHook("{cmd1;cmd2} > out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("brace group append redirect ({cmd;} >> file) is blocked", async () => {
+      const result = await runHook("{ printf '%s\\n' hello; } >> out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
     test("git commit --no-verify is blocked", async () => {
       const result = await runHook("git commit --no-verify -m 'test'")
       expect(result.decision).toBe("deny")
@@ -409,6 +427,11 @@ describe("pretooluse-banned-commands", () => {
 
     test("process substitution to /dev/null passes through", async () => {
       const result = await runHook("cmd > >(tee /dev/null)")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("brace group redirect to /dev/null passes through", async () => {
+      const result = await runHook("{ echo hello; } > /dev/null")
       expect(result.decision).toBeUndefined()
     })
 

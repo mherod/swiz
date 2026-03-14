@@ -30,6 +30,13 @@ export const SHELL_HERESTRING_REDIRECT_RE = /<<<[^|&;]*>(?!\s*[&>])(?!\s*\/dev\/
  */
 export const SHELL_PROCESS_SUBSTITUTION_INPUT_RE = /(?<![<])<\s*<\s*\(/
 
+/**
+ * Matches brace-group command redirects: `{cmd1;cmd2} > file` and `{ cmd; } >> file`.
+ * A `{...}` grouped command followed by a file redirect (not fd-to-fd, not /dev/).
+ * Excludes `${VAR}` parameter expansions via negative lookbehind for `$`.
+ */
+export const SHELL_BRACE_EXPANSION_WRITE_RE = /(?<!\$)\{[^}]*\}\s*>>?(?!\s*\/dev\/)(?!\s*[&>])/
+
 /** Matches shell statement boundaries split by newline, `;`, `&&`, or `||`. */
 export const SHELL_STATEMENT_BOUNDARY = String.raw`(?:^|\n|;|&&|\|\|)`
 
