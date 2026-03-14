@@ -5,10 +5,10 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdir, utimes, writeFile } from "node:fs/promises"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { getSessionTasksDir } from "./hook-utils.ts"
-import { useTempDir } from "./test-utils.ts"
+import { createEnforcementProjectDir, useTempDir } from "./test-utils.ts"
 
 const HOOKS_DIR = resolve(process.cwd(), "hooks")
 const FOOTER_MARKER = "ACTION REQUIRED"
@@ -19,18 +19,6 @@ const TS_IGNORE_KW = ["ts", "ignore"].join("-")
 const TS_NOCHECK_KW = ["ts", "nocheck"].join("-")
 
 const { create: makeTempDir } = useTempDir("swiz-footer-")
-
-/** Create a git repo with an old-mtime CLAUDE.md so enforcement hooks fire without cooldown bypass. */
-async function makeProjectDir(): Promise<string> {
-  const dir = await makeTempDir()
-  const init = Bun.spawn(["git", "init"], { cwd: dir, stdout: "pipe", stderr: "pipe" })
-  await init.exited
-  const claudeMd = join(dir, "CLAUDE.md")
-  await writeFile(claudeMd, "# Guide\n")
-  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
-  await utimes(claudeMd, twoHoursAgo, twoHoursAgo)
-  return dir
-}
 
 interface HookResult {
   denied: boolean
@@ -256,8 +244,8 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
   })
 
   test("pretooluse-update-memory-enforcement: reminder denial includes footer", async () => {
-    // makeProjectDir() gives git repo + CLAUDE.md with old mtime so guard passes and cooldown stays off
-    const dir = await makeProjectDir()
+    // createEnforcementProjectDir() gives git repo + CLAUDE.md with old mtime so guard passes and cooldown stays off
+    const dir = await createEnforcementProjectDir(makeTempDir)
     const transcriptPath = join(dir, "transcript.jsonl")
     await writeFile(
       transcriptPath,

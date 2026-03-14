@@ -12,13 +12,10 @@ interface DispatchResult {
 }
 
 const _tmp = useTempDir()
-async function createTempDir(prefix: string): Promise<string> {
-  return _tmp.create(prefix)
-}
 
 /** Create a git repo + old-mtime CLAUDE.md so enforcement hooks fire without cooldown bypass. */
 async function createProjectDir(): Promise<string> {
-  const dir = await createTempDir("swiz-dispatch-project-")
+  const dir = await _tmp.create("swiz-dispatch-project-")
   Bun.spawnSync(["git", "init"], { cwd: dir, stdout: "pipe", stderr: "pipe" })
   const claudeMd = join(dir, "CLAUDE.md")
   await writeFile(claudeMd, "# Guide\n")
@@ -107,7 +104,7 @@ async function writeTask(
 
 describe("dispatch output formats", () => {
   test("preToolUse deny uses hookSpecificOutput.permissionDecision", async () => {
-    const homeDir = await createTempDir("swiz-dispatch-home-")
+    const homeDir = await _tmp.create("swiz-dispatch-home-")
     // createProjectDir() ensures the cwd is a git repo with CLAUDE.md so enforcement hooks
     // apply (the guard added in issue #28 skips enforcement in non-project directories).
     const cwd = await createProjectDir()
@@ -133,8 +130,8 @@ describe("dispatch output formats", () => {
   }, 15_000)
 
   test("preToolUse allow-with-reason uses hookSpecificOutput envelope", async () => {
-    const homeDir = await createTempDir("swiz-dispatch-home-")
-    const cwd = await createTempDir("swiz-dispatch-cwd-")
+    const homeDir = await _tmp.create("swiz-dispatch-home-")
+    const cwd = await _tmp.create("swiz-dispatch-cwd-")
     const sessionId = "session-allow"
     await writeTask(homeDir, sessionId, "pending")
 
@@ -161,8 +158,8 @@ describe("dispatch output formats", () => {
   }, 15_000)
 
   test("stop block uses top-level decision + reason", async () => {
-    const homeDir = await createTempDir("swiz-dispatch-home-")
-    const repoDir = await createTempDir("swiz-dispatch-repo-")
+    const homeDir = await _tmp.create("swiz-dispatch-home-")
+    const repoDir = await _tmp.create("swiz-dispatch-repo-")
     const transcriptPath = join(repoDir, "transcript.jsonl")
     await writeFile(
       transcriptPath,
@@ -197,8 +194,8 @@ describe("dispatch output formats", () => {
   }, 15_000)
 
   test("sessionStart context uses hookSpecificOutput.additionalContext", async () => {
-    const homeDir = await createTempDir("swiz-dispatch-home-")
-    const cwd = await createTempDir("swiz-dispatch-cwd-")
+    const homeDir = await _tmp.create("swiz-dispatch-home-")
+    const cwd = await _tmp.create("swiz-dispatch-cwd-")
     const result = await dispatch({
       event: "sessionStart",
       hookEventName: "SessionStart",
@@ -221,8 +218,8 @@ describe("dispatch output formats", () => {
   }, 15_000)
 
   test("userPromptSubmit context uses hookSpecificOutput.additionalContext", async () => {
-    const homeDir = await createTempDir("swiz-dispatch-home-")
-    const cwd = await createTempDir("swiz-dispatch-cwd-")
+    const homeDir = await _tmp.create("swiz-dispatch-home-")
+    const cwd = await _tmp.create("swiz-dispatch-cwd-")
     const result = await dispatch({
       event: "userPromptSubmit",
       hookEventName: "UserPromptSubmit",

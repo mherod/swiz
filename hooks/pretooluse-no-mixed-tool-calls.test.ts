@@ -1,36 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { resolve } from "node:path"
+import { runBashHook } from "./test-utils.ts"
 
-const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-no-mixed-tool-calls.ts")
+const HOOK = "hooks/pretooluse-no-mixed-tool-calls.ts"
 
-async function runHook(
-  command: string,
-  opts: { toolName?: string } = {}
-): Promise<{ decision?: string; reason?: string; stdout: string }> {
-  const payload = JSON.stringify({
-    tool_name: opts.toolName ?? "Bash",
-    tool_input: { command },
-  })
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-
-  const stdout = out.trim()
-  if (!stdout) return { stdout }
-
-  const parsed = JSON.parse(stdout)
-  const hso = parsed.hookSpecificOutput
-  return {
-    decision: hso?.permissionDecision ?? parsed.decision,
-    reason: hso?.permissionDecisionReason ?? parsed.reason,
-    stdout,
-  }
+function runHook(command: string, opts: { toolName?: string } = {}) {
+  return runBashHook(HOOK, command, opts)
 }
 
 describe("pretooluse-no-mixed-tool-calls", () => {

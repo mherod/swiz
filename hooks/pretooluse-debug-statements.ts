@@ -14,7 +14,7 @@ import {
   allowPreToolUse,
   denyPreToolUse,
   formatActionPlan,
-  SOURCE_EXT_RE,
+  isExcludedSourcePath,
   TEST_FILE_RE,
 } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
@@ -49,13 +49,13 @@ function countDebugPatterns(content: string): number {
 
 export { countDebugPatterns }
 
-function shouldSkipFile(filePath: string): boolean {
-  if (!SOURCE_EXT_RE.test(filePath)) return true
-  return (
-    TEST_FILE_RE.test(filePath) ||
-    INFRA_FILE_RE.test(filePath) ||
-    GENERATED_FILE_RE.test(filePath) ||
-    CONFIG_FILE_RE.test(filePath)
+function shouldSkipDebugCheck(filePath: string): boolean {
+  return isExcludedSourcePath(
+    filePath,
+    TEST_FILE_RE,
+    INFRA_FILE_RE,
+    GENERATED_FILE_RE,
+    CONFIG_FILE_RE
   )
 }
 
@@ -63,7 +63,7 @@ async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
   const filePath = input.tool_input?.file_path ?? ""
 
-  if (shouldSkipFile(filePath)) {
+  if (shouldSkipDebugCheck(filePath)) {
     allowPreToolUse("")
   }
 

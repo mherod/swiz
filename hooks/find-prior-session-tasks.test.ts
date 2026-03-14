@@ -1,19 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { mkdir, writeFile } from "node:fs/promises"
-import { join } from "node:path"
-import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import { findPriorSessionTasks } from "./hook-utils.ts"
-import { useTempDir, writeTask } from "./test-utils.ts"
+import { useTempDir, writeClaudeSession, writeTask } from "./test-utils.ts"
 
 const { create: createTempHome } = useTempDir("swiz-prior-tasks-")
-
-/** Write a stub transcript file into ~/.claude/projects/<projectKey>/<sessionId>.jsonl */
-async function writeTranscript(homeDir: string, cwd: string, sessionId: string) {
-  const projectKey = projectKeyFromCwd(cwd)
-  const dir = join(homeDir, ".claude", "projects", projectKey)
-  await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, `${sessionId}.jsonl`), "")
-}
 
 describe("findPriorSessionTasks", () => {
   test("returns null when no project directory exists", async () => {
@@ -25,7 +14,7 @@ describe("findPriorSessionTasks", () => {
   test("returns null when prior session has no tasks", async () => {
     const homeDir = await createTempHome()
     const cwd = "/Users/test/myproject"
-    await writeTranscript(homeDir, cwd, "prior-session-1")
+    await writeClaudeSession(homeDir, cwd, "prior-session-1")
     // No task files written for prior-session-1
     const result = await findPriorSessionTasks(cwd, "current-session", homeDir)
     expect(result).toBeNull()
@@ -34,7 +23,7 @@ describe("findPriorSessionTasks", () => {
   test("returns null when prior session tasks are all completed", async () => {
     const homeDir = await createTempHome()
     const cwd = "/Users/test/myproject"
-    await writeTranscript(homeDir, cwd, "prior-session-1")
+    await writeClaudeSession(homeDir, cwd, "prior-session-1")
     await writeTask(homeDir, "prior-session-1", {
       id: "1",
       subject: "Done task",
@@ -47,7 +36,7 @@ describe("findPriorSessionTasks", () => {
   test("returns incomplete tasks with session ID from prior session", async () => {
     const homeDir = await createTempHome()
     const cwd = "/Users/test/myproject"
-    await writeTranscript(homeDir, cwd, "prior-session-1")
+    await writeClaudeSession(homeDir, cwd, "prior-session-1")
     await writeTask(homeDir, "prior-session-1", {
       id: "1",
       subject: "Implement feature X",
@@ -76,7 +65,7 @@ describe("findPriorSessionTasks", () => {
   test("excludes the current session from results", async () => {
     const homeDir = await createTempHome()
     const cwd = "/Users/test/myproject"
-    await writeTranscript(homeDir, cwd, "current-session")
+    await writeClaudeSession(homeDir, cwd, "current-session")
     await writeTask(homeDir, "current-session", {
       id: "1",
       subject: "Current session task",
@@ -92,7 +81,7 @@ describe("findPriorSessionTasks", () => {
     const cwd = "/Users/test/myproject"
 
     // older session with only completed tasks
-    await writeTranscript(homeDir, cwd, "old-session")
+    await writeClaudeSession(homeDir, cwd, "old-session")
     await writeTask(homeDir, "old-session", {
       id: "1",
       subject: "Old completed task",
@@ -103,7 +92,7 @@ describe("findPriorSessionTasks", () => {
     await new Promise((r) => setTimeout(r, 10))
 
     // newer session with pending task
-    await writeTranscript(homeDir, cwd, "recent-session")
+    await writeClaudeSession(homeDir, cwd, "recent-session")
     await writeTask(homeDir, "recent-session", {
       id: "1",
       subject: "Recent pending task",
@@ -121,7 +110,7 @@ describe("findPriorSessionTasks", () => {
     const homeDir = await createTempHome()
     // Path with dots — must use projectKeyFromCwd encoding (both / and . → -)
     const cwd = "/Users/jane.doe/my.project"
-    await writeTranscript(homeDir, cwd, "prior-session-1")
+    await writeClaudeSession(homeDir, cwd, "prior-session-1")
     await writeTask(homeDir, "prior-session-1", {
       id: "1",
       subject: "Task for dotted path",

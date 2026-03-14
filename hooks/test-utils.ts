@@ -1,7 +1,8 @@
 import { afterAll } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import { getSessionTasksDir } from "./hook-utils.ts"
 
 /**
@@ -84,6 +85,162 @@ export async function runHook(
   }
 
   return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, decision, reason }
+}
+
+/**
+ * Create a temp directory that looks like a real project (git repo + CLAUDE.md
+ * with an old mtime) so memory-enforcement hooks fire without cooldown bypass.
+ * Pass the `create` method from a `useTempDir()` instance so cleanup is managed
+ * by the caller's afterAll hook.
+ */
+export async function createEnforcementProjectDir(makeDir: () => Promise<string>): Promise<string> {
+  const dir = await makeDir()
+  const init = Bun.spawn(["git", "init"], { cwd: dir, stdout: "pipe", stderr: "pipe" })
+  await init.exited
+  const claudeMd = join(dir, "CLAUDE.md")
+  await writeFile(claudeMd, "# Guide\n")
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
+  await utimes(claudeMd, twoHoursAgo, twoHoursAgo)
+  return dir
+}
+
+/**
+ * Run a PreToolUse Bash hook as a subprocess with a shell-command payload.
+ * Used by test suites for hooks that inspect Bash commands (no-npm, banned-commands, etc.).
+ */
+export async function runBashHook(
+  script: string,
+  command: string,
+  opts: { toolName?: string; cwd?: string } = {}
+): Promise<{ decision?: string; reason?: string; stdout: string }> {
+  const payload = JSON.stringify({
+    tool_name: opts.toolName ?? "Bash",
+    tool_input: { command },
+  })
+  const proc = Bun.spawn(["bun", script], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    cwd: opts.cwd,
+  })
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
+  const out = await new Response(proc.stdout).text()
+  await proc.exited
+
+  const stdout = out.trim()
+  if (!stdout) return { stdout }
+  try {
+    const parsed = JSON.parse(stdout)
+    const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
+    return {
+      decision: (hso?.permissionDecision ?? parsed.decision) as string | undefined,
+      reason: (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined,
+      stdout,
+    }
+  } catch {
+    return { stdout }
+  }
+}
+
+export interface FileEditHookResult {
+  decision?: string
+  reason?: string
+  rawOutput: string
+}
+
+/**
+ * Run a PreToolUse file-edit hook (Edit/Write) as a subprocess and parse its output.
+ * Used by test suites for hooks that inspect file content (ts-ignore, eslint-disable, etc.).
+ */
+export async function runFileEditHook(
+  script: string,
+  opts: {
+    filePath?: string
+    newString?: string
+    content?: string
+    toolName?: string
+  }
+): Promise<FileEditHookResult> {
+  const payload = JSON.stringify({
+    tool_name: opts.toolName ?? "Edit",
+    tool_input: {
+      file_path: opts.filePath ?? "src/app.ts",
+      new_string: opts.newString,
+      content: opts.content,
+    },
+  })
+
+  const proc = Bun.spawn(["bun", script], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  void proc.stdin.write(payload)
+  void proc.stdin.end()
+
+  const rawOutput = await new Response(proc.stdout).text()
+  await proc.exited
+
+  if (!rawOutput.trim()) return { rawOutput }
+  try {
+    const parsed = JSON.parse(rawOutput.trim())
+    const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
+    return {
+      decision: (hso?.permissionDecision ?? parsed.decision) as string | undefined,
+      reason: (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined,
+      rawOutput,
+    }
+  } catch {
+    return { rawOutput }
+  }
+}
+
+/** Join transcript JSONL entries into a single string for test fixtures. */
+export function makeTranscript(...entries: string[]): string {
+  return entries.join("\n")
+}
+
+/**
+ * Create a bare git repository suitable for hook tests that inspect git state.
+ * If `featureBranch` is supplied, checks out that branch before adding the remote.
+ * The returned directory is NOT managed by useTempDir — callers must clean up if needed.
+ */
+export async function createTestRepo(
+  remoteUrl: string,
+  opts: { featureBranch?: string } = {}
+): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "swiz-test-repo-"))
+  const run = (args: string[]) =>
+    Bun.spawnSync(args, { cwd: dir, stdout: "pipe", stderr: "pipe", env: process.env })
+  run(["git", "init"])
+  run(["git", "config", "user.email", "test@example.com"])
+  run(["git", "config", "user.name", "Test User"])
+  await writeFile(join(dir, "README.md"), "hello\n")
+  run(["git", "add", "README.md"])
+  run(["git", "commit", "-m", "init"])
+  run(["git", "branch", "-M", "main"])
+  if (opts.featureBranch) {
+    run(["git", "checkout", "-b", opts.featureBranch])
+  }
+  run(["git", "remote", "add", "origin", remoteUrl])
+  return dir
+}
+
+/**
+ * Write a stub Claude session transcript file at ~/.claude/projects/<key>/<sessionId>.jsonl.
+ * Pass `content` to seed the file with specific JSONL lines; omit for an empty transcript.
+ */
+export async function writeClaudeSession(
+  homeDir: string,
+  cwd: string,
+  sessionId: string,
+  content = ""
+): Promise<void> {
+  const projectKey = projectKeyFromCwd(cwd)
+  const dir = join(homeDir, ".claude", "projects", projectKey)
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, `${sessionId}.jsonl`), content)
 }
 
 /** Write a task JSON file into ~/.claude/tasks/<sessionId>/<id>.json */

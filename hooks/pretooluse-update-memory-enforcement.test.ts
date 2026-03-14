@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { utimes, writeFile } from "node:fs/promises"
+import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { getSessionTasksDir } from "./hook-utils.ts"
-import { useTempDir } from "./test-utils.ts"
+import { createEnforcementProjectDir, useTempDir } from "./test-utils.ts"
 
 const HOOK = "hooks/pretooluse-update-memory-enforcement.ts"
 const REMINDER_FRAGMENT =
@@ -10,23 +10,6 @@ const REMINDER_FRAGMENT =
 const SELF_SENTINEL = "MEMORY CAPTURE ENFORCEMENT"
 
 const { create: createTempDir } = useTempDir("swiz-update-memory-")
-
-/**
- * Create a temp dir that looks like a real project: git repo + CLAUDE.md with
- * an OLD mtime so the 30-minute cooldown in isMemoryRecentlyUpdated does not fire.
- * Tests that expect enforcement to run must use this helper for their `cwd`.
- */
-async function createProjectDir(): Promise<string> {
-  const dir = await createTempDir()
-  const init = Bun.spawn(["git", "init"], { cwd: dir, stdout: "pipe", stderr: "pipe" })
-  await init.exited
-  const claudeMd = join(dir, "CLAUDE.md")
-  await writeFile(claudeMd, "# Guide\n")
-  // Set mtime 2 hours in the past — outside the 30-min cooldown window
-  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
-  await utimes(claudeMd, twoHoursAgo, twoHoursAgo)
-  return dir
-}
 
 async function createTranscript(dir: string, lines: unknown[]): Promise<string> {
   const path = join(dir, "transcript.jsonl")
@@ -84,9 +67,9 @@ function toolUse(name: string, input: Record<string, unknown>): Record<string, u
 
 describe("pretooluse-update-memory-enforcement", () => {
   test("denies normal work until the update-memory skill is read", async () => {
-    // createProjectDir() gives a git repo + CLAUDE.md with an old mtime so the
+    // createEnforcementProjectDir(createTempDir) gives a git repo + CLAUDE.md with an old mtime so the
     // cooldown does not fire and enforcement runs as expected.
-    const dir = await createProjectDir()
+    const dir = await createEnforcementProjectDir(createTempDir)
     const transcript = await createTranscript(dir, [
       hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),
     ])
@@ -232,7 +215,7 @@ describe("pretooluse-update-memory-enforcement", () => {
   test("still enforces when compaction occurred BEFORE the trigger (new post-compact trigger)", async () => {
     // Compaction happened, THEN a new stop hook fired with a fresh REMINDER_FRAGMENT.
     // The gate should still enforce — this is a new, genuine trigger.
-    const dir = await createProjectDir()
+    const dir = await createEnforcementProjectDir(createTempDir)
     const POST_COMPACT_MARKER = "Post-compaction context"
     const transcript = await createTranscript(dir, [
       // Compaction happened first
@@ -278,7 +261,7 @@ describe("pretooluse-update-memory-enforcement", () => {
 
   describe("in-progress task exemption", () => {
     test("skips enforcement when session has an in_progress task", async () => {
-      const dir = await createProjectDir()
+      const dir = await createEnforcementProjectDir(createTempDir)
       const fakeHome = await createTempDir()
       const sessionId = `test-session-${Date.now()}`
       const tasksDir = getSessionTasksDir(sessionId, fakeHome)
@@ -309,7 +292,7 @@ describe("pretooluse-update-memory-enforcement", () => {
     })
 
     test("enforces when session has only completed tasks (no in_progress)", async () => {
-      const dir = await createProjectDir()
+      const dir = await createEnforcementProjectDir(createTempDir)
       const fakeHome = await createTempDir()
       const sessionId = `test-session-${Date.now()}`
       const tasksDir = getSessionTasksDir(sessionId, fakeHome)
@@ -340,7 +323,7 @@ describe("pretooluse-update-memory-enforcement", () => {
     })
 
     test("enforces when session has no task files", async () => {
-      const dir = await createProjectDir()
+      const dir = await createEnforcementProjectDir(createTempDir)
       const fakeHome = await createTempDir()
       const sessionId = `test-session-${Date.now()}`
       // No tasks directory created for this session
@@ -366,7 +349,7 @@ describe("pretooluse-update-memory-enforcement", () => {
     })
 
     test("skips enforcement when one task is in_progress and another is completed", async () => {
-      const dir = await createProjectDir()
+      const dir = await createEnforcementProjectDir(createTempDir)
       const fakeHome = await createTempDir()
       const sessionId = `test-session-${Date.now()}`
       const tasksDir = getSessionTasksDir(sessionId, fakeHome)
@@ -441,8 +424,8 @@ describe("pretooluse-update-memory-enforcement", () => {
     })
 
     test("enforces when cwd is a git repo with CLAUDE.md present", async () => {
-      // createProjectDir() gives git repo + CLAUDE.md with old mtime (cooldown inactive)
-      const repoDir = await createProjectDir()
+      // createEnforcementProjectDir(createTempDir) gives git repo + CLAUDE.md with old mtime (cooldown inactive)
+      const repoDir = await createEnforcementProjectDir(createTempDir)
 
       const transcript = await createTranscript(repoDir, [
         hookFeedback(`Use the /update-memory skill to ${REMINDER_FRAGMENT}`),

@@ -21,15 +21,12 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { makeTranscript } from "./test-utils.ts"
 
 // ─── Shared transcript builder & runner ──────────────────────────────────────
 
 function entry(role: "user" | "assistant", text: string): string {
   return JSON.stringify({ type: role, message: { content: [{ type: "text", text }] } })
-}
-
-function transcript(...lines: string[]): string {
-  return lines.join("\n")
 }
 
 interface HookResult {
@@ -205,7 +202,7 @@ describe("P1 BLOCK_SURVIVES_NOISE — blocking phrase always blocks regardless o
 
   for (const { label, text } of cases) {
     test(`blocks: ${label}`, async () => {
-      const t = transcript(entry("user", text))
+      const t = makeTranscript(entry("user", text))
       const result = await runHook(t)
       expect(result.blocked).toBe(true)
     })
@@ -220,7 +217,7 @@ describe("P2 APPROVAL_LIFTS_BLOCK — recognised approval after a block always a
 
   for (const approvalText of APPROVAL_CORES) {
     test(`lifts block: ${JSON.stringify(approvalText)}`, async () => {
-      const t = transcript(BLOCK_ENTRY, entry("user", approvalText))
+      const t = makeTranscript(BLOCK_ENTRY, entry("user", approvalText))
       const result = await runHook(t)
       expect(result.blocked).toBe(false)
     })
@@ -235,7 +232,7 @@ describe("P3 NEUTRAL_NO_CHANGE — neutral text never changes hook state", () =>
   describe("neutral text alone does NOT block", () => {
     for (const text of NEUTRAL_LINES) {
       test(`no block from: ${JSON.stringify(text)}`, async () => {
-        const t = transcript(entry("user", text))
+        const t = makeTranscript(entry("user", text))
         expect((await runHook(t)).blocked).toBe(false)
       })
     }
@@ -246,7 +243,7 @@ describe("P3 NEUTRAL_NO_CHANGE — neutral text never changes hook state", () =>
 
     for (const text of NEUTRAL_LINES) {
       test(`still blocked after neutral: ${JSON.stringify(text)}`, async () => {
-        const t = transcript(BLOCK_ENTRY, entry("user", text))
+        const t = makeTranscript(BLOCK_ENTRY, entry("user", text))
         expect((await runHook(t)).blocked).toBe(true)
       })
     }
@@ -299,7 +296,7 @@ describe("P4 FINAL_STATE_WINS — result always reflects the last block or appro
 describe("P5 ROLE_INVARIANT — blocking phrases in assistant text never block", () => {
   for (const core of BLOCKING_CORES) {
     test(`assistant role does not block: ${JSON.stringify(core)}`, async () => {
-      const t = transcript(entry("assistant", `${core} to remote without approval`))
+      const t = makeTranscript(entry("assistant", `${core} to remote without approval`))
       expect((await runHook(t)).blocked).toBe(false)
     })
   }
@@ -317,7 +314,7 @@ describe("P6 APPROVAL_USER_ONLY — approval phrases lift block only from user r
 
   for (const approvalText of REPRESENTATIVE_APPROVALS) {
     test(`user approval lifts: ${JSON.stringify(approvalText)}`, async () => {
-      const t = transcript(BLOCK_ENTRY, entry("user", approvalText))
+      const t = makeTranscript(BLOCK_ENTRY, entry("user", approvalText))
       expect((await runHook(t)).blocked).toBe(false)
     })
   }
@@ -334,7 +331,7 @@ describe("P7 ASSISTANT_NEVER_SELF_APPROVES — approval phrases in assistant tex
 
   for (const approvalText of REPRESENTATIVE_APPROVALS) {
     test(`assistant approval ignored: ${JSON.stringify(approvalText)}`, async () => {
-      const t = transcript(BLOCK_ENTRY, entry("assistant", approvalText))
+      const t = makeTranscript(BLOCK_ENTRY, entry("assistant", approvalText))
       expect((await runHook(t)).blocked).toBe(true)
     })
   }
@@ -349,7 +346,7 @@ describe("Non-approval phrases do not lift a block", () => {
 
   for (const text of NON_APPROVAL_PHRASES) {
     test(`no approval from: ${JSON.stringify(text)}`, async () => {
-      const t = transcript(BLOCK_ENTRY, entry("user", text))
+      const t = makeTranscript(BLOCK_ENTRY, entry("user", text))
       expect((await runHook(t)).blocked).toBe(true)
     })
   }

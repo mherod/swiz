@@ -1,40 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
-import { join, resolve } from "node:path"
-import { useTempDir } from "./test-utils.ts"
+import { join } from "node:path"
+import { runBashHook, useTempDir } from "./test-utils.ts"
 
-const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-no-npm.ts")
+const HOOK = "hooks/pretooluse-no-npm.ts"
 
 const { create: makeTempDir } = useTempDir("swiz-no-npm-")
 
-async function runHook(
-  command: string,
-  opts: { toolName?: string; cwd?: string } = {}
-): Promise<{ decision?: string; reason?: string; stdout: string }> {
-  const payload = JSON.stringify({
-    tool_name: opts.toolName ?? "Bash",
-    tool_input: { command },
-  })
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: opts.cwd ?? process.cwd(),
-  })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-
-  const stdout = out.trim()
-  if (!stdout) return { stdout }
-  const parsed = JSON.parse(stdout)
-  const hso = parsed.hookSpecificOutput
-  return {
-    decision: hso?.permissionDecision ?? parsed.decision,
-    reason: hso?.permissionDecisionReason ?? parsed.reason,
-    stdout,
-  }
+function runHook(command: string, opts: { toolName?: string; cwd?: string } = {}) {
+  return runBashHook(HOOK, command, opts)
 }
 
 // These tests run from the swiz project root which has bun.lock → PM=bun

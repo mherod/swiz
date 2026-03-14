@@ -1,32 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import { runBashHook } from "./test-utils.ts"
 
-// Test the hook by piping JSON to the script and checking output
+const HOOK = "hooks/pretooluse-banned-commands.ts"
 
-async function runHook(
-  command: string
-): Promise<{ decision?: string; allow?: boolean; reason?: string }> {
-  const payload = JSON.stringify({
-    tool_name: "Bash",
-    tool_input: { command },
-  })
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-banned-commands.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-
-  if (!out.trim()) return {}
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed.hookSpecificOutput
-  return {
-    decision: hso?.permissionDecision ?? parsed.decision,
-    reason: hso?.permissionDecisionReason ?? parsed.reason,
-    allow: hso?.permissionDecision === "allow",
-  }
+async function runHook(command: string) {
+  const result = await runBashHook(HOOK, command)
+  return { ...result, allow: result.decision === "allow" }
 }
 
 describe("pretooluse-banned-commands", () => {

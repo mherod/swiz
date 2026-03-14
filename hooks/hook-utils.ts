@@ -998,3 +998,15 @@ export { spawnSpeak } from "../src/speech.ts"
 // ─── File utilities ───────────────────────────────────────────────────────
 
 export { countFileWords } from "../src/file-metrics.ts"
+
+import { SOURCE_EXT_RE as _SOURCE_EXT_RE } from "./utils/git-utils.ts"
+
+/**
+ * Returns true when a file path should be skipped by source-scanning hooks.
+ * Always skips non-source files (unrecognised extension). Pass any additional
+ * per-hook exclusion regexes as extra arguments.
+ */
+export function isExcludedSourcePath(filePath: string, ...extras: RegExp[]): boolean {
+  if (!_SOURCE_EXT_RE.test(filePath)) return true
+  return extras.some((re) => re.test(filePath))
+}

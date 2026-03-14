@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { useTempDir } from "../../hooks/test-utils.ts"
+import { useTempDir, writeClaudeSession } from "../../hooks/test-utils.ts"
 import {
   ALL_STATUS_LINE_SEGMENTS,
   DEFAULT_TRIVIAL_MAX_FILES,
@@ -14,7 +14,6 @@ import {
   SETTINGS_REGISTRY,
 } from "../settings.ts"
 import { createAntigravitySession, createCodexSession } from "../test-fixtures.ts"
-import { projectKeyFromCwd } from "../transcript-utils.ts"
 import { settingsCommand } from "./settings.ts"
 
 const _tmp = useTempDir("swiz-settings-test-")
@@ -87,16 +86,6 @@ async function runSwiz(
   })
   _inProcessQueue = result.catch(() => {})
   return result
-}
-
-async function createSession(home: string, targetDir: string, sessionId: string): Promise<void> {
-  const projectKey = projectKeyFromCwd(targetDir)
-  const projectDir = join(home, ".claude", "projects", projectKey)
-  await mkdir(projectDir, { recursive: true })
-  await writeFile(
-    join(projectDir, `${sessionId}.jsonl`),
-    `{"type":"user","message":{"content":"test"},"cwd":"${targetDir}"}\n`
-  )
 }
 
 async function createGeminiSession(
@@ -214,7 +203,7 @@ describe("swiz settings", () => {
     const home = await createTempHome()
     const targetDir = join(home, "repo")
     const sessionId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-    await createSession(home, targetDir, sessionId)
+    await writeClaudeSession(home, targetDir, sessionId)
 
     const disableGlobal = await runSwiz(["settings", "disable", "auto-continue"], home)
     expect(disableGlobal.exitCode).toBe(0)
@@ -232,7 +221,7 @@ describe("swiz settings", () => {
     const home = await createTempHome()
     const targetDir = join(home, "repo")
     const sessionId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-    await createSession(home, targetDir, sessionId)
+    await writeClaudeSession(home, targetDir, sessionId)
 
     const result = await runSwiz(
       ["settings", "disable", "auto-continue", "--session", "--dir", targetDir],
@@ -297,7 +286,7 @@ describe("swiz settings", () => {
   test("fails when session prefix does not match an existing session", async () => {
     const home = await createTempHome()
     const targetDir = join(home, "repo")
-    await createSession(home, targetDir, "cccccccc-cccc-cccc-cccc-cccccccccccc")
+    await writeClaudeSession(home, targetDir, "cccccccc-cccc-cccc-cccc-cccccccccccc")
 
     const result = await runSwiz(
       ["settings", "disable", "auto-continue", "--session", "not-found", "--dir", targetDir],
@@ -409,7 +398,7 @@ describe("swiz settings", () => {
     const cases = [
       {
         setup: async (home: string) => {
-          await createSession(home, "/tmp/fake-project", "sess-scope-test")
+          await writeClaudeSession(home, "/tmp/fake-project", "sess-scope-test")
         },
         args: ["enable", "speak", "--session", "sess-scope-test"],
         stderr: "does not support --session scope",
@@ -421,7 +410,7 @@ describe("swiz settings", () => {
       },
       {
         setup: async (home: string) => {
-          await createSession(home, "/tmp/fake-project", "sess-voice-test")
+          await writeClaudeSession(home, "/tmp/fake-project", "sess-voice-test")
         },
         args: ["set", "narrator-voice", "Alex", "--session", "sess-voice-test"],
         stderr: "does not support --session scope",
@@ -445,7 +434,7 @@ describe("swiz settings", () => {
     const swizDir = join(home, ".swiz")
     await mkdir(swizDir, { recursive: true })
     await writeFile(join(swizDir, "settings.json"), JSON.stringify({ autoContinue: false }))
-    await createSession(home, home, "sess-ac-test")
+    await writeClaudeSession(home, home, "sess-ac-test")
     const result = await runSwiz(
       ["settings", "enable", "auto-continue", "--session", "sess-ac-test", "--dir", home],
       home
@@ -460,7 +449,7 @@ describe("swiz settings", () => {
     const swizDir = join(home, ".swiz")
     await mkdir(swizDir, { recursive: true })
     await writeFile(join(swizDir, "settings.json"), JSON.stringify({ autoContinue: true }))
-    await createSession(home, home, "sess-ambition-test")
+    await writeClaudeSession(home, home, "sess-ambition-test")
 
     const result = await runSwiz(
       [

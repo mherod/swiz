@@ -2,25 +2,10 @@ import { describe, expect, test } from "bun:test"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { createTestRepo } from "./test-utils.ts"
 
 const BUN_EXE = Bun.which("bun") ?? "bun"
 const WORKSPACE_ROOT = process.cwd()
-
-async function createRepo(remoteUrl: string): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "pretooluse-block-commit-"))
-  const run = (args: string[]) =>
-    Bun.spawnSync(args, { cwd: dir, stdout: "pipe", stderr: "pipe", env: process.env })
-
-  run(["git", "init"])
-  run(["git", "config", "user.email", "test@example.com"])
-  run(["git", "config", "user.name", "Test User"])
-  await writeFile(join(dir, "README.md"), "hello\n")
-  run(["git", "add", "README.md"])
-  run(["git", "commit", "-m", "init"])
-  run(["git", "branch", "-M", "main"])
-  run(["git", "remote", "add", "origin", remoteUrl])
-  return dir
-}
 
 async function createFakeGhBin(currentUser: string): Promise<string> {
   const fakeBin = await mkdtemp(join(tmpdir(), "pretooluse-block-commit-gh-"))
@@ -84,7 +69,7 @@ async function runHook(
 
 describe("pretooluse-block-commit-to-main", () => {
   test("blocks git commit on default branch in collaborative repo", async () => {
-    const repo = await createRepo("https://github.com/acme/repo.git")
+    const repo = await createTestRepo("https://github.com/acme/repo.git")
     const fakeBin = await createFakeGhBin("mherod")
     try {
       const result = await runHook(repo, 'git commit -m "test"', fakeBin)
@@ -103,7 +88,7 @@ describe("pretooluse-block-commit-to-main", () => {
   })
 
   test("allows git commit on default branch in solo repo", async () => {
-    const repo = await createRepo("https://github.com/mherod/repo.git")
+    const repo = await createTestRepo("https://github.com/mherod/repo.git")
     const fakeBin = await createFakeGhBin("mherod")
     try {
       const result = await runHook(repo, 'git commit -m "test"', fakeBin)
@@ -117,7 +102,7 @@ describe("pretooluse-block-commit-to-main", () => {
   })
 
   test("allows git commit on feature branch in collaborative repo", async () => {
-    const repo = await createRepo("https://github.com/acme/repo.git")
+    const repo = await createTestRepo("https://github.com/acme/repo.git")
     const fakeBin = await createFakeGhBin("mherod")
     Bun.spawnSync(["git", "checkout", "-b", "feat/test"], {
       cwd: repo,

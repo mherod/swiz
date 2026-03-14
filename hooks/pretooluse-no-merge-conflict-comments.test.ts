@@ -1,27 +1,10 @@
 import { describe, expect, test } from "bun:test"
+import { runBashHook } from "./test-utils.ts"
 
-async function runHook(command: string): Promise<{ decision?: string; reason?: string }> {
-  const payload = JSON.stringify({
-    tool_name: "Bash",
-    tool_input: { command },
-  })
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-no-merge-conflict-comments.ts"], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  void proc.stdin.write(payload)
-  void proc.stdin.end()
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
+const HOOK = "hooks/pretooluse-no-merge-conflict-comments.ts"
 
-  if (!out.trim()) return {}
-  const parsed = JSON.parse(out.trim())
-  const hso = parsed.hookSpecificOutput
-  return {
-    decision: hso?.permissionDecision ?? parsed.decision,
-    reason: hso?.permissionDecisionReason ?? parsed.reason,
-  }
+function runHook(command: string) {
+  return runBashHook(HOOK, command)
 }
 
 // ─── gh pr comment path ──────────────────────────────────────────────────────

@@ -10,9 +10,6 @@ type JsonObject = Record<string, unknown>
 const HOOK_CONTRACT_TIMEOUT_MS = 30_000
 
 const _tmp = useTempDir()
-async function createTempDir(prefix: string): Promise<string> {
-  return _tmp.create(prefix)
-}
 
 function assertHookOutputShape(output: JsonObject): void {
   const result = hookOutputSchema.safeParse(output)
@@ -22,8 +19,8 @@ function assertHookOutputShape(output: JsonObject): void {
 async function runHookScript(
   file: string
 ): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
-  const homeDir = await createTempDir("swiz-hook-contract-home-")
-  const cwdDir = await createTempDir("swiz-hook-contract-cwd-")
+  const homeDir = await _tmp.create("swiz-hook-contract-home-")
+  const cwdDir = await _tmp.create("swiz-hook-contract-cwd-")
   const transcriptPath = join(cwdDir, "transcript.jsonl")
   const sourceFile = join(cwdDir, "file.ts")
 

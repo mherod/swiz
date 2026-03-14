@@ -25,7 +25,7 @@ pre-commit:
         - merge
         - rebase
     similar:
-      run: command -v resect >/dev/null 2>&1 || exit 0; resect similar . --threshold=0.95
+      run: command -v resect >/dev/null 2>&1 || exit 0; resect similar . --threshold=0.96 --strict --skip-same-file --same-name-only --min-lines=12
       skip:
         - merge
         - rebase

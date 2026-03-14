@@ -26,17 +26,9 @@ interface BypassState {
   repoKey: string
 }
 
-function getRepoKey(): string {
-  return getCanonicalPathHash(process.cwd())
-}
-
-function getSentinelPath(): string {
-  return swizEmergencyBypassPath(getRepoKey())
-}
-
 async function readBypassState(): Promise<BypassState | null> {
   try {
-    const raw = await readFile(getSentinelPath(), "utf8")
+    const raw = await readFile(swizEmergencyBypassPath(getCanonicalPathHash(process.cwd())), "utf8")
     return JSON.parse(raw) as BypassState
   } catch {
     return null
@@ -120,10 +112,13 @@ export const emergencyBypassCommand: Command = {
     const state: BypassState = {
       activatedAt: now,
       expiresAt: now + durationMs,
-      repoKey: getRepoKey(),
+      repoKey: getCanonicalPathHash(process.cwd()),
     }
 
-    await writeFile(getSentinelPath(), JSON.stringify(state, null, 2))
+    await writeFile(
+      swizEmergencyBypassPath(getCanonicalPathHash(process.cwd())),
+      JSON.stringify(state, null, 2)
+    )
 
     const expirySec = Math.round(durationMs / 1000)
     stderrLog("emergency-bypass activate", `Emergency bypass ACTIVATED for ${expirySec}s`)

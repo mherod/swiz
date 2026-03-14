@@ -33,10 +33,6 @@ interface EvidenceConfig {
 
 type ConfigWarning = { field: string; message: string }
 
-function warn(msg: string): void {
-  process.stderr.write(`[task-evidence-config] ${msg}\n`)
-}
-
 /**
  * Validate a single config field. Returns the cleaned array and any warnings.
  * Checks: must be array, elements must be strings, no empty strings, no duplicates, non-empty result.
@@ -116,7 +112,9 @@ async function loadConfig(): Promise<EvidenceConfig> {
   }
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    warn("config root must be an object — using all defaults")
+    process.stderr.write(
+      `[task-evidence-config] config root must be an object — using all defaults\n`
+    )
     return defaults
   }
 
@@ -124,7 +122,9 @@ async function loadConfig(): Promise<EvidenceConfig> {
   const knownKeys = new Set(["toolNames", "evidenceKeys", "taskIdFields"])
   const unknownKeys = Object.keys(parsed).filter((k) => !k.startsWith("$") && !knownKeys.has(k))
   if (unknownKeys.length > 0) {
-    warn(`unknown config key(s) ignored: ${JSON.stringify(unknownKeys)}`)
+    process.stderr.write(
+      `[task-evidence-config] unknown config key(s) ignored: ${JSON.stringify(unknownKeys)}\n`
+    )
   }
 
   const allWarnings: ConfigWarning[] = []
@@ -136,7 +136,7 @@ async function loadConfig(): Promise<EvidenceConfig> {
   allWarnings.push(...tn.warnings, ...ek.warnings, ...tf.warnings)
 
   for (const w of allWarnings) {
-    warn(`${w.field}: ${w.message}`)
+    process.stderr.write(`[task-evidence-config] ${w.field}: ${w.message}\n`)
   }
 
   return {

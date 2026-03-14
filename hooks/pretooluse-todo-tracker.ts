@@ -15,7 +15,7 @@ import {
   allowPreToolUse,
   denyPreToolUse,
   formatActionPlan,
-  SOURCE_EXT_RE,
+  isExcludedSourcePath,
   TEST_FILE_RE,
 } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
@@ -38,20 +38,15 @@ function countTodoMarkers(content: string): number {
 
 export { countTodoMarkers }
 
-function isExcludedPath(filePath: string): boolean {
-  if (!SOURCE_EXT_RE.test(filePath)) return true
-  return (
-    EXCLUDE_PATH_RE.test(filePath) ||
-    GENERATED_FILE_RE.test(filePath) ||
-    TEST_FILE_RE.test(filePath)
-  )
+function shouldSkipTodoCheck(filePath: string): boolean {
+  return isExcludedSourcePath(filePath, EXCLUDE_PATH_RE, GENERATED_FILE_RE, TEST_FILE_RE)
 }
 
 async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
   const filePath = input.tool_input?.file_path ?? ""
-  if (isExcludedPath(filePath)) allowPreToolUse("")
+  if (shouldSkipTodoCheck(filePath)) allowPreToolUse("")
 
   const oldString = input.tool_input?.old_string ?? ""
   const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
