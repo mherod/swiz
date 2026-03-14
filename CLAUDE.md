@@ -61,6 +61,7 @@ alwaysApply: false
   - DO NOT define Git utilities locally — import from canonical source. Duplicates: move to canonical file, update consumers, delete local.
 - Skill helpers: `skillExists` (checks `.skills/` and `~/.claude/skills/` for `SKILL.md`), `skillAdvice`.
 - Cross-agent tool checks: `isShellTool`, `isEditTool`, `isFileEditTool`, `isCodeChangeTool`, `isTaskTool`, `isTaskCreateTool`.
+- Task-tracking exemptions: `isTaskTrackingExemptShellCommand()` in `hook-utils.ts` exempts read-only git, `gh`, `swiz`, setup commands, and recovery commands (`RECOVERY_CMD_RE`: `ps`, `lsof`, `trash`, `wc`). **DO**: When a hook's deny message recommends specific shell commands, verify those commands are task-exempt — otherwise agents deadlock between hooks. **DON'T**: Add broad command patterns (e.g., `cat`) to `RECOVERY_CMD_RE` — tests use them as non-exempt canaries.
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — use typed schema parse (`stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, `sessionHookInputSchema`) or direct type annotation; **DO NOT** use `as { ... }` casts for stdin.
 - Hook schemas (`hooks/schemas.ts`, all `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `taskUpdateInputSchema`. Settings schemas (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State schemas (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
@@ -68,7 +69,7 @@ alwaysApply: false
 - **DO**: For PreToolUse hooks that validate file content (not just tool names/paths), compute projected content for Edit tools: read `Bun.file(filePath).text()`, apply `currentContent.replace(old_string, new_string)`, then validate. DON'T parse raw `new_string` — it's often a fragment, not complete file content. Reference: `pretooluse-no-direct-deps.ts` (dep-block guard), `pretooluse-claude-md-word-limit.ts` (word-count guard). Fail-open when file read or JSON parse fails.
 - NFKC-normalize `new_string`/`content`/`old_string` before pattern matching in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be listed in `EXEMPT_HOOKS`.
 - Use `TEST_FILE_RE` (`.test.ts`, `.spec.ts`, `__tests__/`, `/test/`) for test-file exclusions.
-- DO NOT test external repo code in this repo. Example: remove `src/tasks-list-verify.test.ts` that targeted `~/.claude/hooks/tasks-list.ts`; file issue in owning repo instead.
+- DO NOT test external repo code in this repo; file issue in owning repo instead.
 - Track current diff file from `+++ b/<path>` headers; apply file-level exclusions via that path.
 - Use `sanitizeSessionId()` for `/tmp` names.
 - DO: Use `src/temp-paths.ts` for `/tmp` paths; no `/tmp/*` literals.
@@ -179,6 +180,9 @@ alwaysApply: false
 - LaunchAgent: `~/Library/LaunchAgents/com.swiz.daemon.plist`; `swiz daemon --install` / `--uninstall`.
 - **DO**: In daemon-served `src/web/**` modules, use browser-resolvable imports only (`./`, `../`, `/web/...`). **DON'T** use bare package imports unless daemon adds import-map/bundling support.
 - **DO**: After web-import changes, restart daemon (`lsof -ti tcp:7943 | xargs -r kill && bun run index.ts daemon --port 7943`) and diagnose from newest console entries for the current URL only.
+- **DO**: Use `IssueStore` (`src/issue-store.ts`) as the primary data source for issues, PRs, and CI runs. The daemon's `syncUpstreamState` keeps it fresh; status-line and hooks read from the store first, falling back to `gh` CLI when stale. **DON'T** use per-project file caches — the shared SQLite store (`~/.swiz/issues.db`) replaces them.
+- **DO**: When adding fields that consumers need (e.g., `mergeable`, `url`, `createdAt` for PRs), add them to the `syncUpstreamState` query in `src/issue-store.ts` so the stored data has all required fields.
+- **DO**: Use REST API fallback (`gh api repos/{owner}/{repo}/issues/{number}`) when `gh issue` commands hit GraphQL rate limits. `src/commands/issue.ts` implements `isGraphQLRateLimited()` detection and automatic REST retry.
 ## Settings Configuration
 - Use separate state files for mutable runtime data (e.g., `.swiz/context-stats.json`); never mix runtime observations into user-authored config (`.swiz/config.json`).
 - Use 3-tier setting resolution: `project > user > default`.
@@ -214,7 +218,6 @@ alwaysApply: false
 - With piped `Bun.spawn`, drain stdout/stderr concurrently via `Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])` before `await proc.exited`.
 - Hooks are `.ts` and run as `bun hooks/<file>.ts`.
 - Settings writes must create `.bak` backups first.
-- For multiline frontmatter regex, avoid `/^---[\s\S]*?^---\s*\n?/m`; use `[ \t]*\n?` after the closing delimiter to preserve blank lines.
 - Stop hooks inject session tasks from `~/.claude/tasks/<session_id>/`; format `IN PROGRESS` before `COMPLETED`, before transcript.
 - Stop-memory prompts must include `Cause to capture: <specific cause>`.
 - On `MEMORY CAPTURE ENFORCEMENT`: read `/update-memory/SKILL.md`, edit `CLAUDE.md` with the DO/DON'T rule, then resume work.
@@ -235,13 +238,13 @@ alwaysApply: false
 - Cross-session gap: cooldown doesn't carry between sessions; complete memory follow-through before session end.
 - Cache-key generation: use shared `getCanonicalPathHash()` in `hook-utils.ts` with `realpathSync()`. DO NOT duplicate cache-key logic across hooks/commands.
 - In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp-directory `cwd`, and `env: { ...process.env, HOME: tempDir }`.
-- Do not use Agent tool `isolation: "worktree"` — rejected/partial setup corrupts `.git/config` (`core.bare = true`, bogus worktree branches) and breaks git with "must be run in a work tree".
-- For secret-like test fixtures (e.g., `sk_live_...`), build via array join: `['s','k','_','l','i','v','e','_',...].join('')` — GitHub push protection and git-diff scanning block literal secret strings.
+- Do not use Agent tool `isolation: "worktree"` — corrupts `.git/config` and breaks git.
+- For secret-like test fixtures, build via array join (`['s','k','_','l','i','v','e','_',...].join('')`) — push protection blocks literal secrets.
 - **DON'T**: Edit files outside session sandbox — Edit tool blocks it. For out-of-sandbox memory threshold violations, file a GitHub issue instead.
 - **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop. Use `/push` for unpushed commits.
 - **DON'T**: Rely on `git status` alone for unpush detection—it doesn't show upstream divergence. Always use `git log origin/main..HEAD --oneline` to list unpushed commits.
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` in env overrides — prevents real backend calls on machines with Codex/Gemini installed. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.
-- **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as real violations in a new session. Workaround: make any Edit between runs (issue #174).
-- **DON'T**: Declare commit or push success before reading tool output confirming it. Verify from evidence (git status clean, commit SHA captured, push output showing remote updated) before claiming complete.
-- **DON'T**: Work on auto-continue findings without a filed issue. `stop-personal-repo-issues.ts` actionable issues take priority.
-- **DO**: Route LaunchAgent `prPoll` via daemon first, then fallback: `curl -sSf -X POST ... || bun index.ts dispatch ...`.
+- **DON'T**: Treat first-run `pretooluse-repeated-lint-test` blocks as violations. Workaround: make any Edit between runs.
+- **DON'T**: Declare commit or push success before reading tool output confirming it.
+- **DON'T**: Work on auto-continue findings without a filed issue.
+- **DO**: Route LaunchAgent `prPoll` via daemon first, then fallback to `bun index.ts dispatch`.
