@@ -219,10 +219,12 @@ describe("toolMatchesToken", () => {
       expect(toolMatchesToken("TaskCreate", "update_plan")).toBe(true)
     })
 
-    it("cross-agent create tools do NOT match TaskUpdate", () => {
+    it("cross-agent create tools do NOT match TaskUpdate (except update_plan)", () => {
       expect(toolMatchesToken("TodoWrite", "TaskUpdate")).toBe(false)
       expect(toolMatchesToken("write_todos", "TaskUpdate")).toBe(false)
-      expect(toolMatchesToken("update_plan", "TaskUpdate")).toBe(false)
+      // update_plan is in both TASK_CREATE_TOOLS and TASK_UPDATE_TOOLS
+      // because Codex uses it for both creating and updating tasks
+      expect(toolMatchesToken("update_plan", "TaskUpdate")).toBe(true)
     })
   })
 
