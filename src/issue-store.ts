@@ -701,8 +701,10 @@ interface RestFallbackMapping {
  * Map a `gh <entity> list` command to its REST API fallback.
  * The `normalize` function adapts REST response shapes to match gh CLI output shapes.
  * Returns null if the command has no REST equivalent.
+ *
+ * Exported for unit testing.
  */
-function ghListToRestFallback(args: string[]): RestFallbackMapping | null {
+export function ghListToRestFallback(args: string[]): RestFallbackMapping | null {
   if (args[0] === "issue" && args[1] === "list")
     return { endpoint: "repos/{owner}/{repo}/issues?state=open&per_page=100" }
   if (args[0] === "pr" && args[1] === "list")
@@ -754,8 +756,21 @@ async function fetchViaRest(endpoint: string, cwd: string): Promise<unknown> {
   }
 }
 
+/**
+ * Attempt REST API fallback for a gh list command.
+ * Returns null if no REST mapping exists for the command or if REST also fails.
+ */
+async function tryRestFallback<T>(args: string[], cwd: string): Promise<T | null> {
+  const mapping = ghListToRestFallback(args)
+  if (!mapping) return null
+  debugLog(`[swiz] REST_FALLBACK for ${args.join(" ")}`)
+  const raw = await fetchViaRest(mapping.endpoint, cwd)
+  if (raw === null) return null
+  return (mapping.normalize ? mapping.normalize(raw) : raw) as T
+}
+
 /** Run a gh subcommand and parse JSON output. Returns null on failure.
- *  Automatically retries via REST API when GraphQL rate limits are hit. */
+ *  Automatically retries via REST API when the command fails or returns empty results. */
 async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
   const proc = Bun.spawn(["gh", ...args], {
     cwd,
@@ -768,22 +783,30 @@ async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
   ])
   await proc.exited
   if (proc.exitCode !== 0) {
-    if (isGraphQLRateLimited(stderr)) {
-      const mapping = ghListToRestFallback(args)
-      if (mapping) {
-        debugLog(`[swiz] REST_FALLBACK for ${args.join(" ")}`)
-        const raw = await fetchViaRest(mapping.endpoint, cwd)
-        if (raw === null) return null
-        return (mapping.normalize ? mapping.normalize(raw) : raw) as T
-      }
-    }
-    return null
+    debugLog(
+      isGraphQLRateLimited(stderr)
+        ? `[swiz] GRAPHQL_RATE_LIMITED for ${args.join(" ")}`
+        : `[swiz] GH_FETCH_FAILED exit=${proc.exitCode} for ${args.join(" ")}`
+    )
+    return tryRestFallback<T>(args, cwd)
   }
+  let parsed: T | null = null
   try {
-    return JSON.parse(stdout) as T
+    parsed = JSON.parse(stdout) as T
   } catch {
     return null
   }
+  // Also fall back to REST when gh succeeds but returns an empty list — the REST
+  // endpoint may have fresher or less-filtered data (e.g. after a cache flush or
+  // when a GraphQL query silently drops items due to scope mismatches).
+  if (Array.isArray(parsed) && parsed.length === 0) {
+    const restResult = await tryRestFallback<T>(args, cwd)
+    if (restResult !== null && Array.isArray(restResult) && restResult.length > 0) {
+      debugLog(`[swiz] REST_FALLBACK_NONEMPTY for ${args.join(" ")}`)
+      return restResult
+    }
+  }
+  return parsed
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

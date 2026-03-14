@@ -3,7 +3,12 @@ import { describe, expect, test } from "bun:test"
 import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DEFAULT_TTL_MS, IssueStore, replayPendingMutations } from "./issue-store.ts"
+import {
+  DEFAULT_TTL_MS,
+  ghListToRestFallback,
+  IssueStore,
+  replayPendingMutations,
+} from "./issue-store.ts"
 
 function createStore(): IssueStore {
   const dir = join(
@@ -571,6 +576,70 @@ describe("replayPendingMutations", () => {
       Bun.spawn = originalSpawn
       store.close()
     }
+  })
+})
+
+describe("ghListToRestFallback", () => {
+  test("maps issue list args to REST issues endpoint", () => {
+    const mapping = ghListToRestFallback(["issue", "list", "--state", "open", "--json", "number"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("/issues")
+    expect(mapping!.endpoint).toContain("state=open")
+  })
+
+  test("maps pr list args to REST pulls endpoint", () => {
+    const mapping = ghListToRestFallback(["pr", "list", "--state", "open", "--json", "number"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("/pulls")
+    expect(mapping!.endpoint).toContain("state=open")
+  })
+
+  test("maps run list args to REST actions/runs endpoint with normalize", () => {
+    const mapping = ghListToRestFallback(["run", "list", "--json", "headSha,databaseId"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("actions/runs")
+    expect(mapping!.normalize).toBeTypeOf("function")
+  })
+
+  test("normalize converts REST run shape to gh CLI shape", () => {
+    const mapping = ghListToRestFallback(["run", "list"])!
+    const raw = {
+      workflow_runs: [
+        {
+          head_sha: "abc123",
+          id: 999,
+          status: "completed",
+          conclusion: "success",
+          html_url: "https://example.com",
+        },
+      ],
+    }
+    const result = mapping.normalize!(raw) as Array<{
+      headSha: string
+      databaseId: number
+      conclusion: string
+    }>
+    expect(result).toHaveLength(1)
+    expect(result[0]!.headSha).toBe("abc123")
+    expect(result[0]!.databaseId).toBe(999)
+    expect(result[0]!.conclusion).toBe("success")
+  })
+
+  test("normalize handles null conclusion from REST", () => {
+    const mapping = ghListToRestFallback(["run", "list"])!
+    const raw = {
+      workflow_runs: [
+        { head_sha: "def456", id: 100, status: "in_progress", conclusion: null, html_url: "" },
+      ],
+    }
+    const result = mapping.normalize!(raw) as Array<{ conclusion: string }>
+    expect(result[0]!.conclusion).toBe("")
+  })
+
+  test("returns null for unrecognised commands", () => {
+    expect(ghListToRestFallback(["status", "check"])).toBeNull()
+    expect(ghListToRestFallback(["commit", "list"])).toBeNull()
+    expect(ghListToRestFallback([])).toBeNull()
   })
 })
 
