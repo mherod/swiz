@@ -13,6 +13,7 @@
 // Rationale: gives team members time to review or raise concerns before a PR
 // is merged, preventing premature merges that bypass team visibility.
 
+import { getIssueStore } from "../src/issue-store.ts"
 import { readSwizSettings } from "../src/settings.ts"
 import {
   denyPreToolUse,
@@ -22,7 +23,8 @@ import {
   GIT_MERGE_RE,
   getDefaultBranch,
   getOpenPrForBranch,
-  gh,
+  getRepoSlug,
+  ghJson,
   git,
   isShellTool,
   type ToolHookInput,
@@ -84,11 +86,41 @@ if (import.meta.main) {
   const cwd: string = (input?.tool_input?.cwd as string) ?? process.cwd()
 
   if (isGhPrMerge) {
-    // Vector 1: gh pr merge — fetch PR createdAt directly
+    // Vector 1: gh pr merge — fetch PR createdAt; check store first to avoid a gh call
     const prNumber = extractPrNumber(command)
-    const createdAtStr = prNumber
-      ? await gh(["pr", "view", prNumber, "--json", "createdAt", "--jq", ".createdAt"], cwd)
-      : await gh(["pr", "view", "--json", "createdAt", "--jq", ".createdAt"], cwd)
+    const repo = await getRepoSlug(cwd)
+    let createdAtStr: string | null = null
+
+    if (prNumber && repo) {
+      const cached = getIssueStore().getPullRequest<{ createdAt: string }>(
+        repo,
+        parseInt(prNumber, 10)
+      )
+      createdAtStr = cached?.createdAt ?? null
+    }
+
+    if (!createdAtStr) {
+      // Fetch as structured JSON so we can write back to the store
+      const viewArgs = prNumber
+        ? [
+            "pr",
+            "view",
+            prNumber,
+            "--json",
+            "number,title,state,headRefName,author,reviewDecision,mergeable,url,createdAt,updatedAt",
+          ]
+        : [
+            "pr",
+            "view",
+            "--json",
+            "number,title,state,headRefName,author,reviewDecision,mergeable,url,createdAt,updatedAt",
+          ]
+      const pr = await ghJson<{ number: number; createdAt: string }>(viewArgs, cwd)
+      if (pr && repo) {
+        getIssueStore().upsertPullRequests(repo, [pr])
+      }
+      createdAtStr = pr?.createdAt ?? null
+    }
 
     if (!createdAtStr) process.exit(0)
     await checkPrAge(createdAtStr, gracePeriodMs, graceMinutes)
@@ -107,8 +139,32 @@ if (import.meta.main) {
     // Also skip if merging the current branch into itself (no-op)
     if (branchName === currentBranch) process.exit(0)
 
-    const pr = await getOpenPrForBranch<{ createdAt: string }>(branchName, cwd, "createdAt")
-    if (!pr?.createdAt) process.exit(0)
-    await checkPrAge(pr.createdAt, gracePeriodMs, graceMinutes)
+    // Check store first (by headRefName), then fall back to gh
+    let prCreatedAt: string | null = null
+    const branchRepo = await getRepoSlug(cwd)
+    if (branchRepo) {
+      const store = getIssueStore()
+      const stored = store.listPullRequests<{
+        number: number
+        headRefName: string
+        createdAt: string
+      }>(branchRepo)
+      prCreatedAt = stored.find((p) => p.headRefName === branchName)?.createdAt ?? null
+    }
+
+    if (!prCreatedAt) {
+      const pr = await getOpenPrForBranch<{ number: number; createdAt: string }>(
+        branchName,
+        cwd,
+        "number,title,state,headRefName,author,reviewDecision,mergeable,url,createdAt,updatedAt"
+      )
+      if (pr && branchRepo) {
+        getIssueStore().upsertPullRequests(branchRepo, [pr])
+      }
+      prCreatedAt = pr?.createdAt ?? null
+    }
+
+    if (!prCreatedAt) process.exit(0)
+    await checkPrAge(prCreatedAt, gracePeriodMs, graceMinutes)
   }
 }

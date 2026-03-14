@@ -56,6 +56,7 @@ export interface WarmStatusLineSnapshot {
 export type GitHubCiState = "success" | "pending" | "failure" | "neutral" | "none"
 
 interface GitHubCiRun {
+  databaseId?: number
   status: string
   conclusion: string
   workflowName: string
@@ -512,7 +513,7 @@ async function fetchCiRunsViaStore(
       "--limit",
       "10",
       "--json",
-      "status,conclusion,workflowName,createdAt,event",
+      "databaseId,status,conclusion,workflowName,createdAt,event",
     ],
     cwd
   )

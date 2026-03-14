@@ -4,10 +4,12 @@
 // false-positive blocks for short CI runs that complete within seconds.
 
 import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
+import { getIssueStore } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import {
   blockStop,
   getDefaultBranch,
+  getRepoSlug,
   ghJson,
   git,
   hasGhCli,
@@ -22,30 +24,32 @@ const POLL_INTERVAL_MS = 5_000
 const MAX_POLL_MS = 30_000
 
 interface CIRun {
-  databaseId: number
+  databaseId?: number
   status: string
   conclusion: string
-  displayTitle: string
   workflowName: string
   createdAt: string
   event: string
 }
 
+const CI_RUN_FIELDS = "databaseId,status,conclusion,workflowName,createdAt,event"
+
 async function fetchRuns(branch: string, cwd: string): Promise<CIRun[]> {
+  const repo = await getRepoSlug(cwd)
+  if (repo) {
+    const cached = getIssueStore().getCiBranchRuns<CIRun>(repo, branch)
+    if (cached) return cached.filter((r) => r.event !== "dynamic" && r.event !== "workflow_run")
+  }
+
   const runs = await ghJson<CIRun[]>(
-    [
-      "run",
-      "list",
-      "--branch",
-      branch,
-      "--limit",
-      "5",
-      "--json",
-      "databaseId,status,conclusion,displayTitle,workflowName,createdAt,event",
-    ],
+    ["run", "list", "--branch", branch, "--limit", "5", "--json", CI_RUN_FIELDS],
     cwd
   )
-  return (runs ?? []).filter((r) => r.event !== "dynamic" && r.event !== "workflow_run")
+  const fresh = runs ?? []
+  if (repo) {
+    getIssueStore().upsertCiBranchRuns(repo, branch, fresh)
+  }
+  return fresh.filter((r) => r.event !== "dynamic" && r.event !== "workflow_run")
 }
 
 export function findActive(runs: CIRun[]): CIRun[] {
@@ -109,7 +113,10 @@ function buildFailingReason(branch: string, failing: CIRun[]): string {
   let reason = `GitHub CI is failing on branch '${branch}'.\n\n`
   reason += `Failing checks (${failing.length}): ${names}\n\n`
   reason += "To view failure logs:\n"
-  for (const r of failing) reason += `  gh run view ${r.databaseId} --log-failed\n`
+  for (const r of failing)
+    reason += r.databaseId
+      ? `  gh run view ${r.databaseId} --log-failed\n`
+      : `  gh run list --branch ${branch}\n`
   reason +=
     "\n" +
     skillAdvice(
