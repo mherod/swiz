@@ -120,7 +120,7 @@ export class UpstreamSyncRegistry {
       entry.lastSyncAt = Date.now()
       entry.lastResult = result
       debugLog(
-        `[swiz] UPSTREAM_SYNC repo=${entry.repo} issues=${result.issues.upserted} prs=${result.pullRequests.upserted} ci=${result.ciStatuses.upserted}`
+        `[swiz] UPSTREAM_SYNC repo=${entry.repo} issues=${result.issues.upserted} prs=${result.pullRequests.upserted} ci=${result.ciStatuses.upserted} removed_issues=${result.issues.removed} removed_prs=${result.pullRequests.removed}`
       )
       return result
     } catch (err) {
@@ -129,8 +129,8 @@ export class UpstreamSyncRegistry {
       )
       return (
         entry.lastResult ?? {
-          issues: { upserted: 0 },
-          pullRequests: { upserted: 0 },
+          issues: { upserted: 0, removed: 0 },
+          pullRequests: { upserted: 0, removed: 0 },
           ciStatuses: { upserted: 0 },
         }
       )

@@ -176,6 +176,19 @@ export class IssueStore {
     this.db.query("DELETE FROM issues WHERE repo = ? AND number = ?").run(repo, number)
   }
 
+  /** Remove cached issues whose numbers are not in the given set (i.e., closed upstream). */
+  removeClosedIssues(repo: string, openNumbers: Set<number>): number {
+    if (openNumbers.size === 0) {
+      const result = this.db.query("DELETE FROM issues WHERE repo = ?").run(repo)
+      return result.changes
+    }
+    const placeholders = [...openNumbers].map(() => "?").join(",")
+    const result = this.db
+      .query(`DELETE FROM issues WHERE repo = ? AND number NOT IN (${placeholders})`)
+      .run(repo, ...openNumbers)
+    return result.changes
+  }
+
   // ─── Pull request operations ──────────────────────────────────────────
 
   /** List cached PRs for a repo. Returns only PRs within TTL window. */
@@ -212,6 +225,19 @@ export class IssueStore {
   /** Remove a cached PR (e.g., after merging). */
   removePullRequest(repo: string, number: number): void {
     this.db.query("DELETE FROM pull_requests WHERE repo = ? AND number = ?").run(repo, number)
+  }
+
+  /** Remove cached PRs whose numbers are not in the given set (i.e., closed/merged upstream). */
+  removeClosedPullRequests(repo: string, openNumbers: Set<number>): number {
+    if (openNumbers.size === 0) {
+      const result = this.db.query("DELETE FROM pull_requests WHERE repo = ?").run(repo)
+      return result.changes
+    }
+    const placeholders = [...openNumbers].map(() => "?").join(",")
+    const result = this.db
+      .query(`DELETE FROM pull_requests WHERE repo = ? AND number NOT IN (${placeholders})`)
+      .run(repo, ...openNumbers)
+    return result.changes
   }
 
   // ─── CI status operations ─────────────────────────────────────────────
@@ -608,8 +634,8 @@ function logReplayResult(result: ReplayResult, originalCount: number, repo: stri
 // ─── Upstream sync ──────────────────────────────────────────────────────────
 
 export interface UpstreamSyncResult {
-  issues: { upserted: number }
-  pullRequests: { upserted: number }
+  issues: { upserted: number; removed: number }
+  pullRequests: { upserted: number; removed: number }
   ciStatuses: { upserted: number }
 }
 
@@ -625,8 +651,8 @@ export async function syncUpstreamState(
 ): Promise<UpstreamSyncResult> {
   const s = store ?? getIssueStore()
   const result: UpstreamSyncResult = {
-    issues: { upserted: 0 },
-    pullRequests: { upserted: 0 },
+    issues: { upserted: 0, removed: 0 },
+    pullRequests: { upserted: 0, removed: 0 },
     ciStatuses: { upserted: 0 },
   }
 
@@ -662,13 +688,18 @@ export async function syncUpstreamState(
     >(["run", "list", "--json", "headSha,databaseId,status,conclusion,url", "--limit", "20"], cwd),
   ])
 
-  if (issues && issues.length > 0) {
-    s.upsertIssues(repo, issues)
+  if (issues) {
+    if (issues.length > 0) s.upsertIssues(repo, issues)
+    result.issues.removed = s.removeClosedIssues(repo, new Set(issues.map((i) => i.number)))
     result.issues.upserted = issues.length
   }
 
-  if (prs && prs.length > 0) {
-    s.upsertPullRequests(repo, prs)
+  if (prs) {
+    if (prs.length > 0) s.upsertPullRequests(repo, prs)
+    result.pullRequests.removed = s.removeClosedPullRequests(
+      repo,
+      new Set(prs.map((p) => p.number))
+    )
     result.pullRequests.upserted = prs.length
   }
 
