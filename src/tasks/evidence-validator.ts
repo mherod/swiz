@@ -185,6 +185,111 @@ export function validateEvidence(evidence: string): string | null {
   return validateFieldCount(matched) ?? validateCiGreenTraceability(matched)
 }
 
+// ─── Live CI run verification ────────────────────────────────────────────────
+
+const RUN_ID_RE = /\brun\s+(\d{10,})\b/i
+const COMMIT_SHA_RE = /\bcommit\s*:\s*([0-9a-f]{7,40})\b/i
+
+/** Extract a CI run ID from evidence text. */
+function extractRunId(evidence: string): string | null {
+  return RUN_ID_RE.exec(evidence)?.[1] ?? null
+}
+
+/** Extract a commit SHA from evidence text. */
+function extractCommitSha(evidence: string): string | null {
+  return COMMIT_SHA_RE.exec(evidence)?.[1] ?? null
+}
+
+interface CiRunResult {
+  status: string
+  conclusion: string | null
+}
+
+/** Fetch a CI run's status via gh CLI. Returns null if gh is unavailable or the query fails. */
+async function fetchCiRunStatus(runId: string, cwd: string): Promise<CiRunResult | null> {
+  try {
+    const proc = Bun.spawn(
+      ["gh", "run", "view", runId, "--json", "status,conclusion", "--jq", "{status,conclusion}"],
+      { stdout: "pipe", stderr: "pipe", cwd }
+    )
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    if (proc.exitCode !== 0) return null
+    const parsed = JSON.parse(stdout.trim())
+    return { status: String(parsed.status ?? ""), conclusion: parsed.conclusion ?? null }
+  } catch {
+    return null
+  }
+}
+
+/** Fetch CI run ID for a commit SHA via gh CLI. Returns null if not found. */
+async function fetchRunIdForCommit(sha: string, cwd: string): Promise<string | null> {
+  try {
+    const proc = Bun.spawn(
+      ["gh", "run", "list", "--commit", sha, "--json", "databaseId", "--jq", ".[0].databaseId"],
+      { stdout: "pipe", stderr: "pipe", cwd }
+    )
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    if (proc.exitCode !== 0) return null
+    const id = stdout.trim()
+    return id && /^\d+$/.test(id) ? id : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Verify ci_green: evidence against live CI run status.
+ * Returns an error string if the referenced run is not completed+success,
+ * or null if verification passes or ci_green is not present.
+ * Fails open (returns null) when gh CLI is unavailable or queries fail.
+ */
+export async function verifyCiGreenEvidence(evidence: string, cwd: string): Promise<string | null> {
+  const matched = countEvidenceFields(evidence)
+  if (!matched.includes("ci_green")) return null
+
+  // Try to find a run ID directly, or resolve one from a commit SHA
+  let runId = extractRunId(evidence)
+  if (!runId) {
+    const sha = extractCommitSha(evidence)
+    if (sha) {
+      runId = await fetchRunIdForCommit(sha, cwd)
+    }
+  }
+
+  // No run ID resolvable — fail open (traceability is enforced separately)
+  if (!runId) return null
+
+  const result = await fetchCiRunStatus(runId, cwd)
+  // gh unavailable or query failed — fail open
+  if (!result) return null
+
+  if (result.status !== "completed") {
+    return (
+      `ci_green: evidence rejected — CI run ${runId} is still "${result.status}".\n` +
+      `Wait for the run to complete before claiming ci_green.\n` +
+      `Check status: gh run view ${runId} --json status,conclusion`
+    )
+  }
+
+  if (result.conclusion !== "success") {
+    return (
+      `ci_green: evidence rejected — CI run ${runId} completed with conclusion "${result.conclusion}".\n` +
+      `Only runs that concluded with "success" satisfy ci_green evidence.\n` +
+      `Check details: gh run view ${runId}`
+    )
+  }
+
+  return null
+}
+
 export function verifyTaskSubject(taskSubject: string, verifyText: string): string | null {
   const normalizedSubject = taskSubject.toLowerCase().trim()
   const normalizedVerify = verifyText.toLowerCase().trim()

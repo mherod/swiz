@@ -24,7 +24,11 @@ import {
 } from "../tasks/task-service.ts"
 import type { Command } from "../types.ts"
 
-export { validateEvidence, verifyTaskSubject } from "../tasks/evidence-validator.ts"
+export {
+  validateEvidence,
+  verifyCiGreenEvidence,
+  verifyTaskSubject,
+} from "../tasks/evidence-validator.ts"
 
 export {
   compareTaskIds,

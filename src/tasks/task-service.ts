@@ -10,7 +10,7 @@ import {
 } from "../settings.ts"
 import { computeSubjectFingerprint } from "../subject-fingerprint.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
-import { validateEvidence, verifyTaskSubject } from "./evidence-validator.ts"
+import { validateEvidence, verifyCiGreenEvidence, verifyTaskSubject } from "./evidence-validator.ts"
 import {
   compareTaskIds,
   parseTaskId,
@@ -207,6 +207,9 @@ export async function updateStatus(
   if (evidence) {
     const validationError = validateEvidence(evidence)
     if (validationError) throw new Error(validationError)
+
+    const ciError = await verifyCiGreenEvidence(evidence, process.cwd())
+    if (ciError) throw new Error(ciError)
   }
 
   const oldStatus = task.status
@@ -241,6 +244,9 @@ export async function completeAll(targetSessionId: string, filterCwd?: string, e
   const resolvedEvidence = evidence ?? "note:bulk-complete — conclusion: all tasks completed"
   const evidenceError = validateEvidence(resolvedEvidence)
   if (evidenceError) throw new Error(evidenceError)
+
+  const ciError = await verifyCiGreenEvidence(resolvedEvidence, process.cwd())
+  if (ciError) throw new Error(ciError)
 
   const incomplete = (await collectIncompleteTasks(filterCwd)).filter(
     ({ sessionId }) => sessionId === targetSessionId
@@ -371,6 +377,9 @@ export async function submitEvidence(
   if (validationError) {
     throw new Error(validationError)
   }
+
+  const ciError = await verifyCiGreenEvidence(evidence, process.cwd())
+  if (ciError) throw new Error(ciError)
 
   task.completionEvidence = evidence
   if (!task.completionTimestamp) {

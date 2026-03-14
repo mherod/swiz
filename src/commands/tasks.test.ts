@@ -14,6 +14,7 @@ import {
   sessionPrefix,
   tasksCommand,
   validateEvidence,
+  verifyCiGreenEvidence,
   verifyTaskSubject,
 } from "./tasks.ts"
 
@@ -326,6 +327,30 @@ describe("validateEvidence", () => {
     const error = validateEvidence("note:CI green -- foo:bar")
     expect(error).not.toBeNull()
     expect(error).toContain("foo:")
+  })
+})
+
+// ─── verifyCiGreenEvidence ────────────────────────────────────────────────────
+
+describe("verifyCiGreenEvidence", () => {
+  it("returns null for evidence without ci_green", async () => {
+    expect(await verifyCiGreenEvidence("note:all done", process.cwd())).toBeNull()
+    expect(await verifyCiGreenEvidence("commit:abc123f", process.cwd())).toBeNull()
+  })
+
+  it("returns null (fails open) when ci_green has no resolvable run ID", async () => {
+    // ci_green without run or commit — traceability is enforced by validateEvidence, not here
+    expect(await verifyCiGreenEvidence("ci_green:", process.cwd())).toBeNull()
+  })
+
+  it("returns null (fails open) when gh CLI is unavailable", async () => {
+    // Use a nonexistent cwd so gh fails
+    const result = await verifyCiGreenEvidence(
+      "ci_green: -- run 99999999999",
+      "/nonexistent-path-for-gh-test"
+    )
+    // Should fail open — null means no error
+    expect(result).toBeNull()
   })
 })
 
