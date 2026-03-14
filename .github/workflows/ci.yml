@@ -61,6 +61,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -77,5 +79,85 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit
 
+      - name: Determine test scope
+        id: test-scope
+        run: |
+          # Determine base: previous CI point or fallback
+          if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "pull_request_target" ]]; then
+            CI_BASE="${{ github.event.pull_request.base.sha }}"
+          elif [[ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
+            CI_BASE="${{ github.event.before }}"
+          else
+            CI_BASE=""
+          fi
+
+          # Count commits from CI base
+          if [ -n "$CI_BASE" ]; then
+            CI_COMMITS=$(git rev-list --count "$CI_BASE..HEAD" 2>/dev/null || echo 0)
+          else
+            CI_COMMITS=0
+          fi
+
+          # Use whichever covers more history: 4 commits or commits since last CI
+          MIN_COMMITS=4
+          if [ "$CI_COMMITS" -gt "$MIN_COMMITS" ]; then
+            BASE="$CI_BASE"
+          else
+            BASE="HEAD~${MIN_COMMITS}"
+          fi
+
+          # Get changed .ts/.tsx source files (exclude tests and node_modules)
+          CHANGED=$(git diff --name-only "$BASE" HEAD -- '*.ts' '*.tsx' 2>/dev/null \
+            | grep -v '\.test\.ts$' \
+            | grep -v '\.spec\.ts$' \
+            | grep -v 'node_modules/' \
+            || true)
+
+          # Map each changed source file to its sibling test file
+          TEST_FILES=""
+          while IFS= read -r src; do
+            [ -z "$src" ] && continue
+            base="${src%.tsx}"
+            base="${base%.ts}"
+            for ext in ".test.ts" ".test.tsx"; do
+              if [ -f "${base}${ext}" ]; then
+                TEST_FILES="$TEST_FILES ${base}${ext}"
+                break
+              fi
+            done
+          done <<< "$CHANGED"
+
+          # Include directly changed test files too
+          CHANGED_TESTS=$(git diff --name-only "$BASE" HEAD -- '*.test.ts' '*.spec.ts' 2>/dev/null \
+            | grep -v 'node_modules/' \
+            || true)
+          while IFS= read -r t; do
+            [ -z "$t" ] && continue
+            TEST_FILES="$TEST_FILES $t"
+          done <<< "$CHANGED_TESTS"
+
+          # Deduplicate and count
+          TEST_FILES=$(echo "$TEST_FILES" | tr ' ' '\n' | sort -u | grep -v '^$' | tr '\n' ' ')
+          FILE_COUNT=$(echo "$TEST_FILES" | tr ' ' '\n' | grep -c -v '^$' || true)
+
+          echo "Changed source files: $(echo "$CHANGED" | grep -c -v '^$' || true)"
+          echo "Matched test files ($FILE_COUNT): $TEST_FILES"
+
+          if [ "$FILE_COUNT" -eq 0 ] || [ "$FILE_COUNT" -gt 10 ]; then
+            echo "scope=full" >> "$GITHUB_OUTPUT"
+            echo "→ Running full test suite"
+          else
+            echo "scope=targeted" >> "$GITHUB_OUTPUT"
+            echo "test_files=$TEST_FILES" >> "$GITHUB_OUTPUT"
+            echo "→ Running targeted tests only"
+          fi
+
       - name: Test
-        run: bun test --concurrent --timeout=10000
+        run: |
+          if [ "${{ steps.test-scope.outputs.scope }}" = "full" ]; then
+            echo "Running full test suite"
+            bun test --concurrent --timeout=10000
+          else
+            echo "Running targeted tests: ${{ steps.test-scope.outputs.test_files }}"
+            bun test --concurrent --timeout=10000 ${{ steps.test-scope.outputs.test_files }}
+          fi
