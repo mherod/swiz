@@ -420,7 +420,7 @@ function extractCommandDetailBlock(text: string): {
 }
 
 function stripAnsiLike(text: string): string {
-  const escRe = new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[a-zA-Z]", "g")
+  const escRe = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
   return text.replace(escRe, "").replace(/\[\d+(?:;\d+)*m/g, "")
 }
 

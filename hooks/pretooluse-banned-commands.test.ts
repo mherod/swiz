@@ -207,6 +207,60 @@ describe("pretooluse-banned-commands", () => {
       expect(result.reason).toContain("'pretty' is not valid")
     })
 
+    test("echo plain redirect > is blocked", async () => {
+      const result = await runHook("echo hello > out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("echo append redirect >> is blocked", async () => {
+      const result = await runHook("echo hello >> out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("echo noclobber-bypass >| is blocked", async () => {
+      const result = await runHook("echo hello >| out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("printf | tee file is blocked", async () => {
+      const result = await runHook("printf '%s\\n' hello | tee out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("&> redirect is blocked", async () => {
+      const result = await runHook("command &> out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("&>> redirect is blocked", async () => {
+      const result = await runHook("command &>> out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("1> numbered stdout redirect is blocked", async () => {
+      const result = await runHook("command 1> out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("2> numbered stderr-to-file redirect is blocked", async () => {
+      const result = await runHook("command 2> err.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("cat src > file is blocked", async () => {
+      const result = await runHook("cat src/foo.ts > /tmp/foo.ts")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
     test("git commit --no-verify is blocked", async () => {
       const result = await runHook("git commit --no-verify -m 'test'")
       expect(result.decision).toBe("deny")
@@ -276,6 +330,21 @@ describe("pretooluse-banned-commands", () => {
       // string that is an argument to echo (e.g. piping JSON to a hook script).
       const cmd = `echo '{"tool_input":{"command":"bun test foo.ts --reporter=verbose"}}' | bun hooks/pretooluse-banned-commands.ts`
       const result = await runHook(cmd)
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("2>&1 fd-to-fd redirect passes through", async () => {
+      const result = await runHook("command 2>&1")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test(">&2 fd-to-fd redirect passes through", async () => {
+      const result = await runHook("command >&2")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("tee /dev/null passes through", async () => {
+      const result = await runHook("bun test 2>&1 | tee /dev/null")
       expect(result.decision).toBeUndefined()
     })
 

@@ -57,6 +57,15 @@ const TOUCH_CMD_RE = shellSegmentCommandRe("touch(?:\\s|$)")
 const PYTHON_CMD_RE = shellSegmentCommandRe("python3?(?:\\s|$)")
 const NODE_TS_NODE_CMD_RE = shellSegmentCommandRe("(node|ts-node)\\s")
 
+// Generic shell output redirects to files — excludes fd-to-fd (2>&1) and /dev/ paths.
+// Matches: plain > / >>, &> / &>>, numbered N> / N>>, and noclobber-bypass >|.
+// Safe fd-to-fd forms (2>&1, >&2) are excluded via lookbehind/lookahead guards.
+const SHELL_REDIRECT_PLAIN_RE = /(?<![0-9&])>>?(?!\s*\/dev\/)(?!\s*[&])/
+const SHELL_REDIRECT_BOTH_RE = /&>>?(?!\s*\/dev\/)(?!\s*[&>])/
+const SHELL_REDIRECT_NUMBERED_RE = /\d>>?(?!\s*\/dev\/)(?!\s*[&>])/
+// Matches tee writing to a named file (not /dev/ special paths).
+const SHELL_TEE_WRITE_RE = /\btee\s+(?!\/dev\/)/
+
 const DESTRUCTIVE_FIRST_CMDS = new Set(["rm", "rmdir", "unlink", "shred"])
 const DESTRUCTIVE_CHAIN_RE = /(?:\|\s*xargs\s+rm|&&\s*rm\b|;\s*rm\b)/
 const FIND_DELETE_RE = /find\s.*-delete/
@@ -66,6 +75,15 @@ function isDestructiveDelete(c: string): boolean {
   const first = c.trimStart().split(/\s+/)[0]
   if (DESTRUCTIVE_FIRST_CMDS.has(first ?? "")) return true
   return DESTRUCTIVE_CHAIN_RE.test(c) || FIND_DELETE_RE.test(c) || FIND_EXEC_RM_RE.test(c)
+}
+
+function isShellFileWrite(c: string): boolean {
+  return (
+    SHELL_REDIRECT_PLAIN_RE.test(c) ||
+    SHELL_REDIRECT_BOTH_RE.test(c) ||
+    SHELL_REDIRECT_NUMBERED_RE.test(c) ||
+    SHELL_TEE_WRITE_RE.test(c)
+  )
 }
 
 function buildShellToolRules(): Rule[] {
@@ -96,6 +114,11 @@ function buildShellToolRules(): Rule[] {
       match: (c) => SED_INPLACE_RE.test(c) || SED_REDIRECT_RE.test(c),
       message:
         "Do not use `sed` to write or edit files. It is unreliable and produces unreviewed changes.\n\nInstead, use the Edit tool for file modifications:\n  • Edit tool: precise old_string → new_string replacements (preferred)\n  • Write tool: overwrite a file with entirely new content\n\nRead-only sed usage (e.g. `sed -n '...' file` in a pipeline) is allowed.",
+    },
+    {
+      match: isShellFileWrite,
+      message:
+        "Do not use shell redirects (`>`, `>>`, `>|`, `&>`, `&>>`, `N>`, `N>>`) or `tee` to write files. These produce unreviewed, out-of-band changes.\n\nUse the Edit or Write tools instead:\n  • Write tool: create or overwrite a file with specific content\n  • Edit tool:  modify an existing file with targeted changes\n\nSafe fd-to-fd redirects (`2>&1`, `>&2`) and output to `/dev/null` are still allowed.",
     },
     {
       match: isDestructiveDelete,
