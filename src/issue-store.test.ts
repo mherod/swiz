@@ -637,6 +637,137 @@ describe("ghListToRestFallback", () => {
     expect(result[0]!.conclusion).toBe("")
   })
 
+  test("maps release list args to REST releases endpoint with normalize", () => {
+    const mapping = ghListToRestFallback(["release", "list"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("/releases")
+    expect(mapping!.normalize).toBeTypeOf("function")
+  })
+
+  test("normalize converts REST release shape to gh CLI shape", () => {
+    const mapping = ghListToRestFallback(["release", "list"])!
+    const raw = [
+      {
+        tag_name: "v1.2.3",
+        name: "Release 1.2.3",
+        draft: false,
+        prerelease: false,
+        published_at: "2024-01-01T00:00:00Z",
+        created_at: "2024-01-01T00:00:00Z",
+      },
+    ]
+    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    expect(result[0]!.tagName).toBe("v1.2.3")
+    expect(result[0]!.isDraft).toBe(false)
+    expect(result[0]!.isPrerelease).toBe(false)
+    expect(result[0]!.publishedAt).toBe("2024-01-01T00:00:00Z")
+  })
+
+  test("normalize handles null published_at in release by falling back to created_at", () => {
+    const mapping = ghListToRestFallback(["release", "list"])!
+    const raw = [
+      {
+        tag_name: "v0.1.0",
+        name: "Draft",
+        draft: true,
+        prerelease: true,
+        published_at: null,
+        created_at: "2023-06-15T12:00:00Z",
+      },
+    ]
+    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    expect(result[0]!.publishedAt).toBe("2023-06-15T12:00:00Z")
+    expect(result[0]!.isDraft).toBe(true)
+  })
+
+  test("maps label list args to REST labels endpoint without normalize", () => {
+    const mapping = ghListToRestFallback(["label", "list"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("/labels")
+    expect(mapping!.normalize).toBeUndefined()
+  })
+
+  test("maps milestone list args to REST milestones endpoint with normalize", () => {
+    const mapping = ghListToRestFallback(["milestone", "list"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("/milestones")
+    expect(mapping!.normalize).toBeTypeOf("function")
+  })
+
+  test("normalize converts REST milestone shape to gh CLI shape", () => {
+    const mapping = ghListToRestFallback(["milestone", "list"])!
+    const raw = [
+      {
+        number: 3,
+        title: "v2.0",
+        description: "Major release",
+        state: "open",
+        due_on: "2024-12-31T00:00:00Z",
+        open_issues: 5,
+        closed_issues: 10,
+      },
+    ]
+    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    expect(result[0]!.number).toBe(3)
+    expect(result[0]!.title).toBe("v2.0")
+    expect(result[0]!.dueOn).toBe("2024-12-31T00:00:00Z")
+    expect(result[0]!.openIssues).toBe(5)
+    expect(result[0]!.closedIssues).toBe(10)
+  })
+
+  test("normalize handles null due_on in milestone", () => {
+    const mapping = ghListToRestFallback(["milestone", "list"])!
+    const raw = [
+      {
+        number: 1,
+        title: "No due date",
+        description: null,
+        state: "open",
+        due_on: null,
+        open_issues: 0,
+        closed_issues: 0,
+      },
+    ]
+    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    expect(result[0]!.dueOn).toBeNull()
+    expect(result[0]!.description).toBe("")
+  })
+
+  test("maps repo list args to REST user/repos endpoint with normalize", () => {
+    const mapping = ghListToRestFallback(["repo", "list"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("user/repos")
+    expect(mapping!.normalize).toBeTypeOf("function")
+  })
+
+  test("normalize converts REST repo shape to gh CLI shape", () => {
+    const mapping = ghListToRestFallback(["repo", "list"])!
+    const raw = [
+      {
+        name: "my-repo",
+        full_name: "owner/my-repo",
+        description: "A test repo",
+        private: false,
+        html_url: "https://github.com/owner/my-repo",
+      },
+    ]
+    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    expect(result[0]!.name).toBe("my-repo")
+    expect(result[0]!.nameWithOwner).toBe("owner/my-repo")
+    expect(result[0]!.isPrivate).toBe(false)
+    expect(result[0]!.url).toBe("https://github.com/owner/my-repo")
+  })
+
+  test("normalize handles null description in repo", () => {
+    const mapping = ghListToRestFallback(["repo", "list"])!
+    const raw = [
+      { name: "bare", full_name: "owner/bare", description: null, private: true, html_url: "" },
+    ]
+    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    expect(result[0]!.description).toBe("")
+    expect(result[0]!.isPrivate).toBe(true)
+  })
+
   test("returns null for unrecognised commands", () => {
     expect(ghListToRestFallback(["status", "check"])).toBeNull()
     expect(ghListToRestFallback(["commit", "list"])).toBeNull()
