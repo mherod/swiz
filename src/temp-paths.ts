@@ -56,3 +56,7 @@ export function swizPrPollLogPath(): string {
 export function swizPrPollErrorLogPath(): string {
   return `${TMP_ROOT}/swiz-prpoll-error.log`
 }
+
+export function swizEmergencyBypassPath(repoKey: string): string {
+  return `${TMP_ROOT}/swiz-emergency-bypass-${repoKey}.json`
+}

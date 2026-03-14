@@ -27,6 +27,7 @@ import { crossRepoIssueCommand } from "./src/commands/cross-repo-issue.ts"
 import { daemonCommand } from "./src/commands/daemon.ts"
 import { dispatchCommand } from "./src/commands/dispatch.ts"
 import { doctorCommand } from "./src/commands/doctor.ts"
+import { emergencyBypassCommand } from "./src/commands/emergency-bypass.ts"
 import { hooksCommand } from "./src/commands/hooks.ts"
 import { ideaCommand } from "./src/commands/idea.ts"
 import { installCommand } from "./src/commands/install.ts"
@@ -78,6 +79,7 @@ registerCommand(mergetoolCommand)
 registerCommand(pushWaitCommand)
 registerCommand(pushCiCommand)
 registerCommand(doctorCommand)
+registerCommand(emergencyBypassCommand)
 registerCommand(usageCommand)
 registerCommand(daemonCommand)
 

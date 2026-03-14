@@ -6,7 +6,9 @@
  */
 
 import { readFile, writeFile } from "node:fs/promises"
+import { isEmergencyBypassActive } from "../commands/emergency-bypass.ts"
 import { detectProjectStack } from "../detect-frameworks.ts"
+import { getCanonicalPathHash } from "../git-helpers.ts"
 import type { HookGroup } from "../manifest.ts"
 import {
   type CollaborationMode,
@@ -203,5 +205,15 @@ export async function applyHookSettingFilters(
   )
   const stackFiltered = filterStackHooks(filtered, detectedStacks)
   const stateFiltered = await filterStateHooks(stackFiltered, cwd)
-  return filterDisabledHooks(stateFiltered, disabledSet)
+  const disabledFiltered = filterDisabledHooks(stateFiltered, disabledSet)
+
+  // Emergency bypass: skip all preToolUse groups when active
+  if (cwd) {
+    const repoKey = getCanonicalPathHash(cwd)
+    if (await isEmergencyBypassActive(repoKey)) {
+      return disabledFiltered.filter((g) => g.event !== "preToolUse")
+    }
+  }
+
+  return disabledFiltered
 }
