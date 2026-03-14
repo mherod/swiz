@@ -10,7 +10,11 @@ import {
   isShellTool,
   skillExists,
 } from "./hook-utils.ts"
-import { SHELL_SEGMENT_BOUNDARY, shellSegmentCommandRe } from "./utils/shell-patterns.ts"
+import {
+  SHELL_SEGMENT_BOUNDARY,
+  SHELL_TEE_PIPE_WRITE_RE,
+  shellSegmentCommandRe,
+} from "./utils/shell-patterns.ts"
 
 interface Rule {
   /** Returns true if this rule matches the command. */
@@ -86,6 +90,7 @@ function isShellFileWrite(c: string): boolean {
     SHELL_REDIRECT_BOTH_RE.test(c) ||
     SHELL_REDIRECT_NUMBERED_RE.test(c) ||
     SHELL_TEE_WRITE_RE.test(c) ||
+    SHELL_TEE_PIPE_WRITE_RE.test(c) ||
     SHELL_HEREDOC_WRITE_RE.test(c)
   )
 }

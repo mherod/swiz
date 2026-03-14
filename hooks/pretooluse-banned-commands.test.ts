@@ -261,6 +261,18 @@ describe("pretooluse-banned-commands", () => {
       expect(result.reason).toContain("Write tool")
     })
 
+    test("echo piped to tee file is blocked", async () => {
+      const result = await runHook("echo hello | tee out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("command piped to tee -a file is blocked", async () => {
+      const result = await runHook("command output | tee -a out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
     test("heredoc cat redirect is blocked", async () => {
       const result = await runHook("cat <<EOF > out.txt")
       expect(result.decision).toBe("deny")
