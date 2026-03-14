@@ -65,6 +65,9 @@ const SHELL_REDIRECT_BOTH_RE = /&>>?(?!\s*\/dev\/)(?!\s*[&>])/
 const SHELL_REDIRECT_NUMBERED_RE = /\d>>?(?!\s*\/dev\/)(?!\s*[&>])/
 // Matches tee writing to a named file (not /dev/ special paths).
 const SHELL_TEE_WRITE_RE = /\btee\s+(?!\/dev\/)/
+// Matches heredoc writes: `cat <<EOF > file` or `tee file <<EOF` patterns.
+// Detects <<, <<-, or <<<  combined with a redirect to a named file (not /dev/).
+const SHELL_HEREDOC_WRITE_RE = /<<-?\s*['"]?\w+['"]?[^|&;]*>(?!\s*[&>])(?!\s*\/dev\/)/
 
 const DESTRUCTIVE_FIRST_CMDS = new Set(["rm", "rmdir", "unlink", "shred"])
 const DESTRUCTIVE_CHAIN_RE = /(?:\|\s*xargs\s+rm|&&\s*rm\b|;\s*rm\b)/
@@ -82,7 +85,8 @@ function isShellFileWrite(c: string): boolean {
     SHELL_REDIRECT_PLAIN_RE.test(c) ||
     SHELL_REDIRECT_BOTH_RE.test(c) ||
     SHELL_REDIRECT_NUMBERED_RE.test(c) ||
-    SHELL_TEE_WRITE_RE.test(c)
+    SHELL_TEE_WRITE_RE.test(c) ||
+    SHELL_HEREDOC_WRITE_RE.test(c)
   )
 }
 

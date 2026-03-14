@@ -261,6 +261,24 @@ describe("pretooluse-banned-commands", () => {
       expect(result.reason).toContain("Write tool")
     })
 
+    test("heredoc cat redirect is blocked", async () => {
+      const result = await runHook("cat <<EOF > out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("heredoc with dash (cat <<-EOF > file) is blocked", async () => {
+      const result = await runHook("cat <<-EOF > out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("heredoc quoted delimiter (cat <<'EOF' > file) is blocked", async () => {
+      const result = await runHook("cat <<'EOF' > out.txt")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
     test("git commit --no-verify is blocked", async () => {
       const result = await runHook("git commit --no-verify -m 'test'")
       expect(result.decision).toBe("deny")
@@ -345,6 +363,11 @@ describe("pretooluse-banned-commands", () => {
 
     test("tee /dev/null passes through", async () => {
       const result = await runHook("bun test 2>&1 | tee /dev/null")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("heredoc piped to command (no file redirect) passes through", async () => {
+      const result = await runHook("bun hooks/pretooluse-banned-commands.ts <<EOF")
       expect(result.decision).toBeUndefined()
     })
 
