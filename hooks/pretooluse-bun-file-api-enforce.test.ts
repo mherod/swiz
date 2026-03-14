@@ -128,6 +128,14 @@ describe("findBlockedNodeFileOps — allowed operations", () => {
     expect(findBlockedNodeFileOps('await Bun.write("path", data)')).toHaveLength(0)
   })
 
+  it("allows transformSync (not a file operation)", () => {
+    expect(findBlockedNodeFileOps("const result = transformSync(source)")).toHaveLength(0)
+  })
+
+  it("allows realpathSync (not a blocked file operation)", () => {
+    expect(findBlockedNodeFileOps('realpathSync("/some/path")')).toHaveLength(0)
+  })
+
   it("returns empty for content with no file operations", () => {
     expect(findBlockedNodeFileOps('console.log("hello")')).toHaveLength(0)
   })

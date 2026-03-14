@@ -16,27 +16,27 @@ const BUN_SHEBANG_RE = /^#!.*\bbun\b/m
  */
 const BLOCKED_NODE_FILE_OPS: Array<{ re: RegExp; name: string; replacement: string }> = [
   {
-    re: new RegExp(["read", "File", "Sync", "\\s*\\("].join("")),
+    re: new RegExp(["\\b", "read", "File", "Sync", "\\s*\\("].join("")),
     name: ["read", "File", "Sync"].join(""),
     replacement: "await Bun.file(path).text()  or  await Bun.file(path).json()",
   },
   {
-    re: new RegExp(["write", "File", "Sync", "\\s*\\("].join("")),
+    re: new RegExp(["\\b", "write", "File", "Sync", "\\s*\\("].join("")),
     name: ["write", "File", "Sync"].join(""),
     replacement: "await Bun.write(path, data)",
   },
   {
-    re: new RegExp(["append", "File", "Sync", "\\s*\\("].join("")),
+    re: new RegExp(["\\b", "append", "File", "Sync", "\\s*\\("].join("")),
     name: ["append", "File", "Sync"].join(""),
     replacement: "await Bun.write(path, existingContent + newData)  (read first with Bun.file)",
   },
   {
-    re: new RegExp(["unlink", "Sync", "\\s*\\("].join("")),
+    re: new RegExp(["\\b", "unlink", "Sync", "\\s*\\("].join("")),
     name: ["unlink", "Sync"].join(""),
     replacement: "await Bun.file(path).delete()  or  await unlink(path) from node:fs/promises",
   },
   {
-    re: new RegExp(["rm", "Sync", "\\s*\\("].join("")),
+    re: new RegExp(["\\b", "rm", "Sync", "\\s*\\("].join("")),
     name: ["rm", "Sync"].join(""),
     replacement: "await Bun.file(path).delete()  or  await rm(path) from node:fs/promises",
   },
