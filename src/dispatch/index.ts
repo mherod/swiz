@@ -48,7 +48,12 @@ export {
   type SkipReason,
   toolMatchesToken,
 } from "./engine.ts"
-export { type DispatchRequest, type DispatchResult, executeDispatch } from "./execute.ts"
+export {
+  type DispatchRequest,
+  type DispatchResult,
+  executeDispatch,
+  parsePayload,
+} from "./execute.ts"
 export {
   applyHookSettingFilters,
   countHooks,

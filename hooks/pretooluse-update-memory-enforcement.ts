@@ -13,6 +13,7 @@ import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import {
   denyPreToolUse,
   formatActionPlan,
+  hasFileInTree,
   isEditTool,
   isGitRepo,
   isNotebookTool,
@@ -168,16 +169,6 @@ function scanTranscript(lines: string[], startIndex: number): EnforcementState {
   return state
 }
 
-async function hasClaudeMdUpTree(cwd: string): Promise<boolean> {
-  let dir = cwd
-  while (true) {
-    if (await Bun.file(join(dir, "CLAUDE.md")).exists()) return true
-    const parent = dirname(dir)
-    if (parent === dir) return false
-    dir = parent
-  }
-}
-
 function findLastTriggerIndex(lines: string[]): number {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]
@@ -224,7 +215,7 @@ async function shouldSkipEnforcement(
 ): Promise<boolean> {
   if (!transcriptPath || !toolName) return true
   if (!(await isGitRepo(cwd))) return true
-  if (!(await hasClaudeMdUpTree(cwd))) return true
+  if (!(await hasFileInTree(cwd, "CLAUDE.md"))) return true
   return false
 }
 

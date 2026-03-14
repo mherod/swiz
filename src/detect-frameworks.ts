@@ -15,7 +15,7 @@ import { join } from "node:path"
 import { resolveCwd } from "./cwd.ts"
 
 /** Async file-existence check using `access()`. */
-async function fileExists(path: string): Promise<boolean> {
+export async function fileExists(path: string): Promise<boolean> {
   try {
     await access(path)
     return true

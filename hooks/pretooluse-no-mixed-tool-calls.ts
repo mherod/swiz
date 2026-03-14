@@ -16,7 +16,7 @@ import {
   TASK_TOOLS,
   WRITE_TOOLS,
 } from "./hook-utils.ts"
-import { SHELL_STATEMENT_BOUNDARY } from "./utils/shell-patterns.ts"
+import { escapeRegex, SHELL_STATEMENT_BOUNDARY } from "./utils/shell-patterns.ts"
 
 const EXTRA_TOOL_NAMES = ["AskUserQuestion", "LS", "MultiEdit", "WebFetch", "WebSearch"]
 
@@ -32,10 +32,6 @@ const TOOL_NAMES = [
     ...EXTRA_TOOL_NAMES,
   ]),
 ].sort((a, b) => b.length - a.length)
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
 
 const LEADING_ENV_ASSIGNMENTS = String.raw`(?:[A-Za-z_][A-Za-z0-9_]*=(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s;|&()]+)\s+)*`
 const TOOL_NAME_ALT = TOOL_NAMES.map(escapeRegex).join("|")

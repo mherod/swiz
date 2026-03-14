@@ -34,6 +34,7 @@ import {
   parseGitStatSummary,
   type ToolHookInput,
 } from "./hook-utils.ts"
+import { escapeRegex } from "./utils/shell-patterns.ts"
 
 const input: ToolHookInput = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
@@ -45,10 +46,6 @@ const command: string = (input?.tool_input?.command as string) ?? ""
 const cwd: string = input?.cwd ?? (input?.tool_input?.cwd as string) ?? process.cwd()
 
 const defaultBranch = await getDefaultBranch(cwd)
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
 
 // Only check git push commands that target the effective default branch,
 // or `gh pr merge` commands (which are functionally equivalent to a push to main).

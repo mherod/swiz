@@ -1,8 +1,8 @@
 // Package manager and runtime detection for hook scripts.
 // Walks up from CWD looking for lockfiles. Cached per process.
 
-import { access } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { fileExists } from "../../src/detect-frameworks.ts"
 
 export type PackageManager = "bun" | "pnpm" | "yarn" | "npm"
 export type Runtime = "bun" | "node"
@@ -10,16 +10,6 @@ export type Runtime = "bun" | "node"
 let _pmCache: Promise<PackageManager | null> | undefined
 
 const VALID_PMS = new Set(["bun", "pnpm", "yarn", "npm"] as const)
-
-/** Async file-existence check using `access()`. */
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await access(path)
-    return true
-  } catch {
-    return false
-  }
-}
 
 async function detectFromPkgJson(dir: string): Promise<PackageManager | null> {
   const pkgJsonPath = join(dir, "package.json")

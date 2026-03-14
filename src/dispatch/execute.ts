@@ -33,7 +33,7 @@ const TOOL_NAME_OPTIONAL_EVENTS = new Set([
   "stop",
 ])
 
-function parsePayload(payloadStr: string): {
+export function parsePayload(payloadStr: string): {
   payload: Record<string, unknown>
   parseError: boolean
 } {

@@ -12,6 +12,7 @@ import {
   formatTrace,
   groupMatches,
   log,
+  parsePayload,
   replayBlocking,
   replayContext,
   replayPreToolUse,
@@ -88,11 +89,6 @@ async function tryDaemonDispatch(
 
 const STDIN_PAYLOAD_TIMEOUT_MS = 2_000
 
-interface ParsedPayload {
-  payload: Record<string, unknown>
-  parseError: boolean
-}
-
 interface HookContext {
   toolName: string | undefined
   trigger: string | undefined
@@ -138,17 +134,6 @@ async function readStdinPayloadWithTimeout(
     try {
       reader.releaseLock()
     } catch {}
-  }
-}
-
-function parsePayload(payloadStr: string): ParsedPayload {
-  try {
-    return {
-      payload: JSON.parse(payloadStr || "{}") as Record<string, unknown>,
-      parseError: false,
-    }
-  } catch {
-    return { payload: {}, parseError: true }
   }
 }
 

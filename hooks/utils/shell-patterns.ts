@@ -46,6 +46,11 @@ export const SHELL_SEGMENT_BOUNDARY = `(?:^|[|;&])`
 /** Matches boundaries suitable for whole-command token checks. */
 export const SHELL_TOKEN_BOUNDARY = String.raw`(?:^|\s|&&|\|\||;)`
 
+/** Escape special regex characters in a literal string for use in `new RegExp()`. */
+export function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
 export function shellStatementCommandRe(pattern: string, flags = ""): RegExp {
   return new RegExp(`${SHELL_STATEMENT_BOUNDARY}\\s*${pattern}`, flags)
 }
