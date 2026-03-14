@@ -44,6 +44,7 @@ async function runHook(cwd: string): Promise<{ decision?: string; reason?: strin
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    env: { ...process.env, HOME: cwd },
   })
   void proc.stdin.write(payload)
   void proc.stdin.end()
