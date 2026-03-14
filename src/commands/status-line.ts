@@ -426,6 +426,9 @@ interface PrBranchDetail {
   commentCount: number
 }
 
+/** 1 hour — serve stale data rather than showing nothing when API is down. */
+const STALE_TTL_MS = 60 * 60 * 1000
+
 async function fetchIssuesViaStore(repo: string, cwd: string): Promise<unknown[]> {
   const store = getIssueStore()
   const cached = store.listIssues(repo)
@@ -434,8 +437,12 @@ async function fetchIssuesViaStore(repo: string, cwd: string): Promise<unknown[]
     ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
     cwd
   )
-  if (fresh && fresh.length > 0) store.upsertIssues(repo, fresh)
-  return fresh ?? []
+  if (fresh && fresh.length > 0) {
+    store.upsertIssues(repo, fresh)
+    return fresh
+  }
+  // API failed — serve stale data rather than empty
+  return store.listIssues(repo, STALE_TTL_MS)
 }
 
 async function fetchPrsViaStore(repo: string, cwd: string): Promise<unknown[]> {
@@ -446,8 +453,11 @@ async function fetchPrsViaStore(repo: string, cwd: string): Promise<unknown[]> {
     ["pr", "list", "--state", "open", "--json", "number", "--limit", "100"],
     cwd
   )
-  if (fresh && fresh.length > 0) store.upsertPullRequests(repo, fresh)
-  return fresh ?? []
+  if (fresh && fresh.length > 0) {
+    store.upsertPullRequests(repo, fresh)
+    return fresh
+  }
+  return store.listPullRequests(repo, STALE_TTL_MS)
 }
 
 async function fetchPrDetailViaStore(
@@ -462,7 +472,9 @@ async function fetchPrDetailViaStore(
     ["pr", "view", branch, "--json", "reviewDecision,comments"],
     cwd
   )
-  if (!fresh) return null
+  if (!fresh) {
+    return store.getPrBranchDetail<PrBranchDetail>(repo, branch, STALE_TTL_MS)
+  }
   const detail: PrBranchDetail = {
     reviewDecision: fresh.reviewDecision ?? "",
     commentCount: Array.isArray(fresh.comments) ? fresh.comments.length : 0,
@@ -492,8 +504,11 @@ async function fetchCiRunsViaStore(
     ],
     cwd
   )
-  if (fresh) store.upsertCiBranchRuns(repo, branch, fresh)
-  return fresh
+  if (fresh) {
+    store.upsertCiBranchRuns(repo, branch, fresh)
+    return fresh
+  }
+  return store.getCiBranchRuns<GitHubCiRun>(repo, branch, STALE_TTL_MS)
 }
 
 // ── Per-project context usage extremes ─────────────────────────────────────
