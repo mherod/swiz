@@ -54,14 +54,14 @@ alwaysApply: false
 - **DO NOT** write `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: ..., permissionDecision: "allow" } }))` — use `allowPreToolUse(reason)` instead.
 - **DO NOT** write `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: ..., additionalContext: ... } }))` — use `emitContext(eventName, context, cwd)` instead.
 - **DO NOT** write `console.log(JSON.stringify({ decision: "block", reason: ... }))` in Stop hooks — use `blockStop(reason)` or `blockStopRaw(reason)` instead.
-- Git/GitHub helpers: `git`, `gh`, `ghJson`, `getOpenPrForBranch`, `isGitRepo`, `isGitHubRemote`, `hasGhCli`.
 - **Git Utilities Policy** — canonical locations, no duplication:
   - `hooks/hook-utils.ts` — hook Git helpers: regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`, etc.), extractors, runtime helpers (`git`, `gh`, `ghJson`).
   - `src/git-helpers.ts` — command Git helpers: classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries.
   - DO NOT define Git utilities locally — import from canonical source. Duplicates: move to canonical file, update consumers, delete local.
+- **GitHub API Throttle** (`src/gh-rate-limit.ts`): `await acquireGhSlot()` before every `gh` CLI call. `gh()` calls it; direct `Bun.spawn(["gh"...` must too. 4500 req/hr rolling window. Exempt: `gh auth status`, `gh run watch`.
 - Skill helpers: `skillExists` (checks `.skills/` and `~/.claude/skills/` for `SKILL.md`), `skillAdvice`.
 - Cross-agent tool checks: `isShellTool`, `isEditTool`, `isFileEditTool`, `isCodeChangeTool`, `isTaskTool`, `isTaskCreateTool`.
-- Task-tracking exemptions: `isTaskTrackingExemptShellCommand()` in `hook-utils.ts` exempts read-only git, `gh`, `swiz`, setup commands, and recovery commands (`RECOVERY_CMD_RE`: `ps`, `lsof`, `trash`, `wc`). **DO**: When a hook's deny message recommends specific shell commands, verify those commands are task-exempt — otherwise agents deadlock between hooks. **DON'T**: Add broad command patterns (e.g., `cat`) to `RECOVERY_CMD_RE` — tests use them as non-exempt canaries.
+- Task-tracking exemptions: `isTaskTrackingExemptShellCommand()` exempts read-only git, `gh`, `swiz`, setup, and recovery commands (`RECOVERY_CMD_RE`: `ps`, `lsof`, `trash`, `wc`). **DO**: Verify hook deny-message commands are task-exempt. **DON'T**: Add broad patterns (e.g., `cat`) to `RECOVERY_CMD_RE`.
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — use typed schema parse (`stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, `sessionHookInputSchema`) or direct type annotation; **DO NOT** use `as { ... }` casts for stdin.
 - Hook schemas (`hooks/schemas.ts`, all `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `taskUpdateInputSchema`. Settings schemas (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State schemas (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.

@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { resolveSpawnCwd } from "./cwd.ts"
+import { acquireGhSlot } from "./gh-rate-limit.ts"
 import { getHomeDirOrNull } from "./home.ts"
 
 export const GIT_DIR_NAME = ".git"
@@ -68,6 +69,7 @@ export function withApiCache(args: string[]): string[] {
 /** Run a gh CLI command and return trimmed stdout. Returns "" on failure or timeout (3s).
  *  Read-only `gh api` calls automatically use `--cache` for built-in HTTP caching. */
 export async function gh(args: string[], cwd: string): Promise<string> {
+  await acquireGhSlot()
   const effectiveCwd = resolveSpawnCwd(cwd)
   const effectiveArgs = args[0] === "api" ? withApiCache(args) : args
 

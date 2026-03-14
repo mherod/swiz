@@ -8,6 +8,7 @@
 import { getDefaultBranch, isDefaultBranch } from "../../hooks/utils/git-utils.ts"
 import { requiresPeerReview } from "../collaboration-policy.ts"
 import { stderrLog } from "../debug.ts"
+import { acquireGhSlot } from "../gh-rate-limit.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 import { waitForCiCompletion } from "./ci-wait.ts"
@@ -143,6 +144,7 @@ export const pushCiCommand: Command = {
     )
     const runId = new TextDecoder().decode(runListProc.stdout).trim()
     if (runId) {
+      await acquireGhSlot()
       const viewProc = Bun.spawn(["gh", "run", "view", runId, "--json", "conclusion,status,jobs"], {
         cwd,
         stdout: "inherit",

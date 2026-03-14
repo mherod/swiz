@@ -15,6 +15,7 @@ import { dirname, join } from "node:path"
 
 import { resolveCwd } from "./cwd.ts"
 import { debugLog } from "./debug.ts"
+import { acquireGhSlot } from "./gh-rate-limit.ts"
 import { getHomeDirWithFallback } from "./home.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -877,6 +878,7 @@ export function ghListToRestFallback(args: string[]): RestFallbackMapping | null
 
 /** Fetch via REST API as fallback when GraphQL is rate-limited. */
 async function fetchViaRest(endpoint: string, cwd: string): Promise<unknown> {
+  await acquireGhSlot()
   const proc = Bun.spawn(["gh", "api", endpoint], {
     cwd,
     stdout: "pipe",
@@ -917,6 +919,7 @@ export async function tryRestFallback<T>(args: string[], cwd: string): Promise<T
 /** Run a gh subcommand and parse JSON output. Returns null on failure.
  *  Automatically retries via REST API when the command fails or returns empty results. */
 async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
+  await acquireGhSlot()
   const proc = Bun.spawn(["gh", ...args], {
     cwd,
     stdout: "pipe",

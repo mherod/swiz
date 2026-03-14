@@ -1,4 +1,5 @@
 import { debugLog } from "../debug.ts"
+import { acquireGhSlot } from "../gh-rate-limit.ts"
 import { getRepoSlug, issueState } from "../git-helpers.ts"
 import { getIssueStore } from "../issue-store.ts"
 import type { Command } from "../types.ts"
@@ -58,6 +59,7 @@ async function closeIssue(number: string): Promise<void> {
   }
 
   const slug = await getRepoSlug(cwd)
+  await acquireGhSlot()
   const proc = Bun.spawn(["gh", "issue", "close", number], {
     cwd,
     stdout: "pipe",
@@ -105,6 +107,7 @@ async function commentOnIssue(number: string, body: string): Promise<void> {
   }
 
   const slug = await getRepoSlug(cwd)
+  await acquireGhSlot()
   const proc = Bun.spawn(["gh", "issue", "comment", number, "--body", body], {
     cwd,
     stdout: "pipe",
@@ -155,6 +158,7 @@ async function postComment(
   cwd: string,
   slug: string | null
 ): Promise<void> {
+  await acquireGhSlot()
   const proc = Bun.spawn(["gh", "issue", "comment", number, "--body", body], {
     cwd,
     stdout: "pipe",
@@ -181,6 +185,7 @@ async function postComment(
 }
 
 async function closeAndRemove(number: string, cwd: string, slug: string | null): Promise<void> {
+  await acquireGhSlot()
   const proc = Bun.spawn(["gh", "issue", "close", number], {
     cwd,
     stdout: "pipe",
