@@ -160,6 +160,11 @@ export const manifest: HookGroup[] = [
   },
   {
     event: "preToolUse",
+    matcher: "TaskOutput",
+    hooks: [{ file: "pretooluse-taskoutput-timeout.ts", timeout: 5 }],
+  },
+  {
+    event: "preToolUse",
     matcher: "Edit|Write|NotebookEdit|Bash",
     hooks: [{ file: "pretooluse-update-memory-enforcement.ts", timeout: 5, cooldownSeconds: 300 }],
   },

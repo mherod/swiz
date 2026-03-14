@@ -666,9 +666,28 @@ export async function syncUpstreamState(
   return result
 }
 
-/** Run a gh subcommand and parse JSON output. Returns null on failure. */
-async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
-  const proc = Bun.spawn(["gh", ...args], {
+/** Detect GraphQL rate-limit errors in gh CLI stderr output. */
+function isGraphQLRateLimited(stderr: string): boolean {
+  return stderr.includes("API rate limit") && stderr.includes("GraphQL")
+}
+
+/**
+ * Map a `gh <entity> list` command to its REST API equivalent.
+ * Returns the REST endpoint path or null if the command can't be mapped.
+ */
+function ghListToRestEndpoint(args: string[]): string | null {
+  if (args[0] === "issue" && args[1] === "list")
+    return "repos/{owner}/{repo}/issues?state=open&per_page=100"
+  if (args[0] === "pr" && args[1] === "list")
+    return "repos/{owner}/{repo}/pulls?state=open&per_page=100"
+  if (args[0] === "run" && args[1] === "list")
+    return "repos/{owner}/{repo}/actions/runs?per_page=20"
+  return null
+}
+
+/** Fetch via REST API as fallback when GraphQL is rate-limited. */
+async function fetchViaRest<T>(endpoint: string, cwd: string): Promise<T | null> {
+  const proc = Bun.spawn(["gh", "api", endpoint], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -679,6 +698,36 @@ async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
   ])
   await proc.exited
   if (proc.exitCode !== 0) return null
+  try {
+    return JSON.parse(stdout) as T
+  } catch {
+    return null
+  }
+}
+
+/** Run a gh subcommand and parse JSON output. Returns null on failure.
+ *  Automatically retries via REST API when GraphQL rate limits are hit. */
+async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
+  const proc = Bun.spawn(["gh", ...args], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  if (proc.exitCode !== 0) {
+    if (isGraphQLRateLimited(stderr)) {
+      const restEndpoint = ghListToRestEndpoint(args)
+      if (restEndpoint) {
+        debugLog(`[swiz] REST_FALLBACK for ${args.join(" ")}`)
+        return fetchViaRest<T>(restEndpoint, cwd)
+      }
+    }
+    return null
+  }
   try {
     return JSON.parse(stdout) as T
   } catch {
