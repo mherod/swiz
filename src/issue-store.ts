@@ -115,6 +115,24 @@ export class IssueStore {
         attempts INTEGER DEFAULT 0
       )
     `)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS ci_branch_runs (
+        repo TEXT NOT NULL,
+        branch TEXT NOT NULL,
+        data TEXT NOT NULL,
+        synced_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, branch)
+      )
+    `)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS pr_branch_detail (
+        repo TEXT NOT NULL,
+        branch TEXT NOT NULL,
+        data TEXT NOT NULL,
+        synced_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, branch)
+      )
+    `)
   }
 
   // ─── Read operations ────────────────────────────────────────────────────
@@ -231,6 +249,48 @@ export class IssueStore {
   /** Remove a CI status entry. */
   removeCiStatus(repo: string, sha: string): void {
     this.db.query("DELETE FROM ci_status WHERE repo = ? AND sha = ?").run(repo, sha)
+  }
+
+  // ─── CI branch runs ──────────────────────────────────────────────────
+
+  /** Get cached CI runs for a specific branch. Returns null if no fresh data. */
+  getCiBranchRuns<T = unknown>(repo: string, branch: string, ttlMs = DEFAULT_TTL_MS): T[] | null {
+    const cutoff = Date.now() - ttlMs
+    const row = this.db
+      .query("SELECT data FROM ci_branch_runs WHERE repo = ? AND branch = ? AND synced_at > ?")
+      .get(repo, branch, cutoff) as { data: string } | null
+    if (!row) return null
+    return JSON.parse(row.data) as T[]
+  }
+
+  /** Upsert CI runs for a branch. Stores the full array as a JSON blob. */
+  upsertCiBranchRuns<T>(repo: string, branch: string, runs: T[]): void {
+    this.db
+      .query(
+        "INSERT OR REPLACE INTO ci_branch_runs (repo, branch, data, synced_at) VALUES (?, ?, ?, ?)"
+      )
+      .run(repo, branch, JSON.stringify(runs), Date.now())
+  }
+
+  // ─── PR branch detail ──────────────────────────────────────────────────
+
+  /** Get cached PR detail for a specific branch. Returns null if no fresh data. */
+  getPrBranchDetail<T = unknown>(repo: string, branch: string, ttlMs = DEFAULT_TTL_MS): T | null {
+    const cutoff = Date.now() - ttlMs
+    const row = this.db
+      .query("SELECT data FROM pr_branch_detail WHERE repo = ? AND branch = ? AND synced_at > ?")
+      .get(repo, branch, cutoff) as { data: string } | null
+    if (!row) return null
+    return JSON.parse(row.data) as T
+  }
+
+  /** Upsert PR detail for a branch (reviewDecision, commentCount, etc.). */
+  upsertPrBranchDetail<T>(repo: string, branch: string, detail: T): void {
+    this.db
+      .query(
+        "INSERT OR REPLACE INTO pr_branch_detail (repo, branch, data, synced_at) VALUES (?, ?, ?, ?)"
+      )
+      .run(repo, branch, JSON.stringify(detail), Date.now())
   }
 
   // ─── Mutation queue ─────────────────────────────────────────────────────
@@ -557,7 +617,7 @@ export async function syncUpstreamState(
         "--state",
         "open",
         "--json",
-        "number,title,state,labels,assignees,updatedAt",
+        "number,title,state,labels,author,assignees,updatedAt",
         "--limit",
         "100",
       ],
@@ -570,7 +630,7 @@ export async function syncUpstreamState(
         "--state",
         "open",
         "--json",
-        "number,title,state,headRefName,author,reviewDecision,statusCheckRollup,updatedAt",
+        "number,title,state,headRefName,author,reviewDecision,statusCheckRollup,mergeable,url,createdAt,updatedAt",
         "--limit",
         "100",
       ],
@@ -631,6 +691,11 @@ async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
 function getDefaultDbPath(): string {
   const home = getHomeDirWithFallback("/tmp")
   return join(home, ".swiz", "issues.db")
+}
+
+/** Return the path to the shared IssueStore database file. */
+export function getIssueStoreDbPath(): string {
+  return getDefaultDbPath()
 }
 
 /** Get or create a shared IssueStore instance. */

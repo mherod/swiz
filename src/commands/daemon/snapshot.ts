@@ -1,6 +1,7 @@
 import { getGitBranchStatus } from "../../git-helpers.ts"
+import { getIssueStoreDbPath } from "../../issue-store.ts"
 import { getProjectSettingsPath, getStatePath, getSwizSettingsPath } from "../../settings.ts"
-import { getGhCachePath, type WarmStatusLineSnapshot } from "../status-line.ts"
+import type { WarmStatusLineSnapshot } from "../status-line.ts"
 
 const GITHUB_REFRESH_WINDOW_MS = 20_000
 
@@ -53,7 +54,7 @@ export async function buildSnapshotFingerprint(cwd: string): Promise<SnapshotFin
     projectSettingsMtimeMs: await safeMtime(getProjectSettingsPath(cwd)),
     projectStateMtimeMs: await safeMtime(getStatePath(cwd)),
     globalSettingsMtimeMs: await safeMtime(globalSettingsPath),
-    ghCacheMtimeMs: await safeMtime(getGhCachePath(cwd)),
+    ghCacheMtimeMs: await safeMtime(getIssueStoreDbPath()),
     githubBucket: Math.floor(Date.now() / GITHUB_REFRESH_WINDOW_MS),
   }
 }

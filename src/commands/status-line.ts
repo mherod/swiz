@@ -8,8 +8,10 @@ import {
   ensureGitExclude,
   type GitBranchStatus,
   getGitBranchStatus,
+  getRepoSlug,
   ghJson,
 } from "../git-helpers.ts"
+import { getIssueStore } from "../issue-store.ts"
 import {
   DEFAULT_SETTINGS,
   type EffectiveSwizSettings,
@@ -413,70 +415,85 @@ function joinGroups(groups: Array<string | null | undefined>): string {
   return groups.filter(Boolean).join(` ${DIM}│${R} `)
 }
 
-// ── Short-TTL file-based cache for gh list/view queries ─────────────────────
+// ── IssueStore-backed cache helpers ──────────────────────────────────────────
 //
-// gh api calls use the built-in --cache flag (see withApiCache in git-helpers).
-// gh issue list / gh pr list / gh pr view have no equivalent flag, so we
-// maintain a per-project JSON file at .swiz/gh-cache.json with TTL entries.
+// Reads from the shared SQLite IssueStore (populated by the daemon's upstream
+// sync). Falls back to direct `gh` calls when the store has no fresh data,
+// then upserts results so subsequent reads are fast.
 
-const GH_CACHE_TTL_MS: number = (() => {
-  const raw = process.env.GH_API_CACHE_DURATION ?? "20s"
-  const match = /^(\d+)(s|m)?$/.exec(raw)
-  if (!match) return 20_000
-  const n = parseInt(match[1]!, 10)
-  return match[2] === "m" ? n * 60_000 : n * 1_000
-})()
-
-interface GhCacheEntry<T> {
-  value: T
-  expiresAt: number
+interface PrBranchDetail {
+  reviewDecision: string
+  commentCount: number
 }
 
-type GhCacheStore = Record<string, GhCacheEntry<unknown>>
-
-export function getGhCachePath(cwd: string): string {
-  return join(cwd, ".swiz", "gh-cache.json")
+async function fetchIssuesViaStore(repo: string, cwd: string): Promise<unknown[]> {
+  const store = getIssueStore()
+  const cached = store.listIssues(repo)
+  if (cached.length > 0) return cached
+  const fresh = await ghJson<{ number: number }[]>(
+    ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
+    cwd
+  )
+  if (fresh && fresh.length > 0) store.upsertIssues(repo, fresh)
+  return fresh ?? []
 }
 
-async function readGhCache(cwd: string): Promise<GhCacheStore> {
-  try {
-    const raw = await readFile(getGhCachePath(cwd), "utf8")
-    return JSON.parse(raw) as GhCacheStore
-  } catch {
-    return {}
-  }
+async function fetchPrsViaStore(repo: string, cwd: string): Promise<unknown[]> {
+  const store = getIssueStore()
+  const cached = store.listPullRequests(repo)
+  if (cached.length > 0) return cached
+  const fresh = await ghJson<{ number: number }[]>(
+    ["pr", "list", "--state", "open", "--json", "number", "--limit", "100"],
+    cwd
+  )
+  if (fresh && fresh.length > 0) store.upsertPullRequests(repo, fresh)
+  return fresh ?? []
 }
 
-async function writeGhCache(cwd: string, store: GhCacheStore): Promise<void> {
-  try {
-    await mkdir(join(cwd, ".swiz"), { recursive: true })
-    await writeFile(getGhCachePath(cwd), `${JSON.stringify(store)}\n`)
-  } catch {
-    // Non-fatal: status line continues without persisted cache
+async function fetchPrDetailViaStore(
+  repo: string,
+  branch: string,
+  cwd: string
+): Promise<PrBranchDetail | null> {
+  const store = getIssueStore()
+  const cached = store.getPrBranchDetail<PrBranchDetail>(repo, branch)
+  if (cached) return cached
+  const fresh = await ghJson<{ reviewDecision?: string; comments?: unknown[] }>(
+    ["pr", "view", branch, "--json", "reviewDecision,comments"],
+    cwd
+  )
+  if (!fresh) return null
+  const detail: PrBranchDetail = {
+    reviewDecision: fresh.reviewDecision ?? "",
+    commentCount: Array.isArray(fresh.comments) ? fresh.comments.length : 0,
   }
+  store.upsertPrBranchDetail(repo, branch, detail)
+  return detail
 }
 
-/**
- * Wrap ghJson with a file-based TTL cache stored in .swiz/gh-cache.json.
- * Cache key is the serialised arg list so each unique command variant is
- * cached independently. Expired entries are evicted on each write.
- */
-export async function ghJsonCached<T>(args: string[], cwd: string): Promise<T | null> {
-  const key = args.join("\x00")
-  const now = Date.now()
-  const store = await readGhCache(cwd)
-  const entry = store[key] as GhCacheEntry<T> | undefined
-  if (entry && entry.expiresAt > now) {
-    return entry.value
-  }
-  const value = await ghJson<T>(args, cwd)
-  store[key] = { value, expiresAt: now + GH_CACHE_TTL_MS }
-  for (const k of Object.keys(store)) {
-    const e = store[k] as GhCacheEntry<unknown>
-    if (e.expiresAt <= now && k !== key) delete store[k]
-  }
-  await writeGhCache(cwd, store)
-  return value
+async function fetchCiRunsViaStore(
+  repo: string,
+  branch: string,
+  cwd: string
+): Promise<GitHubCiRun[] | null> {
+  const store = getIssueStore()
+  const cached = store.getCiBranchRuns<GitHubCiRun>(repo, branch)
+  if (cached) return cached
+  const fresh = await ghJson<GitHubCiRun[]>(
+    [
+      "run",
+      "list",
+      "--branch",
+      branch,
+      "--limit",
+      "10",
+      "--json",
+      "status,conclusion,workflowName,createdAt,event",
+    ],
+    cwd
+  )
+  if (fresh) store.upsertCiBranchRuns(repo, branch, fresh)
+  return fresh
 }
 
 // ── Per-project context usage extremes ─────────────────────────────────────
@@ -552,47 +569,20 @@ async function fetchGhData(
   branch: string,
   needs: GhFetchNeeds
 ): Promise<GhFetchResults> {
-  const prViewPromise =
-    needs.pr && branch
-      ? ghJsonCached<{ reviewDecision?: string; comments?: unknown[] }>(
-          ["pr", "view", branch, "--json", "reviewDecision,comments"],
-          cwd
-        )
-      : Promise.resolve(null)
-  const ciPromise =
-    needs.ci && branch
-      ? ghJsonCached<GitHubCiRun[]>(
-          [
-            "run",
-            "list",
-            "--branch",
-            branch,
-            "--limit",
-            "10",
-            "--json",
-            "status,conclusion,workflowName,createdAt,event",
-          ],
-          cwd
-        )
-      : Promise.resolve(null)
+  const repo = await getRepoSlug(cwd)
 
-  const [issueData, prListData, prViewData, ciData, projectState] = await Promise.all([
-    needs.backlog
-      ? ghJsonCached<unknown[]>(
-          ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
-          cwd
-        )
-      : Promise.resolve(null),
-    needs.backlog
-      ? ghJsonCached<unknown[]>(
-          ["pr", "list", "--state", "open", "--json", "number", "--limit", "100"],
-          cwd
-        )
-      : Promise.resolve(null),
-    prViewPromise,
-    ciPromise,
+  const [issueData, prListData, prDetail, ciData, projectState] = await Promise.all([
+    needs.backlog && repo ? fetchIssuesViaStore(repo, cwd) : Promise.resolve(null),
+    needs.backlog && repo ? fetchPrsViaStore(repo, cwd) : Promise.resolve(null),
+    needs.pr && branch && repo ? fetchPrDetailViaStore(repo, branch, cwd) : Promise.resolve(null),
+    needs.ci && branch && repo ? fetchCiRunsViaStore(repo, branch, cwd) : Promise.resolve(null),
     readProjectState(cwd),
   ])
+
+  const prViewData = prDetail
+    ? { reviewDecision: prDetail.reviewDecision, comments: new Array(prDetail.commentCount) }
+    : null
+
   return { issueData, prListData, prViewData, ciData, projectState }
 }
 

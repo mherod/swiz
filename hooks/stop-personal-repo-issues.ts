@@ -385,21 +385,48 @@ function filterVisibleIssues(issues: Issue[], filterUser?: string): Issue[] {
 }
 
 export async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {
-  const jsonFields = "number,title,labels,author,assignees"
-  const [repoSlug, liveIssues] = await Promise.all([
-    getRepoSlug(cwd),
-    ghJson<Issue[]>(["issue", "list", "--state", "open", "--json", jsonFields], cwd),
-  ])
+  const repoSlug = await getRepoSlug(cwd)
+  if (!repoSlug) return []
 
-  if (liveIssues && repoSlug) {
+  // Store-first: use cached data if fresh, fall back to gh CLI
+  const cached = readCachedIssues(repoSlug)
+  if (cached.length > 0) {
+    return filterVisibleIssues(cached, filterUser)
+  }
+
+  const jsonFields = "number,title,labels,author,assignees"
+  const liveIssues = await ghJson<Issue[]>(
+    ["issue", "list", "--state", "open", "--json", jsonFields],
+    cwd
+  )
+
+  if (liveIssues) {
     await cacheIssuesAndReplayMutations(repoSlug, liveIssues, cwd)
   }
 
-  const issues = liveIssues ?? (repoSlug ? readCachedIssues(repoSlug) : [])
-  return filterVisibleIssues(issues, filterUser)
+  return filterVisibleIssues(liveIssues ?? [], filterUser)
 }
 
 async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise<PR[]> {
+  const repoSlug = await getRepoSlug(cwd)
+
+  // Store-first: try to read PRs from the IssueStore
+  if (repoSlug) {
+    const store = getIssueStore()
+    const cachedPrs = store.listPullRequests<PR & { author?: { login: string } }>(repoSlug)
+    if (cachedPrs.length > 0) {
+      // Filter locally: authored by or assigned to current user
+      const relevant = cachedPrs.filter((pr) => pr.author?.login === currentUser)
+      return relevant.filter(
+        (p) =>
+          p.reviewDecision === "CHANGES_REQUESTED" ||
+          p.reviewDecision === "REVIEW_REQUIRED" ||
+          p.mergeable === "CONFLICTING"
+      )
+    }
+  }
+
+  // Fallback: direct gh CLI calls
   const jsonFields = "number,title,url,reviewDecision,mergeable,createdAt"
   const [authoredPrs, reviewerPrs] = await Promise.all([
     ghJson<PR[]>(
@@ -416,6 +443,14 @@ async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise
   const byNumber = new Map<number, PR>()
   for (const pr of [...(authoredPrs ?? []), ...(reviewerPrs ?? [])]) {
     byNumber.set(pr.number, pr)
+  }
+
+  // Cache fetched PRs in the store
+  if (repoSlug) {
+    const allPrs = [...byNumber.values()]
+    if (allPrs.length > 0) {
+      getIssueStore().upsertPullRequests(repoSlug, allPrs)
+    }
   }
 
   return [...byNumber.values()].filter(
