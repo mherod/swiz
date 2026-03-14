@@ -1,5 +1,56 @@
 # Changelog
 
+## 2026-03-14
+
+### New Features
+
+- Added REST API fallback for issue, PR, release, label,
+  milestone, repo, workflow, secret, variable, and environment
+  list commands — data fetches now degrade gracefully when
+  GraphQL is rate-limited. (#294)
+- Added session search and filter input to the dashboard.
+- Added `--since`, `--until`, and `--hours` flags to
+  `swiz transcript` for time-window filtering. (#288)
+- Added `swiz issue cache-bust` subcommand to actively
+  invalidate the issue store cache.
+- Added native task-tool hints when listing incomplete tasks
+  from a prior session — shows the correct tool name for the
+  current agent (e.g. TodoWrite for Cursor). (#290)
+- Added configurable dirty-worktree threshold setting to
+  control when the commit gate fires.
+- Added Tailwind CSS support to the daemon web UI.
+
+### Bug Fixes
+
+- Fixed REST fallback returning empty results for workflow
+  runs due to mismatched response shape normalisation.
+- Fixed status line showing empty data on API failure —
+  now serves stale cached data with a 1-hour TTL instead.
+- Fixed `ci_green:` evidence requiring a traceable commit SHA
+  or run ID to prevent unverifiable CI claims.
+- Fixed task evidence validation rejecting valid prefixes
+  (`conclusion:`, `run:`, `no_ci:`). (#300)
+- Fixed pre-existing dismissal hook missing cross-session
+  patterns by scanning the full transcript. (#293)
+- Fixed false task-gate exemptions when quoted argument
+  values contained diagnostic keywords.
+- Fixed concurrent auto-save conflicts in the settings panel
+  by queuing retries instead of overlapping requests.
+- Fixed push-wait cooldown reads returning zero due to
+  synchronous file API race condition.
+
+### Improvements
+
+- Improved daemon performance by coalescing concurrent
+  fetches and snapshot recomputations per project.
+- Improved status line fetch reporting with discriminated
+  error/stale/ok status indicators. Dashboard now surfaces
+  fetch errors with red indicators.
+- Improved hook deadlock recovery by exempting `ps`, `lsof`,
+  `trash`, and `wc` from the task gate. (#297)
+- Improved git index lock hook with more aggressive retry
+  and graceful handling of missing `lsof`.
+
 ## 2026-03-13
 
 ### New Features
