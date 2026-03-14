@@ -13,6 +13,7 @@ import {
 import {
   SHELL_HERESTRING_REDIRECT_RE,
   SHELL_PROC_SUB_WRITE_RE,
+  SHELL_PROCESS_SUBSTITUTION_INPUT_RE,
   SHELL_SEGMENT_BOUNDARY,
   SHELL_TEE_PIPE_WRITE_RE,
   shellSegmentCommandRe,
@@ -95,6 +96,7 @@ function isShellFileWrite(c: string): boolean {
     SHELL_TEE_WRITE_RE.test(c) ||
     SHELL_TEE_PIPE_WRITE_RE.test(c) ||
     SHELL_PROC_SUB_WRITE_RE.test(c) ||
+    SHELL_PROCESS_SUBSTITUTION_INPUT_RE.test(c) ||
     SHELL_HERESTRING_REDIRECT_RE.test(c) ||
     SHELL_HEREDOC_WRITE_RE.test(c)
   )

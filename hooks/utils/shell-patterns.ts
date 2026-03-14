@@ -22,6 +22,14 @@ export const SHELL_PROC_SUB_WRITE_RE = />\s*>\s*\(\s*tee\s+(?!\/dev\/)/
  */
 export const SHELL_HERESTRING_REDIRECT_RE = /<<<[^|&;]*>(?!\s*[&>])(?!\s*\/dev\/)/
 
+/**
+ * Matches input process substitution: `cmd < <(subcmd)`.
+ * The first `<` is not preceded by another `<` (to avoid matching `<<` heredoc or `<<<` herestring).
+ * This construct can be used to feed file-writing side-effects (e.g. `< <(tee file)`) past
+ * redirect-only guards, since the write is buried inside the substitution.
+ */
+export const SHELL_PROCESS_SUBSTITUTION_INPUT_RE = /(?<![<])<\s*<\s*\(/
+
 /** Matches shell statement boundaries split by newline, `;`, `&&`, or `||`. */
 export const SHELL_STATEMENT_BOUNDARY = String.raw`(?:^|\n|;|&&|\|\|)`
 

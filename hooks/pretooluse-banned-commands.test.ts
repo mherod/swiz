@@ -273,6 +273,18 @@ describe("pretooluse-banned-commands", () => {
       expect(result.reason).toContain("Write tool")
     })
 
+    test("input process substitution (cmd < <(subcmd)) is blocked", async () => {
+      const result = await runHook("cmd < <(subcmd)")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("input process substitution with tee bypass (< <(tee file)) is blocked", async () => {
+      const result = await runHook("bun script < <(tee out.txt)")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
     test("process substitution write (> >(tee file)) is blocked", async () => {
       const result = await runHook("cmd > >(tee out.txt)")
       expect(result.decision).toBe("deny")
