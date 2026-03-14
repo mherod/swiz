@@ -2,6 +2,7 @@ import { ghJson } from "../../git-helpers.ts"
 
 const CI_WATCH_POLL_MS = 30_000
 const CI_WATCH_TIMEOUT_MS = 60 * 60 * 1000
+const MIN_POLL_INTERVAL_MS = 1_000
 
 export interface CiWatchRun {
   databaseId: number
@@ -55,7 +56,7 @@ export class CiWatchRegistry {
       notify?: CiNotify
     } = {}
   ) {
-    this.pollMs = opts.pollMs ?? CI_WATCH_POLL_MS
+    this.pollMs = Math.max(opts.pollMs ?? CI_WATCH_POLL_MS, MIN_POLL_INTERVAL_MS)
     this.timeoutMs = opts.timeoutMs ?? CI_WATCH_TIMEOUT_MS
     this.fetchRun = opts.fetchRun ?? defaultCiRunFetcher
     this.notify = opts.notify ?? (async () => {})

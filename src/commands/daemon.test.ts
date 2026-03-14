@@ -85,8 +85,8 @@ describe("CiWatchRegistry", () => {
     let polls = 0
 
     const registry = new CiWatchRegistry({
-      pollMs: 10,
-      timeoutMs: 1000,
+      pollMs: 1000,
+      timeoutMs: 5000,
       fetchRun: async () => {
         polls += 1
         if (polls < 2) return null
@@ -103,7 +103,7 @@ describe("CiWatchRegistry", () => {
     })
 
     registry.start("/repo", "abc123")
-    const waitUntil = Date.now() + 1000
+    const waitUntil = Date.now() + 5000
     while (notifications.length === 0 && Date.now() < waitUntil) {
       await Bun.sleep(20)
     }
