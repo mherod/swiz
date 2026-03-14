@@ -759,10 +759,16 @@ async function fetchViaRest(endpoint: string, cwd: string): Promise<unknown> {
 /**
  * Attempt REST API fallback for a gh list command.
  * Returns null if no REST mapping exists for the command or if REST also fails.
+ * Logs a descriptive message when no mapping is registered so the gap is observable.
+ *
+ * Exported for unit testing.
  */
-async function tryRestFallback<T>(args: string[], cwd: string): Promise<T | null> {
+export async function tryRestFallback<T>(args: string[], cwd: string): Promise<T | null> {
   const mapping = ghListToRestFallback(args)
-  if (!mapping) return null
+  if (!mapping) {
+    debugLog(`[swiz] NO_REST_FALLBACK for ${args.join(" ")} — no REST endpoint mapping registered`)
+    return null
+  }
   debugLog(`[swiz] REST_FALLBACK for ${args.join(" ")}`)
   const raw = await fetchViaRest(mapping.endpoint, cwd)
   if (raw === null) return null

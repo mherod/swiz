@@ -8,6 +8,7 @@ import {
   ghListToRestFallback,
   IssueStore,
   replayPendingMutations,
+  tryRestFallback,
 } from "./issue-store.ts"
 
 function createStore(): IssueStore {
@@ -640,6 +641,23 @@ describe("ghListToRestFallback", () => {
     expect(ghListToRestFallback(["status", "check"])).toBeNull()
     expect(ghListToRestFallback(["commit", "list"])).toBeNull()
     expect(ghListToRestFallback([])).toBeNull()
+  })
+})
+
+describe("tryRestFallback", () => {
+  test("returns null and does not throw for unrecognised commands", async () => {
+    const result = await tryRestFallback(["workflow", "list"], "/tmp")
+    expect(result).toBeNull()
+  })
+
+  test("returns null for empty args (no mapping)", async () => {
+    const result = await tryRestFallback([], "/tmp")
+    expect(result).toBeNull()
+  })
+
+  test("returns null for commit list (no REST mapping)", async () => {
+    const result = await tryRestFallback(["commit", "list"], "/tmp")
+    expect(result).toBeNull()
   })
 })
 
