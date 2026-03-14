@@ -95,16 +95,20 @@ export class UpstreamSyncRegistry {
     }, this.intervalMs)
   }
 
+  // In-flight coalescing: concurrent doSync calls for the same entry share one computation.
+  private inFlightSyncs = new Map<string, Promise<UpstreamSyncResult>>()
+
   private async doSync(entry: SyncEntry): Promise<UpstreamSyncResult> {
-    if (entry.syncing) {
-      return (
-        entry.lastResult ?? {
-          issues: { upserted: 0 },
-          pullRequests: { upserted: 0 },
-          ciStatuses: { upserted: 0 },
-        }
-      )
-    }
+    // Join existing in-flight computation rather than firing a duplicate gh call.
+    const inflight = this.inFlightSyncs.get(entry.cwd)
+    if (inflight) return inflight
+
+    const computation = this.runSync(entry)
+    this.inFlightSyncs.set(entry.cwd, computation)
+    return computation.finally(() => this.inFlightSyncs.delete(entry.cwd))
+  }
+
+  private async runSync(entry: SyncEntry): Promise<UpstreamSyncResult> {
     entry.syncing = true
     try {
       const result = await Promise.race([

@@ -216,14 +216,22 @@ export interface EligibilitySnapshot {
 
 export class HookEligibilityCache {
   private entries = new Map<string, EligibilitySnapshot>()
+  private inFlight = new Map<string, Promise<EligibilitySnapshot>>()
 
   async compute(cwd: string): Promise<EligibilitySnapshot> {
     const cached = this.entries.get(cwd)
     if (cached) return cached
 
-    const snapshot = await computeEligibility(cwd)
-    this.entries.set(cwd, snapshot)
-    return snapshot
+    const inflight = this.inFlight.get(cwd)
+    if (inflight) return inflight
+
+    const computation = computeEligibility(cwd).then((snapshot) => {
+      this.entries.set(cwd, snapshot)
+      this.inFlight.delete(cwd)
+      return snapshot
+    })
+    this.inFlight.set(cwd, computation)
+    return computation
   }
 
   invalidateProject(cwd: string): void {
@@ -437,15 +445,22 @@ export interface CachedGitState {
 
 export class GitStateCache {
   private entries = new Map<string, CachedGitState>()
+  private inFlight = new Map<string, Promise<CachedGitState | null>>()
 
   async get(cwd: string): Promise<CachedGitState | null> {
     const cached = this.entries.get(cwd)
     if (cached) return cached
-    const status = await getGitBranchStatus(cwd)
-    if (!status) return null
-    const entry: CachedGitState = { status, cachedAt: Date.now() }
-    this.entries.set(cwd, entry)
-    return entry
+    const inflight = this.inFlight.get(cwd)
+    if (inflight) return inflight
+    const computation = getGitBranchStatus(cwd).then((status) => {
+      this.inFlight.delete(cwd)
+      if (!status) return null
+      const entry: CachedGitState = { status, cachedAt: Date.now() }
+      this.entries.set(cwd, entry)
+      return entry
+    })
+    this.inFlight.set(cwd, computation)
+    return computation
   }
 
   invalidateProject(cwd: string): void {
@@ -470,26 +485,33 @@ export interface CachedProjectSettings {
 
 export class ProjectSettingsCache {
   private entries = new Map<string, CachedProjectSettings>()
+  private inFlight = new Map<string, Promise<CachedProjectSettings>>()
 
   async get(cwd: string): Promise<CachedProjectSettings> {
     const cached = this.entries.get(cwd)
     if (cached) return cached
-    const settings = await readProjectSettings(cwd)
-    let resolvedHooks: HookGroup[] = []
-    let warnings: string[] = []
-    if (settings?.hooks?.length) {
-      const result = resolveProjectHooks(settings.hooks, cwd)
-      resolvedHooks = result.resolved
-      warnings = result.warnings
-    }
-    const entry: CachedProjectSettings = {
-      settings,
-      resolvedHooks,
-      warnings,
-      cachedAt: Date.now(),
-    }
-    this.entries.set(cwd, entry)
-    return entry
+    const inflight = this.inFlight.get(cwd)
+    if (inflight) return inflight
+    const computation = readProjectSettings(cwd).then((settings) => {
+      this.inFlight.delete(cwd)
+      let resolvedHooks: HookGroup[] = []
+      let warnings: string[] = []
+      if (settings?.hooks?.length) {
+        const result = resolveProjectHooks(settings.hooks, cwd)
+        resolvedHooks = result.resolved
+        warnings = result.warnings
+      }
+      const entry: CachedProjectSettings = {
+        settings,
+        resolvedHooks,
+        warnings,
+        cachedAt: Date.now(),
+      }
+      this.entries.set(cwd, entry)
+      return entry
+    })
+    this.inFlight.set(cwd, computation)
+    return computation
   }
 
   invalidateProject(cwd: string): void {
@@ -512,6 +534,7 @@ export interface CachedManifest {
 
 export class ManifestCache {
   private entries = new Map<string, CachedManifest>()
+  private inFlight = new Map<string, Promise<HookGroup[]>>()
   private projectSettingsCache: ProjectSettingsCache
 
   constructor(projectSettingsCache: ProjectSettingsCache) {
@@ -521,9 +544,15 @@ export class ManifestCache {
   async get(cwd: string): Promise<HookGroup[]> {
     const cached = this.entries.get(cwd)
     if (cached) return cached.groups
-    const groups = await this.build(cwd)
-    this.entries.set(cwd, { groups, cachedAt: Date.now() })
-    return groups
+    const inflight = this.inFlight.get(cwd)
+    if (inflight) return inflight
+    const computation = this.build(cwd).then((groups) => {
+      this.entries.set(cwd, { groups, cachedAt: Date.now() })
+      this.inFlight.delete(cwd)
+      return groups
+    })
+    this.inFlight.set(cwd, computation)
+    return computation
   }
 
   private async build(cwd: string): Promise<HookGroup[]> {
