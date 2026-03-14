@@ -483,7 +483,12 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
 
   const path = await writeSettingToScope(parsed, key, enabled)
   const verb = enabled ? "Enabled" : "Disabled"
-  console.log(`\n  ${verb} ${parsed.settingArg ?? key} (${parsed.scope})`)
+  let scopeLabel = parsed.scope as string
+  if (parsed.scope === "session") {
+    const sessionId = await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
+    scopeLabel = `session ${sessionId}`
+  }
+  console.log(`\n  ${verb} ${parsed.settingArg ?? key} (${scopeLabel})`)
   console.log(`  Saved: ${path}\n`)
 
   if (enabled && key === "speak") {

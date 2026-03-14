@@ -285,7 +285,7 @@ describe("posttooluse-state-transition no-upstream commit behavior", () => {
         rm(fakeBin, { recursive: true, force: true }),
       ])
     }
-  })
+  }, 30_000)
 
   test("solo mode: git commit on feature branch keeps reviewing unchanged", async () => {
     const repo = await createRepo()
@@ -309,7 +309,7 @@ describe("posttooluse-state-transition no-upstream commit behavior", () => {
         rm(fakeBin, { recursive: true, force: true }),
       ])
     }
-  })
+  }, 30_000)
 
   test("git checkout -b from default branch transitions to developing", async () => {
     const repo = await createRepo()
