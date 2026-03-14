@@ -24,6 +24,7 @@ async function runHook(
     stdin: new Response(JSON.stringify(input)).body,
     stdout: "pipe",
     stderr: "pipe",
+    env: { ...process.env, HOME: tempDir },
   })
 
   const stdout = await new Response(proc.stdout).text()
@@ -108,6 +109,7 @@ describe("pretooluse-claude-word-limit", () => {
       cwd: tempDir,
       stdin: new Response(JSON.stringify(input)).body,
       stdout: "pipe",
+      env: { ...process.env, HOME: tempDir },
     })
 
     await proc.exited

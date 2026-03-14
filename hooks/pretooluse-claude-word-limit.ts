@@ -1,12 +1,29 @@
 #!/usr/bin/env bun
-// PreToolUse hook: Block git push when CLAUDE.md exceeds 5000-word limit
+// PreToolUse hook: Block git push when CLAUDE.md exceeds the configured word limit.
+// Threshold is configurable via `swiz settings set memory-word-threshold <N>` (default: 5000).
 
 import { join } from "node:path"
 import { compactionChecklistSteps } from "../src/memory-compaction-guidance.ts"
+import {
+  DEFAULT_MEMORY_WORD_THRESHOLD,
+  readProjectSettings,
+  readSwizSettings,
+} from "../src/settings.ts"
 import { countFileWords, denyPreToolUse, formatActionPlan, isShellTool } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
-const WORD_LIMIT = 5000
+/** Resolve word limit: project > global > default (5000). */
+async function resolveWordLimit(cwd: string): Promise<number> {
+  const [globalSettings, projectSettings] = await Promise.all([
+    readSwizSettings(),
+    readProjectSettings(cwd),
+  ])
+  return (
+    projectSettings?.memoryWordThreshold ??
+    globalSettings.memoryWordThreshold ??
+    DEFAULT_MEMORY_WORD_THRESHOLD
+  )
+}
 
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())
@@ -21,20 +38,23 @@ async function main(): Promise<void> {
 
   // Check CLAUDE.md word count
   const claudeMdPath = join(cwd, "CLAUDE.md")
-  const stats = await countFileWords(claudeMdPath)
+  const [stats, wordLimit] = await Promise.all([
+    countFileWords(claudeMdPath),
+    resolveWordLimit(cwd),
+  ])
 
   // If CLAUDE.md doesn't exist or can't be read, allow the push
   if (stats === null) return
 
   // If word count exceeds limit, block the push
-  if (stats.words > WORD_LIMIT) {
-    const over = stats.words - WORD_LIMIT
+  if (stats.words > wordLimit) {
+    const over = stats.words - wordLimit
     const reduction = over + 1 // Suggest reducing at least (over + 1) words to get back under
     const compactionChecklist = formatActionPlan(
       compactionChecklistSteps("Re-check after edits: `wc -w CLAUDE.md`"),
       { header: "Compaction checklist:" }
     )
-    const message = `CLAUDE.md exceeds 5000-word limit: ${stats.words} words (${over} over).
+    const message = `CLAUDE.md exceeds ${wordLimit}-word limit: ${stats.words} words (${over} over).
 
 Reduce CLAUDE.md by at least ${reduction} words before pushing.
 
@@ -42,7 +62,7 @@ Use the /compact-memory skill to trim the file, or manually edit CLAUDE.md to re
 
 ${compactionChecklist}
 
-Current: ${stats.words} words | Limit: ${WORD_LIMIT} words | Target: ${WORD_LIMIT - 10} words`
+Current: ${stats.words} words | Limit: ${wordLimit} words | Target: ${wordLimit - 10} words`
 
     denyPreToolUse(message)
   }
