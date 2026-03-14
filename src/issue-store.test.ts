@@ -419,6 +419,11 @@ describe("Cross-repo isolation", () => {
 })
 
 describe("replayPendingMutations", () => {
+  // Promise-chain mutex: ensures only one test owns Bun.spawn at a time.
+  // Required because --concurrent runs these tests in the same event loop and
+  // global Bun.spawn mocking across concurrent tests causes interference.
+  let spawnTestMutex: Promise<void> = Promise.resolve()
+
   test("discards mutations that exceed max attempts", async () => {
     const store = createStore()
     try {
@@ -482,22 +487,37 @@ describe("replayPendingMutations", () => {
 
   test("processes multiple issues in parallel with a limit", async () => {
     const store = createStore()
+    // Acquire mutex before touching global Bun.spawn to prevent concurrent
+    // tests from overwriting each other's mock mid-test.
+    let releaseMutex!: () => void
+    const prevMutex = spawnTestMutex
+    spawnTestMutex = new Promise<void>((resolve) => {
+      releaseMutex = resolve
+    })
+    await prevMutex
+
     const originalSpawn = Bun.spawn
     let inFlight = 0
     let maxInFlight = 0
     const concurrency = 2
+    // Manually-controlled process exits — deterministic alternative to setTimeout.
+    // Each Bun.spawn pushes a resolver; the test calls them explicitly to control timing.
+    const releaseProcess: Array<() => void> = []
 
     // @ts-expect-error - Mocking Bun.spawn
-    Bun.spawn = (_args: string[]) => {
+    Bun.spawn = () => {
       inFlight++
       maxInFlight = Math.max(maxInFlight, inFlight)
-      const p = {
-        exited: new Promise<void>((resolve) =>
-          setTimeout(() => {
-            inFlight--
-            resolve()
-          }, 10)
-        ),
+      // Push the release function inside the executor so it is guaranteed to be
+      // defined at the point of push — avoids any ambiguity about executor timing.
+      const exited = new Promise<void>((resolve) => {
+        releaseProcess.push(() => {
+          inFlight--
+          resolve()
+        })
+      })
+      return {
+        exited,
         exitCode: 0,
         stdout: new ReadableStream({
           start(controller) {
@@ -512,27 +532,64 @@ describe("replayPendingMutations", () => {
           },
         }),
       }
-      return p
+    }
+
+    // Yield to the microtask queue at least once, then until condition is true.
+    // Yielding first ensures pending microtask chains (e.g. worker resumption after
+    // exited resolves → next Bun.spawn) complete before the condition is evaluated.
+    async function drainUntil(condition: () => boolean, maxTicks = 50): Promise<void> {
+      for (let i = 0; i < maxTicks; i++) {
+        await Promise.resolve()
+        if (condition()) break
+      }
     }
 
     try {
-      // Queue 5 different issues
       for (let i = 1; i <= 5; i++) {
         store.queueMutation("owner/repo", { type: "close", number: i })
       }
 
-      const result = await replayPendingMutations("owner/repo", "/tmp", store, concurrency)
+      const replayPromise = replayPendingMutations("owner/repo", "/tmp", store, concurrency)
+
+      // Wait for the pool to fill up to the concurrency limit.
+      await drainUntil(() => releaseProcess.length >= concurrency)
+      expect(releaseProcess.length).toBe(concurrency)
+      expect(inFlight).toBe(concurrency)
+
+      // Release processes one at a time; after each release a new spawn should occur
+      // (up to the pool limit), so inFlight must never exceed concurrency.
+      for (let released = 0; released < 5; released++) {
+        releaseProcess[released]!()
+        await drainUntil(
+          // Wait for the next spawn (which happens several hops after release),
+          // or for all work to be done. The initial pool has `concurrency` spawns,
+          // so after N releases the total should exceed N + concurrency.
+          () => releaseProcess.length > released + concurrency || inFlight === 0
+        )
+        expect(inFlight).toBeLessThanOrEqual(concurrency)
+      }
+
+      const result = await replayPromise
       expect(result.replayed).toBe(5)
-      expect(maxInFlight).toBeLessThanOrEqual(concurrency)
+      expect(maxInFlight).toBe(concurrency)
       expect(maxInFlight).toBeGreaterThan(1)
     } finally {
       Bun.spawn = originalSpawn
       store.close()
+      releaseMutex()
     }
   })
 
   test("preserves ordering for mutations targeting the same issue", async () => {
     const store = createStore()
+    // Acquire mutex before touching global Bun.spawn.
+    let releaseMutex!: () => void
+    const prevMutex = spawnTestMutex
+    spawnTestMutex = new Promise<void>((resolve) => {
+      releaseMutex = resolve
+    })
+    await prevMutex
+
     const originalSpawn = Bun.spawn
     const sequence: number[] = []
 
@@ -576,6 +633,7 @@ describe("replayPendingMutations", () => {
     } finally {
       Bun.spawn = originalSpawn
       store.close()
+      releaseMutex()
     }
   })
 })
@@ -766,6 +824,107 @@ describe("ghListToRestFallback", () => {
     const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
     expect(result[0]!.description).toBe("")
     expect(result[0]!.isPrivate).toBe(true)
+  })
+
+  test("maps workflow list args to REST actions/workflows endpoint with normalize", () => {
+    const mapping = ghListToRestFallback(["workflow", "list"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("actions/workflows")
+    expect(mapping!.normalize).toBeTypeOf("function")
+  })
+
+  test("normalize converts REST workflow shape to gh CLI shape", () => {
+    const mapping = ghListToRestFallback(["workflow", "list"])!
+    const raw = {
+      workflows: [{ id: 1, name: "CI", path: ".github/workflows/ci.yml", state: "active" }],
+    }
+    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    expect(result[0]!.id).toBe(1)
+    expect(result[0]!.name).toBe("CI")
+    expect(result[0]!.path).toBe(".github/workflows/ci.yml")
+    expect(result[0]!.state).toBe("active")
+  })
+
+  test("normalize handles missing workflows array in workflow list", () => {
+    const mapping = ghListToRestFallback(["workflow", "list"])!
+    const result = mapping.normalize!({}) as unknown[]
+    expect(result).toEqual([])
+  })
+
+  test("maps secret list args to REST actions/secrets endpoint with normalize", () => {
+    const mapping = ghListToRestFallback(["secret", "list"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("actions/secrets")
+    expect(mapping!.normalize).toBeTypeOf("function")
+  })
+
+  test("normalize converts REST secret shape to gh CLI shape", () => {
+    const mapping = ghListToRestFallback(["secret", "list"])!
+    const raw = {
+      secrets: [
+        { name: "TOKEN", created_at: "2024-01-01T00:00:00Z", updated_at: "2024-06-01T00:00:00Z" },
+      ],
+    }
+    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    expect(result[0]!.name).toBe("TOKEN")
+    expect(result[0]!.createdAt).toBe("2024-01-01T00:00:00Z")
+    expect(result[0]!.updatedAt).toBe("2024-06-01T00:00:00Z")
+  })
+
+  test("maps variable list args to REST actions/variables endpoint with normalize", () => {
+    const mapping = ghListToRestFallback(["variable", "list"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("actions/variables")
+    expect(mapping!.normalize).toBeTypeOf("function")
+  })
+
+  test("normalize converts REST variable shape to gh CLI shape", () => {
+    const mapping = ghListToRestFallback(["variable", "list"])!
+    const raw = {
+      variables: [
+        {
+          name: "NODE_ENV",
+          value: "production",
+          created_at: "2024-01-01T00:00:00Z",
+          updated_at: "2024-01-02T00:00:00Z",
+        },
+      ],
+    }
+    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    expect(result[0]!.name).toBe("NODE_ENV")
+    expect(result[0]!.value).toBe("production")
+    expect(result[0]!.createdAt).toBe("2024-01-01T00:00:00Z")
+  })
+
+  test("maps environment list args to REST environments endpoint with normalize", () => {
+    const mapping = ghListToRestFallback(["environment", "list"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("/environments")
+    expect(mapping!.normalize).toBeTypeOf("function")
+  })
+
+  test("normalize converts REST environment shape to gh CLI shape", () => {
+    const mapping = ghListToRestFallback(["environment", "list"])!
+    const raw = {
+      environments: [
+        {
+          id: 42,
+          name: "production",
+          created_at: "2024-01-01T00:00:00Z",
+          updated_at: "2024-06-01T00:00:00Z",
+        },
+      ],
+    }
+    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    expect(result[0]!.id).toBe(42)
+    expect(result[0]!.name).toBe("production")
+    expect(result[0]!.createdAt).toBe("2024-01-01T00:00:00Z")
+  })
+
+  test("normalize handles missing environments array in environment list", () => {
+    const mapping = ghListToRestFallback(["environment", "list"])!
+    const result = mapping.normalize!({}) as unknown[]
+    expect(result).toEqual([])
   })
 
   test("returns null for unrecognised commands", () => {

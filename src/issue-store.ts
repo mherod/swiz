@@ -805,6 +805,92 @@ export function ghListToRestFallback(args: string[]): RestFallbackMapping | null
         }))
       },
     }
+  if (args[0] === "workflow" && args[1] === "list")
+    return {
+      endpoint: "repos/{owner}/{repo}/actions/workflows?per_page=100",
+      // REST wraps workflows in { workflows: [...] } with snake_case field names;
+      // normalise to match gh workflow list --json camelCase output.
+      normalize: (raw) => {
+        const data = raw as {
+          workflows?: Array<{
+            id: number
+            name: string
+            path: string
+            state: string
+          }>
+        }
+        return (data.workflows ?? []).map((w) => ({
+          id: w.id,
+          name: w.name,
+          path: w.path,
+          state: w.state,
+        }))
+      },
+    }
+  if (args[0] === "secret" && args[1] === "list")
+    return {
+      endpoint: "repos/{owner}/{repo}/actions/secrets?per_page=100",
+      // REST wraps secrets in { secrets: [...] } with snake_case field names;
+      // normalise to match gh secret list --json camelCase output.
+      normalize: (raw) => {
+        const data = raw as {
+          secrets?: Array<{
+            name: string
+            created_at: string
+            updated_at: string
+          }>
+        }
+        return (data.secrets ?? []).map((s) => ({
+          name: s.name,
+          createdAt: s.created_at,
+          updatedAt: s.updated_at,
+        }))
+      },
+    }
+  if (args[0] === "variable" && args[1] === "list")
+    return {
+      endpoint: "repos/{owner}/{repo}/actions/variables?per_page=100",
+      // REST wraps variables in { variables: [...] } with snake_case field names;
+      // normalise to match gh variable list --json camelCase output.
+      normalize: (raw) => {
+        const data = raw as {
+          variables?: Array<{
+            name: string
+            value: string
+            created_at: string
+            updated_at: string
+          }>
+        }
+        return (data.variables ?? []).map((v) => ({
+          name: v.name,
+          value: v.value,
+          createdAt: v.created_at,
+          updatedAt: v.updated_at,
+        }))
+      },
+    }
+  if (args[0] === "environment" && args[1] === "list")
+    return {
+      endpoint: "repos/{owner}/{repo}/environments?per_page=100",
+      // REST wraps environments in { environments: [...] };
+      // normalise to match gh environment list --json camelCase output.
+      normalize: (raw) => {
+        const data = raw as {
+          environments?: Array<{
+            id: number
+            name: string
+            created_at: string
+            updated_at: string
+          }>
+        }
+        return (data.environments ?? []).map((e) => ({
+          id: e.id,
+          name: e.name,
+          createdAt: e.created_at,
+          updatedAt: e.updated_at,
+        }))
+      },
+    }
   return null
 }
 
