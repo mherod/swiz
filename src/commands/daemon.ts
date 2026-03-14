@@ -137,6 +137,10 @@ function buildSnapshotResolver(snapshots: LRUCache<string, CachedSnapshot>) {
   const cacheKey = (cwd: string, sessionId: string | null | undefined) =>
     `${cwd}\x00${sessionId ?? ""}`
 
+  // In-flight coalescing: concurrent requests for the same cwd share one computation.
+  // Keyed by cwd only — the expensive work (gh API calls) is cwd-scoped.
+  const inFlight = new Map<string, Promise<WarmStatusLineSnapshot>>()
+
   return async (
     cwd: string,
     sessionId: string | null | undefined
@@ -147,9 +151,18 @@ function buildSnapshotResolver(snapshots: LRUCache<string, CachedSnapshot>) {
     if (existing && !hasSnapshotInvalidated(existing.fingerprint, nextFingerprint)) {
       return existing.snapshot
     }
-    const snapshot = await computeWarmStatusLineSnapshot(cwd, sessionId)
-    snapshots.set(key, { snapshot, fingerprint: nextFingerprint })
-    return snapshot
+
+    // Coalesce concurrent callers behind a single in-flight computation per cwd.
+    const inflight = inFlight.get(cwd)
+    if (inflight) return inflight
+
+    const computation = computeWarmStatusLineSnapshot(cwd, sessionId).then((snapshot) => {
+      snapshots.set(key, { snapshot, fingerprint: nextFingerprint })
+      inFlight.delete(cwd)
+      return snapshot
+    })
+    inFlight.set(cwd, computation)
+    return computation
   }
 }
 
