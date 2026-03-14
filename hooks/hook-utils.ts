@@ -42,6 +42,7 @@ import {
   GIT_SYNC_RE,
   GIT_WRITE_RE,
   READ_CMD_RE,
+  RECOVERY_CMD_RE,
   SETUP_CMD_RE,
 } from "./utils/git-utils.ts"
 import { shellTokenCommandRe } from "./utils/shell-patterns.ts"
@@ -877,6 +878,7 @@ export {
   parseGitStatus,
   parseRemoteUrl,
   READ_CMD_RE,
+  RECOVERY_CMD_RE,
   type RemoteInfo,
   recentHeadRange,
   SETUP_CMD_RE,
@@ -904,6 +906,7 @@ export function isTaskTrackingExemptShellCommand(command: string): boolean {
   return (
     (GIT_READ_RE.test(command) && !GIT_WRITE_RE.test(command)) ||
     READ_CMD_RE.test(command) ||
+    RECOVERY_CMD_RE.test(command) ||
     GIT_SYNC_RE.test(command) ||
     GIT_COMMIT_RE.test(command) ||
     GIT_CHECKOUT_RE.test(command) ||

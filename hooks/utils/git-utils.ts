@@ -479,6 +479,9 @@ export function hasGitPushForceFlag(command: string): boolean {
 /** Matches `ls`, `rg`, or `grep` — pure read commands. */
 export const READ_CMD_RE = shellStatementCommandRe("(ls|rg|grep)\\b")
 
+/** Matches diagnostic/cleanup commands recommended by other hooks (e.g., index-lock recovery). */
+export const RECOVERY_CMD_RE = shellStatementCommandRe("(ps|lsof|trash|wc)\\b")
+
 /** Matches setup, install, lint, build, format, test, and typecheck commands — safe to run without tasks. */
 export const SETUP_CMD_RE = shellStatementCommandRe(
   "(bun|pnpm|npm|yarn|npx)\\s+(?:run\\s+)?(install|add|i|ci|lint|lint-staged|build|format|test|typecheck|type-check|check|biome|eslint|prettier|tsc)\\b"
