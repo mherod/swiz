@@ -329,6 +329,26 @@ export class IssueStore {
     return row.cnt
   }
 
+  // ─── Cache management ───────────────────────────────────────────────────
+
+  /** Clear all cached data (issues, PRs, CI) for a repo. Preserves pending mutations. */
+  clearCachedData(repo: string): void {
+    this.db.query("DELETE FROM issues WHERE repo = ?").run(repo)
+    this.db.query("DELETE FROM pull_requests WHERE repo = ?").run(repo)
+    this.db.query("DELETE FROM ci_status WHERE repo = ?").run(repo)
+    this.db.query("DELETE FROM ci_branch_runs WHERE repo = ?").run(repo)
+    this.db.query("DELETE FROM pr_branch_detail WHERE repo = ?").run(repo)
+  }
+
+  /** Clear ALL cached data across all repos. Preserves pending mutations. */
+  clearAllCachedData(): void {
+    this.db.query("DELETE FROM issues").run()
+    this.db.query("DELETE FROM pull_requests").run()
+    this.db.query("DELETE FROM ci_status").run()
+    this.db.query("DELETE FROM ci_branch_runs").run()
+    this.db.query("DELETE FROM pr_branch_detail").run()
+  }
+
   // ─── Lifecycle ──────────────────────────────────────────────────────────
 
   close(): void {

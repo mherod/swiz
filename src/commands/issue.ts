@@ -40,10 +40,11 @@ async function commentViaRest(
 function usage(): string {
   return (
     "Usage: swiz issue <subcommand> <number> [options]\n" +
-    "Subcommands: close, comment, resolve\n" +
+    "Subcommands: close, comment, resolve, cache-bust\n" +
     "  swiz issue close <number>\n" +
     "  swiz issue comment <number> --body <text>\n" +
-    "  swiz issue resolve <number> [--body <text>]"
+    "  swiz issue resolve <number> [--body <text>]\n" +
+    "  swiz issue cache-bust [--repo <slug>]"
   )
 }
 
@@ -277,9 +278,30 @@ export const issueCommand: Command = {
         "Reports accurate final state whether issue was open or already closed.",
     },
     { flags: "--body, -b <text>", description: "Comment body (for comment and resolve)" },
+    {
+      flags: "cache-bust [--repo <slug>]",
+      description:
+        "Clear cached issue/PR/CI data. Defaults to current repo; omit --repo to clear all.",
+    },
   ],
   async run(args) {
     const sub = args[0]
+
+    if (sub === "cache-bust") {
+      const repoFlag = args.indexOf("--repo")
+      const cwd = process.cwd()
+      const slug = repoFlag >= 0 && args[repoFlag + 1] ? args[repoFlag + 1] : await getRepoSlug(cwd)
+      const store = getIssueStore()
+      if (slug) {
+        store.clearCachedData(slug)
+        console.log(`  Cache cleared for ${slug}`)
+      } else {
+        store.clearAllCachedData()
+        console.log("  All cached data cleared")
+      }
+      return
+    }
+
     const number = args[1]
     if (!sub || !number) throw new Error(`Missing arguments.\n${usage()}`)
 
