@@ -151,12 +151,31 @@ export async function ensureFileBackedTask({
   return true
 }
 
+const VALID_TRANSITIONS: Record<string, Set<string>> = {
+  pending: new Set(["in_progress", "cancelled"]),
+  in_progress: new Set(["completed", "pending", "cancelled"]),
+  completed: new Set(["in_progress"]),
+  cancelled: new Set(["pending", "in_progress"]),
+}
+
+export function validateTransition(oldStatus: string, newStatus: string): string | null {
+  if (oldStatus === newStatus) return null
+  const allowed = VALID_TRANSITIONS[oldStatus]
+  if (!allowed || !allowed.has(newStatus)) {
+    return `Invalid transition: ${oldStatus} → ${newStatus}. Tasks must be in_progress before they can be completed.`
+  }
+  return null
+}
+
 export function applyStatusTransition(
   task: Task,
   newStatus: Task["status"],
   nowIso = new Date().toISOString(),
   nowMs = Date.now()
 ): void {
+  const error = validateTransition(task.status, newStatus)
+  if (error) throw new Error(error)
+
   if (task.status === "in_progress" && task.statusChangedAt) {
     const elapsed = nowMs - new Date(task.statusChangedAt).getTime()
     task.elapsedMs = (task.elapsedMs ?? 0) + Math.max(0, elapsed)
@@ -261,6 +280,10 @@ export async function completeAll(targetSessionId: string, filterCwd?: string, e
     `\n  Completing ${incomplete.length} task(s) across ${new Set(incomplete.map((i) => i.sessionId)).size} session(s)...\n`
   )
   for (const { task } of incomplete) {
+    // Transition through in_progress if still pending
+    if (task.status === "pending") {
+      await updateStatus(targetSessionId, task.id, "in_progress", { filterCwd })
+    }
     await updateStatus(targetSessionId, task.id, "completed", {
       evidence: resolvedEvidence,
       filterCwd,

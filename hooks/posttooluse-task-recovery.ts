@@ -63,6 +63,8 @@ function buildRecoveryTask(
   const nowIso = new Date().toISOString()
   const nowMs = Date.now()
 
+  // Recovered tasks must pass through in_progress before completing.
+  // Set startedAt regardless so the lifecycle is satisfied.
   const task: TaskFile = {
     id: taskId,
     subject,
@@ -73,7 +75,7 @@ function buildRecoveryTask(
     blockedBy: [],
     statusChangedAt: nowIso,
     elapsedMs: 0,
-    startedAt: status === "in_progress" ? nowMs : null,
+    startedAt: nowMs,
     completedAt: status === "completed" ? nowMs : null,
     completionTimestamp: status === "completed" ? nowIso : undefined,
   }

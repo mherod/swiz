@@ -1321,3 +1321,36 @@ describe("printPreviousSessionIncompleteHint native tool hint (#290)", () => {
     })
   })
 })
+
+describe("task transition validator (#302)", () => {
+  const { validateTransition } = require("../../src/tasks/task-service.ts") as {
+    validateTransition: (old: string, next: string) => string | null
+  }
+
+  it("allows pending → in_progress", () => {
+    expect(validateTransition("pending", "in_progress")).toBeNull()
+  })
+
+  it("allows in_progress → completed", () => {
+    expect(validateTransition("in_progress", "completed")).toBeNull()
+  })
+
+  it("rejects pending → completed", () => {
+    const error = validateTransition("pending", "completed")
+    expect(error).not.toBeNull()
+    expect(error).toContain("in_progress")
+  })
+
+  it("allows completed → in_progress (reopen)", () => {
+    expect(validateTransition("completed", "in_progress")).toBeNull()
+  })
+
+  it("allows pending → cancelled", () => {
+    expect(validateTransition("pending", "cancelled")).toBeNull()
+  })
+
+  it("allows same-status no-op", () => {
+    expect(validateTransition("pending", "pending")).toBeNull()
+    expect(validateTransition("in_progress", "in_progress")).toBeNull()
+  })
+})

@@ -142,6 +142,8 @@ async function deduplicateStaleTasks(
     if (!isDuplicate) continue
     try {
       const taskPath = join(tasksDir, `${stale.id}.json`)
+      // Transition through in_progress if pending, to satisfy lifecycle
+      if (stale.status === "pending") stale.status = "in_progress"
       const updated = {
         ...stale,
         status: "completed" as const,

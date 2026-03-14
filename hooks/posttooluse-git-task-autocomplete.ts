@@ -50,6 +50,7 @@ async function completeTasks(
 ): Promise<void> {
   for (const task of tasks) {
     if (!shouldCompleteTask(task, isCommit, isPush)) continue
+    if (task.status === "pending") task.status = "in_progress"
     task.status = "completed"
     await Bun.write(join(tasksDir, `${task.id}.json`), JSON.stringify(task, null, 2))
   }
