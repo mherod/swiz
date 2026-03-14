@@ -592,18 +592,38 @@ interface GhFetchResults {
   projectState: ProjectState | null | undefined
 }
 
+/** Worst fetch status wins — error > stale > ok. */
+function computeFetchStatus(
+  issueResult: { status: FetchStatus } | null,
+  prResult: { status: FetchStatus } | null
+): FetchStatus {
+  const statuses = [issueResult?.status, prResult?.status].filter(Boolean) as FetchStatus[]
+  if (statuses.includes("error")) return "error"
+  if (statuses.includes("stale")) return "stale"
+  return "ok"
+}
+
+function conditionalFetch<T>(needed: boolean, fn: () => Promise<T>): Promise<T | null> {
+  return needed ? fn() : Promise.resolve(null)
+}
+
 async function fetchGhData(
   cwd: string,
   branch: string,
   needs: GhFetchNeeds
 ): Promise<GhFetchResults> {
   const repo = await getRepoSlug(cwd)
+  const hasRepo = Boolean(repo)
 
   const [issueResult, prResult, prDetail, ciData, projectState] = await Promise.all([
-    needs.backlog && repo ? fetchIssuesViaStore(repo, cwd) : Promise.resolve(null),
-    needs.backlog && repo ? fetchPrsViaStore(repo, cwd) : Promise.resolve(null),
-    needs.pr && branch && repo ? fetchPrDetailViaStore(repo, branch, cwd) : Promise.resolve(null),
-    needs.ci && branch && repo ? fetchCiRunsViaStore(repo, branch, cwd) : Promise.resolve(null),
+    conditionalFetch(needs.backlog && hasRepo, () => fetchIssuesViaStore(repo!, cwd)),
+    conditionalFetch(needs.backlog && hasRepo, () => fetchPrsViaStore(repo!, cwd)),
+    conditionalFetch(needs.pr && hasRepo && Boolean(branch), () =>
+      fetchPrDetailViaStore(repo!, branch, cwd)
+    ),
+    conditionalFetch(needs.ci && hasRepo && Boolean(branch), () =>
+      fetchCiRunsViaStore(repo!, branch, cwd)
+    ),
     readProjectState(cwd),
   ])
 
@@ -611,18 +631,10 @@ async function fetchGhData(
     ? { reviewDecision: prDetail.reviewDecision, comments: new Array(prDetail.commentCount) }
     : null
 
-  // Worst fetch status wins — error > stale > ok
-  const statuses = [issueResult?.status, prResult?.status].filter(Boolean) as FetchStatus[]
-  const fetchStatus: FetchStatus = statuses.includes("error")
-    ? "error"
-    : statuses.includes("stale")
-      ? "stale"
-      : "ok"
-
   return {
     issueData: issueResult?.data ?? null,
     prListData: prResult?.data ?? null,
-    fetchStatus,
+    fetchStatus: computeFetchStatus(issueResult, prResult),
     prViewData,
     ciData,
     projectState,

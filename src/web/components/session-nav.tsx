@@ -356,12 +356,14 @@ function StatusChips({
 
 function matchesFilter(session: SessionPreview, query: string): boolean {
   const q = query.toLowerCase()
-  if (session.id.toLowerCase().includes(q)) return true
-  if (session.provider?.toLowerCase().includes(q)) return true
-  if (session.activeDispatch?.toolName?.toLowerCase().includes(q)) return true
-  if (session.activeDispatch?.canonicalEvent?.toLowerCase().includes(q)) return true
-  if (session.activeDispatch?.toolInputSummary?.toLowerCase().includes(q)) return true
-  return false
+  const fields = [
+    session.id,
+    session.provider,
+    session.activeDispatch?.toolName,
+    session.activeDispatch?.canonicalEvent,
+    session.activeDispatch?.toolInputSummary,
+  ]
+  return fields.some((f) => f?.toLowerCase().includes(q))
 }
 
 function useSessionNavState(projects: ProjectSessions[], selectedProjectCwd: string | null) {

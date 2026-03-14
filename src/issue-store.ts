@@ -698,200 +698,181 @@ interface RestFallbackMapping {
 }
 
 /**
- * Map a `gh <entity> list` command to its REST API fallback.
+ * Lookup table mapping `gh <entity> list` commands to REST API fallbacks.
  * The `normalize` function adapts REST response shapes to match gh CLI output shapes.
+ */
+const REST_FALLBACK_MAP: Record<string, RestFallbackMapping> = {
+  "issue:list": { endpoint: "repos/{owner}/{repo}/issues?state=open&per_page=100" },
+  "pr:list": { endpoint: "repos/{owner}/{repo}/pulls?state=open&per_page=100" },
+  "run:list": {
+    endpoint: "repos/{owner}/{repo}/actions/runs?per_page=20",
+    normalize: (raw) => {
+      const data = raw as {
+        workflow_runs?: Array<{
+          head_sha: string
+          id: number
+          status: string
+          conclusion: string | null
+          html_url: string
+        }>
+      }
+      return (data.workflow_runs ?? []).map((r) => ({
+        headSha: r.head_sha,
+        databaseId: r.id,
+        status: r.status,
+        conclusion: r.conclusion ?? "",
+        url: r.html_url,
+      }))
+    },
+  },
+  "release:list": {
+    endpoint: "repos/{owner}/{repo}/releases?per_page=30",
+    normalize: (raw) => {
+      const releases = raw as Array<{
+        tag_name: string
+        name: string
+        draft: boolean
+        prerelease: boolean
+        published_at: string | null
+        created_at: string
+      }>
+      return releases.map((r) => ({
+        tagName: r.tag_name,
+        name: r.name,
+        isDraft: r.draft,
+        isPrerelease: r.prerelease,
+        publishedAt: r.published_at ?? r.created_at,
+        createdAt: r.created_at,
+      }))
+    },
+  },
+  "label:list": { endpoint: "repos/{owner}/{repo}/labels?per_page=100" },
+  "milestone:list": {
+    endpoint: "repos/{owner}/{repo}/milestones?state=open&per_page=100",
+    normalize: (raw) => {
+      const milestones = raw as Array<{
+        number: number
+        title: string
+        description: string | null
+        state: string
+        due_on: string | null
+        open_issues: number
+        closed_issues: number
+      }>
+      return milestones.map((m) => ({
+        number: m.number,
+        title: m.title,
+        description: m.description ?? "",
+        state: m.state,
+        dueOn: m.due_on,
+        openIssues: m.open_issues,
+        closedIssues: m.closed_issues,
+      }))
+    },
+  },
+  "repo:list": {
+    endpoint: "user/repos?per_page=100",
+    normalize: (raw) => {
+      const repos = raw as Array<{
+        name: string
+        full_name: string
+        description: string | null
+        private: boolean
+        html_url: string
+      }>
+      return repos.map((r) => ({
+        name: r.name,
+        nameWithOwner: r.full_name,
+        description: r.description ?? "",
+        isPrivate: r.private,
+        url: r.html_url,
+      }))
+    },
+  },
+  "workflow:list": {
+    endpoint: "repos/{owner}/{repo}/actions/workflows?per_page=100",
+    normalize: (raw) => {
+      const data = raw as {
+        workflows?: Array<{
+          id: number
+          name: string
+          path: string
+          state: string
+        }>
+      }
+      return (data.workflows ?? []).map((w) => ({
+        id: w.id,
+        name: w.name,
+        path: w.path,
+        state: w.state,
+      }))
+    },
+  },
+  "secret:list": {
+    endpoint: "repos/{owner}/{repo}/actions/secrets?per_page=100",
+    normalize: (raw) => {
+      const data = raw as {
+        secrets?: Array<{
+          name: string
+          created_at: string
+          updated_at: string
+        }>
+      }
+      return (data.secrets ?? []).map((s) => ({
+        name: s.name,
+        createdAt: s.created_at,
+        updatedAt: s.updated_at,
+      }))
+    },
+  },
+  "variable:list": {
+    endpoint: "repos/{owner}/{repo}/actions/variables?per_page=100",
+    normalize: (raw) => {
+      const data = raw as {
+        variables?: Array<{
+          name: string
+          value: string
+          created_at: string
+          updated_at: string
+        }>
+      }
+      return (data.variables ?? []).map((v) => ({
+        name: v.name,
+        value: v.value,
+        createdAt: v.created_at,
+        updatedAt: v.updated_at,
+      }))
+    },
+  },
+  "environment:list": {
+    endpoint: "repos/{owner}/{repo}/environments?per_page=100",
+    normalize: (raw) => {
+      const data = raw as {
+        environments?: Array<{
+          id: number
+          name: string
+          created_at: string
+          updated_at: string
+        }>
+      }
+      return (data.environments ?? []).map((e) => ({
+        id: e.id,
+        name: e.name,
+        createdAt: e.created_at,
+        updatedAt: e.updated_at,
+      }))
+    },
+  },
+}
+
+/**
+ * Map a `gh <entity> list` command to its REST API fallback.
  * Returns null if the command has no REST equivalent.
  *
  * Exported for unit testing.
  */
 export function ghListToRestFallback(args: string[]): RestFallbackMapping | null {
-  if (args[0] === "issue" && args[1] === "list")
-    return { endpoint: "repos/{owner}/{repo}/issues?state=open&per_page=100" }
-  if (args[0] === "pr" && args[1] === "list")
-    return { endpoint: "repos/{owner}/{repo}/pulls?state=open&per_page=100" }
-  if (args[0] === "run" && args[1] === "list")
-    return {
-      endpoint: "repos/{owner}/{repo}/actions/runs?per_page=20",
-      // REST wraps runs in { workflow_runs: [...] } with snake_case field names;
-      // normalise to match what gh run list --json produces.
-      normalize: (raw) => {
-        const data = raw as {
-          workflow_runs?: Array<{
-            head_sha: string
-            id: number
-            status: string
-            conclusion: string | null
-            html_url: string
-          }>
-        }
-        return (data.workflow_runs ?? []).map((r) => ({
-          headSha: r.head_sha,
-          databaseId: r.id,
-          status: r.status,
-          conclusion: r.conclusion ?? "",
-          url: r.html_url,
-        }))
-      },
-    }
-  if (args[0] === "release" && args[1] === "list")
-    return {
-      endpoint: "repos/{owner}/{repo}/releases?per_page=30",
-      // REST uses snake_case; normalise to match gh release list --json camelCase output.
-      normalize: (raw) => {
-        const releases = raw as Array<{
-          tag_name: string
-          name: string
-          draft: boolean
-          prerelease: boolean
-          published_at: string | null
-          created_at: string
-        }>
-        return releases.map((r) => ({
-          tagName: r.tag_name,
-          name: r.name,
-          isDraft: r.draft,
-          isPrerelease: r.prerelease,
-          publishedAt: r.published_at ?? r.created_at,
-          createdAt: r.created_at,
-        }))
-      },
-    }
-  if (args[0] === "label" && args[1] === "list")
-    // REST label shape matches gh label list --json output (name, description, color) directly.
-    return { endpoint: "repos/{owner}/{repo}/labels?per_page=100" }
-  if (args[0] === "milestone" && args[1] === "list")
-    return {
-      endpoint: "repos/{owner}/{repo}/milestones?state=open&per_page=100",
-      // REST uses snake_case; normalise due_on → dueOn to match gh milestone list --json.
-      normalize: (raw) => {
-        const milestones = raw as Array<{
-          number: number
-          title: string
-          description: string | null
-          state: string
-          due_on: string | null
-          open_issues: number
-          closed_issues: number
-        }>
-        return milestones.map((m) => ({
-          number: m.number,
-          title: m.title,
-          description: m.description ?? "",
-          state: m.state,
-          dueOn: m.due_on,
-          openIssues: m.open_issues,
-          closedIssues: m.closed_issues,
-        }))
-      },
-    }
-  if (args[0] === "repo" && args[1] === "list")
-    return {
-      endpoint: "user/repos?per_page=100",
-      // REST uses snake_case; normalise to match gh repo list --json camelCase output.
-      normalize: (raw) => {
-        const repos = raw as Array<{
-          name: string
-          full_name: string
-          description: string | null
-          private: boolean
-          html_url: string
-        }>
-        return repos.map((r) => ({
-          name: r.name,
-          nameWithOwner: r.full_name,
-          description: r.description ?? "",
-          isPrivate: r.private,
-          url: r.html_url,
-        }))
-      },
-    }
-  if (args[0] === "workflow" && args[1] === "list")
-    return {
-      endpoint: "repos/{owner}/{repo}/actions/workflows?per_page=100",
-      // REST wraps workflows in { workflows: [...] } with snake_case field names;
-      // normalise to match gh workflow list --json camelCase output.
-      normalize: (raw) => {
-        const data = raw as {
-          workflows?: Array<{
-            id: number
-            name: string
-            path: string
-            state: string
-          }>
-        }
-        return (data.workflows ?? []).map((w) => ({
-          id: w.id,
-          name: w.name,
-          path: w.path,
-          state: w.state,
-        }))
-      },
-    }
-  if (args[0] === "secret" && args[1] === "list")
-    return {
-      endpoint: "repos/{owner}/{repo}/actions/secrets?per_page=100",
-      // REST wraps secrets in { secrets: [...] } with snake_case field names;
-      // normalise to match gh secret list --json camelCase output.
-      normalize: (raw) => {
-        const data = raw as {
-          secrets?: Array<{
-            name: string
-            created_at: string
-            updated_at: string
-          }>
-        }
-        return (data.secrets ?? []).map((s) => ({
-          name: s.name,
-          createdAt: s.created_at,
-          updatedAt: s.updated_at,
-        }))
-      },
-    }
-  if (args[0] === "variable" && args[1] === "list")
-    return {
-      endpoint: "repos/{owner}/{repo}/actions/variables?per_page=100",
-      // REST wraps variables in { variables: [...] } with snake_case field names;
-      // normalise to match gh variable list --json camelCase output.
-      normalize: (raw) => {
-        const data = raw as {
-          variables?: Array<{
-            name: string
-            value: string
-            created_at: string
-            updated_at: string
-          }>
-        }
-        return (data.variables ?? []).map((v) => ({
-          name: v.name,
-          value: v.value,
-          createdAt: v.created_at,
-          updatedAt: v.updated_at,
-        }))
-      },
-    }
-  if (args[0] === "environment" && args[1] === "list")
-    return {
-      endpoint: "repos/{owner}/{repo}/environments?per_page=100",
-      // REST wraps environments in { environments: [...] };
-      // normalise to match gh environment list --json camelCase output.
-      normalize: (raw) => {
-        const data = raw as {
-          environments?: Array<{
-            id: number
-            name: string
-            created_at: string
-            updated_at: string
-          }>
-        }
-        return (data.environments ?? []).map((e) => ({
-          id: e.id,
-          name: e.name,
-          createdAt: e.created_at,
-          updatedAt: e.updated_at,
-        }))
-      },
-    }
-  return null
+  return REST_FALLBACK_MAP[`${args[0]}:${args[1]}`] ?? null
 }
 
 /** Fetch via REST API as fallback when GraphQL is rate-limited. */
