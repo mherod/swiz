@@ -691,22 +691,51 @@ function isGraphQLRateLimited(stderr: string): boolean {
   return stderr.includes("API rate limit") && stderr.includes("GraphQL")
 }
 
+interface RestFallbackMapping {
+  endpoint: string
+  /** Transforms the raw REST response body into the shape expected by the caller. */
+  normalize?: (raw: unknown) => unknown
+}
+
 /**
- * Map a `gh <entity> list` command to its REST API equivalent.
- * Returns the REST endpoint path or null if the command can't be mapped.
+ * Map a `gh <entity> list` command to its REST API fallback.
+ * The `normalize` function adapts REST response shapes to match gh CLI output shapes.
+ * Returns null if the command has no REST equivalent.
  */
-function ghListToRestEndpoint(args: string[]): string | null {
+function ghListToRestFallback(args: string[]): RestFallbackMapping | null {
   if (args[0] === "issue" && args[1] === "list")
-    return "repos/{owner}/{repo}/issues?state=open&per_page=100"
+    return { endpoint: "repos/{owner}/{repo}/issues?state=open&per_page=100" }
   if (args[0] === "pr" && args[1] === "list")
-    return "repos/{owner}/{repo}/pulls?state=open&per_page=100"
+    return { endpoint: "repos/{owner}/{repo}/pulls?state=open&per_page=100" }
   if (args[0] === "run" && args[1] === "list")
-    return "repos/{owner}/{repo}/actions/runs?per_page=20"
+    return {
+      endpoint: "repos/{owner}/{repo}/actions/runs?per_page=20",
+      // REST wraps runs in { workflow_runs: [...] } with snake_case field names;
+      // normalise to match what gh run list --json produces.
+      normalize: (raw) => {
+        const data = raw as {
+          workflow_runs?: Array<{
+            head_sha: string
+            id: number
+            status: string
+            conclusion: string | null
+            html_url: string
+          }>
+        }
+        return (data.workflow_runs ?? []).map((r) => ({
+          headSha: r.head_sha,
+          databaseId: r.id,
+          status: r.status,
+          conclusion: r.conclusion ?? "",
+          url: r.html_url,
+        }))
+      },
+    }
   return null
 }
 
 /** Fetch via REST API as fallback when GraphQL is rate-limited. */
-async function fetchViaRest<T>(endpoint: string, cwd: string): Promise<T | null> {
+async function fetchViaRest(endpoint: string, cwd: string): Promise<unknown> {
   const proc = Bun.spawn(["gh", "api", endpoint], {
     cwd,
     stdout: "pipe",
@@ -719,7 +748,7 @@ async function fetchViaRest<T>(endpoint: string, cwd: string): Promise<T | null>
   await proc.exited
   if (proc.exitCode !== 0) return null
   try {
-    return JSON.parse(stdout) as T
+    return JSON.parse(stdout)
   } catch {
     return null
   }
@@ -740,10 +769,12 @@ async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
   await proc.exited
   if (proc.exitCode !== 0) {
     if (isGraphQLRateLimited(stderr)) {
-      const restEndpoint = ghListToRestEndpoint(args)
-      if (restEndpoint) {
+      const mapping = ghListToRestFallback(args)
+      if (mapping) {
         debugLog(`[swiz] REST_FALLBACK for ${args.join(" ")}`)
-        return fetchViaRest<T>(restEndpoint, cwd)
+        const raw = await fetchViaRest(mapping.endpoint, cwd)
+        if (raw === null) return null
+        return (mapping.normalize ? mapping.normalize(raw) : raw) as T
       }
     }
     return null
