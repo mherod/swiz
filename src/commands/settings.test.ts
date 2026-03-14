@@ -13,6 +13,7 @@ import {
   resolvePolicy,
   SETTINGS_REGISTRY,
 } from "../settings.ts"
+import { createAntigravitySession, createCodexSession } from "../test-fixtures.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import { settingsCommand } from "./settings.ts"
 
@@ -117,51 +118,6 @@ async function createGeminiSession(
         { type: "gemini", content: "hi", timestamp: "2026-03-05T10:00:01.000Z" },
       ],
     })
-  )
-}
-
-async function createAntigravitySession(
-  home: string,
-  targetDir: string,
-  sessionId: string
-): Promise<void> {
-  const conversationsDir = join(home, ".gemini", "antigravity", "conversations")
-  const brainDir = join(home, ".gemini", "antigravity", "brain", sessionId)
-  await mkdir(conversationsDir, { recursive: true })
-  await mkdir(brainDir, { recursive: true })
-  await writeFile(join(conversationsDir, `${sessionId}.pb`), Buffer.from([0x0a, 0x01, 0x00]))
-  await writeFile(join(brainDir, "task.md"), `# Task\nThis session targets file://${targetDir}\n`)
-}
-
-async function createCodexSession(
-  home: string,
-  targetDir: string,
-  sessionId: string
-): Promise<void> {
-  const codexDir = join(home, ".codex", "sessions", "2026", "03", "05")
-  await mkdir(codexDir, { recursive: true })
-  await writeFile(
-    join(codexDir, `rollout-2026-03-05T10-00-00-${sessionId}.jsonl`),
-    `${[
-      JSON.stringify({
-        timestamp: "2026-03-05T10:00:00.000Z",
-        type: "session_meta",
-        payload: {
-          id: sessionId,
-          timestamp: "2026-03-05T10:00:00.000Z",
-          cwd: targetDir,
-          originator: "codex_cli_rs",
-        },
-      }),
-      JSON.stringify({
-        timestamp: "2026-03-05T10:00:01.000Z",
-        type: "event_msg",
-        payload: {
-          type: "user_message",
-          message: "Configure session setting",
-        },
-      }),
-    ].join("\n")}\n`
   )
 }
 

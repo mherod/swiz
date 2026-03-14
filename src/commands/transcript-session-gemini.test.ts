@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { useTempDir } from "../../hooks/test-utils.ts"
+import { createAntigravitySession, createCodexSession } from "../test-fixtures.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 
 const { create: createTempHome } = useTempDir("swiz-transcript-gemini-test-")
@@ -139,60 +140,6 @@ async function createClaudeSession(
   await writeFile(transcriptPath, `${lines.join("\n")}\n`)
 }
 
-async function createAntigravitySession(
-  home: string,
-  projectDir: string,
-  sessionId: string
-): Promise<void> {
-  const conversationsDir = join(home, ".gemini", "antigravity", "conversations")
-  const brainDir = join(home, ".gemini", "antigravity", "brain", sessionId)
-  await mkdir(conversationsDir, { recursive: true })
-  await mkdir(brainDir, { recursive: true })
-  await writeFile(join(conversationsDir, `${sessionId}.pb`), Buffer.from([0x0a, 0x01, 0x00]))
-  await writeFile(join(brainDir, "task.md"), `# Task\nImplement update in file://${projectDir}\n`)
-}
-
-async function createCodexSession(
-  home: string,
-  projectDir: string,
-  sessionId: string
-): Promise<void> {
-  const codexDir = join(home, ".codex", "sessions", "2026", "03", "05")
-  await mkdir(codexDir, { recursive: true })
-  const sessionPath = join(codexDir, `rollout-2026-03-05T10-00-00-${sessionId}.jsonl`)
-
-  const lines = [
-    JSON.stringify({
-      timestamp: "2026-03-05T10:00:00.000Z",
-      type: "session_meta",
-      payload: {
-        id: sessionId,
-        timestamp: "2026-03-05T10:00:00.000Z",
-        cwd: projectDir,
-        originator: "codex_cli_rs",
-      },
-    }),
-    JSON.stringify({
-      timestamp: "2026-03-05T10:00:01.000Z",
-      type: "event_msg",
-      payload: {
-        type: "user_message",
-        message: "Hello from Codex session",
-      },
-    }),
-    JSON.stringify({
-      timestamp: "2026-03-05T10:00:02.000Z",
-      type: "response_item",
-      payload: {
-        type: "message",
-        role: "assistant",
-        content: [{ type: "output_text", text: "Hi from Codex assistant" }],
-      },
-    }),
-  ]
-  await writeFile(sessionPath, `${lines.join("\n")}\n`)
-}
-
 async function createDebugLog(home: string, sessionId: string, lines: string[]): Promise<void> {
   const debugDir = join(home, ".claude", "debug")
   await mkdir(debugDir, { recursive: true })
@@ -287,7 +234,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc01-1111-7222-8333-444444444444"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
 
     const result = await runSwiz(["transcript", "--list", "--dir", projectDir], home)
     expect(result.exitCode).toBe(0)
@@ -300,7 +249,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc01-5555-7666-8777-888888888888"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
 
     const result = await runSwiz(
       ["transcript", "--session", sessionId.slice(0, 8), "--dir", projectDir],
@@ -347,7 +298,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc01-7777-7888-8999-aaaaaaaaaaaa"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
     await createDebugLog(home, sessionId, [
       "2026-03-06T04:29:06.552Z [DEBUG] debug line one",
       "2026-03-06T04:29:06.553Z [DEBUG] debug line two",
@@ -370,7 +323,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc01-7777-7888-8999-bbbbbbbbbbbb"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
     // Intentionally write lines out of chronological order
     await createDebugLog(home, sessionId, [
       "2026-03-06T04:29:06.900Z [DEBUG] later line",
@@ -399,7 +354,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc01-7777-7888-8999-cccccccccccc"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
     // Three lines share an identical timestamp — tie-breaker must preserve file order
     await createDebugLog(home, sessionId, [
       "2026-03-06T04:29:06.500Z [DEBUG] first concurrent",
@@ -425,7 +382,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc01-7777-7888-8999-dddddddddddd"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
     // Third line has an out-of-range month (13) which matches the regex but Date parsing returns NaN
     await createDebugLog(home, sessionId, [
       "2026-03-06T04:29:06.100Z [DEBUG] valid first",
@@ -450,7 +409,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc01-7777-7888-8999-eeeeeeeeeeee"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
     // First two lines have out-of-range timestamps (no prior valid ts to inherit)
     await createDebugLog(home, sessionId, [
       "2026-99-06T04:29:06.100Z [DEBUG] leading invalid first",
@@ -481,7 +442,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc01-7777-7888-8999-ffffffffffff"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
     // Second line has no timestamp — it is a continuation of the first event
     await createDebugLog(home, sessionId, [
       "2026-03-06T04:29:06.100Z [DEBUG] main line",
@@ -510,7 +473,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc01-7777-7888-8999-111111111111"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
     // File starts with continuation lines before any ISO-prefixed line
     await createDebugLog(home, sessionId, [
       "no-timestamp header line",
@@ -535,7 +500,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc01-7777-7888-8999-333333333333"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
     // Both malformed lines share the same (invalid) ISO string — _seq must break the tie
     await createDebugLog(home, sessionId, [
       "2026-99-06T04:29:06.000Z [DEBUG] same-iso first",
@@ -565,7 +532,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc01-7777-7888-8999-222222222222"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
     // Alternating valid/malformed lines — merge must preserve file order for malformed events
     await createDebugLog(home, sessionId, [
       "2026-03-06T04:29:06.100Z [DEBUG] valid-A",
@@ -604,7 +573,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc01-7777-7888-8999-444444444444"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
     // Real Claude debug files embed ANSI colour codes in log content after the timestamp.
     // e.g. "ESC[33mpendingESC[0m" for task state labels. These must be stripped before
     // wordWrap measures line width, otherwise byte-length != visual width.
@@ -630,7 +601,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc01-9999-7aaa-8bbb-cccccccccccc"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
 
     const result = await runSwiz(["session", "--list", "--dir", projectDir], home)
     expect(result.exitCode).toBe(0)
@@ -645,7 +618,9 @@ describe("Provider transcript/session command support", () => {
     const codexSessionId = "019cbc01-dddd-7eee-8fff-111111111111"
     await mkdir(projectDir, { recursive: true })
     await createGeminiSession(home, projectDir, geminiSessionId)
-    await createCodexSession(home, projectDir, codexSessionId)
+    await createCodexSession(home, projectDir, codexSessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
 
     const result = await runSwiz(["transcript", "--list", "--dir", projectDir], home)
     expect(result.exitCode).toBe(0)
@@ -661,7 +636,9 @@ describe("Provider transcript/session command support", () => {
     const codexSessionId = "019cbc01-2222-7333-8444-555555555555"
     await mkdir(projectDir, { recursive: true })
     await createGeminiSession(home, projectDir, geminiSessionId)
-    await createCodexSession(home, projectDir, codexSessionId)
+    await createCodexSession(home, projectDir, codexSessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
 
     const result = await runSwiz(["transcript", "--list", "--dir", projectDir], home, {
       CODEX_THREAD_ID: "thread-1",
@@ -679,7 +656,9 @@ describe("Provider transcript/session command support", () => {
     const codexSessionId = "019cbc01-6666-7777-8888-999999999999"
     await mkdir(projectDir, { recursive: true })
     await createGeminiSession(home, projectDir, geminiSessionId)
-    await createCodexSession(home, projectDir, codexSessionId)
+    await createCodexSession(home, projectDir, codexSessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
 
     const result = await runSwiz(["transcript", "--list", "--all", "--dir", projectDir], home, {
       CODEX_THREAD_ID: "thread-2",
@@ -762,7 +741,9 @@ describe("Provider transcript/session command support", () => {
     const projectDir = join(home, "workspace", "demo-codex")
     const sessionId = "019cbc02-1ddd-7eee-8fff-000000000000"
     await mkdir(projectDir, { recursive: true })
-    await createCodexSession(home, projectDir, sessionId)
+    await createCodexSession(home, projectDir, sessionId, {
+      assistantMessage: "Hi from Codex assistant",
+    })
 
     const result = await runSwiz(
       ["continue", "--session", sessionId.slice(0, 8), "--dir", projectDir, "--print"],

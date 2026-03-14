@@ -917,6 +917,16 @@ export function isTaskTrackingExemptShellCommand(command: string): boolean {
   )
 }
 
+/** Returns true when a command attempts to disable a swiz setting identified by any of the given aliases. */
+export function isSettingDisableCommand(command: string, aliases: string[]): boolean {
+  for (const alias of aliases) {
+    if (new RegExp(`swiz\\s+settings\\s+disable\\s+${alias}(?:\\s|$)`).test(command)) return true
+    if (new RegExp(`swiz\\s+settings\\s+set\\s+${alias}\\s+false(?:\\s|$)`).test(command))
+      return true
+  }
+  return false
+}
+
 // Re-exported from src/git-helpers.ts
 export { issueState } from "../src/git-helpers.ts"
 

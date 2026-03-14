@@ -6,7 +6,12 @@
 // This hook denies that command unconditionally — the sandbox can only be
 // disabled by the user directly at the terminal (where this hook never fires).
 
-import { buildIssueGuidance, denyPreToolUse, isShellTool } from "./hook-utils.ts"
+import {
+  buildIssueGuidance,
+  denyPreToolUse,
+  isSettingDisableCommand,
+  isShellTool,
+} from "./hook-utils.ts"
 
 // All recognised aliases for the sandboxedEdits setting
 const SANDBOX_ALIASES = ["sandboxed-edits", "sandboxededits", "sandboxed_edits", "sandboxedEdits"]
@@ -18,14 +23,7 @@ const SANDBOX_ALIASES = ["sandboxed-edits", "sandboxededits", "sandboxed_edits",
  *   swiz settings set <alias> false
  */
 export function isSandboxDisableCommand(command: string): boolean {
-  for (const alias of SANDBOX_ALIASES) {
-    // swiz settings disable <alias>
-    if (new RegExp(`swiz\\s+settings\\s+disable\\s+${alias}(?:\\s|$)`).test(command)) return true
-    // swiz settings set <alias> false
-    if (new RegExp(`swiz\\s+settings\\s+set\\s+${alias}\\s+false(?:\\s|$)`).test(command))
-      return true
-  }
-  return false
+  return isSettingDisableCommand(command, SANDBOX_ALIASES)
 }
 
 if (import.meta.main) {

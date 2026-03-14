@@ -8,7 +8,12 @@
 // This hook denies that command unconditionally — the setting can only be
 // disabled by the user directly at the terminal (where this hook never fires).
 
-import { buildIssueGuidance, denyPreToolUse, isShellTool } from "./hook-utils.ts"
+import {
+  buildIssueGuidance,
+  denyPreToolUse,
+  isSettingDisableCommand,
+  isShellTool,
+} from "./hook-utils.ts"
 
 // All recognised aliases for the strictNoDirectMain setting
 const STRICT_MAIN_ALIASES = [
@@ -27,14 +32,7 @@ const STRICT_MAIN_ALIASES = [
  *   swiz settings set <alias> false
  */
 export function isStrictMainDisableCommand(command: string): boolean {
-  for (const alias of STRICT_MAIN_ALIASES) {
-    // swiz settings disable <alias>
-    if (new RegExp(`swiz\\s+settings\\s+disable\\s+${alias}(?:\\s|$)`).test(command)) return true
-    // swiz settings set <alias> false
-    if (new RegExp(`swiz\\s+settings\\s+set\\s+${alias}\\s+false(?:\\s|$)`).test(command))
-      return true
-  }
-  return false
+  return isSettingDisableCommand(command, STRICT_MAIN_ALIASES)
 }
 
 if (import.meta.main) {

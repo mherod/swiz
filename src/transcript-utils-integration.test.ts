@@ -3,53 +3,13 @@ import { mkdir, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { createCodexSession } from "./test-fixtures.ts"
 
 /** Create a unique temp directory (concurrent-safe). */
 async function makeTmpDir(prefix: string): Promise<string> {
   const dir = join(tmpdir(), `${prefix}-${randomBytes(8).toString("hex")}`)
   await mkdir(dir, { recursive: true })
   return dir
-}
-
-async function createCodexSession(
-  home: string,
-  targetDir: string,
-  sessionId: string
-): Promise<string> {
-  const codexDir = join(home, ".codex", "sessions", "2026", "03", "05")
-  await mkdir(codexDir, { recursive: true })
-  const filePath = join(codexDir, `rollout-2026-03-05T10-00-00-${sessionId}.jsonl`)
-  const lines = [
-    JSON.stringify({
-      timestamp: "2026-03-05T10:00:00.000Z",
-      type: "session_meta",
-      payload: {
-        id: sessionId,
-        timestamp: "2026-03-05T10:00:00.000Z",
-        cwd: targetDir,
-        originator: "codex_cli_rs",
-      },
-    }),
-    JSON.stringify({
-      timestamp: "2026-03-05T10:00:01.000Z",
-      type: "event_msg",
-      payload: {
-        type: "user_message",
-        message: "Please add Codex support",
-      },
-    }),
-    JSON.stringify({
-      timestamp: "2026-03-05T10:00:02.000Z",
-      type: "response_item",
-      payload: {
-        type: "message",
-        role: "assistant",
-        content: [{ type: "output_text", text: "Implemented." }],
-      },
-    }),
-  ]
-  await writeFile(filePath, `${lines.join("\n")}\n`)
-  return filePath
 }
 
 describe("transcript-utils integration", () => {
