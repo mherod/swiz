@@ -237,6 +237,7 @@ describe("renderStatusLineFromSnapshot", () => {
     ciLabel: "",
     issueCount: 2,
     prCount: 1,
+    fetchStatus: "ok" as const,
     reviewDecision: "",
     commentCount: 0,
     projectState: "developing" as const,

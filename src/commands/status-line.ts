@@ -35,6 +35,8 @@ interface StatusLineInput {
 
 import { BOLD, DIM, RESET as R } from "../ansi.ts"
 
+export type FetchStatus = "ok" | "stale" | "error"
+
 export interface WarmStatusLineSnapshot {
   shortCwd: string
   gitInfo: string
@@ -44,6 +46,7 @@ export interface WarmStatusLineSnapshot {
   ciLabel?: string
   issueCount: number | null
   prCount: number | null
+  fetchStatus: FetchStatus
   reviewDecision: string
   commentCount: number
   projectState: ProjectState | null
@@ -429,35 +432,44 @@ interface PrBranchDetail {
 /** 1 hour — serve stale data rather than showing nothing when API is down. */
 const STALE_TTL_MS = 60 * 60 * 1000
 
-async function fetchIssuesViaStore(repo: string, cwd: string): Promise<unknown[]> {
+interface FetchResult<T> {
+  data: T[]
+  status: FetchStatus
+}
+
+async function fetchIssuesViaStore(repo: string, cwd: string): Promise<FetchResult<unknown>> {
   const store = getIssueStore()
   const cached = store.listIssues(repo)
-  if (cached.length > 0) return cached
+  if (cached.length > 0) return { data: cached, status: "ok" }
   const fresh = await ghJson<{ number: number }[]>(
     ["issue", "list", "--state", "open", "--json", "number", "--limit", "100"],
     cwd
   )
   if (fresh && fresh.length > 0) {
     store.upsertIssues(repo, fresh)
-    return fresh
+    return { data: fresh, status: "ok" }
   }
+  if (fresh) return { data: [], status: "ok" }
   // API failed — serve stale data rather than empty
-  return store.listIssues(repo, STALE_TTL_MS)
+  const stale = store.listIssues(repo, STALE_TTL_MS)
+  return { data: stale, status: stale.length > 0 ? "stale" : "error" }
 }
 
-async function fetchPrsViaStore(repo: string, cwd: string): Promise<unknown[]> {
+async function fetchPrsViaStore(repo: string, cwd: string): Promise<FetchResult<unknown>> {
   const store = getIssueStore()
   const cached = store.listPullRequests(repo)
-  if (cached.length > 0) return cached
+  if (cached.length > 0) return { data: cached, status: "ok" }
   const fresh = await ghJson<{ number: number }[]>(
     ["pr", "list", "--state", "open", "--json", "number", "--limit", "100"],
     cwd
   )
   if (fresh && fresh.length > 0) {
     store.upsertPullRequests(repo, fresh)
-    return fresh
+    return { data: fresh, status: "ok" }
   }
-  return store.listPullRequests(repo, STALE_TTL_MS)
+  if (fresh) return { data: [], status: "ok" }
+  const stale = store.listPullRequests(repo, STALE_TTL_MS)
+  return { data: stale, status: stale.length > 0 ? "stale" : "error" }
 }
 
 async function fetchPrDetailViaStore(
@@ -574,6 +586,7 @@ function computeSegmentNeeds(activeSegments: string[]): GhFetchNeeds {
 interface GhFetchResults {
   issueData: unknown[] | null
   prListData: unknown[] | null
+  fetchStatus: FetchStatus
   prViewData: { reviewDecision?: string; comments?: unknown[] } | null
   ciData: GitHubCiRun[] | null
   projectState: ProjectState | null | undefined
@@ -586,7 +599,7 @@ async function fetchGhData(
 ): Promise<GhFetchResults> {
   const repo = await getRepoSlug(cwd)
 
-  const [issueData, prListData, prDetail, ciData, projectState] = await Promise.all([
+  const [issueResult, prResult, prDetail, ciData, projectState] = await Promise.all([
     needs.backlog && repo ? fetchIssuesViaStore(repo, cwd) : Promise.resolve(null),
     needs.backlog && repo ? fetchPrsViaStore(repo, cwd) : Promise.resolve(null),
     needs.pr && branch && repo ? fetchPrDetailViaStore(repo, branch, cwd) : Promise.resolve(null),
@@ -598,7 +611,22 @@ async function fetchGhData(
     ? { reviewDecision: prDetail.reviewDecision, comments: new Array(prDetail.commentCount) }
     : null
 
-  return { issueData, prListData, prViewData, ciData, projectState }
+  // Worst fetch status wins — error > stale > ok
+  const statuses = [issueResult?.status, prResult?.status].filter(Boolean) as FetchStatus[]
+  const fetchStatus: FetchStatus = statuses.includes("error")
+    ? "error"
+    : statuses.includes("stale")
+      ? "stale"
+      : "ok"
+
+  return {
+    issueData: issueResult?.data ?? null,
+    prListData: prResult?.data ?? null,
+    fetchStatus,
+    prViewData,
+    ciData,
+    projectState,
+  }
 }
 
 function assembleSnapshot(
@@ -618,6 +646,7 @@ function assembleSnapshot(
     ciLabel: ciSummary?.label ?? "",
     issueCount: Array.isArray(gh.issueData) ? gh.issueData.length : null,
     prCount: Array.isArray(gh.prListData) ? gh.prListData.length : null,
+    fetchStatus: gh.fetchStatus,
     reviewDecision: gh.prViewData?.reviewDecision ?? "",
     commentCount: Array.isArray(gh.prViewData?.comments) ? gh.prViewData.comments.length : 0,
     projectState: gh.projectState ?? null,
@@ -689,15 +718,19 @@ function buildContextSegment(
 }
 
 function buildBacklogSegment(snapshot: WarmStatusLineSnapshot): string {
+  if (snapshot.fetchStatus === "error") return `\x1b[91m⚠ fetch failed${R}`
+  const staleMark = snapshot.fetchStatus === "stale" ? ` ${DIM}(stale)${R}` : ""
   const issueSeg =
     snapshot.issueCount !== null
       ? formatCountSegment(snapshot.issueCount, "issue", "issues", 10, 25)
       : ""
   const prSeg =
     snapshot.prCount !== null ? formatCountSegment(snapshot.prCount, "PR", "PRs", 5, 12) : ""
-  return snapshot.issueCount !== null || snapshot.prCount !== null
-    ? [issueSeg, prSeg].filter(Boolean).join("  ")
-    : ""
+  const counts =
+    snapshot.issueCount !== null || snapshot.prCount !== null
+      ? [issueSeg, prSeg].filter(Boolean).join("  ")
+      : ""
+  return counts ? `${counts}${staleMark}` : ""
 }
 
 function buildReviewSegment(snapshot: WarmStatusLineSnapshot): string {
