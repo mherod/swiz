@@ -434,17 +434,26 @@ async function runUpdateTask(rest: string[], filterCwd?: string): Promise<void> 
   if (changes.stateFlag) await applyStateUpdate(changes.stateFlag, process.cwd())
 }
 
+/**
+ * `swiz tasks complete-all` — close every incomplete task in the session.
+ *
+ * Pending tasks are automatically transitioned through in_progress before
+ * being marked completed, satisfying the state-machine requirement without
+ * requiring per-task manual intervention.
+ */
+async function runCompleteAllTasks(rest: string[], filterCwd?: string): Promise<void> {
+  const sessionId = await resolveSession(rest)
+  const evidence = extractFlag(rest, "--evidence")
+  await completeAll(sessionId, filterCwd, evidence ?? undefined)
+}
+
 const SUBCOMMAND_HANDLERS: Record<string, (rest: string[], filterCwd?: string) => Promise<void>> = {
   create: (rest) => runCreateTask(rest),
   complete: (rest, filterCwd) => runCompleteTask(rest, filterCwd),
   evidence: (rest, filterCwd) => runEvidenceTask(rest, filterCwd),
   status: (rest, filterCwd) => runStatusTask(rest, filterCwd),
   update: (rest, filterCwd) => runUpdateTask(rest, filterCwd),
-  "complete-all": async (rest, filterCwd) => {
-    const sessionId = await resolveSession(rest)
-    const evidence = extractFlag(rest, "--evidence")
-    await completeAll(sessionId, filterCwd, evidence ?? undefined)
-  },
+  "complete-all": (rest, filterCwd) => runCompleteAllTasks(rest, filterCwd),
   adopt: async (rest) => {
     const sessionId = await resolveSession(rest)
     await adoptOrphanedTasks(sessionId, process.cwd())
