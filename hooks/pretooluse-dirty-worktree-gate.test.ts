@@ -35,6 +35,9 @@ async function createDirtyFiles(dir: string, count: number): Promise<void> {
 }
 
 async function runHook(cwd: string): Promise<{ decision?: string; reason?: string }> {
+  // Use a separate temp dir for HOME to avoid bun/node cache files
+  // polluting the git worktree (causes +1 untracked file on CI)
+  const fakeHome = await mkdtemp(join(tmpdir(), "swiz-dirty-gate-home-"))
   const payload = JSON.stringify({
     tool_name: "TaskUpdate",
     tool_input: { taskId: "1", status: "in_progress" },
@@ -44,7 +47,7 @@ async function runHook(cwd: string): Promise<{ decision?: string; reason?: strin
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, HOME: cwd },
+    env: { ...process.env, HOME: fakeHome },
   })
   void proc.stdin.write(payload)
   void proc.stdin.end()
