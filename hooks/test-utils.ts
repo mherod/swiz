@@ -1,7 +1,7 @@
 import { afterAll } from "bun:test"
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import { getSessionTasksDir } from "./hook-utils.ts"
 
@@ -117,7 +117,7 @@ export async function runBashHook(
     tool_name: opts.toolName ?? "Bash",
     tool_input: { command },
   })
-  const proc = Bun.spawn(["bun", script], {
+  const proc = Bun.spawn(["bun", resolve(script)], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
