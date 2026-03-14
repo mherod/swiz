@@ -16,6 +16,10 @@ const MAX_REQUESTS_PER_WINDOW = 4500 // leave 500 buffer below GitHub's 5000
 const COMPACTION_THRESHOLD = 10_000 // compact file when line count exceeds this
 const RETRY_DELAY_MS = 1_000
 
+// In-process write queue to serialize read-modify-write cycles and prevent
+// concurrent acquireGhSlot() calls within the same process from racing.
+let writeQueue: Promise<void> = Promise.resolve()
+
 /** Read recent timestamps from the throttle file (within the last hour). */
 async function readRecentTimestamps(): Promise<number[]> {
   const cutoff = Date.now() - WINDOW_MS
@@ -34,19 +38,18 @@ async function readRecentTimestamps(): Promise<number[]> {
   }
 }
 
-/** Record a request timestamp. Compacts the file when it grows too large. */
-async function recordRequest(): Promise<void> {
+/** Append a timestamp to the throttle file. Compacts when file grows too large. */
+async function recordRequestInner(): Promise<void> {
   const now = String(Date.now())
   try {
     const file = Bun.file(THROTTLE_FILE)
     const existing = (await file.exists()) ? await file.text() : ""
     await Bun.write(THROTTLE_FILE, `${existing}${now}\n`)
   } catch {
-    // Best-effort — don't block on throttle file errors
     try {
       await Bun.write(THROTTLE_FILE, `${now}\n`)
     } catch {
-      // Ignore
+      // Best-effort
     }
   }
 
@@ -65,6 +68,12 @@ async function recordRequest(): Promise<void> {
   } catch {
     // Compaction is best-effort
   }
+}
+
+/** Serialized record — prevents in-process write races. */
+function recordRequest(): Promise<void> {
+  writeQueue = writeQueue.then(recordRequestInner, recordRequestInner)
+  return writeQueue
 }
 
 /**
