@@ -2,24 +2,9 @@
 // Stop hook: Block stop if large files exceeding the configured threshold were committed without LFS.
 // Threshold is configurable via `swiz settings set large-file-size-kb <N>`.
 
-import {
-  DEFAULT_LARGE_FILE_SIZE_KB,
-  readProjectSettings,
-  readSwizSettings,
-} from "../src/settings.ts"
+import { DEFAULT_LARGE_FILE_SIZE_KB, resolveNumericSetting } from "../src/settings.ts"
 import { blockStop, git, isGitRepo, recentHeadRange } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
-
-/** Resolve the large-file size limit: project > global > default (500KB). */
-async function resolveSizeLimitKb(cwd: string): Promise<number> {
-  const [globalSettings, projectSettings] = await Promise.all([
-    readSwizSettings(),
-    readProjectSettings(cwd),
-  ])
-  return (
-    projectSettings?.largeFileSizeKb ?? globalSettings.largeFileSizeKb ?? DEFAULT_LARGE_FILE_SIZE_KB
-  )
-}
 
 async function checkFileSize(
   filePath: string,
@@ -76,7 +61,11 @@ async function main(): Promise<void> {
 
   if (!(await isGitRepo(cwd))) return
 
-  const sizeLimitKb = await resolveSizeLimitKb(cwd)
+  const sizeLimitKb = await resolveNumericSetting(
+    cwd,
+    "largeFileSizeKb",
+    DEFAULT_LARGE_FILE_SIZE_KB
+  )
   const largeFiles = await findLargeFiles(cwd, sizeLimitKb)
   if (largeFiles.length === 0) return
 

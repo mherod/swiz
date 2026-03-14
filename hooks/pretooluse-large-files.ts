@@ -10,24 +10,15 @@
 // LFS exemption: reads .gitattributes from disk (not from git history) so
 // uncommitted LFS rules added in the same session are respected.
 
+import { DEFAULT_LARGE_FILE_SIZE_KB, resolveNumericSetting } from "../src/settings.ts"
 import {
-  DEFAULT_LARGE_FILE_SIZE_KB,
-  readProjectSettings,
-  readSwizSettings,
-} from "../src/settings.ts"
-import { allowPreToolUse, denyPreToolUse, isEditTool, isWriteTool } from "./hook-utils.ts"
+  allowPreToolUse,
+  computeProjectedContent,
+  denyPreToolUse,
+  isEditTool,
+  isWriteTool,
+} from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
-
-/** Resolve the large-file size limit: project > global > default (500KB). */
-async function resolveSizeLimitKb(cwd: string): Promise<number> {
-  const [globalSettings, projectSettings] = await Promise.all([
-    readSwizSettings(),
-    readProjectSettings(cwd),
-  ])
-  return (
-    projectSettings?.largeFileSizeKb ?? globalSettings.largeFileSizeKb ?? DEFAULT_LARGE_FILE_SIZE_KB
-  )
-}
 
 /**
  * Returns true if the given file path is covered by a Git LFS rule in
@@ -61,24 +52,6 @@ async function isLfsTracked(filePath: string, cwd: string): Promise<boolean> {
   return false
 }
 
-async function getProjectedContent(
-  toolName: string,
-  filePath: string,
-  toolInput: { old_string?: string; new_string?: string; content?: string }
-): Promise<string> {
-  let currentContent = ""
-  try {
-    currentContent = await Bun.file(filePath).text()
-  } catch {
-    currentContent = ""
-  }
-
-  if (isEditTool(toolName)) {
-    return currentContent.replace(toolInput.old_string ?? "", toolInput.new_string ?? "")
-  }
-  return toolInput.content ?? ""
-}
-
 async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
@@ -90,10 +63,15 @@ async function main() {
     allowPreToolUse("")
   }
 
-  const sizeLimitKb = await resolveSizeLimitKb(cwd)
+  const sizeLimitKb = await resolveNumericSetting(
+    cwd,
+    "largeFileSizeKb",
+    DEFAULT_LARGE_FILE_SIZE_KB
+  )
   const sizeLimitBytes = sizeLimitKb * 1024
-  const projectedContent = await getProjectedContent(toolName, filePath, input.tool_input ?? {})
-  const projectedBytes = new TextEncoder().encode(projectedContent).length
+  const projectedContent = await computeProjectedContent(toolName, filePath, input.tool_input ?? {})
+  if (projectedContent === null) allowPreToolUse("")
+  const projectedBytes = new TextEncoder().encode(projectedContent!).length
 
   if (projectedBytes <= sizeLimitBytes) {
     allowPreToolUse("")

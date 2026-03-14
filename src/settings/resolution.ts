@@ -1,3 +1,4 @@
+import { readProjectSettings, readSwizSettings } from "./persistence"
 import type {
   EffectiveSwizSettings,
   PolicyProfile,
@@ -8,6 +9,31 @@ import type {
 } from "./types"
 
 type EffectiveSettingsBase = Omit<SwizSettings, "sessions" | "disabledHooks">
+
+/** Numeric setting keys that exist on both global and project settings. */
+type NumericSettingKey = {
+  [K in keyof SwizSettings]: SwizSettings[K] extends number | undefined ? K : never
+}[keyof SwizSettings] &
+  keyof ProjectSwizSettings
+
+/**
+ * Resolve a numeric setting from disk using the standard 3-tier hierarchy:
+ * project config > global config > default.
+ *
+ * Replaces the duplicated resolveWordLimit / resolveThreshold / resolveSizeLimitKb
+ * pattern across hooks. Reads both settings files in parallel for performance.
+ */
+export async function resolveNumericSetting(
+  cwd: string,
+  key: NumericSettingKey,
+  defaultValue: number
+): Promise<number> {
+  const [globalSettings, projectSettings] = await Promise.all([
+    readSwizSettings(),
+    readProjectSettings(cwd),
+  ])
+  return projectSettings?.[key] ?? globalSettings[key] ?? defaultValue
+}
 
 /** Default trivial-change thresholds (mirrors the gate hook's original hard-coded values) */
 export const DEFAULT_MEMORY_LINE_THRESHOLD = 1400

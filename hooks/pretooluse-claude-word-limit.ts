@@ -4,26 +4,9 @@
 
 import { join } from "node:path"
 import { compactionChecklistSteps } from "../src/memory-compaction-guidance.ts"
-import {
-  DEFAULT_MEMORY_WORD_THRESHOLD,
-  readProjectSettings,
-  readSwizSettings,
-} from "../src/settings.ts"
+import { DEFAULT_MEMORY_WORD_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
 import { countFileWords, denyPreToolUse, formatActionPlan, isShellTool } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
-
-/** Resolve word limit: project > global > default (5000). */
-async function resolveWordLimit(cwd: string): Promise<number> {
-  const [globalSettings, projectSettings] = await Promise.all([
-    readSwizSettings(),
-    readProjectSettings(cwd),
-  ])
-  return (
-    projectSettings?.memoryWordThreshold ??
-    globalSettings.memoryWordThreshold ??
-    DEFAULT_MEMORY_WORD_THRESHOLD
-  )
-}
 
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())
@@ -40,7 +23,7 @@ async function main(): Promise<void> {
   const claudeMdPath = join(cwd, "CLAUDE.md")
   const [stats, wordLimit] = await Promise.all([
     countFileWords(claudeMdPath),
-    resolveWordLimit(cwd),
+    resolveNumericSetting(cwd, "memoryWordThreshold", DEFAULT_MEMORY_WORD_THRESHOLD),
   ])
 
   // If CLAUDE.md doesn't exist or can't be read, allow the push

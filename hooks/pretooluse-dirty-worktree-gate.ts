@@ -3,26 +3,9 @@
 // Forces a commit boundary before the task plan can be reshaped further.
 // Threshold is configurable via `swiz settings set dirty-worktree-threshold <N>`.
 
-import {
-  DEFAULT_DIRTY_WORKTREE_THRESHOLD,
-  readProjectSettings,
-  readSwizSettings,
-} from "../src/settings.ts"
+import { DEFAULT_DIRTY_WORKTREE_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
 import { denyPreToolUse, getGitStatusV2, isGitRepo } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
-
-/** Resolve threshold: project > global > default (15). */
-async function resolveThreshold(cwd: string): Promise<number> {
-  const [globalSettings, projectSettings] = await Promise.all([
-    readSwizSettings(),
-    readProjectSettings(cwd),
-  ])
-  return (
-    projectSettings?.dirtyWorktreeThreshold ??
-    globalSettings.dirtyWorktreeThreshold ??
-    DEFAULT_DIRTY_WORKTREE_THRESHOLD
-  )
-}
 
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())
@@ -30,7 +13,10 @@ async function main(): Promise<void> {
   if (!cwd) process.exit(0)
   if (!(await isGitRepo(cwd))) process.exit(0)
 
-  const [gitStatus, threshold] = await Promise.all([getGitStatusV2(cwd), resolveThreshold(cwd)])
+  const [gitStatus, threshold] = await Promise.all([
+    getGitStatusV2(cwd),
+    resolveNumericSetting(cwd, "dirtyWorktreeThreshold", DEFAULT_DIRTY_WORKTREE_THRESHOLD),
+  ])
   if (!gitStatus) process.exit(0)
 
   if (gitStatus.total <= threshold) process.exit(0)

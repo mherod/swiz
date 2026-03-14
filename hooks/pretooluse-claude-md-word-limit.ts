@@ -12,6 +12,7 @@ import {
 } from "../src/memory-compaction-guidance.ts"
 import {
   allowPreToolUse,
+  computeProjectedContent,
   denyPreToolUse,
   formatActionPlan,
   isEditTool,
@@ -20,35 +21,10 @@ import {
 } from "./hook-utils.ts"
 import { resolveThresholds } from "./posttooluse-memory-size.ts"
 
-interface ToolInput {
-  file_path?: string
-  old_string?: string
-  new_string?: string
-  content?: string
-}
-
-async function computeProjectedContent(
-  toolName: string,
-  filePath: string,
-  toolInput: ToolInput
-): Promise<string> {
-  let currentContent = ""
-  try {
-    currentContent = await Bun.file(filePath).text()
-  } catch {
-    currentContent = ""
-  }
-
-  if (isEditTool(toolName)) {
-    return currentContent.replace(toolInput.old_string ?? "", toolInput.new_string ?? "")
-  }
-  return toolInput.content ?? ""
-}
-
 async function main() {
   const input = (await Bun.stdin.json()) as {
     tool_name?: string
-    tool_input?: ToolInput
+    tool_input?: { file_path?: string; old_string?: string; new_string?: string; content?: string }
     cwd?: string
   }
 
@@ -71,7 +47,8 @@ async function main() {
       filePath,
       input.tool_input ?? {}
     )
-    const projectedWordCount = countMarkdownWords(projectedContent)
+    if (projectedContent === null) allowPreToolUse("")
+    const projectedWordCount = countMarkdownWords(projectedContent!)
 
     if (projectedWordCount > wordThreshold) {
       const currentContent = await Bun.file(filePath)

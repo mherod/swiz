@@ -2,7 +2,7 @@
 // PreToolUse hook: Blocks Node.js sync file operations when the target file
 // already uses Bun APIs or has a bun shebang. Enforces Bun.file()/Bun.write().
 
-import { allowPreToolUse, denyPreToolUse } from "./hook-utils.ts"
+import { allowPreToolUse, computeProjectedContent, denyPreToolUse } from "./hook-utils.ts"
 
 /** Patterns indicating the file uses Bun's native APIs. */
 const BUN_API_RE = /\bBun\.(file|write|spawn|serve|listen|sleep|which|escapeHTML|hash)\s*\(/
@@ -59,30 +59,6 @@ export function findBlockedNodeFileOps(
     name: op.name,
     replacement: op.replacement,
   }))
-}
-
-async function computeProjectedContent(
-  toolName: string,
-  filePath: string,
-  toolInput: Record<string, unknown>
-): Promise<string | null> {
-  if (toolName === "Write" || toolName === "NotebookEdit") {
-    return ((toolInput.content as string) ?? "") || null
-  }
-  if (toolName === "Edit") {
-    const oldString = (toolInput.old_string as string) ?? ""
-    const newString = (toolInput.new_string as string) ?? ""
-    if (!oldString && !newString) return null
-
-    let currentContent: string
-    try {
-      currentContent = await Bun.file(filePath).text()
-    } catch {
-      return null
-    }
-    return currentContent.replace(oldString, newString)
-  }
-  return null
 }
 
 function parseInput(input: Record<string, unknown>): {

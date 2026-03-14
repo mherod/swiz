@@ -36,6 +36,7 @@ export {
   getEffectiveSwizSettings,
   POLICY_PROFILES,
   resolveMemoryThresholds,
+  resolveNumericSetting,
   resolvePolicy,
 } from "./resolution"
 // SettingsStore

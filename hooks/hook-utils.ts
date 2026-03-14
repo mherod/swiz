@@ -105,7 +105,57 @@ export {
 } from "../src/tool-matchers.ts"
 
 // Local import for names used within this file (re-exports don't create local bindings)
-import { TASK_TOOLS } from "../src/tool-matchers.ts"
+import {
+  isEditTool as _isEditTool,
+  isNotebookTool as _isNotebookTool,
+  TASK_TOOLS,
+} from "../src/tool-matchers.ts"
+
+// ─── Projected content computation ──────────────────────────────────────────
+// Shared by PreToolUse hooks that validate file content before writes.
+// For Edit: reads current file, applies old→new replacement.
+// For Write/NotebookEdit: returns content directly.
+// Returns null when the projected content cannot be determined.
+
+interface ProjectedContentInput {
+  old_string?: string
+  new_string?: string
+  content?: string
+}
+
+/**
+ * Compute what a file's content will be after a tool applies its edit.
+ * Used by PreToolUse hooks to validate file content before the write happens.
+ *
+ * Returns null if the projected content cannot be determined (e.g. file unreadable
+ * on an Edit where both old/new are empty).
+ */
+export async function computeProjectedContent(
+  toolName: string,
+  filePath: string,
+  toolInput: ProjectedContentInput
+): Promise<string | null> {
+  if (_isNotebookTool(toolName)) {
+    return (toolInput.content ?? "") || null
+  }
+
+  if (_isEditTool(toolName)) {
+    const oldString = toolInput.old_string ?? ""
+    const newString = toolInput.new_string ?? ""
+    if (!oldString && !newString) return null
+
+    let currentContent: string
+    try {
+      currentContent = await Bun.file(filePath).text()
+    } catch {
+      return null
+    }
+    return currentContent.replace(oldString, newString)
+  }
+
+  // Write tool — content is the full file
+  return (toolInput.content ?? "") || null
+}
 
 /**
  * Returns true if the Bash command is a `swiz` CLI invocation.

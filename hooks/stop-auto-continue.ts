@@ -10,6 +10,7 @@ import { uniq } from "lodash-es"
 import { z } from "zod"
 import { hasAiProvider, promptObject } from "../src/ai-providers.ts"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
+import { resolveCwd } from "../src/cwd.ts"
 import { ensureGeminiApiKey } from "../src/gemini.ts"
 import { getHomeDir, getHomeDirOrNull } from "../src/home.ts"
 import {
@@ -67,10 +68,6 @@ interface TranscriptResolution {
   sourceDescription: string
   formatHint?: Session["format"]
   failureReason?: string
-}
-
-function resolveCwd(cwd?: string): string {
-  return cwd ?? process.cwd()
 }
 
 function inferTranscriptFormatFromPath(path: string): Session["format"] | undefined {
