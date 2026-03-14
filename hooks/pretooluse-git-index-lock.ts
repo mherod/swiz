@@ -80,8 +80,8 @@ async function main() {
       formatActionPlan(
         [
           "Wait for the active git process to finish, then retry.",
-          `If the process is stuck, check with: \`ps aux | grep git\``,
-          `Then remove the lock: \`trash ${lockPath}\``,
+          `If the process is stuck, check with: \`ps aux | grep git\` (task-exempt — runs without tasks)`,
+          `Then remove the lock: \`trash ${lockPath}\` (task-exempt — runs without tasks)`,
         ],
         { header: "To resolve:" }
       ).trimEnd(),

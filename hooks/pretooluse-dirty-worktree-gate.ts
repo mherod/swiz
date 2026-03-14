@@ -38,8 +38,11 @@ async function main(): Promise<void> {
   denyPreToolUse(
     `Worktree has ${gitStatus.total} dirty files (threshold: ${threshold}). ` +
       `Commit your current changes before updating the task plan.\n\n` +
-      `Run: git add . && git commit -m "wip: checkpoint before task update"\n` +
-      `Or use the /commit skill.\n\n` +
+      `Recovery path (TaskCreate is NOT blocked by this gate):\n` +
+      `  1. Use TaskCreate to create a commit task (unblocked)\n` +
+      `  2. Use /commit skill to commit changes\n` +
+      `  3. Retry this TaskUpdate after commit\n\n` +
+      `Manual alternative: git add . && git commit -m "wip: checkpoint"\n\n` +
       `To adjust: swiz settings set dirty-worktree-threshold <N>`
   )
 }
