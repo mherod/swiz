@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
 import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -165,6 +166,29 @@ describe("Mutation queue", () => {
     }
   })
 
+  test("queues PR mutation types", () => {
+    const store = createStore()
+    try {
+      store.queueMutation("owner/repo", { type: "pr_comment", number: 10, body: "LGTM" })
+      store.queueMutation("owner/repo", { type: "pr_merge", number: 10 })
+      store.queueMutation("owner/repo", {
+        type: "pr_review",
+        number: 10,
+        body: "Approved",
+        reviewEvent: "APPROVE",
+      })
+
+      const pending = store.getPendingMutations("owner/repo")
+      expect(pending).toHaveLength(3)
+      expect(JSON.parse(pending[0]!.mutation).type).toBe("pr_comment")
+      expect(JSON.parse(pending[1]!.mutation).type).toBe("pr_merge")
+      expect(JSON.parse(pending[2]!.mutation).type).toBe("pr_review")
+      expect(JSON.parse(pending[2]!.mutation).reviewEvent).toBe("APPROVE")
+    } finally {
+      store.close()
+    }
+  })
+
   test("mutations are isolated per repo", () => {
     const store = createStore()
     try {
@@ -181,6 +205,169 @@ describe("Mutation queue", () => {
   })
 })
 
+describe("Pull request storage", () => {
+  test("upserts and lists PRs within TTL", () => {
+    const store = createStore()
+    try {
+      const prs = [
+        { number: 10, title: "Feature A", headRefName: "feat-a" },
+        { number: 11, title: "Feature B", headRefName: "feat-b" },
+      ]
+      store.upsertPullRequests("owner/repo", prs)
+      const result = store.listPullRequests<{ number: number; title: string }>("owner/repo")
+      expect(result).toHaveLength(2)
+      expect(result.map((r) => r.number).sort()).toEqual([10, 11])
+    } finally {
+      store.close()
+    }
+  })
+
+  test("getPullRequest returns a single cached PR", () => {
+    const store = createStore()
+    try {
+      store.upsertPullRequests("owner/repo", [{ number: 42, title: "The PR" }])
+      const pr = store.getPullRequest<{ number: number; title: string }>("owner/repo", 42)
+      expect(pr).not.toBeNull()
+      expect(pr!.title).toBe("The PR")
+    } finally {
+      store.close()
+    }
+  })
+
+  test("getPullRequest returns null for missing PR", () => {
+    const store = createStore()
+    try {
+      expect(store.getPullRequest("owner/repo", 999)).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+
+  test("removePullRequest deletes from cache", () => {
+    const store = createStore()
+    try {
+      store.upsertPullRequests("owner/repo", [
+        { number: 1, title: "Keep" },
+        { number: 2, title: "Remove" },
+      ])
+      store.removePullRequest("owner/repo", 2)
+      const result = store.listPullRequests<{ number: number }>("owner/repo")
+      expect(result).toHaveLength(1)
+      expect(result[0]!.number).toBe(1)
+    } finally {
+      store.close()
+    }
+  })
+
+  test("upsert replaces existing PR data", () => {
+    const store = createStore()
+    try {
+      store.upsertPullRequests("owner/repo", [{ number: 1, title: "Original" }])
+      store.upsertPullRequests("owner/repo", [{ number: 1, title: "Updated" }])
+      const pr = store.getPullRequest<{ title: string }>("owner/repo", 1)
+      expect(pr!.title).toBe("Updated")
+    } finally {
+      store.close()
+    }
+  })
+
+  test("respects TTL — expired PRs are excluded", () => {
+    const store = createStore()
+    try {
+      store.upsertPullRequests("owner/repo", [{ number: 1, title: "Old" }])
+      const result = store.listPullRequests("owner/repo", 0)
+      expect(result).toHaveLength(0)
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe("CI status storage", () => {
+  test("upserts and lists CI statuses within TTL", () => {
+    const store = createStore()
+    try {
+      const statuses = [
+        { sha: "abc123", status: "completed", conclusion: "success", run_id: 100 },
+        { sha: "def456", status: "in_progress", conclusion: null, run_id: 101 },
+      ]
+      store.upsertCiStatuses("owner/repo", statuses)
+      const result = store.listCiStatuses<{ sha: string; status: string }>("owner/repo")
+      expect(result).toHaveLength(2)
+      expect(result.map((r) => r.sha).sort()).toEqual(["abc123", "def456"])
+    } finally {
+      store.close()
+    }
+  })
+
+  test("getCiStatus returns status for a specific SHA", () => {
+    const store = createStore()
+    try {
+      store.upsertCiStatuses("owner/repo", [
+        { sha: "abc123", status: "completed", conclusion: "success" },
+      ])
+      const ci = store.getCiStatus<{ sha: string; conclusion: string }>("owner/repo", "abc123")
+      expect(ci).not.toBeNull()
+      expect(ci!.conclusion).toBe("success")
+    } finally {
+      store.close()
+    }
+  })
+
+  test("getCiStatus returns null for missing SHA", () => {
+    const store = createStore()
+    try {
+      expect(store.getCiStatus("owner/repo", "nonexistent")).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+
+  test("removeCiStatus deletes from cache", () => {
+    const store = createStore()
+    try {
+      store.upsertCiStatuses("owner/repo", [
+        { sha: "abc123", status: "completed", conclusion: "success" },
+        { sha: "def456", status: "completed", conclusion: "failure" },
+      ])
+      store.removeCiStatus("owner/repo", "def456")
+      const result = store.listCiStatuses<{ sha: string }>("owner/repo")
+      expect(result).toHaveLength(1)
+      expect(result[0]!.sha).toBe("abc123")
+    } finally {
+      store.close()
+    }
+  })
+
+  test("upsert replaces existing CI status data", () => {
+    const store = createStore()
+    try {
+      store.upsertCiStatuses("owner/repo", [
+        { sha: "abc123", status: "in_progress", conclusion: null },
+      ])
+      store.upsertCiStatuses("owner/repo", [
+        { sha: "abc123", status: "completed", conclusion: "success" },
+      ])
+      const ci = store.getCiStatus<{ status: string; conclusion: string }>("owner/repo", "abc123")
+      expect(ci!.status).toBe("completed")
+      expect(ci!.conclusion).toBe("success")
+    } finally {
+      store.close()
+    }
+  })
+
+  test("respects TTL — expired CI statuses are excluded", () => {
+    const store = createStore()
+    try {
+      store.upsertCiStatuses("owner/repo", [{ sha: "abc123", status: "completed" }])
+      const result = store.listCiStatuses("owner/repo", 0)
+      expect(result).toHaveLength(0)
+    } finally {
+      store.close()
+    }
+  })
+})
+
 describe("Cross-repo isolation", () => {
   test("issues from different repos do not mix", () => {
     const store = createStore()
@@ -191,6 +378,34 @@ describe("Cross-repo isolation", () => {
       const beta = store.getIssue<{ title: string }>("owner/beta", 1)
       expect(alpha!.title).toBe("Alpha issue")
       expect(beta!.title).toBe("Beta issue")
+    } finally {
+      store.close()
+    }
+  })
+
+  test("PRs from different repos do not mix", () => {
+    const store = createStore()
+    try {
+      store.upsertPullRequests("owner/alpha", [{ number: 1, title: "Alpha PR" }])
+      store.upsertPullRequests("owner/beta", [{ number: 1, title: "Beta PR" }])
+      const alpha = store.getPullRequest<{ title: string }>("owner/alpha", 1)
+      const beta = store.getPullRequest<{ title: string }>("owner/beta", 1)
+      expect(alpha!.title).toBe("Alpha PR")
+      expect(beta!.title).toBe("Beta PR")
+    } finally {
+      store.close()
+    }
+  })
+
+  test("CI statuses from different repos do not mix", () => {
+    const store = createStore()
+    try {
+      store.upsertCiStatuses("owner/alpha", [{ sha: "abc", conclusion: "success" }])
+      store.upsertCiStatuses("owner/beta", [{ sha: "abc", conclusion: "failure" }])
+      const alpha = store.getCiStatus<{ conclusion: string }>("owner/alpha", "abc")
+      const beta = store.getCiStatus<{ conclusion: string }>("owner/beta", "abc")
+      expect(alpha!.conclusion).toBe("success")
+      expect(beta!.conclusion).toBe("failure")
     } finally {
       store.close()
     }
@@ -354,6 +569,69 @@ describe("replayPendingMutations", () => {
       expect(issue1Events).toEqual([1, 1]) // Two events for issue 1
     } finally {
       Bun.spawn = originalSpawn
+      store.close()
+    }
+  })
+})
+
+describe("Store migration", () => {
+  test("adds pull_requests and ci_status tables to an existing v1 database", () => {
+    const dir = join(
+      tmpdir(),
+      `swiz-issue-store-migrate-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    )
+    mkdirSync(dir, { recursive: true })
+    const dbPath = join(dir, "migrate.db")
+
+    // Create a v1 database with only issues + pending_mutations
+    const rawDb = new Database(dbPath)
+    rawDb.run("PRAGMA journal_mode=WAL")
+    rawDb.run(`
+      CREATE TABLE IF NOT EXISTS issues (
+        repo TEXT NOT NULL,
+        number INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        synced_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, number)
+      )
+    `)
+    rawDb.run(`
+      CREATE TABLE IF NOT EXISTS pending_mutations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        repo TEXT NOT NULL,
+        mutation TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        last_attempt INTEGER,
+        attempts INTEGER DEFAULT 0
+      )
+    `)
+    // Insert a pre-existing issue
+    rawDb.run("INSERT INTO issues (repo, number, data, synced_at) VALUES (?, ?, ?, ?)", [
+      "owner/repo",
+      1,
+      JSON.stringify({ number: 1, title: "Existing" }),
+      Date.now(),
+    ])
+    rawDb.close()
+
+    // Open with IssueStore — migration should add new tables without destroying old data
+    const store = new IssueStore(dbPath)
+    try {
+      // Existing issue data survives migration
+      const issue = store.getIssue<{ title: string }>("owner/repo", 1)
+      expect(issue).not.toBeNull()
+      expect(issue!.title).toBe("Existing")
+
+      // New PR table works
+      store.upsertPullRequests("owner/repo", [{ number: 5, title: "New PR" }])
+      const pr = store.getPullRequest<{ title: string }>("owner/repo", 5)
+      expect(pr!.title).toBe("New PR")
+
+      // New CI status table works
+      store.upsertCiStatuses("owner/repo", [{ sha: "abc", status: "completed" }])
+      const ci = store.getCiStatus<{ status: string }>("owner/repo", "abc")
+      expect(ci!.status).toBe("completed")
+    } finally {
       store.close()
     }
   })

@@ -1,10 +1,12 @@
 /**
- * Local SQLite-backed issue store with GitHub sync fallback.
+ * Local SQLite-backed repo-scoped sync store with GitHub sync fallback.
  * Uses Bun's built-in SQLite support — no external dependencies.
  *
- * Two tables:
- * - `issues`: TTL-cached read store (refreshed on successful gh calls)
- * - `pending_mutations`: Queued mutations for offline replay
+ * Tables:
+ * - `issues`: TTL-cached issue read store (refreshed on successful gh calls)
+ * - `pull_requests`: TTL-cached PR read store
+ * - `ci_status`: TTL-cached CI run status per commit SHA
+ * - `pending_mutations`: Queued outbound mutations for offline replay
  */
 
 import { Database } from "bun:sqlite"
@@ -33,10 +35,28 @@ export interface PendingMutation {
   attempts: number
 }
 
+export interface CachedPullRequest {
+  repo: string
+  number: number
+  data: string // JSON blob matching gh pr list output
+  synced_at: number
+}
+
+export interface CachedCiStatus {
+  repo: string
+  sha: string
+  data: string // JSON blob: {status, conclusion, run_id, url, jobs}
+  synced_at: number
+}
+
+export type MutationType = "close" | "comment" | "resolve" | "pr_comment" | "pr_merge" | "pr_review"
+
 export interface MutationPayload {
-  type: "close" | "comment" | "resolve"
+  type: MutationType
   number: number
   body?: string
+  /** For pr_review: "APPROVE" | "REQUEST_CHANGES" | "COMMENT" */
+  reviewEvent?: string
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -65,6 +85,24 @@ export class IssueStore {
         data TEXT NOT NULL,
         synced_at INTEGER NOT NULL,
         PRIMARY KEY (repo, number)
+      )
+    `)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS pull_requests (
+        repo TEXT NOT NULL,
+        number INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        synced_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, number)
+      )
+    `)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS ci_status (
+        repo TEXT NOT NULL,
+        sha TEXT NOT NULL,
+        data TEXT NOT NULL,
+        synced_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, sha)
       )
     `)
     this.db.run(`
@@ -117,6 +155,82 @@ export class IssueStore {
   /** Remove a cached issue (e.g., after closing). */
   removeIssue(repo: string, number: number): void {
     this.db.query("DELETE FROM issues WHERE repo = ? AND number = ?").run(repo, number)
+  }
+
+  // ─── Pull request operations ──────────────────────────────────────────
+
+  /** List cached PRs for a repo. Returns only PRs within TTL window. */
+  listPullRequests<T = unknown>(repo: string, ttlMs = DEFAULT_TTL_MS): T[] {
+    const cutoff = Date.now() - ttlMs
+    const rows = this.db
+      .query("SELECT data FROM pull_requests WHERE repo = ? AND synced_at > ?")
+      .all(repo, cutoff) as { data: string }[]
+    return rows.map((r) => JSON.parse(r.data) as T)
+  }
+
+  /** Get a single cached PR by repo and number. */
+  getPullRequest<T = unknown>(repo: string, number: number): T | null {
+    const row = this.db
+      .query("SELECT data FROM pull_requests WHERE repo = ? AND number = ?")
+      .get(repo, number) as { data: string } | null
+    return row ? (JSON.parse(row.data) as T) : null
+  }
+
+  /** Upsert PRs from a successful gh call. Replaces existing data. */
+  upsertPullRequests<T extends { number: number }>(repo: string, prs: T[]): void {
+    const stmt = this.db.prepare(
+      "INSERT OR REPLACE INTO pull_requests (repo, number, data, synced_at) VALUES (?, ?, ?, ?)"
+    )
+    const now = Date.now()
+    const tx = this.db.transaction(() => {
+      for (const pr of prs) {
+        stmt.run(repo, pr.number, JSON.stringify(pr), now)
+      }
+    })
+    tx()
+  }
+
+  /** Remove a cached PR (e.g., after merging). */
+  removePullRequest(repo: string, number: number): void {
+    this.db.query("DELETE FROM pull_requests WHERE repo = ? AND number = ?").run(repo, number)
+  }
+
+  // ─── CI status operations ─────────────────────────────────────────────
+
+  /** List cached CI statuses for a repo. Returns only entries within TTL window. */
+  listCiStatuses<T = unknown>(repo: string, ttlMs = DEFAULT_TTL_MS): T[] {
+    const cutoff = Date.now() - ttlMs
+    const rows = this.db
+      .query("SELECT data FROM ci_status WHERE repo = ? AND synced_at > ?")
+      .all(repo, cutoff) as { data: string }[]
+    return rows.map((r) => JSON.parse(r.data) as T)
+  }
+
+  /** Get CI status for a specific commit SHA. */
+  getCiStatus<T = unknown>(repo: string, sha: string): T | null {
+    const row = this.db
+      .query("SELECT data FROM ci_status WHERE repo = ? AND sha = ?")
+      .get(repo, sha) as { data: string } | null
+    return row ? (JSON.parse(row.data) as T) : null
+  }
+
+  /** Upsert CI status records. Each record must have a `sha` field. */
+  upsertCiStatuses<T extends { sha: string }>(repo: string, statuses: T[]): void {
+    const stmt = this.db.prepare(
+      "INSERT OR REPLACE INTO ci_status (repo, sha, data, synced_at) VALUES (?, ?, ?, ?)"
+    )
+    const now = Date.now()
+    const tx = this.db.transaction(() => {
+      for (const status of statuses) {
+        stmt.run(repo, status.sha, JSON.stringify(status), now)
+      }
+    })
+    tx()
+  }
+
+  /** Remove a CI status entry. */
+  removeCiStatus(repo: string, sha: string): void {
+    this.db.query("DELETE FROM ci_status WHERE repo = ? AND sha = ?").run(repo, sha)
   }
 
   // ─── Mutation queue ─────────────────────────────────────────────────────
@@ -219,9 +333,7 @@ export async function replayPendingMutations(
 
       if (ok) {
         s.removeMutation(row.id)
-        if (mutation.type === "close" || mutation.type === "resolve") {
-          s.removeIssue(repo, mutation.number)
-        }
+        invalidateLocalCache(s, repo, mutation)
         result.replayed++
       } else {
         s.markAttempted(row.id)
@@ -238,6 +350,22 @@ export async function replayPendingMutations(
   return result
 }
 
+/**
+ * After a successful mutation, update the local cache to reflect the change.
+ * Removes closed issues and merged PRs so local consumers see consistent state.
+ */
+function invalidateLocalCache(store: IssueStore, repo: string, mutation: MutationPayload): void {
+  switch (mutation.type) {
+    case "close":
+    case "resolve":
+      store.removeIssue(repo, mutation.number)
+      break
+    case "pr_merge":
+      store.removePullRequest(repo, mutation.number)
+      break
+  }
+}
+
 /** Simple concurrency-limited promise pool. */
 async function runWithLimit(concurrency: number, tasks: (() => Promise<void>)[]): Promise<void> {
   let nextTaskIndex = 0
@@ -251,7 +379,7 @@ async function runWithLimit(concurrency: number, tasks: (() => Promise<void>)[])
   await Promise.all(workers)
 }
 
-/** Execute a single mutation against live GitHub. Returns true on success. */
+/** Execute a single mutation against live GitHub via gh CLI. Returns true on success. */
 async function executeMutation(
   mutation: MutationPayload,
   cwd: string,
@@ -260,40 +388,74 @@ async function executeMutation(
   const num = String(mutation.number)
 
   switch (mutation.type) {
-    case "close": {
-      return runGhIssueCommand(["gh", "issue", "close", num], cwd, repo, mutation)
-    }
-    case "comment": {
-      if (!mutation.body) return true // nothing to post
-      return runGhIssueCommand(
+    case "close":
+      return runGhCommand(["gh", "issue", "close", num], cwd, repo, mutation)
+    case "comment":
+      if (!mutation.body) return true
+      return runGhCommand(
         ["gh", "issue", "comment", num, "--body", mutation.body],
         cwd,
         repo,
         mutation
       )
-    }
-    case "resolve": {
-      // Resolve = comment (if body) + close
-      if (mutation.body) {
-        const ok = await runGhIssueCommand(
-          ["gh", "issue", "comment", num, "--body", mutation.body],
-          cwd,
-          repo,
-          { ...mutation, type: "comment" }
-        )
-        if (!ok) return false
-      }
-      return runGhIssueCommand(["gh", "issue", "close", num], cwd, repo, {
-        ...mutation,
-        type: "close",
-      })
+    case "resolve":
+      return executeResolveMutation(mutation, num, cwd, repo)
+    case "pr_comment":
+    case "pr_merge":
+    case "pr_review":
+      return executePrMutation(mutation, num, cwd, repo)
+    default:
+      return false
+  }
+}
+
+async function executeResolveMutation(
+  mutation: MutationPayload,
+  num: string,
+  cwd: string,
+  repo: string
+): Promise<boolean> {
+  if (mutation.body) {
+    const ok = await runGhCommand(
+      ["gh", "issue", "comment", num, "--body", mutation.body],
+      cwd,
+      repo,
+      { ...mutation, type: "comment" }
+    )
+    if (!ok) return false
+  }
+  return runGhCommand(["gh", "issue", "close", num], cwd, repo, { ...mutation, type: "close" })
+}
+
+async function executePrMutation(
+  mutation: MutationPayload,
+  num: string,
+  cwd: string,
+  repo: string
+): Promise<boolean> {
+  switch (mutation.type) {
+    case "pr_comment":
+      if (!mutation.body) return true
+      return runGhCommand(
+        ["gh", "pr", "comment", num, "--body", mutation.body],
+        cwd,
+        repo,
+        mutation
+      )
+    case "pr_merge":
+      return runGhCommand(["gh", "pr", "merge", num, "--squash"], cwd, repo, mutation)
+    case "pr_review": {
+      const event = mutation.reviewEvent ?? "COMMENT"
+      const args = ["gh", "pr", "review", num, `--${event.toLowerCase().replace("_", "-")}`]
+      if (mutation.body) args.push("--body", mutation.body)
+      return runGhCommand(args, cwd, repo, mutation)
     }
     default:
       return false
   }
 }
 
-async function runGhIssueCommand(
+async function runGhCommand(
   args: string[],
   cwd: string,
   repo: string,
@@ -360,6 +522,108 @@ function logReplayResult(result: ReplayResult, originalCount: number, repo: stri
   if (result.discarded > 0) parts.push(`${result.discarded} discarded`)
   if (parts.length === 0) return
   debugLog(`[swiz] REPLAY_SUMMARY repo=${repo} pending=${originalCount} ${parts.join(", ")}`)
+}
+
+// ─── Upstream sync ──────────────────────────────────────────────────────────
+
+export interface UpstreamSyncResult {
+  issues: { upserted: number }
+  pullRequests: { upserted: number }
+  ciStatuses: { upserted: number }
+}
+
+/**
+ * Poll upstream GitHub state for a repo and refresh the local store.
+ * Fetches open issues, open PRs, and recent workflow runs, then upserts
+ * into the shared store. Safe to call on a cadence from the daemon.
+ */
+export async function syncUpstreamState(
+  repo: string,
+  cwd: string,
+  store?: IssueStore
+): Promise<UpstreamSyncResult> {
+  const s = store ?? getIssueStore()
+  const result: UpstreamSyncResult = {
+    issues: { upserted: 0 },
+    pullRequests: { upserted: 0 },
+    ciStatuses: { upserted: 0 },
+  }
+
+  const [issues, prs, runs] = await Promise.all([
+    fetchGhJson<{ number: number }[]>(
+      [
+        "issue",
+        "list",
+        "--state",
+        "open",
+        "--json",
+        "number,title,state,labels,assignees,updatedAt",
+        "--limit",
+        "100",
+      ],
+      cwd
+    ),
+    fetchGhJson<{ number: number }[]>(
+      [
+        "pr",
+        "list",
+        "--state",
+        "open",
+        "--json",
+        "number,title,state,headRefName,author,reviewDecision,statusCheckRollup,updatedAt",
+        "--limit",
+        "100",
+      ],
+      cwd
+    ),
+    fetchGhJson<
+      { headSha: string; databaseId: number; status: string; conclusion: string; url: string }[]
+    >(["run", "list", "--json", "headSha,databaseId,status,conclusion,url", "--limit", "20"], cwd),
+  ])
+
+  if (issues && issues.length > 0) {
+    s.upsertIssues(repo, issues)
+    result.issues.upserted = issues.length
+  }
+
+  if (prs && prs.length > 0) {
+    s.upsertPullRequests(repo, prs)
+    result.pullRequests.upserted = prs.length
+  }
+
+  if (runs && runs.length > 0) {
+    const ciRecords = runs.map((r) => ({
+      sha: r.headSha,
+      run_id: r.databaseId,
+      status: r.status,
+      conclusion: r.conclusion,
+      url: r.url,
+    }))
+    s.upsertCiStatuses(repo, ciRecords)
+    result.ciStatuses.upserted = ciRecords.length
+  }
+
+  return result
+}
+
+/** Run a gh subcommand and parse JSON output. Returns null on failure. */
+async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
+  const proc = Bun.spawn(["gh", ...args], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [stdout] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  if (proc.exitCode !== 0) return null
+  try {
+    return JSON.parse(stdout) as T
+  } catch {
+    return null
+  }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

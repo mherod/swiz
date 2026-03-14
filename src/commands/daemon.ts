@@ -28,6 +28,7 @@ import {
   hasSnapshotInvalidated,
 } from "./daemon/snapshot.ts"
 import type { ActiveHookDispatch } from "./daemon/types.ts"
+import { UpstreamSyncRegistry } from "./daemon/upstream-sync.ts"
 import {
   type CapturedToolCall,
   restartDaemon,
@@ -109,6 +110,7 @@ function createDaemonCaches() {
   const transcriptIndex = new TranscriptIndexCache()
   const cooldownRegistry = new CooldownRegistry()
   const ciWatchRegistry = new CiWatchRegistry()
+  const upstreamSyncRegistry = new UpstreamSyncRegistry()
   const workerRuntime = new DaemonWorkerRuntime()
   const gitStateCache = new GitStateCache()
   const projectSettingsCache = new ProjectSettingsCache()
@@ -122,6 +124,7 @@ function createDaemonCaches() {
     transcriptIndex,
     cooldownRegistry,
     ciWatchRegistry,
+    upstreamSyncRegistry,
     workerRuntime,
     gitStateCache,
     projectSettingsCache,
@@ -201,6 +204,8 @@ function setupWatchers(caches: ReturnType<typeof createDaemonCaches>) {
     for (const transcriptWatch of transcriptWatchPathsForProject(cwd)) {
       watchers.register(transcriptWatch.path, transcriptWatch.label, projectFlush)
     }
+    // Auto-register project for periodic upstream sync
+    void caches.upstreamSyncRegistry.register(cwd)
     watchers.start()
   }
 
@@ -208,6 +213,7 @@ function setupWatchers(caches: ReturnType<typeof createDaemonCaches>) {
   process.on("exit", () => {
     watchers.close()
     caches.ciWatchRegistry.close()
+    caches.upstreamSyncRegistry.close()
     caches.workerRuntime.close()
   })
 
@@ -275,6 +281,9 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     snapshots: caches.snapshots,
     workerRuntime: caches.workerRuntime,
   })
+
+  // Register initial project for periodic upstream sync
+  void caches.upstreamSyncRegistry.register(process.cwd())
 
   console.log(`Daemon listening on ${server.url}`)
 }
