@@ -62,6 +62,8 @@ export function parseProjectStatusLine(statusLine?: string): ParsedStatusToken[]
   const parsed: ParsedStatusToken[] = parts.map((part): ParsedStatusToken => {
     const lower = part.toLowerCase()
     if (lower.startsWith("state:")) return { label: part.replace(/^state:\s*/i, ""), tone: "state" }
+    if (lower.includes("fetch failed")) return { label: "fetch failed", tone: "error" }
+    if (lower.includes("(stale)")) return { label: part, tone: "warn" }
     if (lower.includes("changes requested")) return { label: part, tone: "warn" }
     if (lower.includes("approved")) return { label: part, tone: "success" }
     if (/\b\d+\s+issues?\b/.test(lower) || /\b\d+\s+prs?\b/.test(lower)) {

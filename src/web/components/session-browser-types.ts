@@ -94,7 +94,7 @@ export interface ParsedSearchToolParams {
 
 export type ProjectStateLabel = "planning" | "developing" | "reviewing" | "addressing-feedback"
 
-export type StatusChipTone = "neutral" | "info" | "warn" | "success" | "state"
+export type StatusChipTone = "neutral" | "info" | "warn" | "error" | "success" | "state"
 
 export interface ParsedStatusToken {
   label: string

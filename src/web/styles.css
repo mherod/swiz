@@ -729,6 +729,12 @@ tbody tr:hover {
   color: #ffd1c5;
 }
 
+.project-status-error {
+  border-color: rgba(255, 100, 100, 0.55);
+  background: rgba(160, 40, 40, 0.38);
+  color: #ffb0b0;
+}
+
 .project-status-success {
   border-color: rgba(123, 213, 146, 0.48);
   background: rgba(45, 109, 64, 0.33);
