@@ -35,6 +35,10 @@ const STDERR_ALLOWLIST = new Map<string, string>([
     "Interactive merge progress indicators (→ Gathering..., ✓ Resolved)",
   ],
   ["src/commands/dispatch.ts", "User-invoked replay trace (`swiz dispatch replay`)"],
+  [
+    "src/commands/emergency-bypass.ts",
+    "Emergency bypass CLI status and activation feedback via stderrLog",
+  ],
   ["src/dispatch/replay.ts", "Dispatch replay ANSI trace output (extracted from dispatch.ts)"],
   [
     "src/commands/settings.ts",

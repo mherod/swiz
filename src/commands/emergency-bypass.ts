@@ -11,6 +11,7 @@
  */
 
 import { readFile, writeFile } from "node:fs/promises"
+import { stderrLog } from "../debug.ts"
 import { getCanonicalPathHash } from "../git-helpers.ts"
 import { swizEmergencyBypassPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
@@ -65,14 +66,20 @@ export const emergencyBypassCommand: Command = {
     if (args.includes("--status")) {
       const state = await readBypassState()
       if (!state || Date.now() >= state.expiresAt) {
-        console.error("Emergency bypass: inactive")
+        stderrLog("emergency-bypass status", "Emergency bypass: inactive")
         return
       }
       const remainingMs = state.expiresAt - Date.now()
       const remainingSec = Math.ceil(remainingMs / 1000)
-      console.error(`Emergency bypass: ACTIVE (${remainingSec}s remaining)`)
-      console.error(`  Activated: ${new Date(state.activatedAt).toISOString()}`)
-      console.error(`  Expires:   ${new Date(state.expiresAt).toISOString()}`)
+      stderrLog("emergency-bypass status", `Emergency bypass: ACTIVE (${remainingSec}s remaining)`)
+      stderrLog(
+        "emergency-bypass status",
+        `  Activated: ${new Date(state.activatedAt).toISOString()}`
+      )
+      stderrLog(
+        "emergency-bypass status",
+        `  Expires:   ${new Date(state.expiresAt).toISOString()}`
+      )
       return
     }
 
@@ -90,7 +97,10 @@ export const emergencyBypassCommand: Command = {
 
     const durationMs = Math.min(durationS * 1000, MAX_DURATION_MS)
     if (durationS * 1000 > MAX_DURATION_MS) {
-      console.error(`Duration clamped to ${MAX_DURATION_MS / 1000}s (requested ${durationS}s)`)
+      stderrLog(
+        "emergency-bypass clamp",
+        `Duration clamped to ${MAX_DURATION_MS / 1000}s (requested ${durationS}s)`
+      )
     }
 
     // Check cooldown — can only activate once per hour
@@ -116,11 +126,12 @@ export const emergencyBypassCommand: Command = {
     await writeFile(getSentinelPath(), JSON.stringify(state, null, 2))
 
     const expirySec = Math.round(durationMs / 1000)
-    console.error(`Emergency bypass ACTIVATED for ${expirySec}s`)
-    console.error(
+    stderrLog("emergency-bypass activate", `Emergency bypass ACTIVATED for ${expirySec}s`)
+    stderrLog(
+      "emergency-bypass activate",
       `  All preToolUse hook denials will be skipped until ${new Date(state.expiresAt).toISOString()}`
     )
-    console.error(`  Stop and postToolUse hooks remain active.`)
-    console.error(`  Next activation available in 60 minutes.`)
+    stderrLog("emergency-bypass activate", `  Stop and postToolUse hooks remain active.`)
+    stderrLog("emergency-bypass activate", `  Next activation available in 60 minutes.`)
   },
 }
