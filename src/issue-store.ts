@@ -656,7 +656,7 @@ export async function syncUpstreamState(
     ciStatuses: { upserted: 0 },
   }
 
-  const [issues, prs, runs] = await Promise.all([
+  const [issues, prs, runs, closedIssues, closedPrs] = await Promise.all([
     fetchGhJson<{ number: number }[]>(
       [
         "issue",
@@ -686,12 +686,26 @@ export async function syncUpstreamState(
     fetchGhJson<
       { headSha: string; databaseId: number; status: string; conclusion: string; url: string }[]
     >(["run", "list", "--json", "headSha,databaseId,status,conclusion,url", "--limit", "20"], cwd),
+    // Backfill: fetch recently-closed issues/PRs to explicitly purge stale rows
+    fetchGhJson<{ number: number }[]>(
+      ["issue", "list", "--state", "closed", "--json", "number", "--limit", "30"],
+      cwd
+    ),
+    fetchGhJson<{ number: number }[]>(
+      ["pr", "list", "--state", "closed", "--json", "number", "--limit", "30"],
+      cwd
+    ),
   ])
 
   if (issues) {
     if (issues.length > 0) s.upsertIssues(repo, issues)
     result.issues.removed = s.removeClosedIssues(repo, new Set(issues.map((i) => i.number)))
     result.issues.upserted = issues.length
+  }
+  // Backfill: explicitly remove recently-closed issues even if the open fetch failed
+  if (closedIssues) {
+    for (const ci of closedIssues) s.removeIssue(repo, ci.number)
+    result.issues.removed += closedIssues.length
   }
 
   if (prs) {
@@ -701,6 +715,11 @@ export async function syncUpstreamState(
       new Set(prs.map((p) => p.number))
     )
     result.pullRequests.upserted = prs.length
+  }
+  // Backfill: explicitly remove recently-closed/merged PRs
+  if (closedPrs) {
+    for (const cp of closedPrs) s.removePullRequest(repo, cp.number)
+    result.pullRequests.removed += closedPrs.length
   }
 
   if (runs && runs.length > 0) {
