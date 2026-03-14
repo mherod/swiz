@@ -2,6 +2,7 @@ import { dirname, extname, join } from "node:path"
 import tailwindcss from "bun-plugin-tailwind"
 import type { LRUCache } from "lru-cache"
 import { executeDispatch } from "../../dispatch/execute.ts"
+import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { deleteSessionData, resolveSessionDeletionTargets } from "../../session-data-delete.ts"
 import {
   readSwizSettings,
@@ -908,10 +909,16 @@ type TopRouteHandler = (
   ctx: DaemonWebServerContext
 ) => Promise<Response> | Response
 
+async function handleGhRateLimit(): Promise<Response> {
+  const stats = await getGhRateLimitStats()
+  return Response.json(stats)
+}
+
 const TOP_ROUTE_TABLE: Record<string, TopRouteHandler> = {
   "POST /dispatch": handleDispatchRoute,
   "GET /dispatch/active": (_req, url, ctx) => handleDispatchActive(url, ctx),
   "GET /metrics": (_req, url, ctx) => handleMetricsRoute(url, ctx),
+  "GET /api/gh-rate-limit": () => handleGhRateLimit(),
   "GET /process/agents": () => handleProcessAgents(),
   "POST /process/agents/kill": (req) => handleProcessKill(req),
   "POST /sessions/delete": (req) => handleSessionDelete(req),
