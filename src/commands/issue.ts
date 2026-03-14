@@ -1,6 +1,41 @@
+import { debugLog } from "../debug.ts"
 import { getRepoSlug, issueState } from "../git-helpers.ts"
 import { getIssueStore } from "../issue-store.ts"
 import type { Command } from "../types.ts"
+
+/** Detect GraphQL rate-limit errors in gh CLI stderr output. */
+function isGraphQLRateLimited(stderr: string): boolean {
+  return stderr.includes("API rate limit") && stderr.includes("GraphQL")
+}
+
+/** Close an issue via REST API fallback when GraphQL is rate-limited. */
+async function closeIssueViaRest(slug: string, number: string, cwd: string): Promise<boolean> {
+  debugLog(`[swiz] REST_FALLBACK closing issue #${number} on ${slug}`)
+  const proc = Bun.spawn(
+    ["gh", "api", `repos/${slug}/issues/${number}`, "-X", "PATCH", "-f", "state=closed"],
+    { cwd, stdout: "pipe", stderr: "pipe" }
+  )
+  await new Response(proc.stdout).text()
+  await proc.exited
+  return proc.exitCode === 0
+}
+
+/** Comment on an issue via REST API fallback when GraphQL is rate-limited. */
+async function commentViaRest(
+  slug: string,
+  number: string,
+  body: string,
+  cwd: string
+): Promise<boolean> {
+  debugLog(`[swiz] REST_FALLBACK commenting on issue #${number} on ${slug}`)
+  const proc = Bun.spawn(
+    ["gh", "api", `repos/${slug}/issues/${number}/comments`, "-f", `body=${body}`],
+    { cwd, stdout: "pipe", stderr: "pipe" }
+  )
+  await new Response(proc.stdout).text()
+  await proc.exited
+  return proc.exitCode === 0
+}
 
 function usage(): string {
   return (
@@ -21,33 +56,41 @@ async function closeIssue(number: string): Promise<void> {
     return
   }
 
+  const slug = await getRepoSlug(cwd)
   const proc = Bun.spawn(["gh", "issue", "close", number], {
     cwd,
-    stdout: "inherit",
-    stderr: "inherit",
+    stdout: "pipe",
+    stderr: "pipe",
   })
+  const [, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
+
   if (proc.exitCode !== 0) {
-    // Queue mutation for offline replay
-    const slug = await getRepoSlug(cwd)
+    // REST API fallback on GraphQL rate-limit
+    if (isGraphQLRateLimited(stderr) && slug) {
+      if (await closeIssueViaRest(slug, number, cwd)) {
+        try {
+          getIssueStore().removeIssue(slug, parseInt(number, 10))
+        } catch {}
+        return
+      }
+    }
+
     if (slug) {
       try {
         getIssueStore().queueMutation(slug, { type: "close", number: parseInt(number, 10) })
-      } catch {
-        // Non-fatal — mutation queue is best-effort
-      }
+      } catch {}
     }
     throw new Error(`gh issue close failed with exit code ${proc.exitCode}`)
   }
 
-  // Remove from cache on successful close
-  const slug = await getRepoSlug(cwd)
   if (slug) {
     try {
       getIssueStore().removeIssue(slug, parseInt(number, 10))
-    } catch {
-      // Non-fatal — cache cleanup is best-effort
-    }
+    } catch {}
   }
 }
 
@@ -60,25 +103,28 @@ async function commentOnIssue(number: string, body: string): Promise<void> {
     return
   }
 
+  const slug = await getRepoSlug(cwd)
   const proc = Bun.spawn(["gh", "issue", "comment", number, "--body", body], {
     cwd,
-    stdout: "inherit",
-    stderr: "inherit",
+    stdout: "pipe",
+    stderr: "pipe",
   })
+  const [, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
+
   if (proc.exitCode !== 0) {
-    // Queue mutation for offline replay
-    const slug = await getRepoSlug(cwd)
+    // REST API fallback on GraphQL rate-limit
+    if (isGraphQLRateLimited(stderr) && slug) {
+      if (await commentViaRest(slug, number, body, cwd)) return
+    }
+
     if (slug) {
       try {
-        getIssueStore().queueMutation(slug, {
-          type: "comment",
-          number: parseInt(number, 10),
-          body,
-        })
-      } catch {
-        // Non-fatal
-      }
+        getIssueStore().queueMutation(slug, { type: "comment", number: parseInt(number, 10), body })
+      } catch {}
     }
     throw new Error(`gh issue comment failed with exit code ${proc.exitCode}`)
   }
@@ -110,28 +156,52 @@ async function postComment(
 ): Promise<void> {
   const proc = Bun.spawn(["gh", "issue", "comment", number, "--body", body], {
     cwd,
-    stdout: "inherit",
-    stderr: "inherit",
+    stdout: "pipe",
+    stderr: "pipe",
   })
+  const [, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
-  if (proc.exitCode !== 0) {
-    if (slug) {
-      try {
-        getIssueStore().queueMutation(slug, { type: "comment", number: parseInt(number, 10), body })
-      } catch {}
-    }
-    throw new Error(`gh issue comment failed with exit code ${proc.exitCode}`)
+  if (proc.exitCode === 0) return
+
+  // REST API fallback on GraphQL rate-limit
+  if (isGraphQLRateLimited(stderr) && slug) {
+    if (await commentViaRest(slug, number, body, cwd)) return
   }
+
+  if (slug) {
+    try {
+      getIssueStore().queueMutation(slug, { type: "comment", number: parseInt(number, 10), body })
+    } catch {}
+  }
+  throw new Error(`gh issue comment failed with exit code ${proc.exitCode}`)
 }
 
 async function closeAndRemove(number: string, cwd: string, slug: string | null): Promise<void> {
   const proc = Bun.spawn(["gh", "issue", "close", number], {
     cwd,
-    stdout: "inherit",
-    stderr: "inherit",
+    stdout: "pipe",
+    stderr: "pipe",
   })
+  const [, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
+
   if (proc.exitCode !== 0) {
+    // REST API fallback on GraphQL rate-limit
+    if (isGraphQLRateLimited(stderr) && slug) {
+      if (await closeIssueViaRest(slug, number, cwd)) {
+        try {
+          getIssueStore().removeIssue(slug, parseInt(number, 10))
+        } catch {}
+        return
+      }
+    }
+
     if (slug) {
       try {
         getIssueStore().queueMutation(slug, { type: "close", number: parseInt(number, 10) })
