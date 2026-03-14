@@ -273,6 +273,18 @@ describe("pretooluse-banned-commands", () => {
       expect(result.reason).toContain("Write tool")
     })
 
+    test("process substitution write (> >(tee file)) is blocked", async () => {
+      const result = await runHook("cmd > >(tee out.txt)")
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
+    test("here-string redirect to file (<<< text > file) is blocked", async () => {
+      const result = await runHook('cmd <<< "hello" > out.txt')
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("Write tool")
+    })
+
     test("heredoc cat redirect is blocked", async () => {
       const result = await runHook("cat <<EOF > out.txt")
       expect(result.decision).toBe("deny")
@@ -380,6 +392,11 @@ describe("pretooluse-banned-commands", () => {
 
     test("heredoc piped to command (no file redirect) passes through", async () => {
       const result = await runHook("bun hooks/pretooluse-banned-commands.ts <<EOF")
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("process substitution to /dev/null passes through", async () => {
+      const result = await runHook("cmd > >(tee /dev/null)")
       expect(result.decision).toBeUndefined()
     })
 

@@ -9,6 +9,19 @@
  */
 export const SHELL_TEE_PIPE_WRITE_RE = /\|\s*tee\s+(?:-[a-zA-Z]+\s+)*(?!\/dev\/)(?!\s*-)/
 
+/**
+ * Matches process-substitution writes: `cmd > >(tee file)`.
+ * Bash process substitution `>(cmd)` used as a redirect target to write to a file via tee.
+ * Excludes /dev/ paths.
+ */
+export const SHELL_PROC_SUB_WRITE_RE = />\s*>\s*\(\s*tee\s+(?!\/dev\/)/
+
+/**
+ * Matches here-string redirects to files: `cmd <<< "text" > file`.
+ * Detects `<<<` (here-string) combined with a file redirect (not fd-to-fd, not /dev/).
+ */
+export const SHELL_HERESTRING_REDIRECT_RE = /<<<[^|&;]*>(?!\s*[&>])(?!\s*\/dev\/)/
+
 /** Matches shell statement boundaries split by newline, `;`, `&&`, or `||`. */
 export const SHELL_STATEMENT_BOUNDARY = String.raw`(?:^|\n|;|&&|\|\|)`
 

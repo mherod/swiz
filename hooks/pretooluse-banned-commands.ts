@@ -11,6 +11,8 @@ import {
   skillExists,
 } from "./hook-utils.ts"
 import {
+  SHELL_HERESTRING_REDIRECT_RE,
+  SHELL_PROC_SUB_WRITE_RE,
   SHELL_SEGMENT_BOUNDARY,
   SHELL_TEE_PIPE_WRITE_RE,
   shellSegmentCommandRe,
@@ -64,7 +66,8 @@ const NODE_TS_NODE_CMD_RE = shellSegmentCommandRe("(node|ts-node)\\s")
 // Generic shell output redirects to files — excludes fd-to-fd (2>&1) and /dev/ paths.
 // Matches: plain > / >>, &> / &>>, numbered N> / N>>, and noclobber-bypass >|.
 // Safe fd-to-fd forms (2>&1, >&2) are excluded via lookbehind/lookahead guards.
-const SHELL_REDIRECT_PLAIN_RE = /(?<![0-9&])>>?(?!\s*\/dev\/)(?!\s*[&])/
+// Lookaheads exclude: fd-to-fd (&), /dev/ paths, process-substitution `>(cmd)` and `> >(cmd)`.
+const SHELL_REDIRECT_PLAIN_RE = /(?<![0-9&])>>?(?!\s*\/dev\/)(?!\s*[&])(?!\s*>\()(?!\s*\()/
 const SHELL_REDIRECT_BOTH_RE = /&>>?(?!\s*\/dev\/)(?!\s*[&>])/
 const SHELL_REDIRECT_NUMBERED_RE = /\d>>?(?!\s*\/dev\/)(?!\s*[&>])/
 // Matches tee writing to a named file (not /dev/ special paths).
@@ -91,6 +94,8 @@ function isShellFileWrite(c: string): boolean {
     SHELL_REDIRECT_NUMBERED_RE.test(c) ||
     SHELL_TEE_WRITE_RE.test(c) ||
     SHELL_TEE_PIPE_WRITE_RE.test(c) ||
+    SHELL_PROC_SUB_WRITE_RE.test(c) ||
+    SHELL_HERESTRING_REDIRECT_RE.test(c) ||
     SHELL_HEREDOC_WRITE_RE.test(c)
   )
 }
