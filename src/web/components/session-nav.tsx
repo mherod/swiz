@@ -354,6 +354,16 @@ function StatusChips({
   )
 }
 
+function matchesFilter(session: SessionPreview, query: string): boolean {
+  const q = query.toLowerCase()
+  if (session.id.toLowerCase().includes(q)) return true
+  if (session.provider?.toLowerCase().includes(q)) return true
+  if (session.activeDispatch?.toolName?.toLowerCase().includes(q)) return true
+  if (session.activeDispatch?.canonicalEvent?.toLowerCase().includes(q)) return true
+  if (session.activeDispatch?.toolInputSummary?.toLowerCase().includes(q)) return true
+  return false
+}
+
 function useSessionNavState(projects: ProjectSessions[], selectedProjectCwd: string | null) {
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => a.name.localeCompare(b.name)),
@@ -425,40 +435,66 @@ function SelectedProjectPanel({
   sortedSessions,
   activeSessions,
   recentSessions,
+  filterQuery,
+  onFilterChange,
   sessionRowProps,
 }: {
   selectedProject: ProjectSessions
   sortedSessions: SessionPreview[] | null
   activeSessions: SessionPreview[] | undefined
   recentSessions: SessionPreview[] | undefined
+  filterQuery: string
+  onFilterChange: (query: string) => void
   sessionRowProps: Omit<SessionRowProps, "session">
 }) {
   const statusTokens = parseProjectStatusLine(selectedProject.statusLine).slice(0, 2)
+
+  const filteredActive = useMemo(
+    () =>
+      filterQuery ? activeSessions?.filter((s) => matchesFilter(s, filterQuery)) : activeSessions,
+    [activeSessions, filterQuery]
+  )
+  const filteredRecent = useMemo(
+    () =>
+      filterQuery ? recentSessions?.filter((s) => matchesFilter(s, filterQuery)) : recentSessions,
+    [recentSessions, filterQuery]
+  )
+  const filteredTotal = (filteredActive?.length ?? 0) + (filteredRecent?.length ?? 0)
 
   return (
     <>
       <div className="nav-inline-header nav-inline-header-sessions">
         <h2 className="section-title nav-section-title">Sessions</h2>
-        <span className="nav-count-badge">{sortedSessions?.length ?? 0}</span>
+        <span className="nav-count-badge">
+          {filterQuery ? filteredTotal : (sortedSessions?.length ?? 0)}
+        </span>
       </div>
       <p className="nav-inline-project">
-        {selectedProject.name} · {activeSessions?.length ?? 0} active ·{" "}
-        {recentSessions?.length ?? 0} recent
+        {selectedProject.name} · {filteredActive?.length ?? 0} active ·{" "}
+        {filteredRecent?.length ?? 0} recent
       </p>
       <StatusChips
         tokens={statusTokens}
         keyPrefix={`${selectedProject.cwd}-selected`}
         statusLine={selectedProject.statusLine}
       />
+      <input
+        type="search"
+        className="session-filter-input"
+        placeholder="Filter sessions…"
+        value={filterQuery}
+        onChange={(e) => onFilterChange(e.target.value)}
+        aria-label="Filter sessions by keyword"
+      />
       <ul className="session-list" aria-label="Sessions for selected project">
         <SessionGroupList
           label="Active"
-          sessions={activeSessions}
+          sessions={filteredActive}
           sessionRowProps={sessionRowProps}
         />
         <SessionGroupList
           label="Recent"
-          sessions={recentSessions}
+          sessions={filteredRecent}
           sessionRowProps={sessionRowProps}
         />
       </ul>
@@ -469,6 +505,7 @@ function SelectedProjectPanel({
 export function SessionNav(props: SessionNavProps) {
   const { selectedProjectCwd, selectedSessionId, onSelectProject } = props
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
+  const [filterQuery, setFilterQuery] = useState("")
   const navState = useSessionNavState(props.projects, selectedProjectCwd)
 
   const sessionRowProps = {
@@ -506,6 +543,8 @@ export function SessionNav(props: SessionNavProps) {
           sortedSessions={navState.sortedSessions}
           activeSessions={navState.activeSessions}
           recentSessions={navState.recentSessions}
+          filterQuery={filterQuery}
+          onFilterChange={setFilterQuery}
           sessionRowProps={sessionRowProps}
         />
       ) : (

@@ -482,6 +482,28 @@ tbody tr:hover {
   margin: 8px 2px 0;
 }
 
+.session-filter-input {
+  width: 100%;
+  padding: 6px 10px;
+  margin: 4px 0 8px;
+  border: 1px solid rgba(93, 113, 154, 0.34);
+  border-radius: 8px;
+  background: rgba(36, 40, 49, 0.76);
+  color: var(--fg);
+  font-size: 0.82rem;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.session-filter-input:focus {
+  border-color: var(--accent, #5d9cec);
+}
+
+.session-filter-input::placeholder {
+  color: rgba(180, 190, 210, 0.5);
+}
+
 .project-list,
 .session-list,
 .messages-list {
