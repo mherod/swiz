@@ -105,6 +105,11 @@ async function printPreviousSessionIncompleteHint(sessionId: string): Promise<vo
     console.log(
       `  ${DIM}Incomplete tasks in previous session: ${prevSessionId.slice(0, 8)}...${RESET}`
     )
+    // Fast-path: close all at once
+    console.log(
+      `    ${DIM}swiz tasks complete-all --session ${prevSessionId}  # close all at once${RESET}`
+    )
+    // Per-task commands for selective completion
     for (const task of prevIncomplete) {
       console.log(
         `    ${DIM}swiz tasks complete ${task.id} --session ${prevSessionId} --evidence "note:done"${RESET}`
@@ -223,11 +228,36 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
     verify = task.subject
   }
 
-  await updateStatus(sessionId, taskId, "completed", {
-    evidence,
-    verifyText: verify,
-    filterCwd,
-  })
+  try {
+    await updateStatus(sessionId, taskId, "completed", {
+      evidence,
+      verifyText: verify,
+      filterCwd,
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    // Guide the agent through the mandatory pending → in_progress → completed sequence
+    if (msg.includes("Invalid transition") && msg.includes("pending")) {
+      const sessionSuffix = sessionId ? ` --session ${sessionId.slice(0, 8)}` : ""
+      throw new Error(
+        `${msg}\n\n` +
+          `Task must be set in_progress before it can be completed.\n` +
+          `Run these two commands in sequence:\n` +
+          `  swiz tasks status ${taskId} in_progress${sessionSuffix}\n` +
+          `  swiz tasks complete ${taskId} --evidence "note:..."${sessionSuffix}`
+      )
+    }
+    // Guide the agent to use complete-all when individual task lookup fails
+    if (msg.includes("not found")) {
+      const sessionSuffix = sessionId ? ` --session ${sessionId.slice(0, 8)}` : ""
+      throw new Error(
+        `${msg}\n\n` +
+          `To close all incomplete tasks at once (avoids per-task disambiguation):\n` +
+          `  swiz tasks complete-all${sessionSuffix}`
+      )
+    }
+    throw e
+  }
   if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
 }
 
@@ -292,8 +322,10 @@ const UPDATE_USAGE =
   "  --subject TEXT       Replace the task subject (one-line imperative title)\n" +
   "  --description TEXT   Replace the task description\n" +
   "  --active-form TEXT   Replace the in-progress spinner label\n" +
-  "  --status STATUS      Change status: pending | in_progress | completed | cancelled\n" +
-  "  --state STATE        Update the session working phase\n\n" +
+  "  --status STATUS      Change task todo-status: pending | in_progress | completed | cancelled\n" +
+  "                         (tasks must reach in_progress before they can be completed)\n" +
+  `  --state STATE        Update the session working phase (independent of task status);\n` +
+  `                         valid phases: ${PROJECT_STATES.join(" | ")}\n\n` +
   "At least one of --subject, --description, --active-form, or --status is required.\n" +
   'To add evidence to a completed task, use: swiz tasks evidence <task-id> "<evidence>"'
 
