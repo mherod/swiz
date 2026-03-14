@@ -652,3 +652,7 @@ Hook scripts use the equivalence sets from `hook-utils.ts` (e.g. `isShellTool("r
 **Codex CLI** — has `AfterAgent` and `AfterToolUse` hook events in its Rust crate, but no user-facing config file for hooks yet. Tool name mappings are tracked and ready for when user-configurable hooks ship.
 
 **Claude Code settings revert** — a running Claude Code process watches `~/.claude/settings.json` and may revert writes within ~1.5 seconds. Close all Claude Code sessions before running `swiz install`, or the changes won't persist.
+
+## License
+
+`swiz` is licensed under PolyForm Noncommercial 1.0.0. You may use, modify, and share it for noncommercial purposes under [LICENSE](LICENSE). Commercial use, resale, and commercial repurposing require separate permission from Matthew Herod.
