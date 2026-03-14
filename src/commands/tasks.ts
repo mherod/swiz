@@ -236,7 +236,7 @@ async function runEvidenceTask(rest: string[], filterCwd?: string): Promise<void
   if (!taskId || !evidenceText) {
     throw new Error(
       'Usage: swiz tasks evidence <task-id> "<evidence>" [--subject TEXT]\n' +
-        "Prefixes: commit:, pr:, file:, test:, note:"
+        "Prefixes: commit:, pr:, file:, test:, note:, ci_green:, conclusion:, run:, no_ci:"
     )
   }
   const subjectFlag = extractFlag(rest, "--subject")
@@ -434,7 +434,8 @@ export const tasksCommand: Command = {
     },
     {
       flags: "evidence <id> <text>",
-      description: "Submit evidence to a task (commit:, pr:, file:, test:, note:)",
+      description:
+        "Submit evidence to a task (commit:, pr:, file:, test:, note:, ci_green:, conclusion:, run:, no_ci:)",
     },
     {
       flags: "status <id> <status>",
@@ -461,7 +462,8 @@ export const tasksCommand: Command = {
     },
     {
       flags: "--evidence <text>",
-      description: "Completion evidence (commit:, pr:, file:, test:, note:)",
+      description:
+        "Completion evidence (commit:, pr:, file:, test:, note:, ci_green:, conclusion:, run:, no_ci:)",
     },
     {
       flags: "--verify <text>",
