@@ -14,7 +14,7 @@ const BUN_SHEBANG_RE = /^#!.*\bbun\b/m
  * Blocked Node.js sync file APIs with their Bun-native replacements.
  * Constructed dynamically to avoid keyword self-detection by this hook.
  */
-const BLOCKED_NODE_FILE_OPS: Array<{ re: RegExp; name: string; replacement: string }> = [
+export const BLOCKED_NODE_FILE_OPS: Array<{ re: RegExp; name: string; replacement: string }> = [
   {
     re: new RegExp(["\\b", "read", "File", "Sync", "\\s*\\("].join("")),
     name: ["read", "File", "Sync"].join(""),

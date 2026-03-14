@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { findBlockedNodeFileOps, usesBunApis } from "./pretooluse-bun-file-api-enforce.ts"
+import {
+  BLOCKED_NODE_FILE_OPS,
+  findBlockedNodeFileOps,
+  usesBunApis,
+} from "./pretooluse-bun-file-api-enforce.ts"
 
 // Construct API names dynamically to avoid self-detection by the hook.
 const READ_FS = ["read", "File", "Sync"].join("")
@@ -169,5 +173,15 @@ describe("integration: Bun file detection + blocked ops", () => {
   it("non-Bun file with sync ops is not a hook concern", () => {
     const content = `import fs from "node:fs"\nfs.${READ_FS}("x")`
     expect(usesBunApis(content)).toBe(false)
+  })
+})
+
+// ─── structural: word boundary guard ──────────────────────────────────────────
+
+describe("BLOCKED_NODE_FILE_OPS structural invariants", () => {
+  it("every regex starts with a word boundary to prevent partial-word matches", () => {
+    for (const op of BLOCKED_NODE_FILE_OPS) {
+      expect(op.re.source.startsWith("\\b"), `${op.name} regex missing \\b prefix`).toBe(true)
+    }
   })
 })
