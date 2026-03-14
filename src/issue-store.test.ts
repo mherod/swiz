@@ -646,11 +646,90 @@ describe("ghListToRestFallback", () => {
     expect(mapping!.endpoint).toContain("state=open")
   })
 
+  test("maps closed issue list args to closed REST issues endpoint", () => {
+    const mapping = ghListToRestFallback(["issue", "list", "--state", "closed", "--json", "number"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("/issues")
+    expect(mapping!.endpoint).toContain("state=closed")
+  })
+
   test("maps pr list args to REST pulls endpoint", () => {
     const mapping = ghListToRestFallback(["pr", "list", "--state", "open", "--json", "number"])
     expect(mapping).not.toBeNull()
     expect(mapping!.endpoint).toContain("/pulls")
     expect(mapping!.endpoint).toContain("state=open")
+  })
+
+  test("maps closed pr list args to closed REST pulls endpoint", () => {
+    const mapping = ghListToRestFallback(["pr", "list", "--state", "closed", "--json", "number"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("/pulls")
+    expect(mapping!.endpoint).toContain("state=closed")
+  })
+
+  test("issue list fallback respects --limit", () => {
+    const mapping = ghListToRestFallback(["issue", "list", "--state", "open", "--limit", "30"])
+    expect(mapping).not.toBeNull()
+    expect(mapping!.endpoint).toContain("per_page=30")
+  })
+
+  test("normalize converts REST issue shape to gh CLI shape and filters PRs", () => {
+    const mapping = ghListToRestFallback(["issue", "list"])!
+    const raw = [
+      {
+        number: 42,
+        title: "Bug",
+        state: "open",
+        updated_at: "2024-06-01T00:00:00Z",
+        user: { login: "alice" },
+        assignees: [{ login: "bob" }],
+        labels: [{ name: "bug", color: "d73a4a", description: "Something is broken" }],
+      },
+      {
+        number: 99,
+        title: "PR masquerading as issue",
+        state: "open",
+        updated_at: "2024-06-02T00:00:00Z",
+        user: { login: "carol" },
+        pull_request: { url: "https://api.github.com/repos/owner/repo/pulls/99" },
+      },
+    ]
+    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    expect(result).toHaveLength(1)
+    expect(result[0]!.number).toBe(42)
+    expect(result[0]!.updatedAt).toBe("2024-06-01T00:00:00Z")
+    expect(result[0]!.author).toEqual({ login: "alice" })
+    expect(result[0]!.assignees).toEqual([{ login: "bob" }])
+    expect(result[0]!.labels).toEqual([
+      { name: "bug", color: "d73a4a", description: "Something is broken" },
+    ])
+  })
+
+  test("normalize converts REST pr shape to gh CLI shape", () => {
+    const mapping = ghListToRestFallback(["pr", "list"])!
+    const raw = [
+      {
+        number: 7,
+        title: "Feature",
+        state: "open",
+        html_url: "https://github.com/owner/repo/pull/7",
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-06-01T00:00:00Z",
+        user: { login: "alice" },
+        head: { ref: "feature-branch" },
+        mergeable: true,
+      },
+    ]
+    const result = mapping.normalize!(raw) as Array<Record<string, unknown>>
+    expect(result).toHaveLength(1)
+    expect(result[0]!.number).toBe(7)
+    expect(result[0]!.headRefName).toBe("feature-branch")
+    expect(result[0]!.author).toEqual({ login: "alice" })
+    expect(result[0]!.mergeable).toBe("MERGEABLE")
+    expect(result[0]!.reviewDecision).toBe("")
+    expect(result[0]!.statusCheckRollup).toEqual([])
+    expect(result[0]!.createdAt).toBe("2024-01-01T00:00:00Z")
+    expect(result[0]!.updatedAt).toBe("2024-06-01T00:00:00Z")
   })
 
   test("maps run list args to REST actions/runs endpoint with normalize", () => {
@@ -936,7 +1015,7 @@ describe("ghListToRestFallback", () => {
 
 describe("tryRestFallback", () => {
   test("returns null and does not throw for unrecognised commands", async () => {
-    const result = await tryRestFallback(["workflow", "list"], "/tmp")
+    const result = await tryRestFallback(["status", "check"], "/tmp")
     expect(result).toBeNull()
   })
 

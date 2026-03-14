@@ -479,7 +479,7 @@ export function SessionMessages(props: MessagesProps) {
 
   return (
     <section className="card bento-messages flex flex-col h-full max-h-full overflow-hidden">
-      <div className="messages-header-row flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 shrink-0">
+      <div className="messages-header-row flex flex-col gap-3 mb-4 shrink-0 md:flex-row md:items-center md:justify-between md:mb-5">
         <div>
           <h2 className="section-title">Transcript</h2>
           <p className="section-subtitle">Conversation history for selected session</p>

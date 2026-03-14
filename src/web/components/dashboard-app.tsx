@@ -1,6 +1,7 @@
 import { msgKey } from "../lib/dashboard-helpers.ts"
 import { useDashboardState } from "../lib/dashboard-state.ts"
 import { Header } from "./header.tsx"
+import { ProjectIssuesPanel } from "./project-issues-panel.tsx"
 import { SessionMessages, SessionNav } from "./session-browser.tsx"
 import { SettingsPanel } from "./settings-panel.tsx"
 
@@ -81,23 +82,30 @@ export function DashboardApp() {
           <SettingsPanel cwd={optimisticProjectCwd} />
         </div>
       ) : (
-        <SessionMessages
-          messages={displayedMessages}
-          loading={messagesLoading}
-          newKeys={newMessageKeys}
-          msgKey={msgKey}
-          toolStats={sessionToolStats}
-          tasks={sessionTasks}
-          taskSummary={sessionTaskSummary}
-          tasksLoading={sessionTasksLoading}
-          projectTasks={projectTasks}
-          projectTaskSummary={projectTaskSummary}
-          projectTasksLoading={projectTasksLoading}
-          events={metricsEvents}
-          cacheStatus={cacheStatus}
-          activeSession={activeSession}
-          activeHookDispatches={activeHookDispatches}
-        />
+        <div className="bento-dashboard-stack">
+          <div className="bento-dashboard-secondary">
+            <ProjectIssuesPanel cwd={optimisticProjectCwd} />
+          </div>
+          <div className="bento-dashboard-primary">
+            <SessionMessages
+              messages={displayedMessages}
+              loading={messagesLoading}
+              newKeys={newMessageKeys}
+              msgKey={msgKey}
+              toolStats={sessionToolStats}
+              tasks={sessionTasks}
+              taskSummary={sessionTaskSummary}
+              tasksLoading={sessionTasksLoading}
+              projectTasks={projectTasks}
+              projectTaskSummary={projectTaskSummary}
+              projectTasksLoading={projectTasksLoading}
+              events={metricsEvents}
+              cacheStatus={cacheStatus}
+              activeSession={activeSession}
+              activeHookDispatches={activeHookDispatches}
+            />
+          </div>
+        </div>
       )}
     </div>
   )

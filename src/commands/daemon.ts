@@ -286,6 +286,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
     cooldownRegistry: caches.cooldownRegistry,
     gitStateCache: caches.gitStateCache,
     ciWatchRegistry: caches.ciWatchRegistry,
+    upstreamSyncRegistry: caches.upstreamSyncRegistry,
     projectSettingsCache: caches.projectSettingsCache,
     registeredProjects,
     projectLastSeen: state.projectLastSeen,

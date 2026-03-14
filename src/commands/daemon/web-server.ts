@@ -3,6 +3,8 @@ import tailwindcss from "bun-plugin-tailwind"
 import type { LRUCache } from "lru-cache"
 import { executeDispatch } from "../../dispatch/execute.ts"
 import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
+import { getRepoSlug } from "../../git-helpers.ts"
+import { getIssueStore } from "../../issue-store.ts"
 import { deleteSessionData, resolveSessionDeletionTargets } from "../../session-data-delete.ts"
 import {
   readSwizSettings,
@@ -36,6 +38,7 @@ import {
 import { type AgentProcessSnapshot, handleSessionRoutes } from "./session-routes.ts"
 import type { CachedSnapshot } from "./snapshot.ts"
 import type { ActiveHookDispatch } from "./types.ts"
+import type { UpstreamSyncRegistry } from "./upstream-sync.ts"
 import { type CapturedToolCall, captureSessionToolCall, stripAnsi } from "./utils.ts"
 import type { DaemonWorkerRuntime } from "./worker-runtime.ts"
 
@@ -135,6 +138,88 @@ export function formatWebProjectStatusLine(snapshot: WarmStatusLineSnapshot): st
   return parts.join(" | ")
 }
 
+interface DashboardIssueLabel {
+  name: string
+  color: string | null
+}
+
+interface DashboardIssueActor {
+  login: string
+}
+
+interface DashboardIssueRecord {
+  number: number
+  title: string
+  updatedAt: string | null
+  state: string | null
+  author: DashboardIssueActor | null
+  assignees: DashboardIssueActor[]
+  labels: DashboardIssueLabel[]
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null
+}
+
+function pickString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.length > 0) return value
+  }
+  return null
+}
+
+function normalizeDashboardIssue(raw: unknown): DashboardIssueRecord | null {
+  const issue = asObject(raw)
+  if (!issue) return null
+  if ("pull_request" in issue || "pullRequest" in issue) return null
+
+  const number = typeof issue.number === "number" ? issue.number : null
+  const title = pickString(issue.title)
+  if (!number || !title) return null
+
+  const authorObject = asObject(issue.author) ?? asObject(issue.user)
+  const authorLogin = pickString(authorObject?.login)
+
+  const assignees = Array.isArray(issue.assignees)
+    ? issue.assignees
+        .map((entry) => pickString(asObject(entry)?.login))
+        .filter((login): login is string => login !== null)
+        .map((login) => ({ login }))
+    : []
+
+  const labels = Array.isArray(issue.labels)
+    ? issue.labels
+        .map((entry) => {
+          const label = asObject(entry)
+          const name = pickString(label?.name)
+          if (!name) return null
+          return {
+            name,
+            color: pickString(label?.color),
+          }
+        })
+        .filter((label): label is DashboardIssueLabel => label !== null)
+    : []
+
+  return {
+    number,
+    title,
+    updatedAt: pickString(issue.updatedAt, issue.updated_at),
+    state: pickString(issue.state),
+    author: authorLogin ? { login: authorLogin } : null,
+    assignees,
+    labels,
+  }
+}
+
+function issueUpdatedAtMs(updatedAt: string | null): number {
+  if (!updatedAt) return 0
+  const parsed = Date.parse(updatedAt)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+const STALE_ISSUES_TTL_MS = 60 * 60 * 1000
+
 export interface DaemonWebServerContext {
   port: number
   pruneTranscriptMemory: () => void
@@ -153,6 +238,7 @@ export interface DaemonWebServerContext {
   cooldownRegistry: CooldownRegistry
   gitStateCache: GitStateCache
   ciWatchRegistry: CiWatchRegistry
+  upstreamSyncRegistry: UpstreamSyncRegistry
   projectSettingsCache: ProjectSettingsCache
   registeredProjects: Set<string>
   projectLastSeen: Map<string, number>
@@ -659,6 +745,50 @@ async function handlePrPollRoute(req: Request, ctx: DaemonWebServerContext): Pro
   }
 }
 
+async function handleProjectIssuesRoute(
+  req: Request,
+  ctx: DaemonWebServerContext
+): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as {
+    cwd?: string
+    limit?: number
+  } | null
+  const cwd = body?.cwd
+  if (typeof cwd !== "string" || !cwd) {
+    return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
+  }
+
+  ctx.registerProjectWatchers(cwd)
+  ctx.touchProject(cwd)
+
+  const repo = await getRepoSlug(cwd)
+  if (!repo) return Response.json({ repo: null, issues: [] satisfies DashboardIssueRecord[] })
+
+  const limit = Math.max(1, Math.min(30, body?.limit ?? 10))
+  const store = getIssueStore()
+  let issues = store.listIssues<unknown>(repo)
+
+  // The dashboard often loads a project before the background sync has ever run for it.
+  // Prime the cache synchronously on the first miss so the issues panel can hydrate immediately.
+  if (issues.length === 0) {
+    await ctx.upstreamSyncRegistry.register(cwd)
+    await ctx.upstreamSyncRegistry.syncNow(cwd)
+    issues = store.listIssues<unknown>(repo)
+  }
+
+  if (issues.length === 0) {
+    issues = store.listIssues<unknown>(repo, STALE_ISSUES_TTL_MS)
+  }
+
+  const normalizedIssues = issues
+    .map((issue) => normalizeDashboardIssue(issue))
+    .filter((issue): issue is DashboardIssueRecord => issue !== null)
+    .toSorted((a, b) => issueUpdatedAtMs(b.updatedAt) - issueUpdatedAtMs(a.updatedAt))
+    .slice(0, limit)
+
+  return Response.json({ repo, issues: normalizedIssues })
+}
+
 async function handleSettingsRoutes(
   req: Request,
   url: URL,
@@ -922,6 +1052,7 @@ const TOP_ROUTE_TABLE: Record<string, TopRouteHandler> = {
   "GET /process/agents": () => handleProcessAgents(),
   "POST /process/agents/kill": (req) => handleProcessKill(req),
   "POST /sessions/delete": (req) => handleSessionDelete(req),
+  "POST /projects/issues": (req, _url, ctx) => handleProjectIssuesRoute(req, ctx),
   "POST /pr-poll": (req, _url, ctx) => handlePrPollRoute(req, ctx),
   "GET /cache/status": (_req, _url, ctx) => handleCacheStatus(ctx),
   "POST /status-line/snapshot": (req, _url, ctx) => handleStatusLineSnapshot(req, ctx),
