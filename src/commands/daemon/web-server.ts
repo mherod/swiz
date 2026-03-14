@@ -823,6 +823,19 @@ async function handleProjectPrsRoute(req: Request, ctx: DaemonWebServerContext):
   return Response.json({ repo, pullRequests: normalizedPrs })
 }
 
+async function handleProjectSyncNow(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as { cwd?: string } | null
+  const cwd = body?.cwd
+  if (typeof cwd !== "string" || !cwd) {
+    return Response.json({ error: "Missing required field: cwd (string)" }, { status: 400 })
+  }
+  ctx.registerProjectWatchers(cwd)
+  ctx.touchProject(cwd)
+  // Register idempotently, then kick off sync in the background — returns immediately.
+  void ctx.upstreamSyncRegistry.register(cwd).then(() => ctx.upstreamSyncRegistry.syncNow(cwd))
+  return Response.json({ ok: true, started: true })
+}
+
 async function handleProjectIssuesRoute(
   req: Request,
   ctx: DaemonWebServerContext
@@ -1132,6 +1145,7 @@ const TOP_ROUTE_TABLE: Record<string, TopRouteHandler> = {
   "POST /sessions/delete": (req) => handleSessionDelete(req),
   "POST /projects/issues": (req, _url, ctx) => handleProjectIssuesRoute(req, ctx),
   "POST /projects/prs": (req, _url, ctx) => handleProjectPrsRoute(req, ctx),
+  "POST /projects/sync-now": (req, _url, ctx) => handleProjectSyncNow(req, ctx),
   "POST /pr-poll": (req, _url, ctx) => handlePrPollRoute(req, ctx),
   "GET /cache/status": (_req, _url, ctx) => handleCacheStatus(ctx),
   "POST /status-line/snapshot": (req, _url, ctx) => handleStatusLineSnapshot(req, ctx),
