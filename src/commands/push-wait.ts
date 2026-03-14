@@ -1,11 +1,109 @@
+import { acquireGhSlot } from "../gh-rate-limit.ts"
 import { getCanonicalPathHash } from "../git-helpers.ts"
 import { swizPushCooldownSentinelPath, swizPushResultPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
-import { startCiWatchViaDaemon } from "./ci-wait.ts"
+import { expandSha, findRunId, startCiWatchViaDaemon } from "./ci-wait.ts"
 
 // Must match the values in hooks/pretooluse-push-cooldown.ts
 export const COOLDOWN_MS = 60_000
 const POLL_INTERVAL_MS = 2_000
+const CI_POLL_INTERVAL_MS = 10_000
+
+// ─── CI polling ──────────────────────────────────────────────────────────
+
+interface GhRunJob {
+  name: string
+  conclusion: string | null
+  status: string
+}
+
+interface GhRunViewResult {
+  conclusion: string | null
+  status: string
+  jobs: GhRunJob[]
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+export async function pollUntilAllJobsSuccess(
+  commitSha: string,
+  timeoutSeconds: number,
+  cwd?: string
+): Promise<void> {
+  const startTime = Date.now()
+  const timeoutMs = timeoutSeconds * 1000
+
+  const fullSha = await expandSha(commitSha)
+
+  // Phase 1: discover run ID
+  let runId: number | null = null
+  while (runId === null) {
+    const elapsed = Date.now() - startTime
+    if (elapsed > timeoutMs) {
+      throw new Error(`No CI run found for commit ${commitSha} within ${timeoutSeconds}s`)
+    }
+    runId = await findRunId(fullSha)
+    if (runId === null) {
+      console.log(`⏳ Waiting for CI run... (${Math.round(elapsed / 1000)}s)`)
+      await sleep(CI_POLL_INTERVAL_MS)
+    }
+  }
+
+  console.log(`✓ CI run ${runId} found — polling for job completion...`)
+
+  // Phase 2: poll gh run view until all jobs reach conclusion=success
+  while (true) {
+    const elapsed = Date.now() - startTime
+    if (elapsed > timeoutMs) {
+      throw new Error(`CI run ${runId} did not complete within ${timeoutSeconds}s timeout`)
+    }
+
+    await acquireGhSlot()
+    const proc = Bun.spawn(
+      ["gh", "run", "view", String(runId), "--json", "conclusion,status,jobs"],
+      { stdout: "pipe", stderr: "pipe", ...(cwd ? { cwd } : {}) }
+    )
+    const [output] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+
+    if (proc.exitCode !== 0) {
+      await sleep(CI_POLL_INTERVAL_MS)
+      continue
+    }
+
+    let data: GhRunViewResult
+    try {
+      data = JSON.parse(output) as GhRunViewResult
+    } catch {
+      await sleep(CI_POLL_INTERVAL_MS)
+      continue
+    }
+
+    const { conclusion, status, jobs } = data
+
+    if (status === "completed") {
+      if (conclusion === "success") {
+        const failed = jobs.filter((j) => j.conclusion !== "success")
+        if (failed.length === 0) {
+          console.log(`✓ All ${jobs.length} CI job(s) reached conclusion=success`)
+          return
+        }
+        const names = failed.map((j) => `${j.name} (${j.conclusion ?? "null"})`).join(", ")
+        throw new Error(`CI completed but some jobs did not succeed: ${names}`)
+      }
+      throw new Error(`CI run ${runId} completed with conclusion: ${conclusion ?? "unknown"}`)
+    }
+
+    const done = jobs.filter((j) => j.conclusion !== null).length
+    console.log(
+      `⏳ CI: ${status} — ${done}/${jobs.length} job(s) done (${Math.round(elapsed / 1000)}s)`
+    )
+    await sleep(CI_POLL_INTERVAL_MS)
+  }
+}
 
 // ─── Cooldown utilities ──────────────────────────────────────────────────
 
@@ -94,6 +192,7 @@ export interface PushWaitArgs {
   remote: string
   branch: string
   timeout: number
+  wait: boolean
   extraArgs: string[]
   cwd?: string
 }
@@ -110,6 +209,7 @@ export function parsePushWaitArgs(args: string[]): PushWaitArgs {
   let remote = "origin"
   let branch = ""
   let timeout = 120
+  let wait = false
   let cwd: string | undefined
   const extraArgs: string[] = []
   const positional: string[] = []
@@ -131,6 +231,11 @@ export function parsePushWaitArgs(args: string[]): PushWaitArgs {
       continue
     }
 
+    if (arg === "--wait") {
+      wait = true
+      continue
+    }
+
     if (arg.startsWith("-")) {
       extraArgs.push(arg)
       continue
@@ -142,7 +247,7 @@ export function parsePushWaitArgs(args: string[]): PushWaitArgs {
   remote = positional[0] || remote
   branch = positional[1] || branch
 
-  return { remote, branch, timeout, extraArgs, cwd }
+  return { remote, branch, timeout, wait, extraArgs, cwd }
 }
 
 // ─── Push result file ───────────────────────────────────────────────────
@@ -169,14 +274,15 @@ async function writePushResult(repoKey: string, result: PushResult): Promise<voi
 
 export const pushWaitCommand: Command = {
   name: "push-wait",
-  description: "Wait for push cooldown to expire, then push",
-  usage: "swiz push-wait [remote] [branch] [--cwd <dir>] [--timeout <seconds>]",
+  description: "Wait for push cooldown to expire, then push (optionally wait for CI)",
+  usage: "swiz push-wait [remote] [branch] [--wait] [--cwd <dir>] [--timeout <seconds>]",
   options: [
+    { flags: "--wait", description: "Poll gh run view until all CI jobs reach conclusion=success" },
     { flags: "--cwd <dir>", description: "Working directory for the git push (default: cwd)" },
     { flags: "--timeout, -t <seconds>", description: "Max wait for cooldown (default: 120)" },
   ],
   async run(args) {
-    const { remote, branch, timeout, extraArgs, cwd: cwdArg } = parsePushWaitArgs(args)
+    const { remote, branch, timeout, wait, extraArgs, cwd: cwdArg } = parsePushWaitArgs(args)
     const cwd = cwdArg ?? process.cwd()
 
     // Resolve branch from git if not provided
@@ -234,6 +340,21 @@ export const pushWaitCommand: Command = {
     }
 
     console.log("✓ Push succeeded")
+
+    if (wait) {
+      console.log(`⏳ --wait: polling CI until all jobs reach conclusion=success...`)
+      await pollUntilAllJobsSuccess(commitSha, timeout, cwd)
+      await writePushResult(repoKey, {
+        success: true,
+        commitSha,
+        branch: targetBranch,
+        remote,
+        exitCode: 0,
+        timestamp: Date.now(),
+        ciWatchStarted: false,
+      })
+      return
+    }
 
     const watch = await startCiWatchViaDaemon(commitSha, cwd)
     const ciWatchStarted = watch !== null

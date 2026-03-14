@@ -89,6 +89,30 @@ describe("parsePushWaitArgs", () => {
     const result = parsePushWaitArgs(["origin", "main"])
     expect(result.cwd).toBeUndefined()
   })
+
+  it("parses --wait flag", () => {
+    const result = parsePushWaitArgs(["--wait"])
+    expect(result.wait).toBe(true)
+  })
+
+  it("defaults wait to false when not provided", () => {
+    const result = parsePushWaitArgs([])
+    expect(result.wait).toBe(false)
+  })
+
+  it("parses --wait alongside other flags", () => {
+    const result = parsePushWaitArgs(["--wait", "origin", "main", "--timeout", "60"])
+    expect(result.wait).toBe(true)
+    expect(result.remote).toBe("origin")
+    expect(result.branch).toBe("main")
+    expect(result.timeout).toBe(60)
+  })
+
+  it("does not include --wait in extraArgs", () => {
+    const result = parsePushWaitArgs(["--wait", "--dry-run"])
+    expect(result.wait).toBe(true)
+    expect(result.extraArgs).toEqual(["--dry-run"])
+  })
 })
 
 // ─── getRemainingCooldownMs ──────────────────────────────────────────────

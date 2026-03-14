@@ -58,7 +58,7 @@ export async function expandSha(sha: string): Promise<string> {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
-async function findRunId(fullSha: string): Promise<number | null> {
+export async function findRunId(fullSha: string): Promise<number | null> {
   try {
     const proc = Bun.spawn(
       ["gh", "run", "list", "--commit", fullSha, "--json", "databaseId", "--jq", ".[0].databaseId"],
