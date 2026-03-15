@@ -1075,7 +1075,11 @@ function suggestionKey(text: string): string {
 
 interface SuggestionLog {
   seen: Record<string, number> // key → count
+  totalAttempts: number // total block attempts in this session
 }
+
+/** Max total block attempts before allowing stop regardless of suggestion novelty. */
+const DEDUP_MAX_TOTAL_ATTEMPTS = 5
 
 function getSuggestionsPath(sessionId: string): string {
   const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64)
@@ -1096,12 +1100,16 @@ async function loadSuggestionLog(sessionId: string): Promise<SuggestionLog> {
   } catch {
     // File doesn't exist or is invalid
   }
-  return { seen: {} }
+  return { seen: {}, totalAttempts: 0 }
 }
 
-async function recordSuggestion(sessionId: string, key: string): Promise<number> {
+async function recordSuggestion(
+  sessionId: string,
+  key: string
+): Promise<{ keyCount: number; totalAttempts: number }> {
   const log = await loadSuggestionLog(sessionId)
   log.seen[key] = (log.seen[key] ?? 0) + 1
+  log.totalAttempts = (log.totalAttempts ?? 0) + 1
   const path = getSuggestionsPath(sessionId)
   const { mkdirSync } = await import("node:fs")
   const { dirname } = await import("node:path")
@@ -1109,7 +1117,7 @@ async function recordSuggestion(sessionId: string, key: string): Promise<number>
     mkdirSync(dirname(path), { recursive: true })
   } catch {}
   await Bun.write(path, JSON.stringify(log))
-  return log.seen[key]!
+  return { keyCount: log.seen[key]!, totalAttempts: log.totalAttempts }
 }
 
 /** Best-effort cleanup of dedup files older than 7 days or exceeding max count. */
@@ -1211,16 +1219,23 @@ async function main(): Promise<void> {
     )
   }
 
-  // Dedup: if the AI keeps suggesting the same thing, the agent already acted on it — allow stop.
+  // Dedup: allow stop if the same suggestion repeats OR total attempts exceed threshold.
   const sessionId = input.session_id ?? ""
   if (sessionId && response.next) {
     const key = suggestionKey(response.next)
-    const count = await recordSuggestion(sessionId, key)
-    if (count >= DEDUP_MAX_SEEN) {
+    const { keyCount, totalAttempts } = await recordSuggestion(sessionId, key)
+    if (keyCount >= DEDUP_MAX_SEEN) {
       terminate(
         "skip",
         "SUGGESTION_DEDUP",
-        `Suggestion seen ${count} times — allowing stop (dedup). Key: ${key.slice(0, 60)}`
+        `Suggestion seen ${keyCount} times — allowing stop (dedup). Key: ${key.slice(0, 60)}`
+      )
+    }
+    if (totalAttempts >= DEDUP_MAX_TOTAL_ATTEMPTS) {
+      terminate(
+        "skip",
+        "SUGGESTION_EXHAUSTION",
+        `${totalAttempts} total stop attempts in session — allowing stop (exhaustion). Latest: ${key.slice(0, 60)}`
       )
     }
   }
