@@ -1827,6 +1827,38 @@ tbody tr:hover {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
 }
 
+.tool-category-icon {
+  font-size: 0.8rem;
+  margin-right: var(--space-1);
+}
+
+.tool-call-subject {
+  margin: var(--space-1) 0 0;
+  color: var(--text-main);
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.tool-category-shell { border-color: rgba(126, 182, 255, 0.28); }
+.tool-category-file { border-color: rgba(140, 200, 140, 0.28); }
+.tool-category-search { border-color: rgba(200, 170, 100, 0.28); }
+.tool-category-task { border-color: rgba(100, 200, 220, 0.28); }
+.tool-category-skill { border-color: rgba(180, 140, 255, 0.28); }
+
+.tool-category-file .tool-name { color: var(--color-green-300); }
+.tool-category-search .tool-name { color: var(--color-amber-400); }
+.tool-category-task .tool-name { color: var(--color-cyan-300); }
+.tool-category-skill .tool-name { color: #b88cff; }
+
+.tool-diff-old {
+  color: var(--color-red-300);
+}
+
+.tool-diff-new {
+  color: var(--color-green-300);
+}
+
 .skill-payload-base {
   margin: 0 0 8px;
   display: flex;

@@ -359,3 +359,99 @@ export function parseSearchToolParams(name: string, detail: string): ParsedSearc
 export function isInternalToolName(name: string): boolean {
   return name.trim().toLowerCase() === "structuredoutput"
 }
+
+export type ToolCategory = "shell" | "file" | "search" | "task" | "skill" | "agent" | "other"
+
+export function classifyTool(name: string): ToolCategory {
+  const lower = name.toLowerCase()
+  if (lower === "bash" || lower === "shell") return "shell"
+  if (lower === "read" || lower === "edit" || lower === "write" || lower === "notebookedit")
+    return "file"
+  if (lower === "grep" || lower === "glob" || lower === "rg") return "search"
+  if (lower.startsWith("task") || lower === "update_plan") return "task"
+  if (lower === "skill" || lower === "toolsearch") return "skill"
+  if (lower === "agent" || lower === "task") return "agent"
+  return "other"
+}
+
+export function toolCategoryIcon(category: ToolCategory): string {
+  switch (category) {
+    case "shell":
+      return "❯"
+    case "file":
+      return "◇"
+    case "search":
+      return "◎"
+    case "task":
+      return "☑"
+    case "skill":
+      return "⚡"
+    case "agent":
+      return "◈"
+    default:
+      return "·"
+  }
+}
+
+export interface ParsedTaskToolCall {
+  action: string
+  taskId?: string | null
+  subject?: string | null
+  description?: string | null
+  status?: string | null
+  activeForm?: string | null
+}
+
+export function parseTaskToolCall(name: string, detail: string): ParsedTaskToolCall | null {
+  const lower = name.toLowerCase()
+  if (!lower.startsWith("task") && lower !== "update_plan") return null
+  const action = lower.replace("task", "").toLowerCase() || "update"
+  const payload = parseJsonObject(detail)
+  if (!payload) return { action }
+  return {
+    action,
+    taskId:
+      typeof payload.taskId === "string" || typeof payload.taskId === "number"
+        ? String(payload.taskId)
+        : null,
+    subject: typeof payload.subject === "string" ? payload.subject : null,
+    description: typeof payload.description === "string" ? payload.description : null,
+    status: typeof payload.status === "string" ? payload.status : null,
+    activeForm: typeof payload.activeForm === "string" ? payload.activeForm : null,
+  }
+}
+
+export interface ParsedFileToolCall {
+  filePath: string
+  action: "read" | "edit" | "write" | "glob"
+  oldString?: string | null
+  newString?: string | null
+  pattern?: string | null
+  offset?: number | null
+  limit?: number | null
+}
+
+export function parseFileToolCall(name: string, detail: string): ParsedFileToolCall | null {
+  const lower = name.toLowerCase()
+  if (lower !== "read" && lower !== "edit" && lower !== "write" && lower !== "glob") return null
+  const payload = parseJsonObject(detail)
+  if (!payload) return null
+  const filePath =
+    typeof payload.file_path === "string"
+      ? payload.file_path
+      : typeof payload.path === "string"
+        ? payload.path
+        : typeof payload.pattern === "string"
+          ? payload.pattern
+          : null
+  if (!filePath) return null
+  return {
+    filePath,
+    action: lower as "read" | "edit" | "write" | "glob",
+    oldString: typeof payload.old_string === "string" ? payload.old_string : null,
+    newString: typeof payload.new_string === "string" ? payload.new_string : null,
+    pattern: typeof payload.pattern === "string" ? payload.pattern : null,
+    offset: typeof payload.offset === "number" ? payload.offset : null,
+    limit: typeof payload.limit === "number" ? payload.limit : null,
+  }
+}

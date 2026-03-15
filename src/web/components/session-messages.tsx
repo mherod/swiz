@@ -14,18 +14,22 @@ import type {
 } from "./session-browser-types.ts"
 import {
   COLLAPSE_LINE_THRESHOLD,
+  classifyTool,
   compactPath,
   formatTime,
   groupMessages,
   isInternalToolName,
+  parseFileToolCall,
   parseSearchToolParams,
   parseSkillPayload,
   parseSwizTasksCommand,
+  parseTaskToolCall,
   parseToolCallDetail,
   skillNameFromMessage,
   summarizeRawJson,
   summarizeText,
   TOOL_RAW_JSON_COLLAPSE_THRESHOLD,
+  toolCategoryIcon,
 } from "./session-browser-utils.ts"
 import { ProjectTasksSection, SessionTasksSection } from "./session-tasks.tsx"
 
@@ -135,6 +139,90 @@ function SearchToolDisplay({
   )
 }
 
+function TaskToolDisplay({
+  task,
+  rawJson,
+}: {
+  task: ReturnType<typeof parseTaskToolCall>
+  rawJson: string | null | undefined
+}) {
+  if (!task) return null
+  const fields: Array<{ label: string; value: string }> = [{ label: "action", value: task.action }]
+  if (task.taskId) fields.push({ label: "task", value: task.taskId })
+  if (task.status) fields.push({ label: "status", value: task.status })
+  return (
+    <div className="tool-first-party-call">
+      <p className="tool-first-party-title">
+        <span className="tool-category-icon">☑</span> Task {task.action}
+      </p>
+      {task.subject ? <p className="tool-call-subject">{task.subject}</p> : null}
+      <CommonFieldsList fields={fields} />
+      {task.activeForm ? <p className="tool-call-description">{task.activeForm}</p> : null}
+      {rawJson ? (
+        <details className="tool-raw-json">
+          <summary>Parameters</summary>
+          <pre className="tool-detail-full">{rawJson}</pre>
+        </details>
+      ) : null}
+    </div>
+  )
+}
+
+function FileToolDisplay({
+  file,
+  rawJson,
+}: {
+  file: ReturnType<typeof parseFileToolCall>
+  rawJson: string | null | undefined
+}) {
+  if (!file) return null
+  const actionLabel =
+    file.action === "read"
+      ? "Reading"
+      : file.action === "edit"
+        ? "Editing"
+        : file.action === "write"
+          ? "Writing"
+          : "Searching"
+  return (
+    <div className="tool-first-party-call">
+      <p className="tool-first-party-title">
+        <span className="tool-category-icon">◇</span> {actionLabel}
+      </p>
+      <pre className="tool-command-block">{compactPath(file.filePath, 120)}</pre>
+      {file.offset != null || file.limit != null ? (
+        <ul className="tool-param-list">
+          {file.offset != null ? (
+            <li className="tool-param-item">
+              <span className="tool-param-label">offset</span>
+              <code className="tool-param-value">line {file.offset}</code>
+            </li>
+          ) : null}
+          {file.limit != null ? (
+            <li className="tool-param-item">
+              <span className="tool-param-label">limit</span>
+              <code className="tool-param-value">{file.limit} lines</code>
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+      {file.oldString && file.newString ? (
+        <details className="tool-raw-json">
+          <summary>Edit diff</summary>
+          <pre className="tool-detail-full tool-diff-old">- {summarizeText(file.oldString)}</pre>
+          <pre className="tool-detail-full tool-diff-new">+ {summarizeText(file.newString)}</pre>
+        </details>
+      ) : null}
+      {rawJson && !file.oldString ? (
+        <details className="tool-raw-json">
+          <summary>Parameters</summary>
+          <pre className="tool-detail-full">{rawJson}</pre>
+        </details>
+      ) : null}
+    </div>
+  )
+}
+
 function RawJsonDisplay({
   rawJson,
   isBash,
@@ -189,12 +277,37 @@ function CommonFieldsList({ fields }: { fields: Array<{ label: string; value: st
 function VerboseToolCall({ tc }: { tc: { name: string; detail: string } }) {
   const parsedDetail = parseToolCallDetail(tc.name, tc.detail)
   const isBash = tc.name.toLowerCase() === "bash"
+  const category = classifyTool(tc.name)
+  const icon = toolCategoryIcon(category)
   const searchParams = !isBash ? parseSearchToolParams(tc.name, tc.detail) : null
+  const taskTool = category === "task" ? parseTaskToolCall(tc.name, tc.detail) : null
+  const fileTool = category === "file" ? parseFileToolCall(tc.name, tc.detail) : null
+
+  if (taskTool) {
+    return (
+      <div className={`tool-call tool-call-verbose tool-category-${category}`}>
+        <div className="tool-call-body">
+          <TaskToolDisplay task={taskTool} rawJson={parsedDetail.rawJson} />
+        </div>
+      </div>
+    )
+  }
+
+  if (fileTool) {
+    return (
+      <div className={`tool-call tool-call-verbose tool-category-${category}`}>
+        <div className="tool-call-body">
+          <FileToolDisplay file={fileTool} rawJson={parsedDetail.rawJson} />
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="tool-call tool-call-verbose">
+    <div className={`tool-call tool-call-verbose tool-category-${category}`}>
       <div className="tool-call-body">
         <div className="tool-call-header">
+          <span className="tool-category-icon">{icon}</span>
           <span className="tool-name">{tc.name}</span>
         </div>
         {isBash ? <BashToolBody parsedDetail={parsedDetail} /> : null}
@@ -262,18 +375,23 @@ function ToolCallsList({
   }
   return (
     <ul className="tool-calls">
-      {toolCalls.map((tc) => (
-        <li key={`${tc.name}-${tc.detail}`} className="tool-call">
-          <span className="tool-name">{tc.name}</span>
-          {tc.detail && (
-            <span
-              className="tool-detail"
-              // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped via renderInline
-              dangerouslySetInnerHTML={{ __html: renderInline(tc.detail) }}
-            />
-          )}
-        </li>
-      ))}
+      {toolCalls.map((tc) => {
+        const category = classifyTool(tc.name)
+        const icon = toolCategoryIcon(category)
+        return (
+          <li key={`${tc.name}-${tc.detail}`} className={`tool-call tool-category-${category}`}>
+            <span className="tool-category-icon">{icon}</span>
+            <span className="tool-name">{tc.name}</span>
+            {tc.detail && (
+              <span
+                className="tool-detail"
+                // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped via renderInline
+                dangerouslySetInnerHTML={{ __html: renderInline(tc.detail) }}
+              />
+            )}
+          </li>
+        )
+      })}
     </ul>
   )
 }
