@@ -270,17 +270,19 @@ async function evalHookConditions(
 }
 
 async function computeEligibility(cwd: string): Promise<EligibilitySnapshot> {
-  const settings = await readSwizSettings()
-  const projectSettings = cwd ? await readProjectSettings(cwd) : null
+  const [settings, projectSettings, detectedStacks, workflowIntent] = await Promise.all([
+    readSwizSettings(),
+    cwd ? readProjectSettings(cwd) : Promise.resolve(null),
+    cwd ? detectProjectStack(cwd) : Promise.resolve([]),
+    resolveWorkflowIntent(cwd),
+  ])
   const effective = getEffectiveSwizSettings(settings, null)
 
   const disabledSet = new Set([
     ...(settings.disabledHooks ?? []),
     ...(projectSettings?.disabledHooks ?? []),
   ])
-  const detectedStacks = cwd ? await detectProjectStack(cwd) : []
   const prMergeActive = resolvePrMergeActive(effective.collaborationMode, effective.prMergeMode)
-  const workflowIntent = await resolveWorkflowIntent(cwd)
 
   const conditionResults: Record<string, boolean> = {}
   await evalHookConditions(manifest, conditionResults)
