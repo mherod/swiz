@@ -403,30 +403,39 @@ export async function launchAsyncHooks(
   payloadStr: string,
   daemonContext?: boolean
 ): Promise<void> {
+  // Flatten all async hooks across groups for concurrent condition evaluation.
+  type AsyncEntry = { hook: HookDef; file: string }
+  const asyncEntries: AsyncEntry[] = groups.flatMap((group) =>
+    group.hooks.filter((h) => h.async).map((h) => ({ hook: h, file: h.file }))
+  )
+  if (asyncEntries.length === 0) return
+
+  // Evaluate all conditions concurrently instead of sequentially.
+  const conditionResults = await Promise.all(
+    asyncEntries.map(({ hook }) => evalCondition(hook.condition))
+  )
+
   const promises: Promise<void>[] = []
-  for (const group of groups) {
-    for (const hook of group.hooks) {
-      if (hook.async) {
-        if (!(await evalCondition(hook.condition))) {
-          log(`   ⏭ ${hook.file} [condition false, skipping]`)
-          continue
-        }
-        if (daemonContext) {
-          log(`   → ${hook.file} [async, daemon-awaited]`)
-          const timeout = hook.timeout ?? DEFAULT_TIMEOUT
-          const p = runHook(hook.file, payloadStr, timeout)
-            .then(() => {})
-            .catch((err) => {
-              log(`   ⚠ ${hook.file} [async error: ${err}]`)
-            })
-          promises.push(p)
-        } else {
-          log(`   → ${hook.file} [async, fire-and-forget]`)
-          runHook(hook.file, payloadStr, hook.timeout)
-            .then(() => {})
-            .catch(() => {})
-        }
-      }
+  for (let i = 0; i < asyncEntries.length; i++) {
+    const { hook } = asyncEntries[i]!
+    if (!conditionResults[i]) {
+      log(`   ⏭ ${hook.file} [condition false, skipping]`)
+      continue
+    }
+    if (daemonContext) {
+      log(`   → ${hook.file} [async, daemon-awaited]`)
+      const timeout = hook.timeout ?? DEFAULT_TIMEOUT
+      const p = runHook(hook.file, payloadStr, timeout)
+        .then(() => {})
+        .catch((err) => {
+          log(`   ⚠ ${hook.file} [async error: ${err}]`)
+        })
+      promises.push(p)
+    } else {
+      log(`   → ${hook.file} [async, fire-and-forget]`)
+      runHook(hook.file, payloadStr, hook.timeout)
+        .then(() => {})
+        .catch(() => {})
     }
   }
   if (daemonContext && promises.length > 0) {
