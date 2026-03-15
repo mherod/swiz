@@ -115,6 +115,7 @@
 body {
   margin: 0;
   min-height: 100dvh;
+  padding-bottom: 72px;
   overflow-x: hidden;
   overflow-y: auto;
   background:
@@ -2152,13 +2153,22 @@ tbody tr:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-1);
-  height: 48px;
-  padding: var(--space-1);
+  gap: var(--space-2);
+  height: 56px;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-strong);
-  background: rgba(35, 58, 104, 0.25);
-  backdrop-filter: blur(12px);
+  background: rgba(25, 35, 55, 0.85);
+  backdrop-filter: blur(16px);
+}
+
+.dock-fixed {
+  position: fixed;
+  bottom: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(105, 138, 255, 0.12);
 }
 
 .dock-top {
@@ -2201,7 +2211,7 @@ tbody tr:hover {
 }
 
 .dock-icon-glyph {
-  font-size: 1rem;
+  font-size: 1.1rem;
   line-height: 1;
 }
 
@@ -2209,7 +2219,7 @@ tbody tr:hover {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .dock-icon-project {

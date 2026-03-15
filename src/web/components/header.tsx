@@ -1,7 +1,5 @@
 import { motion } from "motion/react"
-import { cn } from "../lib/cn.ts"
 import type { ActiveView } from "../lib/dashboard-state.ts"
-import { Dock, DockIcon } from "./dock.tsx"
 import { NumberTicker } from "./number-ticker.tsx"
 
 interface HeaderProps {
@@ -40,14 +38,6 @@ function buildCacheEntries(cacheStatus: Record<string, number> | null | undefine
   }
   return { totalCacheEntries: total, warmCaches: warm }
 }
-
-const TAB_LABELS: Array<{ view: ActiveView; label: string; icon: string }> = [
-  { view: "dashboard", label: "Dashboard", icon: "◩" },
-  { view: "issues", label: "Issues", icon: "◉" },
-  { view: "tasks", label: "Tasks", icon: "☑" },
-  { view: "transcript", label: "Transcript", icon: "❯" },
-  { view: "settings", label: "Settings", icon: "⚙" },
-]
 
 function HeaderChips({
   activeHooks,
@@ -117,8 +107,6 @@ export function Header({
   activeWatches,
   activeHooks,
   selectedProjectName,
-  activeView = "dashboard",
-  onSelectView,
   cacheStatus,
   activeAgentProcessProviders = {},
 }: HeaderProps) {
@@ -141,25 +129,6 @@ export function Header({
             <span>Live</span>
           </output>
         </div>
-        {onSelectView && (
-          <Dock iconSize={32} iconMagnification={48} iconDistance={120}>
-            {selectedProjectName ? (
-              <DockIcon disableMagnification className="dock-icon-project">
-                <span className="dock-icon-label">{selectedProjectName}</span>
-              </DockIcon>
-            ) : null}
-            {TAB_LABELS.map(({ view, label, icon }) => (
-              <DockIcon
-                key={view}
-                onClick={() => onSelectView(view)}
-                className={cn(activeView === view && "dock-icon-active")}
-              >
-                <span className="dock-icon-glyph">{icon}</span>
-                <span className="dock-icon-label">{label}</span>
-              </DockIcon>
-            ))}
-          </Dock>
-        )}
       </div>
       <span className="topbar-meta">Updated {lastUpdated}</span>
       <p className="topbar-summary">
