@@ -405,6 +405,7 @@ export async function executeDispatch(req: DispatchRequest): Promise<DispatchRes
       canonicalEvent: ctx.canonicalEvent,
       hookEventName: ctx.hookEventName,
       daemonContext: req.daemonContext,
+      cwd: ctx.cwd,
     })
     return { response }
   } finally {

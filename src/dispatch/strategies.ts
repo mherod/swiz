@@ -22,6 +22,8 @@ export interface HookStrategyContext {
   canonicalEvent: string
   hookEventName: string
   daemonContext?: boolean
+  /** Working directory already resolved by executeDispatch — avoids re-parsing enrichedPayloadStr. */
+  cwd: string
 }
 
 /** Interface for hook execution strategies. */
@@ -90,10 +92,9 @@ function buildPreToolResponse(hints: string[], contexts: string[]): Record<strin
 
 class PreToolUseStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
-    const { filteredGroups, enrichedPayloadStr, daemonContext } = ctx
+    const { filteredGroups, enrichedPayloadStr, daemonContext, cwd } = ctx
 
     await launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext)
-    const cwd = extractCwd(enrichedPayloadStr)
     const hints: string[] = []
     const contexts: string[] = []
     const finalResponse: Record<string, unknown> = {}
@@ -132,10 +133,9 @@ class PreToolUseStrategy implements HookExecutionStrategy {
  */
 class BlockingStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
-    const { filteredGroups, enrichedPayloadStr, canonicalEvent, daemonContext } = ctx
+    const { filteredGroups, enrichedPayloadStr, canonicalEvent, daemonContext, cwd } = ctx
 
     await launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext)
-    const cwd = extractCwd(enrichedPayloadStr)
     const runAllHooks = canonicalEvent === "stop"
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []
@@ -179,10 +179,9 @@ class BlockingStrategy implements HookExecutionStrategy {
  */
 class ContextStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
-    const { filteredGroups, enrichedPayloadStr, hookEventName, daemonContext } = ctx
+    const { filteredGroups, enrichedPayloadStr, hookEventName, daemonContext, cwd } = ctx
 
     await launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext)
-    const cwd = extractCwd(enrichedPayloadStr)
     const contexts: string[] = []
     const executions: HookExecution[] = []
 
@@ -253,6 +252,7 @@ export async function runPreToolUse(
     canonicalEvent: "preToolUse",
     hookEventName: "preToolUse",
     daemonContext,
+    cwd: extractCwd(payloadStr),
   })
 }
 
@@ -269,6 +269,7 @@ export async function runBlocking(
     canonicalEvent: canonicalEvent ?? "blocking",
     hookEventName: canonicalEvent ?? "blocking",
     daemonContext,
+    cwd: extractCwd(payloadStr),
   })
 }
 
@@ -285,5 +286,6 @@ export async function runContext(
     canonicalEvent: hookEventName,
     hookEventName,
     daemonContext,
+    cwd: extractCwd(payloadStr),
   })
 }
