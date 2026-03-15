@@ -317,15 +317,20 @@ async function saveSettingsToServer(opts: {
 function useSettingsFetch(cwd: string | null) {
   const [globalForm, setGlobalForm] = useState<GlobalSettingsForm>(DEFAULT_GLOBAL_FORM)
   const [globalBaseline, setGlobalBaseline] = useState<GlobalSettingsForm>(DEFAULT_GLOBAL_FORM)
-  const [globalLoading, setGlobalLoading] = useState(false)
+  const [globalLoaded, setGlobalLoaded] = useState(false)
+  const [globalLoading, setGlobalLoading] = useState(true)
   const [projectForm, setProjectForm] = useState<ProjectSettingsForm>(DEFAULT_PROJECT_FORM)
   const [projectBaseline, setProjectBaseline] = useState<ProjectSettingsForm>(DEFAULT_PROJECT_FORM)
+  const [projectLoaded, setProjectLoaded] = useState(false)
   const [projectLoading, setProjectLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [globalError, setGlobalError] = useState("")
+  const [projectError, setProjectError] = useState("")
 
   useEffect(() => {
     let cancelled = false
     setGlobalLoading(true)
+    setGlobalLoaded(false)
+    setGlobalError("")
     fetch("/settings/global")
       .then((res) => {
         if (!res.ok) throw new Error("Network response was not ok")
@@ -336,10 +341,11 @@ function useSettingsFetch(cwd: string | null) {
         const next = globalSettingsToForm(result.settings || {})
         setGlobalForm(next)
         setGlobalBaseline(next)
+        setGlobalLoaded(true)
       })
       .catch((err) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : "Failed to load global settings")
+        setGlobalError(err instanceof Error ? err.message : "Failed to load global settings")
       })
       .finally(() => {
         if (!cancelled) setGlobalLoading(false)
@@ -353,20 +359,24 @@ function useSettingsFetch(cwd: string | null) {
     if (!cwd) {
       setProjectForm(DEFAULT_PROJECT_FORM)
       setProjectBaseline(DEFAULT_PROJECT_FORM)
+      setProjectLoaded(false)
       return
     }
     let cancelled = false
     setProjectLoading(true)
+    setProjectLoaded(false)
+    setProjectError("")
     void postJson<CachedProjectSettingsResponse>("/settings/project", { cwd })
       .then((result) => {
         if (cancelled) return
         const next = projectSettingsToForm(result)
         setProjectForm(next)
         setProjectBaseline(next)
+        setProjectLoaded(true)
       })
       .catch((err) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : "Failed to load project settings")
+        setProjectError(err instanceof Error ? err.message : "Failed to load project settings")
       })
       .finally(() => {
         if (!cancelled) setProjectLoading(false)
@@ -382,13 +392,17 @@ function useSettingsFetch(cwd: string | null) {
     globalBaseline,
     setGlobalBaseline,
     globalLoading,
+    globalLoaded,
+    globalError,
     projectForm,
     setProjectForm,
     projectBaseline,
     setProjectBaseline,
     projectLoading,
-    error,
-    setError,
+    projectLoaded,
+    projectError,
+    setGlobalError,
+    setProjectError,
   }
 }
 
@@ -473,9 +487,11 @@ function ProjectFieldsGrid({
 function GlobalSettingsColumn({
   form,
   setForm,
+  error,
 }: {
   form: GlobalSettingsForm
   setForm: (fn: GlobalSettingsForm | ((prev: GlobalSettingsForm) => GlobalSettingsForm)) => void
+  error: string
 }) {
   const set = (patch: Partial<GlobalSettingsForm>) => setForm((f) => ({ ...f, ...patch }))
   const num = (key: keyof GlobalSettingsForm) => (e: { target: { value: string } }) =>
@@ -484,6 +500,7 @@ function GlobalSettingsColumn({
   return (
     <div className="settings-column settings-fields">
       <h3 className="settings-column-title">Global Settings</h3>
+      {error && <p className="settings-error">{error}</p>}
       <label className="settings-label" htmlFor="global-ambition-mode">
         <span>Ambition mode</span>
         <p className="settings-desc">
@@ -580,13 +597,15 @@ function ProjectSettingsColumn({
   form,
   setForm,
   loading,
-  baseline,
+  loaded,
+  error,
 }: {
   cwd: string | null
   form: ProjectSettingsForm
   setForm: (fn: ProjectSettingsForm | ((prev: ProjectSettingsForm) => ProjectSettingsForm)) => void
   loading: boolean
-  baseline: ProjectSettingsForm
+  loaded: boolean
+  error: string
 }) {
   const set = (patch: Partial<ProjectSettingsForm>) => setForm((f) => ({ ...f, ...patch }))
   const optNum = (key: keyof ProjectSettingsForm) => (e: { target: { value: string } }) =>
@@ -600,9 +619,13 @@ function ProjectSettingsColumn({
         <p className="metric-note" style={{ marginTop: "1rem" }}>
           Select a project to edit project-specific settings.
         </p>
-      ) : loading && !baseline.collaborationMode ? (
+      ) : loading && !loaded ? (
         <p className="metric-note" style={{ marginTop: "1rem" }}>
           Loading project settings...
+        </p>
+      ) : error && !loaded ? (
+        <p className="settings-error" style={{ marginTop: "1rem" }}>
+          {error}
         </p>
       ) : (
         <>
@@ -680,7 +703,8 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
   const savingRef = useRef(false)
   const retryRef = useRef(false)
   const { globalForm, globalBaseline, projectForm, projectBaseline } = data
-  const { setGlobalForm, setGlobalBaseline, setProjectForm, setProjectBaseline, setError } = data
+  const { setGlobalForm, setGlobalBaseline, setProjectForm, setProjectBaseline } = data
+  const { setGlobalError, setProjectError } = data
 
   const globalDirty = useMemo(
     () => JSON.stringify(globalForm) !== JSON.stringify(globalBaseline),
@@ -697,7 +721,8 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
       return
     }
     savingRef.current = true
-    setError("")
+    setGlobalError("")
+    setProjectError("")
     setStatus("Saving...")
     try {
       await saveSettingsToServer({
@@ -723,7 +748,9 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
       setTimeout(() => setStatus(""), 2000)
     } catch (err) {
       setStatus("")
-      setError(err instanceof Error ? err.message : "Failed to save settings")
+      const msg = err instanceof Error ? err.message : "Failed to save settings"
+      if (globalDirty) setGlobalError(msg)
+      if (projectDirty) setProjectError(msg)
     } finally {
       savingRef.current = false
       if (retryRef.current) {
@@ -739,10 +766,11 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
     projectBaseline,
     projectDirty,
     projectForm,
-    setError,
     setGlobalBaseline,
+    setGlobalError,
     setGlobalForm,
     setProjectBaseline,
+    setProjectError,
     setProjectForm,
   ])
 
@@ -765,13 +793,24 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
 export function SettingsPanel({ cwd }: { cwd: string | null }) {
   const data = useSettingsFetch(cwd)
   const { isSaving, status } = useAutoSave(cwd, data)
-  const { globalForm, setGlobalForm, globalBaseline, globalLoading } = data
-  const { projectForm, setProjectForm, projectBaseline, projectLoading, error } = data
+  const { globalForm, setGlobalForm, globalLoading, globalLoaded, globalError } = data
+  const { projectForm, setProjectForm, projectLoading, projectLoaded, projectError } = data
 
-  if (globalLoading && !globalBaseline.ambitionMode) {
+  const statusText = isSaving ? "Saving..." : status || null
+
+  if (globalLoading && !globalLoaded) {
     return (
       <div className="card panel-settings">
         <p>Loading settings...</p>
+      </div>
+    )
+  }
+
+  if (globalError && !globalLoaded) {
+    return (
+      <div className="card panel-settings">
+        <h2 className="section-title">Settings</h2>
+        <p className="settings-error">{globalError}</p>
       </div>
     )
   }
@@ -780,23 +819,22 @@ export function SettingsPanel({ cwd }: { cwd: string | null }) {
     <section className="card panel-settings settings-combined">
       <header className="settings-header-title-row">
         <h2 className="section-title">Settings</h2>
-        {isSaving ? (
-          <span className="settings-status-saving">Saving...</span>
-        ) : status ? (
-          <span className="settings-status-ok">{status}</span>
-        ) : error ? (
-          <span className="settings-error">{error}</span>
+        {statusText ? (
+          <span className={isSaving ? "settings-status-saving" : "settings-status-ok"}>
+            {statusText}
+          </span>
         ) : null}
       </header>
       <p className="section-subtitle">Manage global behavior and project-specific overrides</p>
       <div className="settings-layout">
-        <GlobalSettingsColumn form={globalForm} setForm={setGlobalForm} />
+        <GlobalSettingsColumn form={globalForm} setForm={setGlobalForm} error={globalError} />
         <ProjectSettingsColumn
           cwd={cwd}
           form={projectForm}
           setForm={setProjectForm}
           loading={projectLoading}
-          baseline={projectBaseline}
+          loaded={projectLoaded}
+          error={projectError}
         />
       </div>
     </section>
