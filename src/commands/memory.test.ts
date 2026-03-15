@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
@@ -61,8 +61,8 @@ async function runMemory(
 // ─── Unit tests: getMemorySources ────────────────────────────────────────────
 
 describe("getMemorySources", () => {
-  it("returns Claude sources in precedence order", () => {
-    const sources = getMemorySources(getAgent("claude"), "/tmp/myproject")
+  it("returns Claude sources in precedence order", async () => {
+    const sources = await getMemorySources(getAgent("claude"), "/tmp/myproject")
     expect(sources.length).toBeGreaterThanOrEqual(3)
     expect(sources[0]?.label).toBe("Project rules")
     expect(sources[0]?.path).toContain("CLAUDE.md")
@@ -74,21 +74,21 @@ describe("getMemorySources", () => {
     expect(last?.path).toContain(".claude/CLAUDE.md")
   })
 
-  it("returns Cursor sources including .cursorrules", () => {
-    const sources = getMemorySources(getAgent("cursor"), "/tmp/myproject")
+  it("returns Cursor sources including .cursorrules", async () => {
+    const sources = await getMemorySources(getAgent("cursor"), "/tmp/myproject")
     expect(sources.length).toBeGreaterThanOrEqual(2)
     expect(sources[0]?.label).toContain(".cursorrules")
   })
 
-  it("returns Gemini sources with project and global", () => {
-    const sources = getMemorySources(getAgent("gemini"), "/tmp/myproject")
+  it("returns Gemini sources with project and global", async () => {
+    const sources = await getMemorySources(getAgent("gemini"), "/tmp/myproject")
     expect(sources.length).toBe(3)
     expect(sources[0]?.path).toContain("GEMINI.md")
     expect(sources[2]?.path).toContain(".gemini/GEMINI.md")
   })
 
-  it("returns Codex sources with AGENTS.md and instructions", () => {
-    const sources = getMemorySources(getAgent("codex"), "/tmp/myproject")
+  it("returns Codex sources with AGENTS.md and instructions", async () => {
+    const sources = await getMemorySources(getAgent("codex"), "/tmp/myproject")
     expect(sources.length).toBe(3)
     expect(sources[0]?.path).toContain("AGENTS.md")
     expect(sources[1]?.path).toContain(".codex/AGENTS.md")
@@ -96,21 +96,21 @@ describe("getMemorySources", () => {
     expect(sources.some((source) => source.path.includes("history.jsonl"))).toBe(false)
   })
 
-  it("includes additional memory files for Claude projects", () => {
+  it("includes additional memory files for Claude projects", async () => {
     // Create a temp dir with extra memory files
     const tmpHome = join(tmpdir(), `swiz-mem-test-${Date.now()}`)
     const projectKey = "-tmp-memproj"
     const memDir = join(tmpHome, ".claude", "projects", projectKey, "memory")
     mkdirSync(memDir, { recursive: true })
-    writeFileSync(join(memDir, "MEMORY.md"), "# Memory\n")
-    writeFileSync(join(memDir, "debugging.md"), "# Debug notes\n")
-    writeFileSync(join(memDir, "patterns.md"), "# Patterns\n")
+    await Bun.write(join(memDir, "MEMORY.md"), "# Memory\n")
+    await Bun.write(join(memDir, "debugging.md"), "# Debug notes\n")
+    await Bun.write(join(memDir, "patterns.md"), "# Patterns\n")
 
     // Override HOME for agent resolution
     const origHome = process.env.HOME
     process.env.HOME = tmpHome
     try {
-      const sources = getMemorySources(getAgent("claude"), "/tmp/memproj")
+      const sources = await getMemorySources(getAgent("claude"), "/tmp/memproj")
       const labels = sources.map((s) => s.label)
       expect(labels).toContain("Project memory (debugging.md)")
       expect(labels).toContain("Project memory (patterns.md)")
@@ -119,14 +119,14 @@ describe("getMemorySources", () => {
     }
   })
 
-  it("handles Cursor project with .cursor/rules directory", () => {
+  it("handles Cursor project with .cursor/rules directory", async () => {
     const tmpDir = join(tmpdir(), `swiz-cursor-test-${Date.now()}`)
     const rulesDir = join(tmpDir, ".cursor", "rules")
     mkdirSync(rulesDir, { recursive: true })
-    writeFileSync(join(rulesDir, "style.mdc"), "# Style\n")
-    writeFileSync(join(rulesDir, "testing.md"), "# Testing\n")
+    await Bun.write(join(rulesDir, "style.mdc"), "# Style\n")
+    await Bun.write(join(rulesDir, "testing.md"), "# Testing\n")
 
-    const sources = getMemorySources(getAgent("cursor"), tmpDir)
+    const sources = await getMemorySources(getAgent("cursor"), tmpDir)
     const labels = sources.map((s) => s.label)
     expect(labels).toContain("Project rule (style.mdc)")
     expect(labels).toContain("Project rule (testing.md)")
@@ -140,7 +140,7 @@ describe("swiz memory CLI", () => {
     const tmpHome = join(tmpdir(), `swiz-memory-claude-${Date.now()}`)
     const claudeDir = join(tmpHome, ".claude")
     mkdirSync(claudeDir, { recursive: true })
-    writeFileSync(join(claudeDir, "CLAUDE.md"), "# Global Claude rules\n")
+    await Bun.write(join(claudeDir, "CLAUDE.md"), "# Global Claude rules\n")
 
     const { stdout } = await runMemory([], { CLAUDECODE: "1", HOME: tmpHome })
     expect(stdout).toContain("Claude Code")
@@ -153,7 +153,7 @@ describe("swiz memory CLI", () => {
     const tmpRoot = join(tmpdir(), `swiz-memory-gemini-${Date.now()}`)
     const projectDir = join(tmpRoot, "project")
     mkdirSync(projectDir, { recursive: true })
-    writeFileSync(join(projectDir, "GEMINI.md"), "# Project Gemini rules\n")
+    await Bun.write(join(projectDir, "GEMINI.md"), "# Project Gemini rules\n")
 
     const { stdout } = await runMemory(["--gemini", "--dir", projectDir])
     expect(stdout).toContain("Gemini CLI")
@@ -166,7 +166,7 @@ describe("swiz memory CLI", () => {
     const codexDir = join(homeDir, ".codex")
     mkdirSync(codexDir, { recursive: true })
     const globalRulesPath = join(codexDir, "AGENTS.md")
-    writeFileSync(globalRulesPath, "# Codex rules\n")
+    await Bun.write(globalRulesPath, "# Codex rules\n")
 
     const { stdout } = await runMemory(["--codex"], { HOME: homeDir })
     expect(stdout).toContain("Codex CLI")
@@ -185,9 +185,9 @@ describe("swiz memory CLI", () => {
     const globalRulesPath = join(codexDir, "AGENTS.md")
     const globalInstructionsPath = join(codexDir, "instructions.md")
 
-    writeFileSync(projectRulesPath, "PROJECT_RULES_LINE\n")
-    writeFileSync(globalRulesPath, "GLOBAL_RULES_LINE\n")
-    writeFileSync(globalInstructionsPath, "GLOBAL_INSTRUCTIONS_LINE\n")
+    await Bun.write(projectRulesPath, "PROJECT_RULES_LINE\n")
+    await Bun.write(globalRulesPath, "GLOBAL_RULES_LINE\n")
+    await Bun.write(globalInstructionsPath, "GLOBAL_INSTRUCTIONS_LINE\n")
 
     const { stdout, exitCode } = await runMemory(["--codex", "--dir", projectDir, "--view"], {
       HOME: homeDir,
@@ -207,9 +207,9 @@ describe("swiz memory CLI", () => {
     const projectDir = join(tmpRoot, "project")
     const rulesDir = join(projectDir, ".cursor", "rules")
     mkdirSync(rulesDir, { recursive: true })
-    writeFileSync(join(projectDir, ".cursorrules"), "# Root cursor rules\n")
-    writeFileSync(join(rulesDir, "coding-standards.mdc"), "# Coding standards\n")
-    writeFileSync(join(rulesDir, "architecture.mdc"), "# Architecture\n")
+    await Bun.write(join(projectDir, ".cursorrules"), "# Root cursor rules\n")
+    await Bun.write(join(rulesDir, "coding-standards.mdc"), "# Coding standards\n")
+    await Bun.write(join(rulesDir, "architecture.mdc"), "# Architecture\n")
 
     const { stdout } = await runMemory(["--cursor", "--dir", projectDir])
     expect(stdout).toContain("Cursor")
@@ -239,10 +239,10 @@ describe("swiz memory CLI", () => {
     mkdirSync(join(homeDir, ".gemini"), { recursive: true })
     mkdirSync(join(homeDir, ".codex"), { recursive: true })
 
-    writeFileSync(join(projectDir, "CLAUDE.md"), "# Claude\n")
-    writeFileSync(join(projectDir, ".cursorrules"), "# Cursor\n")
-    writeFileSync(join(projectDir, "GEMINI.md"), "# Gemini\n")
-    writeFileSync(join(projectDir, "AGENTS.md"), "# Codex\n")
+    await Bun.write(join(projectDir, "CLAUDE.md"), "# Claude\n")
+    await Bun.write(join(projectDir, ".cursorrules"), "# Cursor\n")
+    await Bun.write(join(projectDir, "GEMINI.md"), "# Gemini\n")
+    await Bun.write(join(projectDir, "AGENTS.md"), "# Codex\n")
 
     const { stdout, exitCode } = await runMemory(["--dir", projectDir], { HOME: homeDir })
     expect(exitCode).toBe(0)
@@ -268,7 +268,7 @@ describe("swiz memory CLI", () => {
     const homeDir = join(tmpRoot, "home")
     mkdirSync(projectDir, { recursive: true })
     mkdirSync(homeDir, { recursive: true })
-    writeFileSync(join(projectDir, "AGENTS.md"), "# Project Codex rules\n")
+    await Bun.write(join(projectDir, "AGENTS.md"), "# Project Codex rules\n")
 
     const { stdout, exitCode } = await runMemory(["--all", "--dir", projectDir], { HOME: homeDir })
     expect(exitCode).toBe(0)
@@ -294,9 +294,9 @@ describe("swiz memory CLI", () => {
     const globalRulesPath = join(codexDir, "AGENTS.md")
     const globalInstructionsPath = join(codexDir, "instructions.md")
 
-    writeFileSync(projectRulesPath, "")
-    writeFileSync(globalRulesPath, "# Global Codex rules\n")
-    writeFileSync(globalInstructionsPath, "")
+    await Bun.write(projectRulesPath, "")
+    await Bun.write(globalRulesPath, "# Global Codex rules\n")
+    await Bun.write(globalInstructionsPath, "")
 
     const { stdout, exitCode } = await runMemory(["--codex", "--dir", projectDir], {
       HOME: homeDir,
@@ -323,9 +323,9 @@ describe("swiz memory CLI", () => {
     const globalRulesPath = join(codexDir, "AGENTS.md")
     const globalInstructionsPath = join(codexDir, "instructions.md")
 
-    writeFileSync(projectRulesPath, "")
-    writeFileSync(globalRulesPath, "ONLY_INCLUDED_CONTENT\n")
-    writeFileSync(globalInstructionsPath, "")
+    await Bun.write(projectRulesPath, "")
+    await Bun.write(globalRulesPath, "ONLY_INCLUDED_CONTENT\n")
+    await Bun.write(globalInstructionsPath, "")
 
     const { stdout, exitCode } = await runMemory(["--codex", "--dir", projectDir, "--view"], {
       HOME: homeDir,
@@ -347,7 +347,7 @@ describe("swiz memory CLI", () => {
     const tmpRoot = join(tmpdir(), `swiz-memory-override-${Date.now()}`)
     const projectDir = join(tmpRoot, "project")
     mkdirSync(projectDir, { recursive: true })
-    writeFileSync(join(projectDir, "GEMINI.md"), "# Project Gemini rules\n")
+    await Bun.write(join(projectDir, "GEMINI.md"), "# Project Gemini rules\n")
 
     const { stdout } = await runMemory(["--gemini", "--dir", projectDir], { CLAUDECODE: "1" })
     expect(stdout).toContain("Gemini CLI")

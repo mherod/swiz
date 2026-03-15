@@ -62,6 +62,14 @@ export async function listDaemonPids(port: number): Promise<number[]> {
   ]
 }
 
+function tryKill(pid: number, signal?: string): void {
+  try {
+    process.kill(pid, signal)
+  } catch {
+    // process may have already exited
+  }
+}
+
 export async function restartDaemonOnPort(
   port: number,
   selfPid: number = process.pid
@@ -70,7 +78,7 @@ export async function restartDaemonOnPort(
   if (existing.length === 0) return
 
   for (const pid of existing) {
-    Bun.spawnSync(["kill", String(pid)], { stdout: "ignore", stderr: "ignore" })
+    tryKill(pid)
   }
 
   // Give processes a short grace period to exit before forcing.
@@ -80,7 +88,7 @@ export async function restartDaemonOnPort(
     if (remaining.length === 0) return
     if (attempt === 5) {
       for (const pid of remaining) {
-        Bun.spawnSync(["kill", "-9", String(pid)], { stdout: "ignore", stderr: "ignore" })
+        tryKill(pid, "SIGKILL")
       }
     }
   }
@@ -200,12 +208,17 @@ function summarizeTaskInput(input: Record<string, unknown>): string | null {
   return null
 }
 
+function extractPathValue(input: Record<string, unknown>): string | undefined {
+  const v = input.path ?? input.file_path ?? input.file ?? input.filePath
+  return typeof v === "string" ? v : undefined
+}
+
 function summarizeFileOrCommandInput(input: Record<string, unknown>): string | null {
   if (typeof input.skill === "string") {
     return typeof input.args === "string" ? `${input.skill} ${input.args}` : input.skill
   }
-  const pathVal = input.path ?? input.file_path ?? input.file ?? input.filePath
-  if (typeof pathVal === "string") return pathVal
+  const pathVal = extractPathValue(input)
+  if (pathVal !== undefined) return pathVal
   if (typeof input.command === "string") return truncate(input.command, 80)
   if (typeof input.pattern === "string") return input.pattern
   if (typeof input.query === "string") return truncate(input.query, 60)

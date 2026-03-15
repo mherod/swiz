@@ -1,4 +1,5 @@
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync } from "node:fs"
+import { readdir } from "node:fs/promises"
 import { basename, join } from "node:path"
 import type { AgentDef } from "./agents.ts"
 import { getHomeDir } from "./home.ts"
@@ -37,7 +38,7 @@ export interface ProviderAdapter {
   getProjectStateDir(projectDir: string): string
   getProjectFiles(projectDir: string): string[]
   getRuleDirs(projectDir: string): ProviderRuleDirs
-  getMemorySources(projectDir: string): ProviderMemorySource[]
+  getMemorySources(projectDir: string): ProviderMemorySource[] | Promise<ProviderMemorySource[]>
   getTranscriptProviders(): Set<TranscriptProviderId>
   getSessionDir(): string
   getSkillDirs(): string[]
@@ -48,12 +49,12 @@ function projectPath(projectDir: string, ...parts: string[]): string {
   return join(projectDir, ...parts)
 }
 
-function scanRuleDir(dirPath: string, extensions: string[]): string[] {
+async function scanRuleDir(dirPath: string, extensions: string[]): Promise<string[]> {
   if (!existsSync(dirPath)) return []
 
   const files: string[] = []
   try {
-    for (const entry of readdirSync(dirPath)) {
+    for (const entry of await readdir(dirPath)) {
       if (extensions.some((ext) => entry.endsWith(ext))) {
         files.push(join(dirPath, entry))
       }
@@ -65,19 +66,19 @@ function scanRuleDir(dirPath: string, extensions: string[]): string[] {
   return files
 }
 
-function appendRuleDirEntries(
+async function appendRuleDirEntries(
   sources: ProviderMemorySource[],
   dirPath: string,
   extensions: string[],
   missingDirLabel: string,
   labelForEntry: (entryName: string) => string
-): void {
+): Promise<void> {
   if (!existsSync(dirPath)) {
     sources.push({ label: missingDirLabel, path: dirPath })
     return
   }
 
-  for (const file of scanRuleDir(dirPath, extensions)) {
+  for (const file of await scanRuleDir(dirPath, extensions)) {
     sources.push({ label: labelForEntry(basename(file)), path: file })
   }
 }
@@ -130,7 +131,7 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
     getRuleDirs() {
       return { project: null, global: null }
     },
-    getMemorySources(projectDir: string) {
+    async getMemorySources(projectDir: string) {
       const memoryDir = this.getProjectStateDir(projectDir)
       const projectMemoryPath = join(memoryDir, "MEMORY.md")
 
@@ -139,7 +140,7 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
         { label: "Project memory", path: projectMemoryPath },
       ]
 
-      for (const file of scanRuleDir(memoryDir, this.config.ruleExtensions)) {
+      for (const file of await scanRuleDir(memoryDir, this.config.ruleExtensions)) {
         if (file === projectMemoryPath) continue
         sources.push({ label: `Project memory (${basename(file)})`, path: file })
       }
@@ -182,7 +183,7 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
         global: join(this.getHomeDir(), "rules"),
       }
     },
-    getMemorySources(projectDir: string) {
+    async getMemorySources(projectDir: string) {
       const sources: ProviderMemorySource[] = []
 
       for (const file of this.getProjectFiles(projectDir)) {
@@ -191,7 +192,7 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
 
       const ruleDirs = this.getRuleDirs(projectDir)
       if (ruleDirs.project) {
-        appendRuleDirEntries(
+        await appendRuleDirEntries(
           sources,
           ruleDirs.project,
           this.config.ruleExtensions,
@@ -201,7 +202,7 @@ const PROVIDER_ADAPTERS: Record<ProviderAgentId, ProviderAdapter> = {
       }
 
       if (ruleDirs.global) {
-        appendRuleDirEntries(
+        await appendRuleDirEntries(
           sources,
           ruleDirs.global,
           this.config.ruleExtensions,

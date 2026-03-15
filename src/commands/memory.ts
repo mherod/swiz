@@ -63,7 +63,10 @@ const WARNING_THRESHOLD_FACTOR = 0.9
  * Returns the ordered list of rule/memory sources for an agent and target directory.
  * Sources are listed in precedence order: project-local first, then global.
  */
-export function getMemorySources(agent: AgentDef, targetDir: string): MemorySource[] {
+export async function getMemorySources(
+  agent: AgentDef,
+  targetDir: string
+): Promise<MemorySource[]> {
   const adapter = getProviderAdapter(agent)
   if (!adapter) return []
 
@@ -302,7 +305,7 @@ async function renderAgentSources(
   let renderedAgentCount = 0
 
   for (const [agentIndex, agent] of targetAgents.entries()) {
-    const sources = getMemorySources(agent, targetDir)
+    const sources = await getMemorySources(agent, targetDir)
     const existing = sources.filter((s) => isPresentMemoryFile(s.path))
     if (existing.length === 0) {
       if (!showingAll) {

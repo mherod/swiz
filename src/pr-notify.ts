@@ -6,7 +6,7 @@
  * ~/.swiz/pr-poll-state.json so the poller never replays old notifications.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { getPrPollStatePath } from "./settings.ts"
 
@@ -44,11 +44,11 @@ export async function readPrPollState(home: string): Promise<PrPollState> {
   return { lastPolledAt: oneDayAgo }
 }
 
-export function writePrPollState(home: string, state: PrPollState): void {
+export async function writePrPollState(home: string, state: PrPollState): Promise<void> {
   const path = getPrPollStatePath(home)
   if (!path) return
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, "utf8")
+  await Bun.write(path, `${JSON.stringify(state, null, 2)}\n`)
 }
 
 // ─── Fetch notifications ─────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ export async function fetchNewPrNotifications(home: string): Promise<PrNotificat
   await proc.exited
 
   // Update state regardless of result — avoids replaying on next error recovery
-  writePrPollState(home, { lastPolledAt: new Date().toISOString() })
+  void writePrPollState(home, { lastPolledAt: new Date().toISOString() })
 
   if (proc.exitCode !== 0) {
     // gh not authenticated or network error — fail silently
