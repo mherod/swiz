@@ -12,7 +12,7 @@ import { tryReplayPendingMutations } from "../issue-store.ts"
 import type { HookGroup } from "../manifest.ts"
 import { manifest } from "../manifest.ts"
 import { loadAllPlugins } from "../plugins.ts"
-import { readProjectSettings, resolveProjectHooks } from "../settings.ts"
+import { type ProjectSwizSettings, readProjectSettings, resolveProjectHooks } from "../settings.ts"
 import { computeTranscriptSummary, type TranscriptSummary } from "../transcript-summary.ts"
 import {
   applyHookSettingFilters,
@@ -162,7 +162,12 @@ function backfillPayloadDefaults(payload: Record<string, unknown>): void {
   }
 }
 
-async function loadCombinedManifest(cwd: string): Promise<HookGroup[]> {
+interface CombinedManifestResult {
+  manifest: HookGroup[]
+  projectSettings: ProjectSwizSettings | null
+}
+
+async function loadCombinedManifest(cwd: string): Promise<CombinedManifestResult> {
   let combinedManifest: HookGroup[] = [...manifest]
   const projectSettings = await readProjectSettings(cwd)
 
@@ -187,7 +192,7 @@ async function loadCombinedManifest(cwd: string): Promise<HookGroup[]> {
     }
   }
 
-  return combinedManifest
+  return { manifest: combinedManifest, projectSettings }
 }
 
 async function enrichPayloadForHooks(
@@ -302,14 +307,26 @@ async function resolveFilteredGroups(
   ctx: DispatchContext,
   manifestProvider?: DispatchRequest["manifestProvider"]
 ): Promise<HookGroup[]> {
-  const combinedManifest = manifestProvider
-    ? await manifestProvider(ctx.cwd)
-    : await loadCombinedManifest(ctx.cwd)
+  let combinedManifest: HookGroup[]
+  let preloadedProjectSettings: ProjectSwizSettings | null | undefined
+
+  if (manifestProvider) {
+    combinedManifest = await manifestProvider(ctx.cwd)
+    preloadedProjectSettings = undefined // daemon provides manifest but not settings snapshot
+  } else {
+    const result = await loadCombinedManifest(ctx.cwd)
+    combinedManifest = result.manifest
+    preloadedProjectSettings = result.projectSettings
+  }
 
   const matchingGroups = combinedManifest.filter(
     (g) => g.event === ctx.canonicalEvent && groupMatches(g, ctx.toolName, ctx.trigger)
   )
-  const filteredGroups = await applyHookSettingFilters(matchingGroups, ctx.payload)
+  const filteredGroups = await applyHookSettingFilters(
+    matchingGroups,
+    ctx.payload,
+    preloadedProjectSettings
+  )
 
   log(
     `   matched ${matchingGroups.length} group(s) from ${combinedManifest.filter((g) => g.event === ctx.canonicalEvent).length} total`

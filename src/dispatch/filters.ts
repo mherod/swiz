@@ -13,6 +13,7 @@ import type { HookGroup } from "../manifest.ts"
 import {
   type CollaborationMode,
   getEffectiveSwizSettings,
+  type ProjectSwizSettings,
   readProjectSettings,
   readProjectState,
   readSwizSettings,
@@ -183,11 +184,23 @@ export async function filterStateHooks(groups: HookGroup[], cwd: string): Promis
 
 export async function applyHookSettingFilters(
   groups: HookGroup[],
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  preloadedProjectSettings?: ProjectSwizSettings | null
 ): Promise<HookGroup[]> {
-  const settings = await readSwizSettings()
   const cwd = (payload.cwd as string | undefined) ?? ""
-  const projectSettings = cwd ? await readProjectSettings(cwd) : null
+
+  // Fan out independent reads concurrently. When the caller already holds
+  // projectSettings (e.g. from loadCombinedManifest), skip the extra read.
+  const [settings, projectSettings, detectedStacks] = await Promise.all([
+    readSwizSettings(),
+    preloadedProjectSettings !== undefined
+      ? Promise.resolve(preloadedProjectSettings)
+      : cwd
+        ? readProjectSettings(cwd)
+        : Promise.resolve(null),
+    cwd ? detectProjectStack(cwd) : Promise.resolve([]),
+  ])
+
   const rawSessionId = payload.session_id ?? payload.sessionId
   const sessionId = typeof rawSessionId === "string" ? rawSessionId : null
   const effective = getEffectiveSwizSettings(settings, sessionId)
@@ -196,7 +209,6 @@ export async function applyHookSettingFilters(
     ...(settings.disabledHooks ?? []),
     ...(projectSettings?.disabledHooks ?? []),
   ])
-  const detectedStacks = cwd ? await detectProjectStack(cwd) : []
   const filtered = filterPrMergeModeHooks(
     groups,
     effective.prMergeMode,
