@@ -260,13 +260,15 @@ async function evalHookConditions(
   groups: Array<{ hooks: Array<{ condition?: string; file: string }> }>,
   results: Record<string, boolean>
 ): Promise<void> {
-  for (const group of groups) {
-    for (const hook of group.hooks) {
-      if (hook.condition && !(hook.file in results)) {
-        results[hook.file] = await evalCondition(hook.condition)
-      }
-    }
-  }
+  const pending: Array<{ file: string; condition: string }> = []
+  for (const group of groups)
+    for (const hook of group.hooks)
+      if (hook.condition && !(hook.file in results))
+        pending.push({ file: hook.file, condition: hook.condition })
+
+  if (pending.length === 0) return
+  const evaluated = await Promise.all(pending.map(({ condition }) => evalCondition(condition)))
+  for (let i = 0; i < pending.length; i++) results[pending[i]!.file] = evaluated[i]!
 }
 
 async function computeEligibility(cwd: string): Promise<EligibilitySnapshot> {
