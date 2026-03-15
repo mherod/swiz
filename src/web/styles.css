@@ -1849,16 +1849,34 @@ tbody tr:hover {
   line-height: 1.4;
 }
 
-.tool-category-shell { border-color: rgba(126, 182, 255, 0.28); }
-.tool-category-file { border-color: rgba(140, 200, 140, 0.28); }
-.tool-category-search { border-color: rgba(200, 170, 100, 0.28); }
-.tool-category-task { border-color: rgba(100, 200, 220, 0.28); }
-.tool-category-skill { border-color: rgba(180, 140, 255, 0.28); }
+.tool-category-shell {
+  border-color: rgba(126, 182, 255, 0.28);
+}
+.tool-category-file {
+  border-color: rgba(140, 200, 140, 0.28);
+}
+.tool-category-search {
+  border-color: rgba(200, 170, 100, 0.28);
+}
+.tool-category-task {
+  border-color: rgba(100, 200, 220, 0.28);
+}
+.tool-category-skill {
+  border-color: rgba(180, 140, 255, 0.28);
+}
 
-.tool-category-file .tool-name { color: var(--color-green-300); }
-.tool-category-search .tool-name { color: var(--color-amber-400); }
-.tool-category-task .tool-name { color: var(--color-cyan-300); }
-.tool-category-skill .tool-name { color: #b88cff; }
+.tool-category-file .tool-name {
+  color: var(--color-green-300);
+}
+.tool-category-search .tool-name {
+  color: var(--color-amber-400);
+}
+.tool-category-task .tool-name {
+  color: var(--color-cyan-300);
+}
+.tool-category-skill .tool-name {
+  color: #b88cff;
+}
 
 .tool-diff-old {
   color: var(--color-red-300);
@@ -2209,7 +2227,9 @@ tbody tr:hover {
   left: 50%;
   transform: translateX(-50%);
   z-index: 100;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(105, 138, 255, 0.12);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(105, 138, 255, 0.12);
 }
 
 .dock-top {
@@ -2263,9 +2283,9 @@ tbody tr:hover {
   gap: var(--space-1);
 }
 
-.dock-icon-project {
+.dock .dock-icon-project {
   border-right: 1px solid var(--border-subtle);
-  padding-right: var(--space-2) !important;
+  padding-right: var(--space-2);
   margin-right: var(--space-1);
 }
 
