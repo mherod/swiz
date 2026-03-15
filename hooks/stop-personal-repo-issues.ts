@@ -182,7 +182,7 @@ const SCORE_NORM: Record<string, number> = Object.fromEntries(
 )
 
 function scoreIssue(issue: Issue): number {
-  return issue.labels.reduce((sum, l) => sum + (SCORE_NORM[normaliseLabel(l.name)] ?? 0), 0)
+  return (issue.labels ?? []).reduce((sum, l) => sum + (SCORE_NORM[normaliseLabel(l.name)] ?? 0), 0)
 }
 
 export interface Issue {
@@ -293,7 +293,9 @@ function filterVisibleIssues(issues: Issue[], filterUser?: string): Issue[] {
         (i) => i.author?.login === filterUser || i.assignees?.some((a) => a.login === filterUser)
       )
     : issues
-  return userFiltered.filter((i) => !i.labels.some((l) => SKIP_NORM.has(normaliseLabel(l.name))))
+  return userFiltered.filter(
+    (i) => !(i.labels ?? []).some((l) => SKIP_NORM.has(normaliseLabel(l.name)))
+  )
 }
 
 export async function getActionableIssues(cwd: string, filterUser?: string): Promise<Issue[]> {

@@ -12,12 +12,15 @@ import {
 describe("hasAiProvider", () => {
   const origKey = process.env.GEMINI_API_KEY
   const origNoBackend = process.env.AI_TEST_NO_BACKEND
+  const origOpenRouterKey = process.env.OPENROUTER_API_KEY
 
   afterEach(() => {
     if (origKey === undefined) delete process.env.GEMINI_API_KEY
     else process.env.GEMINI_API_KEY = origKey
     if (origNoBackend === undefined) delete process.env.AI_TEST_NO_BACKEND
     else process.env.AI_TEST_NO_BACKEND = origNoBackend
+    if (origOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY
+    else process.env.OPENROUTER_API_KEY = origOpenRouterKey
   })
 
   test("returns false when AI_TEST_NO_BACKEND=1", () => {
@@ -30,12 +33,20 @@ describe("hasAiProvider", () => {
     process.env.GEMINI_API_KEY = "test-key"
     expect(hasAiProvider()).toBe(true)
   })
+
+  test("returns true when OPENROUTER_API_KEY is set", () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    delete process.env.GEMINI_API_KEY
+    process.env.OPENROUTER_API_KEY = "test-key"
+    expect(hasAiProvider()).toBe(true)
+  })
 })
 
 describe("activeProvider", () => {
   const origKey = process.env.GEMINI_API_KEY
   const origNoBackend = process.env.AI_TEST_NO_BACKEND
   const origAiProvider = process.env.AI_PROVIDER
+  const origOpenRouterKey = process.env.OPENROUTER_API_KEY
 
   afterEach(() => {
     if (origKey === undefined) delete process.env.GEMINI_API_KEY
@@ -44,6 +55,8 @@ describe("activeProvider", () => {
     else process.env.AI_TEST_NO_BACKEND = origNoBackend
     if (origAiProvider === undefined) delete process.env.AI_PROVIDER
     else process.env.AI_PROVIDER = origAiProvider
+    if (origOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY
+    else process.env.OPENROUTER_API_KEY = origOpenRouterKey
   })
 
   test("returns null when AI_TEST_NO_BACKEND=1", () => {
@@ -51,10 +64,11 @@ describe("activeProvider", () => {
     expect(activeProvider()).toBeNull()
   })
 
-  test("returns 'gemini' when GEMINI_API_KEY is set and claude CLI is unavailable", () => {
+  test("returns 'gemini' when GEMINI_API_KEY is set and no higher-priority provider is available", () => {
     delete process.env.AI_TEST_NO_BACKEND
+    delete process.env.OPENROUTER_API_KEY
     process.env.GEMINI_API_KEY = "test-key"
-    // Claude takes priority in auto-select; this assertion holds only when claude is not installed
+    // OpenRouter > Claude > Gemini in auto-select priority
     if (!Bun.which("claude")) {
       expect(activeProvider()).toBe("gemini")
     } else {
@@ -118,6 +132,26 @@ describe("activeProvider", () => {
     } else {
       expect(() => activeProvider("claude")).toThrow("claude CLI is not installed")
     }
+  })
+
+  test("AI_PROVIDER=openrouter selects openrouter when OPENROUTER_API_KEY is set", () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.OPENROUTER_API_KEY = "test-key"
+    process.env.AI_PROVIDER = "openrouter"
+    expect(activeProvider()).toBe("openrouter")
+  })
+
+  test("AI_PROVIDER=openrouter throws when OPENROUTER_API_KEY is not set", () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    delete process.env.OPENROUTER_API_KEY
+    process.env.AI_PROVIDER = "openrouter"
+    expect(() => activeProvider()).toThrow("OPENROUTER_API_KEY is not set")
+  })
+
+  test("override argument accepts openrouter when key is set", () => {
+    delete process.env.AI_TEST_NO_BACKEND
+    process.env.OPENROUTER_API_KEY = "test-key"
+    expect(activeProvider("openrouter")).toBe("openrouter")
   })
 })
 

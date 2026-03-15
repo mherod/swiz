@@ -1,14 +1,15 @@
 // Unified AI provider layer built on AI SDK v6.
 //
 // Dispatches text/stream/object generation to whichever provider is available:
-//   1. Claude Code (via claude CLI in PATH)
-//   2. Gemini (via GEMINI_API_KEY or gemini CLI OAuth)
-//   3. Codex CLI (via codex CLI in PATH)
+//   1. OpenRouter (via OPENROUTER_API_KEY)
+//   2. Claude Code (via claude CLI in PATH)
+//   3. Gemini (via GEMINI_API_KEY or gemini CLI OAuth)
+//   4. Codex CLI (via codex CLI in PATH)
 //
 // Provider override (highest to lowest precedence):
 //   1. options.provider passed to each prompt function
-//   2. AI_PROVIDER env var ("gemini" | "codex" | "claude")
-//   3. Auto-select: Claude Code preferred, then Gemini, then Codex CLI
+//   2. AI_PROVIDER env var ("gemini" | "codex" | "claude" | "openrouter")
+//   3. Auto-select: OpenRouter preferred, then Claude Code, then Gemini, then Codex CLI
 //
 // Usage:
 //   import { hasAiProvider, promptText, promptStreamText, promptObject } from "./ai-providers.ts"
@@ -30,7 +31,7 @@ import {
 
 // ─── Provider types ───────────────────────────────────────────────────────────
 
-export type AiProviderId = "gemini" | "codex" | "claude"
+export type AiProviderId = "gemini" | "codex" | "claude" | "openrouter"
 
 // ─── Codex provider ──────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ export interface PromptStreamOptions extends PromptOptions {
 
 const CODEX_DEFAULT_MODEL = "codex-mini-latest"
 const CLAUDE_DEFAULT_MODEL = "sonnet"
+const OPENROUTER_DEFAULT_MODEL = "openrouter/free"
 const GEMINI_KNOWN_MODELS = [
   "gemini-flash-latest",
   "gemini-2.5-flash",
@@ -94,6 +96,11 @@ function hasCodexCli(): boolean {
 function hasClaudeCode(): boolean {
   if (process.env.AI_TEST_NO_BACKEND === "1") return false
   return Boolean(Bun.which("claude"))
+}
+
+function hasOpenRouterApiKey(): boolean {
+  if (process.env.AI_TEST_NO_BACKEND === "1") return false
+  return Boolean(process.env.OPENROUTER_API_KEY)
 }
 
 export function resolveSignal(options?: { signal?: AbortSignal; timeout?: number }): {
@@ -227,6 +234,67 @@ async function promptClaudeObject<T>(
   }
 }
 
+// ─── OpenRouter provider ──────────────────────────────────────────────────────
+
+async function promptOpenRouterText(prompt: string, options?: PromptOptions): Promise<string> {
+  const { generateText } = await import("ai")
+  const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
+  const provider = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY })
+  const model = provider.chat(options?.model ?? OPENROUTER_DEFAULT_MODEL)
+  const { signal, cleanup } = resolveSignal(options)
+  try {
+    const { text } = await generateText({ model, prompt, abortSignal: signal })
+    return text.trim()
+  } finally {
+    cleanup()
+  }
+}
+
+async function promptOpenRouterStreamText(
+  prompt: string,
+  options?: PromptStreamOptions
+): Promise<string> {
+  const { streamText } = await import("ai")
+  const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
+  const provider = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY })
+  const model = provider.chat(options?.model ?? OPENROUTER_DEFAULT_MODEL)
+  const { signal, cleanup } = resolveSignal(options)
+  try {
+    const result = streamText({ model, prompt, abortSignal: signal })
+    let text = ""
+    for await (const part of result.textStream) {
+      text += part
+      options?.onTextPart?.(part)
+    }
+    return text.trim()
+  } finally {
+    cleanup()
+  }
+}
+
+async function promptOpenRouterObject<T>(
+  prompt: string,
+  schema: ZodType<T>,
+  options?: PromptOptions
+): Promise<T> {
+  const { generateText, Output } = await import("ai")
+  const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
+  const provider = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY })
+  const model = provider.chat(options?.model ?? OPENROUTER_DEFAULT_MODEL)
+  const { signal, cleanup } = resolveSignal(options)
+  try {
+    const { output } = await generateText({
+      model,
+      output: Output.object({ schema }),
+      prompt,
+      abortSignal: signal,
+    })
+    return output
+  } finally {
+    cleanup()
+  }
+}
+
 // ─── Provider capability registry ────────────────────────────────────────────
 
 interface ProviderCapabilities {
@@ -258,6 +326,11 @@ const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
     streamText: promptClaudeStreamText,
     object: promptClaudeObject,
   },
+  openrouter: {
+    text: promptOpenRouterText,
+    streamText: promptOpenRouterStreamText,
+    object: promptOpenRouterObject,
+  },
 }
 
 // ─── Provider selection ───────────────────────────────────────────────────────
@@ -280,7 +353,7 @@ export function hasAiProvider(): boolean {
   ) {
     return true
   }
-  return hasGeminiApiKey() || hasCodexCli() || hasClaudeCode()
+  return hasGeminiApiKey() || hasCodexCli() || hasClaudeCode() || hasOpenRouterApiKey()
 }
 
 /**
@@ -320,8 +393,16 @@ function handleExplicitlyRequestedProvider(
     }
     return "claude"
   }
+  if (requested === "openrouter") {
+    if (!hasOpenRouterApiKey()) {
+      throw new Error("AI_PROVIDER=openrouter requested but OPENROUTER_API_KEY is not set.")
+    }
+    return "openrouter"
+  }
   if (requested !== undefined) {
-    throw new Error(`Unknown AI provider "${requested}". Valid values: gemini, codex, claude.`)
+    throw new Error(
+      `Unknown AI provider "${requested}". Valid values: gemini, codex, claude, openrouter.`
+    )
   }
   return null
 }
@@ -337,6 +418,7 @@ export function activeProvider(override?: AiProviderId): AiProviderId | null {
   }
 
   // Auto-select
+  if (hasOpenRouterApiKey()) return "openrouter"
   if (hasClaudeCode()) return "claude"
   if (hasGeminiApiKey()) return "gemini"
   if (hasCodexCli()) return "codex"
@@ -361,6 +443,7 @@ function availableProviders(override?: AiProviderId): AiProviderId[] {
 
   // Auto-select: return all available providers in priority order
   const providers: AiProviderId[] = []
+  if (hasOpenRouterApiKey()) providers.push("openrouter")
   if (hasClaudeCode()) providers.push("claude")
   if (hasGeminiApiKey()) providers.push("gemini")
   if (hasCodexCli()) providers.push("codex")
@@ -382,7 +465,7 @@ export async function promptText(prompt: string, options?: PromptOptions): Promi
   const providers = availableProviders(options?.provider)
   if (providers.length === 0) {
     throw new Error(
-      "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
+      "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, install the codex CLI, or install the claude CLI."
     )
   }
   if (providers.length === 1 && providers[0] === "gemini") {
@@ -465,7 +548,7 @@ export async function promptStreamText(
   const providers = availableProviders(options?.provider)
   if (providers.length === 0) {
     throw new Error(
-      "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
+      "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, install the codex CLI, or install the claude CLI."
     )
   }
   if (providers.length === 1 && providers[0] === "gemini") {
@@ -521,7 +604,7 @@ export async function promptObject<T>(
   const providers = availableProviders(options?.provider)
   if (providers.length === 0) {
     throw new Error(
-      "No AI provider available. Set GEMINI_API_KEY, install the codex CLI, or install the claude CLI."
+      "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, install the codex CLI, or install the claude CLI."
     )
   }
   if (providers.length === 1 && providers[0] === "gemini") {

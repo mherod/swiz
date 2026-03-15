@@ -88,7 +88,7 @@ export const NEEDS_REFINEMENT_NORM = normaliseLabel(NEEDS_REFINEMENT_LABEL)
  *   - priority (priority-high, p0, etc.)
  */
 export function missingRefinementCategories(issue: RefinableIssue): string[] {
-  const normLabels = issue.labels.map((l) => normaliseLabel(l.name))
+  const normLabels = (issue.labels ?? []).map((l) => normaliseLabel(l.name))
   const missing: string[] = []
   if (!normLabels.some((nl) => TYPE_NORM.has(nl))) missing.push("type")
   if (!normLabels.some((nl) => READINESS_NORM.has(nl))) missing.push("readiness")
@@ -104,7 +104,7 @@ export function missingRefinementCategories(issue: RefinableIssue): string[] {
  *      (type + readiness/status + priority)
  */
 export function needsRefinement(issue: RefinableIssue): boolean {
-  const normLabels = issue.labels.map((l) => normaliseLabel(l.name))
+  const normLabels = (issue.labels ?? []).map((l) => normaliseLabel(l.name))
   if (normLabels.some((nl) => nl === NEEDS_REFINEMENT_NORM)) return true
   return missingRefinementCategories(issue).length > 0
 }
