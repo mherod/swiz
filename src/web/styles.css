@@ -2148,6 +2148,85 @@ tbody tr:hover {
   position: relative;
 }
 
+.dock {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  height: 48px;
+  padding: var(--space-1);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-strong);
+  background: rgba(35, 58, 104, 0.25);
+  backdrop-filter: blur(12px);
+}
+
+.dock-top {
+  align-items: flex-start;
+}
+
+.dock-bottom {
+  align-items: flex-end;
+}
+
+.dock-icon {
+  display: flex;
+  aspect-ratio: 1;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+}
+
+.dock-icon:hover {
+  background: rgba(110, 147, 223, 0.18);
+}
+
+.dock-icon-active {
+  background: rgba(110, 147, 223, 0.38);
+}
+
+.dock-icon-label {
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-blue-200);
+  white-space: nowrap;
+  text-align: center;
+  line-height: 1;
+}
+
+.dock-icon-active .dock-icon-label {
+  color: #fff;
+}
+
+.dock-icon-glyph {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.dock-icon > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.dock-icon-project {
+  border-right: 1px solid var(--border-subtle);
+  padding-right: var(--space-2) !important;
+  margin-right: var(--space-1);
+}
+
+.dock-icon-project .dock-icon-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--color-blue-400);
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .number-ticker {
   display: inline-block;
   font-variant-numeric: tabular-nums;

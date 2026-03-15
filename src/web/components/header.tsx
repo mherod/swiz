@@ -1,5 +1,7 @@
 import { motion } from "motion/react"
+import { cn } from "../lib/cn.ts"
 import type { ActiveView } from "../lib/dashboard-state.ts"
+import { Dock, DockIcon } from "./dock.tsx"
 import { NumberTicker } from "./number-ticker.tsx"
 
 interface HeaderProps {
@@ -39,39 +41,12 @@ function buildCacheEntries(cacheStatus: Record<string, number> | null | undefine
   return { totalCacheEntries: total, warmCaches: warm }
 }
 
-function ViewToggleButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string
-  active: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`view-tab${active ? " view-tab-active" : ""}`}
-    >
-      {active && (
-        <motion.span
-          className="view-tab-indicator"
-          layoutId="active-tab"
-          transition={{ type: "spring", bounce: 0.2, duration: 0.4 }}
-        />
-      )}
-      <span className="view-tab-label">{label}</span>
-    </button>
-  )
-}
-
-const TAB_LABELS: Array<{ view: ActiveView; label: string }> = [
-  { view: "dashboard", label: "Dashboard" },
-  { view: "issues", label: "Issues" },
-  { view: "tasks", label: "Tasks" },
-  { view: "transcript", label: "Transcript" },
-  { view: "settings", label: "Project Settings" },
+const TAB_LABELS: Array<{ view: ActiveView; label: string; icon: string }> = [
+  { view: "dashboard", label: "Dashboard", icon: "◩" },
+  { view: "issues", label: "Issues", icon: "◉" },
+  { view: "tasks", label: "Tasks", icon: "☑" },
+  { view: "transcript", label: "Transcript", icon: "❯" },
+  { view: "settings", label: "Settings", icon: "⚙" },
 ]
 
 function HeaderChips({
@@ -167,16 +142,23 @@ export function Header({
           </output>
         </div>
         {onSelectView && (
-          <div className="view-toggle">
-            {TAB_LABELS.map(({ view, label }) => (
-              <ViewToggleButton
+          <Dock iconSize={32} iconMagnification={48} iconDistance={120}>
+            {selectedProjectName ? (
+              <DockIcon disableMagnification className="dock-icon-project">
+                <span className="dock-icon-label">{selectedProjectName}</span>
+              </DockIcon>
+            ) : null}
+            {TAB_LABELS.map(({ view, label, icon }) => (
+              <DockIcon
                 key={view}
-                label={label}
-                active={activeView === view}
                 onClick={() => onSelectView(view)}
-              />
+                className={cn(activeView === view && "dock-icon-active")}
+              >
+                <span className="dock-icon-glyph">{icon}</span>
+                <span className="dock-icon-label">{label}</span>
+              </DockIcon>
             ))}
-          </div>
+          </Dock>
         )}
       </div>
       <span className="topbar-meta">Updated {lastUpdated}</span>

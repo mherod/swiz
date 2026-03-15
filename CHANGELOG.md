@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-03-15
+
+### New Features
+
+- Added animated number tickers to header stats and dashboard
+  performance metrics — counters now spring-animate when
+  values change.
+- Added animated beam component for illustrating data flows
+  between UI elements, powered by motion/react.
+- Added sliding tab indicator with spring physics to the
+  dashboard view toggle.
+- Added staggered entrance animations to header stat chips.
+- Added crossfade view transitions when switching between
+  dashboard tabs.
+- Added Issues, Tasks, and Transcript as dedicated full-page
+  views in the dashboard navigation.
+
+### Improvements
+
+- Established a comprehensive design token system with
+  standardised spacing scale, colour palette, shadow depths,
+  and border radius variables.
+- Aligned task and issue card styling to share consistent
+  spacing, font sizes, border radius, and colour tokens.
+- Reduced visual density across dashboard panels with
+  tighter, more consistent spacing.
+
 ## 2026-03-14
 
 ### New Features
