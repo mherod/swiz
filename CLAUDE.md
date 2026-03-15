@@ -105,19 +105,20 @@ alwaysApply: false
 - `find` is not exempt; use `rg` or Glob.
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
-- **Task completion**: `swiz tasks complete <id> --evidence "note:..."`. Valid evidence prefixes: `commit:`, `pr:`, `file:`, `test:`, `note:` — compound strings and unrecognized prefixes rejected. Plain `TaskUpdate status=completed` rejected by stop hooks.
+- **Task completion**: `swiz tasks complete <id> --evidence "note:..."`. Valid prefixes: `commit:`, `pr:`, `file:`, `test:`, `note:`. **DON'T**: Use `TaskUpdate status=completed` — hook rejects it; parallel calls all fail.
 - **`swiz tasks complete` has NO `--subject` flag**. For native-tool tasks: stub via `swiz tasks update <id> --subject "..." --status in_progress`, then complete.
 - **`swiz tasks update` bulk IDs**: `swiz tasks update <id1> <id2> ... [--subject TEXT] [--status STATUS]` — leading non-flag tokens are IDs.
-- **DON'T**: Assume CI success from partial output (e.g., `gh run watch` alone). Always verify terminal job states with `gh run view <run-id> --json conclusion,status,jobs` and confirm every job reached `conclusion: "success"` before claiming CI green.
+- **DON'T**: Assume CI success from partial output. Always run `gh run view <run-id> --json conclusion,status,jobs` and confirm every job reached `conclusion: "success"`.
 - Mark tasks complete immediately on completion.
 - Treat `gh issue create` and task completion as atomic; recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.
 - Run `git diff <files>` before `git add`.
 - Run `git status` immediately after each `git commit`.
-- After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` when approaching the threshold (default 5000, project-configurable via `.swiz/config.json` `memoryWordThreshold`).
+- After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` when approaching threshold (project-configurable via `.swiz/config.json` `memoryWordThreshold`).
 - Before adding a rule to `CLAUDE.md`, scan nearby rules for conflicts.
 - Before issue labeling, run `gh label list`; use requested literal labels when present, otherwise ask before substituting.
 - When user provides explicit labels, remove conflicting inferred labels; do not restore inferred labels.
-- After `gh issue create`, immediately run `/refine-issue <number>` and apply readiness label (`ready`, `triaged`, `confirmed`, `accepted`, `spec-approved`); `backlog` is not readiness.
+- After `gh issue create`, run `/refine-issue <number>` and apply readiness label (`ready`, `triaged`, `confirmed`, `accepted`, `spec-approved`). **DON'T** skip `/refine-issue` — adding `ready` directly bypasses proposals.
+- **DON'T**: Use `$(cat <<'EOF')` in `gh issue create --body` — redirect guard blocks it. Write body to `/tmp/swiz-issue-N.md`, use `--body-file`.
 - Before stop, audit labels: `gh issue list --state open --json number,title,labels --jq '.[] | select(.labels | map(.name) | any(. == "ready" or . == "backlog" or . == "blocked" or . == "wontfix" or . == "duplicate" or . == "upstream")) | .number'`.
 - If stop hook lists actionable issues, pick at least one via `/work-on-issue <number>`; prioritize `ready` over `backlog`.
 ## Standard Work Sequence
