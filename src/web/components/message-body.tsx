@@ -24,6 +24,8 @@ const BLOCK_KIND_CLASS: Record<string, string> = {
   localCommandCaveat: "hook-context-caveat",
   localCommand: "hook-context-local-command",
   bashCommand: "hook-context-bash",
+  taskNotification: "hook-context-task-notif",
+  persistedOutput: "hook-context-persisted",
 }
 
 function blockKindClassName(kind: string | undefined): string | null {
@@ -52,6 +54,22 @@ function BlockTitle({ block }: { block: ParsedBlock }) {
     return (
       <div className="local-command-header">
         <span className="terminal-icon">❯</span>
+        <p className="hook-context-title">{block.title}</p>
+      </div>
+    )
+  }
+  if (block.kind === "taskNotification") {
+    return (
+      <div className="local-command-header">
+        <span className="terminal-icon">☑</span>
+        <p className="hook-context-title">{block.title}</p>
+      </div>
+    )
+  }
+  if (block.kind === "persistedOutput") {
+    return (
+      <div className="local-command-header">
+        <span className="terminal-icon">📄</span>
         <p className="hook-context-title">{block.title}</p>
       </div>
     )

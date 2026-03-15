@@ -32,6 +32,8 @@ export interface ParsedUserMetadataBlock {
     | "localCommand"
     | "localCommandCaveat"
     | "bashCommand"
+    | "taskNotification"
+    | "persistedOutput"
 }
 
 export interface UserMessageParts {
@@ -146,6 +148,14 @@ function extractInlineContextBlocks(text: string): {
   const bashBlocks = extractBashBlocks(cleanedText)
   cleanedText = bashBlocks.cleanedText
   metadataBlocks.push(...bashBlocks.blocks)
+
+  const taskNotif = extractTaskNotificationBlocks2(cleanedText)
+  cleanedText = taskNotif.cleanedText
+  metadataBlocks.push(...taskNotif.blocks)
+
+  const persisted = extractPersistedOutputBlock(cleanedText)
+  cleanedText = persisted.cleanedText
+  if (persisted.block) metadataBlocks.push(persisted.block)
 
   cleanedText = cleanInterruptionMarkers(cleanedText)
 
@@ -517,6 +527,68 @@ function extractBashBlocks(text: string): {
   }
 
   return { cleanedText, blocks }
+}
+
+function extractTaskNotificationBlocks2(text: string): {
+  cleanedText: string
+  blocks: ParsedUserMetadataBlock[]
+} {
+  const re = /<task-notification>([\s\S]*?)<\/task-notification>/gi
+  const blocks: ParsedUserMetadataBlock[] = []
+  let cleanedText = text
+  for (let match = re.exec(cleanedText); match !== null; match = re.exec(cleanedText)) {
+    const inner = match[1] ?? ""
+    const taskId = extractTagValue(inner, "task-id")
+    const status = extractTagValue(inner, "status")
+    const summary = extractTagValue(inner, "summary")
+
+    const details: Array<{ label: string; value: string }> = []
+    if (taskId) details.push({ label: "task", value: taskId })
+    if (status) details.push({ label: "status", value: status })
+
+    blocks.push({
+      title: summary ?? "Background task completed",
+      details,
+      notes: [],
+      kind: "taskNotification",
+    })
+    cleanedText = cleanedText.replace(match[0], "").trim()
+    re.lastIndex = 0
+  }
+
+  cleanedText = cleanedText
+    .replace(/Read the output file to retrieve the result:\s*\S*/g, "")
+    .trim()
+
+  return { cleanedText, blocks }
+}
+
+function extractPersistedOutputBlock(text: string): {
+  cleanedText: string
+  block: ParsedUserMetadataBlock | null
+} {
+  const re = /<persisted-output>([\s\S]*?)<\/persisted-output>/gi
+  const match = re.exec(text)
+  if (!match) return { cleanedText: text, block: null }
+
+  const inner = (match[1] ?? "").trim()
+  const cleanedText = text.replace(match[0], "").trim()
+  const sizeMatch = /Output too large \(([^)]+)\)/i.exec(inner)
+  const pathMatch = /saved to:\s*(\S+)/i.exec(inner)
+
+  const details: Array<{ label: string; value: string }> = []
+  if (sizeMatch?.[1]) details.push({ label: "size", value: sizeMatch[1] })
+  if (pathMatch?.[1]) details.push({ label: "file", value: compactMetadataValue(pathMatch[1]) })
+
+  return {
+    cleanedText,
+    block: {
+      title: "Output persisted to file",
+      details,
+      notes: [],
+      kind: "persistedOutput",
+    },
+  }
 }
 
 function cleanInterruptionMarkers(text: string): string {
