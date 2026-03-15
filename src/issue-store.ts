@@ -1353,23 +1353,44 @@ export function getIssueStore(dbPath?: string): IssueStore {
 
 /** No-op IssueStore that returns empty results for all reads and silently
  *  drops all writes. Used when the SQLite DB is unavailable so callers
- *  fall through to their gh CLI fallback paths. */
+ *  fall through to their gh CLI fallback paths.
+ *  Emits a one-time warning on the first read so unavailability is observable. */
 function createNoOpStore(): IssueStore {
   const noop = {} as IssueStore
+  let warnedOnce = false
+  const READ_LIST_METHODS = new Set(["listIssues", "listPullRequests", "listCiBranchRuns"])
+  const READ_GET_METHODS = new Set([
+    "getIssue",
+    "getPullRequest",
+    "getCiStatus",
+    "getCiBranchRun",
+    "getPrBranchDetail",
+  ])
+
+  const warnOnFirstRead = (method: string | symbol) => {
+    if (!warnedOnce) {
+      warnedOnce = true
+      debugLog(
+        `[swiz] IssueStore unavailable — ${String(method)}() returning empty; gh CLI fallback will be used`
+      )
+    }
+  }
+
   const handler: ProxyHandler<IssueStore> = {
     get(_target, prop) {
       if (prop === "close") return () => {}
-      // Read methods return empty results
-      if (prop === "listIssues" || prop === "listPullRequests" || prop === "listCiBranchRuns")
-        return () => []
-      if (
-        prop === "getIssue" ||
-        prop === "getPullRequest" ||
-        prop === "getCiStatus" ||
-        prop === "getCiBranchRun" ||
-        prop === "getPrBranchDetail"
-      )
-        return () => null
+      if (READ_LIST_METHODS.has(prop as string)) {
+        return (..._args: unknown[]) => {
+          warnOnFirstRead(prop)
+          return []
+        }
+      }
+      if (READ_GET_METHODS.has(prop as string)) {
+        return (..._args: unknown[]) => {
+          warnOnFirstRead(prop)
+          return null
+        }
+      }
       if (prop === "pendingMutationCount" || prop === "removeClosedIssues") return () => 0
       if (prop === "drainPendingMutations") return () => []
       // Write methods are silent no-ops
