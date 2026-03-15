@@ -202,7 +202,11 @@ export async function runHook(
 ): Promise<HookRunResult> {
   const cmd = file.endsWith(".ts") ? ["bun", join(HOOKS_DIR, file)] : [join(HOOKS_DIR, file)]
   const startTime = Date.now()
-  const configuredTimeoutSec = timeoutSec ?? DEFAULT_TIMEOUT
+  const baseTimeoutSec = timeoutSec ?? DEFAULT_TIMEOUT
+  const testTimeoutSec = process.env.SWIZ_TEST_HOOK_TIMEOUT_SEC
+    ? parseInt(process.env.SWIZ_TEST_HOOK_TIMEOUT_SEC, 10)
+    : 0
+  const configuredTimeoutSec = Math.max(baseTimeoutSec, testTimeoutSec)
 
   const proc = Bun.spawn(cmd, {
     stdin: "pipe",
