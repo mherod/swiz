@@ -29,6 +29,7 @@ const STDERR_ALLOWLIST = new Map<string, string>([
     "src/commands/daemon/daemon-admin.ts",
     "daemon admin — reports unreachable daemon or error HTTP responses",
   ],
+  ["src/commands/continue.ts", "SDK agent message stream logging (tool use, results, errors)"],
   ["src/commands/push-ci.ts", "push-ci failure reporting (CI conclusion !== 'success')"],
   [
     "src/commands/mergetool.ts",

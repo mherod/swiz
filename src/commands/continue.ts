@@ -2,7 +2,8 @@ import { resolve } from "node:path"
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import { detectAgentCli, promptAgent } from "../agent.ts"
 import { type AiProviderId, hasAiProvider, promptText } from "../ai-providers.ts"
-import { DIM, RESET } from "../ansi.ts"
+import { CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
+import { stderrLog } from "../debug.ts"
 import {
   extractPlainTurns,
   findAllProviderSessions,
@@ -163,18 +164,77 @@ function resolveQueryOptions(
   return { continue: true, cwd: targetDir }
 }
 
+function log(msg: string): void {
+  stderrLog("SDK agent message stream logging", `${DIM}[continue]${RESET} ${msg}`)
+}
+
 function writeMessageText(message: SDKMessage): void {
-  if (message.type === "assistant") {
-    for (const block of message.message.content) {
-      if (block.type === "text") {
-        process.stdout.write(block.text)
+  switch (message.type) {
+    case "assistant": {
+      for (const block of message.message.content) {
+        if (block.type === "text") {
+          process.stdout.write(block.text)
+        } else if (block.type === "tool_use") {
+          log(`${CYAN}tool_use${RESET} ${block.name} ${DIM}(id: ${block.id})${RESET}`)
+        }
       }
+      process.stdout.write("\n")
+      if (message.error) {
+        log(`${RED}assistant error:${RESET} ${message.error}`)
+      }
+      break
     }
-    process.stdout.write("\n")
-  } else if (message.type === "result") {
-    if (message.subtype !== "success") {
-      process.exitCode = 1
+    case "result": {
+      const duration = (message.duration_ms / 1000).toFixed(1)
+      const apiDuration = (message.duration_api_ms / 1000).toFixed(1)
+      const cost = message.total_cost_usd.toFixed(4)
+      if (message.subtype === "success") {
+        log(
+          `${GREEN}result: success${RESET} ${DIM}turns=${message.num_turns} duration=${duration}s api=${apiDuration}s cost=$${cost}${RESET}`
+        )
+      } else {
+        log(
+          `${RED}result: ${message.subtype}${RESET} ${DIM}turns=${message.num_turns} duration=${duration}s api=${apiDuration}s cost=$${cost}${RESET}`
+        )
+        if ("errors" in message && message.errors.length > 0) {
+          for (const err of message.errors) {
+            log(`${RED}  error: ${err}${RESET}`)
+          }
+        }
+        process.exitCode = 1
+      }
+      if (message.permission_denials.length > 0) {
+        log(`${YELLOW}permission denials: ${message.permission_denials.length}${RESET}`)
+        for (const d of message.permission_denials) {
+          log(`${DIM}  denied: ${d.tool_name} (${d.tool_use_id})${RESET}`)
+        }
+      }
+      break
     }
+    case "tool_progress": {
+      log(
+        `${DIM}tool_progress${RESET} ${message.tool_name} ${DIM}elapsed=${message.elapsed_time_seconds}s${RESET}`
+      )
+      break
+    }
+    case "tool_use_summary": {
+      log(`${DIM}tool_summary${RESET} ${message.summary}`)
+      break
+    }
+    case "system": {
+      if (message.subtype === "status") {
+        log(`${DIM}status: ${message.status}${RESET}`)
+      } else if (message.subtype === "compact_boundary") {
+        log(`${YELLOW}compaction${RESET} ${DIM}trigger=${message.compact_metadata.trigger}${RESET}`)
+      }
+      break
+    }
+    case "stream_event": {
+      // Partial streaming — no logging needed
+      break
+    }
+    default:
+      break
   }
 }
 
@@ -213,6 +273,14 @@ export const continueCommand: Command = {
 
     const { query } = await import("@anthropic-ai/claude-agent-sdk")
     const queryOptions = resolveQueryOptions(session, sessionQuery, targetDir)
+
+    log(`${DIM}session: ${session.id} (${session.provider ?? "unknown"})${RESET}`)
+    log(`${DIM}prompt: ${suggestion}${RESET}`)
+    if (queryOptions.resume) {
+      log(`${DIM}mode: resume (id=${queryOptions.resume})${RESET}`)
+    } else {
+      log(`${DIM}mode: continue${RESET}`)
+    }
 
     const conversation = query({
       prompt: suggestion,
