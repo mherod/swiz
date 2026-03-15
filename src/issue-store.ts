@@ -1354,10 +1354,14 @@ export function getIssueStore(dbPath?: string): IssueStore {
 /** No-op IssueStore that returns empty results for all reads and silently
  *  drops all writes. Used when the SQLite DB is unavailable so callers
  *  fall through to their gh CLI fallback paths.
- *  Emits a one-time warning on the first read so unavailability is observable. */
+ *  Emits a one-time warning on first read and logs suppressed operation
+ *  count on process exit for full observability. */
+let noOpExitHandlerRegistered = false
+
 function createNoOpStore(): IssueStore {
   const noop = {} as IssueStore
   let warnedOnce = false
+  let suppressedOps = 0
   const READ_LIST_METHODS = new Set(["listIssues", "listPullRequests", "listCiBranchRuns"])
   const READ_GET_METHODS = new Set([
     "getIssue",
@@ -1376,25 +1380,48 @@ function createNoOpStore(): IssueStore {
     }
   }
 
+  if (!noOpExitHandlerRegistered) {
+    noOpExitHandlerRegistered = true
+    process.on("exit", () => {
+      if (suppressedOps > 0) {
+        debugLog(`[swiz] IssueStore no-op: ${suppressedOps} operations suppressed during session`)
+      }
+    })
+  }
+
   const handler: ProxyHandler<IssueStore> = {
     get(_target, prop) {
       if (prop === "close") return () => {}
       if (READ_LIST_METHODS.has(prop as string)) {
         return (..._args: unknown[]) => {
+          suppressedOps++
           warnOnFirstRead(prop)
           return []
         }
       }
       if (READ_GET_METHODS.has(prop as string)) {
         return (..._args: unknown[]) => {
+          suppressedOps++
           warnOnFirstRead(prop)
           return null
         }
       }
-      if (prop === "pendingMutationCount" || prop === "removeClosedIssues") return () => 0
-      if (prop === "drainPendingMutations") return () => []
+      if (prop === "pendingMutationCount" || prop === "removeClosedIssues") {
+        return () => {
+          suppressedOps++
+          return 0
+        }
+      }
+      if (prop === "drainPendingMutations") {
+        return () => {
+          suppressedOps++
+          return []
+        }
+      }
       // Write methods are silent no-ops
-      return () => {}
+      return (..._args: unknown[]) => {
+        suppressedOps++
+      }
     },
   }
   return new Proxy(noop, handler)
