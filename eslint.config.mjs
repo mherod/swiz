@@ -65,6 +65,21 @@ export default tseslint.config(
     },
   },
   {
+    files: ["**/*.tsx", "**/*.jsx"],
+    rules: {
+      "max-depth": [COMPLEXITY_WARN, 3],
+      "max-lines-per-function": [
+        COMPLEXITY_WARN,
+        {
+          max: 60,
+          skipBlankLines: true,
+          skipComments: true,
+          IIFEs: true,
+        },
+      ],
+    },
+  },
+  {
     files: ["**/*.test.{ts,tsx,js,jsx}"],
     rules: {
       complexity: "off",

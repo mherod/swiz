@@ -6,146 +6,122 @@ import { SessionMessages, SessionNav } from "./session-browser.tsx"
 import { ProjectTasksSection, SessionTasksSection } from "./session-tasks.tsx"
 import { SettingsPanel } from "./settings-panel.tsx"
 
-export function DashboardApp() {
-  const {
-    error,
-    lastUpdated,
-    m,
-    projectCount,
-    watchCount,
-    activeHookDispatches,
-    activeProject,
-    activeView,
-    setActiveView,
-    visibleProjects,
-    optimisticAgentProcessProviders,
-    optimisticKillingPids,
-    deletingSessionId,
-    optimisticProjectCwd,
-    optimisticSessionId,
-    handleSelectProject,
-    handleSelectSession,
-    handleKillAgentPid,
-    handleDeleteSession,
-    displayedMessages,
-    messagesLoading,
-    newMessageKeys,
-    sessionToolStats,
-    sessionTasks,
-    sessionTaskSummary,
-    sessionTasksLoading,
-    projectTasks,
-    projectTaskSummary,
-    projectTasksLoading,
-    metricsEvents,
-    cacheStatus,
-    activeSession,
-  } = useDashboardState()
+type DashboardState = ReturnType<typeof useDashboardState>
+
+function DashboardContent({ state }: { state: DashboardState }) {
+  const { activeView, optimisticProjectCwd } = state
+
+  if (activeView === "settings") {
+    return (
+      <div className="bento-settings-page">
+        <SettingsPanel cwd={optimisticProjectCwd} />
+      </div>
+    )
+  }
+
+  if (activeView === "issues") {
+    return (
+      <div className="bento-full-page">
+        <ProjectIssuesPanel cwd={optimisticProjectCwd} />
+      </div>
+    )
+  }
+
+  if (activeView === "tasks") {
+    return (
+      <div className="bento-full-page">
+        <SessionTasksSection
+          tasks={state.sessionTasks}
+          summary={state.sessionTaskSummary}
+          loading={state.sessionTasksLoading}
+        />
+        <ProjectTasksSection
+          tasks={state.projectTasks}
+          summary={state.projectTaskSummary}
+          loading={state.projectTasksLoading}
+        />
+      </div>
+    )
+  }
+
+  const messagesProps = {
+    messages: state.displayedMessages,
+    loading: state.messagesLoading,
+    newKeys: state.newMessageKeys,
+    msgKey,
+    toolStats: state.sessionToolStats,
+    tasks: state.sessionTasks,
+    taskSummary: state.sessionTaskSummary,
+    tasksLoading: state.sessionTasksLoading,
+    projectTasks: state.projectTasks,
+    projectTaskSummary: state.projectTaskSummary,
+    projectTasksLoading: state.projectTasksLoading,
+    events: state.metricsEvents,
+    cacheStatus: state.cacheStatus,
+    activeSession: state.activeSession,
+    activeHookDispatches: state.activeHookDispatches,
+  }
+
+  if (activeView === "transcript") {
+    return (
+      <div className="bento-full-page">
+        <SessionMessages {...messagesProps} hideTasks />
+      </div>
+    )
+  }
 
   return (
-    <div className={`bento ${activeView === "settings" ? "bento-view-settings" : ""}`}>
+    <div className="bento-dashboard-stack">
+      <div className="bento-dashboard-secondary">
+        <ProjectIssuesPanel cwd={optimisticProjectCwd} />
+      </div>
+      <div className="bento-dashboard-primary">
+        <SessionMessages {...messagesProps} />
+      </div>
+    </div>
+  )
+}
+
+export function DashboardApp() {
+  const state = useDashboardState()
+
+  return (
+    <div className={`bento ${state.activeView === "settings" ? "bento-view-settings" : ""}`}>
       <p className="sr-only" aria-live="polite" aria-atomic="true">
-        Dashboard updated at {lastUpdated}.
+        Dashboard updated at {state.lastUpdated}.
       </p>
-      {error ? (
+      {state.error ? (
         <section className="card bento-error" role="alert" aria-live="assertive">
           <h2>Error</h2>
-          <p>{error}</p>
+          <p>{state.error}</p>
         </section>
       ) : null}
       <Header
-        lastUpdated={lastUpdated}
-        uptime={m.uptimeHuman ?? "starting"}
-        totalDispatches={m.totalDispatches ?? 0}
-        projects={projectCount}
-        activeWatches={watchCount}
-        activeHooks={activeHookDispatches.length}
-        selectedProjectName={activeProject?.name ?? null}
-        activeView={activeView}
-        onSelectView={setActiveView}
-        cacheStatus={cacheStatus}
-        activeAgentProcessProviders={optimisticAgentProcessProviders}
+        lastUpdated={state.lastUpdated}
+        uptime={state.m.uptimeHuman ?? "starting"}
+        totalDispatches={state.m.totalDispatches ?? 0}
+        projects={state.projectCount}
+        activeWatches={state.watchCount}
+        activeHooks={state.activeHookDispatches.length}
+        selectedProjectName={state.activeProject?.name ?? null}
+        activeView={state.activeView}
+        onSelectView={state.setActiveView}
+        cacheStatus={state.cacheStatus}
+        activeAgentProcessProviders={state.optimisticAgentProcessProviders}
       />
       <SessionNav
-        projects={visibleProjects}
-        activeAgentPidsByProvider={optimisticAgentProcessProviders}
-        killingPids={optimisticKillingPids}
-        deletingSessionId={deletingSessionId}
-        selectedProjectCwd={optimisticProjectCwd}
-        selectedSessionId={optimisticSessionId}
-        onSelectProject={handleSelectProject}
-        onSelectSession={handleSelectSession}
-        onKillAgentPid={handleKillAgentPid}
-        onDeleteSession={handleDeleteSession}
+        projects={state.visibleProjects}
+        activeAgentPidsByProvider={state.optimisticAgentProcessProviders}
+        killingPids={state.optimisticKillingPids}
+        deletingSessionId={state.deletingSessionId}
+        selectedProjectCwd={state.optimisticProjectCwd}
+        selectedSessionId={state.optimisticSessionId}
+        onSelectProject={state.handleSelectProject}
+        onSelectSession={state.handleSelectSession}
+        onKillAgentPid={state.handleKillAgentPid}
+        onDeleteSession={state.handleDeleteSession}
       />
-      {activeView === "settings" ? (
-        <div className="bento-settings-page">
-          <SettingsPanel cwd={optimisticProjectCwd} />
-        </div>
-      ) : activeView === "issues" ? (
-        <div className="bento-full-page">
-          <ProjectIssuesPanel cwd={optimisticProjectCwd} />
-        </div>
-      ) : activeView === "tasks" ? (
-        <div className="bento-full-page">
-          <SessionTasksSection
-            tasks={sessionTasks}
-            summary={sessionTaskSummary}
-            loading={sessionTasksLoading}
-          />
-          <ProjectTasksSection
-            tasks={projectTasks}
-            summary={projectTaskSummary}
-            loading={projectTasksLoading}
-          />
-        </div>
-      ) : activeView === "transcript" ? (
-        <div className="bento-full-page">
-          <SessionMessages
-            messages={displayedMessages}
-            loading={messagesLoading}
-            newKeys={newMessageKeys}
-            msgKey={msgKey}
-            toolStats={sessionToolStats}
-            tasks={sessionTasks}
-            taskSummary={sessionTaskSummary}
-            tasksLoading={sessionTasksLoading}
-            projectTasks={projectTasks}
-            projectTaskSummary={projectTaskSummary}
-            projectTasksLoading={projectTasksLoading}
-            events={metricsEvents}
-            cacheStatus={cacheStatus}
-            activeSession={activeSession}
-            activeHookDispatches={activeHookDispatches}
-            hideTasks
-          />
-        </div>
-      ) : (
-        <div className="bento-dashboard-stack">
-          <div className="bento-dashboard-secondary">
-            <ProjectIssuesPanel cwd={optimisticProjectCwd} />
-          </div>
-          <div className="bento-dashboard-primary">
-            <SessionMessages
-              messages={displayedMessages}
-              loading={messagesLoading}
-              newKeys={newMessageKeys}
-              msgKey={msgKey}
-              toolStats={sessionToolStats}
-              tasks={sessionTasks}
-              taskSummary={sessionTaskSummary}
-              tasksLoading={sessionTasksLoading}
-              projectTasks={projectTasks}
-              projectTaskSummary={projectTaskSummary}
-              projectTasksLoading={projectTasksLoading}
-              events={metricsEvents}
-              cacheStatus={cacheStatus}
-              activeSession={activeSession}
-              activeHookDispatches={activeHookDispatches}
-            />
-          </div>
-        </div>
-      )}
+      <DashboardContent state={state} />
     </div>
   )
 }

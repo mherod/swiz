@@ -86,6 +86,122 @@ function labelStyle(color: string | null): CSSProperties | undefined {
   }
 }
 
+function IssuesHero({
+  repo,
+  loading,
+  issueCount,
+}: {
+  repo: string | null
+  loading: boolean
+  issueCount: number
+}) {
+  const repoParts = splitRepo(repo)
+  return (
+    <div className="project-issues-hero">
+      <div>
+        <p className="project-issues-kicker">GitHub cache</p>
+        <div className="project-issues-title-row">
+          <h2 id="project-issues-title" className="section-title">
+            Issues
+          </h2>
+          <span className="project-issues-count-pill">
+            {loading ? "Loading" : formatIssueCount(issueCount)}
+          </span>
+        </div>
+        <p className="project-issues-summary">
+          {repo
+            ? `Cached open issues for ${repo}.`
+            : "Repository issue state for the selected project."}
+        </p>
+      </div>
+      <div className="project-issues-controls">
+        {repoParts ? (
+          <div className="project-issues-repo-badge">
+            <span className="project-issues-repo-monogram">{repoMonogram(repo)}</span>
+            <div>
+              <div className="project-issues-repo-owner">{repoParts.owner}</div>
+              <div className="project-issues-repo-name">{repoParts.name}</div>
+            </div>
+          </div>
+        ) : null}
+        {repo ? (
+          <a
+            className="project-issues-repo-link"
+            href={`https://github.com/${repo}/issues`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            View all
+          </a>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function IssuesEmptyShell({
+  mark,
+  title,
+  body,
+  isLoading,
+}: {
+  mark: string
+  title: string
+  body: string
+  isLoading?: boolean
+}) {
+  return (
+    <div
+      className={`project-issues-empty-shell${isLoading ? " project-issues-empty-shell-loading" : ""}`}
+    >
+      <div className="project-issues-empty-mark">{mark}</div>
+      <div>
+        <p className="project-issues-empty-title">{title}</p>
+        <p className="project-issues-empty-body">{body}</p>
+      </div>
+    </div>
+  )
+}
+
+function IssueItem({ issue, repo }: { issue: ProjectIssue; repo: string | null }) {
+  return (
+    <li className="project-issues-item">
+      <a
+        className="project-issues-link"
+        href={repo ? `https://github.com/${repo}/issues/${issue.number}` : undefined}
+        target="_blank"
+        rel="noreferrer"
+      >
+        <div className="project-issues-row">
+          <span className="project-issues-number">#{issue.number}</span>
+          <span className="project-issues-title">{issue.title}</span>
+          <span className="project-issues-state">{issue.state ?? "OPEN"}</span>
+        </div>
+        <div className="project-issues-meta">
+          <span>{formatIssueUpdatedAt(issue.updatedAt)}</span>
+          {issue.author?.login ? <span>{issue.author.login}</span> : null}
+          {issue.assignees.length > 0 ? (
+            <span>Assigned: {issue.assignees.map((assignee) => assignee.login).join(", ")}</span>
+          ) : null}
+        </div>
+        {issue.labels.length > 0 ? (
+          <div className="project-issues-labels">
+            {issue.labels.slice(0, 4).map((label) => (
+              <span
+                key={label.name}
+                className="project-issues-label"
+                style={labelStyle(label.color)}
+              >
+                {label.name}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </a>
+    </li>
+  )
+}
+
 export function ProjectIssuesPanel({ cwd }: { cwd: string | null }) {
   const [repo, setRepo] = useState<string | null>(null)
   const [issues, setIssues] = useState<ProjectIssue[]>([])
@@ -132,50 +248,11 @@ export function ProjectIssuesPanel({ cwd }: { cwd: string | null }) {
     }
   }, [cwd])
 
-  const repoParts = splitRepo(repo)
   const emptyState = emptyStateContent(cwd, repo)
 
   return (
     <section className="card project-issues-card" aria-labelledby="project-issues-title">
-      <div className="project-issues-hero">
-        <div>
-          <p className="project-issues-kicker">GitHub cache</p>
-          <div className="project-issues-title-row">
-            <h2 id="project-issues-title" className="section-title">
-              Issues
-            </h2>
-            <span className="project-issues-count-pill">
-              {loading ? "Loading" : formatIssueCount(issues.length)}
-            </span>
-          </div>
-          <p className="project-issues-summary">
-            {repo
-              ? `Cached open issues for ${repo}.`
-              : "Repository issue state for the selected project."}
-          </p>
-        </div>
-        <div className="project-issues-controls">
-          {repoParts ? (
-            <div className="project-issues-repo-badge">
-              <span className="project-issues-repo-monogram">{repoMonogram(repo)}</span>
-              <div>
-                <div className="project-issues-repo-owner">{repoParts.owner}</div>
-                <div className="project-issues-repo-name">{repoParts.name}</div>
-              </div>
-            </div>
-          ) : null}
-          {repo ? (
-            <a
-              className="project-issues-repo-link"
-              href={`https://github.com/${repo}/issues`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              View all
-            </a>
-          ) : null}
-        </div>
-      </div>
+      <IssuesHero repo={repo} loading={loading} issueCount={issues.length} />
 
       {error ? (
         <p className="project-issues-error" role="alert">
@@ -184,66 +261,22 @@ export function ProjectIssuesPanel({ cwd }: { cwd: string | null }) {
       ) : null}
 
       {loading ? (
-        <div className="project-issues-empty-shell project-issues-empty-shell-loading">
-          <div className="project-issues-empty-mark">...</div>
-          <div>
-            <p className="project-issues-empty-title">Refreshing cache</p>
-            <p className="project-issues-empty-body">
-              Loading open issues for the selected project.
-            </p>
-          </div>
-        </div>
+        <IssuesEmptyShell
+          mark="..."
+          title="Refreshing cache"
+          body="Loading open issues for the selected project."
+          isLoading
+        />
       ) : null}
 
       {!loading && !error && issues.length === 0 ? (
-        <div className="project-issues-empty-shell">
-          <div className="project-issues-empty-mark">{repo ? "0" : "?"}</div>
-          <div>
-            <p className="project-issues-empty-title">{emptyState.title}</p>
-            <p className="project-issues-empty-body">{emptyState.body}</p>
-          </div>
-        </div>
+        <IssuesEmptyShell mark={repo ? "0" : "?"} title={emptyState.title} body={emptyState.body} />
       ) : null}
 
       {!loading && issues.length > 0 ? (
         <ul className="project-issues-list">
           {issues.map((issue) => (
-            <li key={issue.number} className="project-issues-item">
-              <a
-                className="project-issues-link"
-                href={repo ? `https://github.com/${repo}/issues/${issue.number}` : undefined}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <div className="project-issues-row">
-                  <span className="project-issues-number">#{issue.number}</span>
-                  <span className="project-issues-title">{issue.title}</span>
-                  <span className="project-issues-state">{issue.state ?? "OPEN"}</span>
-                </div>
-                <div className="project-issues-meta">
-                  <span>{formatIssueUpdatedAt(issue.updatedAt)}</span>
-                  {issue.author?.login ? <span>{issue.author.login}</span> : null}
-                  {issue.assignees.length > 0 ? (
-                    <span>
-                      Assigned: {issue.assignees.map((assignee) => assignee.login).join(", ")}
-                    </span>
-                  ) : null}
-                </div>
-                {issue.labels.length > 0 ? (
-                  <div className="project-issues-labels">
-                    {issue.labels.slice(0, 4).map((label) => (
-                      <span
-                        key={label.name}
-                        className="project-issues-label"
-                        style={labelStyle(label.color)}
-                      >
-                        {label.name}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-              </a>
-            </li>
+            <IssueItem key={issue.number} issue={issue} repo={repo} />
           ))}
         </ul>
       ) : null}
