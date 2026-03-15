@@ -58,6 +58,7 @@ export type MutationType =
   | "pr_merge"
   | "pr_review"
   | "label_add"
+  | "milestone_set"
   | "create"
 
 export interface MutationPayload {
@@ -68,6 +69,8 @@ export interface MutationPayload {
   reviewEvent?: string
   /** For label_add: label names to add */
   labels?: string[]
+  /** For milestone_set: milestone number */
+  milestone?: number
   /** For create: issue title */
   title?: string
 }
@@ -527,6 +530,14 @@ async function executeMutation(
         repo,
         mutation
       )
+    case "milestone_set":
+      if (mutation.milestone == null) return true
+      return runGhCommand(
+        ["gh", "issue", "edit", num, "--milestone", String(mutation.milestone)],
+        cwd,
+        repo,
+        mutation
+      )
     case "pr_comment":
     case "pr_merge":
     case "pr_review":
@@ -653,6 +664,25 @@ async function tryMutationRestFallback(
           stderr: "pipe",
           stdin: new Response(JSON.stringify({ labels: mutation.labels })),
         }
+      )
+      await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+      await proc.exited
+      return proc.exitCode === 0
+    }
+    case "milestone_set": {
+      if (mutation.milestone == null) return true
+      await acquireGhSlot()
+      const proc = Bun.spawn(
+        [
+          "gh",
+          "api",
+          `repos/${repo}/issues/${num}`,
+          "-X",
+          "PATCH",
+          "-f",
+          `milestone=${String(mutation.milestone)}`,
+        ],
+        { cwd, stdout: "pipe", stderr: "pipe" }
       )
       await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
       await proc.exited
