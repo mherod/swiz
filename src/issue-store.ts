@@ -9,7 +9,7 @@
  * - `pending_mutations`: Queued outbound mutations for offline replay
  */
 
-import { Database } from "bun:sqlite"
+import { Database, type Statement } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 
@@ -84,6 +84,12 @@ export const DEFAULT_TTL_MS = 5 * 60 * 1000
 
 export class IssueStore {
   private db: Database
+  private _stmtListIssues!: Statement<{ data: string }>
+  private _stmtGetIssue!: Statement<{ data: string }>
+  private _stmtRemoveIssue!: Statement
+  private _stmtListPullRequests!: Statement<{ data: string }>
+  private _stmtGetPullRequest!: Statement<{ data: string }>
+  private _stmtRemovePullRequest!: Statement
 
   constructor(dbPath?: string) {
     const path = dbPath ?? getDefaultDbPath()
@@ -91,6 +97,20 @@ export class IssueStore {
     this.db = new Database(path)
     this.db.run("PRAGMA journal_mode=WAL")
     this.migrate()
+    this._stmtListIssues = this.db.prepare(
+      "SELECT data FROM issues WHERE repo = ? AND synced_at > ?"
+    )
+    this._stmtGetIssue = this.db.prepare("SELECT data FROM issues WHERE repo = ? AND number = ?")
+    this._stmtRemoveIssue = this.db.prepare("DELETE FROM issues WHERE repo = ? AND number = ?")
+    this._stmtListPullRequests = this.db.prepare(
+      "SELECT data FROM pull_requests WHERE repo = ? AND synced_at > ?"
+    )
+    this._stmtGetPullRequest = this.db.prepare(
+      "SELECT data FROM pull_requests WHERE repo = ? AND number = ?"
+    )
+    this._stmtRemovePullRequest = this.db.prepare(
+      "DELETE FROM pull_requests WHERE repo = ? AND number = ?"
+    )
   }
 
   private migrate(): void {
@@ -155,18 +175,13 @@ export class IssueStore {
 
   /** List cached issues for a repo. Returns only issues within TTL window. */
   listIssues<T = unknown>(repo: string, ttlMs = DEFAULT_TTL_MS): T[] {
-    const cutoff = Date.now() - ttlMs
-    const rows = this.db
-      .query("SELECT data FROM issues WHERE repo = ? AND synced_at > ?")
-      .all(repo, cutoff) as { data: string }[]
+    const rows = this._stmtListIssues.all(repo, Date.now() - ttlMs)
     return rows.map((r) => JSON.parse(r.data) as T)
   }
 
   /** Get a single cached issue by repo and number. */
   getIssue<T = unknown>(repo: string, number: number): T | null {
-    const row = this.db
-      .query("SELECT data FROM issues WHERE repo = ? AND number = ?")
-      .get(repo, number) as { data: string } | null
+    const row = this._stmtGetIssue.get(repo, number)
     return row ? (JSON.parse(row.data) as T) : null
   }
 
@@ -188,7 +203,16 @@ export class IssueStore {
 
   /** Remove a cached issue (e.g., after closing). */
   removeIssue(repo: string, number: number): void {
-    this.db.query("DELETE FROM issues WHERE repo = ? AND number = ?").run(repo, number)
+    this._stmtRemoveIssue.run(repo, number)
+  }
+
+  /** Remove multiple cached issues in a single batch DELETE. */
+  removeIssues(repo: string, numbers: number[]): void {
+    if (numbers.length === 0) return
+    const placeholders = numbers.map(() => "?").join(",")
+    this.db
+      .query(`DELETE FROM issues WHERE repo = ? AND number IN (${placeholders})`)
+      .run(repo, ...numbers)
   }
 
   /** Remove cached issues whose numbers are not in the given set (i.e., closed upstream). */
@@ -208,18 +232,13 @@ export class IssueStore {
 
   /** List cached PRs for a repo. Returns only PRs within TTL window. */
   listPullRequests<T = unknown>(repo: string, ttlMs = DEFAULT_TTL_MS): T[] {
-    const cutoff = Date.now() - ttlMs
-    const rows = this.db
-      .query("SELECT data FROM pull_requests WHERE repo = ? AND synced_at > ?")
-      .all(repo, cutoff) as { data: string }[]
+    const rows = this._stmtListPullRequests.all(repo, Date.now() - ttlMs)
     return rows.map((r) => JSON.parse(r.data) as T)
   }
 
   /** Get a single cached PR by repo and number. */
   getPullRequest<T = unknown>(repo: string, number: number): T | null {
-    const row = this.db
-      .query("SELECT data FROM pull_requests WHERE repo = ? AND number = ?")
-      .get(repo, number) as { data: string } | null
+    const row = this._stmtGetPullRequest.get(repo, number)
     return row ? (JSON.parse(row.data) as T) : null
   }
 
@@ -239,7 +258,16 @@ export class IssueStore {
 
   /** Remove a cached PR (e.g., after merging). */
   removePullRequest(repo: string, number: number): void {
-    this.db.query("DELETE FROM pull_requests WHERE repo = ? AND number = ?").run(repo, number)
+    this._stmtRemovePullRequest.run(repo, number)
+  }
+
+  /** Remove multiple cached PRs in a single batch DELETE. */
+  removePullRequests(repo: string, numbers: number[]): void {
+    if (numbers.length === 0) return
+    const placeholders = numbers.map(() => "?").join(",")
+    this.db
+      .query(`DELETE FROM pull_requests WHERE repo = ? AND number IN (${placeholders})`)
+      .run(repo, ...numbers)
   }
 
   /** Remove cached PRs whose numbers are not in the given set (i.e., closed/merged upstream). */
@@ -827,8 +855,11 @@ export async function syncUpstreamState(
     result.issues.upserted = issues.length
   }
   // Backfill: explicitly remove recently-closed issues even if the open fetch failed
-  if (closedIssues) {
-    for (const ci of closedIssues) s.removeIssue(repo, ci.number)
+  if (closedIssues?.length) {
+    s.removeIssues(
+      repo,
+      closedIssues.map((ci) => ci.number)
+    )
     result.issues.removed += closedIssues.length
   }
 
@@ -841,8 +872,11 @@ export async function syncUpstreamState(
     result.pullRequests.upserted = prs.length
   }
   // Backfill: explicitly remove recently-closed/merged PRs
-  if (closedPrs) {
-    for (const cp of closedPrs) s.removePullRequest(repo, cp.number)
+  if (closedPrs?.length) {
+    s.removePullRequests(
+      repo,
+      closedPrs.map((cp) => cp.number)
+    )
     result.pullRequests.removed += closedPrs.length
   }
 
