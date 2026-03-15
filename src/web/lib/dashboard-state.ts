@@ -605,6 +605,8 @@ function useDerivedDashboardState(input: DerivedStateInput) {
   }
 }
 
+export type DashboardState = ReturnType<typeof useDashboardState>
+
 export function useDashboardState() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const { cacheStatus, onCacheStatus } = useCacheStatusWithJitterFilter()

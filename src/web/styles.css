@@ -1889,42 +1889,42 @@ tbody tr:hover {
 /* ── Session tasks ── */
 
 .session-tasks-section {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(46, 64, 101, 0.55);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .session-tasks-title {
   margin: 0;
   font-family: "Bricolage Grotesque", "IBM Plex Sans", sans-serif;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #93b4ff;
+  letter-spacing: 0.12em;
+  color: var(--color-blue-400);
 }
 
 .session-tasks-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .task-collapse-btn {
-  border: 1px solid rgba(118, 153, 229, 0.34);
-  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
   background: rgba(67, 88, 138, 0.12);
-  color: #c4d7ff;
-  font-size: 0.66rem;
+  color: var(--color-blue-200);
+  font-size: 0.68rem;
   font-weight: 600;
-  padding: 2px 8px;
+  padding: var(--space-1) var(--space-2);
   cursor: pointer;
 }
 
 .session-tasks-summary {
-  margin: 4px 0 10px;
+  margin: var(--space-1) 0 var(--space-2);
   color: var(--text-muted);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
 }
 
 .session-task-list {
@@ -1932,71 +1932,71 @@ tbody tr:hover {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .session-task-controls {
   display: flex;
-  gap: 6px;
-  margin: 8px 0 10px;
+  gap: var(--space-1);
+  margin: var(--space-2) 0;
 }
 
 .task-filter-btn {
-  border: 1px solid rgba(118, 153, 229, 0.32);
-  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
   background: rgba(67, 88, 138, 0.12);
-  color: #b8c8ea;
-  font-size: 0.67rem;
+  color: var(--color-blue-200);
+  font-size: 0.68rem;
   font-weight: 600;
-  padding: 3px 9px;
+  padding: var(--space-1) var(--space-2);
   cursor: pointer;
 }
 
 .task-filter-btn.active {
-  color: #e2ecff;
+  color: var(--color-blue-100);
   border-color: rgba(123, 166, 255, 0.72);
   background: rgba(96, 140, 241, 0.28);
 }
 
 .task-show-more-btn {
-  margin-top: 8px;
-  border: 1px solid rgba(118, 153, 229, 0.36);
-  border-radius: 8px;
+  margin-top: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   background: rgba(67, 88, 138, 0.12);
-  color: #c4d7ff;
+  color: var(--color-blue-200);
   font-size: 0.68rem;
-  padding: 5px 8px;
+  padding: var(--space-1) var(--space-2);
   cursor: pointer;
 }
 
 .session-task-row {
   border: 1px solid rgba(86, 112, 166, 0.24);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(33, 37, 45, 0.72);
-  padding: 8px 9px;
+  padding: var(--space-2);
 }
 
 .session-task-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .session-task-id {
   color: #9fb4dd;
-  font-size: 0.7rem;
+  font-size: 0.74rem;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
 }
 
 .task-status {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid transparent;
-  padding: 1px 7px;
-  text-transform: capitalize;
-  font-size: 0.62rem;
-  letter-spacing: 0.03em;
-  font-weight: 700;
+  padding: var(--space-1) var(--space-2);
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  font-weight: 800;
 }
 
 .task-status-in_progress {
@@ -2024,13 +2024,13 @@ tbody tr:hover {
 }
 
 .session-task-subject {
-  margin: 6px 0 0;
+  margin: var(--space-1) 0 0;
   color: #d9dee9;
   font-size: 0.82rem;
   line-height: 1.42;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .task-checkmark {
@@ -2068,14 +2068,14 @@ tbody tr:hover {
 }
 
 .session-task-time {
-  margin: 4px 0 0;
-  color: #8fa0bc;
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
   font-size: 0.68rem;
 }
 
 .session-task-evidence {
-  margin: 4px 0 0;
-  color: #9fb0cb;
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
   font-size: 0.72rem;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   white-space: pre-wrap;
@@ -2083,13 +2083,13 @@ tbody tr:hover {
 }
 
 .session-completed-tasks {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 .session-completed-tasks > summary {
   cursor: pointer;
-  color: #9cb6e6;
-  font-size: 0.69rem;
+  color: var(--text-muted);
+  font-size: 0.72rem;
   user-select: none;
   list-style: none;
 }
@@ -2099,7 +2099,7 @@ tbody tr:hover {
 }
 
 .session-completed-tasks > .session-task-list {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 .hook-context-box {

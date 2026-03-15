@@ -1,50 +1,16 @@
 import { msgKey } from "../lib/dashboard-helpers.ts"
+import type { DashboardState } from "../lib/dashboard-state.ts"
 import { useDashboardState } from "../lib/dashboard-state.ts"
 import { Header } from "./header.tsx"
-import { ProjectIssuesPanel } from "./project-issues-panel.tsx"
-import { SessionMessages, SessionNav } from "./session-browser.tsx"
-import { ProjectTasksSection, SessionTasksSection } from "./session-tasks.tsx"
+import { SessionNav } from "./session-browser.tsx"
 import { SettingsPanel } from "./settings-panel.tsx"
+import { DashboardView } from "./views/dashboard-view.tsx"
+import { IssuesView } from "./views/issues-view.tsx"
+import { TasksView } from "./views/tasks-view.tsx"
+import { TranscriptView } from "./views/transcript-view.tsx"
 
-type DashboardState = ReturnType<typeof useDashboardState>
-
-function DashboardContent({ state }: { state: DashboardState }) {
-  const { activeView, optimisticProjectCwd } = state
-
-  if (activeView === "settings") {
-    return (
-      <div className="bento-settings-page">
-        <SettingsPanel cwd={optimisticProjectCwd} />
-      </div>
-    )
-  }
-
-  if (activeView === "issues") {
-    return (
-      <div className="bento-full-page">
-        <ProjectIssuesPanel cwd={optimisticProjectCwd} />
-      </div>
-    )
-  }
-
-  if (activeView === "tasks") {
-    return (
-      <div className="bento-full-page">
-        <SessionTasksSection
-          tasks={state.sessionTasks}
-          summary={state.sessionTaskSummary}
-          loading={state.sessionTasksLoading}
-        />
-        <ProjectTasksSection
-          tasks={state.projectTasks}
-          summary={state.projectTaskSummary}
-          loading={state.projectTasksLoading}
-        />
-      </div>
-    )
-  }
-
-  const messagesProps = {
+function buildMessagesProps(state: DashboardState) {
+  return {
     messages: state.displayedMessages,
     loading: state.messagesLoading,
     newKeys: state.newMessageKeys,
@@ -61,25 +27,35 @@ function DashboardContent({ state }: { state: DashboardState }) {
     activeSession: state.activeSession,
     activeHookDispatches: state.activeHookDispatches,
   }
+}
 
-  if (activeView === "transcript") {
+function DashboardContent({ state }: { state: DashboardState }) {
+  const { activeView, optimisticProjectCwd } = state
+
+  if (activeView === "settings") {
     return (
-      <div className="bento-full-page">
-        <SessionMessages {...messagesProps} hideTasks />
+      <div className="bento-settings-page">
+        <SettingsPanel cwd={optimisticProjectCwd} />
       </div>
     )
   }
+  if (activeView === "issues") return <IssuesView cwd={optimisticProjectCwd} />
+  if (activeView === "tasks") {
+    return (
+      <TasksView
+        sessionTasks={state.sessionTasks}
+        sessionTaskSummary={state.sessionTaskSummary}
+        sessionTasksLoading={state.sessionTasksLoading}
+        projectTasks={state.projectTasks}
+        projectTaskSummary={state.projectTaskSummary}
+        projectTasksLoading={state.projectTasksLoading}
+      />
+    )
+  }
 
-  return (
-    <div className="bento-dashboard-stack">
-      <div className="bento-dashboard-secondary">
-        <ProjectIssuesPanel cwd={optimisticProjectCwd} />
-      </div>
-      <div className="bento-dashboard-primary">
-        <SessionMessages {...messagesProps} />
-      </div>
-    </div>
-  )
+  const messagesProps = buildMessagesProps(state)
+  if (activeView === "transcript") return <TranscriptView messagesProps={messagesProps} />
+  return <DashboardView cwd={optimisticProjectCwd} messagesProps={messagesProps} />
 }
 
 export function DashboardApp() {
