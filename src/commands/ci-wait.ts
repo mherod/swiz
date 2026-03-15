@@ -82,7 +82,7 @@ export async function findRunId(fullSha: string): Promise<number | null> {
 export async function waitForCiCompletion(
   commitSha: string,
   timeoutSeconds: number = 300
-): Promise<{ conclusion: string; elapsed: number }> {
+): Promise<{ conclusion: string; elapsed: number; runId: number }> {
   const startTime = Date.now()
   const timeoutMs = timeoutSeconds * 1000
   const discoveryPollMs = 5_000
@@ -126,7 +126,7 @@ export async function waitForCiCompletion(
   const elapsed = Date.now() - startTime
 
   if (watchProc.exitCode === 0) {
-    return { conclusion: "success", elapsed }
+    return { conclusion: "success", elapsed, runId }
   }
 
   // gh run watch --exit-status exits non-zero on failure
@@ -135,7 +135,7 @@ export async function waitForCiCompletion(
     throw new Error(`CI run ${runId} still running after ${timeoutSeconds}s timeout`)
   }
 
-  return { conclusion: "failure", elapsed }
+  return { conclusion: "failure", elapsed, runId }
 }
 
 // ─── Arg parsing ──────────────────────────────────────────────────────────
@@ -184,12 +184,14 @@ export const ciWaitCommand: Command = {
 
     try {
       console.log(`⏳ Waiting for CI run for commit ${commitSha.slice(0, 8)}...`)
-      const { conclusion, elapsed } = await waitForCiCompletion(commitSha, timeout)
+      const { conclusion, elapsed, runId } = await waitForCiCompletion(commitSha, timeout)
 
       const elapsedSeconds = Math.round(elapsed / 1000)
       console.log(`\n✓ CI completed in ${elapsedSeconds}s: ${conclusion}`)
 
       if (conclusion === "success") {
+        // Emit machine-readable evidence for task completion
+        console.log(`evidence: ci_green:${runId} -- commit:${commitSha}`)
         process.exitCode = 0
       } else {
         stderrLog("CI failure status reporting with exit codes", `✗ CI run: ${conclusion}`)
