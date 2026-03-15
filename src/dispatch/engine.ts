@@ -5,6 +5,7 @@
  * Extracted from src/commands/dispatch.ts (issue #84).
  */
 
+import { AsyncLocalStorage } from "node:async_hooks"
 import { appendFile } from "node:fs/promises"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
@@ -68,9 +69,38 @@ type HookDef = HookGroup["hooks"][number]
 
 // ─── Debug logger ───────────────────────────────────────────────────────────
 
+/** Per-dispatch log buffer. When a dispatch is active, lines accumulate here
+ *  and are flushed as a single appendFile at the end. Falls back to per-line
+ *  writes when called outside a dispatch context (e.g. direct test calls). */
+const _logBufferStorage = new AsyncLocalStorage<string[]>()
+
 export function log(msg: string): void {
-  appendFile(LOG_PATH, `${msg}\n`).catch(() => {})
+  const buffer = _logBufferStorage.getStore()
+  if (buffer) {
+    buffer.push(`${msg}\n`)
+  } else {
+    appendFile(LOG_PATH, `${msg}\n`).catch(() => {})
+  }
   debugLog(msg)
+}
+
+/**
+ * Run `fn` inside a per-dispatch log buffer context.
+ * All `log()` calls within `fn` (including nested async work that inherits
+ * the async context) are accumulated and flushed as a single `appendFile`
+ * when `fn` resolves or rejects — regardless of early returns or exceptions.
+ */
+export async function withLogBuffer<T>(fn: () => Promise<T>): Promise<T> {
+  const buffer: string[] = []
+  return _logBufferStorage.run(buffer, async () => {
+    try {
+      return await fn()
+    } finally {
+      if (buffer.length > 0) {
+        appendFile(LOG_PATH, buffer.join("")).catch(() => {})
+      }
+    }
+  })
 }
 
 export function logHeader(

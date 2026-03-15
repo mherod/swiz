@@ -21,6 +21,7 @@ import {
   groupMatches,
   log,
   logHeader,
+  withLogBuffer,
 } from "./index.ts"
 import { STRATEGY_REGISTRY } from "./strategies.ts"
 
@@ -363,7 +364,11 @@ function buildLifecycleEvent(
   }
 }
 
-export async function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
+export function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
+  return withLogBuffer(() => _executeDispatch(req))
+}
+
+async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const ctx = buildDispatchContext(req)
 
   // Short-circuit: project capabilities require a git repo — skip dispatch for non-git dirs.

@@ -47,6 +47,7 @@ export {
   runHook,
   type SkipReason,
   toolMatchesToken,
+  withLogBuffer,
 } from "./engine.ts"
 export {
   type DispatchRequest,
