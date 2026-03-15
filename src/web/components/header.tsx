@@ -1,3 +1,4 @@
+import { motion } from "motion/react"
 import type { ActiveView } from "../lib/dashboard-state.ts"
 import { NumberTicker } from "./number-ticker.tsx"
 
@@ -51,19 +52,16 @@ function ViewToggleButton({
     <button
       type="button"
       onClick={onClick}
-      style={{
-        background: active ? "rgba(110, 147, 223, 0.38)" : "transparent",
-        color: active ? "#fff" : "#a8bee8",
-        border: "none",
-        padding: "4px 12px",
-        borderRadius: "4px",
-        fontSize: "0.75rem",
-        cursor: "pointer",
-        fontWeight: active ? "600" : "400",
-        transition: "all 0.15s ease",
-      }}
+      className={`view-tab${active ? " view-tab-active" : ""}`}
     >
-      {label}
+      {active && (
+        <motion.span
+          className="view-tab-indicator"
+          layoutId="active-tab"
+          transition={{ type: "spring", bounce: 0.2, duration: 0.4 }}
+        />
+      )}
+      <span className="view-tab-label">{label}</span>
     </button>
   )
 }
@@ -75,6 +73,66 @@ const TAB_LABELS: Array<{ view: ActiveView; label: string }> = [
   { view: "transcript", label: "Transcript" },
   { view: "settings", label: "Project Settings" },
 ]
+
+function HeaderChips({
+  activeHooks,
+  totalRunningAgents,
+  selectedProjectName,
+  warmCaches,
+  totalCacheEntries,
+}: {
+  activeHooks: number
+  totalRunningAgents: number
+  selectedProjectName: string | null
+  warmCaches: number
+  totalCacheEntries: number
+}) {
+  const chips = [
+    <span key="hooks" className="header-chip">
+      <strong>
+        <NumberTicker value={activeHooks} />
+      </strong>{" "}
+      active hooks
+    </span>,
+    <span key="agents" className="header-chip">
+      <strong>
+        <NumberTicker value={totalRunningAgents} />
+      </strong>{" "}
+      running agents
+    </span>,
+    <span key="project" className="header-chip">
+      project: <strong>{selectedProjectName ?? "none"}</strong>
+    </span>,
+    totalCacheEntries > 0 ? (
+      <span key="cache" className="header-chip">
+        daemon caches:{" "}
+        <strong>
+          <NumberTicker value={warmCaches} />
+        </strong>{" "}
+        warm /{" "}
+        <strong>
+          <NumberTicker value={totalCacheEntries} />
+        </strong>{" "}
+        total
+      </span>
+    ) : null,
+  ].filter(Boolean)
+
+  return (
+    <div className="header-chips">
+      {chips.map((chip, i) => (
+        <motion.div
+          key={(chip as React.ReactElement).key}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: i * 0.06, duration: 0.3, ease: "easeOut" }}
+        >
+          {chip}
+        </motion.div>
+      ))}
+    </div>
+  )
+}
 
 export function Header({
   lastUpdated,
@@ -90,41 +148,26 @@ export function Header({
   activeAgentProcessProviders = {},
 }: HeaderProps) {
   const { totalCacheEntries, warmCaches } = buildCacheEntries(cacheStatus)
-
   const totalRunningAgents = Object.values(activeAgentProcessProviders).reduce(
     (sum, pids) => sum + pids.length,
     0
   )
-
   const isActive = totalRunningAgents > 0 || activeHooks > 0
   const mascotSrc = isActive ? "/public/swiz-buzz-animated.svg" : "/public/swiz-buzz-flat.svg"
 
   return (
     <header className="bento-title">
-      <div
-        className="title-row"
-        style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <img src={mascotSrc} alt="swiz" style={{ height: "32px", width: "auto" }} />
+      <div className="title-row">
+        <div className="title-row-left">
+          <img src={mascotSrc} alt="swiz" className="title-mascot" />
           <h1 className="topbar-title">swiz daemon</h1>
           <output className="status-pill">
             <span className="status-dot" aria-hidden="true" />
             <span>Live</span>
           </output>
         </div>
-
         {onSelectView && (
-          <div
-            className="view-toggle"
-            style={{
-              display: "flex",
-              background: "rgba(35, 58, 104, 0.25)",
-              borderRadius: "6px",
-              padding: "2px",
-              border: "1px solid rgba(110, 147, 223, 0.38)",
-            }}
-          >
+          <div className="view-toggle">
             {TAB_LABELS.map(({ view, label }) => (
               <ViewToggleButton
                 key={view}
@@ -142,36 +185,13 @@ export function Header({
         <NumberTicker value={projects} /> active projects · <NumberTicker value={activeWatches} />{" "}
         CI watches
       </p>
-      <div className="header-chips">
-        <span className="header-chip">
-          <strong>
-            <NumberTicker value={activeHooks} />
-          </strong>{" "}
-          active hooks
-        </span>
-        <span className="header-chip">
-          <strong>
-            <NumberTicker value={totalRunningAgents} />
-          </strong>{" "}
-          running agents
-        </span>
-        <span className="header-chip">
-          project: <strong>{selectedProjectName ?? "none"}</strong>
-        </span>
-        {totalCacheEntries > 0 && (
-          <span className="header-chip">
-            daemon caches:{" "}
-            <strong>
-              <NumberTicker value={warmCaches} />
-            </strong>{" "}
-            warm /{" "}
-            <strong>
-              <NumberTicker value={totalCacheEntries} />
-            </strong>{" "}
-            total
-          </span>
-        )}
-      </div>
+      <HeaderChips
+        activeHooks={activeHooks}
+        totalRunningAgents={totalRunningAgents}
+        selectedProjectName={selectedProjectName}
+        warmCaches={warmCaches}
+        totalCacheEntries={totalCacheEntries}
+      />
     </header>
   )
 }

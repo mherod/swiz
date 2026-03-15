@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from "motion/react"
 import { msgKey } from "../lib/dashboard-helpers.ts"
 import type { DashboardState } from "../lib/dashboard-state.ts"
 import { useDashboardState } from "../lib/dashboard-state.ts"
@@ -97,7 +98,18 @@ export function DashboardApp() {
         onKillAgentPid={state.handleKillAgentPid}
         onDeleteSession={state.handleDeleteSession}
       />
-      <DashboardContent state={state} />
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={state.activeView}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.2, ease: "easeInOut" }}
+          style={{ display: "contents" }}
+        >
+          <DashboardContent state={state} />
+        </motion.div>
+      </AnimatePresence>
     </div>
   )
 }

@@ -262,7 +262,19 @@ body::before {
 .title-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-2);
+}
+
+.title-row-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.title-mascot {
+  height: 32px;
+  width: auto;
 }
 
 .topbar-title {
@@ -2100,6 +2112,42 @@ tbody tr:hover {
 
 .session-completed-tasks > .session-task-list {
   margin-top: var(--space-2);
+}
+
+.view-toggle {
+  display: flex;
+  background: rgba(35, 58, 104, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+}
+
+.view-tab {
+  position: relative;
+  background: transparent;
+  color: var(--color-blue-200);
+  border: none;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  cursor: pointer;
+  font-weight: 400;
+}
+
+.view-tab-active {
+  color: #fff;
+  font-weight: 600;
+}
+
+.view-tab-indicator {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-sm);
+  background: rgba(110, 147, 223, 0.38);
+}
+
+.view-tab-label {
+  position: relative;
 }
 
 .number-ticker {
