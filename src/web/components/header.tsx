@@ -1,4 +1,5 @@
 import type { ActiveView } from "../lib/dashboard-state.ts"
+import { NumberTicker } from "./number-ticker.tsx"
 
 interface HeaderProps {
   lastUpdated: string
@@ -137,22 +138,36 @@ export function Header({
       </div>
       <span className="topbar-meta">Updated {lastUpdated}</span>
       <p className="topbar-summary">
-        {uptime} uptime · {totalDispatches} dispatches · {projects} active projects ·{" "}
-        {activeWatches} CI watches
+        {uptime} uptime · <NumberTicker value={totalDispatches} /> dispatches ·{" "}
+        <NumberTicker value={projects} /> active projects · <NumberTicker value={activeWatches} />{" "}
+        CI watches
       </p>
       <div className="header-chips">
         <span className="header-chip">
-          <strong>{activeHooks}</strong> active hooks
+          <strong>
+            <NumberTicker value={activeHooks} />
+          </strong>{" "}
+          active hooks
         </span>
         <span className="header-chip">
-          <strong>{totalRunningAgents}</strong> running agents
+          <strong>
+            <NumberTicker value={totalRunningAgents} />
+          </strong>{" "}
+          running agents
         </span>
         <span className="header-chip">
           project: <strong>{selectedProjectName ?? "none"}</strong>
         </span>
         {totalCacheEntries > 0 && (
           <span className="header-chip">
-            daemon caches: <strong>{warmCaches}</strong> warm / <strong>{totalCacheEntries}</strong>{" "}
+            daemon caches:{" "}
+            <strong>
+              <NumberTicker value={warmCaches} />
+            </strong>{" "}
+            warm /{" "}
+            <strong>
+              <NumberTicker value={totalCacheEntries} />
+            </strong>{" "}
             total
           </span>
         )}

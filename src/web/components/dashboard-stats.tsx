@@ -1,6 +1,7 @@
 import { useMemo } from "react"
 import { formatLastActivity } from "../lib/dashboard-helpers.ts"
 import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
+import { NumberTicker } from "./number-ticker.tsx"
 import type { ToolStat } from "./session-browser.tsx"
 import { isInternalToolName } from "./session-browser-utils.ts"
 
@@ -43,12 +44,19 @@ function ProjectPerformanceStats({
       <div className="metric-kpis">
         {totalDispatches > 0 && (
           <span className="metric-kpi">
-            <strong>{totalDispatches}</strong> total
+            <strong>
+              <NumberTicker value={totalDispatches} />
+            </strong>{" "}
+            total
           </span>
         )}
         {avgLatency > 0 && (
           <span className="metric-kpi">
-            <strong>{avgLatency}ms</strong> avg
+            <strong>
+              <NumberTicker value={avgLatency} />
+              ms
+            </strong>{" "}
+            avg
           </span>
         )}
         {hottestEvent !== "n/a" && (
@@ -83,17 +91,26 @@ function SessionKpis({
     <div className="metric-kpis">
       {(activeSession?.dispatches ?? 0) > 0 && (
         <span className="metric-kpi">
-          <strong>{activeSession?.dispatches}</strong> dispatches
+          <strong>
+            <NumberTicker value={activeSession?.dispatches ?? 0} />
+          </strong>{" "}
+          dispatches
         </span>
       )}
       {loadedMessageCount > 0 && (
         <span className="metric-kpi">
-          <strong>{loadedMessageCount}</strong> messages
+          <strong>
+            <NumberTicker value={loadedMessageCount} />
+          </strong>{" "}
+          messages
         </span>
       )}
       {totalToolCalls > 0 && (
         <span className="metric-kpi">
-          <strong>{totalToolCalls}</strong> tool calls
+          <strong>
+            <NumberTicker value={totalToolCalls} />
+          </strong>{" "}
+          tool calls
         </span>
       )}
     </div>

@@ -217,52 +217,52 @@ body::before {
   border: 1px solid var(--panel-border);
   background: linear-gradient(180deg, rgba(44, 48, 56, 0.92) 0%, var(--panel) 100%);
   border-radius: var(--radius);
-  padding: 16px 18px;
+  padding: var(--space-4);
   backdrop-filter: blur(14px);
   box-shadow:
-    0 10px 24px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(195, 213, 255, 0.05);
+    var(--shadow-lg),
+    var(--shadow-inset);
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 6px;
-  border-bottom: 1px solid rgba(118, 153, 229, 0.2);
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .header-chips {
-  margin-top: 8px;
+  margin-top: var(--space-2);
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .header-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border: 1px solid rgba(110, 147, 223, 0.38);
-  border-radius: 999px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
   font-size: 0.68rem;
-  color: #a8bee8;
+  color: var(--color-blue-200);
   background: rgba(35, 58, 104, 0.25);
 }
 
 .header-chip strong {
-  color: #eef4ff;
+  color: var(--color-blue-50);
   font-variant-numeric: tabular-nums;
 }
 
 .topbar-summary {
-  margin: 4px 0 0;
-  color: #a3afc4;
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
   font-size: 0.72rem;
 }
 
 .title-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .topbar-title {
@@ -274,16 +274,16 @@ body::before {
 }
 
 .topbar-meta {
-  color: #8ea5d9;
+  color: var(--text-muted);
   font-size: 0.72rem;
 }
 
 .status-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border-radius: 999px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
   border: 1px solid #297b6f;
   background: rgba(32, 173, 155, 0.14);
   color: #8de7dd;
@@ -295,8 +295,8 @@ body::before {
 .status-dot {
   width: 6px;
   height: 6px;
-  border-radius: 999px;
-  background: #32d1c2;
+  border-radius: var(--radius-pill);
+  background: var(--color-green-teal);
   box-shadow: 0 0 12px rgba(50, 209, 194, 0.72);
 }
 
@@ -319,13 +319,13 @@ table {
 th,
 td {
   text-align: left;
-  border-bottom: 1px solid rgba(46, 64, 101, 0.62);
-  padding: 7px 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: var(--space-2) var(--space-1);
   font-size: 0.82rem;
 }
 
 th {
-  color: #9bb8ff;
+  color: var(--color-blue-400);
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -470,26 +470,26 @@ tbody tr:hover {
   grid-area: nav;
   overflow-y: auto;
   max-height: 34dvh;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .nav-block {
-  border: 1px solid rgba(109, 136, 196, 0.22);
-  border-radius: 12px;
-  padding: 10px;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
   background: rgba(31, 36, 45, 0.58);
 }
 
 .nav-block + .nav-block {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 .nav-block-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .nav-count-badge {
@@ -497,11 +497,11 @@ tbody tr:hover {
   align-items: center;
   justify-content: center;
   min-width: 24px;
-  border-radius: 999px;
-  border: 1px solid rgba(116, 157, 247, 0.38);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
   background: rgba(75, 106, 178, 0.25);
-  color: #bdd4ff;
-  padding: 1px 8px;
+  color: var(--color-blue-200);
+  padding: var(--space-1) var(--space-2);
   font-size: 0.75rem;
   font-weight: 700;
   line-height: 1.5;
@@ -513,14 +513,14 @@ tbody tr:hover {
 }
 
 .nav-guidance {
-  margin-bottom: 10px;
+  margin-bottom: var(--space-2);
 }
 
 .nav-inline-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .nav-inline-header .section-title {
@@ -528,33 +528,33 @@ tbody tr:hover {
 }
 
 .nav-inline-header-sessions {
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
 
 .nav-inline-project {
-  margin: 6px 2px 0;
-  color: #a0b2d5;
+  margin: var(--space-1) var(--space-1) 0;
+  color: var(--text-muted);
   font-size: 0.75rem;
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
 }
 
 .nav-inline-status {
-  margin: 6px 0 2px;
+  margin: var(--space-1) 0 var(--space-1);
 }
 
 .nav-empty-inline {
-  margin: 8px 2px 0;
+  margin: var(--space-2) var(--space-1) 0;
 }
 
 .session-filter-input {
   width: 100%;
-  padding: 6px 10px;
-  margin: 4px 0 8px;
+  padding: var(--space-1) var(--space-2);
+  margin: var(--space-1) 0 var(--space-2);
   border: 1px solid rgba(93, 113, 154, 0.34);
-  border-radius: 8px;
-  background: rgba(36, 40, 49, 0.76);
-  color: var(--fg);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-main);
   font-size: 0.82rem;
   font-family: inherit;
   outline: none;
@@ -580,7 +580,7 @@ tbody tr:hover {
 .project-list,
 .session-list {
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .session-list {
@@ -590,7 +590,7 @@ tbody tr:hover {
 .session-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: stretch;
 }
 
@@ -598,13 +598,13 @@ tbody tr:hover {
 .session-btn {
   width: 100%;
   border: 1px solid rgba(93, 113, 154, 0.34);
-  background: rgba(36, 40, 49, 0.76);
-  border-radius: 10px;
+  background: var(--bg-panel);
+  border-radius: var(--radius-md);
   color: var(--text-main);
-  padding: 9px 10px;
+  padding: var(--space-2);
   text-align: left;
   display: grid;
-  gap: 4px;
+  gap: var(--space-1);
   cursor: pointer;
   font-size: 0.95rem;
   line-height: 1.5;
@@ -634,17 +634,17 @@ tbody tr:hover {
 .session-actions {
   display: grid;
   grid-auto-flow: column;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
 }
 
 .session-action-confirm {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   background: rgba(200, 153, 74, 0.15);
-  border-radius: 10px;
-  padding: 0 4px 0 10px;
+  border-radius: var(--radius-md);
+  padding: 0 var(--space-1) 0 var(--space-2);
   border: 1px solid rgba(200, 153, 74, 0.3);
   animation: slide-in-left 150ms cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -2100,6 +2100,11 @@ tbody tr:hover {
 
 .session-completed-tasks > .session-task-list {
   margin-top: var(--space-2);
+}
+
+.number-ticker {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
 }
 
 .animated-beam {
