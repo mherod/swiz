@@ -581,8 +581,50 @@ async function runGhCommand(
 
   if (proc.exitCode === 0) return true
 
+  // REST API fallback on GraphQL rate-limit for mutation types with REST equivalents
+  if (isGraphQLRateLimited(stderr)) {
+    const restResult = await tryMutationRestFallback(mutationForLog, cwd, repo)
+    if (restResult) return true
+  }
+
   logReplayExecFailed(repo, mutationForLog, proc.exitCode ?? 1, stderr)
   return false
+}
+
+/** Attempt REST API fallback for a mutation when GraphQL is rate-limited. */
+async function tryMutationRestFallback(
+  mutation: MutationPayload,
+  cwd: string,
+  repo: string
+): Promise<boolean> {
+  const num = String(mutation.number)
+  debugLog(`[swiz] REST_FALLBACK_MUTATION repo=${repo} issue=#${num} type=${mutation.type}`)
+
+  switch (mutation.type) {
+    case "close": {
+      await acquireGhSlot()
+      const proc = Bun.spawn(
+        ["gh", "api", `repos/${repo}/issues/${num}`, "-X", "PATCH", "-f", "state=closed"],
+        { cwd, stdout: "pipe", stderr: "pipe" }
+      )
+      await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+      await proc.exited
+      return proc.exitCode === 0
+    }
+    case "comment": {
+      if (!mutation.body) return true
+      await acquireGhSlot()
+      const proc = Bun.spawn(
+        ["gh", "api", `repos/${repo}/issues/${num}/comments`, "-f", `body=${mutation.body}`],
+        { cwd, stdout: "pipe", stderr: "pipe" }
+      )
+      await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+      await proc.exited
+      return proc.exitCode === 0
+    }
+    default:
+      return false
+  }
 }
 
 /** Log a structured execution failure for a single mutation replay. */
