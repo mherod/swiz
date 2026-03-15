@@ -1628,6 +1628,19 @@ tbody tr:hover {
 
 /* ── Tool calls ── */
 
+.messages-header-row {
+  flex-shrink: 0;
+  margin-bottom: var(--space-3);
+}
+
+.messages-scroll-area {
+  flex: 1 1 0;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .tool-calls {
   list-style: none;
   margin: 4px 0 0;
@@ -1711,12 +1724,8 @@ tbody tr:hover {
   overflow-wrap: anywhere;
 }
 
-.tool-call-body {
-  margin-top: 6px;
-}
-
 .tool-call-header {
-  margin-bottom: 6px;
+  margin-bottom: var(--space-1);
 }
 
 .tool-command-block {

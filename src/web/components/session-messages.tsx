@@ -286,9 +286,7 @@ function VerboseToolCall({ tc }: { tc: { name: string; detail: string } }) {
   if (taskTool) {
     return (
       <div className={`tool-call tool-call-verbose tool-category-${category}`}>
-        <div className="tool-call-body">
-          <TaskToolDisplay task={taskTool} rawJson={parsedDetail.rawJson} />
-        </div>
+        <TaskToolDisplay task={taskTool} rawJson={parsedDetail.rawJson} />
       </div>
     )
   }
@@ -296,25 +294,21 @@ function VerboseToolCall({ tc }: { tc: { name: string; detail: string } }) {
   if (fileTool) {
     return (
       <div className={`tool-call tool-call-verbose tool-category-${category}`}>
-        <div className="tool-call-body">
-          <FileToolDisplay file={fileTool} rawJson={parsedDetail.rawJson} />
-        </div>
+        <FileToolDisplay file={fileTool} rawJson={parsedDetail.rawJson} />
       </div>
     )
   }
 
   return (
     <div className={`tool-call tool-call-verbose tool-category-${category}`}>
-      <div className="tool-call-body">
-        <div className="tool-call-header">
-          <span className="tool-category-icon">{icon}</span>
-          <span className="tool-name">{tc.name}</span>
-        </div>
-        {isBash ? <BashToolBody parsedDetail={parsedDetail} /> : null}
-        <CommonFieldsList fields={parsedDetail.commonFields} />
-        {searchParams ? <SearchToolDisplay toolName={tc.name} searchParams={searchParams} /> : null}
-        <RawJsonDisplay rawJson={parsedDetail.rawJson} isBash={isBash} />
+      <div className="tool-call-header">
+        <span className="tool-category-icon">{icon}</span>
+        <span className="tool-name">{tc.name}</span>
       </div>
+      {isBash ? <BashToolBody parsedDetail={parsedDetail} /> : null}
+      <CommonFieldsList fields={parsedDetail.commonFields} />
+      {searchParams ? <SearchToolDisplay toolName={tc.name} searchParams={searchParams} /> : null}
+      <RawJsonDisplay rawJson={parsedDetail.rawJson} isBash={isBash} />
     </div>
   )
 }
@@ -604,13 +598,11 @@ export function SessionMessages(props: MessagesProps) {
         props.className
       )}
     >
-      <div className="messages-header-row flex flex-col gap-3 mb-4 shrink-0 md:flex-row md:items-center md:justify-between md:mb-5">
-        <div>
-          <h2 className="section-title">Transcript</h2>
-          <p className="section-subtitle">Conversation history for selected session</p>
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto min-h-0 flex flex-col">
+      <header className="messages-header-row">
+        <h2 className="section-title">Transcript</h2>
+        <p className="section-subtitle">Conversation history for selected session</p>
+      </header>
+      <div className="messages-scroll-area">
         <SessionStatsBar {...props} />
         {!props.hideTasks && (
           <>
