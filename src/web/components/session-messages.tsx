@@ -403,6 +403,7 @@ interface SessionHealth {
 }
 
 interface MessagesProps {
+  className?: string
   messages: SessionMessage[]
   loading: boolean
   newKeys?: Set<string>
@@ -597,7 +598,12 @@ export function SessionMessages(props: MessagesProps) {
   const grouped = useMemo(() => groupMessages(sorted), [sorted])
 
   return (
-    <section className="card bento-messages flex flex-col h-full max-h-full overflow-hidden">
+    <section
+      className={cn(
+        "card bento-messages flex flex-col h-full max-h-full overflow-hidden",
+        props.className
+      )}
+    >
       <div className="messages-header-row flex flex-col gap-3 mb-4 shrink-0 md:flex-row md:items-center md:justify-between md:mb-5">
         <div>
           <h2 className="section-title">Transcript</h2>
