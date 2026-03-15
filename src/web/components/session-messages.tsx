@@ -142,16 +142,18 @@ function SearchToolDisplay({
 function TaskToolDisplay({
   task,
   rawJson,
+  className,
 }: {
   task: ReturnType<typeof parseTaskToolCall>
   rawJson: string | null | undefined
+  className?: string
 }) {
   if (!task) return null
   const fields: Array<{ label: string; value: string }> = [{ label: "action", value: task.action }]
   if (task.taskId) fields.push({ label: "task", value: task.taskId })
   if (task.status) fields.push({ label: "status", value: task.status })
   return (
-    <div className="tool-first-party-call">
+    <div className={cn("tool-first-party-call", className)}>
       <p className="tool-first-party-title">
         <span className="tool-category-icon">☑</span> Task {task.action}
       </p>
@@ -171,9 +173,11 @@ function TaskToolDisplay({
 function FileToolDisplay({
   file,
   rawJson,
+  className,
 }: {
   file: ReturnType<typeof parseFileToolCall>
   rawJson: string | null | undefined
+  className?: string
 }) {
   if (!file) return null
   const actionLabel =
@@ -185,7 +189,7 @@ function FileToolDisplay({
           ? "Writing"
           : "Searching"
   return (
-    <div className="tool-first-party-call">
+    <div className={cn("tool-first-party-call", className)}>
       <p className="tool-first-party-title">
         <span className="tool-category-icon">◇</span> {actionLabel}
       </p>
@@ -285,26 +289,28 @@ function VerboseToolCall({ tc }: { tc: { name: string; detail: string } }) {
 
   if (taskTool) {
     return (
-      <div className={`tool-call tool-call-verbose tool-category-${category}`}>
-        <TaskToolDisplay task={taskTool} rawJson={parsedDetail.rawJson} />
-      </div>
+      <TaskToolDisplay
+        task={taskTool}
+        rawJson={parsedDetail.rawJson}
+        className={`tool-call tool-call-verbose tool-category-${category}`}
+      />
     )
   }
 
   if (fileTool) {
     return (
-      <div className={`tool-call tool-call-verbose tool-category-${category}`}>
-        <FileToolDisplay file={fileTool} rawJson={parsedDetail.rawJson} />
-      </div>
+      <FileToolDisplay
+        file={fileTool}
+        rawJson={parsedDetail.rawJson}
+        className={`tool-call tool-call-verbose tool-category-${category}`}
+      />
     )
   }
 
   return (
     <div className={`tool-call tool-call-verbose tool-category-${category}`}>
-      <div className="tool-call-header">
-        <span className="tool-category-icon">{icon}</span>
-        <span className="tool-name">{tc.name}</span>
-      </div>
+      <span className="tool-category-icon">{icon}</span>
+      <span className="tool-name">{tc.name}</span>
       {isBash ? <BashToolBody parsedDetail={parsedDetail} /> : null}
       <CommonFieldsList fields={parsedDetail.commonFields} />
       {searchParams ? <SearchToolDisplay toolName={tc.name} searchParams={searchParams} /> : null}
@@ -592,38 +598,31 @@ export function SessionMessages(props: MessagesProps) {
   const grouped = useMemo(() => groupMessages(sorted), [sorted])
 
   return (
-    <section
-      className={cn(
-        "card bento-messages flex flex-col h-full max-h-full overflow-hidden",
-        props.className
-      )}
-    >
+    <section className={cn("card bento-messages flex flex-col h-full max-h-full", props.className)}>
       <header className="messages-header-row">
         <h2 className="section-title">Transcript</h2>
         <p className="section-subtitle">Conversation history for selected session</p>
       </header>
-      <div className="messages-scroll-area">
-        <SessionStatsBar {...props} />
-        {!props.hideTasks && (
-          <>
-            <ProjectTasksSection
-              tasks={projectTasks}
-              summary={projectTaskSummary}
-              loading={projectTasksLoading}
-            />
-            <SessionTasksSection tasks={tasks} summary={taskSummary} loading={tasksLoading} />
-          </>
-        )}
-        {toolStats && toolStats.length > 0 && <ToolStatsBar stats={toolStats} />}
-        <MessagesContent
-          messages={messages}
-          loading={loading}
-          newKeys={newKeys}
-          msgKey={msgKey}
-          grouped={grouped}
-          sorted={sorted}
-        />
-      </div>
+      <SessionStatsBar {...props} />
+      {!props.hideTasks && (
+        <>
+          <ProjectTasksSection
+            tasks={projectTasks}
+            summary={projectTaskSummary}
+            loading={projectTasksLoading}
+          />
+          <SessionTasksSection tasks={tasks} summary={taskSummary} loading={tasksLoading} />
+        </>
+      )}
+      {toolStats && toolStats.length > 0 && <ToolStatsBar stats={toolStats} />}
+      <MessagesContent
+        messages={messages}
+        loading={loading}
+        newKeys={newKeys}
+        msgKey={msgKey}
+        grouped={grouped}
+        sorted={sorted}
+      />
     </section>
   )
 }

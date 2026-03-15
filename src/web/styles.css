@@ -1092,6 +1092,7 @@ tbody tr:hover {
 
 .bento-messages {
   grid-area: msgs;
+  overflow-x: hidden;
   overflow-y: auto;
   min-height: 44dvh;
 }
@@ -1630,15 +1631,11 @@ tbody tr:hover {
 
 .messages-header-row {
   flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
   margin-bottom: var(--space-3);
-}
-
-.messages-scroll-area {
-  flex: 1 1 0;
-  overflow-y: auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
 }
 
 .tool-calls {
@@ -1724,7 +1721,8 @@ tbody tr:hover {
   overflow-wrap: anywhere;
 }
 
-.tool-call-header {
+.tool-call-verbose > .tool-name {
+  display: inline-block;
   margin-bottom: var(--space-1);
 }
 
