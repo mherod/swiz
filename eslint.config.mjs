@@ -50,7 +50,7 @@ export default tseslint.config(
           ignoreComments: true,
         },
       ],
-      complexity: [COMPLEXITY_WARN, 12],
+      complexity: [COMPLEXITY_WARN, 10],
       "max-depth": [COMPLEXITY_WARN, 4],
       "max-params": [COMPLEXITY_WARN, 5],
       "max-lines-per-function": [
