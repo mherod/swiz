@@ -1,5 +1,5 @@
 import { resolve } from "node:path"
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk"
+import type { CanUseTool, SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import { detectAgentCli, promptAgent } from "../agent.ts"
 import { type AiProviderId, hasAiProvider, promptText } from "../ai-providers.ts"
 import { CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
@@ -168,23 +168,68 @@ function log(msg: string): void {
   stderrLog("SDK agent message stream logging", `${DIM}[continue]${RESET} ${msg}`)
 }
 
+// ─── Permission auto-approval ────────────────────────────────────────────────
+
+const autoApprove: CanUseTool = async (toolName, input, _options) => {
+  const summary = formatToolInput(toolName, input)
+  log(`${GREEN}allow${RESET} ${CYAN}${toolName}${RESET}${summary}`)
+  return { behavior: "allow", updatedInput: input }
+}
+
+function formatToolInput(toolName: string, input: Record<string, unknown>): string {
+  if (toolName === "Bash") {
+    const cmd = input.command as string | undefined
+    return cmd ? ` ${DIM}$ ${cmd}${RESET}` : ""
+  }
+  if (toolName === "Edit" || toolName === "Write" || toolName === "Read") {
+    const path = input.file_path as string | undefined
+    return path ? ` ${DIM}${path}${RESET}` : ""
+  }
+  if (toolName === "Glob") {
+    const pattern = input.pattern as string | undefined
+    return pattern ? ` ${DIM}${pattern}${RESET}` : ""
+  }
+  if (toolName === "Grep") {
+    const pattern = input.pattern as string | undefined
+    return pattern ? ` ${DIM}/${pattern}/${RESET}` : ""
+  }
+  return ""
+}
+
+// ─── Message handler ─────────────────────────────────────────────────────────
+
 function writeMessageText(message: SDKMessage): void {
   switch (message.type) {
+    case "stream_event": {
+      const event = message.event
+      if (event.type === "content_block_delta") {
+        if (event.delta.type === "text_delta") {
+          process.stdout.write(event.delta.text)
+        }
+      } else if (event.type === "content_block_start") {
+        if (event.content_block.type === "tool_use") {
+          log(
+            `${CYAN}tool_use${RESET} ${event.content_block.name} ${DIM}(id: ${event.content_block.id})${RESET}`
+          )
+        }
+      }
+      break
+    }
     case "assistant": {
+      // With streaming enabled, text already printed via stream_event.
+      // Only log tool_use blocks and errors from the complete message.
       for (const block of message.message.content) {
-        if (block.type === "text") {
-          process.stdout.write(block.text)
-        } else if (block.type === "tool_use") {
+        if (block.type === "tool_use") {
           log(`${CYAN}tool_use${RESET} ${block.name} ${DIM}(id: ${block.id})${RESET}`)
         }
       }
-      process.stdout.write("\n")
       if (message.error) {
         log(`${RED}assistant error:${RESET} ${message.error}`)
       }
       break
     }
     case "result": {
+      process.stdout.write("\n")
       const duration = (message.duration_ms / 1000).toFixed(1)
       const apiDuration = (message.duration_api_ms / 1000).toFixed(1)
       const cost = message.total_cost_usd.toFixed(4)
@@ -227,10 +272,6 @@ function writeMessageText(message: SDKMessage): void {
       } else if (message.subtype === "compact_boundary") {
         log(`${YELLOW}compaction${RESET} ${DIM}trigger=${message.compact_metadata.trigger}${RESET}`)
       }
-      break
-    }
-    case "stream_event": {
-      // Partial streaming — no logging needed
       break
     }
     default:
@@ -289,6 +330,8 @@ export const continueCommand: Command = {
         tools: { type: "preset", preset: "claude_code" },
         systemPrompt: { type: "preset", preset: "claude_code" },
         settingSources: ["user", "project", "local"],
+        includePartialMessages: true,
+        canUseTool: autoApprove,
       },
     })
 
