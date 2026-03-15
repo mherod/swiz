@@ -94,14 +94,18 @@ class PreToolUseStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
     const { filteredGroups, enrichedPayloadStr, daemonContext, cwd } = ctx
 
-    await launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext)
     const hints: string[] = []
     const contexts: string[] = []
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []
 
     const entries = flatSyncHooks(filteredGroups)
-    const results = await Promise.all(entries.map((e) => runEntry(e, enrichedPayloadStr, cwd)))
+    // Run async hooks concurrently with sync hooks — in daemon context this avoids
+    // blocking the sync fan-out until all async hooks complete.
+    const [results] = await Promise.all([
+      Promise.all(entries.map((e) => runEntry(e, enrichedPayloadStr, cwd))),
+      launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext),
+    ])
 
     for (const { execution, parsed: resp } of results) {
       if (execution.status === "skipped") {
@@ -135,14 +139,16 @@ class BlockingStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
     const { filteredGroups, enrichedPayloadStr, canonicalEvent, daemonContext, cwd } = ctx
 
-    await launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext)
     const runAllHooks = canonicalEvent === "stop"
     const finalResponse: Record<string, unknown> = {}
     const executions: HookExecution[] = []
 
-    // Fan out all sync hooks concurrently; scan results in declaration order.
+    // Fan out all sync hooks concurrently with async hooks; scan results in declaration order.
     const entries = flatSyncHooks(filteredGroups)
-    const results = await Promise.all(entries.map((e) => runEntry(e, enrichedPayloadStr, cwd)))
+    const [results] = await Promise.all([
+      Promise.all(entries.map((e) => runEntry(e, enrichedPayloadStr, cwd))),
+      launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext),
+    ])
 
     for (const { execution, parsed: resp } of results) {
       if (execution.status === "skipped") {
@@ -181,13 +187,16 @@ class ContextStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
     const { filteredGroups, enrichedPayloadStr, hookEventName, daemonContext, cwd } = ctx
 
-    await launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext)
     const contexts: string[] = []
     const executions: HookExecution[] = []
 
     // All context hooks are independent — fan out fully, merge results in order.
+    // Async hooks run concurrently with the sync fan-out.
     const entries = flatSyncHooks(filteredGroups)
-    const results = await Promise.all(entries.map((e) => runEntry(e, enrichedPayloadStr, cwd)))
+    const [results] = await Promise.all([
+      Promise.all(entries.map((e) => runEntry(e, enrichedPayloadStr, cwd))),
+      launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext),
+    ])
 
     for (const { execution, parsed: resp } of results) {
       if (execution.status === "skipped") {
