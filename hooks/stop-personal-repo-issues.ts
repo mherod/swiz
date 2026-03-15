@@ -14,7 +14,7 @@ import {
   needsRefinement,
   normaliseLabel,
 } from "../src/issue-refinement.ts"
-import { getIssueStore, replayPendingMutations } from "../src/issue-store.ts"
+import { getDaemonBackedStore, getIssueStore, replayPendingMutations } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import { stopPersonalRepoIssuesCooldownPath } from "../src/temp-paths.ts"
 import {
@@ -300,12 +300,19 @@ export async function getActionableIssues(cwd: string, filterUser?: string): Pro
   const repoSlug = await getRepoSlug(cwd)
   if (!repoSlug) return []
 
-  // Store-first: use cached data if fresh, fall back to gh CLI
+  // Store-first: use cached data if fresh
   const cached = readCachedIssues(repoSlug)
   if (cached.length > 0) {
     return filterVisibleIssues(cached, filterUser)
   }
 
+  // Daemon-backed store: try daemon HTTP API directly when SQLite is empty
+  const daemonIssues = await getDaemonBackedStore().listIssues<Issue>(repoSlug)
+  if (daemonIssues.length > 0) {
+    return filterVisibleIssues(daemonIssues, filterUser)
+  }
+
+  // Final fallback: direct gh CLI
   const jsonFields = "number,title,labels,author,assignees"
   const liveIssues = await ghJson<Issue[]>(
     ["issue", "list", "--state", "open", "--json", jsonFields],

@@ -1438,3 +1438,103 @@ export function resetIssueStore(): void {
   sharedStore?.close()
   sharedStore = null
 }
+
+// ─── Daemon-backed async store ─────────────────────────────────────────────
+
+const DAEMON_FALLBACK_PORT = Number(process.env.SWIZ_DAEMON_PORT ?? "7943")
+const DAEMON_FALLBACK_TIMEOUT_MS = 2_000
+
+/**
+ * Async issue store that reads from the daemon's /gh-query HTTP API.
+ * Used when the primary SQLite store is unavailable — provides direct
+ * daemon routing at the store level rather than relying on caller fallbacks.
+ *
+ * Usage:
+ *   const store = getDaemonBackedStore()
+ *   const issues = await store.listIssues<Issue>(repo)
+ */
+export class DaemonBackedIssueStore {
+  private daemonAvailable: boolean | null = null
+
+  private async query<T>(args: string[]): Promise<T | null> {
+    if (this.daemonAvailable === false) return null
+    try {
+      const resp = await fetch(`http://127.0.0.1:${DAEMON_FALLBACK_PORT}/gh-query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ args, cwd: ".", ttlMs: 300_000 }),
+        signal: AbortSignal.timeout(DAEMON_FALLBACK_TIMEOUT_MS),
+      })
+      if (!resp.ok) {
+        this.daemonAvailable = false
+        return null
+      }
+      this.daemonAvailable = true
+      const data = (await resp.json()) as { value: T | null }
+      return data.value
+    } catch {
+      this.daemonAvailable = false
+      return null
+    }
+  }
+
+  async listIssues<T = unknown>(repo: string): Promise<T[]> {
+    const result = await this.query<T[]>([
+      "issue",
+      "list",
+      "--repo",
+      repo,
+      "--state",
+      "open",
+      "--json",
+      "number,title,labels,author,assignees",
+    ])
+    return result ?? []
+  }
+
+  async listPullRequests<T = unknown>(repo: string): Promise<T[]> {
+    const result = await this.query<T[]>([
+      "pr",
+      "list",
+      "--repo",
+      repo,
+      "--state",
+      "open",
+      "--json",
+      "number,title,url,reviewDecision,mergeable,createdAt,author",
+    ])
+    return result ?? []
+  }
+
+  async getIssue<T = unknown>(repo: string, number: number): Promise<T | null> {
+    const result = await this.query<T[]>([
+      "issue",
+      "view",
+      "--repo",
+      repo,
+      String(number),
+      "--json",
+      "number,title,labels,author,assignees,body,state",
+    ])
+    return Array.isArray(result) ? (result[0] ?? null) : result
+  }
+
+  get isDaemonAvailable(): boolean | null {
+    return this.daemonAvailable
+  }
+}
+
+let sharedDaemonStore: DaemonBackedIssueStore | null = null
+
+/** Get a shared DaemonBackedIssueStore instance for async reads via daemon HTTP API. */
+export function getDaemonBackedStore(): DaemonBackedIssueStore {
+  if (!sharedDaemonStore) {
+    sharedDaemonStore = new DaemonBackedIssueStore()
+  }
+  return sharedDaemonStore
+}
+
+/** Reset the shared daemon store (for testing). */
+export function resetDaemonBackedStore(): void {
+  sharedDaemonStore = null
+}
