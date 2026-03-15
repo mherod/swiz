@@ -1,9 +1,13 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { getSessionTasksDir } from "./hook-utils.ts"
 import { normalizeTerminateArgs } from "./stop-auto-continue.ts"
 import { useTempDir } from "./test-utils.ts"
+
+// Subprocess-based tests spawn `bun hooks/stop-auto-continue.ts` which is
+// slower on CI runners (Ubuntu) than locally. Bump from the default 10s.
+setDefaultTimeout(30_000)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -90,6 +94,8 @@ async function runHook({
     env: {
       ...cleanEnv,
       HOME: fakeHome,
+      // Never talk to the real daemon from tests.
+      SWIZ_NO_DAEMON: "1",
       // Mock all external AI backends by default so tests never spawn real CLIs.
       // When a mock AI seam is active (AI_TEST_RESPONSE or AI_TEST_CAPTURE_FILE),
       // omit AI_TEST_NO_BACKEND so hasAiProvider() returns true and the seam is used.
@@ -1498,28 +1504,23 @@ describe("stop-auto-continue", () => {
   }
 
   /**
-   * Creates a fake `gh` binary that responds to specific subcommands.
-   * - `gh api user`: returns the current user login
-   * - `gh issue list`: returns the provided issues JSON
-   * - `gh pr list`: returns []
+   * Creates a fake `gh` bun script that serves fixture responses from env vars.
+   * Env vars: GH_MOCK_USER, GH_MOCK_ISSUES, GH_MOCK_PRS.
+   * Bun.spawn/Bun.which ignore process.env.PATH, so the fake must be
+   * prepended to the *full* parent PATH to be resolved first.
    */
-  async function createFakeGh(binDir: string, issuesJson: string): Promise<void> {
+  async function createFakeGh(binDir: string): Promise<void> {
     const ghScript =
-      `#!/bin/sh\n` +
-      `case "$*" in\n` +
-      `  *api*user*)\n` +
-      `    printf '%s' 'testuser'\n` +
-      `    ;;\n` +
-      `  *"issue list"*)\n` +
-      `    printf '%s' '${issuesJson.replace(/'/g, "'\\''")}'\n` +
-      `    ;;\n` +
-      `  *"pr list"*)\n` +
-      `    printf '%s' '[]'\n` +
-      `    ;;\n` +
-      `  *)\n` +
-      `    exit 1\n` +
-      `    ;;\n` +
-      `esac\n`
+      `#!/usr/bin/env bun\n` +
+      `const args = process.argv.slice(2).join(" ")\n` +
+      `if (args.includes("api") && args.includes("user")) {\n` +
+      `  process.stdout.write(process.env.GH_MOCK_USER ?? "testuser")\n` +
+      `} else if (args.includes("issue") && args.includes("list")) {\n` +
+      `  process.stdout.write(process.env.GH_MOCK_ISSUES ?? "[]")\n` +
+      `} else if (args.includes("pr") && args.includes("list")) {\n` +
+      `  process.stdout.write(process.env.GH_MOCK_PRS ?? "[]")\n` +
+      `}\n` +
+      `process.exit(0)\n`
     await writeFile(join(binDir, "gh"), ghScript)
     await chmod(join(binDir, "gh"), 0o755)
   }
@@ -1529,6 +1530,8 @@ describe("stop-auto-continue", () => {
     await initFakeGitRepo(repoDir, "https://github.com/testuser/testrepo.git")
 
     const binDir = await createTempDir()
+    await createFakeGh(binDir)
+
     // Issue #99 has no readiness labels → needsRefinement returns true
     const issues = JSON.stringify([
       {
@@ -1539,15 +1542,16 @@ describe("stop-auto-continue", () => {
         assignees: [],
       },
     ])
-    await createFakeGh(binDir, issues)
 
-    // binDir must come first so fake gh wins, but real git must be reachable
-    const gitDir = (Bun.which("git") ?? "/usr/bin/git").replace(/\/git$/, "")
+    // Prepend binDir to full PATH so Bun.spawn finds fake gh first
     const result = await runHook({
       transcriptContent: buildTranscript(10),
       cwd: repoDir,
       extraEnv: {
-        PATH: `${binDir}:${gitDir}:/bin:/usr/bin`,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        GH_MOCK_USER: "testuser",
+        GH_MOCK_ISSUES: issues,
+        GH_MOCK_PRS: "[]",
         GEMINI_API_KEY: "test-key",
         AI_TEST_RESPONSE: agentResponse("Implement the next feature"),
       },
@@ -1564,6 +1568,8 @@ describe("stop-auto-continue", () => {
     await initFakeGitRepo(repoDir, "https://github.com/testuser/testrepo.git")
 
     const binDir = await createTempDir()
+    await createFakeGh(binDir)
+
     // Issue #50 has type + readiness + priority labels → needsRefinement returns false
     const issues = JSON.stringify([
       {
@@ -1574,14 +1580,15 @@ describe("stop-auto-continue", () => {
         assignees: [],
       },
     ])
-    await createFakeGh(binDir, issues)
 
-    const gitDir = (Bun.which("git") ?? "/usr/bin/git").replace(/\/git$/, "")
     const result = await runHook({
       transcriptContent: buildTranscript(10),
       cwd: repoDir,
       extraEnv: {
-        PATH: `${binDir}:${gitDir}:/bin:/usr/bin`,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        GH_MOCK_USER: "testuser",
+        GH_MOCK_ISSUES: issues,
+        GH_MOCK_PRS: "[]",
         GEMINI_API_KEY: "test-key",
         AI_TEST_RESPONSE: agentResponse("Implement the next feature"),
       },
@@ -1597,14 +1604,16 @@ describe("stop-auto-continue", () => {
     await initFakeGitRepo(repoDir, "https://github.com/testuser/testrepo.git")
 
     const binDir = await createTempDir()
-    await createFakeGh(binDir, "[]")
+    await createFakeGh(binDir)
 
-    const gitDir = (Bun.which("git") ?? "/usr/bin/git").replace(/\/git$/, "")
     const result = await runHook({
       transcriptContent: buildTranscript(10),
       cwd: repoDir,
       extraEnv: {
-        PATH: `${binDir}:${gitDir}:/bin:/usr/bin`,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        GH_MOCK_USER: "testuser",
+        GH_MOCK_ISSUES: "[]",
+        GH_MOCK_PRS: "[]",
         GEMINI_API_KEY: "test-key",
         AI_TEST_RESPONSE: agentResponse("Implement the next feature"),
       },
