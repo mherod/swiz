@@ -1,4 +1,5 @@
 import { resolve } from "node:path"
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import { detectAgentCli, promptAgent } from "../agent.ts"
 import { type AiProviderId, hasAiProvider, promptText } from "../ai-providers.ts"
 import { DIM, RESET } from "../ansi.ts"
@@ -142,23 +143,39 @@ async function generateSuggestion(raw: string, provider?: AiProviderId): Promise
   return suggestion
 }
 
-function buildResumeArgs(
+function resolveQueryOptions(
   session: Session,
   sessionQuery: string | null,
-  suggestion: string
-): string[] {
+  targetDir: string
+): { resume?: string; continue?: boolean; cwd: string } {
   const canResumeClaudeSession = session.provider === "claude"
   const shouldResumeById = Boolean(sessionQuery) && canResumeClaudeSession
-  const resumeArgs: string[] = shouldResumeById
-    ? ["claude", "--resume", session.id, suggestion]
-    : ["claude", "--continue", suggestion]
 
   if (sessionQuery && !canResumeClaudeSession) {
     console.log(
       `${DIM}Session ${session.id} is from ${session.provider ?? "another provider"}; using --continue instead of --resume.${RESET}`
     )
   }
-  return resumeArgs
+
+  if (shouldResumeById) {
+    return { resume: session.id, cwd: targetDir }
+  }
+  return { continue: true, cwd: targetDir }
+}
+
+function writeMessageText(message: SDKMessage): void {
+  if (message.type === "assistant") {
+    for (const block of message.message.content) {
+      if (block.type === "text") {
+        process.stdout.write(block.text)
+      }
+    }
+    process.stdout.write("\n")
+  } else if (message.type === "result") {
+    if (message.subtype !== "success") {
+      process.exitCode = 1
+    }
+  }
 }
 
 // ─── Command ──────────────────────────────────────────────────────────────────
@@ -194,13 +211,21 @@ export const continueCommand: Command = {
       return
     }
 
-    const resumeArgs = buildResumeArgs(session, sessionQuery, suggestion)
-    const proc = Bun.spawn(resumeArgs, {
-      stdout: "inherit",
-      stderr: "inherit",
-      stdin: "inherit",
+    const { query } = await import("@anthropic-ai/claude-agent-sdk")
+    const queryOptions = resolveQueryOptions(session, sessionQuery, targetDir)
+
+    const conversation = query({
+      prompt: suggestion,
+      options: {
+        ...queryOptions,
+        tools: { type: "preset", preset: "claude_code" },
+        systemPrompt: { type: "preset", preset: "claude_code" },
+        settingSources: ["user", "project", "local"],
+      },
     })
-    await proc.exited
-    process.exitCode = proc.exitCode ?? 0
+
+    for await (const message of conversation) {
+      writeMessageText(message)
+    }
   },
 }
