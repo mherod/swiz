@@ -13,6 +13,7 @@ import { detectRepoOwnership } from "../src/collaboration-policy.ts"
 import { resolveCwd } from "../src/cwd.ts"
 import { ensureGeminiApiKey } from "../src/gemini.ts"
 import { getHomeDir, getHomeDirOrNull } from "../src/home.ts"
+import { needsRefinement } from "../src/issue-refinement.ts"
 import {
   type AmbitionMode,
   getEffectiveSwizSettings,
@@ -43,7 +44,7 @@ import {
   skillAdvice,
 } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
-import { getActionableIssues, needsRefinement } from "./stop-personal-repo-issues.ts"
+import { getActionableIssues } from "./stop-personal-repo-issues.ts"
 
 const CONTEXT_TURNS = 20 // Recent turns to send as context
 const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 120_000

@@ -8,6 +8,12 @@
 
 import { orderBy, uniqBy } from "lodash-es"
 import { detectRepoOwnership } from "../src/collaboration-policy.ts"
+import {
+  missingRefinementCategories,
+  NEEDS_REFINEMENT_NORM,
+  needsRefinement,
+  normaliseLabel,
+} from "../src/issue-refinement.ts"
 import { getIssueStore, replayPendingMutations } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import { stopPersonalRepoIssuesCooldownPath } from "../src/temp-paths.ts"
@@ -24,6 +30,8 @@ import {
   skillAdvice,
 } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
+
+export { missingRefinementCategories, needsRefinement }
 
 /** Labels that indicate an issue is not actionable right now. */
 const SKIP_LABELS = new Set([
@@ -90,56 +98,6 @@ const LABEL_SCORE: Record<string, number> = {
   // Not ready to start
   "needs-breakdown": -2,
 }
-
-/**
- * Labels that satisfy the "type" category for refined issues.
- * Keys are normalised at startup via normaliseLabel().
- */
-const TYPE_LABELS = new Set([
-  "bug",
-  "enhancement",
-  "documentation",
-  "chore",
-  "feature",
-  "question",
-  "maintenance",
-  "tech-debt",
-  "help wanted",
-  "good first issue",
-])
-
-/**
- * Labels that satisfy the "readiness/status" category for refined issues.
- * Keys are normalised at startup via normaliseLabel().
- */
-const READINESS_LABELS = new Set([
-  "ready",
-  "ready-for-dev",
-  "ready-for-development",
-  "triaged",
-  "confirmed",
-  "accepted",
-  "spec-approved",
-  "backlog",
-])
-
-/**
- * Labels that satisfy the "priority" category for refined issues.
- * Keys are normalised at startup via normaliseLabel().
- */
-const PRIORITY_LABELS = new Set([
-  "priority:critical",
-  "priority:high",
-  "priority:medium",
-  "priority:low",
-  "p0",
-  "p1",
-  "p2",
-  "p3",
-])
-
-/** Label that explicitly marks an issue as needing refinement. */
-const NEEDS_REFINEMENT_LABEL = "needs-refinement"
 
 const MAX_SHOWN_ISSUES = 5
 const REBASE_SUGGESTIONS_PER_SIDE = 2
@@ -217,60 +175,14 @@ async function updateCooldown(sessionId: string | null, cwd: string): Promise<vo
   }
 }
 
-/**
- * Normalise a label name for agnostic matching:
- *  1. Lowercase
- *  2. Collapse any separator (: / -) to :
- *  3. Sort segments alphabetically
- * Result: "priority:high", "priority/high", "priority-high", and
- * "high-priority" all normalise to the same canonical key.
- */
-function normaliseLabel(name: string): string {
-  const segments = name.toLowerCase().replace(/[/-]/g, ":").split(":")
-  return orderBy(segments, [(segment) => segment], ["asc"]).join(":")
-}
-
 // Pre-compute normalised lookups so source tables stay human-readable.
 const SKIP_NORM = new Set([...SKIP_LABELS].map(normaliseLabel))
 const SCORE_NORM: Record<string, number> = Object.fromEntries(
   Object.entries(LABEL_SCORE).map(([k, v]) => [normaliseLabel(k), v])
 )
-const TYPE_NORM = new Set([...TYPE_LABELS].map(normaliseLabel))
-const READINESS_NORM = new Set([...READINESS_LABELS].map(normaliseLabel))
-const PRIORITY_NORM = new Set([...PRIORITY_LABELS].map(normaliseLabel))
-const NEEDS_REFINEMENT_NORM = normaliseLabel(NEEDS_REFINEMENT_LABEL)
 
 function scoreIssue(issue: Issue): number {
   return issue.labels.reduce((sum, l) => sum + (SCORE_NORM[normaliseLabel(l.name)] ?? 0), 0)
-}
-
-/**
- * Return missing label categories required for issue refinement.
- * Every refined issue must include at least one label for:
- *   - type (bug/feature/etc.)
- *   - readiness/status (ready/triaged/etc.)
- *   - priority (priority-high, p0, etc.)
- */
-export function missingRefinementCategories(issue: Issue): string[] {
-  const normLabels = issue.labels.map((l) => normaliseLabel(l.name))
-  const missing: string[] = []
-  if (!normLabels.some((nl) => TYPE_NORM.has(nl))) missing.push("type")
-  if (!normLabels.some((nl) => READINESS_NORM.has(nl))) missing.push("readiness")
-  if (!normLabels.some((nl) => PRIORITY_NORM.has(nl))) missing.push("priority")
-  return missing
-}
-
-/**
- * Check if an issue needs refinement before it's ready for implementation.
- * An issue needs refinement if:
- *   1. It has a `needs-refinement` label, OR
- *   2. It is missing one or more required label categories
- *      (type + readiness/status + priority)
- */
-export function needsRefinement(issue: Issue): boolean {
-  const normLabels = issue.labels.map((l) => normaliseLabel(l.name))
-  if (normLabels.some((nl) => nl === NEEDS_REFINEMENT_NORM)) return true
-  return missingRefinementCategories(issue).length > 0
 }
 
 export interface Issue {
