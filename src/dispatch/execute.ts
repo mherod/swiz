@@ -7,6 +7,7 @@
  */
 
 import { merge, orderBy } from "lodash-es"
+import { isGitRepo } from "../git-helpers.ts"
 import { tryReplayPendingMutations } from "../issue-store.ts"
 import type { HookGroup } from "../manifest.ts"
 import { manifest } from "../manifest.ts"
@@ -347,6 +348,13 @@ function buildLifecycleEvent(
 
 export async function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const ctx = buildDispatchContext(req)
+
+  // Short-circuit: project capabilities require a git repo — skip dispatch for non-git dirs.
+  if (!(await isGitRepo(ctx.cwd))) {
+    log(`   ⏭ no .git in cwd, skipping dispatch`)
+    return { response: {} }
+  }
+
   const finalPayloadStr = ctx.parseError ? ctx.payloadStr : JSON.stringify(ctx.payload)
 
   await tryReplayPendingMutations(ctx.cwd)
