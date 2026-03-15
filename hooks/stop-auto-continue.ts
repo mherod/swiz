@@ -1095,7 +1095,12 @@ async function loadSuggestionLog(sessionId: string): Promise<SuggestionLog> {
       raw !== null &&
       typeof (raw as SuggestionLog).seen === "object"
     ) {
-      return raw as SuggestionLog
+      const log = raw as SuggestionLog
+      // Migrate: derive totalAttempts from key counts if field is missing (pre-exhaustion files)
+      if (typeof log.totalAttempts !== "number") {
+        log.totalAttempts = Object.values(log.seen).reduce((sum, n) => sum + n, 0)
+      }
+      return log
     }
   } catch {
     // File doesn't exist or is invalid
