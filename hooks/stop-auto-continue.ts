@@ -1112,7 +1112,9 @@ async function recordSuggestion(sessionId: string, key: string): Promise<number>
   return log.seen[key]!
 }
 
-/** Best-effort cleanup of dedup files older than 7 days. */
+/** Best-effort cleanup of dedup files older than 7 days or exceeding max count. */
+const DEDUP_MAX_FILES = 50
+
 async function pruneOldSuggestionLogs(): Promise<void> {
   const home = getHomeDirOrNull()
   if (!home) return
@@ -1120,15 +1122,24 @@ async function pruneOldSuggestionLogs(): Promise<void> {
   try {
     const entries = await readdir(swizDir)
     const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+    const suggestionFiles: { path: string; mtime: number }[] = []
     for (const entry of entries) {
       if (!entry.startsWith("stop-suggestions-") || !entry.endsWith(".json")) continue
       const filePath = join(swizDir, entry)
       const file = Bun.file(filePath)
-      const stat = await file.exists()
-      if (!stat) continue
-      // Use file mtime; Bun.file doesn't expose mtime directly — use lastModified
-      if (file.lastModified < cutoff) {
-        await Bun.write(filePath, "") // Truncate rather than delete (no rm)
+      if (!(await file.exists())) continue
+      const mtime = file.lastModified
+      if (mtime < cutoff) {
+        await Bun.write(filePath, "") // Truncate stale files
+      } else {
+        suggestionFiles.push({ path: filePath, mtime })
+      }
+    }
+    // Cap total files: truncate oldest excess
+    if (suggestionFiles.length > DEDUP_MAX_FILES) {
+      suggestionFiles.sort((a, b) => a.mtime - b.mtime)
+      for (const file of suggestionFiles.slice(0, suggestionFiles.length - DEDUP_MAX_FILES)) {
+        await Bun.write(file.path, "")
       }
     }
   } catch {
