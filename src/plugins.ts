@@ -253,9 +253,5 @@ export async function loadAllPlugins(
   plugins: string[],
   projectRoot: string
 ): Promise<PluginResult[]> {
-  const results: PluginResult[] = []
-  for (const entry of plugins) {
-    results.push(await loadPlugin(entry, projectRoot))
-  }
-  return results
+  return Promise.all(plugins.map((entry) => loadPlugin(entry, projectRoot)))
 }
