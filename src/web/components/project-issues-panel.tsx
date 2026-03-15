@@ -138,7 +138,7 @@ export function ProjectIssuesPanel({ cwd }: { cwd: string | null }) {
   return (
     <section className="card project-issues-card" aria-labelledby="project-issues-title">
       <div className="project-issues-hero">
-        <div className="project-issues-copy">
+        <div>
           <p className="project-issues-kicker">GitHub cache</p>
           <div className="project-issues-title-row">
             <h2 id="project-issues-title" className="section-title">
@@ -158,10 +158,10 @@ export function ProjectIssuesPanel({ cwd }: { cwd: string | null }) {
           {repoParts ? (
             <div className="project-issues-repo-badge">
               <span className="project-issues-repo-monogram">{repoMonogram(repo)}</span>
-              <span className="project-issues-repo-text">
-                <span className="project-issues-repo-owner">{repoParts.owner}</span>
-                <span className="project-issues-repo-name">{repoParts.name}</span>
-              </span>
+              <div>
+                <div className="project-issues-repo-owner">{repoParts.owner}</div>
+                <div className="project-issues-repo-name">{repoParts.name}</div>
+              </div>
             </div>
           ) : null}
           {repo ? (
