@@ -1102,13 +1102,45 @@ async function loadSuggestionLog(sessionId: string): Promise<SuggestionLog> {
 async function recordSuggestion(sessionId: string, key: string): Promise<number> {
   const log = await loadSuggestionLog(sessionId)
   log.seen[key] = (log.seen[key] ?? 0) + 1
-  await Bun.write(getSuggestionsPath(sessionId), JSON.stringify(log))
+  const path = getSuggestionsPath(sessionId)
+  const { mkdirSync } = await import("node:fs")
+  const { dirname } = await import("node:path")
+  try {
+    mkdirSync(dirname(path), { recursive: true })
+  } catch {}
+  await Bun.write(path, JSON.stringify(log))
   return log.seen[key]!
+}
+
+/** Best-effort cleanup of dedup files older than 7 days. */
+async function pruneOldSuggestionLogs(): Promise<void> {
+  const home = getHomeDirOrNull()
+  if (!home) return
+  const swizDir = join(home, ".swiz")
+  try {
+    const entries = await readdir(swizDir)
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+    for (const entry of entries) {
+      if (!entry.startsWith("stop-suggestions-") || !entry.endsWith(".json")) continue
+      const filePath = join(swizDir, entry)
+      const file = Bun.file(filePath)
+      const stat = await file.exists()
+      if (!stat) continue
+      // Use file mtime; Bun.file doesn't expose mtime directly — use lastModified
+      if (file.lastModified < cutoff) {
+        await Bun.write(filePath, "") // Truncate rather than delete (no rm)
+      }
+    }
+  } catch {
+    // Best-effort — ignore errors
+  }
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  void pruneOldSuggestionLogs() // Fire-and-forget cleanup
+
   let hookRaw: Record<string, unknown>
   try {
     hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
