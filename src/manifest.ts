@@ -193,6 +193,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-no-as-any.ts", timeout: 5 },
       { file: "pretooluse-no-secrets.ts", timeout: 5 },
       { file: "pretooluse-bun-file-api-enforce.ts", timeout: 5, cooldownSeconds: 30 },
+      { file: "pretooluse-bun-spawn-enforce.ts", timeout: 5, cooldownSeconds: 30 },
       { file: "pretooluse-debug-statements.ts", timeout: 5 },
       { file: "pretooluse-todo-tracker.ts", timeout: 5 },
       { file: "pretooluse-large-files.ts", timeout: 5 },
