@@ -270,6 +270,11 @@ export function formatTrace(
       REPLAY_RESULT,
       `${BOLD}Result:${RESET} ${RED}${blocked.status.toUpperCase()} by ${blocked.file}${RESET}`
     )
+    // Forward the hook's block/deny JSON to stdout so Claude Code receives it.
+    // Without this, the dispatch process exits with empty stdout and the block is silently lost.
+    if (blocked.output) {
+      process.stdout.write(`${blocked.output}\n`)
+    }
   } else {
     stderrLog(REPLAY_RESULT, `${BOLD}Result:${RESET} ${GREEN}all passed${RESET}`)
   }
