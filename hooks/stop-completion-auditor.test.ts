@@ -59,6 +59,29 @@ describe("formatActionPlan", () => {
     expect(result).toContain("  2. 中文")
   })
 
+  it("renders nested sub-steps with letter indices", () => {
+    const result = formatActionPlan(["Top step", ["Sub A", "Sub B"], "Next step"])
+    expect(result).toBe(
+      "Action plan:\n  1. Top step\n     a. Sub A\n     b. Sub B\n  2. Next step\n"
+    )
+  })
+
+  it("renders deeply nested sub-steps with increasing indent", () => {
+    const result = formatActionPlan(["Top", [["Deep A", "Deep B"]]])
+    expect(result).toContain("Top")
+    expect(result).toContain("Deep A")
+    expect(result).toContain("Deep B")
+  })
+
+  it("handles mixed flat and nested items", () => {
+    const result = formatActionPlan(["Step 1", ["Detail a", "Detail b"], "Step 2", ["Detail c"]])
+    expect(result).toContain("  1. Step 1")
+    expect(result).toContain("     a. Detail a")
+    expect(result).toContain("     b. Detail b")
+    expect(result).toContain("  2. Step 2")
+    expect(result).toContain("     a. Detail c")
+  })
+
   it("output from formatActionPlan is appendable alongside a prose prefix", () => {
     // Mirrors how stop-completion-auditor.ts uses it: prose + formatActionPlan(steps)
     const full = `Create tasks to record the work done.\n\n${formatActionPlan(["TaskCreate", "TaskUpdate"])}`

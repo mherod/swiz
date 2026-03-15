@@ -2,6 +2,8 @@
 // Keep these strings centralized so fallback wording and checklists
 // stay consistent everywhere thresholds are enforced.
 
+import type { ActionPlanItem } from "./action-plan.ts"
+
 // ---------------------------------------------------------------------------
 // Core principle
 // ---------------------------------------------------------------------------
@@ -83,19 +85,17 @@ export function manualCompactionGuidanceFallback(): string {
  * Example:
  * `compactionChecklistSteps("Re-check: `wc -w CLAUDE.md`")`
  */
-export function compactionChecklistSteps(verificationStep: string): string[] {
+export function compactionChecklistSteps(verificationStep: string): ActionPlanItem[] {
   return [
-    // Removal steps
-    "Remove redundant modifiers, auxiliary verbs, and filler phrasing.",
-    "Remove parenthetical restatements and duplicate bullets, sections, and topic lists.",
-    "Convert narrative/session language into direct DO/DON'T/Reference guidance.",
-    // Preservation mandate
-    "Keep all technical specifics: names, IDs, URLs, commands, and numeric constraints.",
-    // Diary check
-    "Scan for narrative language ('we learned', 'this session', 'when we tried') — convert to directives or remove.",
-    // Strategy sweep
+    "Remove unnecessary content:",
+    [
+      "Redundant modifiers, auxiliary verbs, and filler phrasing.",
+      "Parenthetical restatements and duplicate bullets, sections, and topic lists.",
+      "Narrative language ('we learned', 'this session', 'when we tried') — convert to directives or remove.",
+    ],
+    "Convert remaining content to direct DO/DON'T/Reference guidance.",
+    "Preserve all technical specifics: names, IDs, URLs, commands, and numeric constraints.",
     "Apply surgical strategies: consolidate repeated topics, cross-reference instead of repeating, collapse similar lists.",
-    // Final gate
     verificationStep,
   ]
 }
@@ -111,12 +111,15 @@ export function compactionChecklistSteps(verificationStep: string): string[] {
  * Example:
  * `compactionVerificationSteps("bun ~/.claude/skills/compact-memory/scripts/analyze-claude-md.ts")`
  */
-export function compactionVerificationSteps(rerunCommand: string): string[] {
+export function compactionVerificationSteps(rerunCommand: string): ActionPlanItem[] {
   return [
-    `Re-run analysis: \`${rerunCommand}\` — "Overall status" must show "✓ All files within limits".`,
+    `Re-run analysis: \`${rerunCommand}\``,
+    [
+      '"Overall status" must show "✓ All files within limits".',
+      '"Files Exceeding Thresholds" shows "None ✓" and "Total Footprint" shows "✓ Within limit".',
+    ],
     "Confirm word count decreased (never increased).",
     "Verify no specifics removed: all function names, version numbers, IDs, URLs, commands, and file paths remain intact.",
     "Search for residual narrative language ('we learned', 'this session', 'when we', 'during this') and convert or remove.",
-    "Check that 'Files Exceeding Thresholds' shows 'None ✓' and 'Total Footprint' shows '✓ Within limit'.",
   ]
 }

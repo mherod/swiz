@@ -224,9 +224,12 @@ function checkInProgressCap(
       `Having more than ${IN_PROGRESS_CAP} simultaneous in_progress tasks weakens focus and planning quality.\n\n` +
       formatActionPlan(
         [
-          "Use TaskUpdate to mark completed tasks done (status: completed).",
-          "Use TaskUpdate to move non-active tasks back to pending.",
-          `Reduce in_progress count to ${IN_PROGRESS_CAP} or fewer, then retry.`,
+          `Reduce in_progress count to ${IN_PROGRESS_CAP} or fewer:`,
+          [
+            "Use TaskUpdate to mark completed tasks done (status: completed).",
+            "Use TaskUpdate to move non-active tasks back to pending.",
+          ],
+          `Retry ${toolName} — it will succeed once in_progress count is within the cap.`,
         ],
         { translateToolNames: true }
       ) +
@@ -301,8 +304,12 @@ async function checkTaskStaleness(opts: CheckTaskStalenessOpts): Promise<void> {
       `Our current work has clearly grown in scope beyond the original task definition. We should update the in-progress task with current status, and create a new task that represents the work now underway.\n\n` +
       formatActionPlan(
         [
-          "Use TaskUpdate to update in-progress tasks with the latest progress and mark completed work done.",
-          "Ensure the current work has an in_progress task with a clear description.",
+          "Update existing tasks to reflect current reality:",
+          [
+            "Use TaskUpdate to update in-progress tasks with the latest progress.",
+            "Mark completed work done.",
+            "Ensure the current work has an in_progress task with a clear description.",
+          ],
           "Use TaskCreate to create at least one further task for the next concrete step based on the work underway.",
           stateStep,
         ],

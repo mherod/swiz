@@ -21,11 +21,14 @@ describe("memory-compaction-guidance", () => {
   test("compactionChecklistSteps includes shared guidance and caller verification step", () => {
     const steps = compactionChecklistSteps("Re-check with `wc -w CLAUDE.md`.")
     expect(steps).toEqual([
-      "Remove redundant modifiers, auxiliary verbs, and filler phrasing.",
-      "Remove parenthetical restatements and duplicate bullets, sections, and topic lists.",
-      "Convert narrative/session language into direct DO/DON'T/Reference guidance.",
-      "Keep all technical specifics: names, IDs, URLs, commands, and numeric constraints.",
-      "Scan for narrative language ('we learned', 'this session', 'when we tried') — convert to directives or remove.",
+      "Remove unnecessary content:",
+      [
+        "Redundant modifiers, auxiliary verbs, and filler phrasing.",
+        "Parenthetical restatements and duplicate bullets, sections, and topic lists.",
+        "Narrative language ('we learned', 'this session', 'when we tried') — convert to directives or remove.",
+      ],
+      "Convert remaining content to direct DO/DON'T/Reference guidance.",
+      "Preserve all technical specifics: names, IDs, URLs, commands, and numeric constraints.",
       "Apply surgical strategies: consolidate repeated topics, cross-reference instead of repeating, collapse similar lists.",
       "Re-check with `wc -w CLAUDE.md`.",
     ])
