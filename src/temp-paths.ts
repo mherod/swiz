@@ -60,3 +60,7 @@ export function swizPrPollErrorLogPath(): string {
 export function swizEmergencyBypassPath(repoKey: string): string {
   return `${TMP_ROOT}/swiz-emergency-bypass-${repoKey}.json`
 }
+
+export function stopAutoContSuggestionsPath(safeSession: string): string {
+  return `${TMP_ROOT}/swiz-stop-suggestions-${safeSession}.json`
+}

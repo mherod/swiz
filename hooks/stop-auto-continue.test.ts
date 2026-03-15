@@ -54,16 +54,20 @@ function agentResponse(
   })
 }
 
+let sessionCounter = 0
+
 async function runHook({
   transcriptContent,
   stopHookActive = false,
   extraEnv = {},
   cwd,
+  sessionId,
 }: {
   transcriptContent: string
   stopHookActive?: boolean
   extraEnv?: Record<string, string>
   cwd?: string
+  sessionId?: string
 }): Promise<HookResult> {
   const workDir = await createTempDir()
   const transcriptPath = join(workDir, "transcript.jsonl")
@@ -74,7 +78,7 @@ async function runHook({
   const payload = JSON.stringify({
     transcript_path: transcriptPath,
     stop_hook_active: stopHookActive,
-    session_id: "test-session",
+    session_id: sessionId ?? `test-session-${++sessionCounter}`,
     cwd: hookCwd,
   })
 
@@ -194,6 +198,7 @@ describe("stop-auto-continue", () => {
 
     const result = await runHook({
       transcriptContent: buildTranscript(10),
+      sessionId: "test-session",
       extraEnv: {
         HOME: homeDir,
         GEMINI_API_KEY: "test-key",
@@ -540,6 +545,7 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
+      sessionId: "test-session",
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
@@ -559,6 +565,7 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
+      sessionId: "test-session",
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
@@ -580,6 +587,7 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
+      sessionId: "test-session",
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
@@ -603,6 +611,7 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
+      sessionId: "test-session",
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
@@ -626,6 +635,7 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
+      sessionId: "test-session",
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
@@ -649,6 +659,7 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
+      sessionId: "test-session",
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
@@ -678,6 +689,7 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
+      sessionId: "test-session",
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
@@ -705,6 +717,7 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
+      sessionId: "test-session",
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
@@ -731,6 +744,7 @@ describe("stop-auto-continue", () => {
 
     await runHook({
       transcriptContent: buildTranscript(10),
+      sessionId: "test-session",
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",
@@ -1334,6 +1348,7 @@ describe("stop-auto-continue", () => {
     await runHook({
       transcriptContent: buildTranscript(10),
       cwd: projectDir,
+      sessionId: "test-session",
       extraEnv: {
         HOME: fakeHome,
         GEMINI_API_KEY: "test-key",

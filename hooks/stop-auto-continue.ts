@@ -47,6 +47,7 @@ import { stopHookInputSchema } from "./schemas.ts"
 import { getActionableIssues } from "./stop-personal-repo-issues.ts"
 
 const CONTEXT_TURNS = 20 // Recent turns to send as context
+const DEDUP_MAX_SEEN = 2 // Allow stop after suggestion seen this many times
 const ATTEMPT_TIMEOUT_MS = Number(process.env.ATTEMPT_TIMEOUT_MS) || 120_000
 
 const WORKFLOW_FINDING =
@@ -1065,6 +1066,46 @@ async function resolveSessionContext(
   }
 }
 
+// ─── Suggestion deduplication ─────────────────────────────────────────────
+
+/** Normalize a suggestion to a short dedup key. */
+function suggestionKey(text: string): string {
+  return text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim().slice(0, 120)
+}
+
+interface SuggestionLog {
+  seen: Record<string, number> // key → count
+}
+
+function getSuggestionsPath(sessionId: string): string {
+  const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64)
+  const home = getHomeDirOrNull() ?? "/tmp"
+  return join(home, ".swiz", `stop-suggestions-${safe}.json`)
+}
+
+async function loadSuggestionLog(sessionId: string): Promise<SuggestionLog> {
+  try {
+    const raw = await Bun.file(getSuggestionsPath(sessionId)).json()
+    if (
+      typeof raw === "object" &&
+      raw !== null &&
+      typeof (raw as SuggestionLog).seen === "object"
+    ) {
+      return raw as SuggestionLog
+    }
+  } catch {
+    // File doesn't exist or is invalid
+  }
+  return { seen: {} }
+}
+
+async function recordSuggestion(sessionId: string, key: string): Promise<number> {
+  const log = await loadSuggestionLog(sessionId)
+  log.seen[key] = (log.seen[key] ?? 0) + 1
+  await Bun.write(getSuggestionsPath(sessionId), JSON.stringify(log))
+  return log.seen[key]!
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -1125,6 +1166,20 @@ async function main(): Promise<void> {
       "block",
       "Auto-continue could not identify a specific next step. Review your recent changes and ensure all tasks are complete before stopping."
     )
+  }
+
+  // Dedup: if the AI keeps suggesting the same thing, the agent already acted on it — allow stop.
+  const sessionId = input.session_id ?? ""
+  if (sessionId && response.next) {
+    const key = suggestionKey(response.next)
+    const count = await recordSuggestion(sessionId, key)
+    if (count >= DEDUP_MAX_SEEN) {
+      terminate(
+        "skip",
+        "SUGGESTION_DEDUP",
+        `Suggestion seen ${count} times — allowing stop (dedup). Key: ${key.slice(0, 60)}`
+      )
+    }
   }
 
   terminate(
