@@ -1,4 +1,6 @@
 import { homedir } from "node:os"
+import { acquireGhSlot } from "../gh-rate-limit.ts"
+import { getIssueStore, isGraphQLRateLimited } from "../issue-store.ts"
 import type { Command } from "../types.ts"
 
 // Known sandbox-to-repo mappings for auto-inferring --repo from a blocked file path.
@@ -173,14 +175,60 @@ export const crossRepoIssueCommand: Command = {
       context: opts.context,
     })
 
+    const cwd = process.cwd()
+    await acquireGhSlot()
     const proc = Bun.spawn(
       ["gh", "issue", "create", "--repo", repo, "--title", opts.title, "--body", body],
-      { cwd: process.cwd(), stdout: "pipe", stderr: "inherit" }
+      { cwd, stdout: "pipe", stderr: "pipe" }
     )
-    const output = await new Response(proc.stdout).text()
+    const [output, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
     await proc.exited
 
     if (proc.exitCode !== 0) {
+      // REST API fallback on GraphQL rate-limit
+      if (isGraphQLRateLimited(stderr)) {
+        const restProc = Bun.spawn(
+          ["gh", "api", `repos/${repo}/issues`, "-X", "POST", "--input", "-"],
+          {
+            cwd,
+            stdout: "pipe",
+            stderr: "pipe",
+            stdin: new Response(JSON.stringify({ title: opts.title, body })),
+          }
+        )
+        const [restOut] = await Promise.all([
+          new Response(restProc.stdout).text(),
+          new Response(restProc.stderr).text(),
+        ])
+        await restProc.exited
+        if (restProc.exitCode === 0) {
+          try {
+            const parsed = JSON.parse(restOut) as { html_url?: string }
+            const url = parsed.html_url ?? restOut.trim()
+            console.log(`  Issue filed (REST fallback): ${url}`)
+            console.log(`  Repo: ${repo}`)
+            console.log(
+              `  File: ${relativeFilePath(opts.filePath)}${opts.line != null ? `:${opts.line}` : ""}`
+            )
+            return
+          } catch {
+            // fall through to queue
+          }
+        }
+      }
+
+      // Queue for later replay
+      try {
+        getIssueStore().queueMutation(repo, {
+          type: "create",
+          number: 0,
+          title: opts.title,
+          body,
+        })
+      } catch {}
       throw new Error(`gh issue create failed with exit code ${proc.exitCode}`)
     }
 

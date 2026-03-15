@@ -50,7 +50,15 @@ export interface CachedCiStatus {
   synced_at: number
 }
 
-export type MutationType = "close" | "comment" | "resolve" | "pr_comment" | "pr_merge" | "pr_review"
+export type MutationType =
+  | "close"
+  | "comment"
+  | "resolve"
+  | "pr_comment"
+  | "pr_merge"
+  | "pr_review"
+  | "label_add"
+  | "create"
 
 export interface MutationPayload {
   type: MutationType
@@ -58,6 +66,10 @@ export interface MutationPayload {
   body?: string
   /** For pr_review: "APPROVE" | "REQUEST_CHANGES" | "COMMENT" */
   reviewEvent?: string
+  /** For label_add: label names to add */
+  labels?: string[]
+  /** For create: issue title */
+  title?: string
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -507,6 +519,14 @@ async function executeMutation(
       )
     case "resolve":
       return executeResolveMutation(mutation, num, cwd, repo)
+    case "label_add":
+      if (!mutation.labels?.length) return true
+      return runGhCommand(
+        ["gh", "issue", "edit", num, ...mutation.labels.flatMap((l) => ["--add-label", l])],
+        cwd,
+        repo,
+        mutation
+      )
     case "pr_comment":
     case "pr_merge":
     case "pr_review":
@@ -618,6 +638,38 @@ async function tryMutationRestFallback(
         ["gh", "api", `repos/${repo}/issues/${num}/comments`, "-f", `body=${mutation.body}`],
         { cwd, stdout: "pipe", stderr: "pipe" }
       )
+      await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+      await proc.exited
+      return proc.exitCode === 0
+    }
+    case "label_add": {
+      if (!mutation.labels?.length) return true
+      await acquireGhSlot()
+      const proc = Bun.spawn(
+        ["gh", "api", `repos/${repo}/issues/${num}/labels`, "-X", "POST", "--input", "-"],
+        {
+          cwd,
+          stdout: "pipe",
+          stderr: "pipe",
+          stdin: new Response(JSON.stringify({ labels: mutation.labels })),
+        }
+      )
+      await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+      await proc.exited
+      return proc.exitCode === 0
+    }
+    case "create": {
+      if (!mutation.title) return false
+      await acquireGhSlot()
+      const payload: Record<string, unknown> = { title: mutation.title }
+      if (mutation.body) payload.body = mutation.body
+      if (mutation.labels?.length) payload.labels = mutation.labels
+      const proc = Bun.spawn(["gh", "api", `repos/${repo}/issues`, "-X", "POST", "--input", "-"], {
+        cwd,
+        stdout: "pipe",
+        stderr: "pipe",
+        stdin: new Response(JSON.stringify(payload)),
+      })
       await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
       await proc.exited
       return proc.exitCode === 0
