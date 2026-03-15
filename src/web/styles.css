@@ -823,13 +823,6 @@ tbody tr:hover {
   color: #ddd7ff;
 }
 
-.session-meta {
-  color: #94a2bc;
-  font-size: 0.82rem;
-  line-height: 1.4;
-  word-break: break-all;
-}
-
 .session-btn-content {
   display: flex;
   flex-direction: column;

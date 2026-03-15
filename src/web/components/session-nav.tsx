@@ -78,32 +78,33 @@ function SessionRowButton({
   return (
     <button
       type="button"
-      className={cn("session-btn", session.id === selectedSessionId && "selected")}
+      className={cn(
+        "session-btn session-btn-content",
+        session.id === selectedSessionId && "selected"
+      )}
       aria-pressed={session.id === selectedSessionId}
       onClick={() => {
         if (!selectedProjectCwd) return
         onSelectSession(selectedProjectCwd, session.id)
       }}
     >
-      <div className="session-btn-content">
-        <div className="session-header">
-          <span className="session-provider">{(session.provider ?? "unknown").toLowerCase()}</span>
-          <span className="session-time">
-            {formatRelativeTime(session.lastMessageAt ?? session.mtime)}
+      <div className="session-header">
+        <span className="session-provider">{(session.provider ?? "unknown").toLowerCase()}</span>
+        <span className="session-time">
+          {formatRelativeTime(session.lastMessageAt ?? session.mtime)}
+        </span>
+        {session.dispatches ? (
+          <span className="session-dispatches" title={`${session.dispatches} dispatches`}>
+            {session.dispatches}
           </span>
-          {session.dispatches ? (
-            <span className="session-dispatches" title={`${session.dispatches} dispatches`}>
-              {session.dispatches}
-            </span>
-          ) : null}
-        </div>
-        <SessionDetailsRow
-          session={session}
-          activeRuntimeSeconds={activeRuntimeSeconds}
-          processPids={processPids}
-          processLabel={processLabel}
-        />
+        ) : null}
       </div>
+      <SessionDetailsRow
+        session={session}
+        activeRuntimeSeconds={activeRuntimeSeconds}
+        processPids={processPids}
+        processLabel={processLabel}
+      />
     </button>
   )
 }
@@ -127,18 +128,16 @@ function SessionDetailsRow({
           {processLabel}
         </span>
       ) : null}
-      <span className="session-meta">
-        {session.activeDispatch ? (
-          <ActiveDispatchLabel
-            dispatch={session.activeDispatch}
-            activeRuntimeSeconds={activeRuntimeSeconds}
-          />
-        ) : (
-          <span className="session-id-text" title={session.id}>
-            {shortSessionId(session.id)}
-          </span>
-        )}
-      </span>
+      {session.activeDispatch ? (
+        <ActiveDispatchLabel
+          dispatch={session.activeDispatch}
+          activeRuntimeSeconds={activeRuntimeSeconds}
+        />
+      ) : (
+        <span className="session-id-text" title={session.id}>
+          {shortSessionId(session.id)}
+        </span>
+      )}
     </div>
   )
 }
