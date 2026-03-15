@@ -414,17 +414,51 @@ export async function writeProjectSettings(
     }
   }
   await Bun.write(path, JSON.stringify({ ...existing, ...updates }, null, 2))
+  invalidateProjectSettingsCache(path)
   await ensureGitExclude(cwd, ".swiz/")
   return path
 }
 
+// ─── Project settings TTL cache ─────────────────────────────────────────────
+
+const PROJECT_SETTINGS_TTL_MS = 5_000
+
+interface ProjectSettingsCacheEntry {
+  value: ProjectSwizSettings | null
+  expiresAt: number
+}
+
+const _projectSettingsCache = new Map<string, ProjectSettingsCacheEntry>()
+
+function invalidateProjectSettingsCache(path: string): void {
+  _projectSettingsCache.delete(path)
+}
+
+// ─── Project settings I/O ────────────────────────────────────────────────────
+
 export async function readProjectSettings(cwd: string): Promise<ProjectSwizSettings | null> {
   const path = getProjectSettingsPath(cwd)
+
+  const cached = _projectSettingsCache.get(path)
+  if (cached && Date.now() < cached.expiresAt) return cached.value
+
   const file = Bun.file(path)
-  if (!(await file.exists())) return null
+  if (!(await file.exists())) {
+    _projectSettingsCache.set(path, {
+      value: null,
+      expiresAt: Date.now() + PROJECT_SETTINGS_TTL_MS,
+    })
+    return null
+  }
   try {
-    return normalizeProjectSettings(await file.json())
+    const value = normalizeProjectSettings(await file.json())
+    _projectSettingsCache.set(path, { value, expiresAt: Date.now() + PROJECT_SETTINGS_TTL_MS })
+    return value
   } catch {
+    _projectSettingsCache.set(path, {
+      value: null,
+      expiresAt: Date.now() + PROJECT_SETTINGS_TTL_MS,
+    })
     return null
   }
 }
