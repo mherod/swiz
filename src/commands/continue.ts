@@ -196,86 +196,137 @@ function formatToolInput(toolName: string, input: Record<string, unknown>): stri
   return ""
 }
 
+// ─── Progress spinner ────────────────────────────────────────────────────────
+
+const SPINNER_FRAMES = [
+  "\u28CB",
+  "\u28D9",
+  "\u28F9",
+  "\u28F8",
+  "\u28FC",
+  "\u28F4",
+  "\u28E6",
+  "\u28E7",
+  "\u28C7",
+  "\u28CF",
+]
+
+function createSpinner(label: string): { stop(): void } {
+  let frame = 0
+  const start = Date.now()
+  const timer = setInterval(() => {
+    const elapsed = ((Date.now() - start) / 1000).toFixed(0)
+    process.stderr.write(
+      `\r${DIM}${SPINNER_FRAMES[frame % SPINNER_FRAMES.length]} ${label} ${elapsed}s${RESET}`
+    )
+    frame++
+  }, 80)
+
+  return {
+    stop() {
+      clearInterval(timer)
+      process.stderr.write("\r\x1b[2K")
+    },
+  }
+}
+
 // ─── Message handler ─────────────────────────────────────────────────────────
 
-function writeMessageText(message: SDKMessage): void {
-  switch (message.type) {
-    case "stream_event": {
-      const event = message.event
-      if (event.type === "content_block_delta") {
-        if (event.delta.type === "text_delta") {
-          process.stdout.write(event.delta.text)
-        }
-      } else if (event.type === "content_block_start") {
-        if (event.content_block.type === "tool_use") {
-          log(
-            `${CYAN}tool_use${RESET} ${event.content_block.name} ${DIM}(id: ${event.content_block.id})${RESET}`
-          )
-        }
-      }
-      break
+function createMessageHandler(): (message: SDKMessage) => void {
+  let firstOutputReceived = false
+  const spinner = createSpinner("Waiting for response\u2026")
+
+  function clearSpinner(): void {
+    if (!firstOutputReceived) {
+      spinner.stop()
+      firstOutputReceived = true
     }
-    case "assistant": {
-      // With streaming enabled, text already printed via stream_event.
-      // Only log tool_use blocks and errors from the complete message.
-      for (const block of message.message.content) {
-        if (block.type === "tool_use") {
-          log(`${CYAN}tool_use${RESET} ${block.name} ${DIM}(id: ${block.id})${RESET}`)
-        }
-      }
-      if (message.error) {
-        log(`${RED}assistant error:${RESET} ${message.error}`)
-      }
-      break
-    }
-    case "result": {
-      process.stdout.write("\n")
-      const duration = (message.duration_ms / 1000).toFixed(1)
-      const apiDuration = (message.duration_api_ms / 1000).toFixed(1)
-      const cost = message.total_cost_usd.toFixed(4)
-      if (message.subtype === "success") {
-        log(
-          `${GREEN}result: success${RESET} ${DIM}turns=${message.num_turns} duration=${duration}s api=${apiDuration}s cost=$${cost}${RESET}`
-        )
-      } else {
-        log(
-          `${RED}result: ${message.subtype}${RESET} ${DIM}turns=${message.num_turns} duration=${duration}s api=${apiDuration}s cost=$${cost}${RESET}`
-        )
-        if ("errors" in message && message.errors.length > 0) {
-          for (const err of message.errors) {
-            log(`${RED}  error: ${err}${RESET}`)
+  }
+
+  return (message: SDKMessage) => {
+    switch (message.type) {
+      case "stream_event": {
+        const event = message.event
+        if (event.type === "content_block_delta") {
+          if (event.delta.type === "text_delta") {
+            clearSpinner()
+            process.stdout.write(event.delta.text)
+          }
+        } else if (event.type === "content_block_start") {
+          if (event.content_block.type === "tool_use") {
+            clearSpinner()
+            log(
+              `${CYAN}tool_use${RESET} ${event.content_block.name} ${DIM}(id: ${event.content_block.id})${RESET}`
+            )
           }
         }
-        process.exitCode = 1
+        break
       }
-      if (message.permission_denials.length > 0) {
-        log(`${YELLOW}permission denials: ${message.permission_denials.length}${RESET}`)
-        for (const d of message.permission_denials) {
-          log(`${DIM}  denied: ${d.tool_name} (${d.tool_use_id})${RESET}`)
+      case "assistant": {
+        // With streaming enabled, text already printed via stream_event.
+        // Only log tool_use blocks and errors from the complete message.
+        for (const block of message.message.content) {
+          if (block.type === "tool_use") {
+            log(`${CYAN}tool_use${RESET} ${block.name} ${DIM}(id: ${block.id})${RESET}`)
+          }
         }
+        if (message.error) {
+          log(`${RED}assistant error:${RESET} ${message.error}`)
+        }
+        break
       }
-      break
-    }
-    case "tool_progress": {
-      log(
-        `${DIM}tool_progress${RESET} ${message.tool_name} ${DIM}elapsed=${message.elapsed_time_seconds}s${RESET}`
-      )
-      break
-    }
-    case "tool_use_summary": {
-      log(`${DIM}tool_summary${RESET} ${message.summary}`)
-      break
-    }
-    case "system": {
-      if (message.subtype === "status") {
-        log(`${DIM}status: ${message.status}${RESET}`)
-      } else if (message.subtype === "compact_boundary") {
-        log(`${YELLOW}compaction${RESET} ${DIM}trigger=${message.compact_metadata.trigger}${RESET}`)
+      case "result": {
+        clearSpinner()
+        process.stdout.write("\n")
+        const duration = (message.duration_ms / 1000).toFixed(1)
+        const apiDuration = (message.duration_api_ms / 1000).toFixed(1)
+        const cost = message.total_cost_usd.toFixed(4)
+        if (message.subtype === "success") {
+          log(
+            `${GREEN}result: success${RESET} ${DIM}turns=${message.num_turns} duration=${duration}s api=${apiDuration}s cost=$${cost}${RESET}`
+          )
+        } else {
+          log(
+            `${RED}result: ${message.subtype}${RESET} ${DIM}turns=${message.num_turns} duration=${duration}s api=${apiDuration}s cost=$${cost}${RESET}`
+          )
+          if ("errors" in message && message.errors.length > 0) {
+            for (const err of message.errors) {
+              log(`${RED}  error: ${err}${RESET}`)
+            }
+          }
+          process.exitCode = 1
+        }
+        if (message.permission_denials.length > 0) {
+          log(`${YELLOW}permission denials: ${message.permission_denials.length}${RESET}`)
+          for (const d of message.permission_denials) {
+            log(`${DIM}  denied: ${d.tool_name} (${d.tool_use_id})${RESET}`)
+          }
+        }
+        break
       }
-      break
+      case "tool_progress": {
+        log(
+          `${DIM}tool_progress${RESET} ${message.tool_name} ${DIM}elapsed=${message.elapsed_time_seconds}s${RESET}`
+        )
+        break
+      }
+      case "tool_use_summary": {
+        log(`${DIM}tool_summary${RESET} ${message.summary}`)
+        break
+      }
+      case "system": {
+        if (message.subtype === "status") {
+          log(`${DIM}status: ${message.status}${RESET}`)
+        } else if (message.subtype === "compact_boundary") {
+          log(
+            `${YELLOW}compaction${RESET} ${DIM}trigger=${message.compact_metadata.trigger}${RESET}`
+          )
+        }
+        break
+      }
+      default:
+        break
     }
-    default:
-      break
   }
 }
 
@@ -335,8 +386,9 @@ export const continueCommand: Command = {
       },
     })
 
+    const handleMessage = createMessageHandler()
     for await (const message of conversation) {
-      writeMessageText(message)
+      handleMessage(message)
     }
   },
 }
