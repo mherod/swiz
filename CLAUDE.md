@@ -143,7 +143,7 @@ alwaysApply: false
 - Await background pushes (`TaskOutput block:true`) before CI verification.
 - Use `swiz issue resolve <number> --body "<text>"` (not `gh issue comment` + `gh issue close`); close-only: `swiz issue close <number>`.
 - **DON'T** close as `duplicate`/`wontfix` without reading the implementation and verifying each acceptance criterion. "Already implemented" requires file+line evidence, not inference.
-- **DO** check issue state before resolving: `gh issue view <number> --json state -q .state`. `Fixes #N` in a commit message auto-closes on push — `swiz issue resolve` on a closed issue posts a comment (doesn't fail, but wastes an API call).
+- **DO** check issue state before resolving: `gh api repos/:owner/:repo/issues/{number} --jq '.state'`. `Fixes #N` auto-closes on push — `swiz issue resolve` on a closed issue only posts a comment.
 ## Push and CI
 - Repo is solo (`mherod/swiz`); push directly to `main` (no PR required).
 - Run `/push` before `git push`; PreToolUse push gate requires it.
@@ -182,8 +182,8 @@ alwaysApply: false
 - **DO**: In daemon-served `src/web/**` modules, use browser-resolvable imports only (`./`, `../`, `/web/...`). **DON'T** use bare package imports unless daemon adds import-map/bundling support.
 - **DO**: After web-import changes, restart daemon (`lsof -ti tcp:7943 | xargs -r kill && bun run index.ts daemon --port 7943`) and diagnose from newest console entries for the current URL only.
 - **DO**: Use `IssueStore` (`src/issue-store.ts`) as the primary data source for issues, PRs, and CI runs. The daemon's `syncUpstreamState` keeps it fresh; status-line and hooks read from the store first, falling back to `gh` CLI when stale. **DON'T** use per-project file caches — the shared SQLite store (`~/.swiz/issues.db`) replaces them.
-- **DO**: When adding fields that consumers need (e.g., `mergeable`, `url`, `createdAt` for PRs), add them to the `syncUpstreamState` query in `src/issue-store.ts` so the stored data has all required fields.
-- **DO**: Use REST API fallback (`gh api repos/{owner}/{repo}/issues/{number}`) when `gh issue` commands hit GraphQL rate limits. `src/commands/issue.ts` implements `isGraphQLRateLimited()` detection and automatic REST retry.
+- **DO**: When adding fields consumers need (e.g., `mergeable`, `url`, `createdAt`), add them to `syncUpstreamState` in `src/issue-store.ts`.
+- **DO**: Prefer `gh api repos/{owner}/{repo}/...` (REST) over `gh issue view`/`gh issue close`/`gh pr list` (GraphQL) — REST has more generous rate limits; GraphQL errors appear as `GraphQL: API rate limit already exceeded`. Close issues via `gh api repos/:owner/:repo/issues/{number} -X PATCH -f state=closed`. `src/commands/issue.ts` implements `isGraphQLRateLimited()` with automatic REST retry.
 ## Settings Configuration
 - Use separate state files for mutable runtime data (e.g., `.swiz/context-stats.json`); never mix runtime observations into user-authored config (`.swiz/config.json`).
 - Use 3-tier setting resolution: `project > user > default`.

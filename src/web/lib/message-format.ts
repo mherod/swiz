@@ -169,10 +169,16 @@ function extractInlineContextBlocks(text: string): {
   return { cleanedText, metadataBlocks }
 }
 
+const _tagRegexCache = new Map<string, RegExp>()
+
 function extractTagValue(text: string, tagName: string): string | null {
-  const escapedTag = tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  const match = new RegExp(`<${escapedTag}>\\s*([\\s\\S]*?)\\s*<\\/${escapedTag}>`, "i").exec(text)
-  const value = match?.[1]?.trim()
+  let re = _tagRegexCache.get(tagName)
+  if (!re) {
+    const escapedTag = tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    re = new RegExp(`<${escapedTag}>\\s*([\\s\\S]*?)\\s*<\\/${escapedTag}>`, "i")
+    _tagRegexCache.set(tagName, re)
+  }
+  const value = re.exec(text)?.[1]?.trim()
   return value && value.length > 0 ? value : null
 }
 
@@ -419,9 +425,10 @@ function extractCommandDetailBlock(text: string): {
   }
 }
 
+const ANSI_STRIP_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
+
 function stripAnsiLike(text: string): string {
-  const escRe = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g")
-  return text.replace(escRe, "").replace(/\[\d+(?:;\d+)*m/g, "")
+  return text.replace(ANSI_STRIP_RE, "").replace(/\[\d+(?:;\d+)*m/g, "")
 }
 
 function extractLocalCommandStdoutBlock(text: string): {
