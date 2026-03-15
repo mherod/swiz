@@ -300,6 +300,7 @@ interface MessagesProps {
   cacheStatus?: Record<string, number> | null
   activeSession?: SessionHealth | null
   activeHookDispatches?: ActiveHookDispatch[]
+  hideTasks?: boolean
 }
 
 interface MessageRowProps {
@@ -487,12 +488,16 @@ export function SessionMessages(props: MessagesProps) {
       </div>
       <div className="flex-1 overflow-y-auto min-h-0 flex flex-col">
         <SessionStatsBar {...props} />
-        <ProjectTasksSection
-          tasks={projectTasks}
-          summary={projectTaskSummary}
-          loading={projectTasksLoading}
-        />
-        <SessionTasksSection tasks={tasks} summary={taskSummary} loading={tasksLoading} />
+        {!props.hideTasks && (
+          <>
+            <ProjectTasksSection
+              tasks={projectTasks}
+              summary={projectTaskSummary}
+              loading={projectTasksLoading}
+            />
+            <SessionTasksSection tasks={tasks} summary={taskSummary} loading={tasksLoading} />
+          </>
+        )}
         {toolStats && toolStats.length > 0 && <ToolStatsBar stats={toolStats} />}
         <MessagesContent
           messages={messages}

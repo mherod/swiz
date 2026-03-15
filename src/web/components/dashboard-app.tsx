@@ -107,16 +107,17 @@ export function DashboardApp() {
             newKeys={newMessageKeys}
             msgKey={msgKey}
             toolStats={sessionToolStats}
-            tasks={[]}
-            taskSummary={null}
-            tasksLoading={false}
-            projectTasks={[]}
-            projectTaskSummary={null}
-            projectTasksLoading={false}
+            tasks={sessionTasks}
+            taskSummary={sessionTaskSummary}
+            tasksLoading={sessionTasksLoading}
+            projectTasks={projectTasks}
+            projectTaskSummary={projectTaskSummary}
+            projectTasksLoading={projectTasksLoading}
             events={metricsEvents}
             cacheStatus={cacheStatus}
             activeSession={activeSession}
             activeHookDispatches={activeHookDispatches}
+            hideTasks
           />
         </div>
       ) : (
