@@ -1351,9 +1351,15 @@ export function getIssueStore(dbPath?: string): IssueStore {
   return sharedStore
 }
 
-/** No-op IssueStore that returns empty results for all reads and silently
- *  drops all writes. Used when the SQLite DB is unavailable so callers
- *  fall through to their gh CLI fallback paths.
+/** No-op IssueStore used when SQLite is unavailable. Returns empty results
+ *  for all reads, causing callers to fall through to their existing async
+ *  ghJsonViaDaemon / gh CLI fallback paths (which route through the daemon
+ *  HTTP API automatically). Writes are silently dropped.
+ *
+ *  The IssueStore interface is synchronous, so the no-op proxy cannot make
+ *  async daemon HTTP calls directly — instead it returns empty, and the
+ *  callers' async fallback paths handle daemon routing.
+ *
  *  Emits a one-time warning on first read and logs suppressed operation
  *  count on process exit for full observability. */
 let noOpExitHandlerRegistered = false
@@ -1375,7 +1381,7 @@ function createNoOpStore(): IssueStore {
     if (!warnedOnce) {
       warnedOnce = true
       debugLog(
-        `[swiz] IssueStore unavailable — ${String(method)}() returning empty; gh CLI fallback will be used`
+        `[swiz] IssueStore SQLite unavailable — ${String(method)}() returning empty; callers will use daemon/gh CLI fallback`
       )
     }
   }
