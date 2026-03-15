@@ -219,9 +219,7 @@ body::before {
   border-radius: var(--radius);
   padding: var(--space-4);
   backdrop-filter: blur(14px);
-  box-shadow:
-    var(--shadow-lg),
-    var(--shadow-inset);
+  box-shadow: var(--shadow-lg), var(--shadow-inset);
   display: flex;
   flex-direction: column;
   justify-content: center;
