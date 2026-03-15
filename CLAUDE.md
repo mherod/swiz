@@ -17,6 +17,7 @@ alwaysApply: false
 - `src/types.ts` `Command` interface fields: `name`, `description`, optional `usage`, `run(args)`.
 - Add command: create `src/commands/<name>.ts` exporting `Command`, then register in `index.ts`.
 - DO NOT add routing or arg-parsing libraries; keep manual `process.argv` parsing.
+- **DO**: Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude session interactions. **DON'T** spawn `claude` CLI via `Bun.spawn` — use SDK `continue`/`resume` options instead.
 ## Project Root Resolution
 - Resolve project root with `dirname(Bun.main)`.
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.
@@ -37,7 +38,7 @@ alwaysApply: false
 - `validateDispatchRoutes()` in `src/manifest.ts` must pass from both `swiz dispatch` and `swiz install`.
 - Keep `src/dispatch-routing.test.ts` passing.
 - DO NOT hard-code agent-specific event names or tool names in hook scripts.
-- `classifyHookOutput` in `src/dispatch/engine.ts` extracts JSON from polluted stdout (non-JSON prefix text from SDK log lines). DO NOT revert this fallback — it's defense-in-depth against any SDK writing to `process.stdout` in hook subprocesses.
+- `classifyHookOutput` in `src/dispatch/engine.ts` extracts JSON from polluted stdout. DO NOT revert — defense-in-depth against SDK log lines on stdout.
 ## Writing Hooks
 - Update `README.md` whenever `src/manifest.ts` changes.
 - `src/readme-hook-counts.test.ts` invariants:
@@ -142,7 +143,7 @@ alwaysApply: false
 - Push is inseparable from commit.
 - Await background pushes (`TaskOutput block:true`) before CI verification.
 - Use `swiz issue resolve <number> --body "<text>"` (not `gh issue comment` + `gh issue close`); close-only: `swiz issue close <number>`.
-- **DON'T** close as `duplicate`/`wontfix` without reading the implementation and verifying each acceptance criterion. "Already implemented" requires file+line evidence, not inference.
+- **DON'T** close as `duplicate`/`wontfix` without verifying each acceptance criterion. Requires file+line evidence.
 - **DO** check issue state before resolving: `gh api repos/:owner/:repo/issues/{number} --jq '.state'`. `Fixes #N` auto-closes on push — `swiz issue resolve` on a closed issue only posts a comment.
 ## Push and CI
 - Repo is solo (`mherod/swiz`); push directly to `main` (no PR required).
@@ -204,7 +205,7 @@ alwaysApply: false
 ## CLI Error Handling
 - In `src/commands/`, throw errors instead of `process.exit(1)`.
 - `src/cli.ts` handles command errors via `process.exitCode = 1`.
-- `src/commands/continue.ts` pattern: `process.exitCode = proc.exitCode ?? 0; return`.
+- `src/commands/continue.ts`: stream Agent SDK messages; `process.exitCode = 1` on non-success.
 - Hook scripts (`hooks/*.ts`) are the exception: `process.exit(0)` is intentional.
 - In CI/hook scripts, do not use `console.log` for status/debug; use `console.error`.
 - `src/debug-logging.test.ts` enforces allowlists for `console.error`/`console.warn` (STDERR_ALLOWLIST) and `console.log`/`console.info` (STDOUT_ALLOWLIST). Files not on an allowlist must use `import { debugLog } from "./debug.ts"` for diagnostics. Adding to an allowlist requires a justification comment in the test.
