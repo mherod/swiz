@@ -3,6 +3,7 @@ import { useDashboardState } from "../lib/dashboard-state.ts"
 import { Header } from "./header.tsx"
 import { ProjectIssuesPanel } from "./project-issues-panel.tsx"
 import { SessionMessages, SessionNav } from "./session-browser.tsx"
+import { ProjectTasksSection, SessionTasksSection } from "./session-tasks.tsx"
 import { SettingsPanel } from "./settings-panel.tsx"
 
 export function DashboardApp() {
@@ -80,6 +81,43 @@ export function DashboardApp() {
       {activeView === "settings" ? (
         <div className="bento-settings-page">
           <SettingsPanel cwd={optimisticProjectCwd} />
+        </div>
+      ) : activeView === "issues" ? (
+        <div className="bento-full-page">
+          <ProjectIssuesPanel cwd={optimisticProjectCwd} />
+        </div>
+      ) : activeView === "tasks" ? (
+        <div className="bento-full-page">
+          <SessionTasksSection
+            tasks={sessionTasks}
+            summary={sessionTaskSummary}
+            loading={sessionTasksLoading}
+          />
+          <ProjectTasksSection
+            tasks={projectTasks}
+            summary={projectTaskSummary}
+            loading={projectTasksLoading}
+          />
+        </div>
+      ) : activeView === "transcript" ? (
+        <div className="bento-full-page">
+          <SessionMessages
+            messages={displayedMessages}
+            loading={messagesLoading}
+            newKeys={newMessageKeys}
+            msgKey={msgKey}
+            toolStats={sessionToolStats}
+            tasks={[]}
+            taskSummary={null}
+            tasksLoading={false}
+            projectTasks={[]}
+            projectTaskSummary={null}
+            projectTasksLoading={false}
+            events={metricsEvents}
+            cacheStatus={cacheStatus}
+            activeSession={activeSession}
+            activeHookDispatches={activeHookDispatches}
+          />
         </div>
       ) : (
         <div className="bento-dashboard-stack">

@@ -1,3 +1,5 @@
+import type { ActiveView } from "../lib/dashboard-state.ts"
+
 interface HeaderProps {
   lastUpdated: string
   uptime: string
@@ -6,8 +8,8 @@ interface HeaderProps {
   activeWatches: number
   activeHooks: number
   selectedProjectName: string | null
-  activeView?: "dashboard" | "settings"
-  onSelectView?: (view: "dashboard" | "settings") => void
+  activeView?: ActiveView
+  onSelectView?: (view: ActiveView) => void
   cacheStatus?: Record<string, number> | null
   activeAgentProcessProviders?: Record<string, number[]>
 }
@@ -65,6 +67,14 @@ function ViewToggleButton({
   )
 }
 
+const TAB_LABELS: Array<{ view: ActiveView; label: string }> = [
+  { view: "dashboard", label: "Dashboard" },
+  { view: "issues", label: "Issues" },
+  { view: "tasks", label: "Tasks" },
+  { view: "transcript", label: "Transcript" },
+  { view: "settings", label: "Project Settings" },
+]
+
 export function Header({
   lastUpdated,
   uptime,
@@ -114,16 +124,14 @@ export function Header({
               border: "1px solid rgba(110, 147, 223, 0.38)",
             }}
           >
-            <ViewToggleButton
-              label="Dashboard"
-              active={activeView === "dashboard"}
-              onClick={() => onSelectView("dashboard")}
-            />
-            <ViewToggleButton
-              label="Project Settings"
-              active={activeView === "settings"}
-              onClick={() => onSelectView("settings")}
-            />
+            {TAB_LABELS.map(({ view, label }) => (
+              <ViewToggleButton
+                key={view}
+                label={label}
+                active={activeView === view}
+                onClick={() => onSelectView(view)}
+              />
+            ))}
           </div>
         )}
       </div>

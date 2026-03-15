@@ -24,6 +24,8 @@ import {
 } from "./dashboard-hooks.ts"
 import { postJson } from "./http.ts"
 
+export type ActiveView = "dashboard" | "issues" | "tasks" | "transcript" | "settings"
+
 type AgentProcessOptimisticAction =
   | { type: "sync"; providers: Record<string, number[]> }
   | { type: "removePid"; pid: number }
@@ -616,10 +618,10 @@ export function useDashboardState() {
   >([])
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
   const [activeHookDispatches, setActiveHookDispatches] = useState<ActiveHookDispatch[]>([])
-  const [activeView, _setActiveView] = useState<"dashboard" | "settings">(
-    () => (getQueryParam("view") as "dashboard" | "settings") || "dashboard"
+  const [activeView, _setActiveView] = useState<ActiveView>(
+    () => (getQueryParam("view") as ActiveView) || "dashboard"
   )
-  const setActiveView = useCallback((view: "dashboard" | "settings") => {
+  const setActiveView = useCallback((view: ActiveView) => {
     _setActiveView(view)
     setQueryParams({ view })
   }, [])
