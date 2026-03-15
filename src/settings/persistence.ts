@@ -439,20 +439,53 @@ export function getPrPollStatePath(home = getHomeDirOrNull()): string | null {
   return join(home, ".swiz", "pr-poll-state.json")
 }
 
+// ─── Settings TTL cache ──────────────────────────────────────────────────────
+
+const SETTINGS_TTL_MS = 5_000
+
+interface SettingsCacheEntry {
+  value: SwizSettings
+  expiresAt: number
+}
+
+const _settingsCache = new Map<string, SettingsCacheEntry>()
+
+function invalidateSettingsCache(path: string): void {
+  _settingsCache.delete(path)
+}
+
+// ─── Settings I/O ────────────────────────────────────────────────────────────
+
 export async function readSwizSettings(options: ReadOptions = {}): Promise<SwizSettings> {
   const path = getSwizSettingsPath(options.home)
   if (!path) return cloneDefaults()
 
+  // Strict reads bypass the cache (used for validation; must see current disk state)
+  if (!options.strict) {
+    const cached = _settingsCache.get(path)
+    if (cached && Date.now() < cached.expiresAt) return cached.value
+  }
+
   const file = Bun.file(path)
-  if (!(await file.exists())) return cloneDefaults()
+  if (!(await file.exists())) {
+    const value = cloneDefaults()
+    if (!options.strict)
+      _settingsCache.set(path, { value, expiresAt: Date.now() + SETTINGS_TTL_MS })
+    return value
+  }
 
   try {
-    return swizSettingsSchema.parse(await file.json()) as SwizSettings
+    const value = swizSettingsSchema.parse(await file.json()) as SwizSettings
+    if (!options.strict)
+      _settingsCache.set(path, { value, expiresAt: Date.now() + SETTINGS_TTL_MS })
+    return value
   } catch (error) {
     if (options.strict) {
       throw new Error(`Failed to parse swiz settings at ${path}: ${String(error)}`)
     }
-    return cloneDefaults()
+    const value = cloneDefaults()
+    _settingsCache.set(path, { value, expiresAt: Date.now() + SETTINGS_TTL_MS })
+    return value
   }
 }
 
@@ -465,5 +498,6 @@ export async function writeSwizSettings(
 
   await mkdir(dirname(path), { recursive: true })
   await Bun.write(path, `${JSON.stringify(normalizeSettings(settings), null, 2)}\n`)
+  invalidateSettingsCache(path)
   return path
 }
