@@ -482,98 +482,95 @@ function GlobalSettingsColumn({
     set({ [key]: Number(e.target.value) })
 
   return (
-    <div className="settings-column">
+    <div className="settings-column settings-fields">
       <h3 className="settings-column-title">Global Settings</h3>
-      <div className="settings-fields">
-        <label className="settings-label" htmlFor="global-ambition-mode">
-          <span>Ambition mode</span>
-          <p className="settings-desc">
-            Agent's operational tempo. "standard" focuses on prompt completion. "aggressive" acts
-            autonomously. "creative" focuses on exploratory design. "reflective" prioritizes
-            analysis.
-          </p>
-          <Select
-            id="global-ambition-mode"
-            value={form.ambitionMode}
-            onChange={(e) =>
-              set({ ambitionMode: e.target.value as GlobalSettingsForm["ambitionMode"] })
-            }
-            options={[
-              { label: "standard", value: "standard" },
-              { label: "aggressive", value: "aggressive" },
-              { label: "creative", value: "creative" },
-              { label: "reflective", value: "reflective" },
-            ]}
+      <label className="settings-label" htmlFor="global-ambition-mode">
+        <span>Ambition mode</span>
+        <p className="settings-desc">
+          Agent's operational tempo. "standard" focuses on prompt completion. "aggressive" acts
+          autonomously. "creative" focuses on exploratory design. "reflective" prioritizes analysis.
+        </p>
+        <Select
+          id="global-ambition-mode"
+          value={form.ambitionMode}
+          onChange={(e) =>
+            set({ ambitionMode: e.target.value as GlobalSettingsForm["ambitionMode"] })
+          }
+          options={[
+            { label: "standard", value: "standard" },
+            { label: "aggressive", value: "aggressive" },
+            { label: "creative", value: "creative" },
+            { label: "reflective", value: "reflective" },
+          ]}
+        />
+      </label>
+
+      <div className="settings-grid-cols-2">
+        <label className="settings-label">
+          <span>Memory line threshold</span>
+          <input
+            type="number"
+            className="settings-input"
+            value={form.memoryLineThreshold}
+            onChange={num("memoryLineThreshold")}
           />
         </label>
-
-        <div className="settings-grid-cols-2">
-          <label className="settings-label">
-            <span>Memory line threshold</span>
-            <input
-              type="number"
-              className="settings-input"
-              value={form.memoryLineThreshold}
-              onChange={num("memoryLineThreshold")}
-            />
-          </label>
-          <label className="settings-label">
-            <span>Memory word threshold</span>
-            <input
-              type="number"
-              className="settings-input"
-              value={form.memoryWordThreshold}
-              onChange={num("memoryWordThreshold")}
-            />
-          </label>
-          <label className="settings-label">
-            <span>Task duration warning (min)</span>
-            <input
-              type="number"
-              className="settings-input"
-              value={form.taskDurationWarningMinutes}
-              onChange={num("taskDurationWarningMinutes")}
-            />
-          </label>
-          <label className="settings-label">
-            <span>Large file size (KB)</span>
-            <input
-              type="number"
-              className="settings-input"
-              value={form.largeFileSizeKb}
-              onChange={num("largeFileSizeKb")}
-            />
-          </label>
-          <label className="settings-label">
-            <span>Push cooldown (min)</span>
-            <input
-              type="number"
-              className="settings-input"
-              value={form.pushCooldownMinutes}
-              onChange={num("pushCooldownMinutes")}
-            />
-          </label>
-          <label className="settings-label">
-            <span>PR age gate (min)</span>
-            <input
-              type="number"
-              className="settings-input"
-              value={form.prAgeGateMinutes}
-              onChange={num("prAgeGateMinutes")}
-            />
-          </label>
-        </div>
-
-        {GLOBAL_TOGGLES.map(({ key, label, desc }) => (
-          <CheckboxField
-            key={key}
-            checked={form[key] as boolean}
-            onChange={(v) => set({ [key]: v })}
-            label={label}
-            desc={desc}
+        <label className="settings-label">
+          <span>Memory word threshold</span>
+          <input
+            type="number"
+            className="settings-input"
+            value={form.memoryWordThreshold}
+            onChange={num("memoryWordThreshold")}
           />
-        ))}
+        </label>
+        <label className="settings-label">
+          <span>Task duration warning (min)</span>
+          <input
+            type="number"
+            className="settings-input"
+            value={form.taskDurationWarningMinutes}
+            onChange={num("taskDurationWarningMinutes")}
+          />
+        </label>
+        <label className="settings-label">
+          <span>Large file size (KB)</span>
+          <input
+            type="number"
+            className="settings-input"
+            value={form.largeFileSizeKb}
+            onChange={num("largeFileSizeKb")}
+          />
+        </label>
+        <label className="settings-label">
+          <span>Push cooldown (min)</span>
+          <input
+            type="number"
+            className="settings-input"
+            value={form.pushCooldownMinutes}
+            onChange={num("pushCooldownMinutes")}
+          />
+        </label>
+        <label className="settings-label">
+          <span>PR age gate (min)</span>
+          <input
+            type="number"
+            className="settings-input"
+            value={form.prAgeGateMinutes}
+            onChange={num("prAgeGateMinutes")}
+          />
+        </label>
       </div>
+
+      {GLOBAL_TOGGLES.map(({ key, label, desc }) => (
+        <CheckboxField
+          key={key}
+          checked={form[key] as boolean}
+          onChange={(v) => set({ [key]: v })}
+          label={label}
+          desc={desc}
+        />
+      ))}
     </div>
   )
 }
@@ -608,7 +605,7 @@ function ProjectSettingsColumn({
           Loading project settings...
         </p>
       ) : (
-        <div className="settings-fields">
+        <>
           <label className="settings-label" htmlFor="project-ambition-mode">
             <span>Ambition mode override</span>
             <p className="settings-desc">
@@ -670,7 +667,7 @@ function ProjectSettingsColumn({
             label="Strict merge to main mode"
             desc="Enforces feature-branch workflows by blocking direct pushes to the main branch locally, even in solo repositories."
           />
-        </div>
+        </>
       )}
     </div>
   )
@@ -781,33 +778,26 @@ export function SettingsPanel({ cwd }: { cwd: string | null }) {
 
   return (
     <section className="card panel-settings settings-combined">
-      <div className="settings-combined-header">
-        <div className="settings-header-title-row">
-          <h2 className="section-title">Settings</h2>
-          <div className="settings-save-status">
-            {isSaving ? (
-              <span className="settings-status-saving">Saving...</span>
-            ) : status ? (
-              <span className="settings-status-ok">{status}</span>
-            ) : error ? (
-              <span className="settings-error">{error}</span>
-            ) : null}
-          </div>
-        </div>
-        <p className="section-subtitle">Manage global behavior and project-specific overrides</p>
-      </div>
-
-      <div className="settings-form">
-        <div className="settings-layout">
-          <GlobalSettingsColumn form={globalForm} setForm={setGlobalForm} />
-          <ProjectSettingsColumn
-            cwd={cwd}
-            form={projectForm}
-            setForm={setProjectForm}
-            loading={projectLoading}
-            baseline={projectBaseline}
-          />
-        </div>
+      <header className="settings-header-title-row">
+        <h2 className="section-title">Settings</h2>
+        {isSaving ? (
+          <span className="settings-status-saving">Saving...</span>
+        ) : status ? (
+          <span className="settings-status-ok">{status}</span>
+        ) : error ? (
+          <span className="settings-error">{error}</span>
+        ) : null}
+      </header>
+      <p className="section-subtitle">Manage global behavior and project-specific overrides</p>
+      <div className="settings-layout">
+        <GlobalSettingsColumn form={globalForm} setForm={setGlobalForm} />
+        <ProjectSettingsColumn
+          cwd={cwd}
+          form={projectForm}
+          setForm={setProjectForm}
+          loading={projectLoading}
+          baseline={projectBaseline}
+        />
       </div>
     </section>
   )
