@@ -3,6 +3,7 @@
 //
 // Detects commands that change remote GitHub state:
 //   - git push       → new commits land; CI may start; PR may update
+//   - git pull/fetch → remote state changed; issues/PRs may have been updated
 //   - gh pr create   → new PR needs to appear in the store
 //   - gh pr merge    → PR closed; linked issues may auto-close
 //   - gh pr close    → PR state change
@@ -22,6 +23,9 @@ const UPSTREAM_MUTATING_RE =
 //   gh api repos/:owner/:repo/pulls/7 -X PATCH -f state=closed
 const GH_API_ISSUE_PATCH_RE = /\bgh\s+api\s+\S*\/(?:issues|pulls)\/\d+\b.*-X\s+PATCH\b/i
 
+// Matches `git pull` and `git fetch` — remote state may have changed.
+const GIT_PULL_FETCH_RE = /\bgit\s+(pull|fetch)\b/i
+
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)
 
@@ -33,6 +37,7 @@ if (!isShellTool(toolName) || !command) process.exit(0)
 
 const shouldSync =
   GIT_PUSH_RE.test(command) ||
+  GIT_PULL_FETCH_RE.test(command) ||
   UPSTREAM_MUTATING_RE.test(command) ||
   GH_API_ISSUE_PATCH_RE.test(command)
 if (!shouldSync) process.exit(0)
