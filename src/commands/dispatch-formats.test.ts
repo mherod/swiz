@@ -132,6 +132,7 @@ describe("dispatch output formats", () => {
   test("preToolUse allow-with-reason uses hookSpecificOutput envelope", async () => {
     const homeDir = await _tmp.create("swiz-dispatch-home-")
     const cwd = await _tmp.create("swiz-dispatch-cwd-")
+    runGit(cwd, ["init"])
     const sessionId = "session-allow"
     await writeTask(homeDir, sessionId, "pending")
 
@@ -196,6 +197,7 @@ describe("dispatch output formats", () => {
   test("sessionStart context uses hookSpecificOutput.additionalContext", async () => {
     const homeDir = await _tmp.create("swiz-dispatch-home-")
     const cwd = await _tmp.create("swiz-dispatch-cwd-")
+    runGit(cwd, ["init"])
     const result = await dispatch({
       event: "sessionStart",
       hookEventName: "SessionStart",
@@ -220,6 +222,7 @@ describe("dispatch output formats", () => {
   test("userPromptSubmit context uses hookSpecificOutput.additionalContext", async () => {
     const homeDir = await _tmp.create("swiz-dispatch-home-")
     const cwd = await _tmp.create("swiz-dispatch-cwd-")
+    runGit(cwd, ["init"])
     const result = await dispatch({
       event: "userPromptSubmit",
       hookEventName: "UserPromptSubmit",

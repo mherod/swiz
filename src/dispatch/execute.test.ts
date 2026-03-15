@@ -56,7 +56,7 @@ describe("transcriptSummaryProvider", () => {
       canonicalEvent: "preToolUse",
       hookEventName: "PreToolUse",
       payloadStr: JSON.stringify({
-        cwd: "/tmp/test-provider",
+        cwd: process.cwd(),
         session_id: "test-session",
         transcript_path: "/nonexistent/transcript.jsonl",
         tool_name: "Bash",
@@ -104,7 +104,7 @@ describe("manifestProvider", () => {
       canonicalEvent: "preToolUse",
       hookEventName: "PreToolUse",
       payloadStr: JSON.stringify({
-        cwd: "/tmp/test-manifest-provider",
+        cwd: process.cwd(),
         session_id: "test-session",
         tool_name: "Bash",
         tool_input: { command: "echo hello" },
@@ -117,7 +117,7 @@ describe("manifestProvider", () => {
     }
     const result = await executeDispatch(req)
     expect(providerCalled).toBe(true)
-    expect(providerCwd).toBe("/tmp/test-manifest-provider")
+    expect(providerCwd).toBe(process.cwd())
     expect(result.response).toEqual({})
   })
 
