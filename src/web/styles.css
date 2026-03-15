@@ -2102,6 +2102,13 @@ tbody tr:hover {
   margin-top: var(--space-2);
 }
 
+.animated-beam {
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
 .hook-context-box {
   margin-top: 8px;
   border: 1px solid rgba(132, 146, 173, 0.3);
