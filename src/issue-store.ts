@@ -1240,7 +1240,7 @@ export function ghListToRestFallback(args: string[]): RestFallbackMapping | null
   return REST_FALLBACK_MAP[`${args[0]}:${args[1]}`] ?? null
 }
 
-/** Fetch via REST API as fallback when GraphQL is rate-limited. */
+/** Fetch via REST API for a mapped gh list command. */
 async function fetchViaRest(endpoint: string, cwd: string): Promise<unknown> {
   await acquireGhSlot()
   const proc = Bun.spawn(["gh", "api", endpoint], {
@@ -1262,8 +1262,8 @@ async function fetchViaRest(endpoint: string, cwd: string): Promise<unknown> {
 }
 
 /**
- * Attempt REST API fallback for a gh list command.
- * Returns null if no REST mapping exists for the command or if REST also fails.
+ * Fetch a mapped gh list command via REST API.
+ * Returns null if no REST mapping exists for the command or if REST fails.
  * Logs a descriptive message when no mapping is registered so the gap is observable.
  *
  * Exported for unit testing.
@@ -1274,15 +1274,25 @@ export async function tryRestFallback<T>(args: string[], cwd: string): Promise<T
     debugLog(`[swiz] NO_REST_FALLBACK for ${args.join(" ")} — no REST endpoint mapping registered`)
     return null
   }
-  debugLog(`[swiz] REST_FALLBACK for ${args.join(" ")}`)
+  debugLog(`[swiz] REST_QUERY for ${args.join(" ")}`)
   const raw = await fetchViaRest(mapping.endpoint, cwd)
   if (raw === null) return null
   return (mapping.normalize ? mapping.normalize(raw) : raw) as T
 }
 
 /** Run a gh subcommand and parse JSON output. Returns null on failure.
- *  Automatically retries via REST API when the command fails or returns empty results. */
+ *  Prefers REST API for mapped list commands and falls back to gh subcommands only when REST fails. */
 async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
+  const hasRestMapping = ghListToRestFallback(args) !== null
+  if (hasRestMapping) {
+    const restResult = await tryRestFallback<T>(args, cwd)
+    if (restResult !== null) {
+      debugLog(`[swiz] REST_PRIMARY for ${args.join(" ")}`)
+      return restResult
+    }
+    debugLog(`[swiz] REST_PRIMARY_FAILED for ${args.join(" ")}; falling back to gh`)
+  }
+
   await acquireGhSlot()
   const proc = Bun.spawn(["gh", ...args], {
     cwd,
@@ -1300,23 +1310,13 @@ async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
         ? `[swiz] GRAPHQL_RATE_LIMITED for ${args.join(" ")}`
         : `[swiz] GH_FETCH_FAILED exit=${proc.exitCode} for ${args.join(" ")}`
     )
-    return tryRestFallback<T>(args, cwd)
+    return null
   }
   let parsed: T | null = null
   try {
     parsed = JSON.parse(stdout) as T
   } catch {
     return null
-  }
-  // Also fall back to REST when gh succeeds but returns an empty list — the REST
-  // endpoint may have fresher or less-filtered data (e.g. after a cache flush or
-  // when a GraphQL query silently drops items due to scope mismatches).
-  if (Array.isArray(parsed) && parsed.length === 0) {
-    const restResult = await tryRestFallback<T>(args, cwd)
-    if (restResult !== null && Array.isArray(restResult) && restResult.length > 0) {
-      debugLog(`[swiz] REST_FALLBACK_NONEMPTY for ${args.join(" ")}`)
-      return restResult
-    }
   }
   return parsed
 }

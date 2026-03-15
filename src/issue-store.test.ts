@@ -8,6 +8,7 @@ import {
   ghListToRestFallback,
   IssueStore,
   replayPendingMutations,
+  syncUpstreamState,
   tryRestFallback,
 } from "./issue-store.ts"
 
@@ -18,6 +19,37 @@ function createStore(): IssueStore {
   )
   mkdirSync(dir, { recursive: true })
   return new IssueStore(join(dir, "test.db"))
+}
+
+let bunSpawnTestMutex: Promise<void> = Promise.resolve()
+
+async function lockBunSpawn(): Promise<() => void> {
+  let release!: () => void
+  const previous = bunSpawnTestMutex
+  bunSpawnTestMutex = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await previous
+  return release
+}
+
+function createMockSpawnResult(stdout = "", stderr = "", exitCode = 0) {
+  return {
+    exited: Promise.resolve(),
+    exitCode,
+    stdout: new ReadableStream({
+      start(controller) {
+        if (stdout) controller.enqueue(new TextEncoder().encode(stdout))
+        controller.close()
+      },
+    }),
+    stderr: new ReadableStream({
+      start(controller) {
+        if (stderr) controller.enqueue(new TextEncoder().encode(stderr))
+        controller.close()
+      },
+    }),
+  }
 }
 
 describe("DEFAULT_TTL_MS", () => {
@@ -419,11 +451,6 @@ describe("Cross-repo isolation", () => {
 })
 
 describe("replayPendingMutations", () => {
-  // Promise-chain mutex: ensures only one test owns Bun.spawn at a time.
-  // Required because --concurrent runs these tests in the same event loop and
-  // global Bun.spawn mocking across concurrent tests causes interference.
-  let spawnTestMutex: Promise<void> = Promise.resolve()
-
   test("discards mutations that exceed max attempts", async () => {
     const store = createStore()
     try {
@@ -487,15 +514,7 @@ describe("replayPendingMutations", () => {
 
   test("processes multiple issues in parallel with a limit", async () => {
     const store = createStore()
-    // Acquire mutex before touching global Bun.spawn to prevent concurrent
-    // tests from overwriting each other's mock mid-test.
-    let releaseMutex!: () => void
-    const prevMutex = spawnTestMutex
-    spawnTestMutex = new Promise<void>((resolve) => {
-      releaseMutex = resolve
-    })
-    await prevMutex
-
+    const releaseMutex = await lockBunSpawn()
     const originalSpawn = Bun.spawn
     let inFlight = 0
     let maxInFlight = 0
@@ -582,14 +601,7 @@ describe("replayPendingMutations", () => {
 
   test("preserves ordering for mutations targeting the same issue", async () => {
     const store = createStore()
-    // Acquire mutex before touching global Bun.spawn.
-    let releaseMutex!: () => void
-    const prevMutex = spawnTestMutex
-    spawnTestMutex = new Promise<void>((resolve) => {
-      releaseMutex = resolve
-    })
-    await prevMutex
-
+    const releaseMutex = await lockBunSpawn()
     const originalSpawn = Bun.spawn
     const sequence: number[] = []
 
@@ -630,6 +642,84 @@ describe("replayPendingMutations", () => {
       // We just need to check the relative order of mutations for the same issue.
       const issue1Events = sequence.filter((n) => n === 1)
       expect(issue1Events).toEqual([1, 1]) // Two events for issue 1
+    } finally {
+      Bun.spawn = originalSpawn
+      store.close()
+      releaseMutex()
+    }
+  })
+})
+
+describe("syncUpstreamState", () => {
+  test("prefers REST API queries before gh graphql-backed list commands", async () => {
+    const store = createStore()
+    const releaseMutex = await lockBunSpawn()
+    const originalSpawn = Bun.spawn
+    const calls: string[][] = []
+
+    // @ts-expect-error - Mocking Bun.spawn
+    Bun.spawn = (args: string[]) => {
+      calls.push(args)
+
+      if (args[0] !== "gh" || args[1] !== "api") {
+        return createMockSpawnResult("", "unexpected non-REST command", 1)
+      }
+
+      const endpoint = args[2] ?? ""
+      if (endpoint.startsWith("repos/{owner}/{repo}/issues?state=open")) {
+        return createMockSpawnResult(
+          JSON.stringify([
+            {
+              number: 101,
+              title: "REST issue",
+              state: "open",
+              updated_at: "2024-06-01T00:00:00Z",
+              user: { login: "alice" },
+              assignees: [],
+              labels: [],
+            },
+          ])
+        )
+      }
+      if (endpoint.startsWith("repos/{owner}/{repo}/pulls?state=open")) {
+        return createMockSpawnResult(
+          JSON.stringify([
+            {
+              number: 202,
+              title: "REST pr",
+              state: "open",
+              html_url: "https://github.com/owner/repo/pull/202",
+              created_at: "2024-05-01T00:00:00Z",
+              updated_at: "2024-06-02T00:00:00Z",
+              user: { login: "bob" },
+              head: { ref: "feature/rest-primary" },
+            },
+          ])
+        )
+      }
+      if (endpoint.startsWith("repos/{owner}/{repo}/actions/runs?per_page=20")) {
+        return createMockSpawnResult(JSON.stringify({ workflow_runs: [] }))
+      }
+      if (endpoint.startsWith("repos/{owner}/{repo}/issues?state=closed")) {
+        return createMockSpawnResult(JSON.stringify([]))
+      }
+      if (endpoint.startsWith("repos/{owner}/{repo}/pulls?state=closed")) {
+        return createMockSpawnResult(JSON.stringify([]))
+      }
+
+      return createMockSpawnResult("", `unexpected endpoint: ${endpoint}`, 1)
+    }
+
+    try {
+      const result = await syncUpstreamState("owner/repo", "/tmp", store)
+
+      expect(result.issues.upserted).toBe(1)
+      expect(result.pullRequests.upserted).toBe(1)
+      expect(result.ciStatuses.upserted).toBe(0)
+      expect(calls).toHaveLength(5)
+      expect(calls.every((args) => args[0] === "gh" && args[1] === "api")).toBe(true)
+      expect(store.getIssue<{ title: string }>("owner/repo", 101)?.title).toBe("REST issue")
+      expect(store.getPullRequest<{ title: string }>("owner/repo", 202)?.title).toBe("REST pr")
     } finally {
       Bun.spawn = originalSpawn
       store.close()
