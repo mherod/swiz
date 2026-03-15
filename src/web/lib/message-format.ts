@@ -31,6 +31,7 @@ export interface ParsedUserMetadataBlock {
     | "tagged"
     | "localCommand"
     | "localCommandCaveat"
+    | "bashCommand"
 }
 
 export interface UserMessageParts {
@@ -141,6 +142,12 @@ function extractInlineContextBlocks(text: string): {
   const localCommand = extractLocalCommandBlocks(cleanedText)
   cleanedText = localCommand.cleanedText
   metadataBlocks.push(...localCommand.blocks)
+
+  const bashBlocks = extractBashBlocks(cleanedText)
+  cleanedText = bashBlocks.cleanedText
+  metadataBlocks.push(...bashBlocks.blocks)
+
+  cleanedText = cleanInterruptionMarkers(cleanedText)
 
   const slashCommand = extractLeadingSlashCommandBlock(cleanedText)
   cleanedText = slashCommand.cleanedText
@@ -477,6 +484,43 @@ function extractLocalCommandBlocks(text: string): {
   if (stdout.block) blocks.push(stdout.block)
 
   return { cleanedText, blocks }
+}
+
+function extractBashBlocks(text: string): {
+  cleanedText: string
+  blocks: ParsedUserMetadataBlock[]
+} {
+  const blocks: ParsedUserMetadataBlock[] = []
+  let cleanedText = text
+
+  const bashInputRe = /<bash-input>([\s\S]*?)<\/bash-input>/gi
+  const bashStdoutRe = /<bash-stdout>([\s\S]*?)<\/bash-stdout>/gi
+  const bashStderrRe = /<bash-stderr>([\s\S]*?)<\/bash-stderr>/gi
+
+  const inputMatch = bashInputRe.exec(cleanedText)
+  const command = inputMatch?.[1]?.trim() ?? null
+  if (inputMatch) cleanedText = cleanedText.replace(inputMatch[0], "").trim()
+
+  const stdoutMatch = bashStdoutRe.exec(cleanedText)
+  const stdout = stdoutMatch?.[1]?.trim() ?? null
+  if (stdoutMatch) cleanedText = cleanedText.replace(stdoutMatch[0], "").trim()
+
+  const stderrMatch = bashStderrRe.exec(cleanedText)
+  const stderr = stderrMatch?.[1]?.trim() ?? null
+  if (stderrMatch) cleanedText = cleanedText.replace(stderrMatch[0], "").trim()
+
+  if (command) {
+    const details: Array<{ label: string; value: string }> = [{ label: "command", value: command }]
+    if (stdout) details.push({ label: "output", value: compactMetadataValue(stdout) })
+    if (stderr) details.push({ label: "stderr", value: compactMetadataValue(stderr) })
+    blocks.push({ title: "User Shell Command", details, notes: [], kind: "bashCommand" })
+  }
+
+  return { cleanedText, blocks }
+}
+
+function cleanInterruptionMarkers(text: string): string {
+  return text.replace(/\[Request interrupted by user(?:\s+for tool use)?\]/g, "").trim()
 }
 
 const GIT_ACTION_SIGNAL_RE =

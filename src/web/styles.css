@@ -2406,6 +2406,20 @@ tbody tr:hover {
   color: #8ae28a;
 }
 
+.hook-context-bash {
+  border-color: rgba(126, 182, 255, 0.3);
+  background: rgba(8, 18, 34, 0.55);
+}
+
+.hook-context-bash .hook-context-summary {
+  color: var(--color-blue-400);
+}
+
+.hook-context-bash .command-output {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
 .local-command-header,
 .local-command-caveat-header {
   display: flex;
