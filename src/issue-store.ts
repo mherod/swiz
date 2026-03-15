@@ -1333,14 +1333,50 @@ export function getIssueStoreDbPath(): string {
   return getDefaultDbPath()
 }
 
-/** Get or create a shared IssueStore instance. */
+/** Get or create a shared IssueStore instance.
+ *  Falls back to a no-op store if SQLite is unavailable (e.g. locked DB,
+ *  missing directory, corrupted file). Callers' existing gh CLI fallbacks
+ *  will kick in when the no-op store returns empty results. */
 let sharedStore: IssueStore | null = null
 
 export function getIssueStore(dbPath?: string): IssueStore {
   if (!sharedStore) {
-    sharedStore = new IssueStore(dbPath)
+    try {
+      sharedStore = new IssueStore(dbPath)
+    } catch (err) {
+      debugLog(`[swiz] IssueStore init failed, using no-op fallback: ${err}`)
+      sharedStore = createNoOpStore()
+    }
   }
   return sharedStore
+}
+
+/** No-op IssueStore that returns empty results for all reads and silently
+ *  drops all writes. Used when the SQLite DB is unavailable so callers
+ *  fall through to their gh CLI fallback paths. */
+function createNoOpStore(): IssueStore {
+  const noop = {} as IssueStore
+  const handler: ProxyHandler<IssueStore> = {
+    get(_target, prop) {
+      if (prop === "close") return () => {}
+      // Read methods return empty results
+      if (prop === "listIssues" || prop === "listPullRequests" || prop === "listCiBranchRuns")
+        return () => []
+      if (
+        prop === "getIssue" ||
+        prop === "getPullRequest" ||
+        prop === "getCiStatus" ||
+        prop === "getCiBranchRun" ||
+        prop === "getPrBranchDetail"
+      )
+        return () => null
+      if (prop === "pendingMutationCount" || prop === "removeClosedIssues") return () => 0
+      if (prop === "drainPendingMutations") return () => []
+      // Write methods are silent no-ops
+      return () => {}
+    },
+  }
+  return new Proxy(noop, handler)
 }
 
 /** Reset the shared store (for testing). */
