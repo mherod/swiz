@@ -17,6 +17,11 @@ import { GIT_PUSH_RE, isShellTool } from "./hook-utils.ts"
 const UPSTREAM_MUTATING_RE =
   /\bgh\s+(pr\s+(create|merge|close|edit|reopen)|issue\s+(create|close|comment|edit|reopen))\b/i
 
+// Matches REST PATCH calls that mutate issue/PR state:
+//   gh api repos/owner/repo/issues/42 -X PATCH -f state=closed
+//   gh api repos/:owner/:repo/pulls/7 -X PATCH -f state=closed
+const GH_API_ISSUE_PATCH_RE = /\bgh\s+api\s+\S*\/(?:issues|pulls)\/\d+\b.*-X\s+PATCH\b/i
+
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)
 
@@ -26,7 +31,10 @@ const command: string = input.tool_input?.command ?? ""
 
 if (!isShellTool(toolName) || !command) process.exit(0)
 
-const shouldSync = GIT_PUSH_RE.test(command) || UPSTREAM_MUTATING_RE.test(command)
+const shouldSync =
+  GIT_PUSH_RE.test(command) ||
+  UPSTREAM_MUTATING_RE.test(command) ||
+  GH_API_ISSUE_PATCH_RE.test(command)
 if (!shouldSync) process.exit(0)
 
 const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
