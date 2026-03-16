@@ -8,12 +8,15 @@
 
 import { merge, orderBy } from "lodash-es"
 import { isGitRepo } from "../git-helpers.ts"
+import type { HookLogEntry } from "../hook-log.ts"
+import { appendHookLogs } from "../hook-log.ts"
 import { tryReplayPendingMutations } from "../issue-store.ts"
 import type { HookGroup } from "../manifest.ts"
 import { manifest } from "../manifest.ts"
 import { loadAllPlugins } from "../plugins.ts"
 import { type ProjectSwizSettings, readProjectSettings, resolveProjectHooks } from "../settings.ts"
 import { computeTranscriptSummary, type TranscriptSummary } from "../transcript-summary.ts"
+import type { HookExecution } from "./engine.ts"
 import {
   applyHookSettingFilters,
   countHooks,
@@ -412,6 +415,30 @@ async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
       daemonContext: req.daemonContext,
       cwd: ctx.cwd,
     })
+
+    // Fire-and-forget log write — never blocks the dispatch response
+    const executions = (response.hookExecutions ?? []) as HookExecution[]
+    if (executions.length > 0) {
+      const sessionId =
+        typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
+      const logEntries: HookLogEntry[] = executions.map((exec) => ({
+        ts: new Date(exec.startTime).toISOString(),
+        event: ctx.canonicalEvent,
+        hookEventName: ctx.hookEventName,
+        hook: exec.file,
+        status: exec.status,
+        durationMs: exec.durationMs,
+        exitCode: exec.exitCode,
+        matcher: exec.matcher,
+        sessionId,
+        cwd: ctx.cwd,
+        toolName: ctx.toolName,
+        stdoutSnippet: exec.stdoutSnippet || undefined,
+        stderrSnippet: exec.stderrSnippet || undefined,
+      }))
+      void appendHookLogs(logEntries)
+    }
+
     return { response }
   } finally {
     req.onDispatchLifecycle?.(

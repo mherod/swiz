@@ -4,6 +4,7 @@ import type { LRUCache } from "lru-cache"
 import { executeDispatch } from "../../dispatch/execute.ts"
 import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { getRepoSlug } from "../../git-helpers.ts"
+import { readHookLogs } from "../../hook-log.ts"
 import { getIssueStore } from "../../issue-store.ts"
 import { deleteSessionData, resolveSessionDeletionTargets } from "../../session-data-delete.ts"
 import {
@@ -1022,6 +1023,12 @@ type TopRouteHandler = (
   ctx: DaemonWebServerContext
 ) => Promise<Response> | Response
 
+async function handleHookLogs(url: URL): Promise<Response> {
+  const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get("limit") ?? "200", 10)))
+  const entries = await readHookLogs(limit)
+  return Response.json({ entries: entries.reverse() })
+}
+
 async function handleGhRateLimit(): Promise<Response> {
   const stats = await getGhRateLimitStats()
   return Response.json(stats)
@@ -1031,6 +1038,7 @@ const TOP_ROUTE_TABLE: Record<string, TopRouteHandler> = {
   "POST /dispatch": handleDispatchRoute,
   "GET /dispatch/active": (_req, url, ctx) => handleDispatchActive(url, ctx),
   "GET /metrics": (_req, url, ctx) => handleMetricsRoute(url, ctx),
+  "GET /api/hook-logs": (_req, url) => handleHookLogs(url),
   "GET /api/gh-rate-limit": () => handleGhRateLimit(),
   "GET /process/agents": () => handleProcessAgents(),
   "POST /process/agents/kill": (req) => handleProcessKill(req),

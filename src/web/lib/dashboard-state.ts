@@ -24,7 +24,7 @@ import {
 } from "./dashboard-hooks.ts"
 import { postJson } from "./http.ts"
 
-export type ActiveView = "dashboard" | "issues" | "tasks" | "transcript" | "settings"
+export type ActiveView = "dashboard" | "issues" | "tasks" | "transcript" | "logs" | "settings"
 
 type AgentProcessOptimisticAction =
   | { type: "sync"; providers: Record<string, number[]> }

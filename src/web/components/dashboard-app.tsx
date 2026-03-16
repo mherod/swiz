@@ -9,11 +9,12 @@ import { SessionNav } from "./session-browser.tsx"
 import { SettingsPanel } from "./settings-panel.tsx"
 import { DashboardView } from "./views/dashboard-view.tsx"
 import { IssuesView } from "./views/issues-view.tsx"
+import { LogsView } from "./views/logs-view.tsx"
 import { TasksView } from "./views/tasks-view.tsx"
 import { TranscriptView } from "./views/transcript-view.tsx"
 
 const TAB_LABELS: Array<{
-  view: "dashboard" | "issues" | "tasks" | "transcript" | "settings"
+  view: "dashboard" | "issues" | "tasks" | "transcript" | "logs" | "settings"
   label: string
   icon: string
 }> = [
@@ -21,6 +22,7 @@ const TAB_LABELS: Array<{
   { view: "issues", label: "Issues", icon: "◉" },
   { view: "tasks", label: "Tasks", icon: "☑" },
   { view: "transcript", label: "Transcript", icon: "❯" },
+  { view: "logs", label: "Logs", icon: "▤" },
   { view: "settings", label: "Settings", icon: "⚙" },
 ]
 
@@ -77,6 +79,7 @@ function DashboardContent({ state }: { state: DashboardState }) {
     )
   }
   if (activeView === "issues") return <IssuesView cwd={optimisticProjectCwd} />
+  if (activeView === "logs") return <LogsView />
   if (activeView === "tasks") {
     return (
       <TasksView
