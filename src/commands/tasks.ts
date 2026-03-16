@@ -236,16 +236,16 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    // Guide the agent through the mandatory pending → in_progress → completed sequence
+    // Auto-transition pending → in_progress → completed so callers don't need two commands
     if (msg.includes("Invalid transition") && msg.includes("pending")) {
-      const sessionSuffix = sessionId ? ` --session ${sessionId.slice(0, 8)}` : ""
-      throw new Error(
-        `${msg}\n\n` +
-          `Task must be set in_progress before it can be completed.\n` +
-          `Run these two commands in sequence:\n` +
-          `  swiz tasks status ${taskId} in_progress${sessionSuffix}\n` +
-          `  swiz tasks complete ${taskId} --evidence "note:..."${sessionSuffix}`
-      )
+      console.log(`  ⚡ Auto-transitioning #${taskId}: pending → in_progress → completed`)
+      await updateStatus(sessionId, taskId, "in_progress", { filterCwd })
+      await updateStatus(sessionId, taskId, "completed", {
+        evidence,
+        verifyText: verify,
+        filterCwd,
+      })
+      return
     }
     // Guide the agent to use complete-all when individual task lookup fails
     if (msg.includes("not found")) {
