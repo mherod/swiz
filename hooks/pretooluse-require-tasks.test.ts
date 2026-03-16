@@ -578,14 +578,14 @@ describe("pretooluse-require-tasks", () => {
       expect(result.decision).toBeUndefined()
     })
 
-    test("still denies Edit targeting other .md files with no tasks", async () => {
+    test("allows Edit targeting any .md file with no tasks", async () => {
       const homeDir = await createTempHome()
       const result = await runHook({
         homeDir,
         toolName: "Edit",
         filePath: "/Users/test/project/README.md",
       })
-      expect(result.decision).toBe("deny")
+      expect(result.decision).toBeUndefined()
     })
 
     test("still denies Edit targeting .ts files with no tasks", async () => {
