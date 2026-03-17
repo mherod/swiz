@@ -27,8 +27,13 @@ function matchesDataModelPattern(filePath: string): boolean {
 }
 
 async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
+  const raw = await Bun.stdin.json().catch(() => null)
+  if (!raw) return
+
+  const input = stopHookInputSchema.safeParse(raw)
+  if (!input.success) return
+
+  const cwd = input.data.cwd ?? process.cwd()
 
   if (!(await isGitRepo(cwd))) return
 

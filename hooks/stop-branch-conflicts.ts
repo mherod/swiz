@@ -86,8 +86,10 @@ async function checkLocalConflicts(
     blockStop(buildConflictReason(header, defaultBranch, defaultRemoteRef))
   }
 
-  // Skill-aware routing: suggest pr-salvage for severely stale branches
-  if (behind >= STALE_BRANCH_THRESHOLD) {
+  // Skill-aware routing: suggest pr-salvage for severely stale branches.
+  // Only fire when merge-tree produced output (empty mergeTree means git failed —
+  // don't suggest salvage when we can't confirm conflict-free state).
+  if (behind >= STALE_BRANCH_THRESHOLD && mergeTree !== "") {
     const salvageAdvice = skillAdvice(
       "pr-salvage",
       `Use the /pr-salvage skill to recover this stale branch — it can cherry-pick or re-implement the changes on a fresh branch.`,
