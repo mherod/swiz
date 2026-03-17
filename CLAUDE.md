@@ -37,8 +37,10 @@ alwaysApply: false
 - Keep `DISPATCH_ROUTES`, `manifest`, and agent `eventMap` synchronized.
 - `validateDispatchRoutes()` in `src/manifest.ts` must pass from both `swiz dispatch` and `swiz install`.
 - Keep `src/dispatch-routing.test.ts` passing.
+- DO NOT duplicate preToolUse matcher strings across groups — `manifest.find()` returns the first match, shadowing the original. Add hooks to the existing group.
+- DO NOT add sync hooks to unmatchered preToolUse groups — `manifest.test.ts` requires `matcher` for groups with sync hooks; async-only groups are exempt.
 - DO NOT hard-code agent-specific event names or tool names in hook scripts.
-- `classifyHookOutput` in `src/dispatch/engine.ts` extracts JSON from polluted stdout. DO NOT revert — defense-in-depth against SDK log lines on stdout.
+- `classifyHookOutput` in `src/dispatch/engine.ts` extracts JSON from polluted stdout. DO NOT revert — defense-in-depth.
 ## Writing Hooks
 - Update `README.md` whenever `src/manifest.ts` changes.
 - `src/readme-hook-counts.test.ts` invariants:
@@ -102,7 +104,7 @@ alwaysApply: false
 - Call `TaskUpdate` after each file; add updates at least every 3 edits.
 - Create tasks before non-exempt Bash.
 - **DON'T**: Complete last in-progress task while shell commands remain. Keep ≥1 `in_progress` until all shell work finishes.
-- Exempt Bash categories: `ls`, `rg`, `grep`; read-only `git` subcommands (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`, etc.); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
+- Exempt Bash: `ls`, `rg`, `grep`; read-only `git` (`log`, `status`, `diff`, `show`, `branch`, `remote`, `rev-parse`); `git push/pull/fetch`; all `gh`; `swiz issue close/comment`.
 - `find` is not exempt; use `rg` or Glob.
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
@@ -114,14 +116,13 @@ alwaysApply: false
 - Treat `gh issue create` and task completion as atomic; recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.
 - Run `git diff <files>` before `git add`.
 - Run `git status` immediately after each `git commit`.
-- After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` when approaching threshold (project-configurable via `.swiz/config.json` `memoryWordThreshold`).
+- After each `CLAUDE.md` edit, run `wc -w CLAUDE.md`; run `/compact-memory` when approaching threshold (configurable via `.swiz/config.json`).
 - Before adding a rule to `CLAUDE.md`, scan nearby rules for conflicts.
 - Before issue labeling, run `gh label list`; use requested literal labels when present, otherwise ask before substituting.
 - When user provides explicit labels, remove conflicting inferred labels; do not restore inferred labels.
 - After `gh issue create`, run `/refine-issue <number>` and apply readiness label (`ready`, `triaged`, `confirmed`, `accepted`, `spec-approved`). **DON'T** skip `/refine-issue` — adding `ready` directly bypasses proposals.
 - **DON'T**: Use `$(cat <<'EOF')` in `gh issue create --body` — redirect guard blocks it. Write body to `/tmp/swiz-issue-N.md`, use `--body-file`.
-- Before stop, audit labels: `gh issue list --state open --json number,title,labels --jq '.[] | select(.labels | map(.name) | any(. == "ready" or . == "backlog" or . == "blocked" or . == "wontfix" or . == "duplicate" or . == "upstream")) | .number'`.
-- If stop hook lists actionable issues, pick at least one via `/work-on-issue <number>`; prioritize `ready` over `backlog`.
+- Before stop, audit open issue labels; if stop hook lists actionable issues, pick at least one via `/work-on-issue <number>` (prioritize `ready` over `backlog`).
 ## Standard Work Sequence
 - Required order for each unit of work:
   1. `TaskCreate`/`TaskUpdate` -> `in_progress`.
