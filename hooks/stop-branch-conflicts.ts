@@ -60,6 +60,8 @@ async function checkPrConflicts(
   return pr.state === "OPEN" && pr.mergeable === "MERGEABLE"
 }
 
+const STALE_BRANCH_THRESHOLD = 50
+
 async function checkLocalConflicts(
   branch: string,
   cwd: string,
@@ -82,6 +84,20 @@ async function checkLocalConflicts(
   if (conflictCount > 0) {
     const header = `Branch '${branch}' has conflicts with ${defaultRemoteRef}.\n\n${conflictCount} conflict(s) detected — ${behind} commit(s) on ${defaultRemoteRef} not yet in this branch.\n\n`
     blockStop(buildConflictReason(header, defaultBranch, defaultRemoteRef))
+  }
+
+  // Skill-aware routing: suggest pr-salvage for severely stale branches
+  if (behind >= STALE_BRANCH_THRESHOLD) {
+    const salvageAdvice = skillAdvice(
+      "pr-salvage",
+      `Use the /pr-salvage skill to recover this stale branch — it can cherry-pick or re-implement the changes on a fresh branch.`,
+      `Consider rebasing or re-implementing your changes on a fresh branch — this branch is significantly behind ${defaultRemoteRef}.`
+    )
+    blockStop(
+      `Branch '${branch}' is ${behind} commit(s) behind ${defaultRemoteRef} (threshold: ${STALE_BRANCH_THRESHOLD}).\n\n` +
+        `A branch this far behind is at high risk of hidden integration issues even without textual conflicts.\n\n` +
+        salvageAdvice
+    )
   }
 }
 

@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**97 hooks. 11 event types. Every agent. Zero compromises.**
+**99 hooks. 11 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -88,7 +88,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 The bundled hooks cover six events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, and UserPromptSubmit. Four additional events — **Notification**, **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all four; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
 
-### Stop (22)
+### Stop (23)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -114,6 +114,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-upstream-branch-count.ts` | Blocks stop when the remote has more than 40 branches. Stale branches accumulate silently — this surfaces the cleanup work before it becomes unmanageable. Runs with a 2-hour cooldown so it doesn't interrupt every session. |
 | `stop-memory-size.ts` | Scans `CLAUDE.md` and `MEMORY.md` files against the configured line and word thresholds. Blocks stop with file-level details and `/compact-memory` guidance when any file is over threshold. |
 | `stop-dependabot-prs.ts` | Surfaces open Dependabot PRs and blocks stop when any are older than 7 days. Lists PR numbers, titles, ages, and provides next steps for merging, closing, or inspecting each PR. Uses `isAutomationLogin()` from `collaboration-policy.ts` for bot detection. Runs with a 1-hour cooldown. |
+| `stop-gdpr-data-models.ts` | When uncommitted changes touch files matching user-data model patterns (user, account, profile, PII, consent, erasure), suggests the /gdpr-analysis skill via `additionalContext`. Non-blocking advisory — conservative file-name heuristics to minimize false positives. |
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
@@ -175,7 +176,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-claude-word-limit.ts` | Blocks `git push` when CLAUDE.md exceeds 5000 words, enforcing the limit at release time. Provides actionable error showing current word count, overage, and required reduction. Integrates with word-counting utility in hook-utils. |
 | `posttooluse-speak-narrator.ts` | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async. |
 
-### PostToolUse (18)
+### PostToolUse (19)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -187,6 +188,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-test-pairing.ts` | Detects when source files were edited without corresponding test updates and reminds the agent. Tests aren't optional. |
 | `posttooluse-task-advisor.ts` | Issues a countdown warning as the agent approaches the task enforcement threshold — before it gets blocked. |
 | `posttooluse-pr-context.ts` | Injects PR context (description, review status, CI state) when the agent checks out a branch. Instant situational awareness. |
+| `posttooluse-pr-create-refine.ts` | After `gh pr create`, checks if the new PR has a thin or empty description and suggests the /refine-pr skill via `additionalContext`. Non-blocking — advisory only. |
 | `posttooluse-prettier-ts.ts` | Auto-formats TypeScript files after edits. Runs async so it never slows the agent down. |
 | `posttooluse-task-subject-validation.ts` | Validates task subjects after creation, catching issues that the pre-creation hook might have missed. |
 | `posttooluse-task-recovery.ts` | After a TaskUpdate or TaskGet, re-checks the session task list and recovers any tasks that were lost during context compaction. |

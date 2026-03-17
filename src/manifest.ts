@@ -127,6 +127,7 @@ export const manifest: HookGroup[] = [
       { file: "stop-upstream-branch-count.ts", timeout: 10, cooldownSeconds: 7200 },
       { file: "stop-memory-size.ts", timeout: 10 },
       { file: "stop-dependabot-prs.ts", timeout: 10, cooldownSeconds: 3600 },
+      { file: "stop-gdpr-data-models.ts", timeout: 10 },
       { file: "stop-auto-continue.ts", timeout: 120 },
       { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
     ],
@@ -271,6 +272,7 @@ export const manifest: HookGroup[] = [
     matcher: "Bash",
     hooks: [
       { file: "posttooluse-pr-context.ts", timeout: 10 },
+      { file: "posttooluse-pr-create-refine.ts", timeout: 10 },
       { file: "posttooluse-git-task-autocomplete.ts", timeout: 5 },
       { file: "posttooluse-push-cooldown.ts", timeout: 5 },
       { file: "posttooluse-verify-push.ts", timeout: 20 },
