@@ -1,5 +1,51 @@
 # Changelog
 
+## 2026-03-17
+
+### New Features
+
+- **Skill-aware hook routing** — hooks now detect installed skills and
+  route agents to the appropriate skill when problems are detected. (#324)
+  - `stop-branch-conflicts.ts` → routes to `/pr-salvage` when branch
+    is 50+ commits behind main
+  - `posttooluse-pr-create-refine.ts` — new PostToolUse hook suggests
+    `/refine-pr` after `gh pr create` with thin description
+  - `stop-gdpr-data-models.ts` — new Stop hook suggests `/gdpr-analysis`
+    when uncommitted changes touch user-data model files
+- **Task auto-transition** — `pending` tasks automatically transition
+  to `in_progress` when completed via `swiz tasks complete`.
+- **Hook dispatch logs view** in the web dashboard.
+- **Agent SDK integration** for `swiz continue` — uses in-process SDK
+  instead of spawning CLI, with auto-approval, streaming, and message
+  stream logging.
+- **Progress spinner** for `swiz continue`.
+- **Lefthook config validator** script.
+- **OpenRouter AI provider** support.
+- **Nested step hierarchies** in action plans.
+- Structured tool rendering with category icons in dashboard.
+- Dock navigation with project selector in dashboard.
+- Motion tab indicator and view transitions in dashboard.
+- NumberTicker animated stats and AnimatedBeam data-flow component.
+- Parse task notifications and bash/interruption tags in transcript view.
+
+### Bug Fixes
+
+- Error handling in skill-routing hooks (safeParse, merge-tree guard).
+- Allow edits to any markdown file without task gate.
+- Forward stop hook block output to stdout in dispatch engine.
+- Guard settings panel against stale defaults.
+- Trigger issue sync on `git pull` and `git fetch`.
+- Detect `gh api` REST PATCH closes for daemon sync.
+
+### Improvements
+
+- Flattened DOM hierarchy across dashboard views (session-nav,
+  settings-panel, SessionMessages, transcript).
+- Pre-prepared SQLite statements and batch deletes in issue store.
+- Extracted view tabs, sub-components, and comprehensive design system
+  with tokens.
+- Added Agent SDK in-process usage rule to CLAUDE.md.
+
 ## 2026-03-15
 
 ### New Features
