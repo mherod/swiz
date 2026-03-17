@@ -175,6 +175,7 @@ export class IssueStore {
 
   /** List cached issues for a repo. Returns only issues within TTL window. */
   listIssues<T = unknown>(repo: string, ttlMs = DEFAULT_TTL_MS): T[] {
+    if (ttlMs <= 0) return [] // short-circuit: caller wants fresh data, skip query
     const rows = this._stmtListIssues.all(repo, Date.now() - ttlMs)
     return rows.map((r) => JSON.parse(r.data) as T)
   }

@@ -281,7 +281,10 @@ async function cacheIssuesAndReplayMutations(
 function readCachedIssues(repoSlug: string): Issue[] {
   try {
     const store = getIssueStore()
-    return store.listIssues<Issue>(repoSlug)
+    // Pass ttlMs=0 so the stop hook always gets fresh data from the store.
+    // Without this, issues closed between retries remain cached for up to 5
+    // minutes, blocking session termination indefinitely. (#325)
+    return store.listIssues<Issue>(repoSlug, 0)
   } catch {
     return []
   }
@@ -311,6 +314,12 @@ export async function getActionableIssues(cwd: string, filterUser?: string): Pro
   // Daemon-backed store: try daemon HTTP API directly when SQLite is empty
   const daemonIssues = await getDaemonBackedStore().listIssues<Issue>(repoSlug)
   if (daemonIssues.length > 0) {
+    // Populate the local SQLite store so subsequent reads (within TTL) are fast
+    try {
+      getIssueStore().upsertIssues(repoSlug, daemonIssues)
+    } catch {
+      // Non-fatal: local cache write failure shouldn't block the hook
+    }
     return filterVisibleIssues(daemonIssues, filterUser)
   }
 
