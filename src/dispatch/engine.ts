@@ -6,7 +6,6 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks"
-import { statSync } from "node:fs"
 import { appendFile } from "node:fs/promises"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
@@ -238,25 +237,10 @@ export async function runHook(
     : 0
   const configuredTimeoutSec = Math.max(baseTimeoutSec, testTimeoutSec)
 
-  let spawnCwd: string | undefined
-  try {
-    const payload = JSON.parse(payloadStr) as Record<string, unknown>
-    if (typeof payload.cwd === "string" && payload.cwd) {
-      try {
-        if (statSync(payload.cwd).isDirectory()) spawnCwd = payload.cwd
-      } catch {
-        // directory doesn't exist — fall back to inherited cwd
-      }
-    }
-  } catch {
-    // invalid JSON — fall back to inherited cwd
-  }
-
   const proc = Bun.spawn(cmd, {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    cwd: spawnCwd,
   })
 
   void proc.stdin.write(payloadStr)
