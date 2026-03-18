@@ -28,6 +28,26 @@ if (!filePath) process.exit(0)
 const settings = await readSwizSettings()
 if (!settings.sandboxedEdits) process.exit(0)
 
+// Block direct edits to swiz config files even when the path is within the sandbox.
+// Agents must use `swiz settings` / `swiz state` — direct JSON edits bypass all
+// setting validation, schema enforcement, and hook-level guards.
+const SWIZ_CONFIG_RE = /(?:^|[/\\])\.swiz[/\\][^/\\]+\.json$/
+if (SWIZ_CONFIG_RE.test(filePath)) {
+  denyPreToolUse(
+    [
+      "Editing swiz config files directly is not permitted.",
+      "",
+      `  Attempted: ${filePath}`,
+      "",
+      "Use the swiz CLI instead:",
+      "  swiz settings set <key> <value>",
+      "  swiz settings enable <setting>",
+      "  swiz settings disable <setting>",
+      "  swiz state set <state>",
+    ].join("\n")
+  )
+}
+
 /**
  * Resolve the canonical (real) path for any path, whether or not it exists.
  *

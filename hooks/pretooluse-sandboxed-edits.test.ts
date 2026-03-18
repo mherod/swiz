@@ -311,4 +311,33 @@ describe("pretooluse-sandboxed-edits", () => {
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toBe("")
   })
+
+  describe("swiz config file protection", () => {
+    test("blocks Edit to .swiz/config.json within cwd when sandbox is enabled", async () => {
+      const cwd = await createTempDir()
+      const result = await runHook(cwd, "Edit", join(cwd, ".swiz", "config.json"))
+      expect(result.exitCode).toBe(0)
+      const decision = (result.json?.hookSpecificOutput as Record<string, unknown>)
+        ?.permissionDecision
+      expect(decision).toBe("deny")
+    })
+
+    test("blocks Write to .swiz/config.json within cwd when sandbox is enabled", async () => {
+      const cwd = await createTempDir()
+      const result = await runHook(cwd, "Write", join(cwd, ".swiz", "config.json"))
+      expect(result.exitCode).toBe(0)
+      const decision = (result.json?.hookSpecificOutput as Record<string, unknown>)
+        ?.permissionDecision
+      expect(decision).toBe("deny")
+    })
+
+    test("allows .swiz/config.json edits when sandboxedEdits is disabled", async () => {
+      const cwd = await createTempDir()
+      const result = await runHook(cwd, "Edit", join(cwd, ".swiz", "config.json"), {
+        sandboxedEdits: false,
+      })
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toBe("")
+    })
+  })
 })
