@@ -137,7 +137,8 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "dismissal",
-    pattern: /(?:can be |is |are )?(?:safely |)(?:ignored|disregarded|dismissed|skipped over)\b/i,
+    pattern:
+      /(?:can |could |should |may )?be (?:safely )?(?:ignored|disregarded|dismissed|skipped over)\b|(?:safely |harmlessly )(?:ignore|disregard|dismiss|skip over)\b/i,
     response:
       "Nothing that appears in your output can be 'safely ignored'. " +
       "Warnings and errors exist for a reason. Address them.",
