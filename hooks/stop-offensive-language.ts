@@ -10,7 +10,7 @@ import {
   findLazyPattern,
   formatDenialMessage,
   readTranscriptLines,
-} from "./pretooluse-offensive-language.ts"
+} from "./offensive-language-patterns.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 
 async function main() {
