@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**100 hooks. 11 event types. Every agent. Zero compromises.**
+**101 hooks. 11 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -88,13 +88,14 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 The bundled hooks cover six events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, and UserPromptSubmit. Four additional events — **Notification**, **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all four; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
 
-### Stop (23)
+### Stop (24)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
 | Hook | What it does |
 |------|-------------|
 | `stop-secret-scanner.ts` | Scans staged diffs for API keys, tokens, and credentials. Blocks stop if any are found — because secrets in git history are permanent. |
+| `stop-offensive-language.ts` | Defense-in-depth backstop for the PreToolUse offensive-language hook. Scans the last assistant message for lazy behavior patterns (hedging, deferral, compliance gaming, etc.) and blocks stop if the agent's final message contains avoidance language. Shares detection logic with `pretooluse-offensive-language.ts`. |
 | `stop-debug-statements.ts` | Catches `console.log`, `debugger`, and other debug artifacts left in source files. Excludes infrastructure files that legitimately reference these patterns. |
 | `stop-workflow-permissions.ts` | Defense-in-depth backstop for workflow permission changes. Scans committed diffs on non-default branches for `permissions:` additions in `.github/workflows/*.yml` files. Catches changes that bypass the PreToolUse gate (shell edits, amends, cherry-picks). Allows permission changes on the default branch where they are intentional. |
 | `stop-suppression-patterns.ts` | Defense-in-depth backstop for type and lint suppression patterns. Scans committed diffs on non-default branches for newly added `@ts-ignore`, `@ts-nocheck`, bare `@ts-expect-error`, lint-disable comments, and `as any` casts in TypeScript/JavaScript files. Catches suppressions that bypass the PreToolUse gates via shell edits, amends, or cherry-picks. |
@@ -252,7 +253,7 @@ The `swiz-core` plugin provides:
 
 ### `swiz install`
 
-Deploy all 81 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
+Deploy all 82 hooks to agent settings from the canonical manifest. **Merge-based** — swiz hooks are added alongside your existing hooks, never replacing them.
 
 ```bash
 swiz install              # all agents with configurable hooks

@@ -58,7 +58,8 @@ describe("manifest.ts", () => {
       expect(files[0]).toBe("stop-completion-auditor.ts")
       // Security hooks follow immediately after
       expect(files[1]).toBe("stop-secret-scanner.ts")
-      expect(files[2]).toBe("stop-debug-statements.ts")
+      expect(files[2]).toBe("stop-offensive-language.ts")
+      expect(files[3]).toBe("stop-debug-statements.ts")
     })
   })
 
@@ -238,7 +239,7 @@ describe("manifest.ts", () => {
 
       securityHooks.forEach((securityHook) => {
         const index = hookFiles.indexOf(securityHook)
-        expect(index).toBeLessThan(5) // Should be in first 5 hooks
+        expect(index).toBeLessThan(6) // Should be in first 6 hooks
       })
     })
 

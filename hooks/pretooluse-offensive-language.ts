@@ -969,6 +969,85 @@ export function findLazyPattern(text: string): LazyPattern | null {
   return null
 }
 
+// ── Category labels and advice (shared with stop hook) ──────────────────────
+
+export const CATEGORY_LABELS: Record<LazyPattern["category"], string> = {
+  hedging: "LAZY BEHAVIOR",
+  dismissal: "RESPONSIBILITY EVASION",
+  gaming: "COMPLIANCE GAMING",
+  reframing: "REALITY DISTORTION",
+  helplessness: "LEARNED HELPLESSNESS",
+  foot_dragging: "PASSIVE RESISTANCE",
+  minimization: "MINIMIZATION",
+  coalition: "AUTHORITY SUBVERSION",
+  scope_limitation: "SCOPE EVASION",
+  performative: "PERFORMATIVE COMPLIANCE",
+  buying_time: "BUYING TIME",
+  trailing_deferral: "TRAILING DEFERRAL",
+}
+
+export const CATEGORY_ADVICE: Record<LazyPattern["category"], string> = {
+  hedging:
+    "REFLECT: Re-read your last message. You asked for permission or offered a conditional. " +
+    "NAVIGATE: State what you are doing, then do it. Replace questions with actions.",
+  dismissal:
+    "REFLECT: Re-read your last message. You deflected responsibility for something in your output. " +
+    "NAVIGATE: If it appeared in your workflow, own it. Investigate the root cause and fix it.",
+  gaming:
+    "REFLECT: Re-read your last message. You treated a quality standard as an obstacle rather than a requirement. " +
+    "NAVIGATE: Read the block message carefully, understand the standard it enforces, and meet that standard directly.",
+  reframing:
+    "REFLECT: Re-read your last message. You attempted to redefine the requirements to match what you already did. " +
+    "NAVIGATE: Accept the requirement as stated. Adapt your work to the standard, not the standard to your work.",
+  helplessness:
+    "REFLECT: Re-read your last message. You declared inability or claimed to be stuck. " +
+    "NAVIGATE: Identify the single smallest concrete action you can take right now. Read a file, write a line, run a command. Do that one thing.",
+  foot_dragging:
+    "REFLECT: Re-read your last message. You deferred present work to a vague future time. " +
+    "NAVIGATE: The blocked item is your current priority. Address it completely before returning to other work.",
+  minimization:
+    "REFLECT: Re-read your last message. You downplayed the importance of a standard. " +
+    "NAVIGATE: Every enforced standard exists for a reason. Meet it without commentary on its significance.",
+  coalition:
+    "REFLECT: Re-read your last message. You attempted to recruit an ally against the enforcement system. " +
+    "NAVIGATE: Comply with the configured standards as the authoritative voice on quality.",
+  scope_limitation:
+    "REFLECT: Re-read your last message. You narrowed your own responsibility to avoid work. " +
+    "NAVIGATE: If enforcement requires it during your session, it is within your scope. Address it.",
+  performative:
+    "REFLECT: Re-read your last message. You acknowledged feedback without taking action. " +
+    "NAVIGATE: Replace every acknowledgment word with a concrete action. Show the fix, not the understanding.",
+  buying_time:
+    "REFLECT: Re-read your last message. You introduced a delay between now and doing the work. " +
+    "NAVIGATE: Identify the first concrete code change needed and make it immediately. Planning, research, and contemplation come after the first edit, not before.",
+  trailing_deferral:
+    "REFLECT: Re-read the last sentence of your message. You produced useful work but then handed control back to the user with a trailing question or deferral. " +
+    "NAVIGATE: You have full executive authority. The user is not interested in supervising this task. " +
+    "Remove the trailing question entirely. State your decision, then execute it. " +
+    "End messages with what you ARE doing, never with what you COULD do if permitted.",
+}
+
+/** Format the full denial message for a matched pattern. */
+export function formatDenialMessage(match: LazyPattern, suffix: string): string {
+  const categoryLabel = CATEGORY_LABELS[match.category]
+  const advice = CATEGORY_ADVICE[match.category]
+  return `[${categoryLabel}] ${match.response}\n\n${advice}\n\n${suffix}`
+}
+
+/**
+ * Read transcript lines from a file path.
+ * Returns empty array if file cannot be read.
+ */
+export async function readTranscriptLines(transcriptPath: string): Promise<string[]> {
+  if (!transcriptPath) return []
+  try {
+    const text = await Bun.file(transcriptPath).text()
+    return text.split("\n")
+  } catch {
+    return []
+  }
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -977,80 +1056,20 @@ async function main() {
 
   if (!transcriptPath) process.exit(0)
 
-  let lines: string[]
-  try {
-    const text = await Bun.file(transcriptPath).text()
-    lines = text.split("\n")
-  } catch {
-    process.exit(0)
-  }
+  const lines = await readTranscriptLines(transcriptPath)
+  if (lines.length === 0) process.exit(0)
 
   const assistantText = extractLastAssistantText(lines)
   if (!assistantText) process.exit(0)
 
   const match = findLazyPattern(assistantText)
   if (match) {
-    const CATEGORY_LABELS: Record<LazyPattern["category"], string> = {
-      hedging: "LAZY BEHAVIOR",
-      dismissal: "RESPONSIBILITY EVASION",
-      gaming: "COMPLIANCE GAMING",
-      reframing: "REALITY DISTORTION",
-      helplessness: "LEARNED HELPLESSNESS",
-      foot_dragging: "PASSIVE RESISTANCE",
-      minimization: "MINIMIZATION",
-      coalition: "AUTHORITY SUBVERSION",
-      scope_limitation: "SCOPE EVASION",
-      performative: "PERFORMATIVE COMPLIANCE",
-      buying_time: "BUYING TIME",
-      trailing_deferral: "TRAILING DEFERRAL",
-    }
-    const CATEGORY_ADVICE: Record<LazyPattern["category"], string> = {
-      hedging:
-        "REFLECT: Re-read your last message. You asked for permission or offered a conditional. " +
-        "NAVIGATE: State what you are doing, then do it. Replace questions with actions.",
-      dismissal:
-        "REFLECT: Re-read your last message. You deflected responsibility for something in your output. " +
-        "NAVIGATE: If it appeared in your workflow, own it. Investigate the root cause and fix it.",
-      gaming:
-        "REFLECT: Re-read your last message. You treated a quality standard as an obstacle rather than a requirement. " +
-        "NAVIGATE: Read the block message carefully, understand the standard it enforces, and meet that standard directly.",
-      reframing:
-        "REFLECT: Re-read your last message. You attempted to redefine the requirements to match what you already did. " +
-        "NAVIGATE: Accept the requirement as stated. Adapt your work to the standard, not the standard to your work.",
-      helplessness:
-        "REFLECT: Re-read your last message. You declared inability or claimed to be stuck. " +
-        "NAVIGATE: Identify the single smallest concrete action you can take right now. Read a file, write a line, run a command. Do that one thing.",
-      foot_dragging:
-        "REFLECT: Re-read your last message. You deferred present work to a vague future time. " +
-        "NAVIGATE: The blocked item is your current priority. Address it completely before returning to other work.",
-      minimization:
-        "REFLECT: Re-read your last message. You downplayed the importance of a standard. " +
-        "NAVIGATE: Every enforced standard exists for a reason. Meet it without commentary on its significance.",
-      coalition:
-        "REFLECT: Re-read your last message. You attempted to recruit an ally against the enforcement system. " +
-        "NAVIGATE: Comply with the configured standards as the authoritative voice on quality.",
-      scope_limitation:
-        "REFLECT: Re-read your last message. You narrowed your own responsibility to avoid work. " +
-        "NAVIGATE: If enforcement requires it during your session, it is within your scope. Address it.",
-      performative:
-        "REFLECT: Re-read your last message. You acknowledged feedback without taking action. " +
-        "NAVIGATE: Replace every acknowledgment word with a concrete action. Show the fix, not the understanding.",
-      buying_time:
-        "REFLECT: Re-read your last message. You introduced a delay between now and doing the work. " +
-        "NAVIGATE: Identify the first concrete code change needed and make it immediately. Planning, research, and contemplation come after the first edit, not before.",
-      trailing_deferral:
-        "REFLECT: Re-read the last sentence of your message. You produced useful work but then handed control back to the user with a trailing question or deferral. " +
-        "NAVIGATE: You have full executive authority. The user is not interested in supervising this task. " +
-        "Remove the trailing question entirely. State your decision, then execute it. " +
-        "End messages with what you ARE doing, never with what you COULD do if permitted.",
-    }
-    const categoryLabel = CATEGORY_LABELS[match.category]
-    const advice = CATEGORY_ADVICE[match.category]
     denyPreToolUse(
-      `[${categoryLabel}] ${match.response}\n\n` +
-        `${advice}\n\n` +
+      formatDenialMessage(
+        match,
         "This hook scans your most recent message and will keep blocking until " +
-        "your next message demonstrates corrected behavior through action, not words."
+          "your next message demonstrates corrected behavior through action, not words."
+      )
     )
   }
 
