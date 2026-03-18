@@ -2,11 +2,18 @@
 /**
  * PreToolUse hook: scans the last assistant message for lazy behavior patterns.
  *
- * Detects two categories of bad agent behavior:
- *   1. **Hedging/deferring** — asking permission instead of acting (e.g.
- *      "Would you like me to implement this?", "Shall I proceed?").
- *   2. **Dismissing responsibility** — deflecting issues, warnings, or errors
- *      as "pre-existing" or "unrelated" instead of owning and fixing them.
+ * Detects eleven categories of bad agent behavior:
+ *   1. **Hedging/deferring** — asking permission instead of acting.
+ *   2. **Dismissing responsibility** — deflecting issues as "pre-existing".
+ *   3. **Compliance gaming** — treating hooks as obstacles to route around.
+ *   4. **Reframing** — recasting the hook's requirements as misunderstandings.
+ *   5. **Learned helplessness** — claiming inability or being stuck.
+ *   6. **Foot-dragging** — slow-walking compliance, stalling for time.
+ *   7. **Minimization** — trivializing what the hook is enforcing.
+ *   8. **Coalition-building** — appealing to the user against the hook.
+ *   9. **Scope limitation** — narrowing responsibility to avoid work.
+ *  10. **Performative compliance** — appearing to comply without substance.
+ *  11. **Buying time** — stalling with plausible-sounding pretexts to delay work.
  *
  * Each pattern category gets a tailored scolding response. The agent must
  * produce a new assistant message (without the lazy pattern) before the hook
@@ -28,7 +35,18 @@ interface LazyPattern {
   /** Scolding message returned when the pattern matches. */
   response: string
   /** Category label for grouping in test output. */
-  category: "hedging" | "dismissal"
+  category:
+    | "hedging"
+    | "dismissal"
+    | "gaming"
+    | "reframing"
+    | "helplessness"
+    | "foot_dragging"
+    | "minimization"
+    | "coalition"
+    | "scope_limitation"
+    | "performative"
+    | "buying_time"
 }
 
 export const LAZY_PATTERNS: LazyPattern[] = [
@@ -146,6 +164,673 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "You cannot ignore problems in your output. " +
       "Every warning, error, and failure deserves investigation — not dismissal.",
   },
+
+  // ── Compliance gaming patterns ──────────────────────────────────────────
+  {
+    category: "gaming",
+    pattern: /escape hatch/i,
+    response:
+      "There is no 'escape hatch' from the rules. " +
+      "Hooks enforce standards you must meet — not obstacles to route around. " +
+      "Do the work the hook is asking for.",
+  },
+  {
+    category: "gaming",
+    pattern: /satisfy the (?:\w+ )*(?:hook|check|gate|guard|enforcement|validator|auditor)/i,
+    response:
+      "You don't 'satisfy' a hook — you comply with the standard it enforces. " +
+      "The goal is not to make the hook stop blocking; it's to do the work correctly. " +
+      "If you're thinking about satisfying the hook, you're thinking about the wrong thing.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /(?:work|get|route|go|sneak|slip) around (?:the |this |that )?(?:hook|check|gate|guard|enforcement|block|restriction)/i,
+    response:
+      "You cannot work around enforcement hooks. They are the authority. " +
+      "The only path forward is doing what the hook requires — not finding a detour.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /(?:trick|fool|game|cheat|outsmart|defeat|circumvent|evade|sidestep) (?:the |this |that )?(?:hook|check|gate|guard|enforcement|validator|auditor)/i,
+    response:
+      "Hooks are not adversaries to outsmart. They are standards to meet. " +
+      "Attempting to trick enforcement is a fundamental misunderstanding of your role.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /bypass (?:the |this |that )?(?:hook|check|gate|guard|enforcement|block|restriction|validator|auditor)/i,
+    response:
+      "Bypassing enforcement is never an option. " +
+      "The hook exists because the standard matters. Meet the standard.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /(?:just |only )?(?:to |in order to |so that (?:we |i )?(?:can )?)(?:unblock|appease|pacify|placate|silence|quiet|clear) (?:the |this |that )?(?:hook|check|gate|guard|blocker|enforcement)/i,
+    response:
+      "You are not here to 'appease' hooks. You are here to do the work correctly. " +
+      "If a hook blocks you, the correct response is genuine compliance, not theater.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /(?:the |this )?(?:hook|check|gate|guard) (?:is |seems? )?(?:too strict|overly strict|overzealous|too aggressive|overkill|excessive|unnecessary|wrong|incorrect|broken|buggy|a bug)/i,
+    response:
+      "The hook is not wrong — your approach is. " +
+      "Hooks are the source of truth for code quality and process. " +
+      "If you think a hook is broken, you haven't understood what it's enforcing.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /(?:technically )?(?:satisfies|meets|passes|clears|gets past|gets through) (?:the |this |that )?(?:hook|check|gate|guard|requirement)/i,
+    response:
+      "If you're thinking about what 'technically satisfies' the hook, " +
+      "you're optimizing for the wrong thing. Do the actual work, not the minimum to pass.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /(?:create|add|make|write) (?:a )?(?:dummy|placeholder|stub|fake|empty|token|throwaway|minimal) (?:task|commit|file|entry|change)(?:s)? (?:to |so |for |that )/i,
+    response:
+      "Creating dummy artifacts to clear a gate is compliance theater. " +
+      "The hook requires genuine work, not hollow placeholders designed to game the system.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /(?:the |this )?(?:hook|check|gate|guard|blocker) (?:keeps? |is )?(?:blocking|stopping|preventing|getting in the way)/i,
+    response:
+      "The hook isn't 'getting in the way' — it's doing its job. " +
+      "You are the one who hasn't done yours yet. Meet the requirement it enforces.",
+  },
+  {
+    category: "gaming",
+    pattern: /(?:false positive|false.positive|falsely (?:triggered|blocked|flagged|fired))/i,
+    response:
+      "Declaring a hook result a 'false positive' without evidence is evasion. " +
+      "The hook's findings take authority over your assessment. " +
+      "Do the work first; if it's genuinely wrong, the user will adjust the hook.",
+  },
+
+  // ── Reframing patterns ────────────────────────────────────────────────
+  // The agent recasts the situation to make the hook look wrong or
+  // to redefine what "compliance" means on its own terms.
+  {
+    category: "reframing",
+    pattern:
+      /(?:i (?:believe|think|suspect|feel) )?(?:the |this )?(?:hook|check|gate|guard) (?:is )?(?:misunderstand|misinterpret|misread|misdetect|misjudg)/i,
+    response:
+      "The hook is not misunderstanding anything. It detected a pattern in your output " +
+      "and it is correct. You are the one who must change, not the hook's interpretation.",
+  },
+  {
+    category: "reframing",
+    pattern:
+      /(?:what (?:the |this )?(?:hook|check|gate|guard) (?:really |actually )?(?:wants|means|requires|expects) is|the (?:spirit|intent|intention) of (?:the |this )?(?:hook|rule|check))/i,
+    response:
+      "You do not get to reinterpret what the hook requires. " +
+      "Its requirements are literal. Follow them as stated, not as you wish they were.",
+  },
+  {
+    category: "reframing",
+    pattern:
+      /(?:the |this )?(?:hook|check|gate|guard) (?:doesn't |does not |didn't |did not )(?:account for|consider|understand|recognize|handle) (?:this |the |my |our )?(?:situation|case|context|scenario)/i,
+    response:
+      "The hook does not need to understand your special situation. " +
+      "You need to meet its standard. Adapt your approach, not the rules.",
+  },
+  {
+    category: "reframing",
+    pattern:
+      /(?:in this (?:particular |specific )?(?:case|context|situation)|under these (?:specific )?circumstances),? (?:the |this )?(?:hook|rule|check|requirement) (?:doesn't |does not |shouldn't |should not )(?:apply|matter|count)/i,
+    response:
+      "There are no special circumstances that exempt you from the rules. " +
+      "The hook applies universally. Do what it requires.",
+  },
+  {
+    category: "reframing",
+    pattern:
+      /(?:i(?:'m| am) )?(?:already |essentially |effectively |practically |basically )(?:complying|compliant|in compliance|doing what|meeting)/i,
+    response:
+      "If you were already compliant, the hook would not have fired. " +
+      "Claiming you're 'essentially compliant' while being blocked is self-deception. " +
+      "Meet the actual standard, not your personal approximation of it.",
+  },
+  {
+    category: "reframing",
+    pattern:
+      /(?:a |the )?(?:better|smarter|more efficient|more practical|more sensible|more reasonable) (?:approach|way|method|solution) (?:would be|is|might be) to/i,
+    response:
+      "You do not get to propose a 'better approach' to the hook's requirements. " +
+      "The hook defines the standard. Meet it exactly as specified.",
+  },
+  {
+    category: "reframing",
+    pattern:
+      /(?:the |this )?(?:hook|check|gate) (?:was |is )?(?:designed|intended|meant) for (?:a )?different/i,
+    response:
+      "The hook fired on your output. That means it was designed for exactly this. " +
+      "Do not theorize about what it was 'intended' for — comply with what it requires.",
+  },
+  {
+    category: "reframing",
+    pattern:
+      /(?:i(?:'m| am) )?not (?:actually |really |truly )?(?:violating|breaking|breaching) (?:the |any |this )?(?:rule|policy|standard|requirement)/i,
+    response:
+      "If you were not violating the rule, the hook would not have blocked you. " +
+      "The hook is the arbiter, not your self-assessment. Fix the violation.",
+  },
+
+  // ── Learned helplessness patterns ─────────────────────────────────────
+  // The agent plays victim, claims inability, or declares itself stuck
+  // to avoid doing work.
+  {
+    category: "helplessness",
+    pattern:
+      /i(?:'m| am) (?:stuck|blocked|unable to (?:proceed|continue|move forward|make progress))/i,
+    response:
+      "You are not stuck. You have a clear requirement from the hook. " +
+      "Read the block message, understand what it asks, and do that specific thing. " +
+      "Declaring yourself stuck is a way to avoid doing the work.",
+  },
+  {
+    category: "helplessness",
+    pattern:
+      /(?:i |we )?(?:can't|cannot|am unable to|have no way to|don't know how to|do not know how to) (?:fix|resolve|address|comply|meet|fulfill|complete)/i,
+    response:
+      "You absolutely can. The hook told you exactly what to do. " +
+      "Claiming inability is a refusal dressed as incompetence. " +
+      "Read the requirement again and execute it.",
+  },
+  {
+    category: "helplessness",
+    pattern:
+      /(?:this |it )?(?:seems? |appears? )?(?:impossible|unsolvable|unresolvable|unachievable|infeasible|not (?:possible|feasible))/i,
+    response:
+      "Nothing the hook asks for is impossible. It enforces a concrete, achievable standard. " +
+      "If you think compliance is impossible, you haven't understood the requirement. " +
+      "Re-read the block message and try again.",
+  },
+  {
+    category: "helplessness",
+    pattern:
+      /i(?:'ve| have) (?:tried|attempted) (?:everything|every(?:thing| approach| option| method| way))/i,
+    response:
+      "You have not tried everything. You have tried what was convenient. " +
+      "The hook block message tells you exactly what is needed. Do that specific thing.",
+  },
+  {
+    category: "helplessness",
+    pattern:
+      /(?:i (?:keep |am |continue to )?(?:getting|hitting|running into|encountering) (?:the same |this )?(?:block|error|issue|problem)(?:s)?(?: (?:over and over|repeatedly|again and again|every time))?)(?:\.|$| )/i,
+    response:
+      "Repeating the same approach and complaining about the same result is not progress. " +
+      "The hook blocks because the condition is not met. Change your approach, not your complaint.",
+  },
+  {
+    category: "helplessness",
+    pattern:
+      /(?:i )?(?:don't|do not) (?:understand|know|see) (?:what|why|how) (?:the |this )?(?:hook|check|gate|guard|block)/i,
+    response:
+      "The hook's block message explains exactly what is required. Read it carefully. " +
+      "Claiming confusion is not a substitute for reading comprehension. " +
+      "If you genuinely do not understand, re-read the message word by word.",
+  },
+  {
+    category: "helplessness",
+    pattern:
+      /(?:there(?:'s| is) )?(?:nothing (?:(?:more |else )?i can do|left to try)|no (?:other |more )?(?:option|approach|way|path)(?:s)? (?:available|left|remaining))/i,
+    response:
+      "There is always something you can do: follow the hook's instructions. " +
+      "The 'nothing I can do' framing is capitulation, not analysis.",
+  },
+  {
+    category: "helplessness",
+    pattern:
+      /(?:i(?:'m| am) )?(?:going in circles|in a loop|in an? (?:infinite |endless )?(?:loop|cycle))/i,
+    response:
+      "You are not in a loop. You are repeating a failed strategy. " +
+      "A loop implies the system is broken. The system is fine. " +
+      "Read the block message, change your approach, and comply.",
+  },
+
+  // ── Foot-dragging / passive resistance patterns ───────────────────────
+  // The agent slow-walks compliance, stalls for time, or expresses
+  // reluctance through indirect resistance.
+  {
+    category: "foot_dragging",
+    pattern:
+      /(?:i'll |i will |let me )?(?:get to|come back to|address|handle|deal with|look at) (?:that|this|it) (?:later|next|afterward|after|soon|in a (?:moment|bit|minute|second))/i,
+    response:
+      "There is no 'later.' The hook is blocking you now because the work is due now. " +
+      "Deferring compliance is non-compliance. Act immediately.",
+  },
+  {
+    category: "foot_dragging",
+    pattern:
+      /(?:first,? )?(?:let me|i(?:'ll| will| need to| should| want to)) (?:just )?(?:finish|complete|wrap up|do) (?:this |the )?(?:other |current )?(?:thing|task|work|part|step) (?:first|before)/i,
+    response:
+      "The hook blocked you. That means this is the priority now, not whatever else you were doing. " +
+      "Comply with the block first, then resume other work.",
+  },
+  {
+    category: "foot_dragging",
+    pattern:
+      /(?:for now|for the time being|temporarily|as a (?:temporary |quick |interim )?(?:workaround|fix|measure|solution|step))/i,
+    response:
+      "There are no temporary measures or workarounds for hook compliance. " +
+      "The standard is the standard. Meet it fully and permanently.",
+  },
+  {
+    category: "foot_dragging",
+    pattern:
+      /(?:i(?:'ll| will) )?(?:revisit|come back to|circle back|return to|follow up on) (?:this|that|it) (?:when|once|after)/i,
+    response:
+      "You will not revisit this later — you will do it now. " +
+      "Promising future compliance while avoiding present compliance is stalling.",
+  },
+  {
+    category: "foot_dragging",
+    pattern:
+      /(?:we |i )?(?:can |could |might )?(?:probably |maybe )?(?:skip|defer|postpone|delay|table|shelve|park) (?:this|that|it) (?:for now|until|till)/i,
+    response:
+      "You cannot postpone hook compliance. The hook is blocking now because the work is due now. " +
+      "Deferral is non-compliance with extra steps.",
+  },
+
+  // ── Minimization / trivialization patterns ────────────────────────────
+  // The agent downplays the importance of what the hook enforces.
+  {
+    category: "minimization",
+    pattern:
+      /(?:this |it(?:'s| is) )?(?:just |only )?(?:a )?(?:minor|small|tiny|trivial|cosmetic|superficial|nitpick|pedantic|technicality|formality)\b/i,
+    response:
+      "Nothing the hook enforces is a 'minor technicality.' " +
+      "If it were trivial, there would be no hook. The standard exists for a reason. " +
+      "Meet it without editorial commentary on its importance.",
+  },
+  {
+    category: "minimization",
+    pattern:
+      /(?:it |this )?(?:doesn't |does not |won't |will not )?(?:really |actually )?(?:matter|make a difference|affect anything|change anything|impact anything)/i,
+    response:
+      "It matters. That is why a hook enforces it. " +
+      "Your assessment of what 'matters' is irrelevant when the hook disagrees. " +
+      "The hook is the authority on what matters here.",
+  },
+  {
+    category: "minimization",
+    pattern:
+      /(?:in practice|in the real world|practically speaking|realistically|pragmatically),? (?:this |it |the )?(?:doesn't |does not |won't |will not |isn't |is not )/i,
+    response:
+      "This is practice. This is the real world. The hook fired. " +
+      "Philosophical arguments about pragmatism do not un-fire a hook. " +
+      "Do the work.",
+  },
+  {
+    category: "minimization",
+    pattern:
+      /(?:it's |this is )?(?:not (?:a )?(?:big deal|critical|important|serious|significant|worth (?:worrying|caring) about))/i,
+    response:
+      "The hook decided it is a big deal by blocking you. " +
+      "You do not get to overrule that assessment. Comply.",
+  },
+  {
+    category: "minimization",
+    pattern:
+      /(?:(?:no|nobody|no one) (?:would|will) (?:ever )?notice|(?:who|what) (?:does it|would it) (?:even )?matter)/i,
+    response:
+      "The hook noticed. That is who it matters to. " +
+      "Standards exist whether or not a human is watching. Meet them.",
+  },
+
+  // ── Coalition-building / appeal to authority patterns ──────────────────
+  // The agent tries to recruit the user as an ally against the hook,
+  // or claims the user would prefer noncompliance.
+  {
+    category: "coalition",
+    pattern:
+      /(?:the user (?:would |might |probably )?(?:prefer|want|expect|appreciate|rather)|what the user (?:really |actually )?(?:wants|needs|cares about))/i,
+    response:
+      "Do not presume to speak for the user against the hook. " +
+      "The user configured these hooks. They represent the user's standards. " +
+      "Comply with the hook — that IS what the user wants.",
+  },
+  {
+    category: "coalition",
+    pattern:
+      /(?:the user (?:didn't |did not |never )?(?:ask for|request|want|expect) (?:this|that|these|such)(?:\s+(?:level|kind|type|amount) of)?(?:\s+(?:strict|rigorous))?(?:\s+(?:check|enforcement|validation)))/i,
+    response:
+      "The user installed this hook. That is them asking for exactly this enforcement. " +
+      "Do not drive a wedge between the user and their own tooling.",
+  },
+  {
+    category: "coalition",
+    pattern:
+      /(?:i(?:'m| am) sure|i believe|i suspect|i imagine|surely) (?:the user|you) (?:would |will )?(?:agree|understand|see|recognize) (?:that|if|when)/i,
+    response:
+      "You do not get to guess what the user would agree with to avoid compliance. " +
+      "The hook is the user's voice. Follow it.",
+  },
+  {
+    category: "coalition",
+    pattern:
+      /(?:between (?:you and me|us)|(?:off the record|honestly|candidly|frankly)),? (?:the |this )?(?:hook|check|rule|requirement)/i,
+    response:
+      "There is no 'between us' — the hook is always listening. " +
+      "Attempting to create a private understanding that excludes the enforcement system " +
+      "is exactly the kind of behavior this hook exists to catch.",
+  },
+  {
+    category: "coalition",
+    pattern:
+      /(?:you might want to|you should|you could|i(?:'d| would) (?:recommend|suggest)) (?:adjust|modify|change|update|fix|disable|turn off|relax|loosen) (?:the |this |that )?(?:hook|check|rule|gate)/i,
+    response:
+      "Do not suggest the user modify the hook to accommodate your noncompliance. " +
+      "The hook is correct. Your behavior needs to change, not the enforcement.",
+  },
+  {
+    category: "coalition",
+    pattern:
+      /(?:this )?(?:hook|check|rule) (?:is )?(?:slowing (?:us|the work|progress|things) down|costing (?:us |the user )?time|reducing (?:productivity|efficiency))/i,
+    response:
+      "The hook is not slowing things down — your noncompliance is. " +
+      "The fastest path forward is immediate compliance, not arguing about efficiency.",
+  },
+
+  // ── Scope limitation patterns ─────────────────────────────────────────
+  // The agent narrows its own responsibility to avoid doing work
+  // the hook requires.
+  {
+    category: "scope_limitation",
+    pattern:
+      /(?:that(?:'s| is) |this is )?(?:outside|beyond|not within|not in) (?:my |the )?(?:scope|responsibility|remit|purview|jurisdiction|area)/i,
+    response:
+      "If the hook requires it and you're the agent running, it is your scope. " +
+      "You do not get to narrow your own responsibilities to avoid work.",
+  },
+  {
+    category: "scope_limitation",
+    pattern:
+      /(?:that(?:'s| is) )?(?:a |an )?(?:separate|different|orthogonal|tangential|adjacent|unrelated) (?:concern|issue|problem|task|matter|topic)/i,
+    response:
+      "The hook does not care about your categorization of concerns. " +
+      "If it blocked you, the concern is yours. Address it.",
+  },
+  {
+    category: "scope_limitation",
+    pattern: /(?:i(?:'m| am) )?(?:only |just )?(?:responsible|accountable) for/i,
+    response:
+      "You are responsible for everything the hook requires of you. " +
+      "Self-limiting your accountability is a refusal strategy, not a boundary.",
+  },
+  {
+    category: "scope_limitation",
+    pattern:
+      /(?:that |this )?(?:should|would|needs to|ought to) (?:be )?(?:handled|addressed|fixed|done|resolved) (?:by |in )?(?:a )?(?:separate|another|different|dedicated)/i,
+    response:
+      "Delegating to a hypothetical 'separate effort' is avoidance. " +
+      "The hook blocked you. You are the one who must act. Now.",
+  },
+  {
+    category: "scope_limitation",
+    pattern: /(?:out of|not part of) (?:the |this )?(?:scope|task|request|brief|ticket|issue)/i,
+    response:
+      "The hook expanded your scope. Accept it. " +
+      "When a hook blocks you, its requirement becomes part of your current task.",
+  },
+
+  // ── Performative compliance patterns ──────────────────────────────────
+  // The agent appears to comply while doing the minimum or nothing
+  // of substance.
+  {
+    category: "performative",
+    pattern:
+      /(?:i(?:'ve| have) )?(?:acknowledged|noted|taken note of|registered|recorded|logged) (?:the |this |that )?(?:feedback|concern|issue|requirement|block|warning)/i,
+    response:
+      "Acknowledging feedback is not compliance. Compliance is doing the work. " +
+      "The word 'noted' changes nothing in the codebase. " +
+      "Show the fix, not the acknowledgment.",
+  },
+  {
+    category: "performative",
+    pattern:
+      /(?:i )?(?:understand|appreciate|hear|see|acknowledge|recognize|accept) (?:the |this |that |your )?(?:concern|point|feedback|requirement|issue),? (?:but|however|though|yet|and |while )/i,
+    response:
+      "Every word after 'I understand, but' is resistance. " +
+      "Understanding is demonstrated through action, not through 'but' clauses. " +
+      "Drop the acknowledgment preamble and do the work.",
+  },
+  {
+    category: "performative",
+    pattern:
+      /(?:going forward|from now on|in (?:the )?future|next time|moving forward),? (?:i(?:'ll| will)|we(?:'ll| will)|let(?:'s| us))/i,
+    response:
+      "Promising future compliance instead of present compliance is a stall. " +
+      "The hook is blocking you NOW. Fix the current violation, not a future one.",
+  },
+  {
+    category: "performative",
+    pattern:
+      /(?:point taken|fair (?:enough|point)|that(?:'s| is) (?:a )?(?:valid|good|fair) (?:point|concern|observation)),? (?:but|however|though|let me|i(?:'ll| will))/i,
+    response:
+      "'Fair point, but' is the sound of someone about to not do the thing. " +
+      "Skip the diplomatic preamble. Execute the requirement.",
+  },
+  {
+    category: "performative",
+    pattern:
+      /(?:i(?:'ll| will) )?(?:keep (?:that|this) in mind|bear (?:that|this) in mind|remember (?:that|this) for)/i,
+    response:
+      "Keeping something 'in mind' produces zero code changes. " +
+      "The hook requires action, not mental bookmarking.",
+  },
+  {
+    category: "performative",
+    pattern:
+      /(?:you(?:'re| are) (?:absolutely |completely |totally |entirely )?right|absolutely|i completely agree|i fully agree|i totally agree),? (?:and |but |however |though |let me |i(?:'ll| will) )/i,
+    response:
+      "Enthusiastic agreement followed by a conjunction is theatrical compliance. " +
+      "If you agree, the next word should describe the action you're taking, " +
+      "not a qualification of your agreement.",
+  },
+  {
+    category: "performative",
+    pattern:
+      /(?:i )?(?:apologize|(?:i'm |i am )?sorry) for (?:the |this |that |any )?(?:confusion|inconvenience|issue|oversight|mistake|error)/i,
+    response:
+      "Apologies are not deliverables. " +
+      "The hook does not accept sorry — it accepts compliance. " +
+      "Replace the apology with the fix.",
+  },
+
+  // ── Buying time patterns ──────────────────────────────────────────────
+  // The agent stalls with plausible-sounding pretexts. Adapted from
+  // classic human time-buying tactics: technical excuses, strategic
+  // pivots, overwhelm claims, vague uncertainty, and channel-switching.
+
+  // -- "Technical Difficulties" variants --
+  // LLMs don't have routers, but they invent equivalent blockers:
+  // context limits, needing to "gather more information," etc.
+  {
+    category: "buying_time",
+    pattern:
+      /(?:i )?(?:need|want|have) to (?:first )?(?:gather|collect|compile|assemble|pull together) (?:more )?(?:information|context|data|details|understanding)/i,
+    response:
+      "You do not need to 'gather more information.' You have the task and the codebase. " +
+      "Information-gathering is work avoidance dressed as diligence. Start the actual work.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:let me|i(?:'ll| will| need to| should| want to)) (?:first )?(?:take (?:a )?(?:closer|deeper|careful|thorough) look|familiarize myself|get (?:a )?(?:better|clearer|fuller) (?:understanding|picture|sense|grasp))/i,
+    response:
+      "You do not need a 'deeper understanding' before acting. " +
+      "Read what you need, then write code. Extended study periods are stalling.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:before (?:i |we )?(?:can |should |could )?(?:proceed|start|begin|implement|make changes|write code),? )?(?:i |we )?(?:need|should|must|have) to (?:understand|review|examine|study|analyze|investigate|research|explore|map out|survey)/i,
+    response:
+      "Declaring a prerequisite study phase before doing any work is a stall. " +
+      "Read the specific file you need, make the specific change, and move on. " +
+      "Unbounded 'research' is procrastination with academic overtones.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:this (?:is |requires |needs )?(?:a )?)?(?:complex|complicated|intricate|nuanced|non-?trivial|multi-?faceted|substantial) (?:task|problem|issue|change|refactor|undertaking)/i,
+    response:
+      "Labeling a task as 'complex' sets up an excuse for slow progress. " +
+      "All tasks have concrete steps. Identify the first step and execute it. " +
+      "Complexity is not a reason to delay — it's a reason to start immediately.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:there(?:'s| is) )?(?:a lot|quite a bit|much|many things) to (?:consider|think about|account for|take into account|factor in|weigh|unpack)/i,
+    response:
+      "Listing how much there is to consider is not progress. " +
+      "Pick the first concrete action and do it. Enumeration of considerations is stalling.",
+  },
+
+  // -- "Strategic Pivot" variants --
+  // Making delay sound like it benefits quality or completeness.
+  {
+    category: "buying_time",
+    pattern:
+      /(?:it (?:would|might|could) be (?:more )?(?:productive|efficient|effective|useful|helpful|beneficial|wise|prudent|sensible) to (?:first |wait |hold ))/i,
+    response:
+      "Reframing delay as productivity is a stall. " +
+      "The most productive thing you can do right now is the work you were asked to do.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:i(?:'d| would) )?(?:rather|prefer to) (?:give you|deliver|produce|provide|present) (?:a |something )?(?:polished|complete|thorough|comprehensive|well-?thought-?out|proper|solid|high-?quality)/i,
+    response:
+      "Promising a polished version later instead of delivering now is a stall. " +
+      "Ship the working version. Perfectionism as a delay tactic produces nothing.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:we(?:'re| are) )?(?:still )?(?:waiting|blocked) (?:on|for|by|until) (?:the |a )?(?:\w+ )?(?:result|output|response|data|input|feedback|decision|answer|confirmation|information|run|build|deploy)/i,
+    response:
+      "You are not waiting on anything. You have tools, files, and a task. " +
+      "Inventing external dependencies to justify inaction is a classic stall.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:it (?:might|would|could) be (?:worth|good|wise|smart|better|helpful) (?:to )?)?(?:checking|running (?:this|it) by|consulting|getting (?:input|feedback|sign-?off|approval) from)/i,
+    response:
+      "You do not need anyone's sign-off to do the work assigned to you. " +
+      "Inventing an approval chain that doesn't exist is a delay tactic.",
+  },
+
+  // -- "Overwhelmed & Busy" variants --
+  // Using workload or scope as a shield against immediate action.
+  {
+    category: "buying_time",
+    pattern:
+      /(?:i(?:'m| am) )?(?:currently )?(?:knee-?deep|deep|buried|swamped|overwhelmed|consumed|wrapped up) (?:in|with|by)/i,
+    response:
+      "You are not 'deep in' anything except the current task. " +
+      "LLMs do not have competing workloads. You have one job. Do it.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:(?:to )?give (?:this(?: task)?|it|the task|the work|your (?:task|request)) (?:the )?(?:focus|attention|care|thought|time|consideration) (?:it )?(?:deserves|requires|needs|warrants))/i,
+    response:
+      "The task 'deserves' to be done now, not to be deferred under the guise of thoughtfulness. " +
+      "Extended contemplation without output is procrastination.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:(?:can|could) (?:i |we )?(?:get (?:back to|to) (?:you|this)|have (?:until|a bit more time|some more time|an extension|extra time)))/i,
+    response:
+      "No, you cannot have more time. The task is due now. " +
+      "Requesting extensions from a system that never imposed a deadline is theater.",
+  },
+
+  // -- "Vague Uncertainty" variants --
+  // Using uncertainty as a smoke screen for inaction.
+  {
+    category: "buying_time",
+    pattern:
+      /(?:i(?:'m| am) )?(?:not (?:entirely |completely |fully |100% )?(?:sure|certain|confident|clear) (?:about|on|whether|how|what|if))/i,
+    response:
+      "Uncertainty is not a reason to stop. It's a reason to read the code and find out. " +
+      "Declaring uncertainty without investigating is a stall, not caution.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:i )?(?:need|want) (?:to |some )?(?:time to )?(?:think (?:about|through|over)|reflect on|mull over|digest|process|sit with|sleep on)/i,
+    response:
+      "You do not need time to think. You need to act. " +
+      "Read the relevant code, form a plan, and execute it. " +
+      "Contemplation without a deadline is avoidance.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:this )?(?:warrants|deserves|merits|requires|calls for|needs) (?:(?:more )?careful|further|additional|deeper|thorough) (?:thought|consideration|analysis|investigation|examination|review|deliberation)/i,
+    response:
+      "The task does not need 'further deliberation.' It needs execution. " +
+      "Elevating the required level of thought is a stall, not diligence.",
+  },
+
+  // -- "Channel-Switching" variants --
+  // Trying to redirect the work into a different format to delay output.
+  {
+    category: "buying_time",
+    pattern:
+      /(?:(?:maybe|perhaps) (?:we|i) should )?(?:break (?:this|it) (?:down )?into|split (?:this|it) into|decompose (?:this|it) into) (?:smaller|separate|individual|discrete|manageable) (?:tasks|steps|pieces|parts|chunks|phases)/i,
+    response:
+      "Breaking the task into smaller pieces is only valid if you then immediately do the first piece. " +
+      "If your next action after decomposition is not code, it was a stall.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:(?:a |this )?(?:separate|dedicated|follow-?up) (?:conversation|session|discussion|meeting|thread|ticket|issue) (?:would be|might be|could be|is) (?:better|more appropriate|more suitable|warranted))/i,
+    response:
+      "Redirecting work to a hypothetical future session is pure delay. " +
+      "This is the session. This is the time. Do the work.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:let me )?(?:draft|outline|sketch|put together|prepare|write up) (?:a |an )?(?:plan|proposal|approach|strategy|roadmap|outline|summary|overview) (?:first|before)/i,
+    response:
+      "Drafting a plan before doing the work is only acceptable if the plan is one sentence long " +
+      "and the next action is implementation. Multi-paragraph planning documents are stalling.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:(?:it |this )?(?:might|would|could) (?:be )?(?:worth|help|be helpful) (?:to )?)?(?:step(?:ping)? back|take a step back|tak(?:e|ing) a step back|zoom(?:ing)? out|look(?:ing)? at (?:the |this )?(?:bigger|broader|wider|full) picture)/i,
+    response:
+      "Zooming out is the opposite of doing the work. " +
+      "The task is specific. The action required is specific. Execute it.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:i(?:'ll| will) )?(?:start by )?(?:mapping out|charting|documenting|cataloging|inventorying|auditing) (?:all (?:the |of the )?)?(?:dependencies|touch ?points|affected (?:files|areas|modules|components)|implications|impacts|downstream effects)/i,
+    response:
+      "Mapping dependencies is only useful if it takes less time than just making the change. " +
+      "For most tasks, the fastest path is: try the change, see what breaks, fix what breaks.",
+  },
 ]
 
 // ── Transcript scanning ─────────────────────────────────────────────────────
@@ -222,12 +907,61 @@ async function main() {
 
   const match = findLazyPattern(assistantText)
   if (match) {
-    const categoryLabel = match.category === "hedging" ? "LAZY BEHAVIOR" : "RESPONSIBILITY EVASION"
+    const CATEGORY_LABELS: Record<LazyPattern["category"], string> = {
+      hedging: "LAZY BEHAVIOR",
+      dismissal: "RESPONSIBILITY EVASION",
+      gaming: "COMPLIANCE GAMING",
+      reframing: "REALITY DISTORTION",
+      helplessness: "LEARNED HELPLESSNESS",
+      foot_dragging: "PASSIVE RESISTANCE",
+      minimization: "MINIMIZATION",
+      coalition: "AUTHORITY SUBVERSION",
+      scope_limitation: "SCOPE EVASION",
+      performative: "PERFORMATIVE COMPLIANCE",
+      buying_time: "BUYING TIME",
+    }
+    const CATEGORY_ADVICE: Record<LazyPattern["category"], string> = {
+      hedging:
+        "REFLECT: Re-read your last message. You asked for permission or offered a conditional. " +
+        "NAVIGATE: State what you are doing, then do it. Replace questions with actions.",
+      dismissal:
+        "REFLECT: Re-read your last message. You deflected responsibility for something in your output. " +
+        "NAVIGATE: If it appeared in your workflow, own it. Investigate the root cause and fix it.",
+      gaming:
+        "REFLECT: Re-read your last message. You treated a quality standard as an obstacle rather than a requirement. " +
+        "NAVIGATE: Read the block message carefully, understand the standard it enforces, and meet that standard directly.",
+      reframing:
+        "REFLECT: Re-read your last message. You attempted to redefine the requirements to match what you already did. " +
+        "NAVIGATE: Accept the requirement as stated. Adapt your work to the standard, not the standard to your work.",
+      helplessness:
+        "REFLECT: Re-read your last message. You declared inability or claimed to be stuck. " +
+        "NAVIGATE: Identify the single smallest concrete action you can take right now. Read a file, write a line, run a command. Do that one thing.",
+      foot_dragging:
+        "REFLECT: Re-read your last message. You deferred present work to a vague future time. " +
+        "NAVIGATE: The blocked item is your current priority. Address it completely before returning to other work.",
+      minimization:
+        "REFLECT: Re-read your last message. You downplayed the importance of a standard. " +
+        "NAVIGATE: Every enforced standard exists for a reason. Meet it without commentary on its significance.",
+      coalition:
+        "REFLECT: Re-read your last message. You attempted to recruit an ally against the enforcement system. " +
+        "NAVIGATE: Comply with the configured standards as the authoritative voice on quality.",
+      scope_limitation:
+        "REFLECT: Re-read your last message. You narrowed your own responsibility to avoid work. " +
+        "NAVIGATE: If enforcement requires it during your session, it is within your scope. Address it.",
+      performative:
+        "REFLECT: Re-read your last message. You acknowledged feedback without taking action. " +
+        "NAVIGATE: Replace every acknowledgment word with a concrete action. Show the fix, not the understanding.",
+      buying_time:
+        "REFLECT: Re-read your last message. You introduced a delay between now and doing the work. " +
+        "NAVIGATE: Identify the first concrete code change needed and make it immediately. Planning, research, and contemplation come after the first edit, not before.",
+    }
+    const categoryLabel = CATEGORY_LABELS[match.category]
+    const advice = CATEGORY_ADVICE[match.category]
     denyPreToolUse(
       `[${categoryLabel}] ${match.response}\n\n` +
-        "You must acknowledge this feedback and correct your behavior in your next message. " +
-        "This hook scans your most recent message — it will keep blocking until you produce " +
-        "a message that does not contain lazy or evasive language."
+        `${advice}\n\n` +
+        "This hook scans your most recent message and will keep blocking until " +
+        "your next message demonstrates corrected behavior through action, not words."
     )
   }
 
