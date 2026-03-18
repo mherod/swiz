@@ -165,8 +165,7 @@ export function classifyHookOutput({
   try {
     return { parsed: JSON.parse(trimmed) as Record<string, unknown>, status: "ok" }
   } catch {
-    // Stdout may contain non-JSON prefix text (e.g. SDK log lines like
-    // "Loaded cached credentials.") before the actual JSON object.
+    // Stdout may contain non-JSON prefix text before the actual JSON object.
     // Attempt to extract the last JSON object from the output.
     const lastBrace = trimmed.lastIndexOf("{")
     if (lastBrace > 0) {

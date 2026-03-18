@@ -783,13 +783,11 @@ describe("getGitAheadBehind() with malformed inputs", () => {
     expect(result).toBeNull()
   })
 
-  it("falls back to cwd for empty string (which has upstream)", async () => {
-    // Bun.spawn({ cwd: "" }) falls back to process.cwd()
-    const result = await getGitAheadBehind("")
-    // The swiz repo has upstream tracking, so we get actual counts
-    expect(result).not.toBeNull()
-    expect(typeof result!.ahead).toBe("number")
-    expect(typeof result!.behind).toBe("number")
+  it("falls back to cwd for empty string", async () => {
+    // Bun.spawn({ cwd: "" }) falls back to process.cwd() — verify both return the same result
+    const resultEmpty = await getGitAheadBehind("")
+    const resultCwd = await getGitAheadBehind(process.cwd())
+    expect(resultEmpty).toEqual(resultCwd)
   })
 
   it("returns null for non-git directory", async () => {

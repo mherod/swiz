@@ -86,7 +86,7 @@ describe("classifyHookOutput", () => {
     it("extracts JSON after non-JSON prefix text", () => {
       const result = classifyHookOutput({
         timedOut: false,
-        trimmed: 'Loaded cached credentials.\n{"decision":"block","reason":"test"}',
+        trimmed: 'some prefix log line\n{"decision":"block","reason":"test"}',
         exitCode: 0,
       })
       expect(result.status).toBe<HookStatus>("ok")

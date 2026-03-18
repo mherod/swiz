@@ -12,7 +12,6 @@ import type { ZodType } from "zod"
 import { resolveSignal } from "./ai-providers.ts"
 
 const DEFAULT_MODEL = "gemini-flash-latest"
-const GEMINI_STDOUT_NOISE_PATTERNS = [/^Loaded cached credentials\.?$/]
 
 /**
  * Attempts to resolve a GEMINI_API_KEY and inject it into process.env if not
@@ -79,50 +78,6 @@ function createProvider() {
   return createGeminiProvider({ authType: "oauth-personal" })
 }
 
-function isKnownGeminiStdoutNoise(text: string): boolean {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-  if (lines.length === 0) return false
-  return lines.every((line) => GEMINI_STDOUT_NOISE_PATTERNS.some((pattern) => pattern.test(line)))
-}
-
-/**
- * Gemini SDK/OAuth auth can emit credential cache diagnostics to stdout.
- * Hooks treat stdout as protocol output, so we suppress known-noise lines
- * only for the duration of the Gemini provider call.
- */
-async function withSuppressedGeminiStdout<T>(fn: () => Promise<T>): Promise<T> {
-  if (process.env.SWIZ_DISABLE_GEMINI_STDOUT_SUPPRESSION === "1") return fn()
-
-  const originalWrite = process.stdout.write.bind(process.stdout)
-  process.stdout.write = ((...args: Parameters<typeof process.stdout.write>): boolean => {
-    const [chunk] = args
-    const text =
-      typeof chunk === "string"
-        ? chunk
-        : Buffer.isBuffer(chunk)
-          ? chunk.toString("utf8")
-          : String(chunk)
-    if (isKnownGeminiStdoutNoise(text)) {
-      const maybeCallback = args.at(-1)
-      if (typeof maybeCallback === "function") {
-        // Maintain write callback semantics for callers expecting completion.
-        maybeCallback()
-      }
-      return true
-    }
-    return originalWrite(...args)
-  }) as typeof process.stdout.write
-
-  try {
-    return await fn()
-  } finally {
-    process.stdout.write = originalWrite
-  }
-}
-
 // resolveSignal imported from ai-providers.ts
 
 function getGeminiTestResponseForText(): string | undefined {
@@ -155,20 +110,18 @@ export async function promptGemini(prompt: string, options?: PromptGeminiOptions
     return process.env.GEMINI_TEST_TEXT_RESPONSE.trim()
   }
 
-  return withSuppressedGeminiStdout(async () => {
-    const gemini = createProvider()
-    const { signal, cleanup } = resolveSignal(options)
-    try {
-      const { text } = await generateText({
-        model: gemini(options?.model ?? DEFAULT_MODEL),
-        prompt,
-        abortSignal: signal,
-      })
-      return text.trim()
-    } finally {
-      cleanup()
-    }
-  })
+  const gemini = createProvider()
+  const { signal, cleanup } = resolveSignal(options)
+  try {
+    const { text } = await generateText({
+      model: gemini(options?.model ?? DEFAULT_MODEL),
+      prompt,
+      abortSignal: signal,
+    })
+    return text.trim()
+  } finally {
+    cleanup()
+  }
 }
 
 /**
@@ -190,26 +143,24 @@ export async function promptGeminiStreamText(
     return testResponse.trim()
   }
 
-  return withSuppressedGeminiStdout(async () => {
-    const gemini = createProvider()
-    const { signal, cleanup } = resolveSignal(options)
-    try {
-      const result = streamText({
-        model: gemini(options?.model ?? DEFAULT_MODEL),
-        prompt,
-        abortSignal: signal,
-      })
+  const gemini = createProvider()
+  const { signal, cleanup } = resolveSignal(options)
+  try {
+    const result = streamText({
+      model: gemini(options?.model ?? DEFAULT_MODEL),
+      prompt,
+      abortSignal: signal,
+    })
 
-      let text = ""
-      for await (const textPart of result.textStream) {
-        text += textPart
-        options?.onTextPart?.(textPart)
-      }
-      return text.trim()
-    } finally {
-      cleanup()
+    let text = ""
+    for await (const textPart of result.textStream) {
+      text += textPart
+      options?.onTextPart?.(textPart)
     }
-  })
+    return text.trim()
+  } finally {
+    cleanup()
+  }
 }
 
 /**
@@ -252,19 +203,17 @@ export async function promptGeminiObject<T>(
     return JSON.parse(process.env.GEMINI_TEST_RESPONSE) as T
   }
   // ── Real implementation ──────────────────────────────────────────────────
-  return withSuppressedGeminiStdout(async () => {
-    const gemini = createProvider()
-    const { signal, cleanup } = resolveSignal(options)
-    try {
-      const { output } = await generateText({
-        model: gemini(options?.model ?? DEFAULT_MODEL),
-        output: Output.object({ schema }),
-        prompt,
-        abortSignal: signal,
-      })
-      return output
-    } finally {
-      cleanup()
-    }
-  })
+  const gemini = createProvider()
+  const { signal, cleanup } = resolveSignal(options)
+  try {
+    const { output } = await generateText({
+      model: gemini(options?.model ?? DEFAULT_MODEL),
+      output: Output.object({ schema }),
+      prompt,
+      abortSignal: signal,
+    })
+    return output
+  } finally {
+    cleanup()
+  }
 }

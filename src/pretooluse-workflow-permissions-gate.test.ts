@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const HOOK_PATH = join(import.meta.dir, "..", "hooks", "pretooluse-workflow-permissions-gate.ts")
@@ -65,17 +67,27 @@ describe("pretooluse-workflow-permissions-gate", () => {
   })
 
   test("allows workflow permission edits on default branch (main)", async () => {
-    // This test relies on the current repo being on 'main' branch
-    // which is the default for this project
-    const result = await runHook({
-      tool_name: "Write",
-      tool_input: {
-        file_path: ".github/workflows/ci.yml",
-        content: "permissions:\n  contents: read\n  pull-requests: write",
-      },
-    })
-    expect(result.exitCode).toBe(0)
-    expect(result.parsed).toBeNull()
+    // Create a temp git repo on 'main' to test branch-independent of current checkout
+    const tmpDir = await mkdtemp(join(tmpdir(), "swiz-workflow-gate-"))
+    try {
+      const init = Bun.spawn(["git", "init", "-b", "main", tmpDir], {
+        stdout: "ignore",
+        stderr: "ignore",
+      })
+      await init.exited
+      const result = await runHook({
+        tool_name: "Write",
+        tool_input: {
+          file_path: ".github/workflows/ci.yml",
+          content: "permissions:\n  contents: read\n  pull-requests: write",
+        },
+        cwd: tmpDir,
+      })
+      expect(result.exitCode).toBe(0)
+      expect(result.parsed).toBeNull()
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true })
+    }
   })
 
   test("allows Write tool on non-workflow YAML", async () => {
