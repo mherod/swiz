@@ -72,7 +72,15 @@ async function main(): Promise<void> {
 
   let reason = "Quality checks failed — fix all issues before stopping.\n\n"
   reason += failures.join("\n\n")
-  reason += "\n\nFix every issue and try stopping again."
+  reason +=
+    "\n\nFix every lint and typecheck error, including pre-existing ones inherited from the base branch."
+  reason += "\nAll errors are your responsibility regardless of who introduced them."
+  reason += "\n\nIf you are on a feature branch with branch protection on the default branch:"
+  reason += "\n  1. Fix all errors on the current branch"
+  reason += "\n  2. Commit and push the fixes"
+  reason += "\n  3. Merge your PR (or request review if required)"
+  reason += "\n  4. Switch back to the default branch: `git checkout main && git pull`"
+  reason += "\n  5. Then try stopping again"
 
   blockStop(reason, { includeUpdateMemoryAdvice: false })
 }
