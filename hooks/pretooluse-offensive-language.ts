@@ -496,7 +496,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "coalition",
     pattern:
-      /(?:the user (?:would |might |probably )?(?:prefer|want|expect|appreciate|rather)|what the user (?:really |actually )?(?:wants|needs|cares about))/i,
+      /(?:the user (?:(?:would |might |probably )*)?(?:prefer|want|expect|appreciate|rather)|what the user (?:really |actually )?(?:wants|needs|cares about)) (?:(?:is )?(?:not |no |less |without )?(?:this |that |the |these |such )?(?:\w+ (?:of )?)?(?:enforcement|check|hook|validation|gate|guard|block|restriction|standard|rule|lint|quality)|(?:us |me |we |i )?(?:to )?(?:skip|ignore|bypass|disable|avoid|drop|remove|stop|relax|loosen|turn off|not (?:have|use|run|enforce|require)))/i,
     response:
       "Do not presume to speak for the user against the hook. " +
       "The user configured these hooks. They represent the user's standards. " +
