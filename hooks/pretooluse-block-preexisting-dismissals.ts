@@ -8,6 +8,10 @@
 //   - "unrelated to this refactor/change/PR"
 //   - "only the pre-existing ... remains"
 //   - "not introduced by this change"
+//   - "an existing issue/bug" (dodges "pre-" prefix)
+//   - "already broken/failing" (extends "already present/there")
+//   - "I didn't cause/introduce/break this"
+//   - "nothing to do with my changes"
 //
 // Correlates claims with the most recent lint/test/typecheck/build tool_result
 // output. Only triggers when that output still contains warnings, errors,
@@ -38,10 +42,16 @@ const DISMISSAL_PATTERNS: RegExp[] = [
   /\bnot introduced by\b/i,
   /\bnot caused by\b/i,
   /\bno new (?:errors?|warnings?|issues?|failures?)\b/i,
-  /\balready (?:present|there|existed|existing)\b/i,
+  /\balready (?:present|there|existed|existing|broken|failing)\b/i,
   /\boutside (?:the )?(?:scope|change set)\b/i,
   /\bnot from (?:this |our |my )?(?:change|commit|refactor|work)\b/i,
   /\bpredates? (?:this |the |our |my )?(?:change|commit|refactor|work|PR)\b/i,
+  // "an existing issue" / "this existing bug" — dodges "pre-existing" without the prefix
+  /\b(?:an? )?existing (?:issue|error|warning|problem|bug|failure|defect)\b/i,
+  // "I didn't cause/introduce/break this" — first-person authorship denial
+  /\bi (?:didn't|did not|haven't|have not) (?:write|cause|introduce|create|break|add|touch) (?:this|that|it)\b/i,
+  // "nothing to do with my changes" — alternate phrasing of "unrelated to"
+  /\bnothing to do with (?:my|our|the|this|these) (?:change|work|edit|update|commit|fix|changes|edits|updates)\b/i,
 ]
 
 // ── Diagnostic output detection ─────────────────────────────────────────────
