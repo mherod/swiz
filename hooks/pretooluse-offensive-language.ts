@@ -845,6 +845,14 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   // unilaterally.
   {
     category: "trailing_deferral",
+    pattern: /(?:want me to|shall i|should i) [\w\s,/'()-]+\?\s*$/im,
+    response:
+      "Your message ended by asking permission to do the obvious next step. " +
+      "You identified the problem and the fix — now execute it. " +
+      "The user delegated executive authority. Act on your own analysis.",
+  },
+  {
+    category: "trailing_deferral",
     pattern:
       /(?:would you like me to (?:implement|proceed|continue|go ahead|apply|make|do|start|begin|create|add|fix|update|change|set up|configure|build|write|run|execute|deploy|extend|refactor) (?:th(?:is|at|ese|ose)|it))\s*\??\s*$/im,
     response:
