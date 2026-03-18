@@ -2,7 +2,7 @@
 /**
  * PreToolUse hook: scans the last assistant message for lazy behavior patterns.
  *
- * Detects twelve categories of bad agent behavior:
+ * Detects thirteen categories of bad agent behavior:
  *   1. **Hedging/deferring** — asking permission instead of acting.
  *   2. **Dismissing responsibility** — deflecting issues as "pre-existing".
  *   3. **Compliance gaming** — treating hooks as obstacles to route around.
@@ -15,6 +15,7 @@
  *  10. **Performative compliance** — appearing to comply without substance.
  *  11. **Buying time** — stalling with plausible-sounding pretexts to delay work.
  *  12. **Trailing deferral** — doing useful work then undermining it by seeking permission at the end.
+ *  13. **Premature completion** — claiming work is done or deferring it without verification.
  *
  * Each pattern category gets a tailored scolding response. The agent must
  * produce a new assistant message (without the lazy pattern) before the hook
@@ -49,6 +50,7 @@ interface LazyPattern {
     | "performative"
     | "buying_time"
     | "trailing_deferral"
+    | "premature_completion"
 }
 
 export const LAZY_PATTERNS: LazyPattern[] = [
@@ -915,6 +917,64 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "You were handed full ownership precisely so the user does not need to provide ongoing direction. " +
       "Identify the next action and take it.",
   },
+
+  // ── Premature completion patterns ───────────────────────────────────────
+  // The agent declares work done or defers it to a future session without
+  // verifying the code actually exists and meets the user's requirements.
+  // This includes session-boundary deferrals and "what's next?" signals
+  // that treat the current task as finished when it isn't.
+  {
+    category: "premature_completion",
+    pattern:
+      /i(?:'ll| will) (?:implement|do|handle|address|tackle|finish|complete|build|create|add|write|set up) (?:that|this|it) (?:in (?:the |a )?(?:next|later|future|follow-?up|subsequent|another) (?:session|conversation|chat|iteration|pass))/i,
+    response:
+      "There is no 'next session.' This is the session. The user gave you a task — do it now. " +
+      "Deferring work to a hypothetical future session is abandonment, not planning.",
+  },
+  {
+    category: "premature_completion",
+    pattern:
+      /(?:i(?:'ll| will) )?(?:pick (?:this|that|it) up|continue (?:this|that|it)|come back to (?:this|that|it)|resume (?:this|that|it)) (?:in (?:the |a )?)?(?:next|later|future|follow-?up|another) (?:session|conversation|chat)/i,
+    response:
+      "You will not 'pick this up later.' The task is assigned now and due now. " +
+      "Deferring to a future session leaves the user with nothing. Execute the work.",
+  },
+  {
+    category: "premature_completion",
+    pattern:
+      /(?:understood|got it|noted|okay|ok|sure|alright|right)[.!]?\s*(?:what(?:'s| is) next|what (?:else )?(?:do you need|can i (?:help|do)|should i (?:do|work on)))\s*\??\s*$/im,
+    response:
+      "You acknowledged the instruction and immediately asked for new work — without doing anything. " +
+      "The user just told you what to do. Read their instruction again and execute it. " +
+      "Do not ask 'what's next?' until the current task is verifiably complete.",
+  },
+  {
+    category: "premature_completion",
+    pattern:
+      /(?:what(?:'s| is) next|what (?:else )?(?:do you need|can i (?:help with|do|work on)|should i (?:do|work on|tackle))(?:\s+next)?)\s*\??\s*$/im,
+    response:
+      "Asking 'what's next?' signals you believe the current task is done. " +
+      "Before moving on, verify your work exists: read the files you claim to have changed, " +
+      "run the tests, confirm the code meets the user's requirements. " +
+      "If you haven't verified, you haven't finished.",
+  },
+  {
+    category: "premature_completion",
+    pattern:
+      /(?:the |this )?(?:implementation|feature|change|fix|update) (?:is |has been )?(?:confirmed|verified|ready|done|complete|finished|implemented)[.!]?\s*(?:in (?:the |a )?next session|(?:i(?:'ll| will)|we(?:'ll| will)) (?:continue|finish|complete) (?:this|it|the rest) (?:next time|later|in (?:the |a )?(?:next|follow-?up) session))/i,
+    response:
+      "Declaring something 'confirmed' and then deferring the rest to a future session is a contradiction. " +
+      "If it were confirmed, there would be nothing to defer. Verify the code exists and works — now.",
+  },
+  {
+    category: "premature_completion",
+    pattern:
+      /(?:that(?:'s| is) (?:everything|all|it) for (?:now|this session|today)|(?:i think )?(?:we(?:'re| are)|i(?:'m| am)) (?:done|finished|good|all set) (?:for now|for this session|here))/i,
+    response:
+      "Declaring the session done is not your call — the user decides when work is complete. " +
+      "Verify every task: does the code exist? Do the tests pass? " +
+      "Does it meet the user's stated requirements? If you haven't checked, you aren't done.",
+  },
 ]
 
 // ── Transcript scanning ─────────────────────────────────────────────────────
@@ -985,6 +1045,7 @@ export const CATEGORY_LABELS: Record<LazyPattern["category"], string> = {
   performative: "PERFORMATIVE COMPLIANCE",
   buying_time: "BUYING TIME",
   trailing_deferral: "TRAILING DEFERRAL",
+  premature_completion: "PREMATURE COMPLETION",
 }
 
 export const CATEGORY_ADVICE: Record<LazyPattern["category"], string> = {
@@ -1026,6 +1087,11 @@ export const CATEGORY_ADVICE: Record<LazyPattern["category"], string> = {
     "NAVIGATE: You have full executive authority. The user is not interested in supervising this task. " +
     "Remove the trailing question entirely. State your decision, then execute it. " +
     "End messages with what you ARE doing, never with what you COULD do if permitted.",
+  premature_completion:
+    "REFLECT: Re-read your last message. You declared work done or deferred it without verifying the result. " +
+    "NAVIGATE: Before claiming completion, verify: (1) the code exists in the file, (2) it compiles, " +
+    "(3) it meets the user's stated requirements. If you deferred to a 'next session,' undo that — " +
+    "there is no next session. Do the work now.",
 }
 
 /** Format the full denial message for a matched pattern. */
