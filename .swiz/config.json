@@ -3,6 +3,6 @@
   "memoryLineThreshold": 700,
   "memoryWordThreshold": 3500,
   "collaborationMode": "solo",
-  "strictNoDirectMain": true,
+  "strictNoDirectMain": false,
   "ambitionMode": "aggressive"
 }
