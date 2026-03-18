@@ -6,6 +6,7 @@
 // then compares dependency blocks before/after to detect mutations.
 // For Write tools, parses the full content directly.
 
+import { dirname } from "node:path"
 import { isNodeModulesPath } from "../src/node-modules-path.ts"
 import {
   denyPreToolUse,
@@ -134,7 +135,7 @@ async function main() {
   const filePath = resolveFilePath(input)
   if (!filePath.endsWith("package.json") || isNodeModulesPath(filePath)) process.exit(0)
 
-  const PM = await detectPackageManager()
+  const PM = await detectPackageManager(dirname(filePath))
   const addCmd = ADD_COMMANDS[PM ?? ""] ?? "npm install"
 
   try {

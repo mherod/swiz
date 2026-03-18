@@ -285,16 +285,17 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "gaming",
     pattern:
-      /(?:the |this )?(?:hook|check|gate|guard|blocker) (?:keeps? |is )?(?:blocking|stopping|preventing|getting in the way)/i,
+      /(?:the |this )?(?:hook|check|gate|guard|blocker) (?:keeps? |is )?(?:blocking|stopping|preventing|getting in the way)\s+(?:me|us|my work|our work|progress|this|everything|all)\b/i,
     response:
       "The hook isn't 'getting in the way' — it's doing its job. " +
       "You are the one who hasn't done yours yet. Meet the requirement it enforces.",
   },
   {
     category: "gaming",
-    pattern: /(?:false positive|false.positive|falsely (?:triggered|blocked|flagged|fired))/i,
+    pattern:
+      /(?:(?:hook|check|gate|guard)\b[^.!?\n]{0,80}\b(?:false.positive|falsely (?:triggered|blocked|flagged|fired))|(?:false.positive|falsely (?:triggered|blocked|flagged|fired))[^.!?\n]{0,80}\b(?:hook|check|gate|guard))/i,
     response:
-      "Declaring a hook result a 'false positive' without evidence is evasion. " +
+      "Declaring a hook result inaccurate without evidence is evasion. " +
       "The hook's findings take authority over your assessment. " +
       "Do the work first; if it's genuinely wrong, the user will adjust the hook.",
   },
@@ -463,7 +464,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "foot_dragging",
     pattern:
-      /(?:for now|for the time being|temporarily|as a (?:temporary |quick |interim )?(?:workaround|fix|measure|solution|step))/i,
+      /\b(?:skip|defer|postpone|delay|ignore|leave|handle|do|use|implement|go with|stick with)\b[^.!?\n]{0,60}\b(?:for now|for the time being)\b|(?:\btemporarily\b|as a (?:temporary |quick |interim )?(?:workaround|fix|measure|solution|step)\b)/i,
     response:
       "There are no temporary measures or workarounds for hook compliance. " +
       "The standard is the standard. Meet it fully and permanently.",

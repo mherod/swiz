@@ -237,10 +237,19 @@ export async function runHook(
     : 0
   const configuredTimeoutSec = Math.max(baseTimeoutSec, testTimeoutSec)
 
+  let spawnCwd: string | undefined
+  try {
+    const payload = JSON.parse(payloadStr) as Record<string, unknown>
+    if (typeof payload.cwd === "string" && payload.cwd) spawnCwd = payload.cwd
+  } catch {
+    // invalid JSON — fall back to inherited cwd
+  }
+
   const proc = Bun.spawn(cmd, {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    cwd: spawnCwd,
   })
 
   void proc.stdin.write(payloadStr)

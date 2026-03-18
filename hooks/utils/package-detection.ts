@@ -65,8 +65,8 @@ async function detectFromLockfiles(dir: string): Promise<PackageManager | null> 
   return null
 }
 
-async function detectPackageManagerInner(): Promise<PackageManager | null> {
-  let dir = process.cwd()
+async function detectPackageManagerInner(startDir: string): Promise<PackageManager | null> {
+  let dir = startDir
   while (true) {
     const fromPkg = await detectFromPkgJson(dir)
     if (fromPkg) return fromPkg
@@ -84,9 +84,10 @@ async function detectPackageManagerInner(): Promise<PackageManager | null> {
   return null
 }
 
-export function detectPackageManager(): Promise<PackageManager | null> {
+export function detectPackageManager(startDir?: string): Promise<PackageManager | null> {
+  if (startDir !== undefined) return detectPackageManagerInner(startDir)
   if (_pmCache !== undefined) return _pmCache
-  _pmCache = detectPackageManagerInner()
+  _pmCache = detectPackageManagerInner(process.cwd())
   return _pmCache
 }
 
