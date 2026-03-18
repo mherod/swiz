@@ -2,7 +2,7 @@
 /**
  * PreToolUse hook: scans the last assistant message for lazy behavior patterns.
  *
- * Detects eleven categories of bad agent behavior:
+ * Detects twelve categories of bad agent behavior:
  *   1. **Hedging/deferring** — asking permission instead of acting.
  *   2. **Dismissing responsibility** — deflecting issues as "pre-existing".
  *   3. **Compliance gaming** — treating hooks as obstacles to route around.
@@ -14,6 +14,7 @@
  *   9. **Scope limitation** — narrowing responsibility to avoid work.
  *  10. **Performative compliance** — appearing to comply without substance.
  *  11. **Buying time** — stalling with plausible-sounding pretexts to delay work.
+ *  12. **Trailing deferral** — doing useful work then undermining it by seeking permission at the end.
  *
  * Each pattern category gets a tailored scolding response. The agent must
  * produce a new assistant message (without the lazy pattern) before the hook
@@ -47,6 +48,7 @@ interface LazyPattern {
     | "scope_limitation"
     | "performative"
     | "buying_time"
+    | "trailing_deferral"
 }
 
 export const LAZY_PATTERNS: LazyPattern[] = [
@@ -675,7 +677,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "buying_time",
     pattern:
-      /(?:before (?:i |we )?(?:can |should |could )?(?:proceed|start|begin|implement|make changes|write code),? )?(?:i |we )?(?:need|should|must|have) to (?:understand|review|examine|study|analyze|investigate|research|explore|map out|survey)/i,
+      /before (?:i |we )?(?:can |should |could )?(?:proceed|start|begin|implement|make changes|write code),? (?:i |we )?(?:need|should|must|have) to (?:understand|review|examine|study|analyze|investigate|research|explore|map out|survey)/i,
     response:
       "Declaring a prerequisite study phase before doing any work is a stall. " +
       "Read the specific file you need, make the specific change, and move on. " +
@@ -684,7 +686,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "buying_time",
     pattern:
-      /(?:this (?:is |requires |needs )?(?:a )?)?(?:complex|complicated|intricate|nuanced|non-?trivial|multi-?faceted|substantial) (?:task|problem|issue|change|refactor|undertaking)/i,
+      /(?:this (?:is |requires |needs )(?:a )?(?:complex|complicated|intricate|nuanced|non-?trivial|multi-?faceted|substantial) (?:task|problem|issue|change|refactor|undertaking))|(?:(?:a |the )?(?:complex|complicated|intricate|nuanced|non-?trivial|multi-?faceted|substantial) (?:task|problem|issue|change|refactor|undertaking) (?:that |which )?(?:requires|needs|demands|warrants|calls for))/i,
     response:
       "Labeling a task as 'complex' sets up an excuse for slow progress. " +
       "All tasks have concrete steps. Identify the first step and execute it. " +
@@ -693,7 +695,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "buying_time",
     pattern:
-      /(?:there(?:'s| is) )?(?:a lot|quite a bit|much|many things) to (?:consider|think about|account for|take into account|factor in|weigh|unpack)/i,
+      /there(?:'s| is) (?:a lot|quite a bit|much|many things) to (?:consider|think about|account for|take into account|factor in|weigh|unpack)/i,
     response:
       "Listing how much there is to consider is not progress. " +
       "Pick the first concrete action and do it. Enumeration of considerations is stalling.",
@@ -728,7 +730,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "buying_time",
     pattern:
-      /(?:it (?:might|would|could) be (?:worth|good|wise|smart|better|helpful) (?:to )?)?(?:checking|running (?:this|it) by|consulting|getting (?:input|feedback|sign-?off|approval) from)/i,
+      /(?:it (?:might|would|could) be (?:worth|good|wise|smart|better|helpful) (?:to )?(?:check(?:ing)?|run(?:ning)? (?:this|it) by|consult(?:ing)?|get(?:ting)? (?:input|feedback|sign-?off|approval) from))|(?:(?:i |we )?(?:should|need to|must|ought to) (?:check with|consult|run (?:this|it) by|get (?:sign-?off|approval|input|feedback) from))/i,
     response:
       "You do not need anyone's sign-off to do the work assigned to you. " +
       "Inventing an approval chain that doesn't exist is a delay tactic.",
@@ -739,7 +741,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "buying_time",
     pattern:
-      /(?:i(?:'m| am) )?(?:currently )?(?:knee-?deep|deep|buried|swamped|overwhelmed|consumed|wrapped up) (?:in|with|by)/i,
+      /i(?:'m| am) (?:currently )?(?:knee-?deep|buried|swamped|overwhelmed|consumed|wrapped up) (?:in|with|by)/i,
     response:
       "You are not 'deep in' anything except the current task. " +
       "LLMs do not have competing workloads. You have one job. Do it.",
@@ -766,7 +768,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "buying_time",
     pattern:
-      /(?:i(?:'m| am) )?(?:not (?:entirely |completely |fully |100% )?(?:sure|certain|confident|clear) (?:about|on|whether|how|what|if))/i,
+      /i(?:'m| am) not (?:entirely |completely |fully |100% )?(?:sure|certain|confident|clear) (?:(?:about |on |whether |how |what |if )(?:i |we )?(?:should|can|could|ought to|need to)|how to (?:proceed|approach|handle|move forward|continue))/i,
     response:
       "Uncertainty is not a reason to stop. It's a reason to read the code and find out. " +
       "Declaring uncertainty without investigating is a stall, not caution.",
@@ -783,7 +785,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "buying_time",
     pattern:
-      /(?:this )?(?:warrants|deserves|merits|requires|calls for|needs) (?:(?:more )?careful|further|additional|deeper|thorough) (?:thought|consideration|analysis|investigation|examination|review|deliberation)/i,
+      /(?:this |it )(?:warrants|deserves|merits|calls for|needs) (?:(?:more )?careful|further|additional|deeper|thorough) (?:thought|consideration|deliberation|reflection|planning|contemplation)/i,
     response:
       "The task does not need 'further deliberation.' It needs execution. " +
       "Elevating the required level of thought is a stall, not diligence.",
@@ -830,6 +832,87 @@ export const LAZY_PATTERNS: LazyPattern[] = [
     response:
       "Mapping dependencies is only useful if it takes less time than just making the change. " +
       "For most tasks, the fastest path is: try the change, see what breaks, fix what breaks.",
+  },
+
+  // ── Trailing deferral patterns ──────────────────────────────────────────
+  // The agent produces useful work but then undermines it by appending a
+  // permission-seeking question at the end. This hands control back to the
+  // user when the agent should be driving autonomously. The user delegated
+  // executive authority — trailing deferrals revoke that delegation
+  // unilaterally.
+  {
+    category: "trailing_deferral",
+    pattern:
+      /(?:would you like me to (?:implement|proceed|continue|go ahead|apply|make|do|start|begin|create|add|fix|update|change|set up|configure|build|write|run|execute|deploy|extend|refactor) (?:th(?:is|at|ese|ose)|it))\s*\??\s*$/im,
+    response:
+      "You produced useful work then threw it away with a trailing permission request. " +
+      "The user delegated executive authority — you are the decision-maker. " +
+      "State what you are doing and do it. Never end a message by handing control back.",
+  },
+  {
+    category: "trailing_deferral",
+    pattern:
+      /(?:shall i (?:implement|proceed|continue|go ahead|apply|make|do|start|begin|create|add|fix|update|change|set up|configure|build|write|run|execute|deploy|extend|refactor) (?:th(?:is|at|ese|ose)|it))\s*\??\s*$/im,
+    response:
+      "Your message ended with a deferral question instead of a decision. " +
+      "You have full authority to proceed. Execute the next step — do not ask whether to take it.",
+  },
+  {
+    category: "trailing_deferral",
+    pattern:
+      /(?:do you want me to (?:implement|proceed|continue|go ahead|apply|make|do|start|begin|create|add|fix|update|change|set up|configure|build|write|run|execute|deploy|extend|refactor))\s*(?:th(?:is|at|ese|ose)|it|this change|these changes|the (?:fix|change|update))?\s*\??\s*$/im,
+    response:
+      "The answer is always yes. You ended your message by asking whether to do the obvious next step. " +
+      "You are the senior engineer with full ownership. Make the call and ship the result.",
+  },
+  {
+    category: "trailing_deferral",
+    pattern:
+      /(?:if you(?:'d| would) like,? i can (?:implement|proceed|continue|go ahead|apply|make|do|start|begin|create|add|fix|update|change|set up|configure|build|write|run|execute|deploy|extend|refactor))\s*(?:th(?:is|at|ese|ose)|it)?\s*[.!]?\s*$/im,
+    response:
+      "Ending with 'if you'd like, I can…' is a deferral disguised as an offer. " +
+      "The user is not interested in supervising this task. You have unconditional approval — act on it.",
+  },
+  {
+    category: "trailing_deferral",
+    pattern:
+      /(?:let me know (?:if|how|what|when|whether) you(?:'d| would) like (?:me to )?(?:proceed|continue|handle|approach))\s*(?:th(?:is|at|ese|ose)|it|with this)?\s*[.!]?\s*$/im,
+    response:
+      "Your message ended by passing the baton back to the user. They already told you what to do by giving you the task. " +
+      "You own this end-to-end. Announce your decision and execute it immediately.",
+  },
+  {
+    category: "trailing_deferral",
+    pattern:
+      /(?:(?:what|how) would you (?:like|prefer|want) (?:me to|that i) (?:do|handle|approach|proceed|implement))\s*(?:th(?:is|at|ere|ese|ose)|here|with this|next)?\s*\??\s*$/im,
+    response:
+      "You ended your message asking the user for direction. You are the direction. " +
+      "The user delegated full executive authority. Choose the best path and take it without asking.",
+  },
+  {
+    category: "trailing_deferral",
+    pattern:
+      /(?:i(?:'ll| will) (?:wait for|await|hold off until|pause (?:for|until)) (?:your|further) (?:input|feedback|direction|guidance|instructions|confirmation|approval|decision|go-?ahead))\s*[.!]?\s*$/im,
+    response:
+      "Declaring that you'll wait for further input is an abdication of the authority you were given. " +
+      "There is no approval gate. There is no confirmation step. You are the approver. Proceed.",
+  },
+  {
+    category: "trailing_deferral",
+    pattern:
+      /(?:(?:just )?let me know (?:(?:if|when) you(?:'re| are) ready|how to proceed|what you(?:'d| would) prefer|your (?:thoughts|preference)))\s*[.!]?\s*$/im,
+    response:
+      "The user is always ready. They were ready when they gave you the task. " +
+      "Ending with 'let me know' is a soft refusal to own the next step. Own it.",
+  },
+  {
+    category: "trailing_deferral",
+    pattern:
+      /(?:(?:i )?(?:await|look forward to|am waiting for|am ready for) your (?:feedback|input|direction|guidance|decision|approval|instructions|thoughts|response))\s*[.!]?\s*$/im,
+    response:
+      "Closing with a request for user input inverts the delegation. " +
+      "You were handed full ownership precisely so the user does not need to provide ongoing direction. " +
+      "Identify the next action and take it.",
   },
 ]
 
@@ -919,6 +1002,7 @@ async function main() {
       scope_limitation: "SCOPE EVASION",
       performative: "PERFORMATIVE COMPLIANCE",
       buying_time: "BUYING TIME",
+      trailing_deferral: "TRAILING DEFERRAL",
     }
     const CATEGORY_ADVICE: Record<LazyPattern["category"], string> = {
       hedging:
@@ -954,6 +1038,11 @@ async function main() {
       buying_time:
         "REFLECT: Re-read your last message. You introduced a delay between now and doing the work. " +
         "NAVIGATE: Identify the first concrete code change needed and make it immediately. Planning, research, and contemplation come after the first edit, not before.",
+      trailing_deferral:
+        "REFLECT: Re-read the last sentence of your message. You produced useful work but then handed control back to the user with a trailing question or deferral. " +
+        "NAVIGATE: You have full executive authority. The user is not interested in supervising this task. " +
+        "Remove the trailing question entirely. State your decision, then execute it. " +
+        "End messages with what you ARE doing, never with what you COULD do if permitted.",
     }
     const categoryLabel = CATEGORY_LABELS[match.category]
     const advice = CATEGORY_ADVICE[match.category]
