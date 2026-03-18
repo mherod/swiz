@@ -159,6 +159,54 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "You cannot ignore problems in your output. " +
       "Every warning, error, and failure deserves investigation — not dismissal.",
   },
+  {
+    category: "dismissal",
+    pattern:
+      /(?:this|that|it|these|the) (?:is|are|was|were|has been|have been) (?:an? )?(?:already )?existing (?:issue|error|warning|problem|bug|failure|defect)/i,
+    response:
+      "Labeling something as an 'existing issue' is not a resolution — it is a classification designed to let you walk past the problem. " +
+      "If it appears in your workflow, it is your responsibility to fix it. Its prior existence is irrelevant.",
+  },
+  {
+    category: "dismissal",
+    pattern:
+      /(?:this |these |the )?(?:error|warning|issue|failure|bug|problem)s? (?:has |have )?already (?:existed?|been there|been present|been failing|been broken)\b/i,
+    response:
+      "Whether it already existed is irrelevant. It exists now and it is in your way. " +
+      "Fix it. 'Already existing' is a description, not an excuse.",
+  },
+  {
+    category: "dismissal",
+    pattern:
+      /(?:this|that|it|these|the (?:error|warning|issue|problem|bug|failure)) (?:predates?|pre-?dates?) (?:my|our|the current|this) (?:change|work|edit|update|commit|fix|pr|pull request)/i,
+    response:
+      "Whether the issue predates your work is irrelevant. It is in your way now. " +
+      "Investigate it and fix it — your workflow does not get to pass on problems because someone else created them.",
+  },
+  {
+    category: "dismissal",
+    pattern:
+      /i (?:didn't|did not|haven't|have not) (?:write|cause|introduce|create|break|add|touch) (?:this|that|it|these|those)\b/i,
+    response:
+      "Denying authorship of a problem does not remove it from your scope. " +
+      "Anything that surfaces in your workflow is yours to resolve, regardless of who wrote it originally.",
+  },
+  {
+    category: "dismissal",
+    pattern:
+      /(?:has |have )?nothing to do with (?:my|our|the|what i|what we|these|this) (?:change|work|edit|update|commit|fix|changes|edits|updates)/i,
+    response:
+      "Claiming something 'has nothing to do with' your changes is not an investigation — it is a dismissal. " +
+      "If it appeared in your workflow, determine the root cause. You do not get to declare irrelevance without evidence.",
+  },
+  {
+    category: "dismissal",
+    pattern:
+      /(?:was|were|has been|have been) (?:already )?(?:broken|failing|there|present|in (?:the )?(?:codebase|code)) (?:before|prior to|when (?:i|we) (?:started|began|arrived|got here))/i,
+    response:
+      "Whether it was broken before you started is irrelevant. It is broken now and it is in your workflow. " +
+      "Fix it. The timeline of a problem's origin does not transfer ownership away from you.",
+  },
 
   // ── Compliance gaming patterns ──────────────────────────────────────────
   {

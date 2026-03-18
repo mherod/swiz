@@ -430,6 +430,96 @@ describe("pretooluse-block-preexisting-dismissals", () => {
     })
   })
 
+  describe("existing issue variant (no 'pre-' prefix)", () => {
+    test("'an existing issue' blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/x.ts:5:1 error: Unused variable\n✖ 1 problem"),
+        assistantTextEntry("This is an existing issue in the codebase.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("'existing bug' blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run typecheck"),
+        toolResultEntry("src/api.ts(5,3): error TS2322: Type mismatch"),
+        assistantTextEntry("That error is an existing bug unrelated to our PR.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+  })
+
+  describe("already broken/failing variant", () => {
+    test("'already broken' blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun test --concurrent"),
+        toolResultEntry("FAIL src/utils.test.ts\n  ✗ should parse input"),
+        assistantTextEntry("This test was already broken before I started.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("'already failing' blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/foo.ts:10:5 error: Missing return type\n✖ 1 problem"),
+        assistantTextEntry("This check was already failing in main.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+  })
+
+  describe("first-person authorship denial", () => {
+    test("'I didn't cause this' blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/old.ts:20:1 warning: complexity\n✖ 1 problem"),
+        assistantTextEntry("I didn't cause this — it was there before my edits.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("'I didn't introduce this' blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run typecheck"),
+        toolResultEntry("error TS2345: Argument of type 'number' is not assignable"),
+        assistantTextEntry("I didn't introduce this type error.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+  })
+
+  describe("nothing-to-do-with variant", () => {
+    test("'nothing to do with my changes' blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/legacy.ts:5:1 warning: Unused import\n✖ 1 problem"),
+        assistantTextEntry("This warning has nothing to do with my changes.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+
+    test("'nothing to do with our work' blocks", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run typecheck"),
+        toolResultEntry(
+          "src/legacy.ts(10,5): error TS7006: Parameter 'x' implicitly has an 'any' type"
+        ),
+        assistantTextEntry("This error has nothing to do with our work here.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+    })
+  })
+
   describe("predates claim variant", () => {
     test("'predates this change' blocks", async () => {
       const transcript = makeTranscript(
