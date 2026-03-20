@@ -110,6 +110,8 @@ export interface ProjectSwizSettings {
    * When absent, the built-in default list in `DEFAULT_ALLOWED_SKILL_CATEGORIES` applies.
    */
   allowedSkillCategories?: string[]
+  /** Glob patterns for files exempt from large-file checks (e.g. "test-fixtures/**") */
+  largeFileAllowPatterns?: string[]
 }
 
 /** Resolved policy thresholds after merging global + project config */
@@ -211,4 +213,5 @@ export const projectSettingsSchema = z.object({
   disabledHooks: z.array(z.string().min(1)).optional(),
   plugins: z.array(z.string().min(1)).optional(),
   allowedSkillCategories: z.array(z.string().min(1)).optional(),
+  largeFileAllowPatterns: z.array(z.string().min(1)).optional(),
 })

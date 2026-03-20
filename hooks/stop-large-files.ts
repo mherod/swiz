@@ -2,7 +2,11 @@
 // Stop hook: Block stop if large files exceeding the configured threshold were committed without LFS.
 // Threshold is configurable via `swiz settings set large-file-size-kb <N>`.
 
-import { DEFAULT_LARGE_FILE_SIZE_KB, resolveNumericSetting } from "../src/settings.ts"
+import {
+  DEFAULT_LARGE_FILE_SIZE_KB,
+  readProjectSettings,
+  resolveNumericSetting,
+} from "../src/settings.ts"
 import { blockStop, git, isGitRepo, recentHeadRange } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 
@@ -30,7 +34,28 @@ async function checkFileSize(
   return `${sizeKb}KB — ${filePath}`
 }
 
-async function findLargeFiles(cwd: string, sizeLimitKb: number): Promise<string[]> {
+/** Check if a file path matches any of the allow patterns (simple glob: * matches within segment, ** matches across segments). */
+function isAllowed(filePath: string, patterns: string[]): boolean {
+  for (const pattern of patterns) {
+    // Convert simple glob to regex: ** → .*, * → [^/]*, ? → [^/]
+    const re = new RegExp(
+      `^${pattern
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*\*/g, "⬛")
+        .replace(/\*/g, "[^/]*")
+        .replace(/⬛/g, ".*")
+        .replace(/\?/g, "[^/]")}$`
+    )
+    if (re.test(filePath)) return true
+  }
+  return false
+}
+
+async function findLargeFiles(
+  cwd: string,
+  sizeLimitKb: number,
+  allowPatterns: string[]
+): Promise<string[]> {
   const range = await recentHeadRange(cwd, 10)
   const addedRaw = await git(["log", "--diff-filter=A", "--name-only", "--format=", range], cwd)
   if (!addedRaw) return []
@@ -39,6 +64,7 @@ async function findLargeFiles(cwd: string, sizeLimitKb: number): Promise<string[
   const largeFiles: string[] = []
 
   for (const filePath of addedFiles) {
+    if (allowPatterns.length > 0 && isAllowed(filePath, allowPatterns)) continue
     const entry = await checkFileSize(filePath, cwd, sizeLimitKb)
     if (entry) largeFiles.push(entry)
     if (largeFiles.length >= 10) break
@@ -66,7 +92,9 @@ async function main(): Promise<void> {
     "largeFileSizeKb",
     DEFAULT_LARGE_FILE_SIZE_KB
   )
-  const largeFiles = await findLargeFiles(cwd, sizeLimitKb)
+  const projectSettings = await readProjectSettings(cwd)
+  const allowPatterns = projectSettings?.largeFileAllowPatterns ?? []
+  const largeFiles = await findLargeFiles(cwd, sizeLimitKb, allowPatterns)
   if (largeFiles.length === 0) return
 
   blockStop(formatLargeFilesReason(largeFiles, sizeLimitKb), { includeUpdateMemoryAdvice: false })

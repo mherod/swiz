@@ -278,7 +278,7 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
 
   applySchemaFields(obj, result)
   applyBooleanFields(obj, result, ["strictNoDirectMain"])
-  applyStringArrayFields(obj, result, ["disabledHooks", "plugins"])
+  applyStringArrayFields(obj, result, ["disabledHooks", "plugins", "largeFileAllowPatterns"])
   applyHooksAndCategories(obj, result)
   return result
 }
