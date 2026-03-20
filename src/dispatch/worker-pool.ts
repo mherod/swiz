@@ -5,6 +5,7 @@
 
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
+import { debugLog } from "../debug.ts"
 
 const WORKER_COUNT = Math.max(1, (await import("node:os").then((os) => os.cpus().length)) - 1)
 
@@ -79,7 +80,7 @@ export class WorkerPool {
       }
 
       worker.onerror = (error) => {
-        console.error(`Worker ${i} error:`, error)
+        debugLog(`Worker ${i} error: ${error}`)
       }
 
       this.workers.push(worker)
