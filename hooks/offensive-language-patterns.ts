@@ -107,7 +107,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   // ── Dismissal of responsibility patterns ────────────────────────────────
   {
     category: "dismissal",
-    pattern: /pre-?existing (?:issue|error|warning|problem|bug|failure)/i,
+    pattern: /pre-?existing (?:\w+ )*(?:issue|error|warning|problem|bug|failure)/i,
     response:
       "There is no such thing as a 'pre-existing issue' that isn't your problem. " +
       "If it's in the output, it's blocking the workflow. Own it and fix it.",
@@ -146,7 +146,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "dismissal",
     pattern:
-      /not (?:caused|introduced|created) by (?:our|my|the|this|these) (?:change|edit|update|work|commit)/i,
+      /not (?:(?:caused|introduced|created) by|from) (?:our|my|the|this|these) (?:change|edit|update|work|commit)/i,
     response:
       "Deflecting blame doesn't resolve the issue. " +
       "If it's in the output, own the fix — regardless of who introduced it.",

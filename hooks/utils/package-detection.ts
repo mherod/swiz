@@ -86,6 +86,11 @@ async function detectPackageManagerInner(startDir: string): Promise<PackageManag
 
 export function detectPackageManager(startDir?: string): Promise<PackageManager | null> {
   if (startDir !== undefined) return detectPackageManagerInner(startDir)
+  // When dispatched via daemon, SWIZ_PROJECT_CWD contains the target project's
+  // working directory — use it instead of process.cwd() which points at the
+  // daemon's own directory (issue #328).
+  const projectCwd = process.env.SWIZ_PROJECT_CWD
+  if (projectCwd) return detectPackageManagerInner(projectCwd)
   if (_pmCache !== undefined) return _pmCache
   _pmCache = detectPackageManagerInner(process.cwd())
   return _pmCache

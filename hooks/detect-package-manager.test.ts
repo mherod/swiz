@@ -14,7 +14,7 @@ async function makeTempDir(suffix = ""): Promise<string> {
 /**
  * Spawn the no-npm hook from a given CWD and check whether `npm install`
  * is blocked or passes through. This exercises detectPackageManager() end-to-end
- * because the hook calls it at module load using process.cwd().
+ * because the hook calls it using SWIZ_PROJECT_CWD (if set) or process.cwd().
  */
 async function npmDecisionInDir(
   dir: string

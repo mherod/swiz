@@ -374,9 +374,18 @@ export function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
 async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const ctx = buildDispatchContext(req)
 
+  // Inject SWIZ_PROJECT_CWD so spawned hooks detect the correct package
+  // manager without relying on process.cwd() (issue #328).
+  // Set on process.env so child processes inherit it naturally — passing
+  // env explicitly to Bun.spawn causes subprocess hangs (see ed791a1).
+  const prevProjectCwd = process.env.SWIZ_PROJECT_CWD
+  if (ctx.cwd) process.env.SWIZ_PROJECT_CWD = ctx.cwd
+
   // Short-circuit: project capabilities require a git repo — skip dispatch for non-git dirs.
   if (!(await isGitRepo(ctx.cwd))) {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
+    if (prevProjectCwd !== undefined) process.env.SWIZ_PROJECT_CWD = prevProjectCwd
+    else delete process.env.SWIZ_PROJECT_CWD
     return { response: {} }
   }
 
@@ -441,6 +450,10 @@ async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
 
     return { response }
   } finally {
+    // Restore previous SWIZ_PROJECT_CWD value (issue #328).
+    if (prevProjectCwd !== undefined) process.env.SWIZ_PROJECT_CWD = prevProjectCwd
+    else delete process.env.SWIZ_PROJECT_CWD
+
     req.onDispatchLifecycle?.(
       buildLifecycleEvent("end", ctx, filteredGroups, lifecycleRequestId, lifecycleStartedAt)
     )

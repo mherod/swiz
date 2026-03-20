@@ -23,6 +23,7 @@ import {
   isWriteTool,
 } from "../tool-matchers.ts"
 import { isWithinCooldown, markHookCooldown } from "./filters.ts"
+import { getWorkerPool } from "./worker-pool.ts"
 
 // ─── Module-level constants ─────────────────────────────────────────────────
 
@@ -445,16 +446,24 @@ export async function launchAsyncHooks(
   )
 
   const promises: Promise<void>[] = []
+
+  // In daemon context, use the worker pool for parallel execution — workers
+  // stay alive across requests. In CLI context, use runHook directly —
+  // Worker threads would keep the short-lived CLI process alive, causing hangs.
+  const pool = daemonContext ? getWorkerPool() : null
+  if (pool) await pool.initialize()
+
   for (let i = 0; i < asyncEntries.length; i++) {
     const { hook } = asyncEntries[i]!
     if (!conditionResults[i]) {
       log(`   ⏭ ${hook.file} [condition false, skipping]`)
       continue
     }
-    if (daemonContext) {
+    if (daemonContext && pool) {
       log(`   → ${hook.file} [async, daemon-awaited]`)
       const timeout = hook.timeout ?? DEFAULT_TIMEOUT
-      const p = runHook(hook.file, payloadStr, timeout)
+      const p = pool
+        .runHook(hook.file, payloadStr, timeout)
         .then(() => {})
         .catch((err) => {
           log(`   ⚠ ${hook.file} [async error: ${err}]`)
