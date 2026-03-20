@@ -150,7 +150,7 @@ alwaysApply: false
 - Repo is solo (`mherod/swiz`); push directly to `main` (no PR required).
 - Run `/push` before `git push`; PreToolUse push gate requires it.
 - If collaboration guard errors, fix and re-run guard checks before pushing.
-- CI workflow (`.github/workflows/ci.yml`) `paths-ignore`: `**/*.md`, `.claude/**`, `docs/**` — markdown-only commits skip CI; pre-push hooks verify quality locally.
+- CI workflow `paths-ignore`: `.claude/**`, `docs/**` — only those paths skip CI; markdown triggers CI.
 - Pre-push checklist:
   0. **Run Step 0 collaboration guard** (`/push` skill) before every push to `main`/`master` — execute and read signal checks, never assume repo type.
   1. `git log origin/main..HEAD --oneline`.
