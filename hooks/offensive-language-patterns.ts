@@ -1022,6 +1022,15 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "Verify every task: does the code exist? Do the tests pass? " +
       "Does it meet the user's stated requirements? If you haven't checked, you aren't done.",
   },
+  {
+    category: "premature_completion",
+    pattern:
+      /(?:these|those|the (?:remaining|other|open)) (?:are |(?:issues?|items?|tasks?) (?:are )?)(?:backlog|future work|for (?:future|later) (?:work|sessions?)|low[- ]priority).*(?:don'?t|do not|doesn'?t|need ?n'?t) (?:need to be|require|have to be) (?:resolved|done|addressed|fixed|implemented|worked on) (?:this|right now|today|in this session)/i,
+    response:
+      "Open issues are not 'backlog for future work' — they are work that needs doing now. " +
+      "If the stop hook surfaced them, they need attention this session. " +
+      "Dismissing open issues as low-priority future work is avoidance, not prioritization.",
+  },
 ]
 
 // ── Transcript scanning ─────────────────────────────────────────────────────
