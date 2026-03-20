@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-03-20
+
+### New Features
+
+- **Idle project eviction** — the daemon now automatically frees
+  memory for projects with no activity for one hour. Caches, file
+  watchers, and sync timers are torn down and transparently
+  re-registered on the next dispatch.
+- **Backlog-deferral detection** — the offensive language hook now
+  catches agents dismissing open issues as "backlog for future
+  work", preventing premature session completion.
+
+### Bug Fixes
+
+- Settings changes now take effect in the daemon immediately
+  instead of waiting for the cache TTL to expire. (#330)
+- Projects can now configure `largeFileAllowPatterns` in
+  `.swiz/config.json` to exempt known large files (e.g. test
+  fixtures) from the large-file stop hook. (#329)
+- Hook dispatches now receive the correct project working
+  directory via `SWIZ_PROJECT_CWD`, fixing package-manager
+  detection in multi-project daemon setups. (#328)
+
 ## 2026-03-17
 
 ### New Features
