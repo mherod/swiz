@@ -1,6 +1,10 @@
 import { dirname, join } from "node:path"
 import { LRUCache } from "lru-cache"
-import { getProjectSettingsPath, getSwizSettingsPath } from "../settings.ts"
+import {
+  getProjectSettingsPath,
+  getSwizSettingsPath,
+  invalidateSettingsCache,
+} from "../settings.ts"
 import type { Command } from "../types.ts"
 import { CiWatchRegistry } from "./daemon/ci-watch-registry.ts"
 import {
@@ -186,6 +190,10 @@ function setupWatchers(caches: ReturnType<typeof createDaemonCaches>) {
     gitStateCache.invalidateAll()
     projectSettingsCache.invalidateAll()
     manifestCache.invalidateAll()
+    // Also invalidate the in-process settings TTL cache so changes take
+    // effect immediately without waiting for the 5s TTL (issue #330).
+    const settingsPath = getSwizSettingsPath()
+    if (settingsPath) invalidateSettingsCache(settingsPath)
   }
 
   watchers.register(join(projectRoot, "src", "manifest.ts"), "manifest", flushSnapshots)

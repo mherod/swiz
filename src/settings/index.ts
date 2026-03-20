@@ -8,6 +8,7 @@ export {
   getPrPollStatePath,
   getStatePath,
   getSwizSettingsPath,
+  invalidateSettingsCache,
   type ReadOptions,
   readProjectSettings,
   readProjectState,

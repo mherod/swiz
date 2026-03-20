@@ -484,7 +484,7 @@ interface SettingsCacheEntry {
 
 const _settingsCache = new Map<string, SettingsCacheEntry>()
 
-function invalidateSettingsCache(path: string): void {
+export function invalidateSettingsCache(path: string): void {
   _settingsCache.delete(path)
 }
 

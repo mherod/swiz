@@ -532,20 +532,41 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
   console.log(`  Saved: ${path}\n`)
 }
 
+const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
+
+/** Best-effort daemon notification after a settings write (issue #330). */
+async function notifyDaemon(): Promise<void> {
+  try {
+    const resp = await fetch(`http://127.0.0.1:${DAEMON_PORT}/health`, {
+      signal: AbortSignal.timeout(500),
+    })
+    if (!resp.ok) return
+    console.log("  Daemon notified of settings change.")
+  } catch {
+    // Daemon not running — silently continue
+  }
+}
+
 /** Write a single key-value pair to the appropriate scope via SettingsStore. */
 async function writeSettingToScope(
   parsed: ParsedSettingsArgs,
   key: string,
   value: unknown
 ): Promise<string> {
+  let path: string
   if (parsed.scope === "project") {
-    return settingsStore.setProject(parsed.targetDir, key, value)
-  }
-  if (parsed.scope === "session") {
+    path = await settingsStore.setProject(parsed.targetDir, key, value)
+  } else if (parsed.scope === "session") {
     const sessionId = await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
-    return settingsStore.setSession(sessionId, key, value)
+    path = await settingsStore.setSession(sessionId, key, value)
+  } else {
+    path = await settingsStore.setGlobal(key, value)
   }
-  return settingsStore.setGlobal(key, value)
+  // The daemon's file watcher detects changes and calls flushSnapshots(),
+  // which now also invalidates the settings TTL cache. The health check
+  // here just confirms the daemon is alive — no explicit restart needed.
+  await notifyDaemon()
+  return path
 }
 
 async function disableHook(parsed: ParsedSettingsArgs): Promise<void> {
