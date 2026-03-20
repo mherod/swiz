@@ -114,6 +114,20 @@ export class FileWatcherRegistry {
     }
   }
 
+  /** Close and remove all watchers whose label ends with the given suffix. */
+  unregisterByLabelSuffix(suffix: string): number {
+    let removed = 0
+    for (const [path, entry] of this.entries) {
+      if (entry.label.endsWith(suffix)) {
+        entry.watcher?.close()
+        entry.watcher = null
+        this.entries.delete(path)
+        removed++
+      }
+    }
+    return removed
+  }
+
   close(): void {
     for (const entry of this.entries.values()) {
       entry.watcher?.close()

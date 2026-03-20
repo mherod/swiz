@@ -62,7 +62,7 @@ async function makeTempDir(prefix = "swiz-usage-test-"): Promise<string> {
 async function runUsage(
   args: string[]
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn(["bun", INDEX_PATH, "usage", ...args], {
+  const proc = Bun.spawn([process.execPath, INDEX_PATH, "usage", ...args], {
     stdout: "pipe",
     stderr: "pipe",
     env: process.env,

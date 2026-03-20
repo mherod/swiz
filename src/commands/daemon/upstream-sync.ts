@@ -85,6 +85,16 @@ export class UpstreamSyncRegistry {
     }))
   }
 
+  /** Stop the periodic sync timer and remove a single project. */
+  unregister(cwd: string): boolean {
+    const entry = this.entries.get(cwd)
+    if (!entry) return false
+    if (entry.timer) clearTimeout(entry.timer)
+    entry.timer = null
+    this.entries.delete(cwd)
+    return true
+  }
+
   close(): void {
     for (const entry of this.entries.values()) {
       if (entry.timer) clearTimeout(entry.timer)

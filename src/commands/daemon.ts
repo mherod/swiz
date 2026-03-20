@@ -44,6 +44,7 @@ import { computeWarmStatusLineSnapshot, type WarmStatusLineSnapshot } from "./st
 
 const TRANSCRIPT_MEMORY_RETENTION_MS = 12 * 60 * 60 * 1000
 const TRANSCRIPT_MEMORY_PRUNE_INTERVAL_MS = 5 * 60 * 1000
+const PROJECT_IDLE_EVICTION_MS = 60 * 60 * 1000 // 1 hour
 
 async function handleDaemonSubcommand(args: string[], port: number): Promise<boolean> {
   if (args.includes("status")) {
@@ -243,7 +244,8 @@ function setupWatchers(caches: ReturnType<typeof createDaemonCaches>) {
 
 function createPruner(
   state: ReturnType<typeof createDaemonState>,
-  caches: ReturnType<typeof createDaemonCaches>
+  caches: ReturnType<typeof createDaemonCaches>,
+  registeredProjects: Set<string>
 ) {
   let lastPruneAt = 0
   return () => {
@@ -264,6 +266,26 @@ function createPruner(
       }
       if (recent.length !== toolCalls.length) state.sessionToolCalls.set(sessionId, recent)
     }
+
+    // Evict projects idle for longer than PROJECT_IDLE_EVICTION_MS
+    const projectCutoff = now - PROJECT_IDLE_EVICTION_MS
+    for (const [cwd, lastSeen] of state.projectLastSeen) {
+      if (lastSeen >= projectCutoff) continue
+      state.projectLastSeen.delete(cwd)
+      state.projectMetrics.delete(cwd)
+      registeredProjects.delete(cwd)
+      caches.ghCache.invalidateProject(cwd)
+      caches.eligibilityCache.invalidateProject(cwd)
+      caches.gitStateCache.invalidateProject(cwd)
+      caches.projectSettingsCache.invalidateProject(cwd)
+      caches.manifestCache.invalidateProject(cwd)
+      caches.cooldownRegistry.invalidateProject(cwd)
+      caches.upstreamSyncRegistry.unregister(cwd)
+      caches.watchers.unregisterByLabelSuffix(`:${cwd}`)
+      for (const key of caches.snapshots.keys()) {
+        if (key.startsWith(cwd)) caches.snapshots.delete(key)
+      }
+    }
   }
 }
 
@@ -273,7 +295,7 @@ async function startDaemonProcess(_args: string[], port: number): Promise<void> 
   const { registeredProjects, registerProjectWatchers } = setupWatchers(caches)
 
   state.touchProject(process.cwd())
-  const pruneTranscriptMemory = createPruner(state, caches)
+  const pruneTranscriptMemory = createPruner(state, caches, registeredProjects)
   const resolveSnapshot = buildSnapshotResolver(caches.snapshots)
 
   const server = startDaemonWebServer({
