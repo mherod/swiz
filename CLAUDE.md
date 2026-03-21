@@ -58,8 +58,8 @@ alwaysApply: false
 - **DO NOT** write `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: ..., additionalContext: ... } }))` — use `emitContext(eventName, context, cwd)` instead.
 - **DO NOT** write `console.log(JSON.stringify({ decision: "block", reason: ... }))` in Stop hooks — use `blockStop(reason)` or `blockStopRaw(reason)` instead.
 - **Git Utilities Policy** — canonical locations, no duplication:
-  - `hooks/hook-utils.ts` — hook Git helpers: regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`, etc.), extractors, runtime helpers (`git`, `gh`, `ghJson`).
-  - `src/git-helpers.ts` — command Git helpers: classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries.
+  - `hooks/utils/hook-utils.ts` — hook Git helpers: regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`, etc.), extractors, runtime helpers (`git`, `gh`, `ghJson`). Test utils in `hooks/utils/test-utils.ts`.
+  - `src/git-helpers.ts` — command Git helpers: classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries. `git()` strips `GIT_*` env vars (lefthook `GIT_DIR` fix).
   - DO NOT define Git utilities locally — import from canonical source. Duplicates: move to canonical file, update consumers, delete local.
 - **GitHub API Throttle** (`src/gh-rate-limit.ts`): `await acquireGhSlot()` before every `gh` CLI call. `gh()` calls it; direct `Bun.spawn(["gh"...` must too. 4500 req/hr rolling window. Exempt: `gh auth status`, `gh run watch`.
 - Skill helpers: `skillExists` (checks `.skills/` and `~/.claude/skills/` for `SKILL.md`), `skillAdvice`.
@@ -80,12 +80,10 @@ alwaysApply: false
 - DO NOT hardcode `/tmp` sentinel session IDs in tests; use unique IDs or `mtime` checks.
 - For `pgrep` checks, use ancestry (`process.ppid`) and repo scope (`lsof -p <pid> -d cwd -Fn`).
 - Reference implementation: `hooks/stop-git-status.ts`.
-- For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts`; use encoding `cwd.replace(/[/.]/g, "-")`.
-- DO NOT reimplement project-key logic with slash-only replacement (`/\//g`).
-- In `hook-utils.ts`, use lazy `await import("../src/transcript-utils.ts")` for `projectKeyFromCwd` consumers to avoid circular imports.
-- For workflow enforcement, scan `transcript_path` for reminder and completion evidence instead of extra state files/flags.
-- Pattern: `pretooluse-update-memory-enforcement.ts` requires transcript evidence of reading `update-memory/SKILL.md` and writing a `.md` file before unblocking.
-- Memory-reminder text must include explicit trigger cause.
+- For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts`; uses `cwd.replace(/[/.]/g, "-")` — DO NOT reimplement with slash-only replacement.
+- In `hook-utils.ts`, use lazy `await import(...)` for `projectKeyFromCwd` to avoid circular imports.
+- For workflow enforcement, scan `transcript_path` for reminder/completion evidence — no extra state files.
+- `pretooluse-update-memory-enforcement.ts` requires transcript evidence of reading `update-memory/SKILL.md` and writing `.md` before unblocking. Include trigger cause in reminder text.
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Sandbox enforcement hooks (`pretooluse-protect-sandbox`, `pretooluse-sandboxed-edits`) delegate to it. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, { crossRepo: true, hostname })`.
 ## Task Data
 - Task storage: `~/.claude/tasks/<session-id>/<id>.json`; audit log: `~/.claude/tasks/<session-id>/.audit-log.jsonl`.
