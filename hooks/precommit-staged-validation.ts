@@ -10,6 +10,8 @@ import { git, isGitRepo } from "./utils/hook-utils.ts"
 const CONFLICT_MARKER_RE = /^[<>=]{7}( |$)/
 const FOCUSED_TEST_RE = /\b(describe\.only|it\.only|test\.only|fdescribe|fit)\b/
 const STAGED_SOURCE_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/
+/** Files excluded from focused test scanning — hook/test files legitimately reference these patterns. */
+const FOCUSED_TEST_EXCLUDE_RE = /^hooks\/|\.test\.(ts|tsx|js|jsx)$|__tests__\//
 
 async function getStagedFiles(cwd: string): Promise<string[]> {
   const output = await git(["diff", "--cached", "--name-only", "--diff-filter=ACMR"], cwd)
@@ -47,7 +49,11 @@ function scanDiff(diff: string): Finding[] {
       findings.push({ file: currentFile, line: addedLine.slice(0, 80), issue: "conflict marker" })
     }
 
-    if (STAGED_SOURCE_RE.test(currentFile) && FOCUSED_TEST_RE.test(addedLine)) {
+    if (
+      STAGED_SOURCE_RE.test(currentFile) &&
+      !FOCUSED_TEST_EXCLUDE_RE.test(currentFile) &&
+      FOCUSED_TEST_RE.test(addedLine)
+    ) {
       findings.push({
         file: currentFile,
         line: addedLine.trim().slice(0, 80),
