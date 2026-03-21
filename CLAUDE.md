@@ -102,6 +102,7 @@ alwaysApply: false
 - `/commit` checks: branch verification, task preflight, Conventional Commits `<type>(<scope>): <summary>`.
 - Run `git branch --show-current` early to satisfy commit gate transcript checks.
 - Call task tools (`TaskUpdate`, `TaskCreate`, `TaskList`, `TaskGet`) regularly: at least every 10 calls; staleness gate triggers at 20.
+- **DO**: Use native `TaskCreate`/`TaskUpdate`/`TaskList`/`TaskGet` for task creation, status transitions, and queries. **DON'T**: Use `swiz tasks` CLI for status transitions — native tools are canonical. Only exception: `swiz tasks complete` (requires `--evidence`).
 - Call `TaskUpdate` after each file; add updates at least every 3 edits.
 - Create tasks before non-exempt Bash.
 - **DON'T**: Complete last in-progress task while shell commands remain. Keep ≥1 `in_progress` until all shell work finishes.
@@ -109,9 +110,8 @@ alwaysApply: false
 - `find` is not exempt; use `rg` or Glob.
 - DO NOT create task solely for `git push`, `gh`, or `swiz issue close/comment` (`SWIZ_ISSUE_RE`, `GH_CMD_RE`).
 - Stop requires no uncommitted changes (`stop-git-status.sh`).
-- **Task completion**: `swiz tasks complete <id> --evidence "note:..."`. Valid prefixes: `commit:`, `pr:`, `file:`, `test:`, `note:`. **DON'T**: Use `TaskUpdate status=completed` — hook rejects it; parallel calls all fail.
-- **`swiz tasks complete` has NO `--subject` flag**. For native-tool tasks: stub via `swiz tasks update <id> --subject "..." --status in_progress`, then complete.
-- **`swiz tasks update` bulk IDs**: `swiz tasks update <id1> <id2> ... [--subject TEXT] [--status STATUS]` — leading non-flag tokens are IDs.
+- **Task completion**: `swiz tasks complete <id> --evidence "..."`. Prefixes: `commit:`, `pr:`, `file:`, `test:`, `note:`. **DON'T**: Use `TaskUpdate status=completed` — hook rejects it.
+- **`swiz tasks complete` has NO `--subject` flag**. Stub via `swiz tasks update <id> --subject "..."`, then complete.
 - **DON'T**: Assume CI success from partial output. Always run `gh run view <run-id> --json conclusion,status,jobs` and confirm every job reached `conclusion: "success"`.
 - Mark tasks complete immediately.
 - Treat `gh issue create` and task completion as atomic; recover with `swiz tasks complete <id> --session <session-id> --evidence "note:..."`.
