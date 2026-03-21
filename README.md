@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**101 hooks. 12 event types. Every agent. Zero compromises.**
+**102 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -177,7 +177,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-offensive-language.ts` | Scans the last assistant message for two categories of bad behavior: (1) **hedging/deferring** — asking permission instead of acting ("Would you like me to…", "Shall I proceed?", "Let me know if you'd like…"), and (2) **dismissing responsibility** — deflecting issues as "pre-existing", "unrelated to our changes", or "safely ignored". Each pattern triggers a tailored scolding. The agent must produce a new message acknowledging the feedback before the hook allows tool calls to proceed. |
 | `posttooluse-speak-narrator.ts` | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async. |
 
-### PostToolUse (19)
+### PostToolUse (20)
 
 PostToolUse hooks run after a tool completes. They can feed error context back to the agent or inject advisory information.
 
@@ -201,6 +201,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 | `posttooluse-push-cooldown.ts` | After any `git push` executes, writes the cooldown sentinel. Pairs with `pretooluse-push-cooldown.ts` — by writing *after* the push runs, only successful pushes arm the cooldown, so blocked pushes no longer trigger a false 60-second wait. |
 | `posttooluse-verify-push.ts` | After any `git push`, verifies the local HEAD SHA matches the remote tracking branch SHA. Blocks with a hard error if they diverge — prevents the agent from declaring push success when the commit didn't land on the remote. |
 | `posttooluse-state-transition.ts` | Auto-transitions project state based on PR lifecycle: `gh pr create` moves `in-development` → `awaiting-feedback`; `gh pr merge` moves `awaiting-feedback` → `in-development`. |
+| `posttooluse-task-audit-sync.ts` | After TaskCreate or TaskUpdate, writes the task subject and status to the swiz audit log. Ensures `recoverSubjectFromAuditLogs` can recover original task subjects after context compaction orphans the native task files. |
 | `posttooluse-upstream-sync-on-push.ts` | After `git push` or any `gh pr`/`gh issue` mutation command, fires a non-blocking sync request to the daemon so the IssueStore reflects the new GitHub state immediately — without waiting for the next 2-minute sync interval. |
 
 ### SessionStart (5)
