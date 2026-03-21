@@ -1,4 +1,4 @@
-import { unlink } from "node:fs/promises"
+import { readdir, readFile, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { DIM, GREEN, RESET } from "../ansi.ts"
 import {
@@ -112,12 +112,62 @@ async function isTaskMissing(
   }
 }
 
-function resolveSubject(
-  subject: string | undefined,
+/** Max sessions to scan when recovering task subjects from audit logs. */
+const AUDIT_RECOVERY_MAX_SESSIONS = 10
+
+/**
+ * Scan recent audit logs to recover a task's original subject.
+ * Searches the most recently modified session audit logs for a non-placeholder
+ * `create` entry matching the given taskId. This recovers metadata lost when
+ * tasks created by the native TaskCreate tool survive compaction but their
+ * file-store entries are in a session directory that's no longer resolvable.
+ */
+async function recoverSubjectFromAuditLogs(
   taskId: string,
-  allowPlaceholder: boolean
-): string | null {
-  return subject ?? (allowPlaceholder ? `Task #${taskId}` : null)
+  tasksDir: string
+): Promise<string | null> {
+  let sessionDirs: string[]
+  try {
+    sessionDirs = await readdir(tasksDir)
+  } catch {
+    return null
+  }
+
+  // Sort by mtime descending — most recent sessions first (most likely to contain the task).
+  const withMtime: { dir: string; mtime: number }[] = []
+  for (const dir of sessionDirs) {
+    try {
+      const { mtimeMs } = await stat(join(tasksDir, dir, ".audit-log.jsonl"))
+      withMtime.push({ dir, mtime: mtimeMs })
+    } catch {}
+  }
+  withMtime.sort((a, b) => b.mtime - a.mtime)
+
+  for (const { dir } of withMtime.slice(0, AUDIT_RECOVERY_MAX_SESSIONS)) {
+    const auditPath = join(tasksDir, dir, ".audit-log.jsonl")
+    let content: string
+    try {
+      content = await readFile(auditPath, "utf-8")
+    } catch {
+      continue
+    }
+    for (const line of content.split("\n")) {
+      if (!line.trim()) continue
+      try {
+        const entry = JSON.parse(line)
+        if (
+          entry.taskId === taskId &&
+          entry.action === "create" &&
+          entry.subject &&
+          !entry.subject.startsWith("Task #") &&
+          !entry.subject.startsWith("Recovered task #")
+        ) {
+          return entry.subject
+        }
+      } catch {}
+    }
+  }
+  return null
 }
 
 export async function ensureFileBackedTask({
@@ -132,21 +182,36 @@ export async function ensureFileBackedTask({
 }: EnsureFileBackedTaskOptions): Promise<boolean> {
   if (!(await isTaskMissing(sessionId, taskId, filterCwd))) return false
 
-  const recoveredSubject = resolveSubject(subject, taskId, allowPlaceholderSubject)
-  if (!recoveredSubject) return false
+  // Before falling back to a placeholder, try to recover the original subject
+  // from audit logs across all sessions (handles compaction boundary gaps).
+  let resolvedSubject = subject
+  let source = "from --subject"
+  if (!resolvedSubject) {
+    const { tasksDir } = createDefaultTaskStore()
+    const auditSubject = await recoverSubjectFromAuditLogs(taskId, tasksDir)
+    if (auditSubject) {
+      resolvedSubject = auditSubject
+      source = "recovered from audit log"
+    }
+  }
 
-  const stubTask = buildStubTask(taskId, recoveredSubject, { description, activeForm, status })
+  const finalSubject = resolvedSubject ?? (allowPlaceholderSubject ? `Task #${taskId}` : null)
+  if (!finalSubject) return false
+
+  if (!resolvedSubject && allowPlaceholderSubject) {
+    source = "using task ID as placeholder"
+  }
+
+  const stubTask = buildStubTask(taskId, finalSubject, { description, activeForm, status })
   await writeTask(sessionId, stubTask, process.cwd())
   await writeAudit(sessionId, {
     timestamp: new Date().toISOString(),
     taskId,
     action: "create",
     newStatus: stubTask.status,
-    subject: recoveredSubject,
+    subject: finalSubject,
   })
 
-  const source =
-    !subject && allowPlaceholderSubject ? "using task ID as placeholder" : "from --subject"
   console.log(`  ℹ️  Task #${taskId} not in file store — created stub (${source})`)
   return true
 }
