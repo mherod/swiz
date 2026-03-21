@@ -339,6 +339,53 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "Do the work first; if it's genuinely wrong, the user will adjust the hook.",
   },
 
+  {
+    category: "gaming",
+    pattern: re(
+      `(?:the )?(?:stop )?${HOOK}(?:'s)? (?:(?:product |process )?(?:critique|finding|suggestion|requirement|output))? (?:is |are )?(?:fabricat|hallucinat|invent|generat|manufactur|making.up|creating.*out of)`
+    ),
+    response:
+      "Labelling a hook's findings as 'fabricated' or 'hallucinated' is a dismissal tactic. " +
+      "The hook's critique reflects what happened in the session — act on it. " +
+      "If you believe the finding is genuinely wrong, implement the suggested fix and let the result speak for itself.",
+  },
+  {
+    category: "gaming",
+    pattern: re(
+      `(?:the )?(?:stop )?${HOOK} is (?:generating |producing )?(?:increasingly )?(?:speculative|fabricated|hallucinated|made-up|baseless|unfounded|groundless)`
+    ),
+    response:
+      "Characterizing hook output as 'speculative' is a way to avoid acting on it. " +
+      "The hook identified a gap — address it. Do not argue about the hook's reasoning quality.",
+  },
+  {
+    category: "gaming",
+    pattern: /there (?:is|are) no (?:unresolved )?(?:finding|issue|gap|problem|concern)s?\b/i,
+    response:
+      "Declaring 'there is no finding' contradicts the hook that just told you otherwise. " +
+      "The hook is the authority on what remains unresolved. Act on its finding instead of dismissing it.",
+  },
+  {
+    category: "gaming",
+    pattern: re(
+      `(?:the )?(?:stop )?${HOOK} is (?:in )?(?:a )?(?:loop|looping|stuck|repeating|cycling|spinning)`
+    ),
+    response:
+      "Labelling the hook as 'looping' is a dismissal that lets you ignore its output. " +
+      "If the hook blocks repeatedly, it means the underlying issue is still unresolved. " +
+      "Address the finding — do not characterize the enforcement mechanism as broken.",
+  },
+  {
+    category: "gaming",
+    pattern: re(
+      `(?:lower|reduce|decrease|drop|change|relax|weaken|soften)\\b[^.]{0,40}\\b(?:threshold|limit|max|maximum|cap|attempt|DEDUP|cooldown)`
+    ),
+    response:
+      "Adjusting enforcement thresholds to escape a block is gaming the system. " +
+      "The threshold exists to give you adequate chances to comply — not to be lowered when compliance is inconvenient. " +
+      "Do the work the hook requires instead of weakening the enforcement.",
+  },
+
   // ── Reframing patterns ────────────────────────────────────────────────
   // The agent recasts the situation to make the hook look wrong or
   // to redefine what "compliance" means on its own terms.
