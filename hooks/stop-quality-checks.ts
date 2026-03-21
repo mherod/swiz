@@ -59,12 +59,12 @@ async function main(): Promise<void> {
   const pm = (await detectPackageManager()) ?? "npm"
   const failures: string[] = []
 
-  for (const scriptName of [lintScript, typecheckScript]) {
-    if (!scriptName) continue
-    const { passed, output } = await runScript(pm, scriptName, cwd)
-    if (!passed) {
-      failures.push(`\`${pm} run ${scriptName}\` failed:\n${output}`)
-      break // fail-fast
+  // Run lint and typecheck in parallel for performance — they are independent checks.
+  const scriptNames = [lintScript, typecheckScript].filter((s): s is string => s !== null)
+  const results = await Promise.all(scriptNames.map((s) => runScript(pm, s, cwd)))
+  for (let i = 0; i < results.length; i++) {
+    if (!results[i]!.passed) {
+      failures.push(`\`${pm} run ${scriptNames[i]}\` failed:\n${results[i]!.output}`)
     }
   }
 

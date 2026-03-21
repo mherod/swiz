@@ -776,9 +776,14 @@ async function handleNoTranscript(
   inputCwd: string | undefined,
   ambitionMode: AmbitionMode
 ): Promise<void> {
-  const taskContext = await loadTaskContext(sessionId)
-  const refinementStatus = await checkRefinementNeeds(cwd)
-  const statusParts = [await checkChangelogStaleness(cwd), refinementStatus].filter(Boolean)
+  // Parallelize all independent I/O operations
+  const [taskContext, refinementStatus, changelogStatus, repoFiles] = await Promise.all([
+    loadTaskContext(sessionId),
+    checkRefinementNeeds(cwd),
+    checkChangelogStaleness(cwd),
+    git(["ls-files", "hooks/", "src/"], cwd).catch(() => ""),
+  ])
+  const statusParts = [changelogStatus, refinementStatus].filter(Boolean)
   const fallbackPrompt = buildPrompt({
     taskSection: buildTaskSection(taskContext),
     userMessagesSection: "",
@@ -787,7 +792,7 @@ async function handleNoTranscript(
     ambitionMode,
     cwd: inputCwd,
     docsOnly: false,
-    repoFiles: await git(["ls-files", "hooks/", "src/"], cwd).catch(() => ""),
+    repoFiles,
   })
   terminate(
     "block",
@@ -822,8 +827,12 @@ async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentRe
   const context = formatTurnsAsContext(turns)
   const taskSection = buildTaskSection(taskContext)
   const userMessagesSection = buildUserMessagesSection(turns)
-  const statusParts = [await checkChangelogStaleness(cwd), refinementStatus].filter(Boolean)
-  const repoFiles = docsOnly ? "" : await git(["ls-files", "hooks/", "src/"], cwd).catch(() => "")
+  // Parallelize I/O-bound pre-AI data gathering
+  const [changelogStatus, repoFiles] = await Promise.all([
+    checkChangelogStaleness(cwd),
+    docsOnly ? Promise.resolve("") : git(["ls-files", "hooks/", "src/"], cwd).catch(() => ""),
+  ])
+  const statusParts = [changelogStatus, refinementStatus].filter(Boolean)
   const prompt = buildPrompt({
     taskSection,
     userMessagesSection,
@@ -935,11 +944,16 @@ async function resolveSessionContext(
     )
   }
 
+  // Parallelize independent I/O operations
+  const [taskContext, refinementStatus] = await Promise.all([
+    loadTaskContext(input.session_id ?? ""),
+    checkRefinementNeeds(cwd),
+  ])
   return {
     transcriptData,
     docsOnly: isDocsOnlySession(transcriptData.editedPaths),
-    taskContext: await loadTaskContext(input.session_id ?? ""),
-    refinementStatus: await checkRefinementNeeds(cwd),
+    taskContext,
+    refinementStatus,
   }
 }
 
