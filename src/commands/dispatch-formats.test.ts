@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { mkdir, utimes, writeFile } from "node:fs/promises"
+import { mkdir, unlink, utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { getSessionTasksDir } from "../../hooks/hook-utils.ts"
 import { useTempDir } from "../../hooks/test-utils.ts"
+import { hookCooldownPath } from "../dispatch/filters.ts"
 
 interface DispatchResult {
   stdout: string
@@ -110,6 +111,9 @@ describe("dispatch output formats", () => {
     // createProjectDir() ensures the cwd is a git repo with CLAUDE.md so enforcement hooks
     // apply (the guard added in issue #28 skips enforcement in non-project directories).
     const cwd = await createProjectDir()
+    // Clear any cooldown sentinel left by a prior concurrent test run so require-tasks fires.
+    const cooldownFile = hookCooldownPath("pretooluse-require-tasks.ts", cwd)
+    await unlink(cooldownFile).catch(() => {})
     const result = await dispatch({
       event: "preToolUse",
       hookEventName: "PreToolUse",
