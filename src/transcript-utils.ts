@@ -822,7 +822,7 @@ export function stripQuotedText(text: string): string {
     .replace(/`[^`]*`/g, "") // inline code
     .replace(/```[\s\S]*?```/g, "") // fenced code blocks
     .replace(/"[^"]*"/g, "") // double-quoted
-    .replace(/'[^']*'/g, "") // single-quoted
+    .replace(/(?<!\w)'[^']*'(?!\w)/g, "") // single-quoted (lookbehind avoids contractions)
     .replace(/\u2018[^\u2019]*\u2019/g, "") // smart single quotes
     .replace(/\u201c[^\u201d]*\u201d/g, "") // smart double quotes
 }
