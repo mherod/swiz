@@ -355,7 +355,7 @@ export const manifest: HookGroup[] = [
   {
     event: "preCommit",
     scheduled: true,
-    hooks: [],
+    hooks: [{ file: "precommit-staged-validation.ts", timeout: 10 }],
   },
 ]
 

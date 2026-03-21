@@ -135,6 +135,18 @@ export const sessionHookInputSchema = z.looseObject({
 
 export type SessionHookInput = z.infer<typeof sessionHookInputSchema>
 
+/**
+ * PreCommit hook input envelope.
+ * Dispatched by lefthook pre-commit via `swiz dispatch preCommit`.
+ * Contains cwd and optionally the list of staged files.
+ */
+export const preCommitHookInputSchema = z.looseObject({
+  cwd: z.string().optional(),
+  staged_files: z.array(z.string()).optional(),
+})
+
+export type PreCommitHookInput = z.infer<typeof preCommitHookInputSchema>
+
 // ─── Hook output envelope schema ─────────────────────────────────────────────
 
 /**

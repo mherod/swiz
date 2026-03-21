@@ -36,6 +36,7 @@ const TOOL_NAME_OPTIONAL_EVENTS = new Set([
   "subagentStop",
   "userPromptSubmit",
   "stop",
+  "preCommit",
 ])
 
 export function parsePayload(payloadStr: string): {

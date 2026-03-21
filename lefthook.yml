@@ -34,6 +34,11 @@ pre-commit:
       skip:
         - merge
         - rebase
+    swiz-precommit:
+      run: echo '{"cwd":"'$(pwd)'"}' | SWIZ_DIRECT=1 bun run index.ts dispatch preCommit
+      skip:
+        - merge
+        - rebase
 
 pre-push:
   commands:
