@@ -23,17 +23,21 @@ alwaysApply: false
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.
 ## Hook System
 - Hooks live in `hooks/`; canonical manifest is `manifest` in `src/manifest.ts`.
-- Canonical events are camelCase: `stop`, `preToolUse`, `postToolUse`, `sessionStart`, `userPromptSubmit`.
-- Translation layer only:
-  - `EVENT_MAP` maps canonical events to Claude and Cursor names (`UserPromptSubmit` -> Cursor `beforeSubmitPrompt`).
-  - `TOOL_ALIASES` maps tool names per agent (`Bash` vs `Shell`).
-  - Claude config uses nested matcher groups in `~/.claude/settings.json`; Cursor uses flat `version: 1` list in `~/.cursor/hooks.json`.
-- Add hook flow:
+- Canonical events are camelCase: `stop`, `preToolUse`, `postToolUse`, `sessionStart`, `userPromptSubmit`, `preCommit`.
+- Translation: `EVENT_MAP` (canonical→agent events), `TOOL_ALIASES` (per-agent tool names). Claude uses nested matchers in `settings.json`; Cursor uses flat list in `hooks.json`.
+- Add hook flow (agent events):
   1. Add `hooks/<name>.ts`.
   2. Add entry to `manifest` in `src/manifest.ts`.
-  3. If new event: update `DISPATCH_ROUTES` in `src/commands/dispatch.ts` and each agent `eventMap` in `src/agents.ts`.
+  3. If new event: update `DISPATCH_ROUTES` in `src/dispatch/index.ts` and each agent `eventMap` in `src/agents.ts`.
   4. Run `swiz install --dry-run`.
   5. Run `swiz install` to write dispatch entries.
+- Add hook flow (non-agent/scheduled events like `preCommit`, `prPoll`):
+  1. Add `hooks/<name>.ts`.
+  2. Add entry to `manifest` with `scheduled: true` — skips agent eventMap validation and `swiz install`.
+  3. Add `DISPATCH_ROUTES` entry in `src/dispatch/index.ts`.
+  4. Add event to `TOOL_NAME_OPTIONAL_EVENTS` in `src/dispatch/execute.ts`.
+  5. Add `DISPATCH_TIMEOUTS` entry in `src/manifest.ts`.
+  6. Wire into `lefthook.yml` with `SWIZ_DIRECT=1 bun run index.ts dispatch <event>`.
 - Keep `DISPATCH_ROUTES`, `manifest`, and agent `eventMap` synchronized.
 - `validateDispatchRoutes()` in `src/manifest.ts` must pass from both `swiz dispatch` and `swiz install`.
 - Keep `src/dispatch-routing.test.ts` passing.
@@ -41,6 +45,8 @@ alwaysApply: false
 - DO NOT add sync hooks to unmatchered preToolUse groups — `manifest.test.ts` requires `matcher` for groups with sync hooks; async-only groups are exempt.
 - DO NOT hard-code agent-specific event names or tool names in hook scripts.
 - `classifyHookOutput` in `src/dispatch/engine.ts` extracts JSON from polluted stdout. DO NOT revert — defense-in-depth.
+- In `lefthook.yml`, use `SWIZ_DIRECT=1 bun run index.ts dispatch <event>` — without `SWIZ_DIRECT=1`, the global-link check blocks execution.
+- Hooks scanning staged diffs for code patterns (`.only`, `fdescribe`, etc.) must exclude `hooks/` and test files via `FOCUSED_TEST_EXCLUDE_RE` — regex definitions in hook source trigger false positives on themselves.
 ## Writing Hooks
 - Update `README.md` whenever `src/manifest.ts` changes.
 - `src/readme-hook-counts.test.ts` invariants:
@@ -143,8 +149,8 @@ alwaysApply: false
 - Push is inseparable from commit.
 - Await background pushes (`TaskOutput block:true`) before CI verification.
 - Use `swiz issue resolve <number> --body "<text>"` (not `gh issue comment` + `gh issue close`); close-only: `swiz issue close <number>`.
-- **DON'T** close as `duplicate`/`wontfix` without verifying each acceptance criterion. Requires file+line evidence.
-- **DO** check issue state before resolving: `gh api repos/:owner/:repo/issues/{number} --jq '.state'`. `Fixes #N` auto-closes on push — `swiz issue resolve` on a closed issue only posts a comment.
+- **DON'T** close as `duplicate`/`wontfix` without file+line evidence for each acceptance criterion.
+- **DO** check issue state before resolving: `gh api repos/:owner/:repo/issues/{number} --jq '.state'`; `Fixes #N` auto-closes on push.
 ## Push and CI
 - Repo is solo (`mherod/swiz`); push directly to `main` (no PR required).
 - Run `/push` before `git push`; PreToolUse push gate requires it.
@@ -169,12 +175,12 @@ alwaysApply: false
 - Push-command parsing in hooks: token-parse to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
 - DO NOT call `TaskUpdate` or `TaskList` after push starts.
 - DO NOT stop with unpushed commits.
-- DO NOT push to `main`/`master` without running the Step 0 collaboration guard and reading its output (`dbe3440`, `2339489` skipped this gate).
+- DO NOT push to `main`/`master` without running the Step 0 collaboration guard and reading its output.
 - DO NOT skip `git log origin/main..HEAD --oneline` pre-push review.
 - DO NOT run branch/collaboration/open-PR checks after push.
-- DO NOT add `Co-Authored-By: Claude` or other AI attribution in commits/PR descriptions.
-- DO NOT use destructive git commands: `git revert`, `git restore`, `git stash`, `git reset --hard`, `git checkout -- <file>`; use `git reflog` for recovery.
-- DO: When reverting file edits, read the full file first — Biome auto-formatting may have changed other sections, so naive diff-based undos create new errors.
+- DO NOT add `Co-Authored-By` or AI attribution in commits/PR descriptions.
+- DO NOT use destructive git: `git revert`, `git restore`, `git stash`, `git reset --hard`, `git checkout -- <file>`; use `git reflog` for recovery.
+- DO: Read full file before reverting edits — Biome auto-formatting changes other sections.
 ## Daemon
 - `src/commands/daemon.ts`: long-lived `Bun.serve` on port 7943; serves multiple projects simultaneously — scope per-project state by `cwd`.
 - Endpoints: `/health`, `/dispatch` (POST), `/status-line/snapshot` (POST), `/metrics` (GET), `/ci-watch` (POST), `/ci-watches` (GET).
@@ -182,9 +188,9 @@ alwaysApply: false
 - LaunchAgent: `~/Library/LaunchAgents/com.swiz.daemon.plist`; `swiz daemon --install` / `--uninstall`.
 - **DO**: In daemon-served `src/web/**` modules, use browser-resolvable imports only (`./`, `../`, `/web/...`). **DON'T** use bare package imports unless daemon adds import-map/bundling support.
 - **DO**: After web-import changes, restart daemon (`lsof -ti tcp:7943 | xargs -r kill && bun run index.ts daemon --port 7943`) and diagnose from newest console entries for the current URL.
-- **DO**: Use `IssueStore` (`src/issue-store.ts`) as the primary data source for issues, PRs, and CI runs. The daemon's `syncUpstreamState` keeps it fresh; status-line and hooks read from the store first, falling back to `gh` CLI when stale. **DON'T** use per-project file caches — the shared SQLite store (`~/.swiz/issues.db`) replaces them.
-- **DO**: When adding fields consumers need (e.g., `mergeable`, `url`, `createdAt`), add them to `syncUpstreamState` in `src/issue-store.ts`.
-- **DO**: Prefer `gh api repos/{owner}/{repo}/...` (REST) over `gh issue view`/`gh issue close`/`gh pr list` (GraphQL) — REST has higher rate limits; GraphQL errors appear as `GraphQL: API rate limit already exceeded`. Close issues via `gh api repos/:owner/:repo/issues/{number} -X PATCH -f state=closed`. `src/commands/issue.ts` implements `isGraphQLRateLimited()` with automatic REST retry.
+- **DO**: Use `IssueStore` (`src/issue-store.ts`) as primary data source for issues/PRs/CI. Daemon `syncUpstreamState` keeps it fresh. **DON'T** use per-project file caches — `~/.swiz/issues.db` replaces them.
+- **DO**: Add consumer-needed fields (e.g., `mergeable`, `url`) to `syncUpstreamState` in `src/issue-store.ts`.
+- **DO**: Prefer `gh api repos/{owner}/{repo}/...` (REST) over `gh issue view`/`gh pr list` (GraphQL) — REST has higher rate limits. Close issues via `gh api repos/:owner/:repo/issues/{number} -X PATCH -f state=closed`.
 ## Settings Configuration
 - Use separate state files for mutable runtime data (e.g., `.swiz/context-stats.json`); never mix runtime data into user-authored config (`.swiz/config.json`).
 - Use 3-tier setting resolution: `project > user > default`.
