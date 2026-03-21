@@ -23,12 +23,16 @@ export function joinGitPath(repoRoot: string, ...segments: string[]): string {
 export async function git(args: string[], cwd: string): Promise<string> {
   try {
     const effectiveCwd = resolveSpawnCwd(cwd)
-    const { GIT_DIR: _, ...envWithoutGitDir } = process.env
+    // Strip GIT_* env vars (GIT_DIR, GIT_QUARANTINE_PATH, etc.) set by
+    // lefthook/git hooks so spawned git uses the provided cwd correctly.
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_"))
+    )
     const proc = Bun.spawn(["git", ...args], {
       cwd: effectiveCwd,
       stdout: "pipe",
       stderr: "pipe",
-      env: envWithoutGitDir,
+      env,
     })
     const [output] = await Promise.all([
       new Response(proc.stdout).text(),
