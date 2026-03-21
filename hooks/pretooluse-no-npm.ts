@@ -3,6 +3,7 @@
 // Main guardrail: prevent blind npm/npx usage when project signals indicate a non-npm setup.
 
 import {
+  allowPreToolUse,
   denyPreToolUse,
   detectPackageManager,
   isShellTool,
@@ -177,7 +178,9 @@ async function main() {
   const command: string = input?.tool_input?.command ?? ""
   const parsed = parseInvocation(command)
   if (!parsed) process.exit(0)
-  if (!isImplausibleInvocation(parsed.invoked, PM)) process.exit(0)
+  if (!isImplausibleInvocation(parsed.invoked, PM)) {
+    allowPreToolUse(`Package manager invocation '${parsed.invoked}' is plausible for ${PM}`)
+  }
 
   denyImplausible(parsed, PM)
 }

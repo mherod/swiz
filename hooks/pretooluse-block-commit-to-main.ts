@@ -12,6 +12,7 @@
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
 import {
+  allowPreToolUse,
   denyPreToolUse,
   GIT_COMMIT_RE,
   git,
@@ -46,7 +47,9 @@ try {
   process.exit(0) // no git remote — allow
 }
 
-if (!isDefaultBranch(currentBranch, defaultBranch)) process.exit(0)
+if (!isDefaultBranch(currentBranch, defaultBranch)) {
+  allowPreToolUse(`On feature branch '${currentBranch}', not default '${defaultBranch}'`)
+}
 
 // ── Check collaboration policy ───────────────────────────────────────────────
 let collaboration: Awaited<ReturnType<typeof detectProjectCollaborationPolicy>>
@@ -56,7 +59,9 @@ try {
   process.exit(0) // can't determine — allow
 }
 
-if (!collaboration.isCollaborative) process.exit(0)
+if (!collaboration.isCollaborative) {
+  allowPreToolUse(`Solo repo — direct commit to '${currentBranch}' allowed`)
+}
 
 // ── Block: collaborative repo, committing to default branch ─────────────────
 const signals = collaboration.signals.map((s) => `  - ${s}`).join("\n")

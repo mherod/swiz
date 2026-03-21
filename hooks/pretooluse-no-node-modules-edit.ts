@@ -24,7 +24,7 @@ async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
   const filePath = input.tool_input?.file_path ?? ""
   if (isNodeModulesPath(filePath)) denyPreToolUse(NODE_MODULES_REASON)
-  allowPreToolUse("")
+  allowPreToolUse(`File is not in node_modules: ${filePath.split("/").pop()}`)
 }
 
 if (import.meta.main) {

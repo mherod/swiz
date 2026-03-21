@@ -100,15 +100,31 @@ class PreToolUseStrategy implements HookExecutionStrategy {
     const executions: HookExecution[] = []
 
     const entries = flatSyncHooks(filteredGroups)
+    // AbortController allows early termination: when one hook denies, all other
+    // running hook processes are killed immediately instead of waiting for them
+    // to finish. Each hook checks the signal before spawning and listens for
+    // abort to kill its subprocess mid-flight.
+    const controller = new AbortController()
+    const { signal } = controller
+
     // Run async hooks concurrently with sync hooks — in daemon context this avoids
     // blocking the sync fan-out until all async hooks complete.
     const [results] = await Promise.all([
-      Promise.all(entries.map((e) => runEntry(e, enrichedPayloadStr, cwd))),
+      Promise.all(
+        entries.map(async (e) => {
+          const result = await runEntry(e, enrichedPayloadStr, cwd, signal)
+          // If this hook denied, abort all other running hooks immediately.
+          if (result.parsed && isDeny(result.parsed)) {
+            controller.abort()
+          }
+          return result
+        })
+      ),
       launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext),
     ])
 
     for (const { execution, parsed: resp } of results) {
-      if (execution.status === "skipped") {
+      if (execution.status === "skipped" || execution.status === "aborted") {
         executions.push(execution)
         continue
       }
@@ -144,14 +160,27 @@ class BlockingStrategy implements HookExecutionStrategy {
     const executions: HookExecution[] = []
 
     // Fan out all sync hooks concurrently with async hooks; scan results in declaration order.
+    // For non-stop events, use AbortController to kill remaining hooks on first block.
+    // Stop hooks always run all hooks (no abort) so every blocker is reported.
     const entries = flatSyncHooks(filteredGroups)
+    const controller = runAllHooks ? null : new AbortController()
+    const signal = controller?.signal
+
     const [results] = await Promise.all([
-      Promise.all(entries.map((e) => runEntry(e, enrichedPayloadStr, cwd))),
+      Promise.all(
+        entries.map(async (e) => {
+          const result = await runEntry(e, enrichedPayloadStr, cwd, signal)
+          if (!runAllHooks && result.parsed && isBlock(result.parsed)) {
+            controller?.abort()
+          }
+          return result
+        })
+      ),
       launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext),
     ])
 
     for (const { execution, parsed: resp } of results) {
-      if (execution.status === "skipped") {
+      if (execution.status === "skipped" || execution.status === "aborted") {
         executions.push(execution)
         continue
       }

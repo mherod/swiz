@@ -10,7 +10,13 @@
 // This hook prevents accidental privilege escalation by blocking permission edits
 // on feature branches with an explanatory message.
 
-import { denyPreToolUse, getDefaultBranch, git, isFileEditTool } from "./hook-utils.ts"
+import {
+  allowPreToolUse,
+  denyPreToolUse,
+  getDefaultBranch,
+  git,
+  isFileEditTool,
+} from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
 
 const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
@@ -41,7 +47,9 @@ if (!currentBranch) process.exit(0) // Detached HEAD or not a git repo — allow
 const defaultBranch = await getDefaultBranch(cwd)
 
 // On default branch — allow (direct pushes to main are gated by other hooks)
-if (currentBranch === defaultBranch) process.exit(0)
+if (currentBranch === defaultBranch) {
+  allowPreToolUse(`Workflow permissions edit on default branch '${defaultBranch}' — allowed`)
+}
 
 denyPreToolUse(
   [

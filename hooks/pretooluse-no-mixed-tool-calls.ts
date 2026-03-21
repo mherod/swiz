@@ -6,6 +6,7 @@
 
 import { normalizeCommand, stripHeredocs } from "../src/command-utils.ts"
 import {
+  allowPreToolUse,
   denyPreToolUse,
   EDIT_TOOLS,
   isShellTool,
@@ -64,7 +65,7 @@ const rawCommand = String(input?.tool_input?.command ?? "")
 const normalizedCommand = stripHeredocs(normalizeCommand(rawCommand))
 const match = MIXED_TOOL_CALL_RE.exec(normalizedCommand)
 
-if (!match?.groups?.tool) process.exit(0)
+if (!match?.groups?.tool) allowPreToolUse("No mixed tool call detected")
 
 const toolName = match.groups.tool
 const commandPreview = rawCommand.replace(/\s+/g, " ").trim().slice(0, 140) || toolName

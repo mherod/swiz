@@ -9,6 +9,7 @@
 // work directly on a protected or shared main branch without a feature branch.
 
 import {
+  allowPreToolUse,
   BRANCH_CHECK_RE,
   denyPreToolUse,
   extractBashCommands,
@@ -38,7 +39,7 @@ const priorCommands = await extractBashCommands(transcriptPath)
 // the gate because they don't confirm which branch is currently checked out.
 const hasBranchCheck = priorCommands.some((c) => BRANCH_CHECK_RE.test(c))
 
-if (hasBranchCheck) process.exit(0)
+if (hasBranchCheck) allowPreToolUse("Branch check found in transcript")
 
 // ── Block with actionable instructions ────────────────────────────────────────
 

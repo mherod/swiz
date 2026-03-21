@@ -5,7 +5,7 @@
 // denies them.  The project has dedicated local remediation paths for conflict state
 // (stop-branch-conflicts.ts, /rebase-onto-main) that avoid public noise.
 
-import { denyPreToolUse, isShellTool, skillAdvice } from "./hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse, isShellTool, skillAdvice } from "./hook-utils.ts"
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)
@@ -70,7 +70,7 @@ const NOISE_PHRASES: RegExp[] = [
 
 // First check: the body must contain at least one conflict signal
 const hasMergeConflictSignal = NOISE_PHRASES.some((re) => re.test(bodyNormalized))
-if (!hasMergeConflictSignal) process.exit(0)
+if (!hasMergeConflictSignal) allowPreToolUse("Comment has no merge-conflict signals")
 
 // Second check: split the body into sentence fragments and verify ALL lines
 // are either blank/trivial or match a noise phrase. If the body contains
@@ -90,7 +90,7 @@ const lines = bodyNormalized
 
 // If no parseable lines (e.g. very short body), still block — signal was found above
 const allNoise = lines.length === 0 || lines.every(isNoiseLine)
-if (!allNoise) process.exit(0)
+if (!allNoise) allowPreToolUse("Comment contains substantive content beyond conflict notice")
 
 const rebaseAdvice = skillAdvice(
   "rebase-onto-main",

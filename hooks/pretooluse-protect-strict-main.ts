@@ -9,6 +9,7 @@
 // disabled by the user directly at the terminal (where this hook never fires).
 
 import {
+  allowPreToolUse,
   buildIssueGuidance,
   denyPreToolUse,
   isSettingDisableCommand,
@@ -49,4 +50,5 @@ if (import.meta.main) {
         buildIssueGuidance(null)
     )
   }
+  allowPreToolUse("Command does not disable strict-no-direct-main")
 }

@@ -62,7 +62,8 @@ async function main() {
   const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
   checkForWeakening(oldString, newString)
 
-  allowPreToolUse("")
+  const newCounts = countEnforcements(newString)
+  allowPreToolUse(`ESLint config strength maintained (${newCounts.warnings}w/${newCounts.errors}e)`)
 }
 
 if (import.meta.main) {

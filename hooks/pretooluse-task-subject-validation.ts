@@ -5,7 +5,7 @@
 //   2+ commas      — listing 3+ items ("Fix A, B, and C")
 //   multiple #NNN  — referencing multiple issues ("Fix #12 and #34")
 
-import { denyPreToolUse } from "./hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse } from "./hook-utils.ts"
 import { detect, formatMessage } from "./task-subject-validation.ts"
 
 const input = await Bun.stdin.json()
@@ -15,3 +15,4 @@ const result = detect(subject)
 if (result.matched) {
   denyPreToolUse(formatMessage(result))
 }
+allowPreToolUse(`Task subject is valid: "${subject.slice(0, 60)}"`)

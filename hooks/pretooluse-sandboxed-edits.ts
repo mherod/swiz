@@ -9,6 +9,7 @@ import { basename, dirname, join, resolve } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { readSwizSettings } from "../src/settings.ts"
 import {
+  allowPreToolUse,
   buildIssueGuidance,
   denyPreToolUse,
   git,
@@ -109,7 +110,9 @@ const homeDir = getHomeDirOrNull()
 const claudeProjectsDir = homeDir ? await resolveCanonical(`${homeDir}/.claude/projects`) : null
 const allowedRoots = [cwd, tmp, tmpLiteral, ...(claudeProjectsDir ? [claudeProjectsDir] : [])]
 
-if (allowedRoots.some((root) => isWithin(root, target))) process.exit(0)
+if (allowedRoots.some((root) => isWithin(root, target))) {
+  allowPreToolUse(`File is within sandbox: ${target.split("/").slice(-2).join("/")}`)
+}
 
 // Discover if the blocked path lives inside a different GitHub repo.
 // dirname(target) is already canonical so the git walk identifies the true

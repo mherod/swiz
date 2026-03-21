@@ -10,7 +10,7 @@
 // Detection logic mirrors stop-secret-scanner.ts to keep the two hooks aligned.
 // Test files are excluded (same exclusion policy as the stop hook).
 
-import { denyPreToolUse, TEST_FILE_RE } from "./hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse, TEST_FILE_RE } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
 
 // ── Secret patterns (mirrored from stop-secret-scanner.ts) ───────────────────
@@ -86,7 +86,7 @@ async function main(): Promise<void> {
 
   const findings = scanContentForSecrets(content, filePath)
   if (findings.length === 0) {
-    process.exit(0)
+    allowPreToolUse(`No secrets detected in ${filePath.split("/").pop()}`)
   }
 
   const lines = findings.map((f) => `  [${f.kind}] ${f.line}`).join("\n")

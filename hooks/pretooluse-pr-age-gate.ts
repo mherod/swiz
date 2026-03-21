@@ -16,6 +16,7 @@
 import { getIssueStore } from "../src/issue-store.ts"
 import { readSwizSettings } from "../src/settings.ts"
 import {
+  allowPreToolUse,
   denyPreToolUse,
   extractMergeBranch,
   extractPrNumber,
@@ -167,4 +168,6 @@ if (import.meta.main) {
     if (!prCreatedAt) process.exit(0)
     await checkPrAge(prCreatedAt, gracePeriodMs, graceMinutes)
   }
+
+  allowPreToolUse("PR age grace period has elapsed — merge allowed")
 }

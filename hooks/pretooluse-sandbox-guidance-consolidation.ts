@@ -10,7 +10,7 @@
  * patterns from being duplicated across multiple hooks.
  */
 
-import { denyPreToolUse, isFileEditTool } from "./hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse, isFileEditTool } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
 
 const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
@@ -92,4 +92,4 @@ for (const pattern of PROBLEMATIC_PATTERNS) {
   }
 }
 
-process.exit(0)
+allowPreToolUse("No inline issue-guidance patterns detected")

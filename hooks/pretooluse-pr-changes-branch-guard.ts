@@ -16,6 +16,7 @@
  */
 
 import {
+  allowPreToolUse,
   denyPreToolUse,
   GIT_CHECKOUT_RE,
   GIT_SWITCH_RE,
@@ -77,7 +78,9 @@ async function main() {
   if (!reviews) process.exit(0)
 
   const changesRequested = reviews.filter((r) => r.state === "CHANGES_REQUESTED")
-  if (changesRequested.length === 0) process.exit(0) // no changes requested
+  if (changesRequested.length === 0) {
+    allowPreToolUse(`PR #${pr.number} has no changes requested — branch switch allowed`)
+  }
 
   // Build block message
   const reviewers = [...new Set(changesRequested.map((r) => r.user.login))].join(", ")

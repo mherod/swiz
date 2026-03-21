@@ -4,7 +4,7 @@
 // Threshold is configurable via `swiz settings set dirty-worktree-threshold <N>`.
 
 import { DEFAULT_DIRTY_WORKTREE_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
-import { denyPreToolUse, getGitStatusV2, isGitRepo } from "./hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse, getGitStatusV2, isGitRepo } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 
 async function main(): Promise<void> {
@@ -19,7 +19,9 @@ async function main(): Promise<void> {
   ])
   if (!gitStatus) process.exit(0)
 
-  if (gitStatus.total <= threshold) process.exit(0)
+  if (gitStatus.total <= threshold) {
+    allowPreToolUse(`Worktree has ${gitStatus.total} dirty file(s) (threshold: ${threshold})`)
+  }
 
   denyPreToolUse(
     `Worktree has ${gitStatus.total} dirty files (threshold: ${threshold}). ` +

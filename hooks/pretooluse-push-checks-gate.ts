@@ -62,7 +62,9 @@ const hasPRCheck = priorCommands.some((c) => PR_CHECK_RE.test(c))
 // Satisfied by `swiz ci-wait` in the transcript.
 const hasCICheck = modePolicy.prHooksActive ? priorCommands.some((c) => CI_WAIT_RE.test(c)) : true // not required for solo/auto
 
-if (hasBranchCheck && hasPRCheck && hasCICheck) process.exit(0)
+if (hasBranchCheck && hasPRCheck && hasCICheck) {
+  allowPreToolUse("All pre-push checks found in transcript (branch, PR, CI)")
+}
 
 // ── Advise on missing checks ─────────────────────────────────────────────────
 

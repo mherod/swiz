@@ -6,6 +6,7 @@
 // Fails open on all error paths — missing gh, no PR, no protection, API 404.
 
 import {
+  allowPreToolUse,
   denyPreToolUse,
   formatActionPlan,
   GIT_COMMIT_RE,
@@ -125,9 +126,13 @@ async function main(): Promise<void> {
   if (!branch) process.exit(0)
 
   const result = await findApprovedPr(branch, cwd)
-  if (!result) process.exit(0)
+  if (!result) allowPreToolUse(`No approved PR on branch '${branch}'`)
 
-  if (!(await hasDismissStaleReviews(cwd, result.pr.baseRefName))) process.exit(0)
+  if (!(await hasDismissStaleReviews(cwd, result.pr.baseRefName))) {
+    allowPreToolUse(
+      `PR #${result.pr.number} approved but branch protection does not dismiss stale reviews`
+    )
+  }
 
   const approverList = formatApproverList(result.approvals)
   denyPreToolUse(buildDenyMessage(result.pr, approverList))

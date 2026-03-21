@@ -25,6 +25,7 @@
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
 import {
+  allowPreToolUse,
   denyPreToolUse,
   isCodeChangeTool,
   isGitRepo,
@@ -279,7 +280,14 @@ async function main() {
   if (allLines.length === 0) process.exit(0)
 
   const state = scanTranscript(allLines)
-  if (!state.hasDiagnosticIssues || !state.dismissalText || state.cleared) process.exit(0)
+  if (!state.hasDiagnosticIssues || !state.dismissalText || state.cleared) {
+    const reason = state.cleared
+      ? "Pre-existing dismissal cleared via evidence"
+      : !state.dismissalText
+        ? "No pre-existing dismissal detected"
+        : "No diagnostic issues in recent output"
+    allowPreToolUse(reason)
+  }
 
   denyPreToolUse(buildBlockMessage(state))
 }

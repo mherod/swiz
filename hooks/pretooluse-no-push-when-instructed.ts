@@ -20,6 +20,7 @@
 
 import { getSwizSettingsPath, readSwizSettings } from "../src/settings.ts"
 import {
+  allowPreToolUse,
   denyPreToolUse,
   GIT_PUSH_RE,
   isShellTool,
@@ -138,7 +139,8 @@ async function main() {
   if (!transcriptPath) process.exit(0)
 
   const { blockingLine, approvedAfter } = await scanTranscriptForPushBlock(transcriptPath)
-  if (!blockingLine || approvedAfter) process.exit(0)
+  if (!blockingLine) allowPreToolUse("No 'do not push' instruction found in transcript")
+  if (approvedAfter) allowPreToolUse("Push approved by user after 'do not push' instruction")
 
   denyPreToolUse(
     `BLOCKED: git push is prohibited by an explicit instruction in this session.\n\n` +

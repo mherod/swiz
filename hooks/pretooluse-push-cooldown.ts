@@ -18,6 +18,7 @@
 import { readSwizSettings } from "../src/settings.ts"
 import { swizPushCooldownSentinelPath } from "../src/temp-paths.ts"
 import {
+  allowPreToolUse,
   denyPreToolUse,
   GIT_PUSH_RE,
   getCanonicalPathHash,
@@ -76,3 +77,4 @@ if (await Bun.file(sentinelPath).exists()) {
 
 // Sentinel is written by posttooluse-push-cooldown.ts after the push executes,
 // so only successful (non-blocked) pushes arm the cooldown.
+allowPreToolUse("Push cooldown clear")

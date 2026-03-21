@@ -4,7 +4,7 @@
 // record, causing stop hooks to fire repeatedly.  This hook requires >=1 distinct
 // evidence field in the description before allowing completion.
 
-import { denyPreToolUse } from "./hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse } from "./hook-utils.ts"
 
 // Evidence patterns — each entry is a named family with a regex.
 // Any 1+ distinct families must match for the call to proceed.
@@ -30,7 +30,7 @@ const description: string = typeof toolInput.description === "string" ? toolInpu
 
 const matched = EVIDENCE_PATTERNS.filter(({ re }) => re.test(description)).map(({ name }) => name)
 
-if (matched.length >= REQUIRED) process.exit(0)
+if (matched.length >= REQUIRED) allowPreToolUse(`Evidence found: ${matched.join(", ")}`)
 
 const foundList = matched.length > 0 ? matched.join(", ") : "none"
 const reason =

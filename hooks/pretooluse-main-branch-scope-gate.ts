@@ -23,6 +23,7 @@ import {
   resolvePolicy,
 } from "../src/settings.ts"
 import {
+  allowPreToolUse,
   classifyChangeScope,
   denyPreToolUse,
   extractPrNumber,
@@ -200,14 +201,15 @@ const strictMode = effectiveSettings.strictNoDirectMain
 // ─── Enforce policy ────────────────────────────────────────────────────
 
 if (!isCollaborative && !strictMode) {
-  // Solo repo without strict mode: allow all changes to the default branch
-  process.exit(0)
+  allowPreToolUse(
+    `Solo repo without strict mode — push to '${defaultBranch}' allowed (${scopeDescription})`
+  )
 }
 
-// Collaborative repo: block non-trivial work
 if (isDocsOnly || isTrivial) {
-  // Docs and trivial changes are allowed even in collaborative repos
-  process.exit(0)
+  allowPreToolUse(
+    `Scope is ${scopeDescription} (${fileCount} files, ${totalLinesChanged} lines) — allowed on '${defaultBranch}'`
+  )
 }
 
 // Fail-closed: stat parsing failed but files were detected

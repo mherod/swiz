@@ -9,6 +9,7 @@
 import { dirname } from "node:path"
 import { isNodeModulesPath } from "../src/node-modules-path.ts"
 import {
+  allowPreToolUse,
   denyPreToolUse,
   detectPackageManager,
   isEditTool,
@@ -145,6 +146,7 @@ async function main() {
       await checkEditTool(input, filePath, addCmd)
     }
   } catch {}
+  allowPreToolUse(`No direct dependency edits detected in ${filePath.split("/").pop()}`)
 }
 
 if (import.meta.main) main().catch(() => process.exit(0))

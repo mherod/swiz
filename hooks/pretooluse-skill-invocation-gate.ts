@@ -11,6 +11,7 @@
 // by `src/commands/skill.ts`), the gate is skipped — there is nothing to enforce.
 
 import {
+  allowPreToolUse,
   denyPreToolUse,
   extractSkillInvocations,
   formatActionPlan,
@@ -43,7 +44,9 @@ if (!transcriptPath) process.exit(0)
 
 const invokedSkills = await extractSkillInvocations(transcriptPath)
 
-if (invokedSkills.includes(requiredSkill)) process.exit(0)
+if (invokedSkills.includes(requiredSkill)) {
+  allowPreToolUse(`/${requiredSkill} skill was invoked in this session`)
+}
 
 // ── Block with actionable instructions ────────────────────────────────────────
 

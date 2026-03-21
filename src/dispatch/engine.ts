@@ -49,6 +49,7 @@ export type HookStatus =
   | "invalid-json"
   | "error"
   | "skipped"
+  | "aborted"
 
 export type SkipReason = "condition-false" | "cooldown-active"
 
@@ -228,8 +229,28 @@ export interface HookRunResult {
 export async function runHook(
   file: string,
   payloadStr: string,
-  timeoutSec?: number
+  timeoutSec?: number,
+  signal?: AbortSignal
 ): Promise<HookRunResult> {
+  // If already aborted before we even spawn, return immediately.
+  if (signal?.aborted) {
+    const now = Date.now()
+    return {
+      parsed: null,
+      execution: {
+        file,
+        startTime: now,
+        endTime: now,
+        durationMs: 0,
+        configuredTimeoutSec: timeoutSec ?? DEFAULT_TIMEOUT,
+        status: "aborted",
+        exitCode: null,
+        stdoutSnippet: "",
+        stderrSnippet: "",
+      },
+    }
+  }
+
   const cmd = file.endsWith(".ts") ? ["bun", join(HOOKS_DIR, file)] : [join(HOOKS_DIR, file)]
   const startTime = Date.now()
   const baseTimeoutSec = timeoutSec ?? DEFAULT_TIMEOUT
@@ -248,11 +269,20 @@ export async function runHook(
   void proc.stdin.end()
 
   let timedOut = false
+  let aborted = false
   const timer = setTimeout(() => {
     timedOut = true
     log(`   ⏱ TIMEOUT (${configuredTimeoutSec}s) — killing ${file}`)
     proc.kill()
   }, configuredTimeoutSec * 1000)
+
+  // Listen for abort signal to kill the process mid-flight.
+  const onAbort = () => {
+    aborted = true
+    log(`   ⊘ ABORTED ${file} (another hook denied)`)
+    proc.kill()
+  }
+  signal?.addEventListener("abort", onAbort, { once: true })
 
   const [output, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -260,6 +290,7 @@ export async function runHook(
   ])
   await proc.exited
   clearTimeout(timer)
+  signal?.removeEventListener("abort", onAbort)
 
   const endTime = Date.now()
   const exitCode = proc.exitCode
@@ -269,6 +300,24 @@ export async function runHook(
   if (stderrTrimmed) log(`   stderr: ${stderrTrimmed.slice(0, 500)}`)
   if (exitCode !== 0) log(`   exit=${exitCode}`)
   if (trimmed) log(`   stdout: ${trimmed.slice(0, 500)}`)
+
+  // If aborted, treat as a clean skip — don't classify output from a killed process.
+  if (aborted) {
+    return {
+      parsed: null,
+      execution: {
+        file,
+        startTime,
+        endTime,
+        durationMs: endTime - startTime,
+        configuredTimeoutSec,
+        status: "aborted",
+        exitCode: exitCode ?? null,
+        stdoutSnippet: "",
+        stderrSnippet: "",
+      },
+    }
+  }
 
   const { parsed, status } = classifyHookOutput({ timedOut, trimmed, exitCode })
 
@@ -425,15 +474,34 @@ export function flatSyncHooks(groups: HookGroup[]): HookEntry[] {
 export async function runEntry(
   entry: HookEntry,
   payloadStr: string,
-  cwd: string
+  cwd: string,
+  signal?: AbortSignal
 ): Promise<{ execution: HookExecution; parsed: Record<string, unknown> | null }> {
   const { hook, matcher } = entry
+  // Check abort before skip-condition evaluation to avoid unnecessary work.
+  if (signal?.aborted) {
+    const now = Date.now()
+    return {
+      execution: {
+        file: hook.file,
+        startTime: now,
+        endTime: now,
+        durationMs: 0,
+        configuredTimeoutSec: hook.timeout ?? DEFAULT_TIMEOUT,
+        status: "aborted",
+        exitCode: null,
+        stdoutSnippet: "",
+        stderrSnippet: "",
+      },
+      parsed: null,
+    }
+  }
   const skipExecs: HookExecution[] = []
   if (await tryRecordSkippedHook(hook, matcher, cwd, skipExecs)) {
     return { execution: skipExecs[0]!, parsed: null }
   }
   log(`   → ${formatHookTarget(hook.file, matcher)}`)
-  const { parsed, execution } = await runHook(hook.file, payloadStr, hook.timeout)
+  const { parsed, execution } = await runHook(hook.file, payloadStr, hook.timeout, signal)
   finalizeExecution(execution, matcher, hook, cwd, parsed)
   return { execution, parsed }
 }
