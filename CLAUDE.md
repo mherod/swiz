@@ -159,12 +159,12 @@ alwaysApply: false
   5. `gh run list --commit $SHA --json databaseId --jq '.[0].databaseId'`.
   6. `gh run watch <run-id> --exit-status`.
   7. `gh run view <run-id> --json conclusion,status,jobs --jq '{conclusion,status,jobs:[.jobs[]|{name,conclusion,status}]}'`.
-- DO NOT use `gh run view --commit <SHA>` (unsupported); always list-by-commit then view-by-id.
+- DO NOT use `gh run view --commit <SHA>`; list-by-commit then view-by-id.
 - During cooldown use `swiz push-wait origin <branch>` instead of raw `git push`.
-- Never bypass mandatory hooks: no `--no-verify`; pre-push runs `bun test`; CI jobs `lint -> typecheck -> test` must pass.
-- Always verify CI with `gh run view --json`; `gh run watch` alone is insufficient.
-- DO NOT block the session waiting for CI. If pre-push hooks pass, continue; check once with `gh run view` later.
-- For workflow jobs using `github.base_ref`, run only on `pull_request`/`pull_request_target`, never `push`; `github.base_ref` is empty on push and breaks `git diff origin/BASE_REF...HEAD`.
+- No `--no-verify`; pre-push runs `bun test`; CI jobs `lint -> typecheck -> test` must pass.
+- Verify CI with `gh run view --json`; `gh run watch` alone is insufficient.
+- DO NOT block session waiting for CI. Check once with `gh run view`; `in_progress` is acceptable for session completion since pre-push already ran full test suite.
+- `github.base_ref` is empty on `push` events; use only on `pull_request`/`pull_request_target`.
 
 - Push-command parsing in hooks: token-parse to distinguish `git push --force` vs `git push -- --force`, including `-C <path>` global options.
 - DO NOT call `TaskUpdate` or `TaskList` after push starts.
