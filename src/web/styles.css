@@ -1896,6 +1896,88 @@ tbody tr:hover {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
 }
 
+.skill-payload-box-nested {
+  margin-top: 0;
+  border-radius: 6px;
+  border-style: dashed;
+}
+
+.skill-payload-header-minor .skill-payload-label {
+  opacity: 0.85;
+}
+
+.message-row-skill-exchange {
+  border-color: rgba(180, 140, 255, 0.42);
+  background: linear-gradient(
+    135deg,
+    rgba(12, 18, 32, 0.92) 0%,
+    rgba(22, 14, 36, 0.55) 100%
+  );
+}
+
+.message-role-skill-exchange {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.skill-exchange-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.skill-exchange-name {
+  font-size: 0.72rem;
+  color: #d8c4ff;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-weight: 600;
+}
+
+.skill-exchange-times {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.skill-exchange-time-sep {
+  color: rgba(180, 140, 255, 0.65);
+  font-weight: 600;
+}
+
+.skill-exchange-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.skill-exchange-step {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.skill-exchange-step-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.skill-exchange-step-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9aa8c8;
+}
+
+.skill-exchange-step-body.tool-calls-wrap :is(ul.tool-calls) {
+  margin: 0;
+}
+
 /* ── Tool stats bar ── */
 
 .tool-stats-bar {

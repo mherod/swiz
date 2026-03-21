@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { type ReactNode, useMemo } from "react"
 import { cn } from "../lib/cn.ts"
 import type { EventMetric } from "../lib/dashboard-helpers.ts"
 import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
@@ -6,6 +6,8 @@ import { DashboardStats } from "./dashboard-stats.tsx"
 import { renderInline } from "./markdown.tsx"
 import { MessageBody } from "./message-body.tsx"
 import type {
+  GroupedSessionMessage,
+  ParsedSkillPayload,
   ProjectTask,
   SessionMessage,
   SessionTask,
@@ -25,6 +27,7 @@ import {
   parseSwizTasksCommand,
   parseTaskToolCall,
   parseToolCallDetail,
+  skillExchangeMergeAt,
   skillNameFromMessage,
   summarizeRawJson,
   summarizeText,
@@ -322,9 +325,12 @@ function VerboseToolCall({ tc }: { tc: { name: string; detail: string } }) {
 function SkillPayloadDisplay({
   adjacentSkillName,
   parsedSkillPayload,
+  showNameHeader = true,
 }: {
   adjacentSkillName: string | null | undefined
   parsedSkillPayload: { baseDir?: string | null; body: string } | null
+  /** When false, the parent already shows the skill name (e.g. merged skill exchange row). */
+  showNameHeader?: boolean
 }) {
   if (!parsedSkillPayload) return null
   const skillBody = parsedSkillPayload.body
@@ -332,11 +338,17 @@ function SkillPayloadDisplay({
     skillBody.length > 300 || skillBody.split("\n").length > COLLAPSE_LINE_THRESHOLD
   const skillPreview = collapseSkillBody ? summarizeText(skillBody) : skillBody
   return (
-    <div className="skill-payload-box">
-      <div className="skill-payload-header">
-        <span className="skill-payload-label">Skill content</span>
-        <code className="skill-payload-name">{adjacentSkillName}</code>
-      </div>
+    <div className={cn("skill-payload-box", !showNameHeader && "skill-payload-box-nested")}>
+      {showNameHeader ? (
+        <div className="skill-payload-header">
+          <span className="skill-payload-label">Skill content</span>
+          <code className="skill-payload-name">{adjacentSkillName}</code>
+        </div>
+      ) : (
+        <div className="skill-payload-header skill-payload-header-minor">
+          <span className="skill-payload-label">Injected body</span>
+        </div>
+      )}
       {parsedSkillPayload.baseDir ? (
         <p className="skill-payload-base">
           <span className="skill-payload-base-label">base dir</span>
@@ -517,6 +529,97 @@ function resolveMessageRowProps(
   }
 }
 
+function groupKeysForGrouped(
+  entry: GroupedSessionMessage,
+  sorted: SessionMessage[],
+  msgKey: MessagesProps["msgKey"] | undefined,
+  fallbackTag: string
+): string[] {
+  return msgKey
+    ? entry.originalIndices.map((idx) => msgKey(sorted[idx]!, idx))
+    : [`${entry.message.timestamp}-${fallbackTag}`]
+}
+
+function SkillExchangeRow({
+  userGroup,
+  assistantGroup,
+  sorted,
+  msgKey,
+  newKeys,
+  parsedPayload,
+}: {
+  userGroup: GroupedSessionMessage
+  assistantGroup: GroupedSessionMessage
+  sorted: SessionMessage[]
+  msgKey?: MessagesProps["msgKey"]
+  newKeys?: Set<string>
+  parsedPayload: ParsedSkillPayload
+}) {
+  const userMsg = userGroup.message
+  const asstMsg = assistantGroup.message
+  const skillName = skillNameFromMessage(asstMsg) ?? "skill"
+
+  const userKeys = groupKeysForGrouped(userGroup, sorted, msgKey, "skill-u")
+  const asstKeys = groupKeysForGrouped(assistantGroup, sorted, msgKey, "skill-a")
+  const isNew = [...userKeys, ...asstKeys].some((k) => newKeys?.has(k) ?? false)
+
+  const assistantTime = asstMsg.timestamp
+    ? formatTime(new Date(asstMsg.timestamp).getTime())
+    : "Unknown time"
+  const userTime = userMsg.timestamp
+    ? formatTime(new Date(userMsg.timestamp).getTime())
+    : "Unknown time"
+
+  const repeatParts: string[] = []
+  if (userGroup.count > 1) repeatParts.push(`User ×${userGroup.count}`)
+  if (assistantGroup.count > 1) repeatParts.push(`Asst ×${assistantGroup.count}`)
+  const repeatLabel = repeatParts.length > 0 ? repeatParts.join(" · ") : null
+
+  return (
+    <li className={cn("message-row message-row-skill-exchange user", isNew && "message-new")}>
+      <div className="message-meta">
+        <span className="message-role message-role-skill-exchange">
+          <span aria-hidden className="skill-exchange-icon">
+            ⚡
+          </span>
+          Skill
+          <code className="skill-exchange-name">{skillName}</code>
+        </span>
+        <span className="message-meta-right">
+          {repeatLabel ? <span className="message-repeat-badge">{repeatLabel}</span> : null}
+          <span className="skill-exchange-times">
+            <time className="skill-exchange-time-chunk" dateTime={asstMsg.timestamp ?? undefined}>
+              {assistantTime}
+            </time>
+            <span aria-hidden className="skill-exchange-time-sep">
+              →
+            </span>
+            <time className="skill-exchange-time-chunk" dateTime={userMsg.timestamp ?? undefined}>
+              {userTime}
+            </time>
+          </span>
+        </span>
+      </div>
+      <div className="skill-exchange-rail">
+        <div className="skill-exchange-step">
+          <span className="skill-exchange-step-label">Request</span>
+          <div className="skill-exchange-step-body tool-calls-wrap">
+            <ToolCallsList toolCalls={asstMsg.toolCalls ?? []} verbose={false} />
+          </div>
+        </div>
+        <div className="skill-exchange-step skill-exchange-step-main">
+          <span className="skill-exchange-step-label">Injected</span>
+          <SkillPayloadDisplay
+            adjacentSkillName={skillName}
+            parsedSkillPayload={parsedPayload}
+            showNameHeader={false}
+          />
+        </div>
+      </div>
+    </li>
+  )
+}
+
 function MessagesContent({
   messages,
   loading,
@@ -532,18 +635,44 @@ function MessagesContent({
   grouped: ReturnType<typeof groupMessages>
   sorted: SessionMessage[]
 }) {
+  const listItems = useMemo(() => {
+    const rows: ReactNode[] = []
+    for (let i = 0; i < grouped.length; i++) {
+      const merged = skillExchangeMergeAt(grouped, i)
+      if (merged) {
+        const userKeys = groupKeysForGrouped(merged.user, sorted, msgKey, "skill-u")
+        const listKey = userKeys[0]!
+        const parsedPayload = parseSkillPayload(merged.user.message.text ?? "")!
+        rows.push(
+          <SkillExchangeRow
+            key={listKey}
+            assistantGroup={merged.assistant}
+            newKeys={newKeys}
+            parsedPayload={parsedPayload}
+            sorted={sorted}
+            userGroup={merged.user}
+            msgKey={msgKey}
+          />
+        )
+        i += 1
+        continue
+      }
+      const { key, ...rowProps } = resolveMessageRowProps(grouped, sorted, i, msgKey, newKeys)
+      rows.push(<MessageRow key={key} {...rowProps} />)
+    }
+    return rows
+  }, [grouped, sorted, msgKey, newKeys])
+
   if (loading) {
     return <p className="empty p-8 text-center text-zinc-500">Loading...</p>
   }
   if (messages.length === 0) {
     return <p className="empty p-8 text-center text-zinc-500">No messages for this session.</p>
   }
+
   return (
     <ul className="messages-list flex-1 pb-16" aria-label="Last 30 transcript messages">
-      {grouped.map((_, i) => {
-        const { key, ...rowProps } = resolveMessageRowProps(grouped, sorted, i, msgKey, newKeys)
-        return <MessageRow key={key} {...rowProps} />
-      })}
+      {listItems}
     </ul>
   )
 }

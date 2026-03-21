@@ -306,13 +306,61 @@ export function skillNameFromMessage(message: SessionMessage | undefined): strin
 }
 
 export function parseSkillPayload(text: string): ParsedSkillPayload | null {
-  if (!/Base directory for this skill:/i.test(text)) return null
-  const lines = text.split("\n")
-  const firstLine = lines[0]?.trim() ?? ""
-  const baseDirMatch = /^Base directory for this skill:\s*(.+)$/i.exec(firstLine)
-  const baseDir = baseDirMatch?.[1]?.trim() ?? null
-  const body = (baseDirMatch ? lines.slice(1).join("\n") : text).trim()
-  return { baseDir, body: body || text.trim() }
+  const trimmed = text.trim()
+  if (!trimmed) return null
+
+  if (/Base directory for this skill:/i.test(text)) {
+    const lines = text.split("\n")
+    const firstLine = lines[0]?.trim() ?? ""
+    const baseDirMatch = firstLine.match(/^Base directory for this skill:\s*(.+)$/i)
+    const baseDir = baseDirMatch?.[1]?.trim() ?? null
+    const body = (baseDirMatch ? lines.slice(1).join("\n") : text).trim()
+    return { baseDir, body: body || trimmed }
+  }
+
+  const lines = trimmed.split("\n")
+  const skillHead = lines[0]?.trim().match(/^SKILL CONTENT\s+(\S+)/i)
+  if (skillHead) {
+    let rest = lines.slice(1)
+    let baseDir: string | null = null
+    const firstRest = rest[0]?.trim() ?? ""
+    const looseBase = firstRest.match(/^base dir\s+(.+)$/i)
+    if (looseBase) {
+      baseDir = looseBase[1]!.trim()
+      rest = rest.slice(1)
+    }
+    const body = rest.join("\n").trim()
+    return { baseDir, body: body || trimmed }
+  }
+
+  return null
+}
+
+/** Assistant turn with no text and exactly one Skill tool call (typical skill fetch row). */
+export function isSkillToolOnlyAssistant(message: SessionMessage): boolean {
+  if (message.role !== "assistant") return false
+  if ((message.text ?? "").trim().length > 0) return false
+  const tc = message.toolCalls
+  if (!tc || tc.length !== 1) return false
+  if (tc[0]!.name.toLowerCase() !== "skill") return false
+  return parseSkillToolCallName(tc[0]!.detail) != null
+}
+
+/**
+ * In newest-first grouped transcript, the user's skill payload is one index before
+ * the assistant Skill tool row chronologically (user newer → lower index).
+ */
+export function skillExchangeMergeAt(
+  grouped: GroupedSessionMessage[],
+  index: number
+): { user: GroupedSessionMessage; assistant: GroupedSessionMessage } | null {
+  const userG = grouped[index]
+  const assistantG = grouped[index + 1]
+  if (!userG || !assistantG) return null
+  if (userG.message.role !== "user" || assistantG.message.role !== "assistant") return null
+  if (!parseSkillPayload(userG.message.text ?? "")) return null
+  if (!isSkillToolOnlyAssistant(assistantG.message)) return null
+  return { user: userG, assistant: assistantG }
 }
 
 export function parseJsonObject(detail: string): Record<string, unknown> | null {
