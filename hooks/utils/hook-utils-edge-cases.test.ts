@@ -1,7 +1,13 @@
 import { describe, expect, it } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
+
+// Resolve the repo root from this file's location, not process.cwd().
+// During pre-push hooks, lefthook changes cwd to inside .git/, making
+// process.cwd() unreliable for git-repo detection tests.
+const REPO_ROOT = dirname(dirname(dirname(import.meta.path)))
+
 import {
   CI_WAIT_RE,
   createSessionTask,
@@ -145,9 +151,8 @@ describe("isGitRepo() with malformed inputs", () => {
     expect(result).toBe(false)
   })
 
-  it("falls back to cwd for empty string (which is a git repo)", async () => {
-    // Bun.spawn({ cwd: "" }) falls back to process.cwd()
-    const result = await isGitRepo("")
+  it("returns true for repo root", async () => {
+    const result = await isGitRepo(REPO_ROOT)
     expect(result).toBe(true)
   })
 
@@ -171,9 +176,8 @@ describe("isGitRepo() with malformed inputs", () => {
     }
   })
 
-  it("returns true for actual git repo", async () => {
-    // The swiz project root is a git repo
-    const result = await isGitRepo(process.cwd())
+  it("returns true for actual git repo via absolute path", async () => {
+    const result = await isGitRepo(REPO_ROOT)
     expect(result).toBe(true)
   })
 })
@@ -186,9 +190,8 @@ describe("isGitHubRemote() with malformed inputs", () => {
     expect(result).toBe(false)
   })
 
-  it("falls back to cwd for empty string (which has GitHub remote)", async () => {
-    // Bun.spawn({ cwd: "" }) falls back to process.cwd()
-    const result = await isGitHubRemote("")
+  it("returns true for repo root (which has GitHub remote)", async () => {
+    const result = await isGitHubRemote(REPO_ROOT)
     expect(result).toBe(true)
   })
 
@@ -207,8 +210,8 @@ describe("isGitHubRemote() with malformed inputs", () => {
     expect(result).toBe(false)
   })
 
-  it("returns true for swiz repo (GitHub)", async () => {
-    const result = await isGitHubRemote(process.cwd())
+  it("returns true for swiz repo via absolute path (GitHub)", async () => {
+    const result = await isGitHubRemote(REPO_ROOT)
     expect(result).toBe(true)
   })
 })
