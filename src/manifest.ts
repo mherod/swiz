@@ -184,7 +184,7 @@ export const manifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Edit|Write|Bash",
     hooks: [
-      { file: "pretooluse-require-tasks.ts", timeout: 5, cooldownSeconds: 300 },
+      { file: "pretooluse-require-tasks.ts", timeout: 5 },
       { file: "pretooluse-state-gate.ts", timeout: 5 },
       { file: "pretooluse-block-preexisting-dismissals.ts", timeout: 5 },
     ],
