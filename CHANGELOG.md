@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-03-21
+
+### New Features
+
+- **Anthropomorphic fatigue detection** — the offensive language hook now
+  catches 7 new patterns where agents claim time pressure, fatigue, or
+  "fresh session" needs to justify stopping work. Covers fake duration
+  claims, "not going to rush" reframing, "dedicated attention" stalling,
+  sunk-cost commit counting, and fabricated time-cost claims.
+
+### Changed
+
+- **Offensive language hook now runs first** — moved `stop-offensive-language`
+  to position 1 in the stop hook chain, ahead of `stop-completion-auditor`
+  and all other stop hooks. Lazy language patterns are now caught before
+  task completion or git status checks can fire.
+
+### Fixes
+
+- Fixed file permission mode on `posttooluse-task-audit-sync.ts` (644 → 755).
+
 ## 2026-03-20
 
 ### New Features
