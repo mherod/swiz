@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { stripNonCode } from "./pretooluse-no-as-any.ts"
+import { stripNonCode } from "./pretooluse-ts-quality.ts"
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -174,7 +174,7 @@ describe("stripNonCode — output structure", () => {
 // ─── end-to-end CLI tests (import.meta.main guard) ───────────────────────────
 
 describe("pretooluse-no-as-any — CLI subprocess (import.meta.main guard)", () => {
-  const HOOK_PATH = join(import.meta.dir, "pretooluse-no-as-any.ts")
+  const HOOK_PATH = join(import.meta.dir, "pretooluse-ts-quality.ts")
 
   /** Spawn the hook as a subprocess, pipe JSON payload to stdin, return stdout + exit code. */
   async function runHook(payload: object): Promise<{ stdout: string; exitCode: number }> {
@@ -263,7 +263,7 @@ describe("pretooluse-no-as-any — CLI subprocess (import.meta.main guard)", () 
 // ─── failure-path tests ───────────────────────────────────────────────────────
 
 describe("pretooluse-no-as-any — CLI failure paths", () => {
-  const HOOK_PATH = join(import.meta.dir, "pretooluse-no-as-any.ts")
+  const HOOK_PATH = join(import.meta.dir, "pretooluse-ts-quality.ts")
 
   /** Spawn the hook, write raw bytes to stdin, drain stdout+stderr concurrently. */
   async function runRaw(
@@ -310,8 +310,8 @@ describe("pretooluse-no-as-any — CLI failure paths", () => {
     expect(stdout).toBe("")
   })
 
-  it("exits 0 with no stdout when old_string is absent (new-file passthrough)", async () => {
-    // Empty old_string triggers the new-file early-exit guard → no hook JSON emitted
+  it("exits 0 with allow when old_string is absent (new-file passthrough)", async () => {
+    // Empty old_string skips the as-any delta check; other checks still run and allow
     const { exitCode, stdout } = await runRaw(
       JSON.stringify({
         tool_name: "Edit",
@@ -319,7 +319,7 @@ describe("pretooluse-no-as-any — CLI failure paths", () => {
       })
     )
     expect(exitCode).toBe(0)
-    expect(stdout).toBe("")
+    expect(stdout).toContain("permissionDecision")
   })
 
   it("stderr message names the error for invalid JSON (not just a generic crash)", async () => {
@@ -594,7 +594,7 @@ describe("Promise.all drain enforcement — cross-runtime portability guard", ()
 // ─── NFKC homoglyph bypass prevention ──────────────────────────────────────
 
 describe("pretooluse-no-as-any — NFKC homoglyph bypass", () => {
-  const HOOK_PATH = join(import.meta.dir, "pretooluse-no-as-any.ts")
+  const HOOK_PATH = join(import.meta.dir, "pretooluse-ts-quality.ts")
 
   async function runHookPayload(payload: object): Promise<{ stdout: string; exitCode: number }> {
     const proc = Bun.spawn(["bun", HOOK_PATH], {

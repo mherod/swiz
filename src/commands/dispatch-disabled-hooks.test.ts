@@ -54,12 +54,12 @@ describe("filterDisabledHooks", () => {
       {
         event: "preToolUse",
         matcher: "Edit|Write",
-        hooks: [{ file: "pretooluse-no-eslint-disable.ts" }, { file: "pretooluse-no-as-any.ts" }],
+        hooks: [{ file: "pretooluse-ts-quality.ts" }, { file: "pretooluse-debug-statements.ts" }],
       },
     ]
-    const result = filterDisabledHooks(groups, new Set(["pretooluse-no-eslint-disable.ts"]))
+    const result = filterDisabledHooks(groups, new Set(["pretooluse-ts-quality.ts"]))
     expect(result[0]?.matcher).toBe("Edit|Write")
-    expect(result[0]?.hooks.map((h) => h.file)).toEqual(["pretooluse-no-as-any.ts"])
+    expect(result[0]?.hooks.map((h) => h.file)).toEqual(["pretooluse-debug-statements.ts"])
   })
 
   it("is a no-op when disabled file is not in any group", () => {

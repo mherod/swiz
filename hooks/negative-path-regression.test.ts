@@ -149,7 +149,7 @@ describe("pretooluse-json-validation", () => {
 })
 
 describe("pretooluse-no-as-any", () => {
-  const HOOK = "hooks/pretooluse-no-as-any.ts"
+  const HOOK = "hooks/pretooluse-ts-quality.ts"
 
   test("non-typescript file exits cleanly", async () => {
     const r = await runHook(HOOK, {

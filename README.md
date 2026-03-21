@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**102 hooks. 11 event types. Every agent. Zero compromises.**
+**100 hooks. 11 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -119,7 +119,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (53)
+### PreToolUse (51)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -135,11 +135,9 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-protect-sandbox.ts` | Blocks Bash commands that attempt to disable the sandboxed-edits setting. The sandbox can only be disabled by the user at the terminal — agents cannot opt out. |
 | `pretooluse-protect-strict-main.ts` | Blocks Bash commands that attempt to disable the strict-no-direct-main setting. The feature-branch enforcement can only be disabled by the user at the terminal — agents cannot opt out. |
 | `pretooluse-long-sleep.ts` | Blocks `sleep` commands over a threshold. Agents shouldn't be waiting in loops — if they are, something is wrong. |
-| `pretooluse-no-as-any.ts` | Blocks code edits that introduce `as any` type assertions. TypeScript exists for a reason. |
+| `pretooluse-ts-quality.ts` | Blocks edits that weaken TypeScript quality: `as any` casts, `eslint-disable` comments, and `@ts-ignore`/`@ts-expect-error`/`@ts-nocheck` directives. The type system and linter are authority. |
 | `pretooluse-no-node-modules-edit.ts` | Blocks any edit to files inside `node_modules/`. Manual edits there are overwritten on the next install — use version upgrades, upstream PRs, or patch-package instead. |
 | `pretooluse-no-lockfile-edit.ts` | Blocks direct edits to lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `bun.lock`, etc.). Lockfiles are machine-generated — use the package manager command to regenerate them. |
-| `pretooluse-no-eslint-disable.ts` | Blocks edits that add `eslint-disable` comments. The linter is authority — the agent must fix the underlying issue, not silence it. |
-| `pretooluse-no-ts-ignore.ts` | Blocks `@ts-ignore`, `@ts-expect-error`, and `@ts-nocheck` comments in TypeScript files. The type checker is not optional. |
 | `pretooluse-eslint-config-strength.ts` | Prevents weakening ESLint configs — rules can only be added or escalated, never removed or downgraded. Enforces a quality ratchet. |
 | `pretooluse-json-validation.ts` | Validates JSON syntax before any write to a `.json` file. Catches malformed JSON before it breaks the project. |
 | `pretooluse-no-direct-deps.ts` | Blocks direct edits to dependency blocks in `package.json`. Dependencies must go through the package manager, not hand-edited. |

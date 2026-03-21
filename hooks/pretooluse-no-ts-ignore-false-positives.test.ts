@@ -30,7 +30,7 @@ const KW_IGNORE = ["ts", "ignore"].join("-")
 const KW_EXPECT = ["ts", "expect", "error"].join("-")
 const KW_NOCHECK = ["ts", "nocheck"].join("-")
 
-const HOOK = "hooks/pretooluse-no-ts-ignore.ts"
+const HOOK = "hooks/pretooluse-ts-quality.ts"
 
 function runHook(opts: { filePath?: string; newString: string }) {
   return runFileEditHook(HOOK, opts)

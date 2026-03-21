@@ -658,7 +658,7 @@ describe("Promise.all drain enforcement — cross-runtime portability guard", ()
 })
 
 describe("pretooluse-no-as-any — NFKC homoglyph bypass", () => {
-  const HOOK_PATH = join(import.meta.dir, "pretooluse-no-as-any.ts")
+  const HOOK_PATH = join(import.meta.dir, "pretooluse-ts-quality.ts")
 
   async function runHookPayload(payload: object): Promise<{ stdout: string; exitCode: number }> {
     const proc = Bun.spawn(["bun", HOOK_PATH], {

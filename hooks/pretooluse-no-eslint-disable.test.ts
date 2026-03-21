@@ -5,7 +5,7 @@ import { runFileEditHook } from "./test-utils.ts"
 // The hook itself uses the same technique: ["eslint", "disable"].join("-")
 const KW = ["eslint", "disable"].join("-")
 
-const HOOK = "hooks/pretooluse-no-eslint-disable.ts"
+const HOOK = "hooks/pretooluse-ts-quality.ts"
 
 function runHook(opts: {
   filePath?: string

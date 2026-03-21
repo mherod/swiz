@@ -181,7 +181,7 @@ describe("pretooluse-json-validation: positive paths", () => {
 })
 
 describe("pretooluse-no-as-any: positive paths", () => {
-  const HOOK = "hooks/pretooluse-no-as-any.ts"
+  const HOOK = "hooks/pretooluse-ts-quality.ts"
 
   test("same 'as any' count emits allow with correct format", async () => {
     const r = await runHook(HOOK, {

@@ -88,7 +88,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
   })
 
   test("pretooluse-no-as-any: adding as any denial includes footer", async () => {
-    const result = await runHook("pretooluse-no-as-any.ts", {
+    const result = await runHook("pretooluse-ts-quality.ts", {
       tool_name: "Edit",
       tool_input: {
         file_path: "src/util.ts",
@@ -103,7 +103,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
   test("pretooluse-no-eslint-disable: eslint-disable denial includes footer", async () => {
     // Keyword split to avoid self-triggering this test file
     const directive = `// ${ESLINT_DISABLE_KW}-next-line no-console`
-    const result = await runHook("pretooluse-no-eslint-disable.ts", {
+    const result = await runHook("pretooluse-ts-quality.ts", {
       tool_name: "Edit",
       tool_input: {
         file_path: "src/app.ts",
@@ -117,7 +117,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
   test("pretooluse-no-ts-ignore: @ts-ignore denial includes footer", async () => {
     // Keyword split to avoid self-triggering the no-ts-ignore hook on this file
     const directive = `// @${TS_IGNORE_KW}`
-    const result = await runHook("pretooluse-no-ts-ignore.ts", {
+    const result = await runHook("pretooluse-ts-quality.ts", {
       tool_name: "Edit",
       tool_input: {
         file_path: "src/types.ts",
@@ -130,7 +130,7 @@ describe("pretooluse ACTION REQUIRED footer regression", () => {
 
   test("pretooluse-no-ts-ignore: @ts-nocheck denial includes footer", async () => {
     const directive = `// @${TS_NOCHECK_KW}`
-    const result = await runHook("pretooluse-no-ts-ignore.ts", {
+    const result = await runHook("pretooluse-ts-quality.ts", {
       tool_name: "Edit",
       tool_input: {
         file_path: "src/legacy.ts",

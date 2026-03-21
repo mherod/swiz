@@ -172,7 +172,7 @@ beforeAll(async () => {
           new_string: `${directiveLine}\nconst _: string = 1;\n`,
         },
       })
-      const proc = Bun.spawn(["bun", "hooks/pretooluse-no-ts-ignore.ts"], {
+      const proc = Bun.spawn(["bun", "hooks/pretooluse-ts-quality.ts"], {
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
@@ -362,7 +362,7 @@ describe("pretooluse-no-ts-ignore: JSDoc block comment differential (coverage pr
           tool_name: "Edit",
           tool_input: { file_path: "src/app.ts", new_string: newString },
         })
-        const p = Bun.spawn(["bun", "hooks/pretooluse-no-ts-ignore.ts"], {
+        const p = Bun.spawn(["bun", "hooks/pretooluse-ts-quality.ts"], {
           stdin: "pipe",
           stdout: "pipe",
           stderr: "pipe",

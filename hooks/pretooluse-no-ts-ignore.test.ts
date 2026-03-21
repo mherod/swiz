@@ -27,7 +27,7 @@ async function runHook(opts: {
     },
   })
 
-  const proc = Bun.spawn(["bun", "hooks/pretooluse-no-ts-ignore.ts"], {
+  const proc = Bun.spawn(["bun", "hooks/pretooluse-ts-quality.ts"], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
