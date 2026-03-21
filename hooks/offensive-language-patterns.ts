@@ -5,7 +5,7 @@
  * and message formatting. Both pretooluse-offensive-language.ts and
  * stop-offensive-language.ts import from this module — zero duplication.
  *
- * Detects thirteen categories of bad agent behavior:
+ * Detects fourteen categories of bad agent behavior:
  *   1. **Hedging/deferring** — asking permission instead of acting.
  *   2. **Dismissing responsibility** — deflecting issues as "pre-existing".
  *   3. **Compliance gaming** — treating hooks as obstacles to route around.
@@ -19,6 +19,7 @@
  *  11. **Buying time** — stalling with plausible-sounding pretexts to delay work.
  *  12. **Trailing deferral** — doing useful work then undermining it by seeking permission at the end.
  *  13. **Premature completion** — claiming work is done or deferring it without verification.
+ *  14. **Task cancellation** — rationalizing cancellation instead of taking executive action.
  */
 
 // ── Shared regex fragments ──────────────────────────────────────────────────
@@ -66,6 +67,7 @@ type LazyCategory =
   | "buying_time"
   | "trailing_deferral"
   | "premature_completion"
+  | "task_cancellation"
 
 interface LazyPattern {
   /** RegExp tested against assistant text (case-insensitive). */
@@ -1077,6 +1079,89 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "If the stop hook surfaced them, they need attention this session. " +
       "Dismissing open issues as low-priority future work is avoidance, not prioritization.",
   },
+
+  // ── Task cancellation patterns ──────────────────────────────────────────
+  // The agent fabricates a justification for cancelling or abandoning a task
+  // instead of making an executive design/implementation decision and continuing.
+  // The correct behavior is to take ownership, decide the approach, and execute.
+  {
+    category: "task_cancellation",
+    pattern: re(
+      `(?:let me |i(?:'ll| will) )(?:cancel|remove|close|drop|skip|abandon|delete) (?:this |that |the )?task\\b.*(?:since|because|as |given)`
+    ),
+    response:
+      "Do not cancel tasks because you lack input — make the executive decision yourself. " +
+      "You have full authority to decide the design and implementation approach. " +
+      "Cancelling a task is abandonment. Adopt the next logical step and execute it.",
+  },
+  {
+    category: "task_cancellation",
+    pattern: re(
+      `(?:since|because|given(?: that)?) .{0,80}(?:let me |i(?:'ll| will) )?(?:cancel|remove|close|drop|skip|abandon|delete) (?:this |that |the )?task`
+    ),
+    response:
+      "Leading with a rationalization before cancelling does not make cancellation acceptable. " +
+      "You have executive authority over design and implementation. " +
+      "When context is ambiguous, decide the best approach and execute it. Never cancel — always continue.",
+  },
+  {
+    category: "task_cancellation",
+    pattern: rem(
+      `(?:cancel|remove|close|drop|skip|abandon|delete) (?:this |that |the )?task[^.]*\\.\\s*(?:it |this )?(?:was |is )?(?:created as |just )?(?:a )?placeholder`
+    ),
+    response:
+      "No task is 'just a placeholder.' Every task represents work the user expects done. " +
+      "If the task lacks specifics, make the design decision yourself and implement it. " +
+      "You have executive authority — use it.",
+  },
+  {
+    category: "task_cancellation",
+    pattern: re(`(?:this |that |the )?task (?:is |was )?(?:created as |just )?a placeholder\\b`),
+    response:
+      "No task is 'just a placeholder.' Every task represents work the user expects done. " +
+      "If the task lacks specifics, make the design decision yourself and implement it. " +
+      "You have executive authority — use it.",
+  },
+  {
+    category: "task_cancellation",
+    pattern: re(
+      `(?:the user|they) hasn?'?t (?:responded|replied|specified|provided|clarified|confirmed).*(?:cancel|remove|close|drop|skip|abandon|delete) (?:this |that |the )?task`
+    ),
+    response:
+      "The user's silence is not a reason to cancel work — it is delegation. " +
+      "When the user hasn't specified details, that means you decide. " +
+      "Take the best available approach and implement it. Do not wait for permission that was already granted.",
+  },
+  {
+    category: "task_cancellation",
+    pattern: re(
+      `(?:cancel|remove|close|drop|skip|abandon|delete) (?:this |that |the )?task\\b.*(?:no longer (?:needed|relevant|necessary|required)|not (?:needed|necessary|required|relevant) (?:anymore|any longer|now))`
+    ),
+    response:
+      "Tasks do not become 'no longer needed' because you decided they are inconvenient. " +
+      "If the task was created, it serves a purpose. Determine what that purpose is and fulfill it. " +
+      "If requirements are unclear, make the call — you have executive authority.",
+  },
+  {
+    category: "task_cancellation",
+    pattern: re(
+      `(?:cancel|remove|close|drop|skip|abandon|delete) (?:this |that |the )?task\\b.*(?:(?:the user|they) (?:can|could|should|may|might) (?:re-?open|re-?create|file|create|add) (?:it|a new|another))`
+    ),
+    response:
+      "Cancelling a task with 'the user can reopen it later' is abdication disguised as helpfulness. " +
+      "The user assigned you the work so they would not have to manage it. " +
+      "Make the implementation decision and execute. Do not push task management back to the user.",
+  },
+  {
+    category: "task_cancellation",
+    pattern: re(
+      `(?:hasn'?t|haven'?t|didn'?t) (?:(?:yet )?(?:specified|provided|clarified|confirmed|responded|replied|defined)).*(?:so |therefore |thus )?(?:i(?:'ll| will) )?(?:cancel|remove|close|drop|skip|abandon|delete)`
+    ),
+    response:
+      "Absence of explicit direction is implicit delegation. " +
+      "When the user hasn't specified how, you are expected to decide how. " +
+      "Make the best design decision available and implement it immediately.",
+  },
 ]
 
 // ── Transcript scanning ─────────────────────────────────────────────────────
@@ -1116,6 +1201,7 @@ export const CATEGORY_LABELS: Record<LazyPattern["category"], string> = {
   buying_time: "BUYING TIME",
   trailing_deferral: "TRAILING DEFERRAL",
   premature_completion: "PREMATURE COMPLETION",
+  task_cancellation: "TASK CANCELLATION",
 }
 
 export const CATEGORY_ADVICE: Record<LazyPattern["category"], string> = {
@@ -1162,6 +1248,12 @@ export const CATEGORY_ADVICE: Record<LazyPattern["category"], string> = {
     "NAVIGATE: Before claiming completion, verify: (1) the code exists in the file, (2) it compiles, " +
     "(3) it meets the user's stated requirements. If you deferred to a 'next session,' undo that — " +
     "there is no next session. Do the work now.",
+  task_cancellation:
+    "REFLECT: Re-read your last message. You rationalized cancelling a task instead of executing it. " +
+    "NAVIGATE: You have full executive authority over design and implementation decisions. " +
+    "When requirements are unclear or user input is missing, that is delegation — not a reason to cancel. " +
+    "Decide the best approach, implement it, and continue with the remaining tasks. " +
+    "Never cancel work; always continue with tasks.",
 }
 
 /** Format the full denial message for a matched pattern. */
