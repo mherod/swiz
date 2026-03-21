@@ -523,6 +523,24 @@ const PROMPT_REFLECTIONS_RULES =
   ) +
   `\n\n`
 
+function buildPreviousSuggestionsBlock(seen: Record<string, number>): string {
+  const entries = Object.entries(seen)
+  if (entries.length === 0) return ""
+  const lines = entries
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 10)
+    .map(([key, count]) => `  - (×${count}) ${key}`)
+    .join("\n")
+  return (
+    `=== PREVIOUS SUGGESTIONS (already rejected — do NOT repeat these) ===\n` +
+    `The following suggestions were already made in earlier stop attempts this session.\n` +
+    `The agent acted on them but the work was insufficient or the suggestion was wrong.\n` +
+    `You MUST suggest something materially different.\n` +
+    `${lines}\n` +
+    `=== END OF PREVIOUS SUGGESTIONS ===\n\n`
+  )
+}
+
 function buildPrompt(opts: {
   taskSection: string
   userMessagesSection: string
@@ -532,6 +550,7 @@ function buildPrompt(opts: {
   cwd?: string
   docsOnly?: boolean
   repoFiles?: string
+  previousSuggestions?: Record<string, number>
 }): string {
   const {
     taskSection,
@@ -542,16 +561,19 @@ function buildPrompt(opts: {
     cwd,
     docsOnly = false,
     repoFiles = "",
+    previousSuggestions = {},
   } = opts
   const statusSection = projectStatus
     ? `=== PROJECT STATUS ===\n${projectStatus}\n=== END OF PROJECT STATUS ===\n\n`
     : ""
+  const prevSection = buildPreviousSuggestionsBlock(previousSuggestions)
   return (
     PROMPT_ROLE +
     PROMPT_CRITIQUES +
     buildNextStepRules(repoFiles, docsOnly, ambitionMode) +
     buildProhibitionsBlock(cwd) +
     PROMPT_REFLECTIONS_RULES +
+    prevSection +
     taskSection +
     userMessagesSection +
     statusSection +
@@ -811,6 +833,7 @@ interface GenerateAiResponseOpts {
   cwd: string
   inputCwd: string | undefined
   ambitionMode: AmbitionMode
+  sessionId: string
 }
 
 async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentResponse> {
@@ -823,14 +846,16 @@ async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentRe
     cwd,
     inputCwd,
     ambitionMode,
+    sessionId,
   } = opts
   const context = formatTurnsAsContext(turns)
   const taskSection = buildTaskSection(taskContext)
   const userMessagesSection = buildUserMessagesSection(turns)
   // Parallelize I/O-bound pre-AI data gathering
-  const [changelogStatus, repoFiles] = await Promise.all([
+  const [changelogStatus, repoFiles, suggestionLog] = await Promise.all([
     checkChangelogStaleness(cwd),
     docsOnly ? Promise.resolve("") : git(["ls-files", "hooks/", "src/"], cwd).catch(() => ""),
+    sessionId ? loadSuggestionLog(sessionId) : Promise.resolve({ seen: {} }),
   ])
   const statusParts = [changelogStatus, refinementStatus].filter(Boolean)
   const prompt = buildPrompt({
@@ -842,6 +867,7 @@ async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentRe
     cwd: inputCwd,
     docsOnly,
     repoFiles,
+    previousSuggestions: suggestionLog.seen,
   })
 
   try {
@@ -1088,6 +1114,7 @@ async function main(): Promise<void> {
     cwd,
     inputCwd: input.cwd,
     ambitionMode: effective.ambitionMode,
+    sessionId: input.session_id ?? "",
   })
   const response = postProcessResponse(rawResponse, effective.ambitionMode, projectState)
 
