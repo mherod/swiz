@@ -83,6 +83,8 @@ export interface ParsedSwizTaskCommand {
 export interface ParsedSkillPayload {
   baseDir: string | null
   body: string
+  /** Skill id from a `SKILL CONTENT <name>` header, when that format is used */
+  declaredSkill: string | null
 }
 
 export interface ParsedSearchToolParams {

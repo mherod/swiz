@@ -283,16 +283,18 @@ export function parseSwizTasksCommand(command: string): ParsedSwizTaskCommand | 
 }
 
 export function parseSkillToolCallName(detail: string): string | null {
+  if (typeof detail !== "string") return null
   const trimmed = detail.trim()
   if (!trimmed) return null
+  let parsed: unknown
   try {
-    const parsed = JSON.parse(trimmed) as Record<string, unknown>
-    return typeof parsed.skill === "string" && parsed.skill.trim().length > 0
-      ? parsed.skill.trim()
-      : null
+    parsed = JSON.parse(trimmed)
   } catch {
     return null
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
+  const skill = (parsed as Record<string, unknown>).skill
+  return typeof skill === "string" && skill.trim().length > 0 ? skill.trim() : null
 }
 
 export function skillNameFromMessage(message: SessionMessage | undefined): string | null {
@@ -306,6 +308,7 @@ export function skillNameFromMessage(message: SessionMessage | undefined): strin
 }
 
 export function parseSkillPayload(text: string): ParsedSkillPayload | null {
+  if (typeof text !== "string") return null
   const trimmed = text.trim()
   if (!trimmed) return null
 
@@ -315,12 +318,15 @@ export function parseSkillPayload(text: string): ParsedSkillPayload | null {
     const baseDirMatch = firstLine.match(/^Base directory for this skill:\s*(.+)$/i)
     const baseDir = baseDirMatch?.[1]?.trim() ?? null
     const body = (baseDirMatch ? lines.slice(1).join("\n") : text).trim()
-    return { baseDir, body: body || trimmed }
+    const bodyOut = body || trimmed
+    return { baseDir, body: bodyOut, declaredSkill: null }
   }
 
   const lines = trimmed.split("\n")
   const skillHead = lines[0]?.trim().match(/^SKILL CONTENT\s+(\S+)/i)
   if (skillHead) {
+    const declaredRaw = skillHead[1]?.trim() ?? ""
+    if (!declaredRaw) return null
     let rest = lines.slice(1)
     let baseDir: string | null = null
     const firstRest = rest[0]?.trim() ?? ""
@@ -330,7 +336,8 @@ export function parseSkillPayload(text: string): ParsedSkillPayload | null {
       rest = rest.slice(1)
     }
     const body = rest.join("\n").trim()
-    return { baseDir, body: body || trimmed }
+    const bodyOut = body || trimmed
+    return { baseDir, body: bodyOut, declaredSkill: declaredRaw }
   }
 
   return null
@@ -342,8 +349,10 @@ export function isSkillToolOnlyAssistant(message: SessionMessage): boolean {
   if ((message.text ?? "").trim().length > 0) return false
   const tc = message.toolCalls
   if (!tc || tc.length !== 1) return false
-  if (tc[0]!.name.toLowerCase() !== "skill") return false
-  return parseSkillToolCallName(tc[0]!.detail) != null
+  const call = tc[0]!
+  if (typeof call.name !== "string" || call.name.toLowerCase() !== "skill") return false
+  if (typeof call.detail !== "string") return false
+  return parseSkillToolCallName(call.detail) != null
 }
 
 /**
@@ -358,8 +367,19 @@ export function skillExchangeMergeAt(
   const assistantG = grouped[index + 1]
   if (!userG || !assistantG) return null
   if (userG.message.role !== "user" || assistantG.message.role !== "assistant") return null
-  if (!parseSkillPayload(userG.message.text ?? "")) return null
+  const userText = userG.message.text
+  if (typeof userText !== "string") return null
+  const payload = parseSkillPayload(userText)
+  if (!payload) return null
   if (!isSkillToolOnlyAssistant(assistantG.message)) return null
+  const toolSkill = skillNameFromMessage(assistantG.message)
+  if (!toolSkill) return null
+  if (
+    payload.declaredSkill !== null &&
+    payload.declaredSkill.toLowerCase() !== toolSkill.toLowerCase()
+  ) {
+    return null
+  }
   return { user: userG, assistant: assistantG }
 }
 
