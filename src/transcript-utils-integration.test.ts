@@ -190,7 +190,7 @@ describe("transcript-utils integration", () => {
       await mkdir(claudeProjectDir, { recursive: true })
 
       const inputTranscriptPath = join(projectDir, "input.jsonl")
-      await writeFile(inputTranscriptPath, JSON.stringify({ type: "system" }) + "\n")
+      await writeFile(inputTranscriptPath, `${JSON.stringify({ type: "system" })}\n`)
 
       const fallbackTranscriptPath = join(claudeProjectDir, "fallback-session.jsonl")
       const fallbackTranscript =

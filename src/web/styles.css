@@ -1908,11 +1908,7 @@ tbody tr:hover {
 
 .message-row-skill-exchange {
   border-color: rgba(180, 140, 255, 0.42);
-  background: linear-gradient(
-    135deg,
-    rgba(12, 18, 32, 0.92) 0%,
-    rgba(22, 14, 36, 0.55) 100%
-  );
+  background: linear-gradient(135deg, rgba(12, 18, 32, 0.92) 0%, rgba(22, 14, 36, 0.55) 100%);
 }
 
 .message-role-skill-exchange {

@@ -46,7 +46,7 @@ export async function appendHookLogs(entries: HookLogEntry[]): Promise<void> {
   if (!logPath) return
   try {
     mkdirSync(dirname(logPath), { recursive: true })
-    const lines = entries.map((e) => JSON.stringify(e)).join("\n") + "\n"
+    const lines = `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`
     const file = Bun.file(logPath)
     const existing = (await file.exists()) ? await file.text() : ""
     await Bun.write(logPath, existing + lines)
@@ -88,7 +88,7 @@ export async function pruneHookLogs(): Promise<void> {
     const lines = text.trim().split("\n").filter(Boolean)
     if (lines.length <= MAX_LOG_LINES) return
     const trimmed = lines.slice(-MAX_LOG_LINES)
-    await Bun.write(logPath, trimmed.join("\n") + "\n")
+    await Bun.write(logPath, `${trimmed.join("\n")}\n`)
   } catch {
     // Best-effort
   }
