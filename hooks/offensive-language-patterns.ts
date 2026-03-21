@@ -1081,6 +1081,23 @@ export const LAZY_PATTERNS: LazyPattern[] = [
 
 // ── Transcript scanning ─────────────────────────────────────────────────────
 
+/** Extract joined text from a parsed assistant message, or empty string. */
+function extractTextFromEntry(entry: Record<string, unknown>): string {
+  if (entry?.type !== "assistant") return ""
+  const content = (entry as { message?: { content?: unknown[] } })?.message?.content
+  if (!Array.isArray(content)) return ""
+  const texts = content
+    .filter(
+      (block): block is { type: string; text: string } =>
+        typeof block === "object" &&
+        block !== null &&
+        (block as Record<string, unknown>).type === "text" &&
+        typeof (block as Record<string, unknown>).text === "string"
+    )
+    .map((block) => block.text)
+  return texts.length > 0 ? texts.join(" ") : ""
+}
+
 /**
  * Extract text content from the last assistant message in the transcript.
  * Walks backward through JSONL lines for efficiency.
@@ -1090,17 +1107,8 @@ export function extractLastAssistantText(lines: string[]): string {
     const line = lines[i]
     if (!line?.trim()) continue
     try {
-      const entry = JSON.parse(line)
-      if (entry?.type !== "assistant") continue
-      const content = entry?.message?.content
-      if (!Array.isArray(content)) continue
-      const texts: string[] = []
-      for (const block of content) {
-        if (block?.type === "text" && block.text) {
-          texts.push(block.text)
-        }
-      }
-      if (texts.length > 0) return texts.join(" ")
+      const text = extractTextFromEntry(JSON.parse(line))
+      if (text) return text
     } catch {
       // skip malformed lines
     }
