@@ -23,6 +23,7 @@ export interface HookLogEntry {
   sessionId?: string
   cwd?: string
   toolName?: string
+  skipReason?: string
   stdoutSnippet?: string
   stderrSnippet?: string
 }

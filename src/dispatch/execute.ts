@@ -436,6 +436,7 @@ async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
         hookEventName: ctx.hookEventName,
         hook: exec.file,
         status: exec.status,
+        skipReason: exec.skipReason,
         durationMs: exec.durationMs,
         exitCode: exec.exitCode,
         matcher: exec.matcher,

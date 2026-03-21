@@ -238,7 +238,7 @@ export const manifest: HookGroup[] = [
   {
     event: "postToolUse",
     hooks: [
-      { file: "posttooluse-git-status.ts", timeout: 5 },
+      { file: "posttooluse-git-status.ts", timeout: 5, cooldownSeconds: 60 },
       { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
     ],
   },

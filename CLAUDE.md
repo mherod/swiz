@@ -68,6 +68,7 @@ alwaysApply: false
 - Package manager helpers: `detectPackageManager()`, `detectPkgRunner()`.
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — use typed schema parse (`stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, `sessionHookInputSchema`) or direct type annotation; **DO NOT** use `as { ... }` casts for stdin.
 - Hook schemas (`hooks/schemas.ts`, all `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `taskUpdateInputSchema`. Settings schemas (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State schemas (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
+- **Hook cooldowns**: `cooldownSeconds` on a manifest entry skips re-runs within the window (per hook+cwd). Use for expensive/noisy hooks.
 - **DO**: All three memory-threshold checkpoints — `pretooluse-claude-md-word-limit.ts`, `posttooluse-memory-size.ts`, `swiz memory --strict` — must share the same value via `resolveThresholds(cwd)` (project > global > default 5000). Never hardcode — mismatched thresholds cause commits to fail after edits succeed.
 - **DO**: For PreToolUse hooks that validate file content (not just tool names/paths), compute projected content for Edit tools: read `Bun.file(filePath).text()`, apply `currentContent.replace(old_string, new_string)`, then validate. DON'T parse raw `new_string` — it's often a fragment, not complete file content. Reference: `pretooluse-no-direct-deps.ts` (dep-block guard), `pretooluse-claude-md-word-limit.ts` (word-count guard). Fail-open when file read or JSON parse fails.
 - NFKC-normalize `new_string`/`content`/`old_string` before pattern matching in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be listed in `EXEMPT_HOOKS`.
@@ -239,11 +240,11 @@ alwaysApply: false
 - **DO NOT mark tasks complete without shipped code.** Always: modify source, verify `git diff`, commit, then mark complete.
 - Stop-hook footers with `REMINDER_FRAGMENT` re-trigger memory enforcement. `pretooluse-update-memory-enforcement.ts` uses a 30-minute `CLAUDE.md` mtime cooldown; run `swiz install` after hook changes.
 - Cross-session gap: cooldown doesn't carry between sessions; complete memory follow-through before session end.
-- Cache-key generation: use shared `getCanonicalPathHash()` in `hook-utils.ts` with `realpathSync()`. DO NOT duplicate cache-key logic across hooks/commands.
+- Cache-key generation: use `getCanonicalPathHash()` in `hook-utils.ts`. DO NOT duplicate cache-key logic.
 - In CLI subprocess tests, do not set `cwd: process.cwd()`; use absolute `indexPath = join(process.cwd(), "index.ts")`, temp-directory `cwd`, and `env: { ...process.env, HOME: tempDir }`.
-- Do not use Agent tool `isolation: "worktree"` — corrupts `.git/config` and breaks git.
+- Do not use Agent tool `isolation: "worktree"` — corrupts `.git/config`.
 - For secret-like test fixtures, build via array join (`['s','k','_','l','i','v','e','_',...].join('')`) — push protection blocks literal secrets.
-- **DON'T**: Edit files outside session sandbox — Edit tool blocks it. For out-of-sandbox memory threshold violations, file a GitHub issue instead.
+- **DON'T**: Edit files outside session sandbox — file a GitHub issue instead.
 - **DO**: After every commit, run `git log origin/main..HEAD --oneline` before stop. Use `/push` for unpushed commits.
 - **DON'T**: Rely on `git status` alone for unpush detection—it doesn't show upstream divergence. Always use `git log origin/main..HEAD --oneline` to list unpushed commits.
 - **DO**: In subprocess tests reaching `hasAiProvider() || detectAgentCli()`, pass `AI_TEST_NO_BACKEND: "1"` in env overrides — prevents real backend calls when Codex/Gemini is installed. Exempt: tests using `GEMINI_API_KEY: "test-key"` + `GEMINI_TEST_RESPONSE`.

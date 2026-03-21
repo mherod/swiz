@@ -12,6 +12,7 @@ interface HookLogEntry {
   sessionId?: string
   cwd?: string
   toolName?: string
+  skipReason?: string
   stdoutSnippet?: string
   stderrSnippet?: string
 }
@@ -104,6 +105,7 @@ function LogRow({
         </td>
         <td className={`log-cell log-cell-status ${STATUS_COLORS[entry.status] ?? ""}`}>
           {entry.status}
+          {entry.skipReason ? <span className="log-skip-reason"> ({entry.skipReason})</span> : null}
         </td>
         <td className="log-cell log-cell-duration">{formatDuration(entry.durationMs)}</td>
         <td className="log-cell log-cell-tool">{entry.toolName ?? ""}</td>
@@ -189,6 +191,7 @@ function filterEntries(entries: HookLogEntry[], filter: string): HookLogEntry[] 
       e.event.includes(filter) ||
       e.hook.includes(filter) ||
       e.status.includes(filter) ||
+      (e.skipReason ?? "").includes(filter) ||
       (e.toolName ?? "").includes(filter)
   )
 }
