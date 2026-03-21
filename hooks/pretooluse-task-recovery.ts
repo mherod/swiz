@@ -20,7 +20,7 @@ import {
   isTaskTool,
   resolveSafeSessionId,
   type ToolHookInput,
-} from "./hook-utils.ts"
+} from "./utils/hook-utils.ts"
 
 interface ExtendedToolInput extends ToolHookInput {
   tool_input?: {

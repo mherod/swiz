@@ -2,9 +2,9 @@
 // PostToolUse hook: Inject git status context after every tool call
 
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
-import { emitContext, getGitStatusV2, isGitRepo } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 import type { GitStatusV2 } from "./utils/git-utils.ts"
+import { emitContext, getGitStatusV2, isGitRepo } from "./utils/hook-utils.ts"
 
 /**
  * Build the context line from git status data.

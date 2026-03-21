@@ -2,8 +2,8 @@
 // PostToolUse hook: Remind about sibling test file when editing source files
 
 import { basename, dirname } from "node:path"
-import { emitContext, isFileEditTool } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
+import { emitContext, isFileEditTool } from "./utils/hook-utils.ts"
 
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())

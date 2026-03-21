@@ -2,8 +2,8 @@
 // Stop hook: Run project lint and typecheck scripts before allowing stop
 
 import { join } from "node:path"
-import { blockStop, detectPackageManager } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
+import { blockStop, detectPackageManager } from "./utils/hook-utils.ts"
 
 // Script names probed in priority order for each quality category
 export const LINT_SCRIPTS = ["lint", "lint:check", "eslint", "biome:check"] as const

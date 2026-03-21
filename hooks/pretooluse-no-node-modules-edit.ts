@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
 import { isNodeModulesPath } from "../src/node-modules-path.ts"
-import { allowPreToolUse, denyPreToolUse } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
+import { allowPreToolUse, denyPreToolUse } from "./utils/hook-utils.ts"
 
 const NODE_MODULES_REASON = [
   "You cannot edit files inside node_modules/.",

@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { useTempDir, writeClaudeSession } from "../../hooks/test-utils.ts"
+import { useTempDir, writeClaudeSession } from "../../hooks/utils/test-utils.ts"
 import {
   ALL_STATUS_LINE_SEGMENTS,
   DEFAULT_TRIVIAL_MAX_FILES,

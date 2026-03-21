@@ -3,7 +3,7 @@ import {
   classifyChangeScope,
   type GitStatSummary,
   parseGitStatSummary,
-} from "../hooks/hook-utils.ts"
+} from "../hooks/utils/hook-utils.ts"
 
 describe("parseGitStatSummary", () => {
   it("parses both insertions and deletions", () => {

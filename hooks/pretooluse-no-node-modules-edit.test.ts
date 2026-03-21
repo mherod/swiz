@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { runHook as runHookBase } from "./test-utils.ts"
+import { runHook as runHookBase } from "./utils/test-utils.ts"
 
 async function runHook(filePath: string) {
   return runHookBase("hooks/pretooluse-no-node-modules-edit.ts", {

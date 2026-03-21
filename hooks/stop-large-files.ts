@@ -7,8 +7,8 @@ import {
   readProjectSettings,
   resolveNumericSetting,
 } from "../src/settings.ts"
-import { blockStop, git, isGitRepo, recentHeadRange } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
+import { blockStop, git, isGitRepo, recentHeadRange } from "./utils/hook-utils.ts"
 
 async function checkFileSize(
   filePath: string,

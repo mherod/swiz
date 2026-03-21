@@ -21,7 +21,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { makeTranscript } from "./test-utils.ts"
+import { makeTranscript } from "./utils/test-utils.ts"
 
 // ─── Shared transcript builder & runner ──────────────────────────────────────
 

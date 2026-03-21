@@ -10,6 +10,7 @@ import {
   compactionChecklistSteps,
   manualCompactionGuidanceFallback,
 } from "../src/memory-compaction-guidance.ts"
+import { resolveThresholds } from "./posttooluse-memory-size.ts"
 import {
   allowPreToolUse,
   computeProjectedContent,
@@ -18,8 +19,7 @@ import {
   isEditTool,
   isWriteTool,
   skillAdvice,
-} from "./hook-utils.ts"
-import { resolveThresholds } from "./posttooluse-memory-size.ts"
+} from "./utils/hook-utils.ts"
 
 async function main() {
   const input = (await Bun.stdin.json()) as {

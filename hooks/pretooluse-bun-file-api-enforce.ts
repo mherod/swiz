@@ -2,7 +2,7 @@
 // PreToolUse hook: Blocks Node.js sync file operations when the target file
 // already uses Bun APIs or has a bun shebang. Enforces Bun.file()/Bun.write().
 
-import { allowPreToolUse, computeProjectedContent, denyPreToolUse } from "./hook-utils.ts"
+import { allowPreToolUse, computeProjectedContent, denyPreToolUse } from "./utils/hook-utils.ts"
 
 /** Patterns indicating the file uses Bun's native APIs. */
 const BUN_API_RE = /\bBun\.(file|write|spawn|serve|listen|sleep|which|escapeHTML|hash)\s*\(/

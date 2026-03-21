@@ -21,6 +21,7 @@
 import { orderBy } from "lodash-es"
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 import {
   collectBlockedToolUseIds,
   denyPreToolUse,
@@ -30,8 +31,7 @@ import {
   isShellTool,
   readSessionLines,
   stripAnsi,
-} from "./hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 import { shellSegmentCommandRe } from "./utils/shell-patterns.ts"
 
 // ── Command kind classification ───────────────────────────────────────────────

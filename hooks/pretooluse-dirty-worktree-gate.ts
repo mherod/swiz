@@ -4,8 +4,8 @@
 // Threshold is configurable via `swiz settings set dirty-worktree-threshold <N>`.
 
 import { DEFAULT_DIRTY_WORKTREE_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
-import { allowPreToolUse, denyPreToolUse, getGitStatusV2, isGitRepo } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
+import { allowPreToolUse, denyPreToolUse, getGitStatusV2, isGitRepo } from "./utils/hook-utils.ts"
 
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())

@@ -4,7 +4,7 @@
 // record, causing stop hooks to fire repeatedly.  This hook requires >=1 distinct
 // evidence field in the description before allowing completion.
 
-import { allowPreToolUse, denyPreToolUse } from "./hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse } from "./utils/hook-utils.ts"
 
 // Evidence patterns — each entry is a named family with a regex.
 // Any 1+ distinct families must match for the call to proceed.

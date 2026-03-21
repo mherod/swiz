@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { findPriorSessionTasks } from "./hook-utils.ts"
-import { useTempDir, writeClaudeSession, writeTask } from "./test-utils.ts"
+import { findPriorSessionTasks } from "./utils/hook-utils.ts"
+import { useTempDir, writeClaudeSession, writeTask } from "./utils/test-utils.ts"
 
 const { create: createTempHome } = useTempDir("swiz-prior-tasks-")
 

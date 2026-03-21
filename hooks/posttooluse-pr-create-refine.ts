@@ -10,7 +10,7 @@ import {
   hasGhCli,
   isShellTool,
   skillAdvice,
-} from "./hook-utils.ts"
+} from "./utils/hook-utils.ts"
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)

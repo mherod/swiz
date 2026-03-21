@@ -19,7 +19,7 @@ import {
   resolveSafeSessionId,
   type ToolHookInput,
   toolNameForCurrentAgent,
-} from "./hook-utils.ts"
+} from "./utils/hook-utils.ts"
 
 interface TaskFile {
   id: string

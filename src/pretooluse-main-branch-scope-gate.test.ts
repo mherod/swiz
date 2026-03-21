@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { extractPrNumber, GH_PR_MERGE_RE } from "../hooks/hook-utils.ts"
+import { extractPrNumber, GH_PR_MERGE_RE } from "../hooks/utils/hook-utils.ts"
 
 // ── gh pr merge command detection ────────────────────────────────────────────
 // These tests verify the regex and helper used by the scope gate hook to

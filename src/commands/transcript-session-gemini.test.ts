@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
-import { useTempDir } from "../../hooks/test-utils.ts"
+import { useTempDir } from "../../hooks/utils/test-utils.ts"
 import { createAntigravitySession, createCodexSession } from "../test-fixtures.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 

@@ -4,8 +4,8 @@
 
 import { readProjectState } from "../src/settings.ts"
 import { STATE_METADATA } from "../src/state-machine.ts"
-import { denyPreToolUse, isShellTool, isSwizCommand } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
+import { denyPreToolUse, isShellTool, isSwizCommand } from "./utils/hook-utils.ts"
 
 /** Tool categories blocked in each state — extended as new blocking states are added */
 const STATE_BLOCKED_CATEGORIES: Partial<Record<string, ((name: string) => boolean)[]>> = {}

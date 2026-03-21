@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { SOURCE_EXT_RE, TEST_FILE_RE } from "./hook-utils.ts"
 import {
   CONFIG_FILE_RE,
   DEBUGGER_RE,
@@ -10,6 +9,7 @@ import {
   PY_PRINT_RE,
   RUBY_DEBUG_RE,
 } from "./stop-debug-statements.ts"
+import { SOURCE_EXT_RE, TEST_FILE_RE } from "./utils/hook-utils.ts"
 
 function isScanned(filePath: string): boolean {
   return (

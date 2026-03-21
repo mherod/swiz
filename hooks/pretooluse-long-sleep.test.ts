@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { runBashHook } from "./test-utils.ts"
+import { runBashHook } from "./utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-long-sleep.ts"
 

@@ -15,6 +15,7 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 import {
   emitContext,
   GIT_COMMIT_RE,
@@ -25,8 +26,7 @@ import {
   resolveSafeSessionId,
   stripHeredocs,
   toolNameForCurrentAgent,
-} from "./hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 const SUBJECT_RE = /\b(commit|push)\b/i
 

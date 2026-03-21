@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { allowPreToolUse, denyPreToolUse } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
+import { allowPreToolUse, denyPreToolUse } from "./utils/hook-utils.ts"
 
 // Check if file is an ESLint config file
 // Legacy: .eslintrc, .eslintrc.json, .eslintrc.js, .eslintrc.cjs, .eslintrc.yml, .eslintrc.yaml

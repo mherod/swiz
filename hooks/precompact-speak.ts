@@ -2,7 +2,7 @@
 // PreCompact hook: Speak a narration before context compaction begins.
 
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
-import { spawnSpeak } from "./hook-utils.ts"
+import { spawnSpeak } from "./utils/hook-utils.ts"
 
 async function main(): Promise<void> {
   const input = await Bun.stdin.json().catch(() => null)

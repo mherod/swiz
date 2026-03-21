@@ -5,8 +5,13 @@
 import { join } from "node:path"
 import { compactionChecklistSteps } from "../src/memory-compaction-guidance.ts"
 import { DEFAULT_MEMORY_WORD_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
-import { countFileWords, denyPreToolUse, formatActionPlan, isShellTool } from "./hook-utils.ts"
 import { toolHookInputSchema } from "./schemas.ts"
+import {
+  countFileWords,
+  denyPreToolUse,
+  formatActionPlan,
+  isShellTool,
+} from "./utils/hook-utils.ts"
 
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())

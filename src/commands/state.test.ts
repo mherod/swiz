@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
-import { useTempDir } from "../../hooks/test-utils.ts"
+import { useTempDir } from "../../hooks/utils/test-utils.ts"
 import {
   PROJECT_STATES,
   readProjectState,

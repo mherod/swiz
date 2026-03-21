@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
+
 // Stop hook: Block stop if new TODO/FIXME/HACK lines were introduced in commits
 
+import { stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
   buildIssueGuidance,
@@ -8,8 +10,7 @@ import {
   isGitRepo,
   SOURCE_EXT_RE,
   skillAdvice,
-} from "./hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 export const EXCLUDE_PATH_RE = /node_modules|\.claude\/hooks\/|^hooks\/|__tests__|\.test\.|\.spec\./
 export const GENERATED_FILE_RE = /main\.dart\.js$|\.dart\.js$|\.min\.js$|\.bundle\.js$|\.chunk\.js$/

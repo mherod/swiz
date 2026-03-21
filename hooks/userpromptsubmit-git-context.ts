@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // UserPromptSubmit hook: Inject git branch and uncommitted file count
 
-import { emitContext, git } from "./hook-utils.ts"
+import { emitContext, git } from "./utils/hook-utils.ts"
 
 async function main(): Promise<void> {
   const cwd = process.cwd()

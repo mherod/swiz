@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
+
 // Stop hook: Block stop if secrets/credentials detected in recent commits
 
-import { blockStop, git, isGitRepo, TEST_FILE_RE } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
+import { blockStop, git, isGitRepo, TEST_FILE_RE } from "./utils/hook-utils.ts"
 
 const PRIVATE_KEY_RE = /-----BEGIN (RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY/i
 const TOKEN_RE =

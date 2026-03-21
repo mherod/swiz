@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
+
 // Stop hook: Block stop when the remote has too many branches.
 // Fires when `origin` has more than BRANCH_LIMIT remote-tracking branches.
 // Cooldown (cooldownSeconds: 7200 in manifest) is enforced by the dispatcher.
 
-import { blockStop, git, isGitRepo, skillAdvice } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
+import { blockStop, git, isGitRepo, skillAdvice } from "./utils/hook-utils.ts"
 
 const BRANCH_LIMIT = 40
 

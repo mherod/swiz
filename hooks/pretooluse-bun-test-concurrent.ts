@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // PreToolUse hook: require --concurrent on bun test invocations.
 
-import { allowPreToolUse, denyPreToolUse, isShellTool } from "./hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse, isShellTool } from "./utils/hook-utils.ts"
 import { SHELL_SEGMENT_BOUNDARY } from "./utils/shell-patterns.ts"
 
 const input = await Bun.stdin.json()

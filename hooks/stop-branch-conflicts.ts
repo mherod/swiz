@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
+
 // Stop hook: Block stop if current branch has conflicts with the default branch.
 // Checks both GitHub PR merge state (authoritative) and local merge-tree (fallback)
 
+import { stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
   getDefaultBranch,
@@ -11,8 +13,7 @@ import {
   isDefaultBranch,
   isGitRepo,
   skillAdvice,
-} from "./hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 function buildConflictReason(
   header: string,

@@ -17,7 +17,7 @@ import {
   GIT_COMMIT_RE,
   isShellTool,
   type ToolHookInput,
-} from "./hook-utils.ts"
+} from "./utils/hook-utils.ts"
 
 const input: ToolHookInput = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Block file writes that introduce new debug statements.
 // Detects net-new console.log/debug/trace, debugger keywords in JS/TS source.
 // Uses delta check (new count > old count) to avoid false positives when
@@ -10,13 +11,6 @@
 //   - Generated/minified files
 //   - ESLint config files (reference "no-debugger" rule names)
 
-import {
-  allowPreToolUse,
-  denyPreToolUse,
-  formatActionPlan,
-  isExcludedSourcePath,
-  TEST_FILE_RE,
-} from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
 import {
   CONFIG_FILE_RE,
@@ -30,6 +24,13 @@ import {
   PY_PRINT_RE,
   RUBY_DEBUG_RE,
 } from "./stop-debug-statements.ts"
+import {
+  allowPreToolUse,
+  denyPreToolUse,
+  formatActionPlan,
+  isExcludedSourcePath,
+  TEST_FILE_RE,
+} from "./utils/hook-utils.ts"
 
 function isDebugLine(line: string): boolean {
   if (JS_COMMENT_RE.test(line)) return false

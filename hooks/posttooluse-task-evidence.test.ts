@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { getSessionTasksDir } from "./hook-utils.ts"
-import { useTempDir } from "./test-utils.ts"
+import { getSessionTasksDir } from "./utils/hook-utils.ts"
+import { useTempDir } from "./utils/test-utils.ts"
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/posttooluse-task-evidence.ts")
 const SESSION_ID = "test-evidence-session-abc123"

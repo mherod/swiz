@@ -8,7 +8,7 @@ import {
   detectPackageManager,
   isShellTool,
   type PackageManager,
-} from "./hook-utils.ts"
+} from "./utils/hook-utils.ts"
 import { SHELL_SEGMENT_BOUNDARY } from "./utils/shell-patterns.ts"
 
 // Equivalent subcommands across package managers

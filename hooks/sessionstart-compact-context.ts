@@ -6,6 +6,12 @@
 import { join } from "node:path"
 import { getHomeDirWithFallback } from "../src/home.ts"
 import {
+  buildCompactSnapshotSummary,
+  type CompactSnapshot,
+  type CompactSnapshotSummary,
+} from "./precompact-task-snapshot.ts"
+import { sessionHookInputSchema } from "./schemas.ts"
+import {
   emitContext,
   findPriorSessionTasks,
   formatTaskCompleteCommand,
@@ -15,13 +21,7 @@ import {
   isIncompleteTaskStatus,
   readSessionTasks,
   type SessionTask,
-} from "./hook-utils.ts"
-import {
-  buildCompactSnapshotSummary,
-  type CompactSnapshot,
-  type CompactSnapshotSummary,
-} from "./precompact-task-snapshot.ts"
-import { sessionHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 const TASK_PREVIEW_LIMIT = 3
 const TASK_SUBJECT_MAX_CHARS = 120

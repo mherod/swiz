@@ -24,7 +24,7 @@ import {
   resolveSafeSessionId,
   type SessionTask,
   type ToolHookInput,
-} from "./hook-utils.ts"
+} from "./utils/hook-utils.ts"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

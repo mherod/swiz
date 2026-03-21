@@ -2,8 +2,8 @@
 // Stop hook: Run lint-staged if configured in project
 
 import { join } from "node:path"
-import { blockStop } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
+import { blockStop } from "./utils/hook-utils.ts"
 
 type PackageManager = "bun" | "pnpm" | "yarn" | "npm"
 

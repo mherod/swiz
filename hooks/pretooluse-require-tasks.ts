@@ -34,7 +34,7 @@ import {
   isWriteTool,
   readSessionTasks,
   resolveSafeSessionId,
-} from "./hook-utils.ts"
+} from "./utils/hook-utils.ts"
 
 const STALENESS_THRESHOLD = 20
 const LARGE_CONTENT_LINE_THRESHOLD = 10

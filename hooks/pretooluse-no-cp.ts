@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // PreToolUse hook: Block `cp` and recommend `ditto` for copy operations.
 
-import { allowPreToolUse, denyPreToolUse, isShellTool } from "./hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse, isShellTool } from "./utils/hook-utils.ts"
 import { shellSegmentCommandRe } from "./utils/shell-patterns.ts"
 
 const input = await Bun.stdin.json().catch(() => null)

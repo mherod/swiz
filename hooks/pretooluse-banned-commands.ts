@@ -9,7 +9,7 @@ import {
   detectPackageManager,
   isShellTool,
   skillExists,
-} from "./hook-utils.ts"
+} from "./utils/hook-utils.ts"
 import {
   SHELL_BRACE_EXPANSION_WRITE_RE,
   SHELL_HERESTRING_REDIRECT_RE,

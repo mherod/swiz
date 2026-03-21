@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Block Edit/Write/NotebookEdit operations when the proposed
 // new content contains likely secret material — API keys, tokens, private keys,
 // or generic credential assignments.
@@ -10,8 +11,8 @@
 // Detection logic mirrors stop-secret-scanner.ts to keep the two hooks aligned.
 // Test files are excluded (same exclusion policy as the stop hook).
 
-import { allowPreToolUse, denyPreToolUse, TEST_FILE_RE } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
+import { allowPreToolUse, denyPreToolUse, TEST_FILE_RE } from "./utils/hook-utils.ts"
 
 // ── Secret patterns (mirrored from stop-secret-scanner.ts) ───────────────────
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { isSandboxDisableCommand } from "./pretooluse-protect-sandbox.ts"
-import { runBashHook, runFileEditHook } from "./test-utils.ts"
+import { runBashHook, runFileEditHook } from "./utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-protect-sandbox.ts"
 

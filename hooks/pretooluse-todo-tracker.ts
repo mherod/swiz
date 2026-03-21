@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Block file edits that introduce new TODO/FIXME/HACK debt markers.
 //
 // Mirrors stop-todo-tracker.ts semantics — only net-new additions are blocked.
@@ -11,15 +12,15 @@
 //   - Regex literals (lines that start with a / — pattern strings in hook source)
 //   - Non-comment contexts (TODO must appear inside // /* or # comment)
 
+import { fileEditHookInputSchema } from "./schemas.ts"
+import { EXCLUDE_PATH_RE, GENERATED_FILE_RE } from "./stop-todo-tracker.ts"
 import {
   allowPreToolUse,
   denyPreToolUse,
   formatActionPlan,
   isExcludedSourcePath,
   TEST_FILE_RE,
-} from "./hook-utils.ts"
-import { fileEditHookInputSchema } from "./schemas.ts"
-import { EXCLUDE_PATH_RE, GENERATED_FILE_RE } from "./stop-todo-tracker.ts"
+} from "./utils/hook-utils.ts"
 
 const TODO_RE = /\b(TODO|FIXME|HACK|XXX|WORKAROUND)\b/i
 const COMMENT_RE = /(\/[/*]|#\s)/

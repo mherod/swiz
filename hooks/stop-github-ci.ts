@@ -6,6 +6,7 @@
 import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
 import { getIssueStore } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
   getDefaultBranch,
@@ -17,8 +18,7 @@ import {
   isGitHubRemote,
   isGitRepo,
   skillAdvice,
-} from "./hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 const POLL_INTERVAL_MS = 5_000
 const MAX_POLL_MS = 30_000

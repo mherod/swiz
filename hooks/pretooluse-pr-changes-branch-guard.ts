@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * PreToolUse hook: Block switching away from a branch that has an open PR
  * with CHANGES_REQUESTED reviews.
@@ -15,6 +16,8 @@
  *   - Skips when gh CLI is unavailable
  */
 
+import { shellHookInputSchema } from "./schemas.ts"
+import { getDefaultBranch, isDefaultBranch } from "./utils/git-utils.ts"
 import {
   allowPreToolUse,
   denyPreToolUse,
@@ -29,9 +32,7 @@ import {
   isGitRepo,
   isShellTool,
   skillAdvice,
-} from "./hook-utils.ts"
-import { shellHookInputSchema } from "./schemas.ts"
-import { getDefaultBranch, isDefaultBranch } from "./utils/git-utils.ts"
+} from "./utils/hook-utils.ts"
 
 type Review = {
   state: string

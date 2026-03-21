@@ -11,6 +11,7 @@
 //   Any repo + on feature branch           → allowed
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
+import { getDefaultBranch, isDefaultBranch } from "./utils/git-utils.ts"
 import {
   allowPreToolUse,
   denyPreToolUse,
@@ -18,8 +19,7 @@ import {
   git,
   isShellTool,
   type ToolHookInput,
-} from "./hook-utils.ts"
-import { getDefaultBranch, isDefaultBranch } from "./utils/git-utils.ts"
+} from "./utils/hook-utils.ts"
 
 const input: ToolHookInput = await Bun.stdin.json()
 if (!isShellTool(input?.tool_name ?? "")) process.exit(0)

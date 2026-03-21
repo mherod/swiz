@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { manifest } from "../src/manifest.ts"
-import { getSessionTasksDir } from "./hook-utils.ts"
 import { hookOutputSchema } from "./schemas.ts"
-import { useTempDir } from "./test-utils.ts"
+import { getSessionTasksDir } from "./utils/hook-utils.ts"
+import { useTempDir } from "./utils/test-utils.ts"
 
 type JsonObject = Record<string, unknown>
 const HOOK_CONTRACT_TIMEOUT_MS = 30_000

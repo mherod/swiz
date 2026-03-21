@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { extractOwnerFromUrl } from "./hook-utils.ts"
 import {
   type Issue as HookIssue,
   missingRefinementCategories,
   needsRefinement,
 } from "./stop-personal-repo-issues.ts"
+import { extractOwnerFromUrl } from "./utils/hook-utils.ts"
 
 const SKIP_LABELS = new Set([
   "blocked",

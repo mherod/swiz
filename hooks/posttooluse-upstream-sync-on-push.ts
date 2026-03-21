@@ -13,7 +13,7 @@
 // reflects the new state on the agent's next read.  The hook exits immediately;
 // sync happens in the daemon background.
 
-import { GIT_PUSH_RE, isShellTool } from "./hook-utils.ts"
+import { GIT_PUSH_RE, isShellTool } from "./utils/hook-utils.ts"
 
 const UPSTREAM_MUTATING_RE =
   /\bgh\s+(pr\s+(create|merge|close|edit|reopen)|issue\s+(create|close|comment|edit|reopen))\b/i

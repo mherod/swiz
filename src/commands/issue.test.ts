@@ -9,7 +9,7 @@
 import { describe, expect, test } from "bun:test"
 import { chmod, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { useTempDir } from "../../hooks/test-utils.ts"
+import { useTempDir } from "../../hooks/utils/test-utils.ts"
 
 interface RunResult {
   exitCode: number | null

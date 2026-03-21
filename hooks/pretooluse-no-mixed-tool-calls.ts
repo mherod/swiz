@@ -16,7 +16,7 @@ import {
   SHELL_TOOLS,
   TASK_TOOLS,
   WRITE_TOOLS,
-} from "./hook-utils.ts"
+} from "./utils/hook-utils.ts"
 import { escapeRegex, SHELL_STATEMENT_BOUNDARY } from "./utils/shell-patterns.ts"
 
 const EXTRA_TOOL_NAMES = ["AskUserQuestion", "LS", "MultiEdit", "WebFetch", "WebSearch"]

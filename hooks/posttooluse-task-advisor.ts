@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
+
 // PostToolUse hook: Remind agents to create/update tasks regularly
 // Provides countdown hints showing remaining calls until mandatory enforcement
 // Uses transcript scan (no external state) to determine position
 
+import { toolHookInputSchema } from "./schemas.ts"
 import {
   emitContext,
   extractToolNamesFromTranscript,
@@ -11,8 +13,7 @@ import {
   isTaskTool,
   isWriteTool,
   toolNameForCurrentAgent,
-} from "./hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 function emitCreationCountdown(total: number, threshold: number, taskCreateName: string): void {
   const remaining = threshold - total

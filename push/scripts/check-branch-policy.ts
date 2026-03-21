@@ -12,7 +12,13 @@
 // Reads: git state (branch, upstream, changed files, commit messages)
 // Exits: 0 = allow, 1 = block (prints BLOCKED message to stderr)
 
-import { getDefaultBranch, gh, git, isDefaultBranch, isGitRepo } from "../../hooks/hook-utils.ts"
+import {
+  getDefaultBranch,
+  gh,
+  git,
+  isDefaultBranch,
+  isGitRepo,
+} from "../../hooks/utils/hook-utils.ts"
 import {
   detectProjectCollaborationPolicy,
   getCollaborationModePolicy,

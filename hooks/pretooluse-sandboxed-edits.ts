@@ -8,6 +8,7 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { getHomeDirOrNull } from "../src/home.ts"
 import { readSwizSettings } from "../src/settings.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 import {
   allowPreToolUse,
   buildIssueGuidance,
@@ -16,8 +17,7 @@ import {
   isFileEditTool,
   isGitHubHost,
   parseRemoteUrl,
-} from "./hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 const input = toolHookInputSchema.parse(await Bun.stdin.json())
 

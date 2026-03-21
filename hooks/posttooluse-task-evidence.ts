@@ -15,7 +15,7 @@
 
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { getSessionTaskPath, resolveSafeSessionId, type ToolHookInput } from "./hook-utils.ts"
+import { getSessionTaskPath, resolveSafeSessionId, type ToolHookInput } from "./utils/hook-utils.ts"
 
 // ─── Built-in defaults (used when config is missing or malformed) ───────────
 

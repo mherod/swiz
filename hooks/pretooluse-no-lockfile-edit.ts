@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { allowPreToolUse, denyPreToolUse } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
+import { allowPreToolUse, denyPreToolUse } from "./utils/hook-utils.ts"
 
 // Matches any lockfile at path boundaries (handles / and \ separators, case-insensitive)
 const LOCKFILE_RE =

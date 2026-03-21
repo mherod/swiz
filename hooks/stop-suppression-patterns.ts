@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // Stop hook: Block stop when recent commits on a non-default branch introduce
 // suppression patterns that the PreToolUse gates also prohibit.
 //
@@ -14,8 +15,8 @@
 // Policy: only blocks on non-default branches. On the default branch, changes
 // are intentional (gated by code review and other hooks).
 
-import { blockStop, getDefaultBranch, git, isGitRepo } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
+import { blockStop, getDefaultBranch, git, isGitRepo } from "./utils/hook-utils.ts"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

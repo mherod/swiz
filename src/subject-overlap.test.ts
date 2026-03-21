@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { computeSubjectFingerprint, stemWord } from "../hooks/hook-utils.ts"
 import {
   normalizeSubject,
   significantWords,
   subjectsOverlap,
 } from "../hooks/stop-completion-auditor.ts"
+import { computeSubjectFingerprint, stemWord } from "../hooks/utils/hook-utils.ts"
 
 describe("normalizeSubject", () => {
   test("lowercases and strips punctuation", () => {

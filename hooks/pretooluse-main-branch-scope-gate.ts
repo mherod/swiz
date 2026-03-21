@@ -34,7 +34,7 @@ import {
   isShellTool,
   parseGitStatSummary,
   type ToolHookInput,
-} from "./hook-utils.ts"
+} from "./utils/hook-utils.ts"
 import { escapeRegex } from "./utils/shell-patterns.ts"
 
 const input: ToolHookInput = await Bun.stdin.json()

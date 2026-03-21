@@ -10,8 +10,8 @@
  * patterns from being duplicated across multiple hooks.
  */
 
-import { allowPreToolUse, denyPreToolUse, isFileEditTool } from "./hook-utils.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
+import { allowPreToolUse, denyPreToolUse, isFileEditTool } from "./utils/hook-utils.ts"
 
 const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 

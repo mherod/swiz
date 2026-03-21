@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { useTempDir } from "./test-utils.ts"
+import { useTempDir } from "./utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-sandboxed-edits.ts"
 

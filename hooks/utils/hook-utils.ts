@@ -21,18 +21,18 @@ if (!Bun.which("bun")) {
 
 import { dirname, join } from "node:path"
 import { orderBy } from "lodash-es"
-import { translateMatcher } from "../src/agents.ts"
-import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../src/detect.ts"
-import { getHomeDirOrNull, getHomeDirWithFallback } from "../src/home.ts"
+import { translateMatcher } from "../../src/agents.ts"
+import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../../src/detect.ts"
+import { getHomeDirOrNull, getHomeDirWithFallback } from "../../src/home.ts"
 import {
   getStatePath,
   getSwizSettingsPath,
   STATE_TRANSITIONS,
   stateDataSchema,
-} from "../src/settings.ts"
-import { skillAdvice, skillExists } from "../src/skill-utils.ts"
-import { backfillTaskTimingFields } from "../src/tasks/task-timing.ts"
-import { sessionTaskSentinelPath } from "../src/temp-paths.ts"
+} from "../../src/settings.ts"
+import { skillAdvice, skillExists } from "../../src/skill-utils.ts"
+import { backfillTaskTimingFields } from "../../src/tasks/task-timing.ts"
+import { sessionTaskSentinelPath } from "../../src/temp-paths.ts"
 import {
   GH_CMD_RE,
   GIT_CHECKOUT_RE,
@@ -44,34 +44,34 @@ import {
   READ_CMD_RE,
   RECOVERY_CMD_RE,
   SETUP_CMD_RE,
-} from "./utils/git-utils.ts"
-import { shellTokenCommandRe } from "./utils/shell-patterns.ts"
+} from "./git-utils.ts"
+import { shellTokenCommandRe } from "./shell-patterns.ts"
 
 export { skillAdvice, skillExists }
 export { detectCurrentAgent, isCurrentAgent, isRunningInAgent }
 
 // ─── Canonical path hashing — re-exported from src/git-helpers.ts ────────────
-export { getCanonicalPathHash } from "../src/git-helpers.ts"
-export { resolveSafeSessionId, sanitizeSessionId, sessionPrefix } from "../src/session-id.ts"
+export { getCanonicalPathHash } from "../../src/git-helpers.ts"
+export { resolveSafeSessionId, sanitizeSessionId, sessionPrefix } from "../../src/session-id.ts"
 
-export type { PackageManager, Runtime } from "./utils/package-detection.ts"
+export type { PackageManager, Runtime } from "./package-detection.ts"
 export {
   detectPackageManager,
   detectPkgRunner,
   detectRuntime,
-} from "./utils/package-detection.ts"
+} from "./package-detection.ts"
 
 // ─── Framework detection ──────────────────────────────────────────────────
 // Re-exported from src/detect-frameworks.ts so hook scripts can access it
 // via the single hook-utils.ts import, and so src/manifest.ts can import
 // directly from src/ without creating a src→hooks dependency.
 
-export type { Framework, ProjectStack } from "../src/detect-frameworks.ts"
+export type { Framework, ProjectStack } from "../../src/detect-frameworks.ts"
 export {
   _clearFrameworkCache,
   detectFrameworks,
   detectProjectStack,
-} from "../src/detect-frameworks.ts"
+} from "../../src/detect-frameworks.ts"
 
 // ─── Cross-agent tool equivalence ──────────────────────────────────────────
 // Each set contains all names an agent might use for the same concept.
@@ -102,14 +102,14 @@ export {
   TASK_TOOLS,
   TASK_UPDATE_TOOLS,
   WRITE_TOOLS,
-} from "../src/tool-matchers.ts"
+} from "../../src/tool-matchers.ts"
 
 // Local import for names used within this file (re-exports don't create local bindings)
 import {
   isEditTool as _isEditTool,
   isNotebookTool as _isNotebookTool,
   TASK_TOOLS,
-} from "../src/tool-matchers.ts"
+} from "../../src/tool-matchers.ts"
 
 // ─── Projected content computation ──────────────────────────────────────────
 // Shared by PreToolUse hooks that validate file content before writes.
@@ -305,7 +305,7 @@ export async function emitContext(
 
 // ─── Stop hook helpers ────────────────────────────────────────────────────
 
-export { type ActionPlanItem, formatActionPlan } from "../src/action-plan.ts"
+export { type ActionPlanItem, formatActionPlan } from "../../src/action-plan.ts"
 
 /** Return the current agent's tool name for a canonical tool identifier. */
 export function toolNameForCurrentAgent(canonicalName: string): string {
@@ -432,7 +432,7 @@ import {
   hasGhCli,
   isGitHubRemote,
   isGitRepo,
-} from "../src/git-helpers.ts"
+} from "../../src/git-helpers.ts"
 
 /**
  * Hooks should prefer daemon-backed gh query caching to reduce API pressure.
@@ -556,9 +556,9 @@ export async function hasSessionTasksDir(
 }
 
 // ─── Subject fingerprinting (re-exported from src/) ─────────────────────
-export { computeSubjectFingerprint, stemWord } from "../src/subject-fingerprint.ts"
+export { computeSubjectFingerprint, stemWord } from "../../src/subject-fingerprint.ts"
 
-import { computeSubjectFingerprint } from "../src/subject-fingerprint.ts"
+import { computeSubjectFingerprint } from "../../src/subject-fingerprint.ts"
 
 /**
  * Read all task files for a session from ~/.claude/tasks/<sessionId>/.
@@ -637,7 +637,7 @@ export async function findPriorSessionTasks(
   home: string = getHomeDirWithFallback("")
 ): Promise<PriorSessionResult | null> {
   if (!home || !cwd) return null
-  const { projectKeyFromCwd } = await import("../src/transcript-utils.ts")
+  const { projectKeyFromCwd } = await import("../../src/transcript-utils.ts")
   const { readdir, stat } = await import("node:fs/promises")
 
   const projectKey = projectKeyFromCwd(cwd)
@@ -861,14 +861,14 @@ export async function createSessionTask(
 }
 
 // ─── Command normalisation (re-exported from src/) ──────────────────────
-export { normalizeCommand, stripHeredocs } from "../src/command-utils.ts"
+export { normalizeCommand, stripHeredocs } from "../../src/command-utils.ts"
 // ─── Transcript summary (re-exported from src/) ────────────────────────
 export {
   computeTranscriptSummary,
   getTranscriptSummary,
   parseTranscriptSummary,
   type TranscriptSummary,
-} from "../src/transcript-summary.ts"
+} from "../../src/transcript-summary.ts"
 
 // ─── Branch, git status, and source file utilities ─────────────────────
 // Implementations live in ./utils/git-utils.ts; re-exported here for
@@ -880,7 +880,7 @@ export type {
   GitStatSummary,
   GitStatusCounts,
   GitStatusV2,
-} from "./utils/git-utils.ts"
+} from "./git-utils.ts"
 export {
   BRANCH_CHECK_RE,
   CI_WAIT_RE,
@@ -923,7 +923,7 @@ export {
   SOURCE_EXT_RE,
   SWIZ_ISSUE_RE,
   TEST_FILE_RE,
-} from "./utils/git-utils.ts"
+} from "./git-utils.ts"
 
 // ─── Transcript parsing ─────────────────────────────────────────────────
 // Implementations live in ./utils/transcript.ts; re-exported here for
@@ -937,7 +937,7 @@ export {
   readAllTranscriptLines,
   readSessionLines,
   stripAnsi,
-} from "./utils/transcript.ts"
+} from "./transcript.ts"
 
 /** True when a shell command is exempt from task-tracking enforcement. */
 export function isTaskTrackingExemptShellCommand(command: string): boolean {
@@ -966,7 +966,7 @@ export function isSettingDisableCommand(command: string, aliases: string[]): boo
 }
 
 // Re-exported from src/git-helpers.ts
-export { issueState } from "../src/git-helpers.ts"
+export { issueState } from "../../src/git-helpers.ts"
 
 // ─── Common input types ─────────────────────────────────────────────────
 
@@ -993,13 +993,13 @@ export interface SessionHookInput {
   hook_event_name?: string
 }
 
-export { spawnSpeak } from "../src/speech.ts"
+export { spawnSpeak } from "../../src/speech.ts"
 
 // ─── File utilities ───────────────────────────────────────────────────────
 
-export { countFileWords } from "../src/file-metrics.ts"
+export { countFileWords } from "../../src/file-metrics.ts"
 
-import { SOURCE_EXT_RE as _SOURCE_EXT_RE } from "./utils/git-utils.ts"
+import { SOURCE_EXT_RE as _SOURCE_EXT_RE } from "./git-utils.ts"
 
 /**
  * Returns true when a file path should be skipped by source-scanning hooks.

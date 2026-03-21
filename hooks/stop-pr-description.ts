@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
+
 // Stop hook: Block stop if open PR has empty or placeholder description
 
+import { stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
   getDefaultBranch,
@@ -11,8 +13,7 @@ import {
   isGitHubRemote,
   isGitRepo,
   skillAdvice,
-} from "./hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 const PLACEHOLDER_PATTERNS = [
   "Describe your changes",

@@ -7,6 +7,7 @@
 // complete all review tasks, merge the PR, and switch back to main before stopping.
 
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
   getDefaultBranch,
@@ -16,8 +17,7 @@ import {
   isDefaultBranch,
   isGitRepo,
   skillAdvice,
-} from "./hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 async function main(): Promise<void> {
   const input = stopHookInputSchema.parse(await Bun.stdin.json())

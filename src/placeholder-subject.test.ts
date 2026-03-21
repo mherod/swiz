@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { isPlaceholderSubject, PLACEHOLDER_SUBJECT_RE } from "../hooks/hook-utils.ts"
 import { detect } from "../hooks/task-subject-validation.ts"
+import { isPlaceholderSubject, PLACEHOLDER_SUBJECT_RE } from "../hooks/utils/hook-utils.ts"
 
 describe("isPlaceholderSubject", () => {
   test("matches recovered task subjects", () => {

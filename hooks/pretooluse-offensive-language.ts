@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * PreToolUse hook: scans the last assistant message for lazy behavior patterns.
  *
@@ -7,7 +8,6 @@
  * transcript, runs detection, and calls denyPreToolUse/allowPreToolUse.
  */
 
-import { allowPreToolUse, denyPreToolUse } from "./hook-utils.ts"
 import {
   extractLastAssistantText,
   findLazyPattern,
@@ -15,6 +15,7 @@ import {
   readTranscriptLines,
 } from "./offensive-language-patterns.ts"
 import { toolHookInputSchema } from "./schemas.ts"
+import { allowPreToolUse, denyPreToolUse } from "./utils/hook-utils.ts"
 
 async function main() {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())

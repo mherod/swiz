@@ -14,7 +14,7 @@
 import { describe, expect, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { useTempDir } from "../hooks/test-utils.ts"
+import { useTempDir } from "../hooks/utils/test-utils.ts"
 import { joinNodeModulesPath } from "./node-modules-path.ts"
 
 // Resolved once at module load — avoids repeated lookups per test

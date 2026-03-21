@@ -17,6 +17,7 @@ import {
 import { getDaemonBackedStore, getIssueStore, replayPendingMutations } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import { stopPersonalRepoIssuesCooldownPath } from "../src/temp-paths.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
   formatActionPlan,
@@ -28,8 +29,7 @@ import {
   isGitRepo,
   sanitizeSessionId,
   skillAdvice,
-} from "./hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 export { missingRefinementCategories, needsRefinement }
 

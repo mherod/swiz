@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { collectBlockedToolUseIds } from "../hooks/hook-utils.ts"
 import {
   bashMutatesWorkspace,
   buildReadOutputStep,
@@ -16,6 +15,7 @@ import {
   isHelpQuery,
   parseTranscriptEvents,
 } from "../hooks/pretooluse-repeated-lint-test.ts"
+import { collectBlockedToolUseIds } from "../hooks/utils/hook-utils.ts"
 import { extractSessionLines, parseTranscriptSummary } from "../src/transcript-summary.ts"
 
 // ── isHelpQuery ───────────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // Stop hook: Block stop when recent commits on a non-default branch modify
 // workflow `permissions:` blocks in .github/workflows/*.yml files.
 //
@@ -10,8 +11,8 @@
 // Policy: only blocks on non-default branches. On the default branch, workflow
 // permission changes are intentional (gated by other hooks like code review).
 
-import { blockStop, getDefaultBranch, git, isGitRepo } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
+import { blockStop, getDefaultBranch, git, isGitRepo } from "./utils/hook-utils.ts"
 
 // ── Diff scanning (exported for testing) ────────────────────────────────────
 

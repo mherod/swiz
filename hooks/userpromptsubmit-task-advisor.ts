@@ -11,7 +11,7 @@ import {
   readSessionTasks,
   type SessionHookInput,
   toolNameForCurrentAgent,
-} from "./hook-utils.ts"
+} from "./utils/hook-utils.ts"
 
 const TASK_PREVIEW_LIMIT = 3
 

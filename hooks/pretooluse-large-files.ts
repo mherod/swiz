@@ -11,14 +11,14 @@
 // uncommitted LFS rules added in the same session are respected.
 
 import { DEFAULT_LARGE_FILE_SIZE_KB, resolveNumericSetting } from "../src/settings.ts"
+import { fileEditHookInputSchema } from "./schemas.ts"
 import {
   allowPreToolUse,
   computeProjectedContent,
   denyPreToolUse,
   isEditTool,
   isWriteTool,
-} from "./hook-utils.ts"
-import { fileEditHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 /**
  * Returns true if the given file path is covered by a Git LFS rule in

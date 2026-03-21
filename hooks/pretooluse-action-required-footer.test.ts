@@ -7,8 +7,8 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { getSessionTasksDir } from "./hook-utils.ts"
-import { createEnforcementProjectDir, useTempDir } from "./test-utils.ts"
+import { getSessionTasksDir } from "./utils/hook-utils.ts"
+import { createEnforcementProjectDir, useTempDir } from "./utils/test-utils.ts"
 
 const HOOKS_DIR = resolve(process.cwd(), "hooks")
 const FOOTER_MARKER = "ACTION REQUIRED"

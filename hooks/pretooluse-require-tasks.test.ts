@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { getSessionTasksDir } from "./hook-utils.ts"
 import { DIRECT_MERGE_INTENT_RE, isLargeContentPayload } from "./pretooluse-require-tasks.ts"
-import { useTempDir } from "./test-utils.ts"
+import { getSessionTasksDir } from "./utils/hook-utils.ts"
+import { useTempDir } from "./utils/test-utils.ts"
 
 interface HookResult {
   decision?: string

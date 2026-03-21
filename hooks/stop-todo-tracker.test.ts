@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { SOURCE_EXT_RE } from "./hook-utils.ts"
 import { EXCLUDE_PATH_RE, GENERATED_FILE_RE } from "./stop-todo-tracker.ts"
+import { SOURCE_EXT_RE } from "./utils/hook-utils.ts"
 
 // Test the GENERATED_FILE_RE and EXCLUDE_PATH_RE exclusion logic in isolation,
 // using the canonical exports from stop-todo-tracker.ts and hook-utils.ts.

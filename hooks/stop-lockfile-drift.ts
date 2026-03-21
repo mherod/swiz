@@ -4,8 +4,8 @@
 import { dirname, join } from "node:path"
 import { isNodeModulesPath } from "../src/node-modules-path.ts"
 import { stopLockfileDriftBlockedFlagPath } from "../src/temp-paths.ts"
-import { blockStop, git, isGitRepo, recentHeadRange } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
+import { blockStop, git, isGitRepo, recentHeadRange } from "./utils/hook-utils.ts"
 
 const LOCKFILE_MAP: Record<string, string> = {
   "pnpm-lock.yaml": "pnpm install",

@@ -1,9 +1,9 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { getSessionTasksDir } from "./hook-utils.ts"
 import { normalizeTerminateArgs } from "./stop-auto-continue.ts"
-import { useTempDir } from "./test-utils.ts"
+import { getSessionTasksDir } from "./utils/hook-utils.ts"
+import { useTempDir } from "./utils/test-utils.ts"
 
 // Subprocess-based tests spawn `bun hooks/stop-auto-continue.ts` which is
 // slower on CI runners (Ubuntu) than locally. Bump from the default 10s.

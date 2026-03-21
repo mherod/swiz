@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // PreToolUse hook: Block changes to `permissions:` blocks in GitHub Actions
 // workflow files when working on a non-default branch.
 //
@@ -10,14 +11,14 @@
 // This hook prevents accidental privilege escalation by blocking permission edits
 // on feature branches with an explanatory message.
 
+import { fileEditHookInputSchema } from "./schemas.ts"
 import {
   allowPreToolUse,
   denyPreToolUse,
   getDefaultBranch,
   git,
   isFileEditTool,
-} from "./hook-utils.ts"
-import { fileEditHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 

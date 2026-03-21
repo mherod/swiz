@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
+
 // Stop hook: When uncommitted changes touch files matching user-data model patterns,
 // suggest the /gdpr-analysis skill via additionalContext (non-blocking advisory).
 // Conservative file-name heuristics to minimize false positives.
 
-import { emitContext, git, isGitRepo, skillAdvice } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
+import { emitContext, git, isGitRepo, skillAdvice } from "./utils/hook-utils.ts"
 
 // File-path patterns that suggest user/personal data model changes.
 // Intentionally narrow to avoid false positives — matches model/schema files

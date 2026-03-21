@@ -6,6 +6,7 @@ import { readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { orderBy } from "lodash-es"
 import { getHomeDirOrNull } from "../src/home.ts"
+import { stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
   computeSubjectFingerprint,
@@ -20,8 +21,7 @@ import {
   readSessionTasks,
   type SessionTask,
   type TranscriptSummary,
-} from "./hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 const TOOL_CALL_THRESHOLD = 10
 

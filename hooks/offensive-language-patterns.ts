@@ -1154,7 +1154,8 @@ export const CATEGORY_ADVICE: Record<LazyPattern["category"], string> = {
 export function formatDenialMessage(match: LazyPattern, suffix: string): string {
   const categoryLabel = CATEGORY_LABELS[match.category]
   const advice = CATEGORY_ADVICE[match.category]
-  return `[${categoryLabel}] ${match.response}\n\n${advice}\n\n${suffix}`
+  process.stdout.write(`[${categoryLabel}]\n`)
+  return `${match.response}\n\n${advice}\n\n${suffix}`
 }
 
 /**

@@ -3,8 +3,8 @@
 // Reuses isAutomationLogin() from collaboration-policy.ts for Dependabot detection.
 
 import { isAutomationLogin } from "../src/collaboration-policy.ts"
-import { blockStop, ghJson, hasGhCli, isGitHubRemote, isGitRepo } from "./hook-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
+import { blockStop, ghJson, hasGhCli, isGitHubRemote, isGitRepo } from "./utils/hook-utils.ts"
 
 const STALE_DAYS = 7
 const STALE_MS = STALE_DAYS * 24 * 60 * 60 * 1000

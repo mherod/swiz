@@ -7,7 +7,7 @@ import { createHash } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDir } from "../src/home.ts"
-import { emitContext } from "./hook-utils.ts"
+import { emitContext } from "./utils/hook-utils.ts"
 
 const HASH_FILE = join(getHomeDir(), ".local", "share", "swiz", "manifest-hash")
 

@@ -22,7 +22,7 @@ import {
   hasGitPushForceFlag,
   isShellTool,
   type ToolHookInput,
-} from "./hook-utils.ts"
+} from "./utils/hook-utils.ts"
 
 interface ExtendedToolHookInput extends ToolHookInput {
   tool_response?: string | null

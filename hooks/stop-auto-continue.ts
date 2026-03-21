@@ -33,6 +33,8 @@ import {
   projectKeyFromCwd,
   type Session,
 } from "../src/transcript-utils.ts"
+import { stopHookInputSchema } from "./schemas.ts"
+import { getActionableIssues } from "./stop-personal-repo-issues.ts"
 import {
   buildIssueGuidance,
   getOpenPrForBranch,
@@ -42,9 +44,7 @@ import {
   isGitRepo,
   readSessionTasks,
   skillAdvice,
-} from "./hook-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
-import { getActionableIssues } from "./stop-personal-repo-issues.ts"
+} from "./utils/hook-utils.ts"
 
 const CONTEXT_TURNS = 20 // Recent turns to send as context
 const DEDUP_MAX_SEEN = 2 // Allow stop after suggestion seen this many times

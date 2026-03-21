@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { runBashHook, useTempDir } from "./test-utils.ts"
+import { runBashHook, useTempDir } from "./utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-no-npm.ts"
 

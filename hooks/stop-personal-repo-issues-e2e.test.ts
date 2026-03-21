@@ -12,7 +12,7 @@
 import { describe, expect, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { useTempDir } from "./test-utils.ts"
+import { useTempDir } from "./utils/test-utils.ts"
 
 // ─── Infrastructure ───────────────────────────────────────────────────────────
 

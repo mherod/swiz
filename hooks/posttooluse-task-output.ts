@@ -15,7 +15,7 @@ import {
   ghJson,
   stripAnsi,
   type ToolHookInput,
-} from "./hook-utils.ts"
+} from "./utils/hook-utils.ts"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

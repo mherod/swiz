@@ -17,9 +17,9 @@ import {
 } from "../src/memory-compaction-guidance.ts"
 import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
 import { NODE_MODULES_DIR } from "../src/node-modules-path.ts"
-import { blockStop, formatActionPlan, isGitRepo, skillAdvice } from "./hook-utils.ts"
 import { countStats, isMemoryFile, resolveThresholds } from "./posttooluse-memory-size.ts"
 import { stopHookInputSchema } from "./schemas.ts"
+import { blockStop, formatActionPlan, isGitRepo, skillAdvice } from "./utils/hook-utils.ts"
 
 interface MemoryViolation {
   filePath: string

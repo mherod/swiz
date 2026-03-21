@@ -4,9 +4,16 @@
 
 import { join } from "node:path"
 import { getHomeDir } from "../src/home.ts"
-import { emitContext, ghJson, git, hasGhCli, isGitHubRemote, isGitRepo } from "./hook-utils.ts"
 import { sessionHookInputSchema } from "./schemas.ts"
 import { readSessionStartStateInfo } from "./sessionstart-state-utils.ts"
+import {
+  emitContext,
+  ghJson,
+  git,
+  hasGhCli,
+  isGitHubRemote,
+  isGitRepo,
+} from "./utils/hook-utils.ts"
 
 interface PluginEnvRequirement {
   plugin: string

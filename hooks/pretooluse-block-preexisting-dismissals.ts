@@ -24,6 +24,7 @@
 
 import { getTranscriptSummary } from "../src/transcript-summary.ts"
 import { extractTextFromUnknownContent } from "../src/transcript-utils.ts"
+import { toolHookInputSchema } from "./schemas.ts"
 import {
   allowPreToolUse,
   denyPreToolUse,
@@ -31,8 +32,7 @@ import {
   isGitRepo,
   isShellTool,
   readAllTranscriptLines,
-} from "./hook-utils.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+} from "./utils/hook-utils.ts"
 
 // ── Dismissal patterns ──────────────────────────────────────────────────────
 
