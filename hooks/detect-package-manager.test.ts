@@ -72,7 +72,7 @@ describe("detectPackageManager — package.json packageManager field", () => {
     const dir = await makeTempDir("-pkg-npm")
     await writeFile(join(dir, "package.json"), JSON.stringify({ packageManager: "npm@9.8.1" }))
     const result = await npmDecisionInDir(dir)
-    expect(result.decision).toBeUndefined() // npm is allowed (passes through)
+    expect(result.decision).toBe("allow") // npm is allowed (plausible invocation)
   })
 
   test('packageManager: "yarn@3.6.0" → detects yarn, npm is blocked', async () => {
@@ -168,7 +168,7 @@ describe("detectPackageManager — detection priority", () => {
     await writeFile(join(dir, ".npmrc"), "node-linker=hoisted\n")
     const result = await npmDecisionInDir(dir)
     // npm is allowed (passes through), pnpm detection never runs
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("packageManager field overrides all lock files", async () => {
@@ -269,7 +269,7 @@ describe("detectPackageManager — bun lockfiles", () => {
     const dir = await makeTempDir("-bunlock-pnpm")
     await writeFile(join(dir, "bun.lock"), "")
     const decision = await pnpmDecisionInDir(dir)
-    expect(decision).toBeUndefined()
+    expect(decision).toBe("allow")
   })
 })
 
@@ -313,14 +313,14 @@ describe("detectPackageManager — pnpm / yarn / npm", () => {
     await writeFile(join(dir, "package-lock.json"), "{}")
     // npm is the project PM → hook should pass npm through
     const result = await npmDecisionInDir(dir)
-    expect(result.decision).toBeUndefined() // allowed = no output
+    expect(result.decision).toBe("allow")
   })
 
   test("npm-shrinkwrap.json → npm detected, npm install is allowed", async () => {
     const dir = await makeTempDir("-npm-shrinkwrap")
     await writeFile(join(dir, "npm-shrinkwrap.json"), "{}")
     const result = await npmDecisionInDir(dir)
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 })
 
@@ -372,7 +372,7 @@ describe("detectPackageManager — conflicting lockfiles in same directory", () 
     expect(result.reason).toContain("bun")
     // pnpm install should pass through (treated as plausible alternative)
     const pnpmDecision = await pnpmDecisionInDir(dir)
-    expect(pnpmDecision).toBeUndefined()
+    expect(pnpmDecision).toBe("allow")
   })
 
   test("pnpm-lock.yaml + yarn.lock → pnpm wins", async () => {

@@ -58,13 +58,18 @@ async function runHook(
   return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, json }
 }
 
+/** Run a git command and wait for it to finish. */
+async function gitExec(args: string[], cwd: string): Promise<void> {
+  await Bun.spawn(["git", ...args], { cwd }).exited
+}
+
 /** Create a minimal git repo with one commit. */
 async function createGitRepo(): Promise<string> {
   const dir = await createTempDir()
-  Bun.spawnSync(["git", "init"], { cwd: dir })
-  Bun.spawnSync(["git", "config", "user.email", "test@test.com"], { cwd: dir })
-  Bun.spawnSync(["git", "config", "user.name", "Test"], { cwd: dir })
-  Bun.spawnSync(["git", "commit", "--allow-empty", "-m", "init"], { cwd: dir })
+  await gitExec(["init"], dir)
+  await gitExec(["config", "user.email", "test@test.com"], dir)
+  await gitExec(["config", "user.name", "Test"], dir)
+  await gitExec(["commit", "--allow-empty", "-m", "init"], dir)
   return dir
 }
 
@@ -146,7 +151,7 @@ describe("pretooluse-eslint-config-strength: positive paths", () => {
 describe("pretooluse-json-validation: positive paths", () => {
   const HOOK = "hooks/pretooluse-json-validation.ts"
 
-  test("valid settings.json produces no output (implicit allow)", async () => {
+  test("valid settings.json produces explicit allow", async () => {
     const tmp = await createTempDir()
     const settingsDir = join(tmp, ".claude")
     await mkdir(settingsDir, { recursive: true })
@@ -158,7 +163,8 @@ describe("pretooluse-json-validation: positive paths", () => {
       tool_input: { file_path: settingsPath },
     })
     expect(r.exitCode).toBe(0)
-    expect(r.stdout).toBe("")
+    const hso = r.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    expect(hso?.permissionDecision).toBe("allow")
   })
 
   test("invalid settings.json emits deny with structured output", async () => {
@@ -231,7 +237,7 @@ describe("pretooluse-no-as-any: positive paths", () => {
 describe("pretooluse-no-direct-deps: positive paths", () => {
   const HOOK = "hooks/pretooluse-no-direct-deps.ts"
 
-  test("Write with scripts-only emits no deny (allow)", async () => {
+  test("Write with scripts-only emits explicit allow", async () => {
     const r = await runHook(HOOK, {
       tool_name: "Write",
       tool_input: {
@@ -240,7 +246,8 @@ describe("pretooluse-no-direct-deps: positive paths", () => {
       },
     })
     expect(r.exitCode).toBe(0)
-    expect(r.stdout).toBe("")
+    const hso = r.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    expect(hso?.permissionDecision).toBe("allow")
   })
 
   test("Write with devDependencies emits deny with reason", async () => {
@@ -323,13 +330,14 @@ describe("pretooluse-task-subject-validation: positive paths", () => {
     expect(reason).toContain("#34")
   })
 
-  test("simple focused subject produces no output", async () => {
+  test("simple focused subject produces explicit allow", async () => {
     const r = await runHook(HOOK, {
       tool_name: "TaskCreate",
       tool_input: { subject: "Implement user authentication flow" },
     })
     expect(r.exitCode).toBe(0)
-    expect(r.stdout).toBe("")
+    const hso = r.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    expect(hso?.permissionDecision).toBe("allow")
   })
 })
 
@@ -875,7 +883,7 @@ describe("sessionstart-health-snapshot: positive paths", () => {
     const repo = await createGitRepo()
     // The hook requires isGitHubRemote(cwd) to emit git info.
     // Add a fake GitHub remote so the git path is exercised.
-    Bun.spawnSync(["git", "remote", "add", "origin", "git@github.com:test/repo.git"], { cwd: repo })
+    await gitExec(["remote", "add", "origin", "git@github.com:test/repo.git"], repo)
     const r = await runHook(HOOK, { cwd: repo })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
@@ -961,7 +969,7 @@ describe("stop-git-status: positive paths", () => {
   test("dirty repo with staged files reports them", async () => {
     const repo = await createGitRepo()
     await writeFile(join(repo, "staged.ts"), "export default {}")
-    Bun.spawnSync(["git", "add", "staged.ts"], { cwd: repo })
+    await gitExec(["add", "staged.ts"], repo)
     const r = await runHook(HOOK, { cwd: repo, session_id: "test-staged" })
     expect(r.exitCode).toBe(0)
     const reason = r.json?.reason as string
@@ -982,8 +990,8 @@ describe("stop-large-files: positive paths", () => {
   test("repo with only small files allows stop", async () => {
     const repo = await createGitRepo()
     await writeFile(join(repo, "small.ts"), "export const x = 1")
-    Bun.spawnSync(["git", "add", "."], { cwd: repo })
-    Bun.spawnSync(["git", "commit", "-m", "add small file"], { cwd: repo })
+    await gitExec(["add", "."], repo)
+    await gitExec(["commit", "-m", "add small file"], repo)
     const r = await runHook(HOOK, { cwd: repo, session_id: "test" })
     expect(r.exitCode).toBe(0)
     expect(r.stdout).toBe("")
@@ -994,8 +1002,8 @@ describe("stop-large-files: positive paths", () => {
     // Create a file > 500KB
     const largeContent = "x".repeat(600 * 1024)
     await writeFile(join(repo, "huge.bin"), largeContent)
-    Bun.spawnSync(["git", "add", "."], { cwd: repo })
-    Bun.spawnSync(["git", "commit", "-m", "add large file"], { cwd: repo })
+    await gitExec(["add", "."], repo)
+    await gitExec(["commit", "-m", "add large file"], repo)
     const r = await runHook(HOOK, { cwd: repo, session_id: "test-large" })
     expect(r.exitCode).toBe(0)
     expect(r.json).not.toBeNull()
@@ -1128,28 +1136,28 @@ describe("stop-git-push: positive paths (now merged into stop-git-status)", () =
   test("repo with unpushed commits to local bare remote blocks", async () => {
     // Create a normal repo, push to a bare remote, then add an unpushed commit
     const sourceDir = await createTempDir()
-    Bun.spawnSync(["git", "init"], { cwd: sourceDir })
-    Bun.spawnSync(["git", "config", "user.email", "test@test.com"], { cwd: sourceDir })
-    Bun.spawnSync(["git", "config", "user.name", "Test"], { cwd: sourceDir })
+    await gitExec(["init"], sourceDir)
+    await gitExec(["config", "user.email", "test@test.com"], sourceDir)
+    await gitExec(["config", "user.name", "Test"], sourceDir)
     await writeFile(join(sourceDir, "init.txt"), "init")
-    Bun.spawnSync(["git", "add", "."], { cwd: sourceDir })
-    Bun.spawnSync(["git", "commit", "-m", "initial"], { cwd: sourceDir })
+    await gitExec(["add", "."], sourceDir)
+    await gitExec(["commit", "-m", "initial"], sourceDir)
 
     // Create bare remote from source
     const bareDir = await createTempDir()
-    Bun.spawnSync(["git", "clone", "--bare", sourceDir, `${bareDir}/repo.git`])
+    await Bun.spawn(["git", "clone", "--bare", sourceDir, `${bareDir}/repo.git`]).exited
 
     // Clone the bare remote to get tracking
     const cloneDir = await createTempDir()
-    Bun.spawnSync(["git", "clone", `${bareDir}/repo.git`, "work"], { cwd: cloneDir })
+    await Bun.spawn(["git", "clone", `${bareDir}/repo.git`, "work"], { cwd: cloneDir }).exited
     const workDir = join(cloneDir, "work")
-    Bun.spawnSync(["git", "config", "user.email", "test@test.com"], { cwd: workDir })
-    Bun.spawnSync(["git", "config", "user.name", "Test"], { cwd: workDir })
+    await gitExec(["config", "user.email", "test@test.com"], workDir)
+    await gitExec(["config", "user.name", "Test"], workDir)
 
     // Create an unpushed commit
     await writeFile(join(workDir, "new.txt"), "content")
-    Bun.spawnSync(["git", "add", "."], { cwd: workDir })
-    Bun.spawnSync(["git", "commit", "-m", "unpushed"], { cwd: workDir })
+    await gitExec(["add", "."], workDir)
+    await gitExec(["commit", "-m", "unpushed"], workDir)
 
     const r = await runHook(HOOK, { cwd: workDir, session_id: `test-unpushed-${Date.now()}` })
     expect(r.exitCode).toBe(0)
@@ -1173,7 +1181,7 @@ describe("stop-branch-conflicts: positive paths", () => {
 
   test("feature branch without remote allows stop", async () => {
     const repo = await createGitRepo()
-    Bun.spawnSync(["git", "checkout", "-b", "feature/test"], { cwd: repo })
+    await gitExec(["checkout", "-b", "feature/test"], repo)
     const r = await runHook(HOOK, { cwd: repo, session_id: "test" })
     expect(r.exitCode).toBe(0)
     expect(r.stdout).toBe("")
@@ -1202,8 +1210,8 @@ describe("stop-lockfile-drift: positive paths", () => {
     const repo = await createGitRepo()
     // Write file at root level (no subdirectory needed)
     await writeFile(join(repo, "index.ts"), "export default {}")
-    Bun.spawnSync(["git", "add", "."], { cwd: repo })
-    Bun.spawnSync(["git", "commit", "-m", "add source"], { cwd: repo })
+    await gitExec(["add", "."], repo)
+    await gitExec(["commit", "-m", "add source"], repo)
     const r = await runHook(HOOK, { cwd: repo, session_id: "test" })
     expect(r.exitCode).toBe(0)
     expect(r.stdout).toBe("")

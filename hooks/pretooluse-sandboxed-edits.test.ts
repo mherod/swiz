@@ -115,14 +115,16 @@ describe("pretooluse-sandboxed-edits", () => {
     const cwd = await createTempDir()
     const result = await runHook(cwd, "Edit", join(cwd, "src", "app.ts"))
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toBe("")
+    const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    expect(hso?.permissionDecision).toBe("allow")
   })
 
   test("allows edits within /tmp", async () => {
     const cwd = await createTempDir()
     const result = await runHook(cwd, "Edit", "/tmp/scratch.ts")
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toBe("")
+    const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    expect(hso?.permissionDecision).toBe("allow")
   })
 
   test("allows edits within ~/.claude/projects/ (auto-memory)", async () => {
@@ -132,7 +134,8 @@ describe("pretooluse-sandboxed-edits", () => {
     const memoryPath = join(fakeHome, ".claude", "projects", "test-project", "memory", "MEMORY.md")
     const result = await runHook(cwd, "Write", memoryPath, { fakeHomeOverride: fakeHome })
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toBe("")
+    const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+    expect(hso?.permissionDecision).toBe("allow")
   })
 
   test("blocks edits outside cwd with generic message when no GitHub repo", async () => {
@@ -296,7 +299,8 @@ describe("pretooluse-sandboxed-edits", () => {
       // The session cwd is the real dir; target is inside the real dir
       const result = await runHook(real, "Edit", join(real, "src", "app.ts"))
       expect(result.exitCode).toBe(0)
-      expect(result.stdout).toBe("")
+      const hso = result.json?.hookSpecificOutput as Record<string, unknown> | undefined
+      expect(hso?.permissionDecision).toBe("allow")
     })
   })
 

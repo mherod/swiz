@@ -43,7 +43,7 @@ describe("pretooluse-no-cp", () => {
 
   test("allows non-cp commands", async () => {
     const result = await runHook("mv a b")
-    expect(result.stdout).toBe("")
+    expect(result.decision).toBe("allow")
   })
 
   test("ignores non-shell tools", async () => {

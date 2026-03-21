@@ -79,7 +79,7 @@ describe("pretooluse-dirty-worktree-gate", () => {
     const dir = await mkdtemp(join(tmpdir(), "swiz-dirty-gate-clean-"))
     await initGitRepo(dir)
     const result = await runHook(dir)
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("allows task update at threshold boundary (15 dirty files)", async () => {
@@ -87,7 +87,7 @@ describe("pretooluse-dirty-worktree-gate", () => {
     await initGitRepo(dir)
     await createDirtyFiles(dir, 15)
     const result = await runHook(dir)
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("blocks task update above threshold (16 dirty files)", async () => {

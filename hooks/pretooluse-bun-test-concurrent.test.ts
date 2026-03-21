@@ -36,24 +36,24 @@ describe("pretooluse-bun-test-concurrent", () => {
 
   test("allows bun test with a single test file (--concurrent unnecessary)", async () => {
     const result = await runHook("bun test hooks/foo.test.ts --reporter=dots")
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("allows bun test with --concurrent", async () => {
     const result = await runHook("bun test --concurrent")
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("allows bun test with --concurrent=<value>", async () => {
     const result = await runHook("bun test hooks/foo.test.ts --concurrent=4")
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("allows chained single-file bun test without --concurrent", async () => {
     const result = await runHook(
       "bun test --concurrent hooks/a.test.ts && bun test hooks/b.test.ts"
     )
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("ignores non-bash tools", async () => {
@@ -63,37 +63,37 @@ describe("pretooluse-bun-test-concurrent", () => {
 
   test("ignores commands without bun test", async () => {
     const result = await runHook("git status")
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("allows single test file with stderr redirection", async () => {
     const result = await runHook("bun test src/commands/state.test.ts 2> /tmp/out.log")
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("allows single test file with stdout redirection", async () => {
     const result = await runHook("bun test src/foo.test.ts > /tmp/out.log")
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("allows single test file with append redirection", async () => {
     const result = await runHook("bun test src/foo.test.ts >> /tmp/combined.log")
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("allows single test file with 2>&1 redirection", async () => {
     const result = await runHook("bun test src/foo.test.ts 2>&1 > /tmp/combined.log")
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("allows single test file piped to tee", async () => {
     const result = await runHook("bun test src/foo.test.ts | tee /tmp/out.log")
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("allows single test file with multiple redirections", async () => {
     const result = await runHook("bun test src/foo.test.ts > /tmp/out.log 2> /tmp/err.log")
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("blocks multi-file bun test without --concurrent", async () => {

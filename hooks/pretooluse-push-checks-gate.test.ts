@@ -420,7 +420,7 @@ describe("CI check advisory — prHooksActive modes", () => {
       "swiz ci-wait abc123 --timeout 300",
     ])
     expect(result.blocked).toBe(false)
-    expect(result.advisory).toBe(false)
+    expect(result.reason).toContain("All pre-push checks found")
   })
 
   test("team with all three checks passes", async () => {
@@ -430,7 +430,7 @@ describe("CI check advisory — prHooksActive modes", () => {
       "swiz ci-wait abc123 --timeout 300",
     ])
     expect(result.blocked).toBe(false)
-    expect(result.advisory).toBe(false)
+    expect(result.reason).toContain("All pre-push checks found")
   })
 })
 

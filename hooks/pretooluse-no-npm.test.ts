@@ -62,27 +62,27 @@ describe("pretooluse-no-npm (bun project)", () => {
   describe("bun commands are allowed", () => {
     test("bun install passes through", async () => {
       const result = await runHook("bun install")
-      expect(result.stdout).toBe("")
+      expect(result.decision).toBe("allow")
     })
 
     test("bunx passes through", async () => {
       const result = await runHook("bunx tsc")
-      expect(result.stdout).toBe("")
+      expect(result.decision).toBe("allow")
     })
 
     test("bun test passes through", async () => {
       const result = await runHook("bun test")
-      expect(result.stdout).toBe("")
+      expect(result.decision).toBe("allow")
     })
 
     test("bun run dev passes through", async () => {
       const result = await runHook("bun run dev")
-      expect(result.stdout).toBe("")
+      expect(result.decision).toBe("allow")
     })
 
     test("pnpm install also passes through (plausible alternative)", async () => {
       const result = await runHook("pnpm install")
-      expect(result.stdout).toBe("")
+      expect(result.decision).toBe("allow")
     })
   })
 
