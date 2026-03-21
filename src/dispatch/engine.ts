@@ -327,17 +327,30 @@ async function tryRecordSkippedHook(
   return false
 }
 
+/**
+ * Finalize a hook execution record: apply matcher, detect slow hooks, and
+ * start the cooldown timer when applicable.
+ *
+ * Cooldowns only activate after a **deny/block** result — when the hook
+ * allowed the tool call, the cooldown is not started so the hook will run
+ * again on the next invocation. This lets enforcement hooks stay quiet once
+ * they've flagged an issue, giving the agent time to fix it without repeated
+ * blocks on every tool call.
+ */
 function finalizeExecution(
   execution: HookExecution,
   matcher: string | undefined,
   hook: HookDef,
-  cwd: string
+  cwd: string,
+  parsed: Record<string, unknown> | null
 ): HookExecution {
   if (matcher) execution.matcher = matcher
   if (execution.status === "ok" && logSlowHook(execution.file, execution.durationMs)) {
     execution.status = "slow"
   }
-  if (hook.cooldownSeconds) void markHookCooldown(hook.file, cwd)
+  if (hook.cooldownSeconds && parsed && (isDeny(parsed) || isBlock(parsed))) {
+    void markHookCooldown(hook.file, cwd)
+  }
   return execution
 }
 
@@ -421,7 +434,7 @@ export async function runEntry(
   }
   log(`   → ${formatHookTarget(hook.file, matcher)}`)
   const { parsed, execution } = await runHook(hook.file, payloadStr, hook.timeout)
-  finalizeExecution(execution, matcher, hook, cwd)
+  finalizeExecution(execution, matcher, hook, cwd, parsed)
   return { execution, parsed }
 }
 

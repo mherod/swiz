@@ -9,7 +9,13 @@ export interface HookDef {
   file: string
   timeout?: number
   async?: boolean
-  /** Minimum seconds between successive runs of this hook (scoped per hook+cwd). */
+  /**
+   * Minimum seconds between successive deny/block results of this hook (scoped per hook+cwd).
+   * The cooldown timer only starts when the hook **denies or blocks** a tool call.
+   * If the hook allows the call, no cooldown is recorded and the hook will run
+   * again on the next invocation. This prevents repeated blocks while giving the
+   * agent time to address the issue.
+   */
   cooldownSeconds?: number
   /**
    * Optional environment-based skip condition. Evaluated before the hook process
@@ -178,7 +184,7 @@ export const manifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Edit|Write|Bash",
     hooks: [
-      { file: "pretooluse-require-tasks.ts", timeout: 5 },
+      { file: "pretooluse-require-tasks.ts", timeout: 5, cooldownSeconds: 300 },
       { file: "pretooluse-state-gate.ts", timeout: 5 },
       { file: "pretooluse-block-preexisting-dismissals.ts", timeout: 5 },
     ],
@@ -230,7 +236,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-skill-invocation-gate.ts", timeout: 5 },
       { file: "pretooluse-no-push-when-instructed.ts", timeout: 5 },
       { file: "pretooluse-pr-age-gate.ts", timeout: 10 },
-      { file: "pretooluse-repeated-lint-test.ts", timeout: 5 },
+      { file: "pretooluse-repeated-lint-test.ts", timeout: 5, cooldownSeconds: 120 },
     ],
   },
   {
