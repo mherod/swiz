@@ -84,7 +84,8 @@ describe("pretooluse-workflow-permissions-gate", () => {
         cwd: tmpDir,
       })
       expect(result.exitCode).toBe(0)
-      expect(result.parsed).toBeNull()
+      const hso = result.parsed?.hookSpecificOutput as Record<string, unknown> | undefined
+      expect(hso?.permissionDecision).toBe("allow")
     } finally {
       await rm(tmpDir, { recursive: true, force: true })
     }

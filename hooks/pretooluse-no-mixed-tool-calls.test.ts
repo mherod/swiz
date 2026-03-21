@@ -40,12 +40,12 @@ describe("pretooluse-no-mixed-tool-calls", () => {
 
   test("allows normal shell commands", async () => {
     const result = await runHook("swiz tasks 2>/dev/null | head -20 || true")
-    expect(result.stdout).toBe("")
+    expect(result.decision).toBe("allow")
   })
 
   test("does not trigger on tool names used as plain arguments", async () => {
     const result = await runHook("echo TaskCreate")
-    expect(result.stdout).toBe("")
+    expect(result.decision).toBe("allow")
   })
 
   test("ignores non-shell tools", async () => {

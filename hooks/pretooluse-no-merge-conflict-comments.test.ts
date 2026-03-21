@@ -27,14 +27,14 @@ describe("pretooluse-no-merge-conflict-comments — gh pr comment", () => {
     const result = await runHook(
       'gh pr comment 42 --body "The validation logic on line 42 uses the wrong comparator and will pass null inputs. Please fix that, and also rebase your branch."'
     )
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("allows unrelated comments", async () => {
     const result = await runHook(
       'gh pr comment 7 --body "LGTM, nice work! A small nit: prefer const over let on line 5."'
     )
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 })
 
@@ -52,7 +52,7 @@ describe("pretooluse-no-merge-conflict-comments — gh pr review", () => {
     const result = await runHook(
       'gh pr review 10 --comment --body "Great approach overall. The error handling in the retry loop will suppress network timeouts — consider wrapping in a separate try/catch."'
     )
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 })
 
@@ -78,7 +78,7 @@ describe("pretooluse-no-merge-conflict-comments — gh api POST", () => {
     const result = await runHook(
       'gh api repos/owner/repo/issues/42/comments --method POST --field body="The schema migration in this PR will fail if the table does not exist yet. Add a conditional check before the ALTER TABLE statement."'
     )
-    expect(result.decision).toBeUndefined()
+    expect(result.decision).toBe("allow")
   })
 
   test("allows gh api calls to unrelated endpoints", async () => {

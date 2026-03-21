@@ -37,7 +37,7 @@ async function runHook(
   cwd: string,
   command: string,
   pathOverride?: string
-): Promise<{ raw: string; parsed: Record<string, unknown> | null }> {
+): Promise<{ raw: string; parsed: Record<string, unknown> | null; decision?: string }> {
   const payload = JSON.stringify({
     tool_name: "Bash",
     tool_input: { command, cwd },
@@ -64,7 +64,10 @@ async function runHook(
     throw new Error(`hook exited with ${exitCode}: ${stderr || "(no stderr)"}`)
   }
   if (!raw) return { raw, parsed: null }
-  return { raw, parsed: JSON.parse(raw) as Record<string, unknown> }
+  const parsed = JSON.parse(raw) as Record<string, unknown>
+  const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
+  const decision = (hso?.permissionDecision as string) ?? (parsed.decision as string) ?? undefined
+  return { raw, parsed, decision }
 }
 
 describe("pretooluse-block-commit-to-main", () => {
@@ -92,7 +95,7 @@ describe("pretooluse-block-commit-to-main", () => {
     const fakeBin = await createFakeGhBin("mherod")
     try {
       const result = await runHook(repo, 'git commit -m "test"', fakeBin)
-      expect(result.raw).toBe("")
+      expect(result.decision).toBe("allow")
     } finally {
       await Promise.all([
         rm(repo, { recursive: true, force: true }),
@@ -104,15 +107,15 @@ describe("pretooluse-block-commit-to-main", () => {
   test("allows git commit on feature branch in collaborative repo", async () => {
     const repo = await createTestRepo("https://github.com/acme/repo.git")
     const fakeBin = await createFakeGhBin("mherod")
-    Bun.spawnSync(["git", "checkout", "-b", "feat/test"], {
+    await Bun.spawn(["git", "checkout", "-b", "feat/test"], {
       cwd: repo,
       stdout: "pipe",
       stderr: "pipe",
       env: process.env,
-    })
+    }).exited
     try {
       const result = await runHook(repo, 'git commit -m "test"', fakeBin)
-      expect(result.raw).toBe("")
+      expect(result.decision).toBe("allow")
     } finally {
       await Promise.all([
         rm(repo, { recursive: true, force: true }),
