@@ -352,6 +352,11 @@ export const manifest: HookGroup[] = [
     scheduled: true,
     hooks: [],
   },
+  {
+    event: "preCommit",
+    scheduled: true,
+    hooks: [],
+  },
 ]
 
 // ─── Runtime routing validator ──────────────────────────────────────────────
@@ -424,4 +429,5 @@ export const DISPATCH_TIMEOUTS: Record<string, number> = {
   sessionStart: 20,
   preCompact: 15,
   userPromptSubmit: 15,
+  preCommit: 30,
 }
