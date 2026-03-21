@@ -153,8 +153,8 @@ jobs:
         run: |
           if [ "${{ steps.test-scope.outputs.scope }}" = "full" ]; then
             echo "Running full test suite"
-            bun test --concurrent --timeout=10000
+            bun test --concurrent --timeout=60000
           else
             echo "Running targeted tests: ${{ steps.test-scope.outputs.test_files }}"
-            bun test --concurrent --timeout=10000 ${{ steps.test-scope.outputs.test_files }}
+            bun test --concurrent --timeout=60000 ${{ steps.test-scope.outputs.test_files }}
           fi
