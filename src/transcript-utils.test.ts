@@ -3,6 +3,7 @@ import {
   contentBlockSchema,
   countToolCalls,
   extractEditedFilePaths,
+  extractLastAssistantText,
   extractPlainTurns,
   extractText,
   extractToolResultText,
@@ -17,6 +18,8 @@ import {
   type PlainTurn,
   parseTranscriptEntries,
   projectKeyFromCwd,
+  readTranscriptLines,
+  stripQuotedText,
   textBlockSchema,
   toolResultBlockSchema,
   toolUseBlockSchema,
@@ -1845,6 +1848,116 @@ describe("transcript-utils.ts", () => {
       it("returns false for text block with non-string text", () => {
         expect(isTextBlockWithText({ type: "text", text: 123 })).toBe(false)
       })
+    })
+  })
+
+  describe("stripQuotedText", () => {
+    it("removes inline code", () => {
+      expect(stripQuotedText("before `code` after")).toBe("before  after")
+    })
+
+    it("removes fenced code blocks", () => {
+      expect(stripQuotedText("before ```\ncode\n``` after")).toBe("before  after")
+    })
+
+    it("removes double-quoted strings", () => {
+      expect(stripQuotedText('he said "hello world" then left')).toBe("he said  then left")
+    })
+
+    it("removes single-quoted strings", () => {
+      expect(stripQuotedText("he said 'hello world' then left")).toBe("he said  then left")
+    })
+
+    it("removes smart quotes", () => {
+      expect(stripQuotedText("he said \u201chello\u201d and \u2018bye\u2019")).toBe("he said  and ")
+    })
+
+    it("returns text unchanged when no quotes present", () => {
+      expect(stripQuotedText("plain text here")).toBe("plain text here")
+    })
+  })
+
+  describe("extractLastAssistantText", () => {
+    it("returns empty string for empty lines", () => {
+      expect(extractLastAssistantText([])).toBe("")
+    })
+
+    it("extracts text from last assistant message", () => {
+      const lines = [
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "first" }] },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "second" }] },
+        }),
+      ]
+      expect(extractLastAssistantText(lines)).toBe("second")
+    })
+
+    it("skips non-assistant entries", () => {
+      const lines = [
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "answer" }] },
+        }),
+        JSON.stringify({
+          type: "user",
+          message: { content: [{ type: "text", text: "question" }] },
+        }),
+      ]
+      expect(extractLastAssistantText(lines)).toBe("answer")
+    })
+
+    it("skips malformed JSON lines", () => {
+      const lines = [
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "good" }] },
+        }),
+        "not json",
+      ]
+      expect(extractLastAssistantText(lines)).toBe("good")
+    })
+
+    it("joins multiple text blocks", () => {
+      const lines = [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [
+              { type: "text", text: "hello" },
+              { type: "text", text: "world" },
+            ],
+          },
+        }),
+      ]
+      expect(extractLastAssistantText(lines)).toBe("hello world")
+    })
+
+    it("skips entries with no text content", () => {
+      const lines = [
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "found" }] },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "tool_use", name: "Bash" }] },
+        }),
+      ]
+      expect(extractLastAssistantText(lines)).toBe("found")
+    })
+  })
+
+  describe("readTranscriptLines", () => {
+    it("returns empty array for empty path", async () => {
+      expect(await readTranscriptLines("")).toEqual([])
+    })
+
+    it("returns empty array for non-existent file", async () => {
+      expect(await readTranscriptLines("/nonexistent/path.jsonl")).toEqual([])
     })
   })
 })
