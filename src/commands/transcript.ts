@@ -13,6 +13,8 @@ import {
   extractTextFromUnknownContent,
   findAllProviderSessions,
   getUnsupportedTranscriptFormatMessage,
+  isHookFeedback as isHookFeedbackContent,
+  isTextBlockWithText,
   isUnsupportedTranscriptFormat,
   parseTranscriptEntries,
   type Session,
@@ -20,6 +22,7 @@ import {
   type ToolResultBlock,
   type ToolUseBlock,
   type TranscriptEntry,
+  toolUseBlockSchema,
 } from "../transcript-utils.ts"
 import type { Command } from "../types.ts"
 
@@ -88,13 +91,13 @@ function toContentBlocks(content: string | ContentBlock[] | undefined): ContentB
   return typeof content === "string" ? [{ type: "text", text: content }] : content
 }
 
-function isVisibleTextBlock(block: ContentBlock): block is TextBlock {
-  const text = (block as TextBlock).text
-  return block.type === "text" && typeof text === "string" && text.trim().length > 0
+function isVisibleTextBlock(block: ContentBlock): block is TextBlock & { text: string } {
+  return isTextBlockWithText(block) && block.text.trim().length > 0
 }
 
-function isNamedToolUseBlock(block: ContentBlock): block is ToolUseBlock {
-  return block.type === "tool_use" && typeof (block as ToolUseBlock).name === "string"
+function isNamedToolUseBlock(block: ContentBlock): block is ToolUseBlock & { name: string } {
+  const result = toolUseBlockSchema.safeParse(block)
+  return result.success && typeof result.data.name === "string"
 }
 
 function hasVisibleAssistantContent(blocks: ContentBlock[]): boolean {
@@ -164,11 +167,11 @@ function renderAssistantBlocks(entry: TranscriptEntry): boolean {
 
   for (const block of blocks) {
     if (isVisibleTextBlock(block)) {
-      console.log(wordWrap(block.text!.trim(), wrapWidth, "  "))
+      console.log(wordWrap(block.text.trim(), wrapWidth, "  "))
       continue
     }
     if (isNamedToolUseBlock(block)) {
-      const label = formatToolUse(block.name!, block.input ?? {})
+      const label = formatToolUse(block.name, block.input ?? {})
       console.log(`  ${GREEN}⏺${RESET} ${DIM}${label}${RESET}`)
     }
   }
@@ -177,10 +180,6 @@ function renderAssistantBlocks(entry: TranscriptEntry): boolean {
 }
 
 const TOOL_RESULT_MAX = 600
-
-function extractToolResultContent(block: ToolResultBlock): string {
-  return extractTextFromUnknownContent(block.content)
-}
 
 function renderToolResults(entry: TranscriptEntry): boolean {
   const content = entry.message?.content
@@ -192,7 +191,7 @@ function renderToolResults(entry: TranscriptEntry): boolean {
   const wrapWidth = getWrapWidth(6)
 
   for (const result of results) {
-    const text = extractToolResultContent(result)
+    const text = extractTextFromUnknownContent(result.content)
     if (!text) continue
 
     const truncated =
@@ -226,10 +225,6 @@ function cloneUserEntryWithPlainText(entry: TranscriptEntry, text: string): Tran
   }
 }
 
-function isHookFeedback(text: string): boolean {
-  return text.startsWith("Stop hook feedback:") || text.startsWith("<command-message>")
-}
-
 function hasVisibleContent(entry: TranscriptEntry, text: string): boolean {
   if (entry.type === "assistant") {
     return hasVisibleAssistantContent(toContentBlocks(entry.message?.content))
@@ -245,7 +240,7 @@ function collectTurns(entries: TranscriptEntry[], userOnly = false): Turn[] {
     if (!msg) continue
 
     const text = extractText(msg.content).trim()
-    if (entry.type === "user" && isHookFeedback(text)) continue
+    if (entry.type === "user" && isHookFeedbackContent(text)) continue
 
     if (userOnly) {
       if (entry.type !== "user" || !text) continue
@@ -521,9 +516,7 @@ async function generateAutoReply(turns: Turn[]): Promise<void> {
       if (text) lines.push(`User: ${text}\n`)
     } else {
       const blocks = toContentBlocks(entry.message?.content)
-      const textParts = blocks
-        .filter((b): b is TextBlock => isVisibleTextBlock(b))
-        .map((b) => b.text!.trim())
+      const textParts = blocks.filter(isVisibleTextBlock).map((b) => b.text.trim())
       if (textParts.length > 0) {
         lines.push(`Assistant: ${textParts.join("\n")}\n`)
       }
