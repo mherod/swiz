@@ -19,37 +19,11 @@ import {
   getSessionTasksDir,
   isTaskTool,
   resolveSafeSessionId,
-  type ToolHookInput,
 } from "./utils/hook-utils.ts"
-
-interface ExtendedToolInput extends ToolHookInput {
-  tool_input?: {
-    taskId?: string | number
-    status?: string
-    subject?: string
-    description?: string
-    activeForm?: string
-    [key: string]: unknown
-  }
-}
-
-interface TaskFile {
-  id: string
-  subject: string
-  description: string
-  activeForm?: string
-  status: string
-  blocks: string[]
-  blockedBy: string[]
-  statusChangedAt: string
-  elapsedMs: number
-  startedAt: number | null
-  completedAt: number | null
-  completionTimestamp?: string
-}
+import { buildRecoveryStub, type TaskToolInput } from "./utils/task-hook-types.ts"
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ExtendedToolInput
+  const input = (await Bun.stdin.json()) as TaskToolInput
   const sessionId = resolveSafeSessionId(input.session_id)
   if (!sessionId) return
 
@@ -71,25 +45,7 @@ async function main(): Promise<void> {
   // Check if the task already exists — if so, nothing to do
   if (await Bun.file(taskFile).exists()) return
 
-  // Build a stub task. Use "in_progress" as the initial status so TaskUpdate
-  // can transition it to whatever the agent requested (typically "completed").
-  const nowIso = new Date().toISOString()
-  const nowMs = Date.now()
-  const stub: TaskFile = {
-    id: taskId,
-    subject: `Recovered task #${taskId} (lost during compaction)`,
-    description:
-      `This task was automatically recovered by pretooluse-task-recovery ` +
-      `before task #${taskId} was referenced. The original task content was lost ` +
-      `during context compaction. Status will be updated by the triggering tool call.`,
-    status: "in_progress",
-    blocks: [],
-    blockedBy: [],
-    statusChangedAt: nowIso,
-    elapsedMs: 0,
-    startedAt: nowMs,
-    completedAt: null,
-  }
+  const stub = buildRecoveryStub(taskId, { source: "pretooluse-task-recovery" })
 
   try {
     await mkdir(tasksDir, { recursive: true })

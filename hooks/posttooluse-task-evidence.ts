@@ -15,7 +15,7 @@
 
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { getSessionTaskPath, resolveSafeSessionId, type ToolHookInput } from "./utils/hook-utils.ts"
+import { getSessionTaskPath, resolveSafeSessionId } from "./utils/hook-utils.ts"
 
 // ─── Built-in defaults (used when config is missing or malformed) ───────────
 
@@ -148,11 +148,8 @@ async function loadConfig(): Promise<EvidenceConfig> {
 
 // ─── Payload normalization ──────────────────────────────────────────────────
 
-interface ExtendedToolInput extends ToolHookInput {
-  tool_input?: Record<string, unknown> & {
-    metadata?: Record<string, unknown>
-  }
-}
+// Uses TaskToolInput from shared types — tool_input includes metadata field
+type ExtendedToolInput = import("./utils/task-hook-types.ts").TaskToolInput
 
 function extractEvidence(ti: Record<string, unknown>, keys: string[]): string | null {
   // Check metadata first (structured payload)
