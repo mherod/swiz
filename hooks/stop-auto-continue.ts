@@ -966,11 +966,7 @@ function suggestionKey(text: string): string {
 
 interface SuggestionLog {
   seen: Record<string, number> // key → count
-  totalAttempts: number // total block attempts in this session
 }
-
-/** Max total block attempts before allowing stop regardless of suggestion novelty. */
-const DEDUP_MAX_TOTAL_ATTEMPTS = 5
 
 function getSuggestionsPath(sessionId: string): string {
   const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64)
@@ -986,27 +982,17 @@ async function loadSuggestionLog(sessionId: string): Promise<SuggestionLog> {
       raw !== null &&
       typeof (raw as SuggestionLog).seen === "object"
     ) {
-      const log = raw as SuggestionLog
-      // Migrate/repair: ensure totalAttempts reflects at least the sum of key counts
-      const keySum = Object.values(log.seen).reduce((sum, n) => sum + n, 0)
-      if (typeof log.totalAttempts !== "number" || log.totalAttempts < keySum) {
-        log.totalAttempts = keySum
-      }
-      return log
+      return raw as SuggestionLog
     }
   } catch {
     // File doesn't exist or is invalid
   }
-  return { seen: {}, totalAttempts: 0 }
+  return { seen: {} }
 }
 
-async function recordSuggestion(
-  sessionId: string,
-  key: string
-): Promise<{ keyCount: number; totalAttempts: number }> {
+async function recordSuggestion(sessionId: string, key: string): Promise<number> {
   const log = await loadSuggestionLog(sessionId)
   log.seen[key] = (log.seen[key] ?? 0) + 1
-  log.totalAttempts = (log.totalAttempts ?? 0) + 1
   const path = getSuggestionsPath(sessionId)
   const { mkdirSync } = await import("node:fs")
   const { dirname } = await import("node:path")
@@ -1014,7 +1000,7 @@ async function recordSuggestion(
     mkdirSync(dirname(path), { recursive: true })
   } catch {}
   await Bun.write(path, JSON.stringify(log))
-  return { keyCount: log.seen[key]!, totalAttempts: log.totalAttempts }
+  return log.seen[key]!
 }
 
 /** Best-effort cleanup of dedup files older than 7 days or exceeding max count. */
@@ -1116,23 +1102,16 @@ async function main(): Promise<void> {
     )
   }
 
-  // Dedup: allow stop if the same suggestion repeats OR total attempts exceed threshold.
+  // Dedup: allow stop if the same suggestion repeats.
   const sessionId = input.session_id ?? ""
   if (sessionId && response.next) {
     const key = suggestionKey(response.next)
-    const { keyCount, totalAttempts } = await recordSuggestion(sessionId, key)
+    const keyCount = await recordSuggestion(sessionId, key)
     if (keyCount >= DEDUP_MAX_SEEN) {
       terminate(
         "skip",
         "SUGGESTION_DEDUP",
         `Suggestion seen ${keyCount} times — allowing stop (dedup). Key: ${key.slice(0, 60)}`
-      )
-    }
-    if (totalAttempts >= DEDUP_MAX_TOTAL_ATTEMPTS) {
-      terminate(
-        "skip",
-        "SUGGESTION_EXHAUSTION",
-        `${totalAttempts} total stop attempts in session — allowing stop (exhaustion). Latest: ${key.slice(0, 60)}`
       )
     }
   }
