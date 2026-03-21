@@ -3242,6 +3242,22 @@ tbody tr:hover {
   color: var(--text-subtle);
 }
 
+.logs-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.logs-toggle input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .logs-refresh {
   padding: var(--space-1) var(--space-3);
   font-size: 0.72rem;

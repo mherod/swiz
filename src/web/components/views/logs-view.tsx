@@ -184,9 +184,17 @@ function useHookLogs() {
   return { entries, loading, fetchLogs }
 }
 
-function filterEntries(entries: HookLogEntry[], filter: string): HookLogEntry[] {
-  if (!filter) return entries
-  return entries.filter(
+function filterEntries(
+  entries: HookLogEntry[],
+  filter: string,
+  hideSkipped: boolean
+): HookLogEntry[] {
+  let result = entries
+  if (hideSkipped) {
+    result = result.filter((e) => e.status !== "skipped")
+  }
+  if (!filter) return result
+  return result.filter(
     (e) =>
       e.event.includes(filter) ||
       e.hook.includes(filter) ||
@@ -200,8 +208,9 @@ export function LogsView() {
   const { entries, loading, fetchLogs } = useHookLogs()
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
   const [filter, setFilter] = useState("")
+  const [hideSkipped, setHideSkipped] = useState(true)
 
-  const filtered = filterEntries(entries, filter)
+  const filtered = filterEntries(entries, filter, hideSkipped)
 
   return (
     <div className="bento-full-page">
@@ -215,6 +224,14 @@ export function LogsView() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
+          <label className="logs-toggle">
+            <input
+              type="checkbox"
+              checked={hideSkipped}
+              onChange={(e) => setHideSkipped(e.target.checked)}
+            />
+            Hide skipped
+          </label>
           <button type="button" className="logs-refresh" onClick={() => void fetchLogs()}>
             Refresh
           </button>
