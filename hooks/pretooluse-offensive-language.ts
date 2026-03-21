@@ -10,8 +10,8 @@
 
 import {
   extractLastAssistantText,
-  findLazyPattern,
-  formatDenialMessage,
+  findAllLazyPatterns,
+  formatAllDenialMessages,
   readTranscriptLines,
 } from "./offensive-language-patterns.ts"
 import { toolHookInputSchema } from "./schemas.ts"
@@ -29,11 +29,11 @@ async function main() {
   const assistantText = extractLastAssistantText(lines)
   if (!assistantText) process.exit(0)
 
-  const match = findLazyPattern(assistantText)
-  if (match) {
+  const matches = findAllLazyPatterns(assistantText)
+  if (matches.length > 0) {
     denyPreToolUse(
-      formatDenialMessage(
-        match,
+      formatAllDenialMessages(
+        matches,
         "This hook scans your most recent message and will keep blocking until " +
           "your next message demonstrates corrected behavior through action, not words."
       )

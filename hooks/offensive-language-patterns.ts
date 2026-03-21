@@ -1288,6 +1288,20 @@ export function findLazyPattern(text: string): LazyPattern | null {
   return null
 }
 
+/** Return ALL matching lazy patterns (deduplicated by category). */
+export function findAllLazyPatterns(text: string): LazyPattern[] {
+  const cleaned = stripQuotedText(text)
+  const seen = new Set<LazyCategory>()
+  const matches: LazyPattern[] = []
+  for (const entry of LAZY_PATTERNS) {
+    if (!seen.has(entry.category) && entry.pattern.test(cleaned)) {
+      seen.add(entry.category)
+      matches.push(entry)
+    }
+  }
+  return matches
+}
+
 // ── Category labels and advice (shared with stop hook) ──────────────────────
 
 export const CATEGORY_LABELS: Record<LazyPattern["category"], string> = {
@@ -1365,4 +1379,22 @@ export function formatDenialMessage(match: LazyPattern, suffix: string): string 
   const advice = CATEGORY_ADVICE[match.category]
   process.stdout.write(`[${categoryLabel}]\n`)
   return `${match.response}\n\n${advice}\n\n${suffix}`
+}
+
+/** Format denial message for multiple matched patterns. */
+export function formatAllDenialMessages(matches: LazyPattern[], suffix: string): string {
+  const first = matches[0]
+  if (!first) return ""
+  if (matches.length === 1) return formatDenialMessage(first, suffix)
+
+  const labels = matches.map((m) => CATEGORY_LABELS[m.category])
+  process.stdout.write(`[${labels.join(" + ")}]\n`)
+
+  const sections = matches.map((m, i) => {
+    const label = CATEGORY_LABELS[m.category]
+    const advice = CATEGORY_ADVICE[m.category]
+    return `**${i + 1}. ${label}**\n${m.response}\n${advice}`
+  })
+
+  return `Your message triggered ${matches.length} violation categories:\n\n${sections.join("\n\n")}\n\n${suffix}`
 }

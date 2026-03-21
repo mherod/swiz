@@ -7,8 +7,8 @@
 
 import {
   extractLastAssistantText,
-  findLazyPattern,
-  formatDenialMessage,
+  findAllLazyPatterns,
+  formatAllDenialMessages,
   readTranscriptLines,
 } from "./offensive-language-patterns.ts"
 import { stopHookInputSchema } from "./schemas.ts"
@@ -24,11 +24,11 @@ async function main() {
   const assistantText = extractLastAssistantText(lines)
   if (!assistantText) process.exit(0)
 
-  const match = findLazyPattern(assistantText)
-  if (match) {
+  const matches = findAllLazyPatterns(assistantText)
+  if (matches.length > 0) {
     blockStop(
-      formatDenialMessage(
-        match,
+      formatAllDenialMessages(
+        matches,
         "This hook detected a lazy behavior pattern in your final message. " +
           "You cannot stop while your last message contains hedging, deferral, " +
           "or other avoidance patterns. Produce a new message that demonstrates " +
