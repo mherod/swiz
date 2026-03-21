@@ -153,6 +153,89 @@ describe("transcript-utils integration", () => {
     })
   })
 
+  describe("resolveTranscriptText", () => {
+    it("returns the provided transcript when transcript_path is parseable", async () => {
+      const home = await makeTmpDir("transcript-resolve")
+      const projectDir = join(home, "workspace", "direct-input")
+      await mkdir(projectDir, { recursive: true })
+
+      const transcriptPath = join(projectDir, "transcript.jsonl")
+      const transcript =
+        JSON.stringify({ type: "user", message: { content: "hello" } }) +
+        "\n" +
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "hi" }] },
+        }) +
+        "\n"
+      await writeFile(transcriptPath, transcript)
+
+      const { resolveTranscriptText } = await import("./transcript-utils.ts")
+      const resolution = await resolveTranscriptText(transcriptPath, projectDir, home)
+
+      expect(resolution.raw).toBe(transcript)
+      expect(resolution.sourceDescription).toContain(`transcript_path (${transcriptPath})`)
+      expect(resolution.formatHint).toBe("jsonl")
+      expect(resolution.failureReason).toBeUndefined()
+      await rm(home, { recursive: true, force: true }).catch(() => {})
+    })
+
+    it("falls back to a readable cwd session when the input transcript has no parseable turns", async () => {
+      const home = await makeTmpDir("transcript-resolve")
+      const projectDir = join(home, "workspace", "fallback-project")
+      await mkdir(projectDir, { recursive: true })
+
+      const { projectKeyFromCwd, resolveTranscriptText } = await import("./transcript-utils.ts")
+      const claudeProjectDir = join(home, ".claude", "projects", projectKeyFromCwd(projectDir))
+      await mkdir(claudeProjectDir, { recursive: true })
+
+      const inputTranscriptPath = join(projectDir, "input.jsonl")
+      await writeFile(inputTranscriptPath, JSON.stringify({ type: "system" }) + "\n")
+
+      const fallbackTranscriptPath = join(claudeProjectDir, "fallback-session.jsonl")
+      const fallbackTranscript =
+        JSON.stringify({ type: "user", message: { content: "use fallback" } }) +
+        "\n" +
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "fallback reply" }] },
+        }) +
+        "\n"
+      await writeFile(fallbackTranscriptPath, fallbackTranscript)
+
+      const resolution = await resolveTranscriptText(inputTranscriptPath, projectDir, home)
+
+      expect(resolution.raw).toBe(fallbackTranscript)
+      expect(resolution.sourceDescription).toContain("claude session fallback-session")
+      expect(resolution.formatHint).toBe("jsonl")
+      expect(resolution.failureReason).toBeUndefined()
+      await rm(home, { recursive: true, force: true }).catch(() => {})
+    })
+
+    it("reports unsupported fallback formats when no readable transcript is available", async () => {
+      const home = await makeTmpDir("transcript-resolve")
+      const projectDir = join(home, "workspace", "unsupported-project")
+      await mkdir(projectDir, { recursive: true })
+
+      const id = "4f230af4-7a7b-4f1b-a12d-6a5146434f9a"
+      const conversationsDir = join(home, ".gemini", "antigravity", "conversations")
+      const brainDir = join(home, ".gemini", "antigravity", "brain", id)
+      await mkdir(conversationsDir, { recursive: true })
+      await mkdir(brainDir, { recursive: true })
+      await writeFile(join(conversationsDir, `${id}.pb`), Buffer.from([0x0a, 0x01, 0x00]))
+      await writeFile(join(brainDir, "task.md"), `Work in file://${projectDir}\n`)
+
+      const { resolveTranscriptText } = await import("./transcript-utils.ts")
+      const resolution = await resolveTranscriptText(undefined, projectDir, home)
+
+      expect(resolution.raw).toBeNull()
+      expect(resolution.sourceDescription).toBe("none")
+      expect(resolution.failureReason).toContain("Antigravity protobuf format (.pb)")
+      expect(resolution.failureReason).toContain(projectDir)
+      await rm(home, { recursive: true, force: true }).catch(() => {})
+    })
+  })
+
   describe("toolCallLabel helper", () => {
     it("handles path input correctly", async () => {
       const { extractPlainTurns } = await import("./transcript-utils.ts")

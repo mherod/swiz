@@ -25,13 +25,11 @@ import {
   buildTaskSection,
   buildUserMessagesSection,
   extractTranscriptData,
-  findAllProviderSessions,
   formatTurnsAsContext,
-  getUnsupportedTranscriptFormatMessage,
   isDocsOnlySession,
-  isUnsupportedTranscriptFormat,
   projectKeyFromCwd,
-  type Session,
+  resolveTranscriptText,
+  type TranscriptResolution,
 } from "../src/transcript-utils.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 import { getActionableIssues } from "./stop-personal-repo-issues.ts"
@@ -64,127 +62,6 @@ const agentResponseSchema = z.object({
 })
 
 type AgentResponse = z.infer<typeof agentResponseSchema>
-
-interface TranscriptResolution {
-  raw: string | null
-  sourceDescription: string
-  formatHint?: Session["format"]
-  failureReason?: string
-}
-
-function inferTranscriptFormatFromPath(path: string): Session["format"] | undefined {
-  const lowerPath = path.toLowerCase()
-  if (lowerPath.endsWith(".db")) return "cursor-sqlite"
-  if (lowerPath.includes("/.codex/sessions/") && lowerPath.endsWith(".jsonl")) return "codex-jsonl"
-  if (lowerPath.includes("/.cursor/projects/") && lowerPath.endsWith(".jsonl")) {
-    return "cursor-agent-jsonl"
-  }
-  if (lowerPath.endsWith(".jsonl")) return "jsonl"
-  return undefined
-}
-
-async function tryInputTranscript(
-  transcriptPath: string
-): Promise<
-  { resolution: TranscriptResolution; status: "ok" } | { status: "unreadable" | "unparseable" }
-> {
-  const hintedFormat = inferTranscriptFormatFromPath(transcriptPath)
-  try {
-    const raw = await Bun.file(transcriptPath).text()
-    const hintedTurns = extractTranscriptData(raw, hintedFormat).turns.length
-    const fallbackTurns = hintedFormat ? extractTranscriptData(raw).turns.length : 0
-    if (hintedTurns > 0 || fallbackTurns > 0) {
-      return {
-        status: "ok",
-        resolution: {
-          raw,
-          sourceDescription: `stop hook input transcript_path (${transcriptPath})`,
-          formatHint: hintedTurns > 0 ? hintedFormat : undefined,
-        },
-      }
-    }
-    return { status: "unparseable" }
-  } catch {
-    return { status: "unreadable" }
-  }
-}
-
-async function findFallbackTranscript(
-  sessions: Session[]
-): Promise<{ first: TranscriptResolution | null; match: TranscriptResolution | null }> {
-  let first: TranscriptResolution | null = null
-  for (const session of sessions) {
-    if (isUnsupportedTranscriptFormat(session.format)) continue
-    try {
-      const raw = await Bun.file(session.path).text()
-      const resolution: TranscriptResolution = {
-        raw,
-        formatHint: session.format,
-        sourceDescription: `${session.provider ?? "unknown"} session ${session.id} (${session.path})`,
-      }
-      if (!first) first = resolution
-      if (extractTranscriptData(raw, session.format).turns.length > 0) {
-        return { first, match: resolution }
-      }
-    } catch {
-      // Try the next candidate.
-    }
-  }
-  return { first, match: null }
-}
-
-function buildTranscriptFailureReason(
-  sessions: Session[],
-  transcriptPath: string | undefined,
-  inputStatus: "unreadable" | "unparseable" | null,
-  cwd: string
-): string {
-  const unsupported = sessions.find((session) => isUnsupportedTranscriptFormat(session.format))
-  const unsupportedMessage = unsupported ? getUnsupportedTranscriptFormatMessage(unsupported) : ""
-  const inputFailure =
-    inputStatus === "unreadable"
-      ? `Input transcript ${transcriptPath} could not be read.`
-      : inputStatus === "unparseable"
-        ? `Input transcript ${transcriptPath} had no parseable turns.`
-        : ""
-  const failureReasonBase = unsupportedMessage
-    ? `${unsupportedMessage} No readable fallback transcript was found for cwd ${cwd}.`
-    : `No readable transcript was found from stop hook input or cwd fallback sessions for ${cwd}.`
-  return [inputFailure, failureReasonBase].filter(Boolean).join(" ")
-}
-
-async function resolveTranscriptText(
-  transcriptPath: string | undefined,
-  cwd: string
-): Promise<TranscriptResolution> {
-  let inputStatus: "unreadable" | "unparseable" | null = null
-
-  if (transcriptPath?.trim()) {
-    const result = await tryInputTranscript(transcriptPath)
-    if (result.status === "ok") return result.resolution
-    inputStatus = result.status
-  }
-
-  const sessions = await findAllProviderSessions(cwd)
-  const { first, match } = await findFallbackTranscript(sessions)
-  if (match) return match
-
-  if (first) {
-    return {
-      ...first,
-      failureReason:
-        inputStatus === "unparseable"
-          ? `Input transcript ${transcriptPath} had no parseable turns; using best readable fallback transcript.`
-          : undefined,
-    }
-  }
-
-  return {
-    raw: null,
-    sourceDescription: "none",
-    failureReason: buildTranscriptFailureReason(sessions, transcriptPath, inputStatus, cwd),
-  }
-}
 
 /**
  * Reads in_progress and completed tasks for the session.
