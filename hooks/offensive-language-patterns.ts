@@ -1080,56 +1080,16 @@ export const LAZY_PATTERNS: LazyPattern[] = [
 ]
 
 // ── Transcript scanning ─────────────────────────────────────────────────────
+// Canonical implementations live in src/transcript-utils.ts.
+// Re-exported here so existing consumers keep working.
 
-/** Extract joined text from a parsed assistant message, or empty string. */
-function extractTextFromEntry(entry: Record<string, unknown>): string {
-  if (entry?.type !== "assistant") return ""
-  const content = (entry as { message?: { content?: unknown[] } })?.message?.content
-  if (!Array.isArray(content)) return ""
-  const texts = content
-    .filter(
-      (block): block is { type: string; text: string } =>
-        typeof block === "object" &&
-        block !== null &&
-        (block as Record<string, unknown>).type === "text" &&
-        typeof (block as Record<string, unknown>).text === "string"
-    )
-    .map((block) => block.text)
-  return texts.length > 0 ? texts.join(" ") : ""
-}
+import {
+  extractLastAssistantText,
+  readTranscriptLines,
+  stripQuotedText,
+} from "../src/transcript-utils.ts"
 
-/**
- * Extract text content from the last assistant message in the transcript.
- * Walks backward through JSONL lines for efficiency.
- */
-export function extractLastAssistantText(lines: string[]): string {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i]
-    if (!line?.trim()) continue
-    try {
-      const text = extractTextFromEntry(JSON.parse(line))
-      if (text) return text
-    } catch {
-      // skip malformed lines
-    }
-  }
-  return ""
-}
-
-/**
- * Strip quoted text and code blocks before pattern matching.
- * Prevents false positives when the agent quotes a trigger phrase
- * (e.g., acknowledging a prior denial that contained the phrase).
- */
-export function stripQuotedText(text: string): string {
-  return text
-    .replace(/`[^`]*`/g, "") // inline code
-    .replace(/```[\s\S]*?```/g, "") // fenced code blocks
-    .replace(/"[^"]*"/g, "") // double-quoted
-    .replace(/'[^']*'/g, "") // single-quoted
-    .replace(/\u2018[^\u2019]*\u2019/g, "") // smart single quotes
-    .replace(/\u201c[^\u201d]*\u201d/g, "") // smart double quotes
-}
+export { extractLastAssistantText, readTranscriptLines, stripQuotedText }
 
 /** Check text against all lazy patterns; return the first match or null. */
 export function findLazyPattern(text: string): LazyPattern | null {
@@ -1210,18 +1170,4 @@ export function formatDenialMessage(match: LazyPattern, suffix: string): string 
   const advice = CATEGORY_ADVICE[match.category]
   process.stdout.write(`[${categoryLabel}]\n`)
   return `${match.response}\n\n${advice}\n\n${suffix}`
-}
-
-/**
- * Read transcript lines from a file path.
- * Returns empty array if file cannot be read.
- */
-export async function readTranscriptLines(transcriptPath: string): Promise<string[]> {
-  if (!transcriptPath) return []
-  try {
-    const text = await Bun.file(transcriptPath).text()
-    return text.split("\n")
-  } catch {
-    return []
-  }
 }

@@ -690,6 +690,70 @@ export function extractTextFromUnknownContent(content: unknown): string {
   )
 }
 
+/**
+ * Strip quoted text and code blocks from a string.
+ * Prevents false positives when pattern-matching against agent text
+ * that quotes trigger phrases from prior denials.
+ */
+export function stripQuotedText(text: string): string {
+  return text
+    .replace(/`[^`]*`/g, "") // inline code
+    .replace(/```[\s\S]*?```/g, "") // fenced code blocks
+    .replace(/"[^"]*"/g, "") // double-quoted
+    .replace(/'[^']*'/g, "") // single-quoted
+    .replace(/\u2018[^\u2019]*\u2019/g, "") // smart single quotes
+    .replace(/\u201c[^\u201d]*\u201d/g, "") // smart double quotes
+}
+
+/** Extract joined text from a parsed assistant transcript entry, or empty string. */
+function extractTextFromEntry(entry: Record<string, unknown>): string {
+  if (entry?.type !== "assistant") return ""
+  const content = (entry as { message?: { content?: unknown[] } })?.message?.content
+  if (!Array.isArray(content)) return ""
+  const texts = content
+    .filter(
+      (block): block is { type: string; text: string } =>
+        typeof block === "object" &&
+        block !== null &&
+        (block as Record<string, unknown>).type === "text" &&
+        typeof (block as Record<string, unknown>).text === "string"
+    )
+    .map((block) => block.text)
+  return texts.length > 0 ? texts.join(" ") : ""
+}
+
+/**
+ * Extract text content from the last assistant message in transcript lines.
+ * Walks backward through JSONL lines for efficiency.
+ */
+export function extractLastAssistantText(lines: string[]): string {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]
+    if (!line?.trim()) continue
+    try {
+      const text = extractTextFromEntry(JSON.parse(line))
+      if (text) return text
+    } catch {
+      // skip malformed lines
+    }
+  }
+  return ""
+}
+
+/**
+ * Read transcript lines from a file path.
+ * Returns empty array if file cannot be read.
+ */
+export async function readTranscriptLines(transcriptPath: string): Promise<string[]> {
+  if (!transcriptPath) return []
+  try {
+    const text = await Bun.file(transcriptPath).text()
+    return text.split("\n")
+  } catch {
+    return []
+  }
+}
+
 export function isHookFeedback(content: string | ContentBlock[] | undefined): boolean {
   const text = extractText(content)
   return text.startsWith("Stop hook feedback:") || text.startsWith("<command-message>")
