@@ -208,6 +208,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-todo-tracker.ts", timeout: 5 },
       { file: "pretooluse-large-files.ts", timeout: 5 },
       { file: "pretooluse-workflow-permissions-gate.ts", timeout: 5 },
+      { file: "pretooluse-manifest-order-validation.ts", timeout: 5 },
       { file: "pretooluse-claude-md-word-limit.ts", timeout: 5 },
     ],
   },
@@ -238,6 +239,11 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-pr-age-gate.ts", timeout: 10 },
       { file: "pretooluse-repeated-lint-test.ts", timeout: 5, cooldownSeconds: 120 },
     ],
+  },
+  {
+    event: "preToolUse",
+    matcher: "Read|Grep|Glob",
+    hooks: [{ file: "pretooluse-read-grep-stall-guard.ts", timeout: 5, cooldownSeconds: 300 }],
   },
   {
     event: "postToolUse",

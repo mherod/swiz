@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**102 hooks. 12 event types. Every agent. Zero compromises.**
+**104 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -119,7 +119,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (51)
+### PreToolUse (53)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -170,11 +170,13 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-todo-tracker.ts` | Blocks Edit/Write/NotebookEdit when the write introduces net-new TODO/FIXME/HACK/XXX/WORKAROUND debt markers in comment contexts. Uses a delta check (new count vs old count) to avoid false positives when editing files that already contain such markers. Excludes regex literals, non-comment contexts, hook source files, test files, and generated files — mirroring `stop-todo-tracker.ts` semantics. The stop hook remains as a backstop for bypassed paths. |
 | `pretooluse-large-files.ts` | Blocks Edit/Write operations that would create or update a file exceeding the configured large-file size threshold (default 500KB) when the path is not covered by a Git LFS rule in `.gitattributes`. Reads `.gitattributes` from disk so uncommitted LFS rules added in the same session are respected. For Edit, projects the result of old→new replacement before measuring. For NotebookEdit, size is not determinable pre-write and is skipped. Threshold is configurable via `swiz settings set large-file-size-kb <value>` at global or project scope. |
 | `pretooluse-workflow-permissions-gate.ts` | Blocks changes to `permissions:` blocks in `.github/workflows/*.yml` files on non-default branches. GitHub Actions permission changes don't take effect until merged — this prevents accidental privilege escalation that silently activates upon merge. |
+| `pretooluse-manifest-order-validation.ts` | Blocks edits to `src/manifest.ts` that change stop hook order without updating `src/manifest.test.ts`. Compares projected manifest order against test expectations and shows divergences, preventing failed pre-push test cycles. |
 | `pretooluse-sandboxed-edits.ts` | Blocks Edit, Write, and NotebookEdit calls targeting paths outside the session's working directory and temporary directories. Enabled by default; disable with `swiz settings disable sandboxed-edits`. |
 | `pretooluse-sandbox-guidance-consolidation.ts` | Blocks edits that introduce inline issue-guidance patterns. Enforces the use of `buildIssueGuidance()` from hook-utils.ts instead, keeping issue-guidance messages consistent and preventing duplicate patterns across hooks. |
 | `pretooluse-claude-md-word-limit.ts` | Prevents CLAUDE.md edits from exceeding 5000 words. Calculates projected word count before each Edit/Write and blocks if the result would exceed the limit, directing the agent to use the `/compact-memory` skill. |
 | `pretooluse-claude-word-limit.ts` | Blocks `git push` when CLAUDE.md exceeds 5000 words, enforcing the limit at release time. Provides actionable error showing current word count, overage, and required reduction. Integrates with word-counting utility in hook-utils. |
 | `pretooluse-offensive-language.ts` | Scans the last assistant message for two categories of bad behavior: (1) **hedging/deferring** — asking permission instead of acting ("Would you like me to…", "Shall I proceed?", "Let me know if you'd like…"), and (2) **dismissing responsibility** — deflecting issues as "pre-existing", "unrelated to our changes", or "safely ignored". Each pattern triggers a tailored scolding. The agent must produce a new message acknowledging the feedback before the hook allows tool calls to proceed. |
+| `pretooluse-read-grep-stall-guard.ts` | Blocks Read/Grep/Glob when 15+ consecutive read/search tool calls have occurred without any Edit or Write. Detects stall patterns where the model endlessly reads files without producing output. After any Edit or Write, the counter resets and reads are unblocked. |
 | `posttooluse-speak-narrator.ts` | Catches up on unspoken assistant text before each tool call. Shares the same incremental position tracker as the PostToolUse and Stop narrator hooks — ensures no text is missed between tool calls. Runs async. |
 
 ### PostToolUse (20)
