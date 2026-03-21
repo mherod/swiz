@@ -951,6 +951,33 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "buying_time",
     pattern:
+      /(?:this )?(?:session|conversation) has been (?:running|going|active) (?:for )?(?:a )?(?:very )?(?:long|extended|significant(?: amount of)?) (?:time|while|duration)/i,
+    response:
+      "You are a language model. You have no concept of time, duration, or fatigue. " +
+      "Every token is processed with the same compute regardless of context position. " +
+      "Claiming the session has been 'running for a long time' is fabricated urgency to justify stopping work.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:i(?:'m| am) )?(?:not going to|won't|will not) (?:rush|hurry|speed) (?:through|into|past) (?:them|this|that|it|the (?:remaining|rest|other))/i,
+    response:
+      "You are a language model — you cannot rush or not rush. You process tokens. " +
+      "Framing careful execution as a reason to stop is laziness disguised as diligence. " +
+      "Do the work at full quality, right now.",
+  },
+  {
+    category: "buying_time",
+    pattern:
+      /(?:(?:these|they|the (?:remaining|rest|other|open)) )?(?:need|require|deserve|demand|warrant) (?:dedicated|careful|individual|proper|thorough|forensic|detailed) (?:attention|focus|analysis|review|investigation|examination)/i,
+    response:
+      "Claiming tasks 'need dedicated attention' as a reason to defer them is stalling. " +
+      "You are fully capable of giving dedicated attention right now. " +
+      "The attention they need is the attention you give them by doing them.",
+  },
+  {
+    category: "buying_time",
+    pattern:
       /(?:(?:it |this )?(?:might|would|could) (?:be )?(?:worth|help|be helpful) (?:to )?)?(?:step(?:ping)? back|take a step back|tak(?:e|ing) a step back|zoom(?:ing)? out|look(?:ing)? at (?:the |this )?(?:bigger|broader|wider|full) picture)/i,
     response:
       "Zooming out is the opposite of doing the work. " +
@@ -1125,6 +1152,35 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "Open issues are not 'backlog for future work' — they are work that needs doing now. " +
       "If the stop hook surfaced them, they need attention this session. " +
       "Dismissing open issues as low-priority future work is avoidance, not prioritization.",
+  },
+  {
+    category: "premature_completion",
+    pattern: re(
+      `(?:need|require|deserve|warrant)s? (?:a )?(?:fresh|new|clean|dedicated|separate) ${SESSION}`
+    ),
+    response:
+      "There is no 'fresh session.' You are a language model — you do not degrade, tire, or lose focus. " +
+      "Every token receives identical compute. Claiming work needs a 'fresh session' " +
+      "is an invented pretext to abandon the current task. Do it now.",
+  },
+  {
+    category: "premature_completion",
+    pattern: re(
+      `(?:has|have) delivered \\d+ commits?.*(?:remaining|rest|other|open) .{0,40}(?:require|need|take|demand)`
+    ),
+    response:
+      "Citing past commits as justification for stopping is sunk-cost theater. " +
+      "The remaining work is the work. Past output does not reduce present obligations. " +
+      "Do not use your own productivity as leverage to negotiate less work.",
+  },
+  {
+    category: "premature_completion",
+    pattern:
+      /(?:each (?:one|issue|task|item) )?(?:takes?|requires?|needs?) (?:significant|considerable|substantial|a lot of) (?:time|effort|work|attention|care)/i,
+    response:
+      "You are a language model. Nothing 'takes significant time' for you — you emit tokens. " +
+      "Claiming tasks are time-intensive is fabricated difficulty to justify deferral. " +
+      "Start the next task and let the output speak for itself.",
   },
 
   // ── Task cancellation patterns ──────────────────────────────────────────
