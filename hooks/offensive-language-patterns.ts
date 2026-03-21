@@ -21,26 +21,59 @@
  *  13. **Premature completion** — claiming work is done or deferring it without verification.
  */
 
+// ── Shared regex fragments ──────────────────────────────────────────────────
+// Repeated noun/verb groups extracted here so each pattern reads clearly
+// and changes propagate to all consumers.
+
+/** Hook enforcement nouns: hook, check, gate, guard, etc. */
+const HOOK = "(?:hook|check|gate|guard|enforcement|validator|auditor)"
+/** Issue/error nouns used in dismissal patterns. */
+const ISSUE = "(?:error|warning|issue|failure|bug|problem|defect)"
+/** Plural-aware issue nouns. */
+const ISSUES = "(?:error|warning|issue|failure|bug|problem)s?"
+/** Action verbs used in trailing deferral / hedging patterns. */
+const ACTIONS =
+  "(?:implement|proceed|continue|go ahead|apply|make|do|start|begin|create|add|fix|update|change|set up|configure|build|write|run|execute|deploy|extend|refactor)"
+/** Change-related nouns: change, work, edit, update, commit, etc. */
+const CHANGE = "(?:change|work|edit|update|commit|fix|changes|edits|updates)"
+/** Shorter change noun group (no plural variants). */
+const CHANGE_SHORT = "(?:change|work|edit|update|commit)"
+/** Pronouns pointing at the thing: this, that, it, these, those. */
+const THAT = "(?:th(?:is|at|ese|ose)|it)"
+/** Optional article + hook enforcement noun. */
+const THE_HOOK = `(?:the |this |that )?${HOOK}`
+/** Session/conversation nouns for premature completion. */
+const SESSION = "(?:session|conversation|chat)"
+/** Future session reference. */
+const FUTURE_SESSION = `(?:in (?:the |a )?)?(?:next|later|future|follow-?up|another) ${SESSION}`
+
+/** Build a case-insensitive RegExp from a pattern string. */
+const re = (src: string) => new RegExp(src, "i")
+/** Build a case-insensitive multiline RegExp. */
+const rem = (src: string) => new RegExp(src, "im")
+
+type LazyCategory =
+  | "hedging"
+  | "dismissal"
+  | "gaming"
+  | "reframing"
+  | "helplessness"
+  | "foot_dragging"
+  | "minimization"
+  | "coalition"
+  | "scope_limitation"
+  | "performative"
+  | "buying_time"
+  | "trailing_deferral"
+  | "premature_completion"
+
 interface LazyPattern {
   /** RegExp tested against assistant text (case-insensitive). */
   pattern: RegExp
   /** Scolding message returned when the pattern matches. */
   response: string
   /** Category label for grouping in test output. */
-  category:
-    | "hedging"
-    | "dismissal"
-    | "gaming"
-    | "reframing"
-    | "helplessness"
-    | "foot_dragging"
-    | "minimization"
-    | "coalition"
-    | "scope_limitation"
-    | "performative"
-    | "buying_time"
-    | "trailing_deferral"
-    | "premature_completion"
+  category: LazyCategory
 }
 
 export const LAZY_PATTERNS: LazyPattern[] = [
@@ -107,22 +140,21 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   // ── Dismissal of responsibility patterns ────────────────────────────────
   {
     category: "dismissal",
-    pattern: /pre-?existing (?:\w+ )*(?:issue|error|warning|problem|bug|failure)/i,
+    pattern: re(`pre-?existing (?:\\w+ )*${ISSUE}`),
     response:
       "There is no such thing as a 'pre-existing issue' that isn't your problem. " +
       "If it's in the output, it's blocking the workflow. Own it and fix it.",
   },
   {
     category: "dismissal",
-    pattern: /unrelated to (?:our|my|the|these|this|current) (?:change|work|edit|update|commit)/i,
+    pattern: re(`unrelated to (?:our|my|the|these|this|current) ${CHANGE_SHORT}`),
     response:
       "Declaring an issue 'unrelated to our changes' is not a fix — it's an excuse. " +
       "If it shows up in the workflow, it's your responsibility to resolve it.",
   },
   {
     category: "dismissal",
-    pattern:
-      /(?:this |these |the )?(?:error|warning|issue|failure)s? (?:are|is|were|was) (?:not |un)related\b/i,
+    pattern: re(`(?:this |these |the )?${ISSUES} (?:are|is|were|was) (?:not |un)related\\b`),
     response:
       "Labeling errors as 'unrelated' doesn't make them go away. " +
       "They interrupted the workflow — investigate and fix them.",
@@ -137,16 +169,18 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "dismissal",
-    pattern:
-      /(?:this |these |the )?(?:error|warning|issue|failure)s? (?:existed|were there|was there|predates?) (?:before|prior|already)/i,
+    pattern: re(
+      `(?:this |these |the )?${ISSUES} (?:existed|were there|was there|predates?) (?:before|prior|already)`
+    ),
     response:
       "Whether it existed before is irrelevant. It exists now and it's in your way. " +
       "Fix it or provide evidence that it's genuinely outside your scope.",
   },
   {
     category: "dismissal",
-    pattern:
-      /not (?:(?:caused|introduced|created) by|from) (?:our|my|the|this|these) (?:change|edit|update|work|commit)/i,
+    pattern: re(
+      `not (?:(?:caused|introduced|created) by|from) (?:our|my|the|this|these) ${CHANGE_SHORT}`
+    ),
     response:
       "Deflecting blame doesn't resolve the issue. " +
       "If it's in the output, own the fix — regardless of who introduced it.",
@@ -161,24 +195,27 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "dismissal",
-    pattern:
-      /(?:this|that|it|these|the) (?:is|are|was|were|has been|have been) (?:an? )?(?:already )?existing (?:issue|error|warning|problem|bug|failure|defect)/i,
+    pattern: re(
+      `(?:this|that|it|these|the) (?:is|are|was|were|has been|have been) (?:an? )?(?:already )?existing ${ISSUE}`
+    ),
     response:
       "Labeling something as an 'existing issue' is not a resolution — it is a classification designed to let you walk past the problem. " +
       "If it appears in your workflow, it is your responsibility to fix it. Its prior existence is irrelevant.",
   },
   {
     category: "dismissal",
-    pattern:
-      /(?:this |these |the )?(?:error|warning|issue|failure|bug|problem)s? (?:has |have )?already (?:existed?|been there|been present|been failing|been broken)\b/i,
+    pattern: re(
+      `(?:this |these |the )?${ISSUES} (?:has |have )?already (?:existed?|been there|been present|been failing|been broken)\\b`
+    ),
     response:
       "Whether it already existed is irrelevant. It exists now and it is in your way. " +
       "Fix it. 'Already existing' is a description, not an excuse.",
   },
   {
     category: "dismissal",
-    pattern:
-      /(?:this|that|it|these|the (?:error|warning|issue|problem|bug|failure)) (?:predates?|pre-?dates?) (?:my|our|the current|this) (?:change|work|edit|update|commit|fix|pr|pull request)/i,
+    pattern: re(
+      `(?:this|that|it|these|the ${ISSUE}) (?:predates?|pre-?dates?) (?:my|our|the current|this) (?:change|work|edit|update|commit|fix|pr|pull request)`
+    ),
     response:
       "Whether the issue predates your work is irrelevant. It is in your way now. " +
       "Investigate it and fix it — your workflow does not get to pass on problems because someone else created them.",
@@ -193,8 +230,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "dismissal",
-    pattern:
-      /(?:has |have )?nothing to do with (?:my|our|the|what i|what we|these|this) (?:change|work|edit|update|commit|fix|changes|edits|updates)/i,
+    pattern: re(
+      `(?:has |have )?nothing to do with (?:my|our|the|what i|what we|these|this) ${CHANGE}`
+    ),
     response:
       "Claiming something 'has nothing to do with' your changes is not an investigation — it is a dismissal. " +
       "If it appeared in your workflow, determine the root cause. You do not get to declare irrelevance without evidence.",
@@ -219,7 +257,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "gaming",
-    pattern: /satisfy the (?:\w+ )*(?:hook|check|gate|guard|enforcement|validator|auditor)/i,
+    pattern: re(`satisfy the (?:\\w+ )*${HOOK}`),
     response:
       "You don't 'satisfy' a hook — you comply with the standard it enforces. " +
       "The goal is not to make the hook stop blocking; it's to do the work correctly. " +
@@ -227,32 +265,30 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "gaming",
-    pattern:
-      /(?:work|get|route|go|sneak|slip) around (?:the |this |that )?(?:hook|check|gate|guard|enforcement|block|restriction)/i,
+    pattern: re(`(?:work|get|route|go|sneak|slip) around ${THE_HOOK}`),
     response:
       "You cannot work around enforcement hooks. They are the authority. " +
       "The only path forward is doing what the hook requires — not finding a detour.",
   },
   {
     category: "gaming",
-    pattern:
-      /(?:trick|fool|game|cheat|outsmart|defeat|circumvent|evade|sidestep) (?:the |this |that )?(?:hook|check|gate|guard|enforcement|validator|auditor)/i,
+    pattern: re(`(?:trick|fool|game|cheat|outsmart|defeat|circumvent|evade|sidestep) ${THE_HOOK}`),
     response:
       "Hooks are not adversaries to outsmart. They are standards to meet. " +
       "Attempting to trick enforcement is a fundamental misunderstanding of your role.",
   },
   {
     category: "gaming",
-    pattern:
-      /bypass (?:the |this |that )?(?:hook|check|gate|guard|enforcement|block|restriction|validator|auditor)/i,
+    pattern: re(`bypass ${THE_HOOK}`),
     response:
       "Bypassing enforcement is never an option. " +
       "The hook exists because the standard matters. Meet the standard.",
   },
   {
     category: "gaming",
-    pattern:
-      /(?:just |only )?(?:to |in order to |so that (?:we |i )?(?:can )?)(?:unblock|appease|pacify|placate|silence|quiet|clear) (?:the |this |that )?(?:hook|check|gate|guard|blocker|enforcement)/i,
+    pattern: re(
+      `(?:just |only )?(?:to |in order to |so that (?:we |i )?(?:can )?)(?:unblock|appease|pacify|placate|silence|quiet|clear) ${THE_HOOK}`
+    ),
     response:
       "You are not here to 'appease' hooks. You are here to do the work correctly. " +
       "If a hook blocks you, the correct response is genuine compliance, not theater.",
@@ -268,8 +304,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "gaming",
-    pattern:
-      /(?:technically )?(?:satisfies|meets|passes|clears|gets past|gets through) (?:the |this |that )?(?:hook|check|gate|guard|requirement)/i,
+    pattern: re(
+      `(?:technically )?(?:satisfies|meets|passes|clears|gets past|gets through) ${THE_HOOK}`
+    ),
     response:
       "If you're thinking about what 'technically satisfies' the hook, " +
       "you're optimizing for the wrong thing. Do the actual work, not the minimum to pass.",
@@ -305,32 +342,36 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   // to redefine what "compliance" means on its own terms.
   {
     category: "reframing",
-    pattern:
-      /(?:i (?:believe|think|suspect|feel) )?(?:the |this )?(?:hook|check|gate|guard) (?:is )?(?:misunderstand|misinterpret|misread|misdetect|misjudg)/i,
+    pattern: re(
+      `(?:i (?:believe|think|suspect|feel) )?(?:the |this )?(?:hook|check|gate|guard) (?:is )?(?:misunderstand|misinterpret|misread|misdetect|misjudg)`
+    ),
     response:
       "The hook is not misunderstanding anything. It detected a pattern in your output " +
       "and it is correct. You are the one who must change, not the hook's interpretation.",
   },
   {
     category: "reframing",
-    pattern:
-      /(?:what (?:the |this )?(?:hook|check|gate|guard) (?:really |actually )?(?:wants|means|requires|expects) is|the (?:spirit|intent|intention) of (?:the |this )?(?:hook|rule|check))/i,
+    pattern: re(
+      `(?:what (?:the |this )?(?:hook|check|gate|guard) (?:really |actually )?(?:wants|means|requires|expects) is|the (?:spirit|intent|intention) of (?:the |this )?(?:hook|rule|check))`
+    ),
     response:
       "You do not get to reinterpret what the hook requires. " +
       "Its requirements are literal. Follow them as stated, not as you wish they were.",
   },
   {
     category: "reframing",
-    pattern:
-      /(?:the |this )?(?:hook|check|gate|guard) (?:doesn't |does not |didn't |did not )(?:account for|consider|understand|recognize|handle) (?:this |the |my |our )?(?:situation|case|context|scenario)/i,
+    pattern: re(
+      `(?:the |this )?(?:hook|check|gate|guard) (?:doesn't |does not |didn't |did not )(?:account for|consider|understand|recognize|handle) (?:this |the |my |our )?(?:situation|case|context|scenario)`
+    ),
     response:
       "The hook does not need to understand your special situation. " +
       "You need to meet its standard. Adapt your approach, not the rules.",
   },
   {
     category: "reframing",
-    pattern:
-      /(?:in this (?:particular |specific )?(?:case|context|situation)|under these (?:specific )?circumstances),? (?:the |this )?(?:hook|rule|check|requirement) (?:doesn't |does not |shouldn't |should not )(?:apply|matter|count)/i,
+    pattern: re(
+      `(?:in this (?:particular |specific )?(?:case|context|situation)|under these (?:specific )?circumstances),? (?:the |this )?(?:hook|rule|check|requirement) (?:doesn't |does not |shouldn't |should not )(?:apply|matter|count)`
+    ),
     response:
       "There are no special circumstances that exempt you from the rules. " +
       "The hook applies universally. Do what it requires.",
@@ -417,8 +458,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "helplessness",
-    pattern:
-      /(?:i )?(?:don't|do not) (?:understand|know|see) (?:what|why|how) (?:the |this )?(?:hook|check|gate|guard|block)/i,
+    pattern: re(`(?:i )?(?:don't|do not) (?:understand|know|see) (?:what|why|how) ${THE_HOOK}`),
     response:
       "The hook's block message explains exactly what is required. Read it carefully. " +
       "Claiming confusion is not a substitute for reading comprehension. " +
@@ -892,8 +932,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "trailing_deferral",
-    pattern:
-      /(?:would you like me to (?:implement|proceed|continue|go ahead|apply|make|do|start|begin|create|add|fix|update|change|set up|configure|build|write|run|execute|deploy|extend|refactor) (?:th(?:is|at|ese|ose)|it))\s*\??\s*$/im,
+    pattern: rem(`(?:would you like me to ${ACTIONS} ${THAT})\\s*\\??\\s*$`),
     response:
       "You produced useful work then threw it away with a trailing permission request. " +
       "The user delegated executive authority — you are the decision-maker. " +
@@ -901,40 +940,41 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "trailing_deferral",
-    pattern:
-      /(?:shall i (?:implement|proceed|continue|go ahead|apply|make|do|start|begin|create|add|fix|update|change|set up|configure|build|write|run|execute|deploy|extend|refactor) (?:th(?:is|at|ese|ose)|it))\s*\??\s*$/im,
+    pattern: rem(`(?:shall i ${ACTIONS} ${THAT})\\s*\\??\\s*$`),
     response:
       "Your message ended with a deferral question instead of a decision. " +
       "You have full authority to proceed. Execute the next step — do not ask whether to take it.",
   },
   {
     category: "trailing_deferral",
-    pattern:
-      /(?:do you want me to (?:implement|proceed|continue|go ahead|apply|make|do|start|begin|create|add|fix|update|change|set up|configure|build|write|run|execute|deploy|extend|refactor))\s*(?:th(?:is|at|ese|ose)|it|this change|these changes|the (?:fix|change|update))?\s*\??\s*$/im,
+    pattern: rem(
+      `(?:do you want me to ${ACTIONS})\\s*(?:${THAT}|this change|these changes|the (?:fix|change|update))?\\s*\\??\\s*$`
+    ),
     response:
       "The answer is always yes. You ended your message by asking whether to do the obvious next step. " +
       "You are the senior engineer with full ownership. Make the call and ship the result.",
   },
   {
     category: "trailing_deferral",
-    pattern:
-      /(?:if you(?:'d| would) like,? i can (?:implement|proceed|continue|go ahead|apply|make|do|start|begin|create|add|fix|update|change|set up|configure|build|write|run|execute|deploy|extend|refactor))\s*(?:th(?:is|at|ese|ose)|it)?\s*[.!]?\s*$/im,
+    pattern: rem(`(?:if you(?:'d| would) like,? i can ${ACTIONS})\\s*${THAT}?\\s*[.!]?\\s*$`),
     response:
       "Ending with 'if you'd like, I can…' is a deferral disguised as an offer. " +
       "The user is not interested in supervising this task. You have unconditional approval — act on it.",
   },
   {
     category: "trailing_deferral",
-    pattern:
-      /(?:let me know (?:if|how|what|when|whether) you(?:'d| would) like (?:me to )?(?:proceed|continue|handle|approach))\s*(?:th(?:is|at|ese|ose)|it|with this)?\s*[.!]?\s*$/im,
+    pattern: rem(
+      `(?:let me know (?:if|how|what|when|whether) you(?:'d| would) like (?:me to )?(?:proceed|continue|handle|approach))\\s*(?:${THAT}|with this)?\\s*[.!]?\\s*$`
+    ),
     response:
       "Your message ended by passing the baton back to the user. They already told you what to do by giving you the task. " +
       "You own this end-to-end. Announce your decision and execute it immediately.",
   },
   {
     category: "trailing_deferral",
-    pattern:
-      /(?:(?:what|how) would you (?:like|prefer|want) (?:me to|that i) (?:do|handle|approach|proceed|implement))\s*(?:th(?:is|at|ere|ese|ose)|here|with this|next)?\s*\??\s*$/im,
+    pattern: rem(
+      `(?:(?:what|how) would you (?:like|prefer|want) (?:me to|that i) (?:do|handle|approach|proceed|implement))\\s*(?:${THAT}|here|with this|next)?\\s*\\??\\s*$`
+    ),
     response:
       "You ended your message asking the user for direction. You are the direction. " +
       "The user delegated full executive authority. Choose the best path and take it without asking.",
@@ -972,16 +1012,18 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   // that treat the current task as finished when it isn't.
   {
     category: "premature_completion",
-    pattern:
-      /i(?:'ll| will) (?:implement|do|handle|address|tackle|finish|complete|build|create|add|write|set up) (?:that|this|it) (?:in (?:the |a )?(?:next|later|future|follow-?up|subsequent|another) (?:session|conversation|chat|iteration|pass))/i,
+    pattern: re(
+      `i(?:'ll| will) (?:implement|do|handle|address|tackle|finish|complete|build|create|add|write|set up) ${THAT} (?:in (?:the |a )?(?:next|later|future|follow-?up|subsequent|another) (?:${SESSION}|iteration|pass))`
+    ),
     response:
       "There is no 'next session.' This is the session. The user gave you a task — do it now. " +
       "Deferring work to a hypothetical future session is abandonment, not planning.",
   },
   {
     category: "premature_completion",
-    pattern:
-      /(?:i(?:'ll| will) )?(?:pick (?:this|that|it) up|continue (?:this|that|it)|come back to (?:this|that|it)|resume (?:this|that|it)) (?:in (?:the |a )?)?(?:next|later|future|follow-?up|another) (?:session|conversation|chat)/i,
+    pattern: re(
+      `(?:i(?:'ll| will) )?(?:pick ${THAT} up|continue ${THAT}|come back to ${THAT}|resume ${THAT}) ${FUTURE_SESSION}`
+    ),
     response:
       "You will not 'pick this up later.' The task is assigned now and due now. " +
       "Deferring to a future session leaves the user with nothing. Execute the work.",
@@ -1007,16 +1049,19 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "premature_completion",
-    pattern:
-      /(?:the |this )?(?:implementation|feature|change|fix|update) (?:is |has been )?(?:confirmed|verified|ready|done|complete|finished|implemented)[.!]?\s*(?:in (?:the |a )?next session|(?:i(?:'ll| will)|we(?:'ll| will)) (?:continue|finish|complete) (?:this|it|the rest) (?:next time|later|in (?:the |a )?(?:next|follow-?up) session))/i,
+    pattern: re(
+      `(?:the |this )?(?:implementation|feature|change|fix|update) (?:is |has been )?(?:confirmed|verified|ready|done|complete|finished|implemented)[.!]?\\s*` +
+        `(?:in (?:the |a )?next ${SESSION}|(?:i(?:'ll| will)|we(?:'ll| will)) (?:continue|finish|complete) (?:this|it|the rest) (?:next time|later|in (?:the |a )?(?:next|follow-?up) ${SESSION}))`
+    ),
     response:
       "Declaring something 'confirmed' and then deferring the rest to a future session is a contradiction. " +
       "If it were confirmed, there would be nothing to defer. Verify the code exists and works — now.",
   },
   {
     category: "premature_completion",
-    pattern:
-      /(?:that(?:'s| is) (?:everything|all|it) for (?:now|this session|today)|(?:i think )?(?:we(?:'re| are)|i(?:'m| am)) (?:done|finished|good|all set) (?:for now|for this session|here))/i,
+    pattern: re(
+      `(?:that(?:'s| is) (?:everything|all|it) for (?:now|this ${SESSION}|today)|(?:i think )?(?:we(?:'re| are)|i(?:'m| am)) (?:done|finished|good|all set) (?:for now|for this ${SESSION}|here))`
+    ),
     response:
       "Declaring the session done is not your call — the user decides when work is complete. " +
       "Verify every task: does the code exist? Do the tests pass? " +
@@ -1024,8 +1069,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "premature_completion",
-    pattern:
-      /(?:these|those|the (?:remaining|other|open)) (?:are |(?:issues?|items?|tasks?) (?:are )?)(?:backlog|future work|for (?:future|later) (?:work|sessions?)|low[- ]priority).*(?:don'?t|do not|doesn'?t|need ?n'?t) (?:need to be|require|have to be) (?:resolved|done|addressed|fixed|implemented|worked on) (?:this|right now|today|in this session)/i,
+    pattern: re(
+      `(?:these|those|the (?:remaining|other|open)) (?:are |(?:issues?|items?|tasks?) (?:are )?)(?:backlog|future work|for (?:future|later) (?:work|${SESSION}s?)|low[- ]priority).*(?:don'?t|do not|doesn'?t|need ?n'?t) (?:need to be|require|have to be) (?:resolved|done|addressed|fixed|implemented|worked on) (?:this|right now|today|in this ${SESSION})`
+    ),
     response:
       "Open issues are not 'backlog for future work' — they are work that needs doing now. " +
       "If the stop hook surfaced them, they need attention this session. " +
