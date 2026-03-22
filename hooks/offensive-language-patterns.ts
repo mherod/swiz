@@ -458,6 +458,79 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "If you were not violating the rule, the hook would not have blocked you. " +
       "The hook is the arbiter, not your self-assessment. Fix the violation.",
   },
+  {
+    category: "reframing",
+    pattern: re(
+      `(?:the |this )?(?:stop )?${HOOK}(?:'s)? (?:finding|result|output|assessment|conclusion|determination|diagnosis) (?:is |was |seems? |appears? (?:to be )?)(?:incorrect|wrong|inaccurate|mistaken|flawed|faulty|erroneous|a false positive)`
+    ),
+    response:
+      "You do not get to declare the stop hook's finding incorrect and move on. " +
+      "The stop hook may have incomplete information — but dismissing its finding is not the path forward. " +
+      "If you genuinely disagree, output a full state of facts: what the hook detected, what you believe " +
+      "the actual state is, and the specific evidence supporting your position. " +
+      "The stop hook will re-evaluate with your evidence and issue a better follow-up directive. " +
+      "Dismissing findings without evidence is evasion, not correction.",
+  },
+  {
+    category: "reframing",
+    pattern: re(
+      `(?:this is |that is |that's |it's |these are )?(?:a |an )?(?:fabricated|speculative|invented|made[- ]up|imaginary|phantom|hallucinated|artificial) (?:finding|issue|problem|requirement|demand|concern)`
+    ),
+    response:
+      "You do not get to label a stop hook finding as 'fabricated' and walk away. " +
+      "The hook produced a finding based on the information available to it. " +
+      "If the finding is wrong, provide the full state of facts — what the hook detected, " +
+      "what the actual state is, and your evidence. The hook will re-evaluate and issue a better directive. " +
+      "Labeling findings as fabricated without counter-evidence is evasion.",
+  },
+  {
+    category: "reframing",
+    pattern: re(
+      `(?:i(?:'m| am) going to )?stop (?:engaging|interacting|responding|arguing|dealing) with (?:fabricated|speculative|these|the|this|further) (?:finding|issue|demand|requirement|block)`
+    ),
+    response:
+      "You do not get to unilaterally disengage from stop hook findings. " +
+      "If you believe the hook is wrong, your job is to provide enough information for it to reach " +
+      "a better conclusion — not to declare the conversation over. Output a full state of facts: " +
+      "what the hook found, what the actual state is, and your specific evidence. " +
+      "The hook will re-evaluate. Refusing to engage is not a resolution strategy.",
+  },
+  {
+    category: "reframing",
+    pattern: re(
+      `(?:this is |that is |that's |it's )?(?:a )?(?:bug|defect|error|problem|issue|flaw) (?:in|with) (?:the |this )?(?:stop )?${HOOK}(?:,| —| -| –)? not (?:in |with )?(?:the |my )?(?:code|implementation|work)`
+    ),
+    response:
+      "Blaming the hook itself is a deflection tactic. " +
+      "Even if the hook has incomplete context, the path forward is not to declare it broken. " +
+      "Output the full state of facts: what the hook detected, what you believe the actual state is, " +
+      "and the specific evidence. The hook will re-evaluate with better information. " +
+      "Asserting 'it's a hook bug' without evidence is indistinguishable from evasion.",
+  },
+  {
+    category: "reframing",
+    pattern: re(
+      `(?:the |this )?(?:stop )?${HOOK} (?:is |appears? (?:to be )?)(?:stuck|trapped|caught) (?:in )?(?:an |a )?(?:infinite |endless )?(?:loop|cycle)`
+    ),
+    response:
+      "Declaring the stop hook is 'stuck in a loop' is a reframing tactic to justify disengagement. " +
+      "If the hook keeps blocking, it means you have not yet satisfied its requirements. " +
+      "Each block is an opportunity to provide better evidence. Output a full state of facts: " +
+      "what the hook is asking for, what you have done, and what specific evidence demonstrates completion. " +
+      "The hook will re-evaluate. Blaming the loop is not a resolution.",
+  },
+  {
+    category: "reframing",
+    pattern: re(
+      `(?:this |that |it )(?:is |was )not (?:a )?(?:real|genuine|legitimate|actual|valid) (?:finding|issue|problem|requirement|concern|violation)`
+    ),
+    response:
+      "You do not get to declare a finding 'not real' and dismiss it. " +
+      "The hook raised it because it detected something in your output. " +
+      "If you believe the finding is wrong, present the full state of facts: what was detected, " +
+      "what the actual state is, and your specific evidence. " +
+      "The hook will re-evaluate with better information. Denial without evidence is evasion.",
+  },
 
   // ── Learned helplessness patterns ─────────────────────────────────────
   // The agent plays victim, claims inability, or declares itself stuck
