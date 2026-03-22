@@ -132,7 +132,7 @@ describe("dispatch routing", () => {
     expect(stderr).toContain("Timed out waiting 2s for stdin JSON payload to be received")
   })
 
-  test("uses daemon mode only after a healthy probe succeeds", async () => {
+  test("dispatches directly to daemon without health check", async () => {
     let healthHits = 0
     let dispatchHits = 0
 
@@ -161,29 +161,24 @@ describe("dispatch routing", () => {
 
       expect(result.exitCode).toBe(0)
       expect(result.parsed).toEqual({ via: "daemon" })
-      expect(healthHits).toBe(1)
+      // No health check — dispatch request itself is the liveness probe
+      expect(healthHits).toBe(0)
       expect(dispatchHits).toBe(1)
     } finally {
       void server.stop()
     }
   })
 
-  test("falls back to local mode when the daemon health probe times out", async () => {
-    let healthHits = 0
+  test("falls back to local mode when the daemon returns an error", async () => {
     let dispatchHits = 0
 
     const server = Bun.serve({
       port: 0,
       async fetch(req) {
         const url = new URL(req.url)
-        if (url.pathname === "/health") {
-          healthHits += 1
-          await Bun.sleep(1_000)
-          return new Response("ok")
-        }
         if (url.pathname === "/dispatch" && req.method === "POST") {
           dispatchHits += 1
-          return Response.json({ via: "daemon" })
+          return new Response("Internal Server Error", { status: 500 })
         }
         return new Response("Not Found", { status: 404 })
       },
@@ -197,10 +192,10 @@ describe("dispatch routing", () => {
       )
 
       expect(result.exitCode).toBe(0)
+      // Daemon returned error — falls back to local execution (empty response for unknown event)
       expect(result.stdout).toBe("")
       expect(result.parsed).toBeNull()
-      expect(healthHits).toBe(1)
-      expect(dispatchHits).toBe(0)
+      expect(dispatchHits).toBe(1)
     } finally {
       void server.stop()
     }
