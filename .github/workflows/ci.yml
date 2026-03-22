@@ -21,6 +21,7 @@ jobs:
   file-placement:
     name: Enforce test file placement
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: Reject lefthook test files outside src/
@@ -41,6 +42,7 @@ jobs:
     name: Block workflow permission escalation
     if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,6 +58,7 @@ jobs:
 
   ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
