@@ -192,8 +192,16 @@ export class WorkerPool {
 
   /**
    * Terminate all workers and clean up.
+   * Rejects all pending and queued hook executions with a shutdown error.
    */
   terminate(): void {
+    const shutdownError = new Error("Worker pool terminated: process shutting down")
+    for (const [, pending] of this.pendingMessages) {
+      pending.reject(shutdownError)
+    }
+    for (const queued of this.queue) {
+      queued.reject(shutdownError)
+    }
     for (const worker of this.workers) {
       worker.terminate()
     }
@@ -214,6 +222,13 @@ let pool: WorkerPool | null = null
 export function getWorkerPool(): WorkerPool {
   if (!pool) {
     pool = new WorkerPool()
+    process.on("exit", () => pool?.terminate())
+    const signalHandler = () => {
+      pool?.terminate()
+      process.exit(0)
+    }
+    process.on("SIGTERM", signalHandler)
+    process.on("SIGINT", signalHandler)
   }
   return pool
 }
