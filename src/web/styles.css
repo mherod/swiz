@@ -3493,6 +3493,28 @@ tbody tr:hover {
   margin: var(--space-1) 0;
 }
 
+/* Dispatch summary rows */
+.log-row-dispatch .log-cell {
+  background: color-mix(in srgb, var(--bg-inset) 60%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  font-weight: 600;
+}
+
+.log-row-dispatch:hover .log-cell {
+  background: var(--bg-inset);
+}
+
+.log-dispatch-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+}
+
+.log-hook-count {
+  font-weight: 400;
+  color: var(--text-subtle);
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation: none;

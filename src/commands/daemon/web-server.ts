@@ -344,6 +344,7 @@ async function handleDispatchRoute(
   })
   const durationMs = performance.now() - start
   recordDispatch(ctx.globalMetrics, canonicalEvent, durationMs)
+
   const parsed = await ctx.workerRuntime.parseDispatchPayload(payloadStr)
   if (parsed) {
     const nowMs = Date.now()
@@ -369,6 +370,7 @@ async function handleDispatchRoute(
       }
     }
   }
+
   return Response.json(result.response)
 }
 

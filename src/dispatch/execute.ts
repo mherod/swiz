@@ -417,6 +417,7 @@ async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const strategyName = DISPATCH_ROUTES[ctx.canonicalEvent] ?? "blocking"
   const strategy = STRATEGY_REGISTRY[strategyName]
 
+  const dispatchStart = performance.now()
   try {
     const response = await strategy.execute({
       filteredGroups,
@@ -429,9 +430,10 @@ async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
 
     // Fire-and-forget log write — never blocks the dispatch response
     const executions = (response.hookExecutions ?? []) as HookExecution[]
+    const sessionId =
+      typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
+
     if (executions.length > 0) {
-      const sessionId =
-        typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
       const logEntries: HookLogEntry[] = executions.map((exec) => ({
         ts: new Date(exec.startTime).toISOString(),
         event: ctx.canonicalEvent,
@@ -448,6 +450,25 @@ async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
         stdoutSnippet: exec.stdoutSnippet || undefined,
         stderrSnippet: exec.stderrSnippet || undefined,
       }))
+
+      // Append dispatch-level summary after individual hook entries
+      const dispatchDurationMs = Math.round(performance.now() - dispatchStart)
+      const ranCount = executions.filter((h) => h.status !== "skipped").length
+      logEntries.push({
+        ts: new Date().toISOString(),
+        event: ctx.canonicalEvent,
+        hookEventName: ctx.hookEventName,
+        hook: "dispatch",
+        status: ranCount === 0 ? "no-hooks" : "ok",
+        durationMs: dispatchDurationMs,
+        exitCode: null,
+        kind: "dispatch",
+        hookCount: ranCount,
+        sessionId,
+        cwd: ctx.cwd,
+        toolName: ctx.toolName,
+      })
+
       void appendHookLogs(logEntries)
     }
 

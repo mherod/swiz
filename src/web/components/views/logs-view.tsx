@@ -15,6 +15,8 @@ interface HookLogEntry {
   skipReason?: string
   stdoutSnippet?: string
   stderrSnippet?: string
+  kind?: "hook" | "dispatch"
+  hookCount?: number
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -23,6 +25,7 @@ const STATUS_COLORS: Record<string, string> = {
   block: "log-status-deny",
   "allow-with-reason": "log-status-ok",
   "no-output": "log-status-skip",
+  "no-hooks": "log-status-skip",
   skipped: "log-status-skip",
   timeout: "log-status-error",
   error: "log-status-error",
@@ -95,13 +98,27 @@ function LogRow({
   expanded: boolean
   onToggle: () => void
 }) {
+  const isDispatch = entry.kind === "dispatch"
+  const rowClass = isDispatch ? "log-row log-row-dispatch" : "log-row"
   return (
     <>
-      <tr className="log-row" onClick={onToggle}>
+      <tr className={rowClass} onClick={onToggle}>
         <td className="log-cell log-cell-time">{formatTime(entry.ts)}</td>
         <td className="log-cell log-cell-event">{entry.event}</td>
         <td className="log-cell log-cell-hook" title={entry.hook}>
-          {hookBasename(entry.hook)}
+          {isDispatch ? (
+            <span className="log-dispatch-label">
+              dispatch
+              {typeof entry.hookCount === "number" ? (
+                <span className="log-hook-count">
+                  {" "}
+                  ({entry.hookCount} hook{entry.hookCount === 1 ? "" : "s"})
+                </span>
+              ) : null}
+            </span>
+          ) : (
+            hookBasename(entry.hook)
+          )}
         </td>
         <td className={`log-cell log-cell-status ${STATUS_COLORS[entry.status] ?? ""}`}>
           {entry.status}

@@ -6,12 +6,12 @@
  * and re-exports all public symbols for backward compatibility.
  */
 
+import { stderrLog } from "../debug.ts"
 import {
   applyHookSettingFilters,
   DISPATCH_ROUTES,
   formatTrace,
   groupMatches,
-  log,
   parsePayload,
   replayBlocking,
   replayContext,
@@ -60,8 +60,21 @@ async function tryDaemonDispatch(
   hookEventName: string,
   payloadStr: string
 ): Promise<Record<string, unknown> | null> {
-  if (process.env.SWIZ_NO_DAEMON === "1") return null
-  if (!(await isDaemonHealthy())) return null
+  if (process.env.SWIZ_NO_DAEMON === "1") {
+    stderrLog(
+      "daemon dispatch routing diagnostic",
+      `   daemon dispatch: skipped (SWIZ_NO_DAEMON=1)`
+    )
+    return null
+  }
+  const healthy = await isDaemonHealthy()
+  if (!healthy) {
+    stderrLog(
+      "daemon dispatch routing diagnostic",
+      `   daemon dispatch: skipped (health check failed on port ${DAEMON_PORT})`
+    )
+    return null
+  }
 
   const url = `http://127.0.0.1:${DAEMON_PORT}/dispatch?event=${encodeURIComponent(canonicalEvent)}&hookEventName=${encodeURIComponent(hookEventName)}`
 
@@ -76,13 +89,26 @@ async function tryDaemonDispatch(
       DAEMON_TIMEOUT_MS
     )
 
-    if (!resp.ok) return null
+    if (!resp.ok) {
+      stderrLog(
+        "daemon dispatch routing diagnostic",
+        `   daemon dispatch: failed (status ${resp.status}), falling back to local`
+      )
+      return null
+    }
 
     const json = (await resp.json()) as Record<string, unknown>
-    log(`   daemon dispatch: forwarded ${canonicalEvent} to daemon (${resp.status})`)
+    stderrLog(
+      "daemon dispatch routing diagnostic",
+      `   daemon dispatch: forwarded ${canonicalEvent} to daemon (${resp.status})`
+    )
     return json
-  } catch {
-    // Daemon unavailable, timeout, or network error — fall back to local
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    stderrLog(
+      "daemon dispatch routing diagnostic",
+      `   daemon dispatch: error (${msg}), falling back to local`
+    )
     return null
   }
 }

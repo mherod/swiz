@@ -26,6 +26,10 @@ export interface HookLogEntry {
   skipReason?: string
   stdoutSnippet?: string
   stderrSnippet?: string
+  /** "hook" (default) for individual hook runs, "dispatch" for overall dispatch summary */
+  kind?: "hook" | "dispatch"
+  /** Number of hooks executed in this dispatch (only set when kind === "dispatch") */
+  hookCount?: number
 }
 
 const MAX_LOG_LINES = 10_000
