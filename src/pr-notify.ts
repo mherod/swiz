@@ -57,6 +57,10 @@ export async function writePrPollState(home: string, state: PrPollState): Promis
  * Fetch GitHub notifications for PR-related activity since `since`.
  * Returns only notifications with subject.type === "PullRequest".
  *
+ * Does NOT update lastPolledAt — the caller must call `writePrPollState`
+ * after successfully processing the returned notifications. This prevents
+ * lost notifications when the caller crashes before emitting output.
+ *
  * Requires `gh` CLI authenticated.
  */
 export async function fetchNewPrNotifications(home: string): Promise<PrNotification[]> {
@@ -73,9 +77,6 @@ export async function fetchNewPrNotifications(home: string): Promise<PrNotificat
     new Response(proc.stderr).text(),
   ])
   await proc.exited
-
-  // Update state regardless of result — avoids replaying on next error recovery
-  void writePrPollState(home, { lastPolledAt: new Date().toISOString() })
 
   if (proc.exitCode !== 0) {
     // gh not authenticated or network error — fail silently

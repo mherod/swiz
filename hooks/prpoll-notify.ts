@@ -10,7 +10,7 @@
 //      for new PR activity on the pushed branch.
 
 import { homedir } from "node:os"
-import { fetchNewPrNotifications, type PrNotification } from "../src/pr-notify.ts"
+import { fetchNewPrNotifications, type PrNotification, writePrPollState } from "../src/pr-notify.ts"
 import { git } from "./utils/hook-utils.ts"
 
 interface PrPollPayload {
@@ -84,6 +84,11 @@ async function main(): Promise<void> {
   // Emit summary as blocking output for the dispatcher
   const summary = formatNotifications(scoped)
   console.log(JSON.stringify({ decision: "allow", reason: summary }))
+
+  // Advance lastPolledAt only after successfully emitting output.
+  // If the hook crashes before this point, notifications are preserved
+  // for the next poll rather than silently lost.
+  await writePrPollState(home, { lastPolledAt: new Date().toISOString() })
   process.exit(0)
 }
 
