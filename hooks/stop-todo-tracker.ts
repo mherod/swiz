@@ -1,15 +1,16 @@
 #!/usr/bin/env bun
 
-// Stop hook: Block stop if new TODO/FIXME/HACK lines were introduced in commits
+// Stop hook: File follow-up issues for new TODO/FIXME/HACK lines introduced in commits.
+// Instead of blocking stop, auto-creates GitHub issues for each finding and allows stop.
 
 import { stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
-  buildIssueGuidance,
+  fileFollowUpIssue,
   git,
   isGitRepo,
   SOURCE_EXT_RE,
-  skillAdvice,
+  sanitizeSessionId,
 } from "./utils/hook-utils.ts"
 
 export const EXCLUDE_PATH_RE = /node_modules|\.claude\/hooks\/|^hooks\/|__tests__|\.test\.|\.spec\./
@@ -63,17 +64,43 @@ async function main(): Promise<void> {
 
   if (todos.length === 0) return
 
+  const sessionId = sanitizeSessionId(input.session_id)
+
   let reason = `${todos.length} new TODO/FIXME/HACK comment(s) introduced in recent commits.\n\n`
   reason += "Items:\n"
   for (const t of todos) reason += `  ${t}\n`
 
-  const guidanceCmd = buildIssueGuidance(null)
-  const withSkill = `Either resolve these now, or use the /farm-out-issues skill to create issues for them.`
-  const withoutSkill = `Either resolve these now, or create issues for them:\n${guidanceCmd}`
+  // Auto-file a follow-up issue instead of blocking stop.
+  // If filing fails, fileFollowUpIssue falls back to blockStop.
+  const issueBody = [
+    `${todos.length} TODO/FIXME/HACK comment(s) found in recent commits:`,
+    "",
+    ...todos.map((t) => `- \`${t.trim()}\``),
+    "",
+    "These should be resolved or converted to tracked issues.",
+  ].join("\n")
 
-  reason += `\n${skillAdvice("farm-out-issues", withSkill, withoutSkill)}`
+  const issueNum = await fileFollowUpIssue(
+    {
+      title: `chore: resolve ${todos.length} TODO/FIXME comment(s)`,
+      body: issueBody,
+      labels: ["backlog", "maintenance"],
+      cwd,
+      sessionId,
+    },
+    reason
+  )
 
-  // TODO hygiene is a quality/process gate, not a workflow-memory miss.
+  if (issueNum) {
+    console.error(
+      `[swiz][stop-todo-tracker] Filed follow-up issue #${issueNum} for ${todos.length} TODO(s)`
+    )
+    // Allow stop — finding is captured as a tracked issue
+    return
+  }
+
+  // Fallback: fileFollowUpIssue calls blockStop on failure, but if it somehow
+  // returns null without blocking, block explicitly.
   blockStop(reason, { includeUpdateMemoryAdvice: false })
 }
 

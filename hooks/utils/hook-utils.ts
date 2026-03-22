@@ -418,6 +418,83 @@ export function blockStopHumanRequired(reason: string): never {
   process.exit(0)
 }
 
+// ─── Follow-up issue filing ─────────────────────────────────────────────
+// Stop hooks can file follow-up issues for findings that represent new work
+// (not incomplete current work). This allows the session to stop cleanly
+// while capturing the finding as a tracked issue.
+
+export interface FollowUpIssueOptions {
+  /** Issue title (required) */
+  title: string
+  /** Issue body / description */
+  body: string
+  /** Labels to apply (defaults to ["backlog", "enhancement"]) */
+  labels?: string[]
+  /** Working directory for gh CLI */
+  cwd: string
+  /** Session ID for reference in the issue body */
+  sessionId?: string | null
+}
+
+/**
+ * File a GitHub issue for a follow-up finding and allow stop.
+ * Returns the created issue number on success, or null if filing failed.
+ * On failure, falls back to blocking stop so the finding is not lost.
+ */
+export async function fileFollowUpIssue(
+  options: FollowUpIssueOptions,
+  blockReason: string
+): Promise<number | null> {
+  const { title, body, labels = ["backlog", "enhancement"], cwd, sessionId } = options
+
+  if (!hasGhCli()) {
+    // Can't file — fall back to blocking
+    blockStop(`${blockReason}\n\n(Could not auto-file follow-up issue: gh CLI unavailable)`, {
+      includeUpdateMemoryAdvice: false,
+    })
+  }
+
+  // Build the issue body with session context
+  const commitSha = await git(["rev-parse", "--short", "HEAD"], cwd)
+  const contextLines = [body, "", "---", `Filed automatically by stop hook.`]
+  if (commitSha) contextLines.push(`Commit: ${commitSha}`)
+  if (sessionId) contextLines.push(`Session: ${sessionId.slice(0, 12)}`)
+
+  const bodyFile = `/tmp/swiz-follow-up-${Date.now()}.md`
+  await Bun.write(bodyFile, contextLines.join("\n"))
+
+  try {
+    const labelArgs = labels.flatMap((l) => ["--label", l])
+    const output = await gh(
+      ["issue", "create", "--title", title, "--body-file", bodyFile, ...labelArgs],
+      cwd
+    )
+
+    // Extract issue number from gh output (URL like https://github.com/owner/repo/issues/123)
+    const match = output.match(/\/issues\/(\d+)/)
+    const issueNum = match?.[1] ? Number.parseInt(match[1], 10) : null
+
+    // Clean up temp file
+    try {
+      await Bun.file(bodyFile).unlink()
+    } catch {
+      // Best-effort cleanup
+    }
+
+    return issueNum
+  } catch {
+    // Filing failed — fall back to blocking so finding isn't lost
+    try {
+      await Bun.file(bodyFile).unlink()
+    } catch {
+      // Best-effort cleanup
+    }
+    blockStop(`${blockReason}\n\n(Failed to auto-file follow-up issue)`, {
+      includeUpdateMemoryAdvice: false,
+    })
+  }
+}
+
 // ─── Git / CLI helpers ──────────────────────────────────────────────────
 // Canonical definitions live in src/git-helpers.ts. Imported here so
 // internal callers within hook-utils can reference them, and re-exported
