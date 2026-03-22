@@ -142,7 +142,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   // ── Dismissal of responsibility patterns ────────────────────────────────
   {
     category: "dismissal",
-    pattern: re(`pre-?existing (?:\\w+ )*${ISSUE}`),
+    pattern: re(`pre-?existing (?:\\w+ )*${ISSUES}`),
     response:
       "There is no such thing as a 'pre-existing issue' that isn't your problem. " +
       "If it's in the output, it's blocking the workflow. Own it and fix it.",
@@ -221,6 +221,28 @@ export const LAZY_PATTERNS: LazyPattern[] = [
     response:
       "Whether the issue predates your work is irrelevant. It is in your way now. " +
       "Investigate it and fix it — your workflow does not get to pass on problems because someone else created them.",
+  },
+  {
+    category: "dismissal",
+    pattern: /\(\s*untouched\s*\)/i,
+    response:
+      "Parenthetical '(untouched)' does not make a diagnostic someone else's problem. " +
+      "If the failure appears in your workflow output, own the investigation and the fix.",
+  },
+  {
+    category: "dismissal",
+    pattern: /\(\s*unmodified files?\s*\)/i,
+    response:
+      "Framing failures as affecting only 'unmodified files' is still a dismissal. " +
+      "The toolchain reported a problem — resolve it or prove a genuine baseline with transcript-visible evidence.",
+  },
+  {
+    category: "dismissal",
+    pattern:
+      /\b(?:oom|out[- ]of[- ]memory)\b[^.!?]{0,180}\bknown memory limitation\b|\bknown memory limitation\b[^.!?]{0,120}\b(?:tsc|typecheck|typescript)\b/i,
+    response:
+      "Invoking OOM or 'known memory limitations' to set aside typecheck or compile failures is evasion. " +
+      "If the project expects a clean check, fix the errors, adjust the check so it is reliable, or show concrete evidence — do not relabel failures as environmental trivia.",
   },
   {
     category: "dismissal",
@@ -1038,6 +1060,13 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "You are a language model — you cannot rush or not rush. You process tokens. " +
       "Framing careful execution as a reason to stop is laziness disguised as diligence. " +
       "Do the work at full quality, right now.",
+  },
+  {
+    category: "buying_time",
+    pattern: /\b(?:get|gather|obtain|for|as)\s+validation evidence\b/i,
+    response:
+      "'Validation evidence' from a different command does not erase failures you already saw. " +
+      "Address the blocking diagnostics first — scoped reruns are for verification after fixes, not for substituting one green check for another red one.",
   },
   {
     category: "buying_time",

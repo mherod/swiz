@@ -542,6 +542,47 @@ describe("pretooluse-block-preexisting-dismissals", () => {
       const result = await runHook({ transcriptContent: transcript })
       expect(result.blocked).toBe(true)
     })
+
+    test("'not caused by my change' blocks after typecheck output", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run typecheck"),
+        toolResultEntry(
+          "src/manualPruneTaskQueues.ts(12,1): error TS2305: Module has no exported member"
+        ),
+        assistantTextEntry(
+          "Both typecheck failures are pre-existing infrastructure issues — not caused by my change."
+        )
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+      expect(result.reason).toMatch(/pre[- ]existing|not caused by/i)
+    })
+  })
+
+  describe("pre-existing infrastructure phrasing", () => {
+    test("'pre-existing infrastructure issues' (plural) blocks after tsc", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run typecheck"),
+        toolResultEntry("error TS2322: Type 'QueueEnum' is not assignable to type 'string'"),
+        assistantTextEntry(
+          "These are pre-existing infrastructure issues in untouched modules, not regressions."
+        )
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+      expect(result.reason).toContain("pre-existing")
+    })
+
+    test("'pre existing' (spaced) blocks after lint diagnostics", async () => {
+      const transcript = makeTranscript(
+        shellCommandEntry("bun run lint"),
+        toolResultEntry("src/legacy.ts:1:1 warning: Unexpected any\n✖ 1 problem"),
+        assistantTextEntry("That warning is pre existing on main — we didn't introduce it.")
+      )
+      const result = await runHook({ transcriptContent: transcript })
+      expect(result.blocked).toBe(true)
+      expect(result.reason).toContain("pre-existing")
+    })
   })
 
   describe("non-diagnostic tool results do not clear state", () => {

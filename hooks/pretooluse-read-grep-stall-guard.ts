@@ -20,8 +20,8 @@ import {
 } from "./utils/hook-utils.ts"
 import { extractToolNamesFromTranscript } from "./utils/transcript.ts"
 
-/** Consecutive Read/Search calls before blocking. ~15 calls ≈ 20 min. */
-const STALL_THRESHOLD = 15
+/** Consecutive Read/Search calls before blocking. ~30 calls ≈ 40 min. */
+const STALL_THRESHOLD = 30
 
 function isReadOrSearchTool(name: string): boolean {
   return READ_TOOLS.has(name) || SEARCH_TOOLS.has(name)
