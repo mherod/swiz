@@ -58,6 +58,8 @@ async function dispatch({
       AI_TEST_NO_BACKEND: "1",
       // Give hooks extra time in CI where bun cold-compiles TypeScript on first invocation.
       SWIZ_TEST_HOOK_TIMEOUT_SEC: "20",
+      // Skip daemon routing — these are format contract tests, not daemon integration tests.
+      SWIZ_NO_DAEMON: "1",
     },
   })
 
