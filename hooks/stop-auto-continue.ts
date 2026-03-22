@@ -983,6 +983,36 @@ async function resolveSessionContext(
   }
 }
 
+// ─── Suggestion grounding ─────────────────────────────────────────────────
+
+/**
+ * Regex to extract hook/file name references from a suggestion.
+ * Matches patterns like: pretooluse-foo-bar, stop-something, posttooluse-xyz,
+ * session-start-thing, user-prompt-handler — with optional .ts suffix.
+ */
+const HOOK_NAME_RE =
+  /\b(pre-?tool-?use|post-?tool-?use|stop|session-?start|user-?prompt)[a-z0-9-]+(?:\.ts)?\b/gi
+
+/**
+ * Check whether a suggestion references hook/file names that don't exist in
+ * the repo file list. Returns a description of the ungrounded reference if
+ * found, or null if the suggestion is grounded (or has no file references).
+ */
+export function isUngroundedSuggestion(suggestionText: string, repoFiles: string): string | null {
+  const matches = suggestionText.match(HOOK_NAME_RE)
+  if (!matches || matches.length === 0) return null
+
+  const repoFilesLower = repoFiles.toLowerCase()
+  const ungrounded = uniq(
+    matches
+      .map((m) => m.toLowerCase().replace(/\.ts$/, ""))
+      .filter((name) => !repoFilesLower.includes(name))
+  )
+
+  if (ungrounded.length === 0) return null
+  return `Referenced artifacts not in repo: ${ungrounded.join(", ")}`
+}
+
 // ─── Suggestion deduplication ─────────────────────────────────────────────
 
 /** Normalize a suggestion to a short dedup key. */
@@ -1105,17 +1135,20 @@ async function main(): Promise<void> {
   }
 
   const turns = transcriptData.turns.slice(-CONTEXT_TURNS)
-  const rawResponse = await generateAiResponse({
-    turns,
-    editedPaths: transcriptData.editedPaths,
-    docsOnly,
-    taskContext,
-    refinementStatus,
-    cwd,
-    inputCwd: input.cwd,
-    ambitionMode: effective.ambitionMode,
-    sessionId: input.session_id ?? "",
-  })
+  const [rawResponse, repoFiles] = await Promise.all([
+    generateAiResponse({
+      turns,
+      editedPaths: transcriptData.editedPaths,
+      docsOnly,
+      taskContext,
+      refinementStatus,
+      cwd,
+      inputCwd: input.cwd,
+      ambitionMode: effective.ambitionMode,
+      sessionId: input.session_id ?? "",
+    }),
+    docsOnly ? Promise.resolve("") : git(["ls-files", "hooks/", "src/"], cwd).catch(() => ""),
+  ])
   const response = postProcessResponse(rawResponse, effective.ambitionMode, projectState)
 
   if (response.reflections.length > 0) {
@@ -1127,6 +1160,18 @@ async function main(): Promise<void> {
       "block",
       "Auto-continue could not identify a specific next step. Review your recent changes and ensure all tasks are complete before stopping."
     )
+  }
+
+  // Grounding check: if suggestion references hook/file names absent from repo, skip instead of block.
+  if (response.next && repoFiles) {
+    const ungrounded = isUngroundedSuggestion(response.next, repoFiles)
+    if (ungrounded) {
+      terminate(
+        "skip",
+        "UNGROUNDED_SUGGESTION",
+        `Suggestion references non-existent artifacts — allowing stop. Detail: ${ungrounded}`
+      )
+    }
   }
 
   // Dedup: allow stop if the same suggestion repeats.
