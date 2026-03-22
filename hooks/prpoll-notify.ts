@@ -13,11 +13,78 @@ import { homedir } from "node:os"
 import { fetchNewPrNotifications, type PrNotification, writePrPollState } from "../src/pr-notify.ts"
 import { git } from "./utils/hook-utils.ts"
 
+/** Bot author patterns — these are excluded from notification output. */
+const BOT_AUTHOR_RE = /^(dependabot|renovate|github-actions|app\/)/i
+const BOT_SUFFIX_RE = /\[bot\]$/i
+
 interface PrPollPayload {
   cwd?: string
 }
 
-function formatNotifications(notifications: PrNotification[]): string {
+/** Enriched notification with resolved PR author. */
+interface EnrichedNotification extends PrNotification {
+  prAuthor?: string
+}
+
+/**
+ * Resolve PR author from the notification's subject.url.
+ * The URL points to the GitHub API PR endpoint (e.g., /repos/owner/repo/pulls/123).
+ * Returns the author login or null on failure.
+ */
+async function resolvePrAuthor(subjectUrl: string): Promise<string | null> {
+  if (!subjectUrl) return null
+  try {
+    // subject.url is already a full API URL — strip the host prefix for gh api
+    const apiPath = subjectUrl.replace("https://api.github.com", "")
+    const proc = Bun.spawn(["gh", "api", apiPath, "--jq", ".user.login"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    if (proc.exitCode !== 0) return null
+    const login = stdout.trim()
+    return login || null
+  } catch {
+    return null
+  }
+}
+
+/** Returns true if the login matches a known bot pattern. */
+function isBotAuthor(login: string): boolean {
+  return BOT_AUTHOR_RE.test(login) || BOT_SUFFIX_RE.test(login)
+}
+
+/**
+ * Enrich notifications with PR author data and filter out bot-authored PRs.
+ * Resolves authors concurrently (max 5 at a time to limit rate impact).
+ */
+async function enrichAndFilterNotifications(
+  notifications: PrNotification[]
+): Promise<EnrichedNotification[]> {
+  const enriched: EnrichedNotification[] = []
+
+  // Process in batches of 5 to limit concurrent API calls
+  const batchSize = 5
+  for (let i = 0; i < notifications.length; i += batchSize) {
+    const batch = notifications.slice(i, i + batchSize)
+    const results = await Promise.all(
+      batch.map(async (n) => {
+        const author = await resolvePrAuthor(n.subject?.url)
+        return { ...n, prAuthor: author ?? undefined }
+      })
+    )
+    enriched.push(...results)
+  }
+
+  // Filter out bot-authored notifications
+  return enriched.filter((n) => !n.prAuthor || !isBotAuthor(n.prAuthor))
+}
+
+function formatNotifications(notifications: EnrichedNotification[]): string {
   if (notifications.length === 0) return ""
 
   const lines: string[] = [`PR notifications (${notifications.length}):`]
@@ -25,8 +92,9 @@ function formatNotifications(notifications: PrNotification[]): string {
     const repo = n.repository?.full_name ?? "unknown"
     const title = n.subject?.title ?? "untitled"
     const reason = n.reason ?? "unknown"
+    const author = n.prAuthor ? ` by @${n.prAuthor}` : ""
     const updatedAt = n.updated_at ? ` — ${new Date(n.updated_at).toLocaleString()}` : ""
-    lines.push(`  • [${repo}] ${title} (${reason}${updatedAt})`)
+    lines.push(`  • [${repo}] ${title}${author} (${reason}${updatedAt})`)
   }
   return lines.join("\n")
 }
@@ -81,8 +149,15 @@ async function main(): Promise<void> {
     process.exit(0)
   }
 
+  // Resolve PR authors and filter out bot-authored notifications
+  const enriched = await enrichAndFilterNotifications(scoped)
+
+  if (enriched.length === 0) {
+    process.exit(0)
+  }
+
   // Emit summary as blocking output for the dispatcher
-  const summary = formatNotifications(scoped)
+  const summary = formatNotifications(enriched)
   console.log(JSON.stringify({ decision: "allow", reason: summary }))
 
   // Advance lastPolledAt only after successfully emitting output.
