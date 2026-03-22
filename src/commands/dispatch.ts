@@ -12,11 +12,14 @@ import {
   DISPATCH_ROUTES,
   formatTrace,
   groupMatches,
+  log,
   parsePayload,
   replayBlocking,
   replayContext,
   replayPreToolUse,
+  withLogBuffer,
 } from "../dispatch/index.ts"
+import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
 import { manifest } from "../manifest.ts"
 import type { Command } from "../types.ts"
 
@@ -172,6 +175,46 @@ function getHookContext(canonicalEvent: string, payload: Record<string, unknown>
   return { toolName, trigger }
 }
 
+// ─── CLI timing log ─────────────────────────────────────────────────────────
+
+interface CliTimingInfo {
+  canonicalEvent: string
+  hookEventName: string
+  sessionId?: string
+  cwd: string
+  toolName?: string
+  totalMs: number
+  stdinMs: number
+  daemonMs: number
+  localMs?: number
+  route: "daemon" | "local"
+}
+
+function appendCliTimingLog(info: CliTimingInfo): Promise<void> {
+  const entry: HookLogEntry = {
+    ts: new Date().toISOString(),
+    event: info.canonicalEvent,
+    hookEventName: info.hookEventName,
+    hook: `cli:${info.route}`,
+    status: "ok",
+    durationMs: info.totalMs,
+    exitCode: null,
+    kind: "dispatch",
+    sessionId: info.sessionId,
+    cwd: info.cwd,
+    toolName: info.toolName,
+    stdoutSnippet: [
+      `stdin: ${info.stdinMs}ms`,
+      `daemon: ${info.daemonMs}ms (${info.route === "daemon" ? "forwarded" : "fallback"})`,
+      info.localMs !== undefined ? `local: ${info.localMs}ms` : null,
+      `total: ${info.totalMs}ms`,
+    ]
+      .filter(Boolean)
+      .join(", "),
+  }
+  return appendHookLog(entry)
+}
+
 // ─── Backward-compatible re-exports ─────────────────────────────────────────
 // Tests and other consumers import from this file; re-export everything.
 
@@ -241,7 +284,10 @@ export const dispatchCommand: Command = {
         throw new Error("Usage: swiz dispatch replay <event> [--json]")
       }
 
+      const t0 = performance.now()
       const payloadStr = await readStdinPayloadWithTimeout()
+      log(`   ⏱ cli:stdin: ${Math.round(performance.now() - t0)}ms`)
+
       const { payload } = parsePayload(payloadStr)
       const { toolName, trigger } = getHookContext(canonicalEvent, payload)
 
@@ -250,6 +296,7 @@ export const dispatchCommand: Command = {
       )
       const filteredGroups = await applyHookSettingFilters(matchingGroups, payload)
 
+      const tReplay = performance.now()
       const strategy = DISPATCH_ROUTES[canonicalEvent] ?? "blocking"
       const traces =
         strategy === "preToolUse"
@@ -257,8 +304,10 @@ export const dispatchCommand: Command = {
           : strategy === "blocking"
             ? await replayBlocking(filteredGroups, payloadStr, canonicalEvent)
             : await replayContext(filteredGroups, payloadStr)
+      log(`   ⏱ cli:replay: ${Math.round(performance.now() - tReplay)}ms`)
 
       formatTrace(canonicalEvent, strategy, filteredGroups.length, traces, jsonMode)
+      log(`   ⏱ cli:total: ${Math.round(performance.now() - t0)}ms`)
       return
     }
 
@@ -268,22 +317,67 @@ export const dispatchCommand: Command = {
     }
     const hookEventName = args[1] ?? canonicalEvent
 
-    const payloadStr = await readStdinPayloadWithTimeout()
+    await withLogBuffer(async () => {
+      const t0 = performance.now()
+      const payloadStr = await readStdinPayloadWithTimeout()
+      const stdinMs = Math.round(performance.now() - t0)
+      log(`   ⏱ cli:stdin: ${stdinMs}ms`)
 
-    // ── Try daemon first, fall back to local execution ──
-    const daemonResponse = await tryDaemonDispatch(canonicalEvent, hookEventName, payloadStr)
-    if (daemonResponse !== null) {
-      if (Object.keys(daemonResponse).length > 0) {
-        process.stdout.write(`${JSON.stringify(daemonResponse)}\n`)
+      const { payload } = parsePayload(payloadStr)
+      const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined
+      const cwd = (payload.cwd as string | undefined) ?? process.cwd()
+      const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
+
+      // ── Try daemon first, fall back to local execution ──
+      const tDaemon = performance.now()
+      const daemonResponse = await tryDaemonDispatch(canonicalEvent, hookEventName, payloadStr)
+      const daemonMs = Math.round(performance.now() - tDaemon)
+      const forwarded = daemonResponse !== null
+      log(`   ⏱ cli:daemon-attempt: ${daemonMs}ms (${forwarded ? "forwarded" : "fallback"})`)
+
+      if (daemonResponse !== null) {
+        if (Object.keys(daemonResponse).length > 0) {
+          process.stdout.write(`${JSON.stringify(daemonResponse)}\n`)
+        }
+        const totalMs = Math.round(performance.now() - t0)
+        log(`   ⏱ cli:total: ${totalMs}ms`)
+        void appendCliTimingLog({
+          canonicalEvent,
+          hookEventName,
+          sessionId,
+          cwd,
+          toolName,
+          totalMs,
+          stdinMs,
+          daemonMs,
+          route: "daemon",
+        })
+        return
       }
-      return
-    }
 
-    // ── Local execution fallback ──
-    const { executeDispatch } = await import("../dispatch/execute.ts")
-    const { response } = await executeDispatch({ canonicalEvent, hookEventName, payloadStr })
-    // Response already written to stdout by engine strategy functions.
-    // The returned response is used only by the daemon path above.
-    void response
+      // ── Local execution fallback ──
+      const tLocal = performance.now()
+      const { executeDispatch } = await import("../dispatch/execute.ts")
+      const { response } = await executeDispatch({ canonicalEvent, hookEventName, payloadStr })
+      const localMs = Math.round(performance.now() - tLocal)
+      const totalMs = Math.round(performance.now() - t0)
+      log(`   ⏱ cli:local-execute: ${localMs}ms`)
+      log(`   ⏱ cli:total: ${totalMs}ms`)
+      void appendCliTimingLog({
+        canonicalEvent,
+        hookEventName,
+        sessionId,
+        cwd,
+        toolName,
+        totalMs,
+        stdinMs,
+        daemonMs,
+        localMs,
+        route: "local",
+      })
+      // Response already written to stdout by engine strategy functions.
+      // The returned response is used only by the daemon path above.
+      void response
+    })
   },
 }
