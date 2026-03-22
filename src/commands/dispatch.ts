@@ -20,12 +20,12 @@ import {
   withLogBuffer,
 } from "../dispatch/index.ts"
 import { appendHookLog, type HookLogEntry } from "../hook-log.ts"
-import { manifest } from "../manifest.ts"
+import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import type { Command } from "../types.ts"
 
 const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
 const DAEMON_HEALTH_TIMEOUT_MS = 350
-const DAEMON_TIMEOUT_MS = 5_000
+const DEFAULT_DAEMON_TIMEOUT_MS = 15_000
 
 async function fetchWithTimeout(
   url: string,
@@ -58,6 +58,12 @@ async function isDaemonHealthy(): Promise<boolean> {
  * Returns the parsed response on success, or null if the daemon is
  * unavailable, times out, or returns an invalid response.
  */
+function daemonTimeoutForEvent(canonicalEvent: string): number {
+  const budgetSec = DISPATCH_TIMEOUTS[canonicalEvent]
+  if (budgetSec) return budgetSec * 1000
+  return DEFAULT_DAEMON_TIMEOUT_MS
+}
+
 async function tryDaemonDispatch(
   canonicalEvent: string,
   hookEventName: string,
@@ -89,7 +95,7 @@ async function tryDaemonDispatch(
         body: payloadStr,
         headers: { "Content-Type": "application/json" },
       },
-      DAEMON_TIMEOUT_MS
+      daemonTimeoutForEvent(canonicalEvent)
     )
 
     if (!resp.ok) {
