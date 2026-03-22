@@ -76,6 +76,7 @@ export class WorkerPool {
       const worker = new Worker(workerPath)
 
       worker.onmessage = (event: MessageEvent) => {
+        this.workerBusy[i] = false
         this.handleWorkerMessage(event.data as WorkerMessage)
       }
 
@@ -120,6 +121,7 @@ export class WorkerPool {
     if (!hook) return
 
     this.workerBusy[idleIndex] = true
+    this.pendingMessages.set(hook.id, hook)
     const worker = this.workers[idleIndex]!
 
     const msg: RunHookMessage = {
