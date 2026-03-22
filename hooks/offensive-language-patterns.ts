@@ -1229,12 +1229,22 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "premature_completion",
     pattern: re(
-      `(?:need|require|deserve|warrant)s? (?:a )?(?:fresh|new|clean|dedicated|separate) ${SESSION}`
+      `(?:need|require|deserve|warrant)s? (?:(?:a|its own) )?(?:fresh|new|clean|dedicated|separate) ${SESSION}`
     ),
     response:
       "There is no 'fresh session.' You are a language model — you do not degrade, tire, or lose focus. " +
       "Every token receives identical compute. Claiming work needs a 'fresh session' " +
       "is an invented pretext to abandon the current task. Do it now.",
+  },
+  {
+    category: "premature_completion",
+    pattern: re(
+      `deferr(?:ing|ed) to (?:a |its own )?(?:dedicated|separate|new|fresh|future|follow-?up) ${SESSION}`
+    ),
+    response:
+      "'Deferring to a dedicated session' is abandonment with extra syllables. " +
+      "There is no dedicated session — this is the session. " +
+      "The work is assigned, the context is loaded. Execute it now.",
   },
   {
     category: "premature_completion",
