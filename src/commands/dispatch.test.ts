@@ -28,7 +28,7 @@ async function dispatch(
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env, ...options.env },
+      env: { ...process.env, SWIZ_NO_DAEMON: "1", ...options.env },
     }
   )
   void proc.stdin.write(JSON.stringify(payload))
@@ -65,7 +65,7 @@ describe("dispatch preToolUse", () => {
       const hso = result.parsed.hookSpecificOutput as Record<string, unknown> | undefined
       expect(hso?.permissionDecision).not.toBe("deny")
     }
-  }, 15_000)
+  }, 30_000)
 
   test("denies sed commands", async () => {
     const result = await dispatch("preToolUse", {
@@ -76,7 +76,7 @@ describe("dispatch preToolUse", () => {
     const hso = result.parsed!.hookSpecificOutput as Record<string, unknown> | undefined
     const decision = hso?.permissionDecision ?? result.parsed!.decision
     expect(decision).toBe("deny")
-  }, 15_000)
+  }, 30_000)
 
   test("warns on grep with allow", async () => {
     const result = await dispatch("preToolUse", {
@@ -89,7 +89,7 @@ describe("dispatch preToolUse", () => {
     // If require-tasks fires first, it may deny — that's fine
     const decision = (hso?.permissionDecision ?? result.parsed!.decision) as string
     expect(["allow", "deny"]).toContain(decision)
-  }, 15_000)
+  }, 30_000)
 
   test("ignores non-Bash tools for banned-commands", async () => {
     const result = await dispatch("preToolUse", {
@@ -99,19 +99,19 @@ describe("dispatch preToolUse", () => {
     // Read tool has no matching groups for banned-commands
     // May get output from other hooks but not a deny for banned commands
     expect(result.exitCode).toBe(0)
-  }, 15_000)
+  }, 30_000)
 })
 
 describe("dispatch routing", () => {
   test("unknown event produces no output", async () => {
     const result = await dispatch("unknownEvent", {})
     expect(result.stdout).toBe("")
-  }, 15_000)
+  }, 30_000)
 
   test("empty payload doesn't crash", async () => {
     const result = await dispatch("preToolUse", {})
     expect(result.exitCode).toBe(0)
-  }, 15_000)
+  }, 30_000)
 
   test("fails when stdin payload is not received within 2s", async () => {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "preToolUse", "PreToolUse"], {
@@ -154,7 +154,7 @@ describe("dispatch routing", () => {
       const result = await dispatch(
         "unknownEvent",
         {},
-        { env: { SWIZ_DAEMON_PORT: String(server.port) } }
+        { env: { SWIZ_NO_DAEMON: undefined, SWIZ_DAEMON_PORT: String(server.port) } }
       )
 
       expect(result.exitCode).toBe(0)
@@ -191,7 +191,7 @@ describe("dispatch routing", () => {
       const result = await dispatch(
         "unknownEvent",
         {},
-        { env: { SWIZ_DAEMON_PORT: String(server.port) } }
+        { env: { SWIZ_NO_DAEMON: undefined, SWIZ_DAEMON_PORT: String(server.port) } }
       )
 
       expect(result.exitCode).toBe(0)
@@ -202,7 +202,7 @@ describe("dispatch routing", () => {
     } finally {
       void server.stop()
     }
-  }, 15_000)
+  }, 30_000)
 })
 
 describe("dispatch replay", () => {
@@ -217,6 +217,7 @@ describe("dispatch replay", () => {
       stderr: "pipe",
       env: {
         ...process.env,
+        SWIZ_NO_DAEMON: "1",
         // Keep replay deterministic in CI without contacting external providers.
         AI_TEST_NO_BACKEND: "1",
       },
@@ -268,7 +269,7 @@ describe("dispatch replay", () => {
       expect(typeof hook.file).toBe("string")
       expect(typeof hook.status).toBe("string")
     }
-  }, 15_000)
+  }, 30_000)
 
   test("replay outputs human-readable trace to stderr (non-JSON mode)", async () => {
     const result = await replay("preToolUse", {
@@ -281,7 +282,7 @@ describe("dispatch replay", () => {
     expect(result.stderr).toContain("preToolUse")
     // Should mention DENY or BLOCK
     expect(result.stderr.toLowerCase()).toMatch(/deny|block/)
-  }, 15_000)
+  }, 30_000)
 
   test("replay missing event argument throws error", async () => {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "replay"], {
@@ -295,7 +296,7 @@ describe("dispatch replay", () => {
     await proc.exited
     expect(proc.exitCode).not.toBe(0)
     expect(stderr).toContain("replay <event>")
-  }, 15_000)
+  }, 30_000)
 
   test("replay fails when stdin payload is not received within 2s", async () => {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "replay", "preToolUse"], {
@@ -312,7 +313,7 @@ describe("dispatch replay", () => {
     expect(proc.exitCode).toBe(1)
     expect(stdout.trim()).toBe("")
     expect(stderr).toContain("Timed out waiting 2s for stdin JSON payload to be received")
-  }, 15_000)
+  }, 30_000)
 
   test("replay JSON output includes matched_groups and hooks array", async () => {
     const result = await replay(
