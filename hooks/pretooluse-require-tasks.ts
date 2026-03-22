@@ -41,7 +41,7 @@ const LARGE_CONTENT_LINE_THRESHOLD = 10
 const IN_PROGRESS_CAP = 4
 const MIN_INCOMPLETE_TASKS = 2
 const MIN_PENDING_TASKS = 1
-const MEMORY_MARKDOWN_RE = /\.md$/i
+const MEMORY_MARKDOWN_RE = /\.(md|json)$/i
 /**
  * Heuristic patterns that indicate intent to merge directly to the default branch,
  * which contradicts the strict-no-direct-main PR-based workflow.
