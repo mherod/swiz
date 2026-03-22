@@ -37,6 +37,7 @@ const TOOL_NAME_OPTIONAL_EVENTS = new Set([
   "userPromptSubmit",
   "stop",
   "preCommit",
+  "prPoll",
 ])
 
 export function parsePayload(payloadStr: string): {

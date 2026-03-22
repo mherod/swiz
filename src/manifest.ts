@@ -356,7 +356,7 @@ export const manifest: HookGroup[] = [
   {
     event: "prPoll",
     scheduled: true,
-    hooks: [],
+    hooks: [{ file: "prpoll-notify.ts", timeout: 15 }],
   },
   {
     event: "preCommit",
@@ -436,4 +436,5 @@ export const DISPATCH_TIMEOUTS: Record<string, number> = {
   preCompact: 15,
   userPromptSubmit: 15,
   preCommit: 30,
+  prPoll: 20,
 }
