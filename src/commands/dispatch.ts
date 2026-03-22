@@ -24,7 +24,6 @@ import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import type { Command } from "../types.ts"
 
 const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT) || 7943
-const DAEMON_HEALTH_TIMEOUT_MS = 350
 const DEFAULT_DAEMON_TIMEOUT_MS = 15_000
 
 async function fetchWithTimeout(
@@ -42,21 +41,14 @@ async function fetchWithTimeout(
   }
 }
 
-async function isDaemonHealthy(): Promise<boolean> {
-  const url = `http://127.0.0.1:${DAEMON_PORT}/health`
-
-  try {
-    const resp = await fetchWithTimeout(url, { method: "GET" }, DAEMON_HEALTH_TIMEOUT_MS)
-    return resp.ok
-  } catch {
-    return false
-  }
-}
-
 /**
  * Try to forward the dispatch request to the daemon.
  * Returns the parsed response on success, or null if the daemon is
  * unavailable, times out, or returns an invalid response.
+ *
+ * Skips a separate health check — the dispatch request itself serves as
+ * the liveness probe. A separate /health round-trip adds ~350ms overhead
+ * on every call when the daemon is unreachable.
  */
 function daemonTimeoutForEvent(canonicalEvent: string): number {
   const budgetSec = DISPATCH_TIMEOUTS[canonicalEvent]
@@ -73,14 +65,6 @@ async function tryDaemonDispatch(
     stderrLog(
       "daemon dispatch routing diagnostic",
       `   daemon dispatch: skipped (SWIZ_NO_DAEMON=1)`
-    )
-    return null
-  }
-  const healthy = await isDaemonHealthy()
-  if (!healthy) {
-    stderrLog(
-      "daemon dispatch routing diagnostic",
-      `   daemon dispatch: skipped (health check failed on port ${DAEMON_PORT})`
     )
     return null
   }
