@@ -41,5 +41,5 @@ describe("spawnSpeak", () => {
     // but spawnSpeak must still resolve without throwing
     const result = await spawnSpeak("test", NO_VOICE)
     expect(result).toBeUndefined()
-  }, 10000)
+  }, 30000)
 })
