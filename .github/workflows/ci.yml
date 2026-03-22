@@ -153,6 +153,8 @@ jobs:
           fi
 
       - name: Test
+        env:
+          SWIZ_NO_DAEMON: "1"
         run: |
           if [ "${{ steps.test-scope.outputs.scope }}" = "full" ]; then
             echo "Running full test suite"
