@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { filterDisabledHooks } from "./dispatch.ts"
+import { filterDisabledHooks } from "../dispatch/index.ts"
 
 describe("filterDisabledHooks", () => {
   const makeGroups = (files: string[]) => [

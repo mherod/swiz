@@ -2,7 +2,7 @@
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { AGENTS, CONFIGURABLE_AGENTS } from "./agents.ts"
-import { DISPATCH_ROUTES } from "./commands/dispatch.ts"
+import { DISPATCH_ROUTES } from "./dispatch/index.ts"
 import { manifest, validateDispatchRoutes } from "./manifest.ts"
 
 // ─── Dispatch routing validation ────────────────────────────────────────────

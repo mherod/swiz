@@ -205,41 +205,6 @@ function appendCliTimingLog(info: CliTimingInfo): Promise<void> {
   return appendHookLog(entry)
 }
 
-// ─── Backward-compatible re-exports ─────────────────────────────────────────
-// Tests and other consumers import from this file; re-export everything.
-
-export type { DispatchStrategy } from "../dispatch/index.ts"
-export {
-  applyHookSettingFilters,
-  countHooks,
-  DISPATCH_ROUTES,
-  type DispatchRequest,
-  type DispatchResult,
-  executeDispatch,
-  extractCwd,
-  filterDisabledHooks,
-  filterPrMergeModeHooks,
-  filterStackHooks,
-  filterStateHooks,
-  formatTrace,
-  groupMatches,
-  hookCooldownPath,
-  isWithinCooldown,
-  log,
-  logHeader,
-  markHookCooldown,
-  replayBlocking,
-  replayContext,
-  replayPreToolUse,
-  resolvePrMergeActive,
-  runBlocking,
-  runContext,
-  runHook,
-  runPreToolUse,
-  type TraceEntry,
-  toolMatchesToken,
-} from "../dispatch/index.ts"
-
 // ─── Command ────────────────────────────────────────────────────────────────
 
 export const dispatchCommand: Command = {

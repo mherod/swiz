@@ -46,7 +46,7 @@ async function run() {
   commands.set("help", help)
 
   // Validate manifest/route/agent symmetry before any command runs
-  const { DISPATCH_ROUTES } = await import("./commands/dispatch.ts")
+  const { DISPATCH_ROUTES } = await import("./dispatch/index.ts")
   validateDispatchRoutes(DISPATCH_ROUTES, CONFIGURABLE_AGENTS)
 
   const [commandName, ...rest] = process.argv.slice(2)

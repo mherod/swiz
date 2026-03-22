@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { filterStackHooks } from "./dispatch.ts"
+import { filterStackHooks } from "../dispatch/index.ts"
 
 describe("filterStackHooks", () => {
   const makeGroups = (hookDefs: { file: string; stacks?: string[] }[]) => [

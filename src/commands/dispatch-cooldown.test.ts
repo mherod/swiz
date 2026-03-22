@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { existsSync, writeFileSync } from "node:fs"
-import { extractCwd, hookCooldownPath, isWithinCooldown, markHookCooldown } from "./dispatch.ts"
+import { existsSync } from "node:fs"
+import {
+  extractCwd,
+  hookCooldownPath,
+  isWithinCooldown,
+  markHookCooldown,
+} from "../dispatch/index.ts"
 
 // Each test uses a unique cwd derived from the test name and PID to avoid
 // shared sentinel paths between tests or across test-process runs.
@@ -39,7 +44,7 @@ describe("isWithinCooldown", () => {
   test("returns true when sentinel is fresh", async () => {
     const cwd = uniqueCwd("fresh")
     const sentinelPath = hookCooldownPath(TEST_HOOK, cwd)
-    writeFileSync(sentinelPath, String(Date.now()))
+    await Bun.write(sentinelPath, String(Date.now()))
     expect(await isWithinCooldown(TEST_HOOK, 60, cwd)).toBe(true)
   })
 
@@ -47,7 +52,7 @@ describe("isWithinCooldown", () => {
     const cwd = uniqueCwd("older")
     const sentinelPath = hookCooldownPath(TEST_HOOK, cwd)
     const twoMinutesAgo = Date.now() - 2 * 60 * 1000
-    writeFileSync(sentinelPath, String(twoMinutesAgo))
+    await Bun.write(sentinelPath, String(twoMinutesAgo))
     // 60-second cooldown — sentinel is 2 minutes old, outside the window
     expect(await isWithinCooldown(TEST_HOOK, 60, cwd)).toBe(false)
   })
@@ -56,7 +61,7 @@ describe("isWithinCooldown", () => {
     const cwd = uniqueCwd("within")
     const sentinelPath = hookCooldownPath(TEST_HOOK, cwd)
     const thirtySecondsAgo = Date.now() - 30 * 1000
-    writeFileSync(sentinelPath, String(thirtySecondsAgo))
+    await Bun.write(sentinelPath, String(thirtySecondsAgo))
     // 60-second cooldown — sentinel is 30 seconds old, inside the window
     expect(await isWithinCooldown(TEST_HOOK, 60, cwd)).toBe(true)
   })
@@ -64,7 +69,7 @@ describe("isWithinCooldown", () => {
   test("returns false for corrupted sentinel content", async () => {
     const cwd = uniqueCwd("corrupt")
     const sentinelPath = hookCooldownPath(TEST_HOOK, cwd)
-    writeFileSync(sentinelPath, "not-a-timestamp")
+    await Bun.write(sentinelPath, "not-a-timestamp")
     expect(await isWithinCooldown(TEST_HOOK, 60, cwd)).toBe(false)
   })
 
@@ -72,7 +77,7 @@ describe("isWithinCooldown", () => {
     const cwd = uniqueCwd("expired")
     const sentinelPath = hookCooldownPath(TEST_HOOK, cwd)
     const twoSecondsAgo = Date.now() - 2000
-    writeFileSync(sentinelPath, String(twoSecondsAgo))
+    await Bun.write(sentinelPath, String(twoSecondsAgo))
     expect(await isWithinCooldown(TEST_HOOK, 1, cwd)).toBe(false)
   })
 })
@@ -101,10 +106,10 @@ describe("markHookCooldown", () => {
     const cwd = uniqueCwd("overwrite")
     const sentinelPath = hookCooldownPath(TEST_HOOK, cwd)
     // Write old timestamp (outside cooldown)
-    writeFileSync(sentinelPath, String(Date.now() - 2 * 60 * 1000))
+    await Bun.write(sentinelPath, String(Date.now() - 2 * 60 * 1000))
     expect(await isWithinCooldown(TEST_HOOK, 60, cwd)).toBe(false)
     // Write fresh timestamp directly
-    writeFileSync(sentinelPath, String(Date.now()))
+    await Bun.write(sentinelPath, String(Date.now()))
     expect(await isWithinCooldown(TEST_HOOK, 60, cwd)).toBe(true)
   })
 })

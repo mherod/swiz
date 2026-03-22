@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
+import { filterPrMergeModeHooks, resolvePrMergeActive } from "../dispatch/index.ts"
 import { manifest } from "../manifest.ts"
-import { filterPrMergeModeHooks, resolvePrMergeActive } from "./dispatch.ts"
 
 describe("dispatch.ts unit tests", () => {
   describe("cross-agent tool matching patterns", () => {
