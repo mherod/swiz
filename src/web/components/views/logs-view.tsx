@@ -47,9 +47,9 @@ function hookBasename(hook: string): string {
   return parts[parts.length - 1] ?? hook
 }
 
-function LogDetail({ entry }: { entry: HookLogEntry }) {
+function LogDetailContent({ entry }: { entry: HookLogEntry }) {
   return (
-    <div className="log-detail">
+    <>
       {entry.matcher ? (
         <p>
           <strong>Matcher:</strong> {entry.matcher}
@@ -82,7 +82,7 @@ function LogDetail({ entry }: { entry: HookLogEntry }) {
           <pre className="log-snippet">{entry.stderrSnippet}</pre>
         </details>
       ) : null}
-    </div>
+    </>
   )
 }
 
@@ -112,8 +112,8 @@ function LogRow({
       </tr>
       {expanded ? (
         <tr className="log-row-detail">
-          <td colSpan={6}>
-            <LogDetail entry={entry} />
+          <td colSpan={6} className="log-detail">
+            <LogDetailContent entry={entry} />
           </td>
         </tr>
       ) : null}

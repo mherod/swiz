@@ -3464,7 +3464,7 @@ tbody tr:hover {
   border-bottom: 1px solid var(--border-color);
 }
 
-.log-detail {
+.log-row-detail td.log-detail {
   font-size: 0.7rem;
   color: var(--text-muted);
   padding: var(--space-2);
