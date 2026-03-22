@@ -374,6 +374,7 @@ export function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
 }
 
 async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
+  const t0 = performance.now()
   const ctx = buildDispatchContext(req)
 
   // Inject SWIZ_PROJECT_CWD so spawned hooks detect the correct package
@@ -393,9 +394,13 @@ async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
 
   const finalPayloadStr = ctx.parseError ? ctx.payloadStr : JSON.stringify(ctx.payload)
 
+  const tReplay = performance.now()
   await tryReplayPendingMutations(ctx.cwd)
+  log(`   ⏱ replay: ${Math.round(performance.now() - tReplay)}ms`)
 
+  const tManifest = performance.now()
   const filteredGroups = await resolveFilteredGroups(ctx, req.manifestProvider)
+  log(`   ⏱ manifest+filter: ${Math.round(performance.now() - tManifest)}ms`)
   if (filteredGroups.length === 0) return { response: {} }
 
   const lifecycleRequestId =
@@ -407,12 +412,14 @@ async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
     buildLifecycleEvent("start", ctx, filteredGroups, lifecycleRequestId, lifecycleStartedAt)
   )
 
+  const tEnrich = performance.now()
   const enrichedPayloadStr = await enrichPayloadForHooks(
     ctx.payload,
     ctx.parseError,
     finalPayloadStr,
     req.transcriptSummaryProvider
   )
+  log(`   ⏱ enrich: ${Math.round(performance.now() - tEnrich)}ms`)
 
   const strategyName = DISPATCH_ROUTES[ctx.canonicalEvent] ?? "blocking"
   const strategy = STRATEGY_REGISTRY[strategyName]
@@ -472,6 +479,9 @@ async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
       void appendHookLogs(logEntries)
     }
 
+    log(
+      `   ⏱ total: ${Math.round(performance.now() - t0)}ms (hooks: ${Math.round(performance.now() - dispatchStart)}ms)`
+    )
     return { response }
   } finally {
     // Restore previous SWIZ_PROJECT_CWD value (issue #328).
