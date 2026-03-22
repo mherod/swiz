@@ -7,7 +7,10 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
 
-const WORKER_COUNT = Math.max(1, (await import("node:os").then((os) => os.cpus().length)) - 1)
+function getWorkerCount(): number {
+  const { cpus } = require("node:os") as typeof import("node:os")
+  return Math.max(1, cpus().length - 1)
+}
 
 // Bun exposes Worker as a global - add types for TypeScript
 type BunWorker = Pick<globalThis.Worker, "postMessage" | "onmessage" | "onerror" | "terminate">
@@ -74,7 +77,8 @@ export class WorkerPool {
 
     const workerPath = join(import.meta.dir, "hook-worker.ts")
 
-    for (let i = 0; i < WORKER_COUNT; i++) {
+    const workerCount = getWorkerCount()
+    for (let i = 0; i < workerCount; i++) {
       const workerIndex = i
       const worker = new Worker(workerPath)
 
