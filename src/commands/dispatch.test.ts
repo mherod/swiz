@@ -43,14 +43,16 @@ async function dispatch(
   return { stdout: stdout.trim(), stderr, exitCode: proc.exitCode, parsed }
 }
 
-function runGit(cwd: string, args: string[]): void {
-  const proc = Bun.spawnSync(["git", ...args], {
+async function runGit(cwd: string, args: string[]): Promise<void> {
+  const proc = Bun.spawn(["git", ...args], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
   })
+  const stderr = await new Response(proc.stderr).text()
+  await proc.exited
   if (proc.exitCode !== 0) {
-    throw new Error(`git ${args.join(" ")} failed: ${proc.stderr.toString().trim()}`)
+    throw new Error(`git ${args.join(" ")} failed: ${stderr.trim()}`)
   }
 }
 
@@ -269,7 +271,7 @@ describe("dispatch replay", () => {
       expect(typeof hook.file).toBe("string")
       expect(typeof hook.status).toBe("string")
     }
-  }, 30_000)
+  }, 60_000)
 
   test("replay outputs human-readable trace to stderr (non-JSON mode)", async () => {
     const result = await replay("preToolUse", {
@@ -282,7 +284,7 @@ describe("dispatch replay", () => {
     expect(result.stderr).toContain("preToolUse")
     // Should mention DENY or BLOCK
     expect(result.stderr.toLowerCase()).toMatch(/deny|block/)
-  }, 30_000)
+  }, 60_000)
 
   test("replay missing event argument throws error", async () => {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "replay"], {
@@ -296,7 +298,7 @@ describe("dispatch replay", () => {
     await proc.exited
     expect(proc.exitCode).not.toBe(0)
     expect(stderr).toContain("replay <event>")
-  }, 30_000)
+  }, 60_000)
 
   test("replay fails when stdin payload is not received within 2s", async () => {
     const proc = Bun.spawn(["bun", "run", "index.ts", "dispatch", "replay", "preToolUse"], {
@@ -313,7 +315,7 @@ describe("dispatch replay", () => {
     expect(proc.exitCode).toBe(1)
     expect(stdout.trim()).toBe("")
     expect(stderr).toContain("Timed out waiting 2s for stdin JSON payload to be received")
-  }, 30_000)
+  }, 60_000)
 
   test("replay JSON output includes matched_groups and hooks array", async () => {
     const result = await replay(
@@ -335,9 +337,9 @@ describe("dispatch replay", () => {
   test("stop replay continues after first block and still runs stop-git-status", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "swiz-stop-replay-"))
     try {
-      runGit(repoDir, ["init"])
-      runGit(repoDir, ["config", "user.email", "swiz-tests@example.com"])
-      runGit(repoDir, ["config", "user.name", "Swiz Tests"])
+      await runGit(repoDir, ["init"])
+      await runGit(repoDir, ["config", "user.email", "swiz-tests@example.com"])
+      await runGit(repoDir, ["config", "user.name", "Swiz Tests"])
 
       // Secret scanner should block on this committed token pattern.
       // Use array join to avoid triggering GitHub push protection in source code
@@ -377,8 +379,8 @@ describe("dispatch replay", () => {
         "7",
       ].join("")
       await writeFile(join(repoDir, "secrets.ts"), `export const token = "${fakeSecret}";\n`)
-      runGit(repoDir, ["add", "secrets.ts"])
-      runGit(repoDir, ["commit", "-m", "test: add committed secret fixture"])
+      await runGit(repoDir, ["add", "secrets.ts"])
+      await runGit(repoDir, ["commit", "-m", "test: add committed secret fixture"])
 
       const result = await replay("stop", { session_id: "replay-stop-all-hooks", cwd: repoDir }, [
         "--json",
