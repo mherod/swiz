@@ -52,6 +52,8 @@ interface QueuedHook {
   file: string
   payloadStr: string
   timeoutSec?: number
+  /** Filled when the job is assigned to a worker (for error recovery). */
+  workerIndex?: number
   resolve: (result: { parsed: Record<string, unknown> | null; execution: HookExecution }) => void
   reject: (error: Error) => void
 }
@@ -73,15 +75,20 @@ export class WorkerPool {
     const workerPath = join(import.meta.dir, "hook-worker.ts")
 
     for (let i = 0; i < WORKER_COUNT; i++) {
+      const workerIndex = i
       const worker = new Worker(workerPath)
 
       worker.onmessage = (event: MessageEvent) => {
-        this.workerBusy[i] = false
-        this.handleWorkerMessage(event.data as WorkerMessage)
+        this.handleWorkerMessage(event.data as WorkerMessage, workerIndex)
       }
 
       worker.onerror = (error) => {
-        debugLog(`Worker ${i} error: ${error}`)
+        debugLog(`Worker ${workerIndex} error: ${error}`)
+        const err =
+          error instanceof ErrorEvent && error.error instanceof Error
+            ? error.error
+            : new Error(String(error))
+        this.handleWorkerFailure(workerIndex, err)
       }
 
       this.workers.push(worker)
@@ -91,9 +98,14 @@ export class WorkerPool {
     this.initialized = true
   }
 
-  private handleWorkerMessage(msg: WorkerMessage): void {
+  private handleWorkerMessage(msg: WorkerMessage, workerIndex: number): void {
+    this.workerBusy[workerIndex] = false
+
     const pending = this.pendingMessages.get(msg.id)
-    if (!pending) return
+    if (!pending) {
+      this.processQueue()
+      return
+    }
 
     this.pendingMessages.delete(msg.id)
 
@@ -106,7 +118,20 @@ export class WorkerPool {
       })
     }
 
-    // Process next in queue
+    this.processQueue()
+  }
+
+  /** Worker crashed or failed to load — reject the in-flight job and free the slot. */
+  private handleWorkerFailure(workerIndex: number, err: Error): void {
+    this.workerBusy[workerIndex] = false
+    for (const [id, pending] of this.pendingMessages) {
+      if (pending.workerIndex === workerIndex) {
+        this.pendingMessages.delete(id)
+        pending.reject(err)
+        this.processQueue()
+        return
+      }
+    }
     this.processQueue()
   }
 
@@ -121,6 +146,7 @@ export class WorkerPool {
     if (!hook) return
 
     this.workerBusy[idleIndex] = true
+    hook.workerIndex = idleIndex
     this.pendingMessages.set(hook.id, hook)
     const worker = this.workers[idleIndex]!
 
