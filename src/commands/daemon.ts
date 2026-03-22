@@ -6,7 +6,7 @@ import {
   invalidateSettingsCache,
 } from "../settings.ts"
 import type { Command } from "../types.ts"
-import { CiWatchRegistry } from "./daemon/ci-watch-registry.ts"
+import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
 import {
   DAEMON_PORT,
   fetchDaemonStatus,
@@ -114,7 +114,7 @@ function createDaemonCaches() {
   const eligibilityCache = new HookEligibilityCache()
   const transcriptIndex = new TranscriptIndexCache()
   const cooldownRegistry = new CooldownRegistry()
-  const ciWatchRegistry = new CiWatchRegistry()
+  const ciWatchRegistry = new CiWatchRegistry({ notify: notifyCiCompletion })
   const upstreamSyncRegistry = new UpstreamSyncRegistry()
   const workerRuntime = new DaemonWorkerRuntime()
   const gitStateCache = new GitStateCache()

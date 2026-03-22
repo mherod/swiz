@@ -1,4 +1,6 @@
+import { basename } from "node:path"
 import { ghJson } from "../../git-helpers.ts"
+import { appendHookLog } from "../../hook-log.ts"
 
 const CI_WATCH_POLL_MS = 30_000
 const CI_WATCH_TIMEOUT_MS = 60 * 60 * 1000
@@ -158,4 +160,48 @@ export class CiWatchRegistry {
 
     this.schedulePoll(key)
   }
+}
+
+/**
+ * Notify the user when a CI run completes via macOS notification center
+ * and log the completion to the hook log for the daemon logs view.
+ */
+export async function notifyCiCompletion(
+  watch: CiWatchStatus & { conclusion: string }
+): Promise<void> {
+  const shortSha = watch.sha.slice(0, 8)
+  const project = basename(watch.cwd)
+  const passed = watch.conclusion === "success"
+  const title = passed ? "CI passed" : `CI ${watch.conclusion}`
+  const message = `${project} @ ${shortSha}`
+  const sound = passed ? "Glass" : "Sosumi"
+
+  // macOS notification via osascript
+  try {
+    const proc = Bun.spawn(
+      [
+        "osascript",
+        "-e",
+        `display notification "${message}" with title "${title}" sound name "${sound}"`,
+      ],
+      { stdout: "ignore", stderr: "ignore" }
+    )
+    await proc.exited
+  } catch {
+    // Non-macOS or osascript unavailable — skip silently
+  }
+
+  // Log to hook-logs so it appears in the daemon logs view
+  void appendHookLog({
+    ts: new Date().toISOString(),
+    event: "ciWatch",
+    hookEventName: "CiWatch",
+    hook: "ci-notify",
+    status: passed ? "ok" : "error",
+    durationMs: Date.now() - watch.startedAt,
+    exitCode: null,
+    kind: "dispatch",
+    hookCount: 0,
+    cwd: watch.cwd,
+  })
 }
