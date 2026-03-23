@@ -212,6 +212,20 @@ interface ProjectedContentInput {
  * Returns null if the projected content cannot be determined (e.g. file unreadable
  * on an Edit where both old/new are empty).
  */
+async function _computeEditToolContent(
+  filePath: string,
+  oldString: string,
+  newString: string
+): Promise<string | null> {
+  if (!oldString && !newString) return null
+  try {
+    const currentContent = await Bun.file(filePath).text()
+    return currentContent.replace(oldString, () => newString)
+  } catch {
+    return null
+  }
+}
+
 export async function computeProjectedContent(
   toolName: string,
   filePath: string,
@@ -224,15 +238,7 @@ export async function computeProjectedContent(
   if (_isEditTool(toolName)) {
     const oldString = toolInput.old_string ?? ""
     const newString = toolInput.new_string ?? ""
-    if (!oldString && !newString) return null
-
-    let currentContent: string
-    try {
-      currentContent = await Bun.file(filePath).text()
-    } catch {
-      return null
-    }
-    return currentContent.replace(oldString, () => newString)
+    return _computeEditToolContent(filePath, oldString, newString)
   }
 
   // Write tool — content is the full file
@@ -724,6 +730,24 @@ import { computeSubjectFingerprint } from "../../src/subject-fingerprint.ts"
  * Returns an empty array when the directory doesn't exist or can't be read.
  * Skips files that fail to parse or don't end with .json.
  */
+async function _readTaskFile(tasksDir: string, fileName: string): Promise<SessionTask | null> {
+  if (!fileName.endsWith(".json") || fileName.startsWith(".")) return null
+  try {
+    const task = (await Bun.file(join(tasksDir, fileName)).json()) as SessionTask
+    if (task.id && task.subject && task.status) {
+      // Backfill fingerprint for tasks that predate the field
+      if (!task.subjectFingerprint) {
+        task.subjectFingerprint = computeSubjectFingerprint(task.subject)
+      }
+      backfillTaskTimingFields(task)
+      return task
+    }
+  } catch {
+    // skip unreadable or malformed task files
+  }
+  return null
+}
+
 export async function readSessionTasks(
   sessionId: string,
   home: string = getHomeDirWithFallback("")
@@ -739,20 +763,8 @@ export async function readSessionTasks(
   }
   const tasks: SessionTask[] = []
   for (const f of files) {
-    if (!f.endsWith(".json") || f.startsWith(".")) continue
-    try {
-      const task = (await Bun.file(join(tasksDir, f)).json()) as SessionTask
-      if (task.id && task.subject && task.status) {
-        // Backfill fingerprint for tasks that predate the field
-        if (!task.subjectFingerprint) {
-          task.subjectFingerprint = computeSubjectFingerprint(task.subject)
-        }
-        backfillTaskTimingFields(task)
-        tasks.push(task)
-      }
-    } catch {
-      // skip unreadable or malformed task files
-    }
+    const task = await _readTaskFile(tasksDir, f)
+    if (task) tasks.push(task)
   }
   // Sort tasks by ID to ensure deterministic output
   return orderBy(tasks, [(t) => t.id], ["asc"])
@@ -790,26 +802,16 @@ export function limitItems<T>(items: T[], limit = 3): LimitedItems<T> {
  * Returns tasks from the most recently-modified session that has any tasks,
  * excluding `excludeSessionId` (the current session).
  */
-export async function findPriorSessionTasks(
-  cwd: string,
-  excludeSessionId: string,
-  home: string = getHomeDirWithFallback("")
-): Promise<PriorSessionResult | null> {
-  if (!home || !cwd) return null
-  const { projectKeyFromCwd } = await import("../../src/transcript-utils.ts")
+async function _collectSessionsFromTranscripts(
+  projectDir: string,
+  excludeSessionId: string
+): Promise<{ id: string; mtime: number }[]> {
   const { readdir, stat } = await import("node:fs/promises")
-
-  const projectKey = projectKeyFromCwd(cwd)
-  const projectsRoot = getProjectsRoot(home)
-  if (!projectsRoot) return null
-  const projectDir = join(projectsRoot, projectKey)
-
-  // Collect session IDs from transcript files (sorted by mtime, newest first)
   let transcriptFiles: string[]
   try {
     transcriptFiles = await readdir(projectDir)
   } catch {
-    return null
+    return []
   }
 
   const sessions: { id: string; mtime: number }[] = []
@@ -822,7 +824,23 @@ export async function findPriorSessionTasks(
       sessions.push({ id, mtime: s.mtimeMs })
     } catch {}
   }
-  const orderedSessions = orderBy(sessions, [(session) => session.mtime], ["desc"])
+  return orderBy(sessions, [(session) => session.mtime], ["desc"])
+}
+
+export async function findPriorSessionTasks(
+  cwd: string,
+  excludeSessionId: string,
+  home: string = getHomeDirWithFallback("")
+): Promise<PriorSessionResult | null> {
+  if (!home || !cwd) return null
+  const { projectKeyFromCwd } = await import("../../src/transcript-utils.ts")
+
+  const projectKey = projectKeyFromCwd(cwd)
+  const projectsRoot = getProjectsRoot(home)
+  if (!projectsRoot) return null
+  const projectDir = join(projectsRoot, projectKey)
+
+  const orderedSessions = await _collectSessionsFromTranscripts(projectDir, excludeSessionId)
 
   // Walk sessions newest-first; return incomplete tasks from first session with tasks
   for (const { id } of orderedSessions) {
@@ -988,6 +1006,21 @@ async function executeWithFallback(executor: TaskExecutor, args: string[]): Prom
 }
 
 /** Create a session task via `swiz tasks create`. Uses a sentinel file to fire only once per session. */
+async function _validateCreateTaskInputs(
+  sessionId: string | undefined,
+  sentinelKey: string
+): Promise<{ safeSentinel: string; safeSession: string; sentinel: string } | null> {
+  if (!isValidSessionId(sessionId) || !sentinelKey.trim()) return null
+  const home = getHomeDirOrNull()
+  if (!home) return null
+  const safeSentinel = sanitizePathComponent(sentinelKey)
+  const safeSession = sanitizePathComponent(sessionId)
+  if (!safeSentinel || !safeSession) return null
+  const sentinel = sessionTaskSentinelPath(safeSentinel, safeSession)
+  if (await Bun.file(sentinel).exists()) return null
+  return { safeSentinel, safeSession, sentinel }
+}
+
 export async function createSessionTask(
   sessionId: string | undefined,
   sentinelKey: string,
@@ -995,23 +1028,23 @@ export async function createSessionTask(
   description: string,
   executor: TaskExecutor = defaultTaskExecutor
 ): Promise<void> {
-  if (!isValidSessionId(sessionId) || !sentinelKey.trim()) return
+  const validated = await _validateCreateTaskInputs(sessionId, sentinelKey)
+  if (!validated) return
+  const { sentinel } = validated
+
+  let exec = executor
+  if (typeof exec !== "function") {
+    console.error(
+      `[swiz] createSessionTask: invalid executor (got ${typeof exec}), falling back to default`
+    )
+    exec = defaultTaskExecutor
+  }
+
   const home = getHomeDirOrNull()
   if (!home) return
-  const safeSentinel = sanitizePathComponent(sentinelKey)
-  const safeSession = sanitizePathComponent(sessionId)
-  if (!safeSentinel || !safeSession) return
-  const sentinel = sessionTaskSentinelPath(safeSentinel, safeSession)
-  if (await Bun.file(sentinel).exists()) return
-  if (typeof executor !== "function") {
-    console.error(
-      `[swiz] createSessionTask: invalid executor (got ${typeof executor}), falling back to default`
-    )
-    executor = defaultTaskExecutor
-  }
   const swiz = Bun.which("swiz") ?? join(home, ".bun", "bin", "swiz")
-  const args = [swiz, "tasks", "create", subject, description, "--session", sessionId]
-  const exitCode = await executeWithFallback(executor, args)
+  const args = [swiz, "tasks", "create", subject, description, "--session", sessionId ?? ""]
+  const exitCode = await executeWithFallback(exec, args)
   if (exitCode === 0) {
     try {
       await Bun.write(sentinel, "")
@@ -1098,20 +1131,29 @@ export {
   stripAnsi,
 } from "./transcript.ts"
 
-/** True when a shell command is exempt from task-tracking enforcement. */
-export function isTaskTrackingExemptShellCommand(command: string): boolean {
+function _isExemptGitCommand(command: string): boolean {
   return (
     (GIT_READ_RE.test(command) && !GIT_WRITE_RE.test(command)) ||
-    READ_CMD_RE.test(command) ||
-    RECOVERY_CMD_RE.test(command) ||
     GIT_SYNC_RE.test(command) ||
     GIT_COMMIT_RE.test(command) ||
     GIT_CHECKOUT_RE.test(command) ||
-    GIT_SWITCH_RE.test(command) ||
+    GIT_SWITCH_RE.test(command)
+  )
+}
+
+function _isExemptUtilityCommand(command: string): boolean {
+  return (
+    READ_CMD_RE.test(command) ||
+    RECOVERY_CMD_RE.test(command) ||
     GH_CMD_RE.test(command) ||
     SWIZ_CMD_RE.test(command) ||
     SETUP_CMD_RE.test(command)
   )
+}
+
+/** True when a shell command is exempt from task-tracking enforcement. */
+export function isTaskTrackingExemptShellCommand(command: string): boolean {
+  return _isExemptGitCommand(command) || _isExemptUtilityCommand(command)
 }
 
 /** Returns true when a command attempts to disable a swiz setting identified by any of the given aliases. */
