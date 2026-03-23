@@ -721,7 +721,7 @@ async function tryMutationRestFallback(
   debugLog(`[swiz] REST_FALLBACK_MUTATION repo=${repo} issue=#${num} type=${mutation.type}`)
 
   const cmd = _buildMutationArgs(mutation, repo, num)
-  if (!cmd) return mutation.type === "create" ? false : true
+  if (!cmd) return mutation.type !== "create"
 
   return _executeMutationCommand(cmd.args, cwd, cmd.stdin)
 }

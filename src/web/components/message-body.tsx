@@ -315,6 +315,46 @@ function AssistantBody({ text, parts }: { text: string; parts: AssistantParts })
   )
 }
 
+function UserBodyExpanded({
+  userVisible,
+  hasOnlyContext,
+  contextBlocks,
+}: {
+  userVisible: string
+  hasOnlyContext: boolean
+  contextBlocks: React.ReactNode
+}) {
+  return (
+    <>
+      {!hasOnlyContext ? <pre className="message-text">{userVisible}</pre> : null}
+      {contextBlocks}
+    </>
+  )
+}
+
+function UserBodyCollapsed({
+  userVisible,
+  contextBlocks,
+}: {
+  userVisible: string
+  contextBlocks: React.ReactNode
+}) {
+  const preview = summarizeText(userVisible)
+  const hint = buildCollapseHint(userVisible)
+  return (
+    <>
+      <details className="message-collapsible">
+        <summary>
+          <pre className="message-text">{preview}</pre>
+          <span className="message-expand-hint">{hint}</span>
+        </summary>
+        <pre className="message-text">{userVisible}</pre>
+      </details>
+      {contextBlocks}
+    </>
+  )
+}
+
 function UserBody({
   text,
   parts,
@@ -336,27 +376,15 @@ function UserBody({
 
   if (!shouldCollapse) {
     return (
-      <>
-        {!hasOnlyContext ? <pre className="message-text">{userVisible}</pre> : null}
-        {contextBlocks}
-      </>
+      <UserBodyExpanded
+        userVisible={userVisible}
+        hasOnlyContext={hasOnlyContext}
+        contextBlocks={contextBlocks}
+      />
     )
   }
 
-  const preview = summarizeText(userVisible)
-  const hint = buildCollapseHint(userVisible)
-  return (
-    <>
-      <details className="message-collapsible">
-        <summary>
-          <pre className="message-text">{preview}</pre>
-          <span className="message-expand-hint">{hint}</span>
-        </summary>
-        <pre className="message-text">{userVisible}</pre>
-      </details>
-      {contextBlocks}
-    </>
-  )
+  return <UserBodyCollapsed userVisible={userVisible} contextBlocks={contextBlocks} />
 }
 
 export function MessageBody({ text, role }: { text: string; role: "user" | "assistant" }) {

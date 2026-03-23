@@ -578,6 +578,40 @@ function formatRunnerFailure(results: RunnerResult[], exitCode: number): string 
   return `${countLabel} test(s) failed across multiple runners (${runnerNames}) (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
 }
 
+function detectRunnerFailure(clean: string, exitCode: number, lines: string[]): string | null {
+  const runnerResults = collectRunnerResults(clean, lines)
+  if (runnerResults.length > 0) {
+    return formatRunnerFailure(runnerResults, exitCode)
+  }
+  return null
+}
+
+function detectHookFailure(clean: string, exitCode: number, lines: string[]): string | null {
+  if (!HOOK_FAIL_RE.test(clean)) return null
+  const hookName = clean.match(/hook: (\S+)/)?.[1] ?? "pre-push"
+  const errorLine = lines.find((l) => l.includes("error:") || l.includes("✗"))
+  const detail = errorLine ? `\n\nFailing check: ${errorLine.trim()}` : ""
+  return `${hookName} hook blocked the operation (exit code ${exitCode}).${detail}\n\nFix the underlying issue — do not bypass hooks.`
+}
+
+function detectGenericExitFailure(
+  _clean: string,
+  exitCode: number,
+  lines: string[]
+): string | null {
+  const errorLine = lines.find((l) => l.toLowerCase().includes("error") || EXIT_FAIL_RE.test(l))
+  const detail = errorLine ? `\n\nError: ${errorLine.trim()}` : ""
+  return `Background task exited with code ${exitCode}.${detail}\n\nDo not proceed until this failure is resolved.`
+}
+
+function detectExitZeroError(clean: string): string | null {
+  if (EXIT_FAIL_RE.test(clean)) {
+    const code = clean.match(EXIT_FAIL_RE)?.[1]
+    return `Output contains exit status ${code}. Verify the task actually succeeded before continuing.`
+  }
+  return null
+}
+
 function detectFailure(output: string, exitCode: number | null): string | null {
   // Normalize once — all pattern matching below operates on ANSI-free text.
   const clean = stripAnsi(output)
@@ -588,29 +622,20 @@ function detectFailure(output: string, exitCode: number | null): string | null {
     const lines = clean.split("\n").filter((l) => l.trim())
 
     // Collect results from all matching runners (no short-circuit — supports composite output)
-    const runnerResults = collectRunnerResults(clean, lines)
-    if (runnerResults.length > 0) {
-      return formatRunnerFailure(runnerResults, exitCode)
-    }
+    const runnerFailure = detectRunnerFailure(clean, exitCode, lines)
+    if (runnerFailure) return runnerFailure
 
     // Push / hook failures
-    if (HOOK_FAIL_RE.test(clean)) {
-      const hookName = clean.match(/hook: (\S+)/)?.[1] ?? "pre-push"
-      const errorLine = lines.find((l) => l.includes("error:") || l.includes("✗"))
-      const detail = errorLine ? `\n\nFailing check: ${errorLine.trim()}` : ""
-      return `${hookName} hook blocked the operation (exit code ${exitCode}).${detail}\n\nFix the underlying issue — do not bypass hooks.`
-    }
+    const hookFailure = detectHookFailure(clean, exitCode, lines)
+    if (hookFailure) return hookFailure
 
     // Generic non-zero exit
-    const errorLine = lines.find((l) => l.toLowerCase().includes("error") || EXIT_FAIL_RE.test(l))
-    const detail = errorLine ? `\n\nError: ${errorLine.trim()}` : ""
-    return `Background task exited with code ${exitCode}.${detail}\n\nDo not proceed until this failure is resolved.`
+    return detectGenericExitFailure(clean, exitCode, lines)
   }
 
   // Even with exit 0, some tools print error patterns (rare but happens with gh CLI)
-  if (exitCode === null && EXIT_FAIL_RE.test(clean)) {
-    const code = clean.match(EXIT_FAIL_RE)?.[1]
-    return `Output contains exit status ${code}. Verify the task actually succeeded before continuing.`
+  if (exitCode === null) {
+    return detectExitZeroError(clean)
   }
 
   return null

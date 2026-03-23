@@ -67,33 +67,47 @@ const ENV_FALLBACKS: { envVar: string; app: TerminalApp; name: string }[] = [
  * 3. LC_TERMINAL (set by some terminals as a secondary identifier)
  * 4. "unknown" if nothing matches
  */
-export function detectTerminal(
-  env: Record<string, string | undefined> = process.env
-): TerminalInfo {
-  // 1. TERM_PROGRAM — most universal
+function detectFromTermProgram(env: Record<string, string | undefined>): TerminalInfo | null {
   const termProgram = env.TERM_PROGRAM
-  if (termProgram) {
-    const match = TERM_PROGRAM_MAP[termProgram]
-    if (match) {
-      return { ...match, version: env.TERM_PROGRAM_VERSION ?? null }
-    }
-  }
+  if (!termProgram) return null
+  const match = TERM_PROGRAM_MAP[termProgram]
+  if (!match) return null
+  return { ...match, version: env.TERM_PROGRAM_VERSION ?? null }
+}
 
-  // 2. Terminal-specific env vars
+function detectFromEnvFallbacks(env: Record<string, string | undefined>): TerminalInfo | null {
   for (const { envVar, app, name } of ENV_FALLBACKS) {
     if (env[envVar]) {
       return { app, name, version: env.TERM_PROGRAM_VERSION ?? null }
     }
   }
+  return null
+}
+
+function detectFromLcTerminal(env: Record<string, string | undefined>): TerminalInfo | null {
+  const lcTerminal = env.LC_TERMINAL
+  if (!lcTerminal) return null
+  const lower = lcTerminal.toLowerCase()
+  if (lower.includes("iterm"))
+    return { app: "iterm2", name: "iTerm2", version: env.LC_TERMINAL_VERSION ?? null }
+  if (lower.includes("wezterm")) return { app: "wezterm", name: "WezTerm", version: null }
+  return null
+}
+
+export function detectTerminal(
+  env: Record<string, string | undefined> = process.env
+): TerminalInfo {
+  // 1. TERM_PROGRAM — most universal
+  const fromTermProgram = detectFromTermProgram(env)
+  if (fromTermProgram) return fromTermProgram
+
+  // 2. Terminal-specific env vars
+  const fromEnvFallbacks = detectFromEnvFallbacks(env)
+  if (fromEnvFallbacks) return fromEnvFallbacks
 
   // 3. LC_TERMINAL — some terminals set this as secondary
-  const lcTerminal = env.LC_TERMINAL
-  if (lcTerminal) {
-    const lower = lcTerminal.toLowerCase()
-    if (lower.includes("iterm"))
-      return { app: "iterm2", name: "iTerm2", version: env.LC_TERMINAL_VERSION ?? null }
-    if (lower.includes("wezterm")) return { app: "wezterm", name: "WezTerm", version: null }
-  }
+  const fromLcTerminal = detectFromLcTerminal(env)
+  if (fromLcTerminal) return fromLcTerminal
 
   return { app: "unknown", name: "Unknown", version: null }
 }
