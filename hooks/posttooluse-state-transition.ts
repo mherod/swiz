@@ -22,6 +22,9 @@
 import { readProjectState, writeProjectState } from "../src/settings.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 import {
+  extractCheckoutBranch,
+  extractCheckoutStartPoint,
+  extractSwitchBranch,
   GH_PR_CHECKOUT_RE,
   GH_PR_CREATE_RE,
   GH_PR_MERGE_RE,
@@ -29,6 +32,7 @@ import {
   GIT_CHECKOUT_NEW_BRANCH_RE,
   GIT_CHECKOUT_RE,
   GIT_COMMIT_RE,
+  GIT_SWITCH_RE,
   getDefaultBranch,
   getGitStatusV2,
   isDefaultBranch,
@@ -64,32 +68,8 @@ function isReviewingLikeState(state: ProjectState): boolean {
   return state === "reviewing" || state === "addressing-feedback"
 }
 
-/** Extract the target branch from `git checkout <branch>` (non -b form). */
-function extractCheckoutBranch(command: string): string | null {
-  // Match: git checkout <branch> — not a flag, not -b/-B/-c/-C
-  const match = command.match(/\bgit\s+checkout\s+(?!-[bcBC](?:\s|$))([^\s;|&-][^\s;|&]*)/)
-  return match?.[1] ?? null
-}
-
-/** Extract target branch from `git switch <branch>` (non -c/-C form). */
-function extractSwitchBranch(command: string): string | null {
-  const match = command.match(/\bgit\s+switch\s+(?!-[cC](?:\s|$))([^\s;|&-][^\s;|&]*)/)
-  return match?.[1] ?? null
-}
-
-function extractCheckoutStartPoint(command: string): string | null {
-  const checkoutMatch = command.match(
-    /\bgit\s+checkout\s+-[bB]\s+[^\s;|&]+(?:\s+([^\s;|&-][^\s;|&]*))?/
-  )
-  if (checkoutMatch?.[1]) return checkoutMatch[1]
-
-  const switchMatch = command.match(
-    /\bgit\s+switch\s+-[cC]\s+[^\s;|&]+(?:\s+([^\s;|&-][^\s;|&]*))?/
-  )
-  if (switchMatch?.[1]) return switchMatch[1]
-
-  return null
-}
+// extractCheckoutBranch, extractSwitchBranch, extractCheckoutStartPoint
+// are imported from ./utils/git-utils.ts (centralised, -C aware).
 
 async function resolveCheckoutSourceBranch(command: string, cwd: string): Promise<string | null> {
   const explicitStartPoint = extractCheckoutStartPoint(command)
@@ -219,7 +199,7 @@ async function handleCheckoutToDeveloping(
 ): Promise<boolean> {
   if (state === "developing") return false
   const isCheckout =
-    (GIT_CHECKOUT_RE.test(command) || /\bgit\s+switch\b/.test(command)) &&
+    (GIT_CHECKOUT_RE.test(command) || GIT_SWITCH_RE.test(command)) &&
     !GIT_CHECKOUT_NEW_BRANCH_RE.test(command)
   if (!isCheckout) return false
 

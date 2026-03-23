@@ -62,3 +62,21 @@ export function shellSegmentCommandRe(pattern: string, flags = ""): RegExp {
 export function shellTokenCommandRe(pattern: string, flags = ""): RegExp {
   return new RegExp(`${SHELL_TOKEN_BOUNDARY}${pattern}`, flags)
 }
+
+/**
+ * Optional git global options that may appear between `git` and the subcommand.
+ * Handles: `-C <dir>`, `-c <key>=<val>`, `--git-dir <path>`, `--work-tree <path>`,
+ * `--namespace <ns>`, and short flags like `--bare`, `--no-pager`, `-P`, etc.
+ * Value-taking options (`-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`)
+ * consume the next whitespace-delimited token as well.
+ */
+export const GIT_GLOBAL_OPTS = String.raw`(?:(?:-[Cc]\s+\S+|--(?:git-dir|work-tree|namespace)(?:=\S+|\s+\S+)|--?\S+)\s+)*`
+
+/**
+ * Build a regex that matches `git [global-opts] <subcmd>` at a shell statement boundary.
+ * Use instead of `shellStatementCommandRe("git\\s+...")` so that commands like
+ * `git -C /dir push` are recognised alongside plain `git push`.
+ */
+export function gitSubcommandRe(subcmd: string, flags = ""): RegExp {
+  return shellStatementCommandRe(`git\\s+${GIT_GLOBAL_OPTS}${subcmd}`, flags)
+}

@@ -1,3 +1,5 @@
+import { GIT_GLOBAL_OPTS } from "../../../hooks/utils/shell-patterns.ts"
+
 interface ParsedHookContext {
   source: string | null
   details: Array<{ label: string; value: string }>
@@ -635,10 +637,12 @@ function buildGitActionDetails(
     notes.push(compactMetadataValue(actionLine.replace(/^ACTION REQUIRED:\s*/i, "").trim(), 180))
   }
 
-  const commitCmd = lines.find((l) => /\bgit\s+commit\b/.test(l))
+  const gitCommitRe = new RegExp(`\\bgit\\s+${GIT_GLOBAL_OPTS}commit\\b`)
+  const commitCmd = lines.find((l) => gitCommitRe.test(l))
   if (commitCmd) details.push({ label: "commit", value: compactMetadataValue(commitCmd) })
 
-  const pushCmd = lines.find((l) => /\bgit\s+push\b/.test(l))
+  const gitPushRe = new RegExp(`\\bgit\\s+${GIT_GLOBAL_OPTS}push\\b`)
+  const pushCmd = lines.find((l) => gitPushRe.test(l))
   if (pushCmd) details.push({ label: "push", value: compactMetadataValue(pushCmd) })
 
   const declaredCount = first?.match(/(\d+)\s*file\(s\)/i)?.[1]

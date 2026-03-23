@@ -13,7 +13,7 @@
 // reflects the new state on the agent's next read.  The hook exits immediately;
 // sync happens in the daemon background.
 
-import { GIT_PUSH_RE, isShellTool } from "./utils/hook-utils.ts"
+import { GIT_PUSH_RE, GIT_SYNC_RE, isShellTool } from "./utils/hook-utils.ts"
 
 const UPSTREAM_MUTATING_RE =
   /\bgh\s+(pr\s+(create|merge|close|edit|reopen)|issue\s+(create|close|comment|edit|reopen))\b/i
@@ -22,9 +22,6 @@ const UPSTREAM_MUTATING_RE =
 //   gh api repos/owner/repo/issues/42 -X PATCH -f state=closed
 //   gh api repos/:owner/:repo/pulls/7 -X PATCH -f state=closed
 const GH_API_ISSUE_PATCH_RE = /\bgh\s+api\s+\S*\/(?:issues|pulls)\/\d+\b.*-X\s+PATCH\b/i
-
-// Matches `git pull` and `git fetch` — remote state may have changed.
-const GIT_PULL_FETCH_RE = /\bgit\s+(pull|fetch)\b/i
 
 const input = await Bun.stdin.json().catch(() => null)
 if (!input) process.exit(0)
@@ -37,7 +34,7 @@ if (!isShellTool(toolName) || !command) process.exit(0)
 
 const shouldSync =
   GIT_PUSH_RE.test(command) ||
-  GIT_PULL_FETCH_RE.test(command) ||
+  GIT_SYNC_RE.test(command) ||
   UPSTREAM_MUTATING_RE.test(command) ||
   GH_API_ISSUE_PATCH_RE.test(command)
 if (!shouldSync) process.exit(0)

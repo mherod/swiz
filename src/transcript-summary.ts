@@ -4,6 +4,7 @@
 // dispatch.ts computes this once per cycle and injects it into hook payloads
 // as `_transcriptSummary`. Extracted from hooks/hook-utils.ts (issue #84).
 
+import { gitSubcommandRe } from "../hooks/utils/shell-patterns.ts"
 import { normalizeCommand } from "./command-utils.ts"
 import { isShellTool } from "./tool-matchers.ts"
 
@@ -31,7 +32,7 @@ export interface TranscriptSummary {
   sessionLines: string[]
 }
 
-const GIT_PUSH_PATTERN = /\bgit\s+push\b/
+const GIT_PUSH_PATTERN = gitSubcommandRe("push\\b")
 
 /**
  * Extract session-boundary-aware lines from a full transcript text.

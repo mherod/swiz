@@ -2,7 +2,12 @@
 
 import { git } from "../../src/git-helpers.ts"
 import { readProjectSettings } from "../../src/settings.ts"
-import { shellStatementCommandRe, shellTokenCommandRe } from "./shell-patterns.ts"
+import {
+  GIT_GLOBAL_OPTS,
+  gitSubcommandRe,
+  shellStatementCommandRe,
+  shellTokenCommandRe,
+} from "./shell-patterns.ts"
 
 // ── Branch utilities ──────────────────────────────────────────────────────────
 
@@ -322,26 +327,29 @@ export async function recentHeadRange(cwd: string, commitsBack = 10): Promise<st
 }
 
 // ── Git command regexes ───────────────────────────────────────────────────────
+// All GIT_*_RE patterns use gitSubcommandRe() which allows optional global
+// options (e.g. `-C <dir>`, `-c key=val`) between `git` and the subcommand.
 
-/** Matches `git push` anywhere in a shell command string. */
-export const GIT_PUSH_RE = shellStatementCommandRe("git\\s+push\\b")
-/** Matches `git commit` anywhere in a shell command string. */
-export const GIT_COMMIT_RE = shellStatementCommandRe("git\\s+commit\\b")
+/** Matches `git [opts] push` anywhere in a shell command string. */
+export const GIT_PUSH_RE = gitSubcommandRe("push\\b")
+/** Matches `git [opts] commit` anywhere in a shell command string. */
+export const GIT_COMMIT_RE = gitSubcommandRe("commit\\b")
 
-/** Matches git read-only subcommands. */
-export const GIT_READ_RE = shellStatementCommandRe(
-  "git\\s+(log|status|diff|show|branch|remote\\b|rev-parse|rev-list|reflog|ls-files|describe|tag\\b)(\\s|$)"
+/** Matches git read-only subcommands (with optional global opts). */
+export const GIT_READ_RE = gitSubcommandRe(
+  "(log|status|diff|show|branch|remote\\b|rev-parse|rev-list|reflog|ls-files|describe|tag\\b)(\\s|$)"
 )
 
-/** Matches git subcommands that mutate state. */
-export const GIT_WRITE_RE =
-  /\bgit\s+(add|commit|push|pull|fetch|checkout|switch|restore|reset|rebase|merge|stash\s+(?!list)|cherry-pick|revert|rm|mv|apply)\b/
+/** Matches git subcommands that mutate state (with optional global opts). */
+export const GIT_WRITE_RE = new RegExp(
+  `\\bgit\\s+${GIT_GLOBAL_OPTS}(add|commit|push|pull|fetch|checkout|switch|restore|reset|rebase|merge|stash\\s+(?!list)|cherry-pick|revert|rm|mv|apply)\\b`
+)
 
-/** Matches `git push`, `git pull`, or `git fetch` — mechanical sync ops. */
-export const GIT_SYNC_RE = shellStatementCommandRe("git\\s+(push|pull|fetch)\\b")
+/** Matches `git [opts] push|pull|fetch` — mechanical sync ops. */
+export const GIT_SYNC_RE = gitSubcommandRe("(push|pull|fetch)\\b")
 
-/** Matches `git merge` anywhere in a shell command string. */
-export const GIT_MERGE_RE = shellStatementCommandRe("git\\s+merge\\b")
+/** Matches `git [opts] merge` anywhere in a shell command string. */
+export const GIT_MERGE_RE = gitSubcommandRe("merge\\b")
 
 /** Matches `gh pr merge` anywhere in a shell command string. */
 export const GH_PR_MERGE_RE = shellStatementCommandRe("gh\\s+pr\\s+merge\\b")
@@ -349,11 +357,11 @@ export const GH_PR_MERGE_RE = shellStatementCommandRe("gh\\s+pr\\s+merge\\b")
 /** Matches `gh pr create` anywhere in a shell command string. */
 export const GH_PR_CREATE_RE = shellStatementCommandRe("gh\\s+pr\\s+create\\b")
 
-/** Matches `git checkout` anywhere in a shell command string. */
-export const GIT_CHECKOUT_RE = shellStatementCommandRe("git\\s+checkout\\b")
+/** Matches `git [opts] checkout` anywhere in a shell command string. */
+export const GIT_CHECKOUT_RE = gitSubcommandRe("checkout\\b")
 
-/** Matches `git switch` anywhere in a shell command string. */
-export const GIT_SWITCH_RE = shellStatementCommandRe("git\\s+switch\\b")
+/** Matches `git [opts] switch` anywhere in a shell command string. */
+export const GIT_SWITCH_RE = gitSubcommandRe("switch\\b")
 
 /** Matches `gh pr checkout` anywhere in a shell command string. */
 export const GH_PR_CHECKOUT_RE = shellStatementCommandRe("gh\\s+pr\\s+checkout\\b")
@@ -361,9 +369,9 @@ export const GH_PR_CHECKOUT_RE = shellStatementCommandRe("gh\\s+pr\\s+checkout\\
 /** Matches `gh pr review ... --dismiss` anywhere in a shell command string. */
 export const GH_PR_REVIEW_DISMISS_RE = /\bgh\s+pr\s+review\b[^|;&]*--dismiss\b/
 
-/** Matches `git checkout -b` or `git switch -c` — create new branch. */
-export const GIT_CHECKOUT_NEW_BRANCH_RE = shellStatementCommandRe(
-  "git\\s+(?:checkout\\s+-[bcB]|switch\\s+-[cC])\\b"
+/** Matches `git [opts] checkout -b` or `git [opts] switch -c` — create new branch. */
+export const GIT_CHECKOUT_NEW_BRANCH_RE = gitSubcommandRe(
+  "(?:checkout\\s+-[bcB]|switch\\s+-[cC])\\b"
 )
 
 /** Matches any `git` invocation in a shell command string. */
@@ -375,21 +383,59 @@ export function extractPrNumber(command: string): string | null {
   return match?.[1] ?? null
 }
 
-/** Extract the branch name from a `git merge <branch>` command. */
+/** Extract the branch name from a `git [opts] merge <branch>` command. */
 export function extractMergeBranch(command: string): string | null {
-  const match = command.match(/git\s+merge\s+(?:--\S+\s+)*([^\s;|&]+)/)
+  const match = command.match(
+    new RegExp(`git\\s+${GIT_GLOBAL_OPTS}merge\\s+(?:--\\S+\\s+)*([^\\s;|&]+)`)
+  )
   if (!match?.[1]) return null
   const branch = match[1]
   if (branch.startsWith("-")) return null
   return branch
 }
 
+/** Extract the target branch from `git [opts] checkout <branch>` (non -b form). */
+export function extractCheckoutBranch(command: string): string | null {
+  const match = command.match(
+    new RegExp(`\\bgit\\s+${GIT_GLOBAL_OPTS}checkout\\s+(?!-[bcBC](?:\\s|$))([^\\s;|&-][^\\s;|&]*)`)
+  )
+  return match?.[1] ?? null
+}
+
+/** Extract target branch from `git [opts] switch <branch>` (non -c/-C form). */
+export function extractSwitchBranch(command: string): string | null {
+  const match = command.match(
+    new RegExp(`\\bgit\\s+${GIT_GLOBAL_OPTS}switch\\s+(?!-[cC](?:\\s|$))([^\\s;|&-][^\\s;|&]*)`)
+  )
+  return match?.[1] ?? null
+}
+
+/** Extract the start-point from `git [opts] checkout -b <new> [start]` or `git [opts] switch -c <new> [start]`. */
+export function extractCheckoutStartPoint(command: string): string | null {
+  const checkoutMatch = command.match(
+    new RegExp(
+      `\\bgit\\s+${GIT_GLOBAL_OPTS}checkout\\s+-[bB]\\s+[^\\s;|&]+(?:\\s+([^\\s;|&-][^\\s;|&]*))?`
+    )
+  )
+  if (checkoutMatch?.[1]) return checkoutMatch[1]
+
+  const switchMatch = command.match(
+    new RegExp(
+      `\\bgit\\s+${GIT_GLOBAL_OPTS}switch\\s+-[cC]\\s+[^\\s;|&]+(?:\\s+([^\\s;|&-][^\\s;|&]*))?`
+    )
+  )
+  if (switchMatch?.[1]) return switchMatch[1]
+
+  return null
+}
+
 /**
- * Matches any force-push flag on a `git push` command:
+ * Matches any force-push flag on a `git [opts] push` command:
  *   --force, --force-with-lease, --force-with-lease=<ref>, --force-if-includes, -f
  */
-export const FORCE_PUSH_RE =
-  /\bgit\s+push\b.*(?:--force(?:-with-lease(?:=[^\s]+)?|-if-includes)?(?!\S)|-[a-zA-Z]*f)/
+export const FORCE_PUSH_RE = new RegExp(
+  `\\bgit\\s+${GIT_GLOBAL_OPTS}push\\b.*(?:--force(?:-with-lease(?:=[^\\s]+)?|-if-includes)?(?!\\S)|-[a-zA-Z]*f)`
+)
 
 // ── Token-based git push argument parser ──────────────────────────────────────
 
@@ -496,8 +542,10 @@ export const SWIZ_ISSUE_RE = shellStatementCommandRe("swiz\\s+issue\\s+(close|co
 /** Matches CI verification commands. */
 export const CI_WAIT_RE = shellStatementCommandRe("(?:swiz|bun\\b[^|;]*)\\s+ci-wait\\b")
 
-/** Matches `git branch --show-current`. */
-export const BRANCH_CHECK_RE = /\bgit\s+branch\s+--show-current(?!\S)/
+/** Matches `git [opts] branch --show-current`. */
+export const BRANCH_CHECK_RE = new RegExp(
+  `\\bgit\\s+${GIT_GLOBAL_OPTS}branch\\s+--show-current(?!\\S)`
+)
 
 /** Matches `gh pr list --head`. */
 export const PR_CHECK_RE = /\bgh\s+pr\s+list\b.*--head\b/

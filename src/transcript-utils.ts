@@ -1,6 +1,7 @@
 import { open, readdir, readFile, stat } from "node:fs/promises"
 import { basename, join, resolve } from "node:path"
 import { z } from "zod"
+import { GIT_GLOBAL_OPTS } from "../hooks/utils/shell-patterns.ts"
 import { getHomeDir } from "./home.ts"
 import { projectKeyFromCwd } from "./project-key.ts"
 import { createDefaultTaskStore } from "./task-roots.ts"
@@ -1629,16 +1630,22 @@ const INSTALL_TARGET_DIR_RE =
 const CP_MV_TARGET_DIR_RE =
   /(?:^|[|;&\s])(?:cp|mv)\b[^|;&]*?(?:-t\s+("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s|;&"']+)|--target-directory=("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s|;&"']+))/gm
 
-// Matches git checkout <tree-ish> -- <file> [file2 ...] patterns that overwrite working-tree files.
+// Matches git [opts] checkout <tree-ish> -- <file> [file2 ...] patterns that overwrite working-tree files.
 // The -- separator is required; everything after it is a path.
 // Captures all tokens after the -- in group 1.
-const GIT_CHECKOUT_FILES_RE =
-  /(?:^|[|;&\s])git\s+checkout\b[^|;&]*?--\s+((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
+// Supports git global options like -C <dir> between git and checkout.
+const GIT_CHECKOUT_FILES_RE = new RegExp(
+  `(?:^|[|;&\\s])git\\s+${GIT_GLOBAL_OPTS}checkout\\b[^|;&]*?--\\s+((?:"[^"]*"|'[^']*'|[^\\s|;&"']+)(?:\\s+(?:"[^"]*"|'[^']*'|[^\\s|;&"']+))*)`,
+  "gm"
+)
 
-// Matches git restore <file> [file2 ...] patterns that restore working-tree or staged files.
+// Matches git [opts] restore <file> [file2 ...] patterns that restore working-tree or staged files.
 // Skips --source=<tree>, --staged, --worktree, and other flags; captures remaining path tokens.
-const GIT_RESTORE_RE =
-  /(?:^|[|;&\s])git\s+restore\s+(?:(?:--source=\S+|--staged|--worktree|-\S+)\s+)*((?:"[^"]*"|'[^']*'|[^\s|;&"']+)(?:\s+(?:"[^"]*"|'[^']*'|[^\s|;&"']+))*)/gm
+// Supports git global options like -C <dir> between git and restore.
+const GIT_RESTORE_RE = new RegExp(
+  `(?:^|[|;&\\s])git\\s+${GIT_GLOBAL_OPTS}restore\\s+(?:(?:--source=\\S+|--staged|--worktree|-\\S+)\\s+)*((?:"[^"]*"|'[^']*'|[^\\s|;&"']+)(?:\\s+(?:"[^"]*"|'[^']*'|[^\\s|;&"']+))*)`,
+  "gm"
+)
 
 // Matches patch <file> positional target: patch [-p<n>] [--dry-run] [flags] <file>
 // Also handles patch -i <patchfile> <file> where -i consumes the patchfile argument.
