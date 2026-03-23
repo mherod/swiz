@@ -331,6 +331,24 @@ function extractEventsFromBlock(
   return []
 }
 
+function tryParseTranscriptLine(
+  line: string
+): { type?: string; message?: { content?: unknown } } | null {
+  try {
+    return JSON.parse(line) as { type?: string; message?: { content?: unknown } }
+  } catch {
+    return null
+  }
+}
+
+function extractAssistantContent(entry: unknown): unknown[] | null {
+  if (!entry || typeof entry !== "object") return null
+  const e = entry as { type?: string; message?: { content?: unknown } }
+  if (e.type !== "assistant") return null
+  const content = e.message?.content
+  return Array.isArray(content) ? content : null
+}
+
 export async function parseTranscriptEvents(
   transcriptPath: string,
   cachedSessionLines?: string[]
@@ -343,18 +361,19 @@ export async function parseTranscriptEvents(
 
   let lineIdx = 0
   for (const line of lines) {
-    if (!line.trim()) continue
-    try {
-      const entry = JSON.parse(line)
-      if (entry?.type !== "assistant") continue
-      const content = entry?.message?.content
-      if (!Array.isArray(content)) continue
+    if (!line.trim()) {
+      lineIdx++
+      continue
+    }
+    const entry = tryParseTranscriptLine(line)
+    const content = extractAssistantContent(entry)
+    if (content) {
       for (const block of content) {
         events.push(
           ...extractEventsFromBlock(block as Record<string, unknown>, blockedIds, lineIdx)
         )
       }
-    } catch {}
+    }
     lineIdx++
   }
 
@@ -366,13 +385,20 @@ export async function parseTranscriptEvents(
 // → tool_result text in the subsequent user message. Parsed errors are appended
 // to the block message so the agent knows exactly what to edit.
 
+function isMatchingToolUseBlock(block: unknown, kind: CommandKind): boolean {
+  const b = block as Record<string, unknown>
+  if (b?.type !== "tool_use") return false
+  if (!isShellTool(String(b.name ?? ""))) return false
+  const cmd = String((b.input as Record<string, unknown>)?.command ?? "").normalize("NFKC")
+  return classifyCommand(cmd) === kind
+}
+
 function findMatchingToolUseId(content: unknown[], kind: CommandKind): string | null {
   for (const block of content) {
-    const b = block as Record<string, unknown>
-    if (b?.type !== "tool_use") continue
-    if (!isShellTool(String(b.name ?? ""))) continue
-    const cmd = String((b.input as Record<string, unknown>)?.command ?? "").normalize("NFKC")
-    if (classifyCommand(cmd) === kind) return String(b.id ?? "") || null
+    if (isMatchingToolUseBlock(block, kind)) {
+      const b = block as Record<string, unknown>
+      return String(b.id ?? "") || null
+    }
   }
   return null
 }
@@ -403,17 +429,31 @@ async function resolveTranscriptLines(
   }
 }
 
+function extractUserContent(entry: unknown): unknown[] | null {
+  if (!entry || typeof entry !== "object") return null
+  const e = entry as { type?: string; message?: { content?: unknown } }
+  if (e.type !== "user") return null
+  const content = e.message?.content
+  return Array.isArray(content) ? content : null
+}
+
+function findToolResultInBlocks(content: unknown[], toolUseId: string): string | null {
+  for (const block of content) {
+    if ((block as Record<string, unknown>)?.tool_use_id === toolUseId) {
+      return extractTextFromUnknownContent((block as Record<string, unknown>).content) || null
+    }
+  }
+  return null
+}
+
 function findToolResultText(lines: string[], startIdx: number, toolUseId: string): string {
   for (let i = startIdx; i < lines.length; i++) {
     try {
       const entry = JSON.parse(lines[i]!)
-      if (entry?.type !== "user") continue
-      const content = entry?.message?.content
-      if (!Array.isArray(content)) continue
-      for (const block of content) {
-        if (block?.tool_use_id === toolUseId) {
-          return extractTextFromUnknownContent(block.content)
-        }
+      const content = extractUserContent(entry)
+      if (content) {
+        const result = findToolResultInBlocks(content, toolUseId)
+        if (result) return result
       }
     } catch {}
   }
