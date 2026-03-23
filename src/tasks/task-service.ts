@@ -155,18 +155,23 @@ async function collectSessionMtimes(tasksDir: string): Promise<{ dir: string; mt
   return withMtime
 }
 
+function tryParseAuditEntry(line: string, taskId: string): string | null {
+  try {
+    const entry = JSON.parse(line) as Record<string, unknown>
+    if (!isValidRecoveredSubject(entry, taskId)) return null
+    return typeof entry.subject === "string" ? entry.subject : null
+  } catch {
+    return null
+  }
+}
+
 async function searchAuditLogForTask(auditPath: string, taskId: string): Promise<string | null> {
   try {
     const content = await readFile(auditPath, "utf-8")
     for (const line of content.split("\n")) {
       if (!line.trim()) continue
-      try {
-        const entry = JSON.parse(line)
-        if (isValidRecoveredSubject(entry, taskId)) {
-          const subject = entry.subject
-          if (typeof subject === "string") return subject
-        }
-      } catch {}
+      const subject = tryParseAuditEntry(line, taskId)
+      if (subject) return subject
     }
   } catch {}
   return null
@@ -247,6 +252,21 @@ export function validateTransition(oldStatus: string, newStatus: string): string
   return null
 }
 
+function applyTaskTimestamps(
+  task: Task,
+  newStatus: Task["status"],
+  nowIso: string,
+  nowMs: number
+): void {
+  if (task.startedAt === undefined) task.startedAt = null
+  if (task.completedAt === undefined) task.completedAt = null
+  if (newStatus === "in_progress") task.startedAt = nowMs
+  if (newStatus === "completed") {
+    task.completedAt = nowMs
+    if (!task.completionTimestamp) task.completionTimestamp = nowIso
+  }
+}
+
 export function applyStatusTransition(
   task: Task,
   newStatus: Task["status"],
@@ -263,18 +283,15 @@ export function applyStatusTransition(
 
   task.status = newStatus
   task.statusChangedAt = nowIso
+  applyTaskTimestamps(task, newStatus, nowIso, nowMs)
+}
 
-  if (task.startedAt === undefined) task.startedAt = null
-  if (task.completedAt === undefined) task.completedAt = null
-
-  if (newStatus === "in_progress") {
-    task.startedAt = nowMs
-  }
-
-  if (newStatus === "completed") {
-    task.completedAt = nowMs
-    if (!task.completionTimestamp) task.completionTimestamp = nowIso
-  }
+async function validateAndVerifyEvidence(evidence: string | undefined): Promise<void> {
+  if (!evidence) return
+  const validationError = validateEvidence(evidence)
+  if (validationError) throw new Error(validationError)
+  const ciError = await verifyCiGreenEvidence(evidence, process.cwd())
+  if (ciError) throw new Error(ciError)
 }
 
 export async function updateStatus(
@@ -303,13 +320,7 @@ export async function updateStatus(
     throw new Error("Evidence required when completing a task. Use --evidence.")
   }
 
-  if (evidence) {
-    const validationError = validateEvidence(evidence)
-    if (validationError) throw new Error(validationError)
-
-    const ciError = await verifyCiGreenEvidence(evidence, process.cwd())
-    if (ciError) throw new Error(ciError)
-  }
+  await validateAndVerifyEvidence(evidence)
 
   const oldStatus = task.status
   const now = new Date().toISOString()
