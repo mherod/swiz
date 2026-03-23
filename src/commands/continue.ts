@@ -248,7 +248,7 @@ function createMessageHandler(): (message: SDKMessage) => void {
     }
   }
 
-  function _handleResultMessage(message: SDKMessage & { type: "result" }): void {
+  function handleResultMessage(message: SDKMessage & { type: "result" }): void {
     clearSpinner()
     process.stdout.write("\n")
     const duration = (message.duration_ms / 1000).toFixed(1)
@@ -277,7 +277,7 @@ function createMessageHandler(): (message: SDKMessage) => void {
     }
   }
 
-  function _handleStreamEvent(message: unknown) {
+  function handleStreamEvent(message: unknown) {
     const msg = message as { event: unknown }
     const event = msg.event as {
       type: string
@@ -299,7 +299,7 @@ function createMessageHandler(): (message: SDKMessage) => void {
     }
   }
 
-  function _handleAssistantMessage(message: unknown) {
+  function handleAssistantMessage(message: unknown) {
     const msg = message as {
       message: { content: Array<{ type: string; name?: string; id?: string }> }
       error?: string
@@ -314,19 +314,19 @@ function createMessageHandler(): (message: SDKMessage) => void {
     }
   }
 
-  function _handleToolProgress(message: unknown) {
+  function handleToolProgress(message: unknown) {
     const msg = message as { tool_name: string; elapsed_time_seconds: number }
     log(
       `${DIM}tool_progress${RESET} ${msg.tool_name} ${DIM}elapsed=${msg.elapsed_time_seconds}s${RESET}`
     )
   }
 
-  function _handleToolSummary(message: unknown) {
+  function handleToolSummary(message: unknown) {
     const msg = message as { summary: string }
     log(`${DIM}tool_summary${RESET} ${msg.summary}`)
   }
 
-  function _handleSystemMessage(message: unknown) {
+  function handleSystemMessage(message: unknown) {
     const msg = message as {
       subtype: string
       status?: string
@@ -342,22 +342,22 @@ function createMessageHandler(): (message: SDKMessage) => void {
   return (message: SDKMessage) => {
     switch (message.type) {
       case "stream_event":
-        _handleStreamEvent(message)
+        handleStreamEvent(message)
         break
       case "assistant":
-        _handleAssistantMessage(message)
+        handleAssistantMessage(message)
         break
       case "result":
-        _handleResultMessage(message as SDKMessage & { type: "result" })
+        handleResultMessage(message as SDKMessage & { type: "result" })
         break
       case "tool_progress":
-        _handleToolProgress(message)
+        handleToolProgress(message)
         break
       case "tool_use_summary":
-        _handleToolSummary(message)
+        handleToolSummary(message)
         break
       case "system":
-        _handleSystemMessage(message)
+        handleSystemMessage(message)
         break
     }
   }
