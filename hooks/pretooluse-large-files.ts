@@ -52,15 +52,14 @@ async function isLfsTracked(filePath: string, cwd: string): Promise<boolean> {
   return false
 }
 
-async function main() {
-  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
-
-  const toolName = input.tool_name ?? ""
-  const filePath = input.tool_input?.file_path ?? ""
-  const cwd = input.cwd ?? process.cwd()
-
+async function checkFileSizeAllowed(
+  toolName: string,
+  filePath: string,
+  toolInput: Record<string, unknown>,
+  cwd: string
+): Promise<{ allowed: boolean; projectedKb?: number; sizeLimitKb?: number }> {
   if (!isEditTool(toolName) && !isWriteTool(toolName)) {
-    allowPreToolUse("")
+    return { allowed: true }
   }
 
   const sizeLimitKb = await resolveNumericSetting(
@@ -69,19 +68,38 @@ async function main() {
     DEFAULT_LARGE_FILE_SIZE_KB
   )
   const sizeLimitBytes = sizeLimitKb * 1024
-  const projectedContent = await computeProjectedContent(toolName, filePath, input.tool_input ?? {})
-  if (projectedContent === null) allowPreToolUse("")
-  const projectedBytes = new TextEncoder().encode(projectedContent!).length
+  const projectedContent = await computeProjectedContent(toolName, filePath, toolInput)
+  if (projectedContent === null) return { allowed: true }
+
+  const projectedBytes = new TextEncoder().encode(projectedContent).length
 
   if (projectedBytes <= sizeLimitBytes) {
-    allowPreToolUse("")
+    return { allowed: true }
   }
 
   if (await isLfsTracked(filePath, cwd)) {
-    allowPreToolUse("")
+    return { allowed: true }
   }
 
   const projectedKb = Math.round(projectedBytes / 1024)
+  return { allowed: false, projectedKb, sizeLimitKb }
+}
+
+async function main() {
+  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
+
+  const toolName = input.tool_name ?? ""
+  const filePath = input.tool_input?.file_path ?? ""
+  const cwd = input.cwd ?? process.cwd()
+
+  const check = await checkFileSizeAllowed(toolName, filePath, input.tool_input ?? {}, cwd)
+
+  if (check.allowed) {
+    allowPreToolUse("")
+  }
+
+  const projectedKb = check.projectedKb!
+  const sizeLimitKb = check.sizeLimitKb!
 
   denyPreToolUse(
     [

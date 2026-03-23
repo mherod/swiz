@@ -38,6 +38,18 @@ function extractTestExpectations(source: string): string[] {
     .filter((f): f is string => !!f)
 }
 
+function buildOrderDivergences(projectedOrder: string[], expectedOrder: string[]): string[] {
+  const divergences: string[] = []
+  for (let i = 0; i < expectedOrder.length; i++) {
+    if (projectedOrder[i] !== expectedOrder[i]) {
+      divergences.push(
+        `  Position ${i}: manifest has "${projectedOrder[i] ?? "(missing)"}", test expects "${expectedOrder[i]}"`
+      )
+    }
+  }
+  return divergences
+}
+
 async function main() {
   const input = (await Bun.stdin.json()) as {
     tool_name?: string
@@ -95,19 +107,8 @@ async function main() {
       allowPreToolUse("")
     }
 
-    // Check if the first N positions (covered by test) match
-    let mismatch = false
-    const divergences: string[] = []
-    for (let i = 0; i < expectedOrder.length; i++) {
-      if (projectedOrder[i] !== expectedOrder[i]) {
-        mismatch = true
-        divergences.push(
-          `  Position ${i}: manifest has "${projectedOrder[i] ?? "(missing)"}", test expects "${expectedOrder[i]}"`
-        )
-      }
-    }
-
-    if (mismatch) {
+    const divergences = buildOrderDivergences(projectedOrder, expectedOrder)
+    if (divergences.length > 0) {
       denyPreToolUse(
         `Manifest stop hook order diverges from test expectations.\n\n` +
           `Divergences:\n${divergences.join("\n")}\n\n` +
