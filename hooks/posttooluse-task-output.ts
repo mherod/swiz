@@ -541,37 +541,43 @@ function collectRunnerResults(clean: string, lines: string[]): RunnerResult[] {
  * Multi-runner composite output aggregates counts across all runners,
  * preserving concrete counts when mixed with presence-only fallbacks.
  */
-function formatRunnerFailure(results: RunnerResult[], exitCode: number): string {
-  if (results.length === 1) {
-    const r = results[0]!
-    // For a single incomplete runner, avoid presenting partial tallies as exact.
-    const countLabel =
-      r.failCount === null || !r.isComplete ? "unknown number of" : `${r.failCount}`
-    const detail = r.firstFailLine ? `\n\nFirst failure: ${r.firstFailLine.trim()}` : ""
-    return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
-  }
+function formatSingleRunnerFailure(r: RunnerResult, exitCode: number): string {
+  // For a single incomplete runner, avoid presenting partial tallies as exact.
+  const countLabel = r.failCount === null || !r.isComplete ? "unknown number of" : `${r.failCount}`
+  const detail = r.firstFailLine ? `\n\nFirst failure: ${r.firstFailLine.trim()}` : ""
+  return `${countLabel} test(s) failed (exit code ${exitCode}).${detail}\n\nRun the failing tests locally to diagnose before proceeding.`
+}
 
-  // Composite: aggregate across all runners.
-  // Incomplete runners with concrete counts are lower bounds, not exact totals.
+function computeCompositeCountLabel(results: RunnerResult[]): string {
   const concrete = results.filter((r) => r.failCount !== null)
   const hasPresenceOnly = results.some((r) => r.failCount === null)
   const hasIncompleteConcrete = concrete.some((r) => !r.isComplete)
   const concreteFails = concrete.reduce((sum, r) => sum + r.failCount!, 0)
-  const matchedFailureLineCount = new Set(
-    results.flatMap((r) => r.matchedFailureLines.map((line) => line.trim()))
-  ).size
 
-  let countLabel: string
   if (concrete.length === 0) {
     // All presence-only: use distinct matched failure lines when available.
-    countLabel = matchedFailureLineCount > 0 ? `${matchedFailureLineCount}` : "unknown number of"
-  } else if (hasPresenceOnly || hasIncompleteConcrete) {
-    // Mix includes unknown contribution or incomplete tallies: lower bound only.
-    countLabel = `${concreteFails}+`
-  } else {
-    // All runners have concrete, complete counts — sum is exact
-    countLabel = `${concreteFails}`
+    const matchedFailureLineCount = new Set(
+      results.flatMap((r) => r.matchedFailureLines.map((line) => line.trim()))
+    ).size
+    return matchedFailureLineCount > 0 ? `${matchedFailureLineCount}` : "unknown number of"
   }
+
+  if (hasPresenceOnly || hasIncompleteConcrete) {
+    // Mix includes unknown contribution or incomplete tallies: lower bound only.
+    return `${concreteFails}+`
+  }
+
+  // All runners have concrete, complete counts — sum is exact
+  return `${concreteFails}`
+}
+
+function formatRunnerFailure(results: RunnerResult[], exitCode: number): string {
+  if (results.length === 1) {
+    return formatSingleRunnerFailure(results[0]!, exitCode)
+  }
+
+  // Composite: aggregate across all runners.
+  const countLabel = computeCompositeCountLabel(results)
   const runnerNames = results.map((r) => r.runner).join(", ")
   const firstFailLine = results.find((r) => r.firstFailLine)?.firstFailLine ?? null
   const detail = firstFailLine ? `\n\nFirst failure: ${firstFailLine.trim()}` : ""
