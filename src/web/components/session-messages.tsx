@@ -173,6 +173,19 @@ function TaskToolDisplay({
   )
 }
 
+function getActionLabel(action: string): string {
+  switch (action) {
+    case "read":
+      return "Reading"
+    case "edit":
+      return "Editing"
+    case "write":
+      return "Writing"
+    default:
+      return "Searching"
+  }
+}
+
 function FileToolDisplay({
   file,
   rawJson,
@@ -183,49 +196,46 @@ function FileToolDisplay({
   className?: string
 }) {
   if (!file) return null
-  const actionLabel =
-    file.action === "read"
-      ? "Reading"
-      : file.action === "edit"
-        ? "Editing"
-        : file.action === "write"
-          ? "Writing"
-          : "Searching"
+  const actionLabel = getActionLabel(file.action)
+  const hasParams = file.offset != null || file.limit != null
+  const hasDiff = file.oldString && file.newString
+  const hasRawJson = rawJson && !file.oldString
+
   return (
     <div className={cn("tool-first-party-call", className)}>
       <p className="tool-first-party-title">
         <span className="tool-category-icon">◇</span> {actionLabel}
       </p>
       <pre className="tool-command-block">{compactPath(file.filePath, 120)}</pre>
-      {file.offset != null || file.limit != null ? (
+      {hasParams && (
         <ul className="tool-param-list">
-          {file.offset != null ? (
+          {file.offset != null && (
             <li className="tool-param-item">
               <span className="tool-param-label">offset</span>
               <code className="tool-param-value">line {file.offset}</code>
             </li>
-          ) : null}
-          {file.limit != null ? (
+          )}
+          {file.limit != null && (
             <li className="tool-param-item">
               <span className="tool-param-label">limit</span>
               <code className="tool-param-value">{file.limit} lines</code>
             </li>
-          ) : null}
+          )}
         </ul>
-      ) : null}
-      {file.oldString && file.newString ? (
+      )}
+      {hasDiff && file.oldString && file.newString && (
         <details className="tool-raw-json">
           <summary>Edit diff</summary>
           <pre className="tool-detail-full tool-diff-old">- {summarizeText(file.oldString)}</pre>
           <pre className="tool-detail-full tool-diff-new">+ {summarizeText(file.newString)}</pre>
         </details>
-      ) : null}
-      {rawJson && !file.oldString ? (
+      )}
+      {hasRawJson && (
         <details className="tool-raw-json">
           <summary>Parameters</summary>
           <pre className="tool-detail-full">{rawJson}</pre>
         </details>
-      ) : null}
+      )}
     </div>
   )
 }
