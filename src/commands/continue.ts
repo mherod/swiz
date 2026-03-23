@@ -277,62 +277,87 @@ function createMessageHandler(): (message: SDKMessage) => void {
     }
   }
 
+  function _handleStreamEvent(message: unknown) {
+    const msg = message as { event: unknown }
+    const event = msg.event as {
+      type: string
+      delta?: { type: string; text?: string }
+      content_block?: { type: string; name?: string; id?: string }
+    }
+    if (event.type === "content_block_delta") {
+      if (event.delta?.type === "text_delta") {
+        clearSpinner()
+        process.stdout.write(event.delta.text || "")
+      }
+    } else if (event.type === "content_block_start") {
+      if (event.content_block?.type === "tool_use") {
+        clearSpinner()
+        log(
+          `${CYAN}tool_use${RESET} ${event.content_block.name} ${DIM}(id: ${event.content_block.id})${RESET}`
+        )
+      }
+    }
+  }
+
+  function _handleAssistantMessage(message: unknown) {
+    const msg = message as {
+      message: { content: Array<{ type: string; name?: string; id?: string }> }
+      error?: string
+    }
+    for (const block of msg.message.content) {
+      if (block.type === "tool_use") {
+        log(`${CYAN}tool_use${RESET} ${block.name} ${DIM}(id: ${block.id})${RESET}`)
+      }
+    }
+    if (msg.error) {
+      log(`${RED}assistant error:${RESET} ${msg.error}`)
+    }
+  }
+
+  function _handleToolProgress(message: unknown) {
+    const msg = message as { tool_name: string; elapsed_time_seconds: number }
+    log(
+      `${DIM}tool_progress${RESET} ${msg.tool_name} ${DIM}elapsed=${msg.elapsed_time_seconds}s${RESET}`
+    )
+  }
+
+  function _handleToolSummary(message: unknown) {
+    const msg = message as { summary: string }
+    log(`${DIM}tool_summary${RESET} ${msg.summary}`)
+  }
+
+  function _handleSystemMessage(message: unknown) {
+    const msg = message as {
+      subtype: string
+      status?: string
+      compact_metadata?: { trigger: string }
+    }
+    if (msg.subtype === "status") {
+      log(`${DIM}status: ${msg.status}${RESET}`)
+    } else if (msg.subtype === "compact_boundary") {
+      log(`${YELLOW}compaction${RESET} ${DIM}trigger=${msg.compact_metadata?.trigger}${RESET}`)
+    }
+  }
+
   return (message: SDKMessage) => {
     switch (message.type) {
-      case "stream_event": {
-        const event = message.event
-        if (event.type === "content_block_delta") {
-          if (event.delta.type === "text_delta") {
-            clearSpinner()
-            process.stdout.write(event.delta.text)
-          }
-        } else if (event.type === "content_block_start") {
-          if (event.content_block.type === "tool_use") {
-            clearSpinner()
-            log(
-              `${CYAN}tool_use${RESET} ${event.content_block.name} ${DIM}(id: ${event.content_block.id})${RESET}`
-            )
-          }
-        }
+      case "stream_event":
+        _handleStreamEvent(message)
         break
-      }
-      case "assistant": {
-        // With streaming enabled, text already printed via stream_event.
-        // Only log tool_use blocks and errors from the complete message.
-        for (const block of message.message.content) {
-          if (block.type === "tool_use") {
-            log(`${CYAN}tool_use${RESET} ${block.name} ${DIM}(id: ${block.id})${RESET}`)
-          }
-        }
-        if (message.error) {
-          log(`${RED}assistant error:${RESET} ${message.error}`)
-        }
+      case "assistant":
+        _handleAssistantMessage(message)
         break
-      }
       case "result":
-        _handleResultMessage(message)
+        _handleResultMessage(message as SDKMessage & { type: "result" })
         break
-      case "tool_progress": {
-        log(
-          `${DIM}tool_progress${RESET} ${message.tool_name} ${DIM}elapsed=${message.elapsed_time_seconds}s${RESET}`
-        )
+      case "tool_progress":
+        _handleToolProgress(message)
         break
-      }
-      case "tool_use_summary": {
-        log(`${DIM}tool_summary${RESET} ${message.summary}`)
+      case "tool_use_summary":
+        _handleToolSummary(message)
         break
-      }
-      case "system": {
-        if (message.subtype === "status") {
-          log(`${DIM}status: ${message.status}${RESET}`)
-        } else if (message.subtype === "compact_boundary") {
-          log(
-            `${YELLOW}compaction${RESET} ${DIM}trigger=${message.compact_metadata.trigger}${RESET}`
-          )
-        }
-        break
-      }
-      default:
+      case "system":
+        _handleSystemMessage(message)
         break
     }
   }
