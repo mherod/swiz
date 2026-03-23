@@ -276,19 +276,40 @@ interface CheckTaskStalenessOpts {
   cwd: string
 }
 
+function shouldSkipStalenessCheck(
+  transcriptPath: string,
+  lastTaskIndex: number,
+  allTasksDone: boolean,
+  callsSinceTask: number,
+  toolName: string,
+  input: Record<string, unknown>
+): boolean {
+  if (!transcriptPath) return true
+  if (lastTaskIndex < 0 || allTasksDone) return true
+  if (callsSinceTask < STALENESS_THRESHOLD) return true
+  if ((isEditTool(toolName) || isWriteTool(toolName)) && isLargeContentPayload(input)) return true
+  return false
+}
+
 async function checkTaskStaleness(opts: CheckTaskStalenessOpts): Promise<void> {
   const { toolName, input, transcriptPath, allTasks, activeTasks, allTasksDone, cwd } = opts
-  if (!transcriptPath) return
   const summary = getTranscriptSummary(input)
   const toolNames = summary?.toolNames ?? (await extractToolNamesFromTranscript(transcriptPath))
   const total = toolNames.length
   const lastTaskIndex = findLastTaskToolCallIndex(toolNames)
-
-  if (lastTaskIndex < 0 || allTasksDone) return
   const callsSinceTask = total - 1 - lastTaskIndex
-  if (callsSinceTask < STALENESS_THRESHOLD) return
 
-  if ((isEditTool(toolName) || isWriteTool(toolName)) && isLargeContentPayload(input)) return
+  if (
+    shouldSkipStalenessCheck(
+      transcriptPath,
+      lastTaskIndex,
+      allTasksDone,
+      callsSinceTask,
+      toolName,
+      input
+    )
+  )
+    return
 
   const taskList = formatTaskSubjectsForDisplay(allTasks, activeTasks)
   const projectState = await readProjectState(cwd).catch(() => null)
@@ -369,14 +390,25 @@ function isExemptToolCall(input: Record<string, unknown>, toolName: string): boo
   return isMemoryMarkdownEdit(input, toolName)
 }
 
+function validateGuardConditions(
+  sessionId: string | null | undefined,
+  toolName: string,
+  input: Record<string, unknown>
+): boolean {
+  if (!sessionId || !isBlockedTool(toolName) || !getHomeDirOrNull()) return false
+  if (isExemptToolCall(input, toolName)) return false
+  return true
+}
+
 function applySyncGuards(input: Record<string, unknown>): ParsedInput | null {
   const toolName: string = (input?.tool_name as string) ?? ""
   const sessionId = resolveSafeSessionId(input?.session_id as string | undefined)
   const transcriptPath: string = (input?.transcript_path as string) ?? ""
   const cwd: string = (input?.cwd as string) ?? process.cwd()
-  if (!sessionId || !isBlockedTool(toolName) || !getHomeDirOrNull()) return null
-  if (isExemptToolCall(input, toolName)) return null
-  return { input, toolName, sessionId, transcriptPath, cwd }
+
+  if (!validateGuardConditions(sessionId, toolName, input)) return null
+
+  return { input, toolName, sessionId: sessionId as string, transcriptPath, cwd }
 }
 
 async function parseAndGuard(): Promise<ParsedInput | null> {
