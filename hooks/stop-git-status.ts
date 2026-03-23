@@ -367,7 +367,6 @@ async function resolveGitContext(input: {
 
   const settings = await readSwizSettings()
   const effective = getEffectiveSwizSettings(settings, input.session_id)
-  if (!effective.gitStatusGate) return null
 
   const [gitStatus, remoteUrl] = await Promise.all([
     getGitStatusV2(cwd),

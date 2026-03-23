@@ -83,7 +83,6 @@ async function resolveTargetBranch(
     readProjectSettings(cwd),
   ])
   const effective = getEffectiveSwizSettings(globalSettings, sessionId, projectSettings)
-  if (!effective.githubCiGate) return null
   const modePolicy = getCollaborationModePolicy(effective.collaborationMode)
   if (!modePolicy.requirePeerReview) return null
   if (!hasGhCli()) return null

@@ -6,7 +6,6 @@
 // the repository is in a dirty state — even if a PR exists, the agent should
 // complete all review tasks, merge the PR, and switch back to main before stopping.
 
-import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
@@ -24,10 +23,6 @@ async function main(): Promise<void> {
   const cwd = input.cwd ?? process.cwd()
 
   if (!(await isGitRepo(cwd))) return
-
-  const settings = await readSwizSettings()
-  const effective = getEffectiveSwizSettings(settings, input.session_id)
-  if (!effective.nonDefaultBranchGate) return
 
   const branch = await git(["branch", "--show-current"], cwd)
   if (!branch) return // detached HEAD — not a named branch

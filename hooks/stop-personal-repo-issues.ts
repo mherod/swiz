@@ -15,7 +15,6 @@ import {
   normaliseLabel,
 } from "../src/issue-refinement.ts"
 import { getDaemonBackedStore, getIssueStore, replayPendingMutations } from "../src/issue-store.ts"
-import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
 import { stopPersonalRepoIssuesCooldownPath } from "../src/temp-paths.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 import {
@@ -677,13 +676,10 @@ async function resolveRepoContext(input: {
   if (!(await isGitRepo(cwd))) return null
   if (!hasGhCli()) return null
 
-  const [settings, hasRemote, inCooldown] = await Promise.all([
-    readSwizSettings(),
+  const [hasRemote, inCooldown] = await Promise.all([
     isGitHubRemote(cwd),
     isInCooldown(sessionId, cwd),
   ])
-  const effective = getEffectiveSwizSettings(settings, input.session_id)
-  if (!effective.personalRepoIssuesGate) return null
   if (!hasRemote) return null
   if (inCooldown) return null
 

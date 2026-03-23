@@ -170,8 +170,6 @@ async function resolvePrContext(input: {
     readProjectSettings(cwd),
   ])
   const effective = getEffectiveSwizSettings(globalSettings, input.session_id, projectSettings)
-  if (!effective.changesRequestedGate) return null
-
   const modePolicy = getCollaborationModePolicy(effective.collaborationMode)
   if (!modePolicy.requirePeerReview) return null
 
