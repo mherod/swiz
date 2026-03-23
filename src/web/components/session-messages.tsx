@@ -186,6 +186,27 @@ function getActionLabel(action: string): string {
   }
 }
 
+function FileParamsDisplay({ offset, limit }: { offset?: number | null; limit?: number | null }) {
+  const hasParams = offset != null || limit != null
+  if (!hasParams) return null
+  return (
+    <ul className="tool-param-list">
+      {offset != null && (
+        <li className="tool-param-item">
+          <span className="tool-param-label">offset</span>
+          <code className="tool-param-value">line {offset}</code>
+        </li>
+      )}
+      {limit != null && (
+        <li className="tool-param-item">
+          <span className="tool-param-label">limit</span>
+          <code className="tool-param-value">{limit} lines</code>
+        </li>
+      )}
+    </ul>
+  )
+}
+
 function FileToolDisplay({
   file,
   rawJson,
@@ -197,7 +218,6 @@ function FileToolDisplay({
 }) {
   if (!file) return null
   const actionLabel = getActionLabel(file.action)
-  const hasParams = file.offset != null || file.limit != null
   const hasDiff = file.oldString && file.newString
   const hasRawJson = rawJson && !file.oldString
 
@@ -207,22 +227,7 @@ function FileToolDisplay({
         <span className="tool-category-icon">◇</span> {actionLabel}
       </p>
       <pre className="tool-command-block">{compactPath(file.filePath, 120)}</pre>
-      {hasParams && (
-        <ul className="tool-param-list">
-          {file.offset != null && (
-            <li className="tool-param-item">
-              <span className="tool-param-label">offset</span>
-              <code className="tool-param-value">line {file.offset}</code>
-            </li>
-          )}
-          {file.limit != null && (
-            <li className="tool-param-item">
-              <span className="tool-param-label">limit</span>
-              <code className="tool-param-value">{file.limit} lines</code>
-            </li>
-          )}
-        </ul>
-      )}
+      <FileParamsDisplay offset={file.offset} limit={file.limit} />
       {hasDiff && file.oldString && file.newString && (
         <details className="tool-raw-json">
           <summary>Edit diff</summary>
