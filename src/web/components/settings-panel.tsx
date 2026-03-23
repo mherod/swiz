@@ -760,27 +760,29 @@ function useSaveCallbacks(data: ReturnType<typeof useSettingsFetch>) {
   }
 }
 
-function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetch>) {
+function usePerformSave(
+  cwd: string | null,
+  globalDirty: boolean,
+  globalForm: ReturnType<typeof useSettingsFetch>["globalForm"],
+  globalBaseline: ReturnType<typeof useSettingsFetch>["globalBaseline"],
+  projectDirty: boolean,
+  projectForm: ReturnType<typeof useSettingsFetch>["projectForm"],
+  projectBaseline: ReturnType<typeof useSettingsFetch>["projectBaseline"],
+  onGlobalSaved: ReturnType<typeof useSaveCallbacks>["onGlobalSaved"],
+  onProjectSaved: ReturnType<typeof useSaveCallbacks>["onProjectSaved"],
+  setGlobalError: ReturnType<typeof useSettingsFetch>["setGlobalError"],
+  setProjectError: ReturnType<typeof useSettingsFetch>["setProjectError"]
+): {
+  globalSaving: boolean
+  projectSaving: boolean
+  status: string
+  performSave: () => Promise<void>
+} {
   const [globalSaving, setGlobalSaving] = useState(false)
   const [projectSaving, setProjectSaving] = useState(false)
   const [status, setStatus] = useState("")
   const savingRef = useRef(false)
   const retryRef = useRef(false)
-  const {
-    globalForm,
-    globalBaseline,
-    projectForm,
-    projectBaseline,
-    setGlobalError,
-    setProjectError,
-  } = data
-  const { onGlobalSaved, onProjectSaved } = useSaveCallbacks(data)
-  const { globalDirty, projectDirty } = useDirtyState(
-    globalForm,
-    globalBaseline,
-    projectForm,
-    projectBaseline
-  )
 
   const performSave = useCallback(async () => {
     if (savingRef.current) {
@@ -833,10 +835,41 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
     setProjectError,
   ])
 
+  return { globalSaving, projectSaving, status, performSave }
+}
+
+function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetch>) {
+  const {
+    globalForm,
+    globalBaseline,
+    projectForm,
+    projectBaseline,
+    setGlobalError,
+    setProjectError,
+  } = data
+  const { onGlobalSaved, onProjectSaved } = useSaveCallbacks(data)
+  const { globalDirty, projectDirty } = useDirtyState(
+    globalForm,
+    globalBaseline,
+    projectForm,
+    projectBaseline
+  )
+  const { globalSaving, projectSaving, status, performSave } = usePerformSave(
+    cwd,
+    globalDirty,
+    globalForm,
+    globalBaseline,
+    projectDirty,
+    projectForm,
+    projectBaseline,
+    onGlobalSaved,
+    onProjectSaved,
+    setGlobalError,
+    setProjectError
+  )
   const isDirty = globalDirty || projectDirty,
     isSaving = globalSaving || projectSaving
   useSaveEffect(isDirty, isSaving, projectDirty, cwd, performSave)
-
   return { globalDirty, projectDirty, isSaving, status }
 }
 

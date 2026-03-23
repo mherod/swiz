@@ -50,6 +50,34 @@ function buildOrderDivergences(projectedOrder: string[], expectedOrder: string[]
   return divergences
 }
 
+async function checkOrderAgainstTest(projectedOrder: string[], cwd: string): Promise<void> {
+  const testPath = `${cwd}/src/manifest.test.ts`
+  let testSource: string
+  try {
+    testSource = await Bun.file(testPath).text()
+  } catch {
+    // No test file — fail open
+    allowPreToolUse("")
+  }
+
+  const expectedOrder = extractTestExpectations(testSource)
+  if (expectedOrder.length === 0) {
+    // No order assertions found — fail open
+    allowPreToolUse("")
+  }
+
+  const divergences = buildOrderDivergences(projectedOrder, expectedOrder)
+  if (divergences.length > 0) {
+    denyPreToolUse(
+      `Manifest stop hook order diverges from test expectations.\n\n` +
+        `Divergences:\n${divergences.join("\n")}\n\n` +
+        `You must also update src/manifest.test.ts to match the new order.\n` +
+        `Edit the "stop event hooks appear in correct order" test to reflect ` +
+        `the new positions before committing.`
+    )
+  }
+}
+
 async function main() {
   const input = (await Bun.stdin.json()) as {
     tool_name?: string
@@ -66,13 +94,8 @@ async function main() {
   const filePath = input.tool_input?.file_path ?? ""
 
   // Only fire on manifest.ts edits
-  if (!filePath.endsWith("src/manifest.ts")) {
-    process.exit(0)
-  }
-
-  if (!isEditTool(toolName) && !isWriteTool(toolName)) {
-    process.exit(0)
-  }
+  if (!filePath.endsWith("src/manifest.ts")) process.exit(0)
+  if (!isEditTool(toolName) && !isWriteTool(toolName)) process.exit(0)
 
   try {
     const projectedContent = await computeProjectedContent(
@@ -80,43 +103,13 @@ async function main() {
       filePath,
       input.tool_input ?? {}
     )
-    if (projectedContent === null) {
-      allowPreToolUse("")
-    }
+    if (projectedContent === null) allowPreToolUse("")
 
     const projectedOrder = extractStopHookOrder(projectedContent)
-    if (projectedOrder.length === 0) {
-      // Could not parse — fail open
-      allowPreToolUse("")
-    }
+    if (projectedOrder.length === 0) allowPreToolUse("") // Could not parse — fail open
 
-    // Read the test file
     const cwd = input.cwd ?? process.cwd()
-    const testPath = `${cwd}/src/manifest.test.ts`
-    let testSource: string
-    try {
-      testSource = await Bun.file(testPath).text()
-    } catch {
-      // No test file — fail open
-      allowPreToolUse("")
-    }
-
-    const expectedOrder = extractTestExpectations(testSource)
-    if (expectedOrder.length === 0) {
-      // No order assertions found — fail open
-      allowPreToolUse("")
-    }
-
-    const divergences = buildOrderDivergences(projectedOrder, expectedOrder)
-    if (divergences.length > 0) {
-      denyPreToolUse(
-        `Manifest stop hook order diverges from test expectations.\n\n` +
-          `Divergences:\n${divergences.join("\n")}\n\n` +
-          `You must also update src/manifest.test.ts to match the new order.\n` +
-          `Edit the "stop event hooks appear in correct order" test to reflect ` +
-          `the new positions before committing.`
-      )
-    }
+    await checkOrderAgainstTest(projectedOrder, cwd)
 
     allowPreToolUse("")
   } catch {

@@ -198,6 +198,41 @@ function DeleteConfirmationButton({
   )
 }
 
+function SessionActionButton({
+  actionLabel,
+  actionDisabled,
+  actionIcon,
+  actionTitle,
+  hasLiveProcess,
+  onClick,
+}: {
+  actionLabel: string
+  actionDisabled: boolean
+  actionIcon: React.ReactNode
+  actionTitle: string
+  hasLiveProcess: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "session-action-btn",
+        hasLiveProcess ? "session-action-kill" : "session-action-delete"
+      )}
+      onClick={onClick}
+      disabled={actionDisabled}
+      title={actionTitle}
+      aria-label={actionTitle}
+    >
+      <span className="session-action-icon" aria-hidden="true">
+        {actionIcon}
+      </span>
+      <span className="sr-only">{actionLabel}</span>
+    </button>
+  )
+}
+
 function SessionRowActions({
   session,
   hasLiveProcess,
@@ -255,22 +290,14 @@ function SessionRowActions({
   }
 
   return (
-    <button
-      type="button"
-      className={cn(
-        "session-action-btn",
-        hasLiveProcess ? "session-action-kill" : "session-action-delete"
-      )}
+    <SessionActionButton
+      actionLabel={actionLabel}
+      actionDisabled={actionDisabled}
+      actionIcon={actionIcon}
+      actionTitle={actionTitle}
+      hasLiveProcess={hasLiveProcess}
       onClick={handleClick}
-      disabled={actionDisabled}
-      title={actionTitle}
-      aria-label={actionTitle}
-    >
-      <span className="session-action-icon" aria-hidden="true">
-        {actionIcon}
-      </span>
-      <span className="sr-only">{actionLabel}</span>
-    </button>
+    />
   )
 }
 

@@ -235,6 +235,48 @@ function createSpinner(label: string): { stop(): void } {
   }
 }
 
+// ─── Stateless message sub-handlers ──────────────────────────────────────────
+
+function handleAssistantMessage(message: unknown): void {
+  const msg = message as {
+    message: { content: Array<{ type: string; name?: string; id?: string }> }
+    error?: string
+  }
+  for (const block of msg.message.content) {
+    if (block.type === "tool_use") {
+      log(`${CYAN}tool_use${RESET} ${block.name} ${DIM}(id: ${block.id})${RESET}`)
+    }
+  }
+  if (msg.error) {
+    log(`${RED}assistant error:${RESET} ${msg.error}`)
+  }
+}
+
+function handleToolProgress(message: unknown): void {
+  const msg = message as { tool_name: string; elapsed_time_seconds: number }
+  log(
+    `${DIM}tool_progress${RESET} ${msg.tool_name} ${DIM}elapsed=${msg.elapsed_time_seconds}s${RESET}`
+  )
+}
+
+function handleToolSummary(message: unknown): void {
+  const msg = message as { summary: string }
+  log(`${DIM}tool_summary${RESET} ${msg.summary}`)
+}
+
+function handleSystemMessage(message: unknown): void {
+  const msg = message as {
+    subtype: string
+    status?: string
+    compact_metadata?: { trigger: string }
+  }
+  if (msg.subtype === "status") {
+    log(`${DIM}status: ${msg.status}${RESET}`)
+  } else if (msg.subtype === "compact_boundary") {
+    log(`${YELLOW}compaction${RESET} ${DIM}trigger=${msg.compact_metadata?.trigger}${RESET}`)
+  }
+}
+
 // ─── Message handler ─────────────────────────────────────────────────────────
 
 function createMessageHandler(): (message: SDKMessage) => void {
@@ -277,7 +319,7 @@ function createMessageHandler(): (message: SDKMessage) => void {
     }
   }
 
-  function handleStreamEvent(message: unknown) {
+  function handleStreamEvent(message: unknown): void {
     const msg = message as { event: unknown }
     const event = msg.event as {
       type: string
@@ -296,46 +338,6 @@ function createMessageHandler(): (message: SDKMessage) => void {
           `${CYAN}tool_use${RESET} ${event.content_block.name} ${DIM}(id: ${event.content_block.id})${RESET}`
         )
       }
-    }
-  }
-
-  function handleAssistantMessage(message: unknown) {
-    const msg = message as {
-      message: { content: Array<{ type: string; name?: string; id?: string }> }
-      error?: string
-    }
-    for (const block of msg.message.content) {
-      if (block.type === "tool_use") {
-        log(`${CYAN}tool_use${RESET} ${block.name} ${DIM}(id: ${block.id})${RESET}`)
-      }
-    }
-    if (msg.error) {
-      log(`${RED}assistant error:${RESET} ${msg.error}`)
-    }
-  }
-
-  function handleToolProgress(message: unknown) {
-    const msg = message as { tool_name: string; elapsed_time_seconds: number }
-    log(
-      `${DIM}tool_progress${RESET} ${msg.tool_name} ${DIM}elapsed=${msg.elapsed_time_seconds}s${RESET}`
-    )
-  }
-
-  function handleToolSummary(message: unknown) {
-    const msg = message as { summary: string }
-    log(`${DIM}tool_summary${RESET} ${msg.summary}`)
-  }
-
-  function handleSystemMessage(message: unknown) {
-    const msg = message as {
-      subtype: string
-      status?: string
-      compact_metadata?: { trigger: string }
-    }
-    if (msg.subtype === "status") {
-      log(`${DIM}status: ${msg.status}${RESET}`)
-    } else if (msg.subtype === "compact_boundary") {
-      log(`${YELLOW}compaction${RESET} ${DIM}trigger=${msg.compact_metadata?.trigger}${RESET}`)
     }
   }
 
