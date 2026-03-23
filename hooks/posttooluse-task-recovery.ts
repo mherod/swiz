@@ -47,47 +47,67 @@ async function _writeRecoveryTask(
   }
 }
 
-async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as TaskToolInput
+interface RecoveryContext {
+  sessionId: string
+  taskId: string
+  toolName: string
+  input: TaskToolInput
+  tasksDir: string
+  taskPath: string
+}
+
+function tryBuildRecoveryContext(input: TaskToolInput, home: string): RecoveryContext | null {
   const sessionId = resolveSafeSessionId(input.session_id)
-  if (!sessionId) return
+  if (!sessionId) return null
 
   const toolName = input.tool_name ?? ""
-  if (!isTaskTool(toolName) || toolName === "TaskCreate") return
+  if (!isTaskTool(toolName) || toolName === "TaskCreate") return null
 
   const taskId = String(input.tool_input?.taskId ?? "")
-  if (!taskId) return
+  if (!taskId) return null
 
-  const home = homedir()
   const tasksDir = getSessionTasksDir(sessionId, home)
   const taskPath = getSessionTaskPath(sessionId, taskId, home)
-  if (!tasksDir || !taskPath) return
-  if (await Bun.file(taskPath).exists()) return
+  if (!tasksDir || !taskPath) return null
 
-  const task = buildRecoveryStub(taskId, {
-    subject: input.tool_input?.subject,
-    description: input.tool_input?.description,
-    activeForm: input.tool_input?.activeForm,
-    status: input.tool_input?.status ?? "completed",
+  return { sessionId, taskId, toolName, input, tasksDir, taskPath }
+}
+
+async function recoverMissingTask(ctx: RecoveryContext): Promise<void> {
+  if (await Bun.file(ctx.taskPath).exists()) return
+
+  const task = buildRecoveryStub(ctx.taskId, {
+    subject: ctx.input.tool_input?.subject,
+    description: ctx.input.tool_input?.description,
+    activeForm: ctx.input.tool_input?.activeForm,
+    status: ctx.input.tool_input?.status ?? "completed",
     source: "posttooluse-task-recovery",
   })
 
-  const wrote = await _writeRecoveryTask(tasksDir, taskPath, task)
+  const wrote = await _writeRecoveryTask(ctx.tasksDir, ctx.taskPath, task)
   if (!wrote) {
     await emitContext(
       "PostToolUse",
-      buildRecoveryErrorContext(taskId, task.subject, task.status),
-      input.cwd
+      buildRecoveryErrorContext(ctx.taskId, task.subject, task.status),
+      ctx.input.cwd
     )
     return
   }
 
   const successContext =
-    `Task #${taskId} was missing (lost during context compaction) — automatically recovered. ` +
+    `Task #${ctx.taskId} was missing (lost during context compaction) — automatically recovered. ` +
     `A replacement task file has been written with status '${task.status}' and subject: "${task.subject}". ` +
     `No further recovery action is needed. Continue with the next step.`
 
-  await emitContext("PostToolUse", successContext, input.cwd)
+  await emitContext("PostToolUse", successContext, ctx.input.cwd)
+}
+
+async function main(): Promise<void> {
+  const input = (await Bun.stdin.json()) as TaskToolInput
+  const home = homedir()
+  const ctx = tryBuildRecoveryContext(input, home)
+  if (!ctx) return
+  await recoverMissingTask(ctx)
 }
 
 if (import.meta.main) void main()
