@@ -600,11 +600,7 @@ function detectHookFailure(clean: string, exitCode: number, lines: string[]): st
   return `${hookName} hook blocked the operation (exit code ${exitCode}).${detail}\n\nFix the underlying issue — do not bypass hooks.`
 }
 
-function detectGenericExitFailure(
-  _clean: string,
-  exitCode: number,
-  lines: string[]
-): string | null {
+function detectGenericExitFailure(exitCode: number, lines: string[]): string | null {
   const errorLine = lines.find((l) => l.toLowerCase().includes("error") || EXIT_FAIL_RE.test(l))
   const detail = errorLine ? `\n\nError: ${errorLine.trim()}` : ""
   return `Background task exited with code ${exitCode}.${detail}\n\nDo not proceed until this failure is resolved.`
@@ -636,7 +632,7 @@ function detectFailure(output: string, exitCode: number | null): string | null {
     if (hookFailure) return hookFailure
 
     // Generic non-zero exit
-    return detectGenericExitFailure(clean, exitCode, lines)
+    return detectGenericExitFailure(exitCode, lines)
   }
 
   // Even with exit 0, some tools print error patterns (rare but happens with gh CLI)
