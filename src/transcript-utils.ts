@@ -1822,6 +1822,30 @@ function countAndCollectToolBlocks(content: unknown[], editedPaths: Set<string>)
   return count
 }
 
+function _processTranscriptEntry(
+  entry: unknown,
+  turns: PlainTurn[],
+  editedPaths: Set<string>
+): number {
+  if (!entry) return 0
+  const typed = entry as { type: string; message?: { content: unknown } }
+  const { type: entryType, message } = typed
+  if (entryType !== "user" && entryType !== "assistant") return 0
+
+  const content = message?.content as string | ContentBlock[] | undefined
+  let toolCount = 0
+
+  if (entryType === "assistant" && Array.isArray(content)) {
+    toolCount = countAndCollectToolBlocks(content, editedPaths)
+  }
+
+  if (!content || (entryType === "user" && isHookFeedback(content))) return toolCount
+
+  const text = extractEntryText(content, entryType).trim()
+  if (text) turns.push({ role: entryType as "user" | "assistant", text })
+  return toolCount
+}
+
 export function extractTranscriptData(
   jsonlText: string,
   formatHint?: Session["format"]
@@ -1831,21 +1855,7 @@ export function extractTranscriptData(
   let toolCallCount = 0
 
   for (const entry of parseTranscriptEntries(jsonlText, formatHint)) {
-    if (!entry) continue
-    const entryType = entry.type
-    if (entryType !== "user" && entryType !== "assistant") continue
-
-    const content = entry.message?.content
-
-    if (entryType === "assistant" && Array.isArray(content)) {
-      toolCallCount += countAndCollectToolBlocks(content, editedPaths)
-    }
-
-    if (!content) continue
-    if (entryType === "user" && isHookFeedback(content)) continue
-
-    const text = extractEntryText(content, entryType).trim()
-    if (text) turns.push({ role: entryType, text })
+    toolCallCount += _processTranscriptEntry(entry, turns, editedPaths)
   }
 
   return { turns, editedPaths, toolCallCount }
