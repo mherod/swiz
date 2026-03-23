@@ -1,4 +1,4 @@
-import { GIT_GLOBAL_OPTS } from "../../../hooks/utils/shell-patterns.ts"
+import { GIT_GLOBAL_OPTS } from "./git-global-opts.ts"
 
 interface ParsedHookContext {
   source: string | null

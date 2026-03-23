@@ -73,6 +73,14 @@ async function checkWriteTool(input: Record<string, unknown>, addCmd: string): P
   }
 }
 
+async function parseContentSafely(content: string): Promise<Record<string, unknown> | null> {
+  try {
+    return JSON.parse(content)
+  } catch {
+    return null
+  }
+}
+
 async function checkEditTool(
   input: Record<string, unknown>,
   filePath: string,
@@ -92,19 +100,10 @@ async function checkEditTool(
 
   const projectedContent = currentContent.replace(oldString, newString)
 
-  let currentParsed: Record<string, unknown>
-  try {
-    currentParsed = JSON.parse(currentContent)
-  } catch {
-    process.exit(0)
-  }
+  const currentParsed = await parseContentSafely(currentContent)
+  const projectedParsed = await parseContentSafely(projectedContent)
 
-  let projectedParsed: Record<string, unknown>
-  try {
-    projectedParsed = JSON.parse(projectedContent)
-  } catch {
-    process.exit(0)
-  }
+  if (!currentParsed || !projectedParsed) process.exit(0)
 
   if (depsChanged(depsSnapshot(currentParsed), depsSnapshot(projectedParsed))) {
     denyPreToolUse(
@@ -126,16 +125,26 @@ function resolveFilePath(input: Record<string, unknown>): string {
   return toolInput?.file_path ?? toolInput?.path ?? ""
 }
 
+async function validateInputs(
+  input: Record<string, unknown>
+): Promise<{ filePath: string; toolName: string } | null> {
+  const toolName: string = (input.tool_name as string) ?? ""
+  if (!isFileEditTool(toolName)) return null
+
+  const filePath = resolveFilePath(input)
+  if (!filePath.endsWith("package.json") || isNodeModulesPath(filePath)) return null
+
+  return { filePath, toolName }
+}
+
 async function main() {
   const input = await Bun.stdin.json().catch(() => null)
   if (!input) process.exit(0)
 
-  const toolName: string = input.tool_name ?? ""
-  if (!isFileEditTool(toolName)) process.exit(0)
+  const validation = await validateInputs(input)
+  if (!validation) process.exit(0)
 
-  const filePath = resolveFilePath(input)
-  if (!filePath.endsWith("package.json") || isNodeModulesPath(filePath)) process.exit(0)
-
+  const { filePath, toolName } = validation
   const PM = await detectPackageManager(dirname(filePath))
   const addCmd = ADD_COMMANDS[PM ?? ""] ?? "npm install"
 
