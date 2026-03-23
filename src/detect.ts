@@ -1,5 +1,22 @@
 import { AGENTS, type AgentDef } from "./agents.ts"
 
+// ─── Terminal & shell detection ──────────────────────────────────────────────
+// Re-exported from hooks/utils/terminal-detection.ts so both src/ and hooks/
+// consumers can access it via this central detect module.
+
+export type {
+  EnvironmentInfo,
+  ShellInfo,
+  ShellType,
+  TerminalApp,
+  TerminalInfo,
+} from "../hooks/utils/terminal-detection.ts"
+export {
+  detectEnvironment,
+  detectShell,
+  detectTerminal,
+} from "../hooks/utils/terminal-detection.ts"
+
 /**
  * Detects the currently running agent by checking environment variables and parent process.
  *

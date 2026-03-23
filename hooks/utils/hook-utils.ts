@@ -61,6 +61,19 @@ export {
   detectRuntime,
 } from "./package-detection.ts"
 
+// ─── Terminal & shell detection ───────────────────────────────────────────
+// Re-exported so hook scripts can detect the hosting terminal and shell
+// via the single hook-utils.ts import.
+
+export type {
+  EnvironmentInfo,
+  ShellInfo,
+  ShellType,
+  TerminalApp,
+  TerminalInfo,
+} from "./terminal-detection.ts"
+export { detectEnvironment, detectShell, detectTerminal } from "./terminal-detection.ts"
+
 // ─── Framework detection ──────────────────────────────────────────────────
 // Re-exported from src/detect-frameworks.ts so hook scripts can access it
 // via the single hook-utils.ts import, and so src/manifest.ts can import
