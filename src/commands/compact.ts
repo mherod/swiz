@@ -122,19 +122,12 @@ interface ParsedCompactArgs {
   targetDir: string
 }
 
-function parseCompactArgs(args: string[]): ParsedCompactArgs {
-  const dryRun = args.includes("--dry-run")
+function _extractFlagValue(args: string[], flag: string, shortFlag: string): string | undefined {
+  const idx = args.findIndex((a) => a === flag || a === shortFlag)
+  return idx >= 0 ? args[idx + 1] : undefined
+}
 
-  const dirIdx = args.findIndex((a) => a === "--dir" || a === "-d")
-  const targetDir = resolve(
-    dirIdx >= 0 && args[dirIdx + 1] ? (args[dirIdx + 1] as string) : process.cwd()
-  )
-
-  const thresholdIdx = args.findIndex((a) => a === "--threshold" || a === "-t")
-  const thresholdRaw = thresholdIdx >= 0 ? args[thresholdIdx + 1] : undefined
-  const threshold = thresholdRaw !== undefined ? Number(thresholdRaw) : 0
-
-  // The file path is the first positional argument (not a flag or flag value)
+function _collectFlagIndices(args: string[]): Set<number> {
   const flagValues = new Set<number>()
   for (const flag of ["--dir", "-d", "--threshold", "-t"]) {
     const idx = args.indexOf(flag)
@@ -143,6 +136,20 @@ function parseCompactArgs(args: string[]): ParsedCompactArgs {
       flagValues.add(idx + 1)
     }
   }
+  return flagValues
+}
+
+function parseCompactArgs(args: string[]): ParsedCompactArgs {
+  const dryRun = args.includes("--dry-run")
+
+  const dirRaw = _extractFlagValue(args, "--dir", "-d")
+  const targetDir = resolve(dirRaw ?? process.cwd())
+
+  const thresholdRaw = _extractFlagValue(args, "--threshold", "-t")
+  const threshold = thresholdRaw !== undefined ? Number(thresholdRaw) : 0
+
+  // The file path is the first positional argument (not a flag or flag value)
+  const flagValues = _collectFlagIndices(args)
   const positionals = args.filter((a, i) => !a.startsWith("-") && !flagValues.has(i))
   const fileArg = positionals[0]
 

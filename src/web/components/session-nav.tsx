@@ -431,6 +431,27 @@ function SessionGroupList({
   )
 }
 
+function computeFilteredSessions(
+  sessions: SessionPreview[] | undefined,
+  filterQuery: string
+): SessionPreview[] | undefined {
+  return filterQuery ? sessions?.filter((s) => matchesFilter(s, filterQuery)) : sessions
+}
+
+function computeSessionsCounts(
+  filteredActive: SessionPreview[] | undefined,
+  filteredRecent: SessionPreview[] | undefined,
+  filterQuery: string,
+  totalSessions: number
+): { total: number; active: number; recent: number } {
+  const filteredSum = (filteredActive?.length ?? 0) + (filteredRecent?.length ?? 0)
+  return {
+    total: filterQuery ? filteredSum : totalSessions,
+    active: filteredActive?.length ?? 0,
+    recent: filteredRecent?.length ?? 0,
+  }
+}
+
 function SelectedProjectPanel({
   selectedProject,
   sortedSessions,
@@ -451,28 +472,28 @@ function SelectedProjectPanel({
   const statusTokens = parseProjectStatusLine(selectedProject.statusLine).slice(0, 2)
 
   const filteredActive = useMemo(
-    () =>
-      filterQuery ? activeSessions?.filter((s) => matchesFilter(s, filterQuery)) : activeSessions,
+    () => computeFilteredSessions(activeSessions, filterQuery),
     [activeSessions, filterQuery]
   )
   const filteredRecent = useMemo(
-    () =>
-      filterQuery ? recentSessions?.filter((s) => matchesFilter(s, filterQuery)) : recentSessions,
+    () => computeFilteredSessions(recentSessions, filterQuery),
     [recentSessions, filterQuery]
   )
-  const filteredTotal = (filteredActive?.length ?? 0) + (filteredRecent?.length ?? 0)
+  const counts = computeSessionsCounts(
+    filteredActive,
+    filteredRecent,
+    filterQuery,
+    sortedSessions?.length ?? 0
+  )
 
   return (
     <>
       <div className="nav-inline-header nav-inline-header-sessions">
         <h2 className="section-title nav-section-title">Sessions</h2>
-        <span className="nav-count-badge">
-          {filterQuery ? filteredTotal : (sortedSessions?.length ?? 0)}
-        </span>
+        <span className="nav-count-badge">{counts.total}</span>
       </div>
       <p className="nav-inline-project">
-        {selectedProject.name} · {filteredActive?.length ?? 0} active ·{" "}
-        {filteredRecent?.length ?? 0} recent
+        {selectedProject.name} · {counts.active} active · {counts.recent} recent
       </p>
       <StatusChips
         tokens={statusTokens}

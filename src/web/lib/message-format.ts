@@ -680,16 +680,14 @@ function extractUncommittedChangesBlock(text: string): {
   }
 }
 
-function buildDomInspectionBlockFromMatch(
-  match: RegExpMatchArray,
-  index: number
-): ParsedUserMetadataBlock | null {
-  const domPathRaw = match[1] ?? ""
-  const positionRaw = match[2] ?? ""
-  const componentRaw = match[3] ?? ""
-  const elementRaw = match[4] ?? ""
-
+function buildDomInspectionDetails(
+  domPathRaw: string,
+  positionRaw: string,
+  componentRaw: string,
+  elementRaw: string
+): Array<{ label: string; value: string }> {
   const details: Array<{ label: string; value: string }> = []
+
   const domPath = compactMetadataValue(domPathRaw, 220)
   if (domPath) details.push({ label: "dom path", value: domPath })
 
@@ -701,6 +699,20 @@ function buildDomInspectionBlockFromMatch(
 
   const htmlElement = compactHtmlElementValue(elementRaw)
   if (htmlElement) details.push({ label: "html element", value: htmlElement })
+
+  return details
+}
+
+function buildDomInspectionBlockFromMatch(
+  match: RegExpMatchArray,
+  index: number
+): ParsedUserMetadataBlock | null {
+  const domPathRaw = match[1] ?? ""
+  const positionRaw = match[2] ?? ""
+  const componentRaw = match[3] ?? ""
+  const elementRaw = match[4] ?? ""
+
+  const details = buildDomInspectionDetails(domPathRaw, positionRaw, componentRaw, elementRaw)
   if (details.length === 0) return null
 
   return {

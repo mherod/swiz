@@ -983,25 +983,7 @@ function normalizeProjectSettingsUpdates(
   updates: Record<string, unknown>
 ): Record<string, unknown> | { error: string } {
   const result: Record<string, unknown> = {}
-  if ("collaborationMode" in updates) {
-    const mode = updates.collaborationMode
-    if (mode !== "auto" && mode !== "solo" && mode !== "team" && mode !== "relaxed-collab") {
-      return { error: "collaborationMode must be one of: auto, solo, team, relaxed-collab" }
-    }
-    result.collaborationMode = mode
-  }
-  if ("prMergeMode" in updates) {
-    if (typeof updates.prMergeMode !== "boolean") {
-      return { error: "prMergeMode must be a boolean" }
-    }
-    result.prMergeMode = updates.prMergeMode
-  }
-  if ("strictNoDirectMain" in updates) {
-    if (typeof updates.strictNoDirectMain !== "boolean") {
-      return { error: "strictNoDirectMain must be a boolean" }
-    }
-    result.strictNoDirectMain = updates.strictNoDirectMain
-  }
+  const validModes = new Set(["auto", "solo", "team", "relaxed-collab"])
   const optionalKeys = [
     "trivialMaxFiles",
     "trivialMaxLines",
@@ -1012,6 +994,25 @@ function normalizeProjectSettingsUpdates(
     "taskDurationWarningMinutes",
     "ambitionMode",
   ] as const
+
+  if ("collaborationMode" in updates) {
+    const mode = updates.collaborationMode
+    if (!validModes.has(String(mode))) {
+      return { error: "collaborationMode must be one of: auto, solo, team, relaxed-collab" }
+    }
+    result.collaborationMode = mode
+  }
+
+  if ("prMergeMode" in updates && typeof updates.prMergeMode !== "boolean") {
+    return { error: "prMergeMode must be a boolean" }
+  }
+  if ("prMergeMode" in updates) result.prMergeMode = updates.prMergeMode
+
+  if ("strictNoDirectMain" in updates && typeof updates.strictNoDirectMain !== "boolean") {
+    return { error: "strictNoDirectMain must be a boolean" }
+  }
+  if ("strictNoDirectMain" in updates) result.strictNoDirectMain = updates.strictNoDirectMain
+
   for (const key of optionalKeys) {
     if (key in updates) result[key] = updates[key]
   }

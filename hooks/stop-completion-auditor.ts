@@ -117,6 +117,35 @@ function anyTaskHasCiEvidence(tasks: TaskFile[]): boolean {
   return tasks.filter((t) => t.status === "completed").some(taskHasCiEvidence)
 }
 
+function isTaskDuplicate(
+  stale: TaskFile,
+  completedFingerprints: Set<string>,
+  completedNormalized: string[]
+): boolean {
+  const staleFp = stale.subjectFingerprint ?? computeSubjectFingerprint(stale.subject)
+  if (completedFingerprints.has(staleFp)) return true
+
+  const staleNorm = normalizeSubject(stale.subject)
+  return completedNormalized.some((cs) => subjectsOverlap(staleNorm, cs))
+}
+
+async function completeStaleTask(stale: TaskFile, tasksDir: string): Promise<void> {
+  try {
+    const taskPath = join(tasksDir, `${stale.id}.json`)
+    // Transition through in_progress if pending, to satisfy lifecycle
+    if (stale.status === "pending") stale.status = "in_progress"
+    const updated = {
+      ...stale,
+      status: "completed" as const,
+      completionEvidence: "note:auto-completed — duplicate of a completed task",
+    }
+    await Bun.write(taskPath, JSON.stringify(updated, null, 2))
+    stale.status = "completed"
+  } catch {
+    // Write failed — leave as-is and let the normal block message fire
+  }
+}
+
 /** Auto-complete stale incomplete tasks that are duplicates of completed ones. */
 async function deduplicateStaleTasks(
   completedTasks: TaskFile[],
@@ -133,27 +162,8 @@ async function deduplicateStaleTasks(
   const completedNormalized = completedTasks.map((t) => normalizeSubject(t.subject))
 
   for (const stale of incompleteTasks) {
-    const staleFp = stale.subjectFingerprint ?? computeSubjectFingerprint(stale.subject)
-    let isDuplicate = completedFingerprints.has(staleFp)
-    if (!isDuplicate) {
-      const staleNorm = normalizeSubject(stale.subject)
-      isDuplicate = completedNormalized.some((cs) => subjectsOverlap(staleNorm, cs))
-    }
-    if (!isDuplicate) continue
-    try {
-      const taskPath = join(tasksDir, `${stale.id}.json`)
-      // Transition through in_progress if pending, to satisfy lifecycle
-      if (stale.status === "pending") stale.status = "in_progress"
-      const updated = {
-        ...stale,
-        status: "completed" as const,
-        completionEvidence: "note:auto-completed — duplicate of a completed task",
-      }
-      await Bun.write(taskPath, JSON.stringify(updated, null, 2))
-      stale.status = "completed"
-    } catch {
-      // Write failed — leave as-is and let the normal block message fire
-    }
+    if (!isTaskDuplicate(stale, completedFingerprints, completedNormalized)) continue
+    await completeStaleTask(stale, tasksDir)
   }
 }
 
@@ -340,6 +350,27 @@ async function enforceCiEvidence(
   }
 }
 
+async function resolveToolCallStats(
+  summary: TranscriptSummary | null,
+  transcript: string
+): Promise<{ total: number; taskToolUsed: boolean }> {
+  if (summary) return deriveToolCallStats(summary)
+  if (transcript) return await countToolCalls(transcript)
+  return { total: 0, taskToolUsed: false }
+}
+
+async function filterAndDeduplicateTasks(
+  allTasks: TaskFile[],
+  tasksDir: string
+): Promise<{ completedTasks: TaskFile[]; incompleteTasks: TaskFile[] }> {
+  const completedTasks = allTasks.filter((t) => t.status === "completed")
+  const incompleteTasks = allTasks.filter(
+    (t) => t.id && t.id !== "null" && (t.status === "pending" || t.status === "in_progress")
+  )
+  await deduplicateStaleTasks(completedTasks, incompleteTasks, tasksDir)
+  return { completedTasks, incompleteTasks }
+}
+
 async function main(): Promise<void> {
   const raw = (await Bun.stdin.json()) as Record<string, unknown>
   const input = stopHookInputSchema.parse(raw)
@@ -351,11 +382,7 @@ async function main(): Promise<void> {
   if (!tasksDir) return
 
   const summary = getTranscriptSummary(raw)
-  const { total: toolCallCount, taskToolUsed } = summary
-    ? deriveToolCallStats(summary)
-    : transcript
-      ? await countToolCalls(transcript)
-      : { total: 0, taskToolUsed: false }
+  const { total: toolCallCount, taskToolUsed } = await resolveToolCallStats(summary, transcript)
 
   const allTasks = await readSessionTasks(sessionId, home)
   const tasksDirExists = allTasks.length > 0 || (await hasSessionTasksDir(sessionId, home))
@@ -370,11 +397,7 @@ async function main(): Promise<void> {
     return
   }
 
-  const completedTasks = allTasks.filter((t) => t.status === "completed")
-  const incompleteTasks = allTasks.filter(
-    (t) => t.id && t.id !== "null" && (t.status === "pending" || t.status === "in_progress")
-  )
-  await deduplicateStaleTasks(completedTasks, incompleteTasks, tasksDir)
+  await filterAndDeduplicateTasks(allTasks, tasksDir)
 
   const incompleteDetails = getIncompleteDetails(allTasks)
   if (incompleteDetails.length > 0) {

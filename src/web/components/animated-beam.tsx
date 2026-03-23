@@ -23,6 +23,31 @@ export interface AnimatedBeamProps {
   endYOffset?: number
 }
 
+function computeBeamCoordinates(
+  rectA: DOMRect,
+  rectB: DOMRect,
+  containerRect: DOMRect,
+  offsets: { startXOffset: number; startYOffset: number; endXOffset: number; endYOffset: number }
+): { startX: number; startY: number; endX: number; endY: number } {
+  return {
+    startX: rectA.left - containerRect.left + rectA.width / 2 + offsets.startXOffset,
+    startY: rectA.top - containerRect.top + rectA.height / 2 + offsets.startYOffset,
+    endX: rectB.left - containerRect.left + rectB.width / 2 + offsets.endXOffset,
+    endY: rectB.top - containerRect.top + rectB.height / 2 + offsets.endYOffset,
+  }
+}
+
+function computeSvgPath(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  curvature: number
+): string {
+  const controlY = startY - curvature
+  return `M ${startX},${startY} Q ${(startX + endX) / 2},${controlY} ${endX},${endY}`
+}
+
 export function AnimatedBeam({
   className,
   containerRef,
@@ -58,17 +83,16 @@ export function AnimatedBeam({
       const rectA = fromRef.current.getBoundingClientRect()
       const rectB = toRef.current.getBoundingClientRect()
 
-      const svgWidth = containerRect.width
-      const svgHeight = containerRect.height
-      setSvgDimensions({ width: svgWidth, height: svgHeight })
+      setSvgDimensions({ width: containerRect.width, height: containerRect.height })
 
-      const startX = rectA.left - containerRect.left + rectA.width / 2 + startXOffset
-      const startY = rectA.top - containerRect.top + rectA.height / 2 + startYOffset
-      const endX = rectB.left - containerRect.left + rectB.width / 2 + endXOffset
-      const endY = rectB.top - containerRect.top + rectB.height / 2 + endYOffset
-
-      const controlY = startY - curvature
-      setPathD(`M ${startX},${startY} Q ${(startX + endX) / 2},${controlY} ${endX},${endY}`)
+      const coords = computeBeamCoordinates(rectA, rectB, containerRect, {
+        startXOffset,
+        startYOffset,
+        endXOffset,
+        endYOffset,
+      })
+      const path = computeSvgPath(coords.startX, coords.startY, coords.endX, coords.endY, curvature)
+      setPathD(path)
     }
 
     const resizeObserver = new ResizeObserver(() => updatePath())

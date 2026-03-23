@@ -555,6 +555,26 @@ function groupKeysForGrouped(
     : [`${entry.message.timestamp}-${fallbackTag}`]
 }
 
+function formatTimesDisplay(
+  userMsg: SessionMessage,
+  asstMsg: SessionMessage
+): { assistantTime: string; userTime: string } {
+  const assistantTime = asstMsg.timestamp
+    ? formatTime(new Date(asstMsg.timestamp).getTime())
+    : "Unknown time"
+  const userTime = userMsg.timestamp
+    ? formatTime(new Date(userMsg.timestamp).getTime())
+    : "Unknown time"
+  return { assistantTime, userTime }
+}
+
+function buildRepeatLabel(userCount: number, assistantCount: number): string | null {
+  const parts: string[] = []
+  if (userCount > 1) parts.push(`User ×${userCount}`)
+  if (assistantCount > 1) parts.push(`Asst ×${assistantCount}`)
+  return parts.length > 0 ? parts.join(" · ") : null
+}
+
 function SkillExchangeRow({
   userGroup,
   assistantGroup,
@@ -578,17 +598,8 @@ function SkillExchangeRow({
   const asstKeys = groupKeysForGrouped(assistantGroup, sorted, msgKey, "skill-a")
   const isNew = [...userKeys, ...asstKeys].some((k) => newKeys?.has(k) ?? false)
 
-  const assistantTime = asstMsg.timestamp
-    ? formatTime(new Date(asstMsg.timestamp).getTime())
-    : "Unknown time"
-  const userTime = userMsg.timestamp
-    ? formatTime(new Date(userMsg.timestamp).getTime())
-    : "Unknown time"
-
-  const repeatParts: string[] = []
-  if (userGroup.count > 1) repeatParts.push(`User ×${userGroup.count}`)
-  if (assistantGroup.count > 1) repeatParts.push(`Asst ×${assistantGroup.count}`)
-  const repeatLabel = repeatParts.length > 0 ? repeatParts.join(" · ") : null
+  const { assistantTime, userTime } = formatTimesDisplay(userMsg, asstMsg)
+  const repeatLabel = buildRepeatLabel(userGroup.count, assistantGroup.count)
 
   return (
     <li className={cn("message-row message-row-skill-exchange user", isNew && "message-new")}>

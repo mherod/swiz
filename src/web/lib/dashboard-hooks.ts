@@ -190,6 +190,30 @@ export function useSessionPolling(deps: SessionPollingDeps) {
     const cwd = deps.selectedProjectCwd
     const sid = deps.selectedSessionId
 
+    function computeFreshMessageKeys(
+      messages: SessionMessage[],
+      knownKeys: Set<string>
+    ): Set<string> {
+      const fresh = new Set<string>()
+      for (let i = 0; i < messages.length; i++) {
+        const key = msgKey(messages[i]!, i)
+        if (!knownKeys.has(key)) fresh.add(key)
+      }
+      return fresh
+    }
+
+    function handleMessagesUpdate(
+      msgs: SessionMessage[],
+      toolStats: ToolStat[] | undefined,
+      fresh: Set<string>
+    ): void {
+      deps.onNewMessageKeys(fresh)
+      deps.onMessages(msgs, toolStats ?? [])
+      if (fresh.size > 0) {
+        setTimeout(() => deps.onNewMessageKeys(new Set()), 500)
+      }
+    }
+
     async function pollSessionData() {
       try {
         const [messagesResult, tasksResult, projectTasksResult] = await Promise.all([
@@ -213,17 +237,9 @@ export function useSessionPolling(deps: SessionPollingDeps) {
         const snap = JSON.stringify(msgs)
         if (snap !== messagesPrevSnapshotRef.current) {
           messagesPrevSnapshotRef.current = snap
-          const fresh = new Set<string>()
-          for (let i = 0; i < msgs.length; i++) {
-            const key = msgKey(msgs[i]!, i)
-            if (!knownKeysRef.current.has(key)) fresh.add(key)
-          }
+          const fresh = computeFreshMessageKeys(msgs, knownKeysRef.current)
           knownKeysRef.current = new Set(msgs.map(msgKey))
-          deps.onNewMessageKeys(fresh)
-          deps.onMessages(msgs, messagesResult.toolStats ?? [])
-          if (fresh.size > 0) {
-            setTimeout(() => deps.onNewMessageKeys(new Set()), 500)
-          }
+          handleMessagesUpdate(msgs, messagesResult.toolStats, fresh)
         }
 
         deps.onTasks(tasksResult.tasks ?? [], tasksResult.summary ?? null)

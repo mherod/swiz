@@ -193,6 +193,31 @@ async function collectPriorSessionSection(cwd: string, sessionId: string): Promi
   )
 }
 
+async function buildTaskSections(
+  snapshot: CompactSnapshot | null,
+  sessionId: string,
+  cwd: string,
+  home: string
+): Promise<string[]> {
+  const sections: string[] = []
+
+  if (snapshot) {
+    const result = await reconcileSnapshotTasks(snapshot, sessionId, home)
+    sections.push(...result.sections)
+  }
+
+  const currentTasks = await readSessionTasks(sessionId, home)
+  const currentIncomplete = currentTasks.filter((t) => isIncompleteTaskStatus(t.status))
+  if (currentIncomplete.length > 0) {
+    sections.push(buildIncompleteTaskSection(currentIncomplete))
+  } else {
+    const priorSection = await collectPriorSessionSection(cwd, sessionId)
+    if (priorSection) sections.push(priorSection)
+  }
+
+  return sections
+}
+
 async function main(): Promise<void> {
   const input = sessionHookInputSchema.parse(await Bun.stdin.json())
   const matcher = input.matcher ?? input.trigger ?? ""
@@ -209,19 +234,8 @@ async function main(): Promise<void> {
   const home = getHomeDirWithFallback("")
 
   const snapshot = sessionId ? await readCompactSnapshot(sessionId, home) : null
-  if (snapshot) {
-    const result = await reconcileSnapshotTasks(snapshot, sessionId, home)
-    sections.push(...result.sections)
-  }
-
-  const currentTasks = await readSessionTasks(sessionId, home)
-  const currentIncomplete = currentTasks.filter((t) => isIncompleteTaskStatus(t.status))
-  if (currentIncomplete.length > 0) {
-    sections.push(buildIncompleteTaskSection(currentIncomplete))
-  } else {
-    const priorSection = await collectPriorSessionSection(cwd, sessionId)
-    if (priorSection) sections.push(priorSection)
-  }
+  const taskSections = await buildTaskSections(snapshot, sessionId, cwd, home)
+  sections.push(...taskSections)
 
   const ctx = joinSectionsWithinBudget(sections, COMPACT_CONTEXT_MAX_CHARS)
   await emitContext("SessionStart", ctx)

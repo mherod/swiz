@@ -360,6 +360,25 @@ export function isSkillToolOnlyAssistant(message: SessionMessage): boolean {
   return parseSkillToolCallName(call.detail) != null
 }
 
+function skillNamesMatch(declared: string | null, tool: string): boolean {
+  if (declared === null) return true
+  return declared.toLowerCase() === tool.toLowerCase()
+}
+
+function isValidSkillExchange(
+  userG: GroupedSessionMessage | undefined,
+  assistantG: GroupedSessionMessage | undefined
+): boolean {
+  if (!userG || !assistantG) return false
+  if (userG.message.role !== "user" || assistantG.message.role !== "assistant") return false
+  if (typeof userG.message.text !== "string") return false
+  const payload = parseSkillPayload(userG.message.text)
+  if (!payload || !isSkillToolOnlyAssistant(assistantG.message)) return false
+  const toolSkill = skillNameFromMessage(assistantG.message)
+  if (!toolSkill) return false
+  return skillNamesMatch(payload.declaredSkill, toolSkill)
+}
+
 /**
  * In newest-first grouped transcript, the user's skill payload is one index before
  * the assistant Skill tool row chronologically (user newer → lower index).
@@ -370,22 +389,8 @@ export function skillExchangeMergeAt(
 ): { user: GroupedSessionMessage; assistant: GroupedSessionMessage } | null {
   const userG = grouped[index]
   const assistantG = grouped[index + 1]
-  if (!userG || !assistantG) return null
-  if (userG.message.role !== "user" || assistantG.message.role !== "assistant") return null
-  const userText = userG.message.text
-  if (typeof userText !== "string") return null
-  const payload = parseSkillPayload(userText)
-  if (!payload) return null
-  if (!isSkillToolOnlyAssistant(assistantG.message)) return null
-  const toolSkill = skillNameFromMessage(assistantG.message)
-  if (!toolSkill) return null
-  if (
-    payload.declaredSkill !== null &&
-    payload.declaredSkill.toLowerCase() !== toolSkill.toLowerCase()
-  ) {
-    return null
-  }
-  return { user: userG, assistant: assistantG }
+  if (!isValidSkillExchange(userG, assistantG)) return null
+  return { user: userG!, assistant: assistantG! }
 }
 
 export function parseJsonObject(detail: string): Record<string, unknown> | null {
@@ -487,14 +492,10 @@ export interface ParsedTaskToolCall {
   activeForm?: string | null
 }
 
-export function parseTaskToolCall(name: string, detail: string): ParsedTaskToolCall | null {
-  const lower = name.toLowerCase()
-  if (!lower.startsWith("task") && lower !== "update_plan") return null
-  const action = lower.replace("task", "").toLowerCase() || "update"
-  const payload = parseJsonObject(detail)
-  if (!payload) return { action }
+function extractTaskCallFields(
+  payload: Record<string, unknown>
+): Omit<ParsedTaskToolCall, "action"> {
   return {
-    action,
     taskId:
       typeof payload.taskId === "string" || typeof payload.taskId === "number"
         ? String(payload.taskId)
@@ -504,6 +505,15 @@ export function parseTaskToolCall(name: string, detail: string): ParsedTaskToolC
     status: typeof payload.status === "string" ? payload.status : null,
     activeForm: typeof payload.activeForm === "string" ? payload.activeForm : null,
   }
+}
+
+export function parseTaskToolCall(name: string, detail: string): ParsedTaskToolCall | null {
+  const lower = name.toLowerCase()
+  if (!lower.startsWith("task") && lower !== "update_plan") return null
+  const action = lower.replace("task", "").toLowerCase() || "update"
+  const payload = parseJsonObject(detail)
+  if (!payload) return { action }
+  return { action, ...extractTaskCallFields(payload) }
 }
 
 export interface ParsedFileToolCall {

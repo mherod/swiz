@@ -737,31 +737,51 @@ async function checkMergeConflicts(cwd: string): Promise<string | null> {
   }
 }
 
+async function validateReviewingStateInputs(
+  state: string | null,
+  cwd: string
+): Promise<{ valid: boolean; directive?: string }> {
+  if (state !== "reviewing" && state !== "addressing-feedback") {
+    return { valid: false }
+  }
+  if (!(await isGitRepo(cwd))) {
+    return { valid: false }
+  }
+
+  const conflictDirective = await checkMergeConflicts(cwd)
+  if (conflictDirective) {
+    return { valid: false, directive: conflictDirective }
+  }
+
+  if (!hasGhCli() || !(await isGitHubRemote(cwd))) {
+    return { valid: false }
+  }
+
+  return { valid: true }
+}
+
+async function resolvePrForBranch(cwd: string): Promise<ReviewingPr | null> {
+  try {
+    const branch = (await git(["branch", "--show-current"], cwd)).trim()
+    if (!branch) return null
+    return await getOpenPrForBranch<ReviewingPr>(
+      branch,
+      cwd,
+      "number,reviews,reviewThreads,statusCheckRollup"
+    )
+  } catch {
+    return null
+  }
+}
+
 export async function checkReviewingState(
   cwd: string,
   state: string | null
 ): Promise<string | null> {
-  if (state !== "reviewing" && state !== "addressing-feedback") return null
-  if (!(await isGitRepo(cwd))) return null
+  const validation = await validateReviewingStateInputs(state, cwd)
+  if (!validation.valid) return validation.directive ?? null
 
-  const conflictDirective = await checkMergeConflicts(cwd)
-  if (conflictDirective) return conflictDirective
-
-  if (!hasGhCli() || !(await isGitHubRemote(cwd))) return null
-
-  let branch: string
-  try {
-    branch = (await git(["branch", "--show-current"], cwd)).trim()
-  } catch {
-    return null
-  }
-  if (!branch) return null
-
-  const pr = await getOpenPrForBranch<ReviewingPr>(
-    branch,
-    cwd,
-    "number,reviews,reviewThreads,statusCheckRollup"
-  )
+  const pr = await resolvePrForBranch(cwd)
   if (!pr) return null
 
   const reviewDirective = checkPrReviewState(pr)
@@ -1096,17 +1116,14 @@ async function pruneOldSuggestionLogs(): Promise<void> {
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
-  void pruneOldSuggestionLogs() // Fire-and-forget cleanup
-
-  let hookRaw: Record<string, unknown>
-  try {
-    hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
-  } catch {
-    terminate("block", "Auto-continue could not parse stop-hook input JSON.")
-  }
-
-  const { input, cwd } = parseStopInput(hookRaw)
+async function validateMainInputsAndSettings(
+  hookRaw: Record<string, unknown>,
+  cwd: string
+): Promise<{
+  input: StopInput
+  effective: ReturnType<typeof getEffectiveSwizSettings>
+}> {
+  const { input } = parseStopInput(hookRaw)
 
   await ensureGeminiApiKey()
 
@@ -1117,13 +1134,19 @@ async function main(): Promise<void> {
     terminate("skip", "AUTO_CONTINUE_DISABLED", "auto-continue is disabled — skipping block")
   }
 
-  const projectState = await readProjectState(cwd)
-  const { transcriptData, docsOnly, taskContext, refinementStatus } = await resolveSessionContext(
-    input,
-    cwd,
-    effective.ambitionMode
-  )
+  return { input, effective }
+}
 
+async function validatePrerequisitesAndGenerateResponse(
+  cwd: string,
+  input: StopInput,
+  effective: ReturnType<typeof getEffectiveSwizSettings>,
+  projectState: string | null
+): Promise<{
+  response: ReturnType<typeof postProcessResponse>
+  repoFiles: string
+  refinementStatus: string | null
+}> {
   const reviewingDirective = await checkReviewingState(cwd, projectState)
   if (reviewingDirective) terminate("block", reviewingDirective)
 
@@ -1133,6 +1156,12 @@ async function main(): Promise<void> {
       "Auto-continue could not generate a next-step suggestion: no AI backend available.\nSet GEMINI_API_KEY or install the claude or codex CLI, then continue working."
     )
   }
+
+  const { transcriptData, docsOnly, taskContext, refinementStatus } = await resolveSessionContext(
+    input,
+    cwd,
+    effective.ambitionMode
+  )
 
   const turns = transcriptData.turns.slice(-CONTEXT_TURNS)
   const [rawResponse, repoFiles] = await Promise.all([
@@ -1151,6 +1180,16 @@ async function main(): Promise<void> {
   ])
   const response = postProcessResponse(rawResponse, effective.ambitionMode, projectState)
 
+  return { response, repoFiles, refinementStatus }
+}
+
+async function validateResponseAndChecks(
+  response: ReturnType<typeof postProcessResponse>,
+  refinementStatus: string | null,
+  repoFiles: string,
+  sessionId: string,
+  cwd: string
+): Promise<void> {
   if (response.reflections.length > 0) {
     await writeReflections(cwd, response.reflections)
   }
@@ -1175,7 +1214,6 @@ async function main(): Promise<void> {
   }
 
   // Dedup: allow stop if the same suggestion repeats.
-  const sessionId = input.session_id ?? ""
   if (sessionId && response.next) {
     const key = suggestionKey(response.next)
     const keyCount = await recordSuggestion(sessionId, key)
@@ -1187,10 +1225,40 @@ async function main(): Promise<void> {
       )
     }
   }
+}
+
+async function main(): Promise<void> {
+  void pruneOldSuggestionLogs() // Fire-and-forget cleanup
+
+  let hookRaw: Record<string, unknown>
+  try {
+    hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
+  } catch {
+    terminate("block", "Auto-continue could not parse stop-hook input JSON.")
+  }
+
+  const { input, cwd } = parseStopInput(hookRaw)
+  const { effective } = await validateMainInputsAndSettings(hookRaw, cwd)
+
+  const projectState = await readProjectState(cwd)
+  const { response, repoFiles, refinementStatus } = await validatePrerequisitesAndGenerateResponse(
+    cwd,
+    input,
+    effective,
+    projectState
+  )
+
+  await validateResponseAndChecks(
+    response,
+    refinementStatus,
+    repoFiles,
+    input.session_id ?? "",
+    cwd
+  )
 
   terminate(
     "block",
-    buildFinalMessage(response, refinementStatus, effective.critiquesEnabled ?? false)
+    buildFinalMessage(response, refinementStatus ?? "", effective.critiquesEnabled ?? false)
   )
 }
 
