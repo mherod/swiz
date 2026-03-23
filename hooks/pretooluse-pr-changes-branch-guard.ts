@@ -40,45 +40,55 @@ type Review = {
   body?: string
 }
 
-async function main() {
-  const input = shellHookInputSchema.parse(await Bun.stdin.json())
-  if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+async function validateInputs(input: Record<string, unknown>, cwd: string): Promise<boolean> {
+  if (!isShellTool((input?.tool_name as string) ?? "")) return false
+  const command: string = ((input?.tool_input as Record<string, unknown>)?.command as string) ?? ""
+  if (!GIT_CHECKOUT_RE.test(command) && !GIT_SWITCH_RE.test(command)) return false
+  if (!(await isGitRepo(cwd))) return false
+  if (!(await isGitHubRemote(cwd))) return false
+  if (!hasGhCli()) return false
+  return true
+}
 
-  const command: string = input?.tool_input?.command ?? ""
-  const cwd: string = input.cwd ?? process.cwd()
-
-  // Only intercept branch-switching commands
-  if (!GIT_CHECKOUT_RE.test(command) && !GIT_SWITCH_RE.test(command)) process.exit(0)
-
-  // Preflight: git repo, GitHub remote, gh CLI
-  if (!(await isGitRepo(cwd))) process.exit(0)
-  if (!(await isGitHubRemote(cwd))) process.exit(0)
-  if (!hasGhCli()) process.exit(0)
-
-  // Get current branch
+async function getBranchAndPr(
+  cwd: string
+): Promise<{ branch: string; pr: { number: number; title: string } } | null> {
   const currentBranch = (await git(["branch", "--show-current"], cwd)).trim()
-  if (!currentBranch) process.exit(0) // detached HEAD
-
-  // Skip default branch — no PR to guard
+  if (!currentBranch) return null // detached HEAD
   const defaultBranch = await getDefaultBranch(cwd)
-  if (isDefaultBranch(currentBranch, defaultBranch)) process.exit(0)
-
-  // Check for open PR on current branch
+  if (isDefaultBranch(currentBranch, defaultBranch)) return null // no PR on default
   const pr = await getOpenPrForBranch<{ number: number; title: string }>(
     currentBranch,
     cwd,
     "number,title"
   )
-  if (!pr) process.exit(0) // no open PR
+  if (!pr) return null // no open PR
+  return { branch: currentBranch, pr }
+}
 
-  // Check review status
+async function getChangesRequestedReviews(
+  pr: { number: number },
+  cwd: string
+): Promise<Review[] | null> {
   const repo = await getRepoNameWithOwner(cwd)
-  if (!repo) process.exit(0)
-
+  if (!repo) return null
   const reviews = await ghJson<Review[]>(["api", `repos/${repo}/pulls/${pr.number}/reviews`], cwd)
-  if (!reviews) process.exit(0)
+  if (!reviews) return null
+  return reviews.filter((r) => r.state === "CHANGES_REQUESTED")
+}
 
-  const changesRequested = reviews.filter((r) => r.state === "CHANGES_REQUESTED")
+async function main() {
+  const input = shellHookInputSchema.parse(await Bun.stdin.json())
+  const cwd: string = input.cwd ?? process.cwd()
+
+  if (!(await validateInputs(input as Record<string, unknown>, cwd))) process.exit(0)
+
+  const branchAndPr = await getBranchAndPr(cwd)
+  if (!branchAndPr) process.exit(0)
+
+  const { branch: currentBranch, pr } = branchAndPr
+  const changesRequested = await getChangesRequestedReviews(pr, cwd)
+  if (changesRequested === null) process.exit(0)
   if (changesRequested.length === 0) {
     allowPreToolUse(`PR #${pr.number} has no changes requested — branch switch allowed`)
   }
