@@ -386,6 +386,27 @@ export function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
   return withLogBuffer(() => performDispatch(req))
 }
 
+/** Set SWIZ_PROJECT_CWD env var and return previous value for restoration. */
+function injectProjectCwd(cwd: string | undefined): string | undefined {
+  const prev = process.env.SWIZ_PROJECT_CWD
+  if (cwd) process.env.SWIZ_PROJECT_CWD = cwd
+  return prev
+}
+
+/** Restore SWIZ_PROJECT_CWD to its previous value (issue #328). */
+function restoreProjectCwd(prev: string | undefined): void {
+  if (prev !== undefined) process.env.SWIZ_PROJECT_CWD = prev
+  else delete process.env.SWIZ_PROJECT_CWD
+}
+
+/** Create an AbortController merged with an optional incoming abort signal. */
+function buildDispatchAbortController(signal: AbortSignal | undefined): AbortController {
+  const controller = new AbortController()
+  if (signal?.aborted) controller.abort()
+  else signal?.addEventListener("abort", () => controller.abort(), { once: true })
+  return controller
+}
+
 /** Execute strategy with optional timeout budget and return response. */
 async function executeStrategyWithTimeout(
   strategy: (typeof STRATEGY_REGISTRY)[keyof typeof STRATEGY_REGISTRY],
@@ -478,16 +499,12 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
 
   // Inject SWIZ_PROJECT_CWD so spawned hooks detect the correct package
   // manager without relying on process.cwd() (issue #328).
-  // Set on process.env so child processes inherit it naturally — passing
-  // env explicitly to Bun.spawn causes subprocess hangs (see ed791a1).
-  const prevProjectCwd = process.env.SWIZ_PROJECT_CWD
-  if (ctx.cwd) process.env.SWIZ_PROJECT_CWD = ctx.cwd
+  const prevProjectCwd = injectProjectCwd(ctx.cwd)
 
   // Short-circuit: project capabilities require a git repo — skip dispatch for non-git dirs.
   if (!(await isGitRepo(ctx.cwd))) {
     log(`   ⏭ no .git in cwd, skipping dispatch`)
-    if (prevProjectCwd !== undefined) process.env.SWIZ_PROJECT_CWD = prevProjectCwd
-    else delete process.env.SWIZ_PROJECT_CWD
+    restoreProjectCwd(prevProjectCwd)
     return { response: {} }
   }
 
@@ -526,16 +543,12 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   // Enforce dispatch-level timeout budget from DISPATCH_TIMEOUTS.
   // Individual hooks already have per-hook timeouts; this is a safety net
   // for the aggregate (queuing delays, concurrent fan-out overhead, etc.).
-  // An AbortController is used to SIGTERM all running hook processes when
-  // the budget expires — preventing orphaned hooks from lingering.
   const budgetSec = DISPATCH_TIMEOUTS[ctx.canonicalEvent]
   const budgetMs = budgetSec ? budgetSec * 1000 + DISPATCH_TIMEOUT_GRACE_MS : 0
 
   // Merge caller-provided abort signal (from daemon request timeout) with
   // our own dispatch-level timeout into a single controller.
-  const dispatchAbort = new AbortController()
-  if (req.signal?.aborted) dispatchAbort.abort()
-  else req.signal?.addEventListener("abort", () => dispatchAbort.abort(), { once: true })
+  const dispatchAbort = buildDispatchAbortController(req.signal)
 
   const dispatchStart = performance.now()
   try {
@@ -570,10 +583,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     )
     return { response }
   } finally {
-    // Restore previous SWIZ_PROJECT_CWD value (issue #328).
-    if (prevProjectCwd !== undefined) process.env.SWIZ_PROJECT_CWD = prevProjectCwd
-    else delete process.env.SWIZ_PROJECT_CWD
-
+    restoreProjectCwd(prevProjectCwd)
     req.onDispatchLifecycle?.(
       buildLifecycleEvent("end", ctx, filteredGroups, lifecycleRequestId, lifecycleStartedAt)
     )

@@ -1015,6 +1015,32 @@ function _normalizeMergeable(value: unknown): string {
   return "UNKNOWN"
 }
 
+function extractRequiredPRFields(pr: Record<string, unknown>): {
+  number: number | null
+  title: string | null
+  url: string | null
+  createdAt: string | null
+  updatedAt: string | null
+} {
+  return {
+    number: typeof pr.number === "number" ? pr.number : null,
+    title: typeof pr.title === "string" ? pr.title : null,
+    url: typeof pr.html_url === "string" ? pr.html_url : null,
+    createdAt: typeof pr.created_at === "string" ? pr.created_at : null,
+    updatedAt: typeof pr.updated_at === "string" ? pr.updated_at : null,
+  }
+}
+
+function extractOptionalPRFields(pr: Record<string, unknown>): {
+  state: string
+  headRefName: string | null
+} {
+  const state = typeof pr.state === "string" ? pr.state : "open"
+  const head = asRecord(pr.head)
+  const headRefName = typeof head?.ref === "string" ? head.ref : null
+  return { state, headRefName }
+}
+
 function validatePullRequestFields(pr: Record<string, unknown>): {
   number: number
   title: string
@@ -1024,17 +1050,29 @@ function validatePullRequestFields(pr: Record<string, unknown>): {
   updatedAt: string
   headRefName: string
 } | null {
-  const number = typeof pr.number === "number" ? pr.number : null
-  const title = typeof pr.title === "string" ? pr.title : null
-  const state = typeof pr.state === "string" ? pr.state : "open"
-  const url = typeof pr.html_url === "string" ? pr.html_url : null
-  const createdAt = typeof pr.created_at === "string" ? pr.created_at : null
-  const updatedAt = typeof pr.updated_at === "string" ? pr.updated_at : null
-  const head = asRecord(pr.head)
-  const headRefName = typeof head?.ref === "string" ? head.ref : null
+  const required = extractRequiredPRFields(pr)
+  const optional = extractOptionalPRFields(pr)
 
-  if (!number || !title || !url || !createdAt || !updatedAt || !headRefName) return null
-  return { number, title, state, url, createdAt, updatedAt, headRefName }
+  if (
+    !required.number ||
+    !required.title ||
+    !required.url ||
+    !required.createdAt ||
+    !required.updatedAt ||
+    !optional.headRefName
+  ) {
+    return null
+  }
+
+  return {
+    number: required.number,
+    title: required.title,
+    state: optional.state,
+    url: required.url,
+    createdAt: required.createdAt,
+    updatedAt: required.updatedAt,
+    headRefName: optional.headRefName,
+  }
 }
 
 function _normalizePullRequest(pr: Record<string, unknown>) {
