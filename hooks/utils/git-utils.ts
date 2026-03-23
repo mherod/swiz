@@ -153,6 +153,26 @@ function describeScopeCategory(
   return `${result.fileCount}-files, ${result.totalLinesChanged}-lines`
 }
 
+function checkIsDocsOnly(changedFiles: string[]): boolean {
+  const docsOnlyRe =
+    /\.(md|txt|rst)$|^(README|CHANGELOG|LICENSE|docs\/)|(\.config\.|\.json|\.yaml|\.yml|\.toml)$/i
+  return changedFiles.length > 0 && changedFiles.every((f) => docsOnlyRe.test(f))
+}
+
+function checkIsTrivial(
+  statParsingFailed: boolean,
+  fileCount: number,
+  trivialMaxFiles: number,
+  totalLinesChanged: number,
+  trivialMaxLines: number,
+  changedFiles: string[]
+): boolean {
+  if (statParsingFailed) return false
+  if (fileCount > trivialMaxFiles) return false
+  if (totalLinesChanged > trivialMaxLines) return false
+  return !changedFiles.some((f) => /src\/|lib\/|components\//.test(f))
+}
+
 export function classifyChangeScope(
   stat: GitStatSummary,
   changedFiles: string[],
@@ -164,17 +184,15 @@ export function classifyChangeScope(
   const trivialMaxLines = options.trivialMaxLines ?? 20
 
   const statParsingFailed = changedFiles.length > 0 && fileCount === 0
-
-  const docsOnlyRe =
-    /\.(md|txt|rst)$|^(README|CHANGELOG|LICENSE|docs\/)|(\.config\.|\.json|\.yaml|\.yml|\.toml)$/i
-  const isDocsOnly = changedFiles.length > 0 && changedFiles.every((f) => docsOnlyRe.test(f))
-
-  const isTrivial =
-    !statParsingFailed &&
-    fileCount <= trivialMaxFiles &&
-    totalLinesChanged <= trivialMaxLines &&
-    !changedFiles.some((f) => /src\/|lib\/|components\//.test(f))
-
+  const isDocsOnly = checkIsDocsOnly(changedFiles)
+  const isTrivial = checkIsTrivial(
+    statParsingFailed,
+    fileCount,
+    trivialMaxFiles,
+    totalLinesChanged,
+    trivialMaxLines,
+    changedFiles
+  )
   const isSmallFix = !statParsingFailed && fileCount <= 2 && totalLinesChanged <= 30
 
   const result = {
@@ -261,14 +279,18 @@ interface FileCounts {
   untracked: number
 }
 
+function parseXYStatus(xy: string, counts: FileCounts): void {
+  if (xy[0] === "D") counts.deleted++
+  else if (xy[0] === "A") counts.added++
+  else if (xy[0] !== ".") counts.modified++
+  if (xy[1] === "D") counts.deleted++
+  else if (xy[1] !== ".") counts.modified++
+}
+
 function parseFileEntry(line: string, counts: FileCounts, lines: string[]): void {
   if (line.startsWith("1 ") || line.startsWith("2 ")) {
     const xy = line.split(" ")[1] ?? ".."
-    if (xy[0] === "D") counts.deleted++
-    else if (xy[0] === "A") counts.added++
-    else if (xy[0] !== ".") counts.modified++
-    if (xy[1] === "D") counts.deleted++
-    else if (xy[1] !== ".") counts.modified++
+    parseXYStatus(xy, counts)
     const path = line.includes("\t") ? line.split("\t").pop()! : line.split(" ").pop()!
     lines.push(path)
   } else if (line.startsWith("? ")) {
@@ -478,6 +500,44 @@ function shellTokenize(segment: string): string[] {
   return tokens
 }
 
+function skipGitGlobalOptions(tokens: string[], i: number): number {
+  while (i < tokens.length && tokens[i]!.startsWith("-")) {
+    if (GIT_VALUE_OPTS.has(tokens[i]!)) i++
+    i++
+  }
+  return i
+}
+
+function checkPushSegmentForForceFlag(tokens: string[], i: number): boolean {
+  while (i < tokens.length) {
+    const t = tokens[i]!
+    i++
+    if (t === "--") continue
+    if (isGitPushForceToken(t)) return true
+  }
+  return false
+}
+
+function checkSegmentForPushForceFlag(segment: string): boolean {
+  const tokens = shellTokenize(segment)
+  let i = 0
+
+  while (i < tokens.length) {
+    if (tokens[i] !== "git") {
+      i++
+      continue
+    }
+    i++
+
+    i = skipGitGlobalOptions(tokens, i)
+    if (tokens[i] !== "push") continue
+    i++
+
+    if (checkPushSegmentForForceFlag(tokens, i)) return true
+  }
+  return false
+}
+
 /**
  * Token-based detection of force flags in a `git push` command.
  * Handles `git push -- --force` (refspec, not flag), `-C /path push -f`, etc.
@@ -489,35 +549,7 @@ export function hasGitPushForceFlag(command: string): boolean {
     .filter(Boolean)
 
   for (const segment of segments) {
-    const tokens = shellTokenize(segment)
-    let i = 0
-
-    while (i < tokens.length) {
-      if (tokens[i] !== "git") {
-        i++
-        continue
-      }
-      i++
-
-      while (i < tokens.length && tokens[i]!.startsWith("-")) {
-        if (GIT_VALUE_OPTS.has(tokens[i]!)) i++
-        i++
-      }
-
-      if (tokens[i] !== "push") continue
-      i++
-
-      let endOfFlags = false
-      while (i < tokens.length) {
-        const t = tokens[i]!
-        i++
-        if (t === "--") {
-          endOfFlags = true
-          continue
-        }
-        if (!endOfFlags && isGitPushForceToken(t)) return true
-      }
-    }
+    if (checkSegmentForPushForceFlag(segment)) return true
   }
   return false
 }
