@@ -760,19 +760,22 @@ function useSaveCallbacks(data: ReturnType<typeof useSettingsFetch>) {
   }
 }
 
-function usePerformSave(
-  cwd: string | null,
-  globalDirty: boolean,
-  globalForm: ReturnType<typeof useSettingsFetch>["globalForm"],
-  globalBaseline: ReturnType<typeof useSettingsFetch>["globalBaseline"],
-  projectDirty: boolean,
-  projectForm: ReturnType<typeof useSettingsFetch>["projectForm"],
-  projectBaseline: ReturnType<typeof useSettingsFetch>["projectBaseline"],
-  onGlobalSaved: ReturnType<typeof useSaveCallbacks>["onGlobalSaved"],
-  onProjectSaved: ReturnType<typeof useSaveCallbacks>["onProjectSaved"],
-  setGlobalError: ReturnType<typeof useSettingsFetch>["setGlobalError"],
+type PerformSaveParams = {
+  cwd: string | null
+  globalDirty: boolean
+  globalForm: ReturnType<typeof useSettingsFetch>["globalForm"]
+  globalBaseline: ReturnType<typeof useSettingsFetch>["globalBaseline"]
+  onGlobalSaved: ReturnType<typeof useSaveCallbacks>["onGlobalSaved"]
+  projectDirty: boolean
+  projectForm: ReturnType<typeof useSettingsFetch>["projectForm"]
+  projectBaseline: ReturnType<typeof useSettingsFetch>["projectBaseline"]
+  onProjectSaved: ReturnType<typeof useSaveCallbacks>["onProjectSaved"]
+  setGlobalError: ReturnType<typeof useSettingsFetch>["setGlobalError"]
   setProjectError: ReturnType<typeof useSettingsFetch>["setProjectError"]
-): {
+}
+
+// Uses a ref to always-current params so performSave has a stable identity (empty dep array).
+function usePerformSave(params: PerformSaveParams): {
   globalSaving: boolean
   projectSaving: boolean
   status: string
@@ -783,6 +786,8 @@ function usePerformSave(
   const [status, setStatus] = useState("")
   const savingRef = useRef(false)
   const retryRef = useRef(false)
+  const paramsRef = useRef(params)
+  paramsRef.current = params
 
   const performSave = useCallback(async () => {
     if (savingRef.current) {
@@ -790,30 +795,19 @@ function usePerformSave(
       return
     }
     savingRef.current = true
-    setGlobalError("")
-    setProjectError("")
+    const p = paramsRef.current
+    p.setGlobalError("")
+    p.setProjectError("")
     setStatus("Saving...")
     try {
-      await saveSettingsToServer({
-        cwd,
-        globalDirty,
-        globalForm,
-        globalBaseline,
-        onGlobalSaved,
-        setGlobalSaving,
-        projectDirty,
-        projectForm,
-        projectBaseline,
-        onProjectSaved,
-        setProjectSaving,
-      })
+      await saveSettingsToServer({ ...p, setGlobalSaving, setProjectSaving })
       setStatus("Settings saved successfully")
       setTimeout(() => setStatus(""), 2000)
     } catch (err) {
       setStatus("")
       const msg = err instanceof Error ? err.message : "Failed to save settings"
-      if (globalDirty) setGlobalError(msg)
-      if (projectDirty) setProjectError(msg)
+      if (p.globalDirty) p.setGlobalError(msg)
+      if (p.projectDirty) p.setProjectError(msg)
     } finally {
       savingRef.current = false
       if (retryRef.current) {
@@ -821,19 +815,7 @@ function usePerformSave(
         void performSave()
       }
     }
-  }, [
-    cwd,
-    globalDirty,
-    globalForm,
-    globalBaseline,
-    projectDirty,
-    projectForm,
-    projectBaseline,
-    onGlobalSaved,
-    onProjectSaved,
-    setGlobalError,
-    setProjectError,
-  ])
+  }, [])
 
   return { globalSaving, projectSaving, status, performSave }
 }
@@ -854,19 +836,19 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
     projectForm,
     projectBaseline
   )
-  const { globalSaving, projectSaving, status, performSave } = usePerformSave(
+  const { globalSaving, projectSaving, status, performSave } = usePerformSave({
     cwd,
     globalDirty,
     globalForm,
     globalBaseline,
+    onGlobalSaved,
     projectDirty,
     projectForm,
     projectBaseline,
-    onGlobalSaved,
     onProjectSaved,
     setGlobalError,
-    setProjectError
-  )
+    setProjectError,
+  })
   const isDirty = globalDirty || projectDirty,
     isSaving = globalSaving || projectSaving
   useSaveEffect(isDirty, isSaving, projectDirty, cwd, performSave)

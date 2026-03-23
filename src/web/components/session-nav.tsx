@@ -233,6 +233,19 @@ function SessionActionButton({
   )
 }
 
+type SessionRowActionsProps = {
+  session: SessionPreview
+  hasLiveProcess: boolean
+  primaryPid: number | undefined
+  isKilling: boolean
+  isDeleting: boolean
+  confirmingDeleteId: string | null
+  selectedProjectCwd: string | null
+  setConfirmingDeleteId: (id: string | null) => void
+  onKillAgentPid: (pid: number) => void | Promise<void>
+  onDeleteSession: (cwd: string, sessionId: string) => void | Promise<void>
+}
+
 function SessionRowActions({
   session,
   hasLiveProcess,
@@ -244,18 +257,7 @@ function SessionRowActions({
   setConfirmingDeleteId,
   onKillAgentPid,
   onDeleteSession,
-}: {
-  session: SessionPreview
-  hasLiveProcess: boolean
-  primaryPid: number | undefined
-  isKilling: boolean
-  isDeleting: boolean
-  confirmingDeleteId: string | null
-  selectedProjectCwd: string | null
-  setConfirmingDeleteId: (id: string | null) => void
-  onKillAgentPid: (pid: number) => void | Promise<void>
-  onDeleteSession: (cwd: string, sessionId: string) => void | Promise<void>
-}) {
+}: SessionRowActionsProps) {
   const { actionLabel, actionDisabled, actionIcon, actionTitle } = resolveSessionAction(
     hasLiveProcess,
     isKilling,
