@@ -383,10 +383,96 @@ function buildLifecycleEvent(
 }
 
 export function executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
-  return withLogBuffer(() => _executeDispatch(req))
+  return withLogBuffer(() => performDispatch(req))
 }
 
-async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
+/** Execute strategy with optional timeout budget and return response. */
+async function executeStrategyWithTimeout(
+  strategy: (typeof STRATEGY_REGISTRY)[keyof typeof STRATEGY_REGISTRY],
+  params: Parameters<typeof strategy.execute>[0],
+  budgetMs: number,
+  budgetSec: number | undefined,
+  dispatchAbort: AbortController,
+  canonicalEvent: string
+): Promise<Record<string, unknown>> {
+  if (budgetMs <= 0) {
+    return await strategy.execute(params)
+  }
+
+  const budgetTimer = setTimeout(() => {
+    log(
+      `   ⏱ DISPATCH TIMEOUT — ${canonicalEvent} exceeded budget ` +
+        `(${budgetSec}s + ${DISPATCH_TIMEOUT_GRACE_MS / 1000}s grace) — aborting hooks`
+    )
+    dispatchAbort.abort()
+  }, budgetMs)
+
+  try {
+    const result = await Promise.race([
+      strategy.execute(params),
+      new Promise<typeof DISPATCH_TIMEOUT_SENTINEL>((resolve) =>
+        setTimeout(() => resolve(DISPATCH_TIMEOUT_SENTINEL), budgetMs)
+      ),
+    ])
+
+    if (result === DISPATCH_TIMEOUT_SENTINEL) {
+      if (!dispatchAbort.signal.aborted) dispatchAbort.abort()
+      return {
+        error: `dispatch timeout: ${canonicalEvent} exceeded ${budgetSec}s budget`,
+      }
+    }
+
+    return result
+  } finally {
+    clearTimeout(budgetTimer)
+  }
+}
+
+/** Build hook log entries from executions and dispatch summary. */
+function buildDispatchLogEntries(
+  executions: HookExecution[],
+  ctx: ReturnType<typeof buildDispatchContext>,
+  dispatchDurationMs: number
+): HookLogEntry[] {
+  const sessionId = typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
+
+  const logEntries: HookLogEntry[] = executions.map((exec) => ({
+    ts: new Date(exec.startTime).toISOString(),
+    event: ctx.canonicalEvent,
+    hookEventName: ctx.hookEventName,
+    hook: exec.file,
+    status: exec.status,
+    skipReason: exec.skipReason,
+    durationMs: exec.durationMs,
+    exitCode: exec.exitCode,
+    matcher: exec.matcher,
+    sessionId,
+    cwd: ctx.cwd,
+    toolName: ctx.toolName,
+    stdoutSnippet: exec.stdoutSnippet || undefined,
+    stderrSnippet: exec.stderrSnippet || undefined,
+  }))
+
+  const ranCount = executions.filter((h) => h.status !== "skipped").length
+  logEntries.push({
+    ts: new Date().toISOString(),
+    event: ctx.canonicalEvent,
+    hookEventName: ctx.hookEventName,
+    hook: "dispatch",
+    status: ranCount === 0 ? "no-hooks" : "ok",
+    durationMs: dispatchDurationMs,
+    exitCode: null,
+    kind: "dispatch",
+    hookCount: ranCount,
+    sessionId,
+    cwd: ctx.cwd,
+    toolName: ctx.toolName,
+  })
+
+  return logEntries
+}
+
+async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const t0 = performance.now()
   const ctx = buildDispatchContext(req)
 
@@ -453,46 +539,9 @@ async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
 
   const dispatchStart = performance.now()
   try {
-    let response: Record<string, unknown>
-
-    if (budgetMs > 0) {
-      const budgetTimer = setTimeout(() => {
-        log(
-          `   ⏱ DISPATCH TIMEOUT — ${ctx.canonicalEvent} exceeded budget ` +
-            `(${budgetSec}s + ${DISPATCH_TIMEOUT_GRACE_MS / 1000}s grace) — aborting hooks`
-        )
-        dispatchAbort.abort()
-      }, budgetMs)
-
-      const result = await Promise.race([
-        strategy.execute({
-          filteredGroups,
-          enrichedPayloadStr,
-          canonicalEvent: ctx.canonicalEvent,
-          hookEventName: ctx.hookEventName,
-          daemonContext: req.daemonContext,
-          cwd: ctx.cwd,
-          signal: dispatchAbort.signal,
-        }),
-        new Promise<typeof DISPATCH_TIMEOUT_SENTINEL>((resolve) =>
-          setTimeout(() => resolve(DISPATCH_TIMEOUT_SENTINEL), budgetMs)
-        ),
-      ])
-
-      clearTimeout(budgetTimer)
-
-      if (result === DISPATCH_TIMEOUT_SENTINEL) {
-        // Ensure abort fires even if the timer callback hasn't run yet
-        // (race condition between setTimeout callbacks).
-        if (!dispatchAbort.signal.aborted) dispatchAbort.abort()
-        response = {
-          error: `dispatch timeout: ${ctx.canonicalEvent} exceeded ${budgetSec}s budget`,
-        }
-      } else {
-        response = result
-      }
-    } else {
-      response = await strategy.execute({
+    const response = await executeStrategyWithTimeout(
+      strategy,
+      {
         filteredGroups,
         enrichedPayloadStr,
         canonicalEvent: ctx.canonicalEvent,
@@ -500,50 +549,19 @@ async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
         daemonContext: req.daemonContext,
         cwd: ctx.cwd,
         signal: dispatchAbort.signal,
-      })
-    }
+      },
+      budgetMs,
+      budgetSec,
+      dispatchAbort,
+      ctx.canonicalEvent
+    )
 
     // Fire-and-forget log write — never blocks the dispatch response
     const executions = (response.hookExecutions ?? []) as HookExecution[]
-    const sessionId =
-      typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
 
     if (executions.length > 0) {
-      const logEntries: HookLogEntry[] = executions.map((exec) => ({
-        ts: new Date(exec.startTime).toISOString(),
-        event: ctx.canonicalEvent,
-        hookEventName: ctx.hookEventName,
-        hook: exec.file,
-        status: exec.status,
-        skipReason: exec.skipReason,
-        durationMs: exec.durationMs,
-        exitCode: exec.exitCode,
-        matcher: exec.matcher,
-        sessionId,
-        cwd: ctx.cwd,
-        toolName: ctx.toolName,
-        stdoutSnippet: exec.stdoutSnippet || undefined,
-        stderrSnippet: exec.stderrSnippet || undefined,
-      }))
-
-      // Append dispatch-level summary after individual hook entries
       const dispatchDurationMs = Math.round(performance.now() - dispatchStart)
-      const ranCount = executions.filter((h) => h.status !== "skipped").length
-      logEntries.push({
-        ts: new Date().toISOString(),
-        event: ctx.canonicalEvent,
-        hookEventName: ctx.hookEventName,
-        hook: "dispatch",
-        status: ranCount === 0 ? "no-hooks" : "ok",
-        durationMs: dispatchDurationMs,
-        exitCode: null,
-        kind: "dispatch",
-        hookCount: ranCount,
-        sessionId,
-        cwd: ctx.cwd,
-        toolName: ctx.toolName,
-      })
-
+      const logEntries = buildDispatchLogEntries(executions, ctx, dispatchDurationMs)
       void appendHookLogs(logEntries)
     }
 
