@@ -1,7 +1,7 @@
 import { dirname, extname, join } from "node:path"
 import tailwindcss from "bun-plugin-tailwind"
 import type { LRUCache } from "lru-cache"
-import { executeDispatch } from "../../dispatch/execute.ts"
+import { type DispatchLifecycleUpdate, executeDispatch } from "../../dispatch/execute.ts"
 import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { getRepoSlug } from "../../git-helpers.ts"
 import { readHookLogs } from "../../hook-log.ts"
@@ -332,6 +332,61 @@ function reapStaleDispatches(activeHookDispatches: Map<string, ActiveHookDispatc
   }
 }
 
+function createDispatchLifecycleHandler(
+  ctx: DaemonWebServerContext
+): (update: DispatchLifecycleUpdate) => void {
+  return (update) => {
+    if (update.phase === "start") {
+      ctx.activeHookDispatches.set(update.requestId, {
+        requestId: update.requestId,
+        canonicalEvent: update.canonicalEvent,
+        hookEventName: update.hookEventName,
+        cwd: update.cwd,
+        sessionId: update.sessionId,
+        hooks: update.hooks,
+        startedAt: update.startedAt,
+        toolName: update.toolName,
+        toolInputSummary: update.toolInputSummary,
+      })
+      return
+    }
+    ctx.activeHookDispatches.delete(update.requestId)
+  }
+}
+
+async function updateParsedPayloadMetrics(
+  ctx: DaemonWebServerContext,
+  payloadStr: string,
+  canonicalEvent: string,
+  durationMs: number
+): Promise<void> {
+  const parsed = await ctx.workerRuntime.parseDispatchPayload(payloadStr)
+  if (!parsed) return
+
+  const nowMs = Date.now()
+  if (parsed.cwd) {
+    ctx.touchProject(parsed.cwd)
+    recordDispatch(ctx.getProjectMetrics(parsed.cwd), canonicalEvent, durationMs)
+    ctx.registerProjectWatchers(parsed.cwd)
+  }
+  if (parsed.sessionId) {
+    const prev = ctx.sessionActivity.get(parsed.sessionId)
+    ctx.sessionActivity.set(parsed.sessionId, {
+      lastSeen: nowMs,
+      dispatches: (prev?.dispatches ?? 0) + 1,
+    })
+    if (canonicalEvent === "preToolUse" && parsed.toolName) {
+      captureSessionToolCall(
+        ctx.sessionToolCalls,
+        parsed.sessionId,
+        parsed.toolName,
+        parsed.toolInput,
+        nowMs
+      )
+    }
+  }
+}
+
 async function handleDispatchRoute(
   req: Request,
   url: URL,
@@ -355,43 +410,23 @@ async function handleDispatchRoute(
   // ensuring all spawned processes are SIGTERM'd instead of orphaned.
   const requestAbort = new AbortController()
 
-  const dispatchPromise = executeDispatch({
-    canonicalEvent,
-    hookEventName,
-    payloadStr,
-    daemonContext: true,
-    signal: requestAbort.signal,
-    transcriptSummaryProvider: async (path) => {
-      const index = await ctx.transcriptIndex.get(path)
-      return index?.summary ?? null
-    },
-    manifestProvider: async (cwd) => ctx.manifestCache.get(cwd),
-    onDispatchLifecycle: (update) => {
-      if (update.phase === "start") {
-        ctx.activeHookDispatches.set(update.requestId, {
-          requestId: update.requestId,
-          canonicalEvent: update.canonicalEvent,
-          hookEventName: update.hookEventName,
-          cwd: update.cwd,
-          sessionId: update.sessionId,
-          hooks: update.hooks,
-          startedAt: update.startedAt,
-          toolName: update.toolName,
-          toolInputSummary: update.toolInputSummary,
-        })
-        return
-      }
-      ctx.activeHookDispatches.delete(update.requestId)
-    },
-  })
-
   const TIMEOUT_SENTINEL = Symbol("timeout")
-  const requestTimer = setTimeout(() => {
-    requestAbort.abort()
-  }, requestTimeoutMs)
+  const requestTimer = setTimeout(() => requestAbort.abort(), requestTimeoutMs)
 
   const raceResult = await Promise.race([
-    dispatchPromise,
+    executeDispatch({
+      canonicalEvent,
+      hookEventName,
+      payloadStr,
+      daemonContext: true,
+      signal: requestAbort.signal,
+      transcriptSummaryProvider: async (path) => {
+        const index = await ctx.transcriptIndex.get(path)
+        return index?.summary ?? null
+      },
+      manifestProvider: async (cwd) => ctx.manifestCache.get(cwd),
+      onDispatchLifecycle: createDispatchLifecycleHandler(ctx),
+    }),
     new Promise<typeof TIMEOUT_SENTINEL>((resolve) =>
       setTimeout(() => resolve(TIMEOUT_SENTINEL), requestTimeoutMs)
     ),
@@ -413,37 +448,11 @@ async function handleDispatchRoute(
     )
   }
 
-  const result = raceResult
   const durationMs = performance.now() - start
   recordDispatch(ctx.globalMetrics, canonicalEvent, durationMs)
+  await updateParsedPayloadMetrics(ctx, payloadStr, canonicalEvent, durationMs)
 
-  const parsed = await ctx.workerRuntime.parseDispatchPayload(payloadStr)
-  if (parsed) {
-    const nowMs = Date.now()
-    if (parsed.cwd) {
-      ctx.touchProject(parsed.cwd)
-      recordDispatch(ctx.getProjectMetrics(parsed.cwd), canonicalEvent, durationMs)
-      ctx.registerProjectWatchers(parsed.cwd)
-    }
-    if (parsed.sessionId) {
-      const prev = ctx.sessionActivity.get(parsed.sessionId)
-      ctx.sessionActivity.set(parsed.sessionId, {
-        lastSeen: nowMs,
-        dispatches: (prev?.dispatches ?? 0) + 1,
-      })
-      if (canonicalEvent === "preToolUse" && parsed.toolName) {
-        captureSessionToolCall(
-          ctx.sessionToolCalls,
-          parsed.sessionId,
-          parsed.toolName,
-          parsed.toolInput,
-          nowMs
-        )
-      }
-    }
-  }
-
-  return Response.json(result.response)
+  return Response.json(raceResult.response)
 }
 
 function handleMetricsRoute(url: URL, ctx: DaemonWebServerContext): Response {

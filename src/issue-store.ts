@@ -531,6 +531,46 @@ async function runWithLimit(concurrency: number, tasks: (() => Promise<void>)[])
 }
 
 /** Execute a single mutation against live GitHub via gh CLI. Returns true on success. */
+async function executeCommentMutation(
+  mutation: MutationPayload,
+  num: string,
+  cwd: string,
+  repo: string
+): Promise<boolean> {
+  if (!mutation.body) return true
+  return runGhCommand(["gh", "issue", "comment", num, "--body", mutation.body], cwd, repo, mutation)
+}
+
+async function executeLabelAddMutation(
+  mutation: MutationPayload,
+  num: string,
+  cwd: string,
+  repo: string
+): Promise<boolean> {
+  if (!mutation.labels?.length) return true
+  return runGhCommand(
+    ["gh", "issue", "edit", num, ...mutation.labels.flatMap((l) => ["--add-label", l])],
+    cwd,
+    repo,
+    mutation
+  )
+}
+
+async function executeMilestoneSetMutation(
+  mutation: MutationPayload,
+  num: string,
+  cwd: string,
+  repo: string
+): Promise<boolean> {
+  if (mutation.milestone == null) return true
+  return runGhCommand(
+    ["gh", "issue", "edit", num, "--milestone", String(mutation.milestone)],
+    cwd,
+    repo,
+    mutation
+  )
+}
+
 async function executeMutation(
   mutation: MutationPayload,
   cwd: string,
@@ -542,31 +582,13 @@ async function executeMutation(
     case "close":
       return runGhCommand(["gh", "issue", "close", num], cwd, repo, mutation)
     case "comment":
-      if (!mutation.body) return true
-      return runGhCommand(
-        ["gh", "issue", "comment", num, "--body", mutation.body],
-        cwd,
-        repo,
-        mutation
-      )
+      return executeCommentMutation(mutation, num, cwd, repo)
     case "resolve":
       return executeResolveMutation(mutation, num, cwd, repo)
     case "label_add":
-      if (!mutation.labels?.length) return true
-      return runGhCommand(
-        ["gh", "issue", "edit", num, ...mutation.labels.flatMap((l) => ["--add-label", l])],
-        cwd,
-        repo,
-        mutation
-      )
+      return executeLabelAddMutation(mutation, num, cwd, repo)
     case "milestone_set":
-      if (mutation.milestone == null) return true
-      return runGhCommand(
-        ["gh", "issue", "edit", num, "--milestone", String(mutation.milestone)],
-        cwd,
-        repo,
-        mutation
-      )
+      return executeMilestoneSetMutation(mutation, num, cwd, repo)
     case "pr_comment":
     case "pr_merge":
     case "pr_review":
@@ -668,6 +690,29 @@ async function _executeMutationCommand(
   return proc.exitCode === 0
 }
 
+function buildCreateMutationArgs(
+  mutation: MutationPayload,
+  repo: string
+): { args: string[]; stdin: Response } | null {
+  if (!mutation.title) return null
+  const payload: Record<string, unknown> = { title: mutation.title }
+  if (mutation.body) payload.body = mutation.body
+  if (mutation.labels?.length) payload.labels = mutation.labels
+  return {
+    args: [`repos/${repo}/issues`, "-X", "POST", "--input", "-"],
+    stdin: new Response(JSON.stringify(payload)),
+  }
+}
+
+function buildCommentMutationArgs(
+  mutation: MutationPayload,
+  repo: string,
+  num: string
+): { args: string[] } | null {
+  if (!mutation.body) return null
+  return { args: [`repos/${repo}/issues/${num}/comments`, "-f", `body=${mutation.body}`] }
+}
+
 function _buildMutationArgs(
   mutation: MutationPayload,
   repo: string,
@@ -677,8 +722,7 @@ function _buildMutationArgs(
     case "close":
       return { args: [`repos/${repo}/issues/${num}`, "-X", "PATCH", "-f", "state=closed"] }
     case "comment":
-      if (!mutation.body) return null
-      return { args: [`repos/${repo}/issues/${num}/comments`, "-f", `body=${mutation.body}`] }
+      return buildCommentMutationArgs(mutation, repo, num)
     case "label_add":
       if (!mutation.labels?.length) return null
       return {
@@ -696,16 +740,8 @@ function _buildMutationArgs(
           `milestone=${String(mutation.milestone)}`,
         ],
       }
-    case "create": {
-      if (!mutation.title) return null
-      const payload: Record<string, unknown> = { title: mutation.title }
-      if (mutation.body) payload.body = mutation.body
-      if (mutation.labels?.length) payload.labels = mutation.labels
-      return {
-        args: [`repos/${repo}/issues`, "-X", "POST", "--input", "-"],
-        stdin: new Response(JSON.stringify(payload)),
-      }
-    }
+    case "create":
+      return buildCreateMutationArgs(mutation, repo)
     default:
       return null
   }
