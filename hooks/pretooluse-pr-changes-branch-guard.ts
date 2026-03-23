@@ -40,14 +40,19 @@ type Review = {
   body?: string
 }
 
-async function validateInputs(input: Record<string, unknown>, cwd: string): Promise<boolean> {
+function isValidShellCommand(input: Record<string, unknown>): boolean {
   if (!isShellTool((input?.tool_name as string) ?? "")) return false
   const command: string = ((input?.tool_input as Record<string, unknown>)?.command as string) ?? ""
-  if (!GIT_CHECKOUT_RE.test(command) && !GIT_SWITCH_RE.test(command)) return false
-  if (!(await isGitRepo(cwd))) return false
-  if (!(await isGitHubRemote(cwd))) return false
-  if (!hasGhCli()) return false
-  return true
+  return GIT_CHECKOUT_RE.test(command) || GIT_SWITCH_RE.test(command)
+}
+
+async function isValidEnvironment(cwd: string): Promise<boolean> {
+  return (await isGitRepo(cwd)) && (await isGitHubRemote(cwd)) && hasGhCli()
+}
+
+async function validateInputs(input: Record<string, unknown>, cwd: string): Promise<boolean> {
+  if (!isValidShellCommand(input)) return false
+  return await isValidEnvironment(cwd)
 }
 
 async function getBranchAndPr(
@@ -77,30 +82,18 @@ async function getChangesRequestedReviews(
   return reviews.filter((r) => r.state === "CHANGES_REQUESTED")
 }
 
-async function main() {
-  const input = shellHookInputSchema.parse(await Bun.stdin.json())
-  const cwd: string = input.cwd ?? process.cwd()
-
-  if (!(await validateInputs(input as Record<string, unknown>, cwd))) process.exit(0)
-
-  const branchAndPr = await getBranchAndPr(cwd)
-  if (!branchAndPr) process.exit(0)
-
-  const { branch: currentBranch, pr } = branchAndPr
-  const changesRequested = await getChangesRequestedReviews(pr, cwd)
-  if (changesRequested === null) process.exit(0)
-  if (changesRequested.length === 0) {
-    allowPreToolUse(`PR #${pr.number} has no changes requested — branch switch allowed`)
-  }
-
-  // Build block message
+function buildBlockReason(
+  pr: { number: number; title: string },
+  changesRequested: Review[],
+  currentBranch: string
+): string {
   const reviewers = [...new Set(changesRequested.map((r) => r.user.login))].join(", ")
   const details = changesRequested
     .slice(0, 5)
     .map((r) => `- @${r.user.login}: ${r.body || "No comment provided"}`)
     .join("\n")
 
-  const reason =
+  return (
     `PR #${pr.number} ("${pr.title}") has changes requested by ${reviewers}.\n\n` +
     `You cannot switch away from this branch until the requested changes are addressed.\n\n` +
     `Requested changes:\n${details}\n\n` +
@@ -121,7 +114,26 @@ async function main() {
         `  gh pr edit ${pr.number} --add-reviewer ${reviewers}`,
       ].join("\n")
     )
+  )
+}
 
+async function main() {
+  const input = shellHookInputSchema.parse(await Bun.stdin.json())
+  const cwd: string = input.cwd ?? process.cwd()
+
+  if (!(await validateInputs(input as Record<string, unknown>, cwd))) process.exit(0)
+
+  const branchAndPr = await getBranchAndPr(cwd)
+  if (!branchAndPr) process.exit(0)
+
+  const { branch: currentBranch, pr } = branchAndPr
+  const changesRequested = await getChangesRequestedReviews(pr, cwd)
+  if (changesRequested === null) process.exit(0)
+  if (changesRequested.length === 0) {
+    allowPreToolUse(`PR #${pr.number} has no changes requested — branch switch allowed`)
+  }
+
+  const reason = buildBlockReason(pr, changesRequested, currentBranch)
   denyPreToolUse(reason)
 }
 
