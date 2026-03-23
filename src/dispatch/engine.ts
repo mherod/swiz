@@ -565,6 +565,32 @@ export async function runEntry(
 /** Fire async hooks — fire-and-forget in CLI, awaited with timeout in daemon.
  *  When a dispatch-level abort signal is provided, in-flight daemon-context
  *  hooks are killed via the worker pool's abort propagation. */
+function scheduleAsyncHookEntry(
+  hook: HookDef,
+  payloadStr: string,
+  pool: ReturnType<typeof getWorkerPool> | null,
+  daemonContext: boolean | undefined,
+  signal: AbortSignal | undefined,
+  promises: Promise<void>[]
+): void {
+  if (daemonContext && pool) {
+    log(`   → ${hook.file} [async, daemon-awaited]`)
+    const timeout = hook.timeout ?? DEFAULT_TIMEOUT
+    const p = pool
+      .runHook(hook.file, payloadStr, timeout, signal)
+      .then(() => {})
+      .catch((err) => {
+        log(`   ⚠ ${hook.file} [async error: ${err}]`)
+      })
+    promises.push(p)
+  } else {
+    log(`   → ${hook.file} [async, fire-and-forget]`)
+    runHook(hook.file, payloadStr, hook.timeout, signal)
+      .then(() => {})
+      .catch(() => {})
+  }
+}
+
 export async function launchAsyncHooks(
   groups: HookGroup[],
   payloadStr: string,
@@ -601,22 +627,7 @@ export async function launchAsyncHooks(
       log(`   ⏭ ${hook.file} [async, dispatch aborted]`)
       continue
     }
-    if (daemonContext && pool) {
-      log(`   → ${hook.file} [async, daemon-awaited]`)
-      const timeout = hook.timeout ?? DEFAULT_TIMEOUT
-      const p = pool
-        .runHook(hook.file, payloadStr, timeout, signal)
-        .then(() => {})
-        .catch((err) => {
-          log(`   ⚠ ${hook.file} [async error: ${err}]`)
-        })
-      promises.push(p)
-    } else {
-      log(`   → ${hook.file} [async, fire-and-forget]`)
-      runHook(hook.file, payloadStr, hook.timeout, signal)
-        .then(() => {})
-        .catch(() => {})
-    }
+    scheduleAsyncHookEntry(hook, payloadStr, pool, daemonContext, signal, promises)
   }
   if (daemonContext && promises.length > 0) {
     log(`   awaiting ${promises.length} async hook(s) in daemon context`)

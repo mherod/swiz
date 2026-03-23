@@ -187,6 +187,32 @@ async function runCreateTask(rest: string[]): Promise<void> {
   await applyStateUpdate(stateFlag, process.cwd())
 }
 
+async function handleCompleteError(
+  e: unknown,
+  sessionId: string,
+  taskId: string,
+  evidence: string | undefined,
+  verify: string | undefined,
+  filterCwd: string | undefined
+): Promise<void> {
+  const msg = e instanceof Error ? e.message : String(e)
+  if (msg.includes("Invalid transition") && msg.includes("pending")) {
+    console.log(`  ⚡ Auto-transitioning #${taskId}: pending → in_progress → completed`)
+    await updateStatus(sessionId, taskId, "in_progress", { filterCwd })
+    await updateStatus(sessionId, taskId, "completed", { evidence, verifyText: verify, filterCwd })
+    return
+  }
+  if (msg.includes("not found")) {
+    const sessionSuffix = sessionId ? ` --session ${sessionId.slice(0, 8)}` : ""
+    throw new Error(
+      `${msg}\n\n` +
+        `To close all incomplete tasks at once (avoids per-task disambiguation):\n` +
+        `  swiz tasks complete-all${sessionSuffix}`
+    )
+  }
+  throw e
+}
+
 async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void> {
   const [taskId, ...sessionArgs] = rest
   if (!taskId) {
@@ -235,28 +261,8 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
       filterCwd,
     })
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    // Auto-transition pending → in_progress → completed so callers don't need two commands
-    if (msg.includes("Invalid transition") && msg.includes("pending")) {
-      console.log(`  ⚡ Auto-transitioning #${taskId}: pending → in_progress → completed`)
-      await updateStatus(sessionId, taskId, "in_progress", { filterCwd })
-      await updateStatus(sessionId, taskId, "completed", {
-        evidence,
-        verifyText: verify,
-        filterCwd,
-      })
-      return
-    }
-    // Guide the agent to use complete-all when individual task lookup fails
-    if (msg.includes("not found")) {
-      const sessionSuffix = sessionId ? ` --session ${sessionId.slice(0, 8)}` : ""
-      throw new Error(
-        `${msg}\n\n` +
-          `To close all incomplete tasks at once (avoids per-task disambiguation):\n` +
-          `  swiz tasks complete-all${sessionSuffix}`
-      )
-    }
-    throw e
+    await handleCompleteError(e, sessionId, taskId, evidence, verify, filterCwd)
+    return
   }
   if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
 }
