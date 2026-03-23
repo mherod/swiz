@@ -1015,7 +1015,15 @@ function _normalizeMergeable(value: unknown): string {
   return "UNKNOWN"
 }
 
-function _normalizePullRequest(pr: Record<string, unknown>) {
+function validatePullRequestFields(pr: Record<string, unknown>): {
+  number: number
+  title: string
+  state: string
+  url: string
+  createdAt: string
+  updatedAt: string
+  headRefName: string
+} | null {
   const number = typeof pr.number === "number" ? pr.number : null
   const title = typeof pr.title === "string" ? pr.title : null
   const state = typeof pr.state === "string" ? pr.state : "open"
@@ -1024,19 +1032,27 @@ function _normalizePullRequest(pr: Record<string, unknown>) {
   const updatedAt = typeof pr.updated_at === "string" ? pr.updated_at : null
   const head = asRecord(pr.head)
   const headRefName = typeof head?.ref === "string" ? head.ref : null
+
   if (!number || !title || !url || !createdAt || !updatedAt || !headRefName) return null
+  return { number, title, state, url, createdAt, updatedAt, headRefName }
+}
+
+function _normalizePullRequest(pr: Record<string, unknown>) {
+  const fields = validatePullRequestFields(pr)
+  if (!fields) return null
+
   return {
-    number,
-    title,
-    state,
-    headRefName,
+    number: fields.number,
+    title: fields.title,
+    state: fields.state,
+    headRefName: fields.headRefName,
     author: normalizeRestUser(pr.user),
     reviewDecision: "",
     statusCheckRollup: [] as unknown[],
     mergeable: _normalizeMergeable(pr.mergeable),
-    url,
-    createdAt,
-    updatedAt,
+    url: fields.url,
+    createdAt: fields.createdAt,
+    updatedAt: fields.updatedAt,
   }
 }
 
