@@ -61,6 +61,21 @@ function buildSwizTasksRules(): SwizTasksRule[] {
   ]
 }
 
+function checkRules(command: string, rules: SwizTasksRule[]): void {
+  for (const rule of rules) {
+    if (!rule.match(command)) continue
+
+    if (rule.severity === "warn") {
+      allowPreToolUse(rule.message)
+    } else {
+      denyPreToolUse(rule.message)
+    }
+  }
+
+  // No rules matched — allow the command
+  allowPreToolUse("")
+}
+
 async function main() {
   const input = await Bun.stdin.json()
 
@@ -76,21 +91,7 @@ async function main() {
 
   const command: string = input?.tool_input?.command ?? ""
   const rules = buildSwizTasksRules()
-
-  // Check each rule against the command
-  for (const rule of rules) {
-    if (!rule.match(command)) continue
-
-    // Match found
-    if (rule.severity === "warn") {
-      allowPreToolUse(rule.message)
-    } else {
-      denyPreToolUse(rule.message)
-    }
-  }
-
-  // No rules matched — allow the command
-  allowPreToolUse("")
+  checkRules(command, rules)
 }
 
 if (import.meta.main) {
