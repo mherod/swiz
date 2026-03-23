@@ -190,6 +190,18 @@ function CheckboxField(props: {
 
 // --- Toggle definitions (data-driven to keep JSX compact) ---
 
+const GLOBAL_NUMBER_FIELDS: Array<{
+  key: keyof GlobalSettingsForm
+  label: string
+}> = [
+  { key: "memoryLineThreshold", label: "Memory line threshold" },
+  { key: "memoryWordThreshold", label: "Memory word threshold" },
+  { key: "taskDurationWarningMinutes", label: "Task duration warning (min)" },
+  { key: "largeFileSizeKb", label: "Large file size (KB)" },
+  { key: "pushCooldownMinutes", label: "Push cooldown (min)" },
+  { key: "prAgeGateMinutes", label: "PR age gate (min)" },
+]
+
 const GLOBAL_TOGGLES: Array<{
   key: keyof GlobalSettingsForm
   label: string
@@ -435,6 +447,30 @@ function NumberField(props: {
   )
 }
 
+function GlobalNumberFieldsGrid({
+  form,
+  num,
+}: {
+  form: GlobalSettingsForm
+  num: (key: keyof GlobalSettingsForm) => (e: { target: { value: string } }) => void
+}) {
+  return (
+    <div className="settings-grid-cols-2">
+      {GLOBAL_NUMBER_FIELDS.map(({ key, label }) => (
+        <label key={key} className="settings-label">
+          <span>{label}</span>
+          <input
+            type="number"
+            className="settings-input"
+            value={form[key] as number}
+            onChange={num(key)}
+          />
+        </label>
+      ))}
+    </div>
+  )
+}
+
 function ProjectFieldsGrid({
   form,
   set,
@@ -529,64 +565,7 @@ function GlobalSettingsColumn({
           ]}
         />
       </label>
-
-      <div className="settings-grid-cols-2">
-        <label className="settings-label">
-          <span>Memory line threshold</span>
-          <input
-            type="number"
-            className="settings-input"
-            value={form.memoryLineThreshold}
-            onChange={num("memoryLineThreshold")}
-          />
-        </label>
-        <label className="settings-label">
-          <span>Memory word threshold</span>
-          <input
-            type="number"
-            className="settings-input"
-            value={form.memoryWordThreshold}
-            onChange={num("memoryWordThreshold")}
-          />
-        </label>
-        <label className="settings-label">
-          <span>Task duration warning (min)</span>
-          <input
-            type="number"
-            className="settings-input"
-            value={form.taskDurationWarningMinutes}
-            onChange={num("taskDurationWarningMinutes")}
-          />
-        </label>
-        <label className="settings-label">
-          <span>Large file size (KB)</span>
-          <input
-            type="number"
-            className="settings-input"
-            value={form.largeFileSizeKb}
-            onChange={num("largeFileSizeKb")}
-          />
-        </label>
-        <label className="settings-label">
-          <span>Push cooldown (min)</span>
-          <input
-            type="number"
-            className="settings-input"
-            value={form.pushCooldownMinutes}
-            onChange={num("pushCooldownMinutes")}
-          />
-        </label>
-        <label className="settings-label">
-          <span>PR age gate (min)</span>
-          <input
-            type="number"
-            className="settings-input"
-            value={form.prAgeGateMinutes}
-            onChange={num("prAgeGateMinutes")}
-          />
-        </label>
-      </div>
-
+      <GlobalNumberFieldsGrid form={form} num={num} />
       {GLOBAL_TOGGLES.map(({ key, label, desc }) => (
         <CheckboxField
           key={key}
