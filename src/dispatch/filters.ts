@@ -80,6 +80,24 @@ export function countHooks(groups: HookGroup[]): number {
 // ─── Group filters ──────────────────────────────────────────────────────────
 
 /**
+ * Filter hooks from groups using a predicate, preserving group references when
+ * no hooks are removed and dropping groups that become empty.
+ *
+ * Extracted from 5 duplicate inline implementations (issue #351).
+ */
+export function filterHooksFromGroups(
+  groups: HookGroup[],
+  predicate: (hook: HookGroup["hooks"][number]) => boolean
+): HookGroup[] {
+  return groups
+    .map((group) => {
+      const hooks = group.hooks.filter(predicate)
+      return hooks.length === group.hooks.length ? group : { ...group, hooks }
+    })
+    .filter((group) => group.hooks.length > 0)
+}
+
+/**
  * Resolve whether PR-merge hooks should be active based on collaborationMode
  * and the legacy prMergeMode boolean.
  *
@@ -110,39 +128,26 @@ export function filterPrMergeModeHooks(
   const settingsPreserved = new Set<string>()
   if (prAgeGateMinutes > 0) settingsPreserved.add("pretooluse-pr-age-gate.ts")
 
-  return groups
-    .map((group) => {
-      const hooks = group.hooks.filter(
-        (hook) => !PR_MERGE_MODE_DISABLED_HOOKS.has(hook.file) || settingsPreserved.has(hook.file)
-      )
-      return hooks.length === group.hooks.length ? group : { ...group, hooks }
-    })
-    .filter((group) => group.hooks.length > 0)
+  return filterHooksFromGroups(
+    groups,
+    (hook) => !PR_MERGE_MODE_DISABLED_HOOKS.has(hook.file) || settingsPreserved.has(hook.file)
+  )
 }
 
 export function filterDisabledHooks(groups: HookGroup[], disabledHooks: Set<string>): HookGroup[] {
   if (disabledHooks.size === 0) return groups
 
-  return groups
-    .map((group) => {
-      const hooks = group.hooks.filter((hook) => !disabledHooks.has(hook.file))
-      return hooks.length === group.hooks.length ? group : { ...group, hooks }
-    })
-    .filter((group) => group.hooks.length > 0)
+  return filterHooksFromGroups(groups, (hook) => !disabledHooks.has(hook.file))
 }
 
 export function filterStackHooks(groups: HookGroup[], detectedStacks: string[]): HookGroup[] {
   if (detectedStacks.length === 0) return groups
 
   const stackSet = new Set(detectedStacks)
-  return groups
-    .map((group) => {
-      const hooks = group.hooks.filter(
-        (hook) => !hook.stacks || hook.stacks.some((s) => stackSet.has(s))
-      )
-      return hooks.length === group.hooks.length ? group : { ...group, hooks }
-    })
-    .filter((group) => group.hooks.length > 0)
+  return filterHooksFromGroups(
+    groups,
+    (hook) => !hook.stacks || hook.stacks.some((s) => stackSet.has(s))
+  )
 }
 
 // ─── State-based filtering ──────────────────────────────────────────────────
@@ -166,12 +171,7 @@ export async function filterStateHooks(groups: HookGroup[], cwd: string): Promis
 
     // In planning/reviewing states, skip hooks that only make sense during active development
     if (intent === "planning-work" || intent === "awaiting-review") {
-      return groups
-        .map((group) => {
-          const hooks = group.hooks.filter((hook) => !ACTIVE_DEVELOPMENT_ONLY_HOOKS.has(hook.file))
-          return hooks.length === group.hooks.length ? group : { ...group, hooks }
-        })
-        .filter((group) => group.hooks.length > 0)
+      return filterHooksFromGroups(groups, (hook) => !ACTIVE_DEVELOPMENT_ONLY_HOOKS.has(hook.file))
     }
 
     return groups
@@ -192,15 +192,10 @@ export function filterRequiredSettingsHooks(
   groups: HookGroup[],
   effective: EffectiveSwizSettings
 ): HookGroup[] {
-  return groups
-    .map((group) => {
-      const hooks = group.hooks.filter((hook) => {
-        if (!hook.requiredSettings || hook.requiredSettings.length === 0) return true
-        return hook.requiredSettings.every((key) => !!effective[key])
-      })
-      return hooks.length === group.hooks.length ? group : { ...group, hooks }
-    })
-    .filter((group) => group.hooks.length > 0)
+  return filterHooksFromGroups(groups, (hook) => {
+    if (!hook.requiredSettings || hook.requiredSettings.length === 0) return true
+    return hook.requiredSettings.every((key) => !!effective[key])
+  })
 }
 
 // ─── Composite settings filter ──────────────────────────────────────────────
