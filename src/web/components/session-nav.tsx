@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { cn } from "../lib/cn.ts"
 import type { ProjectSessions, SessionPreview } from "./session-browser-types.ts"
 import {
@@ -227,6 +227,21 @@ function SessionRowActions({
     isDeleting,
     primaryPid
   )
+  const handleClick = useCallback(() => {
+    if (hasLiveProcess && primaryPid) {
+      void onKillAgentPid(primaryPid)
+      return
+    }
+    if (!selectedProjectCwd) return
+    setConfirmingDeleteId(session.id)
+  }, [
+    hasLiveProcess,
+    primaryPid,
+    onKillAgentPid,
+    selectedProjectCwd,
+    session.id,
+    setConfirmingDeleteId,
+  ])
 
   if (confirmingDeleteId === session.id && !hasLiveProcess) {
     return (
@@ -246,14 +261,7 @@ function SessionRowActions({
         "session-action-btn",
         hasLiveProcess ? "session-action-kill" : "session-action-delete"
       )}
-      onClick={() => {
-        if (hasLiveProcess && primaryPid) {
-          void onKillAgentPid(primaryPid)
-          return
-        }
-        if (!selectedProjectCwd) return
-        setConfirmingDeleteId(session.id)
-      }}
+      onClick={handleClick}
       disabled={actionDisabled}
       title={actionTitle}
       aria-label={actionTitle}
