@@ -229,6 +229,86 @@ export interface HookRunResult {
   execution: HookExecution
 }
 
+function getConfiguredTimeoutSec(timeoutSec?: number): number {
+  const baseTimeoutSec = timeoutSec ?? DEFAULT_TIMEOUT
+  const testTimeoutSec = process.env.SWIZ_TEST_HOOK_TIMEOUT_SEC
+    ? parseInt(process.env.SWIZ_TEST_HOOK_TIMEOUT_SEC, 10)
+    : 0
+  return Math.max(baseTimeoutSec, testTimeoutSec)
+}
+
+function setupTimeoutHandling(
+  proc: ReturnType<typeof Bun.spawn>,
+  file: string,
+  configuredTimeoutSec: number
+): {
+  timer: ReturnType<typeof setTimeout>
+  sigkillTimer: ReturnType<typeof setTimeout> | undefined
+} {
+  let sigkillTimer: ReturnType<typeof setTimeout> | undefined
+  const timer = setTimeout(() => {
+    log(`   ⏱ TIMEOUT (${configuredTimeoutSec}s) — SIGTERM ${file}`)
+    proc.kill("SIGTERM")
+    sigkillTimer = setTimeout(() => {
+      log(`   ⏱ SIGKILL escalation — ${file} did not exit after SIGTERM`)
+      proc.kill("SIGKILL")
+    }, SIGKILL_GRACE_MS)
+  }, configuredTimeoutSec * 1000)
+  return { timer, sigkillTimer }
+}
+
+function setupAbortListener(
+  proc: ReturnType<typeof Bun.spawn>,
+  file: string,
+  signal?: AbortSignal
+): { onAbort: () => void; cleanup: () => void } {
+  let sigkillTimer: ReturnType<typeof setTimeout> | undefined
+  const onAbort = () => {
+    log(`   ⊘ ABORTED ${file} (another hook denied)`)
+    proc.kill("SIGTERM")
+    sigkillTimer = setTimeout(() => {
+      proc.kill("SIGKILL")
+    }, SIGKILL_GRACE_MS)
+  }
+  signal?.addEventListener("abort", onAbort, { once: true })
+  return {
+    onAbort,
+    cleanup: () => {
+      signal?.removeEventListener("abort", onAbort)
+      if (sigkillTimer) clearTimeout(sigkillTimer)
+    },
+  }
+}
+
+function logHookOutput(trimmed: string, exitCode: number | null, stderrTrimmed: string): void {
+  if (stderrTrimmed) log(`   stderr: ${stderrTrimmed.slice(0, 500)}`)
+  if (exitCode !== 0) log(`   exit=${exitCode}`)
+  if (trimmed) log(`   stdout: ${trimmed.slice(0, 500)}`)
+}
+
+function buildAbortedResult(
+  file: string,
+  startTime: number,
+  endTime: number,
+  configuredTimeoutSec: number,
+  exitCode: number | null
+): HookRunResult {
+  return {
+    parsed: null,
+    execution: {
+      file,
+      startTime,
+      endTime,
+      durationMs: endTime - startTime,
+      configuredTimeoutSec,
+      status: "aborted",
+      exitCode,
+      stdoutSnippet: "",
+      stderrSnippet: "",
+    },
+  }
+}
+
 export async function runHook(
   file: string,
   payloadStr: string,
@@ -238,29 +318,12 @@ export async function runHook(
   // If already aborted before we even spawn, return immediately.
   if (signal?.aborted) {
     const now = Date.now()
-    return {
-      parsed: null,
-      execution: {
-        file,
-        startTime: now,
-        endTime: now,
-        durationMs: 0,
-        configuredTimeoutSec: timeoutSec ?? DEFAULT_TIMEOUT,
-        status: "aborted",
-        exitCode: null,
-        stdoutSnippet: "",
-        stderrSnippet: "",
-      },
-    }
+    return buildAbortedResult(file, now, now, timeoutSec ?? DEFAULT_TIMEOUT, null)
   }
 
   const cmd = file.endsWith(".ts") ? ["bun", join(HOOKS_DIR, file)] : [join(HOOKS_DIR, file)]
   const startTime = Date.now()
-  const baseTimeoutSec = timeoutSec ?? DEFAULT_TIMEOUT
-  const testTimeoutSec = process.env.SWIZ_TEST_HOOK_TIMEOUT_SEC
-    ? parseInt(process.env.SWIZ_TEST_HOOK_TIMEOUT_SEC, 10)
-    : 0
-  const configuredTimeoutSec = Math.max(baseTimeoutSec, testTimeoutSec)
+  const configuredTimeoutSec = getConfiguredTimeoutSec(timeoutSec)
 
   const proc = Bun.spawn(cmd, {
     stdin: "pipe",
@@ -273,63 +336,41 @@ export async function runHook(
 
   let timedOut = false
   let aborted = false
-  let sigkillTimer: ReturnType<typeof setTimeout> | undefined
-  const timer = setTimeout(() => {
-    timedOut = true
-    log(`   ⏱ TIMEOUT (${configuredTimeoutSec}s) — SIGTERM ${file}`)
-    proc.kill("SIGTERM")
-    // Escalate to SIGKILL if the process doesn't exit after grace period.
-    sigkillTimer = setTimeout(() => {
-      log(`   ⏱ SIGKILL escalation — ${file} did not exit after SIGTERM`)
-      proc.kill("SIGKILL")
-    }, SIGKILL_GRACE_MS)
-  }, configuredTimeoutSec * 1000)
 
-  // Listen for abort signal to kill the process mid-flight.
-  const onAbort = () => {
-    aborted = true
-    log(`   ⊘ ABORTED ${file} (another hook denied)`)
-    proc.kill("SIGTERM")
-    sigkillTimer = setTimeout(() => {
-      proc.kill("SIGKILL")
-    }, SIGKILL_GRACE_MS)
-  }
-  signal?.addEventListener("abort", onAbort, { once: true })
+  const timeoutHandler = setupTimeoutHandling(proc, file, configuredTimeoutSec)
+  const abortHandler = setupAbortListener(proc, file, signal)
+
+  signal?.addEventListener(
+    "abort",
+    () => {
+      aborted = true
+    },
+    { once: true }
+  )
 
   const [output, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
   ])
   await proc.exited
-  clearTimeout(timer)
-  if (sigkillTimer) clearTimeout(sigkillTimer)
-  signal?.removeEventListener("abort", onAbort)
+
+  clearTimeout(timeoutHandler.timer)
+  if (timeoutHandler.sigkillTimer) {
+    clearTimeout(timeoutHandler.sigkillTimer)
+    timedOut = true
+  }
+  abortHandler.cleanup()
 
   const endTime = Date.now()
   const exitCode = proc.exitCode
   const trimmed = output.trim()
   const stderrTrimmed = stderr.trim()
 
-  if (stderrTrimmed) log(`   stderr: ${stderrTrimmed.slice(0, 500)}`)
-  if (exitCode !== 0) log(`   exit=${exitCode}`)
-  if (trimmed) log(`   stdout: ${trimmed.slice(0, 500)}`)
+  logHookOutput(trimmed, exitCode, stderrTrimmed)
 
   // If aborted, treat as a clean skip — don't classify output from a killed process.
   if (aborted) {
-    return {
-      parsed: null,
-      execution: {
-        file,
-        startTime,
-        endTime,
-        durationMs: endTime - startTime,
-        configuredTimeoutSec,
-        status: "aborted",
-        exitCode: exitCode ?? null,
-        stdoutSnippet: "",
-        stderrSnippet: "",
-      },
-    }
+    return buildAbortedResult(file, startTime, endTime, configuredTimeoutSec, exitCode ?? null)
   }
 
   const { parsed, status } = classifyHookOutput({ timedOut, trimmed, exitCode })
