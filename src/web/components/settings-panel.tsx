@@ -740,16 +740,41 @@ function useSaveEffect(
   }, [cwd, isDirty, isSaving, performSave, projectDirty])
 }
 
+function useSaveCallbacks(data: ReturnType<typeof useSettingsFetch>) {
+  const { setGlobalForm, setGlobalBaseline, setProjectForm, setProjectBaseline } = data
+  return {
+    onGlobalSaved: useCallback(
+      (f: typeof data.globalForm) => {
+        setGlobalForm(f)
+        setGlobalBaseline(f)
+      },
+      [setGlobalForm, setGlobalBaseline]
+    ),
+    onProjectSaved: useCallback(
+      (f: typeof data.projectForm) => {
+        setProjectForm(f)
+        setProjectBaseline(f)
+      },
+      [setProjectForm, setProjectBaseline]
+    ),
+  }
+}
+
 function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetch>) {
   const [globalSaving, setGlobalSaving] = useState(false)
   const [projectSaving, setProjectSaving] = useState(false)
   const [status, setStatus] = useState("")
   const savingRef = useRef(false)
   const retryRef = useRef(false)
-  const { globalForm, globalBaseline, projectForm, projectBaseline } = data
-  const { setGlobalForm, setGlobalBaseline, setProjectForm, setProjectBaseline } = data
-  const { setGlobalError, setProjectError } = data
-
+  const {
+    globalForm,
+    globalBaseline,
+    projectForm,
+    projectBaseline,
+    setGlobalError,
+    setProjectError,
+  } = data
+  const { onGlobalSaved, onProjectSaved } = useSaveCallbacks(data)
   const { globalDirty, projectDirty } = useDirtyState(
     globalForm,
     globalBaseline,
@@ -772,18 +797,12 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
         globalDirty,
         globalForm,
         globalBaseline,
-        onGlobalSaved: (f) => {
-          setGlobalForm(f)
-          setGlobalBaseline(f)
-        },
+        onGlobalSaved,
         setGlobalSaving,
         projectDirty,
         projectForm,
         projectBaseline,
-        onProjectSaved: (f) => {
-          setProjectForm(f)
-          setProjectBaseline(f)
-        },
+        onProjectSaved,
         setProjectSaving,
       })
       setStatus("Settings saved successfully")
@@ -802,23 +821,20 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
     }
   }, [
     cwd,
-    globalBaseline,
     globalDirty,
     globalForm,
-    projectBaseline,
+    globalBaseline,
     projectDirty,
     projectForm,
-    setGlobalBaseline,
+    projectBaseline,
+    onGlobalSaved,
+    onProjectSaved,
     setGlobalError,
-    setGlobalForm,
-    setProjectBaseline,
     setProjectError,
-    setProjectForm,
   ])
 
-  const isDirty = globalDirty || projectDirty
-  const isSaving = globalSaving || projectSaving
-
+  const isDirty = globalDirty || projectDirty,
+    isSaving = globalSaving || projectSaving
   useSaveEffect(isDirty, isSaving, projectDirty, cwd, performSave)
 
   return { globalDirty, projectDirty, isSaving, status }
