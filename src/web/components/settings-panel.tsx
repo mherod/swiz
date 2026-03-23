@@ -21,6 +21,7 @@ interface GlobalSettingsForm {
   changesRequestedGate: boolean
   personalRepoIssuesGate: boolean
   issueCloseGate: boolean
+  qualityChecksGate: boolean
   taskDurationWarningMinutes: number
   largeFileSizeKb: number
 }
@@ -44,6 +45,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   changesRequestedGate: true,
   personalRepoIssuesGate: true,
   issueCloseGate: false,
+  qualityChecksGate: true,
   taskDurationWarningMinutes: 45,
   largeFileSizeKb: 200,
 }
@@ -114,6 +116,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     changesRequestedGate: settings.changesRequestedGate !== false,
     personalRepoIssuesGate: settings.personalRepoIssuesGate !== false,
     issueCloseGate: !!settings.issueCloseGate,
+    qualityChecksGate: settings.qualityChecksGate !== false,
     taskDurationWarningMinutes: Number(settings.taskDurationWarningMinutes) || 45,
     largeFileSizeKb: Number(settings.largeFileSizeKb) || 200,
   }
@@ -251,6 +254,11 @@ const GLOBAL_TOGGLES: Array<{
     key: "issueCloseGate",
     label: "Issue close gate",
     desc: "Block issue close commands unless explicitly allowed or required by a skill.",
+  },
+  {
+    key: "qualityChecksGate",
+    label: "Quality checks gate",
+    desc: "Run lint and typecheck quality checks before allowing session stop.",
   },
   {
     key: "speak",

@@ -55,6 +55,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   changesRequestedGate: true,
   personalRepoIssuesGate: true,
   issueCloseGate: false,
+  qualityChecksGate: true,
   strictNoDirectMain: false,
   taskDurationWarningMinutes: 10,
   memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
@@ -91,6 +92,7 @@ export const swizSettingsSchema = z.object({
   changesRequestedGate: z.boolean().catch(DEFAULT_SETTINGS.changesRequestedGate),
   personalRepoIssuesGate: z.boolean().catch(DEFAULT_SETTINGS.personalRepoIssuesGate),
   issueCloseGate: z.boolean().catch(DEFAULT_SETTINGS.issueCloseGate),
+  qualityChecksGate: z.boolean().catch(DEFAULT_SETTINGS.qualityChecksGate),
   strictNoDirectMain: z.boolean().catch(DEFAULT_SETTINGS.strictNoDirectMain),
   taskDurationWarningMinutes: z
     .number()
@@ -277,7 +279,7 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   if (defaultBranch) result.defaultBranch = defaultBranch
 
   applySchemaFields(obj, result)
-  applyBooleanFields(obj, result, ["strictNoDirectMain"])
+  applyBooleanFields(obj, result, ["qualityChecksGate", "strictNoDirectMain"])
   applyStringArrayFields(obj, result, ["disabledHooks", "plugins", "largeFileAllowPatterns"])
   applyHooksAndCategories(obj, result)
   return result
@@ -315,6 +317,12 @@ function normalizeProjectHooks(raw: unknown[]): HookGroup[] {
         if (typeof h.cooldownSeconds === "number") def.cooldownSeconds = h.cooldownSeconds
         if (Array.isArray(h.stacks) && h.stacks.every((s: unknown) => typeof s === "string")) {
           def.stacks = h.stacks as string[]
+        }
+        if (
+          Array.isArray(h.requiredSettings) &&
+          h.requiredSettings.every((s: unknown) => typeof s === "string")
+        ) {
+          def.requiredSettings = h.requiredSettings as string[]
         }
         return def
       })

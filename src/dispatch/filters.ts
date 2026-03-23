@@ -12,6 +12,7 @@ import { getCanonicalPathHash } from "../git-helpers.ts"
 import type { HookGroup } from "../manifest.ts"
 import {
   type CollaborationMode,
+  type EffectiveSwizSettings,
   getEffectiveSwizSettings,
   type ProjectSwizSettings,
   readProjectSettings,
@@ -180,6 +181,30 @@ export async function filterStateHooks(groups: HookGroup[], cwd: string): Promis
   }
 }
 
+// ─── Required-settings filter ────────────────────────────────────────────────
+
+/**
+ * Remove hooks whose `requiredSettings` are not all truthy in the effective
+ * settings.  This is a zero-cost fast path — the dispatcher skips the hook
+ * entirely without spawning a process.
+ */
+export function filterRequiredSettingsHooks(
+  groups: HookGroup[],
+  effective: EffectiveSwizSettings
+): HookGroup[] {
+  return groups
+    .map((group) => {
+      const hooks = group.hooks.filter((hook) => {
+        if (!hook.requiredSettings || hook.requiredSettings.length === 0) return true
+        return hook.requiredSettings.every(
+          (key) => !!(effective as unknown as Record<string, unknown>)[key]
+        )
+      })
+      return hooks.length === group.hooks.length ? group : { ...group, hooks }
+    })
+    .filter((group) => group.hooks.length > 0)
+}
+
 // ─── Composite settings filter ──────────────────────────────────────────────
 
 export async function applyHookSettingFilters(
@@ -203,7 +228,7 @@ export async function applyHookSettingFilters(
 
   const rawSessionId = payload.session_id ?? payload.sessionId
   const sessionId = typeof rawSessionId === "string" ? rawSessionId : null
-  const effective = getEffectiveSwizSettings(settings, sessionId)
+  const effective = getEffectiveSwizSettings(settings, sessionId, projectSettings)
 
   const disabledSet = new Set([
     ...(settings.disabledHooks ?? []),
@@ -215,7 +240,8 @@ export async function applyHookSettingFilters(
     effective.collaborationMode,
     effective.prAgeGateMinutes
   )
-  const stackFiltered = filterStackHooks(filtered, detectedStacks)
+  const settingsFiltered = filterRequiredSettingsHooks(filtered, effective)
+  const stackFiltered = filterStackHooks(settingsFiltered, detectedStacks)
   const stateFiltered = await filterStateHooks(stackFiltered, cwd)
   const disabledFiltered = filterDisabledHooks(stateFiltered, disabledSet)
 

@@ -94,6 +94,8 @@ export interface ProjectSwizSettings {
   ambitionMode?: AmbitionMode
   /** Per-project collaboration mode override (e.g. team repos require PR flow). */
   collaborationMode?: CollaborationMode
+  /** Run lint and typecheck quality checks before allowing session stop. */
+  qualityChecksGate?: boolean
   /** Enforce feature-branch workflow even for solo repositories. */
   strictNoDirectMain?: boolean
   /** Warn when an in-progress task exceeds this runtime. */
@@ -159,6 +161,8 @@ export interface SwizSettings {
   personalRepoIssuesGate: boolean
   /** When true, blocks issue close commands unless explicitly allowed. */
   issueCloseGate: boolean
+  /** When true, runs lint and typecheck quality checks before allowing session stop. */
+  qualityChecksGate: boolean
   /** When true, blocks all direct pushes to the default branch regardless of repo type. */
   strictNoDirectMain: boolean
   taskDurationWarningMinutes: number
@@ -208,6 +212,7 @@ export const projectSettingsSchema = z.object({
   dirtyWorktreeThreshold: z.number().int().min(1).optional(),
   ambitionMode: ambitionModeSchema.optional(),
   collaborationMode: collaborationModeSchema.optional(),
+  qualityChecksGate: z.boolean().optional(),
   strictNoDirectMain: z.boolean().optional(),
   taskDurationWarningMinutes: z.number().int().min(1).optional(),
   disabledHooks: z.array(z.string().min(1)).optional(),

@@ -62,6 +62,7 @@ export {
   extractCwd,
   filterDisabledHooks,
   filterPrMergeModeHooks,
+  filterRequiredSettingsHooks,
   filterStackHooks,
   filterStateHooks,
   hookCooldownPath,

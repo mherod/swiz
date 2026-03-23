@@ -42,6 +42,15 @@ export interface HookDef {
    * Example: `stacks: ["bun", "node"]` — skip for Go / Python / Rust projects
    */
   stacks?: string[]
+  /**
+   * Optional list of settings keys (from EffectiveSwizSettings) that must all
+   * be truthy for this hook to run.  Evaluated by the dispatcher before spawning
+   * the hook process — when any listed setting is falsy the hook is skipped
+   * entirely (zero-cost fast path).
+   *
+   * Example: `requiredSettings: ["qualityChecksGate"]`
+   */
+  requiredSettings?: string[]
 }
 
 /**
@@ -123,7 +132,7 @@ export const manifest: HookGroup[] = [
       { file: "stop-git-status.ts", timeout: 10 },
       { file: "stop-lockfile-drift.ts", timeout: 10 },
       { file: "stop-lint-staged.ts", timeout: 30 },
-      { file: "stop-quality-checks.ts", timeout: 60 },
+      { file: "stop-quality-checks.ts", timeout: 60, requiredSettings: ["qualityChecksGate"] },
       { file: "stop-branch-conflicts.ts", timeout: 10 },
       { file: "stop-pr-description.ts", timeout: 10 },
       { file: "stop-pr-changes-requested.ts", timeout: 10 },

@@ -262,6 +262,7 @@ const GLOBAL_BOOL_ROWS: BoolSettingRow[] = [
   ["github-ci-gate:         ", "githubCiGate", "global"],
   ["changes-requested-gate: ", "changesRequestedGate", "global"],
   ["issue-close-gate:       ", "issueCloseGate", "global"],
+  ["quality-checks-gate:    ", "qualityChecksGate", "global"],
 ]
 
 function printGlobalSettings(

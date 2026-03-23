@@ -129,6 +129,22 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "qualityChecksGate",
+    aliases: [
+      "quality-checks-gate",
+      "qualitychecksgate",
+      "quality_checks_gate",
+      "quality-checks",
+      "quality-gate",
+    ],
+    kind: "boolean",
+    scopes: ["global", "project"],
+    docs: {
+      enableDescription: "Run lint and typecheck quality checks before allowing session stop",
+      disableDescription: "Skip lint and typecheck quality checks on session stop",
+    },
+  },
+  {
     key: "strictNoDirectMain",
     aliases: [
       "strict-no-direct-main",
