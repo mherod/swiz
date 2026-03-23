@@ -8,7 +8,7 @@
 import { unlink } from "node:fs/promises"
 import { compact } from "lodash-es"
 import { GIT_DIR_NAME, GIT_INDEX_LOCK, joinGitPath } from "../src/git-helpers.ts"
-import { toolHookInputSchema } from "./schemas.ts"
+import { type ToolHookInput, toolHookInputSchema } from "./schemas.ts"
 import {
   allowPreToolUse,
   denyPreToolUse,
@@ -32,26 +32,30 @@ const STALE_LOCK_AGE_MS = 10_000
 
 // ── Main Execution ───────────────────────────────────────────────────────────
 
-async function main() {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
-
+async function validateMainInputs(
+  input: ToolHookInput
+): Promise<{ cwd: string; repoRoot: string; lockPath: string } | null> {
   // Only applies to shell tools running git commands.
-  if (!isShellTool(input.tool_name ?? "")) process.exit(0)
+  if (!isShellTool(input.tool_name ?? "")) return null
 
   const command: string = (input.tool_input?.command as string) ?? ""
-  if (!GIT_ANY_CMD_RE.test(command)) process.exit(0)
+  if (!GIT_ANY_CMD_RE.test(command)) return null
 
   const cwd = input.cwd || process.cwd()
 
   // Find the repo root — handles subdirectories and worktrees.
   const repoRoot = await git(["rev-parse", "--show-toplevel"], cwd)
-  if (!repoRoot) process.exit(0) // Not in a git repo; let git itself report the error.
+  if (!repoRoot) return null // Not in a git repo; let git itself report the error.
 
   const lockPath = joinGitPath(repoRoot, GIT_INDEX_LOCK)
 
   // Quick exit if no lock exists
-  if (!(await Bun.file(lockPath).exists())) process.exit(0)
+  if (!(await Bun.file(lockPath).exists())) return null
 
+  return { cwd, repoRoot, lockPath }
+}
+
+async function handleLockResolution(lockPath: string, repoRoot: string): Promise<void> {
   // Wait for lock to resolve or git process to finish
   const { lockExists, gitActive } = await waitForLockResolution(lockPath, repoRoot)
 
@@ -88,6 +92,15 @@ async function main() {
       ).trimEnd(),
     ].join("\n")
   )
+}
+
+async function main() {
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+
+  const validated = await validateMainInputs(input)
+  if (!validated) process.exit(0)
+
+  await handleLockResolution(validated.lockPath, validated.repoRoot)
 }
 
 // ── High-Level Logic ─────────────────────────────────────────────────────────
@@ -196,9 +209,9 @@ async function getRunningGitPids(): Promise<number[]> {
   return compact(result.stdout.trim().split("\n").map(Number))
 }
 
-async function getAncestorPids(): Promise<Set<number>> {
+async function buildParentMap(): Promise<Map<number, number>> {
   const result = await spawnWithTimeout(["ps", "-eo", "pid,ppid"], { timeoutMs: 3_000 })
-  if (result.timedOut) return new Set<number>()
+  if (result.timedOut) return new Map<number, number>()
   const out = result.stdout
 
   const parentMap = new Map<number, number>()
@@ -209,6 +222,10 @@ async function getAncestorPids(): Promise<Set<number>> {
     if (!Number.isNaN(pid) && !Number.isNaN(ppid)) parentMap.set(pid, ppid)
   }
 
+  return parentMap
+}
+
+function walkAncestry(parentMap: Map<number, number>): Set<number> {
   const ancestors = new Set<number>()
   let cur = process.ppid
   for (let i = 0; i < MAX_ANCESTRY_DEPTH && cur > 1; i++) {
@@ -217,8 +234,12 @@ async function getAncestorPids(): Promise<Set<number>> {
     if (!ppid || ppid === cur) break
     cur = ppid
   }
-
   return ancestors
+}
+
+async function getAncestorPids(): Promise<Set<number>> {
+  const parentMap = await buildParentMap()
+  return walkAncestry(parentMap)
 }
 
 async function isPidUsingRepoDir(pid: number, repoRoot: string): Promise<boolean> {

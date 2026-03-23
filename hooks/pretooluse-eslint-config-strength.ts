@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { fileEditHookInputSchema } from "./schemas.ts"
+import { type FileEditHookInput, fileEditHookInputSchema } from "./schemas.ts"
 import { allowPreToolUse, denyPreToolUse } from "./utils/hook-utils.ts"
 
 // Check if file is an ESLint config file
@@ -49,20 +49,29 @@ function checkForWeakening(oldString: string, newString: string): void {
   }
 }
 
+function extractInputValues(
+  input: FileEditHookInput
+): { filePath: string; oldString: string; newString: string } | null {
+  const filePath = input.tool_input?.file_path ?? ""
+  if (!isEslintConfigFile(filePath)) return null
+
+  const oldString = input.tool_input?.old_string ?? ""
+  if (!oldString) return null
+
+  const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
+  return { filePath, oldString, newString }
+}
+
 async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
-  const filePath = input.tool_input?.file_path ?? ""
-  if (!isEslintConfigFile(filePath)) process.exit(0)
-
   // NFKC normalization handled by fileEditHookInputSchema.transform()
-  const oldString = input.tool_input?.old_string ?? ""
-  if (!oldString) process.exit(0)
+  const values = extractInputValues(input)
+  if (!values) process.exit(0)
 
-  const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
-  checkForWeakening(oldString, newString)
+  checkForWeakening(values.oldString, values.newString)
 
-  const newCounts = countEnforcements(newString)
+  const newCounts = countEnforcements(values.newString)
   allowPreToolUse(`ESLint config strength maintained (${newCounts.warnings}w/${newCounts.errors}e)`)
 }
 
