@@ -498,28 +498,32 @@ function extractLocalCommandBlocks(text: string): {
   return { cleanedText, blocks }
 }
 
+function _extractBashContent(
+  text: string,
+  pattern: RegExp
+): { value: string | null; cleaned: string } {
+  const match = pattern.exec(text)
+  const value = match?.[1]?.trim() ?? null
+  const cleaned = match ? text.replace(match[0], "").trim() : text
+  return { value, cleaned }
+}
+
 function extractBashBlocks(text: string): {
   cleanedText: string
   blocks: ParsedUserMetadataBlock[]
 } {
   const blocks: ParsedUserMetadataBlock[] = []
-  let cleanedText = text
-
   const bashInputRe = /<bash-input>([\s\S]*?)<\/bash-input>/gi
   const bashStdoutRe = /<bash-stdout>([\s\S]*?)<\/bash-stdout>/gi
   const bashStderrRe = /<bash-stderr>([\s\S]*?)<\/bash-stderr>/gi
 
-  const inputMatch = bashInputRe.exec(cleanedText)
-  const command = inputMatch?.[1]?.trim() ?? null
-  if (inputMatch) cleanedText = cleanedText.replace(inputMatch[0], "").trim()
-
-  const stdoutMatch = bashStdoutRe.exec(cleanedText)
-  const stdout = stdoutMatch?.[1]?.trim() ?? null
-  if (stdoutMatch) cleanedText = cleanedText.replace(stdoutMatch[0], "").trim()
-
-  const stderrMatch = bashStderrRe.exec(cleanedText)
-  const stderr = stderrMatch?.[1]?.trim() ?? null
-  if (stderrMatch) cleanedText = cleanedText.replace(stderrMatch[0], "").trim()
+  let cleanedText = text
+  const { value: command, cleaned: t1 } = _extractBashContent(cleanedText, bashInputRe)
+  cleanedText = t1
+  const { value: stdout, cleaned: t2 } = _extractBashContent(cleanedText, bashStdoutRe)
+  cleanedText = t2
+  const { value: stderr, cleaned: t3 } = _extractBashContent(cleanedText, bashStderrRe)
+  cleanedText = t3
 
   if (command) {
     const details: Array<{ label: string; value: string }> = [{ label: "command", value: command }]

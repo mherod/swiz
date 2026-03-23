@@ -307,40 +307,45 @@ export function skillNameFromMessage(message: SessionMessage | undefined): strin
   return null
 }
 
+function _parseBaseDirectorySkillPayload(text: string, trimmed: string): ParsedSkillPayload | null {
+  const lines = text.split("\n")
+  const firstLine = lines[0]?.trim() ?? ""
+  const baseDirMatch = firstLine.match(/^Base directory for this skill:\s*(.+)$/i)
+  const baseDir = baseDirMatch?.[1]?.trim() ?? null
+  const body = (baseDirMatch ? lines.slice(1).join("\n") : text).trim()
+  const bodyOut = body || trimmed
+  return { baseDir, body: bodyOut, declaredSkill: null }
+}
+
+function _parseSkillContentPayload(lines: string[], trimmed: string): ParsedSkillPayload | null {
+  const skillHead = lines[0]?.trim().match(/^SKILL CONTENT\s+(\S+)/i)
+  if (!skillHead) return null
+  const declaredRaw = skillHead[1]?.trim() ?? ""
+  if (!declaredRaw) return null
+  let rest = lines.slice(1)
+  let baseDir: string | null = null
+  const firstRest = rest[0]?.trim() ?? ""
+  const looseBase = firstRest.match(/^base dir\s+(.+)$/i)
+  if (looseBase) {
+    baseDir = looseBase[1]!.trim()
+    rest = rest.slice(1)
+  }
+  const body = rest.join("\n").trim()
+  const bodyOut = body || trimmed
+  return { baseDir, body: bodyOut, declaredSkill: declaredRaw }
+}
+
 export function parseSkillPayload(text: string): ParsedSkillPayload | null {
   if (typeof text !== "string") return null
   const trimmed = text.trim()
   if (!trimmed) return null
 
   if (/Base directory for this skill:/i.test(text)) {
-    const lines = text.split("\n")
-    const firstLine = lines[0]?.trim() ?? ""
-    const baseDirMatch = firstLine.match(/^Base directory for this skill:\s*(.+)$/i)
-    const baseDir = baseDirMatch?.[1]?.trim() ?? null
-    const body = (baseDirMatch ? lines.slice(1).join("\n") : text).trim()
-    const bodyOut = body || trimmed
-    return { baseDir, body: bodyOut, declaredSkill: null }
+    return _parseBaseDirectorySkillPayload(text, trimmed)
   }
 
   const lines = trimmed.split("\n")
-  const skillHead = lines[0]?.trim().match(/^SKILL CONTENT\s+(\S+)/i)
-  if (skillHead) {
-    const declaredRaw = skillHead[1]?.trim() ?? ""
-    if (!declaredRaw) return null
-    let rest = lines.slice(1)
-    let baseDir: string | null = null
-    const firstRest = rest[0]?.trim() ?? ""
-    const looseBase = firstRest.match(/^base dir\s+(.+)$/i)
-    if (looseBase) {
-      baseDir = looseBase[1]!.trim()
-      rest = rest.slice(1)
-    }
-    const body = rest.join("\n").trim()
-    const bodyOut = body || trimmed
-    return { baseDir, body: bodyOut, declaredSkill: declaredRaw }
-  }
-
-  return null
+  return _parseSkillContentPayload(lines, trimmed)
 }
 
 /** Assistant turn with no text and exactly one Skill tool call (typical skill fetch row). */
@@ -430,15 +435,27 @@ export function isInternalToolName(name: string): boolean {
 
 export type ToolCategory = "shell" | "file" | "search" | "task" | "skill" | "agent" | "other"
 
+const TOOL_CATEGORIES: Record<string, ToolCategory> = {
+  bash: "shell",
+  shell: "shell",
+  read: "file",
+  edit: "file",
+  write: "file",
+  notebookedit: "file",
+  grep: "search",
+  glob: "search",
+  rg: "search",
+  skill: "skill",
+  toolsearch: "skill",
+  agent: "agent",
+  task: "agent",
+}
+
 export function classifyTool(name: string): ToolCategory {
   const lower = name.toLowerCase()
-  if (lower === "bash" || lower === "shell") return "shell"
-  if (lower === "read" || lower === "edit" || lower === "write" || lower === "notebookedit")
-    return "file"
-  if (lower === "grep" || lower === "glob" || lower === "rg") return "search"
+  const mapped = TOOL_CATEGORIES[lower]
+  if (mapped) return mapped
   if (lower.startsWith("task") || lower === "update_plan") return "task"
-  if (lower === "skill" || lower === "toolsearch") return "skill"
-  if (lower === "agent" || lower === "task") return "agent"
   return "other"
 }
 
