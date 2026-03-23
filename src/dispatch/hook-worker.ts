@@ -8,6 +8,8 @@ import { spawn as bunSpawn } from "bun"
 
 const HOOKS_DIR = join(import.meta.dir, "..", "..", "hooks")
 const DEFAULT_TIMEOUT = 10 // seconds
+/** Grace period before escalating SIGTERM → SIGKILL on timed-out hooks (ms). */
+const SIGKILL_GRACE_MS = 3_000
 
 interface RunHookMessage {
   id: string
@@ -64,11 +66,16 @@ async function runHookInWorker(
     await proc.stdin.write(payloadStr)
     await proc.stdin.end()
 
-    // Set up timeout
+    // Set up timeout with SIGKILL escalation
     let timedOut = false
+    let sigkillTimer: ReturnType<typeof setTimeout> | undefined
     const timer = setTimeout(() => {
       timedOut = true
-      proc.kill()
+      proc.kill("SIGTERM")
+      // Escalate to SIGKILL if the process doesn't exit after grace period.
+      sigkillTimer = setTimeout(() => {
+        proc.kill("SIGKILL")
+      }, SIGKILL_GRACE_MS)
     }, baseTimeoutSec * 1000)
 
     // Wait for completion
@@ -78,6 +85,7 @@ async function runHookInWorker(
     ])
     await proc.exited
     clearTimeout(timer)
+    if (sigkillTimer) clearTimeout(sigkillTimer)
 
     const endTime = Date.now()
     const exitCode = proc.exitCode

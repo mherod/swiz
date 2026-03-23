@@ -16,6 +16,7 @@ import {
   GIT_ANY_CMD_RE,
   git,
   isShellTool,
+  spawnWithTimeout,
 } from "./utils/hook-utils.ts"
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -190,17 +191,15 @@ async function isGitProcessActiveForRepo(repoRoot: string): Promise<boolean> {
 // ── Low-Level Utilities ──────────────────────────────────────────────────────
 
 async function getRunningGitPids(): Promise<number[]> {
-  const proc = Bun.spawn(["pgrep", "-f", "git"], { stdout: "pipe", stderr: "pipe" })
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
-  if (proc.exitCode !== 0) return []
-  return compact(out.trim().split("\n").map(Number))
+  const result = await spawnWithTimeout(["pgrep", "-f", "git"], { timeoutMs: 3_000 })
+  if (result.timedOut || result.exitCode !== 0) return []
+  return compact(result.stdout.trim().split("\n").map(Number))
 }
 
 async function getAncestorPids(): Promise<Set<number>> {
-  const proc = Bun.spawn(["ps", "-eo", "pid,ppid"], { stdout: "pipe", stderr: "pipe" })
-  const out = await new Response(proc.stdout).text()
-  await proc.exited
+  const result = await spawnWithTimeout(["ps", "-eo", "pid,ppid"], { timeoutMs: 3_000 })
+  if (result.timedOut) return new Set<number>()
+  const out = result.stdout
 
   const parentMap = new Map<number, number>()
   for (const line of out.trim().split("\n").slice(1)) {
@@ -224,24 +223,13 @@ async function getAncestorPids(): Promise<Set<number>> {
 
 async function isPidUsingRepoDir(pid: number, repoRoot: string): Promise<boolean> {
   try {
-    const proc = Bun.spawn(["lsof", "-p", String(pid), "-d", "cwd", "-Fn"], {
-      stdout: "pipe",
-      stderr: "pipe",
+    const result = await spawnWithTimeout(["lsof", "-p", String(pid), "-d", "cwd", "-Fn"], {
+      timeoutMs: LSOF_TIMEOUT_MS,
     })
 
-    let killed = false
-    const timer = setTimeout(() => {
-      killed = true
-      proc.kill()
-    }, LSOF_TIMEOUT_MS)
+    if (result.timedOut) return false
 
-    const out = await new Response(proc.stdout).text()
-    await proc.exited
-    clearTimeout(timer)
-
-    if (killed) return false
-
-    return out
+    return result.stdout
       .split("\n")
       .some((line) => line.startsWith("n") && line.slice(1).startsWith(repoRoot))
   } catch {

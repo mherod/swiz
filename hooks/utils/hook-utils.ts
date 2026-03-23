@@ -111,6 +111,75 @@ import {
   TASK_TOOLS,
 } from "../../src/tool-matchers.ts"
 
+// ─── Subprocess timeout enforcement ─────────────────────────────────────────
+// Hooks that spawn subprocesses (lint, typecheck, prettier, git, gh, etc.)
+// must use this utility to prevent hangs. SIGTERM is sent on timeout,
+// escalated to SIGKILL after a grace period.
+
+/** Grace period before escalating SIGTERM → SIGKILL (ms). */
+const SUBPROCESS_SIGKILL_GRACE_MS = 3_000
+
+export interface SpawnWithTimeoutResult {
+  stdout: string
+  stderr: string
+  exitCode: number | null
+  timedOut: boolean
+}
+
+/**
+ * Spawn a subprocess with a hard timeout. On expiry, sends SIGTERM then
+ * escalates to SIGKILL after the grace period. Returns stdout, stderr,
+ * exit code, and whether the timeout fired.
+ *
+ * @param cmd  Command array, e.g. `["bun", "run", "lint"]`
+ * @param opts.cwd  Working directory for the subprocess
+ * @param opts.timeoutMs  Hard timeout in milliseconds (default: 30_000)
+ * @param opts.stdin  Optional stdin content to pipe into the process
+ */
+export async function spawnWithTimeout(
+  cmd: string[],
+  opts: { cwd?: string; timeoutMs?: number; stdin?: string } = {}
+): Promise<SpawnWithTimeoutResult> {
+  const { cwd, timeoutMs = 30_000, stdin } = opts
+
+  const proc = Bun.spawn(cmd, {
+    cwd,
+    stdin: stdin !== undefined ? "pipe" : "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+
+  if (stdin !== undefined && proc.stdin) {
+    void proc.stdin.write(stdin)
+    void proc.stdin.end()
+  }
+
+  let timedOut = false
+  let sigkillTimer: ReturnType<typeof setTimeout> | undefined
+  const timer = setTimeout(() => {
+    timedOut = true
+    proc.kill("SIGTERM")
+    sigkillTimer = setTimeout(() => {
+      proc.kill("SIGKILL")
+    }, SUBPROCESS_SIGKILL_GRACE_MS)
+  }, timeoutMs)
+
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+  clearTimeout(timer)
+  if (sigkillTimer) clearTimeout(sigkillTimer)
+
+  return {
+    stdout,
+    stderr,
+    exitCode: proc.exitCode,
+    timedOut,
+  }
+}
+
 // ─── Projected content computation ──────────────────────────────────────────
 // Shared by PreToolUse hooks that validate file content before writes.
 // For Edit: reads current file, applies old→new replacement.

@@ -7,7 +7,7 @@ import { createHash } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDir } from "../src/home.ts"
-import { emitContext } from "./utils/hook-utils.ts"
+import { emitContext, spawnWithTimeout } from "./utils/hook-utils.ts"
 
 const HASH_FILE = join(getHomeDir(), ".local", "share", "swiz", "manifest-hash")
 
@@ -35,6 +35,9 @@ async function writeHash(hash: string): Promise<void> {
   await Bun.write(HASH_FILE, hash)
 }
 
+/** Self-heal install should finish within 10s. */
+const INSTALL_TIMEOUT_MS = 10_000
+
 async function runInstall(swizRoot: string): Promise<boolean> {
   const args = ["bun", join(swizRoot, "index.ts"), "install"]
 
@@ -47,14 +50,8 @@ async function runInstall(swizRoot: string): Promise<boolean> {
     // By default, if no flag is specified, swiz install installs for all detected agents.
   }
 
-  const proc = Bun.spawn(args, {
-    cwd: swizRoot,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-  await proc.exited
-  return proc.exitCode === 0
+  const result = await spawnWithTimeout(args, { cwd: swizRoot, timeoutMs: INSTALL_TIMEOUT_MS })
+  return !result.timedOut && result.exitCode === 0
 }
 
 async function main(): Promise<void> {

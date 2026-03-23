@@ -24,6 +24,8 @@ export interface HookStrategyContext {
   daemonContext?: boolean
   /** Working directory already resolved by executeDispatch — avoids re-parsing enrichedPayloadStr. */
   cwd: string
+  /** Dispatch-level abort signal — when fired, all running hook processes should be killed. */
+  signal?: AbortSignal
 }
 
 /** Interface for hook execution strategies. */
@@ -100,12 +102,16 @@ class PreToolUseStrategy implements HookExecutionStrategy {
     const executions: HookExecution[] = []
 
     const entries = flatSyncHooks(filteredGroups)
-    // AbortController allows early termination: when one hook denies, all other
-    // running hook processes are killed immediately instead of waiting for them
-    // to finish. Each hook checks the signal before spawning and listens for
-    // abort to kill its subprocess mid-flight.
+    // AbortController allows early termination: when one hook denies OR the
+    // dispatch-level timeout fires, all running hook processes are killed
+    // immediately. Each hook checks the signal before spawning and listens
+    // for abort to kill its subprocess mid-flight.
     const controller = new AbortController()
     const { signal } = controller
+
+    // If the dispatch-level signal fires, propagate abort to our local controller.
+    const onDispatchAbort = () => controller.abort()
+    ctx.signal?.addEventListener("abort", onDispatchAbort, { once: true })
 
     // Run async hooks concurrently with sync hooks — in daemon context this avoids
     // blocking the sync fan-out until all async hooks complete.
@@ -120,8 +126,10 @@ class PreToolUseStrategy implements HookExecutionStrategy {
           return result
         })
       ),
-      launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext),
+      launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext, ctx.signal),
     ])
+
+    ctx.signal?.removeEventListener("abort", onDispatchAbort)
 
     for (const { execution, parsed: resp } of results) {
       if (execution.status === "skipped" || execution.status === "aborted") {
@@ -161,23 +169,32 @@ class BlockingStrategy implements HookExecutionStrategy {
 
     // Fan out all sync hooks concurrently with async hooks; scan results in declaration order.
     // For non-stop events, use AbortController to kill remaining hooks on first block.
-    // Stop hooks always run all hooks (no abort) so every blocker is reported.
+    // Stop hooks always run all hooks (no abort on first-block) but still respect
+    // dispatch-level abort for timeout enforcement.
     const entries = flatSyncHooks(filteredGroups)
-    const controller = runAllHooks ? null : new AbortController()
-    const signal = controller?.signal
+    const controller = new AbortController()
+    const { signal } = controller
+
+    // Propagate dispatch-level abort to our local controller.
+    const onDispatchAbort = () => controller.abort()
+    ctx.signal?.addEventListener("abort", onDispatchAbort, { once: true })
 
     const [results] = await Promise.all([
       Promise.all(
         entries.map(async (e) => {
+          // For stop events, only abort on dispatch-level timeout (not first-block).
+          // For other blocking events, also abort on first block.
           const result = await runEntry(e, enrichedPayloadStr, cwd, signal)
           if (!runAllHooks && result.parsed && isBlock(result.parsed)) {
-            controller?.abort()
+            controller.abort()
           }
           return result
         })
       ),
-      launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext),
+      launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext, ctx.signal),
     ])
+
+    ctx.signal?.removeEventListener("abort", onDispatchAbort)
 
     for (const { execution, parsed: resp } of results) {
       if (execution.status === "skipped" || execution.status === "aborted") {
@@ -221,10 +238,11 @@ class ContextStrategy implements HookExecutionStrategy {
 
     // All context hooks are independent — fan out fully, merge results in order.
     // Async hooks run concurrently with the sync fan-out.
+    // Dispatch-level abort signal is passed through for timeout enforcement.
     const entries = flatSyncHooks(filteredGroups)
     const [results] = await Promise.all([
-      Promise.all(entries.map((e) => runEntry(e, enrichedPayloadStr, cwd))),
-      launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext),
+      Promise.all(entries.map((e) => runEntry(e, enrichedPayloadStr, cwd, ctx.signal))),
+      launchAsyncHooks(filteredGroups, enrichedPayloadStr, daemonContext, ctx.signal),
     ])
 
     for (const { execution, parsed: resp } of results) {

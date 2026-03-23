@@ -12,7 +12,7 @@ import type { HookLogEntry } from "../hook-log.ts"
 import { appendHookLogs } from "../hook-log.ts"
 import { tryReplayPendingMutations } from "../issue-store.ts"
 import type { HookGroup } from "../manifest.ts"
-import { manifest } from "../manifest.ts"
+import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import { loadAllPlugins } from "../plugins.ts"
 import { type ProjectSwizSettings, readProjectSettings, resolveProjectHooks } from "../settings.ts"
 import { computeTranscriptSummary, type TranscriptSummary } from "../transcript-summary.ts"
@@ -27,6 +27,15 @@ import {
   withLogBuffer,
 } from "./index.ts"
 import { STRATEGY_REGISTRY } from "./strategies.ts"
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+/** Grace period added to DISPATCH_TIMEOUTS before the hard dispatch-level cutoff (ms).
+ *  This accounts for setup overhead (manifest loading, payload enrichment, etc.). */
+const DISPATCH_TIMEOUT_GRACE_MS = 5_000
+
+/** Sentinel used to detect dispatch-level timeout via Promise.race. */
+const DISPATCH_TIMEOUT_SENTINEL = Symbol("dispatch-timeout")
 
 // ─── Helpers (shared with CLI command) ────────────────────────────────────────
 
@@ -237,6 +246,10 @@ export interface DispatchRequest {
   manifestProvider?: (cwd: string) => Promise<HookGroup[]>
   /** Optional lifecycle callback for in-flight dispatch tracking. */
   onDispatchLifecycle?: (update: DispatchLifecycleUpdate) => void
+  /** Optional abort signal from the caller (e.g. daemon request timeout).
+   *  When fired, all running hook processes are SIGTERM'd and the dispatch
+   *  returns early with a timeout error. */
+  signal?: AbortSignal
 }
 
 export interface DispatchResult {
@@ -424,16 +437,71 @@ async function _executeDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const strategyName = DISPATCH_ROUTES[ctx.canonicalEvent] ?? "blocking"
   const strategy = STRATEGY_REGISTRY[strategyName]
 
+  // Enforce dispatch-level timeout budget from DISPATCH_TIMEOUTS.
+  // Individual hooks already have per-hook timeouts; this is a safety net
+  // for the aggregate (queuing delays, concurrent fan-out overhead, etc.).
+  // An AbortController is used to SIGTERM all running hook processes when
+  // the budget expires — preventing orphaned hooks from lingering.
+  const budgetSec = DISPATCH_TIMEOUTS[ctx.canonicalEvent]
+  const budgetMs = budgetSec ? budgetSec * 1000 + DISPATCH_TIMEOUT_GRACE_MS : 0
+
+  // Merge caller-provided abort signal (from daemon request timeout) with
+  // our own dispatch-level timeout into a single controller.
+  const dispatchAbort = new AbortController()
+  if (req.signal?.aborted) dispatchAbort.abort()
+  else req.signal?.addEventListener("abort", () => dispatchAbort.abort(), { once: true })
+
   const dispatchStart = performance.now()
   try {
-    const response = await strategy.execute({
-      filteredGroups,
-      enrichedPayloadStr,
-      canonicalEvent: ctx.canonicalEvent,
-      hookEventName: ctx.hookEventName,
-      daemonContext: req.daemonContext,
-      cwd: ctx.cwd,
-    })
+    let response: Record<string, unknown>
+
+    if (budgetMs > 0) {
+      const budgetTimer = setTimeout(() => {
+        log(
+          `   ⏱ DISPATCH TIMEOUT — ${ctx.canonicalEvent} exceeded budget ` +
+            `(${budgetSec}s + ${DISPATCH_TIMEOUT_GRACE_MS / 1000}s grace) — aborting hooks`
+        )
+        dispatchAbort.abort()
+      }, budgetMs)
+
+      const result = await Promise.race([
+        strategy.execute({
+          filteredGroups,
+          enrichedPayloadStr,
+          canonicalEvent: ctx.canonicalEvent,
+          hookEventName: ctx.hookEventName,
+          daemonContext: req.daemonContext,
+          cwd: ctx.cwd,
+          signal: dispatchAbort.signal,
+        }),
+        new Promise<typeof DISPATCH_TIMEOUT_SENTINEL>((resolve) =>
+          setTimeout(() => resolve(DISPATCH_TIMEOUT_SENTINEL), budgetMs)
+        ),
+      ])
+
+      clearTimeout(budgetTimer)
+
+      if (result === DISPATCH_TIMEOUT_SENTINEL) {
+        // Ensure abort fires even if the timer callback hasn't run yet
+        // (race condition between setTimeout callbacks).
+        if (!dispatchAbort.signal.aborted) dispatchAbort.abort()
+        response = {
+          error: `dispatch timeout: ${ctx.canonicalEvent} exceeded ${budgetSec}s budget`,
+        }
+      } else {
+        response = result
+      }
+    } else {
+      response = await strategy.execute({
+        filteredGroups,
+        enrichedPayloadStr,
+        canonicalEvent: ctx.canonicalEvent,
+        hookEventName: ctx.hookEventName,
+        daemonContext: req.daemonContext,
+        cwd: ctx.cwd,
+        signal: dispatchAbort.signal,
+      })
+    }
 
     // Fire-and-forget log write — never blocks the dispatch response
     const executions = (response.hookExecutions ?? []) as HookExecution[]

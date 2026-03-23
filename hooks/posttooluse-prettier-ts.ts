@@ -3,7 +3,7 @@
 import { dirname } from "node:path"
 import { joinNodeModulesPath } from "../src/node-modules-path.ts"
 import { fileEditHookInputSchema } from "./schemas.ts"
-import { emitContext, isFileEditTool } from "./utils/hook-utils.ts"
+import { emitContext, isFileEditTool, spawnWithTimeout } from "./utils/hook-utils.ts"
 
 /** Walk up from filePath to find node_modules/.bin/prettier */
 async function findPrettier(filePath: string, cwd: string): Promise<string | null> {
@@ -41,14 +41,10 @@ async function main() {
   if (!prettierBin) process.exit(0)
 
   try {
-    const proc = Bun.spawn([prettierBin, "--write", filePath], {
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-    await proc.exited
-
-    if (proc.exitCode === 0) {
+    const result = await spawnWithTimeout([prettierBin, "--write", filePath], { timeoutMs: 10_000 })
+    if (result.timedOut) {
+      // Prettier hung — skip silently
+    } else if (result.exitCode === 0) {
       await emitContext("PostToolUse", `Prettier formatted: ${filePath}`, cwd)
     }
     // Non-zero exit: skip silently (config issue, parse error, etc.)

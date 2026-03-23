@@ -32,6 +32,9 @@ const HOOKS_DIR = join(SWIZ_ROOT, "hooks")
 const LOG_PATH = swizDispatchLogPath()
 export const DEFAULT_TIMEOUT = 10 // seconds
 
+/** Grace period before escalating SIGTERM → SIGKILL on timed-out hooks (ms). */
+const SIGKILL_GRACE_MS = 3_000
+
 /** Slow-hook threshold: hooks taking longer than this are flagged in the log.
  *  Configurable via SWIZ_SLOW_HOOK_THRESHOLD_MS env var. Default: 3 seconds. */
 const SLOW_HOOK_THRESHOLD_MS = Number(process.env.SWIZ_SLOW_HOOK_THRESHOLD_MS) || 3_000
@@ -270,17 +273,26 @@ export async function runHook(
 
   let timedOut = false
   let aborted = false
+  let sigkillTimer: ReturnType<typeof setTimeout> | undefined
   const timer = setTimeout(() => {
     timedOut = true
-    log(`   ⏱ TIMEOUT (${configuredTimeoutSec}s) — killing ${file}`)
-    proc.kill()
+    log(`   ⏱ TIMEOUT (${configuredTimeoutSec}s) — SIGTERM ${file}`)
+    proc.kill("SIGTERM")
+    // Escalate to SIGKILL if the process doesn't exit after grace period.
+    sigkillTimer = setTimeout(() => {
+      log(`   ⏱ SIGKILL escalation — ${file} did not exit after SIGTERM`)
+      proc.kill("SIGKILL")
+    }, SIGKILL_GRACE_MS)
   }, configuredTimeoutSec * 1000)
 
   // Listen for abort signal to kill the process mid-flight.
   const onAbort = () => {
     aborted = true
     log(`   ⊘ ABORTED ${file} (another hook denied)`)
-    proc.kill()
+    proc.kill("SIGTERM")
+    sigkillTimer = setTimeout(() => {
+      proc.kill("SIGKILL")
+    }, SIGKILL_GRACE_MS)
   }
   signal?.addEventListener("abort", onAbort, { once: true })
 
@@ -290,6 +302,7 @@ export async function runHook(
   ])
   await proc.exited
   clearTimeout(timer)
+  if (sigkillTimer) clearTimeout(sigkillTimer)
   signal?.removeEventListener("abort", onAbort)
 
   const endTime = Date.now()
@@ -508,11 +521,14 @@ export async function runEntry(
 
 // ─── Dispatch strategy helpers ───────────────────────────────────────────────
 
-/** Fire async hooks — fire-and-forget in CLI, awaited with timeout in daemon. */
+/** Fire async hooks — fire-and-forget in CLI, awaited with timeout in daemon.
+ *  When a dispatch-level abort signal is provided, in-flight daemon-context
+ *  hooks are killed via the worker pool's abort propagation. */
 export async function launchAsyncHooks(
   groups: HookGroup[],
   payloadStr: string,
-  daemonContext?: boolean
+  daemonContext?: boolean,
+  signal?: AbortSignal
 ): Promise<void> {
   // Flatten all async hooks across groups for concurrent condition evaluation.
   type AsyncEntry = { hook: HookDef; file: string }
@@ -540,11 +556,15 @@ export async function launchAsyncHooks(
       log(`   ⏭ ${hook.file} [condition false, skipping]`)
       continue
     }
+    if (signal?.aborted) {
+      log(`   ⏭ ${hook.file} [async, dispatch aborted]`)
+      continue
+    }
     if (daemonContext && pool) {
       log(`   → ${hook.file} [async, daemon-awaited]`)
       const timeout = hook.timeout ?? DEFAULT_TIMEOUT
       const p = pool
-        .runHook(hook.file, payloadStr, timeout)
+        .runHook(hook.file, payloadStr, timeout, signal)
         .then(() => {})
         .catch((err) => {
           log(`   ⚠ ${hook.file} [async error: ${err}]`)
@@ -552,7 +572,7 @@ export async function launchAsyncHooks(
       promises.push(p)
     } else {
       log(`   → ${hook.file} [async, fire-and-forget]`)
-      runHook(hook.file, payloadStr, hook.timeout)
+      runHook(hook.file, payloadStr, hook.timeout, signal)
         .then(() => {})
         .catch(() => {})
     }

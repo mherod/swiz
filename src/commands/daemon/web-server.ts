@@ -6,6 +6,7 @@ import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { getRepoSlug } from "../../git-helpers.ts"
 import { readHookLogs } from "../../hook-log.ts"
 import { getIssueStore } from "../../issue-store.ts"
+import { DISPATCH_TIMEOUTS } from "../../manifest.ts"
 import { deleteSessionData, resolveSessionDeletionTargets } from "../../session-data-delete.ts"
 import {
   readSwizSettings,
@@ -216,24 +217,29 @@ async function resolvePidCwds(allPids: number[]): Promise<Record<number, string>
   const chunkSize = 120
   for (let i = 0; i < allPids.length; i += chunkSize) {
     const pidChunk = allPids.slice(i, i + chunkSize)
-    const lsofProc = Bun.spawn(["lsof", "-p", pidChunk.join(","), "-d", "cwd", "-Fn"], {
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    let lsofTimedOut = false
-    const killTimer = setTimeout(() => {
-      lsofTimedOut = true
-      lsofProc.kill()
-    }, 3000)
     try {
-      const [lsofOut] = await Promise.all([
-        new Response(lsofProc.stdout).text(),
-        new Response(lsofProc.stderr).text(),
-      ])
-      await lsofProc.exited
-      if (!lsofTimedOut) Object.assign(pidCwds, parseLsofCwdOutput(lsofOut))
-    } finally {
-      clearTimeout(killTimer)
+      const lsofProc = Bun.spawn(["lsof", "-p", pidChunk.join(","), "-d", "cwd", "-Fn"], {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      let lsofTimedOut = false
+      const killTimer = setTimeout(() => {
+        lsofTimedOut = true
+        lsofProc.kill()
+      }, 3000)
+      try {
+        const [lsofOut] = await Promise.all([
+          new Response(lsofProc.stdout).text(),
+          new Response(lsofProc.stderr).text(),
+        ])
+        await lsofProc.exited
+        if (!lsofTimedOut) Object.assign(pidCwds, parseLsofCwdOutput(lsofOut))
+      } finally {
+        clearTimeout(killTimer)
+      }
+    } catch {
+      // lsof not found on PATH or spawn failed — skip cwd resolution gracefully
+      break
     }
   }
   return pidCwds
@@ -302,6 +308,30 @@ async function getActiveAgentProcesses(): Promise<AgentProcessSnapshot> {
   }
 }
 
+/** Hard request-level timeout for daemon dispatch (ms).
+ *  Uses DISPATCH_TIMEOUTS + 10s grace. Fallback: 60s for unknown events. */
+const DAEMON_REQUEST_TIMEOUT_GRACE_MS = 10_000
+const DAEMON_REQUEST_TIMEOUT_FALLBACK_MS = 60_000
+
+/** Maximum age before an active dispatch entry is considered stale and reaped (ms).
+ *  Generous enough to cover the slowest event (stop: 180s) plus overhead. */
+const STALE_DISPATCH_MAX_AGE_MS = 300_000 // 5 minutes
+
+/**
+ * Remove leaked entries from activeHookDispatches that are older than
+ * STALE_DISPATCH_MAX_AGE_MS. Called on every incoming request as a
+ * lightweight garbage collection pass.
+ */
+function reapStaleDispatches(activeHookDispatches: Map<string, ActiveHookDispatch>): void {
+  if (activeHookDispatches.size === 0) return
+  const cutoff = Date.now() - STALE_DISPATCH_MAX_AGE_MS
+  for (const [id, entry] of activeHookDispatches) {
+    if (entry.startedAt < cutoff) {
+      activeHookDispatches.delete(id)
+    }
+  }
+}
+
 async function handleDispatchRoute(
   req: Request,
   url: URL,
@@ -314,11 +344,23 @@ async function handleDispatchRoute(
   }
   const payloadStr = await req.text()
   const start = performance.now()
-  const result = await executeDispatch({
+
+  const budgetSec = DISPATCH_TIMEOUTS[canonicalEvent]
+  const requestTimeoutMs = budgetSec
+    ? budgetSec * 1000 + DAEMON_REQUEST_TIMEOUT_GRACE_MS
+    : DAEMON_REQUEST_TIMEOUT_FALLBACK_MS
+
+  // Daemon-level AbortController — when the request timeout fires, this
+  // signal propagates through executeDispatch → strategy → individual hooks,
+  // ensuring all spawned processes are SIGTERM'd instead of orphaned.
+  const requestAbort = new AbortController()
+
+  const dispatchPromise = executeDispatch({
     canonicalEvent,
     hookEventName,
     payloadStr,
     daemonContext: true,
+    signal: requestAbort.signal,
     transcriptSummaryProvider: async (path) => {
       const index = await ctx.transcriptIndex.get(path)
       return index?.summary ?? null
@@ -342,6 +384,36 @@ async function handleDispatchRoute(
       ctx.activeHookDispatches.delete(update.requestId)
     },
   })
+
+  const TIMEOUT_SENTINEL = Symbol("timeout")
+  const requestTimer = setTimeout(() => {
+    requestAbort.abort()
+  }, requestTimeoutMs)
+
+  const raceResult = await Promise.race([
+    dispatchPromise,
+    new Promise<typeof TIMEOUT_SENTINEL>((resolve) =>
+      setTimeout(() => resolve(TIMEOUT_SENTINEL), requestTimeoutMs)
+    ),
+  ])
+
+  clearTimeout(requestTimer)
+
+  if (raceResult === TIMEOUT_SENTINEL) {
+    // Ensure abort fires even if timer callback hasn't executed yet.
+    if (!requestAbort.signal.aborted) requestAbort.abort()
+    const durationMs = performance.now() - start
+    recordDispatch(ctx.globalMetrics, canonicalEvent, durationMs)
+    return Response.json(
+      {
+        error: `Dispatch timeout: ${canonicalEvent} exceeded ${requestTimeoutMs}ms`,
+        timedOut: true,
+      },
+      { status: 504 }
+    )
+  }
+
+  const result = raceResult
   const durationMs = performance.now() - start
   recordDispatch(ctx.globalMetrics, canonicalEvent, durationMs)
 
@@ -1124,6 +1196,7 @@ export function startDaemonWebServer(ctx: DaemonWebServerContext) {
     },
     async fetch(req) {
       ctx.pruneTranscriptMemory()
+      reapStaleDispatches(ctx.activeHookDispatches)
       const url = new URL(req.url)
       return handleFetchRoutes(req, url, ctx)
     },

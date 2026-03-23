@@ -3,7 +3,7 @@
 
 import { join } from "node:path"
 import { stopHookInputSchema } from "./schemas.ts"
-import { blockStop } from "./utils/hook-utils.ts"
+import { blockStop, spawnWithTimeout } from "./utils/hook-utils.ts"
 
 type PackageManager = "bun" | "pnpm" | "yarn" | "npm"
 
@@ -42,19 +42,23 @@ async function detectLintStaged(
   return { hasScript, hasDep }
 }
 
+/** Lint-staged should finish well within 25s. */
+const LINT_STAGED_TIMEOUT_MS = 25_000
+
 async function runLintStaged(
   cwd: string,
   detected: { hasScript: boolean }
 ): Promise<{ exitCode: number; output: string }> {
   const pm = await detectPackageManagerForProject(cwd)
   const cmd = detected.hasScript ? [pm, "run", "lint-staged"] : ["npx", "--yes", "lint-staged"]
-  const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "pipe" })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  return { exitCode: proc.exitCode ?? 1, output: stdout + stderr }
+  const result = await spawnWithTimeout(cmd, { cwd, timeoutMs: LINT_STAGED_TIMEOUT_MS })
+  if (result.timedOut) {
+    return {
+      exitCode: 1,
+      output: `TIMEOUT: lint-staged exceeded ${LINT_STAGED_TIMEOUT_MS / 1000}s — killed`,
+    }
+  }
+  return { exitCode: result.exitCode ?? 1, output: result.stdout + result.stderr }
 }
 
 async function main(): Promise<void> {

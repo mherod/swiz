@@ -23,6 +23,7 @@ import {
   isGitRepo,
   sanitizeSessionId,
   skillAdvice,
+  spawnWithTimeout,
 } from "./utils/hook-utils.ts"
 
 const DEFAULT_PUSH_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
@@ -315,39 +316,35 @@ function checkLsofForRepoPush(lsofOut: string, gitRoot: string): boolean {
   return false
 }
 
+/** Timeout for process inspection subcommands (pgrep, ps, lsof). */
+const PROC_INSPECT_TIMEOUT_MS = 5_000
+
 async function detectBackgroundPush(cwd: string): Promise<boolean> {
-  const pgrepProc = Bun.spawn(["pgrep", "-f", "git push"], { stdout: "pipe", stderr: "pipe" })
-  const pgrepOut = await new Response(pgrepProc.stdout).text()
-  await pgrepProc.exited
-  if (pgrepProc.exitCode !== 0) return false
+  const pgrepResult = await spawnWithTimeout(["pgrep", "-f", "git push"], {
+    timeoutMs: PROC_INSPECT_TIMEOUT_MS,
+  })
+  if (pgrepResult.timedOut || pgrepResult.exitCode !== 0) return false
 
-  const pushPids = pgrepOut.trim().split("\n").map(Number).filter(Boolean)
+  const pushPids = pgrepResult.stdout.trim().split("\n").map(Number).filter(Boolean)
 
-  const psAllProc = Bun.spawn(["ps", "-eo", "pid,ppid"], { stdout: "pipe", stderr: "pipe" })
-  const psAllOut = await new Response(psAllProc.stdout).text()
-  await psAllProc.exited
+  const psResult = await spawnWithTimeout(["ps", "-eo", "pid,ppid"], {
+    timeoutMs: PROC_INSPECT_TIMEOUT_MS,
+  })
+  if (psResult.timedOut) return false
 
-  const parentMap = buildParentMap(psAllOut)
+  const parentMap = buildParentMap(psResult.stdout)
   const ancestors = collectAncestors(parentMap, process.ppid)
   const gitRoot = await git(["rev-parse", "--show-toplevel"], cwd)
 
   const nonAncestorPids = pushPids.filter((pid) => !ancestors.has(pid))
   if (nonAncestorPids.length === 0) return false
 
-  const lsofProc = Bun.spawn(["lsof", "-p", nonAncestorPids.join(","), "-d", "cwd", "-Fn"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  let lsofKilled = false
-  const killTimer = setTimeout(() => {
-    lsofKilled = true
-    lsofProc.kill()
-  }, 2000)
-  const lsofOut = await new Response(lsofProc.stdout).text()
-  await lsofProc.exited
-  clearTimeout(killTimer)
+  const lsofResult = await spawnWithTimeout(
+    ["lsof", "-p", nonAncestorPids.join(","), "-d", "cwd", "-Fn"],
+    { timeoutMs: PROC_INSPECT_TIMEOUT_MS }
+  )
 
-  return !lsofKilled && checkLsofForRepoPush(lsofOut, gitRoot)
+  return !lsofResult.timedOut && checkLsofForRepoPush(lsofResult.stdout, gitRoot)
 }
 
 interface GitContext {

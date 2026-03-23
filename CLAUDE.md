@@ -63,6 +63,8 @@ alwaysApply: false
 - **DO NOT** write `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: ..., permissionDecision: "allow" } }))` — use `allowPreToolUse(reason)` instead.
 - **DO NOT** write `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: ..., additionalContext: ... } }))` — use `emitContext(eventName, context, cwd)` instead.
 - **DO NOT** write `console.log(JSON.stringify({ decision: "block", reason: ... }))` in Stop hooks — use `blockStop(reason)` or `blockStopRaw(reason)` instead.
+- **Subprocess timeout**: Hooks spawning subprocesses must use `spawnWithTimeout(cmd, { cwd, timeoutMs })` from `hook-utils.ts`. SIGTERM→SIGKILL escalation. DO NOT use raw `Bun.spawn()` with manual kill timers.
+- **Dispatch abort propagation**: `DispatchRequest.signal` and `HookStrategyContext.signal` carry abort signals from daemon→dispatch→strategy→hooks. Strategies with local `AbortController` (PreToolUse, Blocking) must listen on `ctx.signal` and propagate.
 - **Git Utilities Policy** — canonical locations, no duplication:
   - `hooks/utils/hook-utils.ts` — hook Git helpers: regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`, etc.), extractors, runtime helpers (`git`, `gh`, `ghJson`). Test utils in `hooks/utils/test-utils.ts`.
   - `src/git-helpers.ts` — command Git helpers: classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries. `git()` strips `GIT_*` env vars (lefthook `GIT_DIR` fix).
@@ -90,14 +92,14 @@ alwaysApply: false
 - In `hook-utils.ts`, use lazy `await import(...)` for `projectKeyFromCwd` to avoid circular imports.
 - For workflow enforcement, scan `transcript_path` for reminder/completion evidence — no extra state files.
 - `pretooluse-update-memory-enforcement.ts` requires transcript evidence of reading `update-memory/SKILL.md` and writing `.md` before unblocking. Include trigger cause in reminder text.
-- Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Sandbox enforcement hooks (`pretooluse-protect-sandbox`, `pretooluse-sandboxed-edits`) delegate to it. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, { crossRepo: true, hostname })`.
+- Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, { crossRepo: true, hostname })`.
 ## Task Data
 - Task storage: `~/.claude/tasks/<session-id>/<id>.json`; audit log: `~/.claude/tasks/<session-id>/.audit-log.jsonl`.
-- Session-to-project mapping resolves from `~/.claude/projects/` transcript `cwd` fields.
-- Cross-session task checks in `hooks/stop-completion-auditor.ts`: fallback scan `~/.claude/tasks/`, load JSON via `readSessionTasks()`.
-- Completion requires evidence: `swiz tasks complete <id> --evidence "text"`; enforced by `stop-completion-auditor`.
-- First action must be `TaskCreate`/`TaskUpdate`; required again after compaction resumes.
-- `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks exist AND ≥1 is `pending`. Always ensure ≥1 `in_progress` + ≥1 `pending` before any Edit/Write/Bash.
+- Session-to-project mapping from `~/.claude/projects/` transcript `cwd` fields.
+- Cross-session task checks: `hooks/stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
+- Completion requires evidence: `swiz tasks complete <id> --evidence "text"`.
+- First action must be `TaskCreate`/`TaskUpdate`; required after compaction.
+- `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`. Ensure ≥1 `in_progress` + ≥1 `pending` before Edit/Write/Bash.
 - Prior-session task blocks: recreate and set `in_progress` before retrying.
 - After compaction: `TaskList`, close stale tasks after `git log --oneline -3`.
 - One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects.
@@ -105,8 +107,8 @@ alwaysApply: false
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
 - `/commit` checks: branch verification, task preflight, Conventional Commits `<type>(<scope>): <summary>`.
 - Run `git branch --show-current` early to satisfy commit gate transcript checks.
-- Call task tools (`TaskUpdate`, `TaskCreate`, `TaskList`, `TaskGet`) regularly: at least every 10 calls; staleness gate triggers at 20.
-- **DO**: Use native `TaskCreate`/`TaskUpdate`/`TaskList`/`TaskGet` for task creation, status transitions, and queries. **DON'T**: Use `swiz tasks` CLI for status transitions — native tools are canonical. Only exception: `swiz tasks complete` (requires `--evidence`).
+- Call task tools regularly: every 10 calls; staleness gate at 20.
+- **DO**: Use native task tools for creation/status/queries. **DON'T**: Use `swiz tasks` CLI for status transitions. Exception: `swiz tasks complete` (requires `--evidence`).
 - Call `TaskUpdate` after each file; add updates at least every 3 edits.
 - Create tasks before non-exempt Bash.
 - **DON'T**: Complete last in-progress task while shell commands remain. Keep ≥1 `in_progress` until all shell work finishes.

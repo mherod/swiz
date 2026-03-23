@@ -3,7 +3,7 @@
 
 import { join } from "node:path"
 import { stopHookInputSchema } from "./schemas.ts"
-import { blockStop, detectPackageManager } from "./utils/hook-utils.ts"
+import { blockStop, detectPackageManager, spawnWithTimeout } from "./utils/hook-utils.ts"
 
 // Script names probed in priority order for each quality category
 export const LINT_SCRIPTS = ["lint", "lint:check", "eslint", "biome:check"] as const
@@ -20,18 +20,25 @@ export function findScript(
   return null
 }
 
+/** Per-script timeout: lint/typecheck can be slow but should never take > 45s. */
+const SCRIPT_TIMEOUT_MS = 45_000
+
 async function runScript(
   pm: string,
   scriptName: string,
   cwd: string
 ): Promise<{ passed: boolean; output: string }> {
-  const proc = Bun.spawn([pm, "run", scriptName], { cwd, stdout: "pipe", stderr: "pipe" })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  return { passed: proc.exitCode === 0, output: (stdout + stderr).trim() }
+  const result = await spawnWithTimeout([pm, "run", scriptName], {
+    cwd,
+    timeoutMs: SCRIPT_TIMEOUT_MS,
+  })
+  if (result.timedOut) {
+    return {
+      passed: false,
+      output: `TIMEOUT: \`${pm} run ${scriptName}\` exceeded ${SCRIPT_TIMEOUT_MS / 1000}s`,
+    }
+  }
+  return { passed: result.exitCode === 0, output: (result.stdout + result.stderr).trim() }
 }
 
 async function main(): Promise<void> {

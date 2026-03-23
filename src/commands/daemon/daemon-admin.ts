@@ -9,11 +9,36 @@ import {
 
 export const DAEMON_PORT = 7_943
 
+/** Minimum PATH directories the daemon needs. /usr/sbin is required for
+ *  lsof and pgrep; /opt/homebrew/bin for bun on Apple Silicon. */
+const REQUIRED_PATH_DIRS = [
+  "/opt/homebrew/bin",
+  "/usr/local/bin",
+  "/usr/bin",
+  "/bin",
+  "/usr/sbin",
+  "/sbin",
+]
+
+/** Build a PATH string for the daemon plist that includes all required
+ *  system directories plus the directory containing the bun binary. */
+function buildDaemonPath(bunPath: string): string {
+  const dirs = new Set(REQUIRED_PATH_DIRS)
+  // Ensure the bun binary's directory is on PATH even if it's non-standard.
+  const bunDir = dirname(bunPath)
+  if (bunDir && bunDir !== ".") dirs.add(bunDir)
+  return [...dirs].join(":")
+}
+
 function buildPlist(port: number): string {
   const bunPath = Bun.which("bun") ?? "/opt/homebrew/bin/bun"
   const projectRoot = dirname(Bun.main)
   const indexPath = join(projectRoot, "index.ts")
   const daemonTs = join(projectRoot, "src", "commands", "daemon.ts")
+
+  // Build PATH: include /usr/sbin (lsof, pgrep live there) and inherit
+  // the current user's PATH directories for any non-standard bun locations.
+  const envPath = buildDaemonPath(bunPath)
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -26,7 +51,7 @@ function buildPlist(port: number): string {
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>(sleep 1200 &amp;&amp; kill $$) &amp; exec ${bunPath} --watch ${indexPath} daemon --port ${port}</string>
+    <string>exec ${bunPath} --watch ${indexPath} daemon --port ${port} 2&gt;&amp;1</string>
   </array>
 
   <key>WorkingDirectory</key>
@@ -46,6 +71,9 @@ function buildPlist(port: number): string {
   <key>AbandonProcessGroup</key>
   <true/>
 
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
   <key>StandardOutPath</key>
   <string>/tmp/swiz-daemon.log</string>
 
@@ -61,7 +89,7 @@ function buildPlist(port: number): string {
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>${envPath}</string>
   </dict>
 </dict>
 </plist>`
