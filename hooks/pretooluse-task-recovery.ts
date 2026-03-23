@@ -22,25 +22,36 @@ import {
 } from "./utils/hook-utils.ts"
 import { buildRecoveryStub, type TaskToolInput } from "./utils/task-hook-types.ts"
 
-async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as TaskToolInput
+async function validateInput(input: TaskToolInput): Promise<{
+  sessionId: string
+  toolName: string
+  taskId: string
+  tasksDir: string
+  taskFile: string
+} | null> {
   const sessionId = resolveSafeSessionId(input.session_id)
-  if (!sessionId) return
+  if (!sessionId) return null
 
   const toolName = input.tool_name ?? ""
-  if (!isTaskTool(toolName)) return
+  if (!isTaskTool(toolName) || toolName === "TaskCreate") return null
 
-  // Only act on tools that reference an existing task by ID
   const taskId = String(input.tool_input?.taskId ?? "")
-  if (!taskId) return
-
-  // TaskCreate doesn't reference existing IDs — skip it
-  if (toolName === "TaskCreate") return
+  if (!taskId) return null
 
   const home = homedir()
   const tasksDir = getSessionTasksDir(sessionId, home)
   const taskFile = getSessionTaskPath(sessionId, taskId, home)
-  if (!tasksDir || !taskFile) return
+  if (!tasksDir || !taskFile) return null
+
+  return { sessionId, toolName, taskId, tasksDir, taskFile }
+}
+
+async function main(): Promise<void> {
+  const input = (await Bun.stdin.json()) as TaskToolInput
+  const validated = await validateInput(input)
+  if (!validated) return
+
+  const { taskId, tasksDir, taskFile } = validated
 
   // Check if the task already exists — if so, nothing to do
   if (await Bun.file(taskFile).exists()) return
