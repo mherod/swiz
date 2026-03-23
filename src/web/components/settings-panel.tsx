@@ -695,6 +695,39 @@ function ProjectSettingsColumn({
   )
 }
 
+function useDirtyState(
+  globalForm: GlobalSettingsForm,
+  globalBaseline: GlobalSettingsForm,
+  projectForm: ProjectSettingsForm,
+  projectBaseline: ProjectSettingsForm
+) {
+  const globalDirty = useMemo(
+    () => JSON.stringify(globalForm) !== JSON.stringify(globalBaseline),
+    [globalForm, globalBaseline]
+  )
+  const projectDirty = useMemo(
+    () => JSON.stringify(projectForm) !== JSON.stringify(projectBaseline),
+    [projectForm, projectBaseline]
+  )
+  return { globalDirty, projectDirty }
+}
+
+function useSaveEffect(
+  isDirty: boolean,
+  isSaving: boolean,
+  projectDirty: boolean,
+  cwd: string | null,
+  performSave: () => Promise<void>
+) {
+  useEffect(() => {
+    if (!isDirty || isSaving || (projectDirty && !cwd)) return
+    const timer = setTimeout(() => {
+      void performSave()
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [cwd, isDirty, isSaving, performSave, projectDirty])
+}
+
 function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetch>) {
   const [globalSaving, setGlobalSaving] = useState(false)
   const [projectSaving, setProjectSaving] = useState(false)
@@ -705,13 +738,11 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
   const { setGlobalForm, setGlobalBaseline, setProjectForm, setProjectBaseline } = data
   const { setGlobalError, setProjectError } = data
 
-  const globalDirty = useMemo(
-    () => JSON.stringify(globalForm) !== JSON.stringify(globalBaseline),
-    [globalForm, globalBaseline]
-  )
-  const projectDirty = useMemo(
-    () => JSON.stringify(projectForm) !== JSON.stringify(projectBaseline),
-    [projectForm, projectBaseline]
+  const { globalDirty, projectDirty } = useDirtyState(
+    globalForm,
+    globalBaseline,
+    projectForm,
+    projectBaseline
   )
 
   const performSave = useCallback(async () => {
@@ -776,13 +807,7 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
   const isDirty = globalDirty || projectDirty
   const isSaving = globalSaving || projectSaving
 
-  useEffect(() => {
-    if (!isDirty || isSaving || (projectDirty && !cwd)) return
-    const timer = setTimeout(() => {
-      void performSave()
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [cwd, isDirty, isSaving, performSave, projectDirty])
+  useSaveEffect(isDirty, isSaving, projectDirty, cwd, performSave)
 
   return { globalDirty, projectDirty, isSaving, status }
 }
