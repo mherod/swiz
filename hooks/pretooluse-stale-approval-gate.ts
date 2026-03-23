@@ -109,17 +109,17 @@ function buildDenyMessage(
   )
 }
 
-function resolveGitCommitCwd(input: ToolHookInput): string | null {
-  if (!isShellTool(input?.tool_name ?? "")) return null
-  const command = (input?.tool_input?.command as string) ?? ""
-  if (!GIT_COMMIT_RE.test(command)) return null
+function extractCwd(input: ToolHookInput): string | null {
   const cwd = input?.cwd ?? ""
   return cwd || null
 }
 
 async function main(): Promise<void> {
   const input: ToolHookInput = await Bun.stdin.json()
-  const cwd = resolveGitCommitCwd(input)
+  if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
+  const command = (input?.tool_input?.command as string) ?? ""
+  if (!GIT_COMMIT_RE.test(command)) process.exit(0)
+  const cwd = extractCwd(input)
   if (!cwd) process.exit(0)
 
   const branch = await resolveFeatureBranch(cwd)
