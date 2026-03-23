@@ -148,8 +148,8 @@ function normalizeStatusLineSegments(value: unknown): StatusLineSegment[] {
 function normalizeSessionSettings(value: unknown): SessionSwizSettings | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const obj = value as Record<string, unknown>
-  if (typeof obj.autoContinue !== "boolean") return null
-  const session: SessionSwizSettings = { autoContinue: obj.autoContinue }
+  const session: SessionSwizSettings = {}
+  if (typeof obj.autoContinue === "boolean") session.autoContinue = obj.autoContinue
   if (typeof obj.prMergeMode === "boolean") session.prMergeMode = obj.prMergeMode
   if (
     obj.ambitionMode === "standard" ||

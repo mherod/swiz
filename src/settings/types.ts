@@ -55,7 +55,7 @@ export type StateData = z.infer<typeof stateDataSchema>
 // ─── Settings schemas ─────────────────────────────────────────────────────────
 
 export interface SessionSwizSettings {
-  autoContinue: boolean
+  autoContinue?: boolean
   prMergeMode?: boolean
   ambitionMode?: AmbitionMode
   collaborationMode?: CollaborationMode
@@ -197,7 +197,7 @@ export interface ResolvedMemoryThresholds {
 // ─── Zod schemas for settings objects ────────────────────────────────────────
 
 export const sessionSwizSettingsSchema = z.object({
-  autoContinue: z.boolean(),
+  autoContinue: z.boolean().optional(),
   prMergeMode: z.boolean().optional(),
   ambitionMode: ambitionModeSchema.optional(),
   collaborationMode: collaborationModeSchema.optional(),

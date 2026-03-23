@@ -181,7 +181,7 @@ export function getEffectiveSwizSettings(
     const s = settings.sessions[sessionId]!
     return {
       ...base,
-      autoContinue: s.autoContinue,
+      autoContinue: s.autoContinue ?? base.autoContinue,
       ambitionMode: s.ambitionMode ?? base.ambitionMode,
       collaborationMode: s.collaborationMode ?? base.collaborationMode,
       prMergeMode: typeof s.prMergeMode === "boolean" ? s.prMergeMode : base.prMergeMode,
