@@ -42,6 +42,34 @@ interface ErrorResult {
   error: string
 }
 
+/** Parse hook stdout to a JSON result, handling timeout/empty/invalid cases. */
+function parseWorkerOutput(
+  timedOut: boolean,
+  trimmed: string,
+  exitCode: number
+): { parsed: Record<string, unknown> | null; status: string } {
+  if (timedOut) return { parsed: null, status: "timeout" }
+  if (!trimmed) return { parsed: null, status: exitCode !== 0 ? "error" : "no-output" }
+
+  try {
+    return { parsed: JSON.parse(trimmed) as Record<string, unknown>, status: "ok" }
+  } catch {
+    // Try to extract last JSON object from polluted stdout
+    const lastBrace = trimmed.lastIndexOf("{")
+    if (lastBrace > 0) {
+      try {
+        return {
+          parsed: JSON.parse(trimmed.slice(lastBrace)) as Record<string, unknown>,
+          status: "ok",
+        }
+      } catch {
+        return { parsed: null, status: "invalid-json" }
+      }
+    }
+    return { parsed: null, status: "invalid-json" }
+  }
+}
+
 /**
  * Run a single hook - extracted from engine.ts for worker execution.
  */
@@ -92,32 +120,7 @@ async function runHookInWorker(
     const trimmed = output.trim()
     const stderrTrimmed = stderr.trim()
 
-    // Parse output - classifyHookOutput logic inline
-    let parsed: Record<string, unknown> | null = null
-    let status = "ok"
-
-    if (timedOut) {
-      status = "timeout"
-    } else if (!trimmed) {
-      status = exitCode !== 0 ? "error" : "no-output"
-    } else {
-      try {
-        parsed = JSON.parse(trimmed) as Record<string, unknown>
-      } catch {
-        // Try to extract last JSON object
-        const lastBrace = trimmed.lastIndexOf("{")
-        if (lastBrace > 0) {
-          try {
-            const candidate = trimmed.slice(lastBrace)
-            parsed = JSON.parse(candidate) as Record<string, unknown>
-          } catch {
-            status = "invalid-json"
-          }
-        } else {
-          status = "invalid-json"
-        }
-      }
-    }
+    const { parsed, status } = parseWorkerOutput(timedOut, trimmed, exitCode ?? 0)
 
     return {
       id,

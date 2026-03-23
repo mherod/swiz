@@ -151,6 +151,35 @@ export const crossRepoIssueCommand: Command = {
   async run(args) {
     const opts = parseArgs(args)
 
+    async function tryRestFallbackCreate(
+      repo: string,
+      title: string,
+      body: string,
+      cwd: string
+    ): Promise<string | false> {
+      const restProc = Bun.spawn(
+        ["gh", "api", `repos/${repo}/issues`, "-X", "POST", "--input", "-"],
+        {
+          cwd,
+          stdout: "pipe",
+          stderr: "pipe",
+          stdin: new Response(JSON.stringify({ title, body })),
+        }
+      )
+      const [restOut] = await Promise.all([
+        new Response(restProc.stdout).text(),
+        new Response(restProc.stderr).text(),
+      ])
+      await restProc.exited
+      if (restProc.exitCode !== 0) return false
+      try {
+        const parsed = JSON.parse(restOut) as { html_url?: string }
+        return parsed.html_url ?? restOut.trim()
+      } catch {
+        return false
+      }
+    }
+
     if (!opts.filePath) {
       throw new Error(`--file is required.\n${this.usage}`)
     }
@@ -188,36 +217,17 @@ export const crossRepoIssueCommand: Command = {
     await proc.exited
 
     if (proc.exitCode !== 0) {
-      // REST API fallback on GraphQL rate-limit
-      if (isGraphQLRateLimited(stderr)) {
-        const restProc = Bun.spawn(
-          ["gh", "api", `repos/${repo}/issues`, "-X", "POST", "--input", "-"],
-          {
-            cwd,
-            stdout: "pipe",
-            stderr: "pipe",
-            stdin: new Response(JSON.stringify({ title: opts.title, body })),
-          }
+      const filed = isGraphQLRateLimited(stderr)
+        ? await tryRestFallbackCreate(repo, opts.title, body, cwd)
+        : false
+
+      if (filed) {
+        console.log(`  Issue filed (REST fallback): ${filed}`)
+        console.log(`  Repo: ${repo}`)
+        console.log(
+          `  File: ${relativeFilePath(opts.filePath)}${opts.line != null ? `:${opts.line}` : ""}`
         )
-        const [restOut] = await Promise.all([
-          new Response(restProc.stdout).text(),
-          new Response(restProc.stderr).text(),
-        ])
-        await restProc.exited
-        if (restProc.exitCode === 0) {
-          try {
-            const parsed = JSON.parse(restOut) as { html_url?: string }
-            const url = parsed.html_url ?? restOut.trim()
-            console.log(`  Issue filed (REST fallback): ${url}`)
-            console.log(`  Repo: ${repo}`)
-            console.log(
-              `  File: ${relativeFilePath(opts.filePath)}${opts.line != null ? `:${opts.line}` : ""}`
-            )
-            return
-          } catch {
-            // fall through to queue
-          }
-        }
+        return
       }
 
       // Queue for later replay

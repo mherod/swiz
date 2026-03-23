@@ -155,6 +155,32 @@ class PreToolUseStrategy implements HookExecutionStrategy {
   }
 }
 
+/** Process all blocking hook results, mutating executions and finalResponse in place. */
+function processBlockingResults(
+  results: Array<{ execution: HookExecution; parsed: Record<string, unknown> | null }>,
+  executions: HookExecution[],
+  finalResponse: Record<string, unknown>,
+  runAllHooks: boolean
+): void {
+  for (const { execution, parsed: resp } of results) {
+    if (execution.status === "skipped" || execution.status === "aborted") {
+      executions.push(execution)
+      continue
+    }
+    if (resp && isBlock(resp)) {
+      log(`   ✗ BLOCK from ${execution.file}`)
+      execution.status = "block"
+      executions.push(execution)
+      // Keep the first block response exactly as produced.
+      if (!isBlock(finalResponse)) Object.assign(finalResponse, resp)
+      if (!runAllHooks) break
+      continue
+    }
+    log(`   ✓ ${execution.file} (${resp ? "ok" : "no output"})`)
+    executions.push(execution)
+  }
+}
+
 /**
  * Blocking strategy: forwards first block; stop runs all hooks,
  * postToolUse short-circuits.
@@ -196,23 +222,7 @@ class BlockingStrategy implements HookExecutionStrategy {
 
     ctx.signal?.removeEventListener("abort", onDispatchAbort)
 
-    for (const { execution, parsed: resp } of results) {
-      if (execution.status === "skipped" || execution.status === "aborted") {
-        executions.push(execution)
-        continue
-      }
-      if (resp && isBlock(resp)) {
-        log(`   ✗ BLOCK from ${execution.file}`)
-        execution.status = "block"
-        executions.push(execution)
-        // Keep the first block response exactly as produced.
-        if (!isBlock(finalResponse)) Object.assign(finalResponse, resp)
-        if (!runAllHooks) break
-        continue
-      }
-      log(`   ✓ ${execution.file} (${resp ? "ok" : "no output"})`)
-      executions.push(execution)
-    }
+    processBlockingResults(results, executions, finalResponse, runAllHooks)
 
     if (!isBlock(finalResponse)) {
       log(`   result: all passed`)
