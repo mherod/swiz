@@ -122,18 +122,28 @@ const AUDIT_RECOVERY_MAX_SESSIONS = 10
  * tasks created by the native TaskCreate tool survive compaction but their
  * file-store entries are in a session directory that's no longer resolvable.
  */
-async function recoverSubjectFromAuditLogs(
-  taskId: string,
-  tasksDir: string
-): Promise<string | null> {
+function isValidRecoveredSubject(entry: unknown, taskId: string): entry is Record<string, unknown> {
+  if (typeof entry !== "object" || !entry) return false
+  const e = entry as Record<string, unknown>
+  const subject = e.subject
+  return (
+    e.taskId === taskId &&
+    e.action === "create" &&
+    typeof subject === "string" &&
+    subject.length > 0 &&
+    !subject.startsWith("Task #") &&
+    !subject.startsWith("Recovered task #")
+  )
+}
+
+async function collectSessionMtimes(tasksDir: string): Promise<{ dir: string; mtime: number }[]> {
   let sessionDirs: string[]
   try {
     sessionDirs = await readdir(tasksDir)
   } catch {
-    return null
+    return []
   }
 
-  // Sort by mtime descending — most recent sessions first (most likely to contain the task).
   const withMtime: { dir: string; mtime: number }[] = []
   for (const dir of sessionDirs) {
     try {
@@ -142,30 +152,35 @@ async function recoverSubjectFromAuditLogs(
     } catch {}
   }
   withMtime.sort((a, b) => b.mtime - a.mtime)
+  return withMtime
+}
 
-  for (const { dir } of withMtime.slice(0, AUDIT_RECOVERY_MAX_SESSIONS)) {
-    const auditPath = join(tasksDir, dir, ".audit-log.jsonl")
-    let content: string
-    try {
-      content = await readFile(auditPath, "utf-8")
-    } catch {
-      continue
-    }
+async function searchAuditLogForTask(auditPath: string, taskId: string): Promise<string | null> {
+  try {
+    const content = await readFile(auditPath, "utf-8")
     for (const line of content.split("\n")) {
       if (!line.trim()) continue
       try {
         const entry = JSON.parse(line)
-        if (
-          entry.taskId === taskId &&
-          entry.action === "create" &&
-          entry.subject &&
-          !entry.subject.startsWith("Task #") &&
-          !entry.subject.startsWith("Recovered task #")
-        ) {
-          return entry.subject
+        if (isValidRecoveredSubject(entry, taskId)) {
+          const subject = entry.subject
+          if (typeof subject === "string") return subject
         }
       } catch {}
     }
+  } catch {}
+  return null
+}
+
+async function recoverSubjectFromAuditLogs(
+  taskId: string,
+  tasksDir: string
+): Promise<string | null> {
+  const withMtime = await collectSessionMtimes(tasksDir)
+  for (const { dir } of withMtime.slice(0, AUDIT_RECOVERY_MAX_SESSIONS)) {
+    const auditPath = join(tasksDir, dir, ".audit-log.jsonl")
+    const subject = await searchAuditLogForTask(auditPath, taskId)
+    if (subject) return subject
   }
   return null
 }
