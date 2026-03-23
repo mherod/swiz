@@ -214,25 +214,43 @@ function useAnimatedBeamPath(
   }, [state, setPathD, setSvgDimensions])
 }
 
-export function AnimatedBeam({
-  className,
-  containerRef,
-  fromRef,
-  toRef,
-  curvature = 0,
-  reverse = false,
-  duration = Math.random() * 3 + 4,
-  delay = 0,
-  pathColor = "gray",
-  pathWidth = 2,
-  pathOpacity = 0.2,
-  gradientStartColor = "#ffaa40",
-  gradientStopColor = "#9c40ff",
-  startXOffset = 0,
-  startYOffset = 0,
-  endXOffset = 0,
-  endYOffset = 0,
-}: AnimatedBeamProps): React.ReactElement {
+const ANIMATED_BEAM_DEFAULTS = {
+  curvature: 0,
+  reverse: false,
+  duration: Math.random() * 3 + 4,
+  delay: 0,
+  pathColor: "gray",
+  pathWidth: 2,
+  pathOpacity: 0.2,
+  gradientStartColor: "#ffaa40",
+  gradientStopColor: "#9c40ff",
+  startXOffset: 0,
+  startYOffset: 0,
+  endXOffset: 0,
+  endYOffset: 0,
+} as const
+
+export function AnimatedBeam(props: AnimatedBeamProps): React.ReactElement {
+  const mergedProps = { ...ANIMATED_BEAM_DEFAULTS, ...props }
+  const {
+    className,
+    containerRef,
+    fromRef,
+    toRef,
+    curvature,
+    reverse,
+    duration,
+    delay,
+    pathColor,
+    pathWidth,
+    pathOpacity,
+    gradientStartColor,
+    gradientStopColor,
+    startXOffset,
+    startYOffset,
+    endXOffset,
+    endYOffset,
+  } = mergedProps
   const id = useId()
   const [pathD, setPathD] = useState("")
   const [svgDimensions, setSvgDimensions] = useState({ width: 0, height: 0 })
