@@ -177,23 +177,28 @@ const autoApprove: CanUseTool = async (toolName, input, _options) => {
 }
 
 function formatToolInput(toolName: string, input: Record<string, unknown>): string {
-  if (toolName === "Bash") {
-    const cmd = input.command as string | undefined
-    return cmd ? ` ${DIM}$ ${cmd}${RESET}` : ""
+  switch (toolName) {
+    case "Bash": {
+      const cmd = input.command as string | undefined
+      return cmd ? ` ${DIM}$ ${cmd}${RESET}` : ""
+    }
+    case "Edit":
+    case "Write":
+    case "Read": {
+      const path = input.file_path as string | undefined
+      return path ? ` ${DIM}${path}${RESET}` : ""
+    }
+    case "Glob": {
+      const pattern = input.pattern as string | undefined
+      return pattern ? ` ${DIM}${pattern}${RESET}` : ""
+    }
+    case "Grep": {
+      const pattern = input.pattern as string | undefined
+      return pattern ? ` ${DIM}/${pattern}/${RESET}` : ""
+    }
+    default:
+      return ""
   }
-  if (toolName === "Edit" || toolName === "Write" || toolName === "Read") {
-    const path = input.file_path as string | undefined
-    return path ? ` ${DIM}${path}${RESET}` : ""
-  }
-  if (toolName === "Glob") {
-    const pattern = input.pattern as string | undefined
-    return pattern ? ` ${DIM}${pattern}${RESET}` : ""
-  }
-  if (toolName === "Grep") {
-    const pattern = input.pattern as string | undefined
-    return pattern ? ` ${DIM}/${pattern}/${RESET}` : ""
-  }
-  return ""
 }
 
 // ─── Progress spinner ────────────────────────────────────────────────────────
@@ -243,6 +248,35 @@ function createMessageHandler(): (message: SDKMessage) => void {
     }
   }
 
+  function _handleResultMessage(message: SDKMessage & { type: "result" }): void {
+    clearSpinner()
+    process.stdout.write("\n")
+    const duration = (message.duration_ms / 1000).toFixed(1)
+    const apiDuration = (message.duration_api_ms / 1000).toFixed(1)
+    const cost = message.total_cost_usd.toFixed(4)
+    if (message.subtype === "success") {
+      log(
+        `${GREEN}result: success${RESET} ${DIM}turns=${message.num_turns} duration=${duration}s api=${apiDuration}s cost=$${cost}${RESET}`
+      )
+    } else {
+      log(
+        `${RED}result: ${message.subtype}${RESET} ${DIM}turns=${message.num_turns} duration=${duration}s api=${apiDuration}s cost=$${cost}${RESET}`
+      )
+      if ("errors" in message && message.errors.length > 0) {
+        for (const err of message.errors) {
+          log(`${RED}  error: ${err}${RESET}`)
+        }
+      }
+      process.exitCode = 1
+    }
+    if (message.permission_denials.length > 0) {
+      log(`${YELLOW}permission denials: ${message.permission_denials.length}${RESET}`)
+      for (const d of message.permission_denials) {
+        log(`${DIM}  denied: ${d.tool_name} (${d.tool_use_id})${RESET}`)
+      }
+    }
+  }
+
   return (message: SDKMessage) => {
     switch (message.type) {
       case "stream_event": {
@@ -275,35 +309,9 @@ function createMessageHandler(): (message: SDKMessage) => void {
         }
         break
       }
-      case "result": {
-        clearSpinner()
-        process.stdout.write("\n")
-        const duration = (message.duration_ms / 1000).toFixed(1)
-        const apiDuration = (message.duration_api_ms / 1000).toFixed(1)
-        const cost = message.total_cost_usd.toFixed(4)
-        if (message.subtype === "success") {
-          log(
-            `${GREEN}result: success${RESET} ${DIM}turns=${message.num_turns} duration=${duration}s api=${apiDuration}s cost=$${cost}${RESET}`
-          )
-        } else {
-          log(
-            `${RED}result: ${message.subtype}${RESET} ${DIM}turns=${message.num_turns} duration=${duration}s api=${apiDuration}s cost=$${cost}${RESET}`
-          )
-          if ("errors" in message && message.errors.length > 0) {
-            for (const err of message.errors) {
-              log(`${RED}  error: ${err}${RESET}`)
-            }
-          }
-          process.exitCode = 1
-        }
-        if (message.permission_denials.length > 0) {
-          log(`${YELLOW}permission denials: ${message.permission_denials.length}${RESET}`)
-          for (const d of message.permission_denials) {
-            log(`${DIM}  denied: ${d.tool_name} (${d.tool_use_id})${RESET}`)
-          }
-        }
+      case "result":
+        _handleResultMessage(message)
         break
-      }
       case "tool_progress": {
         log(
           `${DIM}tool_progress${RESET} ${message.tool_name} ${DIM}elapsed=${message.elapsed_time_seconds}s${RESET}`

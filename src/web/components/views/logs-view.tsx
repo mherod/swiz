@@ -1,23 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-
-interface HookLogEntry {
-  ts: string
-  event: string
-  hookEventName: string
-  hook: string
-  status: string
-  durationMs: number
-  exitCode: number | null
-  matcher?: string
-  sessionId?: string
-  cwd?: string
-  toolName?: string
-  skipReason?: string
-  stdoutSnippet?: string
-  stderrSnippet?: string
-  kind?: "hook" | "dispatch"
-  hookCount?: number
-}
+import type { HookLogEntry } from "../../../hook-log.ts"
 
 const STATUS_COLORS: Record<string, string> = {
   ok: "log-status-ok",

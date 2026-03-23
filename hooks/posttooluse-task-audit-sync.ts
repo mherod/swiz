@@ -58,6 +58,38 @@ async function writeAuditEntry(tasksDir: string, entry: AuditEntry): Promise<voi
   }
 }
 
+async function _handleTaskCreate(tasksDir: string, subject: string): Promise<void> {
+  const taskId = await findLatestTaskId(tasksDir)
+  if (!taskId) return
+
+  const entry: AuditEntry = {
+    timestamp: new Date().toISOString(),
+    taskId,
+    action: "create",
+    newStatus: "pending",
+    subject,
+    source: "native-tool-sync",
+  }
+  await writeAuditEntry(tasksDir, entry)
+}
+
+async function _handleTaskUpdate(
+  tasksDir: string,
+  taskId: string,
+  subject: string,
+  newStatus: string
+): Promise<void> {
+  const entry: AuditEntry = {
+    timestamp: new Date().toISOString(),
+    taskId,
+    action: "status_change",
+    newStatus: newStatus || undefined,
+    subject: subject || undefined,
+    source: "native-tool-sync",
+  }
+  await writeAuditEntry(tasksDir, entry)
+}
+
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())
   const sessionId = resolveSafeSessionId(input.session_id)
@@ -71,33 +103,13 @@ async function main(): Promise<void> {
   if (!tasksDir) return
 
   if (toolName === "TaskCreate") {
-    // Find the task ID by reading the most recently created file in the session dir.
-    const taskId = await findLatestTaskId(tasksDir)
-    if (!taskId) return
-
-    const entry: AuditEntry = {
-      timestamp: new Date().toISOString(),
-      taskId,
-      action: "create",
-      newStatus: "pending",
-      subject,
-      source: "native-tool-sync",
-    }
-    await writeAuditEntry(tasksDir, entry)
+    await _handleTaskCreate(tasksDir, subject)
   } else if (toolName === "TaskUpdate") {
     const taskId = String(input.tool_input?.taskId ?? "")
     if (!taskId) return
 
     const newStatus = String(input.tool_input?.status ?? "")
-    const entry: AuditEntry = {
-      timestamp: new Date().toISOString(),
-      taskId,
-      action: "status_change",
-      newStatus: newStatus || undefined,
-      subject: subject || undefined,
-      source: "native-tool-sync",
-    }
-    await writeAuditEntry(tasksDir, entry)
+    await _handleTaskUpdate(tasksDir, taskId, subject, newStatus)
   }
 }
 

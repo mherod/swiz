@@ -33,6 +33,20 @@ function buildRecoveryErrorContext(taskId: string, subject: string, status: stri
   ].join(" ")
 }
 
+async function _writeRecoveryTask(
+  tasksDir: string,
+  taskPath: string,
+  task: ReturnType<typeof buildRecoveryStub>
+): Promise<boolean> {
+  try {
+    await mkdir(tasksDir, { recursive: true })
+    await Bun.write(taskPath, JSON.stringify(task, null, 2))
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function main(): Promise<void> {
   const input = (await Bun.stdin.json()) as TaskToolInput
   const sessionId = resolveSafeSessionId(input.session_id)
@@ -58,15 +72,14 @@ async function main(): Promise<void> {
     source: "posttooluse-task-recovery",
   })
 
-  try {
-    await mkdir(tasksDir, { recursive: true })
-    await Bun.write(taskPath, JSON.stringify(task, null, 2))
-  } catch {
+  const wrote = await _writeRecoveryTask(tasksDir, taskPath, task)
+  if (!wrote) {
     await emitContext(
       "PostToolUse",
       buildRecoveryErrorContext(taskId, task.subject, task.status),
       input.cwd
     )
+    return
   }
 
   const successContext =
