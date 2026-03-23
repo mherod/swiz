@@ -68,6 +68,11 @@ interface PushCheckResult {
 
 const CONVERSATION_ROLES = new Set(["user", "assistant"])
 
+function isTextBlock(block: unknown): string | null {
+  const b = block as Record<string, unknown>
+  return b?.type === "text" && typeof b?.text === "string" ? String(b.text) : null
+}
+
 function extractTextBlocks(entry: Record<string, unknown>): Array<{ role: string; text: string }> {
   const role: string = (entry?.type as string) ?? ""
   if (!CONVERSATION_ROLES.has(role)) return []
@@ -75,9 +80,9 @@ function extractTextBlocks(entry: Record<string, unknown>): Array<{ role: string
   if (!Array.isArray(content)) return []
   const results: Array<{ role: string; text: string }> = []
   for (const block of content) {
-    const b = block as Record<string, unknown>
-    if (b?.type === "text" && typeof b?.text === "string") {
-      results.push({ role, text: b.text })
+    const text = isTextBlock(block)
+    if (text) {
+      results.push({ role, text })
     }
   }
   return results
