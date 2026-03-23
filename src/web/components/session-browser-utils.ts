@@ -516,27 +516,35 @@ export interface ParsedFileToolCall {
   limit?: number | null
 }
 
-export function parseFileToolCall(name: string, detail: string): ParsedFileToolCall | null {
-  const lower = name.toLowerCase()
-  if (lower !== "read" && lower !== "edit" && lower !== "write" && lower !== "glob") return null
-  const payload = parseJsonObject(detail)
-  if (!payload) return null
-  const filePath =
-    typeof payload.file_path === "string"
-      ? payload.file_path
-      : typeof payload.path === "string"
-        ? payload.path
-        : typeof payload.pattern === "string"
-          ? payload.pattern
-          : null
-  if (!filePath) return null
+function extractFilePath(payload: Record<string, unknown>): string | null {
+  if (typeof payload.file_path === "string") return payload.file_path
+  if (typeof payload.path === "string") return payload.path
+  if (typeof payload.pattern === "string") return payload.pattern
+  return null
+}
+
+function extractFileToolFields(
+  payload: Record<string, unknown>
+): Omit<ParsedFileToolCall, "filePath" | "action"> {
   return {
-    filePath,
-    action: lower as "read" | "edit" | "write" | "glob",
     oldString: typeof payload.old_string === "string" ? payload.old_string : null,
     newString: typeof payload.new_string === "string" ? payload.new_string : null,
     pattern: typeof payload.pattern === "string" ? payload.pattern : null,
     offset: typeof payload.offset === "number" ? payload.offset : null,
     limit: typeof payload.limit === "number" ? payload.limit : null,
+  }
+}
+
+export function parseFileToolCall(name: string, detail: string): ParsedFileToolCall | null {
+  const lower = name.toLowerCase()
+  if (lower !== "read" && lower !== "edit" && lower !== "write" && lower !== "glob") return null
+  const payload = parseJsonObject(detail)
+  if (!payload) return null
+  const filePath = extractFilePath(payload)
+  if (!filePath) return null
+  return {
+    filePath,
+    action: lower as "read" | "edit" | "write" | "glob",
+    ...extractFileToolFields(payload),
   }
 }
