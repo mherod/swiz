@@ -53,7 +53,6 @@ const STDERR_ALLOWLIST = new Map<string, string>([
 const STDOUT_ALLOWLIST = new Set([
   // CLI command implementations — each produces user-facing terminal output
   "src/commands/ci-wait.ts",
-  "src/commands/cleanup.ts",
   // cross-repo-issue — prints filed issue URL and location to user
   "src/commands/cross-repo-issue.ts",
   "src/commands/compact.ts",
