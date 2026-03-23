@@ -82,6 +82,8 @@ export interface SettingDef {
 
 /** Project-local policy config — lives in <repo>/.swiz/config.json */
 export interface ProjectSwizSettings {
+  /** Per-project auto-continue override. */
+  autoContinue?: boolean
   profile?: PolicyProfile
   trivialMaxFiles?: number
   trivialMaxLines?: number
@@ -202,6 +204,7 @@ export const sessionSwizSettingsSchema = z.object({
 })
 
 export const projectSettingsSchema = z.object({
+  autoContinue: z.boolean().optional(),
   profile: policyProfileSchema.optional(),
   trivialMaxFiles: z.number().int().min(1).optional(),
   trivialMaxLines: z.number().int().min(1).optional(),

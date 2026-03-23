@@ -6,7 +6,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     key: "autoContinue",
     aliases: ["auto-continue", "autocontinue", "auto_continue"],
     kind: "boolean",
-    scopes: ["global", "session"],
+    scopes: ["global", "project", "session"],
     docs: {
       enableDescription: "Enable stop auto-continue behavior",
       disableDescription: "Disable stop auto-continue behavior",

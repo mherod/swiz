@@ -279,7 +279,7 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   if (defaultBranch) result.defaultBranch = defaultBranch
 
   applySchemaFields(obj, result)
-  applyBooleanFields(obj, result, ["qualityChecksGate", "strictNoDirectMain"])
+  applyBooleanFields(obj, result, ["autoContinue", "qualityChecksGate", "strictNoDirectMain"])
   applyStringArrayFields(obj, result, ["disabledHooks", "plugins", "largeFileAllowPatterns"])
   applyHooksAndCategories(obj, result)
   return result

@@ -120,6 +120,7 @@ export function resolveMemoryThresholds(
 
 /** Keys where project settings can override global settings. */
 const PROJECT_OVERRIDABLE_KEYS = [
+  "autoContinue",
   "ambitionMode",
   "collaborationMode",
   "qualityChecksGate",
@@ -146,7 +147,6 @@ function buildBaseSettings(
   projectSettings?: ProjectSwizSettings | null
 ): EffectiveSettingsBase {
   return {
-    autoContinue: settings.autoContinue,
     critiquesEnabled: settings.critiquesEnabled,
     narratorVoice: settings.narratorVoice,
     narratorSpeed: settings.narratorSpeed,
