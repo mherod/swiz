@@ -196,9 +196,7 @@ export function filterRequiredSettingsHooks(
     .map((group) => {
       const hooks = group.hooks.filter((hook) => {
         if (!hook.requiredSettings || hook.requiredSettings.length === 0) return true
-        return hook.requiredSettings.every(
-          (key) => !!(effective as unknown as Record<string, unknown>)[key]
-        )
+        return hook.requiredSettings.every((key) => !!effective[key])
       })
       return hooks.length === group.hooks.length ? group : { ...group, hooks }
     })

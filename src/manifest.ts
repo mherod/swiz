@@ -4,6 +4,7 @@
 
 import { debugLog } from "./debug.ts"
 import { detectFrameworks, type Framework } from "./detect-frameworks.ts"
+import type { EffectiveSwizSettings } from "./settings/types.ts"
 
 export interface HookDef {
   file: string
@@ -50,7 +51,7 @@ export interface HookDef {
    *
    * Example: `requiredSettings: ["qualityChecksGate"]`
    */
-  requiredSettings?: string[]
+  requiredSettings?: (keyof EffectiveSwizSettings)[]
 }
 
 /**

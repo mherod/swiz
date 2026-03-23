@@ -322,7 +322,8 @@ function normalizeProjectHooks(raw: unknown[]): HookGroup[] {
           Array.isArray(h.requiredSettings) &&
           h.requiredSettings.every((s: unknown) => typeof s === "string")
         ) {
-          def.requiredSettings = h.requiredSettings as string[]
+          def.requiredSettings =
+            h.requiredSettings as (keyof import("./types").EffectiveSwizSettings)[]
         }
         return def
       })

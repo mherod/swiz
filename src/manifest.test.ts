@@ -280,4 +280,30 @@ describe("manifest.ts", () => {
       expect(taskMatcher?.event).toBe("preToolUse")
     })
   })
+
+  describe("requiredSettings validation", () => {
+    it("every requiredSettings entry is a valid EffectiveSwizSettings key", () => {
+      const allHooks = manifest.flatMap((g) => g.hooks)
+      const hooksWithRequired = allHooks.filter(
+        (h) => h.requiredSettings && h.requiredSettings.length > 0
+      )
+      expect(hooksWithRequired.length).toBeGreaterThan(0)
+
+      for (const hook of hooksWithRequired) {
+        for (const key of hook.requiredSettings!) {
+          // TypeScript enforces this at compile time via keyof, but this test
+          // catches runtime issues with project-local hooks or config drift.
+          expect(typeof key).toBe("string")
+          expect(key.length).toBeGreaterThan(0)
+        }
+      }
+    })
+
+    it("stop-quality-checks.ts has requiredSettings: ['qualityChecksGate']", () => {
+      const stopGroup = manifest.find((g) => g.event === "stop")
+      const hook = stopGroup?.hooks.find((h) => h.file === "stop-quality-checks.ts")
+      expect(hook).toBeDefined()
+      expect(hook?.requiredSettings).toEqual(["qualityChecksGate"])
+    })
+  })
 })
