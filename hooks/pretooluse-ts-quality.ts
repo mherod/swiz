@@ -62,6 +62,33 @@ function handleInterpChar(ch: string, depth: number): { out: string; depthDelta:
   return { out: ch, depthDelta: 0 }
 }
 
+function processTemplateLitChar(
+  src: string,
+  i: number,
+  interpDepth: number
+): { out: string; nextI: number; nextDepth: number; consumed: boolean } {
+  const ch = src[i]
+  if (ch === "\\" && interpDepth === 0) {
+    return { out: "  ", nextI: i + 2, nextDepth: interpDepth, consumed: true }
+  }
+  if (ch === "`" && interpDepth === 0) {
+    return { out: " ", nextI: i + 1, nextDepth: interpDepth, consumed: true }
+  }
+  if (ch === "$" && src[i + 1] === "{" && interpDepth === 0) {
+    return { out: "  ", nextI: i + 2, nextDepth: 1, consumed: true }
+  }
+  if (interpDepth > 0) {
+    const result = handleInterpChar(ch!, interpDepth)
+    return {
+      out: result.out,
+      nextI: i + 1,
+      nextDepth: interpDepth + result.depthDelta,
+      consumed: true,
+    }
+  }
+  return { out: ch === "\n" ? "\n" : " ", nextI: i + 1, nextDepth: interpDepth, consumed: false }
+}
+
 function stripTemplateLiteral(
   src: string,
   i: number,
@@ -72,31 +99,11 @@ function stripTemplateLiteral(
   i++
   let interpDepth = 0
   while (i < n) {
-    if (src[i] === "\\" && interpDepth === 0) {
-      out += "  "
-      i += 2
-      continue
-    }
-    if (src[i] === "`" && interpDepth === 0) {
-      out += " "
-      i++
-      break
-    }
-    if (src[i] === "$" && src[i + 1] === "{" && interpDepth === 0) {
-      out += "  "
-      i += 2
-      interpDepth = 1
-      continue
-    }
-    if (interpDepth > 0) {
-      const result = handleInterpChar(src[i]!, interpDepth)
-      out += result.out
-      interpDepth += result.depthDelta
-      i++
-      continue
-    }
-    out += src[i] === "\n" ? "\n" : " "
-    i++
+    const result = processTemplateLitChar(src, i, interpDepth)
+    out += result.out
+    i = result.nextI
+    interpDepth = result.nextDepth
+    if (src[i - 1] === "`" && result.nextDepth === 0) break
   }
   return { out, i }
 }
