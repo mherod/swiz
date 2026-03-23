@@ -365,23 +365,18 @@ async function saveSettingsToServer(opts: {
 
 // --- Data-fetching hook ---
 
-function useSettingsFetch(cwd: string | null) {
-  const [globalForm, setGlobalForm] = useState<GlobalSettingsForm>(DEFAULT_GLOBAL_FORM)
-  const [globalBaseline, setGlobalBaseline] = useState<GlobalSettingsForm>(DEFAULT_GLOBAL_FORM)
-  const [globalLoaded, setGlobalLoaded] = useState(false)
-  const [globalLoading, setGlobalLoading] = useState(true)
-  const [projectForm, setProjectForm] = useState<ProjectSettingsForm>(DEFAULT_PROJECT_FORM)
-  const [projectBaseline, setProjectBaseline] = useState<ProjectSettingsForm>(DEFAULT_PROJECT_FORM)
-  const [projectLoaded, setProjectLoaded] = useState(false)
-  const [projectLoading, setProjectLoading] = useState(false)
-  const [globalError, setGlobalError] = useState("")
-  const [projectError, setProjectError] = useState("")
+function useGlobalSettingsFetch() {
+  const [form, setForm] = useState<GlobalSettingsForm>(DEFAULT_GLOBAL_FORM)
+  const [baseline, setBaseline] = useState<GlobalSettingsForm>(DEFAULT_GLOBAL_FORM)
+  const [loaded, setLoaded] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
 
   useEffect(() => {
     let cancelled = false
-    setGlobalLoading(true)
-    setGlobalLoaded(false)
-    setGlobalError("")
+    setLoading(true)
+    setLoaded(false)
+    setError("")
     fetch("/settings/global")
       .then((res) => {
         if (!res.ok) throw new Error("Network response was not ok")
@@ -390,70 +385,87 @@ function useSettingsFetch(cwd: string | null) {
       .then((result) => {
         if (cancelled) return
         const next = globalSettingsToForm(result.settings || {})
-        setGlobalForm(next)
-        setGlobalBaseline(next)
-        setGlobalLoaded(true)
+        setForm(next)
+        setBaseline(next)
+        setLoaded(true)
       })
       .catch((err) => {
         if (cancelled) return
-        setGlobalError(err instanceof Error ? err.message : "Failed to load global settings")
+        setError(err instanceof Error ? err.message : "Failed to load global settings")
       })
       .finally(() => {
-        if (!cancelled) setGlobalLoading(false)
+        if (!cancelled) setLoading(false)
       })
     return () => {
       cancelled = true
     }
   }, [])
 
+  return { form, setForm, baseline, setBaseline, loaded, loading, error, setError }
+}
+
+function useProjectSettingsFetch(cwd: string | null) {
+  const [form, setForm] = useState<ProjectSettingsForm>(DEFAULT_PROJECT_FORM)
+  const [baseline, setBaseline] = useState<ProjectSettingsForm>(DEFAULT_PROJECT_FORM)
+  const [loaded, setLoaded] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+
   useEffect(() => {
     if (!cwd) {
-      setProjectForm(DEFAULT_PROJECT_FORM)
-      setProjectBaseline(DEFAULT_PROJECT_FORM)
-      setProjectLoaded(false)
+      setForm(DEFAULT_PROJECT_FORM)
+      setBaseline(DEFAULT_PROJECT_FORM)
+      setLoaded(false)
       return
     }
     let cancelled = false
-    setProjectLoading(true)
-    setProjectLoaded(false)
-    setProjectError("")
+    setLoading(true)
+    setLoaded(false)
+    setError("")
     void postJson<CachedProjectSettingsResponse>("/settings/project", { cwd })
       .then((result) => {
         if (cancelled) return
         const next = projectSettingsToForm(result)
-        setProjectForm(next)
-        setProjectBaseline(next)
-        setProjectLoaded(true)
+        setForm(next)
+        setBaseline(next)
+        setLoaded(true)
       })
       .catch((err) => {
         if (cancelled) return
-        setProjectError(err instanceof Error ? err.message : "Failed to load project settings")
+        setError(err instanceof Error ? err.message : "Failed to load project settings")
       })
       .finally(() => {
-        if (!cancelled) setProjectLoading(false)
+        if (!cancelled) setLoading(false)
       })
     return () => {
       cancelled = true
     }
   }, [cwd])
 
+  return { form, setForm, baseline, setBaseline, loaded, loading, error, setError }
+}
+
+function useSettingsFetch(cwd: string | null) {
+  const global = useGlobalSettingsFetch()
+  const project = useProjectSettingsFetch(cwd)
+
   return {
-    globalForm,
-    setGlobalForm,
-    globalBaseline,
-    setGlobalBaseline,
-    globalLoading,
-    globalLoaded,
-    globalError,
-    projectForm,
-    setProjectForm,
-    projectBaseline,
-    setProjectBaseline,
-    projectLoading,
-    projectLoaded,
-    projectError,
-    setGlobalError,
-    setProjectError,
+    globalForm: global.form,
+    setGlobalForm: global.setForm,
+    globalBaseline: global.baseline,
+    setGlobalBaseline: global.setBaseline,
+    globalLoading: global.loading,
+    globalLoaded: global.loaded,
+    globalError: global.error,
+    projectForm: project.form,
+    setProjectForm: project.setForm,
+    projectBaseline: project.baseline,
+    setProjectBaseline: project.setBaseline,
+    projectLoading: project.loading,
+    projectLoaded: project.loaded,
+    projectError: project.error,
+    setGlobalError: global.setError,
+    setProjectError: project.setError,
   }
 }
 
