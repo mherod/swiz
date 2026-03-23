@@ -36,7 +36,7 @@ export function SessionTasksSection({
   tasks: SessionTask[]
   summary: SessionTaskSummary | null
   loading: boolean
-}) {
+}): React.ReactElement {
   const openTasks = useMemo(
     () => tasks.filter((task) => task.status === "pending" || task.status === "in_progress"),
     [tasks]
@@ -45,33 +45,6 @@ export function SessionTasksSection({
     () => tasks.filter((task) => task.status === "completed" || task.status === "cancelled"),
     [tasks]
   )
-  const renderTaskRow = (task: SessionTask) => {
-    const taskTime = task.statusChangedAt ?? task.completionTimestamp
-    return (
-      <li key={task.id} className="session-task-row">
-        <div className="session-task-meta flex-wrap sm:flex-nowrap gap-y-2">
-          <span className="session-task-id truncate max-w-[75%] sm:max-w-none text-[0.65rem] sm:text-[0.7rem]">
-            #{task.id}
-          </span>
-          <TaskStatusBadge status={task.status} />
-        </div>
-        <p className={cn("session-task-subject min-w-0", `session-task-subject-${task.status}`)}>
-          <TaskChecklistMark status={task.status} />
-          <span className="line-clamp-3 sm:line-clamp-none break-words flex-1">{task.subject}</span>
-        </p>
-        {taskTime ? (
-          <p className="session-task-time text-[0.65rem] sm:text-[0.68rem]">
-            {formatTime(new Date(taskTime).getTime())}
-          </p>
-        ) : null}
-        {task.completionEvidence ? (
-          <p className="session-task-evidence line-clamp-2 sm:line-clamp-none break-words text-[0.68rem] sm:text-[0.72rem]">
-            {task.completionEvidence}
-          </p>
-        ) : null}
-      </li>
-    )
-  }
 
   return (
     <section className="session-tasks-section" aria-label="Current tasks for selected session">
@@ -88,7 +61,11 @@ export function SessionTasksSection({
       ) : (
         <>
           {openTasks.length > 0 ? (
-            <ul className="session-task-list">{openTasks.map(renderTaskRow)}</ul>
+            <ul className="session-task-list">
+              {openTasks.map((task) => (
+                <SessionTaskRow key={task.id} task={task} />
+              ))}
+            </ul>
           ) : (
             <p className="empty">No open tasks in this session.</p>
           )}
@@ -97,7 +74,11 @@ export function SessionTasksSection({
               <summary className="py-2 sm:py-0 min-h-[32px] sm:min-h-0 flex items-center w-full">
                 Show completed ({completedTasks.length})
               </summary>
-              <ul className="session-task-list mt-2">{completedTasks.map(renderTaskRow)}</ul>
+              <ul className="session-task-list mt-2">
+                {completedTasks.map((task) => (
+                  <SessionTaskRow key={task.id} task={task} />
+                ))}
+              </ul>
             </details>
           ) : null}
         </>
@@ -129,6 +110,81 @@ function ProjectTaskRow({ task }: { task: ProjectTask }) {
   )
 }
 
+function SessionTaskRow({ task }: { task: SessionTask }) {
+  const taskTime = task.statusChangedAt ?? task.completionTimestamp
+  return (
+    <li key={task.id} className="session-task-row">
+      <div className="session-task-meta flex-wrap sm:flex-nowrap gap-y-2">
+        <span className="session-task-id truncate max-w-[75%] sm:max-w-none text-[0.65rem] sm:text-[0.7rem]">
+          #{task.id}
+        </span>
+        <TaskStatusBadge status={task.status} />
+      </div>
+      <p className={cn("session-task-subject min-w-0", `session-task-subject-${task.status}`)}>
+        <TaskChecklistMark status={task.status} />
+        <span className="line-clamp-3 sm:line-clamp-none break-words flex-1">{task.subject}</span>
+      </p>
+      {taskTime ? (
+        <p className="session-task-time text-[0.65rem] sm:text-[0.68rem]">
+          {formatTime(new Date(taskTime).getTime())}
+        </p>
+      ) : null}
+      {task.completionEvidence ? (
+        <p className="session-task-evidence line-clamp-2 sm:line-clamp-none break-words text-[0.68rem] sm:text-[0.72rem]">
+          {task.completionEvidence}
+        </p>
+      ) : null}
+    </li>
+  )
+}
+
+function ProjectTaskListControls({
+  visibility,
+  openTasks,
+  tasks,
+  setVisibility,
+  setExpanded,
+}: {
+  visibility: "open" | "all"
+  openTasks: ProjectTask[]
+  tasks: ProjectTask[]
+  setVisibility: (v: "open" | "all") => void
+  setExpanded: (v: boolean) => void
+}): React.ReactElement {
+  return (
+    <div className="session-task-controls flex flex-col sm:flex-row gap-2.5 sm:gap-2 mb-3 sm:mb-2.5 mt-2.5">
+      <button
+        type="button"
+        className={cn(
+          "task-filter-btn w-full sm:w-auto text-center justify-center min-h-[32px] sm:min-h-0",
+          visibility === "open" && "active"
+        )}
+        onClick={() => {
+          setVisibility("open")
+          setExpanded(false)
+        }}
+        aria-pressed={visibility === "open"}
+      >
+        Open only ({openTasks.length} shown)
+      </button>
+      <button
+        type="button"
+        className={cn(
+          "task-filter-btn w-full sm:w-auto text-center justify-center min-h-[32px] sm:min-h-0",
+          visibility === "all" && "active"
+        )}
+        onClick={() => {
+          setVisibility("all")
+          setExpanded(false)
+        }}
+        aria-pressed={visibility === "all"}
+      >
+        All ({tasks.length} loaded)
+      </button>
+    </div>
+  )
+}
+
 function ProjectTaskEmptyState({ visibility }: { visibility: "open" | "all" }) {
   return visibility === "open" ? (
     <p className="empty">No open tasks in this project.</p>
@@ -153,7 +209,7 @@ function ProjectTaskList({
   visibility: "open" | "all"
   setVisibility: (v: "open" | "all") => void
   loading: boolean
-}) {
+}): React.ReactElement {
   const [expanded, setExpanded] = useState(false)
   const previewLimit = 16
   const visibleTasks = expanded ? scopedTasks : scopedTasks.slice(0, previewLimit)
@@ -161,36 +217,13 @@ function ProjectTaskList({
 
   return (
     <>
-      <div className="session-task-controls flex flex-col sm:flex-row gap-2.5 sm:gap-2 mb-3 sm:mb-2.5 mt-2.5">
-        <button
-          type="button"
-          className={cn(
-            "task-filter-btn w-full sm:w-auto text-center justify-center min-h-[32px] sm:min-h-0",
-            visibility === "open" && "active"
-          )}
-          onClick={() => {
-            setVisibility("open")
-            setExpanded(false)
-          }}
-          aria-pressed={visibility === "open"}
-        >
-          Open only ({openTasks.length} shown)
-        </button>
-        <button
-          type="button"
-          className={cn(
-            "task-filter-btn w-full sm:w-auto text-center justify-center min-h-[32px] sm:min-h-0",
-            visibility === "all" && "active"
-          )}
-          onClick={() => {
-            setVisibility("all")
-            setExpanded(false)
-          }}
-          aria-pressed={visibility === "all"}
-        >
-          All ({tasks.length} loaded)
-        </button>
-      </div>
+      <ProjectTaskListControls
+        visibility={visibility}
+        openTasks={openTasks}
+        tasks={tasks}
+        setVisibility={setVisibility}
+        setExpanded={setExpanded}
+      />
       {summary && tasks.length < summary.total ? (
         <p className="session-tasks-summary">
           Showing latest {tasks.length} of {summary.total} tasks.

@@ -18,6 +18,7 @@ alwaysApply: false
 - Add command: create `src/commands/<name>.ts` exporting `Command`, then register in `index.ts`.
 - DO NOT add routing or arg-parsing libraries; keep manual `process.argv` parsing.
 - **DO**: Use `@anthropic-ai/claude-agent-sdk` `query()` for Claude session interactions. **DON'T** spawn `claude` CLI via `Bun.spawn` — use SDK `continue`/`resume` options instead.
+- **Complexity reduction**: Extract helper functions to decompose complex logic and parameter assembly.
 ## Project Root Resolution
 - Resolve project root with `dirname(Bun.main)`.
 - DO NOT use `join(dirname(Bun.main), "..")`; it breaks `bun link` execution.
@@ -236,8 +237,7 @@ alwaysApply: false
 - `pretooluse-require-tasks.ts` and `pretooluse-update-memory-enforcement.ts` must skip when not in a git repo or no `CLAUDE.md` exists up the tree; guard with `isGitRepo(cwd)` then upward `CLAUDE.md` search, else `process.exit(0)`.
 - Test Biome rule changes with `biome check .` (not only `biome check src/`); add overrides for every directory with valid console usage (`hooks/`, `scripts/`, `push/scripts/`, etc.).
 - Bun test reporter: `--reporter=dots --concurrent` (`--concurrent` required by hook). Run once without any pipe — piped re-runs trigger `pretooluse-repeated-lint-test` as consecutive.
-- **DON'T**: Re-run lint with different filters consecutively — edit a file first. The hook blocks consecutive runs.
-- **DO**: Edit a file between `bun run format` and `bun run lint` — format-via-wrapper lacks `--write` so `pretooluse-repeated-lint-test` doesn't detect changes; consecutive lint runs without an edit block.
+- **DO**: Edit a file between `bun run format` and `bun run lint` — format lacks `--write` so hook detects no file changes on consecutive runs.
 - Do not run `cd` in Bash commands; use absolute paths, `git -C <dir>`, `pnpm --prefix <dir>`, or `cwd` in `Bun.spawn()`.
 - `sed -i`/`sed > file` blocked; `sed -n` pipelines allowed. Use Read `offset`/`limit`.
 - `awk > file`/`awk | tee -i` blocked; `awk '{print $1}'` and `awk --help` allowed. Prefer `bun -e`, `cut`, or git `--format`.
