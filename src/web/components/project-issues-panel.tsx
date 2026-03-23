@@ -202,6 +202,47 @@ function IssueItem({ issue, repo }: { issue: ProjectIssue; repo: string | null }
   )
 }
 
+interface IssuesPanelContentProps {
+  error: string
+  loading: boolean
+  repo: string | null
+  issues: ProjectIssue[]
+  emptyState: { title: string; body: string }
+}
+
+function IssuesPanelContent({ error, loading, repo, issues, emptyState }: IssuesPanelContentProps) {
+  return (
+    <>
+      {error ? (
+        <p className="project-issues-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      {loading ? (
+        <IssuesEmptyShell
+          mark="..."
+          title="Refreshing cache"
+          body="Loading open issues for the selected project."
+          isLoading
+        />
+      ) : null}
+
+      {!loading && !error && issues.length === 0 ? (
+        <IssuesEmptyShell mark={repo ? "0" : "?"} title={emptyState.title} body={emptyState.body} />
+      ) : null}
+
+      {!loading && issues.length > 0 ? (
+        <ul className="project-issues-list">
+          {issues.map((issue) => (
+            <IssueItem key={issue.number} issue={issue} repo={repo} />
+          ))}
+        </ul>
+      ) : null}
+    </>
+  )
+}
+
 export function ProjectIssuesPanel({ cwd }: { cwd: string | null }) {
   const [repo, setRepo] = useState<string | null>(null)
   const [issues, setIssues] = useState<ProjectIssue[]>([])
@@ -253,33 +294,13 @@ export function ProjectIssuesPanel({ cwd }: { cwd: string | null }) {
   return (
     <section className="card project-issues-card" aria-labelledby="project-issues-title">
       <IssuesHero repo={repo} loading={loading} issueCount={issues.length} />
-
-      {error ? (
-        <p className="project-issues-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      {loading ? (
-        <IssuesEmptyShell
-          mark="..."
-          title="Refreshing cache"
-          body="Loading open issues for the selected project."
-          isLoading
-        />
-      ) : null}
-
-      {!loading && !error && issues.length === 0 ? (
-        <IssuesEmptyShell mark={repo ? "0" : "?"} title={emptyState.title} body={emptyState.body} />
-      ) : null}
-
-      {!loading && issues.length > 0 ? (
-        <ul className="project-issues-list">
-          {issues.map((issue) => (
-            <IssueItem key={issue.number} issue={issue} repo={repo} />
-          ))}
-        </ul>
-      ) : null}
+      <IssuesPanelContent
+        error={error}
+        loading={loading}
+        repo={repo}
+        issues={issues}
+        emptyState={emptyState}
+      />
     </section>
   )
 }
