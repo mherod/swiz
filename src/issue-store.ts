@@ -651,6 +651,66 @@ async function runGhCommand(
   return false
 }
 
+async function _executeMutationCommand(
+  args: string[],
+  cwd: string,
+  stdin?: Response
+): Promise<boolean> {
+  await acquireGhSlot()
+  const proc = Bun.spawn(["gh", "api", ...args], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    ...(stdin && { stdin }),
+  })
+  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+  await proc.exited
+  return proc.exitCode === 0
+}
+
+function _buildMutationArgs(
+  mutation: MutationPayload,
+  repo: string,
+  num: string
+): { args: string[]; stdin?: Response } | null {
+  switch (mutation.type) {
+    case "close":
+      return { args: [`repos/${repo}/issues/${num}`, "-X", "PATCH", "-f", "state=closed"] }
+    case "comment":
+      if (!mutation.body) return null
+      return { args: [`repos/${repo}/issues/${num}/comments`, "-f", `body=${mutation.body}`] }
+    case "label_add":
+      if (!mutation.labels?.length) return null
+      return {
+        args: [`repos/${repo}/issues/${num}/labels`, "-X", "POST", "--input", "-"],
+        stdin: new Response(JSON.stringify({ labels: mutation.labels })),
+      }
+    case "milestone_set":
+      if (mutation.milestone == null) return null
+      return {
+        args: [
+          `repos/${repo}/issues/${num}`,
+          "-X",
+          "PATCH",
+          "-f",
+          `milestone=${String(mutation.milestone)}`,
+        ],
+      }
+    case "create": {
+      if (!mutation.title) return null
+      const payload: Record<string, unknown> = { title: mutation.title }
+      if (mutation.body) payload.body = mutation.body
+      if (mutation.labels?.length) payload.labels = mutation.labels
+      return {
+        args: [`repos/${repo}/issues`, "-X", "POST", "--input", "-"],
+        stdin: new Response(JSON.stringify(payload)),
+      }
+    }
+    default:
+      return null
+  }
+}
+
 /** Attempt REST API fallback for a mutation when GraphQL is rate-limited. */
 async function tryMutationRestFallback(
   mutation: MutationPayload,
@@ -660,82 +720,10 @@ async function tryMutationRestFallback(
   const num = String(mutation.number)
   debugLog(`[swiz] REST_FALLBACK_MUTATION repo=${repo} issue=#${num} type=${mutation.type}`)
 
-  switch (mutation.type) {
-    case "close": {
-      await acquireGhSlot()
-      const proc = Bun.spawn(
-        ["gh", "api", `repos/${repo}/issues/${num}`, "-X", "PATCH", "-f", "state=closed"],
-        { cwd, stdout: "pipe", stderr: "pipe" }
-      )
-      await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-      await proc.exited
-      return proc.exitCode === 0
-    }
-    case "comment": {
-      if (!mutation.body) return true
-      await acquireGhSlot()
-      const proc = Bun.spawn(
-        ["gh", "api", `repos/${repo}/issues/${num}/comments`, "-f", `body=${mutation.body}`],
-        { cwd, stdout: "pipe", stderr: "pipe" }
-      )
-      await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-      await proc.exited
-      return proc.exitCode === 0
-    }
-    case "label_add": {
-      if (!mutation.labels?.length) return true
-      await acquireGhSlot()
-      const proc = Bun.spawn(
-        ["gh", "api", `repos/${repo}/issues/${num}/labels`, "-X", "POST", "--input", "-"],
-        {
-          cwd,
-          stdout: "pipe",
-          stderr: "pipe",
-          stdin: new Response(JSON.stringify({ labels: mutation.labels })),
-        }
-      )
-      await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-      await proc.exited
-      return proc.exitCode === 0
-    }
-    case "milestone_set": {
-      if (mutation.milestone == null) return true
-      await acquireGhSlot()
-      const proc = Bun.spawn(
-        [
-          "gh",
-          "api",
-          `repos/${repo}/issues/${num}`,
-          "-X",
-          "PATCH",
-          "-f",
-          `milestone=${String(mutation.milestone)}`,
-        ],
-        { cwd, stdout: "pipe", stderr: "pipe" }
-      )
-      await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-      await proc.exited
-      return proc.exitCode === 0
-    }
-    case "create": {
-      if (!mutation.title) return false
-      await acquireGhSlot()
-      const payload: Record<string, unknown> = { title: mutation.title }
-      if (mutation.body) payload.body = mutation.body
-      if (mutation.labels?.length) payload.labels = mutation.labels
-      const proc = Bun.spawn(["gh", "api", `repos/${repo}/issues`, "-X", "POST", "--input", "-"], {
-        cwd,
-        stdout: "pipe",
-        stderr: "pipe",
-        stdin: new Response(JSON.stringify(payload)),
-      })
-      await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-      await proc.exited
-      return proc.exitCode === 0
-    }
-    default:
-      return false
-  }
+  const cmd = _buildMutationArgs(mutation, repo, num)
+  if (!cmd) return mutation.type === "create" ? false : true
+
+  return _executeMutationCommand(cmd.args, cwd, cmd.stdin)
 }
 
 /** Log a structured execution failure for a single mutation replay. */
@@ -1020,6 +1008,38 @@ function normalizeRestIssues(raw: unknown): Array<{
     )
 }
 
+function _normalizeMergeable(value: unknown): string {
+  if (typeof value === "string") return value
+  if (value === true) return "MERGEABLE"
+  if (value === false) return "CONFLICTING"
+  return "UNKNOWN"
+}
+
+function _normalizePullRequest(pr: Record<string, unknown>) {
+  const number = typeof pr.number === "number" ? pr.number : null
+  const title = typeof pr.title === "string" ? pr.title : null
+  const state = typeof pr.state === "string" ? pr.state : "open"
+  const url = typeof pr.html_url === "string" ? pr.html_url : null
+  const createdAt = typeof pr.created_at === "string" ? pr.created_at : null
+  const updatedAt = typeof pr.updated_at === "string" ? pr.updated_at : null
+  const head = asRecord(pr.head)
+  const headRefName = typeof head?.ref === "string" ? head.ref : null
+  if (!number || !title || !url || !createdAt || !updatedAt || !headRefName) return null
+  return {
+    number,
+    title,
+    state,
+    headRefName,
+    author: normalizeRestUser(pr.user),
+    reviewDecision: "",
+    statusCheckRollup: [] as unknown[],
+    mergeable: _normalizeMergeable(pr.mergeable),
+    url,
+    createdAt,
+    updatedAt,
+  }
+}
+
 function normalizeRestPullRequests(raw: unknown): Array<{
   number: number
   title: string
@@ -1037,37 +1057,7 @@ function normalizeRestPullRequests(raw: unknown): Array<{
   return raw
     .map((entry) => asRecord(entry))
     .filter((pr): pr is Record<string, unknown> => pr !== null)
-    .map((pr) => {
-      const number = typeof pr.number === "number" ? pr.number : null
-      const title = typeof pr.title === "string" ? pr.title : null
-      const state = typeof pr.state === "string" ? pr.state : "open"
-      const url = typeof pr.html_url === "string" ? pr.html_url : null
-      const createdAt = typeof pr.created_at === "string" ? pr.created_at : null
-      const updatedAt = typeof pr.updated_at === "string" ? pr.updated_at : null
-      const head = asRecord(pr.head)
-      const headRefName = typeof head?.ref === "string" ? head.ref : null
-      if (!number || !title || !url || !createdAt || !updatedAt || !headRefName) return null
-      return {
-        number,
-        title,
-        state,
-        headRefName,
-        author: normalizeRestUser(pr.user),
-        reviewDecision: "",
-        statusCheckRollup: [] as unknown[],
-        mergeable:
-          typeof pr.mergeable === "string"
-            ? pr.mergeable
-            : pr.mergeable === true
-              ? "MERGEABLE"
-              : pr.mergeable === false
-                ? "CONFLICTING"
-                : "UNKNOWN",
-        url,
-        createdAt,
-        updatedAt,
-      }
-    })
+    .map((pr) => _normalizePullRequest(pr))
     .filter(
       (
         pr
