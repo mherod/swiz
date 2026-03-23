@@ -33,7 +33,7 @@ function buildRecoveryErrorContext(taskId: string, subject: string, status: stri
   ].join(" ")
 }
 
-async function _writeRecoveryTask(
+async function writeRecoveryTask(
   tasksDir: string,
   taskPath: string,
   task: ReturnType<typeof buildRecoveryStub>
@@ -84,7 +84,7 @@ async function recoverMissingTask(ctx: RecoveryContext): Promise<void> {
     source: "posttooluse-task-recovery",
   })
 
-  const wrote = await _writeRecoveryTask(ctx.tasksDir, ctx.taskPath, task)
+  const wrote = await writeRecoveryTask(ctx.tasksDir, ctx.taskPath, task)
   if (!wrote) {
     await emitContext(
       "PostToolUse",

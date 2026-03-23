@@ -173,7 +173,7 @@ async function detectFrameworksInner(dir: string): Promise<Set<Framework>> {
 }
 
 /** Clears the per-process cache. Intended for use in tests only. */
-export function _clearFrameworkCache(): void {
+export function clearFrameworkCache(): void {
   _frameworkCache.clear()
   _stackCache.clear()
 }

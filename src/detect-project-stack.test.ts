@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { _clearFrameworkCache, detectProjectStack } from "./detect-frameworks.ts"
+import { clearFrameworkCache, detectProjectStack } from "./detect-frameworks.ts"
 
 let tmpDir: string
 
@@ -15,7 +15,7 @@ afterAll(async () => {
 })
 
 afterEach(() => {
-  _clearFrameworkCache()
+  clearFrameworkCache()
 })
 
 async function fixture(name: string): Promise<string> {
@@ -185,11 +185,11 @@ describe("result caching", () => {
     expect(first).toEqual(second) // value equality (concurrent tests may clear shared cache)
   })
 
-  it("cache is cleared by _clearFrameworkCache", async () => {
+  it("cache is cleared by clearFrameworkCache", async () => {
     const dir = await fixture("stack-clear-cache")
     await Bun.write(join(dir, "go.mod"), "module example.com\n\ngo 1.21\n")
     const first = await detectProjectStack(dir)
-    _clearFrameworkCache()
+    clearFrameworkCache()
     const second = await detectProjectStack(dir)
     expect(first).toEqual(second) // same values after re-detection
   })

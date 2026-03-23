@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { _clearFrameworkCache } from "../detect-frameworks.ts"
+import { clearFrameworkCache } from "../detect-frameworks.ts"
 import { evalCondition } from "../manifest.ts"
 
 describe("evalCondition", () => {
@@ -124,7 +124,7 @@ describe("evalCondition", () => {
     })
 
     afterEach(() => {
-      _clearFrameworkCache()
+      clearFrameworkCache()
     })
 
     it("returns false for 'framework:nextjs' when not a Next.js project", async () => {
@@ -137,7 +137,7 @@ describe("evalCondition", () => {
         expect(await evalCondition("framework:nextjs")).toBe(false)
       } finally {
         process.chdir(origCwd)
-        _clearFrameworkCache()
+        clearFrameworkCache()
       }
     })
 
@@ -151,7 +151,7 @@ describe("evalCondition", () => {
         expect(await evalCondition("framework:nextjs")).toBe(true)
       } finally {
         process.chdir(origCwd)
-        _clearFrameworkCache()
+        clearFrameworkCache()
       }
     })
 
@@ -165,7 +165,7 @@ describe("evalCondition", () => {
         expect(await evalCondition("framework:go")).toBe(true)
       } finally {
         process.chdir(origCwd)
-        _clearFrameworkCache()
+        clearFrameworkCache()
       }
     })
 

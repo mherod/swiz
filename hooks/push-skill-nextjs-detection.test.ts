@@ -22,7 +22,7 @@ import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { _clearFrameworkCache, detectFrameworks } from "./utils/hook-utils.ts"
+import { clearFrameworkCache, detectFrameworks } from "./utils/hook-utils.ts"
 
 // ─── Detection helper (mirrors push skill logic) ───────────────────────────────
 
@@ -48,7 +48,7 @@ afterAll(async () => {
 })
 
 afterEach(() => {
-  _clearFrameworkCache()
+  clearFrameworkCache()
 })
 
 async function fixture(name: string): Promise<string> {

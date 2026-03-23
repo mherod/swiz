@@ -58,7 +58,7 @@ async function writeAuditEntry(tasksDir: string, entry: AuditEntry): Promise<voi
   }
 }
 
-async function _handleTaskCreate(tasksDir: string, subject: string): Promise<void> {
+async function handleTaskCreate(tasksDir: string, subject: string): Promise<void> {
   const taskId = await findLatestTaskId(tasksDir)
   if (!taskId) return
 
@@ -73,7 +73,7 @@ async function _handleTaskCreate(tasksDir: string, subject: string): Promise<voi
   await writeAuditEntry(tasksDir, entry)
 }
 
-async function _handleTaskUpdate(
+async function handleTaskUpdate(
   tasksDir: string,
   taskId: string,
   subject: string,
@@ -103,13 +103,13 @@ async function main(): Promise<void> {
   if (!tasksDir) return
 
   if (toolName === "TaskCreate") {
-    await _handleTaskCreate(tasksDir, subject)
+    await handleTaskCreate(tasksDir, subject)
   } else if (toolName === "TaskUpdate") {
     const taskId = String(input.tool_input?.taskId ?? "")
     if (!taskId) return
 
     const newStatus = String(input.tool_input?.status ?? "")
-    await _handleTaskUpdate(tasksDir, taskId, subject, newStatus)
+    await handleTaskUpdate(tasksDir, taskId, subject, newStatus)
   }
 }
 

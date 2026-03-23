@@ -81,7 +81,7 @@ export { detectEnvironment, detectShell, detectTerminal } from "./terminal-detec
 
 export type { Framework, ProjectStack } from "../../src/detect-frameworks.ts"
 export {
-  _clearFrameworkCache,
+  clearFrameworkCache,
   detectFrameworks,
   detectProjectStack,
 } from "../../src/detect-frameworks.ts"
@@ -212,7 +212,7 @@ interface ProjectedContentInput {
  * Returns null if the projected content cannot be determined (e.g. file unreadable
  * on an Edit where both old/new are empty).
  */
-async function _computeEditToolContent(
+async function computeEditToolContent(
   filePath: string,
   oldString: string,
   newString: string
@@ -238,7 +238,7 @@ export async function computeProjectedContent(
   if (_isEditTool(toolName)) {
     const oldString = toolInput.old_string ?? ""
     const newString = toolInput.new_string ?? ""
-    return _computeEditToolContent(filePath, oldString, newString)
+    return computeEditToolContent(filePath, oldString, newString)
   }
 
   // Write tool — content is the full file
@@ -730,7 +730,7 @@ import { computeSubjectFingerprint } from "../../src/subject-fingerprint.ts"
  * Returns an empty array when the directory doesn't exist or can't be read.
  * Skips files that fail to parse or don't end with .json.
  */
-async function _readTaskFile(tasksDir: string, fileName: string): Promise<SessionTask | null> {
+async function readTaskFile(tasksDir: string, fileName: string): Promise<SessionTask | null> {
   if (!fileName.endsWith(".json") || fileName.startsWith(".")) return null
   try {
     const task = (await Bun.file(join(tasksDir, fileName)).json()) as SessionTask
@@ -763,7 +763,7 @@ export async function readSessionTasks(
   }
   const tasks: SessionTask[] = []
   for (const f of files) {
-    const task = await _readTaskFile(tasksDir, f)
+    const task = await readTaskFile(tasksDir, f)
     if (task) tasks.push(task)
   }
   // Sort tasks by ID to ensure deterministic output
@@ -802,7 +802,7 @@ export function limitItems<T>(items: T[], limit = 3): LimitedItems<T> {
  * Returns tasks from the most recently-modified session that has any tasks,
  * excluding `excludeSessionId` (the current session).
  */
-async function _collectSessionsFromTranscripts(
+async function collectSessionsFromTranscripts(
   projectDir: string,
   excludeSessionId: string
 ): Promise<{ id: string; mtime: number }[]> {
@@ -840,7 +840,7 @@ export async function findPriorSessionTasks(
   if (!projectsRoot) return null
   const projectDir = join(projectsRoot, projectKey)
 
-  const orderedSessions = await _collectSessionsFromTranscripts(projectDir, excludeSessionId)
+  const orderedSessions = await collectSessionsFromTranscripts(projectDir, excludeSessionId)
 
   // Walk sessions newest-first; return incomplete tasks from first session with tasks
   for (const { id } of orderedSessions) {
@@ -1006,7 +1006,7 @@ async function executeWithFallback(executor: TaskExecutor, args: string[]): Prom
 }
 
 /** Create a session task via `swiz tasks create`. Uses a sentinel file to fire only once per session. */
-async function _validateCreateTaskInputs(
+async function validateCreateTaskInputs(
   sessionId: string | undefined,
   sentinelKey: string
 ): Promise<{ safeSentinel: string; safeSession: string; sentinel: string } | null> {
@@ -1028,7 +1028,7 @@ export async function createSessionTask(
   description: string,
   executor: TaskExecutor = defaultTaskExecutor
 ): Promise<void> {
-  const validated = await _validateCreateTaskInputs(sessionId, sentinelKey)
+  const validated = await validateCreateTaskInputs(sessionId, sentinelKey)
   if (!validated) return
   const { sentinel } = validated
 
@@ -1131,7 +1131,7 @@ export {
   stripAnsi,
 } from "./transcript.ts"
 
-function _isExemptGitCommand(command: string): boolean {
+function isExemptGitCommand(command: string): boolean {
   return (
     (GIT_READ_RE.test(command) && !GIT_WRITE_RE.test(command)) ||
     GIT_SYNC_RE.test(command) ||
@@ -1141,7 +1141,7 @@ function _isExemptGitCommand(command: string): boolean {
   )
 }
 
-function _isExemptUtilityCommand(command: string): boolean {
+function isExemptUtilityCommand(command: string): boolean {
   return (
     READ_CMD_RE.test(command) ||
     RECOVERY_CMD_RE.test(command) ||
@@ -1153,7 +1153,7 @@ function _isExemptUtilityCommand(command: string): boolean {
 
 /** True when a shell command is exempt from task-tracking enforcement. */
 export function isTaskTrackingExemptShellCommand(command: string): boolean {
-  return _isExemptGitCommand(command) || _isExemptUtilityCommand(command)
+  return isExemptGitCommand(command) || isExemptUtilityCommand(command)
 }
 
 /** Returns true when a command attempts to disable a swiz setting identified by any of the given aliases. */

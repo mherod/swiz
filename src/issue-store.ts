@@ -673,7 +673,7 @@ async function runGhCommand(
   return false
 }
 
-async function _executeMutationCommand(
+async function executeMutationCommand(
   args: string[],
   cwd: string,
   stdin?: Response
@@ -713,7 +713,7 @@ function buildCommentMutationArgs(
   return { args: [`repos/${repo}/issues/${num}/comments`, "-f", `body=${mutation.body}`] }
 }
 
-function _buildMutationArgs(
+function buildMutationArgs(
   mutation: MutationPayload,
   repo: string,
   num: string
@@ -756,10 +756,10 @@ async function tryMutationRestFallback(
   const num = String(mutation.number)
   debugLog(`[swiz] REST_FALLBACK_MUTATION repo=${repo} issue=#${num} type=${mutation.type}`)
 
-  const cmd = _buildMutationArgs(mutation, repo, num)
+  const cmd = buildMutationArgs(mutation, repo, num)
   if (!cmd) return mutation.type !== "create"
 
-  return _executeMutationCommand(cmd.args, cwd, cmd.stdin)
+  return executeMutationCommand(cmd.args, cwd, cmd.stdin)
 }
 
 /** Log a structured execution failure for a single mutation replay. */
@@ -1044,7 +1044,7 @@ function normalizeRestIssues(raw: unknown): Array<{
     )
 }
 
-function _normalizeMergeable(value: unknown): string {
+function normalizeMergeable(value: unknown): string {
   if (typeof value === "string") return value
   if (value === true) return "MERGEABLE"
   if (value === false) return "CONFLICTING"
@@ -1111,7 +1111,7 @@ function validatePullRequestFields(pr: Record<string, unknown>): {
   }
 }
 
-function _normalizePullRequest(pr: Record<string, unknown>) {
+function normalizePullRequest(pr: Record<string, unknown>) {
   const fields = validatePullRequestFields(pr)
   if (!fields) return null
 
@@ -1123,7 +1123,7 @@ function _normalizePullRequest(pr: Record<string, unknown>) {
     author: normalizeRestUser(pr.user),
     reviewDecision: "",
     statusCheckRollup: [] as unknown[],
-    mergeable: _normalizeMergeable(pr.mergeable),
+    mergeable: normalizeMergeable(pr.mergeable),
     url: fields.url,
     createdAt: fields.createdAt,
     updatedAt: fields.updatedAt,
@@ -1147,7 +1147,7 @@ function normalizeRestPullRequests(raw: unknown): Array<{
   return raw
     .map((entry) => asRecord(entry))
     .filter((pr): pr is Record<string, unknown> => pr !== null)
-    .map((pr) => _normalizePullRequest(pr))
+    .map((pr) => normalizePullRequest(pr))
     .filter(
       (
         pr

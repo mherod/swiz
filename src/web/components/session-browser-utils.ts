@@ -307,7 +307,7 @@ export function skillNameFromMessage(message: SessionMessage | undefined): strin
   return null
 }
 
-function _parseBaseDirectorySkillPayload(text: string, trimmed: string): ParsedSkillPayload | null {
+function parseBaseDirectorySkillPayload(text: string, trimmed: string): ParsedSkillPayload | null {
   const lines = text.split("\n")
   const firstLine = lines[0]?.trim() ?? ""
   const baseDirMatch = firstLine.match(/^Base directory for this skill:\s*(.+)$/i)
@@ -317,7 +317,7 @@ function _parseBaseDirectorySkillPayload(text: string, trimmed: string): ParsedS
   return { baseDir, body: bodyOut, declaredSkill: null }
 }
 
-function _parseSkillContentPayload(lines: string[], trimmed: string): ParsedSkillPayload | null {
+function parseSkillContentPayload(lines: string[], trimmed: string): ParsedSkillPayload | null {
   const skillHead = lines[0]?.trim().match(/^SKILL CONTENT\s+(\S+)/i)
   if (!skillHead) return null
   const declaredRaw = skillHead[1]?.trim() ?? ""
@@ -341,11 +341,11 @@ export function parseSkillPayload(text: string): ParsedSkillPayload | null {
   if (!trimmed) return null
 
   if (/Base directory for this skill:/i.test(text)) {
-    return _parseBaseDirectorySkillPayload(text, trimmed)
+    return parseBaseDirectorySkillPayload(text, trimmed)
   }
 
   const lines = trimmed.split("\n")
-  return _parseSkillContentPayload(lines, trimmed)
+  return parseSkillContentPayload(lines, trimmed)
 }
 
 /** Assistant turn with no text and exactly one Skill tool call (typical skill fetch row). */

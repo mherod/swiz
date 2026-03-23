@@ -1822,7 +1822,7 @@ function countAndCollectToolBlocks(content: unknown[], editedPaths: Set<string>)
   return count
 }
 
-function _processTranscriptEntry(
+function processTranscriptEntry(
   entry: unknown,
   turns: PlainTurn[],
   editedPaths: Set<string>
@@ -1855,7 +1855,7 @@ export function extractTranscriptData(
   let toolCallCount = 0
 
   for (const entry of parseTranscriptEntries(jsonlText, formatHint)) {
-    toolCallCount += _processTranscriptEntry(entry, turns, editedPaths)
+    toolCallCount += processTranscriptEntry(entry, turns, editedPaths)
   }
 
   return { turns, editedPaths, toolCallCount }

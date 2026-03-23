@@ -498,7 +498,7 @@ function extractLocalCommandBlocks(text: string): {
   return { cleanedText, blocks }
 }
 
-function _extractBashContent(
+function extractBashContent(
   text: string,
   pattern: RegExp
 ): { value: string | null; cleaned: string } {
@@ -518,11 +518,11 @@ function extractBashBlocks(text: string): {
   const bashStderrRe = /<bash-stderr>([\s\S]*?)<\/bash-stderr>/gi
 
   let cleanedText = text
-  const { value: command, cleaned: t1 } = _extractBashContent(cleanedText, bashInputRe)
+  const { value: command, cleaned: t1 } = extractBashContent(cleanedText, bashInputRe)
   cleanedText = t1
-  const { value: stdout, cleaned: t2 } = _extractBashContent(cleanedText, bashStdoutRe)
+  const { value: stdout, cleaned: t2 } = extractBashContent(cleanedText, bashStdoutRe)
   cleanedText = t2
-  const { value: stderr, cleaned: t3 } = _extractBashContent(cleanedText, bashStderrRe)
+  const { value: stderr, cleaned: t3 } = extractBashContent(cleanedText, bashStderrRe)
   cleanedText = t3
 
   if (command) {

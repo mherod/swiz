@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { _clearFrameworkCache, detectFrameworks } from "./detect-frameworks.ts"
+import { clearFrameworkCache, detectFrameworks } from "./detect-frameworks.ts"
 
 let tmpDir: string
 
@@ -12,7 +12,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   // Clear cache between tests so each fixture gets a fresh detection result
-  _clearFrameworkCache()
+  clearFrameworkCache()
 })
 
 // afterAll runs after all tests in the file; clean up the temp tree
