@@ -207,6 +207,16 @@ function FileParamsDisplay({ offset, limit }: { offset?: number | null; limit?: 
   )
 }
 
+function FileEditDiff({ oldString, newString }: { oldString: string; newString: string }) {
+  return (
+    <details className="tool-raw-json">
+      <summary>Edit diff</summary>
+      <pre className="tool-detail-full tool-diff-old">- {summarizeText(oldString)}</pre>
+      <pre className="tool-detail-full tool-diff-new">+ {summarizeText(newString)}</pre>
+    </details>
+  )
+}
+
 function FileToolDisplay({
   file,
   rawJson,
@@ -228,13 +238,7 @@ function FileToolDisplay({
       </p>
       <pre className="tool-command-block">{compactPath(file.filePath, 120)}</pre>
       <FileParamsDisplay offset={file.offset} limit={file.limit} />
-      {hasDiff && file.oldString && file.newString && (
-        <details className="tool-raw-json">
-          <summary>Edit diff</summary>
-          <pre className="tool-detail-full tool-diff-old">- {summarizeText(file.oldString)}</pre>
-          <pre className="tool-detail-full tool-diff-new">+ {summarizeText(file.newString)}</pre>
-        </details>
-      )}
+      {hasDiff && <FileEditDiff oldString={file.oldString!} newString={file.newString!} />}
       {hasRawJson && (
         <details className="tool-raw-json">
           <summary>Parameters</summary>
@@ -575,6 +579,77 @@ function buildRepeatLabel(userCount: number, assistantCount: number): string | n
   return parts.length > 0 ? parts.join(" · ") : null
 }
 
+function SkillExchangeMetadata({
+  skillName,
+  repeatLabel,
+  assistantTime,
+  userTime,
+  userMsg,
+  asstMsg,
+}: {
+  skillName: string
+  repeatLabel: string | null
+  assistantTime: string
+  userTime: string
+  userMsg: SessionMessage
+  asstMsg: SessionMessage
+}) {
+  return (
+    <div className="message-meta">
+      <span className="message-role message-role-skill-exchange">
+        <span aria-hidden className="skill-exchange-icon">
+          ⚡
+        </span>
+        Skill
+        <code className="skill-exchange-name">{skillName}</code>
+      </span>
+      <span className="message-meta-right">
+        {repeatLabel ? <span className="message-repeat-badge">{repeatLabel}</span> : null}
+        <span className="skill-exchange-times">
+          <time className="skill-exchange-time-chunk" dateTime={asstMsg.timestamp ?? undefined}>
+            {assistantTime}
+          </time>
+          <span aria-hidden className="skill-exchange-time-sep">
+            →
+          </span>
+          <time className="skill-exchange-time-chunk" dateTime={userMsg.timestamp ?? undefined}>
+            {userTime}
+          </time>
+        </span>
+      </span>
+    </div>
+  )
+}
+
+function SkillExchangeRail({
+  asstMsg,
+  skillName,
+  parsedPayload,
+}: {
+  asstMsg: SessionMessage
+  skillName: string
+  parsedPayload: ParsedSkillPayload
+}) {
+  return (
+    <div className="skill-exchange-rail">
+      <div className="skill-exchange-step">
+        <span className="skill-exchange-step-label">Request</span>
+        <div className="skill-exchange-step-body tool-calls-wrap">
+          <ToolCallsList toolCalls={asstMsg.toolCalls ?? []} verbose={false} />
+        </div>
+      </div>
+      <div className="skill-exchange-step skill-exchange-step-main">
+        <span className="skill-exchange-step-label">Injected</span>
+        <SkillPayloadDisplay
+          adjacentSkillName={skillName}
+          parsedSkillPayload={parsedPayload}
+          showNameHeader={false}
+        />
+      </div>
+    </div>
+  )
+}
+
 function SkillExchangeRow({
   userGroup,
   assistantGroup,
@@ -589,7 +664,7 @@ function SkillExchangeRow({
   msgKey?: MessagesProps["msgKey"]
   newKeys?: Set<string>
   parsedPayload: ParsedSkillPayload
-}) {
+}): React.ReactElement {
   const userMsg = userGroup.message
   const asstMsg = assistantGroup.message
   const skillName = skillNameFromMessage(asstMsg) ?? "skill"
@@ -603,45 +678,15 @@ function SkillExchangeRow({
 
   return (
     <li className={cn("message-row message-row-skill-exchange user", isNew && "message-new")}>
-      <div className="message-meta">
-        <span className="message-role message-role-skill-exchange">
-          <span aria-hidden className="skill-exchange-icon">
-            ⚡
-          </span>
-          Skill
-          <code className="skill-exchange-name">{skillName}</code>
-        </span>
-        <span className="message-meta-right">
-          {repeatLabel ? <span className="message-repeat-badge">{repeatLabel}</span> : null}
-          <span className="skill-exchange-times">
-            <time className="skill-exchange-time-chunk" dateTime={asstMsg.timestamp ?? undefined}>
-              {assistantTime}
-            </time>
-            <span aria-hidden className="skill-exchange-time-sep">
-              →
-            </span>
-            <time className="skill-exchange-time-chunk" dateTime={userMsg.timestamp ?? undefined}>
-              {userTime}
-            </time>
-          </span>
-        </span>
-      </div>
-      <div className="skill-exchange-rail">
-        <div className="skill-exchange-step">
-          <span className="skill-exchange-step-label">Request</span>
-          <div className="skill-exchange-step-body tool-calls-wrap">
-            <ToolCallsList toolCalls={asstMsg.toolCalls ?? []} verbose={false} />
-          </div>
-        </div>
-        <div className="skill-exchange-step skill-exchange-step-main">
-          <span className="skill-exchange-step-label">Injected</span>
-          <SkillPayloadDisplay
-            adjacentSkillName={skillName}
-            parsedSkillPayload={parsedPayload}
-            showNameHeader={false}
-          />
-        </div>
-      </div>
+      <SkillExchangeMetadata
+        skillName={skillName}
+        repeatLabel={repeatLabel}
+        assistantTime={assistantTime}
+        userTime={userTime}
+        userMsg={userMsg}
+        asstMsg={asstMsg}
+      />
+      <SkillExchangeRail asstMsg={asstMsg} skillName={skillName} parsedPayload={parsedPayload} />
     </li>
   )
 }

@@ -166,6 +166,26 @@ interface BeamUpdateState {
   curvature: number
 }
 
+function computeGradientCoordinates(reverse: boolean): {
+  x1: string[]
+  x2: string[]
+  y1: string[]
+  y2: string[]
+} {
+  return reverse
+    ? { x1: ["90%", "-10%"], x2: ["100%", "0%"], y1: ["0%", "0%"], y2: ["0%", "0%"] }
+    : { x1: ["10%", "110%"], x2: ["0%", "100%"], y1: ["0%", "0%"], y2: ["0%", "0%"] }
+}
+
+function assembleBeamOffsets(
+  startXOffset: number,
+  startYOffset: number,
+  endXOffset: number,
+  endYOffset: number
+): { startXOffset: number; startYOffset: number; endXOffset: number; endYOffset: number } {
+  return { startXOffset, startYOffset, endXOffset, endYOffset }
+}
+
 function useAnimatedBeamPath(
   state: BeamUpdateState,
   setPathD: (path: string) => void,
@@ -212,21 +232,20 @@ export function AnimatedBeam({
   startYOffset = 0,
   endXOffset = 0,
   endYOffset = 0,
-}: AnimatedBeamProps) {
+}: AnimatedBeamProps): React.ReactElement {
   const id = useId()
   const [pathD, setPathD] = useState("")
   const [svgDimensions, setSvgDimensions] = useState({ width: 0, height: 0 })
 
-  const gradientCoordinates = reverse
-    ? { x1: ["90%", "-10%"], x2: ["100%", "0%"], y1: ["0%", "0%"], y2: ["0%", "0%"] }
-    : { x1: ["10%", "110%"], x2: ["0%", "100%"], y1: ["0%", "0%"], y2: ["0%", "0%"] }
+  const gradientCoordinates = computeGradientCoordinates(reverse)
+  const offsets = assembleBeamOffsets(startXOffset, startYOffset, endXOffset, endYOffset)
 
   useAnimatedBeamPath(
     {
       containerRef,
       fromRef,
       toRef,
-      offsets: { startXOffset, startYOffset, endXOffset, endYOffset },
+      offsets,
       curvature,
     },
     setPathD,
