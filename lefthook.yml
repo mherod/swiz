@@ -50,7 +50,7 @@ pre-push:
         - rebase
     test:
       glob: "*.{ts,tsx,js,jsx,json}"
-      run: timeout 120 bun test --concurrent --timeout=10000 --max-concurrency=8 $(git ls-files '*.test.ts' | grep -v -e stop-auto-continue -e 'commands/dispatch\.test' -e 'commands/cleanup\.test' -e 'commands/skill\.test' -e 'commands/status\.test' -e 'stop-personal-repo-issues-e2e' -e 'stop-secret-scanner' -e 'commands/state\.test' -e 'commands/compact\.test' -e 'commands/doctor\.test' -e 'positive-path-integration' -e 'commands/manage\.test' -e 'commands/tasks\.test' -e 'commands/issue\.test' -e 'transcript-session-gemini' -e 'commands/settings\.test' -e 'commands/ci-wait\.test' -e 'commands/daemon\.test' -e 'commands/memory\.test' -e 'commands/reflect\.test' -e 'commands/usage\.test' -e 'commands/idea\.test' | tr '\n' ' ')
+      run: timeout 120 bun test --concurrent --timeout=10000 --max-concurrency=8 $(git ls-files '*.test.ts' | grep -v -e stop-auto-continue -e 'commands/dispatch\.test' -e 'commands/dispatch-formats\.test' -e 'commands/cleanup\.test' -e 'commands/skill\.test' -e 'commands/status\.test' -e 'stop-personal-repo-issues-e2e' -e 'stop-secret-scanner' -e 'commands/state\.test' -e 'commands/compact\.test' -e 'commands/doctor\.test' -e 'positive-path-integration' -e 'commands/manage\.test' -e 'commands/tasks\.test' -e 'commands/issue\.test' -e 'transcript-session-gemini' -e 'commands/settings\.test' -e 'commands/ci-wait\.test' -e 'commands/daemon\.test' -e 'commands/memory\.test' -e 'commands/reflect\.test' -e 'commands/usage\.test' -e 'commands/idea\.test' | tr '\n' ' ')
       skip:
         - merge
         - rebase
