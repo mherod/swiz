@@ -167,6 +167,37 @@ function ActiveDispatchLabel({
   )
 }
 
+function DeleteConfirmationButton({
+  sessionId,
+  selectedProjectCwd,
+  onDelete,
+  onDismiss,
+}: {
+  sessionId: string
+  selectedProjectCwd: string | null
+  onDelete: (cwd: string, sessionId: string) => void | Promise<void>
+  onDismiss: () => void
+}) {
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: dismissal via mouse leave
+    <div className="session-action-confirm" onMouseLeave={onDismiss}>
+      <span className="session-action-confirm-text">Delete?</span>
+      <button
+        type="button"
+        className="session-action-btn session-action-delete session-action-delete-confirm"
+        onClick={() => {
+          if (!selectedProjectCwd) return
+          onDismiss()
+          void onDelete(selectedProjectCwd, sessionId)
+        }}
+        title="Confirm delete"
+      >
+        Yes
+      </button>
+    </div>
+  )
+}
+
 function SessionRowActions({
   session,
   hasLiveProcess,
@@ -199,22 +230,12 @@ function SessionRowActions({
 
   if (confirmingDeleteId === session.id && !hasLiveProcess) {
     return (
-      // biome-ignore lint/a11y/noStaticElementInteractions: dismissal via mouse leave
-      <div className="session-action-confirm" onMouseLeave={() => setConfirmingDeleteId(null)}>
-        <span className="session-action-confirm-text">Delete?</span>
-        <button
-          type="button"
-          className="session-action-btn session-action-delete session-action-delete-confirm"
-          onClick={() => {
-            if (!selectedProjectCwd) return
-            setConfirmingDeleteId(null)
-            void onDeleteSession(selectedProjectCwd, session.id)
-          }}
-          title="Confirm delete"
-        >
-          Yes
-        </button>
-      </div>
+      <DeleteConfirmationButton
+        sessionId={session.id}
+        selectedProjectCwd={selectedProjectCwd}
+        onDelete={onDeleteSession}
+        onDismiss={() => setConfirmingDeleteId(null)}
+      />
     )
   }
 
@@ -452,6 +473,32 @@ function computeSessionsCounts(
   }
 }
 
+function ProjectSessionsHeader({
+  project,
+  counts,
+}: {
+  project: ProjectSessions
+  counts: { total: number; active: number; recent: number }
+}) {
+  const statusTokens = parseProjectStatusLine(project.statusLine).slice(0, 2)
+  return (
+    <>
+      <div className="nav-inline-header nav-inline-header-sessions">
+        <h2 className="section-title nav-section-title">Sessions</h2>
+        <span className="nav-count-badge">{counts.total}</span>
+      </div>
+      <p className="nav-inline-project">
+        {project.name} · {counts.active} active · {counts.recent} recent
+      </p>
+      <StatusChips
+        tokens={statusTokens}
+        keyPrefix={`${project.cwd}-selected`}
+        statusLine={project.statusLine}
+      />
+    </>
+  )
+}
+
 function SelectedProjectPanel({
   selectedProject,
   sortedSessions,
@@ -469,8 +516,6 @@ function SelectedProjectPanel({
   onFilterChange: (query: string) => void
   sessionRowProps: Omit<SessionRowProps, "session">
 }) {
-  const statusTokens = parseProjectStatusLine(selectedProject.statusLine).slice(0, 2)
-
   const filteredActive = useMemo(
     () => computeFilteredSessions(activeSessions, filterQuery),
     [activeSessions, filterQuery]
@@ -488,18 +533,7 @@ function SelectedProjectPanel({
 
   return (
     <>
-      <div className="nav-inline-header nav-inline-header-sessions">
-        <h2 className="section-title nav-section-title">Sessions</h2>
-        <span className="nav-count-badge">{counts.total}</span>
-      </div>
-      <p className="nav-inline-project">
-        {selectedProject.name} · {counts.active} active · {counts.recent} recent
-      </p>
-      <StatusChips
-        tokens={statusTokens}
-        keyPrefix={`${selectedProject.cwd}-selected`}
-        statusLine={selectedProject.statusLine}
-      />
+      <ProjectSessionsHeader project={selectedProject} counts={counts} />
       <input
         type="search"
         className="session-filter-input"
