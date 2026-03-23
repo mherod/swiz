@@ -202,6 +202,37 @@ const GLOBAL_NUMBER_FIELDS: Array<{
   { key: "prAgeGateMinutes", label: "PR age gate (min)" },
 ]
 
+const PROJECT_SELECT_FIELDS: Array<{
+  key: "ambitionMode" | "collaborationMode"
+  label: string
+  desc: string
+  options: Array<{ label: string; value: string }>
+}> = [
+  {
+    key: "ambitionMode",
+    label: "Ambition mode override",
+    desc: 'Project-specific override for the agent\'s operational tempo. "inherit" uses the global setting.',
+    options: [
+      { label: "inherit (global)", value: "inherit" },
+      { label: "standard", value: "standard" },
+      { label: "aggressive", value: "aggressive" },
+      { label: "creative", value: "creative" },
+      { label: "reflective", value: "reflective" },
+    ],
+  },
+  {
+    key: "collaborationMode",
+    label: "Collaboration mode",
+    desc: 'Determines how code is integrated. "Auto" falls back to PR merge mode. "Solo" pushes directly to main. "Team" and "Relaxed-collab" require PRs.',
+    options: [
+      { label: "auto", value: "auto" },
+      { label: "solo", value: "solo" },
+      { label: "team", value: "team" },
+      { label: "relaxed-collab", value: "relaxed-collab" },
+    ],
+  },
+]
+
 const GLOBAL_TOGGLES: Array<{
   key: keyof GlobalSettingsForm
   label: string
@@ -471,6 +502,31 @@ function GlobalNumberFieldsGrid({
   )
 }
 
+function ProjectSelectFieldsGrid({
+  form,
+  set,
+}: {
+  form: ProjectSettingsForm
+  set: (patch: Partial<ProjectSettingsForm>) => void
+}) {
+  return (
+    <>
+      {PROJECT_SELECT_FIELDS.map(({ key, label, desc, options }) => (
+        <label key={key} className="settings-label" htmlFor={`project-${key}`}>
+          <span>{label}</span>
+          <p className="settings-desc">{desc}</p>
+          <Select
+            id={`project-${key}`}
+            value={form[key]}
+            onChange={(e) => set({ [key]: e.target.value as never })}
+            options={options}
+          />
+        </label>
+      ))}
+    </>
+  )
+}
+
 function ProjectFieldsGrid({
   form,
   set,
@@ -616,51 +672,7 @@ function ProjectSettingsColumn({
         </p>
       ) : (
         <>
-          <label className="settings-label" htmlFor="project-ambition-mode">
-            <span>Ambition mode override</span>
-            <p className="settings-desc">
-              Project-specific override for the agent's operational tempo. "inherit" uses the global
-              setting.
-            </p>
-            <Select
-              id="project-ambition-mode"
-              value={form.ambitionMode}
-              onChange={(e) =>
-                set({ ambitionMode: e.target.value as ProjectSettingsForm["ambitionMode"] })
-              }
-              options={[
-                { label: "inherit (global)", value: "inherit" },
-                { label: "standard", value: "standard" },
-                { label: "aggressive", value: "aggressive" },
-                { label: "creative", value: "creative" },
-                { label: "reflective", value: "reflective" },
-              ]}
-            />
-          </label>
-
-          <label className="settings-label" htmlFor="project-collaboration-mode">
-            <span>Collaboration mode</span>
-            <p className="settings-desc">
-              Determines how code is integrated. "Auto" falls back to PR merge mode. "Solo" pushes
-              directly to main. "Team" and "Relaxed-collab" require PRs.
-            </p>
-            <Select
-              id="project-collaboration-mode"
-              value={form.collaborationMode}
-              onChange={(e) =>
-                set({
-                  collaborationMode: e.target.value as ProjectSettingsForm["collaborationMode"],
-                })
-              }
-              options={[
-                { label: "auto", value: "auto" },
-                { label: "solo", value: "solo" },
-                { label: "team", value: "team" },
-                { label: "relaxed-collab", value: "relaxed-collab" },
-              ]}
-            />
-          </label>
-
+          <ProjectSelectFieldsGrid form={form} set={set} />
           <ProjectFieldsGrid form={form} set={set} optNum={optNum} />
 
           <CheckboxField
