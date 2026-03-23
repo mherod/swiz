@@ -10,6 +10,7 @@ const REPO_ROOT = dirname(dirname(dirname(import.meta.path)))
 
 import {
   CI_WAIT_RE,
+  computeProjectedContent,
   createSessionTask,
   detectPackageManager,
   detectPkgRunner,
@@ -1207,5 +1208,63 @@ describe("isSwizCommand", () => {
 
   it("does not match when no tool_input", () => {
     expect(isSwizCommand({ cwd: "/tmp", tool_name: "Bash" })).toBe(false)
+  })
+})
+
+// ─── computeProjectedContent() dollar-sign regression ─────────────────────────
+
+describe("computeProjectedContent dollar-sign sequences", () => {
+  const setupFile = async (content: string) => {
+    const dir = await mkdtemp(join(tmpdir(), "projected-content-test-"))
+    const fp = join(dir, "CLAUDE.md")
+    await writeFile(fp, content)
+    return fp
+  }
+
+  it("does not inflate content when new_string contains $' sequence", async () => {
+    const fp = await setupFile("line one\nold text\nline three")
+    const result = await computeProjectedContent("Edit", fp, {
+      old_string: "old text",
+      new_string: "new $'text' here",
+    })
+    expect(result).toBe("line one\nnew $'text' here\nline three")
+  })
+
+  it("does not inflate content when new_string contains $& sequence", async () => {
+    const fp = await setupFile("before\ntarget line\nafter")
+    const result = await computeProjectedContent("Edit", fp, {
+      old_string: "target line",
+      new_string: "replaced $& value",
+    })
+    expect(result).toBe("before\nreplaced $& value\nafter")
+  })
+
+  it("does not inflate content when new_string contains $` sequence", async () => {
+    const fp = await setupFile("prefix\nmatch here\nsuffix")
+    const result = await computeProjectedContent("Edit", fp, {
+      old_string: "match here",
+      new_string: "result $` done",
+    })
+    expect(result).toBe("prefix\nresult $` done\nsuffix")
+  })
+
+  it("handles shell examples like $(git rev-parse HEAD)", async () => {
+    const fp = await setupFile("## Commands\nSHA=placeholder\n## End")
+    const result = await computeProjectedContent("Edit", fp, {
+      old_string: "SHA=placeholder",
+      new_string: "SHA=$(git rev-parse HEAD)",
+    })
+    expect(result).toBe("## Commands\nSHA=$(git rev-parse HEAD)\n## End")
+  })
+
+  it("replacement that removes content results in shorter output", async () => {
+    const fp = await setupFile("word ".repeat(100).trim())
+    const result = await computeProjectedContent("Edit", fp, {
+      old_string: "word ".repeat(20).trim(),
+      new_string: "word ".repeat(5).trim(),
+    })
+    // 100 - 20 + 5 = 85 words expected
+    const wordCount = result!.split(/\s+/).filter(Boolean).length
+    expect(wordCount).toBe(85)
   })
 })

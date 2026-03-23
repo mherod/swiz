@@ -219,7 +219,7 @@ export async function computeProjectedContent(
     } catch {
       return null
     }
-    return currentContent.replace(oldString, newString)
+    return currentContent.replace(oldString, () => newString)
   }
 
   // Write tool — content is the full file
