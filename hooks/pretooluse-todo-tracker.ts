@@ -43,6 +43,25 @@ function shouldSkipTodoCheck(filePath: string): boolean {
   return isExcludedSourcePath(filePath, EXCLUDE_PATH_RE, GENERATED_FILE_RE, TEST_FILE_RE)
 }
 
+function buildDenyMessage(oldCount: number, newCount: number): string {
+  return [
+    "TODO/FIXME/HACK debt markers must not be introduced in source files.",
+    "",
+    `Detected ${newCount - oldCount} new debt marker(s):`,
+    `  Old: ${oldCount} marker(s) | New: ${newCount} marker(s)`,
+    "",
+    formatActionPlan(
+      [
+        "Remove the TODO/FIXME/HACK comment before writing",
+        "If this is real follow-up work, create a GitHub issue instead: gh issue create",
+        "Use the /farm-out-issues skill to convert inline TODOs into tracked issues",
+        "If the marker is already in the file (not new), verify old_string captures it",
+      ],
+      { header: "Your options:" }
+    ).trimEnd(),
+  ].join("\n")
+}
+
 async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
@@ -56,24 +75,7 @@ async function main() {
   const newCount = countTodoMarkers(newString)
 
   if (newCount > oldCount) {
-    denyPreToolUse(
-      [
-        "TODO/FIXME/HACK debt markers must not be introduced in source files.",
-        "",
-        `Detected ${newCount - oldCount} new debt marker(s):`,
-        `  Old: ${oldCount} marker(s) | New: ${newCount} marker(s)`,
-        "",
-        formatActionPlan(
-          [
-            "Remove the TODO/FIXME/HACK comment before writing",
-            "If this is real follow-up work, create a GitHub issue instead: gh issue create",
-            "Use the /farm-out-issues skill to convert inline TODOs into tracked issues",
-            "If the marker is already in the file (not new), verify old_string captures it",
-          ],
-          { header: "Your options:" }
-        ).trimEnd(),
-      ].join("\n")
-    )
+    denyPreToolUse(buildDenyMessage(oldCount, newCount))
   }
 
   allowPreToolUse("")
