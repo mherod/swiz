@@ -27,22 +27,27 @@ function isReadOrSearchTool(name: string): boolean {
   return READ_TOOLS.has(name) || SEARCH_TOOLS.has(name)
 }
 
-async function main(): Promise<void> {
-  const raw = await Bun.stdin.json()
+async function getToolNamesAndValidate(
+  raw: unknown
+): Promise<{ toolNames: string[]; toolName: string } | null> {
   const parsed = toolHookInputSchema.safeParse(raw)
-  if (!parsed.success) return
+  if (!parsed.success) return null
 
   const { tool_name: toolName, transcript_path: transcriptPath } = parsed.data
-  if (!toolName || !isReadOrSearchTool(toolName)) return
+  if (!toolName || !isReadOrSearchTool(toolName)) return null
 
   // Prefer pre-computed summary from dispatch; fall back to direct read
-  const summary = getTranscriptSummary(raw)
+  const summary = getTranscriptSummary(raw as Record<string, unknown>)
   const toolNames =
     summary?.toolNames ??
     (transcriptPath ? await extractToolNamesFromTranscript(transcriptPath) : [])
 
-  if (toolNames.length === 0) return
+  if (toolNames.length === 0) return null
 
+  return { toolNames, toolName }
+}
+
+function countReadStreak(toolNames: string[]): number {
   // Walk backward from the most recent tool call. Count Read/Search calls;
   // stop at the first Edit/Write (code-change) tool. Other tools are ignored.
   let readStreak = 0
@@ -51,6 +56,16 @@ async function main(): Promise<void> {
     if (isCodeChangeTool(name)) break
     if (isReadOrSearchTool(name)) readStreak++
   }
+  return readStreak
+}
+
+async function main(): Promise<void> {
+  const raw = await Bun.stdin.json()
+  const validated = await getToolNamesAndValidate(raw)
+  if (!validated) return
+
+  const { toolNames, toolName } = validated
+  const readStreak = countReadStreak(toolNames)
 
   if (readStreak < STALL_THRESHOLD) return
 
