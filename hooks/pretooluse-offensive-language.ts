@@ -15,7 +15,7 @@ import {
   readTranscriptLines,
 } from "./offensive-language-patterns.ts"
 import { toolHookInputSchema } from "./schemas.ts"
-import { allowPreToolUse, denyPreToolUse } from "./utils/hook-utils.ts"
+import { allowPreToolUse, denyPreToolUse, scheduleAutoSteer } from "./utils/hook-utils.ts"
 
 async function main() {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())
@@ -31,13 +31,14 @@ async function main() {
 
   const matches = findAllLazyPatterns(assistantText)
   if (matches.length > 0) {
-    denyPreToolUse(
-      formatAllDenialMessages(
-        matches,
-        "This hook scans your most recent message and will keep blocking until " +
-          "your next message demonstrates corrected behavior through action, not words."
-      )
+    const reason = formatAllDenialMessages(
+      matches,
+      "This hook scans your most recent message and will keep blocking until " +
+        "your next message demonstrates corrected behavior through action, not words."
     )
+    const sessionId = (input.session_id as string) ?? ""
+    if (sessionId) void scheduleAutoSteer(sessionId, reason)
+    denyPreToolUse(reason)
   }
 
   allowPreToolUse("")
