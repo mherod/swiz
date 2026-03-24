@@ -48,6 +48,12 @@ describe("offensive-language-patterns", () => {
       )
       expect(m?.category).toBe("dismissal")
     })
+    test("matches pre-existing unstaged changes (formatter/lint excuse)", () => {
+      const m = findLazyPattern(
+        "Biome is complaining about eslint.config.mjs formatting — that's one of the pre-existing unstaged changes. I need to format it first or exclude it from my commit. Let me run biome format on it"
+      )
+      expect(m?.category).toBe("dismissal")
+    })
   })
 
   // ── Compliance gaming ──────────────────────────────────────────────────────

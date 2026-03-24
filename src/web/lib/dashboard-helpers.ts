@@ -22,7 +22,7 @@ export function getQueryParam(key: string): string | null {
   return new URLSearchParams(window.location.search).get(key)
 }
 
-export function setQueryParams(params: Record<string, string | null>) {
+export function setQueryParams(params: Record<string, string | null>): void {
   const url = new URL(window.location.href)
   for (const [key, value] of Object.entries(params)) {
     if (value === null) url.searchParams.delete(key)

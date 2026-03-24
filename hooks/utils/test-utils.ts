@@ -28,7 +28,9 @@ export async function writeState(dir: string, state: string): Promise<void> {
  *   const dir = await tmp.create()          // uses default prefix
  *   const dir = await tmp.create("other-")  // override prefix for this dir
  */
-export function useTempDir(defaultPrefix = "swiz-test-") {
+export function useTempDir(defaultPrefix = "swiz-test-"): {
+  create: (prefix?: string) => Promise<string>
+} {
   const dirs: string[] = []
 
   afterAll(async () => {

@@ -205,7 +205,7 @@ export async function writeTask(
   task: Task,
   cwd?: string,
   tasksDir = createDefaultTaskStore().tasksDir
-) {
+): Promise<void> {
   const dir = join(tasksDir, sessionId)
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, `${task.id}.json`), JSON.stringify(task, null, 2))
@@ -219,7 +219,7 @@ export async function writeAudit(
   sessionId: string,
   entry: AuditEntry,
   tasksDir = createDefaultTaskStore().tasksDir
-) {
+): Promise<void> {
   try {
     const dir = join(tasksDir, sessionId)
     await mkdir(dir, { recursive: true })

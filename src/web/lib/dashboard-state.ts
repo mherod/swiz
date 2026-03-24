@@ -364,15 +364,17 @@ function useMutationActions(
 
   const handleKillAgentPid = useCallback(
     (pid: number) => {
-      startMutationTransition(async () => {
-        addOptimisticKillingPid({ type: "add", pid })
-        try {
-          const url = "/process/agents/kill"
-          await postJson<{ ok: boolean; pid: number }>(url, { pid })
-          setAgentProcessProviders((prev) => removePidFromProviders(prev, pid))
-        } catch (err) {
-          setError(err instanceof Error ? err.message : String(err))
-        }
+      startMutationTransition(() => {
+        void (async () => {
+          addOptimisticKillingPid({ type: "add", pid })
+          try {
+            const url = "/process/agents/kill"
+            await postJson<{ ok: boolean; pid: number }>(url, { pid })
+            setAgentProcessProviders((prev) => removePidFromProviders(prev, pid))
+          } catch (err) {
+            setError(err instanceof Error ? err.message : String(err))
+          }
+        })()
       })
     },
     [addOptimisticKillingPid, setAgentProcessProviders, setError, startMutationTransition]
@@ -382,44 +384,46 @@ function useMutationActions(
     (cwd: string, sessionId: string) => {
       setDeletingSessionId(sessionId)
       const deletionKey = sessionDeletionKey(cwd, sessionId)
-      startMutationTransition(async () => {
-        addOptimisticPendingSessionDeletions({ type: "add", key: deletionKey })
-        addOptimisticProjects({ type: "removeSession", cwd, sessionId })
-        try {
-          await postJson<{
-            ok: boolean
-            deletedCount: number
-            sessionIds: string[]
-          }>("/sessions/delete", { cwd, sessionId })
-          const visible = applyPendingSessionDeletions(
-            optimisticProjects,
-            optimisticPendingSessionDeletions
-          )
-          const next = removeSessionFromProjects(visible, cwd, sessionId)
-          setProjects(() => next)
-          if (selectedSessionId === sessionId) {
-            const candidate = getNextSessionCandidate(next, cwd, sessionId)
-            if (candidate) {
-              handleSelectSession(candidate.cwd, candidate.sessionId)
-            } else {
-              setSelectedSessionId(null)
-              addOptimisticSessionId(null)
-              loaders.clearSession()
-              setQueryParams({ session: null })
+      startMutationTransition(() => {
+        void (async () => {
+          addOptimisticPendingSessionDeletions({ type: "add", key: deletionKey })
+          addOptimisticProjects({ type: "removeSession", cwd, sessionId })
+          try {
+            await postJson<{
+              ok: boolean
+              deletedCount: number
+              sessionIds: string[]
+            }>("/sessions/delete", { cwd, sessionId })
+            const visible = applyPendingSessionDeletions(
+              optimisticProjects,
+              optimisticPendingSessionDeletions
+            )
+            const next = removeSessionFromProjects(visible, cwd, sessionId)
+            setProjects(() => next)
+            if (selectedSessionId === sessionId) {
+              const candidate = getNextSessionCandidate(next, cwd, sessionId)
+              if (candidate) {
+                handleSelectSession(candidate.cwd, candidate.sessionId)
+              } else {
+                setSelectedSessionId(null)
+                addOptimisticSessionId(null)
+                loaders.clearSession()
+                setQueryParams({ session: null })
+              }
             }
+          } finally {
+            setPendingSessionDeletions((previous) => {
+              const s = new Set(previous)
+              s.delete(deletionKey)
+              return s
+            })
+            addOptimisticPendingSessionDeletions({
+              type: "remove",
+              key: deletionKey,
+            })
+            setDeletingSessionId(null)
           }
-        } finally {
-          setPendingSessionDeletions((previous) => {
-            const s = new Set(previous)
-            s.delete(deletionKey)
-            return s
-          })
-          addOptimisticPendingSessionDeletions({
-            type: "remove",
-            key: deletionKey,
-          })
-          setDeletingSessionId(null)
-        }
+        })()
       })
     },
     [
@@ -607,6 +611,8 @@ function useDerivedDashboardState(input: DerivedStateInput) {
 
 export type DashboardState = ReturnType<typeof useDashboardState>
 
+// Return type is `DashboardState` (alias above); an explicit annotation would be circular with `ReturnType`.
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- circular with DashboardState alias
 export function useDashboardState() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const { cacheStatus, onCacheStatus } = useCacheStatusWithJitterFilter()

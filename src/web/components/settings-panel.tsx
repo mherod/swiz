@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { postJson } from "../lib/http.ts"
 import { Select } from "./select.tsx"
 
@@ -865,7 +865,7 @@ function useAutoSave(cwd: string | null, data: ReturnType<typeof useSettingsFetc
 
 // --- Main panel (composed from extracted hooks + columns) ---
 
-export function SettingsPanel({ cwd }: { cwd: string | null }) {
+export function SettingsPanel({ cwd }: { cwd: string | null }): ReactElement {
   const data = useSettingsFetch(cwd)
   const { isSaving, status } = useAutoSave(cwd, data)
   const { globalForm, setGlobalForm, globalLoading, globalLoaded, globalError } = data

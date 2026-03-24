@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { type ReactElement, useCallback, useEffect, useState } from "react"
 import type { HookLogEntry } from "../../../hook-log.ts"
 
 const STATUS_COLORS: Record<string, string> = {
@@ -203,7 +203,7 @@ function filterEntries(
   )
 }
 
-export function LogsView() {
+export function LogsView(): ReactElement {
   const { entries, loading, fetchLogs } = useHookLogs()
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
   const [filter, setFilter] = useState("")

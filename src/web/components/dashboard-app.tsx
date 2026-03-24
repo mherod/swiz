@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from "motion/react"
+import type { ReactElement } from "react"
 import { cn } from "../lib/cn.ts"
 import { msgKey } from "../lib/dashboard-helpers.ts"
 import type { DashboardState } from "../lib/dashboard-state.ts"
@@ -98,7 +99,7 @@ function DashboardContent({ state }: { state: DashboardState }) {
   return <DashboardView cwd={optimisticProjectCwd} messagesProps={messagesProps} />
 }
 
-export function DashboardApp() {
+export function DashboardApp(): ReactElement {
   const state = useDashboardState()
 
   return (

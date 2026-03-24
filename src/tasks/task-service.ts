@@ -27,7 +27,11 @@ export { compareTaskIds, parseTaskId, sessionPrefix }
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
 
-export async function createTask(sessionId: string, subject: string, description: string) {
+export async function createTask(
+  sessionId: string,
+  subject: string,
+  description: string
+): Promise<void> {
   const tasks = await readTasks(sessionId)
   const prefix = sessionPrefix(sessionId)
   const maxSeq = tasks.reduce((m, t) => {
@@ -303,7 +307,7 @@ export async function updateStatus(
     verifyText?: string
     filterCwd?: string
   } = {}
-) {
+): Promise<void> {
   const { evidence, verifyText, filterCwd } = options
   const { sessionId: effectiveSessionId, task } = await resolveTaskById(
     taskId,
@@ -350,7 +354,11 @@ export async function updateStatus(
   console.log()
 }
 
-export async function completeAll(targetSessionId: string, filterCwd?: string, evidence?: string) {
+export async function completeAll(
+  targetSessionId: string,
+  filterCwd?: string,
+  evidence?: string
+): Promise<void> {
   const resolvedEvidence = evidence ?? "note:bulk-complete — conclusion: all tasks completed"
   const evidenceError = validateEvidence(resolvedEvidence)
   if (evidenceError) throw new Error(evidenceError)
@@ -480,7 +488,7 @@ export async function submitEvidence(
   taskId: string,
   evidence: string,
   filterCwd?: string
-) {
+): Promise<void> {
   const { sessionId: effectiveSessionId, task } = await resolveTaskById(
     taskId,
     sessionId,

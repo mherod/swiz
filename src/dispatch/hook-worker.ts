@@ -145,10 +145,12 @@ declare const self: {
   postMessage: (data: HookResult | ErrorResult) => void
 }
 
-self.addEventListener("message", async (event: MessageEvent) => {
-  const msg = event.data as RunHookMessage
-  if (msg.type === "run-hook") {
-    const result = await runHookInWorker(msg.id, msg.file, msg.payloadStr, msg.timeoutSec)
-    self.postMessage(result)
-  }
+self.addEventListener("message", (event: MessageEvent) => {
+  void (async () => {
+    const msg = event.data as RunHookMessage
+    if (msg.type === "run-hook") {
+      const result = await runHookInWorker(msg.id, msg.file, msg.payloadStr, msg.timeoutSec)
+      self.postMessage(result)
+    }
+  })()
 })

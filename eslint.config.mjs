@@ -35,10 +35,25 @@ export default tseslint.config(
         },
       ],
       "@typescript-eslint/no-floating-promises": ["error", { ignoreVoid: true }],
+      /** Async functions passed where void is expected (callbacks, JSX handlers). */
       "@typescript-eslint/no-misused-promises": [
         "error",
-        { checksVoidReturn: { arguments: false, attributes: false } },
+        {
+          checksVoidReturn: {
+            arguments: true,
+            attributes: true,
+            properties: true,
+            returns: true,
+            variables: true,
+          },
+        },
       ],
+      /** Await only values that are thenable; catches mistaken awaits. */
+      "@typescript-eslint/await-thenable": "error",
+      /** Prefer `return await` in try/catch so rejections surface with correct stack. */
+      "@typescript-eslint/return-await": ["error", "error-handling-correctness-only"],
+      /** Exported functions/classes must declare return types (public API surface). */
+      "@typescript-eslint/explicit-module-boundary-types": "error",
       "max-len": [
         COMPLEXITY_WARN,
         {
@@ -65,6 +80,43 @@ export default tseslint.config(
     },
   },
   {
+    files: ["**/*.{ts,tsx,js,mjs,cjs}"],
+    ignores: ["hooks/**", "index.ts", "scripts/**", "push/**", "**/*.test.{ts,tsx,js,jsx}"],
+    rules: {
+      /** Bun hook scripts and CLI root use top-level await by design — excluded via ignores above. */
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Program > ExpressionStatement > AwaitExpression",
+          message:
+            "Top-level await is not allowed; use async main() plus void main().catch(...) or an async IIFE.",
+        },
+        {
+          selector:
+            "Program > VariableDeclaration > VariableDeclarator[init.type='AwaitExpression']",
+          message:
+            "Top-level await is not allowed; use async main() plus void main().catch(...) or an async IIFE.",
+        },
+        {
+          selector:
+            "Program > ExportNamedDeclaration > VariableDeclaration > VariableDeclarator[init.type='AwaitExpression']",
+          message:
+            "Top-level await is not allowed; use async main() plus void main().catch(...) or an async IIFE.",
+        },
+        {
+          selector: "Program > ExportDefaultDeclaration > AwaitExpression",
+          message:
+            "Top-level await is not allowed; use async main() plus void main().catch(...) or an async IIFE.",
+        },
+        {
+          selector: "Program > ForOfStatement[await=true]",
+          message:
+            "Top-level for-await is not allowed; use async main() plus void main().catch(...) or an async IIFE.",
+        },
+      ],
+    },
+  },
+  {
     files: ["**/*.tsx", "**/*.jsx"],
     rules: {
       "max-depth": [COMPLEXITY_WARN, 3],
@@ -84,6 +136,12 @@ export default tseslint.config(
     rules: {
       complexity: "off",
       "max-lines-per-function": "off",
+      /** Bun `expect()` / matcher chains are not always typed as Thenable. */
+      "@typescript-eslint/await-thenable": "off",
+      /** Test helpers and specs are not the package API surface. */
+      "@typescript-eslint/explicit-module-boundary-types": "off",
+      /** `setTimeout(async () => …)` and similar patterns in tests. */
+      "@typescript-eslint/no-misused-promises": "off",
     },
   }
 )

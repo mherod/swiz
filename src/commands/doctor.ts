@@ -2203,7 +2203,9 @@ interface ProjectTotals {
 
 async function printProjectTable(results: ProjectResult[]): Promise<ProjectTotals> {
   const decodedNames = await Promise.all(
-    results.map((r) => (r.name.startsWith("(") ? r.name : decodeProjectPath(r.name)))
+    results.map((r) =>
+      r.name.startsWith("(") ? Promise.resolve(r.name) : decodeProjectPath(r.name)
+    )
   )
   const maxNameLen = Math.max(...decodedNames.map((n) => n.length), 20)
 

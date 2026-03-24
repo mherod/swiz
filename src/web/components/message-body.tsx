@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import type { ReactElement, ReactNode } from "react"
 import { cn } from "../lib/cn.ts"
 import {
   formatAssistantJsonBlocks,
@@ -391,7 +391,13 @@ function UserBody({
   return <UserBodyCollapsed userVisible={userVisible} contextBlocks={contextBlocks} />
 }
 
-export function MessageBody({ text, role }: { text: string; role: "user" | "assistant" }) {
+export function MessageBody({
+  text,
+  role,
+}: {
+  text: string
+  role: "user" | "assistant"
+}): ReactElement {
   if (role === "assistant") {
     return <AssistantBody text={text} parts={splitAssistantMessage(text)} />
   }

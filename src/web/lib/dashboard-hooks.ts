@@ -69,7 +69,7 @@ interface OverviewPollingDeps {
   onInitialLoad: (projects: ProjectSessions[]) => void
 }
 
-export function useDashboardOverviewPolling(deps: OverviewPollingDeps) {
+export function useDashboardOverviewPolling(deps: OverviewPollingDeps): void {
   const prevCoreSnapshotRef = useRef("")
   const prevCacheSnapshotRef = useRef("")
   const initialLoadDone = useRef(false)
@@ -142,7 +142,7 @@ export function useDashboardOverviewPolling(deps: OverviewPollingDeps) {
 export function useProjectMetricsPolling(
   selectedProjectCwd: string | null,
   setProjectEvents: (events: Array<{ name: string; count: number; avgMs: number }>) => void
-) {
+): void {
   useEffect(() => {
     if (!selectedProjectCwd) {
       setProjectEvents([])
@@ -172,7 +172,7 @@ interface SessionPollingDeps {
   onNewMessageKeys: (keys: Set<string>) => void
 }
 
-export function useSessionPolling(deps: SessionPollingDeps) {
+export function useSessionPolling(deps: SessionPollingDeps): void {
   const knownKeysRef = useRef<Set<string>>(new Set())
   const messagesPrevSnapshotRef = useRef("")
 

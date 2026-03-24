@@ -1,5 +1,7 @@
 /** Lightweight markdown-to-HTML renderer for assistant transcript messages. */
 
+import type { ReactElement } from "react"
+
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
@@ -148,7 +150,7 @@ function renderMarkdown(src: string): string {
   return html.join("\n")
 }
 
-export function Markdown({ text }: { text: string }) {
+export function Markdown({ text }: { text: string }): ReactElement {
   const html = renderMarkdown(text)
   // biome-ignore lint/security/noDangerouslySetInnerHtml: input is escaped via escapeHtml before rendering
   return <div className="md-body" dangerouslySetInnerHTML={{ __html: html }} />

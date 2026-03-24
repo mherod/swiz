@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { type ReactElement, useMemo, useState } from "react"
 import { cn } from "../lib/cn.ts"
 import type { ProjectTask, SessionTask, SessionTaskSummary } from "./session-browser-types.ts"
 import { formatTime } from "./session-browser-utils.ts"
@@ -263,7 +263,7 @@ export function ProjectTasksSection({
   tasks: ProjectTask[]
   summary: SessionTaskSummary | null
   loading: boolean
-}) {
+}): ReactElement {
   const [collapsed, setCollapsed] = useState(true)
   const [visibility, setVisibility] = useState<"open" | "all">("open")
   const openTasks = useMemo(

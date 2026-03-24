@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react"
+import type { ComponentProps, ReactElement } from "react"
 import { ProjectIssuesPanel } from "../project-issues-panel.tsx"
 import { SessionMessages } from "../session-browser.tsx"
 
@@ -10,7 +10,7 @@ export function DashboardView({
 }: {
   cwd: string | null
   messagesProps: MessagesProps
-}) {
+}): ReactElement {
   return (
     <div className="bento-dashboard-stack">
       <div className="bento-dashboard-secondary">

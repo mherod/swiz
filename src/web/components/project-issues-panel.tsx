@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react"
+import type { CSSProperties, ReactElement } from "react"
 import { useEffect, useState } from "react"
 import { postJson } from "../lib/http.ts"
 
@@ -243,7 +243,7 @@ function IssuesPanelContent({ error, loading, repo, issues, emptyState }: Issues
   )
 }
 
-export function ProjectIssuesPanel({ cwd }: { cwd: string | null }) {
+export function ProjectIssuesPanel({ cwd }: { cwd: string | null }): ReactElement {
   const [repo, setRepo] = useState<string | null>(null)
   const [issues, setIssues] = useState<ProjectIssue[]>([])
   const [loading, setLoading] = useState(false)

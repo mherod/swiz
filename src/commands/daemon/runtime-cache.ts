@@ -40,7 +40,12 @@ export function recordDispatch(metrics: DaemonMetrics, event: string, durationMs
   }
 }
 
-export function serializeMetrics(metrics: DaemonMetrics) {
+export function serializeMetrics(metrics: DaemonMetrics): {
+  uptimeMs: number
+  uptimeHuman: string
+  totalDispatches: number
+  byEvent: Record<string, { count: number; avgMs: number }>
+} {
   const uptimeMs = Date.now() - metrics.startedAt
   const byEvent: Record<string, { count: number; avgMs: number }> = {}
   let totalDispatches = 0

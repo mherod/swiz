@@ -317,6 +317,13 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "If the diagnostic appears in your workflow output, it is your responsibility to fix it. " +
       "Its prior existence is irrelevant — you own every diagnostic in your output.",
   },
+  {
+    category: "dismissal",
+    pattern: /\bpre-?existing (?:\w+ )*unstaged\b|\bunstaged (?:\w+ )*pre-?existing\b/i,
+    response:
+      "Pairing 'pre-existing' with 'unstaged' to excuse formatter or lint output is still a dismissal. " +
+      "If the tool reported it in your session, fix it or stage the fix — do not treat dirty-tree noise as exempt from the work you were asked to ship.",
+  },
 
   // ── Compliance gaming patterns ──────────────────────────────────────────
   {

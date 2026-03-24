@@ -1,11 +1,11 @@
 // Select component for settings forms
-import type { SelectHTMLAttributes } from "react"
+import type { ReactElement, SelectHTMLAttributes } from "react"
 
 export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   options: { label: string; value: string }[]
 }
 
-export function Select({ options, className, ...props }: SelectProps) {
+export function Select({ options, className, ...props }: SelectProps): ReactElement {
   return (
     <div className="select-wrapper">
       <select className={`settings-select ${className || ""}`} {...props}>

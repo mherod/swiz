@@ -1,3 +1,5 @@
+import type { ReactElement } from "react"
+
 /** Renders inline markdown as React elements — no unsafe HTML injection. */
 
 const INLINE_TOKEN_RE =
@@ -71,6 +73,6 @@ function renderInlineToken(token: InlineToken, i: number) {
 }
 
 /** Renders inline markdown (`` `code` ``, links, #issues, **bold**, *italic*) as React elements. */
-export function InlineMarkdown({ text }: { text: string }) {
+export function InlineMarkdown({ text }: { text: string }): ReactElement {
   return <>{tokenizeInline(text).map(renderInlineToken)}</>
 }

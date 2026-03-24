@@ -66,7 +66,11 @@ function renderTaskMetadata(task: Task, dateFormat: DateFormat): void {
   renderTaskRelations(task)
 }
 
-export function renderTask(task: Task, sessionTag?: string, dateFormat: DateFormat = "relative") {
+export function renderTask(
+  task: Task,
+  sessionTag?: string,
+  dateFormat: DateFormat = "relative"
+): void {
   const { emoji, color } = STATUS_STYLE[task.status]
   const tag = sessionTag ? `${DIM}[${sessionTag}]${RESET} ` : ""
   const durationTag =
@@ -117,7 +121,7 @@ export async function listTasks(
   label: string,
   dateFormat: DateFormat = "relative",
   recovered = false
-) {
+): Promise<void> {
   const tasks = await readTasks(sessionId)
   const recoveredTag = recovered ? ` ${YELLOW}[recovered]${RESET}` : ""
   console.log(
@@ -140,7 +144,7 @@ export async function listAllSessionsTasks(
   filterCwd?: string,
   dateFormat: DateFormat = "relative",
   recoveredOnly = false
-) {
+): Promise<void> {
   const [sessions, orphanIds] = await Promise.all([getSessions(filterCwd), getOrphanSessionIds()])
   const filteredSessions = recoveredOnly ? sessions.filter((s) => orphanIds.has(s)) : sessions
   const label = recoveredOnly

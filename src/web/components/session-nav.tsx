@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react"
+import { type ReactElement, useCallback, useMemo, useState } from "react"
 import { cn } from "../lib/cn.ts"
 import type { ProjectSessions, SessionPreview } from "./session-browser-types.ts"
 import {
@@ -595,7 +595,7 @@ function SelectedProjectPanel({
   )
 }
 
-export function SessionNav(props: SessionNavProps) {
+export function SessionNav(props: SessionNavProps): ReactElement {
   const { selectedProjectCwd, selectedSessionId, onSelectProject } = props
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const [filterQuery, setFilterQuery] = useState("")

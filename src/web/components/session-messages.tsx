@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo } from "react"
+import { type ReactElement, type ReactNode, useMemo } from "react"
 import { cn } from "../lib/cn.ts"
 import type { EventMetric } from "../lib/dashboard-helpers.ts"
 import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
@@ -766,7 +766,7 @@ function SessionStatsBar({
   )
 }
 
-export function SessionMessages(props: MessagesProps) {
+export function SessionMessages(props: MessagesProps): ReactElement {
   const {
     messages,
     loading,

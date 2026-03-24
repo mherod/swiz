@@ -244,7 +244,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "string",
     scopes: ["project"],
     docs: { valuePlaceholder: "name" },
-    validate: (v) => {
+    validate: (v: string): string | null => {
       if (!v.trim()) {
         return `Invalid value "${v}" for default-branch. Must be a non-empty branch name`
       }

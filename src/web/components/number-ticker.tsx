@@ -1,5 +1,5 @@
 import { useInView, useMotionValue, useSpring } from "motion/react"
-import { type ComponentPropsWithoutRef, useEffect, useRef } from "react"
+import { type ComponentPropsWithoutRef, type ReactElement, useEffect, useRef } from "react"
 import { cn } from "../lib/cn.ts"
 
 interface NumberTickerProps extends ComponentPropsWithoutRef<"span"> {
@@ -18,7 +18,7 @@ export function NumberTicker({
   className,
   decimalPlaces = 0,
   ...props
-}: NumberTickerProps) {
+}: NumberTickerProps): ReactElement {
   const ref = useRef<HTMLSpanElement>(null)
   const motionValue = useMotionValue(direction === "down" ? value : startValue)
   const springValue = useSpring(motionValue, { damping: 60, stiffness: 100 })

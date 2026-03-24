@@ -1,4 +1,5 @@
 import { motion } from "motion/react"
+import type { ReactElement } from "react"
 import type { ActiveView } from "../lib/dashboard-state.ts"
 import { NumberTicker } from "./number-ticker.tsx"
 
@@ -109,7 +110,7 @@ export function Header({
   selectedProjectName,
   cacheStatus,
   activeAgentProcessProviders = {},
-}: HeaderProps) {
+}: HeaderProps): ReactElement {
   const { totalCacheEntries, warmCaches } = buildCacheEntries(cacheStatus)
   const totalRunningAgents = Object.values(activeAgentProcessProviders).reduce(
     (sum, pids) => sum + pids.length,

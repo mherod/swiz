@@ -217,7 +217,7 @@ export async function ghJsonViaDaemon<T>(
   options: GhQueryOptions = {}
 ): Promise<T | null> {
   const ttlMs = options.ttlMs ?? GH_FALLBACK_CACHE_TTL_MS
-  if (shouldBypassDaemon()) return ghDirectWithFallbackCache<T>(args, cwd, ttlMs)
+  if (shouldBypassDaemon()) return await ghDirectWithFallbackCache<T>(args, cwd, ttlMs)
 
   try {
     const resp = await fetch(`http://127.0.0.1:${DAEMON_PORT}/gh-query`, {
@@ -226,12 +226,12 @@ export async function ghJsonViaDaemon<T>(
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(DAEMON_GH_TIMEOUT_MS),
     })
-    if (!resp.ok) return ghDirectWithFallbackCache<T>(args, cwd, ttlMs)
+    if (!resp.ok) return await ghDirectWithFallbackCache<T>(args, cwd, ttlMs)
     const data = (await resp.json()) as { hit: boolean; value: T | null }
     if (data.value !== null) await writeGhFallbackCache(args, cwd, ttlMs, data.value)
     return data.value
   } catch {
-    return ghDirectWithFallbackCache<T>(args, cwd, ttlMs)
+    return await ghDirectWithFallbackCache<T>(args, cwd, ttlMs)
   }
 }
 

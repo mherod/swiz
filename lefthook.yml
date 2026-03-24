@@ -11,9 +11,10 @@ pre-commit:
       skip:
         - merge
         - rebase
+    # lint-staged fixes staged files; `bun run lint` verifies the whole tree (same as CI).
     lint:
-      glob: "*.{ts,tsx,js,jsx,json}"
-      run: bunx lint-staged
+      glob: "*.{ts,tsx,js,jsx,mjs,cjs,json}"
+      run: bunx lint-staged && bun run lint
       stage_fixed: true
       skip:
         - merge

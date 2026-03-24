@@ -44,6 +44,8 @@ import type { UpstreamSyncRegistry } from "./upstream-sync.ts"
 import { type CapturedToolCall, captureSessionToolCall, stripAnsi } from "./utils.ts"
 import type { DaemonWorkerRuntime } from "./worker-runtime.ts"
 
+type DaemonWebServerHandle = ReturnType<typeof Bun.serve>
+
 export const WEB_ROOT = join(dirname(Bun.main), "src", "web")
 export const PUBLIC_ROOT = join(dirname(Bun.main), "www", "public")
 export const WEB_TSX_TRANSPILER = new Bun.Transpiler({
@@ -1209,7 +1211,7 @@ async function handleFetchRoutes(
   return new Response("Not Found", { status: 404 })
 }
 
-export function startDaemonWebServer(ctx: DaemonWebServerContext) {
+export function startDaemonWebServer(ctx: DaemonWebServerContext): DaemonWebServerHandle {
   const notFound = () => new Response("Not Found", { status: 404 })
   const server = Bun.serve({
     port: ctx.port,

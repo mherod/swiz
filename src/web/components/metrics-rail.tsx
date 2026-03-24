@@ -1,3 +1,4 @@
+import type { ReactElement } from "react"
 import type { EventMetric } from "../lib/dashboard-helpers.ts"
 import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
 import { DashboardStats } from "./dashboard-stats.tsx"
@@ -18,7 +19,7 @@ export function MetricsRail({
   activeHookDispatches: ActiveHookDispatch[]
   loadedMessageCount: number
   sessionToolStats: ToolStat[]
-}) {
+}): ReactElement {
   return (
     <aside className="bento-metrics-stack" aria-label="Metrics panels">
       <DashboardStats

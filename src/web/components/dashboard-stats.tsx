@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { type ReactElement, useMemo } from "react"
 import { formatLastActivity } from "../lib/dashboard-helpers.ts"
 import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
 import { NumberTicker } from "./number-ticker.tsx"
@@ -180,7 +180,7 @@ export function DashboardStats({
   activeHookDispatches: ActiveHookDispatch[]
   loadedMessageCount: number
   sessionToolStats: ToolStat[]
-}) {
+}): ReactElement {
   // Performance logic
   const totalDispatches = useMemo(
     () => events.reduce((sum, event) => sum + event.count, 0),

@@ -1,6 +1,6 @@
 import type { MotionProps } from "motion/react"
 import { type MotionValue, motion, useMotionValue, useSpring, useTransform } from "motion/react"
-import React, { type PropsWithChildren, useRef } from "react"
+import React, { type PropsWithChildren, type ReactElement, useRef } from "react"
 import { cn } from "../lib/cn.ts"
 
 const DEFAULT_SIZE = 40
@@ -25,7 +25,7 @@ export function Dock({
   disableMagnification = false,
   iconDistance = DEFAULT_DISTANCE,
   direction = "middle",
-}: DockProps) {
+}: DockProps): ReactElement {
   const mouseX = useMotionValue(Infinity)
 
   const rendered = React.Children.map(children, (child) => {
@@ -77,7 +77,7 @@ export function DockIcon({
   className,
   children,
   ...props
-}: DockIconProps) {
+}: DockIconProps): ReactElement {
   const ref = useRef<HTMLDivElement>(null)
   const padding = Math.max(6, size * 0.2)
   const defaultMouseX = useMotionValue(Infinity)

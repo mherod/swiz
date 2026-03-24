@@ -30,7 +30,7 @@ async function main(): Promise<void> {
 
   if (!(await isGitRepo(cwd))) return
   if (!(await isGitHubRemote(cwd))) return
-  if (!(await hasGhCli())) return
+  if (!hasGhCli()) return
 
   const prs = await ghJson<DependabotPr[]>(
     [
