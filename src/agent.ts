@@ -35,6 +35,34 @@ export interface PromptAgentOptions {
  * Send a prompt to the Cursor Agent CLI and return the trimmed output.
  * Throws if agent is not installed or the process exits non-zero.
  */
+function attachAbortSignal(
+  proc: ReturnType<typeof Bun.spawn>,
+  options?: Pick<PromptAgentOptions, "signal" | "timeout">
+): void {
+  let signal = options?.signal
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  if (!signal && options?.timeout) {
+    const controller = new AbortController()
+    timeoutHandle = setTimeout(() => controller.abort(), options.timeout).unref()
+    signal = controller.signal
+  }
+  if (!signal) return
+
+  const onAbort = () => {
+    proc.kill()
+    setTimeout(() => proc.kill(9), 2_000).unref()
+  }
+  if (signal.aborted) {
+    onAbort()
+  } else {
+    signal.addEventListener("abort", onAbort, { once: true })
+    void proc.exited.then(() => {
+      signal!.removeEventListener("abort", onAbort)
+      clearTimeout(timeoutHandle)
+    })
+  }
+}
+
 export async function promptAgent(prompt: string, options?: PromptAgentOptions): Promise<string> {
   if (!detectAgentCli()) {
     throw new Error("Cursor Agent not found. Install it via the Cursor IDE.")
@@ -51,37 +79,8 @@ export async function promptAgent(prompt: string, options?: PromptAgentOptions):
   ]
 
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" })
+  attachAbortSignal(proc, options)
 
-  // Resolve the abort signal — caller-supplied takes precedence; otherwise
-  // create an internal one from timeout if provided.
-  let signal = options?.signal
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
-  if (!signal && options?.timeout) {
-    const controller = new AbortController()
-    timeoutHandle = setTimeout(() => controller.abort(), options.timeout).unref()
-    signal = controller.signal
-  }
-
-  if (signal) {
-    const onAbort = () => {
-      proc.kill()
-      setTimeout(() => proc.kill(9), 2_000).unref()
-    }
-    if (signal.aborted) {
-      onAbort()
-    } else {
-      signal.addEventListener("abort", onAbort, { once: true })
-      void proc.exited.then(() => {
-        signal!.removeEventListener("abort", onAbort)
-        clearTimeout(timeoutHandle)
-      })
-    }
-  }
-
-  // Drain both pipes concurrently before awaiting exit.
-  // Reading stderr only after proc.exited risks deadlock when the process writes
-  // more than the pipe buffer (~64 KB) to stderr: the process blocks on write,
-  // stdout never closes, proc.stdout.text() hangs, and proc.exited never fires.
   const [output, err] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),

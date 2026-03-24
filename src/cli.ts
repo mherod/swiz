@@ -8,7 +8,7 @@ import type { Command } from "./types.ts"
 
 const commands = new Map<string, Command>()
 
-export function registerCommand(command: Command) {
+export function registerCommand(command: Command): void {
   commands.set(command.name, command)
 }
 
@@ -41,23 +41,17 @@ export function collectUnknownOptionWarnings(
   return warnings
 }
 
-async function run() {
-  const help = createHelpCommand(commands)
-  commands.set("help", help)
-
-  // Validate manifest/route/agent symmetry before any command runs
-  const { DISPATCH_ROUTES } = await import("./dispatch/index.ts")
-  validateDispatchRoutes(DISPATCH_ROUTES, CONFIGURABLE_AGENTS)
-
-  const [commandName, ...rest] = process.argv.slice(2)
-
+function resolveCommand(
+  commandName: string | undefined,
+  help: Command
+): { command: Command; name: string; rest: string[] } | null {
+  const rest = process.argv.slice(3)
   if (!commandName || commandName === "--help" || commandName === "-h") {
     void help.run(rest)
-    return
+    return null
   }
 
   const command = commands.get(commandName)
-
   if (!command) {
     const hint = suggest(commandName, commands.keys())
     stderrLog(
@@ -66,32 +60,43 @@ async function run() {
     )
     stderrLog("CLI error handler — unknown command", `Run "swiz help" to see available commands.`)
     process.exitCode = 1
-    return
+    return null
   }
 
   if (rest[0] === "--help" || rest[0] === "-h") {
     void help.run([commandName])
-    return
+    return null
   }
 
-  // Fuzzy flag suggestions — warn on unknown flags before delegating to command
-  const unknownOptionWarnings = collectUnknownOptionWarnings(
-    commandName,
-    rest,
-    command.options ?? []
+  return { command, name: commandName, rest }
+}
+
+async function run(): Promise<void> {
+  const help = createHelpCommand(commands)
+  commands.set("help", help)
+
+  const { DISPATCH_ROUTES } = await import("./dispatch/index.ts")
+  validateDispatchRoutes(DISPATCH_ROUTES, CONFIGURABLE_AGENTS)
+
+  const [commandName] = process.argv.slice(2)
+  const resolved = resolveCommand(commandName, help)
+  if (!resolved) return
+
+  const warnings = collectUnknownOptionWarnings(
+    resolved.name,
+    resolved.rest,
+    resolved.command.options ?? []
   )
-  if (unknownOptionWarnings.length > 0) {
-    for (const warning of unknownOptionWarnings)
-      stderrLog("CLI error handler — unknown option warnings", warning)
+  if (warnings.length > 0) {
+    for (const w of warnings) stderrLog("CLI error handler — unknown option warnings", w)
     process.exitCode = 1
     return
   }
 
-  // Best-effort: drain any offline issue mutations before running commands
   await tryReplayPendingMutations()
 
   try {
-    await command.run(rest)
+    await resolved.command.run(resolved.rest)
   } catch (err) {
     stderrLog("CLI error handler — uncaught exception", String(err))
     process.exitCode = 1

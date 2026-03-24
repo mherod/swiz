@@ -417,30 +417,31 @@ async function handleTestFixturesText(
   return undefined
 }
 
+function resolveStreamTextFixture(): string | undefined {
+  if (process.env.AI_TEST_TEXT_RESPONSE !== undefined) return process.env.AI_TEST_TEXT_RESPONSE
+  return (
+    process.env.GEMINI_TEST_STREAM_RESPONSE ??
+    process.env.GEMINI_TEST_TEXT_RESPONSE ??
+    process.env.GEMINI_TEST_RESPONSE
+  )
+}
+
 async function handleTestFixturesStreamText(
   prompt: string,
   options?: PromptStreamOptions
 ): Promise<string | undefined> {
-  // Test seam
-  if (process.env.AI_TEST_TEXT_RESPONSE !== undefined) {
-    const text = process.env.AI_TEST_TEXT_RESPONSE.trim()
-    options?.onTextPart?.(text)
-    return Promise.resolve(text)
-  }
-  // Backward-compatible Gemini test fixtures used by existing hook tests.
-  // GEMINI_TEST_RESPONSE is treated as raw text here (not { next } format).
-  const geminiTextFixture =
-    process.env.GEMINI_TEST_STREAM_RESPONSE ??
-    process.env.GEMINI_TEST_TEXT_RESPONSE ??
-    process.env.GEMINI_TEST_RESPONSE
-  if (geminiTextFixture !== undefined) {
+  const fixture = resolveStreamTextFixture()
+  if (fixture === undefined) return undefined
+
+  // Capture prompt if requested (backward-compat for Gemini test fixtures)
+  if (process.env.AI_TEST_TEXT_RESPONSE === undefined) {
     const captureFile = process.env.AI_TEST_CAPTURE_FILE ?? process.env.GEMINI_TEST_CAPTURE_FILE
     if (captureFile) await Bun.write(captureFile, prompt)
-    const text = geminiTextFixture.trim()
-    options?.onTextPart?.(text)
-    return Promise.resolve(text)
   }
-  return Promise.resolve(undefined)
+
+  const text = fixture.trim()
+  options?.onTextPart?.(text)
+  return text
 }
 
 /**

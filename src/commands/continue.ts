@@ -176,29 +176,35 @@ const autoApprove: CanUseTool = async (toolName, input, _options) => {
   return { behavior: "allow", updatedInput: input }
 }
 
+const TOOL_INPUT_FORMATTERS: Record<string, (input: Record<string, unknown>) => string> = {
+  Bash: (input) => {
+    const cmd = input.command as string | undefined
+    return cmd ? ` ${DIM}$ ${cmd}${RESET}` : ""
+  },
+  Edit: (input) => {
+    const path = input.file_path as string | undefined
+    return path ? ` ${DIM}${path}${RESET}` : ""
+  },
+  Write: (input) => {
+    const path = input.file_path as string | undefined
+    return path ? ` ${DIM}${path}${RESET}` : ""
+  },
+  Read: (input) => {
+    const path = input.file_path as string | undefined
+    return path ? ` ${DIM}${path}${RESET}` : ""
+  },
+  Glob: (input) => {
+    const pattern = input.pattern as string | undefined
+    return pattern ? ` ${DIM}${pattern}${RESET}` : ""
+  },
+  Grep: (input) => {
+    const pattern = input.pattern as string | undefined
+    return pattern ? ` ${DIM}/${pattern}/${RESET}` : ""
+  },
+}
+
 function formatToolInput(toolName: string, input: Record<string, unknown>): string {
-  switch (toolName) {
-    case "Bash": {
-      const cmd = input.command as string | undefined
-      return cmd ? ` ${DIM}$ ${cmd}${RESET}` : ""
-    }
-    case "Edit":
-    case "Write":
-    case "Read": {
-      const path = input.file_path as string | undefined
-      return path ? ` ${DIM}${path}${RESET}` : ""
-    }
-    case "Glob": {
-      const pattern = input.pattern as string | undefined
-      return pattern ? ` ${DIM}${pattern}${RESET}` : ""
-    }
-    case "Grep": {
-      const pattern = input.pattern as string | undefined
-      return pattern ? ` ${DIM}/${pattern}/${RESET}` : ""
-    }
-    default:
-      return ""
-  }
+  return TOOL_INPUT_FORMATTERS[toolName]?.(input) ?? ""
 }
 
 // ─── Progress spinner ────────────────────────────────────────────────────────
