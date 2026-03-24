@@ -15,15 +15,11 @@
 // Policy: only blocks on non-default branches. On the default branch, changes
 // are intentional (gated by code review and other hooks).
 
-import { stopHookInputSchema } from "./schemas.ts"
-import { blockStop, getDefaultBranch, git, isGitRepo } from "./utils/hook-utils.ts"
+import { type DiffViolation, runDiffScanStopHook } from "./utils/diff-scanner.ts"
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
-export interface SuppressionViolation {
-  affectedFiles: string[]
-  matchingLines: string[]
-}
+export type { DiffViolation } from "./utils/diff-scanner.ts"
+/** @deprecated Use DiffViolation from utils/diff-scanner.ts */
+export type SuppressionViolation = DiffViolation
 
 // ── Pattern detection (exported for testing) ─────────────────────────────────
 
@@ -108,75 +104,46 @@ export function scanDiffForSuppressions(diffOutput: string): SuppressionViolatio
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
+const SOURCE_PATHSPECS = [
+  "*.ts",
+  "*.tsx",
+  "*.js",
+  "*.jsx",
+  "*.mjs",
+  "*.cjs",
+  ":!*.test.ts",
+  ":!*.test.tsx",
+  ":!*.spec.ts",
+  ":!*.spec.tsx",
+  ":!*.test.js",
+  ":!*.spec.js",
+]
 
-  if (!(await isGitRepo(cwd))) return
-
-  const branch = await git(["branch", "--show-current"], cwd)
-  if (!branch) return // detached HEAD
-
-  const defaultBranch = await getDefaultBranch(cwd)
-
-  // Only enforce on non-default branches — default branch changes are intentional
-  if (branch === defaultBranch) return
-
-  // Scope diff to commits introduced by this branch (merge-base to HEAD)
-  const mergeBase = await git(["merge-base", defaultBranch, "HEAD"], cwd)
-  if (!mergeBase) return // No common ancestor
-
-  // Get the diff of source files between merge-base and HEAD.
-  // Test files are excluded — suppressions there are sometimes acceptable and
-  // the PreToolUse gate still catches them eagerly during editing.
-  const diffOutput = await git(
-    [
-      "diff",
-      mergeBase,
-      "HEAD",
-      "--",
-      "*.ts",
-      "*.tsx",
-      "*.js",
-      "*.jsx",
-      "*.mjs",
-      "*.cjs",
-      ":!*.test.ts",
-      ":!*.test.tsx",
-      ":!*.spec.ts",
-      ":!*.spec.tsx",
-      ":!*.test.js",
-      ":!*.spec.js",
-    ],
-    cwd
-  )
-
-  const violation = scanDiffForSuppressions(diffOutput)
-  if (!violation) return
-
-  const patternNames = SUPPRESSION_PATTERNS.map((p) => `  - ${p.name}`).join("\n")
-
-  blockStop(
-    [
-      "Suppression patterns detected in committed diffs on non-default branch.",
-      "",
-      `  Current branch: ${branch}`,
-      `  Default branch: ${defaultBranch}`,
-      `  Affected files: ${violation.affectedFiles.join(", ") || "unknown"}`,
-      "",
-      "The following suppression patterns are prohibited in source code:",
-      patternNames,
-      "",
-      "These suppressions were introduced in this branch's commits and bypass",
-      "type-safety and lint enforcement. The PreToolUse gates exist to catch",
-      "them at write time — this Stop hook catches what slipped through.",
-      "",
-      "Review and remove the suppressions:",
-      `  git diff ${mergeBase.slice(0, 8)}..HEAD -- '*.ts' '*.tsx' '*.js' '*.jsx'`,
-      "",
-      "Fix the underlying type errors or lint violations instead of suppressing them.",
-    ].join("\n")
-  )
+if (import.meta.main) {
+  void runDiffScanStopHook({
+    diffPathspecs: SOURCE_PATHSPECS,
+    scanDiff: scanDiffForSuppressions,
+    buildBlockMessage: (branch, defaultBranch, mergeBase, violation) => {
+      const patternNames = SUPPRESSION_PATTERNS.map((p) => `  - ${p.name}`).join("\n")
+      return [
+        "Suppression patterns detected in committed diffs on non-default branch.",
+        "",
+        `  Current branch: ${branch}`,
+        `  Default branch: ${defaultBranch}`,
+        `  Affected files: ${violation.affectedFiles.join(", ") || "unknown"}`,
+        "",
+        "The following suppression patterns are prohibited in source code:",
+        patternNames,
+        "",
+        "These suppressions were introduced in this branch's commits and bypass",
+        "type-safety and lint enforcement. The PreToolUse gates exist to catch",
+        "them at write time — this Stop hook catches what slipped through.",
+        "",
+        "Review and remove the suppressions:",
+        `  git diff ${mergeBase.slice(0, 8)}..HEAD -- '*.ts' '*.tsx' '*.js' '*.jsx'`,
+        "",
+        "Fix the underlying type errors or lint violations instead of suppressing them.",
+      ].join("\n")
+    },
+  })
 }
-
-if (import.meta.main) void main()
