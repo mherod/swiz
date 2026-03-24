@@ -1,4 +1,5 @@
-import { existsSync, unlinkSync } from "node:fs"
+import { existsSync } from "node:fs"
+import { unlink } from "node:fs/promises"
 import { basename, dirname, resolve } from "node:path"
 import { detectAgentCli, promptAgent } from "../agent.ts"
 import { type AiProviderId, hasAiProvider, promptText } from "../ai-providers.ts"
@@ -30,8 +31,8 @@ export function parseMergetoolArgs(args: string[]): MergetoolArgs {
     if (arg === "--provider") {
       const next = args[i + 1]
       if (!next) throw new Error("Missing value for --provider")
-      if (next !== "gemini" && next !== "codex") {
-        throw new Error(`--provider must be "gemini" or "codex", got: ${next}`)
+      if (next !== "gemini" && next !== "claude" && next !== "openrouter") {
+        throw new Error(`--provider must be "gemini", "claude", or "openrouter", got: ${next}`)
       }
       provider = next
       i++
@@ -220,7 +221,7 @@ export async function resolveWithAI(prompt: string, provider?: AiProviderId): Pr
   // Fall back to Cursor Agent CLI when no AI SDK provider is configured.
   if (!provider && !hasAiProvider() && !detectAgentCli()) {
     throw new Error(
-      "No AI backend found. Set GEMINI_API_KEY, install the codex CLI, or install Cursor Agent."
+      "No AI backend found. Set GEMINI_API_KEY, OPENROUTER_API_KEY, install the claude CLI, or install Cursor Agent."
     )
   }
 
@@ -276,7 +277,7 @@ async function writeResolvedContent(mergedPath: string, content: string): Promis
     await Bun.write(mergedPath, writtenContent)
   } finally {
     try {
-      if (existsSync(tmpPath)) unlinkSync(tmpPath)
+      if (existsSync(tmpPath)) await unlink(tmpPath)
     } catch {
       // non-fatal cleanup
     }

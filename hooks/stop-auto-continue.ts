@@ -1136,7 +1136,7 @@ async function validatePrerequisitesAndGenerateResponse(
   if (!hasAiProvider()) {
     terminate(
       "block",
-      "Auto-continue could not generate a next-step suggestion: no AI backend available.\nSet GEMINI_API_KEY or install the claude or codex CLI, then continue working."
+      "Auto-continue could not generate a next-step suggestion: no AI backend available.\nSet GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude CLI, then continue working."
     )
   }
 

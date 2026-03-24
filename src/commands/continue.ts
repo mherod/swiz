@@ -47,11 +47,11 @@ export interface ContinueArgs {
   provider?: AiProviderId
 }
 
-const VALID_PROVIDERS = new Set(["gemini", "codex", "claude"])
+const VALID_PROVIDERS = new Set(["gemini", "claude", "openrouter"])
 
 function validateProvider(value: string): AiProviderId {
   if (!VALID_PROVIDERS.has(value)) {
-    throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${value}`)
+    throw new Error(`--provider must be "gemini", "claude", or "openrouter", got: ${value}`)
   }
   return value as AiProviderId
 }
@@ -120,7 +120,7 @@ async function resolveSession(targetDir: string, sessionQuery: string | null): P
 function ensureAiBackend(): void {
   if (!hasAiProvider() && !detectAgentCli()) {
     throw new Error(
-      "No AI backend found. Set GEMINI_API_KEY, install the codex CLI, or install Cursor Agent."
+      "No AI backend found. Set GEMINI_API_KEY, OPENROUTER_API_KEY, install the claude CLI, or install Cursor Agent."
     )
   }
 }
@@ -377,7 +377,8 @@ export const continueCommand: Command = {
     { flags: "--print", description: "Print the suggested next step without resuming" },
     {
       flags: "--provider, -p <name>",
-      description: 'AI provider override: "gemini", "codex", or "claude" (default: auto-select)',
+      description:
+        'AI provider override: "gemini", "claude", or "openrouter" (default: auto-select)',
     },
   ],
   async run(args) {

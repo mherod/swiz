@@ -62,8 +62,8 @@ describe("parseMergetoolArgs", () => {
     expect(parseMergetoolArgs(["--provider", "gemini", "/a", "/b", "/c", "/d"]).provider).toBe(
       "gemini"
     )
-    expect(parseMergetoolArgs(["--provider", "codex", "/a", "/b", "/c", "/d"]).provider).toBe(
-      "codex"
+    expect(parseMergetoolArgs(["--provider", "openrouter", "/a", "/b", "/c", "/d"]).provider).toBe(
+      "openrouter"
     )
   })
 
@@ -73,7 +73,7 @@ describe("parseMergetoolArgs", () => {
 
   it("throws on invalid --provider value", () => {
     expect(() => parseMergetoolArgs(["--provider", "openai", "/a", "/b", "/c", "/d"])).toThrow(
-      'must be "gemini" or "codex"'
+      'must be "gemini", "claude", or "openrouter"'
     )
   })
 

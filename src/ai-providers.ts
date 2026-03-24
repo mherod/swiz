@@ -4,12 +4,11 @@
 //   1. OpenRouter (via OPENROUTER_API_KEY)
 //   2. Claude Code (via claude CLI in PATH)
 //   3. Gemini (via GEMINI_API_KEY or gemini CLI OAuth)
-//   4. Codex CLI (via codex CLI in PATH)
 //
 // Provider override (highest to lowest precedence):
 //   1. options.provider passed to each prompt function
-//   2. AI_PROVIDER env var ("gemini" | "codex" | "claude" | "openrouter")
-//   3. Auto-select: OpenRouter preferred, then Claude Code, then Gemini, then Codex CLI
+//   2. AI_PROVIDER env var ("gemini" | "claude" | "openrouter")
+//   3. Auto-select: OpenRouter preferred, then Claude Code, then Gemini
 //
 // Usage:
 //   import { hasAiProvider, promptText, promptStreamText, promptObject } from "./ai-providers.ts"
@@ -32,9 +31,9 @@ import {
 
 // ─── Provider types ───────────────────────────────────────────────────────────
 
-export type AiProviderId = "gemini" | "codex" | "claude" | "openrouter"
+export type AiProviderId = "gemini" | "claude" | "openrouter"
 
-// ─── Codex provider ──────────────────────────────────────────────────────────
+// ─── Provider options ─────────────────────────────────────────────────────────
 
 export interface PromptOptions {
   /** Per-call timeout in milliseconds. */
@@ -55,7 +54,6 @@ export interface PromptStreamOptions extends PromptOptions {
   onTextPart?: (textPart: string) => void
 }
 
-const CODEX_DEFAULT_MODEL = "codex-mini-latest"
 const CLAUDE_DEFAULT_MODEL = "sonnet"
 const OPENROUTER_DEFAULT_MODEL = "openrouter/auto"
 const GEMINI_KNOWN_MODELS = [
@@ -88,11 +86,6 @@ function validateConfiguredModelAtStartup(): void {
 }
 
 validateConfiguredModelAtStartup()
-
-function hasCodexCli(): boolean {
-  if (process.env.AI_TEST_NO_BACKEND === "1") return false
-  return Boolean(Bun.which("codex"))
-}
 
 function hasClaudeCode(): boolean {
   if (process.env.AI_TEST_NO_BACKEND === "1") return false
@@ -177,11 +170,6 @@ async function runObject<T>(
 
 // ─── Per-provider model factories ────────────────────────────────────────────
 
-async function getCodexModel(modelId?: string): Promise<LanguageModel> {
-  const { createCodexCli } = await import("ai-sdk-provider-codex-cli")
-  return createCodexCli().languageModel(modelId ?? CODEX_DEFAULT_MODEL)
-}
-
 async function getClaudeModel(modelId?: string): Promise<LanguageModel> {
   const { createClaudeCode } = await import("ai-sdk-provider-claude-code")
   return createClaudeCode().languageModel(modelId ?? CLAUDE_DEFAULT_MODEL)
@@ -192,27 +180,6 @@ async function getOpenRouterModel(modelId?: string): Promise<LanguageModel> {
   return createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY }).chat(
     modelId ?? OPENROUTER_DEFAULT_MODEL
   )
-}
-
-// ─── Codex provider ───────────────────────────────────────────────────────────
-
-async function promptCodexText(prompt: string, options?: PromptOptions): Promise<string> {
-  return runText(await getCodexModel(options?.model), prompt, options)
-}
-
-async function promptCodexStreamText(
-  prompt: string,
-  options?: PromptStreamOptions
-): Promise<string> {
-  return runStreamText(await getCodexModel(options?.model), prompt, options)
-}
-
-async function promptCodexObject<T>(
-  prompt: string,
-  schema: ZodType<T>,
-  options?: PromptOptions
-): Promise<T> {
-  return runObject(await getCodexModel(options?.model), prompt, schema, options)
 }
 
 // ─── Claude Code provider ─────────────────────────────────────────────────────
@@ -278,11 +245,6 @@ const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
     object: (prompt, schema, options) =>
       promptGeminiObject(prompt, schema, options as PromptGeminiOptions),
   },
-  codex: {
-    text: promptCodexText,
-    streamText: promptCodexStreamText,
-    object: promptCodexObject,
-  },
   claude: {
     text: promptClaudeText,
     streamText: promptClaudeStreamText,
@@ -298,7 +260,7 @@ const PROVIDER_REGISTRY: Record<AiProviderId, ProviderCapabilities> = {
 // ─── Provider selection ───────────────────────────────────────────────────────
 
 /**
- * Returns true when at least one AI provider (Gemini, Codex CLI, or Claude Code) is available.
+ * Returns true when at least one AI provider (OpenRouter, Claude Code, or Gemini) is available.
  * Call `ensureGeminiApiKey()` before this to populate Gemini key from Keychain.
  *
  * Set AI_TEST_NO_BACKEND=1 to simulate "no backend" in tests.
@@ -315,7 +277,7 @@ export function hasAiProvider(): boolean {
   ) {
     return true
   }
-  return hasGeminiApiKey() || hasCodexCli() || hasClaudeCode() || hasOpenRouterApiKey()
+  return hasGeminiApiKey() || hasClaudeCode() || hasOpenRouterApiKey()
 }
 
 /**
@@ -323,8 +285,8 @@ export function hasAiProvider(): boolean {
  *
  * Resolution order (highest to lowest precedence):
  *   1. `override` argument (from options.provider or CLI --provider flag)
- *   2. AI_PROVIDER env var ("gemini" | "codex" | "claude")
- *   3. Auto-select: Claude Code preferred, then Gemini, then Codex CLI
+ *   2. AI_PROVIDER env var ("gemini" | "claude" | "openrouter")
+ *   3. Auto-select: OpenRouter preferred, then Claude Code, then Gemini
  *
  * Throws if an explicit override requests a provider that is not available.
  */
@@ -338,14 +300,6 @@ function handleExplicitlyRequestedProvider(
       )
     }
     return "gemini"
-  }
-  if (requested === "codex") {
-    if (!hasCodexCli()) {
-      throw new Error(
-        "AI_PROVIDER=codex requested but the codex CLI is not installed or not in PATH."
-      )
-    }
-    return "codex"
   }
   if (requested === "claude") {
     if (!hasClaudeCode()) {
@@ -362,9 +316,7 @@ function handleExplicitlyRequestedProvider(
     return "openrouter"
   }
   if (requested !== undefined) {
-    throw new Error(
-      `Unknown AI provider "${requested}". Valid values: gemini, codex, claude, openrouter.`
-    )
+    throw new Error(`Unknown AI provider "${requested}". Valid values: gemini, claude, openrouter.`)
   }
   return null
 }
@@ -383,14 +335,13 @@ export function activeProvider(override?: AiProviderId): AiProviderId | null {
   if (hasOpenRouterApiKey()) return "openrouter"
   if (hasClaudeCode()) return "claude"
   if (hasGeminiApiKey()) return "gemini"
-  if (hasCodexCli()) return "codex"
   return null
 }
 
 // ─── Provider fallback ────────────────────────────────────────────────────────
 
 /**
- * Returns all available provider IDs in priority order (Claude Code → Gemini → Codex).
+ * Returns all available provider IDs in priority order (OpenRouter → Claude Code → Gemini).
  * When an explicit override is set (options.provider or AI_PROVIDER env), returns only that provider.
  */
 function availableProviders(override?: AiProviderId): AiProviderId[] {
@@ -408,7 +359,6 @@ function availableProviders(override?: AiProviderId): AiProviderId[] {
   if (hasOpenRouterApiKey()) providers.push("openrouter")
   if (hasClaudeCode()) providers.push("claude")
   if (hasGeminiApiKey()) providers.push("gemini")
-  if (hasCodexCli()) providers.push("codex")
   return providers
 }
 
@@ -416,7 +366,7 @@ function availableProviders(override?: AiProviderId): AiProviderId[] {
 
 /**
  * Send a single-turn prompt and return the trimmed text response.
- * Dispatches to Gemini (preferred) or Codex CLI based on availability.
+ * Dispatches to available provider based on priority (OpenRouter → Claude → Gemini).
  * Throws if no provider is available or the request fails.
  */
 export async function promptText(prompt: string, options?: PromptOptions): Promise<string> {
@@ -427,7 +377,7 @@ export async function promptText(prompt: string, options?: PromptOptions): Promi
   const providers = availableProviders(options?.provider)
   if (providers.length === 0) {
     throw new Error(
-      "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, install the codex CLI, or install the claude CLI."
+      "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, or install the claude CLI."
     )
   }
   if (providers.length === 1 && providers[0] === "gemini") {
@@ -496,7 +446,7 @@ async function handleTestFixturesStreamText(
 /**
  * Send a single-turn prompt and stream text deltas through `onTextPart`.
  * Returns the complete trimmed text when the stream ends.
- * Dispatches to Gemini (preferred) or Codex CLI based on availability.
+ * Dispatches to available provider based on priority (OpenRouter → Claude → Gemini).
  */
 export async function promptStreamText(
   prompt: string,
@@ -510,7 +460,7 @@ export async function promptStreamText(
   const providers = availableProviders(options?.provider)
   if (providers.length === 0) {
     throw new Error(
-      "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, install the codex CLI, or install the claude CLI."
+      "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, or install the claude CLI."
     )
   }
   if (providers.length === 1 && providers[0] === "gemini") {
@@ -550,7 +500,7 @@ async function handleTestFixturesObject<T>(
 
 /**
  * Send a single-turn prompt and return a structured object validated against the Zod schema.
- * Dispatches to Gemini (preferred) or Codex CLI based on availability.
+ * Dispatches to available provider based on priority (OpenRouter → Claude → Gemini).
  * Throws if no provider is available, the request fails, or validation fails.
  */
 export async function promptObject<T>(
@@ -566,7 +516,7 @@ export async function promptObject<T>(
   const providers = availableProviders(options?.provider)
   if (providers.length === 0) {
     throw new Error(
-      "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, install the codex CLI, or install the claude CLI."
+      "No AI provider available. Set GEMINI_API_KEY or OPENROUTER_API_KEY, or install the claude CLI."
     )
   }
   if (providers.length === 1 && providers[0] === "gemini") {

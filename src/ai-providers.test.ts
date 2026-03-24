@@ -79,7 +79,6 @@ describe("activeProvider", () => {
   test("override argument takes precedence over auto-select", () => {
     delete process.env.AI_TEST_NO_BACKEND
     process.env.GEMINI_API_KEY = "test-key"
-    // Codex unavailable in test env, but we can verify gemini override works
     expect(activeProvider("gemini")).toBe("gemini")
   })
 
@@ -102,16 +101,10 @@ describe("activeProvider", () => {
     expect(() => activeProvider("openai")).toThrow("Unknown AI provider")
   })
 
-  test("AI_PROVIDER=codex throws when codex CLI is not installed", () => {
+  test("AI_PROVIDER=codex throws as unknown provider", () => {
     delete process.env.AI_TEST_NO_BACKEND
     process.env.AI_PROVIDER = "codex"
-    // In this test environment codex is not installed — Bun.which("codex") returns null
-    if (Bun.which("codex")) {
-      // codex is installed on this machine — skip the unavailable check
-      expect(activeProvider()).toBe("codex")
-    } else {
-      expect(() => activeProvider()).toThrow("codex CLI is not installed")
-    }
+    expect(() => activeProvider()).toThrow("Unknown AI provider")
   })
 
   test("AI_PROVIDER=claude is accepted as a valid provider ID", () => {

@@ -73,8 +73,8 @@ type ReflectValueOption = {
 }
 
 function parseProvider(value: string): AiProviderId {
-  if (value === "gemini" || value === "codex" || value === "claude") return value
-  throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${value}`)
+  if (value === "gemini" || value === "claude" || value === "openrouter") return value
+  throw new Error(`--provider must be "gemini", "claude", or "openrouter", got: ${value}`)
 }
 
 function applyPositionalCount(state: ReflectArgState, rawCount: string): void {
@@ -411,7 +411,9 @@ export const reflectCommand: Command = {
     }
 
     if (!hasAiProvider()) {
-      throw new Error("No AI provider available. Set GEMINI_API_KEY or install the codex CLI.")
+      throw new Error(
+        "No AI provider available. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude CLI."
+      )
     }
 
     let reflection: SessionReflection

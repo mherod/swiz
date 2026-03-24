@@ -78,13 +78,13 @@ const IDEA_ARG_MAP: Record<IdeaArgKey, (next: string, state: IdeaParseState) => 
     s.timeoutMs = parsed
   },
   "--provider": (n, s) => {
-    if (n !== "gemini" && n !== "codex" && n !== "claude")
-      throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${n}`)
+    if (n !== "gemini" && n !== "claude" && n !== "openrouter")
+      throw new Error(`--provider must be "gemini", "claude", or "openrouter", got: ${n}`)
     s.provider = n
   },
   "-p": (n, s) => {
-    if (n !== "gemini" && n !== "codex" && n !== "claude")
-      throw new Error(`--provider must be "gemini", "codex", or "claude", got: ${n}`)
+    if (n !== "gemini" && n !== "claude" && n !== "openrouter")
+      throw new Error(`--provider must be "gemini", "claude", or "openrouter", got: ${n}`)
     s.provider = n
   },
 }
@@ -261,7 +261,9 @@ export const ideaCommand: Command = {
   ],
   async run(args: string[]) {
     if (!hasAiProvider()) {
-      throw new Error("No AI provider available. Set GEMINI_API_KEY or install the codex CLI.")
+      throw new Error(
+        "No AI provider available. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or install the claude CLI."
+      )
     }
 
     const { targetDir, model, timeoutMs, provider } = parseIdeaArgs(args)

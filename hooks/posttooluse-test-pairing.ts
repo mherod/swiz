@@ -1,12 +1,14 @@
 #!/usr/bin/env bun
 // PostToolUse hook: Remind about sibling test file when editing source files
 
+import { stat } from "node:fs/promises"
 import { basename, dirname } from "node:path"
 import { toolHookInputSchema } from "./schemas.ts"
 import { emitContext, isFileEditTool, scheduleAutoSteer } from "./utils/hook-utils.ts"
 
 const SOURCE_EXT_RE = /\.(ts|tsx|js|jsx|mjs)$/
 const TEST_FILE_RE = /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__/
+const COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
 
 async function findSiblingTest(file: string): Promise<string | undefined> {
   const ext = file.split(".").pop()!
@@ -39,7 +41,17 @@ async function main(): Promise<void> {
   const foundTest = await findSiblingTest(file)
   if (!foundTest) return
 
-  const message = `Test file exists for this source file: ${foundTest} — check if it needs updating to reflect your changes.`
+  // Only remind if the test file hasn't been edited in the last 10 minutes
+  try {
+    const testStat = await stat(foundTest)
+    const ageMs = Date.now() - testStat.mtimeMs
+    if (ageMs < COOLDOWN_MS) return
+  } catch {
+    // stat failed (e.g. race condition) — skip reminder
+    return
+  }
+
+  const message = `Test file exists for this source file: ${foundTest} _ check if it needs updating to reflect your changes.`
   const sessionId = (input.session_id as string) ?? ""
   if (sessionId) await scheduleAutoSteer(sessionId, message)
   await emitContext("PostToolUse", message, input.cwd)

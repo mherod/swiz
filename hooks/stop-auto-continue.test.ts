@@ -225,7 +225,7 @@ describe("stop-auto-continue", () => {
 
   test("blocks stop when no AI backend is available (fail-closed)", async () => {
     // Mock: AI_TEST_NO_BACKEND=1 forces hasAiProvider() to return false,
-    // simulating an environment with no API key and no claude/gemini/codex CLI installed.
+    // simulating an environment with no API key and no claude/gemini CLI installed.
     const result = await runHook({
       transcriptContent: buildTranscript(10),
       extraEnv: { AI_TEST_NO_BACKEND: "1" },
