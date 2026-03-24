@@ -196,6 +196,50 @@ export async function runFileEditHook(
   }
 }
 
+// ─── Git repo fixtures for stop-hook integration tests ──────────────────────
+
+/** Run a git command in a directory; returns stdout trimmed. */
+export async function runGit(dir: string, args: string[]): Promise<string> {
+  const p = Bun.spawn(["git", ...args], { cwd: dir, stdout: "pipe", stderr: "pipe" })
+  const out = await new Response(p.stdout).text()
+  await p.exited
+  return out.trim()
+}
+
+/**
+ * Create a temporary git repo with optional seed commits.
+ * Requires a `useTempDir` instance for lifecycle management.
+ *
+ * @param tmp - A `useTempDir()` instance that manages cleanup
+ * @param opts.suffix - Suffix appended to the temp dir prefix (default: "")
+ * @param opts.seedCommits - Number of empty seed commits (default: 1)
+ */
+export async function makeTempGitRepo(
+  tmp: ReturnType<typeof useTempDir>,
+  opts: { suffix?: string; seedCommits?: number } = {}
+): Promise<string> {
+  const { suffix = "", seedCommits = 1 } = opts
+  const dir = await tmp.create(`swiz-test-git${suffix}-`)
+  await runGit(dir, ["init"])
+  await runGit(dir, ["config", "user.email", "test@example.com"])
+  await runGit(dir, ["config", "user.name", "Test"])
+  for (let i = 0; i < seedCommits; i++) {
+    await runGit(dir, ["commit", "--allow-empty", "-m", i === 0 ? "init" : `seed ${i}`])
+  }
+  return dir
+}
+
+/** Write a file, stage it, and create a commit. Creates parent directories as needed. */
+export async function commitFile(dir: string, relPath: string, content: string): Promise<void> {
+  const parts = relPath.split("/")
+  if (parts.length > 1) {
+    await mkdir(join(dir, ...parts.slice(0, -1)), { recursive: true })
+  }
+  await writeFile(join(dir, relPath), content)
+  await runGit(dir, ["add", relPath])
+  await runGit(dir, ["commit", "-m", `add ${relPath}`])
+}
+
 /** Join transcript JSONL entries into a single string for test fixtures. */
 export function makeTranscript(...entries: string[]): string {
   return entries.join("\n")
