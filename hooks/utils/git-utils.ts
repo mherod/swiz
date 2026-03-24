@@ -512,7 +512,7 @@ function checkPushSegmentForForceFlag(tokens: string[], i: number): boolean {
   while (i < tokens.length) {
     const t = tokens[i]!
     i++
-    if (t === "--") continue
+    if (t === "--") return false
     if (isGitPushForceToken(t)) return true
   }
   return false
