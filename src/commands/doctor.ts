@@ -13,6 +13,7 @@ import {
 } from "../launch-agents.ts"
 import { manifest } from "../manifest.ts"
 import { projectKeyFromCwd } from "../project-key.ts"
+import { defaultTrashPath } from "../session-data-delete.ts"
 import { readProjectSettings, readSwizSettings } from "../settings.ts"
 import {
   findSkillConflicts,
@@ -1600,11 +1601,7 @@ async function dirSize(dirPath: string): Promise<number> {
   return total
 }
 
-async function trashDir(path: string): Promise<boolean> {
-  const proc = Bun.spawn(["trash", path], { stdout: "pipe", stderr: "pipe" })
-  await proc.exited
-  return proc.exitCode === 0
-}
+const trashDir = defaultTrashPath
 
 type DaemonStopState = "not-installed" | "not-running" | "stopped" | "failed"
 
