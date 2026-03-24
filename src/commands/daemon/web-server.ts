@@ -308,6 +308,30 @@ async function getActiveAgentProcesses(): Promise<AgentProcessSnapshot> {
   }
 }
 
+// ─── Agent process snapshot cache ──────────────────────────────────────────
+// Short-TTL cache with in-flight coalescing. Avoids redundant ps+lsof scans
+// when multiple routes request the snapshot concurrently or within the TTL.
+
+const AGENT_PROCESS_CACHE_TTL_MS = 3_000
+
+let cachedSnapshot: AgentProcessSnapshot | null = null
+let cachedAt = 0
+let inflight: Promise<AgentProcessSnapshot> | null = null
+
+async function getCachedAgentProcesses(): Promise<AgentProcessSnapshot> {
+  if (cachedSnapshot && Date.now() - cachedAt < AGENT_PROCESS_CACHE_TTL_MS) {
+    return cachedSnapshot
+  }
+  if (inflight) return inflight
+  inflight = getActiveAgentProcesses().then((snapshot) => {
+    cachedSnapshot = snapshot
+    cachedAt = Date.now()
+    inflight = null
+    return snapshot
+  })
+  return inflight
+}
+
 /** Hard request-level timeout for daemon dispatch (ms).
  *  Uses DISPATCH_TIMEOUTS + 10s grace. Fallback: 60s for unknown events. */
 const DAEMON_REQUEST_TIMEOUT_GRACE_MS = 10_000
@@ -1045,7 +1069,7 @@ function buildSessionRoutesContext(ctx: DaemonWebServerContext) {
       getSessionData(cwd, sessionId, limit, ctx.sessionToolCalls),
     getSessionTasks,
     getProjectTasks,
-    getAgentProcessSnapshot: () => getActiveAgentProcesses(),
+    getAgentProcessSnapshot: () => getCachedAgentProcesses(),
   }
 }
 
@@ -1061,7 +1085,7 @@ function handleDispatchActive(url: URL, ctx: DaemonWebServerContext): Response {
 
 async function handleProcessAgents(): Promise<Response> {
   try {
-    return Response.json(await getActiveAgentProcesses())
+    return Response.json(await getCachedAgentProcesses())
   } catch (error) {
     return Response.json(
       {
