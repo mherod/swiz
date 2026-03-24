@@ -155,7 +155,7 @@ export const manifest: HookGroup[] = [
         requiredSettings: ["personalRepoIssuesGate"],
       },
       { file: "stop-upstream-branch-count.ts", timeout: 10, cooldownSeconds: 7200 },
-      { file: "stop-memory-size.ts", timeout: 10 },
+      { file: "stop-memory-size.ts", timeout: 10, cooldownSeconds: 3600 },
       { file: "stop-dependabot-prs.ts", timeout: 10, cooldownSeconds: 3600 },
       { file: "stop-gdpr-data-models.ts", timeout: 10 },
       { file: "stop-auto-continue.ts", timeout: 120 },

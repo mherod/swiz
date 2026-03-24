@@ -206,6 +206,17 @@ async function main(): Promise<void> {
   const home = getHomeDirWithFallback("")
   const allFiles = await collectUniqueMemoryFiles([cwd, join(home, ".claude")].filter(Boolean))
 
+  // Skip if any CLAUDE.md was modified within the last 5 minutes — memory was recently updated.
+  const RECENCY_WINDOW_MS = 5 * 60 * 1000
+  for (const f of allFiles) {
+    if (f.endsWith("CLAUDE.md")) {
+      try {
+        const s = await stat(f)
+        if (Date.now() - s.mtimeMs < RECENCY_WINDOW_MS) return
+      } catch {}
+    }
+  }
+
   const index = await loadIndex(cwd)
   const { updatedIndex, violations } = await scanMemoryFiles(allFiles, index, thresholds)
   await saveIndex(cwd, updatedIndex)
