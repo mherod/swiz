@@ -1290,10 +1290,27 @@ async function main(): Promise<void> {
     cwd
   )
 
-  terminate(
-    "block",
-    buildFinalMessage(response, refinementStatus ?? "", effective.critiquesEnabled ?? false)
+  const finalMessage = buildFinalMessage(
+    response,
+    refinementStatus ?? "",
+    effective.critiquesEnabled ?? false
   )
+
+  // If auto-steer is available, schedule the suggestion as a steering prompt
+  // and allow stop — the agent will receive the directive asynchronously.
+  const sessionId = input.session_id ?? ""
+  if (sessionId) {
+    const { scheduleAutoSteer } = await import("./utils/hook-utils.ts")
+    if (await scheduleAutoSteer(sessionId, finalMessage)) {
+      terminate(
+        "skip",
+        "AUTO_STEER_SCHEDULED",
+        "suggestion scheduled as auto-steer — allowing stop"
+      )
+    }
+  }
+
+  terminate("block", finalMessage)
 }
 
 // Guard: only run main() when this file is the entry point, not when imported for testing.
