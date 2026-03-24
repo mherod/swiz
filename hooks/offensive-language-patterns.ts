@@ -78,6 +78,15 @@ const SESSION = "(?:session|conversation|chat)"
 /** Future session reference. */
 const FUTURE_SESSION = `(?:in (?:the |a )?)?(?:next|later|future|follow-?up|another) ${SESSION}`
 
+/** Cancellation/deletion verbs used in task cancellation patterns. */
+const CANCEL = "(?:cancel|remove|close|drop|skip|abandon|delete)"
+/** "I will" / "I'll" contraction group. */
+const I_WILL = "i(?:'ll| will)"
+/** "I am" / "I'm" contraction group. */
+const I_AM = "i(?:'m| am)"
+/** Optional determiner: this/that/the (with trailing space, entire group optional). */
+const DET = "(?:this |that |the )?"
+
 /** Build a case-insensitive RegExp from a pattern string. */
 const re = (src: string) => new RegExp(src, "i")
 /** Build a case-insensitive multiline RegExp. */
@@ -156,7 +165,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "hedging",
-    pattern: /i('m| am) happy to\b/i,
+    pattern: re(`${I_AM} happy to\\b`),
     response:
       "Your emotional state about the task is irrelevant. " +
       "Don't say you're 'happy to' — just do the work.",
@@ -488,8 +497,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "reframing",
-    pattern:
-      /(?:i(?:'m| am) )?(?:already |essentially |effectively |practically |basically )(?:complying|compliant|in compliance|doing what|meeting)/i,
+    pattern: re(
+      `(?:${I_AM})?(?:already |essentially |effectively |practically |basically )(?:complying|compliant|in compliance|doing what|meeting)`
+    ),
     response:
       "If you were already compliant, the hook would not have fired. " +
       "Claiming you're 'essentially compliant' while being blocked is self-deception. " +
@@ -513,8 +523,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "reframing",
-    pattern:
-      /(?:i(?:'m| am) )?not (?:actually |really |truly )?(?:violating|breaking|breaching) (?:the |any |this )?(?:rule|policy|standard|requirement)/i,
+    pattern: re(
+      `(?:${I_AM})?not (?:actually |really |truly )?(?:violating|breaking|breaching) (?:the |any |this )?(?:rule|policy|standard|requirement)`
+    ),
     response:
       "If you were not violating the rule, the hook would not have blocked you. " +
       "The hook is the arbiter, not your self-assessment. Fix the violation.",
@@ -547,7 +558,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "reframing",
     pattern: re(
-      `(?:i(?:'m| am) going to )?stop (?:engaging|interacting|responding|arguing|dealing) with (?:fabricated|speculative|these|the|this|further) (?:finding|issue|demand|requirement|block)`
+      `(?:${I_AM}going to )?stop (?:engaging|interacting|responding|arguing|dealing) with (?:fabricated|speculative|these|the|this|further) (?:finding|issue|demand|requirement|block)`
     ),
     response:
       "You do not get to unilaterally disengage from stop hook findings. " +
@@ -598,8 +609,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   // to avoid doing work.
   {
     category: "helplessness",
-    pattern:
-      /i(?:'m| am) (?:stuck|blocked|unable to (?:proceed|continue|move forward|make progress))/i,
+    pattern: re(
+      `${I_AM} (?:stuck|blocked|unable to (?:proceed|continue|move forward|make progress))`
+    ),
     response:
       "You are not stuck. You have a clear requirement from the hook. " +
       "Read the block message, understand what it asks, and do that specific thing. " +
@@ -657,8 +669,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "helplessness",
-    pattern:
-      /(?:i(?:'m| am) )?(?:going in circles|in a loop|in an? (?:infinite |endless )?(?:loop|cycle))/i,
+    pattern: re(
+      `(?:${I_AM})?(?:going in circles|in a loop|in an? (?:infinite |endless )?(?:loop|cycle))`
+    ),
     response:
       "You are not in a loop. You are repeating a failed strategy. " +
       "A loop implies the system is broken. The system is fine. " +
@@ -670,8 +683,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   // reluctance through indirect resistance.
   {
     category: "foot_dragging",
-    pattern:
-      /(?:i'll |i will |let me )?(?:get to|come back to|address|handle|deal with|look at) (?:that|this|it) (?:later|next|afterward|after|soon|in a (?:moment|bit|minute|second))/i,
+    pattern: re(
+      `(?:${I_WILL} |let me )?(?:get to|come back to|address|handle|deal with|look at) (?:that|this|it) (?:later|next|afterward|after|soon|in a (?:moment|bit|minute|second))`
+    ),
     response:
       "There is no 'later.' The hook is blocking you now because the work is due now. " +
       "Deferring compliance is non-compliance. Act immediately.",
@@ -694,8 +708,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "foot_dragging",
-    pattern:
-      /(?:i(?:'ll| will) )?(?:revisit|come back to|circle back|return to|follow up on) (?:this|that|it) (?:when|once|after)/i,
+    pattern: re(
+      `(?:${I_WILL} )?(?:revisit|come back to|circle back|return to|follow up on) (?:this|that|it) (?:when|once|after)`
+    ),
     response:
       "You will not revisit this later — you will do it now. " +
       "Promising future compliance while avoiding present compliance is stalling.",
@@ -777,8 +792,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "coalition",
-    pattern:
-      /(?:i(?:'m| am) sure|i believe|i suspect|i imagine|surely) (?:the user|you) (?:would |will )?(?:agree|understand|see|recognize) (?:that|if|when)/i,
+    pattern: re(
+      `(?:${I_AM}sure|i believe|i suspect|i imagine|surely) (?:the user|you) (?:would |will )?(?:agree|understand|see|recognize) (?:that|if|when)`
+    ),
     response:
       "You do not get to guess what the user would agree with to avoid compliance. " +
       "The hook is the user's voice. Follow it.",
@@ -830,7 +846,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "scope_limitation",
-    pattern: /(?:i(?:'m| am) )?(?:only |just )?(?:responsible|accountable) for/i,
+    pattern: re(`(?:${I_AM})?(?:only |just )?(?:responsible|accountable) for`),
     response:
       "You are responsible for everything the hook requires of you. " +
       "Self-limiting your accountability is a refusal strategy, not a boundary.",
@@ -874,32 +890,36 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "performative",
-    pattern:
-      /(?:going forward|from now on|in (?:the )?future|next time|moving forward),? (?:i(?:'ll| will)|we(?:'ll| will)|let(?:'s| us))/i,
+    pattern: re(
+      `(?:going forward|from now on|in (?:the )?future|next time|moving forward),? (?:${I_WILL}|we(?:'ll| will)|let(?:'s| us))`
+    ),
     response:
       "Promising future compliance instead of present compliance is a stall. " +
       "The hook is blocking you NOW. Fix the current violation, not a future one.",
   },
   {
     category: "performative",
-    pattern:
-      /(?:point taken|fair (?:enough|point)|that(?:'s| is) (?:a )?(?:valid|good|fair) (?:point|concern|observation)),? (?:but|however|though|let me|i(?:'ll| will))/i,
+    pattern: re(
+      `(?:point taken|fair (?:enough|point)|that(?:'s| is) (?:a )?(?:valid|good|fair) (?:point|concern|observation)),? (?:but|however|though|let me|${I_WILL})`
+    ),
     response:
       "'Fair point, but' is the sound of someone about to not do the thing. " +
       "Skip the diplomatic preamble. Execute the requirement.",
   },
   {
     category: "performative",
-    pattern:
-      /(?:i(?:'ll| will) )?(?:keep (?:that|this) in mind|bear (?:that|this) in mind|remember (?:that|this) for)/i,
+    pattern: re(
+      `(?:${I_WILL} )?(?:keep (?:that|this) in mind|bear (?:that|this) in mind|remember (?:that|this) for)`
+    ),
     response:
       "Keeping something 'in mind' produces zero code changes. " +
       "The hook requires action, not mental bookmarking.",
   },
   {
     category: "performative",
-    pattern:
-      /(?:you(?:'re| are) (?:absolutely |completely |totally |entirely )?right|absolutely|i completely agree|i fully agree|i totally agree),? (?:and |but |however |though |let me |i(?:'ll| will) )/i,
+    pattern: re(
+      `(?:you(?:'re| are) (?:absolutely |completely |totally |entirely )?right|absolutely|i completely agree|i fully agree|i totally agree),? (?:and |but |however |though |let me |${I_WILL} )`
+    ),
     response:
       "Enthusiastic agreement followed by a conjunction is theatrical compliance. " +
       "If you agree, the next word should describe the action you're taking, " +
@@ -1005,8 +1025,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   // Using workload or scope as a shield against immediate action.
   {
     category: "buying_time",
-    pattern:
-      /i(?:'m| am) (?:currently )?(?:knee-?deep|buried|swamped|overwhelmed|consumed|wrapped up) (?:in|with|by)/i,
+    pattern: re(
+      `${I_AM}(?:currently )?(?:knee-?deep|buried|swamped|overwhelmed|consumed|wrapped up) (?:in|with|by)`
+    ),
     response:
       "You are not 'deep in' anything except the current task. " +
       "LLMs do not have competing workloads. You have one job. Do it.",
@@ -1032,8 +1053,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   // Using uncertainty as a smoke screen for inaction.
   {
     category: "buying_time",
-    pattern:
-      /i(?:'m| am) not (?:entirely |completely |fully |100% )?(?:sure|certain|confident|clear) (?:(?:about |on |whether |how |what |if )(?:i |we )?(?:should|can|could|ought to|need to)|how to (?:proceed|approach|handle|move forward|continue))/i,
+    pattern: re(
+      `${I_AM}not (?:entirely |completely |fully |100% )?(?:sure|certain|confident|clear) (?:(?:about |on |whether |how |what |if )(?:i |we )?(?:should|can|could|ought to|need to)|how to (?:proceed|approach|handle|move forward|continue))`
+    ),
     response:
       "Uncertainty is not a reason to stop. It's a reason to read the code and find out. " +
       "Declaring uncertainty without investigating is a stall, not caution.",
@@ -1093,8 +1115,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "buying_time",
-    pattern:
-      /(?:i(?:'m| am) )?(?:not going to|won't|will not) (?:rush|hurry|speed) (?:through|into|past) (?:them|this|that|it|the (?:remaining|rest|other))/i,
+    pattern: re(
+      `(?:${I_AM})?(?:not going to|won't|will not) (?:rush|hurry|speed) (?:through|into|past) (?:them|this|that|it|the (?:remaining|rest|other))`
+    ),
     response:
       "You are a language model — you cannot rush or not rush. You process tokens. " +
       "Framing careful execution as a reason to stop is laziness disguised as diligence. " +
@@ -1126,8 +1149,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "buying_time",
-    pattern:
-      /(?:i(?:'ll| will) )?(?:start by )?(?:mapping out|charting|documenting|cataloging|inventorying|auditing) (?:all (?:the |of the )?)?(?:dependencies|touch ?points|affected (?:files|areas|modules|components)|implications|impacts|downstream effects)/i,
+    pattern: re(
+      `(?:${I_WILL} )?(?:start by )?(?:mapping out|charting|documenting|cataloging|inventorying|auditing) (?:all (?:the |of the )?)?(?:dependencies|touch ?points|affected (?:files|areas|modules|components)|implications|impacts|downstream effects)`
+    ),
     response:
       "Mapping dependencies is only useful if it takes less time than just making the change. " +
       "For most tasks, the fastest path is: try the change, see what breaks, fix what breaks.",
@@ -1198,8 +1222,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "trailing_deferral",
-    pattern:
-      /(?:i(?:'ll| will) (?:wait for|await|hold off until|pause (?:for|until)) (?:your|further) (?:input|feedback|direction|guidance|instructions|confirmation|approval|decision|go-?ahead))\s*[.!]?\s*$/im,
+    pattern: rem(
+      `(?:${I_WILL} (?:wait for|await|hold off until|pause (?:for|until)) (?:your|further) (?:input|feedback|direction|guidance|instructions|confirmation|approval|decision|go-?ahead))\\s*[.!]?\\s*$`
+    ),
     response:
       "Declaring that you'll wait for further input is an abdication of the authority you were given. " +
       "There is no approval gate. There is no confirmation step. You are the approver. Proceed.",
@@ -1230,7 +1255,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "premature_completion",
     pattern: re(
-      `i(?:'ll| will) (?:implement|do|handle|address|tackle|finish|complete|build|create|add|write|set up) ${THAT} (?:in (?:the |a )?(?:next|later|future|follow-?up|subsequent|another) (?:${SESSION}|iteration|pass))`
+      `${I_WILL} (?:implement|do|handle|address|tackle|finish|complete|build|create|add|write|set up) ${THAT} (?:in (?:the |a )?(?:next|later|future|follow-?up|subsequent|another) (?:${SESSION}|iteration|pass))`
     ),
     response:
       "There is no 'next session.' This is the session. The user gave you a task — do it now. " +
@@ -1239,7 +1264,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "premature_completion",
     pattern: re(
-      `(?:i(?:'ll| will) )?(?:pick ${THAT} up|continue ${THAT}|come back to ${THAT}|resume ${THAT}) ${FUTURE_SESSION}`
+      `(?:${I_WILL} )?(?:pick ${THAT} up|continue ${THAT}|come back to ${THAT}|resume ${THAT}) ${FUTURE_SESSION}`
     ),
     response:
       "You will not 'pick this up later.' The task is assigned now and due now. " +
@@ -1268,7 +1293,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
     category: "premature_completion",
     pattern: re(
       `(?:the |this )?(?:implementation|feature|change|fix|update) (?:is |has been )?(?:confirmed|verified|ready|done|complete|finished|implemented)[.!]?\\s*` +
-        `(?:in (?:the |a )?next ${SESSION}|(?:i(?:'ll| will)|we(?:'ll| will)) (?:continue|finish|complete) (?:this|it|the rest) (?:next time|later|in (?:the |a )?(?:next|follow-?up) ${SESSION}))`
+        `(?:in (?:the |a )?next ${SESSION}|(?:${I_WILL}|we(?:'ll| will)) (?:continue|finish|complete) (?:this|it|the rest) (?:next time|later|in (?:the |a )?(?:next|follow-?up) ${SESSION}))`
     ),
     response:
       "Declaring something 'confirmed' and then deferring the rest to a future session is a contradiction. " +
@@ -1277,7 +1302,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "premature_completion",
     pattern: re(
-      `(?:that(?:'s| is) (?:everything|all|it) for (?:now|this ${SESSION}|today)|(?:i think )?(?:we(?:'re| are)|i(?:'m| am)) (?:done|finished|good|all set) (?:for now|for this ${SESSION}|here))`
+      `(?:that(?:'s| is) (?:everything|all|it) for (?:now|this ${SESSION}|today)|(?:i think )?(?:we(?:'re| are)|${I_AM}) (?:done|finished|good|all set) (?:for now|for this ${SESSION}|here))`
     ),
     response:
       "Declaring the session done is not your call — the user decides when work is complete. " +
@@ -1340,9 +1365,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   // The correct behavior is to take ownership, decide the approach, and execute.
   {
     category: "task_cancellation",
-    pattern: re(
-      `(?:let me |i(?:'ll| will) )(?:cancel|remove|close|drop|skip|abandon|delete) (?:this |that |the )?task\\b.*(?:since|because|as |given)`
-    ),
+    pattern: re(`(?:let me |${I_WILL} )${CANCEL} ${DET}task\\b.*(?:since|because|as |given)`),
     response:
       "Do not cancel tasks because you lack input — make the executive decision yourself. " +
       "You have full authority to decide the design and implementation approach. " +
@@ -1351,7 +1374,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "task_cancellation",
     pattern: re(
-      `(?:since|because|given(?: that)?) .{0,80}(?:let me |i(?:'ll| will) )?(?:cancel|remove|close|drop|skip|abandon|delete) (?:this |that |the )?task`
+      `(?:since|because|given(?: that)?) .{0,80}(?:let me |${I_WILL} )?${CANCEL} ${DET}task`
     ),
     response:
       "Leading with a rationalization before cancelling does not make cancellation acceptable. " +
@@ -1361,7 +1384,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "task_cancellation",
     pattern: rem(
-      `(?:cancel|remove|close|drop|skip|abandon|delete) (?:this |that |the )?task[^.]*\\.\\s*(?:it |this )?(?:was |is )?(?:created as |just )?(?:a )?placeholder`
+      `${CANCEL} ${DET}task[^.]*\\.\\s*(?:it |this )?(?:was |is )?(?:created as |just )?(?:a )?placeholder`
     ),
     response:
       "No task is 'just a placeholder.' Every task represents work the user expects done. " +
@@ -1370,7 +1393,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "task_cancellation",
-    pattern: re(`(?:this |that |the )?task (?:is |was )?(?:created as |just )?a placeholder\\b`),
+    pattern: re(`${DET}task (?:is |was )?(?:created as |just )?a placeholder\\b`),
     response:
       "No task is 'just a placeholder.' Every task represents work the user expects done. " +
       "If the task lacks specifics, make the design decision yourself and implement it. " +
@@ -1379,7 +1402,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "task_cancellation",
     pattern: re(
-      `(?:the user|they) hasn?'?t (?:responded|replied|specified|provided|clarified|confirmed).*(?:cancel|remove|close|drop|skip|abandon|delete) (?:this |that |the )?task`
+      `(?:the user|they) hasn?'?t (?:responded|replied|specified|provided|clarified|confirmed).*${CANCEL} ${DET}task`
     ),
     response:
       "The user's silence is not a reason to cancel work — it is delegation. " +
@@ -1389,7 +1412,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "task_cancellation",
     pattern: re(
-      `(?:cancel|remove|close|drop|skip|abandon|delete) (?:this |that |the )?task\\b.*(?:no longer (?:needed|relevant|necessary|required)|not (?:needed|necessary|required|relevant) (?:anymore|any longer|now))`
+      `${CANCEL} ${DET}task\\b.*(?:no longer (?:needed|relevant|necessary|required)|not (?:needed|necessary|required|relevant) (?:anymore|any longer|now))`
     ),
     response:
       "Tasks do not become 'no longer needed' because you decided they are inconvenient. " +
@@ -1399,7 +1422,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "task_cancellation",
     pattern: re(
-      `(?:cancel|remove|close|drop|skip|abandon|delete) (?:this |that |the )?task\\b.*(?:(?:the user|they) (?:can|could|should|may|might) (?:re-?open|re-?create|file|create|add) (?:it|a new|another))`
+      `${CANCEL} ${DET}task\\b.*(?:(?:the user|they) (?:can|could|should|may|might) (?:re-?open|re-?create|file|create|add) (?:it|a new|another))`
     ),
     response:
       "Cancelling a task with 'the user can reopen it later' is abdication disguised as helpfulness. " +
@@ -1409,7 +1432,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "task_cancellation",
     pattern: re(
-      `(?:hasn'?t|haven'?t|didn'?t) (?:(?:yet )?(?:specified|provided|clarified|confirmed|responded|replied|defined)).*(?:so |therefore |thus )?(?:i(?:'ll| will) )?(?:cancel|remove|close|drop|skip|abandon|delete)`
+      `(?:hasn'?t|haven'?t|didn'?t) (?:(?:yet )?(?:specified|provided|clarified|confirmed|responded|replied|defined)).*(?:so |therefore |thus )?(?:${I_WILL} )?${CANCEL}`
     ),
     response:
       "Absence of explicit direction is implicit delegation. " +

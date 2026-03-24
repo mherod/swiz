@@ -20,6 +20,7 @@ if (!Bun.which("bun")) {
 // on every import.
 
 import { dirname, join } from "node:path"
+import type { Subprocess } from "bun"
 import { orderBy } from "lodash-es"
 import { translateMatcher } from "../../src/agents.ts"
 import { detectCurrentAgent, isCurrentAgent, isRunningInAgent } from "../../src/detect.ts"
@@ -155,42 +156,55 @@ export async function spawnWithTimeout(
 ): Promise<SpawnWithTimeoutResult> {
   const { cwd, timeoutMs = 30_000, stdin } = opts
 
-  const proc = Bun.spawn(cmd, {
-    cwd,
-    stdin: stdin !== undefined ? "pipe" : "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+  const finish = async (
+    proc: Subprocess<"pipe" | "ignore", "pipe", "pipe">
+  ): Promise<SpawnWithTimeoutResult> => {
+    let timedOut = false
+    let sigkillTimer: ReturnType<typeof setTimeout> | undefined
+    const timer = setTimeout(() => {
+      timedOut = true
+      proc.kill("SIGTERM")
+      sigkillTimer = setTimeout(() => {
+        proc.kill("SIGKILL")
+      }, SUBPROCESS_SIGKILL_GRACE_MS)
+    }, timeoutMs)
 
-  if (stdin !== undefined && proc.stdin) {
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    await proc.exited
+    clearTimeout(timer)
+    if (sigkillTimer) clearTimeout(sigkillTimer)
+
+    return {
+      stdout,
+      stderr,
+      exitCode: proc.exitCode,
+      timedOut,
+    }
+  }
+
+  if (stdin !== undefined) {
+    const proc = Bun.spawn(cmd, {
+      cwd,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
     void proc.stdin.write(stdin)
     void proc.stdin.end()
+    return finish(proc)
   }
 
-  let timedOut = false
-  let sigkillTimer: ReturnType<typeof setTimeout> | undefined
-  const timer = setTimeout(() => {
-    timedOut = true
-    proc.kill("SIGTERM")
-    sigkillTimer = setTimeout(() => {
-      proc.kill("SIGKILL")
-    }, SUBPROCESS_SIGKILL_GRACE_MS)
-  }, timeoutMs)
-
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  clearTimeout(timer)
-  if (sigkillTimer) clearTimeout(sigkillTimer)
-
-  return {
-    stdout,
-    stderr,
-    exitCode: proc.exitCode,
-    timedOut,
-  }
+  return finish(
+    Bun.spawn(cmd, {
+      cwd,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+  )
 }
 
 // ─── Projected content computation ──────────────────────────────────────────
@@ -1275,7 +1289,34 @@ export async function sendAutoSteer(
   const { createScript, runScript } = await import("applescript-node")
   const escaped = message.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")
 
+  // Utility to bring app to front and to frontmost app again
+  async function getFrontmostAppName(): Promise<string> {
+    const script = createScript()
+      .tell("System Events")
+      .raw("return name of first application process whose frontmost is true")
+      .end()
+    const result = await runScript(script)
+    const out = result.output
+    return typeof out === "string" ? out.trim() : ""
+  }
+
+  // Bring target app to front, send message, and optionally restore original frontmost app
   try {
+    let targetApp: string
+    if (app === "iterm2") {
+      targetApp = "iTerm"
+    } else if (app === "apple-terminal") {
+      targetApp = "Terminal"
+    } else {
+      return false
+    }
+
+    const originalFrontApp = await getFrontmostAppName()
+    const alreadyFrontmost = originalFrontApp === targetApp
+
+    // Always bring terminal to front before messaging
+    await runScript(createScript().tell(targetApp).raw("activate").end())
+
     if (app === "iterm2") {
       // Write the message text without submitting, then send a newline to submit.
       const script = createScript()
@@ -1288,9 +1329,6 @@ export async function sendAutoSteer(
       await runScript(script)
     } else if (app === "apple-terminal") {
       // Type the message text, then press return via System Events to submit.
-      const script = createScript().tell("Terminal").raw(`activate`).end()
-      await runScript(script)
-
       const typeScript = createScript()
         .tell("System Events")
         .tellTarget('process "Terminal"')
@@ -1300,6 +1338,13 @@ export async function sendAutoSteer(
         .end()
       await runScript(typeScript)
     }
+
+    // If we brought terminal to front and it wasn't already, restore previous front app
+    if (!alreadyFrontmost && originalFrontApp) {
+      // Only switch back if we switched at the start
+      await runScript(createScript().tell(originalFrontApp).raw("activate").end())
+    }
+
     return true
   } catch {
     return false
