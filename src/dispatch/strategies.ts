@@ -227,21 +227,37 @@ class BlockingStrategy implements HookExecutionStrategy {
     // Auto-steer intercept: when a stop hook blocks and auto-steer is available,
     // send the blocking reason directly to the terminal and convert to allow.
     // This happens at dispatch level so ALL stop hooks benefit automatically.
+    // Uses _terminal and _effectiveSettings from the payload (injected by CLI dispatch)
+    // so this works correctly even when running inside the daemon (no terminal env vars).
     if (canonicalEvent === "stop" && isBlock(finalResponse)) {
       const blockReason = (finalResponse as { reason?: string }).reason ?? ""
       if (blockReason) {
         const payload = JSON.parse(enrichedPayloadStr) as Record<string, unknown>
         const sessionId = (payload.session_id as string) ?? ""
         if (sessionId) {
-          const { isAutoSteerAvailable, sendAutoSteer } = await import(
-            "../../hooks/utils/hook-utils.ts"
-          )
-          const terminalApp = await isAutoSteerAvailable(sessionId)
-          if (terminalApp) {
-            await sendAutoSteer(blockReason, terminalApp)
-            log(`   auto-steer: sent stop block reason to terminal — converting to allow`)
-            delete (finalResponse as Record<string, unknown>).decision
-            delete (finalResponse as Record<string, unknown>).reason
+          // Read autoSteer from dispatcher-injected effective settings, fall back to reading from disk.
+          const injectedSettings = payload._effectiveSettings as Record<string, unknown> | undefined
+          let autoSteerEnabled: boolean
+          if (injectedSettings && typeof injectedSettings.autoSteer === "boolean") {
+            autoSteerEnabled = injectedSettings.autoSteer
+          } else {
+            const { isAutoSteerAvailable } = await import("../../hooks/utils/hook-utils.ts")
+            autoSteerEnabled = (await isAutoSteerAvailable(sessionId)) !== null
+          }
+
+          if (autoSteerEnabled) {
+            // Read terminal from CLI-injected payload field (daemon has no terminal env vars).
+            const injectedTerminal = payload._terminal as { app: string } | undefined
+            const terminalApp = injectedTerminal?.app ?? null
+            if (terminalApp) {
+              const { sendAutoSteer } = await import("../../hooks/utils/hook-utils.ts")
+              await sendAutoSteer(blockReason, terminalApp)
+              log(
+                `   auto-steer: sent stop block reason to terminal (${terminalApp}) — converting to allow`
+              )
+              delete (finalResponse as Record<string, unknown>).decision
+              delete (finalResponse as Record<string, unknown>).reason
+            }
           }
         }
       }
