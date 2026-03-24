@@ -333,6 +333,9 @@ export const dispatchCommand: Command = {
       // Response already written to stdout by engine strategy functions.
       // The returned response is used only by the daemon path above.
       void response
+      // In CLI mode, exit immediately — open resources (SQLite handles,
+      // fire-and-forget hook subprocesses) would otherwise keep Bun alive.
+      process.exit(0)
     })
   },
 }
