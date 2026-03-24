@@ -29,63 +29,67 @@ export interface PluginResult {
  *   - Local paths (relative to projectRoot): "./company-hooks"
  *   - npm package names: "swiz-plugin-security"
  */
+async function loadTsPlugin(tsPath: string, entry: string, base: string): Promise<PluginResult> {
+  try {
+    const mod = await import(tsPath)
+    const hooks = (mod.hooks ?? mod.default) as HookGroup[] | undefined
+    if (!Array.isArray(hooks)) {
+      return {
+        name: entry,
+        hooks: [],
+        errorCode: "invalid-export",
+        error: `${tsPath} does not export hooks: HookGroup[]`,
+      }
+    }
+    return { name: entry, hooks: resolveHookPaths(hooks, base) }
+  } catch (err) {
+    return {
+      name: entry,
+      hooks: [],
+      errorCode: "load-error",
+      error: `Failed to load ${tsPath}: ${normalizeError(err)}`,
+    }
+  }
+}
+
+async function loadJsonPlugin(
+  jsonPath: string,
+  entry: string,
+  base: string
+): Promise<PluginResult> {
+  try {
+    const raw = await readFile(jsonPath, "utf-8")
+    const hooks = JSON.parse(raw) as HookGroup[]
+    if (!Array.isArray(hooks)) {
+      return {
+        name: entry,
+        hooks: [],
+        errorCode: "invalid-export",
+        error: `${jsonPath} is not a HookGroup[]`,
+      }
+    }
+    return { name: entry, hooks: resolveHookPaths(hooks, base) }
+  } catch (err) {
+    return {
+      name: entry,
+      hooks: [],
+      errorCode: "parse-error",
+      error: `Failed to load ${jsonPath}: ${normalizeError(err)}`,
+    }
+  }
+}
+
 async function loadPlugin(entry: string, projectRoot: string): Promise<PluginResult> {
   const isLocal = entry.startsWith("./") || entry.startsWith("../") || isAbsolute(entry)
   const base = isLocal ? resolve(projectRoot, entry) : findNodeModulesPlugin(entry, projectRoot)
-
-  if (!base) {
+  if (!base)
     return { name: entry, hooks: [], errorCode: "not-found", error: `Plugin not found: ${entry}` }
-  }
 
-  // Try swiz-hooks.ts first (ESM import), then swiz-hooks.json
   const tsPath = join(base, "swiz-hooks.ts")
+  if (existsSync(tsPath)) return loadTsPlugin(tsPath, entry, base)
+
   const jsonPath = join(base, "swiz-hooks.json")
-
-  if (existsSync(tsPath)) {
-    try {
-      const mod = await import(tsPath)
-      const hooks = (mod.hooks ?? mod.default) as HookGroup[] | undefined
-      if (!Array.isArray(hooks)) {
-        return {
-          name: entry,
-          hooks: [],
-          errorCode: "invalid-export",
-          error: `${tsPath} does not export hooks: HookGroup[]`,
-        }
-      }
-      return { name: entry, hooks: resolveHookPaths(hooks, base) }
-    } catch (err) {
-      return {
-        name: entry,
-        hooks: [],
-        errorCode: "load-error",
-        error: `Failed to load ${tsPath}: ${normalizeError(err)}`,
-      }
-    }
-  }
-
-  if (existsSync(jsonPath)) {
-    try {
-      const raw = await readFile(jsonPath, "utf-8")
-      const hooks = JSON.parse(raw) as HookGroup[]
-      if (!Array.isArray(hooks)) {
-        return {
-          name: entry,
-          hooks: [],
-          errorCode: "invalid-export",
-          error: `${jsonPath} is not a HookGroup[]`,
-        }
-      }
-      return { name: entry, hooks: resolveHookPaths(hooks, base) }
-    } catch (err) {
-      return {
-        name: entry,
-        hooks: [],
-        errorCode: "parse-error",
-        error: `Failed to load ${jsonPath}: ${normalizeError(err)}`,
-      }
-    }
-  }
+  if (existsSync(jsonPath)) return loadJsonPlugin(jsonPath, entry, base)
 
   return {
     name: entry,

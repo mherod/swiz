@@ -194,6 +194,20 @@ async function recoverSubjectFromAuditLogs(
   return null
 }
 
+async function resolveTaskSubject(
+  taskId: string,
+  subject: string | undefined,
+  allowPlaceholder: boolean
+): Promise<{ subject: string; source: string } | null> {
+  if (subject) return { subject, source: "from --subject" }
+  const { tasksDir } = createDefaultTaskStore()
+  const auditSubject = await recoverSubjectFromAuditLogs(taskId, tasksDir)
+  if (auditSubject) return { subject: auditSubject, source: "recovered from audit log" }
+  if (allowPlaceholder)
+    return { subject: `Task #${taskId}`, source: "using task ID as placeholder" }
+  return null
+}
+
 export async function ensureFileBackedTask({
   sessionId,
   taskId,
@@ -206,37 +220,20 @@ export async function ensureFileBackedTask({
 }: EnsureFileBackedTaskOptions): Promise<boolean> {
   if (!(await isTaskMissing(sessionId, taskId, filterCwd))) return false
 
-  // Before falling back to a placeholder, try to recover the original subject
-  // from audit logs across all sessions (handles compaction boundary gaps).
-  let resolvedSubject = subject
-  let source = "from --subject"
-  if (!resolvedSubject) {
-    const { tasksDir } = createDefaultTaskStore()
-    const auditSubject = await recoverSubjectFromAuditLogs(taskId, tasksDir)
-    if (auditSubject) {
-      resolvedSubject = auditSubject
-      source = "recovered from audit log"
-    }
-  }
+  const resolved = await resolveTaskSubject(taskId, subject, allowPlaceholderSubject)
+  if (!resolved) return false
 
-  const finalSubject = resolvedSubject ?? (allowPlaceholderSubject ? `Task #${taskId}` : null)
-  if (!finalSubject) return false
-
-  if (!resolvedSubject && allowPlaceholderSubject) {
-    source = "using task ID as placeholder"
-  }
-
-  const stubTask = buildStubTask(taskId, finalSubject, { description, activeForm, status })
+  const stubTask = buildStubTask(taskId, resolved.subject, { description, activeForm, status })
   await writeTask(sessionId, stubTask, process.cwd())
   await writeAudit(sessionId, {
     timestamp: new Date().toISOString(),
     taskId,
     action: "create",
     newStatus: stubTask.status,
-    subject: finalSubject,
+    subject: resolved.subject,
   })
 
-  console.log(`  ℹ️  Task #${taskId} not in file store — created stub (${source})`)
+  console.log(`  ℹ️  Task #${taskId} not in file store — created stub (${resolved.source})`)
   return true
 }
 

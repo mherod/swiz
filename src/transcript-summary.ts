@@ -98,18 +98,19 @@ function extractShellCommand(block: ToolBlock, name: string): string {
   return isShellTool(name) ? (block?.input?.command ?? "") : ""
 }
 
+function accumulateShellCommand(block: ToolBlock, name: string, acc: SummaryAccumulator): void {
+  const cmd = extractShellCommand(block, name)
+  if (!cmd) return
+  acc.bashCommands.push(normalizeCommand(cmd))
+  if (!acc.hasGitPush && GIT_PUSH_PATTERN.test(cmd)) acc.hasGitPush = true
+}
+
 function processToolBlock(block: ToolBlock, acc: SummaryAccumulator): void {
   if (block?.type !== "tool_use") return
   const name = extractToolName(block)
   if (!name) return
   acc.toolNames.push(name)
-
-  const cmd = extractShellCommand(block, name)
-  if (cmd) {
-    acc.bashCommands.push(normalizeCommand(cmd))
-    if (!acc.hasGitPush && GIT_PUSH_PATTERN.test(cmd)) acc.hasGitPush = true
-  }
-
+  accumulateShellCommand(block, name, acc)
   if (name === "Skill") {
     const skill = block?.input?.skill ?? ""
     if (skill) acc.skillInvocations.push(skill)

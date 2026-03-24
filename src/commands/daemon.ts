@@ -238,6 +238,32 @@ function setupWatchers(caches: ReturnType<typeof createDaemonCaches>) {
   return { registeredProjects, registerProjectWatchers }
 }
 
+function evictIdleProjects(
+  now: number,
+  state: ReturnType<typeof createDaemonState>,
+  caches: ReturnType<typeof createDaemonCaches>,
+  registeredProjects: Set<string>
+) {
+  const projectCutoff = now - PROJECT_IDLE_EVICTION_MS
+  for (const [cwd, lastSeen] of state.projectLastSeen) {
+    if (lastSeen >= projectCutoff) continue
+    state.projectLastSeen.delete(cwd)
+    state.projectMetrics.delete(cwd)
+    registeredProjects.delete(cwd)
+    caches.ghCache.invalidateProject(cwd)
+    caches.eligibilityCache.invalidateProject(cwd)
+    caches.gitStateCache.invalidateProject(cwd)
+    caches.projectSettingsCache.invalidateProject(cwd)
+    caches.manifestCache.invalidateProject(cwd)
+    caches.cooldownRegistry.invalidateProject(cwd)
+    caches.upstreamSyncRegistry.unregister(cwd)
+    caches.watchers.unregisterByLabelSuffix(`:${cwd}`)
+    for (const key of caches.snapshots.keys()) {
+      if (key.startsWith(cwd)) caches.snapshots.delete(key)
+    }
+  }
+}
+
 function createPruner(
   state: ReturnType<typeof createDaemonState>,
   caches: ReturnType<typeof createDaemonCaches>,
@@ -263,25 +289,7 @@ function createPruner(
       if (recent.length !== toolCalls.length) state.sessionToolCalls.set(sessionId, recent)
     }
 
-    // Evict projects idle for longer than PROJECT_IDLE_EVICTION_MS
-    const projectCutoff = now - PROJECT_IDLE_EVICTION_MS
-    for (const [cwd, lastSeen] of state.projectLastSeen) {
-      if (lastSeen >= projectCutoff) continue
-      state.projectLastSeen.delete(cwd)
-      state.projectMetrics.delete(cwd)
-      registeredProjects.delete(cwd)
-      caches.ghCache.invalidateProject(cwd)
-      caches.eligibilityCache.invalidateProject(cwd)
-      caches.gitStateCache.invalidateProject(cwd)
-      caches.projectSettingsCache.invalidateProject(cwd)
-      caches.manifestCache.invalidateProject(cwd)
-      caches.cooldownRegistry.invalidateProject(cwd)
-      caches.upstreamSyncRegistry.unregister(cwd)
-      caches.watchers.unregisterByLabelSuffix(`:${cwd}`)
-      for (const key of caches.snapshots.keys()) {
-        if (key.startsWith(cwd)) caches.snapshots.delete(key)
-      }
-    }
+    evictIdleProjects(now, state, caches, registeredProjects)
   }
 }
 

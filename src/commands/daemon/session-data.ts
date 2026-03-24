@@ -124,6 +124,18 @@ class SessionDataCache {
     }
   }
 
+  private static trackFallbackSignature(
+    message: SessionMessage,
+    seenSignatures: Map<string, number>,
+    pendingFallback: Array<{ messageIndex: number; key: string }>,
+    messageIndex: number
+  ) {
+    const baseSig = `${message.role}\x00${message.text}\x00${JSON.stringify(message.toolCalls ?? [])}`
+    const seen = (seenSignatures.get(baseSig) ?? 0) + 1
+    seenSignatures.set(baseSig, seen)
+    pendingFallback.push({ messageIndex, key: messageFallbackKey(message, seen) })
+  }
+
   private static extractMessages(entries: ReturnType<typeof parseTranscriptEntries>) {
     const messages: SessionMessage[] = []
     const toolCounts = new Map<string, number>()
@@ -148,13 +160,12 @@ class SessionDataCache {
         continue
       }
 
-      const baseSig = `${message.role}\x00${message.text}\x00${JSON.stringify(message.toolCalls ?? [])}`
-      const seen = (seenSignatures.get(baseSig) ?? 0) + 1
-      seenSignatures.set(baseSig, seen)
-      pendingFallback.push({
-        messageIndex: messages.length - 1,
-        key: messageFallbackKey(message, seen),
-      })
+      SessionDataCache.trackFallbackSignature(
+        message,
+        seenSignatures,
+        pendingFallback,
+        messages.length - 1
+      )
     }
     return { messages, toolCounts, pendingFallback, startedAt, lastMessageAt }
   }
@@ -250,6 +261,22 @@ async function scanSession(session: Pick<Session, "path" | "format">): Promise<S
   }
 }
 
+function ensurePinnedInList<T extends { session: Session }>(
+  list: T[],
+  pinnedSessionId: string | undefined,
+  limit: number
+): T[] {
+  if (!pinnedSessionId) return list.slice(0, limit)
+  let visible = list.slice(0, limit)
+  const pinnedEntry = list.find(
+    ({ session }) => session.id === pinnedSessionId || session.id.startsWith(pinnedSessionId)
+  )
+  if (pinnedEntry && !visible.some(({ session }) => session.id === pinnedEntry.session.id)) {
+    visible = [pinnedEntry, ...visible].slice(0, limit)
+  }
+  return visible
+}
+
 export async function listProjectSessions(
   cwd: string,
   limit = 20,
@@ -282,7 +309,6 @@ export async function listProjectSessions(
     const live = getActivity(s.id)?.lastSeen ?? 0
     return Math.max(scan.lastMessageAt, live)
   }
-  // Sort: sessions with dispatch activity first, then by last message time
   withMessages.sort((a, b) => {
     const aDisp = getRecentDispatches(a.session.id)
     const bDisp = getRecentDispatches(b.session.id)
@@ -290,15 +316,7 @@ export async function listProjectSessions(
     if (aDisp > 0 && bDisp === 0) return -1
     return effectiveLastMessage(b.session, b.scan) - effectiveLastMessage(a.session, a.scan)
   })
-  let visible = withMessages.slice(0, limit)
-  if (pinnedSessionId) {
-    const pinnedEntry = withMessages.find(
-      ({ session }) => session.id === pinnedSessionId || session.id.startsWith(pinnedSessionId)
-    )
-    if (pinnedEntry && !visible.some(({ session }) => session.id === pinnedEntry.session.id)) {
-      visible = [pinnedEntry, ...visible].slice(0, limit)
-    }
-  }
+  const visible = ensurePinnedInList(withMessages, pinnedSessionId, limit)
   return {
     sessionCount: withMessages.length,
     sessions: visible.map(({ session, scan }) => ({
@@ -313,19 +331,25 @@ export async function listProjectSessions(
   }
 }
 
+async function resolveSession(cwd: string, sessionId: string) {
+  const sessions = await findAllProviderSessions(cwd)
+  const session = sessions.find(
+    (candidate) => candidate.id === sessionId || candidate.id.startsWith(sessionId)
+  )
+  if (!session) return null
+  const cached = await sessionDataCache.get(session)
+  return cached ? { session, cached } : null
+}
+
 export async function getSessionData(
   cwd: string,
   sessionId: string,
   limit = 30,
   sessionToolCalls?: Map<string, CapturedToolCall[]>
 ): Promise<SessionData> {
-  const sessions = await findAllProviderSessions(cwd)
-  const session = sessions.find(
-    (candidate) => candidate.id === sessionId || candidate.id.startsWith(sessionId)
-  )
-  if (!session) return { messages: [], toolStats: [] }
-  const cached = await sessionDataCache.get(session)
-  if (!cached) return { messages: [], toolStats: [] }
+  const resolved = await resolveSession(cwd, sessionId)
+  if (!resolved) return { messages: [], toolStats: [] }
+  const { session, cached } = resolved
 
   const messages = cached.messages.slice(-limit)
   const hasToolCalls = messages.some((message) => (message.toolCalls?.length ?? 0) > 0)
@@ -334,10 +358,7 @@ export async function getSessionData(
     detail: entry.detail,
   }))
   if (captured.length === 0 || hasToolCalls || session.format !== "cursor-agent-jsonl") {
-    return {
-      messages,
-      toolStats: cached.toolStats,
-    }
+    return { messages, toolStats: cached.toolStats }
   }
 
   const supplemented = supplementMessagesWithCapturedToolCalls(

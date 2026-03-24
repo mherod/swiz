@@ -232,22 +232,25 @@ function hasVisibleContent(entry: TranscriptEntry, text: string): boolean {
   return hasToolResults(entry.message?.content) || text.length > 0
 }
 
+function collectUserTurns(entries: TranscriptEntry[]): Turn[] {
+  const turns: Turn[] = []
+  for (const entry of entries) {
+    if (entry.type !== "user" || !entry.message) continue
+    const text = extractText(entry.message.content).trim()
+    if (!text || isHookFeedbackContent(text)) continue
+    turns.push({ entry: cloneUserEntryWithPlainText(entry, text), role: "user" })
+  }
+  return turns
+}
+
 function collectTurns(entries: TranscriptEntry[], userOnly = false): Turn[] {
+  if (userOnly) return collectUserTurns(entries)
   const turns: Turn[] = []
   for (const entry of entries) {
     if (entry.type !== "user" && entry.type !== "assistant") continue
-    const msg = entry.message
-    if (!msg) continue
-
-    const text = extractText(msg.content).trim()
+    if (!entry.message) continue
+    const text = extractText(entry.message.content).trim()
     if (entry.type === "user" && isHookFeedbackContent(text)) continue
-
-    if (userOnly) {
-      if (entry.type !== "user" || !text) continue
-      turns.push({ entry: cloneUserEntryWithPlainText(entry, text), role: "user" })
-      continue
-    }
-
     if (!hasVisibleContent(entry, text)) continue
     turns.push({ entry, role: entry.type as "user" | "assistant" })
   }
@@ -454,47 +457,42 @@ function filterSessionsByTime(sessions: Session[], range: TimeRange): Session[] 
 
 // ─── Main rendering ──────────────────────────────────────────────────────────
 
+function renderSingleTurn(entry: TranscriptEntry, role: "user" | "assistant"): void {
+  if (role === "assistant") {
+    renderAssistantBlocks(entry)
+  } else {
+    const content = entry.message?.content
+    if (hasToolResults(content)) {
+      renderToolResults(entry)
+    } else {
+      renderTurn("user", extractText(content), entry.timestamp)
+    }
+  }
+}
+
 function renderTurns(turns: Turn[], sessionId: string, debugEvents?: DebugEvent[]): void {
   console.log(
     `\n${DIM}Session: ${sessionId}${RESET}\n${DIM}${"─".repeat(SESSION_RULE_WIDTH)}${RESET}`
   )
 
-  // Build a sorted index of debug events for interleaving
   let debugIdx = 0
   const debug = debugEvents ?? []
 
   const flushDebugUpTo = (untilTs: number): void => {
-    while (debugIdx < debug.length) {
-      const ev = debug[debugIdx]
-      if (!ev || ev.ts > untilTs) break
-      renderDebugLine(ev)
+    while (debugIdx < debug.length && debug[debugIdx] && debug[debugIdx]!.ts <= untilTs) {
+      renderDebugLine(debug[debugIdx]!)
       debugIdx++
     }
   }
 
   for (const { entry, role } of turns) {
     const turnTs = entry.timestamp ? new Date(entry.timestamp).getTime() : null
-
-    // Flush any debug lines timestamped before this turn
     if (turnTs !== null) flushDebugUpTo(turnTs)
-
-    if (role === "assistant") {
-      renderAssistantBlocks(entry)
-    } else {
-      const content = entry.message?.content
-      if (hasToolResults(content)) {
-        renderToolResults(entry)
-      } else {
-        renderTurn("user", extractText(content), entry.timestamp)
-      }
-    }
+    renderSingleTurn(entry, role)
   }
 
-  // Flush remaining debug lines after the last turn
-  while (debugIdx < debug.length) {
-    const ev = debug[debugIdx]
-    if (!ev) break
-    renderDebugLine(ev)
+  while (debugIdx < debug.length && debug[debugIdx]) {
+    renderDebugLine(debug[debugIdx]!)
     debugIdx++
   }
 
@@ -762,6 +760,25 @@ async function loadOptionalDebug(
 
 // ─── Command ─────────────────────────────────────────────────────────────────
 
+function buildTimeRange(parsed: ReturnType<typeof parseTranscriptArgs>): TimeRange {
+  const from = parsed.hours ? Date.now() - parsed.hours * 3600_000 : parsed.since
+  return { from, to: parsed.until }
+}
+
+async function loadSessionContent(
+  session: Session,
+  parsed: ReturnType<typeof parseTranscriptArgs>,
+  timeRange: TimeRange,
+  hasTimeFilter: boolean
+) {
+  let allTurns = await loadTurns(session, parsed.userOnly)
+  if (hasTimeFilter) allTurns = filterTurnsByTime(allTurns, timeRange)
+  const turns = applyHeadTail(allTurns, parsed.headCount, parsed.tailCount)
+  let debugEvents = await loadOptionalDebug(session, parsed)
+  if (debugEvents && hasTimeFilter) debugEvents = filterDebugEventsByTime(debugEvents, timeRange)
+  return { turns, debugEvents }
+}
+
 export const transcriptCommand: Command = {
   name: "transcript",
   description: "Display Agent-User chat history for the current project",
@@ -805,7 +822,7 @@ export const transcriptCommand: Command = {
     { flags: "--gemini", description: "Show Gemini/Antigravity sessions only" },
     { flags: "--codex", description: "Show Codex sessions only" },
   ],
-  async run(args) {
+  async run(args: string[]) {
     const parsed = parseTranscriptArgs(args)
     validateTranscriptArgs(parsed)
 
@@ -817,10 +834,8 @@ export const transcriptCommand: Command = {
     const selectedProviders = getSelectedProviders(selectedAgents)
     validateProviders(selectedProviders, selectedAgents)
 
-    const timeFrom = parsed.hours ? Date.now() - parsed.hours * 3600_000 : parsed.since
-    const timeTo = parsed.until
-    const hasTimeFilter = timeFrom !== undefined || timeTo !== undefined
-    const timeRange: TimeRange = { from: timeFrom, to: timeTo }
+    const timeRange = buildTimeRange(parsed)
+    const hasTimeFilter = timeRange.from !== undefined || timeRange.to !== undefined
 
     let sessions = await loadFilteredSessions(parsed.targetDir, selectedProviders)
     if (hasTimeFilter) sessions = filterSessionsByTime(sessions, timeRange)
@@ -828,23 +843,20 @@ export const transcriptCommand: Command = {
       console.log(`\n  ${DIM}No sessions found within the specified time range.${RESET}\n`)
       return
     }
-
     if (parsed.listOnly) {
       renderSessionList(sessions, parsed.targetDir)
       return
     }
 
     const session = pickSession(sessions, parsed.sessionQuery)
-    let allTurns = await loadTurns(session, parsed.userOnly)
-    if (hasTimeFilter) allTurns = filterTurnsByTime(allTurns, timeRange)
-    const turns = applyHeadTail(allTurns, parsed.headCount, parsed.tailCount)
-    let debugEvents = await loadOptionalDebug(session, parsed)
-    if (debugEvents && hasTimeFilter) debugEvents = filterDebugEventsByTime(debugEvents, timeRange)
+    const { turns, debugEvents } = await loadSessionContent(
+      session,
+      parsed,
+      timeRange,
+      hasTimeFilter
+    )
 
-    if (parsed.autoReply) {
-      await generateAutoReply(turns)
-    } else {
-      renderTurns(turns, session.id, debugEvents)
-    }
+    if (parsed.autoReply) await generateAutoReply(turns)
+    else renderTurns(turns, session.id, debugEvents)
   },
 }

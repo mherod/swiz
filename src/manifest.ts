@@ -397,42 +397,15 @@ export const manifest: HookGroup[] = [
 // Called at dispatch startup and install time to catch manifest/route/agent drift
 // before it causes silent misrouting. Throws with actionable fix instructions.
 
-export function validateDispatchRoutes(
-  dispatchRoutes: Record<string, string>,
-  agents: {
-    id: string
-    hooksConfigurable: boolean
-    eventMap: Record<string, string>
-    unsupportedEvents?: string[]
-  }[]
-): void {
-  const manifestEvents = [...new Set(manifest.map((g) => g.event))]
-  // Scheduled events are dispatched externally (e.g. LaunchAgent) — not by agent hook systems.
-  const agentEvents = [...new Set(manifest.filter((g) => !g.scheduled).map((g) => g.event))]
-  const routeEvents = Object.keys(dispatchRoutes)
+type AgentDef = {
+  id: string
+  hooksConfigurable: boolean
+  eventMap: Record<string, string>
+  unsupportedEvents?: string[]
+}
+
+function validateAgentEventMaps(agents: AgentDef[], agentEvents: string[]): string[] {
   const errors: string[] = []
-
-  // 1. Every manifest event must have a dispatch route
-  for (const event of manifestEvents) {
-    if (!(event in dispatchRoutes)) {
-      errors.push(
-        `Manifest event "${event}" has no DISPATCH_ROUTES entry. ` +
-          `Add it to DISPATCH_ROUTES in src/commands/dispatch.ts.`
-      )
-    }
-  }
-
-  // 2. Every dispatch route must have at least one manifest entry
-  for (const event of routeEvents) {
-    if (!manifest.some((g) => g.event === event)) {
-      errors.push(
-        `DISPATCH_ROUTES contains "${event}" but no manifest hooks subscribe to it. ` +
-          `Remove it from DISPATCH_ROUTES or add hooks in src/manifest.ts.`
-      )
-    }
-  }
-
-  // 3. Configurable agents must map all non-scheduled manifest events
   for (const agent of agents.filter((a) => a.hooksConfigurable)) {
     const unsupported = new Set(agent.unsupportedEvents ?? [])
     for (const event of agentEvents) {
@@ -445,6 +418,35 @@ export function validateDispatchRoutes(
       }
     }
   }
+  return errors
+}
+
+export function validateDispatchRoutes(
+  dispatchRoutes: Record<string, string>,
+  agents: AgentDef[]
+): void {
+  const manifestEvents = [...new Set(manifest.map((g) => g.event))]
+  const agentEvents = [...new Set(manifest.filter((g) => !g.scheduled).map((g) => g.event))]
+  const routeEvents = Object.keys(dispatchRoutes)
+  const errors: string[] = []
+
+  for (const event of manifestEvents) {
+    if (!(event in dispatchRoutes)) {
+      errors.push(
+        `Manifest event "${event}" has no DISPATCH_ROUTES entry. Add it to DISPATCH_ROUTES in src/commands/dispatch.ts.`
+      )
+    }
+  }
+
+  for (const event of routeEvents) {
+    if (!manifest.some((g) => g.event === event)) {
+      errors.push(
+        `DISPATCH_ROUTES contains "${event}" but no manifest hooks subscribe to it. Remove it from DISPATCH_ROUTES or add hooks in src/manifest.ts.`
+      )
+    }
+  }
+
+  errors.push(...validateAgentEventMaps(agents, agentEvents))
 
   if (errors.length > 0) {
     throw new Error(

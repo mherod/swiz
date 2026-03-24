@@ -278,30 +278,38 @@ function collectLocalByEvent(
   return byEvent
 }
 
+function printEventHooks(
+  event: string,
+  builtins: { file: string }[],
+  plugins: { file: string; plugin: string }[],
+  locals: { file: string }[]
+): void {
+  const GREEN_H = "\x1b[32m"
+  const shortName = (f: string) => f.split("/").pop() ?? f
+  console.log(`  ${event} (${builtins.length + plugins.length + locals.length})`)
+  for (const h of builtins) console.log(`    ${DIM}built-in${RST}  ${shortName(h.file)}`)
+  for (const h of plugins) console.log(`    ${CYAN_H}${h.plugin}${RST}  ${shortName(h.file)}`)
+  for (const h of locals) console.log(`    ${GREEN_H}project${RST}   ${shortName(h.file)}`)
+}
+
 function printEventSources(
   builtinByEvent: Map<string, { file: string }[]>,
   pluginByEvent: Map<string, { file: string; plugin: string }[]>,
   localByEvent: Map<string, { file: string }[]>
 ): void {
-  const GREEN_H = "\x1b[32m"
   const allEvents = new Set([
     ...builtinByEvent.keys(),
     ...pluginByEvent.keys(),
     ...localByEvent.keys(),
   ])
-
   console.log("\n  Hook sources:\n")
-  for (const event of orderBy([...allEvents], [(eventName) => eventName], ["asc"])) {
-    const builtins = builtinByEvent.get(event) ?? []
-    const plugins = pluginByEvent.get(event) ?? []
-    const locals = localByEvent.get(event) ?? []
-    console.log(`  ${event} (${builtins.length + plugins.length + locals.length})`)
-    for (const h of builtins)
-      console.log(`    ${DIM}built-in${RST}  ${h.file.split("/").pop() ?? h.file}`)
-    for (const h of plugins)
-      console.log(`    ${CYAN_H}${h.plugin}${RST}  ${h.file.split("/").pop() ?? h.file}`)
-    for (const h of locals)
-      console.log(`    ${GREEN_H}project${RST}   ${h.file.split("/").pop() ?? h.file}`)
+  for (const event of orderBy([...allEvents], [(e) => e], ["asc"])) {
+    printEventHooks(
+      event,
+      builtinByEvent.get(event) ?? [],
+      pluginByEvent.get(event) ?? [],
+      localByEvent.get(event) ?? []
+    )
   }
 }
 

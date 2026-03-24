@@ -324,22 +324,21 @@ export function summarizeGitHubCiRuns(
   return classifyLatestRuns(latestCiRunsByWorkflow(relevant))
 }
 
+const CI_STATE_FORMAT: Record<string, { color: string; icon: string; fallback: string }> = {
+  success: { color: "\x1b[92m", icon: "✓", fallback: "passing" },
+  pending: { color: "\x1b[93m", icon: "⏳", fallback: "running" },
+  failure: { color: "\x1b[91m", icon: "✗", fallback: "failed" },
+  neutral: { color: DIM, icon: "○", fallback: "unknown" },
+}
+
 export function formatGitHubCiSegment(
   state: GitHubCiState | null | undefined,
   label: string | null | undefined
 ): string {
   if (!state || state === "none") return ""
-
-  switch (state) {
-    case "success":
-      return `\x1b[92m✓ ${label || "passing"}${R}`
-    case "pending":
-      return `\x1b[93m⏳ ${label || "running"}${R}`
-    case "failure":
-      return `\x1b[91m✗ ${label || "failed"}${R}`
-    case "neutral":
-      return `${DIM}○ ${label || "unknown"}${R}`
-  }
+  const fmt = CI_STATE_FORMAT[state]
+  if (!fmt) return ""
+  return `${fmt.color}${fmt.icon} ${label || fmt.fallback}${R}`
 }
 
 // Keys with dedicated indicators — excluded from the catch-all count.
@@ -608,37 +607,51 @@ function conditionalFetch<T>(needed: boolean, fn: () => Promise<T>): Promise<T |
   return needed ? fn() : Promise.resolve(null)
 }
 
+function buildGhFetchResults(
+  issueResult: Awaited<ReturnType<typeof fetchIssuesViaStore>> | null,
+  prResult: Awaited<ReturnType<typeof fetchPrsViaStore>> | null,
+  prDetail: Awaited<ReturnType<typeof fetchPrDetailViaStore>> | null,
+  ciData: GitHubCiRun[] | null,
+  projectState: ProjectState | null
+): GhFetchResults {
+  return {
+    issueData: issueResult?.data ?? null,
+    prListData: prResult?.data ?? null,
+    fetchStatus: computeFetchStatus(issueResult, prResult),
+    prViewData: prDetail
+      ? { reviewDecision: prDetail.reviewDecision, comments: new Array(prDetail.commentCount) }
+      : null,
+    ciData,
+    projectState,
+  }
+}
+
 async function fetchGhData(
   cwd: string,
   branch: string,
   needs: GhFetchNeeds
 ): Promise<GhFetchResults> {
   const repo = await getRepoSlug(cwd)
-  const hasRepo = Boolean(repo)
+  const canFetchRepo = Boolean(repo)
+  const canFetchBranch = canFetchRepo && Boolean(branch)
 
   const [issueResult, prResult, prDetail, ciData, projectState] = await Promise.all([
-    conditionalFetch(needs.backlog && hasRepo, () => fetchIssuesViaStore(repo!, cwd)),
-    conditionalFetch(needs.backlog && hasRepo, () => fetchPrsViaStore(repo!, cwd)),
-    conditionalFetch(needs.pr && hasRepo && Boolean(branch), () =>
-      fetchPrDetailViaStore(repo!, branch, cwd)
-    ),
-    conditionalFetch(needs.ci && hasRepo && Boolean(branch), () =>
-      fetchCiRunsViaStore(repo!, branch, cwd)
-    ),
+    conditionalFetch(needs.backlog && canFetchRepo, () => fetchIssuesViaStore(repo!, cwd)),
+    conditionalFetch(needs.backlog && canFetchRepo, () => fetchPrsViaStore(repo!, cwd)),
+    conditionalFetch(needs.pr && canFetchBranch, () => fetchPrDetailViaStore(repo!, branch, cwd)),
+    conditionalFetch(needs.ci && canFetchBranch, () => fetchCiRunsViaStore(repo!, branch, cwd)),
     readProjectState(cwd),
   ])
 
-  const prViewData = prDetail
-    ? { reviewDecision: prDetail.reviewDecision, comments: new Array(prDetail.commentCount) }
-    : null
+  return buildGhFetchResults(issueResult, prResult, prDetail, ciData, projectState)
+}
 
+function extractGhCounts(gh: GhFetchResults) {
   return {
-    issueData: issueResult?.data ?? null,
-    prListData: prResult?.data ?? null,
-    fetchStatus: computeFetchStatus(issueResult, prResult),
-    prViewData,
-    ciData,
-    projectState,
+    issueCount: Array.isArray(gh.issueData) ? gh.issueData.length : null,
+    prCount: Array.isArray(gh.prListData) ? gh.prListData.length : null,
+    reviewDecision: gh.prViewData?.reviewDecision ?? "",
+    commentCount: Array.isArray(gh.prViewData?.comments) ? gh.prViewData.comments.length : 0,
   }
 }
 
@@ -657,11 +670,8 @@ function assembleSnapshot(
     activeSegments,
     ciState: ciSummary?.state ?? "none",
     ciLabel: ciSummary?.label ?? "",
-    issueCount: Array.isArray(gh.issueData) ? gh.issueData.length : null,
-    prCount: Array.isArray(gh.prListData) ? gh.prListData.length : null,
+    ...extractGhCounts(gh),
     fetchStatus: gh.fetchStatus,
-    reviewDecision: gh.prViewData?.reviewDecision ?? "",
-    commentCount: Array.isArray(gh.prViewData?.comments) ? gh.prViewData.comments.length : 0,
     projectState: gh.projectState ?? null,
     settingsParts: buildSettingsFlags(effective),
   }
@@ -767,6 +777,16 @@ function buildLine1(seg: SegChecker, snapshot: WarmStatusLineSnapshot, a2: strin
   ])
 }
 
+function buildModeSeg(
+  a4: string,
+  agentName: string | undefined,
+  vimMode: string | undefined
+): string {
+  const agentTag = agentName ? `${a4}[${agentName}]${R}` : ""
+  const vimTag = vimMode ? formatVimMode(vimMode) : ""
+  return [agentTag, vimTag].filter(Boolean).join(" ")
+}
+
 function buildLine3(
   seg: SegChecker,
   snapshot: WarmStatusLineSnapshot,
@@ -777,17 +797,31 @@ function buildLine3(
   const lbl = (s: string) => `${DIM}${s}${R}`
   const stateSeg = formatProjectState(snapshot.projectState)
   const ghCountSeg = buildBacklogSegment(snapshot)
-  const agentTag = agentName ? `${a4}[${agentName}]${R}` : ""
-  const vimTag = vimMode ? formatVimMode(vimMode) : ""
-  const modeSeg = [agentTag, vimTag].filter(Boolean).join(" ")
+  const modeSeg = buildModeSeg(a4, agentName, vimMode)
+  const flagsStr = snapshot.settingsParts.join(" ")
   return joinGroups([
     seg("state") && stateSeg ? `${lbl("state")} ${stateSeg}` : "",
     seg("backlog") && ghCountSeg ? `${lbl("backlog")} ${ghCountSeg}` : "",
     seg("mode") && modeSeg ? `${lbl("mode")} ${modeSeg}` : "",
-    seg("flags") && snapshot.settingsParts.join(" ")
-      ? `${lbl("flags")} ${snapshot.settingsParts.join(" ")}`
-      : "",
+    seg("flags") && flagsStr ? `${lbl("flags")} ${flagsStr}` : "",
     seg("time") ? `${lbl("time")} ${DIM}${formatTime()}${R}` : "",
+  ])
+}
+
+function buildLine2(opts: {
+  seg: SegChecker
+  ctxPct: number
+  ctxTokens: number
+  ctxStats: ContextStats | null
+  model: string
+  rb: (s: string, idx?: number) => string
+}): string {
+  const { seg, ctxPct, ctxTokens, ctxStats, model, rb } = opts
+  const lbl = (s: string) => `${DIM}${s}${R}`
+  const ctxSeg = buildContextSegment(ctxPct, ctxTokens, ctxStats)
+  return joinGroups([
+    seg("model") ? `${lbl("model")} ${rb(model)}` : "",
+    seg("ctx") && ctxPct > 0 ? `${lbl("ctx")} ${ctxSeg}` : "",
   ])
 }
 
@@ -800,31 +834,23 @@ export function renderStatusLineFromSnapshot(opts: {
   timeOffset: number
 }): string {
   const { input, snapshot, ctxPct, ctxTokens, ctxStats, timeOffset } = opts
-  const model = input.model?.display_name ?? "claude"
   const seg: SegChecker = (name) =>
     snapshot.activeSegments.length === 0 || snapshot.activeSegments.includes(name)
 
   const a2 = fg256(RAINBOW[(timeOffset + 6) % RL]!)
   const a4 = fg256(RAINBOW[(timeOffset + 18) % RL]!)
   const rb = (s: string, idx = 0) => rainbowStr(s, idx, timeOffset)
-  const lbl = (s: string) => `${DIM}${s}${R}`
+  const model = input.model?.display_name ?? "claude"
 
-  const ctxSeg = buildContextSegment(ctxPct, ctxTokens, ctxStats)
-  const line1Groups = buildLine1(seg, snapshot, a2)
-  const line2Groups = joinGroups([
-    seg("model") ? `${lbl("model")} ${rb(model)}` : "",
-    seg("ctx") && ctxPct > 0 ? `${lbl("ctx")} ${ctxSeg}` : "",
-  ])
-  const line3Groups = buildLine3(seg, snapshot, a4, input.agent?.name, input.vim?.mode)
+  const line1 = buildLine1(seg, snapshot, a2)
+  const line2 = buildLine2({ seg, ctxPct, ctxTokens, ctxStats, model, rb })
+  const line3 = buildLine3(seg, snapshot, a4, input.agent?.name, input.vim?.mode)
 
-  const topLeft = rb("┌──")
-  const midLeft = rb("├──")
-  const bottomLeft = rb("└──")
-
+  const fill = `${DIM}─${R}`
   return [
-    `${topLeft} ${line1Groups || `${DIM}─${R}`}`,
-    `${midLeft} ${line2Groups || `${DIM}─${R}`}`,
-    `${bottomLeft} ${line3Groups || `${DIM}─${R}`}`,
+    `${rb("┌──")} ${line1 || fill}`,
+    `${rb("├──")} ${line2 || fill}`,
+    `${rb("└──")} ${line3 || fill}`,
   ].join("\n")
 }
 

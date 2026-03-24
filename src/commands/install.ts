@@ -63,44 +63,49 @@ function stripManagedFromFlatList(entries: unknown[]): unknown[] {
   return entries.filter((e) => !isManagedSwizCommand((e as Record<string, unknown>).command))
 }
 
+function supportsAgentEvent(agent: AgentDef, canonicalEvent: string): boolean {
+  const unsupported = new Set(agent.unsupportedEvents ?? [])
+  return !unsupported.has(canonicalEvent) && canonicalEvent in agent.eventMap
+}
+
+function buildDispatchEntry(agent: AgentDef, canonicalEvent: string) {
+  const timeoutScale = agent.id === "gemini" ? 1000 : 1
+  const timeout = (DISPATCH_TIMEOUTS[canonicalEvent] ?? 30) * timeoutScale
+  const eventName = translateEvent(canonicalEvent, agent)
+  const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${canonicalEvent} ${eventName}`
+  return { eventName, timeout, cmd }
+}
+
+function addDispatchEntries(
+  agent: AgentDef,
+  merged: Record<string, unknown[]>,
+  wrapEntry: (cmd: string, timeout: number) => unknown
+): void {
+  const seenEvents = new Set<string>()
+  for (const group of manifest) {
+    if (group.scheduled || seenEvents.has(group.event)) continue
+    seenEvents.add(group.event)
+    if (!supportsAgentEvent(agent, group.event)) continue
+    const { eventName, timeout, cmd } = buildDispatchEntry(agent, group.event)
+    if (!merged[eventName]) merged[eventName] = []
+    merged[eventName]!.push(wrapEntry(cmd, timeout))
+  }
+}
+
 function mergeNestedConfig(
   agent: AgentDef,
   existingHooks: Record<string, unknown>
 ): Record<string, unknown[]> {
   const merged: Record<string, unknown[]> = {}
-
-  // Preserve all existing events (including ones swiz doesn't touch)
   for (const [event, groups] of Object.entries(existingHooks)) {
     if (!Array.isArray(groups)) continue
     const userGroups = stripManagedFromNestedGroups(groups)
     if (userGroups.length > 0) merged[event] = userGroups
   }
-
-  // Add one dispatch entry per unique canonical event (skip scheduled events — not agent events)
-  const seenEvents = new Set<string>()
-  for (const group of manifest) {
-    if (group.scheduled) continue
-    if (seenEvents.has(group.event)) continue
-    seenEvents.add(group.event)
-    if (!supportsAgentEvent(agent, group.event)) continue
-
-    const eventName = translateEvent(group.event, agent)
-    if (!merged[eventName]) merged[eventName] = []
-
-    const timeoutScale = agent.id === "gemini" ? 1000 : 1
-    const timeout = (DISPATCH_TIMEOUTS[group.event] ?? 30) * timeoutScale
-    const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${group.event} ${eventName}`
-    merged[eventName]!.push({
-      hooks: [{ type: "command", command: cmd, timeout, statusMessage: "Swizzling..." }],
-    })
-  }
-
+  addDispatchEntries(agent, merged, (cmd, timeout) => ({
+    hooks: [{ type: "command", command: cmd, timeout, statusMessage: "Swizzling..." }],
+  }))
   return merged
-}
-
-function supportsAgentEvent(agent: AgentDef, canonicalEvent: string): boolean {
-  const unsupported = new Set(agent.unsupportedEvents ?? [])
-  return !unsupported.has(canonicalEvent) && canonicalEvent in agent.eventMap
 }
 
 function mergeFlatConfig(
@@ -108,31 +113,16 @@ function mergeFlatConfig(
   existingHooks: Record<string, unknown>
 ): Record<string, unknown[]> {
   const merged: Record<string, unknown[]> = {}
-
-  // Preserve user hooks
   for (const [event, entries] of Object.entries(existingHooks)) {
     if (!Array.isArray(entries)) continue
     const userEntries = stripManagedFromFlatList(entries)
     if (userEntries.length > 0) merged[event] = userEntries
   }
-
-  // Add one dispatch entry per unique canonical event (skip scheduled events — not agent events)
-  const seenEvents = new Set<string>()
-  for (const group of manifest) {
-    if (group.scheduled) continue
-    if (seenEvents.has(group.event)) continue
-    seenEvents.add(group.event)
-    if (!supportsAgentEvent(agent, group.event)) continue
-
-    const eventName = translateEvent(group.event, agent)
-    if (!merged[eventName]) merged[eventName] = []
-
-    const timeoutScale = agent.id === "gemini" ? 1000 : 1
-    const timeout = (DISPATCH_TIMEOUTS[group.event] ?? 30) * timeoutScale
-    const cmd = `command -v swiz >/dev/null 2>&1 || exit 0; swiz dispatch ${group.event} ${eventName}`
-    merged[eventName]!.push({ command: cmd, timeout, statusMessage: "Swizzling..." })
-  }
-
+  addDispatchEntries(agent, merged, (cmd, timeout) => ({
+    command: cmd,
+    timeout,
+    statusMessage: "Swizzling...",
+  }))
   return merged
 }
 
@@ -413,30 +403,27 @@ function reportDryRunAgentInstall(
     ["asc"]
   )
 
-  if (added.length) {
-    console.log(`    ${GREEN}+ ${added.length} hook(s) added:${RESET}`)
-    for (const c of added) console.log(`      ${GREEN}+ ${c}${RESET}`)
+  const sections: Array<{
+    items: string[] | Set<string>
+    color: string
+    prefix: string
+    label: string
+  }> = [
+    { items: added, color: GREEN, prefix: "+", label: "hook(s) added" },
+    { items: removed, color: RED, prefix: "-", label: "hook(s) removed" },
+    { items: legacyCmds, color: YELLOW, prefix: "↻", label: "legacy hook(s) replaced by swiz" },
+  ]
+  for (const { items, color, prefix, label } of sections) {
+    const arr = Array.isArray(items) ? items : [...items]
+    if (arr.length === 0) continue
+    console.log(`    ${color}${prefix} ${arr.length} ${label}:${RESET}`)
+    for (const c of arr) console.log(`      ${color}${prefix} ${c}${RESET}`)
     console.log()
   }
-  if (removed.length) {
-    console.log(`    ${RED}- ${removed.length} hook(s) removed:${RESET}`)
-    for (const c of removed) console.log(`      ${RED}- ${c}${RESET}`)
-    console.log()
-  }
-  if (legacyCmds.length) {
-    console.log(`    ${YELLOW}↻ ${legacyCmds.length} legacy hook(s) replaced by swiz:${RESET}`)
-    for (const c of legacyCmds) console.log(`      ${YELLOW}↻ ${c}${RESET}`)
-    console.log()
-  }
-  if (kept.length) {
-    console.log(`    ${DIM}  ${kept.length} swiz hook(s) unchanged${RESET}\n`)
-  }
-  if (userCmds.size) {
-    console.log(`    ${CYAN}  ${userCmds.size} user hook(s) preserved${RESET}\n`)
-  }
-  if (!oldText && newText) {
+  if (kept.length) console.log(`    ${DIM}  ${kept.length} swiz hook(s) unchanged${RESET}\n`)
+  if (userCmds.size) console.log(`    ${CYAN}  ${userCmds.size} user hook(s) preserved${RESET}\n`)
+  if (!oldText && newText)
     console.log(`    ${GREEN}+ new file (${newText.split("\n").length} lines)${RESET}\n`)
-  }
 
   console.log(formatUnifiedDiff(agent.settingsPath, oldText, newText))
 }

@@ -16,6 +16,26 @@ function pickString(...values: unknown[]): string | null {
   return null
 }
 
+function parseAssignees(raw: unknown): DashboardIssueActor[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((entry) => pickString(asObject(entry)?.login))
+    .filter((login): login is string => login !== null)
+    .map((login) => ({ login }))
+}
+
+function parseLabels(raw: unknown): DashboardIssueLabel[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((entry) => {
+      const label = asObject(entry)
+      const name = pickString(label?.name)
+      if (!name) return null
+      return { name, color: pickString(label?.color) }
+    })
+    .filter((label): label is DashboardIssueLabel => label !== null)
+}
+
 // ─── Issue types ─────────────────────────────────────────────────────────────
 
 export interface DashboardIssueLabel {
@@ -49,26 +69,8 @@ export function normalizeDashboardIssue(raw: unknown): DashboardIssueRecord | nu
   const authorObject = asObject(issue.author) ?? asObject(issue.user)
   const authorLogin = pickString(authorObject?.login)
 
-  const assignees = Array.isArray(issue.assignees)
-    ? issue.assignees
-        .map((entry) => pickString(asObject(entry)?.login))
-        .filter((login): login is string => login !== null)
-        .map((login) => ({ login }))
-    : []
-
-  const labels = Array.isArray(issue.labels)
-    ? issue.labels
-        .map((entry) => {
-          const label = asObject(entry)
-          const name = pickString(label?.name)
-          if (!name) return null
-          return {
-            name,
-            color: pickString(label?.color),
-          }
-        })
-        .filter((label): label is DashboardIssueLabel => label !== null)
-    : []
+  const assignees = parseAssignees(issue.assignees)
+  const labels = parseLabels(issue.labels)
 
   return {
     number,

@@ -85,6 +85,36 @@ interface CachedWebAsset {
 
 const webAssetCache = new Map<string, CachedWebAsset>()
 
+async function buildWebAsset(
+  filePath: string,
+  file: ReturnType<typeof Bun.file>,
+  mtimeMs: number
+): Promise<{ body: string | ArrayBuffer; contentType: string }> {
+  const extension = extname(filePath)
+  if (extension === ".tsx" || extension === ".ts") {
+    const source = await file.text()
+    const code =
+      extension === ".tsx"
+        ? WEB_TSX_TRANSPILER.transformSync(source)
+        : WEB_TS_TRANSPILER.transformSync(source)
+    const contentType = "text/javascript; charset=utf-8"
+    webAssetCache.set(filePath, { mtimeMs, body: code, contentType })
+    return { body: code, contentType }
+  }
+  if (extension === ".css") {
+    const result = await Bun.build({ entrypoints: [filePath], plugins: [tailwindcss] })
+    const output = result.outputs[0]
+    if (output) {
+      const contentType = "text/css; charset=utf-8"
+      const body = await output.text()
+      webAssetCache.set(filePath, { mtimeMs, body, contentType })
+      return { body, contentType }
+    }
+  }
+  const contentType = WEB_MIME_TYPES[extname(filePath)] ?? "application/octet-stream"
+  return { body: await file.arrayBuffer(), contentType }
+}
+
 export async function serveWebAsset(pathname: string): Promise<Response | null> {
   const filePath = resolveWebAssetPath(pathname)
   if (!filePath) {
@@ -103,40 +133,18 @@ export async function serveWebAsset(pathname: string): Promise<Response | null> 
     })
   }
 
-  const extension = extname(filePath)
-  if (extension === ".tsx" || extension === ".ts") {
-    const source = await file.text()
-    const code =
-      extension === ".tsx"
-        ? WEB_TSX_TRANSPILER.transformSync(source)
-        : WEB_TS_TRANSPILER.transformSync(source)
-    const contentType = "text/javascript; charset=utf-8"
-    webAssetCache.set(filePath, { mtimeMs, body: code, contentType })
-    return new Response(code, {
-      headers: { "cache-control": "no-cache", "content-type": contentType },
-    })
-  }
-
-  if (extension === ".css") {
-    const result = await Bun.build({
-      entrypoints: [filePath],
-      plugins: [tailwindcss],
-    })
-    const output = result.outputs[0]
-    if (output) {
-      const contentType = "text/css; charset=utf-8"
-      const body = await output.text()
-      webAssetCache.set(filePath, { mtimeMs, body, contentType })
-      return new Response(body, {
-        headers: { "cache-control": "no-cache", "content-type": contentType },
-      })
-    }
-  }
-
-  const contentType = WEB_MIME_TYPES[extname(filePath)] ?? "application/octet-stream"
-  return new Response(file, {
-    headers: { "cache-control": "no-cache", "content-type": contentType },
+  const built = await buildWebAsset(filePath, file, mtimeMs)
+  return new Response(built.body, {
+    headers: { "cache-control": "no-cache", "content-type": built.contentType },
   })
+}
+
+function formatReviewSegment(snapshot: WarmStatusLineSnapshot): string | null {
+  if (snapshot.reviewDecision === "CHANGES_REQUESTED") return "changes requested"
+  if (snapshot.reviewDecision === "APPROVED") return "approved"
+  if (snapshot.commentCount > 0)
+    return `${snapshot.commentCount} comment${snapshot.commentCount === 1 ? "" : "s"}`
+  return null
 }
 
 export function formatWebProjectStatusLine(snapshot: WarmStatusLineSnapshot): string {
@@ -148,13 +156,8 @@ export function formatWebProjectStatusLine(snapshot: WarmStatusLineSnapshot): st
     parts.push(`${snapshot.issueCount} issue${snapshot.issueCount === 1 ? "" : "s"}`)
   if (snapshot.prCount !== null)
     parts.push(`${snapshot.prCount} PR${snapshot.prCount === 1 ? "" : "s"}`)
-  if (snapshot.reviewDecision === "CHANGES_REQUESTED") {
-    parts.push("changes requested")
-  } else if (snapshot.reviewDecision === "APPROVED") {
-    parts.push("approved")
-  } else if (snapshot.commentCount > 0) {
-    parts.push(`${snapshot.commentCount} comment${snapshot.commentCount === 1 ? "" : "s"}`)
-  }
+  const reviewSeg = formatReviewSegment(snapshot)
+  if (reviewSeg) parts.push(reviewSeg)
   if (parts.length === 0) return "No status data yet"
   return parts.join(" | ")
 }
@@ -731,23 +734,27 @@ async function handleCacheRoutes(
   return handler(req, ctx)
 }
 
+async function handleCiWatchPost(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as { cwd?: string; sha?: string } | null
+  if (typeof body?.cwd !== "string" || !body.cwd || typeof body?.sha !== "string" || !body.sha) {
+    return Response.json(
+      { error: "Missing required fields: cwd (string), sha (string)" },
+      { status: 400 }
+    )
+  }
+  ctx.registerProjectWatchers(body.cwd)
+  ctx.touchProject(body.cwd)
+  const started = ctx.ciWatchRegistry.start(body.cwd, body.sha)
+  return Response.json(started)
+}
+
 async function handleCiRoutes(
   req: Request,
   url: URL,
   ctx: DaemonWebServerContext
 ): Promise<Response | null> {
   if (url.pathname === "/ci-watch" && req.method === "POST") {
-    const body = (await req.json().catch(() => null)) as { cwd?: string; sha?: string } | null
-    if (typeof body?.cwd !== "string" || !body.cwd || typeof body?.sha !== "string" || !body.sha) {
-      return Response.json(
-        { error: "Missing required fields: cwd (string), sha (string)" },
-        { status: 400 }
-      )
-    }
-    ctx.registerProjectWatchers(body.cwd)
-    ctx.touchProject(body.cwd)
-    const started = ctx.ciWatchRegistry.start(body.cwd, body.sha)
-    return Response.json(started)
+    return handleCiWatchPost(req, ctx)
   }
   if (url.pathname === "/ci-watches" && req.method === "GET") {
     const cwd = url.searchParams.get("cwd")
@@ -1031,6 +1038,13 @@ async function handleProjectSettingsUpdate(
   return Response.json({ ...cached, globalSettings: { prMergeMode: globalSettings.prMergeMode } })
 }
 
+function validateBooleanField(updates: Record<string, unknown>, key: string): string | null {
+  if (key in updates && typeof updates[key] !== "boolean") {
+    return `${key} must be a boolean`
+  }
+  return null
+}
+
 function normalizeProjectSettingsUpdates(
   updates: Record<string, unknown>
 ): Record<string, unknown> | { error: string } {
@@ -1055,15 +1069,11 @@ function normalizeProjectSettingsUpdates(
     result.collaborationMode = mode
   }
 
-  if ("prMergeMode" in updates && typeof updates.prMergeMode !== "boolean") {
-    return { error: "prMergeMode must be a boolean" }
+  for (const boolKey of ["prMergeMode", "strictNoDirectMain"] as const) {
+    const err = validateBooleanField(updates, boolKey)
+    if (err) return { error: err }
+    if (boolKey in updates) result[boolKey] = updates[boolKey]
   }
-  if ("prMergeMode" in updates) result.prMergeMode = updates.prMergeMode
-
-  if ("strictNoDirectMain" in updates && typeof updates.strictNoDirectMain !== "boolean") {
-    return { error: "strictNoDirectMain must be a boolean" }
-  }
-  if ("strictNoDirectMain" in updates) result.strictNoDirectMain = updates.strictNoDirectMain
 
   for (const key of optionalKeys) {
     if (key in updates) result[key] = updates[key]

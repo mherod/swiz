@@ -13,24 +13,27 @@ type InlineToken =
   | { kind: "strong"; text: string }
   | { kind: "em"; text: string }
 
+function matchToTokens(m: RegExpMatchArray): InlineToken[] {
+  if (m[1] !== undefined) return [{ kind: "code", text: m[1] }]
+  if (m[2] !== undefined) return [{ kind: "link", text: m[2], href: m[3]! }]
+  if (m[5] !== undefined) {
+    const tokens: InlineToken[] = []
+    if (m[4]) tokens.push({ kind: "text", text: m[4] })
+    tokens.push({ kind: "issue", num: m[5].slice(1) })
+    return tokens
+  }
+  if (m[6] !== undefined) return [{ kind: "strong", text: m[6] }]
+  if (m[7] !== undefined) return [{ kind: "em", text: m[7] }]
+  return []
+}
+
 function tokenizeInline(src: string): InlineToken[] {
   const tokens: InlineToken[] = []
   let lastIndex = 0
   for (const m of src.matchAll(new RegExp(INLINE_TOKEN_RE.source, INLINE_TOKEN_RE.flags))) {
     const idx = m.index ?? 0
     if (idx > lastIndex) tokens.push({ kind: "text", text: src.slice(lastIndex, idx) })
-    if (m[1] !== undefined) {
-      tokens.push({ kind: "code", text: m[1] })
-    } else if (m[2] !== undefined) {
-      tokens.push({ kind: "link", text: m[2], href: m[3]! })
-    } else if (m[5] !== undefined) {
-      if (m[4]) tokens.push({ kind: "text", text: m[4] })
-      tokens.push({ kind: "issue", num: m[5].slice(1) })
-    } else if (m[6] !== undefined) {
-      tokens.push({ kind: "strong", text: m[6] })
-    } else if (m[7] !== undefined) {
-      tokens.push({ kind: "em", text: m[7] })
-    }
+    tokens.push(...matchToTokens(m))
     lastIndex = idx + m[0].length
   }
   if (lastIndex < src.length) tokens.push({ kind: "text", text: src.slice(lastIndex) })

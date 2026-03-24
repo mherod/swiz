@@ -1,4 +1,9 @@
 import { DIM, RESET } from "../ansi.ts"
+import {
+  CLAUDE_MODEL_FOR_PLANNING_AND_REVIEW,
+  setClaudeSettingsModel,
+} from "../claude-model-settings.ts"
+import { stderrLog } from "../debug.ts"
 import { formatDuration } from "../format-duration.ts"
 import {
   PROJECT_STATES,
@@ -96,11 +101,28 @@ async function handleSetState(cwd: string, target: string | undefined): Promise<
   await writeProjectState(cwd, targetState)
   const from = current ? `${current} → ` : ""
   console.log(`  project state: ${from}${targetState}`)
+
+  await tryApplyStateModel(targetState, cwd)
+}
+
+async function tryApplyStateModel(state: ProjectState, cwd: string): Promise<void> {
+  if (state !== "planning" && state !== "reviewing") return
+  try {
+    const { path } = await setClaudeSettingsModel({
+      model: CLAUDE_MODEL_FOR_PLANNING_AND_REVIEW,
+      scope: "local",
+      cwd,
+    })
+    console.log(`  claude model: ${CLAUDE_MODEL_FOR_PLANNING_AND_REVIEW} (${path})`)
+  } catch (err) {
+    stderrLog("state set — claude model", err instanceof Error ? err.message : String(err))
+  }
 }
 
 export const stateCommand: Command = {
   name: "state",
-  description: "Show or set the persistent project state",
+  description:
+    "Show or set the persistent project state (planning/reviewing → Claude model opus in .claude/settings.local.json)",
   usage: "swiz state [show|list|set <state>]",
 
   async run(args: string[]): Promise<void> {

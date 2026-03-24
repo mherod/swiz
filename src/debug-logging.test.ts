@@ -46,6 +46,10 @@ const STDERR_ALLOWLIST = new Map<string, string>([
     "settings enable --force prints a warning about conflicting settings",
   ],
   ["src/commands/manage.ts", "manage validate emits validation failures to stderr"],
+  [
+    "src/commands/state.ts",
+    "state set — Claude model write failures when entering planning/reviewing",
+  ],
   ["src/debug.ts", "The shared debug utility itself"],
 ])
 
@@ -74,6 +78,8 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/install.ts",
   "src/commands/issue.ts",
   "src/commands/memory.ts",
+  // model — Claude Code settings.json model show/set output
+  "src/commands/model.ts",
   // manage command prints MCP list/show/add/remove output
   "src/commands/manage.ts",
   "src/commands/push-ci.ts",

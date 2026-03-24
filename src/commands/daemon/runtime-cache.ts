@@ -341,6 +341,10 @@ function extractToolResultText(block: { content?: string | unknown[] }): string 
 
 type ToolResultBlock = { type?: string; content?: string | unknown[]; tool_use_id?: string }
 
+function isBlockedToolResult(block: ToolResultBlock): boolean {
+  return block?.type === "tool_result" && extractToolResultText(block).includes("ACTION REQUIRED:")
+}
+
 function collectBlockedIdsFromEntry(line: string, blockedIds: string[]): void {
   const entry = JSON.parse(line) as {
     type?: string
@@ -350,8 +354,7 @@ function collectBlockedIdsFromEntry(line: string, blockedIds: string[]): void {
   const content = entry?.message?.content
   if (!Array.isArray(content)) return
   for (const block of content as ToolResultBlock[]) {
-    if (block?.type !== "tool_result") continue
-    if (extractToolResultText(block).includes("ACTION REQUIRED:")) {
+    if (isBlockedToolResult(block)) {
       blockedIds.push(String(block.tool_use_id ?? ""))
     }
   }

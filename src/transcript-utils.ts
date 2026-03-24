@@ -1363,6 +1363,13 @@ function parseGeminiEntries(text: string): TranscriptEntry[] {
   return entries
 }
 
+function advanceStringChar(ch: string, escaped: boolean): { inString: boolean; escaped: boolean } {
+  if (escaped) return { inString: true, escaped: false }
+  if (ch === "\\") return { inString: true, escaped: true }
+  if (ch === '"') return { inString: false, escaped: false }
+  return { inString: true, escaped: false }
+}
+
 function findMatchingBrace(text: string, startIndex: number): number {
   let depth = 0
   let inString = false
@@ -1373,15 +1380,9 @@ function findMatchingBrace(text: string, startIndex: number): number {
     if (!ch) continue
 
     if (inString) {
-      if (escaped) {
-        escaped = false
-        continue
-      }
-      if (ch === "\\") {
-        escaped = true
-        continue
-      }
-      if (ch === '"') inString = false
+      const state = advanceStringChar(ch, escaped)
+      inString = state.inString
+      escaped = state.escaped
       continue
     }
 
@@ -1434,40 +1435,30 @@ const cursorToolResultBlockSchema = z.looseObject({
   result: z.unknown().optional(),
 })
 
+function normalizeCursorItem(item: unknown): ContentBlock | null {
+  const textResult = cursorTextBlockSchema.safeParse(item)
+  if (textResult.success) return { type: "text", text: textResult.data.text }
+
+  const toolCallResult = cursorToolCallBlockSchema.safeParse(item)
+  if (toolCallResult.success) {
+    const p = toolCallResult.data.params
+    const input =
+      p && typeof p === "object" && !Array.isArray(p) ? (p as Record<string, unknown>) : {}
+    return { type: "tool_use", name: toolCallResult.data.toolName, input }
+  }
+
+  const toolResultResult = cursorToolResultBlockSchema.safeParse(item)
+  if (toolResultResult.success) {
+    const resultText = extractTextFromUnknownContent(toolResultResult.data.result)
+    if (resultText) return { type: "tool_result", content: [{ type: "text", text: resultText }] }
+  }
+  return null
+}
+
 function normalizeCursorContent(content: unknown): string | ContentBlock[] {
   if (typeof content === "string") return content
   if (!Array.isArray(content)) return ""
-
-  const blocks: ContentBlock[] = []
-  for (const item of content) {
-    const textResult = cursorTextBlockSchema.safeParse(item)
-    if (textResult.success) {
-      blocks.push({ type: "text", text: textResult.data.text })
-      continue
-    }
-
-    const toolCallResult = cursorToolCallBlockSchema.safeParse(item)
-    if (toolCallResult.success) {
-      const input =
-        toolCallResult.data.params &&
-        typeof toolCallResult.data.params === "object" &&
-        !Array.isArray(toolCallResult.data.params)
-          ? (toolCallResult.data.params as Record<string, unknown>)
-          : {}
-      blocks.push({ type: "tool_use", name: toolCallResult.data.toolName, input })
-      continue
-    }
-
-    const toolResultResult = cursorToolResultBlockSchema.safeParse(item)
-    if (toolResultResult.success) {
-      const resultText = extractTextFromUnknownContent(toolResultResult.data.result)
-      if (resultText) {
-        blocks.push({ type: "tool_result", content: [{ type: "text", text: resultText }] })
-      }
-    }
-  }
-
-  return blocks
+  return content.map(normalizeCursorItem).filter((b): b is ContentBlock => b !== null)
 }
 
 const CURSOR_ROLES = new Set(["user", "assistant", "tool"])
@@ -1506,27 +1497,36 @@ function parseCursorSqliteEntries(text: string): TranscriptEntry[] {
   return entries
 }
 
-export function parseTranscriptEntries(
-  text: string,
-  formatHint?: Session["format"]
-): TranscriptEntry[] {
-  if (formatHint === "antigravity-pb") return []
-  if (formatHint === "cursor-sqlite") return parseCursorSqliteEntries(text)
-  if (formatHint === "cursor-agent-jsonl") return parseJsonlEntries(text)
-  if (formatHint === "gemini-json") return parseGeminiEntries(text)
-  if (formatHint === "codex-jsonl") return parseCodexJsonlEntries(text)
-  if (formatHint === "jsonl") return parseJsonlEntries(text)
+const FORMAT_PARSERS: Record<string, (text: string) => TranscriptEntry[]> = {
+  "antigravity-pb": () => [],
+  "cursor-sqlite": parseCursorSqliteEntries,
+  "cursor-agent-jsonl": parseJsonlEntries,
+  "gemini-json": parseGeminiEntries,
+  "codex-jsonl": parseCodexJsonlEntries,
+  jsonl: parseJsonlEntries,
+}
 
+function autoDetectTranscriptFormat(text: string): TranscriptEntry[] {
   if (text.startsWith("SQLite format 3")) {
     const cursorEntries = parseCursorSqliteEntries(text)
     if (cursorEntries.length > 0) return cursorEntries
   }
-
   const geminiEntries = parseGeminiEntries(text)
   if (geminiEntries.length > 0) return geminiEntries
   const codexEntries = parseCodexJsonlEntries(text)
   if (codexEntries.length > 0) return codexEntries
   return parseJsonlEntries(text)
+}
+
+export function parseTranscriptEntries(
+  text: string,
+  formatHint?: Session["format"]
+): TranscriptEntry[] {
+  if (formatHint) {
+    const parser = FORMAT_PARSERS[formatHint]
+    if (parser) return parser(text)
+  }
+  return autoDetectTranscriptFormat(text)
 }
 
 function buildArrayContentText(content: unknown[], entryType: string): string {
@@ -1836,6 +1836,10 @@ function countAndCollectToolBlocks(content: unknown[], editedPaths: Set<string>)
   return count
 }
 
+function isValidEntryType(type: string): type is "user" | "assistant" {
+  return type === "user" || type === "assistant"
+}
+
 function processTranscriptEntry(
   entry: unknown,
   turns: PlainTurn[],
@@ -1843,20 +1847,18 @@ function processTranscriptEntry(
 ): number {
   if (!entry) return 0
   const typed = entry as { type: string; message?: { content: unknown } }
-  const { type: entryType, message } = typed
-  if (entryType !== "user" && entryType !== "assistant") return 0
+  if (!isValidEntryType(typed.type)) return 0
 
-  const content = message?.content as string | ContentBlock[] | undefined
-  let toolCount = 0
+  const content = typed.message?.content as string | ContentBlock[] | undefined
+  const toolCount =
+    typed.type === "assistant" && Array.isArray(content)
+      ? countAndCollectToolBlocks(content, editedPaths)
+      : 0
 
-  if (entryType === "assistant" && Array.isArray(content)) {
-    toolCount = countAndCollectToolBlocks(content, editedPaths)
-  }
+  if (!content || (typed.type === "user" && isHookFeedback(content))) return toolCount
 
-  if (!content || (entryType === "user" && isHookFeedback(content))) return toolCount
-
-  const text = extractEntryText(content, entryType).trim()
-  if (text) turns.push({ role: entryType as "user" | "assistant", text })
+  const text = extractEntryText(content, typed.type).trim()
+  if (text) turns.push({ role: typed.type, text })
   return toolCount
 }
 

@@ -25,6 +25,44 @@ interface GhRunViewResult {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+function evaluateRunResult(data: GhRunViewResult, runId: number): "success" | "pending" | Error {
+  const { conclusion, status, jobs } = data
+  if (status !== "completed") return "pending"
+  if (conclusion !== "success") {
+    return new Error(`CI run ${runId} completed with conclusion: ${conclusion ?? "unknown"}`)
+  }
+  const failed = jobs.filter((j) => j.conclusion !== "success")
+  if (failed.length === 0) {
+    console.log(`✓ All ${jobs.length} CI job(s) reached conclusion=success`)
+    return "success"
+  }
+  const names = failed.map((j) => `${j.name} (${j.conclusion ?? "null"})`).join(", ")
+  return new Error(`CI completed but some jobs did not succeed: ${names}`)
+}
+
+async function discoverRunId(
+  fullSha: string,
+  commitSha: string,
+  startTime: number,
+  timeoutMs: number
+): Promise<number> {
+  let runId: number | null = null
+  while (runId === null) {
+    const elapsed = Date.now() - startTime
+    if (elapsed > timeoutMs) {
+      throw new Error(
+        `No CI run found for commit ${commitSha} within ${Math.round(timeoutMs / 1000)}s`
+      )
+    }
+    runId = await findRunId(fullSha)
+    if (runId === null) {
+      console.log(`⏳ Waiting for CI run... (${Math.round(elapsed / 1000)}s)`)
+      await sleep(CI_POLL_INTERVAL_MS)
+    }
+  }
+  return runId
+}
+
 export async function pollUntilAllJobsSuccess(
   commitSha: string,
   timeoutSeconds: number,
@@ -34,21 +72,7 @@ export async function pollUntilAllJobsSuccess(
   const timeoutMs = timeoutSeconds * 1000
 
   const fullSha = await expandSha(commitSha)
-
-  // Phase 1: discover run ID
-  let runId: number | null = null
-  while (runId === null) {
-    const elapsed = Date.now() - startTime
-    if (elapsed > timeoutMs) {
-      throw new Error(`No CI run found for commit ${commitSha} within ${timeoutSeconds}s`)
-    }
-    runId = await findRunId(fullSha)
-    if (runId === null) {
-      console.log(`⏳ Waiting for CI run... (${Math.round(elapsed / 1000)}s)`)
-      await sleep(CI_POLL_INTERVAL_MS)
-    }
-  }
-
+  const runId = await discoverRunId(fullSha, commitSha, startTime, timeoutMs)
   console.log(`✓ CI run ${runId} found — polling for job completion...`)
 
   // Phase 2: poll gh run view until all jobs reach conclusion=success
@@ -82,24 +106,13 @@ export async function pollUntilAllJobsSuccess(
       continue
     }
 
-    const { conclusion, status, jobs } = data
+    const pollResult = evaluateRunResult(data, runId)
+    if (pollResult === "success") return
+    if (pollResult instanceof Error) throw pollResult
 
-    if (status === "completed") {
-      if (conclusion === "success") {
-        const failed = jobs.filter((j) => j.conclusion !== "success")
-        if (failed.length === 0) {
-          console.log(`✓ All ${jobs.length} CI job(s) reached conclusion=success`)
-          return
-        }
-        const names = failed.map((j) => `${j.name} (${j.conclusion ?? "null"})`).join(", ")
-        throw new Error(`CI completed but some jobs did not succeed: ${names}`)
-      }
-      throw new Error(`CI run ${runId} completed with conclusion: ${conclusion ?? "unknown"}`)
-    }
-
-    const done = jobs.filter((j) => j.conclusion !== null).length
+    const done = data.jobs.filter((j) => j.conclusion !== null).length
     console.log(
-      `⏳ CI: ${status} — ${done}/${jobs.length} job(s) done (${Math.round(elapsed / 1000)}s)`
+      `⏳ CI: ${data.status} — ${done}/${data.jobs.length} job(s) done (${Math.round(elapsed / 1000)}s)`
     )
     await sleep(CI_POLL_INTERVAL_MS)
   }
@@ -214,33 +227,35 @@ export function parsePushWaitArgs(args: string[]): PushWaitArgs {
   const extraArgs: string[] = []
   const positional: string[] = []
 
+  const valueFlags: Record<string, (v: string) => void> = {
+    "--timeout": (v) => {
+      timeout = parsePositiveTimeout(v)
+    },
+    "-t": (v) => {
+      timeout = parsePositiveTimeout(v)
+    },
+    "--cwd": (v) => {
+      cwd = v
+    },
+  }
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (!arg) continue
-    const next = args[i + 1]
 
-    if ((arg === "--timeout" || arg === "-t") && next) {
-      timeout = parsePositiveTimeout(next)
-      i++
+    const valueSetter = valueFlags[arg]
+    if (valueSetter && args[i + 1]) {
+      valueSetter(args[++i]!)
       continue
     }
-
-    if (arg === "--cwd" && next) {
-      cwd = next
-      i++
-      continue
-    }
-
     if (arg === "--wait") {
       wait = true
       continue
     }
-
     if (arg.startsWith("-")) {
       extraArgs.push(arg)
       continue
     }
-
     positional.push(arg)
   }
 

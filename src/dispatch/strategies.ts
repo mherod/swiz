@@ -185,6 +185,40 @@ function processBlockingResults(
  * Blocking strategy: forwards first block; stop runs all hooks,
  * postToolUse short-circuits.
  */
+async function resolveAutoSteerEnabled(
+  payload: Record<string, unknown>,
+  sessionId: string
+): Promise<boolean> {
+  const injected = payload._effectiveSettings as Record<string, unknown> | undefined
+  if (injected && typeof injected.autoSteer === "boolean") return injected.autoSteer
+  const { isAutoSteerAvailable } = await import("../../hooks/utils/hook-utils.ts")
+  return (await isAutoSteerAvailable(sessionId)) !== null
+}
+
+async function tryAutoSteerStopBlock(
+  finalResponse: Record<string, unknown>,
+  enrichedPayloadStr: string
+): Promise<void> {
+  const blockReason = (finalResponse as { reason?: string }).reason ?? ""
+  if (!blockReason) return
+
+  const payload = JSON.parse(enrichedPayloadStr) as Record<string, unknown>
+  const sessionId = (payload.session_id as string) ?? ""
+  if (!sessionId) return
+
+  const autoSteerEnabled = await resolveAutoSteerEnabled(payload, sessionId)
+  if (!autoSteerEnabled) return
+
+  const terminalApp = (payload._terminal as { app: string } | undefined)?.app ?? null
+  if (!terminalApp) return
+
+  const { sendAutoSteer } = await import("../../hooks/utils/hook-utils.ts")
+  await sendAutoSteer(blockReason, terminalApp)
+  log(`   auto-steer: sent stop block reason to terminal (${terminalApp}) — converting to allow`)
+  delete finalResponse.decision
+  delete finalResponse.reason
+}
+
 class BlockingStrategy implements HookExecutionStrategy {
   async execute(ctx: HookStrategyContext): Promise<Record<string, unknown>> {
     const { filteredGroups, enrichedPayloadStr, canonicalEvent, daemonContext, cwd } = ctx
@@ -224,43 +258,8 @@ class BlockingStrategy implements HookExecutionStrategy {
 
     processBlockingResults(results, executions, finalResponse, runAllHooks)
 
-    // Auto-steer intercept: when a stop hook blocks and auto-steer is available,
-    // send the blocking reason directly to the terminal and convert to allow.
-    // This happens at dispatch level so ALL stop hooks benefit automatically.
-    // Uses _terminal and _effectiveSettings from the payload (injected by CLI dispatch)
-    // so this works correctly even when running inside the daemon (no terminal env vars).
     if (canonicalEvent === "stop" && isBlock(finalResponse)) {
-      const blockReason = (finalResponse as { reason?: string }).reason ?? ""
-      if (blockReason) {
-        const payload = JSON.parse(enrichedPayloadStr) as Record<string, unknown>
-        const sessionId = (payload.session_id as string) ?? ""
-        if (sessionId) {
-          // Read autoSteer from dispatcher-injected effective settings, fall back to reading from disk.
-          const injectedSettings = payload._effectiveSettings as Record<string, unknown> | undefined
-          let autoSteerEnabled: boolean
-          if (injectedSettings && typeof injectedSettings.autoSteer === "boolean") {
-            autoSteerEnabled = injectedSettings.autoSteer
-          } else {
-            const { isAutoSteerAvailable } = await import("../../hooks/utils/hook-utils.ts")
-            autoSteerEnabled = (await isAutoSteerAvailable(sessionId)) !== null
-          }
-
-          if (autoSteerEnabled) {
-            // Read terminal from CLI-injected payload field (daemon has no terminal env vars).
-            const injectedTerminal = payload._terminal as { app: string } | undefined
-            const terminalApp = injectedTerminal?.app ?? null
-            if (terminalApp) {
-              const { sendAutoSteer } = await import("../../hooks/utils/hook-utils.ts")
-              await sendAutoSteer(blockReason, terminalApp)
-              log(
-                `   auto-steer: sent stop block reason to terminal (${terminalApp}) — converting to allow`
-              )
-              delete (finalResponse as Record<string, unknown>).decision
-              delete (finalResponse as Record<string, unknown>).reason
-            }
-          }
-        }
-      }
+      await tryAutoSteerStopBlock(finalResponse, enrichedPayloadStr)
     }
 
     if (!isBlock(finalResponse)) {

@@ -247,41 +247,37 @@ export async function findSkills(): Promise<SkillInfo[]> {
   return skills
 }
 
+async function scanSkillDir(dir: string, byName: Map<string, SkillConflictEntry[]>): Promise<void> {
+  let entries: import("node:fs").Dirent[]
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  const directoryNames = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+  for (const name of orderBy(directoryNames, [(n) => n], ["asc"])) {
+    if (DISABLED_BY_SWIZ_RE.test(name)) continue
+    const skillPath = join(dir, name, "SKILL.md")
+    if (!(await Bun.file(skillPath).exists())) continue
+    const existing = byName.get(name) ?? []
+    existing.push({ dir, path: skillPath })
+    byName.set(name, existing)
+  }
+}
+
 export async function findSkillConflicts(
   skillDirs: string[] = SKILL_PRECEDENCE
 ): Promise<SkillConflict[]> {
   const byName = new Map<string, SkillConflictEntry[]>()
-
-  for (const dir of skillDirs) {
-    let entries: import("node:fs").Dirent[]
-    try {
-      entries = await readdir(dir, { withFileTypes: true })
-    } catch {
-      continue
-    }
-
-    const directoryNames = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
-    const orderedDirectoryNames = orderBy(directoryNames, [(name) => name], ["asc"])
-
-    for (const name of orderedDirectoryNames) {
-      if (DISABLED_BY_SWIZ_RE.test(name)) continue
-      const skillPath = join(dir, name, "SKILL.md")
-      if (!(await Bun.file(skillPath).exists())) continue
-      const existing = byName.get(name) ?? []
-      existing.push({ dir, path: skillPath })
-      byName.set(name, existing)
-    }
-  }
+  for (const dir of skillDirs) await scanSkillDir(dir, byName)
 
   const conflicts: SkillConflict[] = []
-  const sortedNames = orderBy([...byName.keys()], [(name) => name], ["asc"])
-  for (const name of sortedNames) {
+  for (const name of orderBy([...byName.keys()], [(n) => n], ["asc"])) {
     const entries = byName.get(name) ?? []
     if (entries.length <= 1) continue
     const [active, ...overridden] = entries
     if (!active) continue
     conflicts.push({ name, active, overridden })
   }
-
   return conflicts
 }

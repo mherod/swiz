@@ -45,6 +45,18 @@ export async function isEmergencyBypassActive(repoKey: string): Promise<boolean>
   }
 }
 
+async function showBypassStatus(): Promise<void> {
+  const state = await readBypassState()
+  if (!state || Date.now() >= state.expiresAt) {
+    stderrLog("emergency-bypass status", "Emergency bypass: inactive")
+    return
+  }
+  const remainingSec = Math.ceil((state.expiresAt - Date.now()) / 1000)
+  stderrLog("emergency-bypass status", `Emergency bypass: ACTIVE (${remainingSec}s remaining)`)
+  stderrLog("emergency-bypass status", `  Activated: ${new Date(state.activatedAt).toISOString()}`)
+  stderrLog("emergency-bypass status", `  Expires:   ${new Date(state.expiresAt).toISOString()}`)
+}
+
 export const emergencyBypassCommand: Command = {
   name: "emergency-bypass",
   description: "Activate a time-limited PreToolUse hook bypass for deadlock recovery",
@@ -55,25 +67,7 @@ export const emergencyBypassCommand: Command = {
   ],
 
   async run(args: string[]) {
-    if (args.includes("--status")) {
-      const state = await readBypassState()
-      if (!state || Date.now() >= state.expiresAt) {
-        stderrLog("emergency-bypass status", "Emergency bypass: inactive")
-        return
-      }
-      const remainingMs = state.expiresAt - Date.now()
-      const remainingSec = Math.ceil(remainingMs / 1000)
-      stderrLog("emergency-bypass status", `Emergency bypass: ACTIVE (${remainingSec}s remaining)`)
-      stderrLog(
-        "emergency-bypass status",
-        `  Activated: ${new Date(state.activatedAt).toISOString()}`
-      )
-      stderrLog(
-        "emergency-bypass status",
-        `  Expires:   ${new Date(state.expiresAt).toISOString()}`
-      )
-      return
-    }
+    if (args.includes("--status")) return showBypassStatus()
 
     // Parse duration
     let durationS = DEFAULT_DURATION_S

@@ -821,6 +821,71 @@ export interface UpstreamSyncResult {
  * Fetches open issues, open PRs, and recent workflow runs, then upserts
  * into the shared store. Safe to call on a cadence from the daemon.
  */
+function syncIssues(
+  s: IssueStore,
+  repo: string,
+  issues: { number: number }[] | null,
+  closedIssues: { number: number }[] | null,
+  result: UpstreamSyncResult
+): void {
+  if (issues) {
+    if (issues.length > 0) s.upsertIssues(repo, issues)
+    result.issues.removed = s.removeClosedIssues(repo, new Set(issues.map((i) => i.number)))
+    result.issues.upserted = issues.length
+  }
+  if (closedIssues?.length) {
+    s.removeIssues(
+      repo,
+      closedIssues.map((ci) => ci.number)
+    )
+    result.issues.removed += closedIssues.length
+  }
+}
+
+function syncPullRequests(
+  s: IssueStore,
+  repo: string,
+  prs: { number: number }[] | null,
+  closedPrs: { number: number }[] | null,
+  result: UpstreamSyncResult
+): void {
+  if (prs) {
+    if (prs.length > 0) s.upsertPullRequests(repo, prs)
+    result.pullRequests.removed = s.removeClosedPullRequests(
+      repo,
+      new Set(prs.map((p) => p.number))
+    )
+    result.pullRequests.upserted = prs.length
+  }
+  if (closedPrs?.length) {
+    s.removePullRequests(
+      repo,
+      closedPrs.map((cp) => cp.number)
+    )
+    result.pullRequests.removed += closedPrs.length
+  }
+}
+
+function syncCiRuns(
+  s: IssueStore,
+  repo: string,
+  runs:
+    | { headSha: string; databaseId: number; status: string; conclusion: string; url: string }[]
+    | null,
+  result: UpstreamSyncResult
+): void {
+  if (!runs || runs.length === 0) return
+  const ciRecords = runs.map((r) => ({
+    sha: r.headSha,
+    run_id: r.databaseId,
+    status: r.status,
+    conclusion: r.conclusion,
+    url: r.url,
+  }))
+  s.upsertCiStatuses(repo, ciRecords)
+  result.ciStatuses.upserted = ciRecords.length
+}
+
 export async function syncUpstreamState(
   repo: string,
   cwd: string,
@@ -874,48 +939,9 @@ export async function syncUpstreamState(
     ),
   ])
 
-  if (issues) {
-    if (issues.length > 0) s.upsertIssues(repo, issues)
-    result.issues.removed = s.removeClosedIssues(repo, new Set(issues.map((i) => i.number)))
-    result.issues.upserted = issues.length
-  }
-  // Backfill: explicitly remove recently-closed issues even if the open fetch failed
-  if (closedIssues?.length) {
-    s.removeIssues(
-      repo,
-      closedIssues.map((ci) => ci.number)
-    )
-    result.issues.removed += closedIssues.length
-  }
-
-  if (prs) {
-    if (prs.length > 0) s.upsertPullRequests(repo, prs)
-    result.pullRequests.removed = s.removeClosedPullRequests(
-      repo,
-      new Set(prs.map((p) => p.number))
-    )
-    result.pullRequests.upserted = prs.length
-  }
-  // Backfill: explicitly remove recently-closed/merged PRs
-  if (closedPrs?.length) {
-    s.removePullRequests(
-      repo,
-      closedPrs.map((cp) => cp.number)
-    )
-    result.pullRequests.removed += closedPrs.length
-  }
-
-  if (runs && runs.length > 0) {
-    const ciRecords = runs.map((r) => ({
-      sha: r.headSha,
-      run_id: r.databaseId,
-      status: r.status,
-      conclusion: r.conclusion,
-      url: r.url,
-    }))
-    s.upsertCiStatuses(repo, ciRecords)
-    result.ciStatuses.upserted = ciRecords.length
-  }
+  syncIssues(s, repo, issues, closedIssues, result)
+  syncPullRequests(s, repo, prs, closedPrs, result)
+  syncCiRuns(s, repo, runs, result)
 
   return result
 }

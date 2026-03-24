@@ -137,27 +137,35 @@ export const SESSION_META_FILE = ".session-meta.json"
  * Silently ignores write failures (non-fatal, falls back to full scan).
  * @param cwd - Working directory of the owning project. Written once; preserved on subsequent updates.
  */
+async function countOpenTasks(dir: string, files: string[]): Promise<number> {
+  let count = 0
+  for (const f of files) {
+    if (!f.endsWith(".json") || f.startsWith(".") || f === "compact-snapshot.json") continue
+    try {
+      const t = JSON.parse(await readFile(join(dir, f), "utf-8")) as { status?: string }
+      if (t.status === "pending" || t.status === "in_progress") count++
+    } catch {}
+  }
+  return count
+}
+
+async function resolveMetaCwd(dir: string, cwd?: string): Promise<string | undefined> {
+  if (cwd) return cwd
+  try {
+    const existing = JSON.parse(
+      await readFile(join(dir, SESSION_META_FILE), "utf-8")
+    ) as SessionMeta
+    return existing.cwd
+  } catch {
+    return undefined
+  }
+}
+
 async function updateSessionMeta(dir: string, cwd?: string): Promise<void> {
   try {
     const files = await readdir(dir)
-    let openCount = 0
-    for (const f of files) {
-      if (!f.endsWith(".json") || f.startsWith(".") || f === "compact-snapshot.json") continue
-      try {
-        const t = JSON.parse(await readFile(join(dir, f), "utf-8")) as { status?: string }
-        if (t.status === "pending" || t.status === "in_progress") openCount++
-      } catch {}
-    }
-    // Preserve existing cwd when cwd is not provided; write it on first call that has it.
-    let effectiveCwd = cwd
-    if (!effectiveCwd) {
-      try {
-        const existing = JSON.parse(
-          await readFile(join(dir, SESSION_META_FILE), "utf-8")
-        ) as SessionMeta
-        effectiveCwd = existing.cwd
-      } catch {}
-    }
+    const openCount = await countOpenTasks(dir, files)
+    const effectiveCwd = await resolveMetaCwd(dir, cwd)
     const meta: SessionMeta = {
       openCount,
       updatedAt: new Date().toISOString(),

@@ -63,21 +63,23 @@ function parseCiStatus(raw: string): { status: string | null; conclusion: string
   return { status: status ?? null, conclusion: conclusion ?? null }
 }
 
+function printAgentBinary(agent: AgentDef): void {
+  const binaryProc = Bun.spawnSync(["which", agent.binary])
+  const binaryPath =
+    binaryProc.exitCode === 0 ? new TextDecoder().decode(binaryProc.stdout).trim() : null
+  console.log(`  ${BOLD}${agent.name}${RESET}`)
+  console.log(
+    binaryPath
+      ? `    Binary:   ${GREEN}✓${RESET} ${binaryPath}`
+      : `    Binary:   ${DIM}not found${RESET}`
+  )
+}
+
 async function checkAgent(agent: AgentDef) {
   const file = Bun.file(agent.settingsPath)
-  const binaryProc = Bun.spawnSync(["which", agent.binary])
-  const binaryInstalled = binaryProc.exitCode === 0
-  const binaryPath = binaryInstalled ? new TextDecoder().decode(binaryProc.stdout).trim() : null
-
   const settingsExist = await file.exists()
 
-  console.log(`  ${BOLD}${agent.name}${RESET}`)
-
-  if (binaryPath) {
-    console.log(`    Binary:   ${GREEN}✓${RESET} ${binaryPath}`)
-  } else {
-    console.log(`    Binary:   ${DIM}not found${RESET}`)
-  }
+  printAgentBinary(agent)
 
   if (!settingsExist) {
     console.log(`    Settings: ${DIM}${agent.settingsPath} (not found)${RESET}`)

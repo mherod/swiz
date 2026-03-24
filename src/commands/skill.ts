@@ -269,6 +269,37 @@ function remapAllowedToolsFrontmatter(
  * Unmapped tool names (source-specific with no target equivalent) are collected
  * and returned without modification — no silent data loss.
  */
+function collectSourceToolNames(
+  fromAgent: (typeof AGENTS)[number],
+  supplement: Record<string, string>
+): Set<string> {
+  const names = new Set<string>([
+    ...Object.keys(fromAgent.toolAliases),
+    ...Object.values(fromAgent.toolAliases),
+  ])
+  for (const agent of AGENTS) {
+    for (const canonical of Object.keys(agent.toolAliases)) names.add(canonical)
+  }
+  for (const canonical of Object.keys(supplement)) names.add(canonical)
+  return names
+}
+
+function rewriteBodyToolNames(
+  text: string,
+  fromAgent: (typeof AGENTS)[number],
+  supplement: Record<string, string>,
+  remap: (tool: string) => string
+): string {
+  let result = text
+  for (const sourceName of collectSourceToolNames(fromAgent, supplement)) {
+    const mapped = remap(sourceName)
+    if (mapped === sourceName) continue
+    const escaped = sourceName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    result = result.replace(new RegExp(`\\b${escaped}\\b`, "g"), mapped)
+  }
+  return result
+}
+
 export function convertSkillContent(
   content: string,
   fromAgentId: string,
@@ -305,33 +336,7 @@ export function convertSkillContent(
   for (const u of remappedFrontmatter.unmapped) unmappedSet.add(u)
   let result = remappedFrontmatter.result
 
-  // ── Rewrite whole-word tool name references in the body ──────────────────
-  // Collect all known source-agent names (canonical + agent-specific aliases)
-  const sourceNames = new Set<string>([
-    ...Object.keys(fromAgent.toolAliases), // canonical names (e.g. Bash, Edit)
-    ...Object.values(fromAgent.toolAliases), // agent-specific (e.g. run_shell_command)
-  ])
-  // Also include canonical names that have no alias in fromAgent (they ARE canonical already)
-  // Build from ALL agents' canonical keys to be comprehensive
-  for (const agent of AGENTS) {
-    for (const canonical of Object.keys(agent.toolAliases)) {
-      sourceNames.add(canonical)
-    }
-  }
-  // Ensure read-only task tools are always included — they may not appear in any alias table
-  // but are valid canonical names used in skill bodies.
-  for (const canonical of Object.keys(conversionSupplement)) {
-    sourceNames.add(canonical)
-  }
-
-  for (const sourceName of sourceNames) {
-    const mapped = remap(sourceName)
-    if (mapped === sourceName) continue // no change needed
-    // Whole-word replacement: \b boundaries
-    const escaped = sourceName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    result = result.replace(new RegExp(`\\b${escaped}\\b`, "g"), mapped)
-  }
-
+  result = rewriteBodyToolNames(result, fromAgent, conversionSupplement, remap)
   return { content: result, unmapped: [...unmappedSet] }
 }
 
@@ -380,6 +385,27 @@ async function convertSingleSkill(opts: {
     await Bun.write(join(opts.targetDir, "SKILL.md"), content)
   }
   return { unmapped, warnSuffix }
+}
+
+function printConversionSummary(opts: {
+  converted: number
+  overwritten: number
+  skipped: number
+  overwrite: boolean
+  allUnmapped: Set<string>
+  agentName: string
+}): void {
+  const { converted, overwritten, skipped, overwrite, allUnmapped, agentName } = opts
+  console.log(
+    `\nSummary: ${converted} converted, ${overwritten} overwritten, ${skipped} skipped` +
+      (!overwrite && skipped > 0 ? " (use --overwrite to replace existing targets)" : "")
+  )
+  if (allUnmapped.size > 0) {
+    console.log(
+      `⚠ Unmapped tool names (no equivalent in ${agentName}): ${[...allUnmapped].join(", ")}`
+    )
+    console.log("  These tool names were preserved as-is. Review and update manually if needed.")
+  }
 }
 
 /** Convert all skills from one agent to another. */
@@ -436,16 +462,14 @@ async function convertSkills(options: {
     else converted++
   }
 
-  console.log(
-    `\nSummary: ${converted} converted, ${overwritten} overwritten, ${skipped} skipped` +
-      (!overwrite && skipped > 0 ? " (use --overwrite to replace existing targets)" : "")
-  )
-  if (allUnmapped.size > 0) {
-    console.log(
-      `⚠ Unmapped tool names (no equivalent in ${toAgent.name}): ${[...allUnmapped].join(", ")}`
-    )
-    console.log("  These tool names were preserved as-is. Review and update manually if needed.")
-  }
+  printConversionSummary({
+    converted,
+    overwritten,
+    skipped,
+    overwrite,
+    allUnmapped,
+    agentName: toAgent.name,
+  })
 }
 
 function logSkillAction(
@@ -465,6 +489,18 @@ function logSkillAction(
       : `${verb} ${name}`
   console.log(`  - ${label}`)
   return isOverwrite ? "overwrite" : "new"
+}
+
+function printSyncSummary(
+  copied: number,
+  overwritten: number,
+  skipped: number,
+  overwrite: boolean
+): void {
+  console.log(
+    `\nSummary: ${copied} copied, ${overwritten} overwritten, ${skipped} skipped` +
+      (!overwrite && skipped > 0 ? " (use --overwrite to replace existing targets)" : "")
+  )
 }
 
 // Copy-only sync (no tool name remapping). Used by --sync --from <agent> and --sync-gemini alias.
@@ -499,25 +535,20 @@ async function syncSkills(options: {
     skipped = 0
 
   for (const name of orderedSkillNames) {
-    const sourceDir = join(fromSkillsDir, name)
     const targetDir = join(toSkillsDir, name)
     const targetExists = existsSync(targetDir)
-
     if (targetExists && !overwrite) {
       skipped++
       console.log(`  - skipped ${name} (already exists)`)
       continue
     }
-    if (!dryRun) await cp(sourceDir, targetDir, { recursive: true, force: overwrite })
-    const kind = logSkillAction(name, targetExists, dryRun, "copied", "copy")
-    if (kind === "overwrite") overwritten++
+    if (!dryRun)
+      await cp(join(fromSkillsDir, name), targetDir, { recursive: true, force: overwrite })
+    if (logSkillAction(name, targetExists, dryRun, "copied", "copy") === "overwrite") overwritten++
     else copied++
   }
 
-  console.log(
-    `\nSummary: ${copied} copied, ${overwritten} overwritten, ${skipped} skipped` +
-      (!overwrite && skipped > 0 ? " (use --overwrite to replace existing targets)" : "")
-  )
+  printSyncSummary(copied, overwritten, skipped, overwrite)
 }
 
 function extractFlagValue(args: string[], flag: string): string | null {

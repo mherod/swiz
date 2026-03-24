@@ -140,6 +140,26 @@ export async function listTasks(
   )
 }
 
+async function renderSessionTasks(
+  sessionId: string,
+  orphanIds: Set<string>,
+  dateFormat: DateFormat
+): Promise<{ tasks: number; incomplete: number; completed: number } | null> {
+  const tasks = await readTasks(sessionId)
+  if (tasks.length === 0) return null
+
+  const shortId = sessionId.slice(0, 8)
+  const recoveredTag = orphanIds.has(sessionId) ? ` ${YELLOW}[recovered]${RESET}` : ""
+  console.log(`\n  ${BOLD}Session${RESET} ${DIM}${shortId}...${RESET}${recoveredTag}\n`)
+  renderGroupedTasks(tasks, shortId, dateFormat)
+
+  const stats = countTaskStats(tasks)
+  console.log(
+    `  ${DIM}${stats.incomplete}/${tasks.length} incomplete, ${stats.completed} completed${RESET}\n`
+  )
+  return { tasks: tasks.length, incomplete: stats.incomplete, completed: stats.completed }
+}
+
 export async function listAllSessionsTasks(
   filterCwd?: string,
   dateFormat: DateFormat = "relative",
@@ -161,30 +181,17 @@ export async function listAllSessionsTasks(
     return
   }
 
-  let totalTasks = 0
-  let totalIncomplete = 0
-  let totalCompleted = 0
-  let sessionsWithTasks = 0
-
+  let totalTasks = 0,
+    totalIncomplete = 0,
+    totalCompleted = 0,
+    sessionsWithTasks = 0
   for (const sessionId of filteredSessions) {
-    const tasks = await readTasks(sessionId)
-    if (tasks.length === 0) continue
-
+    const stats = await renderSessionTasks(sessionId, orphanIds, dateFormat)
+    if (!stats) continue
     sessionsWithTasks++
-    totalTasks += tasks.length
-
-    const shortId = sessionId.slice(0, 8)
-    const recoveredTag = orphanIds.has(sessionId) ? ` ${YELLOW}[recovered]${RESET}` : ""
-    console.log(`\n  ${BOLD}Session${RESET} ${DIM}${shortId}...${RESET}${recoveredTag}\n`)
-
-    renderGroupedTasks(tasks, shortId, dateFormat)
-
-    const { incomplete, completed } = countTaskStats(tasks)
-    totalIncomplete += incomplete
-    totalCompleted += completed
-    console.log(
-      `  ${DIM}${incomplete}/${tasks.length} incomplete, ${completed} completed${RESET}\n`
-    )
+    totalTasks += stats.tasks
+    totalIncomplete += stats.incomplete
+    totalCompleted += stats.completed
   }
 
   console.log(

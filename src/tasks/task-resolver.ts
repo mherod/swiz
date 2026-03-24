@@ -149,6 +149,29 @@ export async function getSessionIdsByCwdScan(
   return ids
 }
 
+async function matchSessionsByCwd(
+  entries: string[],
+  filterCwd: string,
+  projectsDir: string,
+  tasksDir: string
+): Promise<Set<string>> {
+  const projectSessionIds = await getSessionIdsForProject(projectKeyFromCwd(filterCwd), projectsDir)
+  const matched = new Set<string>()
+  for (const s of entries) {
+    if (projectSessionIds.has(s)) matched.add(s)
+  }
+  const unmatched = entries.filter((s) => !matched.has(s))
+  if (unmatched.length > 0) {
+    const fallbackIds = await getSessionIdsByCwdScan(filterCwd, unmatched, projectsDir, tasksDir)
+    for (const id of fallbackIds) matched.add(id)
+  }
+  const allProjectSessionIds = await getAllProjectSessionIds(projectsDir)
+  for (const s of entries) {
+    if (!allProjectSessionIds.has(s)) matched.add(s)
+  }
+  return matched
+}
+
 export async function getSessions(
   filterCwd?: string,
   tasksDir = createDefaultTaskStore().tasksDir,
@@ -156,55 +179,14 @@ export async function getSessions(
 ): Promise<string[]> {
   try {
     const entries = await readdir(tasksDir)
-
-    let matchedSessionIds: Set<string> | null = null
-
-    if (filterCwd) {
-      // Fast path: derive project key directly and intersect with task sessions.
-      const projectSessionIds = await getSessionIdsForProject(
-        projectKeyFromCwd(filterCwd),
-        projectsDir
-      )
-      matchedSessionIds = new Set<string>()
-      for (const s of entries) {
-        if (projectSessionIds.has(s)) matchedSessionIds.add(s)
-      }
-
-      // Fallback: scan transcript cwd values for any task entries NOT already
-      // matched by the fast path. This catches sessions under older or
-      // mismatched project-key encodings, even when the fast path found some.
-      const unmatched = entries.filter((s) => !matchedSessionIds!.has(s))
-      if (unmatched.length > 0) {
-        const fallbackIds = await getSessionIdsByCwdScan(
-          filterCwd,
-          unmatched,
-          projectsDir,
-          tasksDir
-        )
-        for (const id of fallbackIds) matchedSessionIds.add(id)
-      }
-
-      // Compaction gap: include task-dir sessions that have no transcript in
-      // ANY project directory yet. These are created by TaskCreate immediately
-      // when a session starts, before the transcript file is written. Without
-      // this, a freshly-compacted session is invisible to `swiz tasks` even
-      // though its task files exist — the only session the agent can interact
-      // with. Include them alongside matched sessions; mtime sort ensures they
-      // surface at the top when they are the most recently active session.
-      const allProjectSessionIds = await getAllProjectSessionIds(projectsDir)
-      for (const s of entries) {
-        if (!allProjectSessionIds.has(s)) matchedSessionIds.add(s)
-      }
-    }
+    const matched = filterCwd
+      ? await matchSessionsByCwd(entries, filterCwd, projectsDir, tasksDir)
+      : null
 
     const stats = await Promise.all(
       entries
-        .filter((s) => !matchedSessionIds || matchedSessionIds.has(s))
-        .map(async (s) => {
-          const p = join(tasksDir, s)
-          const st = await stat(p)
-          return { session: s, mtime: st.mtime }
-        })
+        .filter((s) => !matched || matched.has(s))
+        .map(async (s) => ({ session: s, mtime: (await stat(join(tasksDir, s))).mtime }))
     )
     stats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
     return stats.map((s) => s.session)

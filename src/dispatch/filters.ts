@@ -200,15 +200,28 @@ export function filterRequiredSettingsHooks(
 
 // ─── Composite settings filter ──────────────────────────────────────────────
 
-export async function applyHookSettingFilters(
+function applyFilterPipeline(
   groups: HookGroup[],
+  effective: ReturnType<typeof getEffectiveSwizSettings>,
+  disabledSet: Set<string>,
+  detectedStacks: string[]
+): HookGroup[] {
+  let result = filterPrMergeModeHooks(
+    groups,
+    effective.prMergeMode,
+    effective.collaborationMode,
+    effective.prAgeGateMinutes
+  )
+  result = filterRequiredSettingsHooks(result, effective)
+  result = filterStackHooks(result, detectedStacks)
+  return filterDisabledHooks(result, disabledSet)
+}
+
+async function loadFilterSettings(
   payload: Record<string, unknown>,
   preloadedProjectSettings?: ProjectSwizSettings | null
-): Promise<HookGroup[]> {
+) {
   const cwd = (payload.cwd as string | undefined) ?? ""
-
-  // Fan out independent reads concurrently. When the caller already holds
-  // projectSettings (e.g. from loadCombinedManifest), skip the extra read.
   const [settings, projectSettings, detectedStacks] = await Promise.all([
     readSwizSettings(),
     preloadedProjectSettings !== undefined
@@ -218,33 +231,34 @@ export async function applyHookSettingFilters(
         : Promise.resolve(null),
     cwd ? detectProjectStack(cwd) : Promise.resolve([]),
   ])
-
   const rawSessionId = payload.session_id ?? payload.sessionId
   const sessionId = typeof rawSessionId === "string" ? rawSessionId : null
   const effective = getEffectiveSwizSettings(settings, sessionId, projectSettings)
-
   const disabledSet = new Set([
     ...(settings.disabledHooks ?? []),
     ...(projectSettings?.disabledHooks ?? []),
   ])
-  const filtered = filterPrMergeModeHooks(
-    groups,
-    effective.prMergeMode,
-    effective.collaborationMode,
-    effective.prAgeGateMinutes
-  )
-  const settingsFiltered = filterRequiredSettingsHooks(filtered, effective)
-  const stackFiltered = filterStackHooks(settingsFiltered, detectedStacks)
-  const stateFiltered = await filterStateHooks(stackFiltered, cwd)
-  const disabledFiltered = filterDisabledHooks(stateFiltered, disabledSet)
+  return { cwd, effective, disabledSet, detectedStacks }
+}
 
-  // Emergency bypass: skip all preToolUse groups when active
+export async function applyHookSettingFilters(
+  groups: HookGroup[],
+  payload: Record<string, unknown>,
+  preloadedProjectSettings?: ProjectSwizSettings | null
+): Promise<HookGroup[]> {
+  const { cwd, effective, disabledSet, detectedStacks } = await loadFilterSettings(
+    payload,
+    preloadedProjectSettings
+  )
+
+  const filtered = applyFilterPipeline(groups, effective, disabledSet, detectedStacks)
+  const stateFiltered = await filterStateHooks(filtered, cwd)
+
   if (cwd) {
     const repoKey = getCanonicalPathHash(cwd)
     if (await isEmergencyBypassActive(repoKey)) {
-      return disabledFiltered.filter((g) => g.event !== "preToolUse")
+      return stateFiltered.filter((g) => g.event !== "preToolUse")
     }
   }
-
-  return disabledFiltered
+  return stateFiltered
 }

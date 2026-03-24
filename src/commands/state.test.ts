@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "../../hooks/utils/test-utils.ts"
 import {
@@ -22,7 +23,7 @@ async function runSwiz(
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, HOME: cwd },
+    env: { ...process.env, HOME: cwd, SWIZ_DIRECT: "1" },
   })
   void proc.stdin.end()
   const [stdout, stderr] = await Promise.all([
@@ -144,6 +145,33 @@ describe("swiz state CLI", () => {
 
     const state = await readProjectState(dir)
     expect(state).toBe("developing")
+  })
+
+  test("state set reviewing writes opus to .claude/settings.local.json", async () => {
+    const dir = await createTempDir()
+    const result = await runSwiz(["state", "set", "reviewing"], dir)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("claude model:")
+    expect(result.stdout).toContain("opus")
+    const localPath = join(dir, ".claude", "settings.local.json")
+    const raw = await readFile(localPath, "utf8")
+    expect(JSON.parse(raw).model).toBe("opus")
+  })
+
+  test("state set planning writes opus to .claude/settings.local.json", async () => {
+    const dir = await createTempDir()
+    const result = await runSwiz(["state", "set", "planning"], dir)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("opus")
+    const raw = await readFile(join(dir, ".claude", "settings.local.json"), "utf8")
+    expect(JSON.parse(raw).model).toBe("opus")
+  })
+
+  test("state set developing does not require claude settings file", async () => {
+    const dir = await createTempDir()
+    const result = await runSwiz(["state", "set", "developing"], dir)
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).not.toContain("claude model:")
   })
 
   test("state set rejects an unknown state", async () => {

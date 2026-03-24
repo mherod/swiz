@@ -147,19 +147,16 @@ function normalizeStatusLineSegments(value: unknown): StatusLineSegment[] {
   return isLegacyDefault ? [...ALL_STATUS_LINE_SEGMENTS] : segments
 }
 
+const VALID_AMBITION_MODES = new Set(["standard", "aggressive", "creative", "reflective"])
+
 function normalizeSessionSettings(value: unknown): SessionSwizSettings | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const obj = value as Record<string, unknown>
   const session: SessionSwizSettings = {}
   if (typeof obj.autoContinue === "boolean") session.autoContinue = obj.autoContinue
   if (typeof obj.prMergeMode === "boolean") session.prMergeMode = obj.prMergeMode
-  if (
-    obj.ambitionMode === "standard" ||
-    obj.ambitionMode === "aggressive" ||
-    obj.ambitionMode === "creative" ||
-    obj.ambitionMode === "reflective"
-  ) {
-    session.ambitionMode = obj.ambitionMode
+  if (VALID_AMBITION_MODES.has(obj.ambitionMode as string)) {
+    session.ambitionMode = obj.ambitionMode as SessionSwizSettings["ambitionMode"]
   }
   if (collaborationModeSchema.safeParse(obj.collaborationMode).success) {
     session.collaborationMode = obj.collaborationMode as import("./types").CollaborationMode
@@ -501,36 +498,33 @@ export function invalidateSettingsCache(path: string): void {
 
 // ─── Settings I/O ────────────────────────────────────────────────────────────
 
+function cacheAndReturn(path: string, value: SwizSettings, strict?: boolean): SwizSettings {
+  if (!strict) _settingsCache.set(path, { value, expiresAt: Date.now() + SETTINGS_TTL_MS })
+  return value
+}
+
 export async function readSwizSettings(options: ReadOptions = {}): Promise<SwizSettings> {
   const path = getSwizSettingsPath(options.home)
   if (!path) return cloneDefaults()
 
-  // Strict reads bypass the cache (used for validation; must see current disk state)
   if (!options.strict) {
     const cached = _settingsCache.get(path)
     if (cached && Date.now() < cached.expiresAt) return cached.value
   }
 
   const file = Bun.file(path)
-  if (!(await file.exists())) {
-    const value = cloneDefaults()
-    if (!options.strict)
-      _settingsCache.set(path, { value, expiresAt: Date.now() + SETTINGS_TTL_MS })
-    return value
-  }
+  if (!(await file.exists())) return cacheAndReturn(path, cloneDefaults(), options.strict)
 
   try {
-    const value = swizSettingsSchema.parse(await file.json()) as SwizSettings
-    if (!options.strict)
-      _settingsCache.set(path, { value, expiresAt: Date.now() + SETTINGS_TTL_MS })
-    return value
+    return cacheAndReturn(
+      path,
+      swizSettingsSchema.parse(await file.json()) as SwizSettings,
+      options.strict
+    )
   } catch (error) {
-    if (options.strict) {
+    if (options.strict)
       throw new Error(`Failed to parse swiz settings at ${path}: ${String(error)}`)
-    }
-    const value = cloneDefaults()
-    _settingsCache.set(path, { value, expiresAt: Date.now() + SETTINGS_TTL_MS })
-    return value
+    return cacheAndReturn(path, cloneDefaults())
   }
 }
 

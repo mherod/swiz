@@ -138,6 +138,30 @@ interface ManageParseState {
   selectedAgentFlags: Set<AgentId>
 }
 
+function consumeManageValueFlag(
+  token: string,
+  next: string | undefined,
+  state: ManageParseState
+): number | null {
+  if (token === "--command") {
+    if (!next) throw new Error(`Missing value for --command\n${usage()}`)
+    state.command = next
+    return 1
+  }
+  if (token === "--arg") {
+    if (!next) throw new Error(`Missing value for --arg\n${usage()}`)
+    state.actionArgs.push(next)
+    return 1
+  }
+  if (token === "--env") {
+    if (!next) throw new Error(`Missing value for --env\n${usage()}`)
+    const { key, val } = parseEnvAssignment(next)
+    state.env[key] = val
+    return 1
+  }
+  return null
+}
+
 function consumeManageFlag(
   token: string,
   next: string | undefined,
@@ -154,34 +178,14 @@ function consumeManageFlag(
     return 0
   }
 
-  if (token === "--command") {
-    if (!next) throw new Error(`Missing value for --command\n${usage()}`)
-    state.command = next
-    return 1
-  }
+  const valueResult = consumeManageValueFlag(token, next, state)
+  if (valueResult !== null) return valueResult
 
-  if (token === "--arg") {
-    if (!next) throw new Error(`Missing value for --arg\n${usage()}`)
-    state.actionArgs.push(next)
-    return 1
-  }
-
-  if (token === "--env") {
-    if (!next) throw new Error(`Missing value for --env\n${usage()}`)
-    const { key, val } = parseEnvAssignment(next)
-    state.env[key] = val
-    return 1
-  }
-
-  if (token.startsWith("--")) {
-    throw new Error(`Unknown option: ${token}\n${usage()}`)
-  }
-
+  if (token.startsWith("--")) throw new Error(`Unknown option: ${token}\n${usage()}`)
   if (!state.name) {
     state.name = token
     return 0
   }
-
   throw new Error(`Unexpected argument: ${token}\n${usage()}`)
 }
 

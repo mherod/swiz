@@ -69,93 +69,45 @@ export function parsePayload(payloadStr: string): {
   }
 }
 
+function truncate(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max - 3)}...` : s
+}
+
+const TOOL_INPUT_EXTRACTORS: Array<(i: Record<string, unknown>) => string | undefined> = [
+  (i) => (typeof i.subject === "string" ? truncate(i.subject, 60) : undefined),
+  (i) => {
+    if (typeof i.taskId !== "string") return undefined
+    const parts = [`#${i.taskId}`]
+    if (typeof i.status === "string") parts.push(i.status)
+    return parts.join(" -> ")
+  },
+  (i) =>
+    typeof i.skill === "string"
+      ? typeof i.args === "string"
+        ? `${i.skill} ${i.args}`
+        : i.skill
+      : undefined,
+  (i) => {
+    const v = (i.path ?? i.file_path ?? i.file ?? i.filePath) as string | undefined
+    return typeof v === "string" ? v : undefined
+  },
+  (i) => (typeof i.command === "string" ? truncate(i.command, 80) : undefined),
+  (i) => (typeof i.pattern === "string" ? i.pattern : undefined),
+  (i) => (typeof i.query === "string" ? truncate(i.query, 60) : undefined),
+  (i) => (typeof i.content === "string" ? `${i.content.length} chars` : undefined),
+  (i) =>
+    typeof i.old_string === "string"
+      ? `replacing ${i.old_string.split("\n").length} lines`
+      : undefined,
+]
+
 export function summarizeToolInput(input: Record<string, unknown> | undefined): string {
   if (!input) return ""
-  const safeInput = input
-
-  function getSubjectSummary(): string | undefined {
-    if (typeof safeInput.subject === "string") {
-      return safeInput.subject.length > 60
-        ? `${safeInput.subject.slice(0, 57)}...`
-        : safeInput.subject
-    }
-    return undefined
+  for (const extract of TOOL_INPUT_EXTRACTORS) {
+    const result = extract(input)
+    if (result !== undefined) return result
   }
-
-  function getTaskSummary(): string | undefined {
-    if (typeof safeInput.taskId === "string") {
-      const parts = [`#${safeInput.taskId}`]
-      if (typeof safeInput.status === "string") parts.push(safeInput.status)
-      return parts.join(" -> ")
-    }
-    return undefined
-  }
-
-  function getSkillSummary(): string | undefined {
-    if (typeof safeInput.skill === "string") {
-      return typeof safeInput.args === "string"
-        ? `${safeInput.skill} ${safeInput.args}`
-        : safeInput.skill
-    }
-    return undefined
-  }
-
-  function getPathSummary(): string | undefined {
-    const pathVal = (safeInput.path ??
-      safeInput.file_path ??
-      safeInput.file ??
-      safeInput.filePath) as string | undefined
-    if (typeof pathVal === "string") {
-      return pathVal
-    }
-    return undefined
-  }
-
-  function getCommandSummary(): string | undefined {
-    if (typeof safeInput.command === "string") {
-      return safeInput.command.length > 80
-        ? `${safeInput.command.slice(0, 77)}...`
-        : safeInput.command
-    }
-    return undefined
-  }
-
-  function getPatternSummary(): string | undefined {
-    if (typeof safeInput.pattern === "string") return safeInput.pattern
-    return undefined
-  }
-
-  function getQuerySummary(): string | undefined {
-    if (typeof safeInput.query === "string") {
-      return safeInput.query.length > 60 ? `${safeInput.query.slice(0, 57)}...` : safeInput.query
-    }
-    return undefined
-  }
-
-  function getContentSummary(): string | undefined {
-    if (typeof safeInput.content === "string") return `${safeInput.content.length} chars`
-    return undefined
-  }
-
-  function getOldStringSummary(): string | undefined {
-    if (typeof safeInput.old_string === "string") {
-      return `replacing ${safeInput.old_string.split("\n").length} lines`
-    }
-    return undefined
-  }
-
-  return (
-    getSubjectSummary() ??
-    getTaskSummary() ??
-    getSkillSummary() ??
-    getPathSummary() ??
-    getCommandSummary() ??
-    getPatternSummary() ??
-    getQuerySummary() ??
-    getContentSummary() ??
-    getOldStringSummary() ??
-    ""
-  )
+  return ""
 }
 
 function getHookContext(
@@ -188,32 +140,35 @@ interface CombinedManifestResult {
   projectSettings: ProjectSwizSettings | null
 }
 
+async function loadPluginHooks(settings: ProjectSwizSettings, cwd: string): Promise<HookGroup[]> {
+  if (!settings.plugins?.length) return []
+  const pluginResults = await loadAllPlugins(settings.plugins, cwd)
+  for (const result of pluginResults) {
+    if (result.error) log(`   ⚠ plugin ${result.name}: ${result.error}`)
+  }
+  const pluginHooks = pluginResults.flatMap((r) => r.hooks)
+  if (pluginHooks.length > 0) log(`   loaded ${pluginHooks.length} plugin hook group(s)`)
+  return pluginHooks
+}
+
+function loadProjectHooks(settings: ProjectSwizSettings, cwd: string): HookGroup[] {
+  if (!settings.hooks?.length) return []
+  const { resolved, warnings } = resolveProjectHooks(settings.hooks, cwd)
+  for (const warning of warnings) log(`   ⚠ ${warning}`)
+  if (resolved.length > 0) log(`   loaded ${resolved.length} project-local hook group(s)`)
+  return resolved
+}
+
 async function loadCombinedManifest(cwd: string): Promise<CombinedManifestResult> {
-  let combinedManifest: HookGroup[] = [...manifest]
   const projectSettings = await readProjectSettings(cwd)
+  if (!projectSettings) return { manifest: [...manifest], projectSettings }
 
-  if (projectSettings?.plugins?.length) {
-    const pluginResults = await loadAllPlugins(projectSettings.plugins, cwd)
-    const pluginHooks = pluginResults.flatMap((r) => r.hooks)
-    for (const result of pluginResults) {
-      if (result.error) log(`   ⚠ plugin ${result.name}: ${result.error}`)
-    }
-    if (pluginHooks.length > 0) {
-      combinedManifest = [...combinedManifest, ...pluginHooks]
-      log(`   loaded ${pluginHooks.length} plugin hook group(s)`)
-    }
+  const pluginHooks = await loadPluginHooks(projectSettings, cwd)
+  const projectHooks = loadProjectHooks(projectSettings, cwd)
+  return {
+    manifest: [...manifest, ...pluginHooks, ...projectHooks],
+    projectSettings,
   }
-
-  if (projectSettings?.hooks?.length) {
-    const { resolved, warnings } = resolveProjectHooks(projectSettings.hooks, cwd)
-    for (const warning of warnings) log(`   ⚠ ${warning}`)
-    if (resolved.length > 0) {
-      combinedManifest = [...combinedManifest, ...resolved]
-      log(`   loaded ${resolved.length} project-local hook group(s)`)
-    }
-  }
-
-  return { manifest: combinedManifest, projectSettings }
 }
 
 async function enrichPayloadForHooks(
@@ -502,6 +457,37 @@ function buildDispatchLogEntries(
   return logEntries
 }
 
+async function injectEffectiveSettings(
+  ctx: ReturnType<typeof buildDispatchContext>,
+  projectSettings: ProjectSwizSettings | null
+): Promise<void> {
+  const globalSettings = await readSwizSettings()
+  const sessionId = typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
+  const effectiveSettings = getEffectiveSwizSettings(globalSettings, sessionId, projectSettings)
+  ctx.payload._effectiveSettings = effectiveSettings as unknown as Record<string, unknown>
+}
+
+async function prepareDispatchGroups(
+  ctx: ReturnType<typeof buildDispatchContext>,
+  manifestProvider?: (cwd: string) => Promise<HookGroup[]>
+) {
+  const tReplay = performance.now()
+  await tryReplayPendingMutations(ctx.cwd)
+  log(`   ⏱ replay: ${Math.round(performance.now() - tReplay)}ms`)
+
+  const tManifest = performance.now()
+  const result = await resolveFilteredGroups(ctx, manifestProvider)
+  log(`   ⏱ manifest+filter: ${Math.round(performance.now() - tManifest)}ms`)
+  return result
+}
+
+function resolveLifecycleRequestId(payload: Record<string, unknown>): string {
+  return (
+    (payload.request_id as string | undefined) ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  )
+}
+
 async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const t0 = performance.now()
   const ctx = buildDispatchContext(req)
@@ -517,25 +503,12 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     return { response: {} }
   }
 
-  const tReplay = performance.now()
-  await tryReplayPendingMutations(ctx.cwd)
-  log(`   ⏱ replay: ${Math.round(performance.now() - tReplay)}ms`)
-
-  const tManifest = performance.now()
-  const { filteredGroups, projectSettings } = await resolveFilteredGroups(ctx, req.manifestProvider)
-  log(`   ⏱ manifest+filter: ${Math.round(performance.now() - tManifest)}ms`)
+  const { filteredGroups, projectSettings } = await prepareDispatchGroups(ctx, req.manifestProvider)
   if (filteredGroups.length === 0) return { response: {} }
 
-  // Compute effective settings once and inject into payload so hooks
-  // don't need to independently read settings files (project > global > default).
-  const globalSettings = await readSwizSettings()
-  const sessionId = typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
-  const effectiveSettings = getEffectiveSwizSettings(globalSettings, sessionId, projectSettings)
-  ctx.payload._effectiveSettings = effectiveSettings as unknown as Record<string, unknown>
+  await injectEffectiveSettings(ctx, projectSettings ?? null)
 
-  const lifecycleRequestId =
-    (ctx.payload.request_id as string | undefined) ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const lifecycleRequestId = resolveLifecycleRequestId(ctx.payload)
   const lifecycleStartedAt = Date.now()
 
   req.onDispatchLifecycle?.(

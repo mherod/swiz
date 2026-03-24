@@ -44,10 +44,37 @@ function usage(): string {
   )
 }
 
+function removeFromStore(slug: string | null, number: string): void {
+  if (!slug) return
+  try {
+    getIssueStore().removeIssue(slug, parseInt(number, 10))
+  } catch {}
+}
+
+async function handleCloseFailure(
+  slug: string | null,
+  number: string,
+  stderr: string,
+  exitCode: number,
+  cwd: string
+): Promise<void> {
+  if (isGraphQLRateLimited(stderr) && slug) {
+    if (await closeIssueViaRest(slug, number, cwd)) {
+      removeFromStore(slug, number)
+      return
+    }
+  }
+  if (slug) {
+    try {
+      getIssueStore().queueMutation(slug, { type: "close", number: parseInt(number, 10) })
+    } catch {}
+  }
+  throw new Error(`gh issue close failed with exit code ${exitCode}`)
+}
+
 async function closeIssue(number: string): Promise<void> {
   const cwd = process.cwd()
   const state = await issueState(number, cwd)
-
   if (state !== "OPEN") {
     console.log(`  Issue #${number} is already ${state ?? "unknown"} — skipping close.`)
     return
@@ -55,11 +82,7 @@ async function closeIssue(number: string): Promise<void> {
 
   const slug = await getRepoSlug(cwd)
   await acquireGhSlot()
-  const proc = Bun.spawn(["gh", "issue", "close", number], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+  const proc = Bun.spawn(["gh", "issue", "close", number], { cwd, stdout: "pipe", stderr: "pipe" })
   const [, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -67,29 +90,10 @@ async function closeIssue(number: string): Promise<void> {
   await proc.exited
 
   if (proc.exitCode !== 0) {
-    // REST API fallback on GraphQL rate-limit
-    if (isGraphQLRateLimited(stderr) && slug) {
-      if (await closeIssueViaRest(slug, number, cwd)) {
-        try {
-          getIssueStore().removeIssue(slug, parseInt(number, 10))
-        } catch {}
-        return
-      }
-    }
-
-    if (slug) {
-      try {
-        getIssueStore().queueMutation(slug, { type: "close", number: parseInt(number, 10) })
-      } catch {}
-    }
-    throw new Error(`gh issue close failed with exit code ${proc.exitCode}`)
+    await handleCloseFailure(slug, number, stderr, proc.exitCode ?? 1, cwd)
+    return
   }
-
-  if (slug) {
-    try {
-      getIssueStore().removeIssue(slug, parseInt(number, 10))
-    } catch {}
-  }
+  removeFromStore(slug, number)
 }
 
 async function commentOnIssue(number: string, body: string): Promise<void> {
@@ -261,6 +265,20 @@ function parseBodyArg(args: string[]): string | undefined {
   return undefined
 }
 
+async function handleCacheBust(args: string[]): Promise<void> {
+  const repoFlag = args.indexOf("--repo")
+  const cwd = process.cwd()
+  const slug = repoFlag >= 0 && args[repoFlag + 1] ? args[repoFlag + 1] : await getRepoSlug(cwd)
+  const store = getIssueStore()
+  if (slug) {
+    store.clearCachedData(slug)
+    console.log(`  Cache cleared for ${slug}`)
+  } else {
+    store.clearAllCachedData()
+    console.log("  All cached data cleared")
+  }
+}
+
 export const issueCommand: Command = {
   name: "issue",
   description: "Interact with GitHub issues (guards against operating on closed issues)",
@@ -284,27 +302,12 @@ export const issueCommand: Command = {
         "Clear cached issue/PR/CI data. Defaults to current repo; omit --repo to clear all.",
     },
   ],
-  async run(args) {
+  async run(args: string[]) {
     const sub = args[0]
-
-    if (sub === "cache-bust") {
-      const repoFlag = args.indexOf("--repo")
-      const cwd = process.cwd()
-      const slug = repoFlag >= 0 && args[repoFlag + 1] ? args[repoFlag + 1] : await getRepoSlug(cwd)
-      const store = getIssueStore()
-      if (slug) {
-        store.clearCachedData(slug)
-        console.log(`  Cache cleared for ${slug}`)
-      } else {
-        store.clearAllCachedData()
-        console.log("  All cached data cleared")
-      }
-      return
-    }
+    if (sub === "cache-bust") return handleCacheBust(args)
 
     const number = args[1]
     if (!sub || !number) throw new Error(`Missing arguments.\n${usage()}`)
-
     if (sub === "close") return closeIssue(number)
 
     const body = parseBodyArg(args)

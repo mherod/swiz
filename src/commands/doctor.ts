@@ -434,20 +434,15 @@ const REQUIRED_SKILL_FIELDS = ["name", "description"] as const
  * Validates: file existence, non-empty content, frontmatter block, required
  * frontmatter fields (name, description), and category against allowedCategories.
  */
-function validateSkillContent(
+function validateSkillFrontmatter(
   content: string,
   dirName: string,
-  skillDir: string,
-  entryDir: string,
-  allowedCategories: ReadonlySet<string>
+  base: { name: string; skillDir: string; entryDir: string }
 ): InvalidSkillEntry[] {
   const issues: InvalidSkillEntry[] = []
-  const base = { name: dirName, skillDir, entryDir }
-  let hasContentIssues = false
   const missing = REQUIRED_SKILL_FIELDS.filter((f) => !parseFrontmatterField(content, f))
   if (missing.length > 0) {
     issues.push({ ...base, reason: `missing required frontmatter field(s): ${missing.join(", ")}` })
-    hasContentIssues = true
   }
   const rawName = parseFrontmatterField(content, "name") ?? ""
   if (rawName) {
@@ -457,7 +452,6 @@ function validateSkillContent(
         ...base,
         reason: `frontmatter name "${unquotedName}" does not match directory name "${dirName}"`,
       })
-      hasContentIssues = true
     }
   }
   const description = parseFrontmatterField(content, "description")
@@ -466,9 +460,22 @@ function validateSkillContent(
       ...base,
       reason: `description is the generated placeholder — update SKILL.md with a real description`,
     })
-    hasContentIssues = true
   }
-  if (hasContentIssues) return issues
+  return issues
+}
+
+function validateSkillContent(
+  content: string,
+  dirName: string,
+  skillDir: string,
+  entryDir: string,
+  allowedCategories: ReadonlySet<string>
+): InvalidSkillEntry[] {
+  const base = { name: dirName, skillDir, entryDir }
+  const frontmatterIssues = validateSkillFrontmatter(content, dirName, base)
+  if (frontmatterIssues.length > 0) return frontmatterIssues
+
+  const issues: InvalidSkillEntry[] = []
   const rawCategory = parseFrontmatterField(content, "category")
   if (!rawCategory) {
     issues.push({ ...base, reason: MISSING_CATEGORY_REASON })
@@ -938,6 +945,49 @@ async function collectExecutableScriptPaths(): Promise<string[]> {
   return [...new Set(paths)]
 }
 
+function buildPermissionsResult(opts: {
+  fix: boolean
+  paths: string[]
+  notExecutable: string[]
+  fixed: string[]
+  fixFailed: string[]
+}): CheckResult {
+  const { fix, paths, notExecutable, fixed, fixFailed } = opts
+  if (fix) {
+    if (fixed.length === 0 && fixFailed.length === 0) {
+      return {
+        name: "Script execute permissions",
+        status: "pass",
+        detail: "all scripts already executable",
+      }
+    }
+    if (fixFailed.length > 0) {
+      return {
+        name: "Script execute permissions",
+        status: "fail",
+        detail: `chmod failed for ${fixFailed.length} script(s): ${fixFailed.join(", ")}`,
+      }
+    }
+    return {
+      name: "Script execute permissions",
+      status: "pass",
+      detail: `fixed execute permissions on ${fixed.length} script(s)`,
+    }
+  }
+  if (notExecutable.length === 0) {
+    return {
+      name: "Script execute permissions",
+      status: "pass",
+      detail: `all ${paths.length} scripts are executable`,
+    }
+  }
+  return {
+    name: "Script execute permissions",
+    status: "warn",
+    detail: `${notExecutable.length} script(s) missing execute permission — run: swiz doctor --fix`,
+  }
+}
+
 /** Check (and optionally fix) execute permissions on all referenced hook scripts. */
 async function checkScriptExecutePermissions(fix: boolean): Promise<CheckResult> {
   const paths = await collectExecutableScriptPaths()
@@ -965,41 +1015,7 @@ async function checkScriptExecutePermissions(fix: boolean): Promise<CheckResult>
     }
   }
 
-  if (fix) {
-    if (fixed.length === 0 && fixFailed.length === 0) {
-      return {
-        name: "Script execute permissions",
-        status: "pass",
-        detail: "all scripts already executable",
-      }
-    }
-    if (fixFailed.length > 0) {
-      return {
-        name: "Script execute permissions",
-        status: "fail",
-        detail: `chmod failed for ${fixFailed.length} script(s): ${fixFailed.join(", ")}`,
-      }
-    }
-    return {
-      name: "Script execute permissions",
-      status: "pass",
-      detail: `fixed execute permissions on ${fixed.length} script(s)`,
-    }
-  }
-
-  if (notExecutable.length === 0) {
-    return {
-      name: "Script execute permissions",
-      status: "pass",
-      detail: `all ${paths.length} scripts are executable`,
-    }
-  }
-
-  return {
-    name: "Script execute permissions",
-    status: "warn",
-    detail: `${notExecutable.length} script(s) missing execute permission — run: swiz doctor --fix`,
-  }
+  return buildPermissionsResult({ fix, paths, notExecutable, fixed, fixFailed })
 }
 
 // ─── Config sync check ──────────────────────────────────────────────────────
@@ -1024,7 +1040,7 @@ function getExpectedCanonicalEvents(): Set<string> {
   return events
 }
 
-export async function checkAgentConfigSync(agent: AgentDef): Promise<CheckResult> {
+async function loadAgentSettings(agent: AgentDef): Promise<Record<string, unknown> | CheckResult> {
   const file = Bun.file(agent.settingsPath)
   if (!(await file.exists())) {
     return {
@@ -1033,10 +1049,8 @@ export async function checkAgentConfigSync(agent: AgentDef): Promise<CheckResult
       detail: "settings file not found — run: swiz install",
     }
   }
-
-  let settings: Record<string, unknown>
   try {
-    settings = await file.json()
+    return await file.json()
   } catch {
     return {
       name: `${agent.name} config sync`,
@@ -1044,6 +1058,12 @@ export async function checkAgentConfigSync(agent: AgentDef): Promise<CheckResult
       detail: "settings file is malformed JSON",
     }
   }
+}
+
+export async function checkAgentConfigSync(agent: AgentDef): Promise<CheckResult> {
+  const result = await loadAgentSettings(agent)
+  if ("status" in result) return result as CheckResult
+  const settings = result
 
   const hooksRaw = agent.wrapsHooks
     ? ((settings.hooks as Record<string, unknown>) ?? {})
@@ -1068,7 +1088,6 @@ export async function checkAgentConfigSync(agent: AgentDef): Promise<CheckResult
       detail: `${installed.size} dispatch entries in sync with manifest`,
     }
   }
-
   return {
     name: `${agent.name} config sync`,
     status: "warn",
@@ -1149,37 +1168,28 @@ async function comparePluginSkills(
  * Compare skills in the working-tree plugin source against the installed cache.
  * Returns info about each local plugin whose cached copy is out of sync.
  */
+async function loadJsonFileSafe<T>(path: string): Promise<T | null> {
+  const file = Bun.file(path)
+  if (!(await file.exists())) return null
+  try {
+    return await file.json()
+  } catch {
+    return null
+  }
+}
+
 async function checkPluginCacheStaleness(): Promise<PluginCacheInfo[]> {
-  const results: PluginCacheInfo[] = []
-
-  // Read installed_plugins.json to find cache paths
   const installedPath = join(HOME, ".claude", "plugins", "installed_plugins.json")
-  const installedFile = Bun.file(installedPath)
-  if (!(await installedFile.exists())) return results
+  type InstalledPlugins = { version?: number; plugins?: Record<string, { installPath: string }[]> }
+  const installed = await loadJsonFileSafe<InstalledPlugins>(installedPath)
+  if (!installed?.plugins) return []
 
-  let installed: { version?: number; plugins?: Record<string, { installPath: string }[]> }
-  try {
-    installed = await installedFile.json()
-  } catch {
-    return results
-  }
-
-  if (!installed.plugins) return results
-
-  // Read marketplace.json to find local plugin sources
   const marketplacePath = join(SWIZ_ROOT, ".claude-plugin", "marketplace.json")
-  const marketplaceFile = Bun.file(marketplacePath)
-  if (!(await marketplaceFile.exists())) return results
+  type Marketplace = { name?: string; plugins?: { name: string; source: string }[] }
+  const marketplace = await loadJsonFileSafe<Marketplace>(marketplacePath)
+  if (!marketplace?.plugins || !marketplace.name) return []
 
-  let marketplace: { name?: string; plugins?: { name: string; source: string }[] }
-  try {
-    marketplace = await marketplaceFile.json()
-  } catch {
-    return results
-  }
-
-  if (!marketplace.plugins || !marketplace.name) return results
-
+  const results: PluginCacheInfo[] = []
   for (const plugin of marketplace.plugins) {
     const key = `${plugin.name}@${marketplace.name}`
     const entries = installed.plugins[key]
@@ -1191,7 +1201,6 @@ async function checkPluginCacheStaleness(): Promise<PluginCacheInfo[]> {
     )
     if (info) results.push(info)
   }
-
   return results
 }
 
@@ -1772,34 +1781,9 @@ async function findOldTaskFiles(
     return oldTaskFiles
   }
 
-  async function processTaskFile(
-    sessionId: string,
-    sessionDir: string,
-    file: string,
-    cutoffMs: number
-  ): Promise<OldTaskFileInfo | null> {
-    if (!file.endsWith(".json") || file.startsWith(".") || file === "compact-snapshot.json") {
-      return null
-    }
-    const filePath = join(sessionDir, file)
-    let fileStat: Awaited<ReturnType<typeof stat>>
+  async function readTaskFileJson(filePath: string) {
     try {
-      fileStat = await stat(filePath)
-    } catch {
-      return null
-    }
-    if (!fileStat.isFile()) return null
-
-    let task:
-      | {
-          id?: string
-          status?: string
-          statusChangedAt?: string
-          completionTimestamp?: string
-        }
-      | undefined
-    try {
-      task = JSON.parse(await readFile(filePath, "utf-8")) as {
+      return JSON.parse(await readFile(filePath, "utf-8")) as {
         id?: string
         status?: string
         statusChangedAt?: string
@@ -1808,7 +1792,34 @@ async function findOldTaskFiles(
     } catch {
       return null
     }
-    if (!task.status) return null
+  }
+
+  function isTaskJsonFile(file: string): boolean {
+    return file.endsWith(".json") && !file.startsWith(".") && file !== "compact-snapshot.json"
+  }
+
+  async function statFileSafe(filePath: string) {
+    try {
+      const s = await stat(filePath)
+      return s.isFile() ? s : null
+    } catch {
+      return null
+    }
+  }
+
+  async function processTaskFile(
+    sessionId: string,
+    sessionDir: string,
+    file: string,
+    cutoffMs: number
+  ): Promise<OldTaskFileInfo | null> {
+    if (!isTaskJsonFile(file)) return null
+    const filePath = join(sessionDir, file)
+    const fileStat = await statFileSafe(filePath)
+    if (!fileStat) return null
+
+    const task = await readTaskFileJson(filePath)
+    if (!task?.status) return null
     const taskMs = parseTaskAgeMs(task) ?? fileStat.mtimeMs
     if (taskMs >= cutoffMs) return null
 
@@ -2381,6 +2392,21 @@ async function trashAllSessions(
   return { succeeded, failed, taskDirsRemoved }
 }
 
+function buildCleanupNotes(
+  sessions: { taskDirsRemoved: number },
+  tasks: { removed: number },
+  claude: { removed: number },
+  gemini: { removed: number }
+): string {
+  const parts: string[] = []
+  if (sessions.taskDirsRemoved > 0) parts.push(`${sessions.taskDirsRemoved} task dir(s)`)
+  if (tasks.removed > 0)
+    parts.push(`${tasks.removed} old task ${tasks.removed === 1 ? "file" : "files"}`)
+  if (claude.removed > 0) parts.push(`${claude.removed} ${backupLabel("Claude", claude.removed)}`)
+  if (gemini.removed > 0) parts.push(`${gemini.removed} ${backupLabel("Gemini", gemini.removed)}`)
+  return parts.length > 0 ? ` + ${parts.join(" + ")}` : ""
+}
+
 function printCleanupResult(
   sessions: { succeeded: number; failed: number; taskDirsRemoved: number },
   tasks: { removed: number; failed: number },
@@ -2388,19 +2414,9 @@ function printCleanupResult(
   gemini: { removed: number; failed: number },
   totalBytes: number
 ): void {
-  const taskDirNote =
-    sessions.taskDirsRemoved > 0 ? ` + ${sessions.taskDirsRemoved} task dir(s)` : ""
-  const claudeNote =
-    claude.removed > 0 ? ` + ${claude.removed} ${backupLabel("Claude", claude.removed)}` : ""
-  const geminiNote =
-    gemini.removed > 0 ? ` + ${gemini.removed} ${backupLabel("Gemini", gemini.removed)}` : ""
-  const oldTaskNote =
-    tasks.removed > 0
-      ? ` + ${tasks.removed} old task ${tasks.removed === 1 ? "file" : "files"}`
-      : ""
+  const notes = buildCleanupNotes(sessions, tasks, claude, gemini)
   console.log(
-    `  ${GREEN}${BOLD}Done.${RESET} ${sessions.succeeded} session(s)` +
-      `${taskDirNote}${oldTaskNote}${claudeNote}${geminiNote}` +
+    `  ${GREEN}${BOLD}Done.${RESET} ${sessions.succeeded} session(s)${notes}` +
       ` moved to Trash (~${formatBytes(totalBytes)} reclaimed).`
   )
 
@@ -2454,14 +2470,13 @@ async function executeCleanup(opts: ExecuteCleanupOpts): Promise<void> {
 
 // ─── Cleanup runner ─────────────────────────────────────────────────────────
 
-export async function runCleanupCommand(args: string[]): Promise<void> {
-  const cleanupArgs = parseCleanupArgs(args)
+async function gatherCleanupData(cleanupArgs: ReturnType<typeof parseCleanupArgs>) {
   const { projectsDir, tasksDir } = createDefaultTaskStore()
   const cutoffMs = Date.now() - cleanupArgs.olderThanMs
   const taskCutoffMs = cleanupArgs.taskOlderThanMs ? Date.now() - cleanupArgs.taskOlderThanMs : null
 
   const projectNames = await discoverProjectNames(projectsDir, cleanupArgs.projectFilter)
-  if (!projectNames) return
+  if (!projectNames) return null
 
   const results = await scanProjects(projectNames, projectsDir, cutoffMs, tasksDir)
   await markStaleProjects(results)
@@ -2485,6 +2500,14 @@ export async function runCleanupCommand(args: string[]): Promise<void> {
     findClaudeBackups(),
     findGeminiBackups(),
   ])
+  return { results, oldTaskFiles, oldTaskBytes, taskCutoffMs, claudeBackups, geminiBackups }
+}
+
+export async function runCleanupCommand(args: string[]): Promise<void> {
+  const cleanupArgs = parseCleanupArgs(args)
+  const data = await gatherCleanupData(cleanupArgs)
+  if (!data) return
+  const { results, claudeBackups, geminiBackups, oldTaskFiles, oldTaskBytes, taskCutoffMs } = data
 
   if (results.length === 0 && claudeBackups.fileCount === 0 && geminiBackups.fileCount === 0) {
     console.log(`No session directories found (older than ${cleanupArgs.olderThanLabel}).`)

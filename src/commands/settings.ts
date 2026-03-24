@@ -125,17 +125,19 @@ interface SettingsArgState {
   json: boolean
 }
 
+const SIMPLE_FLAGS: Record<string, keyof Pick<SettingsArgState, "force" | "json">> = {
+  "--force": "force",
+  "-f": "force",
+  "--json": "json",
+}
+
 function processSettingsArg(args: string[], i: number, state: SettingsArgState): number {
   const arg = args[i]!
   const next = args[i + 1]
 
-  if (arg === "--force" || arg === "-f") {
-    state.force = true
-    return i
-  }
-
-  if (arg === "--json") {
-    state.json = true
+  const simpleFlag = SIMPLE_FLAGS[arg]
+  if (simpleFlag) {
+    state[simpleFlag] = true
     return i
   }
 
@@ -277,6 +279,19 @@ const GLOBAL_BOOL_ROWS: BoolSettingRow[] = [
   ["quality-checks-gate:", "qualityChecksGate", "global"],
 ]
 
+function printNumericGlobalSettings(effective: EffectiveSwizSettings): void {
+  const minutesOrDisabled = (v: number) => (v > 0 ? `${v} minutes` : "disabled")
+  console.log(`  pr-age-gate:     ${minutesOrDisabled(effective.prAgeGateMinutes)} (global)`)
+  console.log(`  push-cooldown:   ${minutesOrDisabled(effective.pushCooldownMinutes)} (global)`)
+  console.log(`  narrator-voice:  ${effective.narratorVoice || "system default"} (global)`)
+  console.log(
+    `  narrator-speed:  ${effective.narratorSpeed > 0 ? `${effective.narratorSpeed} wpm` : "system default"} (global)`
+  )
+  console.log(`  memory-line-threshold: ${effective.memoryLineThreshold} (global)`)
+  console.log(`  memory-word-threshold: ${effective.memoryWordThreshold} (global)`)
+  console.log(`  large-file-size-kb: ${effective.largeFileSizeKb} (global)`)
+}
+
 function printGlobalSettings(
   effective: EffectiveSwizSettings & { disabledHooks?: string[] },
   ambitionSource: "global" | "project" | "session" | undefined,
@@ -300,19 +315,7 @@ function printGlobalSettings(
     `  strict-no-direct-main:   ${effective.strictNoDirectMain ? "enabled" : "disabled"} (${strictLabel})`
   )
 
-  const ageGateLabel =
-    effective.prAgeGateMinutes > 0 ? `${effective.prAgeGateMinutes} minutes` : "disabled"
-  const cooldownLabel =
-    effective.pushCooldownMinutes > 0 ? `${effective.pushCooldownMinutes} minutes` : "disabled"
-  console.log(`  pr-age-gate:     ${ageGateLabel} (global)`)
-  console.log(`  push-cooldown:   ${cooldownLabel} (global)`)
-  console.log(`  narrator-voice:  ${effective.narratorVoice || "system default"} (global)`)
-  console.log(
-    `  narrator-speed:  ${effective.narratorSpeed > 0 ? `${effective.narratorSpeed} wpm` : "system default"} (global)`
-  )
-  console.log(`  memory-line-threshold: ${effective.memoryLineThreshold} (global)`)
-  console.log(`  memory-word-threshold: ${effective.memoryWordThreshold} (global)`)
-  console.log(`  large-file-size-kb: ${effective.largeFileSizeKb} (global)`)
+  printNumericGlobalSettings(effective)
 
   const globalDisabled = effective.disabledHooks ?? []
   if (globalDisabled.length > 0) {
@@ -486,6 +489,39 @@ async function enforceStrictNoDirectMainConflicts(parsed: ParsedSettingsArgs): P
   )
 }
 
+async function resolveWriteScopeLabel(parsed: ParsedSettingsArgs): Promise<string> {
+  if (parsed.scope === "session") {
+    const sessionId = await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
+    return `session ${sessionId}`
+  }
+  return parsed.scope
+}
+
+function printSettingChange(opts: {
+  parsed: ParsedSettingsArgs
+  key: string
+  value: unknown
+  verb: string
+  scopeLabel: string
+  path: string
+}): void {
+  const { parsed, key, value, verb, scopeLabel, path } = opts
+  if (parsed.json) {
+    console.log(
+      JSON.stringify({
+        action: verb.toLowerCase(),
+        setting: key,
+        value,
+        scope: scopeLabel,
+        path,
+      })
+    )
+    return
+  }
+  console.log(`\n  ${verb} ${parsed.settingArg ?? key} (${scopeLabel})`)
+  console.log(`  Saved: ${path}\n`)
+}
+
 async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): Promise<void> {
   const key = parseSetting(parsed.settingArg)
   if (isNumericSetting(key) || isStringSetting(key)) {
@@ -501,25 +537,8 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
 
   const path = await writeSettingToScope(parsed, key, enabled)
   const verb = enabled ? "Enabled" : "Disabled"
-  let scopeLabel = parsed.scope as string
-  if (parsed.scope === "session") {
-    const sessionId = await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
-    scopeLabel = `session ${sessionId}`
-  }
-  if (parsed.json) {
-    console.log(
-      JSON.stringify({
-        action: verb.toLowerCase(),
-        setting: key,
-        value: enabled,
-        scope: scopeLabel,
-        path,
-      })
-    )
-    return
-  }
-  console.log(`\n  ${verb} ${parsed.settingArg ?? key} (${scopeLabel})`)
-  console.log(`  Saved: ${path}\n`)
+  const scopeLabel = await resolveWriteScopeLabel(parsed)
+  printSettingChange({ parsed, key, value: enabled, verb, scopeLabel, path })
 
   if (enabled && key === "speak") {
     const updatedSettings = await readSwizSettings()
@@ -649,28 +668,37 @@ async function enableHook(parsed: ParsedSettingsArgs): Promise<void> {
   console.log(`  Saved: ${path}\n`)
 }
 
-function buildSettingOptions(): Array<{ flags: string; description: string }> {
-  const options: Array<{ flags: string; description: string }> = []
-  for (const def of SETTINGS_REGISTRY) {
-    const alias = primaryAlias(def)
-    if (def.kind === "boolean") {
-      options.push({
-        flags: `enable ${alias}`,
-        description: def.docs?.enableDescription ?? `Enable ${alias}`,
-      })
-      options.push({
+function settingDefToOptions(
+  def: (typeof SETTINGS_REGISTRY)[number]
+): Array<{ flags: string; description: string }> {
+  const alias = primaryAlias(def)
+  if (def.kind === "boolean") {
+    return [
+      { flags: `enable ${alias}`, description: def.docs?.enableDescription ?? `Enable ${alias}` },
+      {
         flags: `disable ${alias}`,
         description: def.docs?.disableDescription ?? `Disable ${alias}`,
-      })
-      continue
-    }
-    const valuePlaceholder = def.docs?.valuePlaceholder ?? "value"
-    options.push({
+      },
+    ]
+  }
+  const valuePlaceholder = def.docs?.valuePlaceholder ?? "value"
+  return [
+    {
       flags: `set ${alias} <${valuePlaceholder}>`,
       description: def.docs?.setDescription ?? `Set ${alias}`,
-    })
-  }
-  return options
+    },
+  ]
+}
+
+function buildSettingOptions(): Array<{ flags: string; description: string }> {
+  return SETTINGS_REGISTRY.flatMap(settingDefToOptions)
+}
+
+function isJsonHelpRequest(args: string[]): boolean {
+  return (
+    args.includes("--json") &&
+    (args.includes("--help") || args.includes("-h") || args.includes("help"))
+  )
 }
 
 export const settingsCommand: Command = {
@@ -709,10 +737,7 @@ export const settingsCommand: Command = {
     },
   ],
   async run(args) {
-    if (
-      args.includes("--json") &&
-      (args.includes("--help") || args.includes("-h") || args.includes("help"))
-    ) {
+    if (isJsonHelpRequest(args)) {
       const schema = SETTINGS_REGISTRY.map((def) => ({
         key: def.key,
         kind: def.kind,

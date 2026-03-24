@@ -126,6 +126,58 @@ function parseArgs(args: string[]): ParsedArgs {
   return state
 }
 
+async function handleCreateFailure(opts: {
+  repo: string
+  title: string
+  body: string
+  stderr: string
+  cwd: string
+  fileRef: string
+}): Promise<void> {
+  const { repo, title, body, stderr, cwd, fileRef } = opts
+  const filed = isGraphQLRateLimited(stderr)
+    ? await tryRestFallbackCreate(repo, title, body, cwd)
+    : false
+
+  if (filed) {
+    console.log(`  Issue filed (REST fallback): ${filed}`)
+    console.log(`  Repo: ${repo}`)
+    console.log(`  File: ${fileRef}`)
+    return
+  }
+
+  try {
+    getIssueStore().queueMutation(repo, { type: "create", number: 0, title, body })
+  } catch {}
+  throw new Error(`gh issue create failed`)
+}
+
+async function tryRestFallbackCreate(
+  repo: string,
+  title: string,
+  body: string,
+  cwd: string
+): Promise<string | false> {
+  const restProc = Bun.spawn(["gh", "api", `repos/${repo}/issues`, "-X", "POST", "--input", "-"], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: new Response(JSON.stringify({ title, body })),
+  })
+  const [restOut] = await Promise.all([
+    new Response(restProc.stdout).text(),
+    new Response(restProc.stderr).text(),
+  ])
+  await restProc.exited
+  if (restProc.exitCode !== 0) return false
+  try {
+    const parsed = JSON.parse(restOut) as { html_url?: string }
+    return parsed.html_url ?? restOut.trim()
+  } catch {
+    return false
+  }
+}
+
 export const crossRepoIssueCommand: Command = {
   name: "cross-repo-issue",
   description:
@@ -150,36 +202,6 @@ export const crossRepoIssueCommand: Command = {
   ],
   async run(args) {
     const opts = parseArgs(args)
-
-    async function tryRestFallbackCreate(
-      repo: string,
-      title: string,
-      body: string,
-      cwd: string
-    ): Promise<string | false> {
-      const restProc = Bun.spawn(
-        ["gh", "api", `repos/${repo}/issues`, "-X", "POST", "--input", "-"],
-        {
-          cwd,
-          stdout: "pipe",
-          stderr: "pipe",
-          stdin: new Response(JSON.stringify({ title, body })),
-        }
-      )
-      const [restOut] = await Promise.all([
-        new Response(restProc.stdout).text(),
-        new Response(restProc.stderr).text(),
-      ])
-      await restProc.exited
-      if (restProc.exitCode !== 0) return false
-      try {
-        const parsed = JSON.parse(restOut) as { html_url?: string }
-        return parsed.html_url ?? restOut.trim()
-      } catch {
-        return false
-      }
-    }
-
     if (!opts.filePath) {
       throw new Error(`--file is required.\n${this.usage}`)
     }
@@ -216,37 +238,15 @@ export const crossRepoIssueCommand: Command = {
     ])
     await proc.exited
 
+    const fileRef = `${relativeFilePath(opts.filePath)}${opts.line != null ? `:${opts.line}` : ""}`
+
     if (proc.exitCode !== 0) {
-      const filed = isGraphQLRateLimited(stderr)
-        ? await tryRestFallbackCreate(repo, opts.title, body, cwd)
-        : false
-
-      if (filed) {
-        console.log(`  Issue filed (REST fallback): ${filed}`)
-        console.log(`  Repo: ${repo}`)
-        console.log(
-          `  File: ${relativeFilePath(opts.filePath)}${opts.line != null ? `:${opts.line}` : ""}`
-        )
-        return
-      }
-
-      // Queue for later replay
-      try {
-        getIssueStore().queueMutation(repo, {
-          type: "create",
-          number: 0,
-          title: opts.title,
-          body,
-        })
-      } catch {}
-      throw new Error(`gh issue create failed with exit code ${proc.exitCode}`)
+      await handleCreateFailure({ repo, title: opts.title, body, stderr, cwd, fileRef })
+      return
     }
 
-    const url = output.trim()
-    console.log(`  Issue filed: ${url}`)
+    console.log(`  Issue filed: ${output.trim()}`)
     console.log(`  Repo: ${repo}`)
-    console.log(
-      `  File: ${relativeFilePath(opts.filePath)}${opts.line != null ? `:${opts.line}` : ""}`
-    )
+    console.log(`  File: ${fileRef}`)
   },
 }
