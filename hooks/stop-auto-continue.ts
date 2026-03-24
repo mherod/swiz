@@ -888,7 +888,13 @@ async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentRe
     ambitionMode,
     sessionId,
   } = opts
-  const context = formatTurnsAsContext(turns)
+  // Cap context to ~30K chars (~8K tokens) to stay within model limits.
+  // Prioritize recent turns — trim from the front if over budget.
+  const MAX_CONTEXT_CHARS = 30_000
+  let context = formatTurnsAsContext(turns)
+  if (context.length > MAX_CONTEXT_CHARS) {
+    context = `[...earlier turns truncated for length...]\n\n${context.slice(-MAX_CONTEXT_CHARS)}`
+  }
   const taskSection = buildTaskSection(taskContext)
   const userMessagesSection = buildUserMessagesSection(turns)
   // Parallelize I/O-bound pre-AI data gathering
@@ -915,7 +921,9 @@ async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentRe
       timeout: ATTEMPT_TIMEOUT_MS,
     })
     return filterAgentResponse(parsed)
-  } catch {
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err)
+    console.error(`[stop-auto-continue] AI generation failed: ${errMsg}`)
     const fillerNext = await buildFillerSuggestion(editedPaths, docsOnly, inputCwd ?? process.cwd())
     if (fillerNext) {
       return { processCritique: "", productCritique: "", next: fillerNext, reflections: [] }
@@ -923,7 +931,7 @@ async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentRe
     if (!refinementStatus) {
       terminate(
         "block",
-        "Auto-continue could not generate a next-step suggestion: AI backend failed during call.\nReview your recent changes and continue working if there is more to do."
+        `Auto-continue could not generate a next-step suggestion: AI backend failed during call.\nReview your recent changes and continue working if there is more to do.`
       )
     }
     return { processCritique: "", productCritique: "", next: "", reflections: [] }
