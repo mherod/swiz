@@ -232,7 +232,7 @@ describe("stop-debug-statements: mixed commits", () => {
   })
 
   test("only generated files changed — hook exits silently", async () => {
-    const dir = await makeTempGitRepo("-only-generated")
+    const dir = await makeTempGitRepo(tmp, { suffix: "-only-generated" })
     await commitFile(dir, "dist/app.bundle.js", "console.log('bundle init');\n")
     const result = await runHook(dir)
     expect(result.blocked).toBe(false)
