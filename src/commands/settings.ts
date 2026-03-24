@@ -679,7 +679,11 @@ export const settingsCommand: Command = {
     "swiz settings [show | enable <setting> | disable <setting>] [--global | --project | --session [id]] [--dir <path>]",
   options: [
     { flags: "show", description: "Show current effective settings (default action)" },
-    { flags: "--json", description: "Output effective settings as JSON (show mode only)" },
+    {
+      flags: "--json",
+      description:
+        "Output as JSON (show: effective settings, enable/disable/set: confirmation, help: schema)",
+    },
     ...buildSettingOptions(),
     {
       flags: "--force, -f",
@@ -704,6 +708,19 @@ export const settingsCommand: Command = {
     },
   ],
   async run(args) {
+    if (
+      args.includes("--json") &&
+      (args.includes("--help") || args.includes("-h") || args.includes("help"))
+    ) {
+      const schema = SETTINGS_REGISTRY.map((def) => ({
+        key: def.key,
+        kind: def.kind,
+        scopes: def.scopes,
+        aliases: def.aliases,
+      }))
+      console.log(JSON.stringify(schema, null, 2))
+      return
+    }
     const parsed = parseSettingsArgs(args)
     switch (parsed.action) {
       case "show":
