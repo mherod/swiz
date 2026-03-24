@@ -39,10 +39,6 @@ function countTodoMarkers(content: string): number {
 
 export { countTodoMarkers }
 
-function shouldSkipTodoCheck(filePath: string): boolean {
-  return isExcludedSourcePath(filePath, EXCLUDE_PATH_RE, GENERATED_FILE_RE, TEST_FILE_RE)
-}
-
 function buildDenyMessage(oldCount: number, newCount: number): string {
   return [
     "TODO/FIXME/HACK debt markers must not be introduced in source files.",
@@ -66,7 +62,8 @@ async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
 
   const filePath = input.tool_input?.file_path ?? ""
-  if (shouldSkipTodoCheck(filePath)) allowPreToolUse("")
+  if (isExcludedSourcePath(filePath, EXCLUDE_PATH_RE, GENERATED_FILE_RE, TEST_FILE_RE))
+    allowPreToolUse("")
 
   const oldString = input.tool_input?.old_string ?? ""
   const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""

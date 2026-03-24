@@ -50,21 +50,13 @@ function countDebugPatterns(content: string): number {
 
 export { countDebugPatterns }
 
-function shouldSkipDebugCheck(filePath: string): boolean {
-  return isExcludedSourcePath(
-    filePath,
-    TEST_FILE_RE,
-    INFRA_FILE_RE,
-    GENERATED_FILE_RE,
-    CONFIG_FILE_RE
-  )
-}
-
 async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
   const filePath = input.tool_input?.file_path ?? ""
 
-  if (shouldSkipDebugCheck(filePath)) {
+  if (
+    isExcludedSourcePath(filePath, TEST_FILE_RE, INFRA_FILE_RE, GENERATED_FILE_RE, CONFIG_FILE_RE)
+  ) {
     allowPreToolUse("")
   }
 
