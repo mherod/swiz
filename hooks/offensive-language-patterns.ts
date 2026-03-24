@@ -269,6 +269,15 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "Whether it was broken before you started is irrelevant. It is broken now and it is in your workflow. " +
       "Fix it. The timeline of a problem's origin does not transfer ownership away from you.",
   },
+  {
+    category: "dismissal",
+    pattern:
+      /(?:that |this |the )?(?:diagnostic|warning|error|issue|lint)\b[^.!?\n]{0,80}\b(?:is |was )?pre-?existing\b/i,
+    response:
+      "Labeling a diagnostic as 'pre-existing' is a dismissal tactic. " +
+      "If the diagnostic appears in your workflow output, it is your responsibility to fix it. " +
+      "Its prior existence is irrelevant — you own every diagnostic in your output.",
+  },
 
   // ── Compliance gaming patterns ──────────────────────────────────────────
   {
