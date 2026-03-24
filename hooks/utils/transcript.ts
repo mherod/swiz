@@ -98,19 +98,23 @@ export async function extractSkillInvocations(path: string): Promise<string[]> {
  * contains the denial reason. All hook denial messages end with the mandatory
  * `ACTION REQUIRED:` footer, which is the reliable detection signal.
  */
+function collectBlockedIdsFromContent(content: unknown[]): string[] {
+  const ids: string[] = []
+  for (const block of content) {
+    if ((block as Record<string, unknown>)?.type !== "tool_result") continue
+    const text = extractTextFromUnknownContent((block as Record<string, unknown>).content)
+    if (text.includes("ACTION REQUIRED:"))
+      ids.push(String((block as Record<string, unknown>).tool_use_id ?? ""))
+  }
+  return ids
+}
+
 function extractBlockedIdsFromEntry(line: string): string[] {
   try {
     const entry = JSON.parse(line)
     if (entry?.type !== "user") return []
     const content = entry?.message?.content
-    if (!Array.isArray(content)) return []
-    const ids: string[] = []
-    for (const block of content) {
-      if (block?.type !== "tool_result") continue
-      const text = extractTextFromUnknownContent(block.content)
-      if (text.includes("ACTION REQUIRED:")) ids.push(String(block.tool_use_id ?? ""))
-    }
-    return ids
+    return Array.isArray(content) ? collectBlockedIdsFromContent(content) : []
   } catch {
     return []
   }
