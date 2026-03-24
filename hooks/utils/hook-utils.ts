@@ -1274,7 +1274,7 @@ export async function sendAutoSteer(
 
   const { createScript, runScript } = await import("applescript-node")
   const escaped = message.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")
-  const wrapped = `\\n${escaped}\\n`
+  const wrapped = `\\n${escaped}\\n\\r`
 
   try {
     if (app === "iterm2") {
