@@ -1,18 +1,15 @@
 import { join } from "node:path"
 import { getHomeDir } from "./home.ts"
-import { getProviderTaskRoots } from "./provider-adapters.ts"
+import { getProviderTaskRoots, type ProviderTaskRoots } from "./provider-adapters.ts"
 
-export interface TaskRoots {
-  tasksDir: string
-  projectsDir: string
-}
+export type { ProviderTaskRoots as TaskRoots }
 
 /**
  * Provider-neutral task store boundary.
  * Callers receive a `TaskStore` and pass it to task operations;
  * provider selection (Claude, etc.) is isolated inside `createDefaultTaskStore`.
  */
-export type TaskStore = TaskRoots
+export type TaskStore = ProviderTaskRoots
 
 /**
  * Create the default task store for the current environment.
@@ -22,7 +19,7 @@ export type TaskStore = TaskRoots
  *
  * Usage: `const store = createDefaultTaskStore()`
  */
-export function createDefaultTaskStore(homeDir = getHomeDir()): TaskStore {
+export function createDefaultTaskStore(homeDir = getHomeDir()): ProviderTaskRoots {
   const defaultHome = getHomeDir()
   if (homeDir === defaultHome) {
     const roots = getProviderTaskRoots("claude")
@@ -37,6 +34,6 @@ export function createDefaultTaskStore(homeDir = getHomeDir()): TaskStore {
 /**
  * @deprecated Use `createDefaultTaskStore()` instead.
  */
-export function getDefaultTaskRoots(homeDir?: string): TaskRoots {
+export function getDefaultTaskRoots(homeDir?: string): ProviderTaskRoots {
   return createDefaultTaskStore(homeDir)
 }

@@ -18,6 +18,7 @@
 // Gemini-specific helpers (ensureGeminiApiKey, hasGeminiApiKey, promptGemini*, etc.)
 // remain in gemini.ts for backward compatibility and direct use when needed.
 
+import type { LanguageModel } from "ai"
 import type { ZodType } from "zod"
 import {
   ensureGeminiApiKey,
@@ -116,11 +117,14 @@ export function resolveSignal(options?: { signal?: AbortSignal; timeout?: number
   return { signal: undefined, cleanup: () => {} }
 }
 
-async function promptCodexText(prompt: string, options?: PromptOptions): Promise<string> {
+// ─── Shared generation runners ────────────────────────────────────────────────
+
+async function runText(
+  model: LanguageModel,
+  prompt: string,
+  options?: PromptOptions
+): Promise<string> {
   const { generateText } = await import("ai")
-  const { createCodexCli } = await import("ai-sdk-provider-codex-cli")
-  const provider = createCodexCli()
-  const model = provider.languageModel(options?.model ?? CODEX_DEFAULT_MODEL)
   const { signal, cleanup } = resolveSignal(options)
   try {
     const { text } = await generateText({ model, prompt, abortSignal: signal })
@@ -130,14 +134,12 @@ async function promptCodexText(prompt: string, options?: PromptOptions): Promise
   }
 }
 
-async function promptCodexStreamText(
+async function runStreamText(
+  model: LanguageModel,
   prompt: string,
   options?: PromptStreamOptions
 ): Promise<string> {
   const { streamText } = await import("ai")
-  const { createCodexCli } = await import("ai-sdk-provider-codex-cli")
-  const provider = createCodexCli()
-  const model = provider.languageModel(options?.model ?? CODEX_DEFAULT_MODEL)
   const { signal, cleanup } = resolveSignal(options)
   try {
     const result = streamText({ model, prompt, abortSignal: signal })
@@ -150,6 +152,44 @@ async function promptCodexStreamText(
   } finally {
     cleanup()
   }
+}
+
+async function runObject<T>(
+  model: LanguageModel,
+  prompt: string,
+  schema: ZodType<T>,
+  options?: PromptOptions
+): Promise<T> {
+  const { generateText, Output } = await import("ai")
+  const { signal, cleanup } = resolveSignal(options)
+  try {
+    const { output } = await generateText({
+      model,
+      output: Output.object({ schema }),
+      prompt,
+      abortSignal: signal,
+    })
+    return output
+  } finally {
+    cleanup()
+  }
+}
+
+// ─── Codex provider ───────────────────────────────────────────────────────────
+
+async function promptCodexText(prompt: string, options?: PromptOptions): Promise<string> {
+  const { createCodexCli } = await import("ai-sdk-provider-codex-cli")
+  const model = createCodexCli().languageModel(options?.model ?? CODEX_DEFAULT_MODEL)
+  return runText(model, prompt, options)
+}
+
+async function promptCodexStreamText(
+  prompt: string,
+  options?: PromptStreamOptions
+): Promise<string> {
+  const { createCodexCli } = await import("ai-sdk-provider-codex-cli")
+  const model = createCodexCli().languageModel(options?.model ?? CODEX_DEFAULT_MODEL)
+  return runStreamText(model, prompt, options)
 }
 
 async function promptCodexObject<T>(
@@ -157,58 +197,26 @@ async function promptCodexObject<T>(
   schema: ZodType<T>,
   options?: PromptOptions
 ): Promise<T> {
-  const { generateText, Output } = await import("ai")
   const { createCodexCli } = await import("ai-sdk-provider-codex-cli")
-  const provider = createCodexCli()
-  const model = provider.languageModel(options?.model ?? CODEX_DEFAULT_MODEL)
-  const { signal, cleanup } = resolveSignal(options)
-  try {
-    const { output } = await generateText({
-      model,
-      output: Output.object({ schema }),
-      prompt,
-      abortSignal: signal,
-    })
-    return output
-  } finally {
-    cleanup()
-  }
+  const model = createCodexCli().languageModel(options?.model ?? CODEX_DEFAULT_MODEL)
+  return runObject(model, prompt, schema, options)
 }
 
+// ─── Claude Code provider ─────────────────────────────────────────────────────
+
 async function promptClaudeText(prompt: string, options?: PromptOptions): Promise<string> {
-  const { generateText } = await import("ai")
   const { createClaudeCode } = await import("ai-sdk-provider-claude-code")
-  const provider = createClaudeCode()
-  const model = provider.languageModel(options?.model ?? CLAUDE_DEFAULT_MODEL)
-  const { signal, cleanup } = resolveSignal(options)
-  try {
-    const { text } = await generateText({ model, prompt, abortSignal: signal })
-    return text.trim()
-  } finally {
-    cleanup()
-  }
+  const model = createClaudeCode().languageModel(options?.model ?? CLAUDE_DEFAULT_MODEL)
+  return runText(model, prompt, options)
 }
 
 async function promptClaudeStreamText(
   prompt: string,
   options?: PromptStreamOptions
 ): Promise<string> {
-  const { streamText } = await import("ai")
   const { createClaudeCode } = await import("ai-sdk-provider-claude-code")
-  const provider = createClaudeCode()
-  const model = provider.languageModel(options?.model ?? CLAUDE_DEFAULT_MODEL)
-  const { signal, cleanup } = resolveSignal(options)
-  try {
-    const result = streamText({ model, prompt, abortSignal: signal })
-    let text = ""
-    for await (const part of result.textStream) {
-      text += part
-      options?.onTextPart?.(part)
-    }
-    return text.trim()
-  } finally {
-    cleanup()
-  }
+  const model = createClaudeCode().languageModel(options?.model ?? CLAUDE_DEFAULT_MODEL)
+  return runStreamText(model, prompt, options)
 }
 
 async function promptClaudeObject<T>(
@@ -216,60 +224,30 @@ async function promptClaudeObject<T>(
   schema: ZodType<T>,
   options?: PromptOptions
 ): Promise<T> {
-  const { generateText, Output } = await import("ai")
   const { createClaudeCode } = await import("ai-sdk-provider-claude-code")
-  const provider = createClaudeCode()
-  const model = provider.languageModel(options?.model ?? CLAUDE_DEFAULT_MODEL)
-  const { signal, cleanup } = resolveSignal(options)
-  try {
-    const { output } = await generateText({
-      model,
-      output: Output.object({ schema }),
-      prompt,
-      abortSignal: signal,
-    })
-    return output
-  } finally {
-    cleanup()
-  }
+  const model = createClaudeCode().languageModel(options?.model ?? CLAUDE_DEFAULT_MODEL)
+  return runObject(model, prompt, schema, options)
 }
 
 // ─── OpenRouter provider ──────────────────────────────────────────────────────
 
 async function promptOpenRouterText(prompt: string, options?: PromptOptions): Promise<string> {
-  const { generateText } = await import("ai")
   const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
-  const provider = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY })
-  const model = provider.chat(options?.model ?? OPENROUTER_DEFAULT_MODEL)
-  const { signal, cleanup } = resolveSignal(options)
-  try {
-    const { text } = await generateText({ model, prompt, abortSignal: signal })
-    return text.trim()
-  } finally {
-    cleanup()
-  }
+  const model = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY }).chat(
+    options?.model ?? OPENROUTER_DEFAULT_MODEL
+  )
+  return runText(model, prompt, options)
 }
 
 async function promptOpenRouterStreamText(
   prompt: string,
   options?: PromptStreamOptions
 ): Promise<string> {
-  const { streamText } = await import("ai")
   const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
-  const provider = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY })
-  const model = provider.chat(options?.model ?? OPENROUTER_DEFAULT_MODEL)
-  const { signal, cleanup } = resolveSignal(options)
-  try {
-    const result = streamText({ model, prompt, abortSignal: signal })
-    let text = ""
-    for await (const part of result.textStream) {
-      text += part
-      options?.onTextPart?.(part)
-    }
-    return text.trim()
-  } finally {
-    cleanup()
-  }
+  const model = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY }).chat(
+    options?.model ?? OPENROUTER_DEFAULT_MODEL
+  )
+  return runStreamText(model, prompt, options)
 }
 
 async function promptOpenRouterObject<T>(
@@ -277,22 +255,11 @@ async function promptOpenRouterObject<T>(
   schema: ZodType<T>,
   options?: PromptOptions
 ): Promise<T> {
-  const { generateText, Output } = await import("ai")
   const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
-  const provider = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY })
-  const model = provider.chat(options?.model ?? OPENROUTER_DEFAULT_MODEL)
-  const { signal, cleanup } = resolveSignal(options)
-  try {
-    const { output } = await generateText({
-      model,
-      output: Output.object({ schema }),
-      prompt,
-      abortSignal: signal,
-    })
-    return output
-  } finally {
-    cleanup()
-  }
+  const model = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY }).chat(
+    options?.model ?? OPENROUTER_DEFAULT_MODEL
+  )
+  return runObject(model, prompt, schema, options)
 }
 
 // ─── Provider capability registry ────────────────────────────────────────────
