@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 
-import { fileEditHookInputSchema } from "./schemas.ts"
-import { allowPreToolUse, denyPreToolUse } from "./utils/hook-utils.ts"
+import { filePathGuardHook } from "./utils/hook-utils.ts"
 
 // Matches any lockfile at path boundaries (handles / and \ separators, case-insensitive)
 const LOCKFILE_RE =
@@ -24,12 +23,7 @@ const LOCKFILE_REASON = [
   "Do not edit lockfiles directly.",
 ].join("\n")
 
-async function main() {
-  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
-  const filePath = input.tool_input?.file_path ?? ""
-  if (LOCKFILE_RE.test(filePath)) denyPreToolUse(LOCKFILE_REASON)
-  allowPreToolUse("")
-}
+const main = filePathGuardHook((fp) => LOCKFILE_RE.test(fp), LOCKFILE_REASON)
 
 if (import.meta.main) {
   main().catch((e) => {

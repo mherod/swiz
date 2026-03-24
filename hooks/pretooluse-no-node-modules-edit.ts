@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
 
 import { isNodeModulesPath } from "../src/node-modules-path.ts"
-import { fileEditHookInputSchema } from "./schemas.ts"
-import { allowPreToolUse, denyPreToolUse } from "./utils/hook-utils.ts"
+import { filePathGuardHook } from "./utils/hook-utils.ts"
 
 const NODE_MODULES_REASON = [
   "You cannot edit files inside node_modules/.",
@@ -20,12 +19,11 @@ const NODE_MODULES_REASON = [
   "Do not edit node_modules/ directly.",
 ].join("\n")
 
-async function main() {
-  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
-  const filePath = input.tool_input?.file_path ?? ""
-  if (isNodeModulesPath(filePath)) denyPreToolUse(NODE_MODULES_REASON)
-  allowPreToolUse(`File is not in node_modules: ${filePath.split("/").pop()}`)
-}
+const main = filePathGuardHook(
+  isNodeModulesPath,
+  NODE_MODULES_REASON,
+  (fp) => `File is not in node_modules: ${fp.split("/").pop()}`
+)
 
 if (import.meta.main) {
   main().catch((e) => {

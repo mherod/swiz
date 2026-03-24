@@ -342,6 +342,28 @@ export function allowPreToolUseWithUpdatedInput(
   process.exit(0)
 }
 
+/**
+ * Factory for file-path guard PreToolUse hooks.
+ *
+ * Returns an async `main()` that parses stdin, tests the file path against
+ * `predicate`, and calls `denyPreToolUse` / `allowPreToolUse` accordingly.
+ * Absorbs the boilerplate shared by lockfile, node_modules, and similar guards.
+ */
+export function filePathGuardHook(
+  predicate: (filePath: string) => boolean,
+  denyReason: string,
+  allowMsg?: string | ((filePath: string) => string)
+): () => Promise<void> {
+  return async () => {
+    const { fileEditHookInputSchema } = await import("../schemas.ts")
+    const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
+    const filePath = input.tool_input?.file_path ?? ""
+    if (predicate(filePath)) denyPreToolUse(denyReason)
+    const msg = typeof allowMsg === "function" ? allowMsg(filePath) : (allowMsg ?? "")
+    allowPreToolUse(msg)
+  }
+}
+
 /** Emit a PostToolUse block decision and exit. Works across all agents. */
 export function denyPostToolUse(reason: string): never {
   console.log(
