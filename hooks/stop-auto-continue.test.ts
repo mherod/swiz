@@ -1070,10 +1070,10 @@ describe("stop-auto-continue", () => {
       "The fix handles the happy path but leaves the error case broken."
     )
     expect(result.reason).toContain("Run the full test suite")
-    // Critiques must appear before the finding line
+    // Next step must appear before critiques (inverted pyramid)
+    const nextIdx = result.reason!.indexOf("▶ Next step:")
     const critiqueIdx = result.reason!.indexOf("Process:")
-    const findingIdx = result.reason!.indexOf("Stop blocked — unresolved finding")
-    expect(critiqueIdx).toBeLessThan(findingIdx)
+    expect(nextIdx).toBeLessThan(critiqueIdx)
   })
 
   test("omits critique when JSON response has no critique field", async () => {
@@ -1086,8 +1086,8 @@ describe("stop-auto-continue", () => {
     })
 
     expect(result.decision).toBe("block")
-    expect(result.reason).not.toContain("Session critique:")
-    expect(result.reason!.trimStart()).toMatch(/^Stop blocked — unresolved finding:/)
+    expect(result.reason).not.toContain("Session review")
+    expect(result.reason!.trimStart()).toMatch(/^▶ Next step:/)
     expect(result.reason).toContain("Run the full test suite")
   })
 
@@ -1106,7 +1106,7 @@ describe("stop-auto-continue", () => {
     expect(result.decision).toBe("block")
     expect(result.reason).not.toContain("Process:")
     expect(result.reason).not.toContain("Product:")
-    expect(result.reason!.trimStart()).toMatch(/^Stop blocked — unresolved finding:/)
+    expect(result.reason!.trimStart()).toMatch(/^▶ Next step:/)
     expect(result.reason).toContain("Run the linter")
   })
 
@@ -1124,7 +1124,7 @@ describe("stop-auto-continue", () => {
 
     expect(result.decision).toBe("block")
     expect(result.reason).not.toContain("<tool_call>")
-    expect(result.reason!.trimStart()).toMatch(/^Stop blocked — unresolved finding:/)
+    expect(result.reason!.trimStart()).toMatch(/^▶ Next step:/)
     expect(result.reason).toContain("Run the tests")
   })
 

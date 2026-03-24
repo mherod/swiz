@@ -963,17 +963,31 @@ function buildFinalMessage(
   refinementStatus: string,
   critiquesEnabled: boolean
 ): string {
-  const critiqueLines = critiquesEnabled
-    ? [
-        response.processCritique ? `Process: ${response.processCritique}` : "",
-        response.productCritique ? `Product: ${response.productCritique}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n")
-    : ""
-  const critiqueLine = critiqueLines ? `${critiqueLines}\n\n` : ""
-  const refinementDirective = refinementStatus ? `\n\nNote: ${refinementStatus}` : ""
-  return `${critiqueLine}Stop blocked — unresolved finding: ${response.next || refinementStatus}${refinementDirective}`
+  const parts: string[] = []
+
+  // Lead with the actionable next step — most important info first
+  const nextStep = response.next || refinementStatus
+  parts.push(`▶ Next step: ${nextStep}`)
+
+  // Critiques as supporting context
+  if (critiquesEnabled) {
+    const critiques: string[] = []
+    if (response.processCritique) critiques.push(`  Process: ${response.processCritique}`)
+    if (response.productCritique) critiques.push(`  Product: ${response.productCritique}`)
+    if (critiques.length > 0) {
+      parts.push("")
+      parts.push("── Session review ──")
+      parts.push(...critiques)
+    }
+  }
+
+  // Refinement note (only if it wasn't already used as the next step)
+  if (refinementStatus && response.next) {
+    parts.push("")
+    parts.push(`Note: ${refinementStatus}`)
+  }
+
+  return parts.join("\n")
 }
 
 interface SessionContext {
