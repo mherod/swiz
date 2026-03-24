@@ -355,6 +355,7 @@ export const statusCommand: Command = {
   name: "status",
   description: "Show swiz installation status across agents",
   usage: "swiz status [--json]",
+  options: [{ flags: "--json", description: "Output project health as JSON" }],
   async run(args) {
     const cwd = process.cwd()
     const jsonMode = args.includes("--json")
