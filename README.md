@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**106 hooks. 12 event types. Every agent. Zero compromises.**
+**107 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -119,7 +119,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (54)
+### PreToolUse (55)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -136,6 +136,7 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-protect-strict-main.ts` | Blocks Bash commands that attempt to disable the strict-no-direct-main setting. The feature-branch enforcement can only be disabled by the user at the terminal — agents cannot opt out. |
 | `pretooluse-long-sleep.ts` | Blocks `sleep` commands over a threshold. Agents shouldn't be waiting in loops — if they are, something is wrong. |
 | `pretooluse-ts-quality.ts` | Blocks edits that weaken TypeScript quality: `as any` casts, `eslint-disable` comments, and `@ts-ignore`/`@ts-expect-error`/`@ts-nocheck` directives. The type system and linter are authority. |
+| `pretooluse-ts-edit-state-gate.ts` | Blocks edits to `.ts` / `.tsx` files unless project state is `developing`, `reviewing`, or `addressing-feedback`. In `planning`, use triage and design work first — transition state before writing TypeScript. |
 | `pretooluse-no-node-modules-edit.ts` | Blocks any edit to files inside `node_modules/`. Manual edits there are overwritten on the next install — use version upgrades, upstream PRs, or patch-package instead. |
 | `pretooluse-no-lockfile-edit.ts` | Blocks direct edits to lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `bun.lock`, etc.). Lockfiles are machine-generated — use the package manager command to regenerate them. |
 | `pretooluse-eslint-config-strength.ts` | Prevents weakening ESLint configs — rules can only be added or escalated, never removed or downgraded. Enforces a quality ratchet. |
@@ -211,7 +212,7 @@ PostToolUse hooks run after a tool completes. They can feed error context back t
 
 | Hook | What it does |
 |------|-------------|
-| `sessionstart-self-heal.ts` | Detects manifest drift by hashing `src/manifest.ts` and comparing to a stored hash. Automatically runs `swiz install` if they differ, keeping agent configs in sync after `git pull`. |
+| `sessionstart-self-heal.ts` | Detects manifest drift by hashing `src/manifest.ts` and comparing to a stored hash. Automatically runs `swiz install` if they differ, keeping agent configs in sync after `git pull`. After a **full** `swiz install --uninstall` or `swiz uninstall` (all agents), self-heal pauses until you run `swiz install` again so manifest drift cannot undo an intentional removal. |
 | `sessionstart-health-snapshot.ts` | Captures a baseline of project health (lint state, test state, git state) at session start so the agent knows what it's walking into. |
 | `sessionstart-state-context.ts` | Injects the current project state (e.g., `in-development`, `awaiting-feedback`) and allowed transitions into the session context so the agent always knows its lifecycle position. |
 | `posttooluse-speak-narrator.ts` | Speaks any assistant text generated during session startup. Catches up on the transcript before the first tool call. Runs async. |

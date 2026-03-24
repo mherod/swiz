@@ -9,3 +9,22 @@ export interface ActiveHookDispatch {
   toolName?: string
   toolInputSummary?: string
 }
+
+export interface ToolCallSummary {
+  name: string
+  detail: string
+}
+
+export interface SessionMessage {
+  role: "user" | "assistant"
+  timestamp: string | null
+  text: string
+  toolCalls?: ToolCallSummary[]
+}
+
+export interface SessionTaskSummary {
+  total: number
+  open: number
+  completed: number
+  cancelled: number
+}

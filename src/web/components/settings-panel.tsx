@@ -244,14 +244,14 @@ const GLOBAL_TOGGLES: Array<{
     desc: "Automatically trigger follow-up execution runs for pending tasks without user prompts.",
   },
   {
-    key: "critiquesEnabled",
-    label: "Critiques",
-    desc: "Enable automated multi-agent code critiques during review phases.",
-  },
-  {
     key: "prMergeMode",
     label: "PR merge mode",
     desc: 'Require Pull Requests for merging code. Disabling allows direct pushes when collaboration mode is "auto".',
+  },
+  {
+    key: "critiquesEnabled",
+    label: "Critiques",
+    desc: "Enable automated multi-agent code critiques during review phases.",
   },
   {
     key: "pushGate",
@@ -264,14 +264,19 @@ const GLOBAL_TOGGLES: Array<{
     desc: "Restrict file write operations to the current project directory only.",
   },
   {
-    key: "gitStatusGate",
-    label: "Git status gate",
-    desc: "Block session completion when uncommitted or unpushed git changes are detected.",
+    key: "speak",
+    label: "Speak",
+    desc: "Enable text-to-speech audio narration of certain notifications and events.",
   },
   {
     key: "updateMemoryFooter",
     label: "Update memory footer",
     desc: "Require updating CLAUDE.md memory when the session completes successfully.",
+  },
+  {
+    key: "gitStatusGate",
+    label: "Git status gate",
+    desc: "Block session completion when uncommitted or unpushed git changes are detected.",
   },
   {
     key: "nonDefaultBranchGate",
@@ -302,11 +307,6 @@ const GLOBAL_TOGGLES: Array<{
     key: "qualityChecksGate",
     label: "Quality checks gate",
     desc: "Run lint and typecheck quality checks before allowing session stop.",
-  },
-  {
-    key: "speak",
-    label: "Speak",
-    desc: "Enable text-to-speech audio narration of certain notifications and events.",
   },
 ]
 

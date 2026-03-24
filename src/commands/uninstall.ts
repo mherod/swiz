@@ -1,5 +1,6 @@
-import { AGENTS, type AgentDef, getAgentByFlag } from "../agents.ts"
+import { AGENTS, type AgentDef, getAgentByFlag, hasAnyAgentFlag } from "../agents.ts"
 import { BOLD, DIM, GREEN, RED, RESET } from "../ansi.ts"
+import { pauseSessionstartSelfHeal } from "../sessionstart-self-heal-state.ts"
 import { isManagedSwizCommand } from "../swiz-hook-commands.ts"
 import type { Command } from "../types.ts"
 
@@ -115,6 +116,13 @@ function countSwizHooks(hooks: Record<string, unknown>): number {
   return count
 }
 
+/** Shared by `swiz uninstall` and `swiz install --uninstall`. */
+export async function uninstallSwizFromAgents(targets: AgentDef[], dryRun: boolean): Promise<void> {
+  for (const agent of targets) {
+    await uninstallAgent(agent, dryRun)
+  }
+}
+
 export const uninstallCommand: Command = {
   name: "uninstall",
   description: "Remove swiz hooks from agent settings",
@@ -130,8 +138,8 @@ export const uninstallCommand: Command = {
 
     console.log(`\n  swiz uninstall${dryRun ? " (dry run)" : ""}\n`)
 
-    for (const agent of targets) {
-      await uninstallAgent(agent, dryRun)
-    }
+    await uninstallSwizFromAgents(targets, dryRun)
+
+    if (!dryRun && !hasAnyAgentFlag(args)) await pauseSessionstartSelfHeal()
   },
 }

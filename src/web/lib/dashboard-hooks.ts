@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react"
+import type { ActiveHookDispatch } from "../../commands/daemon/types.ts"
 import type {
   ProjectSessions,
   ProjectTask,
@@ -9,6 +10,8 @@ import type {
 } from "../components/session-browser.tsx"
 import { getQueryParam, msgKey, toSortedEvents } from "./dashboard-helpers.ts"
 import { fetchJson, postJson } from "./http.ts"
+
+export type { ActiveHookDispatch } from "../../commands/daemon/types.ts"
 
 export interface MetricsResponse {
   uptimeHuman?: string
@@ -22,18 +25,6 @@ export interface WatchesResponse {
 
 export interface AgentProcessesResponse {
   providers?: Record<string, number[]>
-}
-
-export interface ActiveHookDispatch {
-  requestId: string
-  canonicalEvent: string
-  hookEventName: string
-  cwd: string
-  sessionId: string | null
-  hooks: string[]
-  startedAt: number
-  toolName?: string
-  toolInputSummary?: string
 }
 
 interface InitialSelectionDeps {

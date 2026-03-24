@@ -2,11 +2,14 @@
 // SessionStart hook: Auto-reinstall swiz if the manifest has drifted since last install.
 // Detects manifest changes by comparing a hash of src/manifest.ts to a stored hash.
 // Runs at startup so agents always get up-to-date hook configurations.
+// Skips entirely while `~/.local/share/swiz/sessionstart-self-heal-paused` exists
+// (set by full `swiz install --uninstall` / `swiz uninstall` so drift does not re-add hooks).
 
 import { createHash } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { getHomeDir } from "../src/home.ts"
+import { isSessionstartSelfHealPaused } from "../src/sessionstart-self-heal-state.ts"
 import { emitContext, spawnWithTimeout } from "./utils/hook-utils.ts"
 
 const HASH_FILE = join(getHomeDir(), ".local", "share", "swiz", "manifest-hash")
@@ -56,6 +59,10 @@ async function runInstall(swizRoot: string): Promise<boolean> {
 
 async function main(): Promise<void> {
   await Bun.stdin.json() // consume stdin (required by hook protocol)
+
+  // Full `swiz install --uninstall` / `swiz uninstall` pauses self-heal so manifest drift
+  // does not undo an intentional removal.
+  if (await isSessionstartSelfHealPaused()) return
 
   // Resolve swiz root from the hook file location
   const swizRoot = dirname(dirname(import.meta.path))

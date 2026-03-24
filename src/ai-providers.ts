@@ -175,21 +175,36 @@ async function runObject<T>(
   }
 }
 
+// ─── Per-provider model factories ────────────────────────────────────────────
+
+async function getCodexModel(modelId?: string): Promise<LanguageModel> {
+  const { createCodexCli } = await import("ai-sdk-provider-codex-cli")
+  return createCodexCli().languageModel(modelId ?? CODEX_DEFAULT_MODEL)
+}
+
+async function getClaudeModel(modelId?: string): Promise<LanguageModel> {
+  const { createClaudeCode } = await import("ai-sdk-provider-claude-code")
+  return createClaudeCode().languageModel(modelId ?? CLAUDE_DEFAULT_MODEL)
+}
+
+async function getOpenRouterModel(modelId?: string): Promise<LanguageModel> {
+  const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
+  return createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY }).chat(
+    modelId ?? OPENROUTER_DEFAULT_MODEL
+  )
+}
+
 // ─── Codex provider ───────────────────────────────────────────────────────────
 
 async function promptCodexText(prompt: string, options?: PromptOptions): Promise<string> {
-  const { createCodexCli } = await import("ai-sdk-provider-codex-cli")
-  const model = createCodexCli().languageModel(options?.model ?? CODEX_DEFAULT_MODEL)
-  return runText(model, prompt, options)
+  return runText(await getCodexModel(options?.model), prompt, options)
 }
 
 async function promptCodexStreamText(
   prompt: string,
   options?: PromptStreamOptions
 ): Promise<string> {
-  const { createCodexCli } = await import("ai-sdk-provider-codex-cli")
-  const model = createCodexCli().languageModel(options?.model ?? CODEX_DEFAULT_MODEL)
-  return runStreamText(model, prompt, options)
+  return runStreamText(await getCodexModel(options?.model), prompt, options)
 }
 
 async function promptCodexObject<T>(
@@ -197,26 +212,20 @@ async function promptCodexObject<T>(
   schema: ZodType<T>,
   options?: PromptOptions
 ): Promise<T> {
-  const { createCodexCli } = await import("ai-sdk-provider-codex-cli")
-  const model = createCodexCli().languageModel(options?.model ?? CODEX_DEFAULT_MODEL)
-  return runObject(model, prompt, schema, options)
+  return runObject(await getCodexModel(options?.model), prompt, schema, options)
 }
 
 // ─── Claude Code provider ─────────────────────────────────────────────────────
 
 async function promptClaudeText(prompt: string, options?: PromptOptions): Promise<string> {
-  const { createClaudeCode } = await import("ai-sdk-provider-claude-code")
-  const model = createClaudeCode().languageModel(options?.model ?? CLAUDE_DEFAULT_MODEL)
-  return runText(model, prompt, options)
+  return runText(await getClaudeModel(options?.model), prompt, options)
 }
 
 async function promptClaudeStreamText(
   prompt: string,
   options?: PromptStreamOptions
 ): Promise<string> {
-  const { createClaudeCode } = await import("ai-sdk-provider-claude-code")
-  const model = createClaudeCode().languageModel(options?.model ?? CLAUDE_DEFAULT_MODEL)
-  return runStreamText(model, prompt, options)
+  return runStreamText(await getClaudeModel(options?.model), prompt, options)
 }
 
 async function promptClaudeObject<T>(
@@ -224,30 +233,20 @@ async function promptClaudeObject<T>(
   schema: ZodType<T>,
   options?: PromptOptions
 ): Promise<T> {
-  const { createClaudeCode } = await import("ai-sdk-provider-claude-code")
-  const model = createClaudeCode().languageModel(options?.model ?? CLAUDE_DEFAULT_MODEL)
-  return runObject(model, prompt, schema, options)
+  return runObject(await getClaudeModel(options?.model), prompt, schema, options)
 }
 
 // ─── OpenRouter provider ──────────────────────────────────────────────────────
 
 async function promptOpenRouterText(prompt: string, options?: PromptOptions): Promise<string> {
-  const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
-  const model = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY }).chat(
-    options?.model ?? OPENROUTER_DEFAULT_MODEL
-  )
-  return runText(model, prompt, options)
+  return runText(await getOpenRouterModel(options?.model), prompt, options)
 }
 
 async function promptOpenRouterStreamText(
   prompt: string,
   options?: PromptStreamOptions
 ): Promise<string> {
-  const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
-  const model = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY }).chat(
-    options?.model ?? OPENROUTER_DEFAULT_MODEL
-  )
-  return runStreamText(model, prompt, options)
+  return runStreamText(await getOpenRouterModel(options?.model), prompt, options)
 }
 
 async function promptOpenRouterObject<T>(
@@ -255,11 +254,7 @@ async function promptOpenRouterObject<T>(
   schema: ZodType<T>,
   options?: PromptOptions
 ): Promise<T> {
-  const { createOpenRouter } = await import("@openrouter/ai-sdk-provider")
-  const model = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY }).chat(
-    options?.model ?? OPENROUTER_DEFAULT_MODEL
-  )
-  return runObject(model, prompt, schema, options)
+  return runObject(await getOpenRouterModel(options?.model), prompt, schema, options)
 }
 
 // ─── Provider capability registry ────────────────────────────────────────────

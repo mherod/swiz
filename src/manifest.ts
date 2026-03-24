@@ -223,6 +223,7 @@ export const manifest: HookGroup[] = [
       { file: "pretooluse-no-node-modules-edit.ts", timeout: 5 },
       { file: "pretooluse-no-lockfile-edit.ts", timeout: 5 },
       { file: "pretooluse-ts-quality.ts", timeout: 5 },
+      { file: "pretooluse-ts-edit-state-gate.ts", timeout: 5 },
       { file: "pretooluse-eslint-config-strength.ts", timeout: 5 },
       { file: "pretooluse-no-secrets.ts", timeout: 5 },
       { file: "pretooluse-bun-file-api-enforce.ts", timeout: 5, cooldownSeconds: 30 },

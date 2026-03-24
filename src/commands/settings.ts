@@ -251,8 +251,8 @@ function printBooleanSettings(rows: BoolSettingRow[], effective: EffectiveSwizSe
 }
 
 const GLOBAL_BOOL_ROWS: BoolSettingRow[] = [
-  ["critiques:      ", "critiquesEnabled", "global"],
   ["pr-merge-mode:  ", "prMergeMode", "global"],
+  ["critiques:      ", "critiquesEnabled", "global"],
   ["push-gate:      ", "pushGate", "global"],
   ["sandboxed-edits:", "sandboxedEdits", "global"],
   ["speak:          ", "speak", "global"],

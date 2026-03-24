@@ -59,7 +59,7 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/continue.ts",
   // daemon — prints LaunchAgent install/uninstall status and server URL
   "src/commands/daemon.ts",
-  // daemon-admin — prints install/uninstall status and metrics output
+  // daemon-admin — fetchDaemonStatus metrics (LaunchAgent install is in install.ts)
   "src/commands/daemon/daemon-admin.ts",
   "src/commands/dispatch.ts",
   // Dispatch engine structured JSON output to stdout (extracted from dispatch.ts)

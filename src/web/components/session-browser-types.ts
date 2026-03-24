@@ -1,4 +1,10 @@
-import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
+import type { ActiveHookDispatch, SessionMessage } from "../../commands/daemon/types.ts"
+
+export type {
+  SessionMessage,
+  SessionTaskSummary,
+  ToolCallSummary,
+} from "../../commands/daemon/types.ts"
 
 export interface SessionPreview {
   id: string
@@ -22,18 +28,6 @@ export interface ProjectSessions {
   statusLine?: string
 }
 
-export interface ToolCallSummary {
-  name: string
-  detail: string
-}
-
-export interface SessionMessage {
-  role: "user" | "assistant"
-  timestamp: string | null
-  text: string
-  toolCalls?: ToolCallSummary[]
-}
-
 export interface SessionTask {
   id: string
   subject: string
@@ -41,13 +35,6 @@ export interface SessionTask {
   statusChangedAt: string | null
   completionTimestamp: string | null
   completionEvidence: string | null
-}
-
-export interface SessionTaskSummary {
-  total: number
-  open: number
-  completed: number
-  cancelled: number
 }
 
 export interface ProjectTask extends SessionTask {
@@ -101,4 +88,10 @@ export type StatusChipTone = "neutral" | "info" | "warn" | "error" | "success" |
 export interface ParsedStatusToken {
   label: string
   tone: StatusChipTone
+}
+
+export interface SessionHealth {
+  dispatches?: number
+  lastMessageAt?: number
+  mtime: number
 }

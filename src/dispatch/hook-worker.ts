@@ -5,19 +5,12 @@
 
 import { join } from "node:path"
 import { spawn as bunSpawn } from "bun"
+import type { ErrorResult, RunHookMessage } from "./worker-types.ts"
 
 const HOOKS_DIR = join(import.meta.dir, "..", "..", "hooks")
 const DEFAULT_TIMEOUT = 10 // seconds
 /** Grace period before escalating SIGTERM → SIGKILL on timed-out hooks (ms). */
 const SIGKILL_GRACE_MS = 3_000
-
-interface RunHookMessage {
-  id: string
-  type: "run-hook"
-  file: string
-  payloadStr: string
-  timeoutSec?: number
-}
 
 interface HookResult {
   id: string
@@ -34,12 +27,6 @@ interface HookResult {
     stdoutSnippet: string
     stderrSnippet: string
   }
-}
-
-interface ErrorResult {
-  id: string
-  type: "hook-error"
-  error: string
 }
 
 /** Parse hook stdout to a JSON result, handling timeout/empty/invalid cases. */

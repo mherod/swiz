@@ -1,14 +1,28 @@
+import { dirname, join } from "node:path"
 import { orderBy } from "lodash-es"
-import { AGENTS, type AgentDef, getAgentByFlag, translateEvent } from "../agents.ts"
+import {
+  AGENTS,
+  type AgentDef,
+  getAgentByFlag,
+  hasAnyAgentFlag,
+  translateEvent,
+} from "../agents.ts"
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
 import {
   getLaunchAgentPlistPath,
+  loadLaunchAgent,
   loadLaunchAgentSync,
+  SWIZ_DAEMON_LABEL,
   SWIZ_PR_POLL_LABEL,
+  unloadLaunchAgent,
   unloadLaunchAgentSync,
 } from "../launch-agents.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import { loadAllPlugins, pluginErrorHint, pluginResultsToJson } from "../plugins.ts"
+import {
+  pauseSessionstartSelfHeal,
+  resumeSessionstartSelfHeal,
+} from "../sessionstart-self-heal-state.ts"
 import { readProjectSettings } from "../settings.ts"
 import {
   HOOKS_DIR,
@@ -18,6 +32,8 @@ import {
 } from "../swiz-hook-commands.ts"
 import { swizPrPollErrorLogPath, swizPrPollLogPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
+import { DAEMON_PORT } from "./daemon/daemon-admin.ts"
+import { uninstallSwizFromAgents } from "./uninstall.ts"
 
 // ─── Config generators ──────────────────────────────────────────────────────
 // manifest and DISPATCH_TIMEOUTS imported from ../manifest.ts
@@ -599,10 +615,12 @@ async function installPrPoll(dryRun: boolean): Promise<void> {
 
 // ─── Git mergetool configuration ─────────────────────────────────────────────
 
+const MERGETOOL_SWIZ_CMD = 'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"'
+
 async function installMergeTool(dryRun: boolean): Promise<void> {
   const configs = [
     ["merge.tool", "swiz"],
-    ["mergetool.swiz.cmd", 'swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"'],
+    ["mergetool.swiz.cmd", MERGETOOL_SWIZ_CMD],
     ["mergetool.swiz.trustExitCode", "true"],
   ]
 
@@ -625,8 +643,274 @@ async function installMergeTool(dryRun: boolean): Promise<void> {
 
   console.log(`  ${GREEN}✓${RESET} Git mergetool configured globally:\n`)
   console.log(`    merge.tool = swiz`)
-  console.log(`    mergetool.swiz.cmd = swiz mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"`)
+  console.log(`    mergetool.swiz.cmd = ${MERGETOOL_SWIZ_CMD}`)
   console.log(`    mergetool.swiz.trustExitCode = true\n`)
+}
+
+async function uninstallMergeTool(dryRun: boolean): Promise<void> {
+  const getProc = Bun.spawnSync(["git", "config", "--global", "--get", "merge.tool"])
+  const mergeTool =
+    getProc.exitCode === 0 ? String(new TextDecoder().decode(getProc.stdout)).trim() : ""
+  const cmdProc = Bun.spawnSync(["git", "config", "--global", "--get", "mergetool.swiz.cmd"])
+  const swizCmd =
+    cmdProc.exitCode === 0 ? String(new TextDecoder().decode(cmdProc.stdout)).trim() : ""
+
+  const mergeToolIsSwiz = mergeTool === "swiz"
+  const swizCmdMatchesInstall = swizCmd === MERGETOOL_SWIZ_CMD
+  const willChange = mergeToolIsSwiz || swizCmdMatchesInstall
+
+  if (dryRun) {
+    console.log("  Git mergetool removal (global):\n")
+    if (!willChange) {
+      console.log(`    ${DIM}no swiz mergetool config found${RESET}`)
+    } else if (mergeToolIsSwiz) {
+      console.log(`    ${RED}- git config --global --unset merge.tool${RESET}`)
+      console.log(`    ${RED}- git config --global --unset mergetool.swiz.cmd${RESET}`)
+      console.log(`    ${RED}- git config --global --unset mergetool.swiz.trustExitCode${RESET}`)
+    } else {
+      console.log(`    ${RED}- git config --global --unset mergetool.swiz.cmd${RESET}`)
+      console.log(`    ${RED}- git config --global --unset mergetool.swiz.trustExitCode${RESET}`)
+    }
+    console.log()
+    return
+  }
+
+  if (!willChange) {
+    console.log(`  ${DIM}Git mergetool: no swiz config found${RESET}\n`)
+    return
+  }
+
+  if (mergeToolIsSwiz) {
+    Bun.spawnSync(["git", "config", "--global", "--unset", "merge.tool"])
+    Bun.spawnSync(["git", "config", "--global", "--unset", "mergetool.swiz.cmd"])
+    Bun.spawnSync(["git", "config", "--global", "--unset", "mergetool.swiz.trustExitCode"])
+  } else {
+    Bun.spawnSync(["git", "config", "--global", "--unset", "mergetool.swiz.cmd"])
+    Bun.spawnSync(["git", "config", "--global", "--unset", "mergetool.swiz.trustExitCode"])
+  }
+
+  console.log(`  ${GREEN}✓${RESET} Git mergetool swiz entries removed (global)\n`)
+}
+
+async function uninstallStatusLine(dryRun: boolean): Promise<void> {
+  const claudeAgent = AGENTS.find((a) => a.id === "claude")
+  if (!claudeAgent) return
+
+  const settingsPath = claudeAgent.settingsPath
+  const existing = await readJsonFile(settingsPath)
+  const oldText = (await readFileText(settingsPath)).trimEnd()
+
+  const current = existing.statusLine as Record<string, unknown> | undefined
+  const isSwiz = current?.command === STATUS_LINE_CMD
+
+  if (dryRun) {
+    if (!isSwiz) {
+      console.log(`  ${DIM}statusLine: not set to swiz (skip)${RESET}\n`)
+    } else {
+      console.log(`  ${RED}- statusLine: remove swiz status-line${RESET}\n`)
+      const proposed = { ...existing }
+      delete proposed.statusLine
+      const newText = JSON.stringify(proposed, null, 2)
+      console.log(formatUnifiedDiff(settingsPath, oldText, newText))
+    }
+    return
+  }
+
+  if (!isSwiz) {
+    console.log(`  ${DIM}statusLine: not set to swiz (skip)${RESET}\n`)
+    return
+  }
+
+  await backup(settingsPath)
+  const proposed = { ...existing }
+  delete proposed.statusLine
+  await Bun.write(settingsPath, `${JSON.stringify(proposed, null, 2)}\n`)
+  console.log(`  ${GREEN}✓${RESET} statusLine removed from ${settingsPath}\n`)
+}
+
+async function uninstallPrPoll(dryRun: boolean): Promise<void> {
+  const file = Bun.file(PR_POLL_PLIST)
+  const exists = await file.exists()
+
+  if (dryRun) {
+    if (!exists) {
+      console.log(`  ${DIM}prPoll LaunchAgent: not installed${RESET}\n`)
+    } else {
+      console.log(`  ${RED}- prPoll LaunchAgent: unload + trash ${PR_POLL_PLIST}${RESET}\n`)
+    }
+    return
+  }
+
+  if (!exists) {
+    console.log(`  ${DIM}prPoll LaunchAgent: not installed${RESET}\n`)
+    return
+  }
+
+  unloadLaunchAgentSync(PR_POLL_PLIST)
+  const proc = Bun.spawnSync(["trash", PR_POLL_PLIST])
+  if (proc.exitCode !== 0) {
+    throw new Error(
+      `Failed to trash ${PR_POLL_PLIST} — is the trash CLI installed? (${proc.exitCode ?? "unknown"})`
+    )
+  }
+  console.log(`  ${GREEN}✓${RESET} prPoll LaunchAgent unloaded and removed:\n`)
+  console.log(`    ${DIM}${PR_POLL_PLIST}${RESET}\n`)
+}
+
+// ─── Daemon LaunchAgent ─────────────────────────────────────────────────────
+
+/** Minimum PATH directories the daemon needs. /usr/sbin is required for
+ *  lsof and pgrep; /opt/homebrew/bin for bun on Apple Silicon. */
+const REQUIRED_DAEMON_PATH_DIRS = [
+  "/opt/homebrew/bin",
+  "/usr/local/bin",
+  "/usr/bin",
+  "/bin",
+  "/usr/sbin",
+  "/sbin",
+]
+
+function buildDaemonPath(bunPath: string): string {
+  const dirs = new Set(REQUIRED_DAEMON_PATH_DIRS)
+  const bunDir = dirname(bunPath)
+  if (bunDir && bunDir !== ".") dirs.add(bunDir)
+  return [...dirs].join(":")
+}
+
+function buildDaemonLaunchAgentPlist(port: number): string {
+  const bunPath = Bun.which("bun") ?? "/opt/homebrew/bin/bun"
+  const projectRoot = dirname(Bun.main)
+  const indexPath = join(projectRoot, "index.ts")
+  const daemonTs = join(projectRoot, "src", "commands", "daemon.ts")
+  const envPath = buildDaemonPath(bunPath)
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${SWIZ_DAEMON_LABEL}</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>exec ${bunPath} --watch ${indexPath} daemon --port ${port} 2&gt;&amp;1</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>${projectRoot}</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>Crashed</key>
+    <true/>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>AbandonProcessGroup</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/swiz-daemon.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/swiz-daemon.log</string>
+
+  <key>WatchPaths</key>
+  <array>
+    <string>${daemonTs}</string>
+    <string>${indexPath}</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${envPath}</string>
+  </dict>
+</dict>
+</plist>`
+}
+
+/** Install daemon LaunchAgent; used by `swiz install --daemon` and `swiz daemon --install`. */
+export async function installDaemonLaunchAgent(port: number): Promise<void> {
+  const plist = buildDaemonLaunchAgentPlist(port)
+  const plistPath = getLaunchAgentPlistPath(SWIZ_DAEMON_LABEL)
+  await Bun.write(plistPath, plist)
+  console.log(`Wrote ${plistPath}`)
+
+  const loadExitCode = await loadLaunchAgent(plistPath)
+  if (loadExitCode !== 0) throw new Error("launchctl load failed")
+  console.log(`Loaded ${SWIZ_DAEMON_LABEL}`)
+}
+
+/** Uninstall daemon LaunchAgent; used by `swiz install --uninstall --daemon` and `swiz daemon --uninstall`. */
+export async function uninstallDaemonLaunchAgent(): Promise<void> {
+  const plistPath = getLaunchAgentPlistPath(SWIZ_DAEMON_LABEL)
+  await unloadLaunchAgent(plistPath)
+  const file = Bun.file(plistPath)
+  if (await file.exists()) {
+    const rm = Bun.spawn(["trash", plistPath], {
+      stdout: "inherit",
+      stderr: "inherit",
+    })
+    await rm.exited
+    console.log(`Removed ${plistPath}`)
+  }
+  console.log(`Unloaded ${SWIZ_DAEMON_LABEL}`)
+}
+
+async function installDaemonForCli(port: number, dryRun: boolean): Promise<void> {
+  const plistPath = getLaunchAgentPlistPath(SWIZ_DAEMON_LABEL)
+  const proposed = buildDaemonLaunchAgentPlist(port)
+  const existingContent = await readFileText(plistPath)
+  const alreadyCurrent = existingContent.trim() === proposed.trim()
+
+  if (dryRun) {
+    if (alreadyCurrent) {
+      console.log(`  ${DIM}daemon LaunchAgent: already installed${RESET}\n`)
+    } else {
+      console.log(`  ${GREEN}+ daemon LaunchAgent: ${plistPath}${RESET}\n`)
+      console.log(formatUnifiedDiff(plistPath, existingContent, proposed))
+    }
+    return
+  }
+
+  if (alreadyCurrent) {
+    console.log(`  ${DIM}daemon LaunchAgent: already installed${RESET}\n`)
+    return
+  }
+
+  await installDaemonLaunchAgent(port)
+}
+
+async function uninstallDaemonForCli(dryRun: boolean): Promise<void> {
+  const plistPath = getLaunchAgentPlistPath(SWIZ_DAEMON_LABEL)
+  const file = Bun.file(plistPath)
+  const exists = await file.exists()
+
+  if (dryRun) {
+    if (!exists) {
+      console.log(`  ${DIM}daemon LaunchAgent: not installed${RESET}\n`)
+    } else {
+      console.log(`  ${RED}- daemon LaunchAgent: unload + trash ${plistPath}${RESET}\n`)
+    }
+    return
+  }
+
+  if (!exists) {
+    console.log(`  ${DIM}daemon LaunchAgent: not installed${RESET}\n`)
+    return
+  }
+
+  await uninstallDaemonLaunchAgent()
 }
 
 // ─── Command ────────────────────────────────────────────────────────────────
@@ -634,36 +918,58 @@ async function installMergeTool(dryRun: boolean): Promise<void> {
 interface InstallRunOptions {
   jsonOutput: boolean
   dryRun: boolean
+  uninstall: boolean
   mergeTool: boolean
   statusLine: boolean
   prPoll: boolean
+  daemon: boolean
+  daemonPort: number
   targets: AgentDef[]
 }
 
 function parseInstallRunOptions(args: string[]): InstallRunOptions {
   const jsonOutput = args.includes("--json")
+  const daemon = args.includes("--daemon")
+  const portIdx = args.indexOf("--port")
+  const rawPort = portIdx !== -1 ? Number(args[portIdx + 1]) : Number.NaN
+  const daemonPort =
+    daemon && Number.isFinite(rawPort) ? rawPort : daemon ? DAEMON_PORT : DAEMON_PORT
+
   return {
     jsonOutput,
     dryRun: jsonOutput || args.includes("--dry-run"),
+    uninstall: args.includes("--uninstall"),
     mergeTool: args.includes("--merge-tool"),
     statusLine: args.includes("--status-line"),
     prPoll: args.includes("--pr-poll"),
+    daemon,
+    daemonPort,
     targets: getAgentByFlag(args),
   }
 }
 
-function hasAnyAgentFlag(args: string[]): boolean {
-  return args.some((arg) => AGENTS.some((agent) => `--${agent.id}` === arg))
+/** True when `install --uninstall` should remove every swiz integration (no scope flags). */
+function isFullUninstall(opts: InstallRunOptions): boolean {
+  return opts.uninstall && !opts.mergeTool && !opts.statusLine && !opts.prPoll && !opts.daemon
 }
 
 function shouldInstallHooks(args: string[], opts: InstallRunOptions): boolean {
-  return !opts.mergeTool || hasAnyAgentFlag(args)
+  return (!opts.mergeTool && !opts.daemon) || hasAnyAgentFlag(args)
 }
 
 async function runOptionalInstallSteps(opts: InstallRunOptions): Promise<void> {
   if (opts.mergeTool) await installMergeTool(opts.dryRun)
   if (opts.statusLine) await installStatusLine(opts.dryRun)
   if (opts.prPoll) await installPrPoll(opts.dryRun)
+  if (opts.daemon) await installDaemonForCli(opts.daemonPort, opts.dryRun)
+}
+
+async function runOptionalUninstallSteps(opts: InstallRunOptions): Promise<void> {
+  const all = isFullUninstall(opts)
+  if (all || opts.mergeTool) await uninstallMergeTool(opts.dryRun)
+  if (all || opts.statusLine) await uninstallStatusLine(opts.dryRun)
+  if (all || opts.prPoll) await uninstallPrPoll(opts.dryRun)
+  if (all || opts.daemon) await uninstallDaemonForCli(opts.dryRun)
 }
 
 function logPluginResults(
@@ -716,22 +1022,39 @@ async function installHooksForTargets(args: string[], opts: InstallRunOptions): 
   for (const agent of opts.targets) {
     await installAgent(agent, opts.dryRun)
   }
+  if (!opts.dryRun) await resumeSessionstartSelfHeal()
   return false
+}
+
+async function uninstallHooksForTargets(args: string[], opts: InstallRunOptions): Promise<void> {
+  if (!isFullUninstall(opts) && !shouldInstallHooks(args, opts)) return
+
+  console.log(`  Hooks: ${HOOKS_DIR}`)
+  console.log(`  Agents: ${opts.targets.map((a) => a.name).join(", ")}\n`)
+
+  await uninstallSwizFromAgents(opts.targets, opts.dryRun)
 }
 
 export const installCommand: Command = {
   name: "install",
   description: "Install swiz hooks into agent settings",
-  usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run] [--merge-tool]`,
+  usage: `swiz install [${AGENTS.map((a) => `--${a.id}`).join("] [")}] [--dry-run] [--merge-tool] [--daemon [--port <n>]] [--uninstall]`,
   options: [
     ...AGENTS.map((a) => ({ flags: `--${a.id}`, description: `Install for ${a.name} only` })),
     { flags: "--dry-run", description: "Preview changes without writing to disk" },
+    {
+      flags: "--uninstall",
+      description:
+        "Remove all swiz integration (hooks, mergetool, status-line, pr-poll, daemon); add flags below to limit scope",
+    },
     { flags: "--merge-tool", description: "Configure swiz as the global Git mergetool" },
     { flags: "--status-line", description: "Install swiz status-line into Claude Code settings" },
     {
       flags: "--pr-poll",
       description: "Install LaunchAgent that polls PR reviews/comments every 5min",
     },
+    { flags: "--daemon", description: "Install swiz daemon as a LaunchAgent (default port 7943)" },
+    { flags: "--port <port>", description: "Port for daemon when using --daemon (default: 7943)" },
     { flags: "--json", description: "Output plugin status as JSON (implies --dry-run)" },
     { flags: "(no flags)", description: "Install for all detected agents" },
   ],
@@ -744,6 +1067,17 @@ export const installCommand: Command = {
           `  swiz hooks require bun to run. Install it first:\n\n` +
           `    curl -fsSL https://bun.sh/install | bash`
       )
+    }
+
+    if (opts.uninstall) {
+      console.log(`\n  swiz install --uninstall${opts.dryRun ? " (dry run)" : ""}\n`)
+      await runOptionalUninstallSteps(opts)
+      await uninstallHooksForTargets(args, opts)
+      if (!opts.dryRun && isFullUninstall(opts)) await pauseSessionstartSelfHeal()
+      if (opts.dryRun) {
+        console.log("  No changes written.\n")
+      }
+      return
     }
 
     console.log(`\n  swiz install${opts.dryRun ? " (dry run)" : ""}\n`)

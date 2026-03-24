@@ -3,6 +3,7 @@ import { formatLastActivity } from "../lib/dashboard-helpers.ts"
 import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
 import { NumberTicker } from "./number-ticker.tsx"
 import type { ToolStat } from "./session-browser.tsx"
+import type { SessionHealth } from "./session-browser-types.ts"
 import { isInternalToolName } from "./session-browser-utils.ts"
 
 interface EventMetric {
@@ -20,12 +21,6 @@ interface CacheSummary {
   gitStateCacheSize?: number
   projectSettingsCacheSize?: number
   manifestCacheSize?: number
-}
-
-interface SessionHealth {
-  dispatches?: number
-  lastMessageAt?: number
-  mtime: number
 }
 
 interface ProjectPerformanceStatsProps {

@@ -175,6 +175,10 @@ export function getAgentByFlag(args: string[]): AgentDef[] {
   return explicit.length > 0 ? explicit : AGENTS
 }
 
+export function hasAnyAgentFlag(args: string[]): boolean {
+  return args.some((arg) => AGENTS.some((agent) => `--${agent.id}` === arg))
+}
+
 /** Agents that support user-configurable hooks files */
 export const CONFIGURABLE_AGENTS = AGENTS.filter((a) => a.hooksConfigurable)
 

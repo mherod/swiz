@@ -304,6 +304,11 @@ function extractCodexMetaPayload(line: string): Record<string, unknown> | null {
   return payload as Record<string, unknown>
 }
 
+function extractStringMeta(payload: Record<string, unknown>, key: string): string | null {
+  const val = payload[key]
+  return typeof val === "string" && val.trim() ? (val as string) : null
+}
+
 async function readCodexSessionMeta(
   sessionPath: string
 ): Promise<{ id: string | null; cwd: string | null }> {
@@ -317,12 +322,32 @@ async function readCodexSessionMeta(
     const payload = extractCodexMetaPayload(line)
     if (!payload) continue
 
-    if (!id && typeof payload.id === "string" && payload.id.trim()) id = payload.id as string
-    if (!cwd && typeof payload.cwd === "string" && payload.cwd.trim()) cwd = payload.cwd as string
+    id ??= extractStringMeta(payload, "id")
+    cwd ??= extractStringMeta(payload, "cwd")
     if (id && cwd) break
   }
 
   return { id, cwd }
+}
+
+async function processCodexFileEntry(
+  entryPath: string,
+  entryName: string,
+  targetPath: string,
+  sessions: Session[]
+): Promise<void> {
+  const { id: parsedId, cwd } = await readCodexSessionMeta(entryPath)
+  if (!cwd || resolve(cwd) !== targetPath) return
+  try {
+    const s = await stat(entryPath)
+    sessions.push({
+      id: parsedId ?? parseCodexIdFromFilename(entryName),
+      path: entryPath,
+      mtime: s.mtimeMs,
+      provider: "codex",
+      format: "codex-jsonl",
+    })
+  } catch {}
 }
 
 async function findCodexSessions(targetDir: string, home?: string): Promise<Session[]> {
@@ -334,7 +359,6 @@ async function findCodexSessions(targetDir: string, home?: string): Promise<Sess
 
   while (pendingDirs.length > 0) {
     const current = pendingDirs.pop()!
-
     let entries: import("node:fs").Dirent[]
     try {
       entries = await readdir(current, { withFileTypes: true })
@@ -349,20 +373,7 @@ async function findCodexSessions(targetDir: string, home?: string): Promise<Sess
         continue
       }
       if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue
-
-      const { id: parsedId, cwd } = await readCodexSessionMeta(entryPath)
-      if (!cwd || resolve(cwd) !== targetPath) continue
-
-      try {
-        const s = await stat(entryPath)
-        sessions.push({
-          id: parsedId ?? parseCodexIdFromFilename(entry.name),
-          path: entryPath,
-          mtime: s.mtimeMs,
-          provider: "codex",
-          format: "codex-jsonl",
-        })
-      } catch {}
+      await processCodexFileEntry(entryPath, entry.name, targetPath, sessions)
     }
   }
 
@@ -383,6 +394,34 @@ async function cursorSessionMatchesTarget(
   }
 }
 
+async function processCursorSessionEntry(
+  sessionEntry: import("node:fs").Dirent,
+  workspaceDir: string,
+  targetDir: string,
+  sessions: Session[]
+): Promise<void> {
+  if (!sessionEntry.isDirectory()) return
+  const sessionDir = join(workspaceDir, sessionEntry.name)
+  const sessionPath = join(sessionDir, "store.db")
+  try {
+    const s = await stat(sessionPath)
+    if (!s.isFile()) return
+  } catch {
+    return
+  }
+  if (!(await cursorSessionMatchesTarget(sessionPath, targetDir))) return
+  try {
+    const s = await stat(sessionPath)
+    sessions.push({
+      id: sessionEntry.name,
+      path: sessionPath,
+      mtime: s.mtimeMs,
+      provider: "cursor",
+      format: "cursor-sqlite",
+    })
+  } catch {}
+}
+
 async function findCursorSessions(targetDir: string, home?: string): Promise<Session[]> {
   home = home ?? getHomeDir()
   const chatsRoot = join(home, ".cursor", "chats")
@@ -398,39 +437,14 @@ async function findCursorSessions(targetDir: string, home?: string): Promise<Ses
   for (const workspaceEntry of workspaceEntries) {
     if (!workspaceEntry.isDirectory()) continue
     const workspaceDir = join(chatsRoot, workspaceEntry.name)
-
     let sessionEntries: import("node:fs").Dirent[]
     try {
       sessionEntries = await readdir(workspaceDir, { withFileTypes: true })
     } catch {
       continue
     }
-
     for (const sessionEntry of sessionEntries) {
-      if (!sessionEntry.isDirectory()) continue
-      const sessionDir = join(workspaceDir, sessionEntry.name)
-      const sessionPath = join(sessionDir, "store.db")
-
-      try {
-        const s = await stat(sessionPath)
-        if (!s.isFile()) continue
-      } catch {
-        continue
-      }
-
-      const matchesTarget = await cursorSessionMatchesTarget(sessionPath, targetDir)
-      if (!matchesTarget) continue
-
-      try {
-        const s = await stat(sessionPath)
-        sessions.push({
-          id: sessionEntry.name,
-          path: sessionPath,
-          mtime: s.mtimeMs,
-          provider: "cursor",
-          format: "cursor-sqlite",
-        })
-      } catch {}
+      await processCursorSessionEntry(sessionEntry, workspaceDir, targetDir, sessions)
     }
   }
 

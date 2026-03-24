@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { debugLog } from "../debug.ts"
+import type { ErrorResult, RunHookMessage } from "./worker-types.ts"
 
 /** Grace period added to the hook's own timeout for supervisor-level enforcement (seconds).
  *  Accounts for worker startup, message passing, and SIGKILL escalation time. */
@@ -18,14 +19,6 @@ function getWorkerCount(): number {
 
 // Bun exposes Worker as a global - add types for TypeScript
 type BunWorker = Pick<globalThis.Worker, "postMessage" | "onmessage" | "onerror" | "terminate">
-
-interface RunHookMessage {
-  id: string
-  type: "run-hook"
-  file: string
-  payloadStr: string
-  timeoutSec?: number
-}
 
 export interface HookExecution {
   file: string
@@ -44,12 +37,6 @@ interface HookResult {
   type: "hook-result"
   parsed: Record<string, unknown> | null
   execution: HookExecution
-}
-
-interface ErrorResult {
-  id: string
-  type: "hook-error"
-  error: string
 }
 
 type WorkerMessage = HookResult | ErrorResult

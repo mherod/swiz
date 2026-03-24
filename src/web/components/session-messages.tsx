@@ -3,12 +3,13 @@ import { cn } from "../lib/cn.ts"
 import type { EventMetric } from "../lib/dashboard-helpers.ts"
 import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
 import { DashboardStats } from "./dashboard-stats.tsx"
-import { renderInline } from "./markdown.tsx"
+import { InlineMarkdown } from "./inline-markdown.tsx"
 import { MessageBody } from "./message-body.tsx"
 import type {
   GroupedSessionMessage,
   ParsedSkillPayload,
   ProjectTask,
+  SessionHealth,
   SessionMessage,
   SessionTask,
   SessionTaskSummary,
@@ -414,23 +415,15 @@ function ToolCallsList({
             <span className="tool-category-icon">{icon}</span>
             <span className="tool-name">{tc.name}</span>
             {tc.detail && (
-              <span
-                className="tool-detail"
-                // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped via renderInline
-                dangerouslySetInnerHTML={{ __html: renderInline(tc.detail) }}
-              />
+              <span className="tool-detail">
+                <InlineMarkdown text={tc.detail} />
+              </span>
             )}
           </li>
         )
       })}
     </ul>
   )
-}
-
-interface SessionHealth {
-  dispatches?: number
-  lastMessageAt?: number
-  mtime: number
 }
 
 interface MessagesProps {

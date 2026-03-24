@@ -2,12 +2,7 @@ import type { EventMetric } from "../lib/dashboard-helpers.ts"
 import type { ActiveHookDispatch } from "../lib/dashboard-hooks.ts"
 import { DashboardStats } from "./dashboard-stats.tsx"
 import type { ToolStat } from "./session-browser.tsx"
-
-interface SessionHealth {
-  dispatches?: number
-  lastMessageAt?: number
-  mtime: number
-}
+import type { SessionHealth } from "./session-browser-types.ts"
 
 export function MetricsRail({
   events,

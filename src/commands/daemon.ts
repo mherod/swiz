@@ -7,12 +7,7 @@ import {
 } from "../settings.ts"
 import type { Command } from "../types.ts"
 import { CiWatchRegistry, notifyCiCompletion } from "./daemon/ci-watch-registry.ts"
-import {
-  DAEMON_PORT,
-  fetchDaemonStatus,
-  installDaemonLaunchAgent,
-  uninstallDaemonLaunchAgent,
-} from "./daemon/daemon-admin.ts"
+import { DAEMON_PORT, fetchDaemonStatus } from "./daemon/daemon-admin.ts"
 import {
   CooldownRegistry,
   createMetrics,
@@ -40,6 +35,7 @@ import {
 } from "./daemon/utils.ts"
 import { startDaemonWebServer } from "./daemon/web-server.ts"
 import { DaemonWorkerRuntime } from "./daemon/worker-runtime.ts"
+import { installDaemonLaunchAgent, uninstallDaemonLaunchAgent } from "./install.ts"
 import { computeWarmStatusLineSnapshot, type WarmStatusLineSnapshot } from "./status-line.ts"
 
 const TRANSCRIPT_MEMORY_RETENTION_MS = 12 * 60 * 60 * 1000

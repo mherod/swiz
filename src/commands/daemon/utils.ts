@@ -1,5 +1,9 @@
 import { join } from "node:path"
 import { getHomeDir } from "../../home.ts"
+import type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./types.ts"
+
+export type { SessionMessage, SessionTaskSummary, ToolCallSummary } from "./types.ts"
+
 import {
   getLaunchAgentPlistPath,
   isLaunchAgentLoaded,
@@ -145,29 +149,10 @@ export function stripAnsi(text: string): string {
   return text.replace(ansiRe, "")
 }
 
-export interface ToolCallSummary {
-  name: string
-  detail: string
-}
-
 export interface CapturedToolCall {
   name: string
   detail: string
   timestamp: string
-}
-
-export interface SessionMessage {
-  role: "user" | "assistant"
-  timestamp: string | null
-  text: string
-  toolCalls?: ToolCallSummary[]
-}
-
-export interface SessionTaskSummary {
-  total: number
-  open: number
-  completed: number
-  cancelled: number
 }
 
 export interface SessionTaskPreview {
