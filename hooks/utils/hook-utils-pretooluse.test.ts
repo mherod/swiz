@@ -2,8 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-
-type JsonObject = Record<string, unknown>
+import type { JsonObject } from "./test-utils.ts"
 
 /**
  * Run an inline bun script that imports and calls a hook-utils helper.

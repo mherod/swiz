@@ -5,6 +5,16 @@ import { join, resolve } from "node:path"
 import { projectKeyFromCwd } from "../../src/transcript-utils.ts"
 import { getSessionTasksDir } from "./hook-utils.ts"
 
+/** Shared type alias for loosely-typed JSON objects in tests. */
+export type JsonObject = Record<string, unknown>
+
+/** Write a `.swiz/state.json` file into the given directory. */
+export async function writeState(dir: string, state: string): Promise<void> {
+  const configDir = join(dir, ".swiz")
+  await mkdir(configDir, { recursive: true })
+  await Bun.write(join(configDir, "state.json"), JSON.stringify({ state }))
+}
+
 /**
  * Concurrent-safe temporary directory manager for bun tests.
  *

@@ -1,17 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { mkdir } from "node:fs/promises"
-import { join, resolve } from "node:path"
-import { useTempDir } from "./utils/test-utils.ts"
+import { resolve } from "node:path"
+import { useTempDir, writeState } from "./utils/test-utils.ts"
 
 const HOOK_PATH = resolve(process.cwd(), "hooks/pretooluse-state-gate.ts")
 
 const { create: makeTempDir } = useTempDir("swiz-state-gate-")
-
-async function writeState(dir: string, state: string): Promise<void> {
-  const configDir = join(dir, ".swiz")
-  await mkdir(configDir, { recursive: true })
-  await Bun.write(join(configDir, "state.json"), JSON.stringify({ state }))
-}
 
 async function runHook(
   toolName: string,
