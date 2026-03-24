@@ -505,6 +505,18 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
     const sessionId = await resolveSessionId(parsed.sessionQuery, parsed.targetDir)
     scopeLabel = `session ${sessionId}`
   }
+  if (parsed.json) {
+    console.log(
+      JSON.stringify({
+        action: verb.toLowerCase(),
+        setting: key,
+        value: enabled,
+        scope: scopeLabel,
+        path,
+      })
+    )
+    return
+  }
   console.log(`\n  ${verb} ${parsed.settingArg ?? key} (${scopeLabel})`)
   console.log(`  Saved: ${path}\n`)
 
@@ -532,6 +544,18 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
       if (error) throw new Error(`${error}\n${usage()}`)
     }
     const path = await writeSettingToScope(parsed, key, parsed.settingValue)
+    if (parsed.json) {
+      console.log(
+        JSON.stringify({
+          action: "set",
+          setting: key,
+          value: parsed.settingValue,
+          scope: parsed.scope,
+          path,
+        })
+      )
+      return
+    }
     console.log(`\n  Set ${parsed.settingArg} = ${parsed.settingValue} (${parsed.scope})`)
     console.log(`  Saved: ${path}\n`)
     return
@@ -544,6 +568,10 @@ async function setValueSetting(parsed: ParsedSettingsArgs): Promise<void> {
   }
   const value = Number(parsed.settingValue)
   const path = await writeSettingToScope(parsed, key, value)
+  if (parsed.json) {
+    console.log(JSON.stringify({ action: "set", setting: key, value, scope: parsed.scope, path }))
+    return
+  }
   const label = value === 0 ? "system default" : `${value}`
   console.log(`\n  Set ${parsed.settingArg} = ${label} (${parsed.scope})`)
   console.log(`  Saved: ${path}\n`)
