@@ -2,13 +2,8 @@
 // PreToolUse hook: Blocks Node.js sync file operations when the target file
 // already uses Bun APIs or has a bun shebang. Enforces Bun.file()/Bun.write().
 
+import { parseBunEnforcementInput, usesBunApis } from "./utils/bun-enforcement-utils.ts"
 import { allowPreToolUse, computeProjectedContent, denyPreToolUse } from "./utils/hook-utils.ts"
-
-/** Patterns indicating the file uses Bun's native APIs. */
-const BUN_API_RE = /\bBun\.(file|write|spawn|serve|listen|sleep|which|escapeHTML|hash)\s*\(/
-
-/** Patterns indicating the file has a bun shebang. */
-const BUN_SHEBANG_RE = /^#!.*\bbun\b/m
 
 /**
  * Blocked Node.js sync file APIs with their Bun-native replacements.
@@ -42,12 +37,7 @@ export const BLOCKED_NODE_FILE_OPS: Array<{ re: RegExp; name: string; replacemen
   },
 ]
 
-/**
- * Check whether the projected file content uses Bun APIs or has a bun shebang.
- */
-export function usesBunApis(content: string): boolean {
-  return BUN_SHEBANG_RE.test(content) || BUN_API_RE.test(content)
-}
+export { usesBunApis } from "./utils/bun-enforcement-utils.ts"
 
 /**
  * Find all blocked Node.js sync file operations in the projected content.
@@ -61,23 +51,11 @@ export function findBlockedNodeFileOps(
   }))
 }
 
-function parseInput(input: Record<string, unknown>): {
-  toolName: string
-  filePath: string
-  toolInput: Record<string, unknown>
-} | null {
-  const toolName: string = (input.tool_name as string) ?? ""
-  const ti = (input.tool_input ?? {}) as Record<string, unknown>
-  const filePath: string = (ti.file_path as string) ?? (ti.path as string) ?? ""
-  if (!filePath || !/\.(ts|tsx|js|jsx|mjs)$/.test(filePath)) return null
-  return { toolName, filePath, toolInput: ti }
-}
-
 async function main() {
   const raw = await Bun.stdin.json().catch(() => null)
   if (!raw) process.exit(0)
 
-  const parsed = parseInput(raw as Record<string, unknown>)
+  const parsed = parseBunEnforcementInput(raw as Record<string, unknown>)
   if (!parsed) process.exit(0)
 
   const projectedContent = await computeProjectedContent(
