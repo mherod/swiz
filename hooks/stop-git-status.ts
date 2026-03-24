@@ -8,6 +8,10 @@
 // Uncommitted changes are always enforced regardless of cooldown.
 
 import {
+  type CollaborationModePolicy,
+  getCollaborationModePolicy,
+} from "../src/collaboration-policy.ts"
+import {
   type CollaborationMode,
   getEffectiveSwizSettings,
   readSwizSettings,
@@ -150,26 +154,24 @@ function selectTaskSubject(hasUncommitted: boolean, ahead: number, behind: numbe
   return "Push branch to remote"
 }
 
-function pushSubStepsForMode(collabMode: CollaborationMode, branch: string): ActionPlanItem[] {
-  if (collabMode === "solo") {
-    return [`git push origin ${branch}`]
-  }
-  if (collabMode === "team") {
-    const isMainBranch = branch === "main" || branch === "master"
-    if (isMainBranch) {
-      return [
-        `Create a feature branch first: git checkout -b <type>/<slug>`,
-        `Push the feature branch: git push origin <feature-branch>`,
-        `Open a PR: gh pr create --base ${branch}`,
-      ]
+function pushSubStepsForPolicy(policy: CollaborationModePolicy, branch: string): ActionPlanItem[] {
+  const isMainBranch = branch === "main" || branch === "master"
+
+  if (policy.requireFeatureBranch && isMainBranch) {
+    const steps: ActionPlanItem[] = [
+      `Create a feature branch first: git checkout -b <type>/<slug>`,
+      `Push the feature branch: git push origin <feature-branch>`,
+    ]
+    if (policy.requirePullRequest) {
+      steps.push(`Open a PR: gh pr create --base ${branch}`)
     }
-    return [`git push origin ${branch}`]
+    if (policy.requirePeerReview) {
+      steps.push("Request a peer review before merging")
+    }
+    return steps
   }
-  // "auto" or "relaxed-collab" — show the generic guidance
-  return [
-    `git push origin ${branch}`,
-    "Before pushing — run the collaboration guard: solo repo → direct push; org repo → feature branch and PR",
-  ]
+
+  return [`git push origin ${branch}`]
 }
 
 function buildReason(opts: {
@@ -232,7 +234,7 @@ function buildReason(opts: {
     if (skillExists("push")) {
       pushSubSteps.push("/push — Push to remote with collaboration guard")
     }
-    pushSubSteps.push(...pushSubStepsForMode(collabMode, branch))
+    pushSubSteps.push(...pushSubStepsForPolicy(getCollaborationModePolicy(collabMode), branch))
     steps.push(pushHeader, pushSubSteps)
   }
 
