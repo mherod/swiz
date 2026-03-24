@@ -14,7 +14,13 @@ import { tryReplayPendingMutations } from "../issue-store.ts"
 import type { HookGroup } from "../manifest.ts"
 import { DISPATCH_TIMEOUTS, manifest } from "../manifest.ts"
 import { loadAllPlugins } from "../plugins.ts"
-import { type ProjectSwizSettings, readProjectSettings, resolveProjectHooks } from "../settings.ts"
+import {
+  getEffectiveSwizSettings,
+  type ProjectSwizSettings,
+  readProjectSettings,
+  readSwizSettings,
+  resolveProjectHooks,
+} from "../settings.ts"
 import { computeTranscriptSummary, type TranscriptSummary } from "../transcript-summary.ts"
 import type { HookExecution } from "./engine.ts"
 import {
@@ -322,10 +328,15 @@ function buildDispatchContext(req: DispatchRequest): DispatchContext {
   return { canonicalEvent, hookEventName, payload, parseError, payloadStr, cwd, toolName, trigger }
 }
 
+interface ResolvedGroups {
+  filteredGroups: HookGroup[]
+  projectSettings: ProjectSwizSettings | null | undefined
+}
+
 async function resolveFilteredGroups(
   ctx: DispatchContext,
   manifestProvider?: DispatchRequest["manifestProvider"]
-): Promise<HookGroup[]> {
+): Promise<ResolvedGroups> {
   let combinedManifest: HookGroup[]
   let preloadedProjectSettings: ProjectSwizSettings | null | undefined
 
@@ -354,7 +365,7 @@ async function resolveFilteredGroups(
   if (skippedHooks > 0) {
     log(`   skipped ${skippedHooks} PR-merge hook(s) (pr-merge-mode disabled)`)
   }
-  return filteredGroups
+  return { filteredGroups, projectSettings: preloadedProjectSettings }
 }
 
 function buildLifecycleEvent(
@@ -508,16 +519,21 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
     return { response: {} }
   }
 
-  const finalPayloadStr = ctx.parseError ? ctx.payloadStr : JSON.stringify(ctx.payload)
-
   const tReplay = performance.now()
   await tryReplayPendingMutations(ctx.cwd)
   log(`   ⏱ replay: ${Math.round(performance.now() - tReplay)}ms`)
 
   const tManifest = performance.now()
-  const filteredGroups = await resolveFilteredGroups(ctx, req.manifestProvider)
+  const { filteredGroups, projectSettings } = await resolveFilteredGroups(ctx, req.manifestProvider)
   log(`   ⏱ manifest+filter: ${Math.round(performance.now() - tManifest)}ms`)
   if (filteredGroups.length === 0) return { response: {} }
+
+  // Compute effective settings once and inject into payload so hooks
+  // don't need to independently read settings files (project > global > default).
+  const globalSettings = await readSwizSettings()
+  const sessionId = typeof ctx.payload.session_id === "string" ? ctx.payload.session_id : undefined
+  const effectiveSettings = getEffectiveSwizSettings(globalSettings, sessionId, projectSettings)
+  ctx.payload._effectiveSettings = effectiveSettings as unknown as Record<string, unknown>
 
   const lifecycleRequestId =
     (ctx.payload.request_id as string | undefined) ??
@@ -532,7 +548,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
   const enrichedPayloadStr = await enrichPayloadForHooks(
     ctx.payload,
     ctx.parseError,
-    finalPayloadStr,
+    JSON.stringify(ctx.payload),
     req.transcriptSummaryProvider
   )
   log(`   ⏱ enrich: ${Math.round(performance.now() - tEnrich)}ms`)

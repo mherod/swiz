@@ -14,6 +14,7 @@ import {
 import {
   type CollaborationMode,
   getEffectiveSwizSettings,
+  readProjectSettings,
   readSwizSettings,
 } from "../src/settings.ts"
 import { stopGitPushPromptedFlagPath } from "../src/temp-paths.ts"
@@ -358,12 +359,22 @@ interface GitContext {
 async function resolveGitContext(input: {
   cwd?: string
   session_id?: string
+  _effectiveSettings?: Record<string, unknown>
 }): Promise<GitContext | null> {
   const cwd = input.cwd ?? process.cwd()
   if (!(await isGitRepo(cwd))) return null
 
-  const settings = await readSwizSettings()
-  const effective = getEffectiveSwizSettings(settings, input.session_id)
+  // Prefer dispatcher-provided effective settings; fall back to computing locally.
+  let effective: { collaborationMode: CollaborationMode; pushCooldownMinutes: number }
+  if (input._effectiveSettings && typeof input._effectiveSettings.collaborationMode === "string") {
+    effective = input._effectiveSettings as typeof effective
+  } else {
+    const [settings, projectSettings] = await Promise.all([
+      readSwizSettings(),
+      readProjectSettings(cwd),
+    ])
+    effective = getEffectiveSwizSettings(settings, input.session_id, projectSettings)
+  }
 
   const [gitStatus, remoteUrl] = await Promise.all([
     getGitStatusV2(cwd),

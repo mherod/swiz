@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // PostToolUse hook: Inject git status context after every tool call
 
-import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 import type { GitStatusV2 } from "./utils/git-utils.ts"
 import { emitContext, getGitStatusV2, isGitRepo } from "./utils/hook-utils.ts"
@@ -49,11 +49,28 @@ async function main(): Promise<void> {
 
   // Single subprocess replaces: branch --show-current, status --porcelain,
   // rev-parse @{upstream}, rev-list x2
-  const [gitStatus, settings] = await Promise.all([getGitStatusV2(cwd), readSwizSettings()])
+  const gitStatus = await getGitStatusV2(cwd)
   if (!gitStatus) return
 
-  const effective = getEffectiveSwizSettings(settings, input.session_id)
-  const status = buildGitContextLine(gitStatus, effective.collaborationMode)
+  // Prefer dispatcher-provided effective settings; fall back to computing locally.
+  const injected = (input as Record<string, unknown>)._effectiveSettings as
+    | Record<string, unknown>
+    | undefined
+  let collabMode: string
+  if (injected && typeof injected.collaborationMode === "string") {
+    collabMode = injected.collaborationMode
+  } else {
+    const [settings, projectSettings] = await Promise.all([
+      readSwizSettings(),
+      readProjectSettings(cwd),
+    ])
+    collabMode = getEffectiveSwizSettings(
+      settings,
+      input.session_id,
+      projectSettings
+    ).collaborationMode
+  }
+  const status = buildGitContextLine(gitStatus, collabMode)
 
   await emitContext("PostToolUse", status, cwd)
 }
