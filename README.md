@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**105 hooks. 12 event types. Every agent. Zero compromises.**
+**103 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -88,7 +88,7 @@ Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_
 
 The bundled hooks cover six events: Stop, PreToolUse, PostToolUse, SessionStart, PreCompact, and UserPromptSubmit. Four additional events — **Notification**, **SubagentStart**, **SubagentStop**, and **SessionEnd** — are formally registered in the dispatch system. Claude and Cursor support all four; Gemini currently supports `SessionEnd` but not subagent lifecycle events. These events ship with no bundled hooks; any custom hooks added for supported events will be dispatched automatically.
 
-### Stop (24)
+### Stop (23)
 
 Stop hooks run before the agent is allowed to end a session. They're the last line of defense — and the most powerful. A blocking stop hook keeps the agent working until the problem is resolved.
 
@@ -96,7 +96,6 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 |------|-------------|
 | `stop-secret-scanner.ts` | Scans staged diffs for API keys, tokens, and credentials. Blocks stop if any are found — because secrets in git history are permanent. |
 | `stop-offensive-language.ts` | Defense-in-depth backstop for the PreToolUse offensive-language hook. Scans the last assistant message for lazy behavior patterns (hedging, deferral, compliance gaming, etc.) and blocks stop if the agent's final message contains avoidance language. Shares detection logic with `pretooluse-offensive-language.ts`. |
-| `stop-debug-statements.ts` | Catches `console.log`, `debugger`, and other debug artifacts left in source files. Excludes infrastructure files that legitimately reference these patterns. |
 | `stop-workflow-permissions.ts` | Defense-in-depth backstop for workflow permission changes. Scans committed diffs on non-default branches for `permissions:` additions in `.github/workflows/*.yml` files. Catches changes that bypass the PreToolUse gate (shell edits, amends, cherry-picks). Allows permission changes on the default branch where they are intentional. |
 | `stop-suppression-patterns.ts` | Defense-in-depth backstop for type and lint suppression patterns. Scans committed diffs on non-default branches for newly added `@ts-ignore`, `@ts-nocheck`, bare `@ts-expect-error`, lint-disable comments, and `as any` casts in TypeScript/JavaScript files. Catches suppressions that bypass the PreToolUse gates via shell edits, amends, or cherry-picks. |
 | `stop-large-files.ts` | Blocks stop if any uncommitted file exceeds the size threshold — preventing accidental binary or generated-file commits. |
@@ -119,7 +118,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (53)
+### PreToolUse (52)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -165,7 +164,6 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-block-preexisting-dismissals.ts` | Blocks follow-up work when the assistant dismisses lint/test/typecheck/build warnings as "pre-existing" or "unrelated" without proving the claim. Scans the transcript for dismissal language after diagnostic-bearing output, and blocks unless the agent has fixed the issues, run a scoped verification, or provided baseline evidence (e.g. git diff) that the diagnostics predate the current changes. |
 | `pretooluse-no-secrets.ts` | Blocks Edit/Write/NotebookEdit operations when the proposed content contains likely secret material — private keys, API tokens (AWS, GitHub, Slack, OpenAI, Stripe), or generic credential assignments. Eager counterpart to `stop-secret-scanner.ts`: prevents secrets from landing on disk rather than catching them at commit time. Test files are excluded to allow fixture credentials. |
 | `pretooluse-bun-api-enforce.ts` | Blocks Node.js sync file operations (`readFileSync`, `writeFileSync`, `appendFileSync`, `unlinkSync`, `rmSync`) and sync child_process operations (`execSync`, `spawnSync`, `execFileSync`) when the file already uses Bun APIs or has a bun shebang. Enforces Bun-native replacements (`Bun.file()`, `Bun.write()`, `Bun.spawn()`, `Bun.$\`\``). Directory operations (`mkdir`, `readdir`, `stat`) and async spawn/exec remain allowed. |
-| `pretooluse-debug-statements.ts` | Blocks Edit/Write/NotebookEdit when the write introduces net-new debug output calls (`console.log`, `console.debug`, `console.trace`, `debugger`, Python `print()`, Ruby `binding.pry`). Uses a delta check (new count vs old count) to avoid false positives when editing files that already contain debug statements. Mirrors the allowlists of `stop-debug-statements.ts`: test files, hook/command infrastructure, generated files, and ESLint config files are exempt. |
 | `pretooluse-todo-tracker.ts` | Blocks Edit/Write/NotebookEdit when the write introduces net-new TODO/FIXME/HACK/XXX/WORKAROUND debt markers in comment contexts. Uses a delta check (new count vs old count) to avoid false positives when editing files that already contain such markers. Excludes regex literals, non-comment contexts, hook source files, test files, and generated files — mirroring `stop-todo-tracker.ts` semantics. The stop hook remains as a backstop for bypassed paths. |
 | `pretooluse-large-files.ts` | Blocks Edit/Write operations that would create or update a file exceeding the configured large-file size threshold (default 500KB) when the path is not covered by a Git LFS rule in `.gitattributes`. Reads `.gitattributes` from disk so uncommitted LFS rules added in the same session are respected. For Edit, projects the result of old→new replacement before measuring. For NotebookEdit, size is not determinable pre-write and is skipped. Threshold is configurable via `swiz settings set large-file-size-kb <value>` at global or project scope. |
 | `pretooluse-workflow-permissions-gate.ts` | Blocks changes to `permissions:` blocks in `.github/workflows/*.yml` files on non-default branches. GitHub Actions permission changes don't take effect until merged — this prevents accidental privilege escalation that silently activates upon merge. |

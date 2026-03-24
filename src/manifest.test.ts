@@ -60,7 +60,6 @@ describe("manifest.ts", () => {
       expect(files[1]).toBe("stop-completion-auditor.ts")
       // Security hooks follow immediately after
       expect(files[2]).toBe("stop-secret-scanner.ts")
-      expect(files[3]).toBe("stop-debug-statements.ts")
     })
   })
 
@@ -231,11 +230,7 @@ describe("manifest.ts", () => {
 
     it("security hooks appear early in stop event", () => {
       const stopGroup = manifest.find((g) => g.event === "stop")
-      const securityHooks = [
-        "stop-secret-scanner.ts",
-        "stop-debug-statements.ts",
-        "stop-large-files.ts",
-      ]
+      const securityHooks = ["stop-secret-scanner.ts", "stop-large-files.ts"]
       const hookFiles = (stopGroup?.hooks || []).map((h) => h.file)
 
       securityHooks.forEach((securityHook) => {
