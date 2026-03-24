@@ -21,23 +21,54 @@ import {
   skillAdvice,
 } from "./utils/hook-utils.ts"
 
+async function buildWordLimitDenyReason(
+  filePath: string,
+  projectedWordCount: number,
+  wordThreshold: number
+): Promise<string> {
+  const currentContent = await Bun.file(filePath)
+    .text()
+    .catch(() => "")
+  const currentWordCount = countMarkdownWords(currentContent)
+  const skill = skillAdvice(
+    "compact-memory",
+    `Use the /compact-memory skill to reduce the file below ${wordThreshold} words, then retry this edit.`,
+    manualCompactionGuidanceFallback()
+  )
+  const inlineChecklist = formatActionPlan(
+    compactionChecklistSteps(`Re-check size: \`wc -w ${filePath}\``),
+    { header: "Compaction checklist:" }
+  )
+  return (
+    `CLAUDE.md word limit exceeded.\n\n` +
+    `Current: ${currentWordCount} words\n` +
+    `After edit: ${projectedWordCount} words\n` +
+    `Limit: ${wordThreshold} words\n\n` +
+    `The CLAUDE.md file cannot exceed ${wordThreshold} words. ` +
+    `This limit keeps the memory file focused and performant.\n\n` +
+    `${skill}\n\n` +
+    `${inlineChecklist}`
+  )
+}
+
+type WordLimitInput = {
+  tool_name?: string
+  tool_input?: { file_path?: string; old_string?: string; new_string?: string; content?: string }
+  cwd?: string
+}
+
+function isClaudeMdEdit(input: WordLimitInput): boolean {
+  const toolName = input.tool_name ?? ""
+  const filePath = input.tool_input?.file_path ?? ""
+  return filePath.endsWith("CLAUDE.md") && (isEditTool(toolName) || isWriteTool(toolName))
+}
+
 async function main() {
-  const input = (await Bun.stdin.json()) as {
-    tool_name?: string
-    tool_input?: { file_path?: string; old_string?: string; new_string?: string; content?: string }
-    cwd?: string
-  }
+  const input = (await Bun.stdin.json()) as WordLimitInput
+  if (!isClaudeMdEdit(input)) process.exit(0)
 
   const toolName = input.tool_name ?? ""
   const filePath = input.tool_input?.file_path ?? ""
-
-  if (!filePath.endsWith("CLAUDE.md")) {
-    process.exit(0)
-  }
-
-  if (!isEditTool(toolName) && !isWriteTool(toolName)) {
-    process.exit(0)
-  }
 
   try {
     const cwd = input.cwd ?? process.cwd()
@@ -51,30 +82,7 @@ async function main() {
     const projectedWordCount = countMarkdownWords(projectedContent!)
 
     if (projectedWordCount > wordThreshold) {
-      const currentContent = await Bun.file(filePath)
-        .text()
-        .catch(() => "")
-      const currentWordCount = countMarkdownWords(currentContent)
-      const skill = skillAdvice(
-        "compact-memory",
-        `Use the /compact-memory skill to reduce the file below ${wordThreshold} words, then retry this edit.`,
-        manualCompactionGuidanceFallback()
-      )
-      const inlineChecklist = formatActionPlan(
-        compactionChecklistSteps(`Re-check size: \`wc -w ${filePath}\``),
-        { header: "Compaction checklist:" }
-      )
-
-      denyPreToolUse(
-        `CLAUDE.md word limit exceeded.\n\n` +
-          `Current: ${currentWordCount} words\n` +
-          `After edit: ${projectedWordCount} words\n` +
-          `Limit: ${wordThreshold} words\n\n` +
-          `The CLAUDE.md file cannot exceed ${wordThreshold} words. ` +
-          `This limit keeps the memory file focused and performant.\n\n` +
-          `${skill}\n\n` +
-          `${inlineChecklist}`
-      )
+      denyPreToolUse(await buildWordLimitDenyReason(filePath, projectedWordCount, wordThreshold))
     }
 
     allowPreToolUse("")

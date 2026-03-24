@@ -49,17 +49,16 @@ function checkForWeakening(oldString: string, newString: string): void {
   }
 }
 
-function extractInputValues(
-  input: FileEditHookInput
-): { filePath: string; oldString: string; newString: string } | null {
-  const filePath = input.tool_input?.file_path ?? ""
-  if (!isEslintConfigFile(filePath)) return null
-
-  const oldString = input.tool_input?.old_string ?? ""
-  if (!oldString) return null
-
-  const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
-  return { filePath, oldString, newString }
+function extractInputValues(input: FileEditHookInput): {
+  filePath: string
+  oldString: string
+  newString: string
+} | null {
+  const ti = input.tool_input ?? {}
+  const filePath = String(ti.file_path ?? "")
+  const oldString = String(ti.old_string ?? "")
+  if (!isEslintConfigFile(filePath) || !oldString) return null
+  return { filePath, oldString, newString: String(ti.new_string ?? ti.content ?? "") }
 }
 
 async function main() {

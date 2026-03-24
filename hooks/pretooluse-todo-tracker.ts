@@ -58,20 +58,32 @@ function buildDenyMessage(oldCount: number, newCount: number): string {
   ].join("\n")
 }
 
+interface EditDelta {
+  oldString: string
+  newString: string
+}
+
+function resolveEditDelta(
+  input: ReturnType<typeof fileEditHookInputSchema.parse>
+): EditDelta | null {
+  const filePath = input.tool_input?.file_path ?? ""
+  if (isExcludedSourcePath(filePath, EXCLUDE_PATH_RE, GENERATED_FILE_RE, TEST_FILE_RE)) return null
+  return {
+    oldString: input.tool_input?.old_string ?? "",
+    newString: input.tool_input?.new_string ?? input.tool_input?.content ?? "",
+  }
+}
+
 async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
+  const delta = resolveEditDelta(input)
+  if (!delta) allowPreToolUse("")
 
-  const filePath = input.tool_input?.file_path ?? ""
-  if (isExcludedSourcePath(filePath, EXCLUDE_PATH_RE, GENERATED_FILE_RE, TEST_FILE_RE))
-    allowPreToolUse("")
+  const oldCount = countTodoMarkers(delta!.oldString)
+  const newCount = countTodoMarkers(delta!.newString)
+  const netNew = newCount - oldCount
 
-  const oldString = input.tool_input?.old_string ?? ""
-  const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
-
-  const oldCount = countTodoMarkers(oldString)
-  const newCount = countTodoMarkers(newString)
-
-  if (newCount > oldCount) {
+  if (netNew > 0) {
     denyPreToolUse(buildDenyMessage(oldCount, newCount))
   }
 

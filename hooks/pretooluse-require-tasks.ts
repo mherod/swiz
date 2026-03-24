@@ -292,18 +292,22 @@ interface CheckTaskStalenessOpts {
   cwd: string
 }
 
-function shouldSkipStalenessCheck(
-  transcriptPath: string,
-  lastTaskIndex: number,
-  allTasksDone: boolean,
-  callsSinceTask: number,
-  toolName: string,
+function shouldSkipStalenessCheck(opts: {
+  transcriptPath: string
+  lastTaskIndex: number
+  allTasksDone: boolean
+  callsSinceTask: number
+  toolName: string
   input: Record<string, unknown>
-): boolean {
-  if (!transcriptPath) return true
-  if (lastTaskIndex < 0 || allTasksDone) return true
-  if (callsSinceTask < STALENESS_THRESHOLD) return true
-  if ((isEditTool(toolName) || isWriteTool(toolName)) && isLargeContentPayload(input)) return true
+}): boolean {
+  if (!opts.transcriptPath) return true
+  if (opts.lastTaskIndex < 0 || opts.allTasksDone) return true
+  if (opts.callsSinceTask < STALENESS_THRESHOLD) return true
+  if (
+    (isEditTool(opts.toolName) || isWriteTool(opts.toolName)) &&
+    isLargeContentPayload(opts.input)
+  )
+    return true
   return false
 }
 
@@ -316,14 +320,14 @@ async function checkTaskStaleness(opts: CheckTaskStalenessOpts): Promise<void> {
   const callsSinceTask = total - 1 - lastTaskIndex
 
   if (
-    shouldSkipStalenessCheck(
+    shouldSkipStalenessCheck({
       transcriptPath,
       lastTaskIndex,
       allTasksDone,
       callsSinceTask,
       toolName,
-      input
-    )
+      input,
+    })
   )
     return
 

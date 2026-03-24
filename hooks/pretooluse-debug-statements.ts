@@ -50,41 +50,49 @@ function countDebugPatterns(content: string): number {
 
 export { countDebugPatterns }
 
-async function main() {
-  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
-  const filePath = input.tool_input?.file_path ?? ""
+function buildDebugDenyReason(oldCount: number, newCount: number): string {
+  return [
+    "Debug statements must not be committed to source files.",
+    "",
+    "Detected new debug output call(s) being introduced:",
+    `  Old: ${oldCount} debug pattern(s) | New: ${newCount} debug pattern(s)`,
+    "",
+    formatActionPlan(
+      [
+        "Remove console.log / console.debug / console.trace before writing",
+        "Use SWIZ_DEBUG-gated logging: `const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {}`",
+        "For permanent structured output, use console.error (not console.log)",
+        "Use the debugger in your IDE instead of console.log statements",
+      ],
+      { header: "Your options:" }
+    ).trimEnd(),
+  ].join("\n")
+}
 
+function resolveDebugEditDelta(
+  input: ReturnType<typeof fileEditHookInputSchema.parse>
+): { oldString: string; newString: string } | null {
+  const filePath = input.tool_input?.file_path ?? ""
   if (
     isExcludedSourcePath(filePath, TEST_FILE_RE, INFRA_FILE_RE, GENERATED_FILE_RE, CONFIG_FILE_RE)
-  ) {
-    allowPreToolUse("")
+  )
+    return null
+  return {
+    oldString: input.tool_input?.old_string ?? "",
+    newString: input.tool_input?.new_string ?? input.tool_input?.content ?? "",
   }
+}
 
-  const oldString = input.tool_input?.old_string ?? ""
-  const newString = input.tool_input?.new_string ?? input.tool_input?.content ?? ""
+async function main() {
+  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
+  const delta = resolveDebugEditDelta(input)
+  if (!delta) allowPreToolUse("")
 
-  const oldCount = countDebugPatterns(oldString)
-  const newCount = countDebugPatterns(newString)
+  const oldCount = countDebugPatterns(delta!.oldString)
+  const newCount = countDebugPatterns(delta!.newString)
 
   if (newCount > oldCount) {
-    const reason = [
-      "Debug statements must not be committed to source files.",
-      "",
-      "Detected new debug output call(s) being introduced:",
-      `  Old: ${oldCount} debug pattern(s) | New: ${newCount} debug pattern(s)`,
-      "",
-      formatActionPlan(
-        [
-          "Remove console.log / console.debug / console.trace before writing",
-          "Use SWIZ_DEBUG-gated logging: `const debugLog = process.env.SWIZ_DEBUG ? console.error.bind(console) : () => {}`",
-          "For permanent structured output, use console.error (not console.log)",
-          "Use the debugger in your IDE instead of console.log statements",
-        ],
-        { header: "Your options:" }
-      ).trimEnd(),
-    ].join("\n")
-
-    denyPreToolUse(reason)
+    denyPreToolUse(buildDebugDenyReason(oldCount, newCount))
   }
 
   allowPreToolUse("")
