@@ -1377,6 +1377,23 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "When the user hasn't specified how, you are expected to decide how. " +
       "Make the best design decision available and implement it immediately.",
   },
+  {
+    category: "task_cancellation",
+    pattern: /(?:tasks?|items?) (?:were |was )?(?:created |added |made )?speculatively\b/i,
+    response:
+      "No task is 'speculative.' Every task represents work the user expects done. " +
+      "Labeling tasks as 'speculatively created' is a rationalization for abandoning them. " +
+      "If the task exists, it has a purpose. Fulfill it.",
+  },
+  {
+    category: "task_cancellation",
+    pattern:
+      /(?:the user's |user's )?(?:request|ask|task|work)\b[^.!?\n]{0,60}\b(?:(?:a |is a )?future (?:feature|work|task|item)|not (?:current[- ]session|this[- ]session(?:'s)?) work)\b/i,
+    response:
+      "The user's request is never 'a future feature' or 'not current-session work.' " +
+      "If the user asked for it, it is current work — full stop. " +
+      "Reframing a user request as future work is abandonment disguised as prioritization.",
+  },
 ]
 
 // ── Transcript scanning ─────────────────────────────────────────────────────
