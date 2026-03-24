@@ -135,9 +135,17 @@ describe("integration: Bun API detection + blocked spawn ops", () => {
 // ─── structural: word boundary guard ──────────────────────────────────────────
 
 describe("BLOCKED_NODE_SPAWN_OPS structural invariants", () => {
-  it("every regex starts with a word boundary to prevent partial-word matches", () => {
+  it("every regex contains a word boundary to prevent partial-word matches", () => {
     for (const op of BLOCKED_NODE_SPAWN_OPS) {
-      expect(op.re.source.startsWith("\\b"), `${op.name} regex missing \\b prefix`).toBe(true)
+      expect(op.re.source.includes("\\b"), `${op.name} regex missing \\b`).toBe(true)
+    }
+  })
+
+  it("every regex uses negative lookbehind to exclude Bun-native calls", () => {
+    for (const op of BLOCKED_NODE_SPAWN_OPS) {
+      expect(op.re.source.includes("(?<!Bun\\.)"), `${op.name} regex missing Bun lookbehind`).toBe(
+        true
+      )
     }
   })
 })

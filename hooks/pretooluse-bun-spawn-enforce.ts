@@ -16,17 +16,17 @@ const BUN_SHEBANG_RE = /^#!.*\bbun\b/m
  */
 export const BLOCKED_NODE_SPAWN_OPS: Array<{ re: RegExp; name: string; replacement: string }> = [
   {
-    re: new RegExp(["\\b", "exec", "Sync", "\\s*\\("].join("")),
+    re: new RegExp(["(?<!Bun\\.)", "\\b", "exec", "Sync", "\\s*\\("].join("")),
     name: ["exec", "Sync"].join(""),
     replacement: 'Bun.spawn(["sh", "-c", cmd])  or  Bun.$`cmd`',
   },
   {
-    re: new RegExp(["\\b", "spawn", "Sync", "\\s*\\("].join("")),
+    re: new RegExp(["(?<!Bun\\.)", "\\b", "spawn", "Sync", "\\s*\\("].join("")),
     name: ["spawn", "Sync"].join(""),
     replacement: "Bun.spawn([cmd, ...args])",
   },
   {
-    re: new RegExp(["\\b", "exec", "File", "Sync", "\\s*\\("].join("")),
+    re: new RegExp(["(?<!Bun\\.)", "\\b", "exec", "File", "Sync", "\\s*\\("].join("")),
     name: ["exec", "File", "Sync"].join(""),
     replacement: "Bun.spawn([file, ...args])",
   },
