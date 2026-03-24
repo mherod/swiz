@@ -14,6 +14,7 @@ import {
 } from "../../settings.ts"
 import { getWorkflowIntent } from "../../state-machine.ts"
 import { parseTranscriptSummary, type TranscriptSummary } from "../../transcript-summary.ts"
+import { projectKeyFromCwd } from "../../transcript-utils.ts"
 
 export interface EventMetrics {
   count: number
@@ -392,6 +393,14 @@ export class TranscriptIndexCache {
       return index
     } catch {
       return null
+    }
+  }
+
+  /** Invalidate only entries whose transcript path contains the project key for `cwd`. */
+  invalidateProject(cwd: string): void {
+    const projectKey = projectKeyFromCwd(cwd)
+    for (const key of this.entries.keys()) {
+      if (key.includes(projectKey)) this.entries.delete(key)
     }
   }
 

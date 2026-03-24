@@ -213,8 +213,8 @@ function setupWatchers(caches: ReturnType<typeof createDaemonCaches>) {
       gitStateCache.invalidateProject(cwd)
       projectSettingsCache.invalidateProject(cwd)
       manifestCache.invalidateProject(cwd)
-      transcriptIndex.invalidateAll()
-      sessionDataCache.invalidateAll()
+      transcriptIndex.invalidateProject(cwd)
+      sessionDataCache.invalidateProject(cwd)
     }
     const projectSettings = getProjectSettingsPath(cwd)
     if (projectSettings) watchers.register(projectSettings, `project-settings:${cwd}`, projectFlush)

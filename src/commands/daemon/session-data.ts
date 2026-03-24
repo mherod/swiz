@@ -6,6 +6,7 @@ import {
   findAllProviderSessions,
   isHookFeedback,
   parseTranscriptEntries,
+  projectKeyFromCwd,
   type Session,
   type TranscriptEntry,
 } from "../../transcript-utils.ts"
@@ -219,6 +220,14 @@ class SessionDataCache {
     for (const [sessionPath, entry] of this.entries) {
       const activityMs = Math.max(entry.lastMessageAt, entry.mtimeMs)
       if (activityMs < cutoffMs) this.entries.delete(sessionPath)
+    }
+  }
+
+  /** Invalidate only entries whose session path contains the project key for `cwd`. */
+  invalidateProject(cwd: string): void {
+    const projectKey = projectKeyFromCwd(cwd)
+    for (const key of this.entries.keys()) {
+      if (key.includes(projectKey)) this.entries.delete(key)
     }
   }
 
