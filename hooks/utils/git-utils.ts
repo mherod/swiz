@@ -159,18 +159,18 @@ function checkIsDocsOnly(changedFiles: string[]): boolean {
   return changedFiles.length > 0 && changedFiles.every((f) => docsOnlyRe.test(f))
 }
 
-function checkIsTrivial(
-  statParsingFailed: boolean,
-  fileCount: number,
-  trivialMaxFiles: number,
-  totalLinesChanged: number,
-  trivialMaxLines: number,
+function checkIsTrivial(opts: {
+  statParsingFailed: boolean
+  fileCount: number
+  trivialMaxFiles: number
+  totalLinesChanged: number
+  trivialMaxLines: number
   changedFiles: string[]
-): boolean {
-  if (statParsingFailed) return false
-  if (fileCount > trivialMaxFiles) return false
-  if (totalLinesChanged > trivialMaxLines) return false
-  return !changedFiles.some((f) => /src\/|lib\/|components\//.test(f))
+}): boolean {
+  if (opts.statParsingFailed) return false
+  if (opts.fileCount > opts.trivialMaxFiles) return false
+  if (opts.totalLinesChanged > opts.trivialMaxLines) return false
+  return !opts.changedFiles.some((f) => /src\/|lib\/|components\//.test(f))
 }
 
 export function classifyChangeScope(
@@ -185,14 +185,14 @@ export function classifyChangeScope(
 
   const statParsingFailed = changedFiles.length > 0 && fileCount === 0
   const isDocsOnly = checkIsDocsOnly(changedFiles)
-  const isTrivial = checkIsTrivial(
+  const isTrivial = checkIsTrivial({
     statParsingFailed,
     fileCount,
     trivialMaxFiles,
     totalLinesChanged,
     trivialMaxLines,
-    changedFiles
-  )
+    changedFiles,
+  })
   const isSmallFix = !statParsingFailed && fileCount <= 2 && totalLinesChanged <= 30
 
   const result = {
@@ -475,31 +475,47 @@ function isGitPushForceToken(token: string): boolean {
   return token.slice(1).includes("f")
 }
 
-function shellTokenize(segment: string): string[] {
-  const tokens: string[] = []
-  let token = ""
-  let quote: '"' | "'" | null = null
+interface TokenizerState {
+  tokens: string[]
+  token: string
+  quote: '"' | "'" | null
+}
 
+function processQuotedChar(state: TokenizerState, ch: string): void {
+  if (ch === state.quote) state.quote = null
+  else state.token += ch
+}
+
+function processUnquotedChar(
+  state: TokenizerState,
+  ch: string,
+  segment: string,
+  i: number
+): number {
+  if (ch === '"' || ch === "'") {
+    state.quote = ch
+  } else if (ch === "\\" && i + 1 < segment.length) {
+    state.token += segment[++i]!
+  } else if (ch === " " || ch === "\t") {
+    if (state.token) {
+      state.tokens.push(state.token)
+      state.token = ""
+    }
+  } else {
+    state.token += ch
+  }
+  return i
+}
+
+function shellTokenize(segment: string): string[] {
+  const state: TokenizerState = { tokens: [], token: "", quote: null }
   for (let i = 0; i < segment.length; i++) {
     const ch = segment[i]!
-    if (quote) {
-      if (ch === quote) quote = null
-      else token += ch
-    } else if (ch === '"' || ch === "'") {
-      quote = ch
-    } else if (ch === "\\" && i + 1 < segment.length) {
-      token += segment[++i]!
-    } else if (ch === " " || ch === "\t") {
-      if (token) {
-        tokens.push(token)
-        token = ""
-      }
-    } else {
-      token += ch
-    }
+    if (state.quote) processQuotedChar(state, ch)
+    else i = processUnquotedChar(state, ch, segment, i)
   }
-  if (token) tokens.push(token)
-  return tokens
+  if (state.token) state.tokens.push(state.token)
+  return state.tokens
 }
 
 function skipGitGlobalOptions(tokens: string[], i: number): number {

@@ -78,6 +78,19 @@ function detectMultipleIssues(s: string, verb: string | null): CompoundMatch | n
   }
 }
 
+function countSuffixTokens(firstTokens: string[], maxSuffixLen: number): number {
+  let count = 0
+  for (let i = firstTokens.length - 1; i >= 0; i--) {
+    const candidate = firstTokens.slice(i).join(" ")
+    if (candidate.length <= maxSuffixLen) {
+      count = firstTokens.length - i
+    } else {
+      break
+    }
+  }
+  return count
+}
+
 function detectSuffixExpansion(
   parts: string[],
   bare: string,
@@ -92,15 +105,7 @@ function detectSuffixExpansion(
   const firstTokens = firstPart.split(/\s+/)
   const maxSuffixLen = Math.max(...parts.slice(1).map((p) => p.trim().length))
 
-  let suffixTokens = 0
-  for (let i = firstTokens.length - 1; i >= 0; i--) {
-    const candidate = firstTokens.slice(i).join(" ")
-    if (candidate.length <= maxSuffixLen) {
-      suffixTokens = firstTokens.length - i
-    } else {
-      break
-    }
-  }
+  const suffixTokens = countSuffixTokens(firstTokens, maxSuffixLen)
   if (suffixTokens === 0) return null
 
   const stemTokens = firstTokens.slice(0, firstTokens.length - suffixTokens)

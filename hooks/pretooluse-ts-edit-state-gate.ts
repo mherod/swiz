@@ -15,20 +15,19 @@ function isTsOrTsxPath(raw: string): boolean {
   return /\.(tsx|ts)$/i.test(p)
 }
 
-async function main(): Promise<void> {
-  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
-  const toolName = input.tool_name ?? ""
-
-  if (!isCodeChangeTool(toolName)) return
-
+function resolveTsEditPath(input: ReturnType<typeof fileEditHookInputSchema.parse>): string | null {
+  if (!isCodeChangeTool(input.tool_name ?? "")) return null
   const toolInput = input.tool_input as Record<string, unknown> | undefined
   const filePath = String(toolInput?.file_path ?? toolInput?.path ?? "")
-  if (!filePath || !isTsOrTsxPath(filePath)) return
+  return filePath && isTsOrTsxPath(filePath) ? filePath : null
+}
 
-  const state = await readProjectState(cwd)
-  if (!state) return
-  if (ALLOWED_STATES.has(state)) return
+async function main(): Promise<void> {
+  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
+  if (!resolveTsEditPath(input)) return
+
+  const state = await readProjectState(input.cwd ?? process.cwd())
+  if (!state || ALLOWED_STATES.has(state)) return
 
   denyPreToolUse(
     `Editing TypeScript sources requires project state \`developing\`, \`reviewing\`, or \`addressing-feedback\`.\n\n` +

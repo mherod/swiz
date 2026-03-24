@@ -78,26 +78,25 @@ async function checkOrderAgainstTest(projectedOrder: string[], cwd: string): Pro
   }
 }
 
-async function main() {
-  const input = (await Bun.stdin.json()) as {
-    tool_name?: string
-    tool_input?: {
-      file_path?: string
-      old_string?: string
-      new_string?: string
-      content?: string
-    }
-    cwd?: string
-  }
+type ManifestEditInput = {
+  tool_name?: string
+  tool_input?: { file_path?: string; old_string?: string; new_string?: string; content?: string }
+  cwd?: string
+}
 
-  const toolName = input.tool_name ?? ""
+function isManifestEdit(input: ManifestEditInput): boolean {
   const filePath = input.tool_input?.file_path ?? ""
+  const toolName = input.tool_name ?? ""
+  return filePath.endsWith("src/manifest.ts") && (isEditTool(toolName) || isWriteTool(toolName))
+}
 
-  // Only fire on manifest.ts edits
-  if (!filePath.endsWith("src/manifest.ts")) process.exit(0)
-  if (!isEditTool(toolName) && !isWriteTool(toolName)) process.exit(0)
+async function main() {
+  const input = (await Bun.stdin.json()) as ManifestEditInput
+  if (!isManifestEdit(input)) process.exit(0)
 
   try {
+    const toolName = input.tool_name ?? ""
+    const filePath = input.tool_input?.file_path ?? ""
     const projectedContent = await computeProjectedContent(
       toolName,
       filePath,
@@ -106,14 +105,11 @@ async function main() {
     if (projectedContent === null) allowPreToolUse("")
 
     const projectedOrder = extractStopHookOrder(projectedContent)
-    if (projectedOrder.length === 0) allowPreToolUse("") // Could not parse — fail open
+    if (projectedOrder.length === 0) allowPreToolUse("")
 
-    const cwd = input.cwd ?? process.cwd()
-    await checkOrderAgainstTest(projectedOrder, cwd)
-
+    await checkOrderAgainstTest(projectedOrder, input.cwd ?? process.cwd())
     allowPreToolUse("")
   } catch {
-    // Fail open on any error
     process.exit(0)
   }
 }

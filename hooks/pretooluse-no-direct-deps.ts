@@ -81,15 +81,23 @@ async function parseContentSafely(content: string): Promise<Record<string, unkno
   }
 }
 
+function resolveEditStrings(input: Record<string, unknown>): {
+  oldString: string
+  newString: string
+} | null {
+  const toolInput = input.tool_input as Record<string, string> | undefined
+  const oldString: string = toolInput?.old_string ?? ""
+  const newString: string = toolInput?.new_string ?? ""
+  return oldString || newString ? { oldString, newString } : null
+}
+
 async function checkEditTool(
   input: Record<string, unknown>,
   filePath: string,
   addCmd: string
 ): Promise<void> {
-  const toolInput = input.tool_input as Record<string, string> | undefined
-  const oldString: string = toolInput?.old_string ?? ""
-  const newString: string = toolInput?.new_string ?? ""
-  if (!oldString && !newString) process.exit(0)
+  const strings = resolveEditStrings(input)
+  if (!strings) process.exit(0)
 
   let currentContent: string
   try {
@@ -98,11 +106,9 @@ async function checkEditTool(
     process.exit(0)
   }
 
-  const projectedContent = currentContent.replace(oldString, newString)
-
+  const projectedContent = currentContent.replace(strings.oldString, strings.newString)
   const currentParsed = await parseContentSafely(currentContent)
   const projectedParsed = await parseContentSafely(projectedContent)
-
   if (!currentParsed || !projectedParsed) process.exit(0)
 
   if (depsChanged(depsSnapshot(currentParsed), depsSnapshot(projectedParsed))) {

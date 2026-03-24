@@ -114,12 +114,16 @@ function extractCwd(input: ToolHookInput): string | null {
   return cwd || null
 }
 
+function resolveGitCommitContext(input: ToolHookInput): string | null {
+  if (!isShellTool(input?.tool_name ?? "")) return null
+  const command = (input?.tool_input?.command as string) ?? ""
+  if (!GIT_COMMIT_RE.test(command)) return null
+  return extractCwd(input)
+}
+
 async function main(): Promise<void> {
   const input: ToolHookInput = await Bun.stdin.json()
-  if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
-  const command = (input?.tool_input?.command as string) ?? ""
-  if (!GIT_COMMIT_RE.test(command)) process.exit(0)
-  const cwd = extractCwd(input)
+  const cwd = resolveGitCommitContext(input)
   if (!cwd) process.exit(0)
 
   const branch = await resolveFeatureBranch(cwd)
@@ -128,14 +132,14 @@ async function main(): Promise<void> {
   const result = await findApprovedPr(branch, cwd)
   if (!result) allowPreToolUse(`No approved PR on branch '${branch}'`)
 
-  if (!(await hasDismissStaleReviews(cwd, result.pr.baseRefName))) {
+  if (!(await hasDismissStaleReviews(cwd, result!.pr.baseRefName))) {
     allowPreToolUse(
-      `PR #${result.pr.number} approved but branch protection does not dismiss stale reviews`
+      `PR #${result!.pr.number} approved but branch protection does not dismiss stale reviews`
     )
   }
 
-  const approverList = formatApproverList(result.approvals)
-  denyPreToolUse(buildDenyMessage(result.pr, approverList))
+  const approverList = formatApproverList(result!.approvals)
+  denyPreToolUse(buildDenyMessage(result!.pr, approverList))
 }
 
 if (import.meta.main) main().catch(() => process.exit(0))

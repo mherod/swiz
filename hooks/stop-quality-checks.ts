@@ -41,25 +41,35 @@ async function runScript(
   return { passed: result.exitCode === 0, output: (result.stdout + result.stderr).trim() }
 }
 
-async function main(): Promise<void> {
-  const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const cwd = input.cwd ?? process.cwd()
+async function resolveScripts(cwd: string): Promise<{
+  scripts: Record<string, unknown>
+  lint: string | null
+  typecheck: string | null
+} | null> {
   const pkgPath = join(cwd, "package.json")
-
-  if (!(await Bun.file(pkgPath).exists())) return
-
+  if (!(await Bun.file(pkgPath).exists())) return null
   let pkg: Record<string, unknown>
   try {
     pkg = (await Bun.file(pkgPath).json()) as Record<string, unknown>
   } catch {
-    return
+    return null
   }
-
   const scripts = pkg.scripts as Record<string, unknown> | undefined
-  if (!scripts) return
+  if (!scripts) return null
+  const lint = findScript(scripts, LINT_SCRIPTS)
+  const typecheck = findScript(scripts, TYPECHECK_SCRIPTS)
+  if (!lint && !typecheck) return null
+  return { scripts, lint, typecheck }
+}
 
-  const lintScript = findScript(scripts, LINT_SCRIPTS)
-  const typecheckScript = findScript(scripts, TYPECHECK_SCRIPTS)
+async function main(): Promise<void> {
+  const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const cwd = input.cwd ?? process.cwd()
+  const resolved = await resolveScripts(cwd)
+  if (!resolved) return
+
+  const lintScript = resolved.lint
+  const typecheckScript = resolved.typecheck
 
   if (!lintScript && !typecheckScript) return
 
