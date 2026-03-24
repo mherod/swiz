@@ -358,24 +358,33 @@ export async function getSessionTasks(
   return buildSessionTasksView(tasks, limit)
 }
 
+const TASK_READ_CONCURRENCY = 8
+
 export async function getProjectTasks(
   cwd: string,
   limit = 100
 ): Promise<{ tasks: ProjectTaskPreview[]; summary: SessionTaskSummary }> {
   const sessions = await getSessions(cwd)
+
+  // Read tasks in bounded-concurrency batches, preserving session order.
   const allTasks: ProjectTaskPreview[] = []
-  for (const sessionId of sessions) {
-    const sessionTasks = await readTasks(sessionId)
-    for (const task of sessionTasks) {
-      allTasks.push({
-        sessionId,
-        id: task.id,
-        subject: task.subject,
-        status: task.status,
-        statusChangedAt: task.statusChangedAt ?? null,
-        completionTimestamp: task.completionTimestamp ?? null,
-        completionEvidence: task.completionEvidence ?? null,
-      })
+  for (let i = 0; i < sessions.length; i += TASK_READ_CONCURRENCY) {
+    const batch = sessions.slice(i, i + TASK_READ_CONCURRENCY)
+    const results = await Promise.all(
+      batch.map((sid) => readTasks(sid).then((tasks) => ({ sid, tasks })))
+    )
+    for (const { sid, tasks } of results) {
+      for (const task of tasks) {
+        allTasks.push({
+          sessionId: sid,
+          id: task.id,
+          subject: task.subject,
+          status: task.status,
+          statusChangedAt: task.statusChangedAt ?? null,
+          completionTimestamp: task.completionTimestamp ?? null,
+          completionEvidence: task.completionEvidence ?? null,
+        })
+      }
     }
   }
 
