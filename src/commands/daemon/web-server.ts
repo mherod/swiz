@@ -776,10 +776,11 @@ async function handleProjectPrsRoute(req: Request, ctx: DaemonWebServerContext):
   const store = getIssueStore()
   let prs = store.listPullRequests<unknown>(repo)
 
+  let syncing = false
   if (prs.length === 0) {
-    await ctx.upstreamSyncRegistry.register(cwd)
-    await ctx.upstreamSyncRegistry.syncNow(cwd)
-    prs = store.listPullRequests<unknown>(repo)
+    // Fire-and-forget: don't block the response on network sync
+    void ctx.upstreamSyncRegistry.register(cwd).then(() => ctx.upstreamSyncRegistry.syncNow(cwd))
+    syncing = true
   }
 
   if (prs.length === 0) {
@@ -796,7 +797,7 @@ async function handleProjectPrsRoute(req: Request, ctx: DaemonWebServerContext):
     })
     .slice(0, limit)
 
-  return Response.json({ repo, pullRequests: normalizedPrs })
+  return Response.json({ repo, pullRequests: normalizedPrs, syncing })
 }
 
 async function handleProjectSyncNow(req: Request, ctx: DaemonWebServerContext): Promise<Response> {
@@ -835,12 +836,11 @@ async function handleProjectIssuesRoute(
   const store = getIssueStore()
   let issues = store.listIssues<unknown>(repo)
 
-  // The dashboard often loads a project before the background sync has ever run for it.
-  // Prime the cache synchronously on the first miss so the issues panel can hydrate immediately.
+  let syncing = false
   if (issues.length === 0) {
-    await ctx.upstreamSyncRegistry.register(cwd)
-    await ctx.upstreamSyncRegistry.syncNow(cwd)
-    issues = store.listIssues<unknown>(repo)
+    // Fire-and-forget: don't block the response on network sync
+    void ctx.upstreamSyncRegistry.register(cwd).then(() => ctx.upstreamSyncRegistry.syncNow(cwd))
+    syncing = true
   }
 
   if (issues.length === 0) {
@@ -853,7 +853,7 @@ async function handleProjectIssuesRoute(
     .toSorted((a, b) => issueUpdatedAtMs(b.updatedAt) - issueUpdatedAtMs(a.updatedAt))
     .slice(0, limit)
 
-  return Response.json({ repo, issues: normalizedIssues })
+  return Response.json({ repo, issues: normalizedIssues, syncing })
 }
 
 async function handleSettingsRoutes(
