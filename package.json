@@ -25,6 +25,7 @@
     "ai-sdk-provider-claude-code": "^3.4.3",
     "ai-sdk-provider-codex-cli": "^1.1.0",
     "ai-sdk-provider-gemini-cli": "^2.0.1",
+    "applescript-node": "^1.0.3",
     "date-fns": "^4.1.0",
     "lodash-es": "^4.17.23",
     "lru-cache": "^11.2.6",

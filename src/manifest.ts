@@ -271,6 +271,12 @@ export const manifest: HookGroup[] = [
     hooks: [
       { file: "posttooluse-git-status.ts", timeout: 5, cooldownSeconds: 60 },
       { file: "posttooluse-speak-narrator.ts", timeout: 30, async: true },
+      {
+        file: "posttooluse-auto-steer.ts",
+        timeout: 10,
+        async: true,
+        requiredSettings: ["autoSteer"],
+      },
     ],
   },
   {

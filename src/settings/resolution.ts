@@ -156,6 +156,7 @@ function buildBaseSettings(
     pushGate: settings.pushGate,
     sandboxedEdits: settings.sandboxedEdits,
     speak: settings.speak,
+    autoSteer: settings.autoSteer,
     updateMemoryFooter: settings.updateMemoryFooter,
     gitStatusGate: settings.gitStatusGate,
     nonDefaultBranchGate: settings.nonDefaultBranchGate,

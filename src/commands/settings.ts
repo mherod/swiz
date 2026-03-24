@@ -266,6 +266,7 @@ const GLOBAL_BOOL_ROWS: BoolSettingRow[] = [
   ["push-gate:", "pushGate", "global"],
   ["sandboxed-edits:", "sandboxedEdits", "global"],
   ["speak:", "speak", "global"],
+  ["auto-steer:", "autoSteer", "global"],
   ["update-memory-footer:", "updateMemoryFooter", "global"],
   ["git-status-gate:", "gitStatusGate", "global"],
   ["non-default-branch-gate:", "nonDefaultBranchGate", "global"],

@@ -9,6 +9,7 @@ interface GlobalSettingsForm {
   pushGate: boolean
   sandboxedEdits: boolean
   speak: boolean
+  autoSteer: boolean
   gitStatusGate: boolean
   ambitionMode: "standard" | "aggressive" | "creative" | "reflective"
   memoryWordThreshold: number
@@ -33,6 +34,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   pushGate: true,
   sandboxedEdits: true,
   speak: false,
+  autoSteer: false,
   gitStatusGate: true,
   ambitionMode: "standard",
   memoryWordThreshold: 5000,
@@ -104,6 +106,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     pushGate: settings.pushGate !== false,
     sandboxedEdits: settings.sandboxedEdits !== false,
     speak: !!settings.speak,
+    autoSteer: !!settings.autoSteer,
     gitStatusGate: settings.gitStatusGate !== false,
     ambitionMode: (settings.ambitionMode as GlobalSettingsForm["ambitionMode"]) ?? "standard",
     memoryWordThreshold: Number(settings.memoryWordThreshold) || 5000,
@@ -267,6 +270,11 @@ const GLOBAL_TOGGLES: Array<{
     key: "speak",
     label: "Speak",
     desc: "Enable text-to-speech audio narration of certain notifications and events.",
+  },
+  {
+    key: "autoSteer",
+    label: "Auto-steer",
+    desc: "Type 'Continue' into the terminal after every tool call via AppleScript.",
   },
   {
     key: "updateMemoryFooter",

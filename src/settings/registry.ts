@@ -59,6 +59,16 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     },
   },
   {
+    key: "autoSteer",
+    aliases: ["auto-steer", "autosteer", "auto_steer"],
+    kind: "boolean",
+    scopes: ["global"],
+    docs: {
+      enableDescription: "Type 'Continue' into the terminal after every tool call via AppleScript",
+      disableDescription: "Disable auto-steer terminal input",
+    },
+  },
+  {
     key: "updateMemoryFooter",
     aliases: [
       "update-memory-footer",

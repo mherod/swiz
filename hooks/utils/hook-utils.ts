@@ -1212,3 +1212,38 @@ export function isExcludedSourcePath(filePath: string, ...extras: RegExp[]): boo
   if (!_SOURCE_EXT_RE.test(filePath)) return true
   return extras.some((re) => re.test(filePath))
 }
+
+// ─── Auto-steer scheduling ─────────────────────────────────────────────────
+
+/**
+ * Schedule an auto-steer "Continue" input to be sent on the next PostToolUse cycle.
+ * Any hook can call this to request the auto-steer hook fires on the next opportunity.
+ * The auto-steer hook consumes the request file atomically.
+ */
+export async function scheduleAutoSteer(sessionId: string): Promise<void> {
+  const { sanitizeSessionId: sanitize } = await import("../../src/session-id.ts")
+  const safeSession = sanitize(sessionId)
+  if (!safeSession) return
+  const { autoSteerRequestPath } = await import("../../src/temp-paths.ts")
+  await Bun.write(autoSteerRequestPath(safeSession), String(Date.now()))
+}
+
+/**
+ * Check whether an auto-steer request is pending for this session.
+ * Atomically consumes the request — returns true if one was pending.
+ */
+export async function consumeAutoSteerRequest(sessionId: string): Promise<boolean> {
+  const { sanitizeSessionId: sanitize } = await import("../../src/session-id.ts")
+  const safeSession = sanitize(sessionId)
+  if (!safeSession) return false
+  const { autoSteerRequestPath } = await import("../../src/temp-paths.ts")
+  const requestFile = autoSteerRequestPath(safeSession)
+  const file = Bun.file(requestFile)
+  if (!(await file.exists())) return false
+  try {
+    await file.delete()
+  } catch {
+    // Race condition with another consumer — fine
+  }
+  return true
+}

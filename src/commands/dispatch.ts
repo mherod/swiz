@@ -6,6 +6,7 @@
  * and re-exports all public symbols for backward compatibility.
  */
 
+import { detectTerminal } from "../../hooks/utils/terminal-detection.ts"
 import { stderrLog } from "../debug.ts"
 import {
   applyHookSettingFilters,
@@ -283,9 +284,20 @@ export const dispatchCommand: Command = {
       const cwd = (payload.cwd as string | undefined) ?? process.cwd()
       const toolName = (payload.tool_name ?? payload.toolName) as string | undefined
 
+      // Inject terminal info from the CLI process environment (daemon doesn't have these env vars)
+      if (!payload._terminal) {
+        const terminal = detectTerminal()
+        payload._terminal = { app: terminal.app, name: terminal.name }
+      }
+      const enrichedPayloadStr = JSON.stringify(payload)
+
       // ── Try daemon first, fall back to local execution ──
       const tDaemon = performance.now()
-      const daemonResponse = await tryDaemonDispatch(canonicalEvent, hookEventName, payloadStr)
+      const daemonResponse = await tryDaemonDispatch(
+        canonicalEvent,
+        hookEventName,
+        enrichedPayloadStr
+      )
       const daemonMs = Math.round(performance.now() - tDaemon)
       const forwarded = daemonResponse !== null
       log(`   ⏱ cli:daemon-attempt: ${daemonMs}ms (${forwarded ? "forwarded" : "fallback"})`)
@@ -313,7 +325,11 @@ export const dispatchCommand: Command = {
       // ── Local execution fallback ──
       const tLocal = performance.now()
       const { executeDispatch } = await import("../dispatch/execute.ts")
-      const { response } = await executeDispatch({ canonicalEvent, hookEventName, payloadStr })
+      const { response } = await executeDispatch({
+        canonicalEvent,
+        hookEventName,
+        payloadStr: enrichedPayloadStr,
+      })
       const localMs = Math.round(performance.now() - tLocal)
       const totalMs = Math.round(performance.now() - t0)
       log(`   ⏱ cli:local-execute: ${localMs}ms`)

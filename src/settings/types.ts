@@ -155,6 +155,8 @@ export interface SwizSettings {
   pushGate: boolean
   sandboxedEdits: boolean
   speak: boolean
+  /** When true, types "Continue" into the terminal after every tool call via AppleScript. */
+  autoSteer: boolean
   updateMemoryFooter: boolean
   gitStatusGate: boolean
   nonDefaultBranchGate: boolean
