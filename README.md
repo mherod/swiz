@@ -6,7 +6,7 @@ One manifest of TypeScript hook scripts gets installed across Claude Code, Curso
 
 When `swiz idea` and `swiz continue` are used together, the system can enter a **self-directed loop** — a closed-loop state where the agent's own outputs become the next inputs, expanding the project without external prompts. See [docs/ai-providers.md](docs/ai-providers.md#self-directed-loop) for the canonical terminology.
 
-**107 hooks. 12 event types. Every agent. Zero compromises.**
+**106 hooks. 12 event types. Every agent. Zero compromises.**
 
 ## Install
 
@@ -119,7 +119,7 @@ Stop hooks run before the agent is allowed to end a session. They're the last li
 | `stop-auto-continue.ts` | Blocks stop with an AI-generated "what should you do next?" suggestion. Instead of ending, the agent gets a concrete next step. Combined with `swiz continue`, this creates an autonomous work loop. |
 | `posttooluse-speak-narrator.ts` | Speaks new assistant text aloud using platform-native TTS (macOS `say`, Linux `espeak-ng`/`espeak`/`spd-say`, Windows PowerShell). Tracks position per session so only incremental text is spoken. Uses PID-aware file locking with heartbeats to queue speech in order. Runs async so it never blocks the session. |
 
-### PreToolUse (55)
+### PreToolUse (54)
 
 PreToolUse hooks intercept tool calls *before* they execute. A blocking hook here prevents the action entirely — the agent has to find another way.
 
@@ -147,7 +147,6 @@ PreToolUse hooks intercept tool calls *before* they execute. A blocking hook her
 | `pretooluse-require-tasks.ts` | Blocks Edit, Write, and Shell tools unless the agent has active tasks. No more undisciplined free-form editing — work must be tracked. |
 | `pretooluse-no-task-delegation.ts` | Prevents agents from creating sub-tasks to delegate work instead of doing it. Task creation is for tracking, not avoidance. |
 | `pretooluse-task-subject-validation.ts` | Validates task subjects meet quality standards before they're created — no vague "fix stuff" tasks. |
-| `pretooluse-commit-checks-gate.ts` | Blocks `git commit` unless a branch check (`git branch --show-current`) has already been run in the current session. Prevents committing to the wrong branch without first verifying context. |
 | `pretooluse-stale-approval-gate.ts` | Warns before `git commit` would invalidate an existing PR approval when branch protection dismisses stale reviews. Fires once per 5 minutes (cooldown), then allows subsequent commits. Fails open when `gh` is unavailable or branch is unprotected. |
 | `pretooluse-push-checks-gate.ts` | Blocks `git push` unless branch and open-PR checks have already been run in the current session. Prevents pushing without verifying context and avoiding duplicate PRs. |
 | `pretooluse-push-cooldown.ts` | Enforces a 60-second cooldown between `git push` commands for the same repository. Prevents accidental rapid-fire pushes. Bypass with `--force`, `--force-with-lease`, `--force-with-lease=<ref>`, `--force-if-includes`, or `-f`. |

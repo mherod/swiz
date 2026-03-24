@@ -106,8 +106,7 @@ alwaysApply: false
 - One verb per task subject; `pretooluse-task-subject-validation.ts` rejects compound subjects.
 - Keep at least one `pending`/`in_progress` task before `git add` or `git commit`; mark commit task complete after commit success.
 - Run `/commit` before `git commit`; `pretooluse-commit-skill-gate` enforces it.
-- `/commit` checks: branch verification, task preflight, Conventional Commits `<type>(<scope>): <summary>`.
-- Run `git branch --show-current` early to satisfy commit gate transcript checks.
+- `/commit` checks: task preflight, Conventional Commits `<type>(<scope>): <summary>`.
 - Call task tools regularly: every 10 calls; staleness gate at 20.
 - **DO**: Use native task tools for creation/status/queries. **DON'T**: Use `swiz tasks` CLI for status transitions. Exception: `swiz tasks complete` (requires `--evidence`).
 - Call `TaskUpdate` after each file; add updates at least every 3 edits.
