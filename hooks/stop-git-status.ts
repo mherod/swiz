@@ -157,10 +157,12 @@ function selectTaskSubject(hasUncommitted: boolean, ahead: number, behind: numbe
 function pushSubStepsForPolicy(policy: CollaborationModePolicy, branch: string): ActionPlanItem[] {
   const isMainBranch = branch === "main" || branch === "master"
 
+  // On main/master when direct push is not permitted
   if (policy.requireFeatureBranch && isMainBranch) {
     const steps: ActionPlanItem[] = [
-      `Create a feature branch first: git checkout -b <type>/<slug>`,
-      `Push the feature branch: git push origin <feature-branch>`,
+      "Direct push to main is not permitted — create a feature branch",
+      `git checkout -b <type>/<slug>`,
+      `git push origin <feature-branch>`,
     ]
     if (policy.requirePullRequest) {
       steps.push(`Open a PR: gh pr create --base ${branch}`)
@@ -171,7 +173,15 @@ function pushSubStepsForPolicy(policy: CollaborationModePolicy, branch: string):
     return steps
   }
 
-  return [`git push origin ${branch}`]
+  // On a feature branch or main without branch restriction
+  const steps: ActionPlanItem[] = [`git push origin ${branch}`]
+  if (!isMainBranch && policy.requirePullRequest) {
+    steps.push(`Open or update a PR: gh pr create --base main (if no PR exists)`)
+  }
+  if (!isMainBranch && policy.requirePeerReview) {
+    steps.push("Request a peer review before merging")
+  }
+  return steps
 }
 
 function buildReason(opts: {
@@ -226,15 +236,20 @@ function buildReason(opts: {
 
   const willNeedPush = ahead > 0 || (hasUncommitted && hasRemote)
   if (willNeedPush) {
-    const pushHeader =
-      ahead > 0
+    const policy = getCollaborationModePolicy(collabMode)
+    const isMainBranch = branch === "main" || branch === "master"
+    const mainBlocked = policy.requireFeatureBranch && isMainBranch
+
+    const pushHeader = mainBlocked
+      ? `Move commits off '${branch}' to a feature branch:`
+      : ahead > 0
         ? `Push ${ahead} commit(s) to '${upstream}':`
         : `Push your committed changes to '${upstream}':`
     const pushSubSteps: ActionPlanItem[] = []
     if (skillExists("push")) {
       pushSubSteps.push("/push — Push to remote with collaboration guard")
     }
-    pushSubSteps.push(...pushSubStepsForPolicy(getCollaborationModePolicy(collabMode), branch))
+    pushSubSteps.push(...pushSubStepsForPolicy(policy, branch))
     steps.push(pushHeader, pushSubSteps)
   }
 
