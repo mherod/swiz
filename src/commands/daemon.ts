@@ -146,16 +146,16 @@ function buildSnapshotResolver(snapshots: LRUCache<string, CachedSnapshot>) {
     cwd: string,
     sessionId: string | null | undefined
   ): Promise<WarmStatusLineSnapshot> => {
+    // Coalesce concurrent callers before doing any expensive work.
+    const inflight = inFlight.get(cwd)
+    if (inflight) return inflight
+
     const key = cacheKey(cwd, sessionId)
     const nextFingerprint = await buildSnapshotFingerprint(cwd)
     const existing = snapshots.get(key)
     if (existing && !hasSnapshotInvalidated(existing.fingerprint, nextFingerprint)) {
       return existing.snapshot
     }
-
-    // Coalesce concurrent callers behind a single in-flight computation per cwd.
-    const inflight = inFlight.get(cwd)
-    if (inflight) return inflight
 
     const computation = computeWarmStatusLineSnapshot(cwd, sessionId).then((snapshot) => {
       snapshots.set(key, { snapshot, fingerprint: nextFingerprint })

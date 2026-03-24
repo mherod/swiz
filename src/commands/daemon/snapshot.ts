@@ -47,14 +47,26 @@ async function safeMtime(path: string | null): Promise<number> {
 }
 
 export async function buildSnapshotFingerprint(cwd: string): Promise<SnapshotFingerprint> {
-  const gitStatus = await getGitBranchStatus(cwd)
   const globalSettingsPath = getSwizSettingsPath()
+  const [
+    gitStatus,
+    projectSettingsMtimeMs,
+    projectStateMtimeMs,
+    globalSettingsMtimeMs,
+    ghCacheMtimeMs,
+  ] = await Promise.all([
+    getGitBranchStatus(cwd),
+    safeMtime(getProjectSettingsPath(cwd)),
+    safeMtime(getStatePath(cwd)),
+    safeMtime(globalSettingsPath),
+    safeMtime(getIssueStoreDbPath()),
+  ])
   return {
     git: gitStatus ? JSON.stringify(gitStatus) : "not-git",
-    projectSettingsMtimeMs: await safeMtime(getProjectSettingsPath(cwd)),
-    projectStateMtimeMs: await safeMtime(getStatePath(cwd)),
-    globalSettingsMtimeMs: await safeMtime(globalSettingsPath),
-    ghCacheMtimeMs: await safeMtime(getIssueStoreDbPath()),
+    projectSettingsMtimeMs,
+    projectStateMtimeMs,
+    globalSettingsMtimeMs,
+    ghCacheMtimeMs,
     githubBucket: Math.floor(Date.now() / GITHUB_REFRESH_WINDOW_MS),
   }
 }
