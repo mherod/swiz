@@ -568,11 +568,14 @@ export async function runEntry(
 function scheduleAsyncHookEntry(
   hook: HookDef,
   payloadStr: string,
-  pool: ReturnType<typeof getWorkerPool> | null,
-  daemonContext: boolean | undefined,
-  signal: AbortSignal | undefined,
-  promises: Promise<void>[]
+  ctx: {
+    pool: ReturnType<typeof getWorkerPool> | null
+    daemonContext: boolean | undefined
+    signal: AbortSignal | undefined
+    promises: Promise<void>[]
+  }
 ): void {
+  const { pool, daemonContext, signal, promises } = ctx
   if (daemonContext && pool) {
     log(`   → ${hook.file} [async, daemon-awaited]`)
     const timeout = hook.timeout ?? DEFAULT_TIMEOUT
@@ -627,7 +630,7 @@ export async function launchAsyncHooks(
       log(`   ⏭ ${hook.file} [async, dispatch aborted]`)
       continue
     }
-    scheduleAsyncHookEntry(hook, payloadStr, pool, daemonContext, signal, promises)
+    scheduleAsyncHookEntry(hook, payloadStr, { pool, daemonContext, signal, promises })
   }
   if (daemonContext && promises.length > 0) {
     log(`   awaiting ${promises.length} async hook(s) in daemon context`)

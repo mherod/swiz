@@ -422,11 +422,9 @@ function buildDispatchAbortController(signal: AbortSignal | undefined): AbortCon
 async function executeStrategyWithTimeout(
   strategy: (typeof STRATEGY_REGISTRY)[keyof typeof STRATEGY_REGISTRY],
   params: Parameters<typeof strategy.execute>[0],
-  budgetMs: number,
-  budgetSec: number | undefined,
-  dispatchAbort: AbortController,
-  canonicalEvent: string
+  budget: { ms: number; sec: number | undefined; abort: AbortController; event: string }
 ): Promise<Record<string, unknown>> {
+  const { ms: budgetMs, sec: budgetSec, abort: dispatchAbort, event: canonicalEvent } = budget
   if (budgetMs <= 0) {
     return await strategy.execute(params)
   }
@@ -579,10 +577,7 @@ async function performDispatch(req: DispatchRequest): Promise<DispatchResult> {
         cwd: ctx.cwd,
         signal: dispatchAbort.signal,
       },
-      budgetMs,
-      budgetSec,
-      dispatchAbort,
-      ctx.canonicalEvent
+      { ms: budgetMs, sec: budgetSec, abort: dispatchAbort, event: ctx.canonicalEvent }
     )
 
     // Fire-and-forget log write — never blocks the dispatch response

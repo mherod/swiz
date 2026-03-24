@@ -189,21 +189,27 @@ async function runCreateTask(rest: string[]): Promise<void> {
 
 async function handleCompleteError(
   e: unknown,
-  sessionId: string,
-  taskId: string,
-  evidence: string | undefined,
-  verify: string | undefined,
-  filterCwd: string | undefined
+  opts: {
+    sessionId: string
+    taskId: string
+    evidence: string | undefined
+    verify: string | undefined
+    filterCwd: string | undefined
+  }
 ): Promise<void> {
   const msg = e instanceof Error ? e.message : String(e)
   if (msg.includes("Invalid transition") && msg.includes("pending")) {
-    console.log(`  ⚡ Auto-transitioning #${taskId}: pending → in_progress → completed`)
-    await updateStatus(sessionId, taskId, "in_progress", { filterCwd })
-    await updateStatus(sessionId, taskId, "completed", { evidence, verifyText: verify, filterCwd })
+    console.log(`  ⚡ Auto-transitioning #${opts.taskId}: pending → in_progress → completed`)
+    await updateStatus(opts.sessionId, opts.taskId, "in_progress", { filterCwd: opts.filterCwd })
+    await updateStatus(opts.sessionId, opts.taskId, "completed", {
+      evidence: opts.evidence,
+      verifyText: opts.verify,
+      filterCwd: opts.filterCwd,
+    })
     return
   }
   if (msg.includes("not found")) {
-    const sessionSuffix = sessionId ? ` --session ${sessionId.slice(0, 8)}` : ""
+    const sessionSuffix = opts.sessionId ? ` --session ${opts.sessionId.slice(0, 8)}` : ""
     throw new Error(
       `${msg}\n\n` +
         `To close all incomplete tasks at once (avoids per-task disambiguation):\n` +
@@ -261,7 +267,7 @@ async function runCompleteTask(rest: string[], filterCwd?: string): Promise<void
       filterCwd,
     })
   } catch (e) {
-    await handleCompleteError(e, sessionId, taskId, evidence, verify, filterCwd)
+    await handleCompleteError(e, { sessionId, taskId, evidence, verify, filterCwd })
     return
   }
   if (stateFlag) await applyStateUpdate(stateFlag, process.cwd())
