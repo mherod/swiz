@@ -224,6 +224,29 @@ class BlockingStrategy implements HookExecutionStrategy {
 
     processBlockingResults(results, executions, finalResponse, runAllHooks)
 
+    // Auto-steer intercept: when a stop hook blocks and auto-steer is available,
+    // send the blocking reason directly to the terminal and convert to allow.
+    // This happens at dispatch level so ALL stop hooks benefit automatically.
+    if (canonicalEvent === "stop" && isBlock(finalResponse)) {
+      const blockReason = (finalResponse as { reason?: string }).reason ?? ""
+      if (blockReason) {
+        const payload = JSON.parse(enrichedPayloadStr) as Record<string, unknown>
+        const sessionId = (payload.session_id as string) ?? ""
+        if (sessionId) {
+          const { isAutoSteerAvailable, sendAutoSteer } = await import(
+            "../../hooks/utils/hook-utils.ts"
+          )
+          const terminalApp = await isAutoSteerAvailable(sessionId)
+          if (terminalApp) {
+            await sendAutoSteer(blockReason, terminalApp)
+            log(`   auto-steer: sent stop block reason to terminal — converting to allow`)
+            delete (finalResponse as Record<string, unknown>).decision
+            delete (finalResponse as Record<string, unknown>).reason
+          }
+        }
+      }
+    }
+
     if (!isBlock(finalResponse)) {
       log(`   result: all passed`)
     }

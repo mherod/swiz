@@ -1296,19 +1296,9 @@ async function main(): Promise<void> {
     effective.critiquesEnabled ?? false
   )
 
-  // If auto-steer is available, send the suggestion directly to the terminal
-  // and allow stop — the agent receives the directive as typed input immediately.
-  // Can't schedule here: session is ending, no future PostToolUse cycle to consume it.
-  const sessionId = input.session_id ?? ""
-  if (sessionId) {
-    const { isAutoSteerAvailable, sendAutoSteer } = await import("./utils/hook-utils.ts")
-    const terminalApp = await isAutoSteerAvailable(sessionId)
-    if (terminalApp) {
-      await sendAutoSteer(finalMessage, terminalApp)
-      terminate("skip", "AUTO_STEER_SENT", "suggestion sent to terminal via auto-steer")
-    }
-  }
-
+  // Auto-steer intercept is handled at the dispatch level (BlockingStrategy).
+  // This hook just blocks as usual; the dispatcher converts it to a terminal
+  // steering prompt when autoSteer is enabled.
   terminate("block", finalMessage)
 }
 
