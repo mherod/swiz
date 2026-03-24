@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { randomBytes } from "node:crypto"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -41,21 +41,12 @@ async function runModel(
 }
 
 describe("swiz model", () => {
-  const dirs: string[] = []
-
-  afterEach(async () => {
-    for (const d of dirs.splice(0)) {
-      await rm(d, { recursive: true, force: true })
-    }
-  })
-
-  async function setup(): Promise<{ home: string; proj: string }> {
+  async function setup(): Promise<{ home: string; proj: string; cleanup: () => Promise<void> }> {
     const home = makeHome()
     const proj = join(home, "proj")
-    dirs.push(home)
     await mkdir(join(home, ".claude"), { recursive: true })
     await mkdir(proj, { recursive: true })
-    return { home, proj }
+    return { home, proj, cleanup: () => rm(home, { recursive: true, force: true }) }
   }
 
   test("show reports not set when no model keys exist", async () => {

@@ -48,13 +48,18 @@ type DaemonWebServerHandle = ReturnType<typeof Bun.serve>
 
 export const WEB_ROOT = join(dirname(Bun.main), "src", "web")
 export const PUBLIC_ROOT = join(dirname(Bun.main), "www", "public")
-export const WEB_TSX_TRANSPILER = new Bun.Transpiler({
-  loader: "tsx",
-  autoImportJSX: true,
-})
-export const WEB_TS_TRANSPILER = new Bun.Transpiler({
-  loader: "ts",
-})
+let _tsxTranspiler: InstanceType<typeof Bun.Transpiler> | undefined
+let _tsTranspiler: InstanceType<typeof Bun.Transpiler> | undefined
+
+/** Lazy-init to avoid CurrentWorkingDirectoryUnlinked when imported from tests. */
+export function getWebTsxTranspiler(): InstanceType<typeof Bun.Transpiler> {
+  if (!_tsxTranspiler) _tsxTranspiler = new Bun.Transpiler({ loader: "tsx", autoImportJSX: true })
+  return _tsxTranspiler
+}
+export function getWebTsTranspiler(): InstanceType<typeof Bun.Transpiler> {
+  if (!_tsTranspiler) _tsTranspiler = new Bun.Transpiler({ loader: "ts" })
+  return _tsTranspiler
+}
 
 export const WEB_MIME_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -95,8 +100,8 @@ async function buildWebAsset(
     const source = await file.text()
     const code =
       extension === ".tsx"
-        ? WEB_TSX_TRANSPILER.transformSync(source)
-        : WEB_TS_TRANSPILER.transformSync(source)
+        ? getWebTsxTranspiler().transformSync(source)
+        : getWebTsTranspiler().transformSync(source)
     const contentType = "text/javascript; charset=utf-8"
     webAssetCache.set(filePath, { mtimeMs, body: code, contentType })
     return { body: code, contentType }
