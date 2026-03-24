@@ -8,6 +8,7 @@ import {
   denyPreToolUse,
   isRunningInAgent,
   isShellTool,
+  scheduleAutoSteer,
 } from "./utils/hook-utils.ts"
 
 // Only enforce in agent/Claude Code context
@@ -61,11 +62,12 @@ function buildSwizTasksRules(): SwizTasksRule[] {
   ]
 }
 
-function checkRules(command: string, rules: SwizTasksRule[]): void {
+function checkRules(command: string, rules: SwizTasksRule[], sessionId: string): void {
   for (const rule of rules) {
     if (!rule.match(command)) continue
 
     if (rule.severity === "warn") {
+      if (sessionId) void scheduleAutoSteer(sessionId, rule.message)
       allowPreToolUse(rule.message)
     } else {
       denyPreToolUse(rule.message)
@@ -90,8 +92,9 @@ async function main() {
   }
 
   const command: string = input?.tool_input?.command ?? ""
+  const sessionId: string = input?.session_id ?? ""
   const rules = buildSwizTasksRules()
-  checkRules(command, rules)
+  checkRules(command, rules, sessionId)
 }
 
 if (import.meta.main) {

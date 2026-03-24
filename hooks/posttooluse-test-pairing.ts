@@ -3,7 +3,7 @@
 
 import { basename, dirname } from "node:path"
 import { toolHookInputSchema } from "./schemas.ts"
-import { emitContext, isFileEditTool } from "./utils/hook-utils.ts"
+import { emitContext, isFileEditTool, scheduleAutoSteer } from "./utils/hook-utils.ts"
 
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())
@@ -41,11 +41,10 @@ async function main(): Promise<void> {
   }
   if (!foundTest) return
 
-  await emitContext(
-    "PostToolUse",
-    `Test file exists for this source file: ${foundTest} — check if it needs updating to reflect your changes.`,
-    input.cwd
-  )
+  const message = `Test file exists for this source file: ${foundTest} — check if it needs updating to reflect your changes.`
+  const sessionId = (input.session_id as string) ?? ""
+  if (sessionId) void scheduleAutoSteer(sessionId, message)
+  await emitContext("PostToolUse", message, input.cwd)
 }
 
 if (import.meta.main) void main()

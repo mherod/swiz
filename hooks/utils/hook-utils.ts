@@ -1215,35 +1215,48 @@ export function isExcludedSourcePath(filePath: string, ...extras: RegExp[]): boo
 
 // ─── Auto-steer scheduling ─────────────────────────────────────────────────
 
+export interface AutoSteerRequest {
+  message: string
+  timestamp: number
+}
+
 /**
- * Schedule an auto-steer "Continue" input to be sent on the next PostToolUse cycle.
- * Any hook can call this to request the auto-steer hook fires on the next opportunity.
- * The auto-steer hook consumes the request file atomically.
+ * Schedule an auto-steer input with a steering prompt message.
+ * The message will be typed into the terminal on the next PostToolUse cycle,
+ * giving the agent actionable context (not just "Continue").
  */
-export async function scheduleAutoSteer(sessionId: string): Promise<void> {
+export async function scheduleAutoSteer(sessionId: string, message = "Continue"): Promise<void> {
   const { sanitizeSessionId: sanitize } = await import("../../src/session-id.ts")
   const safeSession = sanitize(sessionId)
   if (!safeSession) return
   const { autoSteerRequestPath } = await import("../../src/temp-paths.ts")
-  await Bun.write(autoSteerRequestPath(safeSession), String(Date.now()))
+  const request: AutoSteerRequest = { message, timestamp: Date.now() }
+  await Bun.write(autoSteerRequestPath(safeSession), JSON.stringify(request))
 }
 
 /**
  * Check whether an auto-steer request is pending for this session.
- * Atomically consumes the request — returns true if one was pending.
+ * Atomically consumes the request — returns the steering message if pending, null otherwise.
  */
-export async function consumeAutoSteerRequest(sessionId: string): Promise<boolean> {
+export async function consumeAutoSteerRequest(sessionId: string): Promise<AutoSteerRequest | null> {
   const { sanitizeSessionId: sanitize } = await import("../../src/session-id.ts")
   const safeSession = sanitize(sessionId)
-  if (!safeSession) return false
+  if (!safeSession) return null
   const { autoSteerRequestPath } = await import("../../src/temp-paths.ts")
   const requestFile = autoSteerRequestPath(safeSession)
   const file = Bun.file(requestFile)
-  if (!(await file.exists())) return false
+  if (!(await file.exists())) return null
+  let content: string
   try {
+    content = await file.text()
     await file.delete()
   } catch {
-    // Race condition with another consumer — fine
+    return null
   }
-  return true
+  try {
+    return JSON.parse(content) as AutoSteerRequest
+  } catch {
+    // Legacy format (plain timestamp) — treat as "Continue"
+    return { message: "Continue", timestamp: Number(content) || Date.now() }
+  }
 }

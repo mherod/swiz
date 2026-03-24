@@ -12,6 +12,7 @@ import {
   isEditTool,
   isTaskTool,
   isWriteTool,
+  scheduleAutoSteer,
   toolNameForCurrentAgent,
 } from "./utils/hook-utils.ts"
 
@@ -57,9 +58,12 @@ function emitStalenessWarning(
   }
 }
 
+let _sessionId = ""
+
 async function main(): Promise<void> {
   const hookRaw = (await Bun.stdin.json()) as Record<string, unknown>
   const input = toolHookInputSchema.parse(hookRaw)
+  _sessionId = (input.session_id as string) ?? ""
   const transcript = input.transcript_path
   if (!transcript) return
 
@@ -83,6 +87,7 @@ async function main(): Promise<void> {
 }
 
 async function emit(context: string): Promise<never> {
+  if (_sessionId) void scheduleAutoSteer(_sessionId, context)
   return emitContext("PostToolUse", context)
 }
 
