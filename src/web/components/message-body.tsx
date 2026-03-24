@@ -252,8 +252,12 @@ function renderUserContextBlocks(
       {parsedObjective ? <ObjectiveBlock objective={parsedObjective} /> : null}
       {hookContext ? <HookContextBlock hookContext={hookContext} /> : null}
       {attachedSkills ? <AttachedSkillsBlock skills={attachedSkills} /> : null}
-      {blocks.map((block, idx) => (
-        <MetadataBlockItem key={`${block.title}-${idx}`} block={block} unwrap={shouldUnwrap} />
+      {blocks.map((block) => (
+        <MetadataBlockItem
+          key={`${block.kind}-${block.title}`}
+          block={block}
+          unwrap={shouldUnwrap}
+        />
       ))}
       {hasContext ? <span className="sr-only">Parsed message context available.</span> : null}
     </>

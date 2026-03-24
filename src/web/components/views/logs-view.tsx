@@ -145,7 +145,7 @@ function LogTable({
         <tbody>
           {entries.map((entry, i) => (
             <LogRow
-              key={`${entry.ts}-${entry.hook}-${i}`}
+              key={`${entry.ts}-${entry.hook}-${entry.event}-${entry.durationMs}`}
               entry={entry}
               expanded={expandedIdx === i}
               onToggle={() => onToggle(i)}
