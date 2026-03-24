@@ -108,6 +108,11 @@ export const toolHookInputSchema = z
 
 export type ToolHookInput = z.infer<typeof toolHookInputSchema>
 
+/** PostToolUse input — extends ToolHookInput with the tool's response payload. */
+export interface PostToolHookInput extends ToolHookInput {
+  tool_response?: unknown
+}
+
 /**
  * Stop / SubagentStop hook input envelope.
  * Mirrors the `StopHookInput` interface in hook-utils.ts with runtime validation.

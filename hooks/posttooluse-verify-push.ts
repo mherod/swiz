@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * PostToolUse hook: Verify that a git push actually landed on the remote.
  *
@@ -21,20 +22,10 @@
  *      — Claude Code's response text for async Bash tool calls
  */
 
-import {
-  denyPostToolUse,
-  emitContext,
-  GIT_PUSH_RE,
-  git,
-  isShellTool,
-  type ToolHookInput,
-} from "./utils/hook-utils.ts"
+import type { PostToolHookInput } from "./schemas.ts"
+import { denyPostToolUse, emitContext, GIT_PUSH_RE, git, isShellTool } from "./utils/hook-utils.ts"
 
-interface ExtendedToolHookInput extends ToolHookInput {
-  tool_response?: string | null
-}
-
-const input = (await Bun.stdin.json()) as ExtendedToolHookInput
+const input = (await Bun.stdin.json()) as PostToolHookInput
 if (!input.tool_name || !isShellTool(input.tool_name)) process.exit(0)
 
 const command = String(input.tool_input?.command ?? "")

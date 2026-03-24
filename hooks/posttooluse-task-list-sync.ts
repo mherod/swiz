@@ -17,25 +17,16 @@
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
+import type { PostToolHookInput } from "./schemas.ts"
 import {
   emitContext,
   getSessionTaskPath,
   getSessionTasksDir,
   resolveSafeSessionId,
   type SessionTask,
-  type ToolHookInput,
 } from "./utils/hook-utils.ts"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-interface TaskListResponse {
-  tasks?: unknown[]
-  [key: string]: unknown
-}
-
-interface ExtendedToolHookInput extends ToolHookInput {
-  tool_response?: TaskListResponse | string | null
-}
 
 interface NormalizedTask {
   id: string
@@ -53,7 +44,7 @@ function parseNormalizedTask(t: Record<string, unknown>): NormalizedTask | null 
   return { id, subject, status }
 }
 
-function parseRawTasks(raw: ExtendedToolHookInput["tool_response"]): unknown[] | null {
+function parseRawTasks(raw: PostToolHookInput["tool_response"]): unknown[] | null {
   if (!raw) return null
   let parsed: unknown = raw
   if (typeof raw === "string") {
@@ -68,7 +59,7 @@ function parseRawTasks(raw: ExtendedToolHookInput["tool_response"]): unknown[] |
   return Array.isArray(items) ? items : null
 }
 
-function parseToolResponse(raw: ExtendedToolHookInput["tool_response"]): NormalizedTask[] {
+function parseToolResponse(raw: PostToolHookInput["tool_response"]): NormalizedTask[] {
   const items = parseRawTasks(raw)
   if (!items) return []
   const result: NormalizedTask[] = []
@@ -166,7 +157,7 @@ async function reconcileTasks(
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ExtendedToolHookInput
+  const input = (await Bun.stdin.json()) as PostToolHookInput
   if (input.tool_name !== "TaskList") return
   const sessionId = resolveSafeSessionId(input.session_id)
   if (!sessionId) return

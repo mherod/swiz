@@ -9,13 +9,8 @@
 //     without re-running the git log / gh run list dance.
 
 import { claudeTaskOutputPath } from "../src/temp-paths.ts"
-import {
-  denyPostToolUse,
-  emitContext,
-  ghJson,
-  stripAnsi,
-  type ToolHookInput,
-} from "./utils/hook-utils.ts"
+import type { PostToolHookInput } from "./schemas.ts"
+import { denyPostToolUse, emitContext, ghJson, stripAnsi } from "./utils/hook-utils.ts"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -24,10 +19,6 @@ interface TaskOutputResponse {
   status?: string
   exit_code?: number
   exitCode?: number
-}
-
-interface ExtendedToolHookInput extends ToolHookInput {
-  tool_response?: TaskOutputResponse | string | null
 }
 
 interface GhRun {
@@ -719,7 +710,7 @@ async function buildCiContext(output: string, cwd: string): Promise<string | nul
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
-const input = (await Bun.stdin.json().catch(() => null)) as ExtendedToolHookInput | null
+const input = (await Bun.stdin.json().catch(() => null)) as PostToolHookInput | null
 if (!input) process.exit(0)
 
 if (input.tool_name !== "TaskOutput") process.exit(0)
