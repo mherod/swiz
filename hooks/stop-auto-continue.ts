@@ -4,7 +4,7 @@
 // Uses the Gemini API (promptGemini) for transcript analysis.
 // Only skips for trivial sessions (< MIN_TOOL_CALLS) or when no API key is available.
 
-import { readdir, stat } from "node:fs/promises"
+import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { uniq } from "lodash-es"
 import { z } from "zod"
@@ -637,46 +637,6 @@ function terminate(action: "skip" | "block", ...args: string[]): never {
  * Uses the session's edited file paths to produce a context-aware suggestion.
  * Returns "" if no useful suggestion can be derived.
  */
-/** Check if any memory file (CLAUDE.md or MEMORY.md) was modified within recency window. */
-async function memoryRecentlyUpdated(cwd: string, windowMs: number): Promise<boolean> {
-  const home = getHomeDirOrNull()
-  const candidates = [join(cwd, "CLAUDE.md"), ...(home ? [join(home, ".claude", "CLAUDE.md")] : [])]
-  for (const f of candidates) {
-    try {
-      const s = await stat(f)
-      if (Date.now() - s.mtimeMs < windowMs) return true
-    } catch {}
-  }
-  return false
-}
-
-const MEMORY_RECENCY_WINDOW_MS = 5 * 60 * 1000
-
-export async function buildFillerSuggestion(
-  editedPaths: Set<string>,
-  docsOnly: boolean,
-  cwd: string
-): Promise<string> {
-  // Skip reflection suggestion if memory was recently updated (within 5 minutes).
-  if (await memoryRecentlyUpdated(cwd, MEMORY_RECENCY_WINDOW_MS)) return ""
-
-  const reflectAdvice = skillAdvice(
-    "reflect-on-session-mistakes",
-    "run /reflect-on-session-mistakes to identify patterns to avoid",
-    "review the session transcript for patterns to avoid"
-  )
-  if (docsOnly) {
-    return skillAdvice(
-      "changelog",
-      "Review the documentation changes for accuracy and completeness, then use /changelog to update CHANGELOG.md if it reflects user-facing behavior.",
-      "Review the documentation changes for accuracy and completeness, then update CHANGELOG.md if it reflects user-facing behavior."
-    )
-  }
-  if (editedPaths.size > 0) {
-    return `Reflect on this session's work: ${reflectAdvice}, then update MEMORY.md with any confirmed directives from this session.`
-  }
-  return `Reflect on this session: ${reflectAdvice} and update MEMORY.md with confirmed directives.`
-}
 
 // ─── Reviewing-state checklist ───────────────────────────────────────────────
 
@@ -866,7 +826,6 @@ async function handleNoTranscript(
 
 interface GenerateAiResponseOpts {
   turns: ReturnType<typeof extractTranscriptData>["turns"]
-  editedPaths: Set<string>
   docsOnly: boolean
   taskContext: string
   refinementStatus: string
@@ -877,17 +836,8 @@ interface GenerateAiResponseOpts {
 }
 
 async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentResponse> {
-  const {
-    turns,
-    editedPaths,
-    docsOnly,
-    taskContext,
-    refinementStatus,
-    cwd,
-    inputCwd,
-    ambitionMode,
-    sessionId,
-  } = opts
+  const { turns, docsOnly, taskContext, refinementStatus, cwd, inputCwd, ambitionMode, sessionId } =
+    opts
   // Cap context to ~30K chars (~8K tokens) to stay within model limits.
   // Prioritize recent turns — trim from the front if over budget.
   const MAX_CONTEXT_CHARS = 30_000
@@ -924,17 +874,8 @@ async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentRe
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)
     console.error(`[stop-auto-continue] AI generation failed: ${errMsg}`)
-    const fillerNext = await buildFillerSuggestion(editedPaths, docsOnly, inputCwd ?? process.cwd())
-    if (fillerNext) {
-      return { processCritique: "", productCritique: "", next: fillerNext, reflections: [] }
-    }
-    if (!refinementStatus) {
-      terminate(
-        "block",
-        `Auto-continue could not generate a next-step suggestion: AI backend failed during call.\nReview your recent changes and continue working if there is more to do.`
-      )
-    }
-    return { processCritique: "", productCritique: "", next: "", reflections: [] }
+    // Allow stop gracefully — other stop hooks (memory reminder, etc.) handle fallback suggestions.
+    terminate("skip", "AI_BACKEND_FAILED", `AI generation failed: ${errMsg}`)
   }
 }
 
@@ -1209,7 +1150,6 @@ async function validatePrerequisitesAndGenerateResponse(
   const [rawResponse, repoFiles] = await Promise.all([
     generateAiResponse({
       turns,
-      editedPaths: transcriptData.editedPaths,
       docsOnly,
       taskContext,
       refinementStatus,

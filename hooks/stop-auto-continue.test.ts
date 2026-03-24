@@ -210,7 +210,7 @@ describe("stop-auto-continue", () => {
     expect(result.reason).toContain("Run the linter")
   })
 
-  test("blocks stop when agent fails (fail-closed with filler suggestion)", async () => {
+  test("skips stop gracefully when agent fails (no blocking error)", async () => {
     const result = await runHook({
       transcriptContent: buildTranscript(10),
       extraEnv: {
@@ -219,9 +219,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBe("block")
-    // With all providers failing, the filler suggestion is used instead of generic error
-    expect(result.reason).toContain("Reflect")
+    // AI failure now skips instead of blocking — other stop hooks handle suggestions
+    expect(result.decision).toBeUndefined()
   })
 
   test("blocks stop when no AI backend is available (fail-closed)", async () => {
@@ -758,7 +757,7 @@ describe("stop-auto-continue", () => {
     expect(capturedPrompt).not.toContain("Should be ignored")
   })
 
-  test("blocks stop when backend times out (fail-closed with filler suggestion)", async () => {
+  test("skips stop when backend times out (graceful degradation)", async () => {
     const result = await runHook({
       transcriptContent: buildTranscript(10),
       extraEnv: {
@@ -767,9 +766,8 @@ describe("stop-auto-continue", () => {
       },
     })
 
-    expect(result.decision).toBe("block")
-    // With all providers failing, filler suggestion is used
-    expect(result.reason).toContain("Reflect")
+    // AI failure now skips instead of blocking
+    expect(result.decision).toBeUndefined()
   })
 
   // ─── JSON response parsing tests ──────────────────────────────────────────
