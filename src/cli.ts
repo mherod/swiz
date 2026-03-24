@@ -52,6 +52,13 @@ async function run() {
   const [commandName, ...rest] = process.argv.slice(2)
 
   if (!commandName || commandName === "--help" || commandName === "-h") {
+    if (rest.includes("--json")) {
+      const cmds = [...commands.entries()]
+        .filter(([name]) => name !== "help")
+        .map(([name, cmd]) => ({ name, description: cmd.description }))
+      console.log(JSON.stringify(cmds, null, 2))
+      return
+    }
     void help.run([])
     return
   }
