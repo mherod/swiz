@@ -1274,23 +1274,31 @@ export async function sendAutoSteer(
 
   const { createScript, runScript } = await import("applescript-node")
   const escaped = message.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")
-  const wrapped = `\\n${escaped}\\n\\r`
 
   try {
     if (app === "iterm2") {
+      // Write the message text without submitting, then send a newline to submit.
       const script = createScript()
         .tell("iTerm")
         .tellTarget("current session of current window")
-        .raw(`write text "${wrapped}"`)
+        .raw(`write text "${escaped}" newline no`)
+        .raw(`write text ""`)
         .end()
         .end()
       await runScript(script)
     } else if (app === "apple-terminal") {
-      const script = createScript()
-        .tell("Terminal")
-        .raw(`do script "${wrapped}" in front window`)
-        .end()
+      // Type the message text, then press return via System Events to submit.
+      const script = createScript().tell("Terminal").raw(`activate`).end()
       await runScript(script)
+
+      const typeScript = createScript()
+        .tell("System Events")
+        .tellTarget('process "Terminal"')
+        .raw(`keystroke "${escaped}"`)
+        .raw(`keystroke return`)
+        .end()
+        .end()
+      await runScript(typeScript)
     }
     return true
   } catch {
