@@ -1223,6 +1223,59 @@ export interface AutoSteerRequest {
 const AUTOSTEER_SUPPORTED_TERMINALS = new Set(["iterm2", "apple-terminal"])
 
 /**
+ * Check whether auto-steer is available (setting enabled + supported terminal).
+ * Returns the detected terminal app if available, null otherwise.
+ */
+export async function isAutoSteerAvailable(sessionId: string): Promise<string | null> {
+  const { detectTerminal } = await import("./terminal-detection.ts")
+  const terminal = detectTerminal()
+  if (!AUTOSTEER_SUPPORTED_TERMINALS.has(terminal.app)) return null
+  const { getEffectiveSwizSettings, readSwizSettings } = await import("../../src/settings.ts")
+  const settings = getEffectiveSwizSettings(await readSwizSettings(), sessionId)
+  if (!settings.autoSteer) return null
+  return terminal.app
+}
+
+/**
+ * Send a steering message directly to the terminal via AppleScript.
+ * Use this for immediate sends (e.g. stop hooks) where there's no future
+ * PostToolUse cycle to consume a scheduled request.
+ *
+ * Returns true if the message was sent, false if terminal unsupported or send failed.
+ */
+export async function sendAutoSteer(
+  message: string,
+  terminalApp?: string | null
+): Promise<boolean> {
+  const app = terminalApp ?? (await import("./terminal-detection.ts")).detectTerminal().app
+  if (!AUTOSTEER_SUPPORTED_TERMINALS.has(app)) return false
+
+  const { createScript, runScript } = await import("applescript-node")
+  const escaped = message.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")
+
+  try {
+    if (app === "iterm2") {
+      const script = createScript()
+        .tell("iTerm")
+        .tellTarget("current session of current window")
+        .raw(`write text "${escaped}"`)
+        .end()
+        .end()
+      await runScript(script)
+    } else if (app === "apple-terminal") {
+      const script = createScript()
+        .tell("Terminal")
+        .raw(`do script "${escaped}" in front window`)
+        .end()
+      await runScript(script)
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Schedule an auto-steer input with a steering prompt message.
  * The message will be typed into the terminal on the next PostToolUse cycle,
  * giving the agent actionable context (not just "Continue").
