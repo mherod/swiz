@@ -18,6 +18,7 @@ import {
   CI_WAIT_RE,
   extractBashCommands,
   formatActionPlan,
+  GIT_PUSH_DELETE_RE,
   GIT_PUSH_RE,
   isShellTool,
   PR_CHECK_RE,
@@ -29,8 +30,8 @@ if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 
 const command: string = (input?.tool_input?.command as string) ?? ""
 
-// Only gate on git push commands
-if (!GIT_PUSH_RE.test(command)) process.exit(0)
+// Only gate on git push commands — skip branch deletion (--delete or :branch)
+if (!GIT_PUSH_RE.test(command) || GIT_PUSH_DELETE_RE.test(command)) process.exit(0)
 
 // ── Scan transcript for prior checks ─────────────────────────────────────────
 

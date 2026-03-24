@@ -354,6 +354,8 @@ export async function recentHeadRange(cwd: string, commitsBack = 10): Promise<st
 
 /** Matches `git [opts] push` anywhere in a shell command string. */
 export const GIT_PUSH_RE = gitSubcommandRe("push\\b")
+/** Matches `git push --delete` or `git push origin :branch` (remote branch deletion, not a code push). */
+export const GIT_PUSH_DELETE_RE = gitSubcommandRe("push\\b.*?(--delete\\b|\\s:[^\\s])")
 /** Matches `git [opts] commit` anywhere in a shell command string. */
 export const GIT_COMMIT_RE = gitSubcommandRe("commit\\b")
 

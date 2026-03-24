@@ -16,6 +16,7 @@ import {
   extractSkillInvocations,
   formatActionPlan,
   GIT_COMMIT_RE,
+  GIT_PUSH_DELETE_RE,
   GIT_PUSH_RE,
   isShellTool,
   skillExists,
@@ -30,7 +31,11 @@ const command: string = (input?.tool_input?.command as string) ?? ""
 // Determine which skill is relevant for this command
 let requiredSkill: string | null = null
 if (GIT_COMMIT_RE.test(command)) requiredSkill = "commit"
-else if (GIT_PUSH_RE.test(command)) requiredSkill = "push"
+else if (GIT_PUSH_RE.test(command)) {
+  // Branch deletion (--delete or :branch) is not a code push — skip gate
+  if (GIT_PUSH_DELETE_RE.test(command)) process.exit(0)
+  requiredSkill = "push"
+}
 
 if (!requiredSkill) process.exit(0)
 
