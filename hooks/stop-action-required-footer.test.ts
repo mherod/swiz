@@ -9,57 +9,16 @@
  * - GitHub API hooks (stop-pr-*, stop-branch-conflicts, stop-github-ci): require live API
  */
 
-import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { getSessionTasksDir } from "./utils/hook-utils.ts"
+import { commitFile, makeTempGitRepo, runGit, useTempDir } from "./utils/test-utils.ts"
 
 const HOOKS_DIR = resolve(process.cwd(), "hooks")
 const FOOTER_MARKER = "ACTION REQUIRED"
 
-const tempDirs: string[] = []
-
-afterAll(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()!
-    await rm(dir, { recursive: true, force: true })
-  }
-})
-
-async function makeTempDir(suffix = ""): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), `swiz-stop-footer${suffix}-`))
-  tempDirs.push(dir)
-  return dir
-}
-
-async function runGit(dir: string, args: string[]): Promise<string> {
-  const p = Bun.spawn(["git", ...args], { cwd: dir, stdout: "pipe", stderr: "pipe" })
-  const out = await new Response(p.stdout).text()
-  await p.exited
-  return out.trim()
-}
-
-/** Create a git repo with one empty seed commit (so HEAD is valid). */
-async function makeTempGitRepo(suffix = ""): Promise<string> {
-  const dir = await makeTempDir(suffix)
-  await runGit(dir, ["init"])
-  await runGit(dir, ["config", "user.email", "test@example.com"])
-  await runGit(dir, ["config", "user.name", "Test"])
-  await runGit(dir, ["commit", "--allow-empty", "-m", "init"])
-  return dir
-}
-
-/** Write a file, stage it, and create a commit. Creates parent directories as needed. */
-async function commitFile(dir: string, relPath: string, content: string): Promise<void> {
-  const parts = relPath.split("/")
-  if (parts.length > 1) {
-    await mkdir(join(dir, ...parts.slice(0, -1)), { recursive: true })
-  }
-  await writeFile(join(dir, relPath), content)
-  await runGit(dir, ["add", relPath])
-  await runGit(dir, ["commit", "-m", `add ${relPath}`])
-}
+const tmp = useTempDir("swiz-stop-footer-")
 
 interface HookResult {
   blocked: boolean
@@ -98,7 +57,7 @@ async function runStopHook(
 
 describe("stop hook ACTION REQUIRED footer regression", () => {
   test("stop-git-status: uncommitted changes block includes footer", async () => {
-    const dir = await makeTempGitRepo("-git-status")
+    const dir = await makeTempGitRepo(tmp, { suffix: "-git-status" })
     // Untracked file — not committed — triggers the hasUncommitted path
     await writeFile(join(dir, "app.ts"), "export const x = 1\n")
     const result = await runStopHook("stop-git-status.ts", { cwd: dir }, { cwd: dir })
@@ -109,7 +68,7 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
   })
 
   test("stop-debug-statements: console.log in source block includes footer", async () => {
-    const dir = await makeTempGitRepo("-debug")
+    const dir = await makeTempGitRepo(tmp, { suffix: "-debug" })
     await commitFile(dir, "src/app.ts", "export function run() {\n  console.log('debug');\n}\n")
     const result = await runStopHook("stop-debug-statements.ts", { cwd: dir }, { cwd: dir })
     expect(result.blocked).toBe(true)
@@ -117,7 +76,7 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
   })
 
   test("stop-todo-tracker: TODO comment in source block includes footer", async () => {
-    const dir = await makeTempGitRepo("-todo")
+    const dir = await makeTempGitRepo(tmp, { suffix: "-todo" })
     await commitFile(
       dir,
       "src/service.ts",
@@ -129,7 +88,7 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
   })
 
   test("stop-secret-scanner: credential in committed source block includes footer", async () => {
-    const dir = await makeTempGitRepo("-secret")
+    const dir = await makeTempGitRepo(tmp, { suffix: "-secret" })
     // Value has no excluded words (example/placeholder/test/fake/dummy/replace/env.)
     // and is 20 chars (> the 8-char minimum required by GENERIC_SECRET_RE)
     const credLine = `const password = "aBcDeFgHiJ0123456789"\n`
@@ -140,7 +99,7 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
   })
 
   test("stop-large-files: >500KB committed file block includes footer", async () => {
-    const dir = await makeTempGitRepo("-large")
+    const dir = await makeTempGitRepo(tmp, { suffix: "-large" })
     await mkdir(join(dir, "assets"), { recursive: true })
     // 600KB binary — well above the 500KB threshold
     await Bun.write(join(dir, "assets/large.bin"), Buffer.alloc(600 * 1024, 65))
@@ -152,7 +111,7 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
   })
 
   test("stop-completion-auditor: in_progress task block includes footer", async () => {
-    const fakeHome = await makeTempDir("-home")
+    const fakeHome = await tmp.create("swiz-stop-footer-home-")
     const sessionId = "test-footer-auditor-session"
     const tasksDir = getSessionTasksDir(sessionId, fakeHome)
     if (!tasksDir) throw new Error("Failed to resolve session tasks directory")
@@ -173,7 +132,7 @@ describe("stop hook ACTION REQUIRED footer regression", () => {
   test("stop-lockfile-drift: package.json changed without lockfile update block includes footer", async () => {
     // Unique session ID avoids the per-session sentinel blocking a re-run
     const sessionId = `test-footer-lockfile-${Date.now()}`
-    const dir = await makeTempGitRepo("-lockfile")
+    const dir = await makeTempGitRepo(tmp, { suffix: "-lockfile" })
     // Untracked lockfile on disk — hook detects npm as the package manager
     await writeFile(join(dir, "package-lock.json"), "{}")
     // Commit package.json with a dependencies section but do NOT commit the lockfile
