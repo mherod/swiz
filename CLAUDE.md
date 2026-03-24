@@ -61,11 +61,9 @@ alwaysApply: false
   - PostToolUse: `denyPostToolUse(reason)` — feed error back to Claude.
   - Context injection: `emitContext(eventName, context, cwd?)` — use for SessionStart, UserPromptSubmit, and PostToolUse `additionalContext`; handles `systemMessage` wrapper and state-line injection automatically.
   - Stop: `blockStop(reason, opts?)` — block with ACTION REQUIRED footer; `blockStopRaw(reason)` — block without footer.
-- **DO NOT** write `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: ..., permissionDecision: "allow" } }))` — use `allowPreToolUse(reason)` instead.
-- **DO NOT** write `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: ..., additionalContext: ... } }))` — use `emitContext(eventName, context, cwd)` instead.
-- **DO NOT** write `console.log(JSON.stringify({ decision: "block", reason: ... }))` in Stop hooks — use `blockStop(reason)` or `blockStopRaw(reason)` instead.
-- **Subprocess timeout**: Hooks spawning subprocesses must use `spawnWithTimeout(cmd, { cwd, timeoutMs })` from `hook-utils.ts`. SIGTERM→SIGKILL escalation. DO NOT use raw `Bun.spawn()` with manual kill timers.
-- **Dispatch abort propagation**: `DispatchRequest.signal` and `HookStrategyContext.signal` carry abort signals from daemon→dispatch→strategy→hooks. Strategies with local `AbortController` (PreToolUse, Blocking) must listen on `ctx.signal` and propagate.
+- **DO NOT** write raw `console.log(JSON.stringify(...))` for hook output — use output helpers: `allowPreToolUse`, `denyPreToolUse`, `emitContext`, `blockStop`/`blockStopRaw`.
+- **Subprocess timeout**: Use `spawnWithTimeout(cmd, { cwd, timeoutMs })` from `hook-utils.ts`. DON'T use raw `Bun.spawn()` with manual kill timers.
+- **Dispatch abort propagation**: `DispatchRequest.signal` and `HookStrategyContext.signal` carry abort signals. Strategies with local `AbortController` must listen on `ctx.signal`.
 - **Git Utilities Policy** — canonical locations, no duplication:
   - `hooks/utils/hook-utils.ts` — hook Git helpers: regexes (`GIT_PUSH_RE`, `GIT_MERGE_RE`, etc.), extractors, runtime helpers (`git`, `gh`, `ghJson`). Test utils in `hooks/utils/test-utils.ts`.
   - `src/git-helpers.ts` — command Git helpers: classifiers (`isDocsOrConfig`, `parseCommitType`), status types, queries. `git()` strips `GIT_*` env vars (lefthook `GIT_DIR` fix).
@@ -79,6 +77,7 @@ alwaysApply: false
 - Typed inputs: `StopHookInput`, `ToolHookInput`, `SessionHookInput` — use typed schema parse (`stopHookInputSchema`, `toolHookInputSchema`, `fileEditHookInputSchema`, `shellHookInputSchema`, `sessionHookInputSchema`) or direct type annotation; **DO NOT** use `as { ... }` casts for stdin.
 - Hook schemas (`hooks/schemas.ts`, all `z.looseObject`): `fileEditHookInputSchema`, `shellHookInputSchema`, `toolHookInputSchema`, `stopHookInputSchema`, `sessionHookInputSchema`, `hookOutputSchema`, `taskUpdateInputSchema`. Settings schemas (`src/settings.ts`): `swizSettingsSchema`, `projectSettingsSchema`, `sessionSwizSettingsSchema`, `projectStateSchema`. State schemas (`src/state-machine.ts`): `workflowIntentSchema`, `statePrioritySchema`, `stateMetadataSchema`.
 - **Hook cooldowns**: `cooldownSeconds` on a manifest entry skips re-runs within the window (per hook+cwd). Use for expensive/noisy hooks.
+- **Auto-steer scheduling**: `scheduleAutoSteer(sessionId, message)` in `hook-utils.ts` returns `Promise<boolean>` — `true` when the request was scheduled (setting enabled + supported terminal), `false` otherwise. **DO**: Always `await` the result and branch: `if (await scheduleAutoSteer(id, reason)) { allowPreToolUse(reason) } else { denyPreToolUse(reason) }`. **DON'T**: Use `void scheduleAutoSteer(...)` fire-and-forget — silently discards the setting/terminal check. The `posttooluse-auto-steer.ts` hook consumes requests atomically. Gated by `requiredSettings: ["autoSteer"]`. Terminal detection flows through `_terminal` payload field from `src/commands/dispatch.ts`.
 - **DO**: All three memory-threshold checkpoints — `pretooluse-claude-md-word-limit.ts`, `posttooluse-memory-size.ts`, `swiz memory --strict` — must share the same value via `resolveThresholds(cwd)` (project > global > default 5000). Never hardcode — mismatched thresholds cause commits to fail after edits succeed.
 - **DO**: Use `computeProjectedContent()` from `hook-utils.ts` for content validation — it uses `() => newString` to suppress `$&`/`$'`/`` $` `` interpolation. DON'T call `currentContent.replace(old, new)` directly. DON'T parse raw `new_string` — it's a fragment. Fail-open on read/parse errors.
 - NFKC-normalize `new_string`/`content`/`old_string` before pattern matching in content-inspecting hooks: `.normalize("NFKC")`. Enforced by `src/nfkc-enforcement.test.ts`. Exempt hooks must be listed in `EXEMPT_HOOKS`.
@@ -91,16 +90,16 @@ alwaysApply: false
 - For `pgrep` checks, use ancestry (`process.ppid`) and repo scope (`lsof -p <pid> -d cwd -Fn`).
 - Reference implementation: `hooks/stop-git-status.ts`.
 - For `~/.claude/projects/` lookups, import `projectKeyFromCwd` from `src/transcript-utils.ts`; uses `cwd.replace(/[/.]/g, "-")` — DO NOT reimplement with slash-only replacement.
-- In `hook-utils.ts`, use lazy `await import(...)` for `projectKeyFromCwd` to avoid circular imports.
-- For workflow enforcement, scan `transcript_path` for reminder/completion evidence — no extra state files.
-- `pretooluse-update-memory-enforcement.ts` requires transcript evidence of reading `update-memory/SKILL.md` and writing `.md` before unblocking. Include trigger cause in reminder text.
+- In `hook-utils.ts`, use lazy `await import(...)` for `projectKeyFromCwd` (circular import avoidance).
+- Workflow enforcement: scan `transcript_path` for evidence — no extra state files.
+- `pretooluse-update-memory-enforcement.ts` requires reading `update-memory/SKILL.md` and writing `.md` before unblocking.
 - Cross-repo issue guidance: `buildIssueGuidance()` in `hook-utils.ts`. Generic: `buildIssueGuidance(null)`; cross-repo: `buildIssueGuidance(repo, { crossRepo: true, hostname })`.
 ## Task Data
 - Task storage: `~/.claude/tasks/<session-id>/<id>.json`; audit log: `~/.claude/tasks/<session-id>/.audit-log.jsonl`.
 - Session-to-project mapping from `~/.claude/projects/` transcript `cwd` fields.
-- Cross-session task checks: `hooks/stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
+- Cross-session task checks: `stop-completion-auditor.ts` scans `~/.claude/tasks/` via `readSessionTasks()`.
 - Completion requires evidence: `swiz tasks complete <id> --evidence "text"`.
-- First action must be `TaskCreate`/`TaskUpdate`; required after compaction.
+- First action: `TaskCreate`/`TaskUpdate`; required after compaction.
 - `pretooluse-require-tasks.ts` blocks Edit/Write/Bash unless ≥2 incomplete tasks AND ≥1 `pending`. Ensure ≥1 `in_progress` + ≥1 `pending` before Edit/Write/Bash.
 - Prior-session task blocks: recreate and set `in_progress` before retrying.
 - After compaction: `TaskList`, close stale tasks after `git log --oneline -3`.

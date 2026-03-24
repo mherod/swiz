@@ -1220,18 +1220,35 @@ export interface AutoSteerRequest {
   timestamp: number
 }
 
+const AUTOSTEER_SUPPORTED_TERMINALS = new Set(["iterm2", "apple-terminal"])
+
 /**
  * Schedule an auto-steer input with a steering prompt message.
  * The message will be typed into the terminal on the next PostToolUse cycle,
  * giving the agent actionable context (not just "Continue").
+ *
+ * Returns true if the request was scheduled, false if auto-steer is disabled
+ * or the terminal doesn't support AppleScript. Callers should fall back to
+ * their normal deny/block behavior when this returns false.
  */
-export async function scheduleAutoSteer(sessionId: string, message = "Continue"): Promise<void> {
+export async function scheduleAutoSteer(sessionId: string, message = "Continue"): Promise<boolean> {
+  // Check terminal support first (cheap, no I/O)
+  const { detectTerminal } = await import("./terminal-detection.ts")
+  const terminal = detectTerminal()
+  if (!AUTOSTEER_SUPPORTED_TERMINALS.has(terminal.app)) return false
+
+  // Check autoSteer setting
+  const { getEffectiveSwizSettings, readSwizSettings } = await import("../../src/settings.ts")
+  const settings = getEffectiveSwizSettings(await readSwizSettings(), sessionId)
+  if (!settings.autoSteer) return false
+
   const { sanitizeSessionId: sanitize } = await import("../../src/session-id.ts")
   const safeSession = sanitize(sessionId)
-  if (!safeSession) return
+  if (!safeSession) return false
   const { autoSteerRequestPath } = await import("../../src/temp-paths.ts")
   const request: AutoSteerRequest = { message, timestamp: Date.now() }
   await Bun.write(autoSteerRequestPath(safeSession), JSON.stringify(request))
+  return true
 }
 
 /**

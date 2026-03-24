@@ -62,14 +62,23 @@ function buildSwizTasksRules(): SwizTasksRule[] {
   ]
 }
 
-function checkRules(command: string, rules: SwizTasksRule[], sessionId: string): void {
+async function checkRules(
+  command: string,
+  rules: SwizTasksRule[],
+  sessionId: string
+): Promise<void> {
   for (const rule of rules) {
     if (!rule.match(command)) continue
 
     if (rule.severity === "warn") {
-      if (sessionId) void scheduleAutoSteer(sessionId, rule.message)
+      // Best-effort: schedule auto-steer if available, allow regardless
+      if (sessionId) await scheduleAutoSteer(sessionId, rule.message)
       allowPreToolUse(rule.message)
     } else {
+      // For deny rules: if auto-steer can handle it, allow + steer instead
+      if (sessionId && (await scheduleAutoSteer(sessionId, rule.message))) {
+        allowPreToolUse(rule.message)
+      }
       denyPreToolUse(rule.message)
     }
   }
@@ -94,7 +103,7 @@ async function main() {
   const command: string = input?.tool_input?.command ?? ""
   const sessionId: string = input?.session_id ?? ""
   const rules = buildSwizTasksRules()
-  checkRules(command, rules, sessionId)
+  await checkRules(command, rules, sessionId)
 }
 
 if (import.meta.main) {

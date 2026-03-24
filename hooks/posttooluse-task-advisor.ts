@@ -87,7 +87,7 @@ async function main(): Promise<void> {
 }
 
 async function emit(context: string): Promise<never> {
-  if (_sessionId) void scheduleAutoSteer(_sessionId, context)
+  if (_sessionId) await scheduleAutoSteer(_sessionId, context)
   return emitContext("PostToolUse", context)
 }
 
