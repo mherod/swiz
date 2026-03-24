@@ -4,7 +4,7 @@
 // Uses the Gemini API (promptGemini) for transcript analysis.
 // Only skips for trivial sessions (< MIN_TOOL_CALLS) or when no API key is available.
 
-import { readdir } from "node:fs/promises"
+import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { uniq } from "lodash-es"
 import { z } from "zod"
@@ -637,7 +637,29 @@ function terminate(action: "skip" | "block", ...args: string[]): never {
  * Uses the session's edited file paths to produce a context-aware suggestion.
  * Returns "" if no useful suggestion can be derived.
  */
-export function buildFillerSuggestion(editedPaths: Set<string>, docsOnly: boolean): string {
+/** Check if any memory file (CLAUDE.md or MEMORY.md) was modified within recency window. */
+async function memoryRecentlyUpdated(cwd: string, windowMs: number): Promise<boolean> {
+  const home = getHomeDirOrNull()
+  const candidates = [join(cwd, "CLAUDE.md"), ...(home ? [join(home, ".claude", "CLAUDE.md")] : [])]
+  for (const f of candidates) {
+    try {
+      const s = await stat(f)
+      if (Date.now() - s.mtimeMs < windowMs) return true
+    } catch {}
+  }
+  return false
+}
+
+const MEMORY_RECENCY_WINDOW_MS = 5 * 60 * 1000
+
+export async function buildFillerSuggestion(
+  editedPaths: Set<string>,
+  docsOnly: boolean,
+  cwd: string
+): Promise<string> {
+  // Skip reflection suggestion if memory was recently updated (within 5 minutes).
+  if (await memoryRecentlyUpdated(cwd, MEMORY_RECENCY_WINDOW_MS)) return ""
+
   const reflectAdvice = skillAdvice(
     "reflect-on-session-mistakes",
     "run /reflect-on-session-mistakes to identify patterns to avoid",
@@ -896,7 +918,7 @@ async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentRe
     })
     return filterAgentResponse(parsed)
   } catch {
-    const fillerNext = buildFillerSuggestion(editedPaths, docsOnly)
+    const fillerNext = await buildFillerSuggestion(editedPaths, docsOnly, inputCwd ?? process.cwd())
     if (fillerNext) {
       return { processCritique: "", productCritique: "", next: fillerNext, reflections: [] }
     }
