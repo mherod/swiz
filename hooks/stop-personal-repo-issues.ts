@@ -18,6 +18,7 @@ import { getDaemonBackedStore, getIssueStore, replayPendingMutations } from "../
 import { stopPersonalRepoIssuesCooldownPath } from "../src/temp-paths.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 import {
+  type ActionPlanItem,
   blockStop,
   formatActionPlan,
   getCanonicalPathHash,
@@ -28,6 +29,7 @@ import {
   isGitRepo,
   sanitizeSessionId,
   skillAdvice,
+  skillExists,
 } from "./utils/hook-utils.ts"
 
 export { missingRefinementCategories, needsRefinement }
@@ -527,94 +529,59 @@ function buildStopReasonLines(ctx: StopContext): string[] {
   return reasonLines
 }
 
-function buildStopPlanSteps(ctx: StopContext): string[] {
-  const planSteps: string[] = []
+function buildStopPlanSteps(ctx: StopContext): ActionPlanItem[] {
+  const planSteps: ActionPlanItem[] = []
   const feedbackPRCount = ctx.changesRequestedPRs.length + ctx.reviewRequiredPRs.length
   const refinementCount = ctx.sortedRefinement.length
   const issueCount = ctx.sortedIssues.length
   if (feedbackPRCount > 0) {
     const firstPrNum =
       ctx.changesRequestedPRs[0]?.number ?? ctx.reviewRequiredPRs[0]?.number ?? "<number>"
-    const workOnPrsSkill = [
-      "Use the /work-on-prs skill to address all feedback and resolve reviews:",
-      "  /work-on-prs — Start working on the next PR",
-    ].join("\n")
-    const workOnPrsFallback = formatActionPlan(
-      [
-        `Read ALL feedback for PR #${firstPrNum}: top-level comments, inline review comments, and review summaries`,
-        "Implement a fix for each unresolved item; commit each fix separately",
-        "Run quality checks: bun run typecheck && bun run lint && bun test",
-        `Push and verify CI: git push && gh pr checks ${firstPrNum}`,
-        `Dismiss stale CHANGES_REQUESTED reviews and request re-review: gh pr edit ${firstPrNum} --add-reviewer <reviewer>`,
-      ],
-      { header: "Address all PR feedback before stopping:" }
+    const prSubSteps: ActionPlanItem[] = []
+    if (skillExists("work-on-prs")) {
+      prSubSteps.push("/work-on-prs — Start working on the next PR")
+    }
+    prSubSteps.push(
+      `Read ALL feedback for PR #${firstPrNum}: top-level comments, inline review comments, and review summaries`,
+      "Implement a fix for each unresolved item; commit each fix separately",
+      "Run quality checks: bun run typecheck && bun run lint && bun test",
+      `Push and verify CI: git push && gh pr checks ${firstPrNum}`,
+      `Dismiss stale CHANGES_REQUESTED reviews and request re-review: gh pr edit ${firstPrNum} --add-reviewer <reviewer>`
     )
-    planSteps.push(skillAdvice("work-on-prs", workOnPrsSkill, workOnPrsFallback))
+    planSteps.push("Address all PR feedback before stopping:", prSubSteps)
   }
   if (refinementCount > 0) {
     const refineArg = ctx.firstRefinementNum !== undefined ? ` ${ctx.firstRefinementNum}` : ""
-    const refineSkill = [
-      "Use the /refine-issue skill to refine and label issues:",
-      `  /refine-issue${refineArg} — Refine the next issue needing attention`,
-    ].join("\n")
-    const refineFallback = [
-      "Refine issues before implementation. Every issue MUST have at least one label from each category:",
-      "  1. Type (bug, enhancement, documentation)",
-      "  2. Readiness (ready, triaged, backlog)",
-      "  3. Priority (priority-high, priority-medium, priority-low)",
-      "",
-      "Commands:",
-      "  gh label list",
-      '  gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"',
-      "",
-      "Rule: If you created the issue, NEVER add new comments. Always edit the original issue body instead to add proposals/context.",
-    ].join("\n")
-    planSteps.push(skillAdvice("refine-issue", refineSkill, refineFallback))
+    const refineSubSteps: ActionPlanItem[] = []
+    if (skillExists("refine-issue")) {
+      refineSubSteps.push(`/refine-issue${refineArg} — Refine the next issue needing attention`)
+    }
+    refineSubSteps.push(
+      "Every issue MUST have at least one label from each category: Type (bug, enhancement, documentation), Readiness (ready, triaged, backlog), Priority (priority-high, priority-medium, priority-low)",
+      "Run gh label list to check available labels",
+      'Label issues: gh issue edit <number> --add-label "bug,ready,priority-high" --remove-label "needs-triage"',
+      "Rule: If you created the issue, NEVER add new comments — always edit the original issue body instead"
+    )
+    planSteps.push("Refine issues before implementation:", refineSubSteps)
   }
   if (issueCount > 0) {
     const issueArg = ctx.firstIssueNum !== undefined ? ` ${ctx.firstIssueNum}` : ""
     const issueNum = ctx.firstIssueNum ?? "<number>"
-    const workOnIssueSkill = [
-      "Use the /work-on-issue skill (follow its full guide — the steps below are a quick reference):",
-      `  /work-on-issue${issueArg} — Start working on the next issue`,
-    ].join("\n")
-    const workOnIssueFallback = [
-      `Pick up and resolve issue #${issueNum} before stopping:`,
-      "",
-      "Step 0 — Check for existing work first:",
-      `  LINKED_PR=$(gh pr list --search "linked:${issueNum} OR ${issueNum} in:title" --state open --json number,url --limit 1)`,
-      '  echo "Linked PRs: $LINKED_PR"',
-      "  git fetch origin --prune",
-      "",
-      `  If an open PR for #${issueNum} exists with passing checks → merge it (gh pr merge <PR_NUMBER> --squash).`,
-      "  If checks are failing → switch to the PR branch and fix them.",
-      "  If no PR exists → proceed to claim and implement.",
-      "",
-      "Step 0.5 — Claim ownership:",
-      `  gh issue edit ${issueNum} --add-assignee @me`,
-      "",
-      "Step 0.7 — Verify branch starting point:",
-      "  git branch --show-current  # must be main for a solo repo",
-      "  git pull --rebase --autostash",
-      "",
-      `Step 1 — Plan with TaskCreate before touching any code (issue #${issueNum}):`,
-      "  1. Analyze issue requirements",
-      "  2. Implement solution",
-      "  3. Run quality checks (bun run typecheck && bun run lint && bun test)",
-      "  4. Commit, push, and verify CI",
-      `  5. swiz issue resolve ${issueNum} --body "<evidence>"`,
-      "",
-      `Step 2a — Check for blockers on #${issueNum}:`,
-      `  gh issue view ${issueNum} --json labels -q '.labels[].name' | rg -i blocked`,
-      `  gh issue view ${issueNum} --json body -q '.body' | rg -i 'blocked by|depends on'`,
-      `  If #${issueNum} is blocked → resolve the blocking issue first.`,
-      "",
-      "Step 4 — Quality checks (MANDATORY before commit):",
-      "  bun run typecheck",
-      "  bun run lint",
-      "  bun test --concurrent",
-    ].join("\n")
-    planSteps.push(skillAdvice("work-on-issue", workOnIssueSkill, workOnIssueFallback))
+    const issueSubSteps: ActionPlanItem[] = []
+    if (skillExists("work-on-issue")) {
+      issueSubSteps.push(`/work-on-issue${issueArg} — Start working on the next issue`)
+    }
+    issueSubSteps.push(
+      `Check for existing work: search for linked PRs and git fetch origin --prune`,
+      `If an open PR for #${issueNum} exists with passing checks → merge it; if checks failing → fix them; if no PR → implement`,
+      `Claim ownership: gh issue edit ${issueNum} --add-assignee @me`,
+      "Verify branch starting point: git branch --show-current (must be main), git pull --rebase --autostash",
+      `Plan with TaskCreate before touching any code for issue #${issueNum}`,
+      `Check for blockers on #${issueNum}: inspect labels and body for blocked/depends-on references`,
+      "Quality checks (MANDATORY before commit): bun run typecheck && bun run lint && bun test --concurrent",
+      `Resolve: swiz issue resolve ${issueNum} --body "<evidence>"`
+    )
+    planSteps.push(`Pick up and resolve issue #${issueNum} before stopping:`, issueSubSteps)
   }
   return planSteps
 }

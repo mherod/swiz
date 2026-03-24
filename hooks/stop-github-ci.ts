@@ -8,7 +8,9 @@ import { getIssueStore } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 import {
+  type ActionPlanItem,
   blockStop,
+  formatActionPlan,
   getDefaultBranch,
   getRepoSlug,
   ghJson,
@@ -17,7 +19,7 @@ import {
   isDefaultBranch,
   isGitHubRemote,
   isGitRepo,
-  skillAdvice,
+  skillExists,
 } from "./utils/hook-utils.ts"
 
 const POLL_INTERVAL_MS = 5_000
@@ -116,20 +118,23 @@ function buildFailingReason(branch: string, failing: CIRun[]): string {
     reason += r.databaseId
       ? `  gh run view ${r.databaseId} --log-failed\n`
       : `  gh run list --branch ${branch}\n`
+
+  const fixSubSteps: ActionPlanItem[] = []
+  if (skillExists("ci-status")) {
+    fixSubSteps.push("/ci-status — Analyze failures and fix them")
+  }
+  fixSubSteps.push(
+    "View failure details: gh run view <run-id> --log-failed",
+    "Fix the failing code (type errors, test failures, lint issues)",
+    "Run checks locally: bun run typecheck && bun run lint && bun test",
+    "Commit and push the fix",
+    "Wait for CI to go green: gh run watch <run-id> --exit-status"
+  )
   reason +=
     "\n" +
-    skillAdvice(
-      "ci-status",
-      "Use the /ci-status skill to analyze failures and fix them before stopping.",
-      [
-        `Analyze and fix CI failures before stopping:`,
-        `  1. View failure details: gh run view <run-id> --log-failed`,
-        `  2. Fix the failing code (type errors, test failures, lint issues)`,
-        `  3. Run checks locally: bun run typecheck && bun run lint && bun test`,
-        `  4. Commit and push the fix`,
-        `  5. Wait for CI to go green: gh run watch <run-id> --exit-status`,
-      ].join("\n")
-    )
+    formatActionPlan(["Analyze and fix CI failures before stopping:", fixSubSteps], {
+      translateToolNames: true,
+    })
   return reason
 }
 
@@ -137,17 +142,19 @@ function buildActiveReason(branch: string, active: CIRun[]): string {
   const names = active.map((r) => `${r.workflowName} (${r.status})`).join(", ")
   let reason = `GitHub CI is still running on branch '${branch}' after waiting ${MAX_POLL_MS / 1000}s.\n\n`
   reason += `Active checks (${active.length}): ${names}\n\n`
-  reason += skillAdvice(
-    "ci-status",
-    "Wait for CI to complete, then check results with the /ci-status skill.",
-    [
-      `Wait for CI to complete, then check results:`,
-      `  gh run list --branch ${branch}`,
-      `  gh run watch <run-id> --exit-status`,
-      ``,
-      `Once complete: if passing → stop. If failing → fix before stopping.`,
-    ].join("\n")
+
+  const waitSubSteps: ActionPlanItem[] = []
+  if (skillExists("ci-status")) {
+    waitSubSteps.push("/ci-status — Check results once CI completes")
+  }
+  waitSubSteps.push(
+    `gh run list --branch ${branch}`,
+    "gh run watch <run-id> --exit-status",
+    "Once complete: if passing → stop. If failing → fix before stopping."
   )
+  reason += formatActionPlan(["Wait for CI to complete, then check results:", waitSubSteps], {
+    translateToolNames: true,
+  })
   return reason
 }
 

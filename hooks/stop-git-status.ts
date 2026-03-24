@@ -15,6 +15,7 @@ import {
 import { stopGitPushPromptedFlagPath } from "../src/temp-paths.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 import {
+  type ActionPlanItem,
   blockStop,
   createSessionTask,
   formatActionPlan,
@@ -22,7 +23,7 @@ import {
   git,
   isGitRepo,
   sanitizeSessionId,
-  skillAdvice,
+  skillExists,
   spawnWithTimeout,
 } from "./utils/hook-utils.ts"
 
@@ -149,41 +150,26 @@ function selectTaskSubject(hasUncommitted: boolean, ahead: number, behind: numbe
   return "Push branch to remote"
 }
 
-function pushAdviceForMode(
-  collabMode: CollaborationMode,
-  branch: string,
-  upstream: string,
-  ahead: number
-): string {
-  const pushLabel =
-    ahead > 0
-      ? `Push ${ahead} commit(s) to '${upstream}'`
-      : `Push your committed changes to '${upstream}'`
-
+function pushSubStepsForMode(collabMode: CollaborationMode, branch: string): ActionPlanItem[] {
   if (collabMode === "solo") {
-    return [`${pushLabel}:`, `  git push origin ${branch}`].join("\n")
+    return [`git push origin ${branch}`]
   }
   if (collabMode === "team") {
     const isMainBranch = branch === "main" || branch === "master"
     if (isMainBranch) {
       return [
-        `${pushLabel}:`,
-        `  Create a feature branch first: git checkout -b <type>/<slug>`,
-        `  Then push: git push origin <feature-branch>`,
-        `  Open a PR: gh pr create --base ${branch}`,
-      ].join("\n")
+        `Create a feature branch first: git checkout -b <type>/<slug>`,
+        `Push the feature branch: git push origin <feature-branch>`,
+        `Open a PR: gh pr create --base ${branch}`,
+      ]
     }
-    return [`${pushLabel}:`, `  git push origin ${branch}`].join("\n")
+    return [`git push origin ${branch}`]
   }
   // "auto" or "relaxed-collab" — show the generic guidance
   return [
-    `${pushLabel}:`,
-    `  git push origin ${branch}`,
-    "",
-    "Before pushing — run the collaboration guard:",
-    "  Solo repo → direct push to main is permitted.",
-    "  Org repo or other contributors active → use a feature branch and PR instead.",
-  ].join("\n")
+    `git push origin ${branch}`,
+    "Before pushing — run the collaboration guard: solo repo → direct push; org repo → feature branch and PR",
+  ]
 }
 
 function buildReason(opts: {
@@ -212,48 +198,42 @@ function buildReason(opts: {
     ? buildUncommittedReason(gitStatus, branch, upstream, behind)
     : describeRemoteState(branch, upstream, ahead, behind)
 
-  const steps: string[] = []
+  const steps: ActionPlanItem[] = []
 
   if (hasUncommitted) {
-    steps.push(
-      skillAdvice(
-        "commit",
-        "Commit your changes with /commit",
-        [
-          "Commit your changes:",
-          "  git add .",
-          '  git commit -m "<type>(<scope>): <summary>"',
-          "",
-          "Commit message types: feat, fix, refactor, docs, style, test, chore",
-          "Keep summary under 50 characters. Use present tense. No Co-Authored-By trailers.",
-        ].join("\n")
-      )
+    const commitSubSteps: ActionPlanItem[] = []
+    if (skillExists("commit")) {
+      commitSubSteps.push("/commit — Stage and commit with Conventional Commits")
+    }
+    commitSubSteps.push(
+      "git add .",
+      'git commit -m "<type>(<scope>): <summary>"',
+      "Types: feat, fix, refactor, docs, style, test, chore. Keep summary under 50 characters."
     )
+    steps.push("Commit your changes:", commitSubSteps)
   }
 
   if (behind > 0) {
-    steps.push(
-      skillAdvice(
-        "resolve-conflicts",
-        "Pull and rebase: git pull --rebase --autostash (use /resolve-conflicts if conflicts arise)",
-        "Pull and rebase: git pull --rebase --autostash"
-      )
-    )
+    const pullSubSteps: ActionPlanItem[] = []
+    if (skillExists("resolve-conflicts")) {
+      pullSubSteps.push("/resolve-conflicts — Use if conflicts arise during rebase")
+    }
+    pullSubSteps.push("git pull --rebase --autostash")
+    steps.push("Pull and rebase:", pullSubSteps)
   }
 
   const willNeedPush = ahead > 0 || (hasUncommitted && hasRemote)
   if (willNeedPush) {
-    const pushLabel =
+    const pushHeader =
       ahead > 0
-        ? `Push ${ahead} commit(s) to '${upstream}'`
-        : `Push your committed changes to '${upstream}'`
-    steps.push(
-      skillAdvice(
-        "push",
-        `${pushLabel} with /push`,
-        pushAdviceForMode(collabMode, branch, upstream, ahead)
-      )
-    )
+        ? `Push ${ahead} commit(s) to '${upstream}':`
+        : `Push your committed changes to '${upstream}':`
+    const pushSubSteps: ActionPlanItem[] = []
+    if (skillExists("push")) {
+      pushSubSteps.push("/push — Push to remote with collaboration guard")
+    }
+    pushSubSteps.push(...pushSubStepsForMode(collabMode, branch))
+    steps.push(pushHeader, pushSubSteps)
   }
 
   reason += formatActionPlan(steps)
