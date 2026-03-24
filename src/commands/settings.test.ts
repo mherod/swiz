@@ -123,8 +123,8 @@ describe("swiz settings", () => {
     test("shows default auto-continue state", () => {
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toContain("auto-continue:   enabled")
-      expect(result.stdout).toContain("pr-merge-mode:   enabled")
-      expect(result.stdout).toContain("update-memory-footer: disabled")
+      expect(result.stdout).toMatch(/pr-merge-mode:\s+enabled/)
+      expect(result.stdout).toMatch(/update-memory-footer:\s+disabled/)
       expect(result.stdout).toContain("(defaults)")
     })
 
@@ -553,8 +553,8 @@ describe("swiz settings", () => {
     const result = await runSwiz(["settings"], home)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("auto-continue:   disabled")
-    expect(result.stdout).toContain("pr-merge-mode:   enabled")
-    expect(result.stdout).toContain("speak:           enabled")
+    expect(result.stdout).toMatch(/pr-merge-mode:\s+enabled/)
+    expect(result.stdout).toMatch(/speak:\s+enabled/)
     expect(result.stdout).toContain("narrator-voice:  system default")
     expect(result.stdout).toContain("narrator-speed:  system default")
   })

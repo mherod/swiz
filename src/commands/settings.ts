@@ -244,26 +244,27 @@ function resolveScopeLabel(source: string | undefined, fallback: string): string
 }
 
 function printBooleanSettings(rows: BoolSettingRow[], effective: EffectiveSwizSettings): void {
+  const maxLen = Math.max(...rows.map(([label]) => label.length))
   for (const [label, key, scope] of rows) {
     const value = effective[key] ? "enabled" : "disabled"
-    console.log(`  ${label} ${value} (${scope})`)
+    console.log(`  ${label.padEnd(maxLen)} ${value} (${scope})`)
   }
 }
 
 const GLOBAL_BOOL_ROWS: BoolSettingRow[] = [
-  ["pr-merge-mode:  ", "prMergeMode", "global"],
-  ["critiques:      ", "critiquesEnabled", "global"],
-  ["push-gate:      ", "pushGate", "global"],
+  ["pr-merge-mode:", "prMergeMode", "global"],
+  ["critiques:", "critiquesEnabled", "global"],
+  ["push-gate:", "pushGate", "global"],
   ["sandboxed-edits:", "sandboxedEdits", "global"],
-  ["speak:          ", "speak", "global"],
+  ["speak:", "speak", "global"],
   ["update-memory-footer:", "updateMemoryFooter", "global"],
-  ["git-status-gate:        ", "gitStatusGate", "global"],
+  ["git-status-gate:", "gitStatusGate", "global"],
   ["non-default-branch-gate:", "nonDefaultBranchGate", "global"],
-  ["github-ci-gate:         ", "githubCiGate", "global"],
-  ["changes-requested-gate: ", "changesRequestedGate", "global"],
+  ["github-ci-gate:", "githubCiGate", "global"],
+  ["changes-requested-gate:", "changesRequestedGate", "global"],
   ["personal-repo-issues-gate:", "personalRepoIssuesGate", "global"],
-  ["issue-close-gate:         ", "issueCloseGate", "global"],
-  ["quality-checks-gate:      ", "qualityChecksGate", "global"],
+  ["issue-close-gate:", "issueCloseGate", "global"],
+  ["quality-checks-gate:", "qualityChecksGate", "global"],
 ]
 
 function printGlobalSettings(
