@@ -49,6 +49,7 @@ interface ParsedSettingsArgs {
   scope: SettingsScope
   sessionQuery: string | null
   force: boolean
+  json: boolean
 }
 
 function validateSettingScope(key: SettingKey, scope: SettingsScope, settingArg: string): void {
@@ -121,6 +122,7 @@ interface SettingsArgState {
   scope: SettingsScope
   sessionQuery: string | null
   force: boolean
+  json: boolean
 }
 
 function processSettingsArg(args: string[], i: number, state: SettingsArgState): number {
@@ -129,6 +131,11 @@ function processSettingsArg(args: string[], i: number, state: SettingsArgState):
 
   if (arg === "--force" || arg === "-f") {
     state.force = true
+    return i
+  }
+
+  if (arg === "--json") {
+    state.json = true
     return i
   }
 
@@ -159,6 +166,7 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
     scope: "global",
     sessionQuery: null,
     force: false,
+    json: false,
   }
 
   for (let i = 0; i < args.length; i++) {
@@ -179,6 +187,7 @@ function parseSettingsArgs(args: string[]): ParsedSettingsArgs {
     scope: state.scope,
     sessionQuery: state.sessionQuery,
     force: state.force,
+    json: state.json,
   }
 }
 
@@ -402,6 +411,11 @@ async function showSettings(parsed: ParsedSettingsArgs): Promise<void> {
   const effective = getEffectiveSwizSettings(settings, sessionId, projectSettings)
   const path = getSwizSettingsPath()
   const fileExists = path ? await Bun.file(path).exists() : false
+
+  if (parsed.json) {
+    console.log(JSON.stringify(effective, null, 2))
+    return
+  }
 
   const detectedStacks = await detectProjectStack(parsed.targetDir)
   printSettings({
@@ -637,6 +651,7 @@ export const settingsCommand: Command = {
     "swiz settings [show | enable <setting> | disable <setting>] [--global | --project | --session [id]] [--dir <path>]",
   options: [
     { flags: "show", description: "Show current effective settings (default action)" },
+    { flags: "--json", description: "Output effective settings as JSON (show mode only)" },
     ...buildSettingOptions(),
     {
       flags: "--force, -f",
