@@ -9,17 +9,11 @@
  */
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
-import { useTempDir } from "./utils/test-utils.ts"
+import { type HookResult, useTempDir } from "./utils/test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
 const { create: createTempDir } = useTempDir("swiz-negpath-")
-
-interface HookResult {
-  exitCode: number | null
-  stdout: string
-  stderr: string
-}
 
 /**
  * Run a hook script as a subprocess with controlled stdin and env.

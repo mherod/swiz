@@ -16,16 +16,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { claudeTaskOutputPath } from "../src/temp-paths.ts"
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-interface HookResult {
-  exitCode: number | null
-  stdout: string
-  stderr: string
-  decision?: string
-  reason?: string
-}
+import type { HookResult } from "./utils/test-utils.ts"
 
 // ─── Output-file recovery helpers ────────────────────────────────────────────
 
