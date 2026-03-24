@@ -256,7 +256,8 @@ export const ideaCommand: Command = {
     },
     {
       flags: "--provider, -p <name>",
-      description: 'AI provider override: "gemini", "codex", or "claude" (default: auto-select)',
+      description:
+        'AI provider override: "gemini", "claude", or "openrouter" (default: auto-select)',
     },
   ],
   async run(args: string[]) {
