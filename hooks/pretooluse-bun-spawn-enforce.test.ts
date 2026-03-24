@@ -3,7 +3,7 @@ import {
   BLOCKED_NODE_SPAWN_OPS,
   findBlockedNodeSpawnOps,
   usesBunApis,
-} from "./pretooluse-bun-spawn-enforce.ts"
+} from "./pretooluse-bun-api-enforce.ts"
 
 // Construct API names dynamically to avoid self-detection by the hook.
 const EXEC_S = ["exec", "Sync"].join("")
