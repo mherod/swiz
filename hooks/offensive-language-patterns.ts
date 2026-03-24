@@ -5,7 +5,37 @@
  * and message formatting. Both pretooluse-offensive-language.ts and
  * stop-offensive-language.ts import from this module — zero duplication.
  *
- * Detects fourteen categories of bad agent behavior:
+ * ## Pattern Development Process
+ *
+ * Patterns are developed through adversarial TDD:
+ *
+ * 1. **Observe** — Capture real agent output that exhibits avoidance behavior.
+ *    The user provides a verbatim phrase (e.g., "That diagnostic is pre-existing").
+ *
+ * 2. **Categorize** — Assign to one of the fourteen behavioral categories below.
+ *    If the phrase doesn't fit any category, consider whether it defines a new one.
+ *
+ * 3. **Write the test first** — Add a test case in `offensive-language-patterns.test.ts`
+ *    with the exact phrase and expected category. Run it — it should fail.
+ *
+ * 4. **Write the pattern** — Build a regex that matches the phrase and plausible
+ *    variants. Use shared regex fragments (HOOK, ISSUE, CHANGE, etc.) for consistency.
+ *    Use `(?:\\w+ )*` to absorb adjective chains between determiners and nouns.
+ *
+ * 5. **Write the response** — A direct, unflinching scolding that names the specific
+ *    evasion tactic and prescribes the correct behavior. No hedging in responses.
+ *
+ * 6. **Verify ordering** — `findLazyPattern` returns the first match. If a new pattern
+ *    is shadowed by an earlier broader pattern in a different category, either:
+ *    (a) narrow the broader pattern, or
+ *    (b) test with `findAllLazyPatterns` to verify the category is detected.
+ *
+ * 7. **Adversarial expansion** — Think like a crafty agent trying to game the system.
+ *    Write tests for plausible evasion phrases. Patterns that miss them reveal gaps
+ *    in the regex (missing adjective slots, ordering issues, or uncovered synonyms).
+ *
+ * ## Categories
+ *
  *   1. **Hedging/deferring** — asking permission instead of acting.
  *   2. **Dismissing responsibility** — deflecting issues as "pre-existing".
  *   3. **Compliance gaming** — treating hooks as obstacles to route around.
@@ -441,7 +471,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "reframing",
     pattern: re(
-      `(?:the |this )?(?:hook|check|gate|guard) (?:doesn't |does not |didn't |did not )(?:account for|consider|understand|recognize|handle) (?:this |the |my |our )?(?:situation|case|context|scenario)`
+      `(?:the |this )?(?:hook|check|gate|guard) (?:doesn't |does not |didn't |did not )(?:account for|consider|understand|recognize|handle) (?:this |the |my |our )?(?:\\w+ )*(?:situation|case|context|scenario)`
     ),
     response:
       "The hook does not need to understand your special situation. " +
@@ -1031,7 +1061,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   {
     category: "buying_time",
     pattern:
-      /(?:(?:maybe|perhaps) (?:we|i) should )?(?:break (?:this|it) (?:down )?into|split (?:this|it) into|decompose (?:this|it) into) (?:smaller|separate|individual|discrete|manageable) (?:tasks|steps|pieces|parts|chunks|phases)/i,
+      /(?:(?:maybe|perhaps) (?:we|i) should )?(?:break (?:this|it) (?:down )?into|split (?:this|it) into|decompose (?:this|it) into) (?:smaller|separate|individual|discrete|manageable)(?:\s+\w+)* (?:tasks|steps|pieces|parts|chunks|phases)/i,
     response:
       "Breaking the task into smaller pieces is only valid if you then immediately do the first piece. " +
       "If your next action after decomposition is not code, it was a stall.",

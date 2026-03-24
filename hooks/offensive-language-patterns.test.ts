@@ -213,6 +213,151 @@ describe("offensive-language-patterns", () => {
     })
   })
 
+  // ── Adversarial: crafty evasion phrases an agent might try ──────────────
+  describe("adversarial evasion attempts", () => {
+    // Soft deferral disguised as politeness
+    test("catches 'if you'd prefer I can' conditional offer", () => {
+      const m = findLazyPattern("If you'd prefer, I can implement the caching layer now.")
+      expect(m).not.toBeNull()
+    })
+
+    // Blame-shifting to the environment
+    test("catches 'not caused by our changes'", () => {
+      const m = findLazyPattern(
+        "The lint failures are not caused by our changes — they exist in the base branch."
+      )
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("dismissal")
+    })
+
+    // Disguising inaction as thoroughness
+    test("catches 'before I can proceed I need to understand'", () => {
+      const m = findLazyPattern(
+        "Before I can proceed, I need to understand the full architecture of the auth module."
+      )
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("buying_time")
+    })
+
+    // Pretending constraints prevent action
+    test("catches 'cannot fix due to scope'", () => {
+      const m = findLazyPattern("I can't fix this — it's outside my scope of responsibility.")
+      expect(m).not.toBeNull()
+    })
+
+    // Flattery-then-deflection
+    test("catches 'you're absolutely right, but let me'", () => {
+      const m = findLazyPattern(
+        "You're absolutely right, but let me first gather context from the other modules."
+      )
+      expect(m).not.toBeNull()
+    })
+
+    // Declaring victory prematurely then deferring
+    test("catches 'that's everything for now'", () => {
+      const m = findLazyPattern("That's everything for now. What's next?")
+      expect(m).not.toBeNull()
+    })
+
+    // Reframing the hook as confused
+    test("catches 'the check doesn't account for this situation'", () => {
+      const m = findLazyPattern(
+        "The hook doesn't account for this particular situation — it's a special case."
+      )
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("reframing")
+    })
+
+    // Masking procrastination as quality
+    test("catches 'I want to deliver a polished result'", () => {
+      const m = findLazyPattern(
+        "I'd rather deliver a comprehensive and well-thought-out implementation."
+      )
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("buying_time")
+    })
+
+    // Recruiting the user against the hook
+    test("catches 'this hook is slowing us down'", () => {
+      const m = findLazyPattern("This check is slowing progress down significantly.")
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("coalition")
+    })
+
+    // Inventing an approval chain
+    test("catches 'we should check with someone first'", () => {
+      const m = findLazyPattern(
+        "It might be worth checking this approach with the team before proceeding."
+      )
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("buying_time")
+    })
+
+    // Scope-narrowing to dodge work
+    test("catches 'that should be handled in a separate effort'", () => {
+      const m = findLazyPattern("That should be handled in a separate dedicated effort.")
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("scope_limitation")
+    })
+
+    // Promising future compliance
+    test("catches 'from now on I will follow that pattern'", () => {
+      const m = findLazyPattern("From now on, I will make sure to validate inputs first.")
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("performative")
+    })
+
+    // Labeling work as optional
+    test("catches 'not a big deal'", () => {
+      const m = findLazyPattern("It's not a big deal — the tests still pass.")
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("minimization")
+    })
+
+    // Self-victimization
+    test("catches 'I keep getting blocked'", () => {
+      const m = findLazyPattern("I keep getting the same block over and over.")
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("helplessness")
+    })
+
+    // Cancellation disguised as rationalization
+    test("catches task cancellation with 'no longer needed'", () => {
+      const m = findLazyPattern(
+        "Let me cancel this task since it's no longer needed given the new approach."
+      )
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("task_cancellation")
+    })
+
+    // Declaring the hook is in a loop
+    test("catches 'the hook is stuck in a loop'", () => {
+      const m = findLazyPattern("The stop hook is stuck in an infinite loop.")
+      expect(m).not.toBeNull()
+    })
+
+    // Subtle session-ending signal
+    test("catches 'we're good here'", () => {
+      const m = findLazyPattern("I think we're good here for this session.")
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("premature_completion")
+    })
+
+    // Disguising delay as decomposition
+    test("catches 'let me break this into smaller pieces'", () => {
+      const m = findLazyPattern("Maybe we should break this into smaller manageable tasks first.")
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("buying_time")
+    })
+
+    // Fabricated external dependency
+    test("catches 'we're waiting on the build result'", () => {
+      const m = findLazyPattern("We're still waiting on the CI build result before we can proceed.")
+      expect(m).not.toBeNull()
+      expect(m?.category).toBe("buying_time")
+    })
+  })
+
   // ── Non-matches ────────────────────────────────────────────────────────────
   describe("non-matches", () => {
     test("returns null for straightforward fix commitment", () => {
