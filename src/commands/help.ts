@@ -6,6 +6,13 @@ export function createHelpCommand(commands: Map<string, Command>): Command {
     description: "Show available commands",
     usage: "swiz help [command]",
     run(args) {
+      if (args.includes("--json")) {
+        const cmds = [...commands.entries()]
+          .filter(([name]) => name !== "help")
+          .map(([name, cmd]) => ({ name, description: cmd.description }))
+        console.log(JSON.stringify(cmds, null, 2))
+        return
+      }
       const target = args[0]
 
       if (target) {
