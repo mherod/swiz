@@ -213,7 +213,8 @@ async function tryAutoSteerStopBlock(
   if (!terminalApp) return
 
   const { sendAutoSteer } = await import("../../hooks/utils/hook-utils.ts")
-  await sendAutoSteer(blockReason, terminalApp)
+  const sent = await sendAutoSteer(blockReason, terminalApp)
+  if (!sent) return
   log(`   auto-steer: sent stop block reason to terminal (${terminalApp}) — converting to allow`)
   delete finalResponse.decision
   delete finalResponse.reason

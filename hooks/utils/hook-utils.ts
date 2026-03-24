@@ -1259,6 +1259,67 @@ export interface AutoSteerRequest {
 const AUTOSTEER_SUPPORTED_TERMINALS = new Set(["iterm2", "apple-terminal"])
 
 /**
+ * True when the given System Events frontmost process name is a chat app we should
+ * not interrupt by activating the terminal (WhatsApp, Telegram, variants).
+ */
+export function isAutoSteerDeferredForForegroundAppName(name: string): boolean {
+  const t = name.trim().toLowerCase()
+  return t.startsWith("whatsapp") || t.startsWith("telegram")
+}
+
+/**
+ * True when the user is currently focused on a chat app; scheduled auto-steer should
+ * not consume the request (retry on a later PostToolUse).
+ */
+export async function shouldDeferAutoSteerForForegroundChatApp(): Promise<boolean> {
+  const { createScript, runScript } = await import("applescript-node")
+  const script = createScript()
+    .tell("System Events")
+    .raw("return name of first application process whose frontmost is true")
+    .end()
+  try {
+    const result = await runScript(script)
+    const out = typeof result.output === "string" ? result.output.trim() : ""
+    return isAutoSteerDeferredForForegroundAppName(out)
+  } catch {
+    return false
+  }
+}
+
+type AutoSteerTerminalKind = "iterm2" | "apple-terminal"
+
+async function runAutoSteerTerminalScripts(
+  kind: AutoSteerTerminalKind,
+  escaped: string,
+  createScript: typeof import("applescript-node").createScript,
+  runScript: typeof import("applescript-node").runScript
+): Promise<void> {
+  if (kind === "iterm2") {
+    const script = createScript()
+      .tell("iTerm")
+      .tellTarget("current session of current window")
+      .raw(`write text "${escaped}" newline no`)
+      .raw(`write text ""`)
+      .raw(`delay 0.1`)
+      .raw(`write text ""`)
+      .end()
+      .end()
+    await runScript(script)
+    return
+  }
+  const typeScript = createScript()
+    .tell("System Events")
+    .tellTarget('process "Terminal"')
+    .raw(`keystroke "${escaped}"`)
+    .raw(`keystroke return`)
+    .raw(`delay 0.1`)
+    .raw(`keystroke return`)
+    .end()
+    .end()
+  await runScript(typeScript)
+}
+
+/**
  * Check whether auto-steer is available (setting enabled + supported terminal).
  * Returns the detected terminal app if available, null otherwise.
  */
@@ -1272,6 +1333,22 @@ export async function isAutoSteerAvailable(sessionId: string): Promise<string | 
   return terminal.app
 }
 
+export type SendAutoSteerOptions = {
+  /** If the user focuses a chat app before send, re-schedule this session's request (PostToolUse path). */
+  requeueOnForegroundDeferSessionId?: string
+}
+
+async function deferAutoSteerWhenChatForeground(
+  originalFrontApp: string,
+  message: string,
+  opts?: SendAutoSteerOptions
+): Promise<boolean> {
+  if (!isAutoSteerDeferredForForegroundAppName(originalFrontApp)) return false
+  const sid = opts?.requeueOnForegroundDeferSessionId
+  if (sid) await scheduleAutoSteer(sid, message)
+  return true
+}
+
 /**
  * Send a steering message directly to the terminal via AppleScript.
  * Use this for immediate sends (e.g. stop hooks) where there's no future
@@ -1281,7 +1358,8 @@ export async function isAutoSteerAvailable(sessionId: string): Promise<string | 
  */
 export async function sendAutoSteer(
   message: string,
-  terminalApp?: string | null
+  terminalApp?: string | null,
+  opts?: SendAutoSteerOptions
 ): Promise<boolean> {
   const app = terminalApp ?? (await import("./terminal-detection.ts")).detectTerminal().app
   if (!AUTOSTEER_SUPPORTED_TERMINALS.has(app)) return false
@@ -1312,38 +1390,19 @@ export async function sendAutoSteer(
     }
 
     const originalFrontApp = await getFrontmostAppName()
+    if (await deferAutoSteerWhenChatForeground(originalFrontApp, message, opts)) return false
+
     const alreadyFrontmost = originalFrontApp === targetApp
 
     // Always bring terminal to front before messaging
     await runScript(createScript().tell(targetApp).raw("activate").end())
 
-    if (app === "iterm2") {
-      // Write the message text without submitting, then newline(s) to submit.
-      // Second newline after a short delay helps ensure the prompt accepts input.
-      const script = createScript()
-        .tell("iTerm")
-        .tellTarget("current session of current window")
-        .raw(`write text "${escaped}" newline no`)
-        .raw(`write text ""`)
-        .raw(`delay 0.1`)
-        .raw(`write text ""`)
-        .end()
-        .end()
-      await runScript(script)
-    } else if (app === "apple-terminal") {
-      // Type the message text, then return via System Events to submit; brief delay
-      // and a second return make submission reliable if the first key was dropped.
-      const typeScript = createScript()
-        .tell("System Events")
-        .tellTarget('process "Terminal"')
-        .raw(`keystroke "${escaped}"`)
-        .raw(`keystroke return`)
-        .raw(`delay 0.1`)
-        .raw(`keystroke return`)
-        .end()
-        .end()
-      await runScript(typeScript)
-    }
+    await runAutoSteerTerminalScripts(
+      app as AutoSteerTerminalKind,
+      escaped,
+      createScript,
+      runScript
+    )
 
     // If we brought terminal to front and it wasn't already, restore previous front app
     if (!alreadyFrontmost && originalFrontApp) {

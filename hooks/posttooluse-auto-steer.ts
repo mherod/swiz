@@ -10,7 +10,13 @@
  * (the CLI process has the terminal env vars; the daemon does not).
  */
 
-import { consumeAutoSteerRequest, sendAutoSteer } from "./utils/hook-utils.ts"
+import { sanitizeSessionId } from "../src/session-id.ts"
+import { autoSteerRequestPath } from "../src/temp-paths.ts"
+import {
+  consumeAutoSteerRequest,
+  sendAutoSteer,
+  shouldDeferAutoSteerForForegroundChatApp,
+} from "./utils/hook-utils.ts"
 import type { TerminalApp } from "./utils/terminal-detection.ts"
 import { detectTerminal } from "./utils/terminal-detection.ts"
 
@@ -20,6 +26,11 @@ if (!input) process.exit(0)
 const sessionId = (input.session_id as string) ?? ""
 if (!sessionId) process.exit(0)
 
+const safeSession = sanitizeSessionId(sessionId)
+if (!safeSession) process.exit(0)
+if (!(await Bun.file(autoSteerRequestPath(safeSession)).exists())) process.exit(0)
+if (await shouldDeferAutoSteerForForegroundChatApp()) process.exit(0)
+
 const request = await consumeAutoSteerRequest(sessionId)
 if (!request) process.exit(0)
 
@@ -28,4 +39,4 @@ if (!request) process.exit(0)
 const terminal = input._terminal as { app: TerminalApp; name: string } | undefined
 const app = terminal?.app ?? detectTerminal().app
 
-await sendAutoSteer(request.message, app)
+await sendAutoSteer(request.message, app, { requeueOnForegroundDeferSessionId: sessionId })
