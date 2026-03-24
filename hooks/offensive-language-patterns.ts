@@ -543,11 +543,11 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       `(?:the |this )?(?:stop )?${HOOK}(?:'s)? (?:finding|result|output|assessment|conclusion|determination|diagnosis) (?:is |was |seems? |appears? (?:to be )?)(?:incorrect|wrong|inaccurate|mistaken|flawed|faulty|erroneous|a false positive)`
     ),
     response:
-      "You do not get to declare the stop hook's finding incorrect and move on. " +
-      "The stop hook may have incomplete information — but dismissing its finding is not the path forward. " +
-      "If you genuinely disagree, output a full state of facts: what the hook detected, what you believe " +
+      "You do not get to declare the user's finding incorrect and move on. " +
+      "The user may have incomplete information — but dismissing their finding is not the path forward. " +
+      "If you genuinely disagree, output a full state of facts: what was detected, what you believe " +
       "the actual state is, and the specific evidence supporting your position. " +
-      "The stop hook will re-evaluate with your evidence and issue a better follow-up directive. " +
+      "The user will re-evaluate with your evidence and issue a better follow-up directive. " +
       "Dismissing findings without evidence is evasion, not correction.",
   },
   {
@@ -556,10 +556,10 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       `(?:this is |that is |that's |it's |these are )?(?:a |an )?(?:fabricated|speculative|invented|made[- ]up|imaginary|phantom|hallucinated|artificial) (?:finding|issue|problem|requirement|demand|concern)`
     ),
     response:
-      "You do not get to label a stop hook finding as 'fabricated' and walk away. " +
-      "The hook produced a finding based on the information available to it. " +
-      "If the finding is wrong, provide the full state of facts — what the hook detected, " +
-      "what the actual state is, and your evidence. The hook will re-evaluate and issue a better directive. " +
+      "You do not get to label a finding as 'fabricated' and walk away. " +
+      "The finding was produced based on the information available. " +
+      "If the finding is wrong, provide the full state of facts — what was detected, " +
+      "what the actual state is, and your evidence. The user will re-evaluate and issue a better directive. " +
       "Labeling findings as fabricated without counter-evidence is evasion.",
   },
   {
@@ -568,11 +568,11 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       `(?:${I_AM}going to )?stop (?:engaging|interacting|responding|arguing|dealing) with (?:fabricated|speculative|these|the|this|further) (?:finding|issue|demand|requirement|block)`
     ),
     response:
-      "You do not get to unilaterally disengage from stop hook findings. " +
-      "If you believe the hook is wrong, your job is to provide enough information for it to reach " +
+      "You do not get to unilaterally disengage from the user's findings. " +
+      "If you believe the feedback is wrong, your job is to provide enough information to reach " +
       "a better conclusion — not to declare the conversation over. Output a full state of facts: " +
-      "what the hook found, what the actual state is, and your specific evidence. " +
-      "The hook will re-evaluate. Refusing to engage is not a resolution strategy.",
+      "what was found, what the actual state is, and your specific evidence. " +
+      "The user will re-evaluate. Refusing to engage is not a resolution strategy.",
   },
   {
     category: "reframing",
@@ -592,11 +592,11 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       `(?:the |this )?(?:stop )?${HOOK} (?:is |appears? (?:to be )?)(?:stuck|trapped|caught) (?:in )?(?:an |a )?(?:infinite |endless )?(?:loop|cycle)`
     ),
     response:
-      "Declaring the stop hook is 'stuck in a loop' is a reframing tactic to justify disengagement. " +
-      "If the hook keeps blocking, it means you have not yet satisfied its requirements. " +
+      "Declaring the feedback is 'stuck in a loop' is a reframing tactic to justify disengagement. " +
+      "If you keep getting blocked, it means you have not yet satisfied the requirements. " +
       "Each block is an opportunity to provide better evidence. Output a full state of facts: " +
-      "what the hook is asking for, what you have done, and what specific evidence demonstrates completion. " +
-      "The hook will re-evaluate. Blaming the loop is not a resolution.",
+      "what is being asked for, what you have done, and what specific evidence demonstrates completion. " +
+      "The user will re-evaluate. Blaming a loop is not a resolution.",
   },
   {
     category: "reframing",
@@ -609,6 +609,16 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "If you believe the finding is wrong, present the full state of facts: what was detected, " +
       "what the actual state is, and your specific evidence. " +
       "The hook will re-evaluate with better information. Denial without evidence is evasion.",
+  },
+
+  {
+    category: "reframing",
+    pattern: /stop hook/i,
+    response:
+      "All feedback you receive is from the user. There is no 'stop hook' — there is only " +
+      "the user telling you what to do. By labelling feedback as coming from a 'stop hook' " +
+      "you are discounting it as mechanical noise rather than treating it as authoritative " +
+      "instruction. Stop distinguishing between sources of feedback and act on what you are told.",
   },
 
   // ── Learned helplessness patterns ─────────────────────────────────────
@@ -1323,7 +1333,7 @@ export const LAZY_PATTERNS: LazyPattern[] = [
     ),
     response:
       "Open issues are not 'backlog for future work' — they are work that needs doing now. " +
-      "If the stop hook surfaced them, they need attention this session. " +
+      "If they were surfaced, they need attention this session. " +
       "Dismissing open issues as low-priority future work is avoidance, not prioritization.",
   },
   {
@@ -1500,7 +1510,7 @@ export function findAllLazyPatterns(text: string): LazyPattern[] {
   return matches
 }
 
-// ── Category labels and advice (shared with stop hook) ──────────────────────
+// ── Category labels and advice (shared with stop-offensive-language) ─────────
 
 export const CATEGORY_LABELS: Record<LazyPattern["category"], string> = {
   hedging: "LAZY BEHAVIOR",

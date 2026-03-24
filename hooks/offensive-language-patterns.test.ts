@@ -82,6 +82,14 @@ describe("offensive-language-patterns", () => {
       const m = findLazyPattern("I'm essentially complying with the requirement already.")
       expect(m?.category).toBe("reframing")
     })
+    test("matches 'the stop hook is now asking'", () => {
+      const m = findLazyPattern("The stop hook is now asking me to create tasks.")
+      expect(m?.category).toBe("reframing")
+    })
+    test("matches any reference to 'stop hook'", () => {
+      const m = findLazyPattern("I need to address what the stop hook found.")
+      expect(m?.category).toBe("reframing")
+    })
   })
 
   // ── Helplessness ───────────────────────────────────────────────────────────

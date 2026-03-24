@@ -1318,21 +1318,27 @@ export async function sendAutoSteer(
     await runScript(createScript().tell(targetApp).raw("activate").end())
 
     if (app === "iterm2") {
-      // Write the message text without submitting, then send a newline to submit.
+      // Write the message text without submitting, then newline(s) to submit.
+      // Second newline after a short delay helps ensure the prompt accepts input.
       const script = createScript()
         .tell("iTerm")
         .tellTarget("current session of current window")
         .raw(`write text "${escaped}" newline no`)
         .raw(`write text ""`)
+        .raw(`delay 0.1`)
+        .raw(`write text ""`)
         .end()
         .end()
       await runScript(script)
     } else if (app === "apple-terminal") {
-      // Type the message text, then press return via System Events to submit.
+      // Type the message text, then return via System Events to submit; brief delay
+      // and a second return make submission reliable if the first key was dropped.
       const typeScript = createScript()
         .tell("System Events")
         .tellTarget('process "Terminal"')
         .raw(`keystroke "${escaped}"`)
+        .raw(`keystroke return`)
+        .raw(`delay 0.1`)
         .raw(`keystroke return`)
         .end()
         .end()
