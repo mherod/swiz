@@ -1,5 +1,56 @@
 # Changelog
 
+## 2026-03-24
+
+### New Features
+
+- **Session-start self-heal pause** — full uninstall (`swiz uninstall`)
+  now pauses the session-start self-heal hook so manifest drift does
+  not silently re-add hooks after removal (#353).
+- **CI completion notifications** — the daemon now notifies when
+  watched CI runs complete (#334).
+- **Dispatch timing logs** — structured phase-level timing is now
+  logged per dispatch for diagnosing latency.
+- **Quality checks gate** — new `qualityChecksGate` setting controls
+  whether lint and typecheck run on session stop. Configurable at
+  both global and project scope.
+- **Project-scoped auto-continue** — `autoContinue` can now be
+  overridden per-project, not just globally (#345).
+- **Terminal and shell detection** — improved detection of terminal
+  emulator and shell environment for hook behaviour.
+- **Dismissive session-deferral detection** — the offensive language
+  hook now catches "requires its own dedicated session" and similar
+  premature-completion patterns.
+- **Manifest `requiredSettings` filtering** — hooks can declare
+  required settings; the dispatcher skips them at zero cost when
+  those settings are disabled (#348).
+
+### Fixes
+
+- Fixed `swiz settings` CLI and web panel showing toggles in
+  different orders — both now follow the registry canonical
+  order (#352, #353).
+- Fixed `swiz settings` label padding inconsistency — labels now
+  align dynamically to the longest entry (#352).
+- Fixed `swiz dispatch` subprocess hanging indefinitely after
+  writing its result — open SQLite handles kept the event loop
+  alive in CLI mode.
+- Fixed `hasGitPushForceFlag` treating `--force` after `--` as a
+  flag instead of a refspec — the end-of-flags sentinel is now
+  handled correctly.
+- Fixed session `autoContinue` unconditionally overriding project
+  settings — now optional with nullish coalescing (#350).
+- Fixed dollar-sign interpolation in `computeProjectedContent`
+  inflating projected content when replacement strings contain
+  shell examples (#354).
+- Fixed stop-memory-size hook re-triggering repeatedly — added
+  1-hour cooldown and 5-minute CLAUDE.md recency skip.
+- Fixed reflection filler suggestion re-triggering after reflection
+  was already completed — now checks CLAUDE.md mtime.
+- Fixed `personalRepoIssuesGate` missing from CLI settings
+  display (#346).
+- Fixed worker pool deadlock and error recovery in daemon dispatch.
+
 ## 2026-03-21
 
 ### New Features
