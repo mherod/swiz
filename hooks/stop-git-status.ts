@@ -205,6 +205,54 @@ function pushSubStepsForPolicy(
   return remotePushSubSteps(policy, branch, isMainBranch)
 }
 
+function buildCommitSteps(): [string, ActionPlanItem[]] {
+  const subSteps: ActionPlanItem[] = []
+  if (skillExists("commit")) {
+    subSteps.push("/commit — Stage and commit with Conventional Commits")
+  }
+  subSteps.push(
+    "git add .",
+    'git commit -m "<type>(<scope>): <summary>"',
+    "Types: feat, fix, refactor, docs, style, test, chore. Keep summary under 50 characters."
+  )
+  return ["Commit your changes:", subSteps]
+}
+
+function buildPullSteps(): [string, ActionPlanItem[]] {
+  const subSteps: ActionPlanItem[] = []
+  if (skillExists("resolve-conflicts")) {
+    subSteps.push("/resolve-conflicts — Use if conflicts arise during rebase")
+  }
+  subSteps.push("git pull --rebase --autostash")
+  return ["Pull and rebase:", subSteps]
+}
+
+function buildPushSteps(
+  branch: string,
+  upstream: string,
+  ahead: number,
+  collabMode: CollaborationMode
+): [string, ActionPlanItem[]] {
+  const policy = getCollaborationModePolicy(collabMode)
+  const isMainBranch = branch === "main" || branch === "master"
+  const mainBlocked =
+    policy.requireFeatureBranch &&
+    isMainBranch &&
+    !allowsDirectMainCollaborationWorkflow(collabMode)
+
+  const pushHeader = mainBlocked
+    ? `Move commits off '${branch}' to a feature branch:`
+    : ahead > 0
+      ? `Push ${ahead} commit(s) to '${upstream}':`
+      : `Push your committed changes to '${upstream}':`
+  const subSteps: ActionPlanItem[] = []
+  if (skillExists("push")) {
+    subSteps.push("/push — Push to remote with collaboration guard")
+  }
+  subSteps.push(...pushSubStepsForPolicy(policy, branch, collabMode))
+  return [pushHeader, subSteps]
+}
+
 function buildReason(opts: {
   gitStatus: {
     total: number
@@ -233,48 +281,10 @@ function buildReason(opts: {
 
   const steps: ActionPlanItem[] = []
 
-  if (hasUncommitted) {
-    const commitSubSteps: ActionPlanItem[] = []
-    if (skillExists("commit")) {
-      commitSubSteps.push("/commit — Stage and commit with Conventional Commits")
-    }
-    commitSubSteps.push(
-      "git add .",
-      'git commit -m "<type>(<scope>): <summary>"',
-      "Types: feat, fix, refactor, docs, style, test, chore. Keep summary under 50 characters."
-    )
-    steps.push("Commit your changes:", commitSubSteps)
-  }
-
-  if (behind > 0) {
-    const pullSubSteps: ActionPlanItem[] = []
-    if (skillExists("resolve-conflicts")) {
-      pullSubSteps.push("/resolve-conflicts — Use if conflicts arise during rebase")
-    }
-    pullSubSteps.push("git pull --rebase --autostash")
-    steps.push("Pull and rebase:", pullSubSteps)
-  }
-
-  const willNeedPush = ahead > 0 || (hasUncommitted && hasRemote)
-  if (willNeedPush) {
-    const policy = getCollaborationModePolicy(collabMode)
-    const isMainBranch = branch === "main" || branch === "master"
-    const mainBlocked =
-      policy.requireFeatureBranch &&
-      isMainBranch &&
-      !allowsDirectMainCollaborationWorkflow(collabMode)
-
-    const pushHeader = mainBlocked
-      ? `Move commits off '${branch}' to a feature branch:`
-      : ahead > 0
-        ? `Push ${ahead} commit(s) to '${upstream}':`
-        : `Push your committed changes to '${upstream}':`
-    const pushSubSteps: ActionPlanItem[] = []
-    if (skillExists("push")) {
-      pushSubSteps.push("/push — Push to remote with collaboration guard")
-    }
-    pushSubSteps.push(...pushSubStepsForPolicy(policy, branch, collabMode))
-    steps.push(pushHeader, pushSubSteps)
+  if (hasUncommitted) steps.push(...buildCommitSteps())
+  if (behind > 0) steps.push(...buildPullSteps())
+  if (ahead > 0 || (hasUncommitted && hasRemote)) {
+    steps.push(...buildPushSteps(branch, upstream, ahead, collabMode))
   }
 
   reason += formatActionPlan(steps)
@@ -379,6 +389,23 @@ interface GitContext {
   pushCooldownMinutes: number
 }
 
+async function resolveEffectiveSettings(
+  input: { _effectiveSettings?: Record<string, unknown>; session_id?: string },
+  cwd: string
+): Promise<{ collaborationMode: CollaborationMode; pushCooldownMinutes: number }> {
+  if (input._effectiveSettings && typeof input._effectiveSettings.collaborationMode === "string") {
+    return input._effectiveSettings as {
+      collaborationMode: CollaborationMode
+      pushCooldownMinutes: number
+    }
+  }
+  const [settings, projectSettings] = await Promise.all([
+    readSwizSettings(),
+    readProjectSettings(cwd),
+  ])
+  return getEffectiveSwizSettings(settings, input.session_id, projectSettings)
+}
+
 async function resolveGitContext(input: {
   cwd?: string
   session_id?: string
@@ -387,17 +414,7 @@ async function resolveGitContext(input: {
   const cwd = input.cwd ?? process.cwd()
   if (!(await isGitRepo(cwd))) return null
 
-  // Prefer dispatcher-provided effective settings; fall back to computing locally.
-  let effective: { collaborationMode: CollaborationMode; pushCooldownMinutes: number }
-  if (input._effectiveSettings && typeof input._effectiveSettings.collaborationMode === "string") {
-    effective = input._effectiveSettings as typeof effective
-  } else {
-    const [settings, projectSettings] = await Promise.all([
-      readSwizSettings(),
-      readProjectSettings(cwd),
-    ])
-    effective = getEffectiveSwizSettings(settings, input.session_id, projectSettings)
-  }
+  const effective = await resolveEffectiveSettings(input, cwd)
 
   const [gitStatus, remoteUrl] = await Promise.all([
     getGitStatusV2(cwd),

@@ -99,6 +99,15 @@ function extractToolResultText(entry: Record<string, unknown>): string {
   return extractTextFromUnknownContent(content)
 }
 
+function parseToolUseBlock(block: unknown): { toolName: string; command: string } | null {
+  const b = block as Record<string, unknown>
+  if (b?.type !== "tool_use") return null
+  return {
+    toolName: String(b.name ?? ""),
+    command: String((b.input as Record<string, unknown>)?.command ?? ""),
+  }
+}
+
 function extractToolUse(
   entry: Record<string, unknown>
 ): { toolName: string; command: string } | null {
@@ -106,12 +115,8 @@ function extractToolUse(
   const content = (entry as { message?: { content?: unknown[] } })?.message?.content
   if (!Array.isArray(content)) return null
   for (const block of content) {
-    const b = block as Record<string, unknown>
-    if (b?.type === "tool_use") {
-      const toolName = String(b.name ?? "")
-      const command = String((b.input as Record<string, unknown>)?.command ?? "")
-      return { toolName, command }
-    }
+    const result = parseToolUseBlock(block)
+    if (result) return result
   }
   return null
 }
@@ -266,28 +271,35 @@ function buildBlockMessage(state: ScanState): string {
   )
 }
 
+function resolveAllowReason(state: ScanState): string | null {
+  if (state.cleared) return "Pre-existing dismissal cleared via evidence"
+  if (!state.dismissalText) return "No pre-existing dismissal detected"
+  if (!state.hasDiagnosticIssues) return "No diagnostic issues in recent output"
+  return null
+}
+
+async function resolveTranscriptContext(
+  raw: Record<string, unknown>,
+  input: ReturnType<typeof toolHookInputSchema.parse>
+): Promise<string[] | null> {
+  const cwd = input.cwd ?? process.cwd()
+  if (!(await isGitRepo(cwd))) return null
+  const toolName = input.tool_name ?? ""
+  if (shouldSkipTool(toolName, input.tool_input ?? {})) return null
+  const lines = await getAllTranscriptLines(raw, input.transcript_path ?? "")
+  return lines.length > 0 ? lines : null
+}
+
 async function main() {
   const raw = await Bun.stdin.json()
   const input = toolHookInputSchema.parse(raw)
 
-  const cwd = input.cwd ?? process.cwd()
-  if (!(await isGitRepo(cwd))) process.exit(0)
+  const lines = await resolveTranscriptContext(raw, input)
+  if (!lines) process.exit(0)
 
-  const toolName = input.tool_name ?? ""
-  if (shouldSkipTool(toolName, input.tool_input ?? {})) process.exit(0)
-
-  const allLines = await getAllTranscriptLines(raw, input.transcript_path ?? "")
-  if (allLines.length === 0) process.exit(0)
-
-  const state = scanTranscript(allLines)
-  if (!state.hasDiagnosticIssues || !state.dismissalText || state.cleared) {
-    const reason = state.cleared
-      ? "Pre-existing dismissal cleared via evidence"
-      : !state.dismissalText
-        ? "No pre-existing dismissal detected"
-        : "No diagnostic issues in recent output"
-    allowPreToolUse(reason)
-  }
+  const state = scanTranscript(lines)
+  const allowReason = resolveAllowReason(state)
+  if (allowReason) allowPreToolUse(allowReason)
 
   denyPreToolUse(buildBlockMessage(state))
 }
