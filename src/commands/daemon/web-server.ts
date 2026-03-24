@@ -71,6 +71,18 @@ export function resolveWebAssetPath(pathname: string): string | null {
   return join(WEB_ROOT, relative)
 }
 
+// ─── Web asset cache ──────────────────────────────────────────────────────
+// Avoids per-request transpile/build when source files haven't changed.
+// Keyed by filePath; invalidated when mtime changes.
+
+interface CachedWebAsset {
+  mtimeMs: number
+  body: string | ArrayBuffer
+  contentType: string
+}
+
+const webAssetCache = new Map<string, CachedWebAsset>()
+
 export async function serveWebAsset(pathname: string): Promise<Response | null> {
   const filePath = resolveWebAssetPath(pathname)
   if (!filePath) {
@@ -80,6 +92,15 @@ export async function serveWebAsset(pathname: string): Promise<Response | null> 
   const file = Bun.file(filePath)
   if (!(await file.exists())) return null
 
+  const stat = await file.stat()
+  const mtimeMs = stat.mtimeMs ?? 0
+  const cached = webAssetCache.get(filePath)
+  if (cached && cached.mtimeMs === mtimeMs) {
+    return new Response(cached.body, {
+      headers: { "cache-control": "no-cache", "content-type": cached.contentType },
+    })
+  }
+
   const extension = extname(filePath)
   if (extension === ".tsx" || extension === ".ts") {
     const source = await file.text()
@@ -87,11 +108,10 @@ export async function serveWebAsset(pathname: string): Promise<Response | null> 
       extension === ".tsx"
         ? WEB_TSX_TRANSPILER.transformSync(source)
         : WEB_TS_TRANSPILER.transformSync(source)
+    const contentType = "text/javascript; charset=utf-8"
+    webAssetCache.set(filePath, { mtimeMs, body: code, contentType })
     return new Response(code, {
-      headers: {
-        "cache-control": "no-cache",
-        "content-type": "text/javascript; charset=utf-8",
-      },
+      headers: { "cache-control": "no-cache", "content-type": contentType },
     })
   }
 
@@ -102,21 +122,18 @@ export async function serveWebAsset(pathname: string): Promise<Response | null> 
     })
     const output = result.outputs[0]
     if (output) {
-      return new Response(output, {
-        headers: {
-          "cache-control": "no-cache",
-          "content-type": "text/css; charset=utf-8",
-        },
+      const contentType = "text/css; charset=utf-8"
+      const body = await output.text()
+      webAssetCache.set(filePath, { mtimeMs, body, contentType })
+      return new Response(body, {
+        headers: { "cache-control": "no-cache", "content-type": contentType },
       })
     }
   }
 
   const contentType = WEB_MIME_TYPES[extname(filePath)] ?? "application/octet-stream"
   return new Response(file, {
-    headers: {
-      "cache-control": "no-cache",
-      "content-type": contentType,
-    },
+    headers: { "cache-control": "no-cache", "content-type": contentType },
   })
 }
 
