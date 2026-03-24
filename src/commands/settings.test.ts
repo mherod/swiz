@@ -146,6 +146,44 @@ describe("swiz settings", () => {
     })
   })
 
+  test("--json outputs valid JSON with all effective settings keys", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "--json"], home)
+    expect(result.exitCode).toBe(0)
+    const parsed = JSON.parse(result.stdout)
+    expect(typeof parsed).toBe("object")
+    expect(parsed).toHaveProperty("autoContinue")
+    expect(parsed).toHaveProperty("prMergeMode")
+    expect(parsed).toHaveProperty("pushGate")
+    expect(parsed).toHaveProperty("sandboxedEdits")
+    expect(parsed).toHaveProperty("speak")
+    expect(parsed).toHaveProperty("gitStatusGate")
+    expect(parsed).toHaveProperty("memoryLineThreshold")
+    expect(parsed).toHaveProperty("source")
+  })
+
+  test("--json enable outputs confirmation with setting key and value", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "enable", "push-gate", "--json"], home)
+    expect(result.exitCode).toBe(0)
+    const parsed = JSON.parse(result.stdout)
+    expect(parsed.action).toBe("enabled")
+    expect(parsed.setting).toBe("pushGate")
+    expect(parsed.value).toBe(true)
+    expect(parsed).toHaveProperty("path")
+  })
+
+  test("--json disable outputs confirmation with setting key and value", async () => {
+    const home = await createTempHome()
+    const result = await runSwiz(["settings", "disable", "push-gate", "--json"], home)
+    expect(result.exitCode).toBe(0)
+    const parsed = JSON.parse(result.stdout)
+    expect(parsed.action).toBe("disabled")
+    expect(parsed.setting).toBe("pushGate")
+    expect(parsed.value).toBe(false)
+    expect(parsed).toHaveProperty("path")
+  })
+
   // ── Boolean toggle persistence: run concurrently ──────────────────────
   test("boolean settings persist correctly via enable/disable", async () => {
     const cases: Array<{
