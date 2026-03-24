@@ -29,27 +29,32 @@ async function findSiblingTest(file: string): Promise<string | undefined> {
   return undefined
 }
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+async function isTestFileStale(testPath: string): Promise<boolean> {
+  try {
+    const testStat = await stat(testPath)
+    return Date.now() - testStat.mtimeMs >= COOLDOWN_MS
+  } catch {
+    return false
+  }
+}
+
+function resolveEditTarget(input: ReturnType<typeof toolHookInputSchema.parse>): string | null {
   const tool = input.tool_name ?? ""
   const file = (input.tool_input?.file_path as string) ?? ""
+  if (!isFileEditTool(tool)) return null
+  if (!SOURCE_EXT_RE.test(file)) return null
+  if (TEST_FILE_RE.test(file)) return null
+  return file
+}
 
-  if (!isFileEditTool(tool)) return
-  if (!SOURCE_EXT_RE.test(file)) return
-  if (TEST_FILE_RE.test(file)) return
+async function main(): Promise<void> {
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+  const file = resolveEditTarget(input)
+  if (!file) return
 
   const foundTest = await findSiblingTest(file)
   if (!foundTest) return
-
-  // Only remind if the test file hasn't been edited in the last 10 minutes
-  try {
-    const testStat = await stat(foundTest)
-    const ageMs = Date.now() - testStat.mtimeMs
-    if (ageMs < COOLDOWN_MS) return
-  } catch {
-    // stat failed (e.g. race condition) — skip reminder
-    return
-  }
+  if (!(await isTestFileStale(foundTest))) return
 
   const message = `Test file exists for this source file: ${foundTest} _ check if it needs updating to reflect your changes.`
   const sessionId = (input.session_id as string) ?? ""

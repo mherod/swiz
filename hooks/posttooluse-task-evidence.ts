@@ -181,43 +181,53 @@ function resolveTaskId(ti: Record<string, unknown>, fields: string[]): string {
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as ExtendedToolInput
+interface ResolvedEvidenceInput {
+  taskPath: string
+  evidence: string
+}
+
+async function resolveEvidenceInput(
+  input: ExtendedToolInput
+): Promise<ResolvedEvidenceInput | null> {
   const sessionId = resolveSafeSessionId(input.session_id)
-  if (!sessionId) return
+  if (!sessionId) return null
 
   const config = await loadConfig()
-
   const toolName = input.tool_name ?? ""
-  const toolSet = new Set(config.toolNames)
-  if (!toolSet.has(toolName)) return
+  if (!new Set(config.toolNames).has(toolName)) return null
 
   const ti = input.tool_input
-  if (!ti) return
+  if (!ti) return null
 
   const taskId = resolveTaskId(ti, config.taskIdFields)
-  if (!taskId) return
+  if (!taskId) return null
 
   const evidence = extractEvidence(ti, config.evidenceKeys)
-  if (!evidence) return
+  if (!evidence) return null
 
   const taskPath = getSessionTaskPath(sessionId, taskId, homedir())
-  if (!taskPath) return
+  if (!taskPath) return null
+
+  return { taskPath, evidence }
+}
+
+async function main(): Promise<void> {
+  const input = (await Bun.stdin.json()) as ExtendedToolInput
+  const resolved = await resolveEvidenceInput(input)
+  if (!resolved) return
 
   try {
-    const raw = await Bun.file(taskPath).text()
+    const raw = await Bun.file(resolved.taskPath).text()
     const task = JSON.parse(raw)
 
-    // Idempotent — skip if evidence is already identical
-    if (task.completionEvidence === evidence) return
+    if (task.completionEvidence === resolved.evidence) return
 
-    const nowIso = new Date().toISOString()
-    task.completionEvidence = evidence
-    task.completionTimestamp = nowIso
+    task.completionEvidence = resolved.evidence
+    task.completionTimestamp = new Date().toISOString()
     if (task.completedAt === undefined || task.completedAt === null) {
       task.completedAt = Date.now()
     }
-    await Bun.write(taskPath, JSON.stringify(task, null, 2))
+    await Bun.write(resolved.taskPath, JSON.stringify(task, null, 2))
   } catch {
     // Task file doesn't exist or is unreadable — skip silently
   }

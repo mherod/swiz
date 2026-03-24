@@ -156,39 +156,53 @@ async function reconcileTasks(
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
-  const input = (await Bun.stdin.json()) as PostToolHookInput
-  if (input.tool_name !== "TaskList") return
+interface ResolvedListSyncInput {
+  sessionId: string
+  tasks: NormalizedTask[]
+  tasksDir: string
+  cwd: string
+}
+
+async function resolveListSyncInput(
+  input: PostToolHookInput
+): Promise<ResolvedListSyncInput | null> {
+  if (input.tool_name !== "TaskList") return null
   const sessionId = resolveSafeSessionId(input.session_id)
-  if (!sessionId) return
-
+  if (!sessionId) return null
   const tasks = parseToolResponse(input.tool_response)
-  if (tasks.length === 0) return
-
-  const home = homedir()
-  const tasksDir = getSessionTasksDir(sessionId, home)
-  if (!tasksDir) return
-
+  if (tasks.length === 0) return null
+  const tasksDir = getSessionTasksDir(sessionId, homedir())
+  if (!tasksDir) return null
   try {
     await mkdir(tasksDir, { recursive: true })
   } catch {
-    return
+    return null
   }
+  return { sessionId, tasks, tasksDir, cwd: input.cwd ?? process.cwd() }
+}
 
-  const { created, updated, skipped } = await reconcileTasks(tasks, home, sessionId)
-
-  if (created === 0 && updated === 0) return
-
+function formatSyncSummary(
+  counts: { created: number; updated: number; skipped: number },
+  total: number
+): string | null {
+  if (counts.created === 0 && counts.updated === 0) return null
   const parts: string[] = []
-  if (created > 0) parts.push(`${created} created`)
-  if (updated > 0) parts.push(`${updated} updated`)
-  if (skipped > 0) parts.push(`${skipped} skipped`)
+  if (counts.created > 0) parts.push(`${counts.created} created`)
+  if (counts.updated > 0) parts.push(`${counts.updated} updated`)
+  if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`)
+  return `TaskList sync: ${parts.join(", ")} (${total} task(s) in response).`
+}
 
-  await emitContext(
-    "PostToolUse",
-    `TaskList sync: ${parts.join(", ")} (${tasks.length} task(s) in response).`,
-    input.cwd
-  )
+async function main(): Promise<void> {
+  const input = (await Bun.stdin.json()) as PostToolHookInput
+  const resolved = await resolveListSyncInput(input)
+  if (!resolved) return
+
+  const counts = await reconcileTasks(resolved.tasks, homedir(), resolved.sessionId)
+  const summary = formatSyncSummary(counts, resolved.tasks.length)
+  if (!summary) return
+
+  await emitContext("PostToolUse", summary, resolved.cwd)
 }
 
 if (import.meta.main) void main()

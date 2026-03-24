@@ -55,30 +55,17 @@ export async function resolveThresholds(
   }
 }
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+function resolveMemoryEditTarget(
+  input: ReturnType<typeof toolHookInputSchema.parse>
+): string | null {
   const tool = input.tool_name ?? ""
   const filePath = (input.tool_input?.file_path as string) ?? ""
+  if (!isFileEditTool(tool)) return null
+  if (!filePath || !isMemoryFile(filePath)) return null
+  return filePath
+}
 
-  if (!isFileEditTool(tool)) return
-  if (!filePath || !isMemoryFile(filePath)) return
-
-  const cwd = input.cwd ?? process.cwd()
-  const { lineThreshold, wordThreshold } = await resolveThresholds(cwd)
-
-  // Read the file content after the edit
-  const file = Bun.file(filePath)
-  if (!(await file.exists())) return
-  const content = await file.text()
-  const { lines, words } = countStats(content)
-
-  const violations = getMemoryThresholdViolations(
-    { lines, words },
-    { lineThreshold, wordThreshold }
-  )
-
-  if (violations.length === 0) return
-
+function buildViolationContext(filePath: string, violations: string[]): string {
   const basename = filePath.split("/").pop() ?? filePath
   const compactAdvice = skillAdvice(
     "compact-memory",
@@ -92,13 +79,32 @@ async function main(): Promise<void> {
     { header: "Compaction checklist:" }
   ).trimEnd()
 
-  const context = [
+  return [
     `${basename} exceeds size thresholds after edit: ${violations.join(", ")}.`,
     compactAdvice,
     compactionChecklist,
   ].join("\n\n")
+}
 
-  await emitContext("PostToolUse", context, cwd)
+async function main(): Promise<void> {
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+  const filePath = resolveMemoryEditTarget(input)
+  if (!filePath) return
+
+  const cwd = input.cwd ?? process.cwd()
+  const { lineThreshold, wordThreshold } = await resolveThresholds(cwd)
+
+  const file = Bun.file(filePath)
+  if (!(await file.exists())) return
+  const { lines, words } = countStats(await file.text())
+
+  const violations = getMemoryThresholdViolations(
+    { lines, words },
+    { lineThreshold, wordThreshold }
+  )
+  if (violations.length === 0) return
+
+  await emitContext("PostToolUse", buildViolationContext(filePath, violations), cwd)
 }
 
 if (import.meta.main) void main()

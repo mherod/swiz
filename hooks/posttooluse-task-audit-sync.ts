@@ -90,27 +90,46 @@ async function handleTaskUpdate(
   await writeAuditEntry(tasksDir, entry)
 }
 
+interface ResolvedTaskInput {
+  tasksDir: string
+  toolName: string
+  subject: string
+  toolInput: Record<string, unknown>
+}
+
+function resolveTaskInput(
+  input: ReturnType<typeof toolHookInputSchema.parse>
+): ResolvedTaskInput | null {
+  const sessionId = resolveSafeSessionId(input.session_id)
+  if (!sessionId) return null
+  const subject = String(input.tool_input?.subject ?? "")
+  if (!subject) return null
+  const tasksDir = getSessionTasksDir(sessionId)
+  if (!tasksDir) return null
+  return {
+    tasksDir,
+    toolName: input.tool_name ?? "",
+    subject,
+    toolInput: (input.tool_input ?? {}) as Record<string, unknown>,
+  }
+}
+
+async function dispatchTaskAudit(resolved: ResolvedTaskInput): Promise<void> {
+  if (resolved.toolName === "TaskCreate") {
+    await handleTaskCreate(resolved.tasksDir, resolved.subject)
+  } else if (resolved.toolName === "TaskUpdate") {
+    const taskId = String(resolved.toolInput.taskId ?? "")
+    if (!taskId) return
+    const newStatus = String(resolved.toolInput.status ?? "")
+    await handleTaskUpdate(resolved.tasksDir, taskId, resolved.subject, newStatus)
+  }
+}
+
 async function main(): Promise<void> {
   const input = toolHookInputSchema.parse(await Bun.stdin.json())
-  const sessionId = resolveSafeSessionId(input.session_id)
-  if (!sessionId) return
-
-  const toolName = input.tool_name ?? ""
-  const subject = String(input.tool_input?.subject ?? "")
-  if (!subject) return
-
-  const tasksDir = getSessionTasksDir(sessionId)
-  if (!tasksDir) return
-
-  if (toolName === "TaskCreate") {
-    await handleTaskCreate(tasksDir, subject)
-  } else if (toolName === "TaskUpdate") {
-    const taskId = String(input.tool_input?.taskId ?? "")
-    if (!taskId) return
-
-    const newStatus = String(input.tool_input?.status ?? "")
-    await handleTaskUpdate(tasksDir, taskId, subject, newStatus)
-  }
+  const resolved = resolveTaskInput(input)
+  if (!resolved) return
+  await dispatchTaskAudit(resolved)
 }
 
 if (import.meta.main) void main()

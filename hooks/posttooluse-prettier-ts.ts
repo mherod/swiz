@@ -23,34 +23,37 @@ async function findPrettier(filePath: string, cwd: string): Promise<string | nul
   return null
 }
 
-async function main() {
-  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
-
+function resolveTsEditTarget(
+  input: ReturnType<typeof fileEditHookInputSchema.parse>
+): string | null {
   const toolName = input.tool_name ?? ""
-  if (!isFileEditTool(toolName)) process.exit(0)
-
+  if (!isFileEditTool(toolName)) return null
   const filePath = input.tool_input?.file_path ?? ""
-  if (!filePath) process.exit(0)
+  if (!filePath || !/\.(ts|tsx)$/.test(filePath)) return null
+  return filePath
+}
 
-  if (!/\.(ts|tsx)$/.test(filePath)) process.exit(0)
-
-  const cwd = input.cwd ?? process.cwd()
-  const prettierBin = await findPrettier(filePath, cwd)
-
-  // No prettier available — exit silently, no stderr noise
-  if (!prettierBin) process.exit(0)
-
+async function runPrettier(prettierBin: string, filePath: string, cwd: string): Promise<void> {
   try {
     const result = await spawnWithTimeout([prettierBin, "--write", filePath], { timeoutMs: 10_000 })
-    if (result.timedOut) {
-      // Prettier hung — skip silently
-    } else if (result.exitCode === 0) {
+    if (!result.timedOut && result.exitCode === 0) {
       await emitContext("PostToolUse", `Prettier formatted: ${filePath}`, cwd)
     }
-    // Non-zero exit: skip silently (config issue, parse error, etc.)
   } catch {
     // Prettier crashed — skip silently
   }
+}
+
+async function main() {
+  const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
+  const filePath = resolveTsEditTarget(input)
+  if (!filePath) process.exit(0)
+
+  const cwd = input.cwd ?? process.cwd()
+  const prettierBin = await findPrettier(filePath, cwd)
+  if (!prettierBin) process.exit(0)
+
+  await runPrettier(prettierBin, filePath, cwd)
 }
 
 if (import.meta.main) main().catch(() => {})

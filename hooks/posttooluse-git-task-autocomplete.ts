@@ -65,26 +65,37 @@ async function buildPushContext(sessionId: string): Promise<string> {
     : `git push succeeded. Use ${taskCreateName} to create an "Open PR for this branch" task, then mark it in_progress and open the pull request before stopping.`
 }
 
-async function main(): Promise<void> {
-  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+function resolveGitOp(
+  input: ReturnType<typeof toolHookInputSchema.parse>
+): { sessionId: string; isCommit: boolean; isPush: boolean } | null {
   const sessionId = resolveSafeSessionId(input.session_id)
-  if (!sessionId) return
-  if (!input.tool_name || !isShellTool(input.tool_name)) return
-
+  if (!sessionId) return null
+  if (!input.tool_name || !isShellTool(input.tool_name)) return null
   const command = stripHeredocs(String(input.tool_input?.command ?? ""))
   const isCommit = GIT_COMMIT_RE.test(command)
   const isPush = GIT_PUSH_RE.test(command)
-  if (!isCommit && !isPush) return
+  if (!isCommit && !isPush) return null
+  return { sessionId, isCommit, isPush }
+}
+
+async function main(): Promise<void> {
+  const input = toolHookInputSchema.parse(await Bun.stdin.json())
+  const op = resolveGitOp(input)
+  if (!op) return
 
   const home = homedir()
-  const tasksDir = getSessionTasksDir(sessionId, home)
+  const tasksDir = getSessionTasksDir(op.sessionId, home)
   if (!tasksDir) return
-  const tasks = await readSessionTasks(sessionId, home)
+  const tasks = await readSessionTasks(op.sessionId, home)
 
-  await completeTasks(tasksDir, tasks, isCommit, isPush)
+  await completeTasks(tasksDir, tasks, op.isCommit, op.isPush)
 
-  if (isPush) {
-    await emitContext("PostToolUse", await buildPushContext(sessionId), input.cwd ?? process.cwd())
+  if (op.isPush) {
+    await emitContext(
+      "PostToolUse",
+      await buildPushContext(op.sessionId),
+      input.cwd ?? process.cwd()
+    )
   }
 }
 
