@@ -1167,6 +1167,44 @@ describe("stop-git-push: positive paths (now merged into stop-git-status)", () =
     expect(reason).toContain("Unpushed commits")
     expect(reason).toContain("1 commit(s)")
   }, 15000)
+
+  test("unpushed commits on main with solo collaborationMode do not suggest a feature branch", async () => {
+    const sourceDir = await createTempDir()
+    await gitExec(["init"], sourceDir)
+    await gitExec(["config", "user.email", "test@test.com"], sourceDir)
+    await gitExec(["config", "user.name", "Test"], sourceDir)
+    await writeFile(join(sourceDir, "init.txt"), "init")
+    await gitExec(["add", "."], sourceDir)
+    await gitExec(["commit", "-m", "initial"], sourceDir)
+
+    const bareDir = await createTempDir()
+    await Bun.spawn(["git", "clone", "--bare", sourceDir, `${bareDir}/repo.git`]).exited
+
+    const cloneDir = await createTempDir()
+    await Bun.spawn(["git", "clone", `${bareDir}/repo.git`, "work"], { cwd: cloneDir }).exited
+    const workDir = join(cloneDir, "work")
+    await gitExec(["config", "user.email", "test@test.com"], workDir)
+    await gitExec(["config", "user.name", "Test"], workDir)
+
+    await writeFile(join(workDir, "new.txt"), "content")
+    await gitExec(["add", "."], workDir)
+    await gitExec(["commit", "-m", "unpushed"], workDir)
+
+    const r = await runHook(HOOK, {
+      cwd: workDir,
+      session_id: `test-solo-main-${Date.now()}`,
+      _effectiveSettings: {
+        collaborationMode: "solo",
+        pushCooldownMinutes: 0,
+      },
+    })
+    expect(r.exitCode).toBe(0)
+    expect(r.json?.decision).toBe("block")
+    const reason = r.json?.reason as string
+    expect(reason).toMatch(/\bgit push origin (main|master)\b/)
+    expect(reason).not.toContain("feature branch")
+    expect(reason).not.toContain("Move commits off")
+  }, 15000)
 })
 
 describe("stop-branch-conflicts: positive paths", () => {

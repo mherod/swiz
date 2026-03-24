@@ -16,7 +16,7 @@ import {
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
   allowPreToolUseWithContext,
-  denyPreToolUse as deny,
+  denyPreToolUse,
   extractToolNamesFromTranscript,
   findLastTaskToolCallIndex,
   findPriorSessionTasks,
@@ -34,7 +34,23 @@ import {
   isWriteTool,
   readSessionTasks,
   resolveSafeSessionId,
+  scheduleAutoSteer,
 } from "./utils/hook-utils.ts"
+
+// ── Auto-steer deny wrapper ────────────────────────────────────────────────
+// When auto-steer is available, schedule the denial reason as a steering
+// message and ALLOW the tool call — the guidance will be typed into the
+// terminal on the next PostToolUse cycle. When unavailable, deny as before.
+let _autoSteerSessionId: string | null = null
+
+async function deny(reason: string): Promise<never> {
+  if (_autoSteerSessionId) {
+    if (await scheduleAutoSteer(_autoSteerSessionId, reason)) {
+      allowPreToolUseWithContext(reason, reason)
+    }
+  }
+  denyPreToolUse(reason)
+}
 
 const STALENESS_THRESHOLD = 20
 const LARGE_CONTENT_LINE_THRESHOLD = 10
@@ -140,7 +156,7 @@ function checkNoTasks(
         "note:completed in prior session",
         { indent: "  " }
       )
-      deny(
+      await deny(
         `STOP. This session has no tasks, but a prior session (${priorSessionId}) had ${priorTasks.length} incomplete task(s):\n` +
           taskLines +
           `\n\n` +
@@ -155,7 +171,7 @@ function checkNoTasks(
       )
     }
 
-    deny(
+    await deny(
       `STOP. ${toolName} is BLOCKED because this session has no incomplete tasks.\n\n` +
         `Required:\n` +
         `  • At least ${MIN_INCOMPLETE_TASKS} incomplete tasks (pending/in_progress)\n` +
@@ -173,10 +189,10 @@ function checkNoTasks(
   }
 }
 
-function checkTaskMinimums(
+async function checkTaskMinimums(
   toolName: string,
   summary: ReturnType<typeof buildIncompleteTaskSummary>
-): void {
+): Promise<void> {
   const { incompleteTasks, pendingTasks, allTasksDone, incompleteTaskList } = summary
   if (allTasksDone) return
   if (incompleteTasks.length >= MIN_INCOMPLETE_TASKS && pendingTasks.length >= MIN_PENDING_TASKS)
@@ -198,7 +214,7 @@ function checkTaskMinimums(
     actions.push(`Use TaskCreate to add ${missingIncomplete} incomplete task(s).`)
   }
 
-  deny(
+  await deny(
     `STOP. ${toolName} is BLOCKED because the required tasks are missing.\n\n` +
       `Current:\n` +
       `  • Incomplete tasks: ${incompleteTasks.length}\n` +
@@ -211,14 +227,14 @@ function checkTaskMinimums(
   )
 }
 
-function checkInProgressCap(
+async function checkInProgressCap(
   toolName: string,
   allTasks: Array<{ id: string; status: string; subject: string }>
-): void {
+): Promise<void> {
   const inProgressTasks = allTasks.filter((t) => t.status === "in_progress")
   if (inProgressTasks.length <= IN_PROGRESS_CAP) return
   const taskList = inProgressTasks.map((t) => `  • #${t.id}: ${t.subject}`).join("\n")
-  deny(
+  await deny(
     `STOP. Too many in-progress tasks (${inProgressTasks.length}/${IN_PROGRESS_CAP} max). ${toolName} is BLOCKED.\n\n` +
       `Currently in progress:\n${taskList}\n\n` +
       `Having more than ${IN_PROGRESS_CAP} simultaneous in_progress tasks weakens focus and planning quality.\n\n` +
@@ -248,7 +264,7 @@ async function checkDirectMergeIntent(
     const settings = await readSwizSettings()
     if (!settings.strictNoDirectMain) return
     const taskList = mergePrTasks.map((t) => `  • #${t.id} (${t.status}): ${t.subject}`).join("\n")
-    deny(
+    await deny(
       `STOP. ${toolName} is BLOCKED because strict-no-direct-main is enabled but the task plan includes "Merge PR" tasks.\n\n` +
         `Conflicting tasks:\n${taskList}\n\n` +
         `When strict-no-direct-main is enabled, all merges must go through the PR review workflow — ` +
@@ -316,7 +332,7 @@ async function checkTaskStaleness(opts: CheckTaskStalenessOpts): Promise<void> {
   const stateStep = projectState
     ? `Check project state (\`swiz state show\`): currently \`${projectState}\`. Run \`swiz state set <state>\` if the work phase has changed.`
     : `Set a project state to reflect the current phase: \`swiz state set <state>\` (\`swiz state list\` for options).`
-  deny(
+  await deny(
     `STOP. Tasks have gone stale. ${callsSinceTask} tool calls since last task update. ` +
       `${toolName} is BLOCKED.\n\n` +
       `We currently have these tasks in progress:\n${taskList}\n\n` +
@@ -421,6 +437,11 @@ async function parseAndGuard(): Promise<ParsedInput | null> {
 
 async function runChecks(parsed: ParsedInput): Promise<void> {
   const { input, toolName, sessionId, transcriptPath, cwd } = parsed
+
+  // Enable auto-steer: if the setting is on, deny() will schedule a
+  // steering message and allow the tool call instead of hard-blocking.
+  _autoSteerSessionId = sessionId
+
   const allTasks = await readSessionTasks(sessionId)
   const activeTasks = allTasks
     .filter((t) => isIncompleteTaskStatus(t.status))
@@ -429,8 +450,8 @@ async function runChecks(parsed: ParsedInput): Promise<void> {
   await checkNoTasks(toolName, cwd, sessionId)(allTasks)
 
   const summary = buildIncompleteTaskSummary(allTasks)
-  checkTaskMinimums(toolName, summary)
-  checkInProgressCap(toolName, allTasks)
+  await checkTaskMinimums(toolName, summary)
+  await checkInProgressCap(toolName, allTasks)
   await checkDirectMergeIntent(toolName, summary.incompleteTasks)
   await checkTaskStaleness({
     toolName,
@@ -454,7 +475,7 @@ async function main() {
 if (import.meta.main) {
   void main().catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err)
-    deny(
+    denyPreToolUse(
       `STOP. ${"\u26a0\ufe0f"} pretooluse-require-tasks encountered an unexpected error and is failing closed.\n\n` +
         `Error: ${message}\n\n` +
         formatActionPlan(

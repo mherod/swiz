@@ -34,6 +34,11 @@ import {
 
 const DEFAULT_PUSH_COOLDOWN_MS = 10 * 60 * 1000 // 10 minutes
 
+/** Solo and auto modes never use the team/relaxed feature-branch + PR workflow on main. */
+function allowsDirectMainCollaborationWorkflow(mode: CollaborationMode): boolean {
+  return mode === "solo" || mode === "auto"
+}
+
 function pushSentinelPath(safeSession: string): string {
   return stopGitPushPromptedFlagPath(safeSession)
 }
@@ -155,10 +160,33 @@ function selectTaskSubject(hasUncommitted: boolean, ahead: number, behind: numbe
   return "Push branch to remote"
 }
 
-function pushSubStepsForPolicy(policy: CollaborationModePolicy, branch: string): ActionPlanItem[] {
+function remotePushSubSteps(
+  policy: CollaborationModePolicy,
+  branch: string,
+  isMainBranch: boolean
+): ActionPlanItem[] {
+  const steps: ActionPlanItem[] = [`git push origin ${branch}`]
+  if (!isMainBranch && policy.requirePullRequest) {
+    steps.push(`Open or update a PR: gh pr create --base main (if no PR exists)`)
+  }
+  if (!isMainBranch && policy.requirePeerReview) {
+    steps.push("Request a peer review before merging")
+  }
+  return steps
+}
+
+function pushSubStepsForPolicy(
+  policy: CollaborationModePolicy,
+  branch: string,
+  collabMode: CollaborationMode
+): ActionPlanItem[] {
   const isMainBranch = branch === "main" || branch === "master"
 
-  // On main/master when direct push is not permitted
+  if (allowsDirectMainCollaborationWorkflow(collabMode)) {
+    return remotePushSubSteps(policy, branch, isMainBranch)
+  }
+
+  // On main/master when direct push is not permitted (team / relaxed-collab)
   if (policy.requireFeatureBranch && isMainBranch) {
     const steps: ActionPlanItem[] = [
       "Direct push to main is not permitted — create a feature branch",
@@ -174,15 +202,7 @@ function pushSubStepsForPolicy(policy: CollaborationModePolicy, branch: string):
     return steps
   }
 
-  // On a feature branch or main without branch restriction
-  const steps: ActionPlanItem[] = [`git push origin ${branch}`]
-  if (!isMainBranch && policy.requirePullRequest) {
-    steps.push(`Open or update a PR: gh pr create --base main (if no PR exists)`)
-  }
-  if (!isMainBranch && policy.requirePeerReview) {
-    steps.push("Request a peer review before merging")
-  }
-  return steps
+  return remotePushSubSteps(policy, branch, isMainBranch)
 }
 
 function buildReason(opts: {
@@ -239,7 +259,10 @@ function buildReason(opts: {
   if (willNeedPush) {
     const policy = getCollaborationModePolicy(collabMode)
     const isMainBranch = branch === "main" || branch === "master"
-    const mainBlocked = policy.requireFeatureBranch && isMainBranch
+    const mainBlocked =
+      policy.requireFeatureBranch &&
+      isMainBranch &&
+      !allowsDirectMainCollaborationWorkflow(collabMode)
 
     const pushHeader = mainBlocked
       ? `Move commits off '${branch}' to a feature branch:`
@@ -250,7 +273,7 @@ function buildReason(opts: {
     if (skillExists("push")) {
       pushSubSteps.push("/push — Push to remote with collaboration guard")
     }
-    pushSubSteps.push(...pushSubStepsForPolicy(policy, branch))
+    pushSubSteps.push(...pushSubStepsForPolicy(policy, branch, collabMode))
     steps.push(pushHeader, pushSubSteps)
   }
 
