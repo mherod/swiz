@@ -31,7 +31,7 @@ import {
   resolveTranscriptText,
   type TranscriptResolution,
 } from "../src/transcript-utils.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 import { getActionableIssues } from "./stop-personal-repo-issues.ts"
 import {
   buildIssueGuidance,
@@ -822,9 +822,7 @@ export async function checkReviewingState(
 
 // ─── Main helpers ────────────────────────────────────────────────────────────
 
-type StopInput = ReturnType<typeof stopHookInputSchema.parse>
-
-function parseStopInput(hookRaw: unknown): { input: StopInput; cwd: string } {
+function parseStopInput(hookRaw: unknown): { input: StopHookInput; cwd: string } {
   const parsedInput = stopHookInputSchema.safeParse(hookRaw)
   if (!parsedInput.success) {
     terminate("block", "Auto-continue received malformed stop-hook input.")
@@ -998,7 +996,7 @@ interface SessionContext {
 }
 
 async function resolveSessionContext(
-  input: StopInput,
+  input: StopHookInput,
   cwd: string,
   ambitionMode: AmbitionMode
 ): Promise<SessionContext> {
@@ -1156,7 +1154,7 @@ async function validateMainInputsAndSettings(
   hookRaw: Record<string, unknown>,
   cwd: string
 ): Promise<{
-  input: StopInput
+  input: StopHookInput
   effective: ReturnType<typeof getEffectiveSwizSettings>
 }> {
   const { input } = parseStopInput(hookRaw)
@@ -1175,7 +1173,7 @@ async function validateMainInputsAndSettings(
 
 async function validatePrerequisitesAndGenerateResponse(
   cwd: string,
-  input: StopInput,
+  input: StopHookInput,
   effective: ReturnType<typeof getEffectiveSwizSettings>,
   projectState: string | null
 ): Promise<{

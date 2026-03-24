@@ -4,8 +4,7 @@
 import { join } from "node:path"
 import { stopHookInputSchema } from "./schemas.ts"
 import { blockStop, spawnWithTimeout } from "./utils/hook-utils.ts"
-
-type PackageManager = "bun" | "pnpm" | "yarn" | "npm"
+import type { PackageManager } from "./utils/package-detection.ts"
 
 const PM_LOCKFILE_MAP: Array<{ pm: PackageManager; files: string[] }> = [
   { pm: "bun", files: ["bun.lockb", "bun.lock"] },
