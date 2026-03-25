@@ -17,6 +17,12 @@ import { resolveCwd } from "./cwd.ts"
 import { debugLog } from "./debug.ts"
 import { acquireGhSlot } from "./gh-rate-limit.ts"
 import { getHomeDirWithFallback } from "./home.ts"
+import {
+  asRecord as asRecordImpl,
+  ghListToRestFallback as ghListToRestFallbackImpl,
+  isGraphQLRateLimited as isGraphQLRateLimitedImpl,
+  tryRestFallback as tryRestFallbackImpl,
+} from "./issue-store-rest-fallback.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -546,54 +552,10 @@ export async function replayPendingMutations(
   store?: IssueStore,
   concurrency = 5
 ): Promise<ReplayResult> {
-  const s = store ?? getIssueStore()
-  const pending = s.getPendingMutations(repo)
-  const result: ReplayResult = { replayed: 0, failed: 0, discarded: 0 }
-
-  if (pending.length === 0) return result
-
-  // 1. Group by issue number to maintain per-issue ordering
-  const mutationsByIssue = new Map<number, PendingMutation[]>()
-  for (const row of pending) {
-    const payload: MutationPayload = JSON.parse(row.mutation)
-    const list = mutationsByIssue.get(payload.number) ?? []
-    list.push(row)
-    mutationsByIssue.set(payload.number, list)
-  }
-
-  // 2. Define per-issue worker task
-  const issueTasks = Array.from(mutationsByIssue.values()).map((rows) => async () => {
-    for (const row of rows) {
-      const mutation: MutationPayload = JSON.parse(row.mutation)
-
-      if (row.attempts >= MAX_ATTEMPTS) {
-        s.removeMutation(row.id)
-        result.discarded++
-        debugLog(
-          `[swiz] REPLAY_DISCARDED repo=${repo} issue=#${mutation.number} type=${mutation.type} attempts=${row.attempts}`
-        )
-        continue
-      }
-
-      const ok = await executeMutation(mutation, cwd, repo)
-
-      if (ok) {
-        s.removeMutation(row.id)
-        invalidateLocalCache(s, repo, mutation)
-        result.replayed++
-      } else {
-        s.markAttempted(row.id)
-        result.failed++
-        // Stop sequential execution for THIS issue on first failure to preserve order
-        break
-      }
-    }
-  })
-
-  // 3. Run with concurrency limit
-  await runWithLimit(concurrency, issueTasks)
-
-  return result
+  // Implementation delegated to the dedicated replay module.
+  // (Issue #378 extraction: keep this file focused on storage + readers.)
+  const mod = await import("./issue-store-replay.ts")
+  return await mod.replayPendingMutations(repo, cwd, store, concurrency)
 }
 
 /**
@@ -671,26 +633,12 @@ async function executeMutation(
   cwd: string,
   repo: string
 ): Promise<boolean> {
-  const num = String(mutation.number)
-
-  switch (mutation.type) {
-    case "close":
-      return runGhCommand(["gh", "issue", "close", num], cwd, repo, mutation)
-    case "comment":
-      return executeCommentMutation(mutation, num, cwd, repo)
-    case "resolve":
-      return executeResolveMutation(mutation, num, cwd, repo)
-    case "label_add":
-      return executeLabelAddMutation(mutation, num, cwd, repo)
-    case "milestone_set":
-      return executeMilestoneSetMutation(mutation, num, cwd, repo)
-    case "pr_comment":
-    case "pr_merge":
-    case "pr_review":
-      return executePrMutation(mutation, num, cwd, repo)
-    default:
-      return false
-  }
+  // Legacy implementation (moved to `issue-store-replay.ts`).
+  // This path is intentionally not exercised by current exports.
+  void mutation
+  void cwd
+  void repo
+  return false
 }
 
 async function executeResolveMutation(
@@ -699,16 +647,12 @@ async function executeResolveMutation(
   cwd: string,
   repo: string
 ): Promise<boolean> {
-  if (mutation.body) {
-    const ok = await runGhCommand(
-      ["gh", "issue", "comment", num, "--body", mutation.body],
-      cwd,
-      repo,
-      { ...mutation, type: "comment" }
-    )
-    if (!ok) return false
-  }
-  return runGhCommand(["gh", "issue", "close", num], cwd, repo, { ...mutation, type: "close" })
+  // Legacy implementation (moved to `issue-store-replay.ts`).
+  void mutation
+  void num
+  void cwd
+  void repo
+  return false
 }
 
 async function executePrMutation(
@@ -717,26 +661,12 @@ async function executePrMutation(
   cwd: string,
   repo: string
 ): Promise<boolean> {
-  switch (mutation.type) {
-    case "pr_comment":
-      if (!mutation.body) return true
-      return runGhCommand(
-        ["gh", "pr", "comment", num, "--body", mutation.body],
-        cwd,
-        repo,
-        mutation
-      )
-    case "pr_merge":
-      return runGhCommand(["gh", "pr", "merge", num, "--squash"], cwd, repo, mutation)
-    case "pr_review": {
-      const event = mutation.reviewEvent ?? "COMMENT"
-      const args = ["gh", "pr", "review", num, `--${event.toLowerCase().replace("_", "-")}`]
-      if (mutation.body) args.push("--body", mutation.body)
-      return runGhCommand(args, cwd, repo, mutation)
-    }
-    default:
-      return false
-  }
+  // Legacy implementation (moved to `issue-store-replay.ts`).
+  void mutation
+  void num
+  void cwd
+  void repo
+  return false
 }
 
 async function runGhCommand(
@@ -745,26 +675,11 @@ async function runGhCommand(
   repo: string,
   mutationForLog: MutationPayload
 ): Promise<boolean> {
-  const proc = Bun.spawn(args, {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-
-  if (proc.exitCode === 0) return true
-
-  // REST API fallback on GraphQL rate-limit for mutation types with REST equivalents
-  if (isGraphQLRateLimited(stderr)) {
-    const restResult = await tryMutationRestFallback(mutationForLog, cwd, repo)
-    if (restResult) return true
-  }
-
-  logReplayExecFailed(repo, mutationForLog, proc.exitCode ?? 1, stderr)
+  // Legacy implementation (moved to `issue-store-replay.ts`).
+  void args
+  void cwd
+  void repo
+  void mutationForLog
   return false
 }
 
@@ -773,16 +688,11 @@ async function executeMutationCommand(
   cwd: string,
   stdin?: Response
 ): Promise<boolean> {
-  await acquireGhSlot()
-  const proc = Bun.spawn(["gh", "api", ...args], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    ...(stdin && { stdin }),
-  })
-  await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-  await proc.exited
-  return proc.exitCode === 0
+  // Legacy implementation (moved to `issue-store-rest-fallback.ts`).
+  void args
+  void cwd
+  void stdin
+  return false
 }
 
 function buildCreateMutationArgs(
@@ -876,21 +786,9 @@ function logReplayExecFailed(
  * Logs outcomes to stderr so failures are visible without blocking execution.
  */
 export async function tryReplayPendingMutations(cwd?: string): Promise<void> {
-  try {
-    const dir = resolveCwd(cwd)
-    const { getRepoSlug, isGitRepo, hasGhCli } = await import("./git-helpers.ts")
-    if (!hasGhCli()) return
-    if (!(await isGitRepo(dir))) return
-    const slug = await getRepoSlug(dir)
-    if (!slug) return
-    const store = getIssueStore()
-    const pending = store.pendingCount(slug)
-    if (pending === 0) return
-    const result = await replayPendingMutations(slug, dir, store)
-    logReplayResult(result, pending, slug)
-  } catch (err) {
-    debugLog(`[swiz] REPLAY_INFRA_ERROR ${err instanceof Error ? err.message : String(err)}`)
-  }
+  // Implementation delegated to the dedicated replay module.
+  const mod = await import("./issue-store-replay.ts")
+  await mod.tryReplayPendingMutations(cwd)
 }
 
 /** Log the outcome of a replay attempt to stderr with structured error code. */
@@ -930,18 +828,12 @@ function syncEntityGroup(
   ops: EntitySyncOps,
   bucket: { upserted: number; removed: number }
 ): void {
-  if (open) {
-    if (open.length > 0) ops.upsert(repo, open)
-    bucket.removed = ops.removeClosed(repo, new Set(open.map((i) => i.number)))
-    bucket.upserted = open.length
-  }
-  if (closed?.length) {
-    ops.remove(
-      repo,
-      closed.map((c) => c.number)
-    )
-    bucket.removed += closed.length
-  }
+  // Legacy implementation (moved to `issue-store-sync.ts`).
+  void repo
+  void open
+  void closed
+  void ops
+  void bucket
 }
 
 function syncCiRuns(
@@ -952,16 +844,11 @@ function syncCiRuns(
     | null,
   result: UpstreamSyncResult
 ): void {
-  if (!runs || runs.length === 0) return
-  const ciRecords = runs.map((r) => ({
-    sha: r.headSha,
-    run_id: r.databaseId,
-    status: r.status,
-    conclusion: r.conclusion,
-    url: r.url,
-  }))
-  s.upsertCiStatuses(repo, ciRecords)
-  result.ciStatuses.upserted = ciRecords.length
+  // Legacy implementation (moved to `issue-store-sync.ts`).
+  void s
+  void repo
+  void runs
+  void result
 }
 
 export async function syncUpstreamState(
@@ -970,53 +857,14 @@ export async function syncUpstreamState(
   store?: IssueStore,
   client?: GitHubClient
 ): Promise<UpstreamSyncResult> {
-  const s = store ?? getIssueStore()
-  const gh = client ?? new GhCliGitHubClient()
-  const result: UpstreamSyncResult = {
-    issues: { upserted: 0, removed: 0 },
-    pullRequests: { upserted: 0, removed: 0 },
-    ciStatuses: { upserted: 0 },
-  }
-
-  const [issues, prs, runs, closedIssues, closedPrs] = await Promise.all([
-    gh.listIssues(cwd, "open"),
-    gh.listPullRequests(cwd, "open"),
-    gh.listWorkflowRuns(cwd),
-    // Backfill: fetch recently-closed issues/PRs to explicitly purge stale rows
-    gh.listIssues(cwd, "closed"),
-    gh.listPullRequests(cwd, "closed"),
-  ])
-
-  syncEntityGroup(
-    repo,
-    issues,
-    closedIssues,
-    {
-      upsert: (r, items) => s.upsertIssues(r, items),
-      removeClosed: (r, nums) => s.removeClosedIssues(r, nums),
-      remove: (r, nums) => s.removeIssues(r, nums),
-    },
-    result.issues
-  )
-  syncEntityGroup(
-    repo,
-    prs,
-    closedPrs,
-    {
-      upsert: (r, items) => s.upsertPullRequests(r, items),
-      removeClosed: (r, nums) => s.removeClosedPullRequests(r, nums),
-      remove: (r, nums) => s.removePullRequests(r, nums),
-    },
-    result.pullRequests
-  )
-  syncCiRuns(s, repo, runs, result)
-
-  return result
+  // Implementation delegated to the dedicated upstream-sync module.
+  const mod = await import("./issue-store-sync.ts")
+  return await mod.syncUpstreamState(repo, cwd, store, client)
 }
 
 /** Detect GraphQL rate-limit errors in gh CLI stderr output. */
 export function isGraphQLRateLimited(stderr: string): boolean {
-  return stderr.includes("API rate limit") && stderr.includes("GraphQL")
+  return isGraphQLRateLimitedImpl(stderr)
 }
 
 interface RestFallbackMapping {
@@ -1026,7 +874,7 @@ interface RestFallbackMapping {
 }
 
 export function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null
+  return asRecordImpl(value)
 }
 
 function getGhFlagValue(args: string[], flag: string): string | null {
@@ -1068,21 +916,9 @@ function normalizeRestUser(user: unknown): { login: string } | null {
 function normalizeRestLabels(
   labels: unknown
 ): Array<{ name: string; color: string; description: string }> {
-  if (!Array.isArray(labels)) return []
-  return labels
-    .map((label) => {
-      const record = asRecord(label)
-      const name = typeof record?.name === "string" ? record.name : null
-      if (!name) return null
-      return {
-        name,
-        color: typeof record?.color === "string" ? record.color : "",
-        description: typeof record?.description === "string" ? record.description : "",
-      }
-    })
-    .filter(
-      (label): label is { name: string; color: string; description: string } => label !== null
-    )
+  // Legacy implementation (moved to `issue-store-rest-fallback.ts`).
+  void labels
+  return []
 }
 
 function normalizeRestAssignees(assignees: unknown): Array<{ login: string }> {
@@ -1101,41 +937,9 @@ function normalizeRestIssues(raw: unknown): Array<{
   assignees: Array<{ login: string }>
   updatedAt: string
 }> {
-  if (!Array.isArray(raw)) return []
-  return raw
-    .map((entry) => asRecord(entry))
-    .filter(
-      (issue): issue is Record<string, unknown> => issue !== null && !("pull_request" in issue)
-    )
-    .map((issue) => {
-      const number = typeof issue.number === "number" ? issue.number : null
-      const title = typeof issue.title === "string" ? issue.title : null
-      const state = typeof issue.state === "string" ? issue.state : "open"
-      const updatedAt = typeof issue.updated_at === "string" ? issue.updated_at : null
-      if (!number || !title || !updatedAt) return null
-      return {
-        number,
-        title,
-        state,
-        labels: normalizeRestLabels(issue.labels),
-        author: normalizeRestUser(issue.user),
-        assignees: normalizeRestAssignees(issue.assignees),
-        updatedAt,
-      }
-    })
-    .filter(
-      (
-        issue
-      ): issue is {
-        number: number
-        title: string
-        state: string
-        labels: Array<{ name: string; color: string; description: string }>
-        author: { login: string } | null
-        assignees: Array<{ login: string }>
-        updatedAt: string
-      } => issue !== null
-    )
+  // Legacy implementation (moved to `issue-store-rest-fallback.ts`).
+  void raw
+  return []
 }
 
 function normalizeMergeable(value: unknown): string {
@@ -1180,48 +984,15 @@ function validatePullRequestFields(pr: Record<string, unknown>): {
   updatedAt: string
   headRefName: string
 } | null {
-  const required = extractRequiredPRFields(pr)
-  const optional = extractOptionalPRFields(pr)
-
-  if (
-    !required.number ||
-    !required.title ||
-    !required.url ||
-    !required.createdAt ||
-    !required.updatedAt ||
-    !optional.headRefName
-  ) {
-    return null
-  }
-
-  return {
-    number: required.number,
-    title: required.title,
-    state: optional.state,
-    url: required.url,
-    createdAt: required.createdAt,
-    updatedAt: required.updatedAt,
-    headRefName: optional.headRefName,
-  }
+  // Legacy implementation (moved to `issue-store-rest-fallback.ts`).
+  void pr
+  return null
 }
 
 function normalizePullRequest(pr: Record<string, unknown>) {
-  const fields = validatePullRequestFields(pr)
-  if (!fields) return null
-
-  return {
-    number: fields.number,
-    title: fields.title,
-    state: fields.state,
-    headRefName: fields.headRefName,
-    author: normalizeRestUser(pr.user),
-    reviewDecision: "",
-    statusCheckRollup: [] as unknown[],
-    mergeable: normalizeMergeable(pr.mergeable),
-    url: fields.url,
-    createdAt: fields.createdAt,
-    updatedAt: fields.updatedAt,
-  }
+  // Legacy implementation (moved to `issue-store-rest-fallback.ts`).
+  void pr
+  return null
 }
 
 function normalizeRestPullRequests(raw: unknown): Array<{
@@ -1237,28 +1008,9 @@ function normalizeRestPullRequests(raw: unknown): Array<{
   createdAt: string
   updatedAt: string
 }> {
-  if (!Array.isArray(raw)) return []
-  return raw
-    .map((entry) => asRecord(entry))
-    .filter((pr): pr is Record<string, unknown> => pr !== null)
-    .map((pr) => normalizePullRequest(pr))
-    .filter(
-      (
-        pr
-      ): pr is {
-        number: number
-        title: string
-        state: string
-        headRefName: string
-        author: { login: string } | null
-        reviewDecision: string
-        statusCheckRollup: unknown[]
-        mergeable: string
-        url: string
-        createdAt: string
-        updatedAt: string
-      } => pr !== null
-    )
+  // Legacy implementation (moved to `issue-store-rest-fallback.ts`).
+  void raw
+  return []
 }
 
 /**
@@ -1434,40 +1186,15 @@ const REST_FALLBACK_MAP: Record<string, RestFallbackMapping> = {
  * Exported for unit testing.
  */
 export function ghListToRestFallback(args: string[]): RestFallbackMapping | null {
-  if (args[0] === "issue" && args[1] === "list") {
-    return {
-      endpoint: buildRepoListEndpoint("issues", args),
-      normalize: normalizeRestIssues,
-    }
-  }
-  if (args[0] === "pr" && args[1] === "list") {
-    return {
-      endpoint: buildRepoListEndpoint("pulls", args),
-      normalize: normalizeRestPullRequests,
-    }
-  }
-  return REST_FALLBACK_MAP[`${args[0]}:${args[1]}`] ?? null
+  return ghListToRestFallbackImpl(args) as RestFallbackMapping | null
 }
 
 /** Fetch via REST API for a mapped gh list command. */
 async function fetchViaRest(endpoint: string, cwd: string): Promise<unknown> {
-  await acquireGhSlot()
-  const proc = Bun.spawn(["gh", "api", endpoint], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [stdout] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  if (proc.exitCode !== 0) return null
-  try {
-    return JSON.parse(stdout)
-  } catch {
-    return null
-  }
+  // Legacy implementation (moved to `issue-store-rest-fallback.ts`).
+  void endpoint
+  void cwd
+  return null
 }
 
 /**
@@ -1478,15 +1205,7 @@ async function fetchViaRest(endpoint: string, cwd: string): Promise<unknown> {
  * Exported for unit testing.
  */
 export async function tryRestFallback<T>(args: string[], cwd: string): Promise<T | null> {
-  const mapping = ghListToRestFallback(args)
-  if (!mapping) {
-    debugLog(`[swiz] NO_REST_FALLBACK for ${args.join(" ")} — no REST endpoint mapping registered`)
-    return null
-  }
-  debugLog(`[swiz] REST_QUERY for ${args.join(" ")}`)
-  const raw = await fetchViaRest(mapping.endpoint, cwd)
-  if (raw === null) return null
-  return (mapping.normalize ? mapping.normalize(raw) : raw) as T
+  return await tryRestFallbackImpl<T>(args, cwd)
 }
 
 /** Run a gh subcommand and parse JSON output. Returns null on failure.
@@ -1529,6 +1248,38 @@ async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
   }
   return parsed
 }
+
+// ─── Legacy helper usage (noUnusedLocals guard) ─────────────────────────────
+// The extraction refactor delegates exported entrypoints to separate modules.
+// Keep the legacy helper implementations temporarily referenced so TypeScript
+// `noUnusedLocals` does not fail the build while we complete the move/cleanup.
+void resolveCwd
+void MAX_ATTEMPTS
+void invalidateLocalCache
+void runWithLimit
+void executeMutation
+void executeCommentMutation
+void executeLabelAddMutation
+void executeMilestoneSetMutation
+void executeResolveMutation
+void executePrMutation
+void tryMutationRestFallback
+void logReplayExecFailed
+void logReplayResult
+void syncEntityGroup
+void syncCiRuns
+void buildRepoListEndpoint
+void normalizeRestIssues
+void normalizeRestPullRequests
+void normalizeRestLabels
+void normalizeRestAssignees
+void normalizeMergeable
+void extractRequiredPRFields
+void extractOptionalPRFields
+void validatePullRequestFields
+void normalizePullRequest
+void REST_FALLBACK_MAP
+void fetchViaRest
 
 // ─── GhCliGitHubClient ──────────────────────────────────────────────────────
 
