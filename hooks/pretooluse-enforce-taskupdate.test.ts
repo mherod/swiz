@@ -79,6 +79,58 @@ describe("pretooluse-enforce-taskupdate", () => {
     expect(result.reason ?? "").not.toContain("Tip:")
   })
 
+  test("omits list/get tip when transcript shows swiz tasks create", async () => {
+    const tmp = await createTempDir()
+    const tPath = await writeTranscript(tmp, [
+      assistantJsonl([
+        {
+          type: "tool_use",
+          name: "Bash",
+          input: {
+            command: 'swiz tasks create "Do work" "details here"',
+          },
+        },
+      ]),
+    ])
+    const result = await runHook("swiz tasks list", { transcript_path: tPath })
+    expect(result.decision).toBe("allow")
+    expect(result.reason ?? "").not.toContain("Tip:")
+  })
+
+  test("omits complete tip when transcript shows swiz tasks start", async () => {
+    const tmp = await createTempDir()
+    const tPath = await writeTranscript(tmp, [
+      assistantJsonl([
+        {
+          type: "tool_use",
+          name: "Bash",
+          input: { command: "swiz tasks start 3" },
+        },
+      ]),
+    ])
+    const result = await runHook("swiz tasks complete 3 --evidence note:done", {
+      transcript_path: tPath,
+    })
+    expect(result.decision).toBe("allow")
+    expect(result.reason ?? "").not.toContain("Tip:")
+  })
+
+  test("omits list tip when transcript shows swiz tasks add", async () => {
+    const tmp = await createTempDir()
+    const tPath = await writeTranscript(tmp, [
+      assistantJsonl([
+        {
+          type: "tool_use",
+          name: "Bash",
+          input: { command: "swiz tasks add 'New item'" },
+        },
+      ]),
+    ])
+    const result = await runHook("swiz tasks get 1", { transcript_path: tPath })
+    expect(result.decision).toBe("allow")
+    expect(result.reason ?? "").not.toContain("Tip:")
+  })
+
   test("warns on `swiz tasks get`", async () => {
     const result = await runHook("swiz tasks get 1")
     expect(result.decision).toBe("allow")

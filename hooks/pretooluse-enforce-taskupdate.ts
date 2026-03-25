@@ -45,7 +45,7 @@ function buildSwizTasksRules(): SwizTasksRule[] {
     {
       match: (c) => /swiz\s+tasks\s+complete(?:\s|$)/.test(c),
       severity: "warn",
-      skipTipIf: (ctx) => ctx.hasSwizCompleteWithEvidence,
+      skipTipIf: (ctx) => ctx.hasSwizCompleteWithEvidence || ctx.usedSwizTasksAddCreateStart,
       message:
         "Tip: `swiz tasks complete` is the correct command for task completion with evidence.\n\n" +
         "Ensure you include structured evidence:\n" +
@@ -56,7 +56,7 @@ function buildSwizTasksRules(): SwizTasksRule[] {
     {
       match: (c) => /swiz\s+tasks\s+(?:list|get)(?:\s|$)/.test(c),
       severity: "warn",
-      skipTipIf: (ctx) => ctx.usedNativeTaskListOrGet,
+      skipTipIf: (ctx) => ctx.usedNativeTaskListOrGet || ctx.usedSwizTasksAddCreateStart,
       message:
         "Tip: Use the TaskList or TaskGet tool instead of `swiz tasks list/get`.\n\n" +
         "In Claude Code, prefer native task tools for better integration:\n" +

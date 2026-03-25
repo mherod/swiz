@@ -180,6 +180,8 @@ export interface SessionTaskTipContext {
   hasSwizCompleteWithEvidence: boolean
   /** Assistant already used TaskList or TaskGet in this session. */
   usedNativeTaskListOrGet: boolean
+  /** Prior Bash ran `swiz tasks` add/create/start (lifecycle engagement via CLI). */
+  usedSwizTasksAddCreateStart: boolean
 }
 
 const NATIVE_TASK_QUERY_TOOLS = new Set(["TaskList", "TaskGet"])
@@ -191,6 +193,15 @@ function isSwizCompleteWithEvidenceCommand(normalizedCommand: string): boolean {
   )
 }
 
+function isSwizTasksAddCreateOrStartCommand(normalizedCommand: string): boolean {
+  return /swiz\s+tasks\s+(?:add|create|start)(?:\s|$)/.test(normalizedCommand)
+}
+
+function mergeShellCommandIntoSessionTaskTip(norm: string, acc: SessionTaskTipContext): void {
+  if (isSwizCompleteWithEvidenceCommand(norm)) acc.hasSwizCompleteWithEvidence = true
+  if (isSwizTasksAddCreateOrStartCommand(norm)) acc.usedSwizTasksAddCreateStart = true
+}
+
 function mergeToolBlockIntoSessionTaskTip(
   block: Record<string, unknown>,
   acc: SessionTaskTipContext
@@ -200,14 +211,14 @@ function mergeToolBlockIntoSessionTaskTip(
   if (!isShellTool(name)) return
   const raw = String((block.input as Record<string, unknown>)?.command ?? "")
   if (!raw) return
-  if (isSwizCompleteWithEvidenceCommand(normalizeCommand(raw)))
-    acc.hasSwizCompleteWithEvidence = true
+  mergeShellCommandIntoSessionTaskTip(normalizeCommand(raw), acc)
 }
 
 function foldBlocksToSessionTaskTip(blocks: Array<Record<string, unknown>>): SessionTaskTipContext {
   const acc: SessionTaskTipContext = {
     hasSwizCompleteWithEvidence: false,
     usedNativeTaskListOrGet: false,
+    usedSwizTasksAddCreateStart: false,
   }
   for (const block of blocks) mergeToolBlockIntoSessionTaskTip(block, acc)
   return acc
@@ -223,6 +234,7 @@ export async function sessionTaskToolPatterns(
   const empty: SessionTaskTipContext = {
     hasSwizCompleteWithEvidence: false,
     usedNativeTaskListOrGet: false,
+    usedSwizTasksAddCreateStart: false,
   }
   if (!transcriptPath) return empty
   const lines = await readSessionLines(transcriptPath)
