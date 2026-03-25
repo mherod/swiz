@@ -263,7 +263,7 @@ function printBooleanSettings(rows: BoolSettingRow[], effective: EffectiveSwizSe
   }
 }
 
-/** Excluded from auto-generated boolean rows — printed with custom formatting. */
+/** Excluded from auto-generated boolean rows — these have custom scope labels or positioning. */
 const SPECIAL_BOOL_KEYS = new Set(["autoContinue", "strictNoDirectMain", "trunkMode"])
 
 /** Derive global boolean display rows from SETTINGS_REGISTRY. */
