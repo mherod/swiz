@@ -36,7 +36,7 @@ async function main(): Promise<void> {
     blockStop(
       `Stopping on branch '${branch}' — trunk mode requires the default branch ('${defaultBranch}') before the session ends.\n\n` +
         `Switch back: \`git checkout ${defaultBranch}\`\n\n` +
-        `Do not open a pull request for trunk-mode work; integrate on '${defaultBranch}' or disable trunk mode in \`.swiz/config.json\` if you need feature branches.`
+        `Do not open a pull request for trunk-mode work; integrate on '${defaultBranch}'.`
     )
   }
 

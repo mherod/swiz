@@ -52,7 +52,7 @@ function denyPrCreateWhenTrunk(command: string, defaultBranch: string): void {
   if (!GH_PR_CREATE_RE.test(command)) return
   denyPreToolUse(
     `Trunk mode is enabled — opening a new pull request is not allowed.\n\n` +
-      `Push directly to the default branch (\`${defaultBranch}\`). Disable trunk mode in \`.swiz/config.json\` if you need PRs.`
+      `Push directly to the default branch (\`${defaultBranch}\`).`
   )
 }
 
@@ -82,7 +82,7 @@ async function denyPrCheckoutWhenTrunk(
 
   denyPreToolUse(
     `Trunk mode is enabled for this project — checking out a pull request branch is not allowed.\n\n` +
-      `Work on the default branch (\`${defaultBranch}\`) only. Disable trunk mode in \`.swiz/config.json\` if you need feature branches or PR checkouts.`
+      `Work on the default branch (\`${defaultBranch}\`) only.`
   )
 }
 
@@ -92,7 +92,7 @@ function denyNonDefaultNewBranches(command: string, defaultBranch: string): void
     denyPreToolUse(
       `Trunk mode is enabled — creating a new branch other than the default branch (\`${defaultBranch}\`) is not allowed.\n\n` +
         `Attempted new branch: \`${name}\`\n\n` +
-        `Stay on \`${defaultBranch}\` or disable trunk mode in \`.swiz/config.json\`.`
+        `Stay on \`${defaultBranch}\`.`
     )
   }
 }
@@ -103,7 +103,7 @@ function denyNonDefaultPlainCheckouts(command: string, defaultBranch: string): v
     denyPreToolUse(
       `Trunk mode is enabled — switching to a branch other than the default (\`${defaultBranch}\`) is not allowed.\n\n` +
         `Attempted ref: \`${target}\`\n\n` +
-        `Use \`git checkout ${defaultBranch}\` (or equivalent) or disable trunk mode in \`.swiz/config.json\`.`
+        `Use \`git checkout ${defaultBranch}\` (or equivalent).`
     )
   }
 }
