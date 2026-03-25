@@ -64,6 +64,10 @@ async function resolveScripts(cwd: string): Promise<{
 
 async function main(): Promise<void> {
   const input = stopHookInputSchema.parse(await Bun.stdin.json())
+  const settings = (input as Record<string, unknown>)._effectiveSettings as
+    | Record<string, unknown>
+    | undefined
+  if (!settings?.qualityChecksGate) return
   const cwd = input.cwd ?? process.cwd()
   const resolved = await resolveScripts(cwd)
   if (!resolved) return

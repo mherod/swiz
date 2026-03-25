@@ -41,17 +41,14 @@ function parseWorkerOutput(
   try {
     return { parsed: JSON.parse(trimmed) as Record<string, unknown>, status: "ok" }
   } catch {
-    // Try to extract last JSON object from polluted stdout
-    const lastBrace = trimmed.lastIndexOf("{")
-    if (lastBrace > 0) {
+    // Stdout may contain non-JSON lines before or after the hook's JSON object.
+    // Scan lines in reverse order so the last JSON-looking line wins.
+    for (const line of trimmed.split("\n").reverse()) {
+      const l = line.trim()
+      if (!l.startsWith("{")) continue
       try {
-        return {
-          parsed: JSON.parse(trimmed.slice(lastBrace)) as Record<string, unknown>,
-          status: "ok",
-        }
-      } catch {
-        return { parsed: null, status: "invalid-json" }
-      }
+        return { parsed: JSON.parse(l) as Record<string, unknown>, status: "ok" }
+      } catch {}
     }
     return { parsed: null, status: "invalid-json" }
   }

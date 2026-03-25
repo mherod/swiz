@@ -103,6 +103,18 @@ describe("classifyHookOutput", () => {
       expect(result.parsed).toEqual({ ok: true })
     })
 
+    it("extracts JSON when non-JSON text follows (JSON-first stdout pollution)", () => {
+      // Regression: lastBrace > 0 check failed when JSON appeared at position 0
+      // (e.g. auth library writing "Loaded cached credentials." after the hook JSON)
+      const result = classifyHookOutput({
+        timedOut: false,
+        trimmed: '{"decision":"block","reason":"test"}\nLoaded cached credentials.',
+        exitCode: 0,
+      })
+      expect(result.status).toBe<HookStatus>("ok")
+      expect(result.parsed).toEqual({ decision: "block", reason: "test" })
+    })
+
     it("returns invalid-json when no valid JSON exists anywhere", () => {
       const result = classifyHookOutput({
         timedOut: false,

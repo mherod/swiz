@@ -170,15 +170,15 @@ export function classifyHookOutput({
   try {
     return { parsed: JSON.parse(trimmed) as Record<string, unknown>, status: "ok" }
   } catch {
-    // Stdout may contain non-JSON prefix text before the actual JSON object.
-    // Attempt to extract the last JSON object from the output.
-    const lastBrace = trimmed.lastIndexOf("{")
-    if (lastBrace > 0) {
+    // Stdout may contain non-JSON lines before or after the hook's JSON object.
+    // Scan lines in reverse order so the last JSON-looking line wins.
+    for (const line of trimmed.split("\n").reverse()) {
+      const l = line.trim()
+      if (!l.startsWith("{")) continue
       try {
-        const candidate = trimmed.slice(lastBrace)
-        return { parsed: JSON.parse(candidate) as Record<string, unknown>, status: "ok" }
+        return { parsed: JSON.parse(l) as Record<string, unknown>, status: "ok" }
       } catch {
-        // Fall through to invalid-json
+        // Fall through to next line
       }
     }
     return { parsed: null, status: "invalid-json" }

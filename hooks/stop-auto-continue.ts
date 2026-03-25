@@ -785,6 +785,10 @@ export async function checkReviewingState(
 function parseStopInput(hookRaw: unknown): { input: StopHookInput; cwd: string } {
   const parsedInput = stopHookInputSchema.safeParse(hookRaw)
   if (!parsedInput.success) {
+    console.error(
+      "[stop-auto-continue] stopHookInputSchema parse failed:",
+      JSON.stringify(parsedInput.error.issues)
+    )
     terminate("block", "Auto-continue received malformed stop-hook input.")
   }
   const input = parsedInput.data
@@ -874,6 +878,11 @@ async function generateAiResponse(opts: GenerateAiResponseOpts): Promise<AgentRe
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)
     console.error(`[stop-auto-continue] AI generation failed: ${errMsg}`)
+    if (errMsg.includes("Requested entity was not found")) {
+      console.error(
+        "[stop-auto-continue] Hint: check GEMINI_MODEL env var, API key project, and GEMINI_API_VERSION"
+      )
+    }
     // Allow stop gracefully — other stop hooks (memory reminder, etc.) handle fallback suggestions.
     terminate("skip", "AI_BACKEND_FAILED", `AI generation failed: ${errMsg}`)
   }
