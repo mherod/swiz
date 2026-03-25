@@ -12,7 +12,7 @@ interface RunResult {
 const { create: createTempDir } = useTempDir("swiz-plugins-")
 
 async function runCli(args: string[], homeDir: string): Promise<RunResult> {
-  const proc = Bun.spawn(["bun", "run", "index.ts", ...args], {
+  const proc = Bun.spawn([process.execPath, "run", "index.ts", ...args], {
     cwd: process.cwd(),
     stdout: "pipe",
     stderr: "pipe",
