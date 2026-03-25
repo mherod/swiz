@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { mkdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "../../hooks/utils/test-utils.ts"
@@ -35,13 +35,9 @@ async function writeInstalledPlugins(homeDir: string, payload: unknown): Promise
 }
 
 describe("swiz plugins", () => {
-  afterEach(() => {
-    delete process.env.SWIZ_CLAUDE_HOME
-  })
-
   test("list --json returns installed plugins", async () => {
     const home = await createTempDir()
-    process.env.SWIZ_CLAUDE_HOME = home
+    const pluginsDir = join(home, ".claude", "plugins")
     await writeInstalledPlugins(home, {
       version: 1,
       plugins: {
@@ -53,7 +49,7 @@ describe("swiz plugins", () => {
     })
 
     const captured = captureConsoleLog()
-    await pluginsCommand.run(["list", "--json"])
+    await pluginsCommand.run(["list", "--json", "--plugins-dir", pluginsDir])
     captured.restore()
 
     const payload = JSON.parse(captured.messages.join("\n")) as Array<{ key: string }>
@@ -62,7 +58,7 @@ describe("swiz plugins", () => {
 
   test("info errors on ambiguous plugin name", async () => {
     const home = await createTempDir()
-    process.env.SWIZ_CLAUDE_HOME = home
+    const pluginsDir = join(home, ".claude", "plugins")
     await writeInstalledPlugins(home, {
       version: 1,
       plugins: {
@@ -71,12 +67,14 @@ describe("swiz plugins", () => {
       },
     })
 
-    await expect(pluginsCommand.run(["info", "alpha"])).rejects.toThrow("ambiguous")
+    await expect(
+      pluginsCommand.run(["info", "alpha", "--plugins-dir", pluginsDir])
+    ).rejects.toThrow("ambiguous")
   })
 
   test("uninstall removes install directory and registry entry", async () => {
     const home = await createTempDir()
-    process.env.SWIZ_CLAUDE_HOME = home
+    const pluginsDir = join(home, ".claude", "plugins")
     const installPath = join(home, ".claude/plugins/cache/alpha")
     await mkdir(installPath, { recursive: true })
     await Bun.write(join(installPath, "file.txt"), "x")
@@ -89,7 +87,12 @@ describe("swiz plugins", () => {
     })
 
     const captured = captureConsoleLog()
-    await pluginsCommand.run(["uninstall", "alpha@claude-plugins-official"])
+    await pluginsCommand.run([
+      "uninstall",
+      "alpha@claude-plugins-official",
+      "--plugins-dir",
+      pluginsDir,
+    ])
     captured.restore()
     expect(captured.messages.join("\n")).toContain("Uninstalled Claude plugin")
 

@@ -32,18 +32,17 @@ function splitPluginKey(key: string): { name: string; marketplace: string | null
   return { name: key.slice(0, idx), marketplace: key.slice(idx + 1) }
 }
 
-function pluginDir(): string {
-  const override = process.env.SWIZ_CLAUDE_HOME
-  if (override && override.length > 0) return join(override, ".claude", "plugins")
+function pluginDir(pluginsDirOverride?: string): string {
+  if (pluginsDirOverride) return pluginsDirOverride
   return join(getHomeDirWithFallback(""), ".claude", "plugins")
 }
 
-function installedPluginsPath(): string {
-  return join(pluginDir(), "installed_plugins.json")
+function installedPluginsPath(pluginsDirOverride?: string): string {
+  return join(pluginDir(pluginsDirOverride), "installed_plugins.json")
 }
 
-async function readInstalledPlugins(): Promise<InstalledPlugins> {
-  const path = installedPluginsPath()
+async function readInstalledPlugins(pluginsDirOverride?: string): Promise<InstalledPlugins> {
+  const path = installedPluginsPath(pluginsDirOverride)
   const file = Bun.file(path)
   if (!(await file.exists())) {
     throw new Error(`Claude plugin registry not found: ${path}`)
@@ -108,17 +107,20 @@ async function removeInstallDirectories(entries: InstalledPluginEntry[]): Promis
   }
 }
 
-async function writeInstalledPlugins(installed: InstalledPlugins): Promise<void> {
-  const path = installedPluginsPath()
+async function writeInstalledPlugins(
+  installed: InstalledPlugins,
+  pluginsDirOverride?: string
+): Promise<void> {
+  const path = installedPluginsPath(pluginsDirOverride)
   const file = Bun.file(path)
   const previous = await file.text()
   await Bun.write(`${path}.bak`, previous)
   await Bun.write(path, `${JSON.stringify(installed, null, 2)}\n`)
 }
 
-async function handleList(args: string[]): Promise<void> {
+async function handleList(args: string[], pluginsDirOverride?: string): Promise<void> {
   const asJson = args.includes("--json")
-  const records = toPluginRecords(await readInstalledPlugins())
+  const records = toPluginRecords(await readInstalledPlugins(pluginsDirOverride))
   if (asJson) {
     console.log(
       JSON.stringify(
@@ -138,11 +140,14 @@ async function handleList(args: string[]): Promise<void> {
   printPluginList(records)
 }
 
-async function handleInfo(args: string[]): Promise<void> {
+async function handleInfo(args: string[], pluginsDirOverride?: string): Promise<void> {
   const target = args[0]
   if (!target) throw new Error(`Missing plugin name.\n${usage()}`)
   const asJson = args.includes("--json")
-  const record = resolveTarget(toPluginRecords(await readInstalledPlugins()), target)
+  const record = resolveTarget(
+    toPluginRecords(await readInstalledPlugins(pluginsDirOverride)),
+    target
+  )
   if (asJson) {
     console.log(
       JSON.stringify(
@@ -161,11 +166,11 @@ async function handleInfo(args: string[]): Promise<void> {
   printPluginInfo(record)
 }
 
-async function handleUninstall(args: string[]): Promise<void> {
+async function handleUninstall(args: string[], pluginsDirOverride?: string): Promise<void> {
   const target = args[0]
   if (!target) throw new Error(`Missing plugin name.\n${usage()}`)
 
-  const installed = await readInstalledPlugins()
+  const installed = await readInstalledPlugins(pluginsDirOverride)
   const records = toPluginRecords(installed)
   const record = resolveTarget(records, target)
 
@@ -173,7 +178,7 @@ async function handleUninstall(args: string[]): Promise<void> {
 
   const nextPlugins = { ...(installed.plugins ?? {}) }
   delete nextPlugins[record.key]
-  await writeInstalledPlugins({ ...installed, plugins: nextPlugins })
+  await writeInstalledPlugins({ ...installed, plugins: nextPlugins }, pluginsDirOverride)
 
   console.log(`  Uninstalled Claude plugin: ${record.key}`)
 }
@@ -192,14 +197,28 @@ export const pluginsCommand: Command = {
       flags: "uninstall <name|name@marketplace>",
       description: "Uninstall plugin and remove it from installed_plugins.json",
     },
+    {
+      flags: "--plugins-dir <path>",
+      description: "Override ~/.claude/plugins path (for advanced usage/testing)",
+    },
     { flags: "--json", description: "Output JSON for list/info subcommands" },
   ],
   async run(args: string[]) {
-    const sub = args[0]
+    const pluginsDirFlag = args.indexOf("--plugins-dir")
+    let pluginsDirOverride: string | undefined
+    let effectiveArgs = args
+    if (pluginsDirFlag >= 0) {
+      pluginsDirOverride = args[pluginsDirFlag + 1]
+      if (!pluginsDirOverride) {
+        throw new Error("--plugins-dir requires a path value")
+      }
+      effectiveArgs = args.filter((_, i) => i !== pluginsDirFlag && i !== pluginsDirFlag + 1)
+    }
+    const sub = effectiveArgs[0]
     if (!sub) throw new Error(`Missing subcommand.\n${usage()}`)
-    if (sub === "list") return handleList(args.slice(1))
-    if (sub === "info") return handleInfo(args.slice(1))
-    if (sub === "uninstall") return handleUninstall(args.slice(1))
+    if (sub === "list") return handleList(effectiveArgs.slice(1), pluginsDirOverride)
+    if (sub === "info") return handleInfo(effectiveArgs.slice(1), pluginsDirOverride)
+    if (sub === "uninstall") return handleUninstall(effectiveArgs.slice(1), pluginsDirOverride)
     throw new Error(`Unknown subcommand: ${sub}\n${usage()}`)
   },
 }
