@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-03-25
+
+### Fixes
+
+- Fixed `stop-quality-checks` hook running unconditionally — it now
+  exits early unless `_effectiveSettings.qualityChecksGate` is
+  explicitly `true`, making the hook opt-in by default.
+- Fixed JSON extraction in hook output parser — replaced
+  `lastIndexOf("{")` with reverse-line scanning so hooks that emit
+  non-JSON lines after their JSON object are parsed correctly,
+  eliminating `invalid-json` dispatch failures (closes #374).
+- Fixed opaque malformed-input failures in `stop-auto-continue` —
+  schema parse errors now log structured details; added hint for
+  "Requested entity was not found" model errors.
+- Fixed web mascot not updating when `src` prop changes — `<img>` is
+  now force-remounted via `key` prop on source change.
+
+### Refactors
+
+- Extracted `isQualityChecksEnabled` helper from `stop-quality-checks`
+  `main()`, reducing cyclomatic complexity from 11 to 10. Helper is
+  exported and covered by unit tests.
+
 ## 2026-03-24
 
 ### New Features
@@ -24,6 +47,12 @@
 - **Manifest `requiredSettings` filtering** — hooks can declare
   required settings; the dispatcher skips them at zero cost when
   those settings are disabled (#348).
+- **"Stop hook" reframing detection** — the offensive-language hook
+  now blocks agents that reframe user feedback as coming from a
+  mechanical stop hook rather than authoritative instruction.
+- **Auto-steer deferred for chat apps** — auto-steer is now skipped
+  when the active application is a chat interface, avoiding phantom
+  keystrokes in non-terminal windows.
 
 ### Fixes
 
@@ -50,6 +79,11 @@
 - Fixed `personalRepoIssuesGate` missing from CLI settings
   display (#346).
 - Fixed worker pool deadlock and error recovery in daemon dispatch.
+- Fixed `Bun.Transpiler` eagerly initialising at module load —
+  deferred to first use so model-related tests don't fail when the
+  transpiler is unavailable.
+- Extended pre-push test timeout from 60 s to 600 s to prevent
+  false-positive CI failures on slower machines.
 
 ## 2026-03-21
 
