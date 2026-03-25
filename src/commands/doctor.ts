@@ -23,6 +23,9 @@ import {
 } from "../skill-utils.ts"
 import { createDefaultTaskStore } from "../task-roots.ts"
 import type { Command } from "../types.ts"
+import { DIAGNOSTIC_CHECKS } from "./doctor/checks/index.ts"
+import type { CheckResult } from "./doctor/types.ts"
+import { whichExists } from "./doctor/utils.ts"
 
 /**
  * Built-in allowed values for the `category:` frontmatter field in SKILL.md files.
@@ -58,28 +61,7 @@ const PASS = `${GREEN}✓${RESET}`
 const FAIL = `${RED}✗${RESET}`
 const WARN = `${YELLOW}!${RESET}`
 
-interface CheckResult {
-  name: string
-  status: "pass" | "warn" | "fail"
-  detail: string
-}
-
 // ─── Individual checks ──────────────────────────────────────────────────────
-
-async function checkBun(): Promise<CheckResult> {
-  return {
-    name: "Bun runtime",
-    status: "pass",
-    detail: `v${Bun.version}`,
-  }
-}
-
-async function whichExists(binary: string): Promise<string | null> {
-  const proc = Bun.spawn(["which", binary], { stdout: "pipe", stderr: "pipe" })
-  const stdout = await new Response(proc.stdout).text()
-  await proc.exited
-  return proc.exitCode === 0 ? stdout.trim() : null
-}
 
 async function checkAgentBinary(agent: AgentDef): Promise<CheckResult> {
   const path = await whichExists(agent.binary)
@@ -295,74 +277,7 @@ async function fixMissingConfigScripts(paths: string[]): Promise<{
   return { registered, failed }
 }
 
-async function checkGhAuth(): Promise<CheckResult> {
-  const ghPath = await whichExists("gh")
-  if (!ghPath) {
-    return {
-      name: "GitHub CLI auth",
-      status: "warn",
-      detail: "gh not installed — some hooks require it",
-    }
-  }
-
-  const proc = Bun.spawn(["gh", "auth", "status"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-
-  if (proc.exitCode === 0) {
-    const output = (stdout + stderr).trim()
-    const accountMatch = output.match(/Logged in to .+ account (\S+)/)
-    const account = accountMatch?.[1] ?? "authenticated"
-    return {
-      name: "GitHub CLI auth",
-      status: "pass",
-      detail: account,
-    }
-  }
-
-  return {
-    name: "GitHub CLI auth",
-    status: "fail",
-    detail: "not authenticated — run: gh auth login",
-  }
-}
-
-async function checkTtsBackend(): Promise<CheckResult> {
-  const platform = process.platform
-
-  if (platform === "darwin") {
-    const sayPath = await whichExists("say")
-    if (sayPath) {
-      return { name: "TTS backend", status: "pass", detail: "macOS say" }
-    }
-    return { name: "TTS backend", status: "warn", detail: "macOS say not found" }
-  }
-
-  if (platform === "win32") {
-    return { name: "TTS backend", status: "pass", detail: "PowerShell SpeechSynthesizer" }
-  }
-
-  // Linux: check for espeak-ng, espeak, spd-say
-  const linuxEngines = ["espeak-ng", "espeak", "spd-say"]
-  for (const engine of linuxEngines) {
-    const enginePath = await whichExists(engine)
-    if (enginePath) {
-      return { name: "TTS backend", status: "pass", detail: engine }
-    }
-  }
-
-  return {
-    name: "TTS backend",
-    status: "warn",
-    detail: "no TTS engine found — install espeak-ng, espeak, or spd-say",
-  }
-}
+// checkGhAuth and checkTtsBackend extracted to doctor/checks/
 
 async function checkSwizSettings(): Promise<CheckResult> {
   try {
@@ -1418,7 +1333,19 @@ interface DoctorCheckResults {
 
 async function collectDoctorChecks(fix: boolean): Promise<DoctorCheckResults> {
   const results: CheckResult[] = []
-  results.push(await checkBun())
+  const ctx = { fix }
+
+  // Run pluggable checks from the registry
+  for (const check of DIAGNOSTIC_CHECKS) {
+    const result = await check.run(ctx)
+    if (Array.isArray(result)) {
+      results.push(...result)
+    } else {
+      results.push(result)
+    }
+  }
+
+  // Inline checks not yet extracted to the registry
   for (const agent of AGENTS) {
     results.push(await checkAgentBinary(agent))
     results.push(await checkAgentSettings(agent))
@@ -1442,8 +1369,6 @@ async function collectDoctorChecks(fix: boolean): Promise<DoctorCheckResults> {
   results.push(...buildInvalidSkillResults(invalidSkillEntries))
   const pluginCacheInfos = await checkPluginCacheStaleness()
   results.push(...buildPluginCacheResults(pluginCacheInfos))
-  results.push(await checkGhAuth())
-  results.push(await checkTtsBackend())
   results.push(await checkSwizSettings())
   return { results, skillConflicts, invalidSkillEntries, pluginCacheInfos }
 }
