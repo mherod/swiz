@@ -3,7 +3,10 @@
 // Threshold is configurable via `swiz settings set memory-word-threshold <N>` (default: 5000).
 
 import { join } from "node:path"
-import { compactionChecklistSteps } from "../src/memory-compaction-guidance.ts"
+import {
+  compactionChecklistSteps,
+  USE_COMPACT_MEMORY_SKILL,
+} from "../src/memory-compaction-guidance.ts"
 import { DEFAULT_MEMORY_WORD_THRESHOLD, resolveNumericSetting } from "../src/settings.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 import {
@@ -46,7 +49,7 @@ async function main(): Promise<void> {
 
 Reduce CLAUDE.md by at least ${reduction} words before pushing.
 
-Use the /compact-memory skill to trim the file, or manually edit CLAUDE.md to remove redundancy.
+${USE_COMPACT_MEMORY_SKILL} to trim the file, or manually edit CLAUDE.md to remove redundancy.
 
 ${compactionChecklist}
 

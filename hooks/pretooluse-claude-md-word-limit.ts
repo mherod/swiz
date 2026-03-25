@@ -7,8 +7,10 @@
 
 import { countMarkdownWords } from "../src/markdown-word-count.ts"
 import {
+  COMPACT_MEMORY_SKILL_ID,
   compactionChecklistSteps,
   manualCompactionGuidanceFallback,
+  USE_COMPACT_MEMORY_SKILL,
 } from "../src/memory-compaction-guidance.ts"
 import { resolveThresholds } from "./posttooluse-memory-size.ts"
 import type { FileEditHookInput } from "./schemas.ts"
@@ -32,8 +34,8 @@ async function buildWordLimitDenyReason(
     .catch(() => "")
   const currentWordCount = countMarkdownWords(currentContent)
   const skill = skillAdvice(
-    "compact-memory",
-    `Use the /compact-memory skill to reduce the file below ${wordThreshold} words, then retry this edit.`,
+    COMPACT_MEMORY_SKILL_ID,
+    `${USE_COMPACT_MEMORY_SKILL} to reduce the file below ${wordThreshold} words, then retry this edit.`,
     manualCompactionGuidanceFallback()
   )
   const inlineChecklist = formatActionPlan(

@@ -6,8 +6,10 @@ import { BOLD, CYAN, DIM, GREEN, RESET, YELLOW } from "../ansi.ts"
 import { detectCurrentAgent } from "../detect.ts"
 import { countFileWords } from "../file-metrics.ts"
 import {
+  COMPACT_MEMORY_SKILL_ID,
   compactionChecklistSteps,
   manualCompactionFallback,
+  USE_COMPACT_MEMORY_SKILL,
 } from "../memory-compaction-guidance.ts"
 import { exceedsMemoryThresholds } from "../memory-thresholds.ts"
 import { getProviderAdapter } from "../provider-adapters.ts"
@@ -331,8 +333,8 @@ function throwStrictError(
 ): never {
   const fileList = exceededFiles.map((f) => `  - ${f.agentName}: ${f.label} (${f.path})`).join("\n")
   const compactAdvice = skillAdvice(
-    "compact-memory",
-    "Use the /compact-memory skill to reduce each file below thresholds.",
+    COMPACT_MEMORY_SKILL_ID,
+    `${USE_COMPACT_MEMORY_SKILL} to reduce each file below thresholds.`,
     manualCompactionFallback("each file")
   )
   const compactionChecklist = formatActionPlan(

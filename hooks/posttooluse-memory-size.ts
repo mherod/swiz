@@ -6,8 +6,10 @@
 // Thresholds are configurable via global (~/.swiz/settings.json) and project (.swiz/config.json).
 
 import {
+  COMPACT_MEMORY_SKILL_ID,
   compactionChecklistSteps,
   manualCompactionFallback,
+  USE_COMPACT_MEMORY_SKILL,
 } from "../src/memory-compaction-guidance.ts"
 import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
 import {
@@ -68,8 +70,8 @@ function resolveMemoryEditTarget(
 function buildViolationContext(filePath: string, violations: string[]): string {
   const basename = filePath.split("/").pop() ?? filePath
   const compactAdvice = skillAdvice(
-    "compact-memory",
-    `Use the /compact-memory skill to reduce ${basename} below thresholds.`,
+    COMPACT_MEMORY_SKILL_ID,
+    `${USE_COMPACT_MEMORY_SKILL} to reduce ${basename} below thresholds.`,
     manualCompactionFallback(basename)
   )
   const compactionChecklist = formatActionPlan(

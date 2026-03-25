@@ -1,11 +1,20 @@
 import { describe, expect, test } from "bun:test"
 import {
+  COMPACT_MEMORY_SKILL_ID,
+  COMPACT_MEMORY_SLASH,
   compactionChecklistSteps,
   manualCompactionFallback,
   manualCompactionGuidanceFallback,
+  USE_COMPACT_MEMORY_SKILL,
 } from "./memory-compaction-guidance.ts"
 
 describe("memory-compaction-guidance", () => {
+  test("COMPACT_MEMORY_SLASH, USE_COMPACT_MEMORY_SKILL, and COMPACT_MEMORY_SKILL_ID stay aligned", () => {
+    expect(COMPACT_MEMORY_SLASH).toBe("/compact-memory")
+    expect(USE_COMPACT_MEMORY_SKILL).toBe("Use the /compact-memory skill")
+    expect(COMPACT_MEMORY_SKILL_ID).toBe("compact-memory")
+  })
+
   test("manualCompactionFallback formats subject-specific guidance", () => {
     expect(manualCompactionFallback("CLAUDE.md")).toBe(
       "Compact CLAUDE.md manually: remove redundant modifiers and parenthetical restatements, collapse duplicate topics/lists, convert narrative/session notes to DO/DON'T/Reference directives, and preserve names/IDs/URLs/commands/thresholds."

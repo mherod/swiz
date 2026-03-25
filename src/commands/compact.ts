@@ -1,5 +1,6 @@
 import { resolve } from "node:path"
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../ansi.ts"
+import { COMPACT_MEMORY_SKILL_ID } from "../memory-compaction-guidance.ts"
 import {
   DEFAULT_MEMORY_WORD_THRESHOLD,
   readProjectSettings,
@@ -155,7 +156,7 @@ function parseCompactArgs(args: string[]): ParsedCompactArgs {
 
   if (!fileArg) {
     throw new Error(
-      "Usage: swiz compact-memory <file> [--threshold <words>] [--dry-run] [--dir <path>]"
+      `Usage: swiz ${COMPACT_MEMORY_SKILL_ID} <file> [--threshold <words>] [--dry-run] [--dir <path>]`
     )
   }
 
@@ -174,10 +175,10 @@ function parseCompactArgs(args: string[]): ParsedCompactArgs {
 // ─── Command ──────────────────────────────────────────────────────────────────
 
 export const compactCommand: Command = {
-  name: "compact-memory",
+  name: COMPACT_MEMORY_SKILL_ID,
   description:
     "Compact a memory file to stay under its word threshold, preserving pinned directives",
-  usage: "swiz compact-memory <file> [--threshold <words>] [--dry-run] [--dir <path>]",
+  usage: `swiz ${COMPACT_MEMORY_SKILL_ID} <file> [--threshold <words>] [--dry-run] [--dir <path>]`,
   options: [
     { flags: "<file>", description: "Memory file to compact (e.g. CLAUDE.md)" },
     {
@@ -220,7 +221,7 @@ export const compactCommand: Command = {
     const text = await file.text()
     const { output, removedCount, before, after } = compactText(text, threshold)
 
-    console.log(`\n  ${BOLD}swiz compact-memory${RESET}`)
+    console.log(`\n  ${BOLD}swiz ${COMPACT_MEMORY_SKILL_ID}${RESET}`)
     console.log(`  File:      ${filePath}`)
     console.log(`  Threshold: ${CYAN}${threshold} words${RESET}`)
     console.log(`  Before:    ${before > threshold ? YELLOW : GREEN}${before} words${RESET}`)

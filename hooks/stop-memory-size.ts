@@ -12,8 +12,10 @@ import { join } from "node:path"
 import { GIT_DIR_NAME } from "../src/git-helpers.ts"
 import { getHomeDirWithFallback } from "../src/home.ts"
 import {
+  COMPACT_MEMORY_SKILL_ID,
   compactionChecklistSteps,
   manualCompactionFallback,
+  USE_COMPACT_MEMORY_SKILL,
 } from "../src/memory-compaction-guidance.ts"
 import { getMemoryThresholdViolations } from "../src/memory-thresholds.ts"
 import { NODE_MODULES_DIR } from "../src/node-modules-path.ts"
@@ -176,11 +178,13 @@ function buildMemoryViolationReason(
   wordThreshold: number
 ): string {
   const summary = violations.map((v) => `  ${v.filePath}: ${v.violations.join(", ")}`).join("\n")
-  const perFileCommands = violations.map((v) => `  swiz compact-memory ${v.filePath}`).join("\n")
+  const perFileCommands = violations
+    .map((v) => `  swiz ${COMPACT_MEMORY_SKILL_ID} ${v.filePath}`)
+    .join("\n")
 
   const compactAdvice = skillAdvice(
-    "compact-memory",
-    `Use the /compact-memory skill or run these commands directly:\n${perFileCommands}`,
+    COMPACT_MEMORY_SKILL_ID,
+    `${USE_COMPACT_MEMORY_SKILL} or run these commands directly:\n${perFileCommands}`,
     `${manualCompactionFallback("each file")}\n\nOr run:\n${perFileCommands}`
   )
 

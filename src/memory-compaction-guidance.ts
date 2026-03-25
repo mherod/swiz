@@ -5,6 +5,22 @@
 import type { ActionPlanItem } from "./action-plan.ts"
 
 // ---------------------------------------------------------------------------
+// Slash command / CLI identifier (user-facing)
+// ---------------------------------------------------------------------------
+
+/** Slash command shown to agents (Claude Code / Cursor style). */
+export const COMPACT_MEMORY_SLASH = "/compact-memory" as const
+
+/**
+ * Standard prefix for skill-directed compaction messages, e.g.
+ * "Use the /compact-memory skill to reduce …".
+ */
+export const USE_COMPACT_MEMORY_SKILL = `Use the ${COMPACT_MEMORY_SLASH} skill`
+
+/** Skill id for `skillAdvice()` and `swiz` subcommand name (no leading slash). */
+export const COMPACT_MEMORY_SKILL_ID = "compact-memory" as const
+
+// ---------------------------------------------------------------------------
 // Core principle
 // ---------------------------------------------------------------------------
 

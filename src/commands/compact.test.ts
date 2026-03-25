@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { COMPACT_MEMORY_SKILL_ID } from "../memory-compaction-guidance.ts"
 import { compactText } from "./compact.ts"
 
 const SWIZ_ENTRY = join(import.meta.dir, "../../index.ts")
@@ -11,7 +12,7 @@ const SWIZ_ENTRY = join(import.meta.dir, "../../index.ts")
 async function runCompact(
   args: string[]
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn(["bun", "run", SWIZ_ENTRY, "compact-memory", ...args], {
+  const proc = Bun.spawn(["bun", "run", SWIZ_ENTRY, COMPACT_MEMORY_SKILL_ID, ...args], {
     stdout: "pipe",
     stderr: "pipe",
   })
