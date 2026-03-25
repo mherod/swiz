@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { findScript, LINT_SCRIPTS, TYPECHECK_SCRIPTS } from "./stop-quality-checks.ts"
+import {
+  findScript,
+  isQualityChecksEnabled,
+  LINT_SCRIPTS,
+  TYPECHECK_SCRIPTS,
+} from "./stop-quality-checks.ts"
 
 describe("stop-quality-checks: findScript", () => {
   describe("lint script discovery", () => {
@@ -61,6 +66,26 @@ describe("stop-quality-checks: findScript", () => {
 
     test("returns null when no typecheck script present", () => {
       expect(findScript({ lint: "eslint src", build: "tsc" }, TYPECHECK_SCRIPTS)).toBeNull()
+    })
+  })
+
+  describe("isQualityChecksEnabled", () => {
+    test("returns true when qualityChecksGate is true", () => {
+      expect(isQualityChecksEnabled({ _effectiveSettings: { qualityChecksGate: true } })).toBe(true)
+    })
+
+    test("returns false when qualityChecksGate is false", () => {
+      expect(isQualityChecksEnabled({ _effectiveSettings: { qualityChecksGate: false } })).toBe(
+        false
+      )
+    })
+
+    test("returns false when _effectiveSettings is absent", () => {
+      expect(isQualityChecksEnabled({})).toBe(false)
+    })
+
+    test("returns false when qualityChecksGate is missing from settings", () => {
+      expect(isQualityChecksEnabled({ _effectiveSettings: {} })).toBe(false)
     })
   })
 

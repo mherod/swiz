@@ -62,12 +62,14 @@ async function resolveScripts(cwd: string): Promise<{
   return { scripts, lint, typecheck }
 }
 
+export function isQualityChecksEnabled(raw: Record<string, unknown>): boolean {
+  const settings = raw._effectiveSettings as Record<string, unknown> | undefined
+  return !!settings?.qualityChecksGate
+}
+
 async function main(): Promise<void> {
   const input = stopHookInputSchema.parse(await Bun.stdin.json())
-  const settings = (input as Record<string, unknown>)._effectiveSettings as
-    | Record<string, unknown>
-    | undefined
-  if (!settings?.qualityChecksGate) return
+  if (!isQualityChecksEnabled(input as Record<string, unknown>)) return
   const cwd = input.cwd ?? process.cwd()
   const resolved = await resolveScripts(cwd)
   if (!resolved) return
