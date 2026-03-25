@@ -107,6 +107,19 @@ async function removeInstallDirectories(entries: InstalledPluginEntry[]): Promis
   }
 }
 
+async function removeDataDirectory(
+  record: PluginRecord,
+  pluginsDirOverride?: string
+): Promise<void> {
+  if (!record.marketplace) return
+  const dataDir = join(
+    pluginDir(pluginsDirOverride),
+    "data",
+    `${record.name}-${record.marketplace}`
+  )
+  await rm(dataDir, { recursive: true, force: true })
+}
+
 async function writeInstalledPlugins(
   installed: InstalledPlugins,
   pluginsDirOverride?: string
@@ -175,6 +188,7 @@ async function handleUninstall(args: string[], pluginsDirOverride?: string): Pro
   const record = resolveTarget(records, target)
 
   await removeInstallDirectories(record.entries)
+  await removeDataDirectory(record, pluginsDirOverride)
 
   const nextPlugins = { ...(installed.plugins ?? {}) }
   delete nextPlugins[record.key]

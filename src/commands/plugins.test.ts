@@ -76,8 +76,11 @@ describe("swiz plugins", () => {
     const home = await createTempDir()
     const pluginsDir = join(home, ".claude", "plugins")
     const installPath = join(home, ".claude/plugins/cache/alpha")
+    const dataPath = join(home, ".claude/plugins/data/alpha-claude-plugins-official")
     await mkdir(installPath, { recursive: true })
     await Bun.write(join(installPath, "file.txt"), "x")
+    await mkdir(dataPath, { recursive: true })
+    await Bun.write(join(dataPath, "data.json"), "{}")
     await writeInstalledPlugins(home, {
       version: 1,
       plugins: {
@@ -107,5 +110,6 @@ describe("swiz plugins", () => {
       stat(join(home, ".claude", "plugins", "installed_plugins.json.bak"))
     ).resolves.toBeDefined()
     await expect(stat(installPath)).rejects.toBeDefined()
+    await expect(stat(dataPath)).rejects.toBeDefined()
   })
 })
