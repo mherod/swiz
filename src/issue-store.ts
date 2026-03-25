@@ -152,7 +152,9 @@ export interface GitHubCiRunRecord {
  * without spawning real `gh` CLI processes.
  */
 export interface GitHubClient {
+  /** When `state` is `"closed"`, implementations may only populate `number`. */
   listIssues(cwd: string, state: "open" | "closed"): Promise<GitHubIssueRecord[] | null>
+  /** When `state` is `"closed"`, implementations may only populate `number`. */
   listPullRequests(cwd: string, state: "open" | "closed"): Promise<GitHubPullRequestRecord[] | null>
   listWorkflowRuns(cwd: string): Promise<GitHubCiRunRecord[] | null>
 }
@@ -1288,6 +1290,11 @@ void fetchViaRest
  * (REST-primary with gh CLI fallback).
  */
 export class GhCliGitHubClient implements GitHubClient {
+  /**
+   * List issues via `gh issue list`. When `state` is `"closed"`, only the
+   * `number` field is populated (minimal fetch for stale-row purging in
+   * `syncUpstreamState`). All other record fields will be `undefined`.
+   */
   async listIssues(cwd: string, state: "open" | "closed"): Promise<GitHubIssueRecord[] | null> {
     const limit = state === "closed" ? "30" : "100"
     const fields =
@@ -1298,6 +1305,11 @@ export class GhCliGitHubClient implements GitHubClient {
     )
   }
 
+  /**
+   * List PRs via `gh pr list`. When `state` is `"closed"`, only the
+   * `number` field is populated (minimal fetch for stale-row purging in
+   * `syncUpstreamState`). All other record fields will be `undefined`.
+   */
   async listPullRequests(
     cwd: string,
     state: "open" | "closed"
