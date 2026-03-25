@@ -1338,6 +1338,23 @@ export type SendAutoSteerOptions = {
   requeueOnForegroundDeferSessionId?: string
 }
 
+let autoSteerMutex: Promise<void> = Promise.resolve()
+
+async function withAutoSteerMutex<T>(fn: () => Promise<T>): Promise<T> {
+  const previous = autoSteerMutex
+  let release!: () => void
+  autoSteerMutex = new Promise<void>((resolve) => {
+    release = resolve
+  })
+
+  await previous
+  try {
+    return await fn()
+  } finally {
+    release()
+  }
+}
+
 async function deferAutoSteerWhenChatForeground(
   originalFrontApp: string,
   message: string,
@@ -1361,59 +1378,61 @@ export async function sendAutoSteer(
   terminalApp?: string | null,
   opts?: SendAutoSteerOptions
 ): Promise<boolean> {
-  const app = terminalApp ?? (await import("./terminal-detection.ts")).detectTerminal().app
-  if (!AUTOSTEER_SUPPORTED_TERMINALS.has(app)) return false
+  return withAutoSteerMutex(async () => {
+    const app = terminalApp ?? (await import("./terminal-detection.ts")).detectTerminal().app
+    if (!AUTOSTEER_SUPPORTED_TERMINALS.has(app)) return false
 
-  const { createScript, runScript } = await import("applescript-node")
-  const escaped = message.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")
+    const { createScript, runScript } = await import("applescript-node")
+    const escaped = message.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")
 
-  // Utility to bring app to front and to frontmost app again
-  async function getFrontmostAppName(): Promise<string> {
-    const script = createScript()
-      .tell("System Events")
-      .raw("return name of first application process whose frontmost is true")
-      .end()
-    const result = await runScript(script)
-    const out = result.output
-    return typeof out === "string" ? out.trim() : ""
-  }
+    // Utility to bring app to front and to frontmost app again
+    async function getFrontmostAppName(): Promise<string> {
+      const script = createScript()
+        .tell("System Events")
+        .raw("return name of first application process whose frontmost is true")
+        .end()
+      const result = await runScript(script)
+      const out = result.output
+      return typeof out === "string" ? out.trim() : ""
+    }
 
-  // Bring target app to front, send message, and optionally restore original frontmost app
-  try {
-    let targetApp: string
-    if (app === "iterm2") {
-      targetApp = "iTerm"
-    } else if (app === "apple-terminal") {
-      targetApp = "Terminal"
-    } else {
+    // Bring target app to front, send message, and optionally restore original frontmost app
+    try {
+      let targetApp: string
+      if (app === "iterm2") {
+        targetApp = "iTerm"
+      } else if (app === "apple-terminal") {
+        targetApp = "Terminal"
+      } else {
+        return false
+      }
+
+      const originalFrontApp = await getFrontmostAppName()
+      if (await deferAutoSteerWhenChatForeground(originalFrontApp, message, opts)) return false
+
+      const alreadyFrontmost = originalFrontApp === targetApp
+
+      // Always bring terminal to front before messaging
+      await runScript(createScript().tell(targetApp).raw("activate").end())
+
+      await runAutoSteerTerminalScripts(
+        app as AutoSteerTerminalKind,
+        escaped,
+        createScript,
+        runScript
+      )
+
+      // If we brought terminal to front and it wasn't already, restore previous front app
+      if (!alreadyFrontmost && originalFrontApp) {
+        // Only switch back if we switched at the start
+        await runScript(createScript().tell(originalFrontApp).raw("activate").end())
+      }
+
+      return true
+    } catch {
       return false
     }
-
-    const originalFrontApp = await getFrontmostAppName()
-    if (await deferAutoSteerWhenChatForeground(originalFrontApp, message, opts)) return false
-
-    const alreadyFrontmost = originalFrontApp === targetApp
-
-    // Always bring terminal to front before messaging
-    await runScript(createScript().tell(targetApp).raw("activate").end())
-
-    await runAutoSteerTerminalScripts(
-      app as AutoSteerTerminalKind,
-      escaped,
-      createScript,
-      runScript
-    )
-
-    // If we brought terminal to front and it wasn't already, restore previous front app
-    if (!alreadyFrontmost && originalFrontApp) {
-      // Only switch back if we switched at the start
-      await runScript(createScript().tell(originalFrontApp).raw("activate").end())
-    }
-
-    return true
-  } catch {
-    return false
-  }
+  })
 }
 
 /**
