@@ -19,6 +19,7 @@ import {
   SHELL_TEE_PIPE_WRITE_RE,
   shellSegmentCommandRe,
 } from "./utils/shell-patterns.ts"
+import { extractReadFilePaths } from "./utils/transcript.ts"
 
 interface Rule {
   /** Returns true if this rule matches the command. */
@@ -89,6 +90,26 @@ function isDestructiveDelete(c: string): boolean {
   return DESTRUCTIVE_CHAIN_RE.test(c) || FIND_DELETE_RE.test(c) || FIND_EXEC_RM_RE.test(c)
 }
 
+/**
+ * Extract the target file path from a plain `>` or `>>` redirect.
+ * Returns the resolved absolute path, or null if no redirect target is found.
+ */
+export function extractPlainRedirectTarget(c: string, cwd: string): string | null {
+  const m = c.match(/(?<![0-9&])>>?\s+(\S+)/)
+  if (!m?.[1]) return null
+  let target = m[1]
+  if (target.startsWith("/dev/") || target.startsWith("&") || target.startsWith(">(")) return null
+  target = target.replace(/^['"]|['"]$/g, "")
+  if (target.startsWith("~/") || target === "~") {
+    const home = process.env.HOME ?? ""
+    target = target === "~" ? home : `${home}${target.slice(1)}`
+  }
+  if (!target.startsWith("/")) {
+    target = `${cwd}/${target}`
+  }
+  return target
+}
+
 function isShellFileWrite(c: string): boolean {
   return (
     SHELL_REDIRECT_PLAIN_RE.test(c) ||
@@ -102,6 +123,22 @@ function isShellFileWrite(c: string): boolean {
     SHELL_HEREDOC_WRITE_RE.test(c) ||
     SHELL_BRACE_EXPANSION_WRITE_RE.test(c)
   )
+}
+
+/**
+ * Check if a shell file write is only a plain redirect (not &>, N>, tee, etc.).
+ */
+export function isPlainRedirectOnly(c: string): boolean {
+  if (SHELL_REDIRECT_BOTH_RE.test(c)) return false
+  if (SHELL_REDIRECT_NUMBERED_RE.test(c)) return false
+  if (SHELL_TEE_WRITE_RE.test(c)) return false
+  if (SHELL_TEE_PIPE_WRITE_RE.test(c)) return false
+  if (SHELL_PROC_SUB_WRITE_RE.test(c)) return false
+  if (SHELL_PROCESS_SUBSTITUTION_INPUT_RE.test(c)) return false
+  if (SHELL_HERESTRING_REDIRECT_RE.test(c)) return false
+  if (SHELL_HEREDOC_WRITE_RE.test(c)) return false
+  if (SHELL_BRACE_EXPANSION_WRITE_RE.test(c)) return false
+  return SHELL_REDIRECT_PLAIN_RE.test(c)
 }
 
 function buildShellToolRules(): Rule[] {
@@ -296,6 +333,8 @@ async function main() {
   if (!isShellTool(input?.tool_name ?? "")) process.exit(0)
 
   const command: string = input?.tool_input?.command ?? ""
+  const transcriptPath: string = input?.transcript_path ?? ""
+  const cwd: string = input?.cwd ?? process.cwd()
 
   // Strip quoted string contents once before any rule matching so that banned
   // patterns embedded inside commit messages, evidence args, or other quoted
@@ -303,7 +342,21 @@ async function main() {
   // for reporter correction output which must reference the real command text.
   const strippedCommand = stripQuotedStrings(command)
 
-  const warnings = evaluateRules(RULES, command, strippedCommand)
+  // Exempt plain `>` / `>>` redirects when the target file was Read this session.
+  let exemptRedirect = false
+  if (isShellFileWrite(strippedCommand) && isPlainRedirectOnly(strippedCommand)) {
+    const target = extractPlainRedirectTarget(strippedCommand, cwd)
+    if (target && transcriptPath) {
+      const readPaths = await extractReadFilePaths(transcriptPath)
+      if (readPaths.has(target)) {
+        exemptRedirect = true
+      }
+    }
+  }
+
+  const effectiveRules = exemptRedirect ? RULES.filter((r) => r.match !== isShellFileWrite) : RULES
+
+  const warnings = evaluateRules(effectiveRules, command, strippedCommand)
 
   checkBunTestReporter(command)
 

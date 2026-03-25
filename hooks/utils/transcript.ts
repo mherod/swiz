@@ -97,6 +97,21 @@ export async function extractSkillInvocations(path: string): Promise<string[]> {
   return skills
 }
 
+/**
+ * Extract all file paths from Read tool calls in a transcript.
+ * Used to determine which files the agent has already read this session.
+ */
+export async function extractReadFilePaths(path: string): Promise<Set<string>> {
+  const blocks = await readTranscriptToolBlocks(path)
+  const paths = new Set<string>()
+  for (const block of blocks) {
+    if (block.name !== "Read") continue
+    const filePath = String((block.input as Record<string, unknown>)?.file_path ?? "")
+    if (filePath) paths.add(filePath)
+  }
+  return paths
+}
+
 // ── Blocked tool_use detection ────────────────────────────────────────────────
 
 /**
