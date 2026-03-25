@@ -13,7 +13,7 @@
 // Rationale: gives team members time to review or raise concerns before a PR
 // is merged, preventing premature merges that bypass team visibility.
 
-import { getIssueStore } from "../src/issue-store.ts"
+import { getIssueStore, getIssueStoreReader } from "../src/issue-store.ts"
 import { readSwizSettings } from "../src/settings.ts"
 import {
   allowPreToolUse,
@@ -93,7 +93,7 @@ if (import.meta.main) {
     let createdAtStr: string | null = null
 
     if (prNumber && repo) {
-      const cached = getIssueStore().getPullRequest<{ createdAt: string }>(
+      const cached = await getIssueStoreReader().getPullRequest<{ createdAt: string }>(
         repo,
         parseInt(prNumber, 10)
       )
@@ -144,8 +144,7 @@ if (import.meta.main) {
     let prCreatedAt: string | null = null
     const branchRepo = await getRepoSlug(cwd)
     if (branchRepo) {
-      const store = getIssueStore()
-      const stored = store.listPullRequests<{
+      const stored = await getIssueStoreReader().listPullRequests<{
         number: number
         headRefName: string
         createdAt: string

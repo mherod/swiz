@@ -4,7 +4,7 @@
 // false-positive blocks for short CI runs that complete within seconds.
 
 import { getCollaborationModePolicy } from "../src/collaboration-policy.ts"
-import { getIssueStore } from "../src/issue-store.ts"
+import { getIssueStore, getIssueStoreReader } from "../src/issue-store.ts"
 import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 import {
@@ -39,7 +39,7 @@ const CI_RUN_FIELDS = "databaseId,status,conclusion,workflowName,createdAt,event
 async function fetchRuns(branch: string, cwd: string): Promise<CIRun[]> {
   const repo = await getRepoSlug(cwd)
   if (repo) {
-    const cached = getIssueStore().getCiBranchRuns<CIRun>(repo, branch)
+    const cached = await getIssueStoreReader().getCiBranchRuns<CIRun>(repo, branch)
     if (cached) return cached.filter((r) => r.event !== "dynamic" && r.event !== "workflow_run")
   }
 

@@ -14,7 +14,12 @@ import {
   needsRefinement,
   normaliseLabel,
 } from "../src/issue-refinement.ts"
-import { getDaemonBackedStore, getIssueStore, replayPendingMutations } from "../src/issue-store.ts"
+import {
+  getDaemonBackedStore,
+  getIssueStore,
+  getIssueStoreReader,
+  replayPendingMutations,
+} from "../src/issue-store.ts"
 import { stopPersonalRepoIssuesCooldownPath } from "../src/temp-paths.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 import {
@@ -292,13 +297,13 @@ async function cacheIssuesAndReplayMutations(
   }
 }
 
-function readCachedIssues(repoSlug: string): Issue[] {
+async function readCachedIssues(repoSlug: string): Promise<Issue[]> {
   try {
-    const store = getIssueStore()
+    const reader = getIssueStoreReader()
     // Pass ttlMs=0 so the stop hook always gets fresh data from the store.
     // Without this, issues closed between retries remain cached for up to 5
     // minutes, blocking session termination indefinitely. (#325)
-    return store.listIssues<Issue>(repoSlug, 0)
+    return await reader.listIssues<Issue>(repoSlug, 0)
   } catch {
     return []
   }
@@ -320,7 +325,7 @@ export async function getActionableIssues(cwd: string, filterUser?: string): Pro
   if (!repoSlug) return []
 
   // Store-first: use cached data if fresh
-  const cached = readCachedIssues(repoSlug)
+  const cached = await readCachedIssues(repoSlug)
   if (cached.length > 0) {
     return filterVisibleIssues(cached, filterUser)
   }
