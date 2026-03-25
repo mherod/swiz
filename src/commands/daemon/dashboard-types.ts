@@ -3,11 +3,9 @@
  * Extracted from web-server.ts to keep routing code focused.
  */
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+import { asRecord as asObject } from "../../issue-store.ts"
 
-function asObject(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null
-}
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function pickString(...values: unknown[]): string | null {
   for (const value of values) {
