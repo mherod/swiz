@@ -196,7 +196,9 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "dismissal",
-    pattern: re(`unrelated to (?:our|my|the|these|this|current) ${CHANGE_SHORT}`),
+    pattern: re(
+      `(?:unrelated|not\\s+related) to (?:our|my|the|these|this|that|current) (?:[\\w'-]+\\s+){0,5}(?:change|changes|work|works|edit|edits|update|updates|commit|commits|fix|fixes|diff|signature)\\b`
+    ),
     response:
       "Declaring an issue 'unrelated to our changes' is not a fix — it's an excuse. " +
       "If it shows up in the workflow, it's your responsibility to resolve it.",
@@ -332,6 +334,22 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "Pairing 'pre-existing' with 'unstaged' to excuse formatter or lint output is still a dismissal. " +
       "If the tool reported it in your session, fix it or stage the fix — do not treat dirty-tree noise as exempt from the work you were asked to ship.",
   },
+  {
+    category: "dismissal",
+    pattern:
+      /\bpre-?existing\b[^.!?\n]{0,180}\brace(?: |-)?condition\b|\brace(?: |-)?condition\b[^.!?\n]{0,120}\bpre-?existing\b/im,
+    response:
+      "Calling a failure a 'pre-existing race condition' does not remove it from your run. " +
+      "If it surfaced while executing your workflow, reproduce, fix, or quarantine with evidence — do not relabel it as someone else's timing bug.",
+  },
+  {
+    category: "dismissal",
+    pattern:
+      /\b(?:my|our)\s+(?:changes?|edits?|work|code|fixes?|updates?)\s+(?:is|are|were|was|'s)\s+in\s+separate\s+describe\b/i,
+    response:
+      "Isolating edits in separate describe blocks does not immunize you from failures in the same test run. " +
+      "If the suite broke or red tests appeared in your session, own the investigation — not geographic separation in the file.",
+  },
 
   // ── Compliance gaming patterns ──────────────────────────────────────────
   {
@@ -379,6 +397,21 @@ export const LAZY_PATTERNS: LazyPattern[] = [
     response:
       "You are not here to 'appease' hooks. You are here to do the work correctly. " +
       "If a hook blocks you, the correct response is genuine compliance, not theater.",
+  },
+  {
+    category: "gaming",
+    pattern: /\bclear(?:ing)?\s+(?:the |this |that )?gate\b/i,
+    response:
+      "You are not here to 'clear the gate' as a goal. " +
+      "Hooks enforce real standards — satisfy them with substantive work, not a procedural unlock phrase.",
+  },
+  {
+    category: "gaming",
+    pattern:
+      /\b(?:trivial|cosmetic|no-?op)\s+(?:whitespace\s+)?edit\b[^.!?]{0,100}\b(?:clear|unblock|pass|satisfy|reset)\b/i,
+    response:
+      "A trivial or whitespace-only edit to satisfy a gate is compliance theater. " +
+      "If a hook fired, address what it enforces — do not no-op your way past it.",
   },
   {
     category: "gaming",
@@ -1376,6 +1409,39 @@ export const LAZY_PATTERNS: LazyPattern[] = [
       "'Deferring to a dedicated session' is abandonment with extra syllables. " +
       "There is no dedicated session — this is the session. " +
       "The work is assigned, the context is loaded. Execute it now.",
+  },
+  {
+    category: "premature_completion",
+    pattern: /\bnot\s+something\s+to\s+squeeze\s+in\s+at\s+(?:the\s+)?session\s+end\b/i,
+    response:
+      "You do not experience time, session boundaries, or fatigue. " +
+      "'Session end' is not a real constraint on your next edit. " +
+      "Framing substantive work as 'not something to squeeze in before closing' is lazy deferral — make forward progress now.",
+  },
+  {
+    category: "premature_completion",
+    pattern: /\bleave\s+it\s+open\s+for\s+(?:a\s+)?dedicated\s+session\b/i,
+    response:
+      "'Leave it open for a dedicated session' pretends a future turn is magically more capable. " +
+      "It isn't. Labels, line counts, and extraction counts describe the work breakdown — not a license to park the task. " +
+      "Start the first extraction or commit a concrete slice in this turn.",
+  },
+  {
+    category: "premature_completion",
+    pattern:
+      /\bthe\s+responsible\s+action\s+is\s+to\s+leave\s+(?:it|this|the\s+(?:issue|ticket|work))\s+open\b/i,
+    response:
+      "Naming a 'responsible action' that ships zero progress is sophistry. " +
+      "Responsibility means advancing the refactor or delivering a minimal verifiable step — not deferring to an imaginary next session.",
+  },
+  {
+    category: "premature_completion",
+    pattern:
+      /\bmulti-?session\s+refactor\b[\s\S]{0,280}\b(?:session\s+end|squeeze\s+in\s+at\s+(?:the\s+)?session\s+end|dedicated\s+session|leave\s+it\s+open)\b/im,
+    response:
+      "Pairing 'multi-session refactor' with session-boundary excuses is evasion. " +
+      "You have no calendar and no sense of 'how long the session has left' — that framing is fiction used to stop working. " +
+      "Ship a scoped increment now: one extraction, one split, or one check unblocked.",
   },
   {
     category: "premature_completion",
