@@ -183,7 +183,7 @@ function CheckboxField(props: {
 }) {
   return (
     <div>
-      <label className="settings-checkbox">
+      <label className="inline-flex items-center gap-[7px] text-[#c4d3ef] text-[0.76rem] [&_input]:accent-[#77b7ff]">
         <input
           type="checkbox"
           checked={props.checked}
@@ -191,7 +191,9 @@ function CheckboxField(props: {
         />
         <span>{props.label}</span>
       </label>
-      <p className="settings-desc">{props.desc}</p>
+      <p className="text-[0.7rem] text-[var(--text-muted)] mt-[2px] mb-[6px] leading-[1.4]">
+        {props.desc}
+      </p>
     </div>
   )
 }
@@ -490,11 +492,11 @@ function NumberField(props: {
   type?: string
 }) {
   return (
-    <label className="settings-label">
+    <label className="grid gap-1 text-[0.75rem] text-[#b8c8ea]">
       <span>{props.label}</span>
       <input
         type={props.type ?? "number"}
-        className="settings-input"
+        className="w-full border border-[rgba(109,136,196,0.42)] rounded-lg bg-[rgba(29,34,44,0.72)] text-[#dfe8fb] px-2 py-[7px] text-[0.8rem] focus-visible:outline-none focus-visible:border-[rgba(126,170,255,0.72)] focus-visible:shadow-[0_0_0_2px_rgba(97,144,240,0.2)]"
         value={props.value}
         onChange={props.onChange}
         placeholder={props.placeholder}
@@ -511,13 +513,13 @@ function GlobalNumberFieldsGrid({
   num: (key: keyof GlobalSettingsForm) => (e: { target: { value: string } }) => void
 }) {
   return (
-    <div className="settings-grid-cols-2">
+    <div className="grid grid-cols-2 gap-4">
       {GLOBAL_NUMBER_FIELDS.map(({ key, label }) => (
-        <label key={key} className="settings-label">
+        <label key={key} className="grid gap-1 text-[0.75rem] text-[#b8c8ea]">
           <span>{label}</span>
           <input
             type="number"
-            className="settings-input"
+            className="w-full border border-[rgba(109,136,196,0.42)] rounded-lg bg-[rgba(29,34,44,0.72)] text-[#dfe8fb] px-2 py-[7px] text-[0.8rem] focus-visible:outline-none focus-visible:border-[rgba(126,170,255,0.72)] focus-visible:shadow-[0_0_0_2px_rgba(97,144,240,0.2)]"
             value={form[key] as number}
             onChange={num(key)}
           />
@@ -537,9 +539,15 @@ function ProjectSelectFieldsGrid({
   return (
     <>
       {PROJECT_SELECT_FIELDS.map(({ key, label, desc, options }) => (
-        <label key={key} className="settings-label" htmlFor={`project-${key}`}>
+        <label
+          key={key}
+          className="grid gap-1 text-[0.75rem] text-[#b8c8ea]"
+          htmlFor={`project-${key}`}
+        >
           <span>{label}</span>
-          <p className="settings-desc">{desc}</p>
+          <p className="text-[0.7rem] text-[var(--text-muted)] mt-[2px] mb-[6px] leading-[1.4]">
+            {desc}
+          </p>
           <Select
             id={`project-${key}`}
             value={form[key]}
@@ -562,7 +570,7 @@ function ProjectFieldsGrid({
   optNum: (key: keyof ProjectSettingsForm) => (e: { target: { value: string } }) => void
 }) {
   return (
-    <div className="settings-grid-cols-2">
+    <div className="grid grid-cols-2 gap-4">
       <NumberField
         label="Default branch"
         value={form.defaultBranch as string}
@@ -623,12 +631,14 @@ function GlobalSettingsColumn({
     set({ [key]: Number(e.target.value) })
 
   return (
-    <div className="settings-column settings-fields">
-      <h3 className="settings-column-title">Global Settings</h3>
-      {error && <p className="settings-error">{error}</p>}
-      <label className="settings-label" htmlFor="global-ambition-mode">
+    <div className="grid gap-4 mb-4">
+      <h3 className="text-[0.85rem] font-semibold text-[#c4d4f2] mb-4 uppercase tracking-[0.05em]">
+        Global Settings
+      </h3>
+      {error && <p className="text-[#ff7e7e]">{error}</p>}
+      <label className="grid gap-1 text-[0.75rem] text-[#b8c8ea]" htmlFor="global-ambition-mode">
         <span>Ambition mode</span>
-        <p className="settings-desc">
+        <p className="text-[0.7rem] text-[var(--text-muted)] mt-[2px] mb-[6px] leading-[1.4]">
           Agent's operational tempo. "standard" focuses on prompt completion. "aggressive" acts
           autonomously. "creative" focuses on exploratory design. "reflective" prioritizes analysis.
         </p>
@@ -680,21 +690,17 @@ function ProjectSettingsColumn({
     set({ [key]: e.target.value === "" ? "" : Number(e.target.value) })
 
   return (
-    <div className="settings-column">
-      <h3 className="settings-column-title">Project Settings</h3>
+    <div>
+      <h3 className="text-[0.85rem] font-semibold text-[#c4d4f2] mb-4 uppercase tracking-[0.05em]">
+        Project Settings
+      </h3>
 
       {!cwd ? (
-        <p className="metric-note" style={{ marginTop: "1rem" }}>
-          Select a project to edit project-specific settings.
-        </p>
+        <p className="metric-note mt-4">Select a project to edit project-specific settings.</p>
       ) : loading && !loaded ? (
-        <p className="metric-note" style={{ marginTop: "1rem" }}>
-          Loading project settings...
-        </p>
+        <p className="metric-note mt-4">Loading project settings...</p>
       ) : error && !loaded ? (
-        <p className="settings-error" style={{ marginTop: "1rem" }}>
-          {error}
-        </p>
+        <p className="text-[#ff7e7e] mt-4">{error}</p>
       ) : (
         <>
           <ProjectSelectFieldsGrid form={form} set={set} />
@@ -886,7 +892,7 @@ export function SettingsPanel({ cwd }: { cwd: string | null }): ReactElement {
 
   if (globalLoading && !globalLoaded) {
     return (
-      <div className="card panel-settings">
+      <div className="card gap-2">
         <p>Loading settings...</p>
       </div>
     )
@@ -894,25 +900,25 @@ export function SettingsPanel({ cwd }: { cwd: string | null }): ReactElement {
 
   if (globalError && !globalLoaded) {
     return (
-      <div className="card panel-settings">
+      <div className="card gap-2">
         <h2 className="section-title">Settings</h2>
-        <p className="settings-error">{globalError}</p>
+        <p className="text-[#ff7e7e]">{globalError}</p>
       </div>
     )
   }
 
   return (
-    <section className="card panel-settings settings-combined">
-      <header className="settings-header-title-row">
+    <section className="card gap-2 overflow-y-auto">
+      <header className="flex items-center justify-between">
         <h2 className="section-title">Settings</h2>
         {statusText ? (
-          <span className={isSaving ? "settings-status-saving" : "settings-status-ok"}>
+          <span className={isSaving ? "text-[#90a4c8] animate-pulse" : "text-[#8ae28a]"}>
             {statusText}
           </span>
         ) : null}
       </header>
       <p className="section-subtitle">Manage global behavior and project-specific overrides</p>
-      <div className="settings-layout">
+      <div className="grid gap-8 content-start md:grid-cols-2">
         <GlobalSettingsColumn form={globalForm} setForm={setGlobalForm} error={globalError} />
         <ProjectSettingsColumn
           cwd={cwd}
