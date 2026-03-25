@@ -155,6 +155,8 @@ function buildShellToolRules(): Rule[] {
 }
 
 function buildGitRules(): Rule[] {
+  const GH_ISSUE_EDIT_BODY_SENSITIVE_RE =
+    /gh\s+issue\s+edit\b[\s\S]*\s--body(?:=|\s+)(["'])(?:(?!\1).)*(?:`|\$\(|<[^>]*>)(?:(?!\1).)*\1/
   return [
     {
       match: (c) => /git\s+stash(\s|$)/.test(c),
@@ -210,6 +212,12 @@ function buildGitRules(): Rule[] {
       match: (c) => /gh\s+.*--admin/.test(c),
       message:
         "Do not use `gh --admin`. It bypasses repository protection rules and required checks.\n\nEnsure PRs pass all required checks and obtain proper approvals.",
+    },
+    {
+      useRawCommand: true,
+      match: (c) => GH_ISSUE_EDIT_BODY_SENSITIVE_RE.test(c),
+      message:
+        "Do not pass shell-sensitive issue content inline with `gh issue edit --body`.\n\nUse a body file instead:\n  gh issue edit <number> --body-file /tmp/issue-body.md\n\nInline bodies that contain backticks, `$()`, or `<...>` are fragile in shell quoting and can fail or be misinterpreted.",
     },
   ]
 }

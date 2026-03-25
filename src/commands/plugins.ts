@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises"
+import { readdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { getHomeDirWithFallback } from "../home.ts"
 import type { Command } from "../types.ts"
@@ -111,13 +111,27 @@ async function removeDataDirectory(
   record: PluginRecord,
   pluginsDirOverride?: string
 ): Promise<void> {
-  if (!record.marketplace) return
-  const dataDir = join(
-    pluginDir(pluginsDirOverride),
-    "data",
-    `${record.name}-${record.marketplace}`
-  )
-  await rm(dataDir, { recursive: true, force: true })
+  const dataRoot = join(pluginDir(pluginsDirOverride), "data")
+  if (record.marketplace) {
+    const dataDir = join(dataRoot, `${record.name}-${record.marketplace}`)
+    await rm(dataDir, { recursive: true, force: true })
+    return
+  }
+
+  // Legacy/unknown keys can omit marketplace. In that case, clean any
+  // data directories matching "<name>-*" to avoid orphaned plugin state.
+  let entries: import("node:fs").Dirent[]
+  try {
+    entries = await readdir(dataRoot, { withFileTypes: true })
+  } catch {
+    return
+  }
+
+  const prefix = `${record.name}-`
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue
+    await rm(join(dataRoot, entry.name), { recursive: true, force: true })
+  }
 }
 
 async function writeInstalledPlugins(

@@ -112,4 +112,27 @@ describe("swiz plugins", () => {
     await expect(stat(installPath)).rejects.toBeDefined()
     await expect(stat(dataPath)).rejects.toBeDefined()
   })
+
+  test("uninstall removes prefixed data directories when marketplace is unknown", async () => {
+    const home = await createTempDir()
+    const pluginsDir = join(home, ".claude", "plugins")
+    const installPath = join(home, ".claude/plugins/cache/gamma")
+    const matchedDataPath = join(home, ".claude/plugins/data/gamma-random-market")
+    const unmatchedDataPath = join(home, ".claude/plugins/data/gammadelta-random-market")
+    await mkdir(installPath, { recursive: true })
+    await mkdir(matchedDataPath, { recursive: true })
+    await mkdir(unmatchedDataPath, { recursive: true })
+    await writeInstalledPlugins(home, {
+      version: 1,
+      plugins: {
+        gamma: [{ installPath }],
+      },
+    })
+
+    await pluginsCommand.run(["uninstall", "gamma", "--plugins-dir", pluginsDir])
+
+    await expect(stat(installPath)).rejects.toBeDefined()
+    await expect(stat(matchedDataPath)).rejects.toBeDefined()
+    await expect(stat(unmatchedDataPath)).resolves.toBeDefined()
+  })
 })

@@ -321,6 +321,14 @@ describe("pretooluse-banned-commands", () => {
       const result = await runHook("git commit --trailer 'Co-authored-by: AI'")
       expect(result.decision).toBe("deny")
     })
+
+    test("gh issue edit --body with shell-sensitive content is blocked", async () => {
+      const result = await runHook(
+        'gh issue edit 123 --body "Include `code`, $(date), and <placeholder>."'
+      )
+      expect(result.decision).toBe("deny")
+      expect(result.reason).toContain("--body-file")
+    })
   })
 
   describe("allowed commands (no output)", () => {
@@ -462,6 +470,11 @@ describe("pretooluse-banned-commands", () => {
 
     test("commit message containing 'git clean' in double quotes passes through", async () => {
       const result = await runHook(`git commit -m "docs: document git clean risks"`)
+      expect(result.decision).toBeUndefined()
+    })
+
+    test("gh issue edit --body without shell-sensitive markers passes through", async () => {
+      const result = await runHook('gh issue edit 123 --body "Plain text body."')
       expect(result.decision).toBeUndefined()
     })
   })
