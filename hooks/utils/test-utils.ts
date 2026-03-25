@@ -116,6 +116,38 @@ export async function createEnforcementProjectDir(makeDir: () => Promise<string>
   return dir
 }
 
+export type BashHookRunOpts = {
+  toolName?: string
+  cwd?: string
+  transcript_path?: string
+  session_id?: string
+}
+
+function bashHookPayloadJson(command: string, opts: BashHookRunOpts): string {
+  return JSON.stringify({
+    tool_name: opts.toolName ?? "Bash",
+    tool_input: { command },
+    ...(opts.transcript_path !== undefined && { transcript_path: opts.transcript_path }),
+    ...(opts.session_id !== undefined && { session_id: opts.session_id }),
+  })
+}
+
+function parsePreToolUseHookStdout(stdout: string): {
+  decision?: string
+  reason?: string
+} | null {
+  try {
+    const parsed = JSON.parse(stdout) as Record<string, unknown>
+    const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
+    return {
+      decision: (hso?.permissionDecision ?? parsed.decision) as string | undefined,
+      reason: (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
 /**
  * Run a PreToolUse Bash hook as a subprocess with a shell-command payload.
  * Used by test suites for hooks that inspect Bash commands (no-npm, banned-commands, etc.).
@@ -123,14 +155,9 @@ export async function createEnforcementProjectDir(makeDir: () => Promise<string>
 export async function runBashHook(
   script: string,
   command: string,
-  opts: { toolName?: string; cwd?: string; transcript_path?: string; session_id?: string } = {}
+  opts: BashHookRunOpts = {}
 ): Promise<{ decision?: string; reason?: string; stdout: string }> {
-  const payload = JSON.stringify({
-    tool_name: opts.toolName ?? "Bash",
-    tool_input: { command },
-    ...(opts.transcript_path !== undefined && { transcript_path: opts.transcript_path }),
-    ...(opts.session_id !== undefined && { session_id: opts.session_id }),
-  })
+  const payload = bashHookPayloadJson(command, opts)
   const proc = Bun.spawn(["bun", resolve(script)], {
     stdin: "pipe",
     stdout: "pipe",
@@ -143,18 +170,9 @@ export async function runBashHook(
   await proc.exited
 
   const stdout = out.trim()
-  if (!stdout) return { stdout }
-  try {
-    const parsed = JSON.parse(stdout)
-    const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
-    return {
-      decision: (hso?.permissionDecision ?? parsed.decision) as string | undefined,
-      reason: (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined,
-      stdout,
-    }
-  } catch {
-    return { stdout }
-  }
+  const parsed = parsePreToolUseHookStdout(stdout)
+  if (!stdout || !parsed) return { stdout }
+  return { ...parsed, stdout }
 }
 
 export interface FileEditHookResult {

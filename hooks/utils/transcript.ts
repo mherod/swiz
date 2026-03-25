@@ -182,6 +182,37 @@ export interface SessionTaskTipContext {
   usedNativeTaskListOrGet: boolean
 }
 
+const NATIVE_TASK_QUERY_TOOLS = new Set(["TaskList", "TaskGet"])
+
+function isSwizCompleteWithEvidenceCommand(normalizedCommand: string): boolean {
+  return (
+    /swiz\s+tasks\s+complete(?:\s|$)/.test(normalizedCommand) &&
+    /--evidence(?:\s|=|$)/.test(normalizedCommand)
+  )
+}
+
+function mergeToolBlockIntoSessionTaskTip(
+  block: Record<string, unknown>,
+  acc: SessionTaskTipContext
+): void {
+  const name = String(block.name ?? "")
+  if (NATIVE_TASK_QUERY_TOOLS.has(name)) acc.usedNativeTaskListOrGet = true
+  if (!isShellTool(name)) return
+  const raw = String((block.input as Record<string, unknown>)?.command ?? "")
+  if (!raw) return
+  if (isSwizCompleteWithEvidenceCommand(normalizeCommand(raw)))
+    acc.hasSwizCompleteWithEvidence = true
+}
+
+function foldBlocksToSessionTaskTip(blocks: Array<Record<string, unknown>>): SessionTaskTipContext {
+  const acc: SessionTaskTipContext = {
+    hasSwizCompleteWithEvidence: false,
+    usedNativeTaskListOrGet: false,
+  }
+  for (const block of blocks) mergeToolBlockIntoSessionTaskTip(block, acc)
+  return acc
+}
+
 /**
  * Scan the current session (after last compaction boundary) for task-tool patterns
  * that show the agent already follows CLI vs native guidance.
@@ -194,26 +225,8 @@ export async function sessionTaskToolPatterns(
     usedNativeTaskListOrGet: false,
   }
   if (!transcriptPath) return empty
-
   const lines = await readSessionLines(transcriptPath)
-  const blocks = collectToolBlocksFromLines(lines)
-  let hasSwizCompleteWithEvidence = false
-  let usedNativeTaskListOrGet = false
-
-  for (const block of blocks) {
-    const name = String(block.name ?? "")
-    if (name === "TaskList" || name === "TaskGet") usedNativeTaskListOrGet = true
-    if (isShellTool(name)) {
-      const raw = String((block.input as Record<string, unknown>)?.command ?? "")
-      if (!raw) continue
-      const norm = normalizeCommand(raw)
-      if (/swiz\s+tasks\s+complete(?:\s|$)/.test(norm) && /--evidence(?:\s|=|$)/.test(norm)) {
-        hasSwizCompleteWithEvidence = true
-      }
-    }
-  }
-
-  return { hasSwizCompleteWithEvidence, usedNativeTaskListOrGet }
+  return foldBlocksToSessionTaskTip(collectToolBlocksFromLines(lines))
 }
 
 /**
