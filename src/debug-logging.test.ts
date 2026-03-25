@@ -80,6 +80,8 @@ const STDOUT_ALLOWLIST = new Set([
   "src/commands/memory.ts",
   // model — Claude Code settings.json model show/set output
   "src/commands/model.ts",
+  // plugins — user-facing Claude plugin list/info/uninstall output
+  "src/commands/plugins.ts",
   // manage command prints MCP list/show/add/remove output
   "src/commands/manage.ts",
   "src/commands/push-ci.ts",
