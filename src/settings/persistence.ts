@@ -58,6 +58,7 @@ export const DEFAULT_SETTINGS: SwizSettings = {
   issueCloseGate: false,
   qualityChecksGate: true,
   strictNoDirectMain: false,
+  trunkMode: false,
   taskDurationWarningMinutes: 10,
   memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
   memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
@@ -96,6 +97,7 @@ export const swizSettingsSchema = z.object({
   issueCloseGate: z.boolean().catch(DEFAULT_SETTINGS.issueCloseGate),
   qualityChecksGate: z.boolean().catch(DEFAULT_SETTINGS.qualityChecksGate),
   strictNoDirectMain: z.boolean().catch(DEFAULT_SETTINGS.strictNoDirectMain),
+  trunkMode: z.boolean().catch(DEFAULT_SETTINGS.trunkMode),
   taskDurationWarningMinutes: z
     .number()
     .int()
@@ -278,7 +280,12 @@ function normalizeProjectSettings(value: unknown): ProjectSwizSettings | null {
   if (defaultBranch) result.defaultBranch = defaultBranch
 
   applySchemaFields(obj, result)
-  applyBooleanFields(obj, result, ["autoContinue", "qualityChecksGate", "strictNoDirectMain"])
+  applyBooleanFields(obj, result, [
+    "autoContinue",
+    "qualityChecksGate",
+    "strictNoDirectMain",
+    "trunkMode",
+  ])
   applyStringArrayFields(obj, result, ["disabledHooks", "plugins", "largeFileAllowPatterns"])
   applyHooksAndCategories(obj, result)
   return result

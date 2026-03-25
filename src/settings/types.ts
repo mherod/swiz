@@ -100,6 +100,8 @@ export interface ProjectSwizSettings {
   qualityChecksGate?: boolean
   /** Enforce feature-branch workflow even for solo repositories. */
   strictNoDirectMain?: boolean
+  /** When true, work directly on the default branch — no feature branches or PRs. */
+  trunkMode?: boolean
   /** Warn when an in-progress task exceeds this runtime. */
   taskDurationWarningMinutes?: number
   /** Hook filenames to skip for this project (e.g. "stop-github-ci.ts") */
@@ -169,6 +171,8 @@ export interface SwizSettings {
   qualityChecksGate: boolean
   /** When true, blocks all direct pushes to the default branch regardless of repo type. */
   strictNoDirectMain: boolean
+  /** When true, work directly on the default branch — no feature branches or PRs. */
+  trunkMode: boolean
   taskDurationWarningMinutes: number
   memoryLineThreshold: number
   memoryWordThreshold: number
@@ -219,6 +223,7 @@ export const projectSettingsSchema = z.object({
   collaborationMode: collaborationModeSchema.optional(),
   qualityChecksGate: z.boolean().optional(),
   strictNoDirectMain: z.boolean().optional(),
+  trunkMode: z.boolean().optional(),
   taskDurationWarningMinutes: z.number().int().min(1).optional(),
   disabledHooks: z.array(z.string().min(1)).optional(),
   plugins: z.array(z.string().min(1)).optional(),

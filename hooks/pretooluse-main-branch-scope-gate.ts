@@ -46,6 +46,12 @@ const command: string = (input?.tool_input?.command as string) ?? ""
 // to process.cwd() can evaluate policy against the wrong repository.
 const cwd: string = input?.cwd ?? (input?.tool_input?.cwd as string) ?? process.cwd()
 
+// ── Trunk mode bypass ────────────────────────────────────────────────────────
+const trunkModeSettings = await readProjectSettings(cwd)
+if (trunkModeSettings?.trunkMode) {
+  allowPreToolUse("Trunk mode enabled — direct push to default branch allowed")
+}
+
 const defaultBranch = await getDefaultBranch(cwd)
 
 // Only check git push commands that target the effective default branch,

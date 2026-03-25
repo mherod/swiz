@@ -56,6 +56,7 @@ interface CachedProjectSettingsResponse {
   settings?: {
     collaborationMode?: "auto" | "solo" | "team" | "relaxed-collab"
     strictNoDirectMain?: boolean
+    trunkMode?: boolean
     trivialMaxFiles?: number
     trivialMaxLines?: number
     defaultBranch?: string
@@ -74,6 +75,7 @@ interface ProjectSettingsForm {
   collaborationMode: "auto" | "solo" | "team" | "relaxed-collab"
   prMergeMode: boolean
   strictNoDirectMain: boolean
+  trunkMode: boolean
   trivialMaxFiles: number
   trivialMaxLines: number
   defaultBranch: string
@@ -88,6 +90,7 @@ const DEFAULT_PROJECT_FORM: ProjectSettingsForm = {
   collaborationMode: "auto",
   prMergeMode: true,
   strictNoDirectMain: false,
+  trunkMode: false,
   trivialMaxFiles: 2,
   trivialMaxLines: 50,
   defaultBranch: "main",
@@ -129,6 +132,7 @@ const PROJECT_FORM_DEFAULTS: ProjectSettingsForm = {
   collaborationMode: "auto",
   prMergeMode: true,
   strictNoDirectMain: false,
+  trunkMode: false,
   trivialMaxFiles: 2,
   trivialMaxLines: 50,
   defaultBranch: "main",
@@ -148,6 +152,7 @@ function projectSettingsToForm(response: CachedProjectSettingsResponse): Project
       collaborationMode: s.collaborationMode,
       prMergeMode: g.prMergeMode,
       strictNoDirectMain: s.strictNoDirectMain,
+      trunkMode: s.trunkMode,
       trivialMaxFiles: s.trivialMaxFiles,
       trivialMaxLines: s.trivialMaxLines,
       defaultBranch: s.defaultBranch || undefined,
@@ -708,6 +713,12 @@ function ProjectSettingsColumn({
             onChange={(v) => set({ strictNoDirectMain: v })}
             label="Strict merge to main mode"
             desc="Enforces feature-branch workflows by blocking direct pushes to the main branch locally, even in solo repositories."
+          />
+          <CheckboxField
+            checked={form.trunkMode}
+            onChange={(v) => set({ trunkMode: v })}
+            label="Trunk mode"
+            desc="Work directly on the default branch with no feature branches or PRs. Overrides strict-no-direct-main and branch gate hooks."
           />
         </>
       )}

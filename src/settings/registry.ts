@@ -167,6 +167,16 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global", "project"],
   },
   {
+    key: "trunkMode",
+    aliases: ["trunk-mode", "trunkmode", "trunk_mode", "trunk"],
+    kind: "boolean",
+    scopes: ["project"],
+    docs: {
+      enableDescription: "Enable trunk-based development (push directly to default branch, no PRs)",
+      disableDescription: "Disable trunk mode (use feature branches and PRs)",
+    },
+  },
+  {
     key: "prAgeGateMinutes",
     aliases: ["pr-age-gate", "pragegate", "pr_age_gate", "pragegateminutes", "pr-age-gate-minutes"],
     kind: "numeric",

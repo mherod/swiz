@@ -125,6 +125,7 @@ const PROJECT_OVERRIDABLE_KEYS = [
   "collaborationMode",
   "qualityChecksGate",
   "strictNoDirectMain",
+  "trunkMode",
   "taskDurationWarningMinutes",
   "largeFileSizeKb",
   "dirtyWorktreeThreshold",

@@ -15,6 +15,7 @@ import {
 } from "../src/settings.ts"
 import { getTaskCurrentDurationMs } from "../src/tasks/task-timing.ts"
 import {
+  allowPreToolUse,
   allowPreToolUseWithContext,
   denyPreToolUse,
   extractToolNamesFromTranscript,
@@ -46,7 +47,8 @@ let _autoSteerSessionId: string | null = null
 async function deny(reason: string): Promise<never> {
   if (_autoSteerSessionId) {
     if (await scheduleAutoSteer(_autoSteerSessionId, reason)) {
-      allowPreToolUseWithContext(reason, reason)
+      // Auto-steer will deliver the message — allow silently to avoid duplicate guidance.
+      allowPreToolUse("")
     }
   }
   denyPreToolUse(reason)

@@ -220,6 +220,7 @@ interface ProjectPolicyInfo {
   memoryLineSource: "project" | "user" | "default"
   memoryWordThreshold: number
   memoryWordSource: "project" | "user" | "default"
+  trunkMode: boolean
   source: "project" | "default"
   disabledHooks?: string[]
 }
@@ -343,6 +344,9 @@ function printProjectPolicy(projectPolicyInfo: ProjectPolicyInfo, detectedStacks
   console.log(
     `  memory-word-threshold: ${projectPolicyInfo.memoryWordThreshold} (${projectPolicyInfo.memoryWordSource})`
   )
+  console.log(
+    `  trunk-mode: ${projectPolicyInfo.trunkMode ? "enabled" : "disabled"} (${projectPolicyInfo.source})`
+  )
   const projectDisabled = projectPolicyInfo.disabledHooks ?? []
   if (projectDisabled.length > 0) {
     console.log(`  disabled-hooks:  ${projectDisabled.join(", ")} (project)`)
@@ -400,6 +404,7 @@ function buildProjectPolicyInfo(
     memoryLineSource: memoryThresholds.memoryLineSource,
     memoryWordThreshold: memoryThresholds.memoryWordThreshold,
     memoryWordSource: memoryThresholds.memoryWordSource,
+    trunkMode: projectSettings?.trunkMode ?? false,
     source: policy.source,
     disabledHooks: projectSettings?.disabledHooks,
   }
@@ -533,6 +538,17 @@ async function setBooleanSetting(enabled: boolean, parsed: ParsedSettingsArgs): 
 
   if (key === "strictNoDirectMain" && enabled) {
     await enforceStrictNoDirectMainConflicts(parsed)
+  }
+
+  if (key === "trunkMode" && enabled) {
+    const projectSettings = await readProjectSettings(parsed.targetDir)
+    if (projectSettings?.strictNoDirectMain && !parsed.force) {
+      throw new Error(
+        `Cannot enable trunk-mode: strictNoDirectMain is enabled for this project.\n` +
+          `These settings are mutually exclusive. Disable strict-no-direct-main first,\n` +
+          `or use --force to override:\n  swiz settings enable trunk-mode --project --force\n`
+      )
+    }
   }
 
   const path = await writeSettingToScope(parsed, key, enabled)

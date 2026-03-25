@@ -199,7 +199,7 @@ export const manifest: HookGroup[] = [
     event: "preToolUse",
     matcher: "Edit|Write|NotebookEdit|Bash",
     hooks: [
-      { file: "pretooluse-offensive-language.ts", timeout: 5 },
+      { file: "pretooluse-offensive-language.ts", timeout: 5, cooldownSeconds: 60 },
       { file: "pretooluse-update-memory-enforcement.ts", timeout: 5, cooldownSeconds: 300 },
     ],
   },

@@ -11,6 +11,7 @@
 //   Any repo + on feature branch           → allowed
 
 import { detectProjectCollaborationPolicy } from "../src/collaboration-policy.ts"
+import { readProjectSettings } from "../src/settings.ts"
 import { getDefaultBranch, isDefaultBranch } from "./utils/git-utils.ts"
 import {
   allowPreToolUse,
@@ -28,6 +29,12 @@ const command: string = (input?.tool_input?.command as string) ?? ""
 const cwd: string = input.cwd ?? process.cwd()
 
 if (!GIT_COMMIT_RE.test(command)) process.exit(0)
+
+// ── Trunk mode bypass ────────────────────────────────────────────────────────
+const projectSettings = await readProjectSettings(cwd)
+if (projectSettings?.trunkMode) {
+  allowPreToolUse("Trunk mode enabled — direct commit to default branch allowed")
+}
 
 // ── Check current branch ──────────────────────────────────────────────────────
 let currentBranch: string

@@ -140,7 +140,7 @@ body::before {
 }
 
 #app {
-  min-height: 100dvh;
+  height: 100dvh;
   width: 100%;
   display: flex;
   justify-content: center;

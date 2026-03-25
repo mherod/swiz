@@ -37,10 +37,10 @@ async function main() {
         "your next message demonstrates corrected behavior through action, not words."
     )
     const sessionId = (input.session_id as string) ?? ""
-    // If auto-steer is available, allow the call and let the steering prompt guide correction.
-    // If not, deny as usual — the agent gets the reason in the denial response.
+    // Auto-steer delivers the message — allow silently to avoid duplicate guidance.
+    // If auto-steer unavailable, deny as usual.
     if (sessionId && (await scheduleAutoSteer(sessionId, reason))) {
-      allowPreToolUse(reason)
+      allowPreToolUse("")
     }
     denyPreToolUse(reason)
   }
