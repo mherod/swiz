@@ -270,10 +270,19 @@ describe("agents.ts", () => {
       expect(result).toBe("BeforeTool")
     })
 
-    it("translates stop event for Codex", () => {
+    it("translates stop event for Codex to shipped Stop", () => {
       const codex = getAgent("codex")!
-      const result = translateEvent("stop", codex)
-      expect(result).toBe("AfterAgent")
+      expect(translateEvent("stop", codex)).toBe("Stop")
+    })
+
+    it("translates userPromptSubmit for Codex to shipped UserPromptSubmit", () => {
+      const codex = getAgent("codex")!
+      expect(translateEvent("userPromptSubmit", codex)).toBe("UserPromptSubmit")
+    })
+
+    it("translates sessionStart for Codex to shipped SessionStart", () => {
+      const codex = getAgent("codex")!
+      expect(translateEvent("sessionStart", codex)).toBe("SessionStart")
     })
 
     it("returns canonical event for unknown events", () => {
@@ -387,9 +396,9 @@ describe("agents.ts", () => {
       })
     })
 
-    it("codex does not have preToolUse in mapping (uses different name)", () => {
+    it("codex maps preToolUse to internal BeforeToolUse (not user hooks.json key)", () => {
       const codex = getAgent("codex")!
-      expect(codex.eventMap.preToolUse).toBeDefined()
+      expect(codex.eventMap.preToolUse).toBe("BeforeToolUse")
     })
 
     it("gemini marks subagent lifecycle events unsupported", () => {

@@ -74,11 +74,11 @@ The canonical manifest uses neutral names. At install time, `agents.ts` translat
 
 | Event | Claude Code | Cursor | Gemini CLI | Codex CLI |
 |-------|------------|--------|------------|-----------|
-| Before tool use | `PreToolUse` | `preToolUse` | `BeforeTool` | — (planned) |
-| After tool use | `PostToolUse` | `postToolUse` | `AfterTool` | `AfterToolUse` |
-| Stop / completion | `Stop` | `stop` | `AfterAgent` | `AfterAgent` |
-| Session start | `SessionStart` | `sessionStart` | `SessionStart` | — |
-| User prompt | `UserPromptSubmit` | `beforeSubmitPrompt` | `BeforeAgent` | — |
+| Before tool use | `PreToolUse` | `preToolUse` | `BeforeTool` | `BeforeToolUse` (internal) |
+| After tool use | `PostToolUse` | `postToolUse` | `AfterTool` | `AfterToolUse` (internal) |
+| Stop / completion | `Stop` | `stop` | `AfterAgent` | `Stop` |
+| Session start | `SessionStart` | `sessionStart` | `SessionStart` | `SessionStart` |
+| User prompt | `UserPromptSubmit` | `beforeSubmitPrompt` | `BeforeAgent` | `UserPromptSubmit` |
 
 Hook scripts use equivalence sets from `hook-utils.ts` (`isShellTool("run_shell_command")` returns `true`) so they work regardless of which agent's name lands in the payload.
 
@@ -651,7 +651,7 @@ swiz/
     └── *.ts                  # 78 hook scripts (all TypeScript)
 ```
 
-The canonical hook manifest lives in `src/manifest.ts`. Each hook group specifies an event, an optional tool matcher, and a list of scripts. At install time, `agents.ts` translates matchers (`Bash` → `Shell` for Cursor, `Bash` → `run_shell_command` for Gemini) and events (`Stop` → `stop` for Cursor, `Stop` → `AfterAgent` for Gemini), then generates the correct config structure per agent.
+The canonical hook manifest lives in `src/manifest.ts`. Each hook group specifies an event, an optional tool matcher, and a list of scripts. At install time, `agents.ts` translates matchers (`Bash` → `Shell` for Cursor, `Bash` → `run_shell_command` for Gemini) and events (`Stop` → `stop` for Cursor, `Stop` → `AfterAgent` for Gemini, `Stop` → `Stop` for Codex user hooks), then generates the correct config structure per agent.
 
 Hook scripts use the equivalence sets from `hook-utils.ts` (e.g. `isShellTool("run_shell_command")` returns `true`) so they work regardless of which agent's tool name is in the payload.
 
@@ -659,7 +659,7 @@ Hook scripts use the equivalence sets from `hook-utils.ts` (e.g. `isShellTool("r
 
 **Cursor CLI** — only `beforeShellExecution` and `afterShellExecution` events fire. All other hook events (`preToolUse`, `postToolUse`, `stop`, `sessionStart`, `beforeSubmitPrompt`, etc.) are silently ignored. This means swiz event hooks only work in the **Cursor IDE**, not when running `cursor` in the terminal. **Workaround**: `swiz shim install` adds shell-level interception that catches banned commands regardless of which agent runs them. Full CLI hook parity is on Cursor's roadmap with no ETA. [Forum thread](https://forum.cursor.com/t/cursor-cli-doesnt-send-all-events-defined-in-hooks/148316).
 
-**Codex CLI** — has `AfterAgent` and `AfterToolUse` hook events in its Rust crate, but no user-facing config file for hooks yet. Tool name mappings are tracked and ready for when user-configurable hooks ship.
+**Codex CLI** — hooks.json (v0.116.0+) uses `SessionStart`, `Stop`, and `UserPromptSubmit`. Tool-use hook types still use internal Rust names (`BeforeToolUse`, `AfterToolUse`) and are not those user-facing keys yet. Swiz keeps `hooksConfigurable: false` until Codex documents a stable settings path for installing hook commands.
 
 **Claude Code settings revert** — a running Claude Code process watches `~/.claude/settings.json` and may revert writes within ~1.5 seconds. Close all Claude Code sessions before running `swiz install`, or the changes won't persist.
 

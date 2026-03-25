@@ -32,9 +32,13 @@ export interface AgentDef {
 }
 
 // ─── Codex hooks status ─────────────────────────────────────────────────────
-// Codex has AfterAgent and AfterToolUse events in its Rust hooks crate, but
-// no user-facing config file for hooks yet (only programmatic Rust hooks).
-// We include it here for tool name mapping and forward compatibility.
+// Codex hooks engine (v0.116.0+) ships user-facing hook events in hooks.json:
+//   SessionStart, Stop, UserPromptSubmit (see openai/codex#13276).
+// Rust-side identifiers (BeforeToolUse, AfterToolUse, …) still exist internally
+// but are not those JSON keys. `hooksConfigurable` stays false until Codex
+// documents a stable user settings path for hooks; eventMap values below match
+// shipped names where applicable and keep internal names for other canonical
+// events until they appear in the user schema.
 
 export const AGENTS: AgentDef[] = [
   {
@@ -154,13 +158,13 @@ export const AGENTS: AgentDef[] = [
       NotebookEdit: "apply_patch",
     },
     eventMap: {
-      stop: "AfterAgent",
-      postToolUse: "AfterToolUse",
-      // Codex does not yet support pre-tool or session hooks
-      preToolUse: "BeforeToolUse",
+      stop: "Stop",
       sessionStart: "SessionStart",
+      userPromptSubmit: "UserPromptSubmit",
+      // Not in user hooks.json schema as of v0.116+ — internal / future wiring
+      postToolUse: "AfterToolUse",
+      preToolUse: "BeforeToolUse",
       sessionEnd: "SessionEnd",
-      userPromptSubmit: "BeforeAgent",
       preCompact: "PreCompress",
     },
   },

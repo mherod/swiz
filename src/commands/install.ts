@@ -343,7 +343,9 @@ function collectCommands(hooks: Record<string, unknown>): Set<string> {
 
 function logUnconfigurableAgent(agent: AgentDef): void {
   console.log(`  ${BOLD}${agent.name}${RESET} → ${YELLOW}hooks not yet user-configurable${RESET}`)
-  console.log(`  ${DIM}${agent.name} has hooks infrastructure (AfterAgent, AfterToolUse) but no`)
+  console.log(
+    `  ${DIM}${agent.name} ships user hook events (Stop, UserPromptSubmit, SessionStart) plus internal tool hooks (BeforeToolUse, AfterToolUse) but no`
+  )
   console.log(
     `  settings file format for user hooks. Tool mappings are tracked for when this ships.${RESET}\n`
   )
