@@ -7,11 +7,13 @@ import {
   DaemonBackedIssueStore,
   DEFAULT_TTL_MS,
   type GitHubClient,
+  getIssueStore,
   ghListToRestFallback,
   IssueStore,
   type IssueStoreReader,
   replayPendingMutations,
   resetDaemonBackedStore,
+  resetIssueStore,
   syncUpstreamState,
   tryRestFallback,
 } from "./issue-store.ts"
@@ -1381,6 +1383,29 @@ describe("IssueStoreReader", () => {
     } finally {
       store.close()
     }
+  })
+
+  test("createNoOpStore returns empty IssueStoreReader via asReader()", async () => {
+    resetIssueStore()
+
+    // Bun SQLite cannot open a directory as a database file; this forces
+    // getIssueStore() to fall back to createNoOpStore().
+    const dbPath = join(
+      tmpdir(),
+      `swiz-noop-dbdir-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    )
+    mkdirSync(dbPath, { recursive: true })
+
+    const store = getIssueStore(dbPath)
+    const reader = store.asReader()
+
+    expect(await reader.listIssues("owner/repo")).toEqual([])
+    expect(await reader.listPullRequests("owner/repo")).toEqual([])
+    expect(await reader.getIssue("owner/repo", 1)).toBeNull()
+    expect(await reader.getPullRequest("owner/repo", 1)).toBeNull()
+    expect(await reader.getCiStatus("owner/repo", "sha")).toBeNull()
+    expect(await reader.getCiBranchRuns("owner/repo", "main")).toBeNull()
+    expect(await reader.getPrBranchDetail("owner/repo", "feat/a")).toBeNull()
   })
 })
 

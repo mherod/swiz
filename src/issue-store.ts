@@ -1647,6 +1647,27 @@ function createNoOpStore(): IssueStore {
   const handler: ProxyHandler<IssueStore> = {
     get(_target, prop) {
       if (prop === "close") return () => {}
+      // When SQLite is unavailable, callers may still go through the reader
+      // abstraction (`getIssueStoreReader()` → `store.asReader()`).
+      // Ensure `asReader()` returns an `IssueStoreReader` with empty responses.
+      if (prop === "asReader") {
+        return (): IssueStoreReader => ({
+          listIssues: async <T = unknown>(_repo: string): Promise<T[]> => [],
+          listPullRequests: async <T = unknown>(_repo: string): Promise<T[]> => [],
+          getIssue: async <T = unknown>(_repo: string, _number: number): Promise<T | null> => null,
+          getPullRequest: async <T = unknown>(_repo: string, _number: number): Promise<T | null> =>
+            null,
+          getCiStatus: async <T = unknown>(_repo: string, _sha: string): Promise<T | null> => null,
+          getCiBranchRuns: async <T = unknown>(
+            _repo: string,
+            _branch: string
+          ): Promise<T[] | null> => null,
+          getPrBranchDetail: async <T = unknown>(
+            _repo: string,
+            _branch: string
+          ): Promise<T | null> => null,
+        })
+      }
       if (READ_LIST_METHODS.has(prop as string)) {
         return (..._args: unknown[]) => {
           suppressedOps++
