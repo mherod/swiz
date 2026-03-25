@@ -36,12 +36,12 @@ async function writeInstalledPlugins(homeDir: string, payload: unknown): Promise
 
 describe("swiz plugins", () => {
   afterEach(() => {
-    delete process.env.HOME
+    delete process.env.SWIZ_CLAUDE_HOME
   })
 
   test("list --json returns installed plugins", async () => {
     const home = await createTempDir()
-    process.env.HOME = home
+    process.env.SWIZ_CLAUDE_HOME = home
     await writeInstalledPlugins(home, {
       version: 1,
       plugins: {
@@ -62,7 +62,7 @@ describe("swiz plugins", () => {
 
   test("info errors on ambiguous plugin name", async () => {
     const home = await createTempDir()
-    process.env.HOME = home
+    process.env.SWIZ_CLAUDE_HOME = home
     await writeInstalledPlugins(home, {
       version: 1,
       plugins: {
@@ -76,7 +76,7 @@ describe("swiz plugins", () => {
 
   test("uninstall removes install directory and registry entry", async () => {
     const home = await createTempDir()
-    process.env.HOME = home
+    process.env.SWIZ_CLAUDE_HOME = home
     const installPath = join(home, ".claude/plugins/cache/alpha")
     await mkdir(installPath, { recursive: true })
     await Bun.write(join(installPath, "file.txt"), "x")

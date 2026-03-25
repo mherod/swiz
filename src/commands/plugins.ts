@@ -33,6 +33,8 @@ function splitPluginKey(key: string): { name: string; marketplace: string | null
 }
 
 function pluginDir(): string {
+  const override = process.env.SWIZ_CLAUDE_HOME
+  if (override && override.length > 0) return join(override, ".claude", "plugins")
   return join(getHomeDirWithFallback(""), ".claude", "plugins")
 }
 
