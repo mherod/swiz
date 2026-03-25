@@ -757,7 +757,13 @@ export async function hasSessionTasksDir(
 }
 
 // ─── Subject fingerprinting (re-exported from src/) ─────────────────────
-export { computeSubjectFingerprint, stemWord } from "../../src/subject-fingerprint.ts"
+export {
+  computeSubjectFingerprint,
+  normalizeSubject,
+  significantWords,
+  stemWord,
+  subjectsOverlap,
+} from "../../src/subject-fingerprint.ts"
 
 import { computeSubjectFingerprint } from "../../src/subject-fingerprint.ts"
 

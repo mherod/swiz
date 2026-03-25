@@ -287,6 +287,43 @@ export function stemWord(word: string): string {
  * Two subjects describing the same work produce the same fingerprint
  * regardless of word order, inflection, or synonym choice.
  */
+// ─── Subject text analysis ──────────────────────────────────────────────
+
+/** Lowercase, strip punctuation, collapse whitespace for fuzzy comparison. */
+export function normalizeSubject(subject: string): string {
+  return subject
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+/** Extract significant words (skip stop words and short tokens). */
+export function significantWords(normalized: string): Set<string> {
+  return new Set(
+    normalized.split(" ").filter((w) => w.length > 2 && !FINGERPRINT_STOP_WORDS.has(w))
+  )
+}
+
+/**
+ * Two subjects overlap if they share ≥50% of their significant words.
+ * This catches cases like "Push backward-compat error commit" vs
+ * "Push backward-compat commit" without false-positiving on unrelated tasks.
+ */
+export function subjectsOverlap(a: string, b: string): boolean {
+  const wordsA = significantWords(a)
+  const wordsB = significantWords(b)
+  if (wordsA.size === 0 || wordsB.size === 0) return false
+  let overlap = 0
+  for (const w of wordsA) {
+    if (wordsB.has(w)) overlap++
+  }
+  const minSize = Math.min(wordsA.size, wordsB.size)
+  return overlap / minSize >= 0.5
+}
+
+// ─── Fingerprint ────────────────────────────────────────────────────────────
+
 export function computeSubjectFingerprint(subject: string): string {
   const normalized = subject
     .toLowerCase()

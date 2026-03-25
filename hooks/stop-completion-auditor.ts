@@ -20,61 +20,14 @@ import {
   hasSessionTasksDir,
   isIncompleteTaskStatus,
   isTaskCreateTool,
+  normalizeSubject,
   readSessionTasks,
   type SessionTask,
+  subjectsOverlap,
   type TranscriptSummary,
 } from "./utils/hook-utils.ts"
 
 const TOOL_CALL_THRESHOLD = 10
-
-// ── Subject deduplication helpers ──────────────────────────────────────────
-
-/** Lowercase, strip punctuation, collapse whitespace for fuzzy comparison. */
-export function normalizeSubject(subject: string): string {
-  return subject
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-}
-
-/** Extract significant words (skip stop words and short tokens). */
-export function significantWords(normalized: string): Set<string> {
-  const STOP = new Set([
-    "the",
-    "a",
-    "an",
-    "and",
-    "or",
-    "for",
-    "to",
-    "in",
-    "of",
-    "on",
-    "with",
-    "is",
-    "was",
-    "be",
-  ])
-  return new Set(normalized.split(" ").filter((w) => w.length > 2 && !STOP.has(w)))
-}
-
-/**
- * Two subjects overlap if they share ≥50% of their significant words.
- * This catches cases like "Push backward-compat error commit" vs
- * "Push backward-compat commit" without false-positiving on unrelated tasks.
- */
-export function subjectsOverlap(a: string, b: string): boolean {
-  const wordsA = significantWords(a)
-  const wordsB = significantWords(b)
-  if (wordsA.size === 0 || wordsB.size === 0) return false
-  let overlap = 0
-  for (const w of wordsA) {
-    if (wordsB.has(w)) overlap++
-  }
-  const minSize = Math.min(wordsA.size, wordsB.size)
-  return overlap / minSize >= 0.5
-}
 
 /**
  * Extract sibling session IDs from the same project directory.
