@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { useTempDir } from "./utils/test-utils.ts"
+import { type HookResult, useTempDir } from "./utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-sandboxed-edits.ts"
 
@@ -45,12 +45,6 @@ async function initGitRepo(dir: string, remoteUrl?: string): Promise<void> {
   if (remoteUrl) {
     await run("remote", "add", "origin", remoteUrl)
   }
-}
-
-interface HookResult {
-  exitCode: number | null
-  stdout: string
-  json: Record<string, unknown> | null
 }
 
 async function runHook(
@@ -99,7 +93,10 @@ async function runHook(
   void proc.stdin.write(payload)
   void proc.stdin.end()
 
-  const stdout = await new Response(proc.stdout).text()
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
 
   let json: Record<string, unknown> | null = null
@@ -107,7 +104,7 @@ async function runHook(
     if (stdout.trim()) json = JSON.parse(stdout.trim())
   } catch {}
 
-  return { exitCode: proc.exitCode, stdout: stdout.trim(), json }
+  return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, json }
 }
 
 describe("pretooluse-sandboxed-edits", () => {

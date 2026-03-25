@@ -53,6 +53,8 @@ export interface HookResult {
   exitCode: number | null
   stdout: string
   stderr: string
+  /** Parsed JSON from stdout, if parseable. */
+  json?: Record<string, unknown> | null
   decision?: string
   reason?: string
 }
@@ -86,17 +88,19 @@ export async function runHook(
 
   let decision: string | undefined
   let reason: string | undefined
+  let json: Record<string, unknown> | null = null
 
   if (stdout.trim()) {
     try {
       const parsed = JSON.parse(stdout.trim())
+      json = parsed as Record<string, unknown>
       const hso = parsed.hookSpecificOutput as Record<string, unknown> | undefined
       decision = (hso?.permissionDecision ?? parsed.decision) as string | undefined
       reason = (hso?.permissionDecisionReason ?? parsed.reason) as string | undefined
     } catch {}
   }
 
-  return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, decision, reason }
+  return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, json, decision, reason }
 }
 
 /**

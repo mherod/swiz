@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { getSessionTasksDir } from "./utils/hook-utils.ts"
-import { createEnforcementProjectDir, useTempDir } from "./utils/test-utils.ts"
+import { createEnforcementProjectDir, type HookResult, useTempDir } from "./utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-update-memory-enforcement.ts"
 const REMINDER_FRAGMENT =
@@ -15,12 +15,6 @@ async function createTranscript(dir: string, lines: unknown[]): Promise<string> 
   const path = join(dir, "transcript.jsonl")
   await writeFile(path, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`)
   return path
-}
-
-interface HookResult {
-  exitCode: number | null
-  stdout: string
-  json: Record<string, unknown> | null
 }
 
 async function runHook(
@@ -36,7 +30,10 @@ async function runHook(
   void proc.stdin.write(JSON.stringify(stdinPayload))
   void proc.stdin.end()
 
-  const stdout = await new Response(proc.stdout).text()
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
   await proc.exited
 
   let json: Record<string, unknown> | null = null
@@ -44,7 +41,7 @@ async function runHook(
     if (stdout.trim()) json = JSON.parse(stdout.trim())
   } catch {}
 
-  return { exitCode: proc.exitCode, stdout: stdout.trim(), json }
+  return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, json }
 }
 
 function hookFeedback(text: string): Record<string, unknown> {

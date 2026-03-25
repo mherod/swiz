@@ -10,18 +10,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { projectKeyFromCwd } from "../src/transcript-utils.ts"
 import { getSessionCompactSnapshotPath, getSessionTasksDir } from "./utils/hook-utils.ts"
-import { useTempDir, writeTask } from "./utils/test-utils.ts"
+import { type HookResult, useTempDir, writeTask } from "./utils/test-utils.ts"
 
 // ─── Shared test infrastructure ─────────────────────────────────────────────
 
 const { create: createTempDir } = useTempDir("swiz-pospath-")
-
-interface HookResult {
-  exitCode: number | null
-  stdout: string
-  stderr: string
-  json: Record<string, unknown> | null
-}
 
 async function runHook(
   script: string,

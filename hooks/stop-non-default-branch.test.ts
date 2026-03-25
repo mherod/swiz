@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { useTempDir } from "./utils/test-utils.ts"
+import { type HookResult, useTempDir } from "./utils/test-utils.ts"
 
 async function enableTrunkMode(dir: string): Promise<void> {
   await mkdir(join(dir, ".swiz"), { recursive: true })
@@ -24,12 +24,6 @@ async function createGitRepo(branchName = "main"): Promise<string> {
   return dir
 }
 
-interface HookResult {
-  exitCode: number | null
-  stdout: string
-  json: Record<string, unknown> | null
-}
-
 async function runHook(cwd: string): Promise<HookResult> {
   const payload = JSON.stringify({ session_id: "test-session", cwd, transcript_path: "" })
   const proc = Bun.spawn(["bun", HOOK], {
@@ -41,7 +35,7 @@ async function runHook(cwd: string): Promise<HookResult> {
   void proc.stdin.write(payload)
   void proc.stdin.end()
 
-  const [stdout] = await Promise.all([
+  const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
   ])
@@ -52,7 +46,7 @@ async function runHook(cwd: string): Promise<HookResult> {
     if (stdout.trim()) json = JSON.parse(stdout.trim())
   } catch {}
 
-  return { exitCode: proc.exitCode, stdout: stdout.trim(), json }
+  return { exitCode: proc.exitCode, stdout: stdout.trim(), stderr, json }
 }
 
 describe("stop-non-default-branch", () => {
