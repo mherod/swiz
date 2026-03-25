@@ -63,12 +63,11 @@ function syncCiRuns(
 export async function syncUpstreamState(
   repo: string,
   cwd: string,
-  store?: IssueStore,
-  client?: GitHubClient
+  opts?: { store?: IssueStore; client?: GitHubClient }
 ): Promise<UpstreamSyncResult> {
   const { getIssueStore, GhCliGitHubClient } = await import("./issue-store.ts")
-  const s = store ?? getIssueStore()
-  const gh = client ?? new GhCliGitHubClient()
+  const s = opts?.store ?? getIssueStore()
+  const gh = opts?.client ?? new GhCliGitHubClient()
 
   const result: UpstreamSyncResult = {
     issues: { upserted: 0, removed: 0 },

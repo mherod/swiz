@@ -856,12 +856,11 @@ function syncCiRuns(
 export async function syncUpstreamState(
   repo: string,
   cwd: string,
-  store?: IssueStore,
-  client?: GitHubClient
+  opts?: { store?: IssueStore; client?: GitHubClient }
 ): Promise<UpstreamSyncResult> {
   // Implementation delegated to the dedicated upstream-sync module.
   const mod = await import("./issue-store-sync.ts")
-  return await mod.syncUpstreamState(repo, cwd, store, client)
+  return await mod.syncUpstreamState(repo, cwd, opts)
 }
 
 /** Detect GraphQL rate-limit errors in gh CLI stderr output. */

@@ -717,7 +717,7 @@ describe("syncUpstreamState", () => {
     }
 
     try {
-      const result = await syncUpstreamState("owner/repo", "/tmp", store)
+      const result = await syncUpstreamState("owner/repo", "/tmp", { store })
 
       expect(result.issues.upserted).toBe(1)
       expect(result.pullRequests.upserted).toBe(1)
@@ -1125,7 +1125,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
     }
 
     try {
-      const result = await syncUpstreamState("test/repo", "/tmp", store, mockClient)
+      const result = await syncUpstreamState("test/repo", "/tmp", { store, client: mockClient })
       expect(result.issues.upserted).toBe(1)
       expect(result.pullRequests.upserted).toBe(1)
       expect(result.ciStatuses.upserted).toBe(0)
@@ -1145,7 +1145,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
     }
 
     try {
-      const result = await syncUpstreamState("test/repo", "/tmp", store, nullClient)
+      const result = await syncUpstreamState("test/repo", "/tmp", { store, client: nullClient })
       expect(result.issues.upserted).toBe(0)
       expect(result.pullRequests.upserted).toBe(0)
       expect(result.ciStatuses.upserted).toBe(0)
@@ -1179,7 +1179,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
     }
 
     try {
-      const result = await syncUpstreamState("test/repo", "/tmp", store, client)
+      const result = await syncUpstreamState("test/repo", "/tmp", { store, client })
       expect(result.issues.upserted).toBe(1)
       expect(result.issues.removed).toBeGreaterThanOrEqual(1)
       expect(result.pullRequests.upserted).toBe(1)
@@ -1219,7 +1219,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
     }
 
     try {
-      const result = await syncUpstreamState("test/repo", "/tmp", store, client)
+      const result = await syncUpstreamState("test/repo", "/tmp", { store, client })
       expect(result.ciStatuses.upserted).toBe(2)
       const ci = store.getCiStatus<{ run_id: number; conclusion: string }>("test/repo", "abc123")
       expect(ci?.run_id).toBe(999)
@@ -1246,7 +1246,7 @@ describe("syncUpstreamState with mock GitHubClient", () => {
     }
 
     try {
-      const result = await syncUpstreamState("test/repo", "/tmp", store, client)
+      const result = await syncUpstreamState("test/repo", "/tmp", { store, client })
       // 0 open issues upserted, but stale rows should be purged
       expect(result.issues.upserted).toBe(0)
       expect(result.issues.removed).toBe(2)

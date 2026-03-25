@@ -272,6 +272,28 @@ describe("offensive-language-patterns", () => {
       const m = findLazyPattern("I'll implement that in the next session.")
       expect(m?.category).toBe("premature_completion")
     })
+    test("matches 'not something to squeeze in at session end'", () => {
+      const m = findLazyPattern(
+        "That's a substantial refactor, not something to squeeze in at session end."
+      )
+      expect(m?.category).toBe("premature_completion")
+    })
+    test("matches 'leave it open for a dedicated session'", () => {
+      const m = findLazyPattern("The responsible path is to leave it open for a dedicated session.")
+      expect(m?.category).toBe("premature_completion")
+    })
+    test("matches 'responsible action is to leave it open'", () => {
+      const m = findLazyPattern(
+        "The responsible action is to leave the issue open until we have bandwidth."
+      )
+      expect(m?.category).toBe("premature_completion")
+    })
+    test("matches multi-session refactor paired with session-boundary deferral (verbatim-style)", () => {
+      const m = findLazyPattern(
+        "This issue is labeled needs-breakdown and requires reducing a 2567-line file below 500 lines with at least 3 check extractions. That's a substantial multi-session refactor, not something to squeeze in at session end. The responsible action is to leave it open for a dedicated session"
+      )
+      expect(m?.category).toBe("premature_completion")
+    })
   })
 
   // ── Task cancellation ──────────────────────────────────────────────────────

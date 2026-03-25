@@ -128,7 +128,7 @@ export class UpstreamSyncRegistry {
     entry.syncing = true
     try {
       const result = await Promise.race([
-        syncUpstreamState(entry.repo, entry.cwd, this.store ?? undefined),
+        syncUpstreamState(entry.repo, entry.cwd, { store: this.store ?? undefined }),
         new Promise<UpstreamSyncResult>((_, reject) =>
           setTimeout(() => reject(new Error("sync timeout")), this.timeoutMs)
         ),
