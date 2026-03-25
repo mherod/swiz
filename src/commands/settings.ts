@@ -263,35 +263,41 @@ function printBooleanSettings(rows: BoolSettingRow[], effective: EffectiveSwizSe
   }
 }
 
-const GLOBAL_BOOL_ROWS: BoolSettingRow[] = [
-  ["pr-merge-mode:", "prMergeMode", "global"],
-  ["critiques:", "critiquesEnabled", "global"],
-  ["push-gate:", "pushGate", "global"],
-  ["sandboxed-edits:", "sandboxedEdits", "global"],
-  ["speak:", "speak", "global"],
-  ["auto-steer:", "autoSteer", "global"],
-  ["update-memory-footer:", "updateMemoryFooter", "global"],
-  ["git-status-gate:", "gitStatusGate", "global"],
-  ["non-default-branch-gate:", "nonDefaultBranchGate", "global"],
-  ["ignore-ci:", "ignoreCi", "global"],
-  ["github-ci-gate:", "githubCiGate", "global"],
-  ["changes-requested-gate:", "changesRequestedGate", "global"],
-  ["personal-repo-issues-gate:", "personalRepoIssuesGate", "global"],
-  ["issue-close-gate:", "issueCloseGate", "global"],
-  ["quality-checks-gate:", "qualityChecksGate", "global"],
-]
+/** Excluded from auto-generated boolean rows — printed with custom formatting. */
+const SPECIAL_BOOL_KEYS = new Set(["autoContinue", "strictNoDirectMain", "trunkMode"])
 
+/** Derive global boolean display rows from SETTINGS_REGISTRY. */
+const GLOBAL_BOOL_ROWS: BoolSettingRow[] = SETTINGS_REGISTRY.filter(
+  (d) => d.kind === "boolean" && d.scopes.includes("global") && !SPECIAL_BOOL_KEYS.has(d.key)
+).map((d) => [`${d.aliases[0]}:`, d.key as keyof EffectiveSwizSettings, "global"])
+
+/** Derive global numeric/string display from SETTINGS_REGISTRY. */
 function printNumericGlobalSettings(effective: EffectiveSwizSettings): void {
-  const minutesOrDisabled = (v: number) => (v > 0 ? `${v} minutes` : "disabled")
-  console.log(`  pr-age-gate:     ${minutesOrDisabled(effective.prAgeGateMinutes)} (global)`)
-  console.log(`  push-cooldown:   ${minutesOrDisabled(effective.pushCooldownMinutes)} (global)`)
-  console.log(`  narrator-voice:  ${effective.narratorVoice || "system default"} (global)`)
-  console.log(
-    `  narrator-speed:  ${effective.narratorSpeed > 0 ? `${effective.narratorSpeed} wpm` : "system default"} (global)`
-  )
-  console.log(`  memory-line-threshold: ${effective.memoryLineThreshold} (global)`)
-  console.log(`  memory-word-threshold: ${effective.memoryWordThreshold} (global)`)
-  console.log(`  large-file-size-kb: ${effective.largeFileSizeKb} (global)`)
+  for (const def of SETTINGS_REGISTRY) {
+    if (def.kind !== "numeric" && def.kind !== "string") continue
+    if (!def.scopes.includes("global")) continue
+    const key = def.key as keyof EffectiveSwizSettings
+    const value = effective[key]
+    const label = def.aliases[0] ?? def.key
+    if (def.kind === "numeric") {
+      const numVal = value as number
+      const placeholder = def.docs?.valuePlaceholder
+      const display =
+        placeholder === "minutes"
+          ? numVal > 0
+            ? `${numVal} minutes`
+            : "disabled"
+          : placeholder === "wpm"
+            ? numVal > 0
+              ? `${numVal} wpm`
+              : "system default"
+            : String(numVal)
+      console.log(`  ${label}: ${display} (global)`)
+    } else {
+      const strVal = value as string
+      console.log(`  ${label}: ${strVal || "system default"} (global)`)
+    }
+  }
 }
 
 function printGlobalSettings(

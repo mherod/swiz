@@ -141,8 +141,8 @@ describe("swiz settings", () => {
     })
 
     test("shows default narrator-voice and narrator-speed", () => {
-      expect(result.stdout).toContain("narrator-voice:  system default")
-      expect(result.stdout).toContain("narrator-speed:  system default")
+      expect(result.stdout).toContain("narrator-voice: system default")
+      expect(result.stdout).toContain("narrator-speed: system default")
     })
 
     test("shows default project policy", () => {
@@ -416,8 +416,8 @@ describe("swiz settings", () => {
       runSwiz(["settings"], voiceHome),
       runSwiz(["settings"], speedHome),
     ])
-    expect(voiceResult.stdout).toContain("narrator-voice:  Alex")
-    expect(speedResult.stdout).toContain("narrator-speed:  180 wpm")
+    expect(voiceResult.stdout).toContain("narrator-voice: Alex")
+    expect(speedResult.stdout).toContain("narrator-speed: 180 wpm")
   }, 30_000)
 
   // ── Rejection tests: run concurrently ─────────────────────────────────
@@ -607,8 +607,8 @@ describe("swiz settings", () => {
     expect(result.stdout).toContain("auto-continue:   disabled")
     expect(result.stdout).toMatch(/pr-merge-mode:\s+enabled/)
     expect(result.stdout).toMatch(/speak:\s+enabled/)
-    expect(result.stdout).toContain("narrator-voice:  system default")
-    expect(result.stdout).toContain("narrator-speed:  system default")
+    expect(result.stdout).toContain("narrator-voice: system default")
+    expect(result.stdout).toContain("narrator-speed: system default")
   })
 
   test("shows project policy section in settings output", async () => {
