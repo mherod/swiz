@@ -489,6 +489,28 @@ describe("replayPendingMutations", () => {
 
   test("bumps attempt count on failed replay", async () => {
     const store = createStore()
+    const releaseMutex = await lockBunSpawn()
+    const originalSpawn = Bun.spawn
+    // @ts-expect-error - Mocking Bun.spawn
+    Bun.spawn = () => {
+      const exited = new Promise<void>((resolve) => resolve())
+      return {
+        exited,
+        exitCode: 1,
+        stdout: new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode(""))
+            c.close()
+          },
+        }),
+        stderr: new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode("mock failure"))
+            c.close()
+          },
+        }),
+      }
+    }
     try {
       store.queueMutation("owner/repo", { type: "close", number: 999999 })
       const result = await replayPendingMutations("owner/repo", "/tmp", store)
@@ -498,7 +520,9 @@ describe("replayPendingMutations", () => {
       expect(after).toHaveLength(1)
       expect(after[0]!.attempts).toBe(1)
     } finally {
+      Bun.spawn = originalSpawn
       store.close()
+      releaseMutex()
     }
   })
 
