@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { mkdir, readFile, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { countEvidenceFields } from "../tasks/evidence-validator.ts"
 import { projectKeyFromCwd } from "../transcript-utils.ts"
 import {
   compareTaskIds,
@@ -242,12 +243,14 @@ describe("validateEvidence", () => {
     expect(error).toContain("Invalid commit SHA")
   })
 
-  it("gives a delimiter hint when a known evidence prefix follows commit: without --", () => {
-    const error = validateEvidence("commit:02f30fb note:CI passed")
-    expect(error).not.toBeNull()
-    expect(error).toContain("Cannot mix evidence types without a delimiter")
-    expect(error).toContain("--")
-    expect(error).toContain("note:")
+  it("accepts commit:<sha> followed by note: without an explicit delimiter", () => {
+    expect(validateEvidence("commit:02f30fb note:CI passed")).toBeNull()
+  })
+
+  it("counts both commit and note fields when space-delimited without --", () => {
+    const fields = countEvidenceFields("commit:02f30fb note:CI passed")
+    expect(fields).toContain("commit")
+    expect(fields).toContain("note")
   })
 
   it("rejects bare commit: with no SHA", () => {

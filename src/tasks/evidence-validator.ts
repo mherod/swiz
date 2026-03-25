@@ -55,16 +55,47 @@ const PR_PREFIX_RE = /^pr\s*:\s*/i
 const PR_NUMBER_RE = /^#?\d+$/
 const PR_URL_RE = /^https?:\/\/github\.com\/.+\/pull\/\d+/i
 
+const SEGMENT_SPLIT_RE = /\s*(?:—|--|;|\|)\s*|\s*,\s+/
+const PREFIX_SHAPE_RE = /^(\w{2,20}):/
+
+/**
+ * Split evidence string into validation segments.
+ * Primary split: standard delimiters (—, --, ;, |, ", ").
+ * Secondary split: within a commit: segment, break before the first
+ * whitespace-delimited token that starts with a known evidence prefix
+ * (e.g. "commit:abc note:CI passed" → ["commit:abc", "note:CI passed"]).
+ * This lets callers omit the explicit "--" delimiter for the common two-type pattern.
+ */
+function splitEvidenceSegments(evidence: string): string[] {
+  const result: string[] = []
+  for (const seg of evidence
+    .split(SEGMENT_SPLIT_RE)
+    .map((s) => s.trim())
+    .filter(Boolean)) {
+    const commitMatch = COMMIT_PREFIX_RE.exec(seg)
+    if (commitMatch) {
+      const rest = seg.slice(commitMatch[0].length).trim()
+      const tokens = rest.split(/\s+/)
+      // Find first non-SHA token that starts with a known evidence prefix (i > 0 ensures ≥1 SHA)
+      const splitAt = tokens.findIndex(
+        (t, i) => i > 0 && !HEX_SHA_RE.test(t) && EVIDENCE_PREFIXES.some((p) => t.startsWith(p))
+      )
+      if (splitAt > 0) {
+        result.push(`commit:${tokens.slice(0, splitAt).join(" ")}`)
+        result.push(tokens.slice(splitAt).join(" "))
+        continue
+      }
+    }
+    result.push(seg)
+  }
+  return result
+}
+
 /** Split evidence on delimiters, check each segment independently, return matched field names. */
 export function countEvidenceFields(evidence: string): string[] {
-  const rawSegments = evidence
-    .split(/\s*(?:—|--|;|\|)\s*|\s*,\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-
   // Expand "commit:<sha1> <sha2> ..." into one "commit:<sha>" segment per SHA
   const segments: string[] = []
-  for (const seg of rawSegments) {
+  for (const seg of splitEvidenceSegments(evidence)) {
     const prefixMatch = COMMIT_PREFIX_RE.exec(seg)
     if (prefixMatch) {
       const rest = seg.slice(prefixMatch[0].length).trim()
@@ -86,16 +117,6 @@ export function countEvidenceFields(evidence: string): string[] {
     }
   }
   return [...foundKeys]
-}
-
-const SEGMENT_SPLIT_RE = /\s*(?:—|--|;|\|)\s*|\s*,\s+/
-const PREFIX_SHAPE_RE = /^(\w{2,20}):/
-
-function splitEvidenceSegments(evidence: string): string[] {
-  return evidence
-    .split(SEGMENT_SPLIT_RE)
-    .map((s) => s.trim())
-    .filter(Boolean)
 }
 
 function formatPrefixList(): string {
@@ -125,13 +146,6 @@ function validateCommitSegments(segments: string[]): string | null {
       return `commit: requires a hex SHA value.\n  --evidence "commit:abc123f"`
     for (const token of value.split(/\s+/)) {
       if (!HEX_SHA_RE.test(token)) {
-        if (EVIDENCE_PREFIXES.some((p) => token.startsWith(p))) {
-          return (
-            `Cannot mix evidence types without a delimiter in "${seg}".\n` +
-            `To combine multiple evidence types, separate them with "--":\n` +
-            `  --evidence "commit:abc123f -- ${token}..."`
-          )
-        }
         return `Invalid commit SHA: "${token}"\ncommit: evidence must be a 7–40 character hex SHA.\n  --evidence "commit:abc123f"`
       }
     }
