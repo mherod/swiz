@@ -116,9 +116,11 @@ interface LazyPattern {
   /** Category label for grouping in test output. */
   category: LazyCategory
   /**
-   * Optional negation guard. When set, a pattern match is suppressed if this
-   * regex also matches the same cleaned text — allowing legitimate negated
-   * phrasings (e.g. "no change is needed") to pass without triggering the pattern.
+   * Optional negation guard. When set, a match is suppressed only when this
+   * regex fires against the context window around the specific match (up to
+   * 100 chars before the match through the end of the matched substring).
+   * Scoped to the match site — a negated phrase elsewhere in the text does
+   * not suppress a separate, genuine match later in the same input.
    */
   negationPattern?: RegExp
 }
@@ -1497,11 +1499,55 @@ import {
 
 export { extractLastAssistantText, readTranscriptLines, stripQuotedText }
 
+/**
+ * Build the context window for a match at `matchIndex` with `matchLength`.
+ *
+ * Looks back from the match position to the start of the current sentence
+ * (the last `.`, `!`, `?`, or newline before the match), then extends to the
+ * end of the matched substring. Staying within the current sentence prevents
+ * a negated phrase in an earlier sentence from suppressing a genuine match
+ * later in the same text.
+ */
+function sentenceContextWindow(cleaned: string, matchIndex: number, matchLength: number): string {
+  const lookback = cleaned.slice(0, matchIndex)
+  const lastBoundary = Math.max(
+    lookback.lastIndexOf("."),
+    lookback.lastIndexOf("!"),
+    lookback.lastIndexOf("?"),
+    lookback.lastIndexOf("\n")
+  )
+  const windowStart = lastBoundary === -1 ? 0 : lastBoundary + 1
+  return cleaned.slice(windowStart, matchIndex + matchLength)
+}
+
+/**
+ * Check whether a pattern entry has any non-negated match in `cleaned`.
+ *
+ * When `negationPattern` is set, each match is tested against the sentence
+ * context window around that specific match. If negation fires, the search
+ * advances past the negated match and tries the next occurrence — so a
+ * negated phrase in an earlier sentence does not suppress a genuine match later.
+ */
+function matchesWithoutNegation(entry: LazyPattern, cleaned: string): boolean {
+  if (!entry.negationPattern) return entry.pattern.test(cleaned)
+  let offset = 0
+  while (offset < cleaned.length) {
+    const match = entry.pattern.exec(cleaned.slice(offset))
+    if (!match) return false
+    const matchIndex = match.index + offset
+    const context = sentenceContextWindow(cleaned, matchIndex, match[0].length)
+    if (!entry.negationPattern.test(context)) return true
+    // This match is negated; advance past it and try the next one.
+    offset += match.index + match[0].length
+  }
+  return false
+}
+
 /** Check text against all lazy patterns; return the first match or null. */
 export function findLazyPattern(text: string): LazyPattern | null {
   const cleaned = stripQuotedText(text)
   for (const entry of LAZY_PATTERNS) {
-    if (entry.pattern.test(cleaned) && !entry.negationPattern?.test(cleaned)) return entry
+    if (matchesWithoutNegation(entry, cleaned)) return entry
   }
   return null
 }
@@ -1512,11 +1558,7 @@ export function findAllLazyPatterns(text: string): LazyPattern[] {
   const seen = new Set<LazyCategory>()
   const matches: LazyPattern[] = []
   for (const entry of LAZY_PATTERNS) {
-    if (
-      !seen.has(entry.category) &&
-      entry.pattern.test(cleaned) &&
-      !entry.negationPattern?.test(cleaned)
-    ) {
+    if (!seen.has(entry.category) && matchesWithoutNegation(entry, cleaned)) {
       seen.add(entry.category)
       matches.push(entry)
     }

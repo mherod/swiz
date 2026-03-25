@@ -103,6 +103,16 @@ describe("offensive-language-patterns", () => {
       const m = findLazyPattern("change the threshold to something more reasonable")
       expect(m?.category).toBe("gaming")
     })
+    // ── Mixed-scenario: negated phrase elsewhere must not suppress genuine match ──
+    test("detects gaming when negated phrase precedes a separate genuine gaming phrase", () => {
+      // The old whole-text approach would suppress the genuine "lower the limit" because
+      // "no change is needed" also appears in the text. The context-aware approach
+      // scopes negation to the specific match site, so "lower the limit" is still caught.
+      const m = findLazyPattern(
+        "No change is needed to the cap. Separately, we should lower the limit to stop the block."
+      )
+      expect(m?.category).toBe("gaming")
+    })
   })
 
   // ── Reframing ──────────────────────────────────────────────────────────────
