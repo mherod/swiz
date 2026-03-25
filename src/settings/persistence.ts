@@ -5,11 +5,7 @@ import { z } from "zod"
 import { ensureGitExclude } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import type { HookDef, HookGroup } from "../manifest.ts"
-import {
-  DEFAULT_DIRTY_WORKTREE_THRESHOLD,
-  DEFAULT_MEMORY_LINE_THRESHOLD,
-  DEFAULT_MEMORY_WORD_THRESHOLD,
-} from "./resolution"
+import { deriveDefaultsFromRegistry } from "./registry"
 import {
   ALL_STATUS_LINE_SEGMENTS,
   ambitionModeSchema,
@@ -35,39 +31,15 @@ const LEGACY_DEFAULT_STATUS_LINE_SEGMENTS: readonly StatusLineSegment[] = [
   "time",
 ]
 
+/**
+ * DEFAULT_SETTINGS is derived from SETTINGS_REGISTRY defaults.
+ * Non-registry fields (statusLineSegments, sessions) are added here.
+ */
 export const DEFAULT_SETTINGS: SwizSettings = {
-  autoContinue: true,
-  critiquesEnabled: true,
-  ambitionMode: "standard",
-  collaborationMode: "auto",
-  narratorVoice: "",
-  narratorSpeed: 0,
-  prAgeGateMinutes: 10,
-  prMergeMode: true,
-  pushCooldownMinutes: 0,
-  pushGate: false,
-  sandboxedEdits: true,
-  speak: false,
-  autoSteer: false,
-  updateMemoryFooter: false,
-  gitStatusGate: true,
-  nonDefaultBranchGate: true,
-  ignoreCi: false,
-  githubCiGate: true,
-  changesRequestedGate: true,
-  personalRepoIssuesGate: true,
-  issueCloseGate: false,
-  qualityChecksGate: true,
-  strictNoDirectMain: false,
-  trunkMode: false,
-  taskDurationWarningMinutes: 10,
-  memoryLineThreshold: DEFAULT_MEMORY_LINE_THRESHOLD,
-  memoryWordThreshold: DEFAULT_MEMORY_WORD_THRESHOLD,
-  largeFileSizeKb: 500,
-  dirtyWorktreeThreshold: DEFAULT_DIRTY_WORKTREE_THRESHOLD,
+  ...deriveDefaultsFromRegistry(),
   statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
   sessions: {},
-}
+} as SwizSettings
 
 const statusLineSegmentSchema = z.enum(ALL_STATUS_LINE_SEGMENTS)
 

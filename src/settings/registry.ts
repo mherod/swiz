@@ -7,6 +7,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["auto-continue", "autocontinue", "auto_continue"],
     kind: "boolean",
     scopes: ["global", "project", "session"],
+    default: true,
     docs: {
       enableDescription: "Enable stop auto-continue behavior",
       disableDescription: "Disable stop auto-continue behavior",
@@ -17,6 +18,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["pr-merge-mode", "prmergemode", "pr_merge_mode", "pr-merge", "prmerge"],
     kind: "boolean",
     scopes: ["global", "session"],
+    default: true,
     docs: {
       enableDescription: "Enable merge-oriented PR hooks",
       disableDescription: "Disable merge-oriented PR hooks; keep creation-oriented guidance only",
@@ -27,6 +29,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["critiques-enabled", "critiquesenabled", "critiques_enabled", "critiques"],
     kind: "boolean",
     scopes: ["global"],
+    default: true,
     docs: {
       enableDescription: "Show Process/Product critique lines in auto-continue output",
       disableDescription: "Suppress critique lines and emit only next-step directive",
@@ -37,12 +40,14 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["push-gate", "pushgate", "push_gate"],
     kind: "boolean",
     scopes: ["global"],
+    default: false,
   },
   {
     key: "sandboxedEdits",
     aliases: ["sandboxed-edits", "sandboxededits", "sandboxed_edits"],
     kind: "boolean",
     scopes: ["global"],
+    default: true,
     docs: {
       enableDescription: "Block file edits outside cwd and /tmp",
       disableDescription: "Allow file edits anywhere on the filesystem",
@@ -53,6 +58,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["speak", "tts"],
     kind: "boolean",
     scopes: ["global"],
+    default: false,
     docs: {
       enableDescription: "Enable TTS narrator",
       disableDescription: "Disable TTS narrator",
@@ -63,6 +69,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["auto-steer", "autosteer", "auto_steer"],
     kind: "boolean",
     scopes: ["global"],
+    default: false,
     docs: {
       enableDescription: "Type 'Continue' into the terminal after every tool call via AppleScript",
       disableDescription: "Disable auto-steer terminal input",
@@ -78,6 +85,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     ],
     kind: "boolean",
     scopes: ["global"],
+    default: false,
     docs: {
       enableDescription: "Include update-memory guidance in ACTION REQUIRED footers",
       disableDescription: "Exclude update-memory guidance from ACTION REQUIRED footers",
@@ -88,6 +96,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["git-status-gate", "gitstatusgate", "git_status_gate", "git-status"],
     kind: "boolean",
     scopes: ["global"],
+    default: true,
   },
   {
     key: "nonDefaultBranchGate",
@@ -99,18 +108,21 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     ],
     kind: "boolean",
     scopes: ["global"],
+    default: true,
   },
   {
     key: "githubCiGate",
     aliases: ["github-ci-gate", "githubcigate", "github_ci_gate", "ci-gate"],
     kind: "boolean",
     scopes: ["global"],
+    default: true,
   },
   {
     key: "ignoreCi",
     aliases: ["ignore-ci", "ignoreci", "ignore_ci", "no-ci"],
     kind: "boolean",
     scopes: ["global"],
+    default: false,
     docs: {
       enableDescription:
         "Suppress CI interactions (no CI wait/poll, CI hooks, CI status-line data, or CI evidence gates)",
@@ -127,6 +139,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     ],
     kind: "boolean",
     scopes: ["global"],
+    default: true,
   },
   {
     key: "personalRepoIssuesGate",
@@ -138,12 +151,14 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     ],
     kind: "boolean",
     scopes: ["global"],
+    default: true,
   },
   {
     key: "issueCloseGate",
     aliases: ["issue-close-gate", "issueclosegate", "issue_close_gate", "issue-close"],
     kind: "boolean",
     scopes: ["global"],
+    default: false,
     docs: {
       enableDescription: "Block issue close commands unless explicitly allowed",
       disableDescription: "Allow issue close commands without restriction",
@@ -160,6 +175,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     ],
     kind: "boolean",
     scopes: ["global", "project"],
+    default: true,
     docs: {
       enableDescription: "Run lint and typecheck quality checks before allowing session stop",
       disableDescription: "Skip lint and typecheck quality checks on session stop",
@@ -176,12 +192,14 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     ],
     kind: "boolean",
     scopes: ["global", "project"],
+    default: false,
   },
   {
     key: "trunkMode",
     aliases: ["trunk-mode", "trunkmode", "trunk_mode", "trunk"],
     kind: "boolean",
     scopes: ["project"],
+    default: false,
     docs: {
       enableDescription: "Enable trunk-based development (push directly to default branch, no PRs)",
       disableDescription: "Disable trunk mode (use feature branches and PRs)",
@@ -192,6 +210,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["pr-age-gate", "pragegate", "pr_age_gate", "pragegateminutes", "pr-age-gate-minutes"],
     kind: "numeric",
     scopes: ["global"],
+    default: 10,
     docs: { valuePlaceholder: "minutes" },
   },
   {
@@ -204,6 +223,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     ],
     kind: "numeric",
     scopes: ["global"],
+    default: 0,
     docs: { valuePlaceholder: "minutes" },
   },
   {
@@ -217,6 +237,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     ],
     kind: "numeric",
     scopes: ["global", "project"],
+    default: 10,
     docs: { valuePlaceholder: "minutes" },
   },
   {
@@ -224,6 +245,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["narrator-speed", "narratorspeed", "narrator_speed", "speed"],
     kind: "numeric",
     scopes: ["global"],
+    default: 0,
     docs: { valuePlaceholder: "wpm" },
   },
   {
@@ -231,6 +253,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["memory-line-threshold", "memorylinethreshold", "memory_line_threshold"],
     kind: "numeric",
     scopes: ["global", "project"],
+    default: 1400,
     docs: { valuePlaceholder: "lines" },
   },
   {
@@ -238,6 +261,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["memory-word-threshold", "memorywordthreshold", "memory_word_threshold"],
     kind: "numeric",
     scopes: ["global", "project"],
+    default: 5000,
     docs: { valuePlaceholder: "words" },
   },
   {
@@ -250,6 +274,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     ],
     kind: "numeric",
     scopes: ["global", "project"],
+    default: 15,
     docs: { valuePlaceholder: "files" },
   },
   {
@@ -257,6 +282,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["large-file-size-kb", "largefilesizekb", "large_file_size_kb"],
     kind: "numeric",
     scopes: ["global", "project"],
+    default: 500,
     docs: { valuePlaceholder: "kb" },
   },
   {
@@ -283,6 +309,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["narrator-voice", "narratorvoice", "narrator_voice", "voice"],
     kind: "string",
     scopes: ["global"],
+    default: "",
     docs: { valuePlaceholder: "name" },
   },
   {
@@ -290,6 +317,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     aliases: ["ambition-mode", "ambitionmode", "ambition_mode", "ambition"],
     kind: "string",
     scopes: ["global", "project", "session"],
+    default: "standard",
     docs: { valuePlaceholder: "standard|aggressive|creative|reflective" },
     validate: (v) =>
       ambitionModeSchema.safeParse(v).success
@@ -308,6 +336,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     ],
     kind: "string",
     scopes: ["global", "project", "session"],
+    default: "auto",
     docs: { valuePlaceholder: "auto|solo|team|relaxed-collab" },
     validate: (v) =>
       collaborationModeSchema.safeParse(v).success
@@ -315,3 +344,19 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
         : `Invalid value "${v}" for collaboration-mode. Must be: ${collaborationModeSchema.options.join(" | ")}`,
   },
 ]
+
+/**
+ * Derive a defaults object from the registry. Keys with `default` defined
+ * are included; keys without (e.g. project-only strings like defaultBranch)
+ * are omitted. Consumers add non-registry fields (sessions, statusLineSegments)
+ * separately.
+ */
+export function deriveDefaultsFromRegistry(): Record<string, boolean | number | string> {
+  const defaults: Record<string, boolean | number | string> = {}
+  for (const def of SETTINGS_REGISTRY) {
+    if (def.default !== undefined) {
+      defaults[def.key] = def.default
+    }
+  }
+  return defaults
+}

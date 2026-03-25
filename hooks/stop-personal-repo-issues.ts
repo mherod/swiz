@@ -182,10 +182,6 @@ const SCORE_NORM: Record<string, number> = Object.fromEntries(
   Object.entries(LABEL_SCORE).map(([k, v]) => [normaliseLabel(k), v])
 )
 
-function scoreIssue(issue: Issue): number {
-  return (issue.labels ?? []).reduce((sum, l) => sum + (SCORE_NORM[normaliseLabel(l.name)] ?? 0), 0)
-}
-
 export interface Issue {
   number: number
   title: string
@@ -201,6 +197,23 @@ export interface PR {
   reviewDecision: string
   mergeable: string
   createdAt?: string
+}
+
+/** Open PRs that should surface in stop messaging (feedback pending or merge conflicts). */
+function openPrNeedsStopAttention(p: PR): boolean {
+  return (
+    p.reviewDecision === "CHANGES_REQUESTED" ||
+    p.reviewDecision === "REVIEW_REQUIRED" ||
+    p.mergeable === "CONFLICTING"
+  )
+}
+
+function scoreIssue(issue: Issue): number {
+  return (issue.labels ?? []).reduce((sum, l) => sum + (SCORE_NORM[normaliseLabel(l.name)] ?? 0), 0)
+}
+
+function sortIssuesByScoreAndNumber(issues: Issue[]): Issue[] {
+  return orderBy(issues, [(issue) => scoreIssue(issue), (issue) => issue.number], ["desc", "desc"])
 }
 
 function getErrorMessage(error: unknown): string {
@@ -348,12 +361,7 @@ async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise
     if (cachedPrs.length > 0) {
       // Filter locally: authored by or assigned to current user
       const relevant = cachedPrs.filter((pr) => pr.author?.login === currentUser)
-      return relevant.filter(
-        (p) =>
-          p.reviewDecision === "CHANGES_REQUESTED" ||
-          p.reviewDecision === "REVIEW_REQUIRED" ||
-          p.mergeable === "CONFLICTING"
-      )
+      return relevant.filter(openPrNeedsStopAttention)
     }
   }
 
@@ -384,12 +392,7 @@ async function getOpenPRsWithFeedback(cwd: string, currentUser: string): Promise
     }
   }
 
-  return [...byNumber.values()].filter(
-    (p) =>
-      p.reviewDecision === "CHANGES_REQUESTED" ||
-      p.reviewDecision === "REVIEW_REQUIRED" ||
-      p.mergeable === "CONFLICTING"
-  )
+  return [...byNumber.values()].filter(openPrNeedsStopAttention)
 }
 
 interface StopContext {
@@ -403,6 +406,17 @@ interface StopContext {
   sortedIssues: Issue[]
   firstRefinementNum?: number
   firstIssueNum?: number
+}
+
+function feedbackPrCount(
+  ctx: Pick<StopContext, "changesRequestedPRs" | "reviewRequiredPRs">
+): number {
+  return ctx.changesRequestedPRs.length + ctx.reviewRequiredPRs.length
+}
+
+/** Matches cooldown update in main: refinement-only blocks do not refresh cooldown. */
+function shouldUpdateStopCooldown(ctx: StopContext): boolean {
+  return ctx.sortedIssues.length > 0 || feedbackPrCount(ctx) > 0 || ctx.conflictingPRs.length > 0
 }
 
 function buildFeedbackPRSection(ctx: StopContext): string[] {
@@ -498,6 +512,7 @@ function buildIssueSection(ctx: StopContext): string[] {
   }
   if (hiddenCount > 0) {
     lines.push(`  …and ${hiddenCount} more lower-priority issue(s)`)
+    lines.push("")
   }
   return lines
 }
@@ -509,11 +524,11 @@ function appendSection(lines: string[], section: string[]): void {
 
 function buildStopReasonLines(ctx: StopContext): string[] {
   const reasonLines: string[] = [
-    "STOP: We have detected open issues and PRs that need your attention.",
+    "There are open issues and PRs that need your attention before we can finish the session.",
     "",
   ]
 
-  if (ctx.changesRequestedPRs.length + ctx.reviewRequiredPRs.length > 0) {
+  if (feedbackPrCount(ctx) > 0) {
     appendSection(reasonLines, buildFeedbackPRSection(ctx))
   }
   if (ctx.conflictingPRs.length > 0) {
@@ -579,8 +594,7 @@ function buildIssuePickupSteps(ctx: StopContext): ActionPlanItem[] {
 
 function buildStopPlanSteps(ctx: StopContext): ActionPlanItem[] {
   const planSteps: ActionPlanItem[] = []
-  if (ctx.changesRequestedPRs.length + ctx.reviewRequiredPRs.length > 0)
-    planSteps.push(...buildPrFeedbackSteps(ctx))
+  if (feedbackPrCount(ctx) > 0) planSteps.push(...buildPrFeedbackSteps(ctx))
   if (ctx.sortedRefinement.length > 0) planSteps.push(...buildRefinementSteps(ctx))
   if (ctx.sortedIssues.length > 0) planSteps.push(...buildIssuePickupSteps(ctx))
   return planSteps
@@ -588,7 +602,6 @@ function buildStopPlanSteps(ctx: StopContext): ActionPlanItem[] {
 
 async function gatherStopContext(
   cwd: string,
-  sessionId: string | null,
   isPersonalRepo: boolean,
   currentUser: string,
   hasChangesRequested: boolean
@@ -605,18 +618,9 @@ async function gatherStopContext(
   const refinementIssues = allIssues.filter((i) => needsRefinement(i))
   const actionableIssues = allIssues.filter((i) => !needsRefinement(i))
 
-  const sortedRefinement = orderBy(
-    refinementIssues,
-    [(issue) => scoreIssue(issue), (issue) => issue.number],
-    ["desc", "desc"]
-  )
-  const sortedIssues = orderBy(
-    actionableIssues,
-    [(issue) => scoreIssue(issue), (issue) => issue.number],
-    ["desc", "desc"]
-  )
+  const sortedRefinement = sortIssuesByScoreAndNumber(refinementIssues)
+  const sortedIssues = sortIssuesByScoreAndNumber(actionableIssues)
 
-  void sessionId // parameter kept for interface consistency
   return {
     sortedRefinement,
     sortedIssues,
@@ -662,14 +666,26 @@ async function resolveRepoContext(input: {
   }
 }
 
+function partitionPRsForStop(
+  prs: PR[]
+): Pick<StopContext, "changesRequestedPRs" | "reviewRequiredPRs" | "conflictingPRs"> {
+  const changesRequestedPRs: PR[] = []
+  const reviewRequiredPRs: PR[] = []
+  const conflictingPRs: PR[] = []
+  for (const p of prs) {
+    if (p.reviewDecision === "CHANGES_REQUESTED") changesRequestedPRs.push(p)
+    if (p.reviewDecision === "REVIEW_REQUIRED") reviewRequiredPRs.push(p)
+    if (p.mergeable === "CONFLICTING") conflictingPRs.push(p)
+  }
+  return { changesRequestedPRs, reviewRequiredPRs, conflictingPRs }
+}
+
 function buildStopContext(
   ctx: RepoContext,
   prs: PR[],
   gathered: Awaited<ReturnType<typeof gatherStopContext>>
 ): StopContext | null {
-  const changesRequestedPRs = prs.filter((p) => p.reviewDecision === "CHANGES_REQUESTED")
-  const conflictingPRs = prs.filter((p) => p.mergeable === "CONFLICTING")
-  const reviewRequiredPRs = prs.filter((p) => p.reviewDecision === "REVIEW_REQUIRED")
+  const { changesRequestedPRs, reviewRequiredPRs, conflictingPRs } = partitionPRsForStop(prs)
 
   const total =
     gathered.sortedIssues.length +
@@ -703,7 +719,6 @@ async function main(): Promise<void> {
     const hasChangesRequested = prs.some((p) => p.reviewDecision === "CHANGES_REQUESTED")
     const gathered = await gatherStopContext(
       ctx.cwd,
-      ctx.sessionId,
       ctx.isPersonalRepo,
       ctx.currentUser,
       hasChangesRequested
@@ -716,11 +731,7 @@ async function main(): Promise<void> {
     const planSteps = buildStopPlanSteps(stopCtx)
     reasonLines.push(formatActionPlan(planSteps, { translateToolNames: true }))
 
-    const hasActionable =
-      stopCtx.sortedIssues.length > 0 ||
-      stopCtx.changesRequestedPRs.length + stopCtx.reviewRequiredPRs.length > 0 ||
-      stopCtx.conflictingPRs.length > 0
-    if (hasActionable) await updateCooldown(ctx.sessionId, ctx.cwd)
+    if (shouldUpdateStopCooldown(stopCtx)) await updateCooldown(ctx.sessionId, ctx.cwd)
 
     blockStop(reasonLines.join("\n"), { includeUpdateMemoryAdvice: false })
   } catch {

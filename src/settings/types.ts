@@ -76,6 +76,8 @@ export interface SettingDef {
   aliases: string[]
   kind: SettingValueKind
   scopes: readonly SettingsScope[]
+  /** Default value used in DEFAULT_SETTINGS and schema .catch() fallback. */
+  default?: boolean | number | string
   docs?: SettingDoc
   validate?: (value: string) => string | null
 }

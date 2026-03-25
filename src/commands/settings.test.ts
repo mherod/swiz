@@ -21,6 +21,17 @@ async function createTempHome(): Promise<string> {
   return realpath(await _tmp.create())
 }
 
+/** Git repo with no `.swiz/` so project settings do not pick up the real checkout. */
+async function createIsolatedGitProject(parentDir: string): Promise<string> {
+  const dir = join(parentDir, "isolated-repo")
+  await mkdir(dir, { recursive: true })
+  const init = Bun.spawnSync(["git", "init"], { cwd: dir, stdout: "pipe", stderr: "pipe" })
+  if (init.exitCode !== 0) {
+    throw new Error(`git init failed: ${new TextDecoder().decode(init.stderr)}`)
+  }
+  return dir
+}
+
 // Serialize in-process calls — they mutate process.env.HOME and console
 let _inProcessQueue: Promise<unknown> = Promise.resolve()
 
@@ -117,7 +128,8 @@ describe("swiz settings", () => {
 
     beforeAll(async () => {
       const home = await createTempHome()
-      result = await runSwiz(["settings"], home)
+      const projectDir = await createIsolatedGitProject(home)
+      result = await runSwiz(["settings", "--dir", projectDir], home)
     })
 
     test("shows default auto-continue state", () => {
