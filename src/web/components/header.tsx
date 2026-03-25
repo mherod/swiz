@@ -123,7 +123,7 @@ export function Header({
     <header className="bento-title">
       <div className="title-row">
         <div className="title-row-left">
-          <img src={mascotSrc} alt="swiz" className="title-mascot" />
+          <img key={mascotSrc} src={mascotSrc} alt="swiz" className="title-mascot" />
           <h1 className="topbar-title">swiz daemon</h1>
           <output className="status-pill">
             <span className="status-dot" aria-hidden="true" />
