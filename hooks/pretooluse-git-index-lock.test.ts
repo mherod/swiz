@@ -71,40 +71,60 @@ async function runHook(
 describe("pretooluse-git-index-lock", () => {
   // Each auto-resolve test uses its own isolated repo to avoid concurrent lock contention.
   describe("auto-resolves stale locks (no active git process)", () => {
-    test("git status is allowed after stale lock auto-removal", async () => {
-      const repo = await createLockedRepo("auto-resolve-status")
-      const result = await runHook("git status", repo)
-      expect(result.decision).toBe("allow")
-      expect(result.reason).toContain("Auto-removed")
-      expect(result.reason).toContain("index.lock")
-    }, { timeout: 30_000 })
+    test(
+      "git status is allowed after stale lock auto-removal",
+      async () => {
+        const repo = await createLockedRepo("auto-resolve-status")
+        const result = await runHook("git status", repo)
+        expect(result.decision).toBe("allow")
+        expect(result.reason).toContain("Auto-removed")
+        expect(result.reason).toContain("index.lock")
+      },
+      { timeout: 30_000 }
+    )
 
-    test("git commit is allowed after stale lock auto-removal", async () => {
-      const repo = await createLockedRepo("auto-resolve-commit")
-      const result = await runHook('git commit -m "test"', repo)
-      expect(result.decision).toBe("allow")
-      expect(result.reason).toContain("Auto-removed")
-    }, { timeout: 30_000 })
+    test(
+      "git commit is allowed after stale lock auto-removal",
+      async () => {
+        const repo = await createLockedRepo("auto-resolve-commit")
+        const result = await runHook('git commit -m "test"', repo)
+        expect(result.decision).toBe("allow")
+        expect(result.reason).toContain("Auto-removed")
+      },
+      { timeout: 30_000 }
+    )
 
-    test("git add is allowed after stale lock auto-removal", async () => {
-      const repo = await createLockedRepo("auto-resolve-add")
-      const result = await runHook("git add .", repo)
-      expect(result.decision).toBe("allow")
-    }, { timeout: 30_000 })
+    test(
+      "git add is allowed after stale lock auto-removal",
+      async () => {
+        const repo = await createLockedRepo("auto-resolve-add")
+        const result = await runHook("git add .", repo)
+        expect(result.decision).toBe("allow")
+      },
+      { timeout: 30_000 }
+    )
 
-    test("piped git command is allowed after stale lock auto-removal", async () => {
-      const repo = await createLockedRepo("auto-resolve-piped")
-      const result = await runHook("echo hello | git log", repo)
-      expect(result.decision).toBe("allow")
-    }, { timeout: 30_000 })
+    test(
+      "piped git command is allowed after stale lock auto-removal",
+      async () => {
+        const repo = await createLockedRepo("auto-resolve-piped")
+        const result = await runHook("echo hello | git log", repo)
+        expect(result.decision).toBe("allow")
+      },
+      { timeout: 30_000 }
+    )
 
-    test("lock file is actually removed after auto-resolution", async () => {
-      const repo = await createLockedRepo("auto-resolve-verify")
-      await runHook("git status", repo)
-      const lockPath = joinGitPath(repo, GIT_INDEX_LOCK)
-      const exists = await Bun.file(lockPath).exists()
-      expect(exists).toBe(false)
-    }, { timeout: 30_000 })
+    test(
+      "lock file is actually removed after auto-resolution",
+      async () => {
+        const repo = await createLockedRepo("auto-resolve-verify")
+        await runHook("git status", repo)
+        const lockPath = joinGitPath(repo, GIT_INDEX_LOCK)
+        const exists = await Bun.file(lockPath).exists()
+        expect(exists).toBe(false)
+      },
+      { timeout: 30_000 }
+    )
   })
 
   describe("allows git commands when no lock", () => {
