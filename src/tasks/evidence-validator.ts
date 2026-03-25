@@ -125,6 +125,13 @@ function validateCommitSegments(segments: string[]): string | null {
       return `commit: requires a hex SHA value.\n  --evidence "commit:abc123f"`
     for (const token of value.split(/\s+/)) {
       if (!HEX_SHA_RE.test(token)) {
+        if (EVIDENCE_PREFIXES.some((p) => token.startsWith(p))) {
+          return (
+            `Cannot mix evidence types without a delimiter in "${seg}".\n` +
+            `To combine multiple evidence types, separate them with "--":\n` +
+            `  --evidence "commit:abc123f -- ${token}..."`
+          )
+        }
         return `Invalid commit SHA: "${token}"\ncommit: evidence must be a 7–40 character hex SHA.\n  --evidence "commit:abc123f"`
       }
     }

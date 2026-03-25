@@ -242,6 +242,14 @@ describe("validateEvidence", () => {
     expect(error).toContain("Invalid commit SHA")
   })
 
+  it("gives a delimiter hint when a known evidence prefix follows commit: without --", () => {
+    const error = validateEvidence("commit:02f30fb note:CI passed")
+    expect(error).not.toBeNull()
+    expect(error).toContain("Cannot mix evidence types without a delimiter")
+    expect(error).toContain("--")
+    expect(error).toContain("note:")
+  })
+
   it("rejects bare commit: with no SHA", () => {
     const error = validateEvidence("commit:")
     expect(error).not.toBeNull()
