@@ -87,6 +87,25 @@ describe("stop-quality-checks: findScript", () => {
     test("returns false when qualityChecksGate is missing from settings", () => {
       expect(isQualityChecksEnabled({ _effectiveSettings: {} })).toBe(false)
     })
+
+    test("returns false when _effectiveSettings is a non-object (string)", () => {
+      expect(isQualityChecksEnabled({ _effectiveSettings: "yes" })).toBe(false)
+    })
+
+    test("returns false when _effectiveSettings is null", () => {
+      expect(isQualityChecksEnabled({ _effectiveSettings: null })).toBe(false)
+    })
+
+    test("returns false when qualityChecksGate is null", () => {
+      expect(isQualityChecksEnabled({ _effectiveSettings: { qualityChecksGate: null } })).toBe(
+        false
+      )
+    })
+
+    test("returns true when qualityChecksGate is a truthy non-boolean (coerced)", () => {
+      // !! coercion: any truthy value enables the gate — this documents the current behavior
+      expect(isQualityChecksEnabled({ _effectiveSettings: { qualityChecksGate: 1 } })).toBe(true)
+    })
   })
 
   describe("script name priority ordering", () => {
