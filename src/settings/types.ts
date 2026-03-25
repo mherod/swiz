@@ -78,6 +78,8 @@ export interface SettingDef {
   scopes: readonly SettingsScope[]
   /** Default value used in DEFAULT_SETTINGS and schema .catch() fallback. */
   default?: boolean | number | string
+  /** Custom Zod schema for this field (e.g. z.enum for constrained strings). When omitted, derived from kind. */
+  zodSchema?: import("zod").ZodTypeAny
   docs?: SettingDoc
   validate?: (value: string) => string | null
 }

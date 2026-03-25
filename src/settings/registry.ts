@@ -1,3 +1,4 @@
+import { z } from "zod"
 import type { SettingDef } from "./types"
 import { ambitionModeSchema, collaborationModeSchema } from "./types"
 
@@ -246,6 +247,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "numeric",
     scopes: ["global"],
     default: 0,
+    zodSchema: z.number().min(0).max(600),
     docs: { valuePlaceholder: "wpm" },
   },
   {
@@ -318,6 +320,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "string",
     scopes: ["global", "project", "session"],
     default: "standard",
+    zodSchema: ambitionModeSchema,
     docs: { valuePlaceholder: "standard|aggressive|creative|reflective" },
     validate: (v) =>
       ambitionModeSchema.safeParse(v).success
@@ -337,6 +340,7 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     kind: "string",
     scopes: ["global", "project", "session"],
     default: "auto",
+    zodSchema: collaborationModeSchema,
     docs: { valuePlaceholder: "auto|solo|team|relaxed-collab" },
     validate: (v) =>
       collaborationModeSchema.safeParse(v).success
@@ -359,4 +363,34 @@ export function deriveDefaultsFromRegistry(): Record<string, boolean | number | 
     }
   }
   return defaults
+}
+
+/**
+ * Derive the Zod schema shape for global settings from the registry.
+ * Each registry entry with a `default` produces a schema field with `.catch(default)`.
+ * Entries with `zodSchema` use that schema; otherwise derived from `kind`.
+ * Non-registry fields (statusLineSegments, sessions, disabledHooks) must be added by the caller.
+ */
+export function deriveSchemaShape(): Record<string, z.ZodTypeAny> {
+  const shape: Record<string, z.ZodTypeAny> = {}
+  for (const def of SETTINGS_REGISTRY) {
+    if (def.default === undefined) continue
+    if (def.zodSchema) {
+      shape[def.key] = def.zodSchema.catch(def.default)
+    } else if (def.kind === "boolean") {
+      shape[def.key] = z.boolean().catch(def.default as boolean)
+    } else if (def.kind === "numeric") {
+      shape[def.key] = z
+        .number()
+        .int()
+        .min(def.default === 0 ? 0 : 1)
+        .catch(def.default as number)
+    } else {
+      shape[def.key] = z
+        .string()
+        .max(200)
+        .catch(def.default as string)
+    }
+  }
+  return shape
 }

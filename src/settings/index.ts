@@ -23,7 +23,7 @@ export {
 } from "./persistence"
 
 // Registry
-export { deriveDefaultsFromRegistry, SETTINGS_REGISTRY } from "./registry"
+export { deriveDefaultsFromRegistry, deriveSchemaShape, SETTINGS_REGISTRY } from "./registry"
 
 // Resolution logic
 export {

@@ -5,7 +5,7 @@ import { z } from "zod"
 import { ensureGitExclude } from "../git-helpers.ts"
 import { getHomeDirOrNull } from "../home.ts"
 import type { HookDef, HookGroup } from "../manifest.ts"
-import { deriveDefaultsFromRegistry } from "./registry"
+import { deriveDefaultsFromRegistry, deriveSchemaShape } from "./registry"
 import {
   ALL_STATUS_LINE_SEGMENTS,
   ambitionModeSchema,
@@ -43,53 +43,33 @@ export const DEFAULT_SETTINGS: SwizSettings = {
 
 const statusLineSegmentSchema = z.enum(ALL_STATUS_LINE_SEGMENTS)
 
-export const swizSettingsSchema = z.object({
-  autoContinue: z.boolean().catch(DEFAULT_SETTINGS.autoContinue),
-  critiquesEnabled: z.boolean().catch(DEFAULT_SETTINGS.critiquesEnabled),
-  ambitionMode: z
-    .enum(["standard", "aggressive", "creative", "reflective"])
-    .catch(DEFAULT_SETTINGS.ambitionMode),
-  collaborationMode: z
-    .enum(["auto", "solo", "team", "relaxed-collab"])
-    .catch(DEFAULT_SETTINGS.collaborationMode),
-  narratorVoice: z.string().max(200).catch(DEFAULT_SETTINGS.narratorVoice),
-  narratorSpeed: z.number().min(0).max(600).catch(DEFAULT_SETTINGS.narratorSpeed),
-  prAgeGateMinutes: z.number().int().min(0).catch(DEFAULT_SETTINGS.prAgeGateMinutes),
-  prMergeMode: z.boolean().catch(DEFAULT_SETTINGS.prMergeMode),
-  pushCooldownMinutes: z.number().int().min(0).catch(DEFAULT_SETTINGS.pushCooldownMinutes),
-  pushGate: z.boolean().catch(DEFAULT_SETTINGS.pushGate),
-  sandboxedEdits: z.boolean().catch(DEFAULT_SETTINGS.sandboxedEdits),
-  speak: z.boolean().catch(DEFAULT_SETTINGS.speak),
-  autoSteer: z.boolean().catch(DEFAULT_SETTINGS.autoSteer),
-  updateMemoryFooter: z.boolean().catch(DEFAULT_SETTINGS.updateMemoryFooter),
-  gitStatusGate: z.boolean().catch(DEFAULT_SETTINGS.gitStatusGate),
-  nonDefaultBranchGate: z.boolean().catch(DEFAULT_SETTINGS.nonDefaultBranchGate),
-  ignoreCi: z.boolean().catch(DEFAULT_SETTINGS.ignoreCi),
-  githubCiGate: z.boolean().catch(DEFAULT_SETTINGS.githubCiGate),
-  changesRequestedGate: z.boolean().catch(DEFAULT_SETTINGS.changesRequestedGate),
-  personalRepoIssuesGate: z.boolean().catch(DEFAULT_SETTINGS.personalRepoIssuesGate),
-  issueCloseGate: z.boolean().catch(DEFAULT_SETTINGS.issueCloseGate),
-  qualityChecksGate: z.boolean().catch(DEFAULT_SETTINGS.qualityChecksGate),
-  strictNoDirectMain: z.boolean().catch(DEFAULT_SETTINGS.strictNoDirectMain),
-  trunkMode: z.boolean().catch(DEFAULT_SETTINGS.trunkMode),
-  taskDurationWarningMinutes: z
-    .number()
-    .int()
-    .min(1)
-    .catch(DEFAULT_SETTINGS.taskDurationWarningMinutes),
-  memoryLineThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.memoryLineThreshold),
-  memoryWordThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.memoryWordThreshold),
-  largeFileSizeKb: z.number().int().min(1).catch(DEFAULT_SETTINGS.largeFileSizeKb),
-  dirtyWorktreeThreshold: z.number().int().min(1).catch(DEFAULT_SETTINGS.dirtyWorktreeThreshold),
-  statusLineSegments: z
-    .array(statusLineSegmentSchema)
-    .catch([...ALL_STATUS_LINE_SEGMENTS])
-    .transform(normalizeStatusLineSegments),
-  sessions: z.record(z.string(), sessionSwizSettingsSchema).catch({}),
-  disabledHooks: z.array(z.string().min(1)).optional().catch(undefined),
-})
+/**
+ * swizSettingsSchema is derived from SETTINGS_REGISTRY.
+ * Each registry entry with a default generates a schema field.
+ * Non-registry fields (statusLineSegments, sessions, disabledHooks) are added here.
+ */
+export const swizSettingsSchema: z.ZodType<SwizSettings> = z
+  .object({
+    ...deriveSchemaShape(),
+    statusLineSegments: z
+      .array(statusLineSegmentSchema)
+      .catch([...ALL_STATUS_LINE_SEGMENTS])
+      .transform(normalizeStatusLineSegments),
+    sessions: z.record(z.string(), sessionSwizSettingsSchema).catch({}),
+    disabledHooks: z.array(z.string().min(1)).optional().catch(undefined),
+  })
+  .transform((v) => v as unknown as SwizSettings)
 
-const swizSettingsWithoutSessionsSchema = swizSettingsSchema.omit({ sessions: true })
+const swizSettingsWithoutSessionsSchema = z
+  .object({
+    ...deriveSchemaShape(),
+    statusLineSegments: z
+      .array(statusLineSegmentSchema)
+      .catch([...ALL_STATUS_LINE_SEGMENTS])
+      .transform(normalizeStatusLineSegments),
+    disabledHooks: z.array(z.string().min(1)).optional().catch(undefined),
+  })
+  .transform((v) => v as unknown as Omit<SwizSettings, "sessions">)
 
 export interface ReadOptions {
   home?: string | undefined
