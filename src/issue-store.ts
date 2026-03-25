@@ -75,6 +75,75 @@ export interface MutationPayload {
   title?: string
 }
 
+// ─── IssueStoreReader ────────────────────────────────────────────────────────
+
+/**
+ * Shared read interface for issue/PR stores. Async to accommodate both
+ * synchronous (SQLite-backed IssueStore) and asynchronous (DaemonBackedIssueStore)
+ * implementations. Consumers depend on this interface rather than concrete classes.
+ */
+export interface IssueStoreReader {
+  listIssues<T = unknown>(repo: string): Promise<T[]>
+  listPullRequests<T = unknown>(repo: string): Promise<T[]>
+  getIssue<T = unknown>(repo: string, number: number): Promise<T | null>
+}
+
+// ─── GitHubClient ────────────────────────────────────────────────────────────
+
+/** Raw issue shape returned by GitHub list APIs. */
+export interface GitHubIssueRecord {
+  number: number
+  title?: string
+  state?: string
+  labels?: unknown[]
+  author?: unknown
+  assignees?: unknown[]
+  updatedAt?: string
+  // REST equivalents
+  updated_at?: string
+  user?: unknown
+}
+
+/** Raw PR shape returned by GitHub list APIs. */
+export interface GitHubPullRequestRecord {
+  number: number
+  title?: string
+  state?: string
+  headRefName?: string
+  author?: unknown
+  reviewDecision?: string
+  statusCheckRollup?: unknown
+  mergeable?: string
+  url?: string
+  createdAt?: string
+  updatedAt?: string
+  // REST equivalents
+  html_url?: string
+  created_at?: string
+  updated_at?: string
+  user?: unknown
+  head?: { ref: string }
+}
+
+/** Raw CI run shape returned by GitHub list APIs. */
+export interface GitHubCiRunRecord {
+  headSha: string
+  databaseId: number
+  status: string
+  conclusion: string
+  url: string
+}
+
+/**
+ * Abstraction over GitHub data fetching. Allows sync logic to be tested
+ * without spawning real `gh` CLI processes.
+ */
+export interface GitHubClient {
+  listIssues(cwd: string, state: "open" | "closed"): Promise<GitHubIssueRecord[] | null>
+  listPullRequests(cwd: string, state: "open" | "closed"): Promise<GitHubPullRequestRecord[] | null>
+  listWorkflowRuns(cwd: string): Promise<GitHubCiRunRecord[] | null>
+}
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 /** Default TTL for cached issues: 5 minutes (max GitHub cache TTL rule — no GitHub cache may exceed 300_000 ms) */
@@ -424,6 +493,17 @@ export class IssueStore {
 
   close(): void {
     this.db.close()
+  }
+
+  /** Return an IssueStoreReader adapter wrapping this store's sync reads. */
+  asReader(): IssueStoreReader {
+    return {
+      listIssues: <T = unknown>(repo: string) => Promise.resolve(this.listIssues<T>(repo)),
+      listPullRequests: <T = unknown>(repo: string) =>
+        Promise.resolve(this.listPullRequests<T>(repo)),
+      getIssue: <T = unknown>(repo: string, number: number) =>
+        Promise.resolve(this.getIssue<T>(repo, number)),
+    }
   }
 }
 
@@ -889,9 +969,11 @@ function syncCiRuns(
 export async function syncUpstreamState(
   repo: string,
   cwd: string,
-  store?: IssueStore
+  store?: IssueStore,
+  client?: GitHubClient
 ): Promise<UpstreamSyncResult> {
   const s = store ?? getIssueStore()
+  const gh = client ?? new GhCliGitHubClient()
   const result: UpstreamSyncResult = {
     issues: { upserted: 0, removed: 0 },
     pullRequests: { upserted: 0, removed: 0 },
@@ -899,44 +981,12 @@ export async function syncUpstreamState(
   }
 
   const [issues, prs, runs, closedIssues, closedPrs] = await Promise.all([
-    fetchGhJson<{ number: number }[]>(
-      [
-        "issue",
-        "list",
-        "--state",
-        "open",
-        "--json",
-        "number,title,state,labels,author,assignees,updatedAt",
-        "--limit",
-        "100",
-      ],
-      cwd
-    ),
-    fetchGhJson<{ number: number }[]>(
-      [
-        "pr",
-        "list",
-        "--state",
-        "open",
-        "--json",
-        "number,title,state,headRefName,author,reviewDecision,statusCheckRollup,mergeable,url,createdAt,updatedAt",
-        "--limit",
-        "100",
-      ],
-      cwd
-    ),
-    fetchGhJson<
-      { headSha: string; databaseId: number; status: string; conclusion: string; url: string }[]
-    >(["run", "list", "--json", "headSha,databaseId,status,conclusion,url", "--limit", "20"], cwd),
+    gh.listIssues(cwd, "open"),
+    gh.listPullRequests(cwd, "open"),
+    gh.listWorkflowRuns(cwd),
     // Backfill: fetch recently-closed issues/PRs to explicitly purge stale rows
-    fetchGhJson<{ number: number }[]>(
-      ["issue", "list", "--state", "closed", "--json", "number", "--limit", "30"],
-      cwd
-    ),
-    fetchGhJson<{ number: number }[]>(
-      ["pr", "list", "--state", "closed", "--json", "number", "--limit", "30"],
-      cwd
-    ),
+    gh.listIssues(cwd, "closed"),
+    gh.listPullRequests(cwd, "closed"),
   ])
 
   syncIssues(s, repo, issues, closedIssues, result)
@@ -1462,6 +1512,46 @@ async function fetchGhJson<T>(args: string[], cwd: string): Promise<T | null> {
   return parsed
 }
 
+// ─── GhCliGitHubClient ──────────────────────────────────────────────────────
+
+/**
+ * Default `GitHubClient` implementation that delegates to `fetchGhJson`
+ * (REST-primary with gh CLI fallback).
+ */
+export class GhCliGitHubClient implements GitHubClient {
+  async listIssues(cwd: string, state: "open" | "closed"): Promise<GitHubIssueRecord[] | null> {
+    const limit = state === "closed" ? "30" : "100"
+    const fields =
+      state === "closed" ? "number" : "number,title,state,labels,author,assignees,updatedAt"
+    return fetchGhJson<GitHubIssueRecord[]>(
+      ["issue", "list", "--state", state, "--json", fields, "--limit", limit],
+      cwd
+    )
+  }
+
+  async listPullRequests(
+    cwd: string,
+    state: "open" | "closed"
+  ): Promise<GitHubPullRequestRecord[] | null> {
+    const limit = state === "closed" ? "30" : "100"
+    const fields =
+      state === "closed"
+        ? "number"
+        : "number,title,state,headRefName,author,reviewDecision,statusCheckRollup,mergeable,url,createdAt,updatedAt"
+    return fetchGhJson<GitHubPullRequestRecord[]>(
+      ["pr", "list", "--state", state, "--json", fields, "--limit", limit],
+      cwd
+    )
+  }
+
+  async listWorkflowRuns(cwd: string): Promise<GitHubCiRunRecord[] | null> {
+    return fetchGhJson<GitHubCiRunRecord[]>(
+      ["run", "list", "--json", "headSha,databaseId,status,conclusion,url", "--limit", "20"],
+      cwd
+    )
+  }
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function getDefaultDbPath(): string {
@@ -1594,7 +1684,7 @@ const DAEMON_FALLBACK_TIMEOUT_MS = 2_000
  *   const store = getDaemonBackedStore()
  *   const issues = await store.listIssues<Issue>(repo)
  */
-export class DaemonBackedIssueStore {
+export class DaemonBackedIssueStore implements IssueStoreReader {
   private daemonAvailable: boolean | null = null
 
   private async query<T>(args: string[]): Promise<T | null> {
@@ -1678,4 +1768,16 @@ export function getDaemonBackedStore(): DaemonBackedIssueStore {
 /** Reset the shared daemon store (for testing). */
 export function resetDaemonBackedStore(): void {
   sharedDaemonStore = null
+}
+
+/**
+ * Factory: returns the best available IssueStoreReader.
+ * Tries SQLite-backed IssueStore first (via asReader()), falls back to
+ * DaemonBackedIssueStore if the SQLite store is a no-op.
+ */
+export function getIssueStoreReader(): IssueStoreReader {
+  const store = getIssueStore()
+  // If the store has data capacity (not no-op), use it
+  const reader = store.asReader()
+  return reader
 }

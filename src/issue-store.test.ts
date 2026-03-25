@@ -5,8 +5,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   DEFAULT_TTL_MS,
+  type GitHubClient,
   ghListToRestFallback,
   IssueStore,
+  type IssueStoreReader,
   replayPendingMutations,
   syncUpstreamState,
   tryRestFallback,
@@ -1100,6 +1102,102 @@ describe("ghListToRestFallback", () => {
     expect(ghListToRestFallback(["status", "check"])).toBeNull()
     expect(ghListToRestFallback(["commit", "list"])).toBeNull()
     expect(ghListToRestFallback([])).toBeNull()
+  })
+})
+
+describe("syncUpstreamState with mock GitHubClient", () => {
+  test("uses injected GitHubClient instead of gh CLI", async () => {
+    const store = createStore()
+    const mockClient: GitHubClient = {
+      listIssues: async (_cwd, state) => {
+        if (state === "open") return [{ number: 1, title: "Mock issue", state: "open" }]
+        return []
+      },
+      listPullRequests: async (_cwd, state) => {
+        if (state === "open") return [{ number: 10, title: "Mock PR", state: "open" }]
+        return []
+      },
+      listWorkflowRuns: async () => [],
+    }
+
+    try {
+      const result = await syncUpstreamState("test/repo", "/tmp", store, mockClient)
+      expect(result.issues.upserted).toBe(1)
+      expect(result.pullRequests.upserted).toBe(1)
+      expect(result.ciStatuses.upserted).toBe(0)
+      expect(store.getIssue<{ title: string }>("test/repo", 1)?.title).toBe("Mock issue")
+      expect(store.getPullRequest<{ title: string }>("test/repo", 10)?.title).toBe("Mock PR")
+    } finally {
+      store.close()
+    }
+  })
+
+  test("handles null returns from GitHubClient gracefully", async () => {
+    const store = createStore()
+    const nullClient: GitHubClient = {
+      listIssues: async () => null,
+      listPullRequests: async () => null,
+      listWorkflowRuns: async () => null,
+    }
+
+    try {
+      const result = await syncUpstreamState("test/repo", "/tmp", store, nullClient)
+      expect(result.issues.upserted).toBe(0)
+      expect(result.pullRequests.upserted).toBe(0)
+      expect(result.ciStatuses.upserted).toBe(0)
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe("IssueStoreReader", () => {
+  test("IssueStore.asReader() returns a valid IssueStoreReader", async () => {
+    const store = createStore()
+    try {
+      store.upsertIssues("test/repo", [
+        { number: 1, title: "Issue A" },
+        { number: 2, title: "Issue B" },
+      ])
+      store.upsertPullRequests("test/repo", [{ number: 10, title: "PR X" }])
+
+      const reader: IssueStoreReader = store.asReader()
+      const issues = await reader.listIssues<{ title: string }>("test/repo")
+      expect(issues).toHaveLength(2)
+      expect(issues[0]!.title).toBe("Issue A")
+
+      const prs = await reader.listPullRequests<{ title: string }>("test/repo")
+      expect(prs).toHaveLength(1)
+      expect(prs[0]!.title).toBe("PR X")
+
+      const issue = await reader.getIssue<{ title: string }>("test/repo", 1)
+      expect(issue?.title).toBe("Issue A")
+
+      const missing = await reader.getIssue("test/repo", 999)
+      expect(missing).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+
+  test("mock IssueStoreReader can substitute for real stores", async () => {
+    const data = [{ number: 42, title: "Mocked" }]
+    const mockReader: IssueStoreReader = {
+      listIssues: async <T = unknown>() => data as T[],
+      listPullRequests: async <T = unknown>() => [] as T[],
+      getIssue: async <T = unknown>(_repo: string, num: number) =>
+        (num === 42 ? data[0] : null) as T | null,
+    }
+
+    const issues = await mockReader.listIssues("any/repo")
+    expect(issues).toHaveLength(1)
+    expect(issues[0]).toEqual({ number: 42, title: "Mocked" })
+
+    const found = await mockReader.getIssue("any/repo", 42)
+    expect(found).toEqual({ number: 42, title: "Mocked" })
+
+    const notFound = await mockReader.getIssue("any/repo", 99)
+    expect(notFound).toBeNull()
   })
 })
 
