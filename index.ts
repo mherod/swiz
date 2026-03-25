@@ -36,6 +36,7 @@ import { manageCommand } from "./src/commands/manage.ts"
 import { memoryCommand } from "./src/commands/memory.ts"
 import { mergetoolCommand } from "./src/commands/mergetool.ts"
 import { modelCommand } from "./src/commands/model.ts"
+import { pluginsCommand } from "./src/commands/plugins.ts"
 import { pushCiCommand } from "./src/commands/push-ci.ts"
 import { pushWaitCommand } from "./src/commands/push-wait.ts"
 import { reflectCommand } from "./src/commands/reflect.ts"
@@ -75,6 +76,7 @@ registerCommand(sessionCommand)
 registerCommand(ciWaitCommand)
 registerCommand(memoryCommand)
 registerCommand(modelCommand)
+registerCommand(pluginsCommand)
 registerCommand(manageCommand)
 registerCommand(compactCommand)
 registerCommand(mergetoolCommand)
