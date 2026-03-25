@@ -5,7 +5,7 @@
 
 import { join } from "node:path"
 import { spawn as bunSpawn } from "bun"
-import type { ErrorResult, RunHookMessage } from "./worker-types.ts"
+import { type ErrorResult, extractCallerEnv, type RunHookMessage } from "./worker-types.ts"
 
 const HOOKS_DIR = join(import.meta.dir, "..", "..", "hooks")
 const DEFAULT_TIMEOUT = 10 // seconds
@@ -68,10 +68,16 @@ async function runHookInWorker(
   const baseTimeoutSec = timeoutSec ?? DEFAULT_TIMEOUT
 
   try {
+    // Merge caller's environment from the enriched payload so daemon-spawned
+    // hooks inherit the full shell env (LaunchAgent only gets minimal env vars).
+    const callerEnv = extractCallerEnv(payloadStr)
+    const env = callerEnv ? { ...process.env, ...callerEnv } : undefined
+
     const proc = bunSpawn(cmd, {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      env,
     })
 
     // Write payload and close stdin

@@ -289,6 +289,11 @@ export const dispatchCommand: Command = {
         const terminal = detectTerminal()
         payload._terminal = { app: terminal.app, name: terminal.name }
       }
+      // Inject caller's environment so daemon-spawned hooks inherit the full
+      // shell env (LaunchAgent only gets a minimal set of env vars).
+      if (!payload._env) {
+        payload._env = { ...process.env }
+      }
       const enrichedPayloadStr = JSON.stringify(payload)
 
       // ── Try daemon first, fall back to local execution ──

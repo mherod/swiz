@@ -5,7 +5,7 @@ import { type DispatchLifecycleUpdate, executeDispatch } from "../../dispatch/ex
 import { getGhRateLimitStats } from "../../gh-rate-limit.ts"
 import { getRepoSlug } from "../../git-helpers.ts"
 import { readHookLogs } from "../../hook-log.ts"
-import { getIssueStore } from "../../issue-store.ts"
+import { getIssueStoreReader } from "../../issue-store.ts"
 import { DISPATCH_TIMEOUTS } from "../../manifest.ts"
 import { deleteSessionData, resolveSessionDeletionTargets } from "../../session-data-delete.ts"
 import {
@@ -832,8 +832,8 @@ async function handleProjectPrsRoute(req: Request, ctx: DaemonWebServerContext):
   if (!repo) return Response.json({ repo: null, pullRequests: [] satisfies DashboardPrRecord[] })
 
   const limit = Math.max(1, Math.min(30, body?.limit ?? 10))
-  const store = getIssueStore()
-  let prs = store.listPullRequests<unknown>(repo)
+  const reader = getIssueStoreReader()
+  let prs = await reader.listPullRequests<unknown>(repo)
 
   let syncing = false
   if (prs.length === 0) {
@@ -843,7 +843,7 @@ async function handleProjectPrsRoute(req: Request, ctx: DaemonWebServerContext):
   }
 
   if (prs.length === 0) {
-    prs = store.listPullRequests<unknown>(repo, STALE_ISSUES_TTL_MS)
+    prs = await reader.listPullRequests<unknown>(repo, STALE_ISSUES_TTL_MS)
   }
 
   const normalizedPrs = prs
@@ -892,8 +892,8 @@ async function handleProjectIssuesRoute(
   if (!repo) return Response.json({ repo: null, issues: [] satisfies DashboardIssueRecord[] })
 
   const limit = Math.max(1, Math.min(30, body?.limit ?? 10))
-  const store = getIssueStore()
-  let issues = store.listIssues<unknown>(repo)
+  const reader = getIssueStoreReader()
+  let issues = await reader.listIssues<unknown>(repo)
 
   let syncing = false
   if (issues.length === 0) {
@@ -903,7 +903,7 @@ async function handleProjectIssuesRoute(
   }
 
   if (issues.length === 0) {
-    issues = store.listIssues<unknown>(repo, STALE_ISSUES_TTL_MS)
+    issues = await reader.listIssues<unknown>(repo, STALE_ISSUES_TTL_MS)
   }
 
   const normalizedIssues = issues

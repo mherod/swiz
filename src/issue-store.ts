@@ -89,8 +89,8 @@ export interface MutationPayload {
  * implementations. Consumers depend on this interface rather than concrete classes.
  */
 export interface IssueStoreReader {
-  listIssues<T = unknown>(repo: string): Promise<T[]>
-  listPullRequests<T = unknown>(repo: string): Promise<T[]>
+  listIssues<T = unknown>(repo: string, ttlMs?: number): Promise<T[]>
+  listPullRequests<T = unknown>(repo: string, ttlMs?: number): Promise<T[]>
   getIssue<T = unknown>(repo: string, number: number): Promise<T | null>
   getPullRequest<T = unknown>(repo: string, number: number): Promise<T | null>
   /** CI status for a commit SHA (shape matches `upsertCiStatuses` records). */
@@ -513,9 +513,10 @@ export class IssueStore {
   /** Return an IssueStoreReader adapter wrapping this store's sync reads. */
   asReader(): IssueStoreReader {
     return {
-      listIssues: <T = unknown>(repo: string) => Promise.resolve(this.listIssues<T>(repo)),
-      listPullRequests: <T = unknown>(repo: string) =>
-        Promise.resolve(this.listPullRequests<T>(repo)),
+      listIssues: <T = unknown>(repo: string, ttlMs?: number) =>
+        Promise.resolve(this.listIssues<T>(repo, ttlMs)),
+      listPullRequests: <T = unknown>(repo: string, ttlMs?: number) =>
+        Promise.resolve(this.listPullRequests<T>(repo, ttlMs)),
       getIssue: <T = unknown>(repo: string, number: number) =>
         Promise.resolve(this.getIssue<T>(repo, number)),
       getPullRequest: <T = unknown>(repo: string, number: number) =>
@@ -1522,7 +1523,7 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
     }
   }
 
-  async listIssues<T = unknown>(repo: string): Promise<T[]> {
+  async listIssues<T = unknown>(repo: string, _ttlMs?: number): Promise<T[]> {
     const result = await this.query<T[]>([
       "issue",
       "list",
@@ -1536,7 +1537,7 @@ export class DaemonBackedIssueStore implements IssueStoreReader {
     return result ?? []
   }
 
-  async listPullRequests<T = unknown>(repo: string): Promise<T[]> {
+  async listPullRequests<T = unknown>(repo: string, _ttlMs?: number): Promise<T[]> {
     const result = await this.query<T[]>([
       "pr",
       "list",

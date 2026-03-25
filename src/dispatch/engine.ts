@@ -24,6 +24,7 @@ import {
 } from "../tool-matchers.ts"
 import { isWithinCooldown, markHookCooldown } from "./filters.ts"
 import { getWorkerPool } from "./worker-pool.ts"
+import { extractCallerEnv } from "./worker-types.ts"
 
 // ─── Module-level constants ─────────────────────────────────────────────────
 
@@ -309,6 +310,13 @@ function buildAbortedResult(
   }
 }
 
+/** Build the env object for a hook subprocess by merging caller env from
+ *  the enriched payload with the current process env. */
+function buildHookEnv(payloadStr: string): Record<string, string | undefined> | undefined {
+  const callerEnv = extractCallerEnv(payloadStr)
+  return callerEnv ? { ...process.env, ...callerEnv } : undefined
+}
+
 export async function runHook(
   file: string,
   payloadStr: string,
@@ -329,6 +337,7 @@ export async function runHook(
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    env: buildHookEnv(payloadStr),
   })
 
   void proc.stdin.write(payloadStr)
