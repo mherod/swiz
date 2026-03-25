@@ -1263,6 +1263,32 @@ export function isExcludedSourcePath(filePath: string, ...extras: RegExp[]): boo
   return extras.some((re) => re.test(filePath))
 }
 
+// ─── Edit delta resolution ──────────────────────────────────────────────────
+
+export interface EditDelta {
+  oldString: string
+  newString: string
+}
+
+/**
+ * Extract old/new strings from a file-edit hook input, returning null if the
+ * file path matches any exclusion pattern. Common extraction shared across
+ * hooks that inspect edit content (debug statements, TODO tracker, etc.).
+ */
+export function resolveEditDelta(
+  input: {
+    tool_input?: { file_path?: string; old_string?: string; new_string?: string; content?: string }
+  },
+  ...excludePatterns: RegExp[]
+): EditDelta | null {
+  const filePath = input.tool_input?.file_path ?? ""
+  if (isExcludedSourcePath(filePath, ...excludePatterns)) return null
+  return {
+    oldString: input.tool_input?.old_string ?? "",
+    newString: input.tool_input?.new_string ?? input.tool_input?.content ?? "",
+  }
+}
+
 // ─── Auto-steer scheduling ─────────────────────────────────────────────────
 
 export interface AutoSteerRequest {

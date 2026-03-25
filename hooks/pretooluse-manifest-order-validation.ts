@@ -4,6 +4,7 @@
 // without updating src/manifest.test.ts expectations. Prevents failed pushes
 // caused by manifest/test order divergence.
 
+import type { FileEditHookInput } from "./schemas.ts"
 import {
   allowPreToolUse,
   computeProjectedContent,
@@ -78,20 +79,14 @@ async function checkOrderAgainstTest(projectedOrder: string[], cwd: string): Pro
   }
 }
 
-type ManifestEditInput = {
-  tool_name?: string
-  tool_input?: { file_path?: string; old_string?: string; new_string?: string; content?: string }
-  cwd?: string
-}
-
-function isManifestEdit(input: ManifestEditInput): boolean {
+function isManifestEdit(input: FileEditHookInput): boolean {
   const filePath = input.tool_input?.file_path ?? ""
   const toolName = input.tool_name ?? ""
   return filePath.endsWith("src/manifest.ts") && (isEditTool(toolName) || isWriteTool(toolName))
 }
 
 async function main() {
-  const input = (await Bun.stdin.json()) as ManifestEditInput
+  const input = (await Bun.stdin.json()) as FileEditHookInput
   if (!isManifestEdit(input)) process.exit(0)
 
   try {

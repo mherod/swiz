@@ -28,7 +28,7 @@ import {
   allowPreToolUse,
   denyPreToolUse,
   formatActionPlan,
-  isExcludedSourcePath,
+  resolveEditDelta,
   TEST_FILE_RE,
 } from "./utils/hook-utils.ts"
 
@@ -69,23 +69,15 @@ function buildDebugDenyReason(oldCount: number, newCount: number): string {
   ].join("\n")
 }
 
-function resolveDebugEditDelta(
-  input: ReturnType<typeof fileEditHookInputSchema.parse>
-): { oldString: string; newString: string } | null {
-  const filePath = input.tool_input?.file_path ?? ""
-  if (
-    isExcludedSourcePath(filePath, TEST_FILE_RE, INFRA_FILE_RE, GENERATED_FILE_RE, CONFIG_FILE_RE)
-  )
-    return null
-  return {
-    oldString: input.tool_input?.old_string ?? "",
-    newString: input.tool_input?.new_string ?? input.tool_input?.content ?? "",
-  }
-}
-
 async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
-  const delta = resolveDebugEditDelta(input)
+  const delta = resolveEditDelta(
+    input,
+    TEST_FILE_RE,
+    INFRA_FILE_RE,
+    GENERATED_FILE_RE,
+    CONFIG_FILE_RE
+  )
   if (!delta) allowPreToolUse("")
 
   const oldCount = countDebugPatterns(delta!.oldString)

@@ -11,6 +11,7 @@ import {
   manualCompactionGuidanceFallback,
 } from "../src/memory-compaction-guidance.ts"
 import { resolveThresholds } from "./posttooluse-memory-size.ts"
+import type { FileEditHookInput } from "./schemas.ts"
 import {
   allowPreToolUse,
   computeProjectedContent,
@@ -51,20 +52,14 @@ async function buildWordLimitDenyReason(
   )
 }
 
-type WordLimitInput = {
-  tool_name?: string
-  tool_input?: { file_path?: string; old_string?: string; new_string?: string; content?: string }
-  cwd?: string
-}
-
-function isClaudeMdEdit(input: WordLimitInput): boolean {
+function isClaudeMdEdit(input: FileEditHookInput): boolean {
   const toolName = input.tool_name ?? ""
   const filePath = input.tool_input?.file_path ?? ""
   return filePath.endsWith("CLAUDE.md") && (isEditTool(toolName) || isWriteTool(toolName))
 }
 
 async function main() {
-  const input = (await Bun.stdin.json()) as WordLimitInput
+  const input = (await Bun.stdin.json()) as FileEditHookInput
   if (!isClaudeMdEdit(input)) process.exit(0)
 
   const toolName = input.tool_name ?? ""

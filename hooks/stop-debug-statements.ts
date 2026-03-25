@@ -43,7 +43,7 @@ function scanDiffForDebugStatements(diff: string, limit = 15): string[] {
   return findings
 }
 
-function isSourceFile(f: string): boolean {
+export function isSourceFile(f: string): boolean {
   return (
     SOURCE_EXT_RE.test(f) &&
     !TEST_FILE_RE.test(f) &&

@@ -18,7 +18,7 @@ import {
   allowPreToolUse,
   denyPreToolUse,
   formatActionPlan,
-  isExcludedSourcePath,
+  resolveEditDelta,
   TEST_FILE_RE,
 } from "./utils/hook-utils.ts"
 
@@ -58,25 +58,9 @@ function buildDenyMessage(oldCount: number, newCount: number): string {
   ].join("\n")
 }
 
-interface EditDelta {
-  oldString: string
-  newString: string
-}
-
-function resolveEditDelta(
-  input: ReturnType<typeof fileEditHookInputSchema.parse>
-): EditDelta | null {
-  const filePath = input.tool_input?.file_path ?? ""
-  if (isExcludedSourcePath(filePath, EXCLUDE_PATH_RE, GENERATED_FILE_RE, TEST_FILE_RE)) return null
-  return {
-    oldString: input.tool_input?.old_string ?? "",
-    newString: input.tool_input?.new_string ?? input.tool_input?.content ?? "",
-  }
-}
-
 async function main() {
   const input = fileEditHookInputSchema.parse(await Bun.stdin.json())
-  const delta = resolveEditDelta(input)
+  const delta = resolveEditDelta(input, EXCLUDE_PATH_RE, GENERATED_FILE_RE, TEST_FILE_RE)
   if (!delta) allowPreToolUse("")
 
   const oldCount = countTodoMarkers(delta!.oldString)

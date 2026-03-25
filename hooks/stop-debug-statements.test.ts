@@ -3,23 +3,12 @@ import {
   CONFIG_FILE_RE,
   DEBUGGER_RE,
   ESLINT_DEBUGGER_RULE_RE,
-  GENERATED_FILE_RE,
-  INFRA_FILE_RE,
+  isSourceFile as isScanned,
   JS_DEBUG_RE,
   PY_PRINT_RE,
   RUBY_DEBUG_RE,
 } from "./stop-debug-statements.ts"
-import { SOURCE_EXT_RE, TEST_FILE_RE } from "./utils/hook-utils.ts"
-
-function isScanned(filePath: string): boolean {
-  return (
-    SOURCE_EXT_RE.test(filePath) &&
-    !TEST_FILE_RE.test(filePath) &&
-    !INFRA_FILE_RE.test(filePath) &&
-    !GENERATED_FILE_RE.test(filePath) &&
-    !CONFIG_FILE_RE.test(filePath)
-  )
-}
+import { SOURCE_EXT_RE } from "./utils/hook-utils.ts"
 
 describe("stop-debug-statements file filter", () => {
   describe("GENERATED_FILE_RE — compiled artifacts are excluded", () => {
