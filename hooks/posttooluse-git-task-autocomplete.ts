@@ -22,6 +22,7 @@ import {
   GIT_PUSH_RE,
   getSessionTasksDir,
   isShellTool,
+  isTerminalTaskStatus,
   readSessionTasks,
   resolveSafeSessionId,
   stripHeredocs,
@@ -35,8 +36,7 @@ function shouldCompleteTask(
   isCommit: boolean,
   isPush: boolean
 ): boolean {
-  if (task.status === "completed" || task.status === "cancelled" || task.status === "deleted")
-    return false
+  if (isTerminalTaskStatus(task.status)) return false
   if (!SUBJECT_RE.test(task.subject)) return false
   const subjectLower = task.subject.toLowerCase()
   return (isPush && subjectLower.includes("push")) || (isCommit && subjectLower.includes("commit"))

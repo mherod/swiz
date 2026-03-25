@@ -12,6 +12,7 @@ import { getHomeDirWithFallback } from "../src/home.ts"
 import { sessionHookInputSchema } from "./schemas.ts"
 import {
   getSessionCompactSnapshotPath,
+  isIncompleteTaskStatus,
   limitItems,
   readSessionTasks,
   type SessionTask,
@@ -58,7 +59,7 @@ export function buildCompactSnapshotSummary(
   tasks: Pick<SessionTask, "status" | "subject" | "activeForm" | "description">[]
 ): CompactSnapshotSummary {
   const completed = tasks.filter((t) => t.status === "completed")
-  const incomplete = tasks.filter((t) => t.status === "pending" || t.status === "in_progress")
+  const incomplete = tasks.filter((t) => isIncompleteTaskStatus(t.status))
 
   const completedHighlights = uniquePreview(completed.map((t) => t.subject))
   const nextActions = uniquePreview(incomplete.map((t) => t.activeForm || t.subject))

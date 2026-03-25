@@ -910,6 +910,11 @@ export function isIncompleteTaskStatus(status: string): boolean {
   return status === "pending" || status === "in_progress"
 }
 
+/** True when a task status counts as terminal work. */
+export function isTerminalTaskStatus(status: string): boolean {
+  return status === "completed" || status === "cancelled" || status === "deleted"
+}
+
 /**
  * Find the most recent index in `toolNames` that corresponds to any task tool.
  * Returns -1 when no task tool is present.

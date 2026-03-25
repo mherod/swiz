@@ -18,6 +18,7 @@ import {
   getTasksRoot,
   getTranscriptSummary,
   hasSessionTasksDir,
+  isIncompleteTaskStatus,
   isTaskCreateTool,
   readSessionTasks,
   type SessionTask,
@@ -196,8 +197,8 @@ async function checkAuditLogAllowsStop(
         latestStatus.set(e.taskId, e.newStatus)
       }
     }
-    const incomplete = Array.from(latestStatus.values()).filter(
-      (s) => s === "pending" || s === "in_progress"
+    const incomplete = Array.from(latestStatus.values()).filter((s) =>
+      isIncompleteTaskStatus(s)
     ).length
 
     if (created > 0 && incomplete === 0) return true
@@ -296,7 +297,7 @@ function handleNoTasksDir(taskToolUsed: boolean, toolCallCount: number): boolean
 function getIncompleteDetails(allTasks: TaskFile[]): string[] {
   const incompleteTaskRows = allTasks
     .filter((t) => t.id && t.id !== "null")
-    .filter((t): t is TaskFile => t.status === "pending" || t.status === "in_progress")
+    .filter((t): t is TaskFile => isIncompleteTaskStatus(t.status))
   return orderBy(
     incompleteTaskRows,
     [(task) => (task.status === "in_progress" ? 1 : 0), (task) => Number.parseInt(task.id, 10)],
@@ -366,7 +367,7 @@ async function filterAndDeduplicateTasks(
 ): Promise<{ completedTasks: TaskFile[]; incompleteTasks: TaskFile[] }> {
   const completedTasks = allTasks.filter((t) => t.status === "completed")
   const incompleteTasks = allTasks.filter(
-    (t) => t.id && t.id !== "null" && (t.status === "pending" || t.status === "in_progress")
+    (t) => t.id && t.id !== "null" && isIncompleteTaskStatus(t.status)
   )
   await deduplicateStaleTasks(completedTasks, incompleteTasks, tasksDir)
   return { completedTasks, incompleteTasks }

@@ -8,6 +8,7 @@ import {
   findPriorSessionTasks,
   formatTaskCompleteCommand,
   formatTaskList,
+  isIncompleteTaskStatus,
   readSessionTasks,
   type SessionHookInput,
   toolNameForCurrentAgent,
@@ -24,9 +25,7 @@ async function main(): Promise<void> {
   if (!home) return
 
   const tasks = await readSessionTasks(sessionId, home)
-  const pendingCount = tasks.filter(
-    (t) => t.status === "pending" || t.status === "in_progress"
-  ).length
+  const pendingCount = tasks.filter((t) => isIncompleteTaskStatus(t.status)).length
 
   const cwd = input.cwd ?? process.cwd()
   const taskCreateName = toolNameForCurrentAgent("TaskCreate")

@@ -32,6 +32,7 @@ import {
   isIncompleteTaskStatus,
   isShellTool,
   isTaskTrackingExemptShellCommand,
+  isTerminalTaskStatus,
   isWriteTool,
   readSessionTasks,
   resolveSafeSessionId,
@@ -105,7 +106,8 @@ function buildIncompleteTaskSummary(
 } {
   const incompleteTasks = allTasks.filter((task) => isIncompleteTaskStatus(task.status))
   const pendingTasks = incompleteTasks.filter((task) => task.status === "pending")
-  const allTasksDone = allTasks.length > 0 && incompleteTasks.length === 0
+  const allTasksDone =
+    allTasks.length > 0 && allTasks.every((task) => isTerminalTaskStatus(task.status))
   const incompleteTaskList = incompleteTasks
     .map((task) => `  • #${task.id} (${task.status}): ${task.subject}`)
     .join("\n")
