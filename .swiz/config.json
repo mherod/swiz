@@ -4,5 +4,6 @@
   "memoryWordThreshold": 3500,
   "collaborationMode": "solo",
   "strictNoDirectMain": false,
-  "ambitionMode": "aggressive"
+  "ambitionMode": "aggressive",
+  "trunkMode": true
 }
