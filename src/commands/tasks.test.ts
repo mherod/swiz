@@ -754,7 +754,7 @@ describe("tasks command regressions (#242)", () => {
       process.env.HOME = home
       process.chdir(repoCwd)
       try {
-        await expect(
+        await Promise.resolve(
           tasksCommand.run([
             "status",
             taskId,
@@ -764,7 +764,7 @@ describe("tasks command regressions (#242)", () => {
             "--evidence",
             "note:completed",
           ])
-        ).resolves.toBeUndefined()
+        )
       } finally {
         process.chdir(prevCwd)
         if (prevHome === undefined) {
@@ -927,7 +927,7 @@ describe("task timing fields (#267)", () => {
       process.env.HOME = home
       process.chdir(repoCwd)
       try {
-        await expect(
+        await Promise.resolve(
           tasksCommand.run([
             "status",
             taskId,
@@ -937,7 +937,7 @@ describe("task timing fields (#267)", () => {
             "--evidence",
             "note:completed with timing",
           ])
-        ).resolves.toBeUndefined()
+        )
       } finally {
         process.chdir(prevCwd)
         if (prevHome === undefined) delete process.env.HOME

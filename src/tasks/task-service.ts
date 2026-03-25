@@ -478,6 +478,49 @@ export async function applyStateUpdate(targetState: string, cwd: string): Promis
   console.log(`  project state: ${from}${state}`)
 }
 
+// ─── Push pre-flight task-state validation ────────────────────────────────────
+
+/**
+ * Pure core: inspect a list of incomplete tasks and return an error string if
+ * the push pre-flight requirements are not met (≥1 in_progress + ≥1 pending).
+ * Returns null when the state is valid or when there are no tasks at all
+ * (skip check — not in a task-tracked session).
+ */
+export function checkPushPreFlightTaskState(
+  incomplete: ReadonlyArray<{ task: { status: string } }>
+): string | null {
+  if (incomplete.length === 0) return null
+
+  const hasInProgress = incomplete.some(({ task }) => task.status === "in_progress")
+  const hasPending = incomplete.some(({ task }) => task.status === "pending")
+
+  if (!hasInProgress) {
+    return (
+      "Push pre-flight: no in_progress task.\n" +
+      "Transition a task to in_progress before pushing:\n" +
+      "  swiz tasks status <id> in_progress"
+    )
+  }
+  if (!hasPending) {
+    return (
+      "Push pre-flight: no pending task.\n" +
+      "Create a next-step pending task (e.g. 'Verify CI') before pushing:\n" +
+      "  swiz tasks create 'Verify CI passes'"
+    )
+  }
+  return null
+}
+
+/**
+ * Validate that task state is ready for push or verify operations.
+ * Reads incomplete tasks for the project CWD and delegates to
+ * checkPushPreFlightTaskState for the actual logic.
+ */
+export async function validatePushPreFlightTaskState(filterCwd?: string): Promise<string | null> {
+  const incomplete = await collectIncompleteTasks(filterCwd)
+  return checkPushPreFlightTaskState(incomplete)
+}
+
 // ─── Evidence submission ──────────────────────────────────────────────────────
 
 export async function submitEvidence(

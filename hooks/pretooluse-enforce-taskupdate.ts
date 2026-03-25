@@ -10,6 +10,7 @@ import {
   isShellTool,
   scheduleAutoSteer,
 } from "./utils/hook-utils.ts"
+import { type SessionTaskTipContext, sessionTaskToolPatterns } from "./utils/transcript.ts"
 
 // Only enforce in agent/Claude Code context
 const isClaudeCode = isRunningInAgent() || process.env.CLAUDECODE === "1"
@@ -21,6 +22,8 @@ interface SwizTasksRule {
   severity?: "deny" | "warn"
   /** Human-readable guidance */
   message: string
+  /** When set, omit tip if the current session transcript already shows this pattern */
+  skipTipIf?: (ctx: SessionTaskTipContext) => boolean
 }
 
 /**
@@ -42,6 +45,7 @@ function buildSwizTasksRules(): SwizTasksRule[] {
     {
       match: (c) => /swiz\s+tasks\s+complete(?:\s|$)/.test(c),
       severity: "warn",
+      skipTipIf: (ctx) => ctx.hasSwizCompleteWithEvidence,
       message:
         "Tip: `swiz tasks complete` is the correct command for task completion with evidence.\n\n" +
         "Ensure you include structured evidence:\n" +
@@ -52,6 +56,7 @@ function buildSwizTasksRules(): SwizTasksRule[] {
     {
       match: (c) => /swiz\s+tasks\s+(?:list|get)(?:\s|$)/.test(c),
       severity: "warn",
+      skipTipIf: (ctx) => ctx.usedNativeTaskListOrGet,
       message:
         "Tip: Use the TaskList or TaskGet tool instead of `swiz tasks list/get`.\n\n" +
         "In Claude Code, prefer native task tools for better integration:\n" +
@@ -62,18 +67,32 @@ function buildSwizTasksRules(): SwizTasksRule[] {
   ]
 }
 
+async function emitWarnAndAllow(
+  rule: SwizTasksRule,
+  sessionId: string,
+  tipContext: SessionTaskTipContext
+): Promise<never> {
+  const skipTip = rule.skipTipIf?.(tipContext) ?? false
+  const message = skipTip ? "" : rule.message
+  if (sessionId && message) await scheduleAutoSteer(sessionId, message)
+  allowPreToolUse(message)
+}
+
+function shouldInspectShellInput(input: { tool_name?: string }): boolean {
+  return isClaudeCode && isShellTool(input?.tool_name ?? "")
+}
+
 async function checkRules(
   command: string,
   rules: SwizTasksRule[],
-  sessionId: string
+  sessionId: string,
+  tipContext: SessionTaskTipContext
 ): Promise<void> {
   for (const rule of rules) {
     if (!rule.match(command)) continue
 
     if (rule.severity === "warn") {
-      // Best-effort: schedule auto-steer if available, allow regardless
-      if (sessionId) await scheduleAutoSteer(sessionId, rule.message)
-      allowPreToolUse(rule.message)
+      await emitWarnAndAllow(rule, sessionId, tipContext)
     } else {
       // For deny rules: if auto-steer can handle it, allow + steer instead
       if (sessionId && (await scheduleAutoSteer(sessionId, rule.message))) {
@@ -87,23 +106,18 @@ async function checkRules(
   allowPreToolUse("")
 }
 
+async function runSwizTasksEnforcement(input: Record<string, unknown>): Promise<void> {
+  const command = String((input.tool_input as Record<string, unknown> | undefined)?.command ?? "")
+  const sessionId = String(input.session_id ?? "")
+  const transcriptPath = String(input.transcript_path ?? "")
+  const tipContext = await sessionTaskToolPatterns(transcriptPath)
+  await checkRules(command, buildSwizTasksRules(), sessionId, tipContext)
+}
+
 async function main() {
   const input = await Bun.stdin.json()
-
-  // Only apply in Claude Code environment
-  if (!isClaudeCode) {
-    process.exit(0)
-  }
-
-  // Only check shell tools (Bash, Shell)
-  if (!isShellTool(input?.tool_name ?? "")) {
-    process.exit(0)
-  }
-
-  const command: string = input?.tool_input?.command ?? ""
-  const sessionId: string = input?.session_id ?? ""
-  const rules = buildSwizTasksRules()
-  await checkRules(command, rules, sessionId)
+  if (!shouldInspectShellInput(input)) process.exit(0)
+  await runSwizTasksEnforcement(input as Record<string, unknown>)
 }
 
 if (import.meta.main) {

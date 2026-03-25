@@ -35,15 +35,29 @@ function extractToolBlocksFromEntry(line: string): Array<Record<string, unknown>
   }
 }
 
+function collectToolBlocksFromLines(lines: string[]): Array<Record<string, unknown>> {
+  const blocks: Array<Record<string, unknown>> = []
+  for (const line of lines) {
+    if (!line.trim()) continue
+    blocks.push(...extractToolBlocksFromEntry(line))
+  }
+  return blocks
+}
+
+function bashCommandsFromBlocks(blocks: Array<Record<string, unknown>>): string[] {
+  const commands: string[] = []
+  for (const block of blocks) {
+    if (!isShellTool(String(block.name ?? ""))) continue
+    const cmd = String((block.input as Record<string, unknown>)?.command ?? "")
+    if (cmd) commands.push(normalizeCommand(cmd))
+  }
+  return commands
+}
+
 async function readTranscriptToolBlocks(path: string): Promise<Array<Record<string, unknown>>> {
   try {
     const text = await Bun.file(path).text()
-    const blocks: Array<Record<string, unknown>> = []
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue
-      blocks.push(...extractToolBlocksFromEntry(line))
-    }
-    return blocks
+    return collectToolBlocksFromLines(text.split("\n"))
   } catch {
     return []
   }
@@ -66,13 +80,7 @@ export async function extractToolNamesFromTranscript(transcriptPath: string): Pr
  */
 export async function extractBashCommands(path: string): Promise<string[]> {
   const blocks = await readTranscriptToolBlocks(path)
-  const commands: string[] = []
-  for (const block of blocks) {
-    if (!isShellTool(String(block.name ?? ""))) continue
-    const cmd = String((block.input as Record<string, unknown>)?.command ?? "")
-    if (cmd) commands.push(normalizeCommand(cmd))
-  }
-  return commands
+  return bashCommandsFromBlocks(blocks)
 }
 
 /**
@@ -164,6 +172,48 @@ export async function readSessionLines(transcriptPath: string): Promise<string[]
     }
   }
   return sessionStartIdx > 0 ? allLines.slice(sessionStartIdx) : allLines
+}
+
+/** Signals from the current session transcript for suppressing redundant PreToolUse tips. */
+export interface SessionTaskTipContext {
+  /** Prior Bash tool_use ran `swiz tasks complete` with `--evidence`. */
+  hasSwizCompleteWithEvidence: boolean
+  /** Assistant already used TaskList or TaskGet in this session. */
+  usedNativeTaskListOrGet: boolean
+}
+
+/**
+ * Scan the current session (after last compaction boundary) for task-tool patterns
+ * that show the agent already follows CLI vs native guidance.
+ */
+export async function sessionTaskToolPatterns(
+  transcriptPath: string
+): Promise<SessionTaskTipContext> {
+  const empty: SessionTaskTipContext = {
+    hasSwizCompleteWithEvidence: false,
+    usedNativeTaskListOrGet: false,
+  }
+  if (!transcriptPath) return empty
+
+  const lines = await readSessionLines(transcriptPath)
+  const blocks = collectToolBlocksFromLines(lines)
+  let hasSwizCompleteWithEvidence = false
+  let usedNativeTaskListOrGet = false
+
+  for (const block of blocks) {
+    const name = String(block.name ?? "")
+    if (name === "TaskList" || name === "TaskGet") usedNativeTaskListOrGet = true
+    if (isShellTool(name)) {
+      const raw = String((block.input as Record<string, unknown>)?.command ?? "")
+      if (!raw) continue
+      const norm = normalizeCommand(raw)
+      if (/swiz\s+tasks\s+complete(?:\s|$)/.test(norm) && /--evidence(?:\s|=|$)/.test(norm)) {
+        hasSwizCompleteWithEvidence = true
+      }
+    }
+  }
+
+  return { hasSwizCompleteWithEvidence, usedNativeTaskListOrGet }
 }
 
 /**

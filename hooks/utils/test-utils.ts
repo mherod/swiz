@@ -123,11 +123,13 @@ export async function createEnforcementProjectDir(makeDir: () => Promise<string>
 export async function runBashHook(
   script: string,
   command: string,
-  opts: { toolName?: string; cwd?: string } = {}
+  opts: { toolName?: string; cwd?: string; transcript_path?: string; session_id?: string } = {}
 ): Promise<{ decision?: string; reason?: string; stdout: string }> {
   const payload = JSON.stringify({
     tool_name: opts.toolName ?? "Bash",
     tool_input: { command },
+    ...(opts.transcript_path !== undefined && { transcript_path: opts.transcript_path }),
+    ...(opts.session_id !== undefined && { session_id: opts.session_id }),
   })
   const proc = Bun.spawn(["bun", resolve(script)], {
     stdin: "pipe",
