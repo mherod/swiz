@@ -6,25 +6,28 @@
  * and posttooluse-task-evidence share a single definition.
  */
 
-import type { ToolHookInput } from "./hook-utils.ts"
+import type { SessionTask, ToolHookInput } from "./hook-utils.ts"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-/** On-disk task file shape written to ~/.claude/tasks/<session>/<id>.json. */
-export interface TaskFile {
-  id: string
-  subject: string
-  description: string
-  activeForm?: string
-  status: string
-  blocks: string[]
-  blockedBy: string[]
-  statusChangedAt: string
-  elapsedMs: number
-  startedAt: number | null
-  completedAt: number | null
-  completionTimestamp?: string
-}
+/** Strict task file shape with all timing fields required — used by builders. */
+export type TaskFile = Required<
+  Pick<
+    SessionTask,
+    | "id"
+    | "subject"
+    | "description"
+    | "status"
+    | "statusChangedAt"
+    | "elapsedMs"
+    | "startedAt"
+    | "completedAt"
+  >
+> &
+  Pick<SessionTask, "activeForm" | "completionTimestamp"> & {
+    blocks: string[]
+    blockedBy: string[]
+  }
 
 /** ToolHookInput extended with typed task tool_input fields. */
 export interface TaskToolInput extends ToolHookInput {

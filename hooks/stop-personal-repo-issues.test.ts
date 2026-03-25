@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
-  type Issue as HookIssue,
+  type Issue,
   missingRefinementCategories,
   needsRefinement,
 } from "./stop-personal-repo-issues.ts"
@@ -65,14 +65,6 @@ const SKIP_NORM = new Set([...SKIP_LABELS].map(normaliseLabel))
 const SCORE_NORM: Record<string, number> = Object.fromEntries(
   Object.entries(LABEL_SCORE).map(([k, v]) => [normaliseLabel(k), v])
 )
-
-interface Issue {
-  number: number
-  title: string
-  labels: Array<{ name: string }>
-  author?: { login: string }
-  assignees?: Array<{ login: string }>
-}
 
 function filterByUser(issues: Issue[], filterUser: string): Issue[] {
   return issues.filter(
@@ -1019,7 +1011,7 @@ describe("integration — top-5 truncation with mixed real-world label sets", ()
 // ─── needsRefinement — issue refinement detection ─────────────────────────────
 
 describe("needsRefinement — explicit needs-refinement label", () => {
-  function issue(labels: string[]): HookIssue {
+  function issue(labels: string[]): Issue {
     return { number: 1, title: "Test", labels: labels.map((name) => ({ name })) }
   }
 
@@ -1045,7 +1037,7 @@ describe("needsRefinement — explicit needs-refinement label", () => {
 })
 
 describe("needsRefinement — missing readiness labels", () => {
-  function issue(labels: string[]): HookIssue {
+  function issue(labels: string[]): Issue {
     return { number: 1, title: "Test", labels: labels.map((name) => ({ name })) }
   }
 
@@ -1079,7 +1071,7 @@ describe("needsRefinement — missing readiness labels", () => {
 })
 
 describe("needsRefinement — issues that are ready (should NOT need refinement)", () => {
-  function issue(labels: string[]): HookIssue {
+  function issue(labels: string[]): Issue {
     return { number: 1, title: "Test", labels: labels.map((name) => ({ name })) }
   }
 
@@ -1105,7 +1097,7 @@ describe("needsRefinement — issues that are ready (should NOT need refinement)
 })
 
 describe("missingRefinementCategories", () => {
-  function issue(labels: string[]): HookIssue {
+  function issue(labels: string[]): Issue {
     return { number: 1, title: "Test", labels: labels.map((name) => ({ name })) }
   }
 
@@ -1123,7 +1115,7 @@ describe("missingRefinementCategories", () => {
 })
 
 describe("needsRefinement — edge case: needs-refinement overrides readiness", () => {
-  function issue(labels: string[]): HookIssue {
+  function issue(labels: string[]): Issue {
     return { number: 1, title: "Test", labels: labels.map((name) => ({ name })) }
   }
 
