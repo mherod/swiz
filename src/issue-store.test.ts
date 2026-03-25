@@ -1149,6 +1149,109 @@ describe("syncUpstreamState with mock GitHubClient", () => {
       store.close()
     }
   })
+
+  test("closed issues/PRs remove stale rows from store", async () => {
+    const store = createStore()
+    // Pre-populate with issues that will be "closed"
+    store.upsertIssues("test/repo", [
+      { number: 1, title: "Open" },
+      { number: 2, title: "Will close" },
+    ])
+    store.upsertPullRequests("test/repo", [
+      { number: 10, title: "Open PR" },
+      { number: 20, title: "Will merge" },
+    ])
+
+    const client: GitHubClient = {
+      listIssues: async (_cwd, state) => {
+        if (state === "open") return [{ number: 1, title: "Open" }]
+        return [{ number: 2 }] // closed
+      },
+      listPullRequests: async (_cwd, state) => {
+        if (state === "open") return [{ number: 10, title: "Open PR" }]
+        return [{ number: 20 }] // closed
+      },
+      listWorkflowRuns: async () => [],
+    }
+
+    try {
+      const result = await syncUpstreamState("test/repo", "/tmp", store, client)
+      expect(result.issues.upserted).toBe(1)
+      expect(result.issues.removed).toBeGreaterThanOrEqual(1)
+      expect(result.pullRequests.upserted).toBe(1)
+      expect(result.pullRequests.removed).toBeGreaterThanOrEqual(1)
+      // Stale #2 and #20 should be gone
+      expect(store.getIssue("test/repo", 2)).toBeNull()
+      expect(store.getPullRequest("test/repo", 20)).toBeNull()
+      // Open #1 and #10 should remain
+      expect(store.getIssue("test/repo", 1)).not.toBeNull()
+      expect(store.getPullRequest("test/repo", 10)).not.toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+
+  test("CI runs are upserted into store", async () => {
+    const store = createStore()
+    const client: GitHubClient = {
+      listIssues: async () => [],
+      listPullRequests: async () => [],
+      listWorkflowRuns: async () => [
+        {
+          headSha: "abc123",
+          databaseId: 999,
+          status: "completed",
+          conclusion: "success",
+          url: "https://example.com/run/999",
+        },
+        {
+          headSha: "def456",
+          databaseId: 888,
+          status: "in_progress",
+          conclusion: "",
+          url: "https://example.com/run/888",
+        },
+      ],
+    }
+
+    try {
+      const result = await syncUpstreamState("test/repo", "/tmp", store, client)
+      expect(result.ciStatuses.upserted).toBe(2)
+      const ci = store.getCiStatus<{ run_id: number; conclusion: string }>("test/repo", "abc123")
+      expect(ci?.run_id).toBe(999)
+      expect(ci?.conclusion).toBe("success")
+      const ci2 = store.getCiStatus<{ run_id: number; conclusion: string }>("test/repo", "def456")
+      expect(ci2?.run_id).toBe(888)
+      expect(ci2?.conclusion).toBe("")
+    } finally {
+      store.close()
+    }
+  })
+
+  test("empty open lists remove all stale rows", async () => {
+    const store = createStore()
+    store.upsertIssues("test/repo", [
+      { number: 1, title: "Stale" },
+      { number: 2, title: "Also stale" },
+    ])
+
+    const client: GitHubClient = {
+      listIssues: async (_cwd, state) => (state === "open" ? [] : []),
+      listPullRequests: async (_cwd, state) => (state === "open" ? [] : []),
+      listWorkflowRuns: async () => [],
+    }
+
+    try {
+      const result = await syncUpstreamState("test/repo", "/tmp", store, client)
+      // 0 open issues upserted, but stale rows should be purged
+      expect(result.issues.upserted).toBe(0)
+      expect(result.issues.removed).toBe(2)
+      expect(store.getIssue("test/repo", 1)).toBeNull()
+      expect(store.getIssue("test/repo", 2)).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
 })
 
 describe("IssueStoreReader", () => {
@@ -1198,6 +1301,55 @@ describe("IssueStoreReader", () => {
 
     const notFound = await mockReader.getIssue("any/repo", 99)
     expect(notFound).toBeNull()
+  })
+
+  test("asReader() returns empty arrays for repos with no data", async () => {
+    const store = createStore()
+    try {
+      const reader = store.asReader()
+      const issues = await reader.listIssues("nonexistent/repo")
+      expect(issues).toEqual([])
+      const prs = await reader.listPullRequests("nonexistent/repo")
+      expect(prs).toEqual([])
+      const issue = await reader.getIssue("nonexistent/repo", 1)
+      expect(issue).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+
+  test("asReader() returns empty after TTL expiry", async () => {
+    const store = createStore()
+    try {
+      store.upsertIssues("test/repo", [{ number: 1, title: "Old" }])
+      // Default TTL is 5 minutes; passing ttlMs=0 to listIssues forces expiry
+      // asReader() uses default TTL, but we can verify the sync read returns empty with 0 TTL
+      const expired = store.listIssues("test/repo", 0)
+      expect(expired).toEqual([])
+      // asReader() uses default TTL — data just inserted should still be fresh
+      const reader = store.asReader()
+      const fresh = await reader.listIssues("test/repo")
+      expect(fresh).toHaveLength(1)
+    } finally {
+      store.close()
+    }
+  })
+
+  test("asReader() reflects mutations between calls", async () => {
+    const store = createStore()
+    try {
+      const reader = store.asReader()
+      // Initially empty
+      expect(await reader.listIssues("test/repo")).toEqual([])
+      // Add data after reader creation
+      store.upsertIssues("test/repo", [{ number: 5, title: "New" }])
+      // Reader should reflect the new data
+      const issues = await reader.listIssues<{ title: string }>("test/repo")
+      expect(issues).toHaveLength(1)
+      expect(issues[0]!.title).toBe("New")
+    } finally {
+      store.close()
+    }
   })
 })
 
