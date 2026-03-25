@@ -17,6 +17,9 @@ import {
 // All recognised aliases for the sandboxedEdits setting
 const SANDBOX_ALIASES = ["sandboxed-edits", "sandboxededits", "sandboxed_edits", "sandboxedEdits"]
 
+// All recognised aliases for the trunkMode setting
+const TRUNK_MODE_ALIASES = ["trunk-mode", "trunkmode", "trunk_mode", "trunkMode"]
+
 // Matches any JSON file directly inside a .swiz/ directory.
 // Direct edits to these files bypass setting validation and schema enforcement,
 // and can be used to disable sandbox protections — so we block them unconditionally,
@@ -33,6 +36,13 @@ export function isSandboxDisableCommand(command: string): boolean {
   return isSettingDisableCommand(command, SANDBOX_ALIASES)
 }
 
+/**
+ * Returns true when the command attempts to disable the trunk-mode setting.
+ */
+export function isTrunkModeDisableCommand(command: string): boolean {
+  return isSettingDisableCommand(command, TRUNK_MODE_ALIASES)
+}
+
 if (import.meta.main) {
   const input = await Bun.stdin.json()
   const toolName: string = input?.tool_name ?? ""
@@ -43,6 +53,13 @@ if (import.meta.main) {
       denyPreToolUse(
         "Disabling sandboxed-edits is not permitted from agent Bash commands.\n\n" +
           "The sandbox can only be disabled by the user directly at the terminal.\n" +
+          buildIssueGuidance(null)
+      )
+    }
+    if (isTrunkModeDisableCommand(command)) {
+      denyPreToolUse(
+        "Disabling trunk-mode is not permitted from agent Bash commands.\n\n" +
+          "Trunk mode can only be disabled by the user directly at the terminal.\n" +
           buildIssueGuidance(null)
       )
     }

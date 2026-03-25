@@ -283,6 +283,25 @@ describe("renderStatusLineFromSnapshot", () => {
     expect(out).toContain("ci")
     expect(out).toContain("running")
   })
+
+  it("does not render CI when snapshot.ignoreCi is set", () => {
+    const out = renderStatusLineFromSnapshot({
+      input: { model: { display_name: "claude-haiku" } },
+      snapshot: {
+        ...baseSnapshot,
+        ignoreCi: true,
+        ciState: "pending",
+        ciLabel: "running",
+      },
+      ctxPct: 0,
+      ctxTokens: 0,
+      ctxStats: null,
+      timeOffset: 0,
+    })
+    expect(out).not.toContain("running")
+    const line1 = out.split("\n")[0] ?? ""
+    expect(line1).not.toMatch(/\bci\b/i)
+  })
 })
 
 describe("summarizeGitHubCiRuns", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { isSandboxDisableCommand } from "./pretooluse-protect-sandbox.ts"
+import { isSandboxDisableCommand, isTrunkModeDisableCommand } from "./pretooluse-protect-sandbox.ts"
 import { runBashHook, runFileEditHook } from "./utils/test-utils.ts"
 
 const HOOK = "hooks/pretooluse-protect-sandbox.ts"
@@ -24,9 +24,39 @@ describe("isSandboxDisableCommand", () => {
   })
 })
 
+describe("isTrunkModeDisableCommand", () => {
+  test("matches swiz settings disable trunk-mode", () => {
+    expect(isTrunkModeDisableCommand("swiz settings disable trunk-mode")).toBe(true)
+  })
+
+  test("matches swiz settings disable trunkmode", () => {
+    expect(isTrunkModeDisableCommand("swiz settings disable trunkmode")).toBe(true)
+  })
+
+  test("matches swiz settings set trunkMode false", () => {
+    expect(isTrunkModeDisableCommand("swiz settings set trunkMode false")).toBe(true)
+  })
+
+  test("does not match unrelated settings commands", () => {
+    expect(isTrunkModeDisableCommand("swiz settings enable trunk-mode")).toBe(false)
+    expect(isTrunkModeDisableCommand("swiz settings disable sandboxed-edits")).toBe(false)
+    expect(isTrunkModeDisableCommand("echo hello")).toBe(false)
+  })
+})
+
 describe("pretooluse-protect-sandbox (shell commands)", () => {
   test("blocks swiz settings disable sandboxed-edits", async () => {
     const result = await runBashHook(HOOK, "swiz settings disable sandboxed-edits")
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks swiz settings disable trunk-mode", async () => {
+    const result = await runBashHook(HOOK, "swiz settings disable trunk-mode")
+    expect(result.decision).toBe("deny")
+  })
+
+  test("blocks swiz settings set trunkMode false", async () => {
+    const result = await runBashHook(HOOK, "swiz settings set trunkMode false")
     expect(result.decision).toBe("deny")
   })
 

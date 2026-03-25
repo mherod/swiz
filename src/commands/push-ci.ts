@@ -9,7 +9,12 @@ import { getDefaultBranch, isDefaultBranch } from "../../hooks/utils/git-utils.t
 import { requiresPeerReview } from "../collaboration-policy.ts"
 import { stderrLog } from "../debug.ts"
 import { acquireGhSlot } from "../gh-rate-limit.ts"
-import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../settings.ts"
+import {
+  type CollaborationMode,
+  getEffectiveSwizSettings,
+  readProjectSettings,
+  readSwizSettings,
+} from "../settings.ts"
 import type { Command } from "../types.ts"
 import { waitForCiCompletion } from "./ci-wait.ts"
 import { getSentinelPath, parsePushWaitArgs, waitForCooldown } from "./push-wait.ts"
@@ -20,6 +25,24 @@ export interface PushCiArgs {
   cooldownTimeout: number
   ciTimeout: number
   cwd?: string
+}
+
+async function assertPeerReviewAllowsDefaultPush(
+  cwd: string,
+  targetBranch: string,
+  collaborationMode: CollaborationMode
+): Promise<void> {
+  const defaultBranch = await getDefaultBranch(cwd)
+  if (!isDefaultBranch(targetBranch, defaultBranch)) return
+  if (!requiresPeerReview(collaborationMode)) return
+  throw new Error(
+    `Collaboration mode "${collaborationMode}" requires peer review — ` +
+      `direct pushes to ${targetBranch} are not allowed.\n\n` +
+      `Push to a feature branch and open a PR instead:\n` +
+      `  git checkout -b feat/<description>\n` +
+      `  git push origin feat/<description>\n` +
+      `  gh pr create`
+  )
 }
 
 export function parsePushCiArgs(args: string[]): PushCiArgs {
@@ -59,6 +82,12 @@ export const pushCiCommand: Command = {
     const { remote, branch, cooldownTimeout, ciTimeout, cwd: cwdArg } = parsePushCiArgs(args)
     const cwd = cwdArg ?? process.cwd()
 
+    const [globalSettings, projectSettings] = await Promise.all([
+      readSwizSettings(),
+      readProjectSettings(cwd),
+    ])
+    const effective = getEffectiveSwizSettings(globalSettings, undefined, projectSettings)
+
     // Resolve branch if not provided
     let targetBranch = branch
     if (!targetBranch) {
@@ -84,25 +113,7 @@ export const pushCiCommand: Command = {
       throw new Error("Could not determine HEAD SHA")
     }
 
-    // 0. Peer-review gate: block direct default-branch pushes in team mode
-    const defaultBranch = await getDefaultBranch(cwd)
-    if (isDefaultBranch(targetBranch, defaultBranch)) {
-      const [globalSettings, projectSettings] = await Promise.all([
-        readSwizSettings(),
-        readProjectSettings(cwd),
-      ])
-      const effective = getEffectiveSwizSettings(globalSettings, undefined, projectSettings)
-      if (requiresPeerReview(effective.collaborationMode)) {
-        throw new Error(
-          `Collaboration mode "${effective.collaborationMode}" requires peer review — ` +
-            `direct pushes to ${targetBranch} are not allowed.\n\n` +
-            `Push to a feature branch and open a PR instead:\n` +
-            `  git checkout -b feat/<description>\n` +
-            `  git push origin feat/<description>\n` +
-            `  gh pr create`
-        )
-      }
-    }
+    await assertPeerReviewAllowsDefaultPush(cwd, targetBranch, effective.collaborationMode)
 
     // 1. Wait for push cooldown
     const sentinelPath = getSentinelPath(cwd)
@@ -121,6 +132,11 @@ export const pushCiCommand: Command = {
       throw new Error(`git push failed with exit code ${pushProc.exitCode}`)
     }
     console.log(`✓ Push succeeded — SHA ${commitSha.slice(0, 8)}`)
+
+    if (effective.ignoreCi) {
+      console.log(`ℹ ignore-ci enabled — skipping CI wait and GitHub Actions checks.`)
+      return
+    }
 
     // 3. Poll CI for the pushed SHA
     console.log(`⏳ Waiting for CI run for commit ${commitSha.slice(0, 8)}...`)

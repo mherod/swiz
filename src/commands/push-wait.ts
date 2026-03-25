@@ -1,5 +1,11 @@
 import { acquireGhSlot } from "../gh-rate-limit.ts"
 import { getCanonicalPathHash } from "../git-helpers.ts"
+import {
+  type EffectiveSwizSettings,
+  getEffectiveSwizSettings,
+  readProjectSettings,
+  readSwizSettings,
+} from "../settings.ts"
 import { swizPushCooldownSentinelPath, swizPushResultPath } from "../temp-paths.ts"
 import type { Command } from "../types.ts"
 import { expandSha, findRunId, startCiWatchViaDaemon } from "./ci-wait.ts"
@@ -285,6 +291,67 @@ async function writePushResult(repoKey: string, result: PushResult): Promise<voi
   }
 }
 
+async function finalizeSuccessfulPushWait(opts: {
+  effective: EffectiveSwizSettings
+  wait: boolean
+  timeout: number
+  commitSha: string
+  cwd: string
+  repoKey: string
+  targetBranch: string
+  remote: string
+}): Promise<void> {
+  const { effective, wait, timeout, commitSha, cwd, repoKey, targetBranch, remote } = opts
+  console.log("✓ Push succeeded")
+
+  if (wait) {
+    if (effective.ignoreCi) {
+      console.log(`ℹ ignore-ci enabled — skipping CI poll (--wait).`)
+    } else {
+      console.log(`⏳ --wait: polling CI until all jobs reach conclusion=success...`)
+      await pollUntilAllJobsSuccess(commitSha, timeout, cwd)
+    }
+    await writePushResult(repoKey, {
+      success: true,
+      commitSha,
+      branch: targetBranch,
+      remote,
+      exitCode: 0,
+      timestamp: Date.now(),
+      ciWatchStarted: false,
+    })
+    return
+  }
+
+  let ciWatchStarted = false
+  if (effective.ignoreCi) {
+    console.log(`ℹ ignore-ci enabled — skipping background CI watch.`)
+  } else {
+    const watchResult = await startCiWatchViaDaemon(commitSha, cwd)
+    if (watchResult?.ignored) {
+      console.log(`ℹ ignore-ci enabled — skipping background CI watch.`)
+    } else if (watchResult?.watch) {
+      ciWatchStarted = true
+      const mode = watchResult.deduped ? "already active" : "started"
+      console.log(`✓ CI background watch ${mode} for ${commitSha.slice(0, 8)}`)
+    } else {
+      console.log(
+        `⚠ Could not reach daemon for CI watch; run 'swiz daemon' to enable background CI notifications.`
+      )
+    }
+  }
+
+  await writePushResult(repoKey, {
+    success: true,
+    commitSha,
+    branch: targetBranch,
+    remote,
+    exitCode: 0,
+    timestamp: Date.now(),
+    ciWatchStarted,
+  })
+}
+
 // ─── Command ─────────────────────────────────────────────────────────────
 
 export const pushWaitCommand: Command = {
@@ -299,6 +366,12 @@ export const pushWaitCommand: Command = {
   async run(args) {
     const { remote, branch, timeout, wait, extraArgs, cwd: cwdArg } = parsePushWaitArgs(args)
     const cwd = cwdArg ?? process.cwd()
+
+    const [globalSettings, projectSettings] = await Promise.all([
+      readSwizSettings(),
+      readProjectSettings(cwd),
+    ])
+    const effective = getEffectiveSwizSettings(globalSettings, undefined, projectSettings)
 
     // Resolve branch from git if not provided
     let targetBranch = branch
@@ -354,44 +427,15 @@ export const pushWaitCommand: Command = {
       throw new Error(`git push failed with exit code ${proc.exitCode}`)
     }
 
-    console.log("✓ Push succeeded")
-
-    if (wait) {
-      console.log(`⏳ --wait: polling CI until all jobs reach conclusion=success...`)
-      await pollUntilAllJobsSuccess(commitSha, timeout, cwd)
-      await writePushResult(repoKey, {
-        success: true,
-        commitSha,
-        branch: targetBranch,
-        remote,
-        exitCode: 0,
-        timestamp: Date.now(),
-        ciWatchStarted: false,
-      })
-      return
-    }
-
-    const watch = await startCiWatchViaDaemon(commitSha, cwd)
-    const ciWatchStarted = watch !== null
-    if (watch) {
-      const mode = watch.deduped ? "already active" : "started"
-      console.log(`✓ CI background watch ${mode} for ${commitSha.slice(0, 8)}`)
-    } else {
-      console.log(
-        `⚠ Could not reach daemon for CI watch; run 'swiz daemon' to enable background CI notifications.`
-      )
-    }
-
-    // Write structured result file so callers can retrieve push outcome
-    // even if the background task record is cleaned up
-    await writePushResult(repoKey, {
-      success: true,
+    await finalizeSuccessfulPushWait({
+      effective,
+      wait,
+      timeout,
       commitSha,
-      branch: targetBranch,
+      cwd,
+      repoKey,
+      targetBranch,
       remote,
-      exitCode: 0,
-      timestamp: Date.now(),
-      ciWatchStarted,
     })
   },
 }

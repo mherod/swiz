@@ -6,6 +6,7 @@
 // the repository is in a dirty state — even if a PR exists, the agent should
 // complete all review tasks, merge the PR, and switch back to main before stopping.
 
+import { readProjectSettings } from "../src/settings.ts"
 import { stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
@@ -29,6 +30,15 @@ async function main(): Promise<void> {
 
   const defaultBranch = await getDefaultBranch(cwd)
   if (isDefaultBranch(branch, defaultBranch)) return
+
+  const trunkMode = (await readProjectSettings(cwd))?.trunkMode === true
+  if (trunkMode) {
+    blockStop(
+      `Stopping on branch '${branch}' — trunk mode requires the default branch ('${defaultBranch}') before the session ends.\n\n` +
+        `Switch back: \`git checkout ${defaultBranch}\`\n\n` +
+        `Do not open a pull request for trunk-mode work; integrate on '${defaultBranch}' or disable trunk mode in \`.swiz/config.json\` if you need feature branches.`
+    )
+  }
 
   // Check if the branch has an open PR — tailor guidance accordingly
   let pr: { number: number } | null = null

@@ -60,8 +60,11 @@ const hasBranchCheck = priorCommands.some((c) => BRANCH_CHECK_RE.test(c))
 const hasPRCheck = priorCommands.some((c) => PR_CHECK_RE.test(c))
 
 // Check 3: CI check — required when prHooksActive (team/relaxed-collab).
-// Satisfied by `swiz ci-wait` in the transcript.
-const hasCICheck = modePolicy.prHooksActive ? priorCommands.some((c) => CI_WAIT_RE.test(c)) : true // not required for solo/auto
+// Satisfied by `swiz ci-wait` in the transcript (skipped when ignore-ci is on).
+const hasCICheck =
+  effectiveSettings.ignoreCi || !modePolicy.prHooksActive
+    ? true
+    : priorCommands.some((c) => CI_WAIT_RE.test(c))
 
 if (hasBranchCheck && hasPRCheck && hasCICheck) {
   allowPreToolUse("All pre-push checks found in transcript (branch, PR, CI)")

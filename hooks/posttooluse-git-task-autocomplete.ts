@@ -14,7 +14,7 @@
 
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { getEffectiveSwizSettings, readSwizSettings } from "../src/settings.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { toolHookInputSchema } from "./schemas.ts"
 import {
   emitContext,
@@ -56,10 +56,17 @@ async function completeTasks(
   }
 }
 
-async function buildPushContext(sessionId: string): Promise<string> {
+async function buildPushContext(sessionId: string, cwd: string): Promise<string> {
   const taskCreateName = toolNameForCurrentAgent("TaskCreate")
   const settings = await readSwizSettings()
-  const effective = getEffectiveSwizSettings(settings, sessionId)
+  const projectSettings = await readProjectSettings(cwd)
+  const effective = getEffectiveSwizSettings(settings, sessionId, projectSettings)
+  if (effective.ignoreCi) {
+    return "git push succeeded."
+  }
+  if (projectSettings?.trunkMode) {
+    return `git push succeeded. Trunk mode — no pull request. Use ${taskCreateName} to add a "Wait for CI and verify pass" task if your workflow needs it, then mark it in_progress before stopping.`
+  }
   return effective.prMergeMode
     ? `git push succeeded. Use ${taskCreateName} to create a "Wait for CI and verify pass" task, then mark it in_progress and monitor CI before stopping.`
     : `git push succeeded. Use ${taskCreateName} to create an "Open PR for this branch" task, then mark it in_progress and open the pull request before stopping.`
@@ -91,11 +98,8 @@ async function main(): Promise<void> {
   await completeTasks(tasksDir, tasks, op.isCommit, op.isPush)
 
   if (op.isPush) {
-    await emitContext(
-      "PostToolUse",
-      await buildPushContext(op.sessionId),
-      input.cwd ?? process.cwd()
-    )
+    const cwd = input.cwd ?? process.cwd()
+    await emitContext("PostToolUse", await buildPushContext(op.sessionId, cwd), cwd)
   }
 }
 

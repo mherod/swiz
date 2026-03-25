@@ -18,6 +18,7 @@ interface GlobalSettingsForm {
   prAgeGateMinutes: number
   updateMemoryFooter: boolean
   nonDefaultBranchGate: boolean
+  ignoreCi: boolean
   githubCiGate: boolean
   changesRequestedGate: boolean
   personalRepoIssuesGate: boolean
@@ -43,6 +44,7 @@ const DEFAULT_GLOBAL_FORM: GlobalSettingsForm = {
   prAgeGateMinutes: 15,
   updateMemoryFooter: true,
   nonDefaultBranchGate: true,
+  ignoreCi: false,
   githubCiGate: true,
   changesRequestedGate: true,
   personalRepoIssuesGate: true,
@@ -118,6 +120,7 @@ function globalSettingsToForm(settings: Record<string, unknown>): GlobalSettings
     prAgeGateMinutes: Number(settings.prAgeGateMinutes) || 15,
     updateMemoryFooter: settings.updateMemoryFooter !== false,
     nonDefaultBranchGate: settings.nonDefaultBranchGate !== false,
+    ignoreCi: !!settings.ignoreCi,
     githubCiGate: settings.githubCiGate !== false,
     changesRequestedGate: settings.changesRequestedGate !== false,
     personalRepoIssuesGate: settings.personalRepoIssuesGate !== false,
@@ -297,6 +300,11 @@ const GLOBAL_TOGGLES: Array<{
     key: "nonDefaultBranchGate",
     label: "Non-default branch gate",
     desc: "Block completion on the default branch to encourage feature branch workflows.",
+  },
+  {
+    key: "ignoreCi",
+    label: "Ignore CI",
+    desc: "Disable CI integration: no CI waits, CI hooks, CI status-line data, or CI evidence enforcement.",
   },
   {
     key: "githubCiGate",
@@ -724,7 +732,7 @@ function ProjectSettingsColumn({
             checked={form.trunkMode}
             onChange={(v) => set({ trunkMode: v })}
             label="Trunk mode"
-            desc="Work directly on the default branch with no feature branches or PRs. Overrides strict-no-direct-main and branch gate hooks."
+            desc="Work directly on the default branch with no feature branches or PRs. Overrides strict-no-direct-main and branch gate hooks. Blocks checkout/switch to other branches, gh pr checkout, and gh pr create."
           />
         </>
       )}

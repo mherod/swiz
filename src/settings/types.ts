@@ -162,6 +162,11 @@ export interface SwizSettings {
   updateMemoryFooter: boolean
   gitStatusGate: boolean
   nonDefaultBranchGate: boolean
+  /**
+   * When true, suppress CI-facing behavior: no `gh run` polling, no CI hooks, no CI status-line fetches,
+   * and advisory gates treat CI pre-checks as satisfied.
+   */
+  ignoreCi: boolean
   githubCiGate: boolean
   changesRequestedGate: boolean
   personalRepoIssuesGate: boolean

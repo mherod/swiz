@@ -24,8 +24,10 @@ import {
   blockStop,
   createSessionTask,
   formatActionPlan,
+  getDefaultBranch,
   getGitStatusV2,
   git,
+  isDefaultBranch,
   isGitRepo,
   sanitizeSessionId,
   skillExists,
@@ -163,13 +165,15 @@ function selectTaskSubject(hasUncommitted: boolean, ahead: number, behind: numbe
 function remotePushSubSteps(
   policy: CollaborationModePolicy,
   branch: string,
-  isMainBranch: boolean
+  onDefaultBranch: boolean,
+  trunkMode: boolean,
+  defaultBranch: string
 ): ActionPlanItem[] {
   const steps: ActionPlanItem[] = [`git push origin ${branch}`]
-  if (!isMainBranch && policy.requirePullRequest) {
-    steps.push(`Open or update a PR: gh pr create --base main (if no PR exists)`)
+  if (!trunkMode && !onDefaultBranch && policy.requirePullRequest) {
+    steps.push(`Open or update a PR: gh pr create --base ${defaultBranch} (if no PR exists)`)
   }
-  if (!isMainBranch && policy.requirePeerReview) {
+  if (!trunkMode && !onDefaultBranch && policy.requirePeerReview) {
     steps.push("Request a peer review before merging")
   }
   return steps
@@ -178,23 +182,29 @@ function remotePushSubSteps(
 function pushSubStepsForPolicy(
   policy: CollaborationModePolicy,
   branch: string,
-  collabMode: CollaborationMode
+  collabMode: CollaborationMode,
+  trunkMode: boolean,
+  defaultBranch: string
 ): ActionPlanItem[] {
-  const isMainBranch = branch === "main" || branch === "master"
+  const onDefault = isDefaultBranch(branch, defaultBranch)
 
-  if (allowsDirectMainCollaborationWorkflow(collabMode)) {
-    return remotePushSubSteps(policy, branch, isMainBranch)
+  if (trunkMode && onDefault) {
+    return [`git push origin ${branch}`]
   }
 
-  // On main/master when direct push is not permitted (team / relaxed-collab)
-  if (policy.requireFeatureBranch && isMainBranch) {
+  if (allowsDirectMainCollaborationWorkflow(collabMode)) {
+    return remotePushSubSteps(policy, branch, onDefault, trunkMode, defaultBranch)
+  }
+
+  // On default branch when direct push is not permitted (team / relaxed-collab)
+  if (policy.requireFeatureBranch && onDefault && !trunkMode) {
     const steps: ActionPlanItem[] = [
-      "Direct push to main is not permitted — create a feature branch",
+      "Direct push to the default branch is not permitted — create a feature branch",
       `git checkout -b <type>/<slug>`,
       `git push origin <feature-branch>`,
     ]
     if (policy.requirePullRequest) {
-      steps.push(`Open a PR: gh pr create --base ${branch}`)
+      steps.push(`Open a PR: gh pr create --base ${defaultBranch}`)
     }
     if (policy.requirePeerReview) {
       steps.push("Request a peer review before merging")
@@ -202,7 +212,7 @@ function pushSubStepsForPolicy(
     return steps
   }
 
-  return remotePushSubSteps(policy, branch, isMainBranch)
+  return remotePushSubSteps(policy, branch, onDefault, trunkMode, defaultBranch)
 }
 
 function buildCommitSteps(): [string, ActionPlanItem[]] {
@@ -227,17 +237,23 @@ function buildPullSteps(): [string, ActionPlanItem[]] {
   return ["Pull and rebase:", subSteps]
 }
 
-function buildPushSteps(
-  branch: string,
-  upstream: string,
-  ahead: number,
+interface PushStepParams {
+  branch: string
+  upstream: string
+  ahead: number
   collabMode: CollaborationMode
-): [string, ActionPlanItem[]] {
+  trunkMode: boolean
+  defaultBranch: string
+}
+
+function buildPushSteps(p: PushStepParams): [string, ActionPlanItem[]] {
+  const { branch, upstream, ahead, collabMode, trunkMode, defaultBranch } = p
   const policy = getCollaborationModePolicy(collabMode)
-  const isMainBranch = branch === "main" || branch === "master"
+  const onDefault = isDefaultBranch(branch, defaultBranch)
   const mainBlocked =
+    !trunkMode &&
     policy.requireFeatureBranch &&
-    isMainBranch &&
+    onDefault &&
     !allowsDirectMainCollaborationWorkflow(collabMode)
 
   const pushHeader = mainBlocked
@@ -249,7 +265,7 @@ function buildPushSteps(
   if (skillExists("push")) {
     subSteps.push("/push — Push to remote with collaboration guard")
   }
-  subSteps.push(...pushSubStepsForPolicy(policy, branch, collabMode))
+  subSteps.push(...pushSubStepsForPolicy(policy, branch, collabMode, trunkMode, defaultBranch))
   return [pushHeader, subSteps]
 }
 
@@ -273,8 +289,21 @@ function buildReason(opts: {
   ahead: number
   behind: number
   collabMode: CollaborationMode
+  trunkMode: boolean
+  defaultBranch: string
 }): string {
-  const { gitStatus, branch, upstream, hasUncommitted, hasRemote, ahead, behind, collabMode } = opts
+  const {
+    gitStatus,
+    branch,
+    upstream,
+    hasUncommitted,
+    hasRemote,
+    ahead,
+    behind,
+    collabMode,
+    trunkMode,
+    defaultBranch,
+  } = opts
   let reason = hasUncommitted
     ? buildUncommittedReason(gitStatus, branch, upstream, behind)
     : describeRemoteState(branch, upstream, ahead, behind)
@@ -284,7 +313,7 @@ function buildReason(opts: {
   if (hasUncommitted) steps.push(...buildCommitSteps())
   if (behind > 0) steps.push(...buildPullSteps())
   if (ahead > 0 || (hasUncommitted && hasRemote)) {
-    steps.push(...buildPushSteps(branch, upstream, ahead, collabMode))
+    steps.push(...buildPushSteps({ branch, upstream, ahead, collabMode, trunkMode, defaultBranch }))
   }
 
   reason += formatActionPlan(steps)
@@ -387,23 +416,46 @@ interface GitContext {
   upstream: string
   collabMode: CollaborationMode
   pushCooldownMinutes: number
+  defaultBranch: string
+  trunkMode: boolean
 }
 
 async function resolveEffectiveSettings(
   input: { _effectiveSettings?: Record<string, unknown>; session_id?: string },
   cwd: string
-): Promise<{ collaborationMode: CollaborationMode; pushCooldownMinutes: number }> {
+): Promise<{
+  collaborationMode: CollaborationMode
+  pushCooldownMinutes: number
+  projectSettings: Awaited<ReturnType<typeof readProjectSettings>>
+}> {
+  const projectSettings = await readProjectSettings(cwd)
   if (input._effectiveSettings && typeof input._effectiveSettings.collaborationMode === "string") {
-    return input._effectiveSettings as {
+    const injected = input._effectiveSettings as {
       collaborationMode: CollaborationMode
-      pushCooldownMinutes: number
+      pushCooldownMinutes?: number
+    }
+    return {
+      collaborationMode: injected.collaborationMode,
+      pushCooldownMinutes: injected.pushCooldownMinutes ?? 0,
+      projectSettings,
     }
   }
-  const [settings, projectSettings] = await Promise.all([
-    readSwizSettings(),
-    readProjectSettings(cwd),
-  ])
-  return getEffectiveSwizSettings(settings, input.session_id, projectSettings)
+  const settings = await readSwizSettings()
+  const full = getEffectiveSwizSettings(settings, input.session_id, projectSettings)
+  return {
+    collaborationMode: full.collaborationMode,
+    pushCooldownMinutes: full.pushCooldownMinutes,
+    projectSettings,
+  }
+}
+
+function gitStatusWarrantsStopHook(
+  gitStatus: NonNullable<Awaited<ReturnType<typeof getGitStatusV2>>>
+): boolean {
+  const branch = gitStatus.branch
+  if (!branch || branch === "(detached)") return false
+  if (gitStatus.total > 0) return true
+  return gitStatus.ahead > 0 || gitStatus.behind > 0
 }
 
 async function resolveGitContext(input: {
@@ -421,12 +473,13 @@ async function resolveGitContext(input: {
     git(["remote", "get-url", "origin"], cwd),
   ])
 
-  if (!gitStatus) return null
-  const { branch, ahead, behind } = gitStatus
-  if (!branch || branch === "(detached)") return null
+  if (!gitStatus || !gitStatusWarrantsStopHook(gitStatus)) return null
 
+  const { branch } = gitStatus
   const hasUncommitted = gitStatus.total > 0
-  if (!hasUncommitted && ahead === 0 && behind === 0) return null
+
+  const defaultBranch = await getDefaultBranch(cwd)
+  const trunkMode = effective.projectSettings?.trunkMode === true
 
   return {
     cwd,
@@ -437,6 +490,8 @@ async function resolveGitContext(input: {
     upstream: gitStatus.upstream ?? `origin/${branch}`,
     collabMode: effective.collaborationMode,
     pushCooldownMinutes: effective.pushCooldownMinutes,
+    defaultBranch,
+    trunkMode,
   }
 }
 
@@ -491,6 +546,8 @@ async function main(): Promise<void> {
     ahead,
     behind,
     collabMode: ctx.collabMode,
+    trunkMode: ctx.trunkMode,
+    defaultBranch: ctx.defaultBranch,
   })
 
   if (willNeedPush) await markPushPrompted(ctx.sessionId)

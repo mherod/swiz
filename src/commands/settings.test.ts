@@ -158,6 +158,7 @@ describe("swiz settings", () => {
     expect(parsed).toHaveProperty("sandboxedEdits")
     expect(parsed).toHaveProperty("speak")
     expect(parsed).toHaveProperty("gitStatusGate")
+    expect(parsed).toHaveProperty("ignoreCi")
     expect(parsed).toHaveProperty("memoryLineThreshold")
     expect(parsed).toHaveProperty("source")
   })
@@ -900,6 +901,7 @@ describe("SETTINGS_REGISTRY", () => {
       "gitStatusGate",
       "nonDefaultBranchGate",
       "githubCiGate",
+      "ignoreCi",
       "changesRequestedGate",
       "personalRepoIssuesGate",
       "issueCloseGate",
@@ -1078,6 +1080,7 @@ describe("collaborationMode settings", () => {
       gitStatusGate: true,
       nonDefaultBranchGate: true,
       githubCiGate: true,
+      ignoreCi: false,
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
@@ -1094,6 +1097,46 @@ describe("collaborationMode settings", () => {
     }
     const effective = getEffectiveSwizSettings(settings)
     expect(effective.collaborationMode).toBe("solo")
+  })
+
+  test("getEffectiveSwizSettings forces githubCiGate off when ignoreCi is enabled", () => {
+    const settings = {
+      autoContinue: true,
+      critiquesEnabled: true,
+      ambitionMode: "standard" as const,
+      collaborationMode: "solo" as const,
+      narratorVoice: "",
+      narratorSpeed: 0,
+      prAgeGateMinutes: 10,
+      prMergeMode: true,
+      pushCooldownMinutes: 0,
+      pushGate: false,
+      sandboxedEdits: true,
+      speak: false,
+      autoSteer: false,
+      swizNotifyHooks: false,
+      updateMemoryFooter: false,
+      gitStatusGate: true,
+      nonDefaultBranchGate: true,
+      githubCiGate: true,
+      ignoreCi: true,
+      changesRequestedGate: true,
+      personalRepoIssuesGate: true,
+      issueCloseGate: false,
+      qualityChecksGate: true,
+      strictNoDirectMain: false,
+      trunkMode: false,
+      taskDurationWarningMinutes: 10,
+      memoryLineThreshold: 1400,
+      memoryWordThreshold: 5000,
+      largeFileSizeKb: 500,
+      dirtyWorktreeThreshold: 15,
+      statusLineSegments: [...ALL_STATUS_LINE_SEGMENTS],
+      sessions: {},
+    }
+    const effective = getEffectiveSwizSettings(settings)
+    expect(effective.ignoreCi).toBe(true)
+    expect(effective.githubCiGate).toBe(false)
   })
 
   test("session collaborationMode overrides global", () => {
@@ -1116,6 +1159,7 @@ describe("collaborationMode settings", () => {
       gitStatusGate: true,
       nonDefaultBranchGate: true,
       githubCiGate: true,
+      ignoreCi: false,
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
@@ -1160,6 +1204,7 @@ describe("collaborationMode settings", () => {
       gitStatusGate: true,
       nonDefaultBranchGate: true,
       githubCiGate: true,
+      ignoreCi: false,
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
@@ -1202,6 +1247,7 @@ describe("collaborationMode settings", () => {
       gitStatusGate: true,
       nonDefaultBranchGate: true,
       githubCiGate: true,
+      ignoreCi: false,
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
@@ -1240,6 +1286,7 @@ describe("collaborationMode settings", () => {
       gitStatusGate: true,
       nonDefaultBranchGate: true,
       githubCiGate: true,
+      ignoreCi: false,
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
@@ -1278,6 +1325,7 @@ describe("collaborationMode settings", () => {
       gitStatusGate: true,
       nonDefaultBranchGate: true,
       githubCiGate: true,
+      ignoreCi: false,
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
@@ -1521,6 +1569,12 @@ describe("strictNoDirectMain setting", () => {
     expect(stdout).toContain("strict-no-direct-main")
   })
 
+  test("swiz settings show surfaces ignore-ci", async () => {
+    const home = await createTempHome()
+    const { stdout } = await runSwiz(["settings", "show"], home)
+    expect(stdout).toContain("ignore-ci:")
+  })
+
   test("swiz settings show reports project source for strict-no-direct-main", async () => {
     const home = await createTempHome()
     const { exitCode: setExitCode } = await runSwiz(
@@ -1552,6 +1606,7 @@ describe("strictNoDirectMain setting", () => {
       gitStatusGate: true,
       nonDefaultBranchGate: true,
       githubCiGate: true,
+      ignoreCi: false,
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,
@@ -1590,6 +1645,7 @@ describe("strictNoDirectMain setting", () => {
       gitStatusGate: true,
       nonDefaultBranchGate: true,
       githubCiGate: true,
+      ignoreCi: false,
       changesRequestedGate: true,
       personalRepoIssuesGate: true,
       issueCloseGate: false,

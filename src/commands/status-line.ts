@@ -43,6 +43,8 @@ export interface WarmStatusLineSnapshot {
   gitInfo: string
   gitBranch: string
   activeSegments: string[]
+  /** When true (global ignore-ci), the status line must not render CI — even if ciState was populated. */
+  ignoreCi?: boolean
   ciState?: GitHubCiState
   ciLabel?: string
   issueCount: number | null
@@ -352,6 +354,7 @@ const COVERED_SETTING_KEYS = new Set([
   "pushGate",
   "strictNoDirectMain",
   "sandboxedEdits",
+  "ignoreCi",
 ])
 
 // Keys that cannot be compared with simple equality (arrays, objects, metadata).
@@ -366,6 +369,7 @@ const BOOLEAN_FLAGS: BooleanFlagDef[] = [
   ["pushGate", `\x1b[93m🚧 push-gate:on${R}`, `\x1b[90m🚧 push-gate:off${R}`],
   ["strictNoDirectMain", `\x1b[91m🛡 direct-main:off${R}`, `\x1b[90m🛡 direct-main:on${R}`],
   ["sandboxedEdits", `\x1b[92m🧪 sandbox:on${R}`, `\x1b[93m🧪 sandbox:off${R}`],
+  ["ignoreCi", `\x1b[93m⏭ ignore-ci${R}`, `\x1b[90m⏭ ignore-ci:off${R}`],
 ]
 
 const AMBITION_LABELS: Record<string, string> = {
@@ -663,12 +667,14 @@ function assembleSnapshot(
   gh: GhFetchResults,
   effective: EffectiveSwizSettings | null
 ): WarmStatusLineSnapshot {
-  const ciSummary = summarizeGitHubCiRuns(gh.ciData)
+  const suppressCi = Boolean(effective?.ignoreCi)
+  const ciSummary = suppressCi ? null : summarizeGitHubCiRuns(gh.ciData)
   return {
     shortCwd,
     gitInfo: gitResult.info,
     gitBranch: gitResult.branch,
     activeSegments,
+    ignoreCi: suppressCi,
     ciState: ciSummary?.state ?? "none",
     ciLabel: ciSummary?.label ?? "",
     ...extractGhCounts(gh),
@@ -696,6 +702,7 @@ export async function computeWarmStatusLineSnapshot(
   const activeSegments = activeSegmentsFromEffective(effective)
   const needs = computeSegmentNeeds(activeSegments)
   if (!ciProviders.has("github-actions")) needs.ci = false
+  if (effective?.ignoreCi) needs.ci = false
   const gh = await fetchGhData(cwd, gitResult.branch, needs)
   return assembleSnapshot(shortCwd, gitResult, activeSegments, gh, effective)
 }
@@ -770,7 +777,7 @@ type SegChecker = (name: string) => boolean
 
 function buildLine1(seg: SegChecker, snapshot: WarmStatusLineSnapshot, a2: string): string {
   const lbl = (s: string) => `${DIM}${s}${R}`
-  const ciSeg = formatGitHubCiSegment(snapshot.ciState, snapshot.ciLabel)
+  const ciSeg = snapshot.ignoreCi ? "" : formatGitHubCiSegment(snapshot.ciState, snapshot.ciLabel)
   const reviewStatus = buildReviewSegment(snapshot)
   return joinGroups([
     seg("repo") ? `${lbl("repo")} ${a2}${snapshot.shortCwd}${R}` : "",

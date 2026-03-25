@@ -432,6 +432,43 @@ describe("CI check advisory — prHooksActive modes", () => {
     expect(result.blocked).toBe(false)
     expect(result.reason).toContain("All pre-push checks found")
   })
+
+  test("ignore-ci skips CI advisory for team mode", async () => {
+    const home = await mkdtemp(join(tmpDir, "ignore-ci-home-"))
+    await mkdir(join(home, ".swiz"), { recursive: true })
+    await Bun.write(join(home, ".swiz", "settings.json"), JSON.stringify({ ignoreCi: true }))
+    const projectDir = await mkdtemp(join(tmpDir, "team-ignore-ci-"))
+    const swizDir = join(projectDir, ".swiz")
+    await mkdir(swizDir, { recursive: true })
+    await Bun.write(join(swizDir, "config.json"), JSON.stringify({ collaborationMode: "team" }))
+    const transcript = makeTranscript(
+      "git branch --show-current",
+      "gh pr list --state open --head main"
+    )
+    const tPath = join(tmpDir, `t-${Math.random().toString(36).slice(2)}.jsonl`)
+    await Bun.write(tPath, transcript)
+    const payload = JSON.stringify({
+      tool_name: "Bash",
+      tool_input: { command: "git push origin main", cwd: projectDir },
+      transcript_path: tPath,
+      session_id: "test",
+    })
+    const proc = Bun.spawn(["bun", "hooks/pretooluse-push-checks-gate.ts"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, HOME: home },
+    })
+    void proc.stdin.write(payload)
+    void proc.stdin.end()
+    const out = await new Response(proc.stdout).text()
+    await proc.exited
+    expect(out.trim()).toBeTruthy()
+    const parsed = JSON.parse(out.trim())
+    const reason = parsed?.hookSpecificOutput?.permissionDecisionReason ?? ""
+    expect(reason).toContain("All pre-push checks found")
+    expect(reason).not.toContain("swiz ci-wait")
+  })
 })
 
 // ─── Parametric regression matrix ────────────────────────────────────────────

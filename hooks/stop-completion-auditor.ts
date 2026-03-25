@@ -6,7 +6,8 @@ import { readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { orderBy } from "lodash-es"
 import { getHomeDirOrNull } from "../src/home.ts"
-import { stopHookInputSchema } from "./schemas.ts"
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
+import { type StopHookInput, stopHookInputSchema } from "./schemas.ts"
 import {
   blockStop,
   computeSubjectFingerprint,
@@ -371,16 +372,34 @@ async function filterAndDeduplicateTasks(
   return { completedTasks, incompleteTasks }
 }
 
-async function main(): Promise<void> {
-  const raw = (await Bun.stdin.json()) as Record<string, unknown>
-  const input = stopHookInputSchema.parse(raw)
-  const sessionId = input.session_id ?? ""
-  const transcript = input.transcript_path ?? ""
-  const home = getHomeDirOrNull()
-  if (!home) return
-  const tasksDir = getSessionTasksDir(sessionId, home)
-  if (!tasksDir) return
+interface CiEvidenceAfterPushCtx {
+  cwd: string
+  sessionId: string
+  transcript: string
+  home: string
+  summary: TranscriptSummary | null
+  allTasks: TaskFile[]
+}
 
+async function maybeEnforceCiEvidenceAfterPush(ctx: CiEvidenceAfterPushCtx): Promise<void> {
+  const [globalSettings, projectSettings] = await Promise.all([
+    readSwizSettings(),
+    readProjectSettings(ctx.cwd),
+  ])
+  const effective = getEffectiveSwizSettings(globalSettings, ctx.sessionId, projectSettings)
+  if (effective.ignoreCi) return
+  await enforceCiEvidence(ctx.allTasks, ctx.transcript, ctx.sessionId, ctx.home, ctx.summary)
+}
+
+async function runStopCompletionWhenTasksDirReady(opts: {
+  raw: Record<string, unknown>
+  input: StopHookInput
+  sessionId: string
+  transcript: string
+  home: string
+  tasksDir: string
+}): Promise<void> {
+  const { raw, input, sessionId, transcript, home, tasksDir } = opts
   const summary = getTranscriptSummary(raw)
   const { total: toolCallCount, taskToolUsed } = await resolveToolCallStats(summary, transcript)
 
@@ -406,8 +425,35 @@ async function main(): Promise<void> {
   }
 
   if (transcript) {
-    await enforceCiEvidence(allTasks, transcript, sessionId, home, summary)
+    await maybeEnforceCiEvidenceAfterPush({
+      cwd: input.cwd ?? process.cwd(),
+      sessionId,
+      transcript,
+      home,
+      summary,
+      allTasks,
+    })
   }
+}
+
+async function main(): Promise<void> {
+  const raw = (await Bun.stdin.json()) as Record<string, unknown>
+  const input = stopHookInputSchema.parse(raw)
+  const sessionId = input.session_id ?? ""
+  const transcript = input.transcript_path ?? ""
+  const home = getHomeDirOrNull()
+  if (!home) return
+  const tasksDir = getSessionTasksDir(sessionId, home)
+  if (!tasksDir) return
+
+  await runStopCompletionWhenTasksDirReady({
+    raw,
+    input,
+    sessionId,
+    transcript,
+    home,
+    tasksDir,
+  })
 }
 
 if (import.meta.main) {

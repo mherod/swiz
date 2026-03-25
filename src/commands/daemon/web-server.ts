@@ -747,6 +747,10 @@ async function handleCiWatchPost(req: Request, ctx: DaemonWebServerContext): Pro
       { status: 400 }
     )
   }
+  const global = await readSwizSettings()
+  if (global.ignoreCi) {
+    return Response.json({ ignored: true })
+  }
   ctx.registerProjectWatchers(body.cwd)
   ctx.touchProject(body.cwd)
   const started = ctx.ciWatchRegistry.start(body.cwd, body.sha)

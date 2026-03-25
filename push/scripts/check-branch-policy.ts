@@ -48,14 +48,22 @@ const TRIVIAL_TYPES = new Set([
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function block(reason: string): never {
+function block(reason: string, opts: { trunkMode?: boolean } = {}): never {
+  const trunkMode = opts.trunkMode === true
   console.error(`BLOCKED: ${reason}`)
-  console.error(
-    "\nUse a feature branch instead:\n" +
-      "  git checkout -b feat/<description>\n" +
-      "  git push origin feat/<description>\n" +
-      "  gh pr create"
-  )
+  if (trunkMode) {
+    console.error(
+      "\nTrunk mode is enabled — direct pushes to the default branch are expected. " +
+        "Fix the issue above (or run `gh auth login` if gh is required), not by opening a feature-branch PR."
+    )
+  } else {
+    console.error(
+      "\nUse a feature branch instead:\n" +
+        "  git checkout -b feat/<description>\n" +
+        "  git push origin feat/<description>\n" +
+        "  gh pr create"
+    )
+  }
   process.exit(1)
 }
 
@@ -69,6 +77,9 @@ const branch = await git(["branch", "--show-current"], cwd)
 if (!branch) process.exit(0)
 const defaultBranch = await getDefaultBranch(cwd)
 if (!isDefaultBranch(branch, defaultBranch)) process.exit(0)
+
+const projectSettings = await readProjectSettings(cwd)
+const trunkMode = projectSettings?.trunkMode === true
 
 // Get changed files between upstream and HEAD
 const upstream = await git(["rev-parse", "--abbrev-ref", `${branch}@{upstream}`], cwd)
@@ -121,16 +132,16 @@ if (!ghAvailable) {
       "Remediation:\n" +
       "  1. Install gh: brew install gh\n" +
       "  2. Authenticate: gh auth login\n" +
-      "  3. Or use a feature branch (no gh required)"
+      "  3. Or use a feature branch (no gh required)",
+    { trunkMode }
   )
 }
 
 // ── Check 2: Collaboration detection + mode policy ───────────────────────
 
-const [collaboration, globalSettings, projectSettings] = await Promise.all([
+const [collaboration, globalSettings] = await Promise.all([
   detectProjectCollaborationPolicy(cwd),
   readSwizSettings(),
-  readProjectSettings(cwd),
 ])
 collaborationResolved = collaboration.resolved
 
@@ -141,7 +152,8 @@ const modePolicy = getCollaborationModePolicy(effectiveSettings.collaborationMod
 // - If requireFeatureBranch=true (team/relaxed-collab), block direct push regardless of signals.
 // - If requireFeatureBranch=false and signals say collaborative, also block.
 // - If requireFeatureBranch=false and signals say solo (auto/solo), allow.
-if (modePolicy.requireFeatureBranch) {
+// Trunk mode: expect direct pushes to the default branch — skip feature-branch collaboration gates.
+if (modePolicy.requireFeatureBranch && !trunkMode) {
   block(
     `Collaboration mode "${effectiveSettings.collaborationMode}" requires a feature branch — direct pushes to ${branch} are not allowed.\n\n` +
       "Create a feature branch:\n" +
@@ -151,7 +163,7 @@ if (modePolicy.requireFeatureBranch) {
   )
 }
 
-if (collaboration.isCollaborative) {
+if (collaboration.isCollaborative && !trunkMode) {
   block(
     `Collaborative repository detected — direct pushes to ${branch} are not allowed.\n\n` +
       "Collaboration signals:\n" +
@@ -160,7 +172,7 @@ if (collaboration.isCollaborative) {
 }
 
 // If collaboration checks partially failed, treat as fail-closed for non-trivial
-if (!collaborationResolved && nonDocsFiles.length > MAX_TRIVIAL_FILES) {
+if (!collaborationResolved && nonDocsFiles.length > MAX_TRIVIAL_FILES && !trunkMode) {
   block(
     "Collaboration state could not be fully resolved (partial gh API failures).\n\n" +
       `${nonDocsFiles.length} non-docs/config file(s) changed — blocking as a precaution.`
@@ -171,7 +183,8 @@ if (!collaborationResolved && nonDocsFiles.length > MAX_TRIVIAL_FILES) {
 
 if (nonDocsFiles.length > MAX_FILES_HARD_BLOCK) {
   block(
-    `Too many files for a direct push to ${branch}: ${nonDocsFiles.length} non-docs/config files (limit: ${MAX_FILES_HARD_BLOCK}).`
+    `Too many files for a direct push to ${branch}: ${nonDocsFiles.length} non-docs/config files (limit: ${MAX_FILES_HARD_BLOCK}).`,
+    { trunkMode }
   )
 }
 
@@ -186,14 +199,18 @@ for (const msg of commitMessages) {
   if (type === "feat" && nonDocsFiles.length > MAX_TRIVIAL_FILES) {
     block(
       `Feature commit with ${nonDocsFiles.length} non-docs files exceeds trivial threshold (${MAX_TRIVIAL_FILES}).\n\n` +
-        `Commit: "${msg}"`
+        `Commit: "${msg}"`,
+      { trunkMode }
     )
   }
 
   if (type === "feat" && nonDocsFiles.length <= MAX_TRIVIAL_FILES) {
     console.error(
-      `Warning: Feature commit with ${nonDocsFiles.length} file(s) — consider using a feature branch for features.\n` +
-        `Commit: "${msg}"`
+      trunkMode
+        ? `Warning: Feature commit with ${nonDocsFiles.length} file(s) (trunk mode — ensure change is appropriate for a direct default-branch push).\n` +
+            `Commit: "${msg}"`
+        : `Warning: Feature commit with ${nonDocsFiles.length} file(s) — consider using a feature branch for features.\n` +
+            `Commit: "${msg}"`
     )
   }
 
@@ -201,7 +218,8 @@ for (const msg of commitMessages) {
   if (type !== null && !TRIVIAL_TYPES.has(type) && type !== "feat") {
     if (nonDocsFiles.length > MAX_FILES_HARD_BLOCK) {
       block(
-        `Non-standard commit type "${type}" with ${nonDocsFiles.length} files exceeds limit (${MAX_FILES_HARD_BLOCK}).`
+        `Non-standard commit type "${type}" with ${nonDocsFiles.length} files exceeds limit (${MAX_FILES_HARD_BLOCK}).`,
+        { trunkMode }
       )
     }
   }

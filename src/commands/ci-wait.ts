@@ -1,4 +1,5 @@
 import { stderrLog } from "../debug.ts"
+import { readSwizSettings } from "../settings.ts"
 import type { Command } from "../types.ts"
 
 // ─── Utilities ────────────────────────────────────────────────────────────
@@ -6,8 +7,10 @@ const DAEMON_PORT = Number(process.env.SWIZ_DAEMON_PORT ?? "7943")
 const DAEMON_ORIGIN = process.env.SWIZ_DAEMON_ORIGIN ?? `http://127.0.0.1:${DAEMON_PORT}`
 
 export interface CiWatchStartResponse {
-  deduped: boolean
-  watch: {
+  /** Set when global `ignore-ci` is enabled — daemon did not register a watch. */
+  ignored?: boolean
+  deduped?: boolean
+  watch?: {
     sha: string
     cwd: string
     startedAt: number
@@ -29,7 +32,10 @@ export async function startCiWatchViaDaemon(
       signal: AbortSignal.timeout(1500),
     })
     if (!resp.ok) return null
-    return (await resp.json()) as CiWatchStartResponse
+    const data = (await resp.json()) as CiWatchStartResponse
+    if (data.ignored) return { ignored: true }
+    if (!data.watch) return null
+    return { deduped: data.deduped ?? false, watch: data.watch }
   } catch {
     return null
   }
@@ -180,6 +186,12 @@ export const ciWaitCommand: Command = {
   usage: "swiz ci-wait <commit-sha> [--timeout <seconds>]",
   options: [{ flags: "--timeout, -t <seconds>", description: "Timeout in seconds (default: 300)" }],
   async run(args) {
+    const settings = await readSwizSettings()
+    if (settings.ignoreCi) {
+      console.error("ignore-ci is enabled — skipping CI wait.")
+      return
+    }
+
     const { commitSha, timeout } = parseCiWaitArgs(args)
 
     try {

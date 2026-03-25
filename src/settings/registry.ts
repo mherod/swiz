@@ -107,6 +107,17 @@ export const SETTINGS_REGISTRY: SettingDef[] = [
     scopes: ["global"],
   },
   {
+    key: "ignoreCi",
+    aliases: ["ignore-ci", "ignoreci", "ignore_ci", "no-ci"],
+    kind: "boolean",
+    scopes: ["global"],
+    docs: {
+      enableDescription:
+        "Suppress CI interactions (no CI wait/poll, CI hooks, CI status-line data, or CI evidence gates)",
+      disableDescription: "Use normal GitHub Actions CI integration",
+    },
+  },
+  {
     key: "changesRequestedGate",
     aliases: [
       "changes-requested-gate",

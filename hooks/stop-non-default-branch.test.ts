@@ -3,6 +3,11 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { useTempDir } from "./utils/test-utils.ts"
 
+async function enableTrunkMode(dir: string): Promise<void> {
+  await mkdir(join(dir, ".swiz"), { recursive: true })
+  await writeFile(join(dir, ".swiz", "config.json"), JSON.stringify({ trunkMode: true }))
+}
+
 const HOOK = "hooks/stop-non-default-branch.ts"
 
 const tmp = useTempDir("swiz-non-default-branch-")
@@ -107,6 +112,18 @@ describe("stop-non-default-branch", () => {
     expect(reason).toContain("git checkout")
     // Should explain workflow concern
     expect(reason.toLowerCase()).toMatch(/unfinished|workflow|branch/)
+  })
+
+  test("trunk mode omits PR workflow and mentions trunk", async () => {
+    const dir = await createGitRepo("feat/trunk-msg")
+    await enableTrunkMode(dir)
+    const result = await runHook(dir)
+    expect(result.json?.decision).toBe("block")
+    const reason = result.json?.reason as string
+    expect(reason.toLowerCase()).toContain("trunk mode")
+    expect(reason).toContain("git checkout")
+    expect(reason).not.toContain("gh pr create")
+    expect(reason).not.toContain("PR #")
   })
 
   test("allows stop when not in a git repo", async () => {

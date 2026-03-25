@@ -18,12 +18,13 @@ async function runHook(
   command: string,
   toolName = "Bash",
   sessionId = "test-session-id",
-  envOverrides: Record<string, string | undefined> = {}
+  envOverrides: Record<string, string | undefined> = {},
+  cwd = "/tmp"
 ): Promise<HookResult> {
   const payload = JSON.stringify({
     tool_name: toolName,
     tool_input: { command },
-    cwd: "/tmp",
+    cwd,
     session_id: sessionId,
   })
   const env: Record<string, string | undefined> = { ...process.env, HOME: _testHome }
@@ -107,6 +108,34 @@ describe("posttooluse-git-task-autocomplete: git push emits additionalContext", 
       expect(result.additionalContext).not.toContain("Wait for CI")
     } finally {
       rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  test("git push with ignore-ci omits CI and PR workflow guidance", async () => {
+    const home = createTempHomeWithSettings({ ignoreCi: true })
+    try {
+      const result = await runHook("git push origin main", "Bash", "test-session-id", {
+        HOME: home,
+      })
+      expect(result.exitedCleanly).toBe(true)
+      expect(result.additionalContext).toBe("git push succeeded.")
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  test("git push with project trunk mode omits open-PR guidance", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "swiz-trunk-push-ctx-"))
+    mkdirSync(join(repo, ".swiz"), { recursive: true })
+    writeFileSync(join(repo, ".swiz", "config.json"), JSON.stringify({ trunkMode: true }))
+    try {
+      const result = await runHook("git push origin main", "Bash", "test-session-id", {}, repo)
+      expect(result.exitedCleanly).toBe(true)
+      expect(result.additionalContext).toBeDefined()
+      expect(result.additionalContext).toMatch(/trunk mode/i)
+      expect(result.additionalContext).not.toContain("Open PR for this branch")
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
     }
   })
 

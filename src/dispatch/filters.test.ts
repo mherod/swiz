@@ -22,6 +22,7 @@ function makeEffective(overrides: Partial<EffectiveSwizSettings> = {}): Effectiv
     updateMemoryFooter: false,
     gitStatusGate: true,
     nonDefaultBranchGate: true,
+    ignoreCi: false,
     githubCiGate: true,
     changesRequestedGate: true,
     personalRepoIssuesGate: true,

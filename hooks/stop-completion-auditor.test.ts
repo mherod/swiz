@@ -402,6 +402,25 @@ describe("stop-completion-auditor — CI verification enforcement", () => {
     expect(result.reason).toContain("CI verification evidence")
   })
 
+  it("allows stop without CI evidence when ignore-ci is enabled", async () => {
+    const { home, tasksDir, transcriptPath } = await createFixtureWithPush()
+    await mkdir(join(home, ".swiz"), { recursive: true })
+    await writeFile(join(home, ".swiz", "settings.json"), JSON.stringify({ ignoreCi: true }))
+    await writeFile(
+      join(tasksDir, "1.json"),
+      JSON.stringify({
+        id: "1",
+        subject: "Implement feature",
+        status: "completed",
+        completionEvidence: "tests pass locally",
+        blocks: [],
+        blockedBy: [],
+      })
+    )
+    const result = await runAuditor(home, transcriptPath)
+    expect(result.blocked).toBe(false)
+  })
+
   it("allows stop when a completed task has CI evidence in completionEvidence", async () => {
     const { home, tasksDir, transcriptPath } = await createFixtureWithPush()
     await writeFile(

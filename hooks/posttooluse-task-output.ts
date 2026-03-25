@@ -8,6 +8,7 @@
 //   → injects the CI run ID as additionalContext so the agent can watch CI
 //     without re-running the git log / gh run list dance.
 
+import { getEffectiveSwizSettings, readProjectSettings, readSwizSettings } from "../src/settings.ts"
 import { claudeTaskOutputPath } from "../src/temp-paths.ts"
 import type { PostToolHookInput } from "./schemas.ts"
 import { denyPostToolUse, emitContext, ghJson, stripAnsi } from "./utils/hook-utils.ts"
@@ -782,7 +783,15 @@ if (failureReason) {
 // ── Success path: detect git push and inject CI context ──────────────────────
 if (!output.includes("To https://") && !PUSH_SHA_RE.test(output)) process.exit(0)
 
-const ciContext = await buildCiContext(output, input.cwd ?? process.cwd())
+const pushCwd = input.cwd ?? process.cwd()
+const [globalSettings, projectSettings] = await Promise.all([
+  readSwizSettings(),
+  readProjectSettings(pushCwd),
+])
+const effectivePush = getEffectiveSwizSettings(globalSettings, null, projectSettings)
+if (effectivePush.ignoreCi) process.exit(0)
+
+const ciContext = await buildCiContext(output, pushCwd)
 if (!ciContext) process.exit(0)
 
 await emitContext("PostToolUse", ciContext, input.cwd ?? process.cwd())

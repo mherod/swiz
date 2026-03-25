@@ -9,6 +9,11 @@ import { dirname, join } from "node:path"
 const REPO_ROOT = dirname(dirname(dirname(import.meta.path)))
 
 import {
+  collectCheckoutNewBranchNames,
+  collectPlainCheckoutSwitchTargets,
+  extractCheckoutNewBranchName,
+} from "./git-utils.ts"
+import {
   CI_WAIT_RE,
   computeProjectedContent,
   createSessionTask,
@@ -539,6 +544,26 @@ describe("isDefaultBranch() with edge-case inputs", () => {
   it("supports a custom configured default branch", () => {
     expect(isDefaultBranch("trunk", "trunk")).toBe(true)
     expect(isDefaultBranch("main", "trunk")).toBe(false)
+  })
+})
+
+describe("collectCheckoutNewBranchNames / plain checkout targets", () => {
+  it("collects every new branch name in a compound command", () => {
+    const cmd = "git checkout main && git checkout -b a && git switch -c b"
+    expect(collectCheckoutNewBranchNames(cmd)).toEqual(["a", "b"])
+  })
+
+  it("extractCheckoutNewBranchName returns the first new branch", () => {
+    expect(extractCheckoutNewBranchName("git checkout -b first && git checkout -b second")).toBe(
+      "first"
+    )
+  })
+
+  it("collectPlainCheckoutSwitchTargets gathers plain checkout and switch refs", () => {
+    expect(collectPlainCheckoutSwitchTargets("git checkout main && git switch develop")).toEqual([
+      "main",
+      "develop",
+    ])
   })
 })
 

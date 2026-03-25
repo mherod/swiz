@@ -453,6 +453,53 @@ export function extractCheckoutStartPoint(command: string): string | null {
   return null
 }
 
+/** All new branch names from `checkout -b|-B` / `switch -c|-C` in a compound shell command. */
+export function collectCheckoutNewBranchNames(command: string): string[] {
+  const names: string[] = []
+  const checkoutRe = new RegExp(
+    `\\bgit\\s+${GIT_GLOBAL_OPTS}checkout\\s+-[bB]\\s+([^\\s;|&]+)`,
+    "g"
+  )
+  const switchRe = new RegExp(`\\bgit\\s+${GIT_GLOBAL_OPTS}switch\\s+-[cC]\\s+([^\\s;|&]+)`, "g")
+  for (const m of command.matchAll(checkoutRe)) {
+    if (m[1]) names.push(m[1])
+  }
+  for (const m of command.matchAll(switchRe)) {
+    if (m[1]) names.push(m[1])
+  }
+  return names
+}
+
+/**
+ * Plain `checkout <ref>` / `switch <ref>` targets (excludes `-b`/`-c` forms), in order.
+ */
+export function collectPlainCheckoutSwitchTargets(command: string): string[] {
+  const targets: string[] = []
+  const checkoutRe = new RegExp(
+    `\\bgit\\s+${GIT_GLOBAL_OPTS}checkout\\s+(?!-[bcBC](?:\\s|$))([^\\s;|&-][^\\s;|&]*)`,
+    "g"
+  )
+  const switchRe = new RegExp(
+    `\\bgit\\s+${GIT_GLOBAL_OPTS}switch\\s+(?!-[cC](?:\\s|$))([^\\s;|&-][^\\s;|&]*)`,
+    "g"
+  )
+  for (const m of command.matchAll(checkoutRe)) {
+    if (m[1]) targets.push(m[1])
+  }
+  for (const m of command.matchAll(switchRe)) {
+    if (m[1]) targets.push(m[1])
+  }
+  return targets
+}
+
+/**
+ * Extract the first new branch name from `git [opts] checkout -b|-B <name>` or
+ * `git [opts] switch -c|-C <name>`.
+ */
+export function extractCheckoutNewBranchName(command: string): string | null {
+  return collectCheckoutNewBranchNames(command)[0] ?? null
+}
+
 /**
  * Matches any force-push flag on a `git [opts] push` command:
  *   --force, --force-with-lease, --force-with-lease=<ref>, --force-if-includes, -f

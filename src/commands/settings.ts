@@ -273,6 +273,7 @@ const GLOBAL_BOOL_ROWS: BoolSettingRow[] = [
   ["update-memory-footer:", "updateMemoryFooter", "global"],
   ["git-status-gate:", "gitStatusGate", "global"],
   ["non-default-branch-gate:", "nonDefaultBranchGate", "global"],
+  ["ignore-ci:", "ignoreCi", "global"],
   ["github-ci-gate:", "githubCiGate", "global"],
   ["changes-requested-gate:", "changesRequestedGate", "global"],
   ["personal-repo-issues-gate:", "personalRepoIssuesGate", "global"],
