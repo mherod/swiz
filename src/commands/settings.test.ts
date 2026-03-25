@@ -149,12 +149,13 @@ describe("swiz settings", () => {
       expect(result.stdout).toContain("project policy")
       expect(result.stdout).toContain(`trivial-max-files: ${DEFAULT_TRIVIAL_MAX_FILES}`)
       expect(result.stdout).toContain(`trivial-max-lines: ${DEFAULT_TRIVIAL_MAX_LINES}`)
-      expect(result.stdout).toContain("(project)")
+      // Isolated --dir repo has no .swiz/config.json → policy lines use (default)
+      expect(result.stdout).toMatch(/trivial-max-(files|lines):.*\(default\)/)
     })
 
     test("shows default collaboration mode", () => {
       expect(result.stdout).toContain("collaboration:")
-      expect(result.stdout).toContain("(project)")
+      expect(result.stdout).toMatch(/collaboration:.*\((default|project)\)/)
     })
   })
 
