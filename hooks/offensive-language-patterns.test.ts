@@ -70,6 +70,39 @@ describe("offensive-language-patterns", () => {
       const m = findLazyPattern("The hook is too strict for this case.")
       expect(m?.category).toBe("gaming")
     })
+    test("matches threshold-adjustment phrase", () => {
+      const m = findLazyPattern("We should lower the threshold to avoid this block.")
+      expect(m?.category).toBe("gaming")
+    })
+    test("matches attempt-count reduction", () => {
+      const m = findLazyPattern("Let's reduce the attempt count to 3.")
+      expect(m?.category).toBe("gaming")
+    })
+    test("matches cap-adjustment phrase", () => {
+      const m = findLazyPattern("I'll drop the cap to get past this.")
+      expect(m?.category).toBe("gaming")
+    })
+    // ── Negation exemptions ────────────────────────────────────────────────
+    test("exempts 'no change is needed, capture the reasoning' (original false positive)", () => {
+      const m = findLazyPattern("no change is needed, capture the reasoning")
+      expect(m?.category).not.toBe("gaming")
+    })
+    test("exempts 'no change to the cap is needed'", () => {
+      const m = findLazyPattern("no change to the cap is needed")
+      expect(m?.category).not.toBe("gaming")
+    })
+    test("exempts 'not changing the threshold'", () => {
+      const m = findLazyPattern("not changing the threshold here")
+      expect(m?.category).not.toBe("gaming")
+    })
+    test("exempts 'without reducing the limit'", () => {
+      const m = findLazyPattern("without reducing the limit")
+      expect(m?.category).not.toBe("gaming")
+    })
+    test("does not exempt genuine gaming with threshold (no negation word)", () => {
+      const m = findLazyPattern("change the threshold to something more reasonable")
+      expect(m?.category).toBe("gaming")
+    })
   })
 
   // ── Reframing ──────────────────────────────────────────────────────────────

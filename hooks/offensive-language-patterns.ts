@@ -115,6 +115,12 @@ interface LazyPattern {
   response: string
   /** Category label for grouping in test output. */
   category: LazyCategory
+  /**
+   * Optional negation guard. When set, a pattern match is suppressed if this
+   * regex also matches the same cleaned text — allowing legitimate negated
+   * phrasings (e.g. "no change is needed") to pass without triggering the pattern.
+   */
+  negationPattern?: RegExp
 }
 
 export const LAZY_PATTERNS: LazyPattern[] = [
@@ -454,9 +460,13 @@ export const LAZY_PATTERNS: LazyPattern[] = [
   },
   {
     category: "gaming",
+    // \b after noun group prevents prefix matches (e.g. "capture" matching "cap").
     pattern: re(
-      `(?:lower|reduce|decrease|drop|change|relax|weaken|soften)\\b[^.]{0,40}\\b(?:threshold|limit|max|maximum|cap|attempt|DEDUP|cooldown)`
+      `(?:lower|reduce|decrease|drop|change|relax|weaken|soften)\\b[^.]{0,40}\\b(?:threshold|limit|max|maximum|cap|attempt|DEDUP|cooldown)\\b`
     ),
+    // Suppress when the verb is preceded by a negation word (e.g. "no change is needed").
+    negationPattern:
+      /(?:no|not|without|cannot|can't|doesn't|isn't|aren't|don't)\s+(?:\w+\s+){0,3}(?:lower|reduce|decrease|drop|change|relax|weaken|soften)\b/i,
     response:
       "Adjusting enforcement thresholds to escape a block is gaming the system. " +
       "The threshold exists to give you adequate chances to comply — not to be lowered when compliance is inconvenient. " +
@@ -1491,7 +1501,7 @@ export { extractLastAssistantText, readTranscriptLines, stripQuotedText }
 export function findLazyPattern(text: string): LazyPattern | null {
   const cleaned = stripQuotedText(text)
   for (const entry of LAZY_PATTERNS) {
-    if (entry.pattern.test(cleaned)) return entry
+    if (entry.pattern.test(cleaned) && !entry.negationPattern?.test(cleaned)) return entry
   }
   return null
 }
@@ -1502,7 +1512,11 @@ export function findAllLazyPatterns(text: string): LazyPattern[] {
   const seen = new Set<LazyCategory>()
   const matches: LazyPattern[] = []
   for (const entry of LAZY_PATTERNS) {
-    if (!seen.has(entry.category) && entry.pattern.test(cleaned)) {
+    if (
+      !seen.has(entry.category) &&
+      entry.pattern.test(cleaned) &&
+      !entry.negationPattern?.test(cleaned)
+    ) {
       seen.add(entry.category)
       matches.push(entry)
     }
