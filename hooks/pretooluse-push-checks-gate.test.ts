@@ -371,10 +371,13 @@ describe("CI check advisory — prHooksActive modes", () => {
       transcript_path: tPath,
       session_id: "test",
     })
+    // Isolate HOME so global ~/.swiz/settings.json (e.g. ignoreCi: true) doesn't leak
+    const fakeHome = await mkdtemp(join(tmpDir, `home-${mode}-`))
     const proc = Bun.spawn(["bun", "hooks/pretooluse-push-checks-gate.ts"], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      env: { ...process.env, HOME: fakeHome },
     })
     void proc.stdin.write(payload)
     void proc.stdin.end()
